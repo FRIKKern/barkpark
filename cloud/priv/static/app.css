@@ -3,6 +3,56 @@
    CSS custom properties, light + dark via [data-theme]. No framework.
    ========================================================================== */
 
+/* ============================================================================
+   THE WRAP RULE (cch-w25-s3, charter D299) — READ THIS BEFORE ADDING A WRAP.
+   Stated once, here, by the slice that measured it. Two waves shipped
+   `overflow-wrap: anywhere` and `overflow-wrap: break-word` into this file in
+   the same round; both were right for their element and both carried their
+   measurements at the site, which reads as inconsistency until you read the
+   comments. It is THREE-VALUED, plus a parent-side half that is not optional.
+
+   PROSE (a sentence a person reads) ......... overflow-wrap: break-word
+     Breaks only a word that cannot fit its line, and PRESERVES min-content — so
+     the flex/grid track it sits in still asks for its longest word and cannot
+     collapse. Use it on names, captions, human copy.
+   MACHINE STRING (a path, a host, an id, a raw error) ... overflow-wrap: anywhere
+     Also breaks at the box edge, but LOWERS min-content, so the element cannot
+     force its own track — and therefore the PAGE — wider than the viewport,
+     whether or not an ancestor happens to carry the escape below. Read the
+     ordering honestly: the difference is only OBSERVABLE where something
+     actually consults a min-content floor, so a surface whose parent already
+     escapes will measure the two values identically (cch-w25-s3 drove exactly
+     that on `.deploy-rail-fail`). Choose by what the string IS, not by which
+     value the current markup can tell apart — the markup changes.
+   word-break: break-word ............. A LEGACY ALIAS WITH NO RULING. It behaves
+     like `anywhere` (min-content lowered), not like `break-word`, despite the
+     name. Do not add new ones; the SEVEN that exist are a POPULATION to triage
+     with a fixture each (cch-w24-bl-word-break-alias-remaining-seven), never a
+     to-do list to convert. `word-break: break-all` is a different declaration
+     and stays where it is: on opaque tokens (secrets, env keys, URLs) where
+     breaking mid-token IS the reading aid — five sites.
+   min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
+     A flex item and a grid track both floor at their content's min-content, so
+     a wrap on the child without this on the parent yields a SPILL, not a wrap.
+     56 of this file's 62 `min-width` declarations are this escape, and none of
+     them had a written ruling until this block.
+
+   EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
+   without one is how two irreconcilable numbers get cited as a pair: comments
+   STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
+   break-all), 62 `min-width` (66 occurrences less the FOUR that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 24
+   `overflow-wrap`. The raw line greps are higher (18 / 103 / 38) because this
+   block and the per-site comments name them in prose. Re-derive with a
+   comment-stripping pass, never a bare `grep -c`.
+
+   AND THE PART THAT IS NOT A DECLARATION: none of the four is provable by
+   reading. Every wrap in this file that is load-bearing carries a MEASUREMENT
+   at its site (page scrollWidth and the element's own scrollWidth, at a named
+   width, in a named fixture) and a leg in __preview__/overflow-guard.mjs that
+   reds without it. A wrap whose only guard is this paragraph is not guarded.
+   ========================================================================== */
+
 /* Self-hosted Inter (charter decision 27) — the console renders fully offline;
    no fonts.googleapis.com. One variable woff2 carries weights 100–900 (we use
    400/500/600/700), latin-subset. Italic is browser-synthesised (used only in
@@ -506,8 +556,7 @@ a:hover { text-decoration: underline; }
    __css_check E12 refuses any focus rule whose sole band is a translucent
    token; --ring-soft stays for DECORATIVE fills (tints, tracks, pulses). */
 .nav-link:focus-visible,
-.nav-menu summary:focus-visible,
-.nav-menu-item:focus-visible,
+.nav-group-summary:focus-visible,
 .auth-tab:focus-visible,
 .inst-tab:focus-visible,
 .affix-btn:focus-visible,
@@ -949,10 +998,74 @@ select.form-input {
 /* v4 screens/01: the lifecycle pill LEADS the row in its own column so names
    align down the list; the pill's detail truncates via the existing .status-pill
    rules (never edited here — charter GR11/GR25). */
-.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; }
+/* cch-w23-s1 — `max-width: 100%`, FOLDED IN PLACE, is what makes the wrap at
+   :3176 BIND in the side-by-side band. Driven on `fleet-cruel-content#fleet`
+   with `overflow-wrap: anywhere` already shipped on `.status-pill-detail`: at
+   320-898 the row is `flex-direction: column` and the page landed 320/320, but
+   at 900 and 1000 it was STILL 4108 against the viewport in both themes — the
+   detail measured 3754/3754, i.e. its own box had grown to the whole token, so
+   nothing about it was "overflowing" and no wrap could ever fire. The chain
+   says why: this column is `flex: 0 0 auto`, so its flex base size is
+   MAX-CONTENT and `flex-shrink: 0` forbids the line from taking any of it back
+   — the wrap is only consulted once something bounds the box.
+   `max-width: 100%` is the bound, and it is the SMALLEST one available: it caps
+   the column at the row's own width and lets `flex-wrap: wrap` (:2503, the
+   >=900 block) drop the badges to their own line, which is the trade that block
+   already accepted. Measured after: 900 lands 900/900 with the detail 502/502,
+   1000 lands 1000/1000 with 602/602.
+   `flex: 0 1 auto` WAS DRIVEN TOO, and the prediction that it would collapse
+   this column onto its 116px floor was WRONG: it measures IDENTICALLY (900 ->
+   502/502, 1000 -> 602/602, kind corpus unchanged), because `flex-wrap: wrap`
+   drops the badges before the line needs much shrink at all. It is refused for
+   a reason that is not pixels — it REWRITES an existing declaration, where this
+   is an ADD (D157), so the <=898 stacked band, where `flex-shrink` would act on
+   the COLUMN axis instead, is untouched by construction rather than by a second
+   measurement.
+   WHY NOT `max-width: 45%`: REFUTED BY MEASUREMENT at :2487 (it ellipsed the
+   money message in 60 of 64 cells) and not re-proposed here.
+   THE KIND CORPUS IS BYTE-IDENTICAL, which is the whole claim: on `mixed-fleet`
+   at 320/390/620/900/1000 every `.status-pill-detail` in this scope measures
+   exactly what it measured before this declaration (45/45, 130/130, 170/170,
+   245/245, 209/209, 237/237) — a row that already fits is never asked to
+   shrink, so nothing was bought at the kind row's expense.
+   GR11/GR25: `.fleet-status` is a WRAPPER (the vocabulary :2499 uses); no
+   quarantined pill family is edited here. */
+.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; max-width: 100%; }
 .fleet-main { min-width: 0; flex: 1; }
-.fleet-name { font-size: 14px; font-weight: 600; line-height: 1.3; }
-.fleet-url { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; }
+/* cch-w21-s3 — THE TWO FLEET-ROW TEXT LINES ARE BOUNDED BY THE SAME ONE-WORD
+   DECLARATION EACH, FOLDED IN PLACE (no new rule head, no new @media).
+   WHAT A PERSON SAW, driven on `fleet-cruel-content` (the epic's first
+   committed adversarial fixture: a 253-char `custom_host` and a 255-char
+   `name`, both AT the server's own `validate_length` caps — barkpark.ex:727
+   and :466 — and `publicUrl()` (`grep -n "function publicUrl" app.js`) PREFERS
+   `custom_host` over `url`, so this is the dominant real input, not an edge
+   case). At a 320 viewport the fleet
+   table measured `.fleet-url` scrollWidth 1447 against clientWidth 250 — 83%
+   of the address simply not rendered — and, because `.fleet-url` computes
+   `overflow: visible`, the remainder painted THROUGH the badge column while
+   `documentElement.scrollWidth` reached 1482: 1162px of sideways page scroll
+   with no cue. It was red at EVERY driven width, 1000 included (1447 vs 682).
+   `.fleet-name` is the same defect one line up, and it is why BOTH lines are
+   here: with only the URL bounded the page still measured 465 at 320, because
+   a real name carries an unbroken compound token the breaker cannot split.
+
+   WRAP, NOT ELLIPSIS, AND `break-word` NOT `anywhere` (D165, and the recorded
+   rejection at :2261 in this same file). An ellipsis on a hostname eats the
+   TLD — the one part that tells two boxes apart — so it trades a scrollbar
+   for a lie, which is the exact trade w20-s3 refused on `.instance-card-url`.
+   `anywhere` was already REFUSED on THIS track: it lowers the element's
+   min-content contribution, so `.fleet-main` stops registering as overflowing,
+   the badges are never asked to shrink, and the text becomes the flex-squeeze
+   loser (measured then at 36px -> 90px tall). `break-word` permits the break
+   WITHOUT lowering min-content, so the W15 row mechanics at :2270 are
+   untouched: driven after this change, `.fleet-main` still floors at 200px
+   above 900, `.fleet-badges` still sits at its exact baseline width, and the
+   KIND corpus (`mixed-fleet`) is byte-identical in every guard cell.
+   THE ROW'S PRICE, said out loud: on the CRUEL row only, the URL line goes
+   from one clipped line to a wrapped block — the row grows taller and nothing
+   is hidden. On today's content the row does not move at all. */
+.fleet-name { font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: break-word; }
+.fleet-url { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; overflow-wrap: break-word; }
 .fleet-url.provisioning { color: var(--dim); font-family: var(--font); font-style: italic; }
 /* The mono metadata line: region · size · version · channel · autoupdate. */
 .fleet-meta { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 3px; }
@@ -978,6 +1091,14 @@ select.form-input {
 .fleet-update-chip--busy .fleet-update-dot { background: var(--info); }
 [data-theme="dark"] .fleet-update-chip--ready { background: hsl(var(--ok-hsl) / 0.2); }
 [data-theme="dark"] .fleet-update-chip--busy { background: hsl(var(--info-hsl) / 0.2); }
+/* cch-w63-s5: refused = WARN, and the role is deliberate. This chip says "we
+   could not check this box" — a failure to measure, not a danger and emphatically
+   not the ready GREEN, which on this row means "a newer release is waiting for
+   you". It is the same amber usageMeterDisplay's "Could not measure" already
+   carries for the same class of fact one card away. */
+.fleet-update-chip--refused { background: var(--warn-soft); border-color: hsl(var(--warn-hsl) / 0.28); color: var(--warn-strong); }
+.fleet-update-chip--refused .fleet-update-dot { background: var(--warn); }
+[data-theme="dark"] .fleet-update-chip--refused { background: hsl(var(--warn-hsl) / 0.2); }
 
 /* stw4-freshness (charter D24): the site-row deploy-freshness badge. Amber pulse
    while a content-auto rebuild is in flight; a settled status·trigger·when pill
@@ -1039,10 +1160,16 @@ select.form-input {
 /* ---------------------------------------------------------- tiers */
 .tier-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* auto-fit + a 230px floor: minmax(0, 1fr) let a track shrink below its own
+     content without limit, and repeat(5, ...) held five tracks open even when
+     the catalog renders three — so the CTA label was cut at EVERY width, not
+     just at 901 (.content caps at 1040px, so the grid box measures 950px and
+     five tracks were pinned at 180.4px — button 147 wide in a 136 box).
+     TRAP: a minimum at or below ~180px admits five tracks again and silently
+     un-fixes this with every gate still green. Do not tidy it downward. */
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 12px;
 }
-@media (max-width: 900px) { .tier-grid { grid-template-columns: 1fr 1fr; } }
 .tier {
   display: flex;
   flex-direction: column;
@@ -1129,6 +1256,14 @@ select.form-input {
 .session-main { min-width: 0; }
 .session-device { font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px; }
 .session-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; font-family: var(--mono); }
+/* The sessions fold — one full-width quiet row that reads as "there is more
+   list", not as an action button competing with Revoke. */
+.session-fold {
+  width: 100%; padding: 8px 12px; cursor: pointer; font: inherit;
+  font-size: 12.5px; color: var(--muted-text); text-align: center;
+  background: none; border: 1px dashed var(--border); border-radius: 8px;
+}
+.session-fold:hover { color: var(--text); border-color: var(--muted-text); }
 .badge-current { background: var(--success); color: var(--primary-fg); }
 .pw-form { display: flex; flex-direction: column; gap: 4px; }
 .pw-form .field { margin-bottom: 10px; }
@@ -1417,14 +1552,49 @@ select.form-input {
 
 .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .detail-head h1 { margin-bottom: 4px; }
-.detail-grid { display: grid; grid-template-columns: 1fr 260px; gap: 28px; align-items: start; }
+/* cch-w25-s3: THE MAIN COLUMN'S MIN-CONTENT ESCAPE, hoisted out of the
+   max-width:768 block onto the base rule (a DECLARATION change — same rule head,
+   so the CSSOM census does not move). A bare `1fr` track floors at its content's
+   min-content, so ONE unbreakable run anywhere in `.detail-main` pushes the
+   whole grid: with the deploy rail's failed BUILD stage on screen, the page
+   measured documentElement.scrollWidth 1070 against a 900 viewport, widest box
+   `.detail-rail` right=1069.72 — the sidebar shoved off the edge by the main
+   column. `minmax(0, 1fr)` is the same escape the ≤768 block has always applied;
+   this makes it true at every width. It cannot widen anything — it only lowers a
+   floor. Driven at 320/390/900 in both themes by overflow-guard's
+   W25-deploy-rail-fail-wrap leg, and reverting this one declaration reds its 900
+   cell. `.detail-grid--instance` below keeps its bare `1fr`: no leg in this file
+   drives an instance route against a string cruel enough to floor it, and a
+   conversion with no fixture that could fail is exactly the change this epic
+   refuses. */
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; align-items: start; }
 /* The instance workspace rail hosts the per-host domain checklist (#instance-
    domains), which needs room for a rung's label + evidence code on one line — so
    its rail is wider than the shared 260px. SCOPED to the instance workspace: the
    site-deploys grid (bare .detail-grid) is byte-identical. The single-column
    collapse below (GR65: ≤768px, moved up from 720) still wins — same specificity,
-   later in source — so this only widens the desktop rail. */
-.detail-grid--instance { grid-template-columns: 1fr 340px; }
+   later in source — so this only widens the desktop rail.
+   W26-S1 — THE TRACK FLOORS AT min-content, AND THAT IS THE CAUSE. A bare `1fr`
+   is `minmax(auto, 1fr)`: it never shrinks below the content's min-content
+   width, so one long unbreakable-ish cell in the Sites card widened this track
+   to 1948.94px and took the whole page to 2573 against a 900px viewport — 1673px
+   of the instance workspace off-screen sideways, measured on origin/main
+   cfc2f2b77 at 900/1000/1280 in both themes. `minmax(0, 1fr)` restores the
+   escape the base `.detail-grid` above already has, and drives the page to
+   900/900, 1000/1000, 1280/1280 with `.detail-main` at 252/352/624. Nothing
+   below 900 moves — the single-column collapse (≤899px) already owns that band.
+   THE VICTIM FIX WAS REFUSED (D308): `overflow-wrap: anywhere` on `.site-name`
+   patches ONE cell of a floor that will produce a fourth, and `.site-name` is
+   bound by TWO emitters with DIFFERENT caps — `siteRow` (the compact instance
+   card) binds `domains[0]`, capped at 253 by a `validate_change` in
+   registry/site.ex that a length census CANNOT see, while `globalSiteRow` binds
+   `s.name` at 255 via `validate_length`. It is the census-invisible emitter that
+   carries the live defect, so a remedy keyed to the visible cap misses it.
+   The leg that can lose is W26-instance-track-min-content in overflow-guard.mjs
+   — page-level, because every `.site-name` cell reads scrollWidth == clientWidth
+   here (1555/1555 on the cruel row) and a cell-level assertion is green by
+   construction while the page drags. */
+.detail-grid--instance { grid-template-columns: minmax(0, 1fr) 340px; }
 .detail-main h2 { margin-bottom: 12px; }
 .detail-rail { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
 .detail-rail h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-text); margin-bottom: 6px; }
@@ -1494,9 +1664,74 @@ select.form-input {
 .site-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .site-row + .site-row { margin-top: 10px; }
 .site-main { flex: 1; min-width: 0; }
-.site-name { font-size: 14px; font-weight: 600; }
+/* W22-S2 — THE SITE ROW'S THREE TEXT HOSTS ARE BOUND TO THEIR BOX.
+   `.site-name` (:1534), `.site-host` (:1544) and `.site-meta .mono` (:1536) each
+   render a server string that is admissibly LONG and admissibly UNBREAKABLE, and
+   until this block not one of them carried a wrap property. MEASURED on
+   origin/main bytes in headless Chrome (Chrome 150.0.7871.187), ?scen=sites#sites,
+   the same DOM carrying kind rows and cruel rows together:
+
+     KIND corpus (9-13 char names, real hosts): 0 of 18 cells spilling and
+       documentElement.scrollWidth == clientWidth at 320/390/430/620/900, both
+       themes. That control is why the numbers below are the CONTENT's fault and
+       not the layout's.
+     CRUEL corpus, same screen: a 255-char name reads .site-name 2015/254 at 320
+       (+1761) and takes documentElement to 2048/320 — 1728px of sideways PAGE
+       scroll — 2048/390, 2048/430, 2048/620, and 2418/900. A 253-char domain
+       reads .site-host 1822/254; a 66-char one (a 63-char DNS label + ".no")
+       reads 475/254. The ancestor walk finds NO overflow-x != visible above
+       either host at any width, so the spill reaches documentElement: this is
+       the whole page moving, not a cell clipping.
+
+   ADMISSIBLE, and that is the load-bearing half — a cruel fixture that the
+   server would refuse proves nothing. `registry/site.ex:241` is
+   `validate_length(:name, min: 1, max: 255)` and the column is
+   `add :name, :string` (`20260627150000_create_sites.exs:20`) = varchar(255), so
+   255 chars STORE. Unlike a name that doubles as an id, `Site.changeset/2`
+   (:209) casts `:slug` as its own REQUIRED field (`validate_required` :240,
+   `validate_length(:slug, max: 63)` :242) and `Registry.create_site/2`
+   (registry.ex:4332) never derives it from `:name` — `POST /v1/sites` even takes
+   an explicit one (`router.ex:5894`, `slug <- conn.body_params["slug"] ||
+   slugify(name)`). A 255-char display name over a short slug is a person's
+   ordinary choice, not an attack.
+   The host's cap is 253 and it is enforced by `validate_change` at
+   `registry/site.ex:432-436` (`is_binary(d) and String.length(d) <= 253 and
+   Regex.match?(@domain_format, d)`) — NOT by `validate_length`, so a
+   validate_length census cannot see this cap at all. `@domain_format` (:28) caps
+   each label at 63 and requires dots; a dot is not a CSS break opportunity, so a
+   legal domain arrives as one unbreakable run.
+
+   THE REMEDY IS `overflow-wrap: break-word` ON THE THREE HOSTS, and nothing on
+   their ancestors. `.site-main` already carries `min-width: 0; flex: 1` (:1533),
+   which grants PERMISSION to shrink below min-content but supplies no break
+   opportunity — the box duly shrinks and the unbreakable run overflows it. The
+   wrap is what makes that min-width: 0 yield something other than a spill.
+   `anywhere`, NOT chosen: it also drops the min-content contribution to one
+   character, the shred D165 measured on .fleet-url (0 clips while the row grows
+   112 -> ~430px). `break-word` keeps the intrinsic width honest and breaks only
+   the run that would not otherwise fit. */
+.site-name { font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
 .site-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
-.site-meta .mono { font-family: var(--mono); }
+/* FIXED, NOT REFUSED — and it is the ONE host here that needs `anywhere`.
+   `.site-meta .mono` is the worst text on the row, not the mildest: `siteRow()`
+   (grep -n 'function siteRow' app.js — a SECOND copy of the same concat lives in
+   `siteDetailHtml()`; grep -n 'github_branch' app.js re-derives both)
+   concatenates `github_repo` + "@" + `github_branch` into ONE span and both
+   columns carry their own varchar(255), so a 511-char unbreakable token is
+   reachable. Measured on the instance-workspace Sites card with that token,
+   pre-fix: 1901/21 at 430, 1901/1713 at 900, page 1936/430.
+   `break-word` was tried FIRST and left one cell red: at 900 the instance
+   detail's track is min-content-sized, `break-word` does not lower min-content,
+   and the page still read 2563/900 (1663px sideways) while every CELL reported
+   sw <= cw — a green that the page itself refutes. `anywhere` lowers the
+   min-content contribution, which is exactly the property that track needs, and
+   the page lands 900/900.
+   D165's shred is the cost of `anywhere` and it was MEASURED here, not assumed
+   away: across the KIND corpus (real 13-22 char repo@branch strings) at
+   320/390/430/620/900 in both themes, ZERO cells render taller than 40px — the
+   short strings are untouched. The shred D165 recorded on `.fleet-url` needed a
+   flex sibling free to squeeze the box to ~19px; the pair below denies that. */
+.site-meta .mono { font-family: var(--mono); overflow-wrap: anywhere; }
 .site-inst { color: var(--text); font-weight: 500; }
 /* E-01: the global #sites list adopts the fleet-row anatomy — a fixed leading
    status column, then the main block, then the badges. The instance-Overview
@@ -1504,7 +1739,7 @@ select.form-input {
    never disturbs it. */
 .site-row--global { align-items: center; }
 .site-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; }
-.site-host { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; }
+.site-host { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; overflow-wrap: break-word; }
 .site-inst-link { color: var(--text); font-weight: 500; text-decoration: none; }
 .site-inst-link:hover { text-decoration: underline; }
 .site-inst-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); border-radius: var(--radius-sm); }
@@ -1522,6 +1757,28 @@ select.form-input {
   white-space: pre;
   overflow-wrap: normal;
 }
+/* W22-S2, THE PRECONDITION THE WRAP ABOVE NEEDS ON THE OTHER ROW BUILDER.
+   `.site-row--global` (the #sites list) stacks at <=720 (:2424), so its
+   `.site-main` always has a real box to wrap inside. The COMPACT row — `siteRow()`
+   (grep -n 'function siteRow' app.js), the instance-workspace Sites card
+   rendered by `loadInstanceSites()` — never got that stack, and
+   `.site-main`'s `flex: 1` is `1 1 0%`: with `min-width: 0` and an unshrinkable
+   badge column beside it, its resolved width is LITERALLY ZERO. Measured on
+   origin/main bytes, KIND content, no cruelty applied: `.site-name` "acme-web"
+   reads 70/0 at 320/390/900 and 70/21 at 430, and the page itself runs 982/900 —
+   the name paints straight over the badges. That is the pre-existing state.
+   It is stated here because `overflow-wrap` interacts with it: inside a 0px box
+   `break-word` breaks EVERY character, so shipping the wrap alone turned the
+   sideways overprint into "acme-web" 168px tall, one glyph per line — D165's
+   shred, arrived at from the other direction. Measured, then repaired here.
+   `flex-basis: 200px` gives the main block a real base size so the row WRAPS
+   instead of crushing it, and the wrap is scoped `:not(.site-row--global)`
+   because a `flex-wrap: wrap` on the global row would meet its <=720
+   `flex-direction: column` — and wrap on a COLUMN container wraps into extra
+   COLUMNS, the same trap recorded at :2346. After this pair: 0 spilling cells
+   and page == viewport at 320/390/430/620/900, both themes, kind AND cruel. */
+.site-row:not(.site-row--global) { flex-wrap: wrap; }
+.site-row:not(.site-row--global) .site-main { flex: 1 1 200px; }
 .site-row[data-id] { cursor: pointer; }
 .site-row[data-id]:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 2px var(--ring-soft); }
 /* "Visit ↗" live-site link — sits among the row/detail badges. In a list row it
@@ -1532,6 +1789,27 @@ select.form-input {
 .site-open:hover { color: var(--text); text-decoration: underline; }
 .site-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
+/* W15-S5 (pays cch-w14-bl-site-open-phone-overflow): the SAME `.site-open` class
+   dresses two different contents — a 49px "Visit ↗" chip, and, in the site
+   detail head's `.fleet-url` sub-line, the WHOLE live URL as its own text. The
+   chip wants `white-space: nowrap`; the URL cannot have it. `esc(live)` renders
+   an unbreakable run (a host + path has no space, and the trailing `&nbsp;↗` is
+   non-breaking by construction), so nowrap pinned the URL at 372.03px wide
+   ending at x=388.03 and pushed documentElement.scrollWidth PAST the viewport
+   on every iPhone in portrait, both themes, on every site fixture: 320 (+68),
+   340 (+48), 360 (+28), 375 (+13), and 320 (+75) … 390 (+5) on the longer
+   `site-binding-bound` host. Page-level sideways scroll, no cue.
+   THE SHAPE IS WRAP, NOT TRUNCATION: the URL is the sub-line's whole content
+   and a person reads it to know WHERE the site lives, so ellipsing it would
+   trade a scrollbar for a lie. Wrapping costs row height only where the URL
+   does not fit; nothing is hidden and no cue is owed (a cue with nothing
+   clipped behind it is exactly the sweep's Q2 CUE_STUCK).
+   WHY `break-word` AND NOT `anywhere`/`break-all` (charter D165): `break-word`
+   permits the break WITHOUT lowering the element's min-content contribution,
+   so it cannot become the flex-squeeze that shredded `.fleet-name`/`.fleet-url`
+   into one-character columns. Scoped to `.fleet-url` so the `Visit ↗` chip in
+   the list row and the `.btn` in the badges keep their nowrap unchanged. */
+.fleet-url .site-open { white-space: normal; overflow-wrap: break-word; }
 
 /* ===================================================== DEPLOYMENTS
    gr-p3-site-detail (v4, screens2/05): the deploy ladder is ONE card — hairline-
@@ -1568,7 +1846,21 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .deploy-row:last-child { border-bottom: none; }
 .deploy-head { display: flex; align-items: center; gap: 14px; }
 .deploy-main { flex: 1; min-width: 0; }
-.deploy-ref { font-size: 13px; font-weight: 500; }
+/* cch-w26-bl-deploy-row-siblings-unwrapped: the row carries TWO person-shaped
+   mono strings on one line — the raw branch and the preview hostname — and only
+   ONE of them is bounded. `Registry.preview_slug_for/2` clamps the preview DNS
+   label to 63 (host <= 78, hyphen-rich); `registry/deployment.ex` declares NO
+   validate_length on `:branch` and the webhook writes whatever GitHub sent. An
+   84-char underscore branch measured 464px outside this box at 320 and lost
+   pixels at all ten swept widths in both themes, inside `.deploys{overflow:
+   hidden}` — no scrollbar, no page scroll, the name simply not painted.
+   ONE declaration, on the parent: `overflow-wrap` INHERITS and `.deploy-ref
+   .mono` sets only font-family, so this reaches the branch span AND the
+   `.preview-url` inside it. Same remedy and same reason as `.site-meta .mono`
+   (:1718) — `anywhere` over `break-word` so the run can break at the box edge
+   rather than reserving its own min-content. Guarded by overflow-guard.mjs
+   --defect W27-deploy-ref-branch-bounded (52 findings pre-fix). */
+.deploy-ref { font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
 .deploy-ref .mono { font-family: var(--mono); }
 .deploy-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
 .deploy-meta .mono { font-family: var(--mono); }
@@ -1585,6 +1877,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
   font-size: 12.5px;
   line-height: 1.55;
+  /* cch-w26-s2 / D309 — THE UNFIXED TWIN. `.deploy-rail-fail` got exactly this
+     declaration in #9255; this box, which carries the SETTLED row's reason on
+     the same screen, did not. Without it the panel computes overflow-wrap:
+     normal, so a builder's own `Cannot find module '/opt/.../<205 unbreakable
+     chars>'` runs straight past the `.deploys{overflow:hidden}` card above —
+     and since #9255 hoisted `minmax(0,1fr)` onto `.detail-grid`, the track can
+     shrink below min-content, so the card SWALLOWS the excess instead of the
+     page scrolling: no scrollbar, no selection, no copy, nothing to signal the
+     sentence ended early. Driven pre-fix: glyphs at x=729.39 against .deploys
+     content edges of 587/687/711 — 142.39/42.39/18.39px of the reason gone at
+     900/1000/1024, and 186.39 at 320 — while documentElement read CLEAN in all
+     20 cells. `anywhere` rather than `break-word` because break-word preserves
+     min-content, which is precisely the floor the hoisted track no longer
+     honours. The honest cost is a taller panel; it is printed per cell by
+     overflow-guard's W26-deploy-fail-clip leg and pinned nowhere. */
+  overflow-wrap: anywhere;
 }
 .deploy-fail-dot {
   flex: 0 0 auto;
@@ -1605,7 +1913,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .deploy-fail--blocked .deploy-fail-dot { background: var(--warn); }
 /* dwb-19: the "last step before it broke" caption on the failed /new screen. */
-.new-failed-caption { font-size: 12px; color: var(--muted-text); margin: 10px 0 0; }
+/* cch-w24-s4: `overflow-wrap` here for the same reason as .new-fail-copy — the
+   caption echoes the failing step's detail, hostname and all, and unguarded a
+   63-char label measured scrollWidth 557 against a 214px box at 320. */
+.new-failed-caption { font-size: 12px; color: var(--muted-text); margin: 10px 0 0; overflow-wrap: break-word; }
 
 /* dwb-19: the live sub-caption under an active deployment's status — the
    build-side twin of .new-step-detail, same subtle fade/translate on change. */
@@ -1639,6 +1950,53 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dep-failed  { color: var(--danger); background: hsl(var(--danger-hsl) / 0.10); border-color: hsl(var(--danger-hsl) / 0.30); }
 .dep-building, .dep-pushing { color: var(--warn-strong); background: hsl(var(--warn-hsl) / 0.12); border-color: hsl(var(--warn-hsl) / 0.35); }
 .dep-queued  { color: var(--muted-text); }
+/* cch-w64-s6: deferred is the SEVENTH status (registry/deployment.ex @statuses)
+   and, like cancelled before its rule existed, it had none — so it fell through
+   to the .dep-pill base, which the comment below records as byte-identical to
+   .dep-queued on colour AND background AND border in both themes. A build the
+   box REFUSED therefore impersonated a build still waiting its turn: the one
+   reading that costs a person the most, because it says "be patient" about a
+   round that did not run.
+   ONE ADDITIVE RULE under the GR11/D24 dep-pill freeze, on the wave-13 D157
+   shape (charter D787's carve-out is for THIS rule and nothing else): an ADD,
+   never a restyle — no other .dep-* rule and no .status-pill is touched.
+   THE VOICE: warn HUE, but NOT .dep-building's filled warn chip. Reusing that
+   would swap impersonating-queued for impersonating-building in the same pixel,
+   in the wave whose subject is states that impersonate each other. It follows
+   .dep-cancelled's precedent instead — a row no longer holding a build slot
+   gives up the filled chip — while keeping amber and a SOLID hairline, because
+   unlike a deliberate stop a deferral wants attention. Three-way distinct:
+   filled+muted (queued), filled+amber (building), open+amber (deferred),
+   open+dashed+dim (cancelled). Contrast is gated: --warn-strong on --surface is
+   declared in __css_check CONTRAST_PAIRS (the transparent ground is why this
+   rule owes a pair the tinted variant would not). */
+.dep-deferred {
+  color: var(--warn-strong);
+  background: transparent;
+  border-color: hsl(var(--warn-hsl) / 0.35);
+}
+/* cch-w13-s3: cancelled is a TERMINAL, deliberately-stopped deployment (the
+   server's own sixth status — auto_deploy_worker.refuse/1 mints one on an
+   ordinary content publish, Registry.cancel_preview/2 on a branch delete), and
+   until this rule existed it had NO rule at all: the class fell through to the
+   .dep-pill base, which is byte-identical to .dep-queued (whose only
+   declaration re-states the base colour) on colour AND background AND border,
+   in both themes. A finished abort read as "waiting to start".
+   ONE ADDITIVE RULE under the GR11/D24 dep-pill freeze (wave-13 charter D157):
+   an ADD, never a restyle — no other .dep-* rule and no .status-pill is touched.
+   The voice is HOLLOW, not coloured: --ok and --danger are both wrong for a
+   deliberate stop (and D143 measured them only 19° apart under the ember
+   identity), so cancelled steps DOWN a tone (--dim) and gives up its filled
+   chip for a dashed hairline — the row still occupies the ladder but no longer
+   claims a slot. The dash carries the meaning without colour, so the state
+   survives greyscale and colour-blind viewing. Contrast is gated: the
+   --dim-on---surface pair is declared in __css_check CONTRAST_PAIRS. */
+.dep-cancelled {
+  color: var(--dim);
+  background: transparent;
+  border-style: dashed;
+  border-color: rgba(var(--cc-line-rgb), 0.28);
+}
 
 /* gh-5: per-deployment live build console — the deploy-side twin of .new-console */
 .deploy-console { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
@@ -1698,9 +2056,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 /* The abilities picker rides GR34's shared .set-check grammar now (see the
    .set-* anatomy block); the retired .token-ability* rules are gone. */
-.token-reveal { display: flex; gap: 8px; align-items: center; margin: 4px 0 2px; }
-.token-reveal .input-affix { flex: 1 1 auto; }
-.token-reveal-input { font-family: var(--mono); font-size: 12px; }
+/* The write-once reveal (cch-w21-s4). THREE HEADS, THE SAME THREE THAT WERE
+   ALREADY HERE — every declaration below folds into a rule that existed, so
+   this slice moves the CSSOM head count by ZERO (D230/D232 abstention: it is
+   not the baseline holder).
+   .token-reveal is a WRAPPING row: the secret takes a full line of its own and
+   Copy sits under it, because the token is a <code> text node now — an <input>
+   can only scroll, and at 320 it showed 22 of 51 characters. 12px is the type
+   scale's --text-xs floor and this rule stays ON it (D240): readability bought
+   with smaller type is not readability. `.token-reveal .input-affix` no longer
+   holds the visible field — it wraps the off-screen copy buffer, clipped rather
+   than display:none so execCommand("copy") can still select it. */
+.token-reveal { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 2px; }
+.token-reveal .input-affix { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.token-reveal-input {
+  font-family: var(--mono);
+  font-size: 12px;
+  flex: 1 1 100%;
+  min-width: 0;
+  line-height: 1.55;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  user-select: all;
+}
 
 /* ---- .notif-card / .notif-h: the GitHub-connection card in the Providers view
    (the ONLY remaining consumer; G-04 retired the Notifications view's own
@@ -1815,6 +2198,30 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .prov-connect-form { display: flex; flex-direction: column; gap: var(--space-3); }
 .prov-seg-note { font-size: var(--text-xs); color: var(--dim); margin-left: 4px; }
 
+/* cch-w13-s5 — WHICH cloud account this connection points at, rendered inside
+   the ROTATION card above the credential fields so it is read BEFORE "Verify &
+   replace" is pressed. Authored at REVIEW: the slice shipped six emitted classes
+   with no rule at all, which __css_check E2 reds on (12 errors) — the slice's own
+   gate did not run that checker, so it went green while breaking a check three
+   sibling slices' gates do run.
+   Tokens only, no new fg/bg pairing: the VALUE is body copy on a card
+   (--text on --surface, already contrast-paired) and everything around it is the
+   muted/dim voices this section already uses. The value is set in --mono because
+   it is an identifier a person compares CHARACTER BY CHARACTER against their
+   cloud portal — the one thing on this card that is data rather than prose. */
+.prov-identity-slot { margin: 0; }
+.prov-identity { display: block; line-height: 1.5; }
+.prov-identity-label { color: var(--muted-text); font-weight: 600; }
+.prov-identity-value {
+  color: var(--text); font-family: var(--mono); font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* An absent identity is stated in words and must NOT read like a value: it steps
+   down to the tertiary voice and drops the mono, so "not known" cannot be
+   mistaken for an account id at a glance. */
+.prov-identity-unknown { color: var(--dim); font-family: inherit; font-weight: 400; }
+.prov-identity-note { font-weight: 400; }
+
 /* gr-p4 G-03 — the honest capability matrix: 9 verb rows × prod-provider
    columns. Tokens only. The affirmative mark reads --ok (an identity-invariant
    status green, already contrast-paired on --surface); the dash + server-owned
@@ -1882,9 +2289,56 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* G-04 event×channel routing matrix (GR36): a live toggle grid — 1 label column +
    6 channel columns (email + 5 chat). Scrolls horizontally on narrow viewports so
-   the page body never does. Cells are `.set-toggle`-weight checkboxes; a dashed
-   cell marks a chat_default_on failure event still on its honest default. */
-.set-matrix { overflow-x: auto; margin-top: var(--space-2); }
+   the page body never does (measured true: BODY_OVERFLOWS=false on #notifications
+   at 768/430/390 — the fleet grid is what used to scroll the body, not this).
+   Cells are `.set-toggle`-weight checkboxes; a dashed cell marks a
+   chat_default_on failure event still on its honest default.
+
+   W12 — IT SCROLLED SILENTLY. The comment above was true about the PAGE and
+   false about the matrix itself: at 390px, 204px of 520px was hidden with
+   scrollLeft 0 — Telegram, Pushover and Webhook fully off-screen, Slack half —
+   and nothing said so. There is no OS scrollbar to lean on: the reserved track
+   (offsetHeight - clientHeight) measures 0px even in a CLASSIC-scrollbar run
+   (proven able to fail: injecting ::-webkit-scrollbar{height:12px} flips the
+   same read 0 -> 12). Two cues, the Kinsta/Vercel idiom for a wide table on a
+   phone:
+     1. the LABEL COLUMN sticks. Row identity is what you lose first when the
+        channels slide under your thumb, so `.set-matrix-corner` and
+        `.set-matrix-event` pin to the scroller's left edge with a hairline
+        divider. That is why the grid's `overflow:hidden` became a `clip-path` —
+        overflow:hidden makes the GRID the sticky scrollport, so the sticky
+        column would compute `sticky` and never move (a dead rule of exactly the
+        class GR109/GR115 were about). `clip-path` rounds the corners without
+        creating a scrollport.
+     2. the RIGHT EDGE FADES, and only while something is hidden. The fade is
+        scroll-driven (`animation-timeline: scroll(self inline)`), so with no
+        scrollable overflow the timeline is inactive, `--set-matrix-fade` keeps
+        its 0px initial value, and the mask is a no-op; at rest while clipped it
+        is 48px, and it retracts to 0 as you reach the end — the edge only
+        promises more when there IS more. It is a MASK on the element's own
+        paint, not a gradient in a theme colour: the card surface shows through,
+        so light and dark are correct by construction with no second token to
+        keep in sync. No left-edge fade on purpose — the sticky label column
+        already owns that edge, and two competing treatments there read as
+        damage rather than design. */
+.set-matrix {
+  overflow-x: auto;
+  margin-top: var(--space-2);
+  -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - var(--set-matrix-fade)), transparent);
+  mask-image: linear-gradient(to right, currentColor calc(100% - var(--set-matrix-fade)), transparent);
+  animation-name: set-matrix-edge-fade;
+  animation-duration: auto;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: scroll(self inline);
+}
+/* Registered so the length INTERPOLATES — an unregistered custom property is a
+   token stream and would jump 48px -> 0px at the end of the scroll. */
+@property --set-matrix-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes set-matrix-edge-fade {
+  from { --set-matrix-fade: 48px; }
+  to { --set-matrix-fade: 0px; }
+}
 .set-matrix-grid {
   display: grid;
   grid-template-columns: minmax(150px, 1.6fr) repeat(6, minmax(52px, 1fr));
@@ -1892,9 +2346,29 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   min-width: 520px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  clip-path: inset(0 round var(--radius-lg));
 }
-.set-matrix-corner { border-bottom: 1px solid var(--border); }
+.set-matrix-corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  /* STRETCH, or the pin is a hairline. The grid is `align-items: center`, and
+     this cell is EMPTY — it laid out 1px tall (its own border-bottom) centred
+     in the header row, so the channel headers scrolled straight THROUGH the
+     label column at the top while the rows below were correctly covered.
+     Measured: corner rect y 107.375 h 1 inside a header row 90.375-125.375.
+     THE ROW IS 55px, NOT 35 (cch-w23-s5). This comment used to say "a 35px
+     header row" and the guard printed the same 35, because both read COLUMN 0
+     while two of the six channel headings wrap to two lines: the columns
+     measure [35, 35, 35, 55, 55, 35] in every cell (light/dark x 768/430/390).
+     `stretch` is what makes the pin as tall as the TALLEST heading; anything
+     shorter — a centred 40px corner leaves 7.5px uncovered top and bottom —
+     puts the headings back through the label column. */
+  align-self: stretch;
+  background: var(--muted-surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
 .set-matrix-col {
   display: flex;
   flex-direction: column;
@@ -1910,9 +2384,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .set-matrix-off { font-size: var(--text-xs); font-weight: 500; color: var(--muted-text); }
 .set-matrix-event {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  /* Same reason as the corner: the opaque backdrop has to be the whole ROW, not
+     the height of the words. The flex box keeps the label optically centred, so
+     stretching changes the cover and not the type. */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-sm);
   color: var(--text);
+  /* Opaque, or the channel cells scroll visibly THROUGH the pinned label. The
+     matrix sits on a .set-section, which is --surface. */
+  background: var(--surface);
+  border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 .set-matrix-cell {
@@ -1932,8 +2419,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: var(--text-xs);
   border-bottom: 1px solid var(--border);
 }
-/* The final row (the always-send "test" label + its spanning cell) sits on the
-   card's own bottom edge, so it drops its hairline to avoid a double border. */
+/* The final row (the LAST always-send label + its spanning cell) sits on the
+   card's own bottom edge, so it drops its hairline to avoid a double border.
+   There are now TWO always-send rows ("Test", then "Trial ending" — wave 30
+   S1), and `-n + 2` is still exactly right: only the bottom one loses its
+   hairline, and the one above keeps the separator it should have. */
 .set-matrix-grid > *:nth-last-child(-n + 2) { border-bottom: none; }
 .set-matrix-legend { font-size: var(--text-xs); margin-top: var(--space-2); }
 .set-matrix-ack { font-size: var(--text-sm); margin-top: var(--space-2); min-height: 1em; }
@@ -1963,10 +2453,40 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   flex: 0 0 auto;
 }
 .set-row-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
-.set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+/* `overflow-wrap: anywhere` is what makes the `text-overflow: ellipsis` beside
+   it honest rather than decorative. An email is ONE unbreakable word, so with
+   the default `white-space: normal` the ellipsis can never paint (it needs a
+   line that is forbidden to wrap) and `overflow: hidden` silently swallowed
+   whatever did not fit — measured at 77px of "rex@acme.com" gone at 390px,
+   with no cue, on the row whose Remove button destroys that person's access.
+   `anywhere` also lowers this column's min-content contribution, which is what
+   lets `min-width: 0` on `.set-row-main` above actually yield. Same idiom the
+   sibling `.set-row-key` below already uses. */
+.set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
 .set-row-key { font-size: var(--text-sm); font-weight: 600; color: var(--text); font-family: var(--mono); overflow-wrap: anywhere; }
 .set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
-.set-row-note { font-size: var(--text-xs); color: var(--dim); margin-top: 2px; }
+/* W22-S3 — the note was the SOLE `.set-row-main` child without `overflow-wrap`,
+   and it is the only render host of an env var's free-text comment (app.js
+   `envVarRowHtml`). A comment is user-typed prose, so it can arrive as ONE
+   unbreakable token; `min-width: 0` on `.set-row-main` cannot help, because a
+   flex item's min-content contribution is the longest unbreakable run.
+   MEASURED on `?scen=env-populated#settings/env` with a 255-char single-token
+   comment, every `.set-row-note` written (light and dark identical):
+     @320  note scrollWidth 1554 / clientWidth 246, page 1591/320 — 1271px of
+           sideways scroll on the whole document, ink to x=1591, i.e. 1367px
+           past Delete's left edge (224), and `overflow` is `visible` so it is
+           not clipped either: it paints out of the card and across the page.
+     @390 1554/316 · @430 1554/356 · @620 1554/546 · @900 1554/507 (page 1831).
+   CRUEL IS THE TOKEN, NOT THE TOTAL: a SPACED comment of the SAME 255
+   characters measures scrollWidth == clientWidth at all five widths and simply
+   grows taller (h108@320 -> h54@620). Length alone never reproduces this — a
+   fixture that only pads text is green by construction.
+   What the defect costs a person is the READ, not the reach: the wave-21 620
+   band gives `.set-row-side` its own line, so Delete stays on screen (224..283
+   at a 320 viewport) throughout. `anywhere` (not `break-word`) matches both
+   siblings above and, unlike `break-word`, also lowers the min-content
+   contribution — which is what lets the flex column actually yield. */
+.set-row-note { font-size: var(--text-xs); color: var(--dim); margin-top: 2px; overflow-wrap: anywhere; }
 .set-row-tags { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-top: 2px; }
 .set-row-side { display: flex; align-items: center; gap: var(--space-2); flex: 0 0 auto; }
 /* A bordered metadata chip (scope · secret · write-once). Text-only tint keeps
@@ -1981,7 +2501,181 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   white-space: nowrap;
 }
 
+/* W21-S1 ROSTER PHONE BAND (620px) — the GR33 row stops being a desktop row
+   wearing a phone. Above 620 the row keeps today's single-line shape exactly;
+   at or below it the action cluster takes its OWN line and the identity gets
+   the full remaining width beside its avatar.
+   WHY: `.set-row-main { min-width: 0; flex: 1 1 auto }` beside `.set-row-side
+   { flex: 0 0 auto }` made the IDENTITY the only shrinkable column — the role
+   chip, Change role and Remove never yielded, so the column naming WHO the row
+   is about absorbed the entire deficit. Driven on origin/main bytes,
+   members-populated, both themes, every `#members-body .set-row` iterated:
+   at 320 the page scrolled sideways 12px and Remove's right edge landed at
+   331.86 against a 320 viewport (OFF-SCREEN — you cannot tap what is not
+   there), and `.set-row-name` clientWidth measured 0 on two rows. The clip ran
+   the whole phone band: 61-93px hidden at 390, still 21-37px at 430, clean
+   from 480 on THIS fixture. 620 is the band, not 480: the server caps an email
+   at 160 chars (accounts/user.ex validate_length), so 480 is an artefact of
+   twelve-character fixture strings and 620 — this file's existing phone
+   breakpoint, not a new one — is the first edge that survives a real address.
+   `flex-basis: 100%` (not `margin-left: auto`) is what forces the wrap: auto
+   margins only move an item inside a line, they never create one.
+   FONT-CONDITIONAL (D218): every px above was measured against an unpinned,
+   unasserted face. The ORDERING facts — identity clipped, controls past the
+   edge, both gone after this block — survive a face swap; the px do not. */
+@media (max-width: 620px) {
+  .set-row { flex-wrap: wrap; row-gap: var(--space-2); }
+  .set-row-side { flex-basis: 100%; justify-content: flex-end; }
+}
+
 /* ---------------------------------------------------------- responsive */
+/* W13-S4 DETAIL BAND (899px): the detail routes' OWN threshold, split off from
+   the 768 block rather than raising it. GR65 moved `.detail-grid`'s
+   single-column remedy up to 768 on the strength of a 768px screenshot — but
+   the two-column grid does not stop clipping at 768, it stops at ~899: above
+   the breakpoint `.detail-grid--instance { 1fr 340px }` governs, and its
+   min-content is 581px against a 489-598px content box. Driven on origin/main
+   bytes (real OS scrollbars, --hide-scrollbars deliberately omitted), 11
+   fixtures x 13 widths x 2 themes = 286 cells: 56 cells scrolled the PAGE
+   sideways, every one of them at 769-899, on panel-overview (documentElement
+   .scrollWidth pinned 837 at 769-830), rollback (838), site-states (861) and
+   mixed-fleet#fleet (790 at 769-785). At 790px `window.scrollTo(99999, 0)`
+   yielded scrollX=47: 47px of the DETAILS rail sat off-screen at rest with no
+   cue. After this block: 8 of 286 — a 56 -> 8 drop, and the 8 that remain are
+   ALL mixed-fleet#fleet at 769-785 in both themes, which this block cannot
+   reach: that overhang is `.fleet-row`'s min-content (533 against a 487px
+   container), whose remedy lives in the 768 block below and is filed as
+   cch-w13-fleet-row-band-769-785. Every detail route is 0. Said plainly here
+   because a comment claiming 0/286 would be the same shape of lie the block
+   exists to remove; overflow-guard.mjs pins the residual at <=21px rather than
+   hiding it.
+   THAT RESIDUAL IS NOW PAID (W14-S3, see the .fleet-row note at the foot of
+   this block): the row's stack moved into this block too, the 8 cells went to
+   0, and overflow-guard.mjs's FLEET_ROW_RESIDUAL pin was deleted with them —
+   the W13 leg now asserts #fleet like every other route, 108/108.
+   WHY A SEPARATE BLOCK AND NOT `max-width: 899` ON THE 768 ONE: the 768 block
+   also carries `.fleet-row`'s stack and GR116's topbar tighten — the past-due
+   chip's money message, measured at 154.61 of 169.78px. Raising it wholesale
+   would apply a phone-shaped topbar across the whole tablet band, unasserted.
+   The `.detail-head` stack comes UP from the 720 block for the same reason the
+   grid does: once the grid is one column the header's title/badges/actions row
+   is what is left overhanging.
+   NOT TOUCHED, DELIBERATELY: the `@media (max-width: 720px)` shell fold and the
+   sidebar's `flex: 0 0 232px`. Raising the fold to 900 also zeroes the
+   overflow, but it RELOCATES the identical 231px content cliff to 901 and
+   exports the folded shell — a 690px-tall nav strip with `.content` starting at
+   y=746 — to every tablet in portrait. An icon rail across 721-899 inverts
+   monotonicity (899 -> content 839, 900 -> content 668): one more pixel of
+   browser costs the person 171px. Both were driven and both were rejected. */
+@media (max-width: 899px) {
+  /* minmax(0, …), NOT a bare 1fr — see the measurement in the 768 note below:
+     a 1fr track's automatic minimum is min-content, so the "fix" clips exactly
+     as much as the two-column layout did. */
+  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Stack the detail header (title above badges + Retry/Remove) so the actions
+     don't wrap awkwardly or clip. Was 720-only until W13-S4 measured the band. */
+  .detail-head { flex-direction: column; align-items: stretch; }
+  .detail-head .fleet-badges { justify-content: flex-start; }
+  .detail-actions { margin-left: 0; }
+  /* W14-S3: the fleet row's stack came UP from the 768 block below, the same
+     move and for the same reason as `.detail-grid`: it does not stop clipping
+     at 768 either. Driven on origin/main bytes at every width 769-789 plus the
+     720/768/799/830/899/900/1024 controls, both themes, mixed-fleet AND
+     fleet-v4 (112 cells): 70 cells scrolled the PAGE sideways — mixed-fleet's
+     documentElement.scrollWidth pinned at 790 across the WHOLE 769-789 band
+     (21px off-screen at rest, no cue) and fleet-v4's at 783 across 769-782.
+     After this pair moved: 0 of 112, and the clipped-text count over the same
+     sweep went 786 -> 0. The row lands the already-accepted <=768 stack one
+     band earlier; nothing else changes.
+     WHY NOT `overflow-wrap: anywhere` ON .fleet-name/.fleet-url: it also
+     measures 0 offending cells AND SHREDS THE PERSON (charter D165) — dropping
+     the min-content contribution to one character lets flexbox squeeze
+     `.fleet-main` to 18.78px, so "Staging" renders St/ag/in/g down a 19px
+     column and the row grows 112 -> ~430px while scrollWidth prints CLEAN.
+     WHY NOT `.fleet-status { max-width }`: it ellipses the money message
+     ("Suspended — Payment fail…"), the exact sin GR116 exists to prevent, and
+     `.status-pill` is out of bounds by GR11/GR25.
+     The UNBOUNDED LEAD COLUMN is the root cause and is NOT fixed here:
+     `.fleet-status { flex: 0 0 auto; min-width: 116px }` has no max-width, so
+     the pill's detail text sizes it (134.80px Healthy … 348.02px Suspended on a
+     489px row), leaving `.fleet-main` 44.53px. Stacking removes the contest;
+     the column is recorded, not repaired. `.fleet-main { min-width: 0 }` (:953)
+     and `.fleet-badges { flex-wrap: wrap }` (:962) already ship — re-declaring
+     either here is a measured no-op.
+     PAID BY W15-S4 IN THE BLOCK DIRECTLY BELOW, and that paragraph's diagnosis
+     turned out to be HALF WRONG: in the worst cell the pill is the NARROWEST
+     box on the row, so capping the lead column buys it nothing. The mechanism
+     is `.fleet-main`'s zero flex-basis. Read that block before acting on this
+     one. */
+  .fleet-row { flex-direction: column; align-items: stretch; }
+  .fleet-badges { justify-content: flex-start; }
+}
+
+/* W15-S4 — THE ROW STOPS PAINTING THE HOSTNAME THROUGH THE BADGE CHIPS.
+   The COMPLEMENT of the `@media (max-width: 899px)` block directly above: that
+   block owns the STACKED band, this one owns the SIDE-BY-SIDE band. Edit one
+   and read the other (D159) — the two together must cover every width, and the
+   scope below is the whole reason this is a second block and not two more
+   declarations at :952.
+
+   WHAT A PERSON SAW. On `fleet-v4#fleet` at 900 in both themes the first row's
+   `.fleet-url` measured scrollWidth 144 against clientWidth 60 — 58% of the
+   hostname simply not rendered — and it is SPILL, not truncation: `.fleet-url`
+   computes `overflow: visible`, so the box ended at x=482.75 while its text
+   reached 566.80 and `.fleet-badges` began at 498.75. The hostname was PAINTED
+   THROUGH the chips. Driven over 769/830/899/900/940/983/1000/1100/1200 x 2
+   themes x mixed-fleet + fleet-v4 (36 cells): 12 clipped text cells, 8 of them
+   at the 900 control, and 6 rows whose text reached past the badge column.
+
+   THE ROOT CAUSE `cch-backlog-fleet-status-unbounded-lead-column` RECORDED IS
+   HALF WRONG, and the corrected measurement is why nothing here caps the lead
+   column: in the WORST cell `.fleet-status` is 131.80px — the NARROWEST pill on
+   the screen — while `.fleet-badges` is 331.80px. Capping the pill buys that
+   row nothing. The mechanism is `.fleet-main { min-width: 0; flex: 1 }` (:952),
+   i.e. `flex: 1 1 0%`: a ZERO hypothetical main size means the flex line never
+   registers as overflowing, so `.fleet-badges` (`flex: 0 1 auto`) is never
+   asked to shrink and the hostname is the structural loser regardless of the
+   pill's width. `flex: 1 1 auto` restores the content-sized basis so the line
+   DOES overflow; `flex-wrap: wrap` then lets the badges drop to their own line
+   instead of the text losing; `min-width: 200px` is the floor that makes the
+   wrap happen before the hostname is squeezed again.
+
+   MEASURED, same 36 cells: clipped text 12 -> 0, ellipsed money messages 0 -> 0,
+   page-level overflow 0 -> 0, spill past the badge column 6 -> 0, minimum
+   `.fleet-main` width 59.95 -> 202.89, and every `.fleet-badges` box at its
+   EXACT baseline width (nothing was collapsed to buy the text room). The <= 899
+   stacked band and the 1200 desktop control are byte-identical to baseline.
+   ACCEPTED TRADE: at 900-1100 a crowded row goes one line to two (94.19 ->
+   134.19 at 1000). Nothing is hidden and nothing is shredded — that is the
+   trade this block buys, said out loud.
+
+   THE `min-width: 900px` SCOPE IS LOAD-BEARING, NOT TIDINESS. The identical two
+   declarations UNSCOPED ship a NEW 846px page-level overflow at 721 and 769 on
+   `fleet-support-failed#fleet` in BOTH themes: below 899 `.fleet-row` is
+   `flex-direction: column`, and `flex-wrap: wrap` on a column flex container
+   wraps into additional COLUMNS. Do not "simplify away" the media query.
+
+   THREE SHAPES REFUTED BY MEASUREMENT — do not re-propose them:
+     `.fleet-status { max-width: 45% }` ellipses the money message in 60 of 64
+       cells, including the stacked band where there is no contest (39% of
+       "Payment failed - subscription past due" at 769). The exact sin GR116
+       exists to prevent.
+     `overflow-wrap: anywhere` scores 0 clips while growing `.fleet-url` from 36
+       to 90px tall — it shreds the person rather than fitting them (D165).
+     `.fleet-badges { min-width: 0 }` scores 0 on every text metric while
+       collapsing the badge column to 29.83px around an unshrinkable 66.33px
+       chip — the mirror image of the shred, and INVISIBLE to a clip-only
+       scorer, which is why overflow-guard's new W15 leg also asserts that the
+       badge column is never squeezed narrower than its own content.
+
+   GR11/GR25: `.fleet-status` and `.fleet-main` are WRAPPERS. Neither is one of
+   the four quarantined pill families (`status-pill`, `dep-pill`, `tlv-badge`,
+   `badge`/`fresh-badge`) and no pill rule block is touched here. */
+@media (min-width: 900px) {
+  .fleet-row { flex-wrap: wrap; }
+  .fleet-main { flex: 1 1 auto; min-width: 200px; }
+}
+
 /* GR65 TABLET (768px): three layouts break BEFORE the 720px phone threshold,
    and 768 is exactly the second width __preview__/shoot.sh shoots — so every
    green screenshot pass was taken 48px above the break. Shot at 768 in both
@@ -1995,28 +2689,42 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    .detail-head / .site-row--global and the webhooks + sites panels were shot
    at 768 and render cleanly, so they keep the 720px phone threshold rather
    than going phone-shaped on a tablet. */
+/* THIS BLOCK NOW DECLARES NOTHING — every rule it ever held has moved, and the
+   four comments below are the record of where each one went and why. It is kept
+   as that record, not as CSS: it contributes ZERO authored rule heads (parity
+   1253 == 1253, MISSES 0) and 768 stays in the derived breakpoint axis from the
+   OTHER `@media (max-width: 768px)` block further down, so deleting this one
+   would cost the axis nothing either. Delete it if you would rather have the
+   history in git than in the stylesheet. */
 @media (max-width: 768px) {
-  .fleet-row { flex-direction: column; align-items: stretch; }
-  .fleet-badges { justify-content: flex-start; }
+  /* `.fleet-row`'s stack and `.fleet-badges`' flex-start MOVED UP to the 899
+     block above (W14-S3) — the row clips all the way to 789, not to 768. Only
+     those two rules moved at the time; GR116's topbar tighten stayed here until
+     W17-S6 moved it DOWN to 830 (see the last comment in this block), which is
+     why this block was split rather than raised. */
   /* minmax(0, …), NOT a bare 1fr: a 1fr track's automatic minimum is min-content,
      so the stacked panels (whose min-content is ~572px of unbreakable host names
      and code) blew the track back past the viewport and the "fix" clipped exactly
      as much as the two-column layout did. Measured at 768: bare 1fr → track
      572.5px, panel right edge 828.5 (viewport 768); minmax(0,1fr) → track 473px,
-     right edge 729. */
-  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+     right edge 729. THE RULE ITSELF MOVED UP to the 899 block above (W13-S4):
+     the two-column grid clips all the way to 899, and this block cannot be
+     raised wholesale without dragging GR116's topbar tighten with it. */
   /* .attention-row's tablet stack lives NEXT TO ITS BASE in the attention-card
      section now (GR109): authored here, it sat ~700 lines BEFORE the base rule,
      whose later align-items:center silently killed the flex-start half at equal
      (0,0,1,0) specificity — the row stacked but stayed centred. */
-  /* GR116 cosmetic half — ships WITH the unconditional `.topbar-right > *
-     { min-width: 0 }` pair, never instead of it. The pair alone clips the
-     past-due chip to 154.61px of its 169.78px label at 768; tightening the
-     topbar here (was 720-only) buys the full money message back at tablet
-     widths. Three declarations: topbar padding/gap, topbar-right gap, and the
-     live-chip label fold (in the liveness-chip section, moved 720 -> 768). */
-  .topbar { padding: 0 14px; gap: 10px; }
-  .topbar-right { gap: 8px; }
+  /* GR116's topbar tighten (`.topbar` padding/gap + `.topbar-right` gap) MOVED
+     DOWN OUT OF THIS BLOCK to the single `@media (max-width: 830px)` block in
+     the liveness-chip section (W17-S6). It is one MOVE, not a duplicate: all
+     four GR116 tighten declarations now live together, because the past-due
+     money message is cut from 769 to 805 as well — above this breakpoint, where
+     nothing here can reach it. The destination is AFTER the `.live-chip` base
+     rule on purpose; authored next to this block it would sit BEFORE that base
+     and lose its padding/gap at equal (0,0,1,0) specificity — measurably worse
+     than shipping nothing. See the comment there. Nothing else moved WITH it —
+     this block was emptied one rule at a time, never raised wholesale, and
+     `.fleet-row` / `.fleet-badges` stay where W14-S3 put them (D153). */
 }
 
 @media (max-width: 720px) {
@@ -2025,11 +2733,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .site-row--global { flex-direction: column; align-items: stretch; }
   .toast-stack { left: 12px; right: 12px; bottom: 12px; max-width: none; }
   .crumbs { display: none; }
-  /* Stack the detail header (title above badges + Retry/Remove) so the actions
-     don't wrap awkwardly or clip on phones. */
-  .detail-head { flex-direction: column; align-items: stretch; }
-  .detail-head .fleet-badges { justify-content: flex-start; }
-  .detail-actions { margin-left: 0; }
+  /* The .detail-head stack that lived here moved UP to the 899 block (W13-S4):
+     it is a detail-route rule, and the routes break at 899, not at 720. */
 }
 
 /* ---------- Activity (audit trail) ----------
@@ -2259,6 +2964,23 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
   transition: --p 0.9s linear;
 }
+/* …and a step whose budget was never MEASURED has nothing to sweep, so its dot
+   goes INDETERMINATE (markup drops data-ring and --p): the tree's shipped
+   `next` idiom — solid accent border + the same 1.4s pulse — which reads
+   "working, distance unknown". All four resets undo the ring rule above and
+   every one is load-bearing: it sets `border: 0` (without restoring the border
+   the row is 22px of nothing), its radial mask clips the element's whole
+   painted output INCLUDING the pulse's box-shadow, the conic falls back to a
+   flat --ring-soft disc once --p is gone, and the --p transition has nothing
+   left to tween. */
+.new-step.active .new-step-dot[data-ring-unpaced] {
+  border: 2px solid var(--primary);
+  background: none;
+  -webkit-mask: none;
+  mask: none;
+  transition: none;
+  animation: new-next-pulse 1.4s ease-in-out infinite;
+}
 /* dwb-14: a worker-reported failed step renders honest (red), not a stuck spinner. */
 .new-step.failed .new-step-dot { background: var(--danger); border-color: var(--danger); }
 /* GR18(4): steps behind a failure never ran and never will — dashed hollow,
@@ -2286,7 +3008,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 12px;
   color: var(--muted-text);
   line-height: 1.35;
-  word-break: break-word;
+  /* cch-w24-s4: NOT `word-break: break-word`. That deprecated alias lowers the
+     element's MIN-CONTENT, so the flex track shrank to the widest FRAGMENT and
+     tore `hugin.barkpark.cloud` across two lines inside a 92.25px box at 320
+     while 129px of the column sat unused. `overflow-wrap: break-word` leaves
+     min-content intact (the box widens, the host stays whole) and still breaks
+     a run that genuinely cannot fit — a 63-char DNS label, the legal maximum,
+     is measured not to spill. Guard: overflow-guard.mjs
+     W24-theater-failed-hostname-whole. */
+  overflow-wrap: break-word;
   animation: new-detail-in 0.28s ease;
 }
 .new-step.done .new-step-detail,
@@ -2375,7 +3105,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-gh { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: left; }
 .new-gh .label { display: block; margin-bottom: 4px; }
 .new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
-.new-ready .mono { font-family: var(--mono); font-size: 13px; }
+/* W27: the hero every successful signup lands on names the instance's URL, and
+   `https://<63-char DNS label>.barkpark.cloud` — 78 chars with no break
+   opportunity, the LONGEST url clean_url/1 can issue — painted 670.81px into a
+   214px paragraph at 320 and dragged the whole page 408px sideways. The wrap
+   escape is the remedy, same declaration and same reason as `.site-meta .mono`
+   above: `anywhere` breaks only where nothing else can, so the shipped 35-char
+   host keeps the exact rects it had. Measured, both themes: page 728/320 -> 320/320,
+   4 box overflows -> 0, mono 670.81/214 -> 210.61/214. */
+.new-ready .mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 
 /* failed step — the theater's failure stage (GR18(4)): head carries the honest
    server-owned failCopy; the rail shows the snap (failed red, rest skipped);
@@ -2390,6 +3128,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 13px;
   line-height: 1.5;
   text-align: left;
+  /* cch-w24-s4: this paragraph is SERVER-OWNED text and carries the hostname.
+     With no break declaration at all, a 63-char DNS label (the legal maximum)
+     drove scrollWidth 569 against a 212px box and the whole page 623 against a
+     320px viewport — the panel has no overflow-x to catch it. Same guard leg. */
+  overflow-wrap: break-word;
 }
 .new-failed .new-actions { margin: 18px 0 0; }
 .new-failed .new-failed-caption {
@@ -2440,9 +3183,23 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font: 12px/1.55 var(--mono);
   scroll-behavior: smooth;
 }
-.new-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+/* cch-w24-s4: `overflow-wrap`, not `word-break: break-word` — the break is
+   INHERITED from here into .new-console-text (which declares none of its own),
+   and the alias dropped that child's min-content, tearing the hostname across
+   two lines at 320 AND 360 in a 115.59/155.59px box. Measured with the guard's
+   W24-theater-failed-hostname-whole leg, cruel half included. */
+.new-console-line { display: flex; gap: 10px; white-space: pre-wrap; overflow-wrap: break-word; }
 .new-console-line.dim { color: var(--console-dim); } /* dim on the dark console = its own theme-invariant token (5.21:1) */
 .new-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+/* cch-w24-s4 MEASURED AND REJECTED: `min-width: 0` here (and on
+   .new-theater-rail) makes the 63-char cruel-host page fit exactly 320/320 —
+   and puts the tear straight back, because it hands the flex item permission to
+   shrink below its own content: .new-step-detail returned to a 92.25px box and
+   `hugin.barkpark.cloud` to two line boxes at 320 AND 360. The two goals share
+   one lever (min-content), so this file buys the REAL hostname's wholeness and
+   files the cruel-host page overflow as its own defect rather than paying for a
+   hypothetical string with the defect a person actually meets. Guard leg
+   W24-theater-failed-hostname-whole prints both numbers every run. */
 .new-console-text { flex: 1 1 auto; }
 
 /* dwb-16: connection-lost banner in the progress screen. */
@@ -2507,7 +3264,45 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    BOTH console families' bases sit ABOVE this block (GR115) — order is load-
    bearing here, not style. */
 @media (max-width: 720px) {
-  .new-theater-grid { grid-template-columns: 1fr; gap: 16px; }
+  /* cch-w25-s2 — THE MIN-CONTENT ESCAPE, PAID, plus the step-row budget that
+     made it look unsatisfiable.
+       A bare `1fr` track is `minmax(auto, 1fr)`: its floor is the content's
+     min-content, so the stacked theater track could not shrink below its
+     widest word and the grid overflowed its own card at 320 WITH THE ORDINARY
+     HOSTNAME on shipped bytes (.new-theater-grid sw/cw 251/214,
+     .new-failed-caption painting 250.97 inside 214). That is live today for
+     every failed signup on a 320 phone; it escaped every guard only because
+     the card's left offset kept the spill under the viewport.
+     `minmax(0, 1fr)` drops the floor to zero and the track fits.
+       THE ESCAPE ALONE PUTS THE TEAR BACK. Once .new-step-body may shrink,
+     `.new-step` — a flex row of 22px dot + 12px gap + body + 12px gap +
+     .new-step-time (margin-left:auto, white-space:nowrap, never shrinks) —
+     spends 84px of a 176px row on chrome and hands the body 92.25px for a
+     hostname that needs 129.22. That is a ROW-BUDGET fact, not a min-content
+     fact, and it is separable: wrap the row and give the time its own line at
+     <=720 and the body gets the full 176px. Hostname whole AND escape paid.
+       PADDING-left, NEVER margin-left, on the reflowed time. The margin form
+     passes the page guard while opening a silent 34px internal overflow
+     (.new-step 210/176) no page-level instrument can see; the global
+     border-box reset is why padding is contained and margin is not. 34px is
+     the dot (22) + the row gap (12), so the time still hangs under its label.
+       COST, PRINTED AND ACCEPTED (pinned nowhere — a bare pixel assertion is
+     a maintenance liability this epic has already deleted one of). Measured by
+     the guard leg itself at 320, which prints h= on every run so the trade
+     stays quotable rather than remembered: .new-failed 977.28 -> 1144.59px,
+     and .new-theater-grid on theater-midflight 813.17 -> 978.88px. This is a
+     VISIBLE DESIGN CHANGE — at <=720 every step's elapsed time sits on its own
+     line under its label. Accepted: a taller page scrolls, a torn hostname
+     cannot be typed.
+       IT ALSO CURES A DEFECT NOBODY FILED. On origin/main bytes the mid-flight
+     .new-step row overran itself at ALL FOUR phone widths (212/209 at 320,
+     288/286 at 430) — the nowrap time column simply did not fit its row. The
+     reflow removes it from the row's inline budget entirely.
+       Driven by overflow-guard's W24-theater-failed-hostname-whole leg, which
+     asserts the page number on both theater-failed AND theater-midflight. */
+  .new-theater-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .new-step { flex-wrap: wrap; }
+  .new-step-time { margin-left: 0; flex: 1 0 100%; padding-left: 34px; }
   .new-console-body, .bp-console-body { max-height: 40vh; }
   .new-ready .new-actions .btn { width: 100%; }
   .new-step-detail, .new-step-probe, .new-step-time,
@@ -2523,6 +3318,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    indicator is state, not decoration. */
 @media (prefers-reduced-motion: reduce) {
   .new-step.next .new-step-dot { animation: none; }
+  /* The indeterminate (unpaced) active dot keeps its solid accent border and
+     simply stops pulsing — static, visible, still not pretending to measure. */
+  .new-step.active .new-step-dot[data-ring-unpaced] { animation: none; }
   .new-step-dot, .new-step-label { transition: none; }
   .new-step.active .new-step-dot { transition: none; }
   .new-step-detail { animation: none; }
@@ -2582,9 +3380,86 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
+  /* cch-w24-s2 — THE BOX THAT DRAGS THE PAGE, and it is not the pill. This box
+     holds `<b>Setup failed.</b> ` plus `provision_error` VERBATIM, and nothing
+     between the worker socket and here bounds that string: `provision_jobs.error`
+     is a POSTGRES :text column (the `modify :error, :text` migration under
+     cloud/priv/repo/migrations) and `ProvisionJob.changeset` (registry/
+     provision_job.ex) casts `:error` with ZERO `validate_length`.
+     ELEMENT-HIDING BISECT on the pre-fix tree, `?scen=fleet-cruel-content`
+     `#instance/…c2`: blanking `span.status-pill-detail` left the page at
+     documentElement.scrollWidth 4040 against a 320 viewport; blanking
+     `div.bp-tl-fail` returned it to 320/320 at 320/390/430/900 exactly. Fixing
+     the pill alone leaves a console scrolling 3.7k pixels sideways.
+     WHY IT SPILLS RATHER THAN CLIPS: computed `overflow: visible` with
+     `overflow-wrap: normal`, rect 250x60 and elScrollWidth 4004 — 3754px of ink
+     painted OUTSIDE the box, through whatever sits beside it.
+     TWO REMEDIES WERE PRICED, and this one wraps the BOX. The alternative —
+     splitting the machine string into its own `<span>` so only that span takes
+     `anywhere` — is refused twice over: it needs an app.js change (`timelineHtml`
+     builds this markup), which is outside this slice's file fence, and it is a
+     second head. THE PROSE IS NOT SHREDDED, and that is MEASURED rather than
+     assumed: `anywhere` breaks a word only when the word cannot fit its line,
+     and "Setup failed." is 80px against a 226px content box at 320 — driven at
+     320/390/900, the `<b>` renders on exactly ONE 80px line box in every cell,
+     before AND after. What changes is the machine string: one 3992px line box
+     becomes 19 line boxes at 320, 14 at 390, 8 at 900, all inside the border,
+     and the box grows from 60px tall to 399/305/192. That height is the honest
+     rendering of a 512-character error — nothing is hidden and nothing lies —
+     and it is UNASSERTED here: no guard in this epic pins height against a
+     cruel string (filed as its own row, not smuggled into this block). */
+  overflow-wrap: anywhere;
 }
 .bp-tl-fail b { color: var(--danger); }
-.bp-tl-retry { margin-top: 12px; }
+/* cch-w25-bl-flick-to-bottom-overshoots-retry — THE RECOVERY CONTROL IS DOCKED
+   TO THE VIEWPORT, and this is the ONE declaration block that decides whether a
+   person whose provision failed can reach it at all.
+   THE MEASUREMENT. `.bp-tl-retry` is emitted inside `.bp-timeline`, and
+   `.bp-timeline` is not the last thing on the page — `.detail-grid--instance`
+   follows it inside `#instance-tabpanel`. Flick to `document.body.scrollHeight`
+   on the SHIPPED strings and the control sat at top -725.25 in a 2452px
+   document at 320x568 (`scen=failed` and `mixed-fleet`), -393.34 at 390x844,
+   and -96.06 at 1280x900 — 18 of 18 cells above the viewport, hit-testing to
+   nothing. It is not phone-only and it is not a cruel-corpus artefact.
+   THREE CANDIDATES WERE PRICED AND TWO WERE MEASURED DEAD, on this tree, with
+   the W27 leg in __preview__/overflow-guard.mjs as the instrument:
+     · DOM ORDER (the filed row's own remedy — emit Retry after `.bp-console`):
+       -470.98 at 320x568, -159.22 at 390x844, green ONLY at 1280 (+50.31).
+       It buys 254px of a 725px overshoot, because the overshoot is 993.98px of
+       detail grid BELOW the timeline, not console height inside it.
+     · `position: sticky; bottom: 16px`: BYTE-IDENTICAL to no fix at all
+       (-725.25 / -393.34 / -96.06). A sticky box is constrained by its
+       CONTAINING BLOCK, which here is `.bp-timeline` — it releases at exactly
+       the moment the timeline leaves the viewport, which is the moment the
+       person needs it. Sticky would need the control re-parented to the tab
+       panel, and `wireInstanceTimeline` queries `[data-tl-retry]` inside the
+       timeline section it just re-rendered, so that move strands the wiring.
+     · SCROLL-ANCHOR ON FAILURE (`scrollIntoView` when the timeline mounts):
+       also byte-identical (-725.25 / -393.34 / -96.06). A one-shot gesture is
+       undone by the person's next one, and the gesture in this row IS the next
+       one.
+   SO: fixed. The dock is scoped to the failure state by construction — the
+   button is only emitted while `isProvisionFailed(bp)`, so nothing floats over
+   a healthy instance screen (the leg drives `panel-overview` as that control).
+   It sits BELOW `--z-menu`/`--z-modal`/`--z-toast`, so a dialog, a menu or a
+   toast still covers it rather than fighting it. `env(safe-area-inset-bottom)`
+   keeps it off the home indicator. The 36px height is the honest cost of a
+   control that is now a touch target rather than an inline button — `.btn-sm`'s
+   28px is short for a floating action. It DOES float over scrolling content
+   mid-page, which is what a dock is; what it must never do is permanently eat
+   the page's END, and `instanceOverviewHtml` pays that clearance in the failed
+   state (the leg asserts zero rect overlap with any `.rail-row`/`.card` at the
+   document bottom, so deleting that padding reds this leg). */
+.bp-tl-retry {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: var(--z-tabnav);
+  height: 36px;
+  padding: 0 18px;
+  box-shadow: var(--elev-3);
+}
 
 /* The timeline's expandable console (.bp-console-*) is authored NEXT TO its
    .new-console twin, ABOVE the shared theater/phone media block — see GR115:
@@ -2625,6 +3500,44 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* cch-w23-s1 — ONE DECLARATION, FOLDED INTO THE EXISTING HEAD. This detail is
+     `bp.provision_error` verbatim (`statusOf`, app.js: kind "failed" returns
+     `detail: bp.provision_error`) and NOTHING between the worker socket and
+     this box bounds it: provision_jobs.error is a POSTGRES :text column
+     (migration 20260702130000_provision_job_error_to_text.exs, `modify :error,
+     :text`) and ProvisionJob.changeset carries ZERO validate_length.
+     THE DEFECT IS TOKEN SHAPE, NOT LENGTH, so a length cap is the WRONG remedy
+     (D267, and it inverts what cch-w21-bl-status-pill-detail-fed-by-uncapped-
+     error asked for): driven on the cruel fixture, 512 word-broken characters
+     are clean at every width while 512 characters in ONE UNBROKEN TOKEN took
+     #overview to documentElement.scrollWidth 3860 against a 320px viewport
+     (the detail itself 3754/170) and #fleet to 3856/320 — a cap loose enough to
+     keep a real capture readable still lets one token paint 3754px, and one
+     tight enough to stop the token shreds the capture.
+     `anywhere` rather than `break-word` for the same reason `.site-meta .mono`
+     (:1631) takes it: this is a MACHINE string, not prose, and only `anywhere`
+     lowers the box's min-content contribution — which is the property the
+     flex/grid track actually reads, and therefore the only one that stops the
+     PAGE being dragged sideways. Measured after: every host lands 3754 -> its
+     own box, page 320/320.
+     NO WRAP COMPANION IS AUTHORED ON THE THREE DESCENDANT OVERRIDES, and that
+     is a MEASUREMENT, not a shortcut. `.attention-row` (:3391), `.fleet-status`
+     (:6018) and `.instance-card-head` (:6097) rewrite ONLY the visibility pair
+     (`overflow: visible` plus the ellipsis property beside it) and NONE of them
+     sets `overflow-wrap`, so this
+     one declaration reaches the same element inside all three scopes and a
+     companion there would change ZERO pixels, which makes it a sentence rather
+     than a remedy. Re-driven per scope on `fleet-cruel-content` with EVERY
+     `.status-pill-detail` iterated and its wrapper scope named (not
+     `querySelector` — the fifth clause: a guard whose selector cannot reach the
+     defect is green by construction), light theme, at 320/390/620/900/1000:
+       .fleet-status       detail 3754/170 -> 170/170 @320, 3754/240 -> 240/240 @390
+       .attention-row      detail 3754/170 -> 170/170 @320, 3754/372 -> 372/372 @900
+       .instance-card-head detail 3754/164 -> 164/164 @320, 3754/496 -> 496/496 @900
+     Every host is fixed and there is nothing left to refuse — but ONE of them
+     needed a second declaration OUTSIDE this block to make the wrap bind at all:
+     see `.fleet-status`'s `max-width: 100%` at :983 and the note there. */
+  overflow-wrap: anywhere;
 }
 .status-pill-detail::before { content: "·"; margin-right: 6px; color: var(--dim); }
 .status-pill--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
@@ -2644,44 +3557,19 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 [data-theme="dark"] .status-pill--danger { background: hsl(var(--danger-hsl) / 0.22); }
 
 /* ============================================================ SETTINGS MENU
-   The Settings cluster is a native <details> disclosure (charter decision 6).
-   It sits outside .tabnav-primary so its dropdown escapes the primary scroller;
-   applyRoute() closes it after every navigation. */
-.nav-menu { position: relative; flex: 0 0 auto; display: flex; align-items: center; }
-.nav-menu-trigger { cursor: pointer; list-style: none; user-select: none; }
-.nav-menu-trigger::-webkit-details-marker { display: none; }
-.nav-caret {
-  display: inline-block;
-  margin-left: 6px;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid currentColor;
-  opacity: 0.6;
-  transition: transform var(--t);
-}
-.nav-menu[open] .nav-caret { transform: rotate(180deg); }
-.nav-menu-list {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  min-width: 184px;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  z-index: var(--z-menu);
-}
-.nav-menu-item {
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--muted-text);
-}
-.nav-menu-item:hover { background: var(--muted-surface); color: var(--text); text-decoration: none; }
+   RETIRED (cch-w14-s2). This block styled a pre-v4 TOPBAR dropdown — `.nav-menu`
+   / `.nav-menu-trigger` / `.nav-caret` / `.nav-menu-list` / `.nav-menu-item`,
+   eight rule heads plus two selectors in the shared focus-ring group — and
+   `nav-menu` occurred ZERO times in index.html: the v4 shell moved Settings into
+   the sidebar and left the styling behind. Two app.js handlers still swept for it
+   after every navigation and on every document click, matching nothing.
+   Dead CSS is not free here: it is exactly the population cssom-parity and the
+   E2 dead-class checker exist to keep honest, and a reader looking for the live
+   Settings disclosure found this first.
+   The LIVE disclosure is `<details class="nav-group">` in the sidebar — its rules
+   are `.nav-group-summary` / `.nav-group-caret` below, and its close-on-navigate
+   behaviour (which this block's comment described and its markup no longer had)
+   now runs against the element that actually exists. */
 
 /* ============================================================ OVERVIEW (home)
    gr-p2 HOME TRIAGE (C-01/C-02, v4): a time-of-day greeting, page-header fleet
@@ -2724,7 +3612,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .attention-row:last-child { border-bottom: none; }
 .attention-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.attention-name { font-size: 14px; font-weight: 600; color: var(--text); }
+/* W20-S9: the name is BOUNDED, not just boxed. `.attention-reason` below has
+   carried overflow/ellipsis since GR65; `.attention-name` never did, so when
+   its column shrank the glyphs kept painting OUTSIDE the box — measured on
+   origin/main at 800, mixed-fleet's Marketing name ran 50.94 x 11.75px straight
+   across the "View instance" button's own rect. Bounding the box without
+   bounding the text only moves that bug, so both halves ship together. */
+.attention-name {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .attention-name:hover { color: var(--primary); }
 .attention-reason { font-size: 13px; color: var(--muted-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .attention-acts { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
@@ -2746,6 +3643,114 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .attention-row .attention-main { align-self: stretch; }
 }
 
+/* ═════════════════ W20-S6 THE ATTENTION QUEUE SAYS WHY, ALL THE WAY DOWN
+   THE DEFECT, DRIVEN on merged-main bytes with the route pinned
+   `?scen=mixed-fleet#overview`: `.attention-row .status-pill-detail` rendered
+   139 of 237px of "Payment failed — subscription past due" at 320 — 41.4% of
+   the money message unrendered — while row[0] in the SAME DOM at the SAME
+   instant read 170/245 (30.6%). It clips at 320/360/375/390 and again at 769;
+   `overview-attention` clips at 320, at 769 (117/165, the worst single tablet
+   cell) and at 800 (148/165). Light and dark are byte-identical in every cell:
+   theme is not an axis for this row. Three of these rows ship on the landing
+   screen, and the row that hides the most was the one no instrument had ever
+   read — GR109 asked with `querySelector`, so it could only ever have seen
+   row[0].
+
+   THE ROUTE IS PART OF THE FACT (charter D228). `mixed-fleet`'s own deepLink is
+   `#fleet`, where this queue renders ZERO rows; a filed "renders ZERO at any
+   width" universal came from exactly that omission. The successor leg pins the
+   hash and asserts the landed view id per cell.
+
+   FOURTH COPY OF THE RECIPE, DELIBERATELY (D210). `.detail-rail`,
+   `.fleet-status`, `.instance-card-head` and now `.attention-row` each carry a
+   wrapper-scoped clone of the same five-declaration core. The shared
+   `.status-pill--wrap` variant was priced and refused three blocks below for
+   reasons that hold here unchanged — it saves ZERO rule heads, needs an app.js
+   change through the shared statusPill() factory, and authors a head INSIDE the
+   GR25-quarantined family. What was missing was not a refactor but a MEASURE of
+   divergence, and __css_check's E14 now pins all five declarations across every
+   copy: this block cannot drift from the other three without reddening.
+
+   GR11/GR25 CARVE-OUT BY CONSTRUCTION, NOT BY INSPECTION. `.attention-row` is a
+   WRAPPER in the vocabulary app.css:2270 uses; no quarantined pill family is
+   edited. Every line here is an ADD (D157 "an ADD, not a restyle"), so
+   `git diff -U0` shows this block as a hunk of OLD LENGTH ZERO and :2913-2957
+   is untouched without anyone having to check. It sits directly BELOW the
+   `.attention-row` 768 block on purpose (D236): a (0,0,2,0) wrapper selector
+   beats the (0,0,1,0) base from anywhere, so position is cascade-irrelevant
+   here — and the anchor that costs nothing keeps the file tail free for the
+   slices that need it.
+
+   THE VERTICAL HALF IS LOAD-BEARING, NOT CEREMONY (DRIVEN). `.status-pill`
+   pins `height: 24px` at :2923-2938 and computes `overflow: visible`. Two
+   negative controls — `white-space: normal` ALONE, and a detail-only wrap —
+   BOTH score a PERFECT horizontal 117/117 at 769 while `pill.scrollHeight 29 >
+   clientHeight 22` and the detail's bottom edge paints 6px OUTSIDE the capsule.
+   `height: auto` + `min-height: 24px` are the two declarations that carry it,
+   which is why the leg asserts pill height and the detail's bottom edge as well
+   as the width it was filed on.
+
+   THE 2px INSET IS DERIVED, as in the three blocks below: a 24px chip is 1px
+   border + 2px + an 18px line box + 2px + 1px, so `padding-top/bottom: 2px`
+   reproduces the existing optical inset exactly and a ONE-LINE pill measures
+   24px before and after — only a wrapped pill grows. `min-height: 24px` keeps
+   that floor. THE DOT OFFSET IS RE-DERIVED, NOT COPIED: this pill's own first
+   line box measures 18px (12px font, inherited line-height), so (18 - 7) / 2 =
+   5.5px puts the 7px dot on the centre of the FIRST line rather than the middle
+   of a two-line chip. `overflow: visible; text-overflow: clip` retires the
+   ellipsis machinery the wrap makes unreachable, so nothing can silently
+   re-truncate the reason. NO HEIGHT IS PINNED ANYWHERE (D206): the wrap
+   boundary is a property of the fixture STRING, not of this CSS. */
+.attention-row .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+.attention-row .status-pill-dot { margin-top: 5.5px; }
+.attention-row .status-pill-detail { overflow: visible; text-overflow: clip; }
+/* W20-S9 tablet band, 769-899 — the OTHER half of the GR109 banner above.
+   GR109 fixed the shape it describes only BELOW 769; from 769 up the row is
+   still a row, `.attention-acts` is still flex:0 0 auto, and `.attention-main`
+   is still flex:1 min-width:0 — so the buttons refuse to shrink and the name
+   column absorbs every lost pixel. Driven on origin/main bytes: at 769 AND 800
+   `.attention-main` measures 0.00px wide and `.attention-name` reads
+   scrollWidth 67 / clientWidth 0 on overview-attention, and mixed-fleet's
+   Marketing row reads 69/4 at 800 — the person is told THAT a box needs an
+   operator and not WHICH one. The band's upper edge is DRIVEN, not assumed:
+   mixed-fleet is still cut at 860 and clean from 866; overview-attention is
+   still cut at 880 and clean from 890 — so it is 769-899, not the 769-830
+   this row was filed as, and 899 is already this harness's band edge.
+
+   THREE THINGS TOGETHER, and the order is the point:
+     `min-width` on the name column is the floor — it is what makes the wrap
+     fire at all, because `flex-wrap` alone is dead against `min-width: 0`
+     (that is exactly the trap GR109 records above, and it is why this is a
+     floor AND a wrap and not either one alone).
+     `flex-wrap` is what the floor spends: when the row can no longer seat the
+     status pill, a 12rem name column and the buttons, the ACTION CLUSTER
+     yields — never the identity of the box it acts on.
+     `margin-left: auto` keeps that cluster anchored to the card's right edge
+     whether it wrapped or not, so a wrapped row and an unwrapped one still
+     terminate on the same vertical line.
+   NOT CLAIMED: the wrap POINT is still per-row, because `.attention-row
+   .status-pill` has no cap and its width is a reason STRING — so one card can
+   show two row shapes. That is aesthetic, measured clean, another slice's
+   host, and filed as cch-w20-bl-attention-band-wrap-point-not-uniform.
+   A floor with no wrap was measured and REFUSED: it fixes this column by
+   taking the width straight out of `.attention-row .status-pill-detail`
+   (165/165 -> 0/165 at 830), trading "which box" for "why" — and that host is
+   another row's, not this one's. Bounded to 769-899 on purpose: every one of
+   the 64 driven row-cells outside this band is byte-identical to origin/main,
+   the 320-768 stack included. Above it, the ellipsis on `.attention-name` is
+   the right treatment on its own. */
+@media (min-width: 769px) and (max-width: 899px) {
+  .attention-row { flex-wrap: wrap; row-gap: 10px; }
+  .attention-main { min-width: 12rem; }
+  .attention-acts { margin-left: auto; }
+}
 /* v4 instances grid — auto-fill cards. */
 .overview-instances { margin-top: 4px; }
 .instances-grid {
@@ -2763,12 +3768,40 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .instance-card--danger { border-left-color: var(--danger); }
 .instance-card--info { border-left-color: var(--info); }
 .instance-card--ok { border-left-color: var(--ok); }
+/* cch-w34-s6 review: `neutral` was a role statusOf declared and could never
+   produce, so this modifier had no rule and the card silently fell back to the
+   base --border edge — the ONE state with no accent, which reads as "nothing to
+   say" for the box we know least about. `unreported` makes the role reachable,
+   so it gets the dim accent its pill already uses (.status-pill--neutral's dot),
+   distinct from every measured state and from the plain border. */
+.instance-card--neutral { border-left-color: var(--dim); }
 .instance-card-head { display: flex; align-items: center; gap: 10px; }
-.instance-card-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-right: auto; }
+/* cch-w21-s3 — THE NAME IS BOUNDED, and it is a DIFFERENT failure shape from
+   the address line directly below it, which is why w20-s3's fix did not cover
+   it. `.instance-card-url` CLIPPED ITSELF, so a scrollWidth check could see it.
+   `.instance-card-name` has no bound at all and never clips: it is a flex item
+   in `.instance-card-head` with `min-width: auto`, so it holds its full
+   min-content width and pushes the PAGE. Driven on `fleet-cruel-content` at a
+   320 viewport, both themes: the element measured 497px inside a 288px card
+   with ZERO per-element findings, while `documentElement.scrollWidth` was 536
+   against clientWidth 320 — 216px of sideways scroll on the FRONT SCREEN, and
+   still 8px out at 768. An element-only scorer calls that host perfect.
+   BOTH DECLARATIONS ARE LOAD-BEARING: `min-width: 0` is what lets the flex
+   item shrink at all (without it `break-word` never gets a narrow enough line
+   box to break in), and `break-word` — not `anywhere`, for the min-content
+   reason recorded at :2261 — is what stops the shrink from clipping. Folded
+   into the existing rule: no new head, no new @media. */
+.instance-card-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-right: auto; min-width: 0; overflow-wrap: break-word; }
 .instance-card-name:hover { color: var(--primary); }
+/* cch-w20-s3: the front screen's address line WRAPS instead of ellipsising.
+   `white-space: nowrap` + `text-overflow: ellipsis` dropped the tail of a real
+   public address at every phone width — and the tail is the TLD, so two boxes
+   on different domains rendered as the same visible string. `break-word` (not
+   `anywhere`): it leaves the min-content contribution intact, so the card's
+   grid track is not shredded the way a flex `.fleet-url` would be. */
 .instance-card-url {
   font-family: var(--mono); font-size: 12px; color: var(--muted-text);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow: hidden; overflow-wrap: break-word;
 }
 .instance-card-spark { height: 30px; color: var(--dim); border-bottom: 1px solid var(--border); }
 .instance-card-spark .spark { display: block; width: 100%; height: 30px; }
@@ -2862,7 +3895,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 
 @media (max-width: 620px) {
-  .instances-grid { grid-template-columns: 1fr; }
+  /* W12 — NOT a bare `1fr`. This rule matched all along (matchMedia true at
+     390px) and still let the PAGE BODY scroll 106px: a grid item at the default
+     `min-width:auto` floors its track at the item's MIN-CONTENT, measured
+     480.203px for .instance-card, inside a 358px container — so the one-column
+     mobile layout was a 480px column in a 358px page. `minmax(0, 1fr)` is the
+     same one-column intent with a floor the track can actually honour.
+     The child-level fix does NOT work and was measured: min-width:0 on
+     .instance-card-stats, -url and -head, individually AND all three together,
+     leaves the track at 480.203px. The floor belongs to the CARD, so the cure
+     has to be stated on the card's track (or on the card itself). */
+  .instances-grid { grid-template-columns: minmax(0, 1fr); }
   .overview-head { flex-direction: column; }
   .overview-head-right { justify-content: flex-start; }
   /* .attention-row already STACKS from 768px down — see the GR65 tablet block
@@ -3554,13 +4597,155 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .live-chip[data-state="live"] .live-dot.is-ping::after { animation: none; }
 }
 
-/* On a narrow topbar the label/ago fold away (same rule as .topbar-link); the
+/* ── GR116's topbar tighten, ALL FOUR DECLARATIONS, AT ONE BREAKPOINT ────────
+   On a narrow topbar the label/ago fold away (same rule as .topbar-link); the
    dot alone still carries the health signal. 720 -> 768 with GR116: the fold is
    the third cosmetic declaration that buys the past-due billing chip its full
-   169.78px label back at tablet widths. */
-@media (max-width: 768px) {
+   169.78px label back at tablet widths.
+
+   768 -> 830 with W17-S6, and the two `.topbar` heads MOVED HERE from the
+   `@media (max-width: 768px)` block ~1550 lines above. Driven on origin/main
+   bytes, the past-due chip ("Payment failed · fix billing", scrollWidth 168) is
+   cut ABOVE that breakpoint too — 769:153, 775:155, 780:158, 785:160, 800:166
+   light; one pixel worse in dark, out to 805 — because at 769 the topbar snaps
+   back to 20px padding / 16px gap and the liveness label unfolds, and 168px of
+   money message does not fit in what is left. 810/820/830 read 168/168 on main:
+   the ceiling is where the LONGEST string in the chip's value space fits, and
+   830 is that width for today's longest ("Payment failed · fix billing"). A
+   longer message needs this number re-measured, not assumed.
+
+   A MOVE, NOT A DUPLICATE: authoring a second copy at 830 costs +5 authored
+   rule heads; relocating costs 0 (1253 -> 1253, cssom-parity MISSES 0).
+
+   THE DESTINATION IS CASCADE-CRITICAL. The `.live-chip` base declares its OWN
+   `gap: 7px` and `padding: 0 10px` just above this comment. Authored instead
+   beside where the topbar declarations came from (~:2318, before that base)
+   this block ALSO parity-passes at exactly 1253 and MEASURABLY REGRESSES the
+   defect: driven, band A goes 160 -> 157 at 721 and 740/741 — clean on main at
+   168/168 — truncate at 166/165 in both themes. At equal (0,0,1,0) specificity
+   the LATER base wins, so the moved `.live-chip { padding: 0 7px; gap: 0 }`
+   silently dies and the chip keeps its wide padding. (The label fold itself
+   survives either way — the later `.live-chip-label` rule only sets `color` —
+   which is exactly why the head count and the fold both look fine while the
+   pixels get worse.) Net-zero head count is not evidence a move preserved
+   behaviour; only driving it is. Keep this block AFTER the `.live-chip` base.
+
+   THE LIVENESS LABEL FOLDS 769-830 AND THAT IS THE POINT (D191). Driven, a
+   topbar-only move still leaves 769 and 775 truncated in dark (164/168,
+   167/168): the last 4px come from the label/ago fold, so the four declarations
+   are not separable. GR116's sin is a truncated MONEY MESSAGE; the liveness
+   LABEL is not one — the dot still carries the health signal, exactly as it
+   already did from 768 down.
+
+   NOT BAND A. 721-740 is truncated too, but this tighten is ALREADY computed
+   there (14px/10px at 721, identical to 320): that band is the
+   `@media (max-width: 720px){.app-shell{flex-direction:column}}` shell fold, a
+   231px cliff, and no breakpoint change here moves it by a pixel. Filed as
+   `cch-w17-bl-band-a-shell-fold-cliff`. ────────────────────────────────────── */
+@media (max-width: 830px) {
+  .topbar { padding: 0 14px; gap: 10px; }
+  .topbar-right { gap: 8px; }
   .live-chip-label, .live-chip-ago { display: none; }
   .live-chip { padding: 0 7px; gap: 0; }
+}
+
+/* ── W20-S8: THE PAST-DUE MONEY MESSAGE STOPS BEING CUT 721-740 ──────────────
+   Pays `cch-w17-bl-band-a-shell-fold-cliff` and the 721 half of
+   `cch-w14-bl-billing-chip-truncated-above-768` (its 769-820 half was paid by
+   #8851). The 830 block above says this band "is truncated too" and declares no
+   breakpoint here moves it — true of a breakpoint CHANGE, false of a NEW block:
+   the 830 tighten is already computed at 721 (14px/10px, identical to 320), so
+   the only remaining width comes from tightening FURTHER, which is what this
+   does.
+
+   WHAT A PERSON SAW ON MAIN, DRIVEN AT 501fb9670 (Chrome/150, both themes,
+   `?scen=billing-past-due|overview-past-due`), `#billing-chip` sw/cw:
+     light  721 168/160   725 168/162   730 168/164   735 168/166   740 168/168
+     dark   721 168/159   725 168/161   730 168/163   735 168/165   740 168/167
+   It is a LINEAR RAMP — 8/9, 6/7, 4/5, 2/3, 0/1 px short — NOT "~8px like 721".
+   "Payment failed · fix billing" is cut mid-word at the wide end of it, and the
+   guard scored the whole band a CHECKMARK for four waves (see overflow-guard's
+   GR108 leg, whose band-A tolerance this commit deletes).
+
+   WHY 4px ON BOTH AXES AND NOT 8px OF PADDING. The ramp's worst cell is 9px, and
+   `.topbar` has TWO squeezable axes here: its own inline padding (2 x 14px) and
+   its `column-gap` (10px). Driven, spending only the padding axis
+   (`padding: 0 var(--space-2)` = 8px, gap 4px) cures 740 but leaves 721/dark at
+   168/167 — a strict `<=` assertion and an rc=0 run cannot both hold. Halving
+   BOTH lands every one of the 16 band cells at 168/168, at FULL intrinsic width
+   rather than a pixel of slack. `--space-1` is retired (:340), so
+   `calc(var(--space-2) / 2)` is the only token-legal 4px.
+
+   THE LOWER BOUND IS LOAD-BEARING, NOT DECORATION. `.topbar` is declared at :794
+   and re-declared by the 830 block at :3911; a media query adds no specificity,
+   so the LAST equal-specificity declarant wins. Without `min-width: 621px` this
+   block would also be the last declarant BELOW 620 — driven, `.topbar`'s
+   computed `column-gap` at 320 and at 620 goes 10px -> 4px, falsifying the very
+   invariant the W19-S2 comment block below states about itself, and the guard
+   still exits 0 while it happens. That regression is invisible to git merge, to
+   `__css_check`, to `cssom-parity` and to `__app.test`; only the computed style
+   catches it. Same reason this block is authored HERE, above the 620 banner: the
+   region reads descending 830 > 740 > 620, and authoring it after the 620 block
+   merges clean and computes wrong.
+
+   HONESTY TAX (D218): these are macOS/Inter numbers and a face swap moves chip
+   widths by ~4px — larger than the 1px residues this band used to carry. The
+   4px-both-axes shape is chosen to sit OUTSIDE that noise floor (real slack at
+   full intrinsic width) rather than 1px inside it. ─────────────────────────── */
+@media (min-width: 621px) and (max-width: 740px) {
+  .topbar { padding: 0 calc(var(--space-2) / 2); gap: calc(var(--space-2) / 2); }
+}
+
+/* ── W19-S2: THE PHONE TOPBAR WRAPS AT 620 ───────────────────────────────────
+   Pays three filed rows at once, on the one band that is on screen on EVERY
+   route: `cch-w16-bl-trial-chip-truncated-on-every-phone` (the trial sentence),
+   `task-9fcf92e7a02fa5b8` (the past-due money message) and
+   `cch-w16-bl-theme-picker-select-clipped-at-320` (the theme palette control).
+
+   WHAT A PERSON SAW ON MAIN, DRIVEN AT 29cb76e60 (Chrome/150, both themes,
+   `?scen=billing-trial|billing-past-due&theme=…#settings/billing`):
+     @320 trial   `#billing-chip` 121/70  — "Trial · 14 days left" cut to "Trial ·"
+     @320 past-due `#billing-chip` 168/85 — "Payment failed · fix billing" cut mid-word
+     @320 `select#bp-theme-picker` 72/59 on trial, 72/55 on past-due — a UA-painted
+          control whose selected identity ("Evergreen") is cut with NO cue at all.
+   The page never scrolled sideways in any of those cells; `.topbar-right > *`
+   (:818) floors every child at min-width 0 and the chip's own `overflow: hidden`
+   (:4761) absorbs the squeeze. That trade was the right one for the PAGE and the
+   wrong one for the PERSON: it converts a scrollbar into a silently truncated
+   sentence. Below 620 there is no width to squeeze from, so the band WRAPS
+   instead of shrinking — the chip keeps its intrinsic width on its own line.
+
+   WHY 620 AND NOT 430. The identical declarations under a 430 prelude clear all
+   20 phone cells (320/360/375/390/430 x 2 themes x 2 billing scenarios) and stop
+   there — leaving a REAL truncated band immediately above themselves that no
+   committed instrument can see (`PHONE_WIDTHS` never asserts `#billing-chip`;
+   `CHIP_WIDTHS` starts at 721). Driven on main, the past-due money message reads
+   168/134 @431, 168/143 @450, 168/151 @470, 168/165 @500 and is whole only from
+   519; the trial sentence is cut 431-469. 620 kills that residue for free, and
+   it is ALREADY a declared breakpoint — so `BREAKPOINTS` in breakpoint-sweep.mjs
+   is untouched and Leg A stays at rc=0, where 430 reds it in BOTH directions
+   (CSS-only → `UNCOVERED breakpoint 430px`; list-only → `PHANTOM breakpoint
+   430px`). 621 measures byte-identical to base — same padding, same
+   `.topbar-right` gap and width, same 56px topbar, same `.content` top offset.
+
+   THE DESTINATION IS CASCADE-CRITICAL, exactly as it is for the 830 block above.
+   `.topbar` (:794) and `.topbar-right` (:807) are declared ~3100 lines up and the
+   830 block re-declares both at :3911-3912; a media query adds NO specificity, so
+   the LAST equal-specificity declarant wins. Nothing after this point declares
+   `.topbar` in a width media query, which is what makes 6px/12px and 6px the
+   computed values below 620 rather than 830's 0/14px and 8px. THE PROOF IS
+   COMPUTED STYLE, NOT POSITION: `.topbar`'s own `column-gap` computes 10px at
+   every width before and after this block (830 already sets it) and is NOT a
+   mutation signal — padding and `.topbar-right`'s gap are.
+
+   `flex: 0 0 auto` on `.billing-chip` is the load-bearing half: `.topbar-right >
+   *` sets `min-width: 0`, so without it the chip still shrinks-to-clip inside a
+   wrapped line and the wrap buys nothing. `.billing-chip` (:4748) declares no
+   `flex` of its own, so this is the only declarant. ────────────────────────── */
+@media (max-width: 620px) {
+  .topbar { height: auto; min-height: 56px; flex-wrap: wrap; padding: 6px 12px; }
+  .topbar-right { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .billing-chip { flex: 0 0 auto; }
 }
 
 /* ============================================================================
@@ -3647,11 +4832,74 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 12px;
   color: var(--muted-text);
 }
+/* THE RESURRECT CLUSTER TOOK ITS OWN WIDTH AND PUSHED THE PAGE (cch-w15-s2,
+   corrected diagnosis of cch-w14-bl-fleet-archives-band-721).
+   `flex: 0 0 auto` laid a 460.2px cluster (Resurrect button + the CLI chip)
+   into a 286px row content box, so the PAGE scrolled sideways — measured on
+   the two-row fixture at 171px @320, 116 @375, 101 @390, 0 at 500-719 and
+   10 @721: TWO DISJOINT BANDS, of which the sweep's boundary walk (floor 619)
+   can only ever see the second. The chip itself was never the defect — it
+   reported scrollWidth 337 == clientWidth 337 at every width.
+   IT IS FIXTURE-BOUND. The command is
+   `bp cloud instance resurrect <slug> --provider <kind>` and the registry caps
+   a slug at 63 chars, so the product maximum is a 110-char / 726px chip: on the
+   unfixed rule that is 561px of page overflow at 320 and the band reaches to
+   ~1121px. The fix is proven at the MAXIMUM, not at the 4-char fixture slug.
+   WHY NOT `min-width: 0` ALONE. `.cli-chip-code` already carries
+   overflow:hidden + text-overflow:ellipsis, so one `min-width: 0` takes page
+   overflow to 0 everywhere — and ellipses 35% of the command at 320 and 70% at
+   a max slug, with the cut landing INSIDE THE SLUG, the one variable an
+   operator has to read. A green sweep over a truncated shell command is the
+   failure this epic exists to prevent, so the command stays WHOLE and becomes
+   SCROLLABLE instead. (Copy was never at risk: `.copy-btn[data-copy]` carries
+   the full string verbatim whatever paints.)
+   WRAP FIRST, THEN SCROLL. `flex-basis: 100%` gives the cluster its own line
+   inside the already-wrapping `.archive-row`, and its own `flex-wrap` lets the
+   chip drop below the button on a phone. That alone is NOT enough (86/31/16px
+   residual at 320/375/390), so the chip is additionally bounded and scrollable.
+   Accepted cost: ~34px of row height per archived row at >= 390. */
 .archive-resurrect {
-  flex: 0 0 auto;
+  flex: 0 1 100%;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+/* SCOPED ON PURPOSE — `.cli-chip` is shared (the webhook chips use it, and
+   `.cli-card .inst-life-cli .cli-chip` already overrides it). An unscoped chip
+   rule would blast every other surface that ships one. */
+.archive-resurrect .cli-chip {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.archive-resurrect .cli-chip-code {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  /* `clip`, not the inherited `ellipsis`: an ellipsis on a scroller is a lie —
+     it says "the rest is gone" where the rest is one swipe away. */
+  text-overflow: clip;
+  -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - var(--archive-cli-fade)), transparent);
+  mask-image: linear-gradient(to right, currentColor calc(100% - var(--archive-cli-fade)), transparent);
+  /* TWO-STATE BY CONSTRUCTION, the `.set-matrix` idiom. The fade is
+     scroll-driven, so with nothing to scroll the timeline is INACTIVE and the
+     property keeps its 0px initial value — the edge only promises more when
+     there IS more. An unconditional cue would be a lie at >= 721, where the
+     chip fits whole, and the sweep's own Q2 CUE_STUCK class would say so. */
+  animation-name: archive-cli-edge-fade;
+  animation-duration: auto;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: scroll(self inline);
+}
+/* Registered so the length INTERPOLATES rather than jumping at the end of the
+   scroll; `inherits: false` so no descendant reports a cue it does not own. */
+@property --archive-cli-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes archive-cli-edge-fade {
+  from { --archive-cli-fade: 32px; }
+  to { --archive-cli-fade: 0px; }
 }
 .archive-resurrect-btn {
   flex: 0 0 auto;
@@ -3931,6 +5179,57 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
+  /* cch-w25-s3 — THE SECOND HEAD OF A TWO-HEADED BOX. Wave 24 gave `.bp-tl-fail`
+     (above) `overflow-wrap: anywhere`; this twin — same padding, same border,
+     same font-size, same line-height, as the comment on the line above has said
+     since it was authored — kept `overflow-wrap: normal`, `word-break: normal`,
+     `overflow: visible`. It holds a deploy stage's `detail` VERBATIM: the
+     control plane scrubs console entries for SECRETS on ["line","detail"] and
+     never humanises them, three lines from the failure_reason that IS
+     humanised, so a builder's own `Cannot find module '/opt/barkpark/sites/
+     <slug>/releases/…'` — one unbreakable run carrying the person's own slug —
+     lands here whole.
+     PRE-FIX, MEASURED on `?scen=site-deploy-rail-failed` (the fixture this
+     slice had to write, because no scenario in the harness carried a rail STAGE
+     entry and the rail had therefore never rendered at any width): the box read
+     scrollWidth 454 against a 248px client box at 320 and 454/318 at 390 — 206px
+     and 136px of the error painted OUTSIDE its own border — and the page read
+     490/320, 490/390, 1070/900. After: 320/320, 390/390, 900/900 with every box
+     inside its border, both themes.
+     WHY `anywhere`, AND AN HONEST NARROWING OF THE MEASUREMENT THAT SENT THIS
+     SLICE HERE (charter D298). D298 recorded `break-word` on THIS box failing at
+     900 (page 1011) — measured with the cruel string injected into the FOOTER
+     ALONE. On a fixture that delivers the string the way the product does, that
+     comparison is NOT REPRODUCIBLE, because the same detail is rendered TWICE:
+     here, and in the step row's `.new-step-detail`. Driven at 320/390/900 in
+     both themes, swapping this box between `anywhere` and `break-word` changes
+     NOTHING (box 248/248, 318/318, 292/292 either way; page identical) — the
+     900 page overflow is `.new-step-detail`'s preserved min-content, and wave 24
+     chose `overflow-wrap: break-word` there DELIBERATELY so a hostname stays
+     whole (W24-theater-failed-hostname-whole reds if it is changed). D298 is
+     therefore MASKED on this surface, not refuted, and this box's value is
+     chosen by the RULE at the head of this file rather than by a pixel
+     difference this surface can show: the footer holds a machine string, and
+     `anywhere` keeps the box's own min-content low so it does not depend on an
+     ancestor escape it does not own. Anyone re-measuring D298's pair must
+     neutralise the step caption first, or they will measure the caption.
+     THE OTHER HALF IS THE PARENT, AND IT IS NOT OPTIONAL: `.detail-grid`'s
+     `minmax(0, 1fr)` escape used to be authored ONLY inside the max-width:768
+     block, leaving a bare `1fr` above it — a track that floors at its content's
+     min-content. It is now on the base rule (one declaration, same rule head).
+     Both mutations were driven and each reds a DIFFERENT assertion of the guard
+     leg: revert the track to `1fr` and the PAGE reds at 900 (1070/900, widest
+     `.detail-rail` right=1069.72); keep the track and delete the declaration
+     below and the BOX reds at every width (454 into 248/318/292) WHILE THE PAGE
+     STAYS GREEN at 900 — which is exactly why the leg asserts both.
+     THE COST IS HEIGHT, AND IT IS HONEST: the footer goes 135.06px → 172.75px
+     at 320 on a 240-character error. Nothing is hidden and nothing lies. The
+     guard PRINTS it per cell and deliberately does not pin it — a pixel pin on
+     a wrapped string is a claim about THAT string at THAT width.
+     Guard: overflow-guard.mjs W25-deploy-rail-fail-wrap, 320/390/900 x 2 themes,
+     page AND box, with the ordinary HEALTH string driven as a kind control in
+     the same cells. See THE WRAP RULE at the head of this file. */
+  overflow-wrap: anywhere;
 }
 
 /* ── Create-site "Deploy now" field ────────────────────────────────────────
@@ -4001,10 +5300,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .deploys-rollback-note a:hover { text-decoration: underline; }
 /* search-template W8: the inline theme picker in the site-detail rail — a compact
    select that reuses the token palette; all colours resolve through var(--…). */
+/* cch-w14-s4: this control was authored OUTSIDE the .form-input select pattern —
+   no appearance reset, no chevron gutter, and a `max-width: 60%` cap nothing else
+   in the console has. Measured on origin/main it rendered clientWidth 96 against
+   scrollWidth 137 (+41px) — byte-identical at every width from 320 to 1440 in
+   both themes, because the cap is a percentage of a row that never changes. With
+   `text-overflow: clip` and `appearance: auto` the NATIVE chevron paints on top of
+   the cut glyph: "Template default" needed 124.80px of the 80px inner box, so the
+   rail read "Template d" with the arrow over the "d" — the one fact this row
+   exists to state was unreadable. Width-invariant and a form control, so neither
+   a breakpoint sweep nor documentElement.scrollWidth could ever see it.
+   The cap is lifted to 100% (cures the number) AND the .form-input treatment is
+   adopted — appearance:none + the same inline-SVG chevron + a reserved gutter
+   (cures the CLASS, so a longer future theme name cannot collide again).
+   Scale stays the rail's own: 13px, 3px/8px padding. */
 .rail-select {
-  font: inherit; font-size: 13px; padding: 3px 8px; border-radius: var(--radius-sm);
+  font: inherit; font-size: 13px; padding: 3px 26px 3px 8px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  max-width: 60%; cursor: pointer;
+  max-width: 100%; cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
 }
 .rail-select:hover { border-color: var(--ring); }
 .rail-select:disabled { opacity: 0.6; cursor: progress; }
@@ -4082,6 +5399,24 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .nav-group { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(var(--cc-line-rgb), 0.06); display: flex; flex-direction: column; gap: 2px; }
 
+/* The Settings group is a <details> (cch-w14-s2). `display: flex` on the details
+   box is what makes the 2px row gap survive the element swap — a details defaults
+   to `display: block`, and the eyebrow-then-links rhythm below it is the flex
+   column above. The summary keeps `.nav-eyebrow`'s type and padding and only adds
+   the row layout + the caret; the marker is suppressed on BOTH spellings because
+   Chrome still answers to the legacy pseudo-element. The caret is the ONLY paint
+   this adds above the fold — the group ships `open` and app.js never closes it
+   there — so a desktop sidebar reads exactly as it did, with one honest cue that
+   the cluster is now collapsible. */
+.nav-group-summary {
+  display: flex; align-items: center; gap: 6px;
+  list-style: none; cursor: pointer; user-select: none;
+}
+.nav-group-summary::-webkit-details-marker { display: none; }
+.nav-group-summary:hover { color: var(--muted-text); }
+.nav-group-caret { margin-left: auto; flex: 0 0 auto; opacity: 0.55; transition: transform var(--t); }
+.nav-group[open] > .nav-group-summary .nav-group-caret { transform: rotate(180deg); }
+
 /* sidebar nav items (the primary nav-links carry data-view; applyRoute lights them) */
 .sidebar .nav-link {
   display: flex; align-items: center; gap: 10px;
@@ -4153,13 +5488,143 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .scope-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scope-foot { color: var(--muted-text); border-top: 1px solid rgba(var(--cc-line-rgb), 0.07); margin-top: 4px; }
 
+/* Team picker — the sidebar workspace switcher's own menu. Built from the SAME
+   tokens as .scope-menu above (one menu language, not two), and anchored to a
+   wrapper so the outside-click test is a single .closest(). */
+.ws-switch-wrap { position: relative; }
+.team-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: var(--z-menu);
+  background: var(--cc-modal); border: 1px solid rgba(var(--cc-line-rgb), 0.12);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow); padding: 6px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.team-search { padding: 2px 2px 6px; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.07); margin-bottom: 4px; }
+.team-search input {
+  width: 100%; box-sizing: border-box; padding: 7px 9px;
+  background: transparent; border: 1px solid rgba(var(--cc-line-rgb), 0.12);
+  border-radius: var(--radius); color: var(--text); font: inherit; font-size: var(--text-sm);
+}
+.team-search input:focus { outline: none; border-color: rgba(var(--cc-line-rgb), 0.28); }
+.team-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
+.team-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 9px; border-radius: var(--radius); cursor: pointer;
+  font: inherit; font-size: var(--text-sm); font-weight: 500; color: var(--text);
+  border: none; background: transparent; width: 100%; text-align: left; transition: background var(--t);
+}
+.team-item:hover { background: rgba(var(--cc-line-rgb), 0.06); }
+.team-avatar {
+  width: 20px; height: 20px; flex: 0 0 auto; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(var(--cc-line-rgb), 0.14); color: var(--text);
+  font-size: 10px; font-weight: 600;
+}
+.team-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.team-sub { display: block; font-size: 11px; font-weight: 400; color: var(--muted-text); }
+.team-role {
+  flex: 0 0 auto; font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+  color: var(--cc-fg4); text-transform: lowercase;
+}
+.team-check { flex: 0 0 auto; color: var(--text); font-size: 12px; }
+.team-empty { padding: 10px; font-size: var(--text-sm); color: var(--muted-text); }
+.team-foot { color: var(--muted-text); border-top: 1px solid rgba(var(--cc-line-rgb), 0.07); margin-top: 4px; align-items: flex-start; }
+
 /* Narrow viewports: the sidebar folds to a full-width strip above the content so
-   nothing is stranded (the nav stays reachable; content flows below). */
+   nothing is stranded (the nav stays reachable; content flows below).
+
+   cch-w14-s2 — "NOTHING IS STRANDED" WAS FALSE, AND MEASURABLY SO. `height: auto`
+   let the folded strip grow to its full 690px, so `.content` began at y=745.88 at
+   EVERY width 320-720, in both themes, on all ten top-level views (measured on
+   origin/main, app.css sha256 c8b3bd06a335…, Chrome 150.0.7871.187). On an
+   800px-tall phone that is 54px of page above the fold; at 390x667 the rendered
+   view is ENTIRELY below it. A nav click swapped the view with scrollY 0 and
+   contentTop unchanged — the strip is not an internal scroller, there is no skip
+   link, no hamburger, no toggle, and 17 of 34 focus stops precede the first
+   control in .content. THE FOLD ITSELF IS NOT RAISED (charter D153): raising it
+   relocates the identical cliff onto every tablet in portrait. The fix is inside.
+
+   THREE PARTS, AND ALL THREE ARE LOAD-BEARING — the first two alone each fail:
+     1. `max-height: calc(40vh - 60px)` + the strip's own scroller. UNIFORM: it
+        flattens the root (690), instance (510) and site (368) layers to one
+        number, so the instance route is fixed too — a disclosure alone leaves it
+        at 566.13, because #nav-layer-instance has no Settings group to collapse.
+        AND IT MAKES THE BAR AN IDENTITY RATHER THAN A LUCKY NUMBER (cch-w15-s1).
+        The topbar above the strip is an invariant 56px, so a bare `Nvh` cap puts
+        `.content` at `cap*H + 56` — a FRACTION of `cap + 56/H`, which is worst at
+        the SMALLEST height. That is why the previous `34vh` (0.34H + 56) read
+        0.4100 at H=800, 0.4239 at 667 and 0.4836 at landscape 390 against the
+        sweep's own FOLD_FRACTION = 0.4 budget: OVER at every height, and the
+        sweep only reported green because a 745.88px pin swallowed it. Subtracting
+        the topbar inside the cap cancels it: contentTop = 0.40H - 60 + 56 =
+        0.4H - 4 at EVERY height — a constant 4px of margin under the bar.
+        Driven (Chrome, --render): 316 @800 (budget 320), 262.8 @667 (266.8) and
+        152 @390 (156). Landscape 720x390 is the BINDING height and the only one
+        that refuted the alternatives: a plain `31vh` reads 176.89 there against
+        the same 156 budget, and buys ZERO additional reachable controls at 800 or
+        667 because the reach curve is FLAT between 304 and 328 (the 5th control
+        needs contentTop <= 274, i.e. ~27vh).
+     2. THE CONTINUATION CUE, live IFF clipped. A bare cap is a REGRESSION this
+        epic already owns: at 390x800 it hides 449px with nine of sixteen nav
+        controls below the cut and NOTHING saying so — the exact
+        clipped-without-cue shape W12 fixed on .set-matrix. This is that same
+        idiom turned 90 degrees: a registered `<length>` driving a mask on the
+        strip's OWN paint, so the card surface shows through and light and dark are
+        correct by construction with no second token to keep in sync. While
+        something is below the cut the bottom edge fades over 40px; it retracts the
+        moment the last row is reached. The edge only promises more when there IS
+        more. It fades the bottom hairline along with everything else while
+        clipped; that is deliberate, the fade IS the edge in that state.
+        ONE PART OF THAT IDIOM IS DELIBERATELY NOT REUSED, AND IT WAS MEASURED
+        BOTH WAYS BEFORE RULING. .set-matrix drives its length from
+        `animation-timeline: scroll(self inline)`. Built that way first, this cue
+        was live on the root layer and DEAD on the other two: across 72 driven
+        cells, 48 sat clipped — 238px hidden on the instance layer, 96px on the
+        site layer — while `--nav-fade` computed 0px, and one cell that DID paint
+        the fade still read 40px after scrolling to the end, promising more at the
+        bottom of the list. A narrower probe of the same two routes read 40px, so
+        it was not even consistently wrong. Both of those layers are painted by JS
+        after load (applyShellNav / paintInstanceSections); a scroll timeline whose
+        scroller had no scrollable overflow when the animation attached does not
+        reliably wake up when the content lands. A cue that is right about a third
+        of the time is not a cue. So the STATE is measured instead of inferred:
+        app.js's navStripCue() reads scrollHeight/clientHeight/scrollTop live and
+        sets `is-nav-clipped`; the paint stays here.
+        AND THE FADE FLIPS, IT DOES NOT EASE — also measured, not taste. A
+        `transition: --nav-fade 140ms linear` on this rule looked free and was not:
+        with the class correctly present and 96-238px genuinely clipped, the
+        transitioned custom property computed 0px and STAYED there through 2.5s on
+        two of four driven routes, so the mask went flat while the state underneath
+        it was right. Deleting the transition took the same four routes to 40px,
+        every one. A 140ms ease on a 40px fade is worth nothing; a cue that is
+        sometimes invisible costs everything.
+     3. The `.nav-group` disclosure (index.html + syncNavDisclosure in app.js),
+        which removes 225 of the 449px the cap would otherwise have to hide, so
+        the strip usually needs no scrolling at all.
+   `overscroll-behavior: contain` keeps a flick inside the strip from chaining
+   into the page behind it, which is what makes a 226px nested scroller usable on
+   a phone rather than a trap. */
 @media (max-width: 720px) {
   .app-shell { flex-direction: column; }
-  .sidebar { flex-basis: auto; width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.08); }
+  .sidebar {
+    flex-basis: auto; width: 100%; height: auto; position: static;
+    border-right: none; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.08);
+    max-height: calc(40vh - 60px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--nav-fade)), transparent);
+    mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--nav-fade)), transparent);
+  }
+  .sidebar.is-nav-clipped { --nav-fade: 40px; }
   .nav-spacer { display: none; }
 }
+/* Registered for its TYPED INITIAL VALUE, which is what makes the mask a defined
+   no-op everywhere `is-nav-clipped` is absent — every width above the fold, where
+   navStripCue() never sets it, and every folded strip short enough to fit. Left
+   unregistered, `calc(100% - var(--nav-fade))` would be a guaranteed-invalid
+   substitution and the whole mask-image declaration would drop; that happens to
+   look the same and is a very different reason. `@property` is an OPAQUE at-rule:
+   cssom-parity skips it on both sides, so it adds no rule head. */
+@property --nav-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
 
 /* ---------------------------------------------------------- gr-p2 plan & dunning (C-03/C-04)
    Trial state (countdown chip + ratified CTA), the GR17 dunning banner, the
@@ -4324,6 +5789,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .inst-sites-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .inst-sites-head h2 { margin: 0; }
 .inst-sites-card .site-row { border: none; box-shadow: none; border-radius: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+/* THE FOCUS PERIMETER THIS CARD OWES ITS KEYBOARD USERS.
+   The flush list treatment above zeroes the border that the shared rule
+   `.site-row[data-id]:focus-visible` (app.css ~1526) only ever RE-COLOURS — that
+   rule sets border-COLOR, never width or style. Driven in Chrome after the 0.15s
+   border-color transition settles, a focused row in THIS card computed
+   border-top 1px solid var(--ring) but right/bottom/left `0px none`: three of the
+   four sides had no indicator at all, leaving a keyboard user the translucent
+   --ring-soft halo plus a top hairline. Elsewhere (.fleet-list, the bare
+   .site-row) the row keeps its 1px border, so the shared rule is correct there —
+   this is a defect of THIS context only, and the fix stays scoped to it.
+   OUTLINE, not border: restoring a border here would add 1px on three sides and
+   shift the row's `10px 0` rhythm the moment focus lands. An inset outline costs
+   no layout, paints all four sides, and leaves the RESTING look byte-identical.
+   The top hairline is reset to --border so the list separator does not double as
+   half the indicator — the outline is the whole signal. Square, like the list.
+   --ring is opaque and clears SC 1.4.11's 3:1 floor in every driven theme state
+   (10 measured 2026-07-31; worst 3.85:1 ember light, best 9.30:1 fjord dark). */
+.inst-sites-card .site-row[data-id]:focus-visible {
+  border-top-color: var(--border);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
 .inst-sites-card .site-row + .site-row { margin-top: 0; }
 .inst-sites-card .empty-state { border: none; padding: 8px 0 4px; }
 
@@ -4357,7 +5844,33 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .vf-head-main .vf-meta { margin: 3px 0 0; }
 
 @media (max-width: 620px) {
-  .detail-head--inst { flex-direction: column; }
+  /* `align-items: stretch` IS THE FIX, and it is one declaration because the
+     defect is one declaration doing a different job in the stacked axis than
+     the one it was written for. `.detail-head--inst { align-items: flex-start }`
+     (above, unconditional) means TOP-ALIGN in the row axis — its intent. The
+     moment this head stacks, the same declaration means FIT-CONTENT, so
+     `.detail-head-main` sizes to its own min-content instead of the 288px the
+     page offers. Driven on the shipped `mixed-fleet` fixture at 320 (Chrome
+     150, both themes): head 326 against 288 available, page scrollWidth 342
+     against a 320 viewport, and `.copy-btn`'s right edge at 342 — the address
+     Copy control sat 22px OFF-SCREEN at rest, on a route dispatched to every
+     signed-in reader. Bisected, not assumed: hiding `.detail-url-text` alone
+     drops the head to 281.6 and the page to 320, so the 326 is that span's
+     38-char unbreakable URL (min-content 300) + 6px gap + the 20px button.
+     `.detail-title-row` measures the same 326 and is a PASSENGER — its own
+     max-content is 281.6, under the 288 available; it is stretched by the head,
+     not a cause. NOT a min-width clamp: `min-width: 0` AND `flex: 1 1 0` on
+     `.detail-url-text` were both driven and both left the page at 342, because
+     clamping an item does not lower a flex container's min-content
+     contribution. Only stretching the head does — which is what the SHARED
+     `.detail-head` already grants every other detail head when it stacks
+     (the 899 block, `flex-direction: column; align-items: stretch`); the
+     `--inst` variant silently opted out of the second half. Post-fix, driven:
+     320 reads scrollWidth 320 and the Copy button's right edge 304, with
+     `.detail-url-text` ellipsising at 262 (its phone-width ellipsis is a
+     separately filed row, not this one). Px are font-conditional (D218) — the
+     ORDINAL fact, a control past the viewport edge, is not. */
+  .detail-head--inst { flex-direction: column; align-items: stretch; }
   .detail-head--inst .detail-actions { justify-content: flex-start; }
 }
 
@@ -4480,6 +5993,25 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
 .dom-rung--active { color: var(--info); background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.3); }
 .dom-rung--proxied { color: var(--info); background: hsl(var(--info-hsl) / 0.08); border-color: hsl(var(--info-hsl) / 0.25); }
+/* A rung the control plane ATTEMPTED and could not measure. It must not look
+   like a rung we are still waiting on (the default muted pill): amber, and a
+   DASHED border — the shape says "no reading taken", not "in flight". Same
+   warn-strong-on-warn-soft pairing .dom-note already carries (tokens only). */
+.dom-rung--unknown {
+  color: var(--warn-strong);
+  background: var(--warn-soft);
+  border-color: hsl(var(--warn-hsl) / 0.3);
+  border-style: dashed;
+}
+/* The way back from a stopped checklist: the control the 4s poll no longer is. */
+.dom-recheck {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.dom-recheck-note { font-size: var(--text-xs); color: var(--dim); }
 /* The server's remediation line — amber note, rendered verbatim (the SPA never
    invents fix text). */
 .dom-note {
@@ -4544,6 +6076,31 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
 }
 
+/* cch-w20-s7 — `.op-gate` IS A WRAPPER, and this block is WRAPPER-SCOPED.
+   Every selector below is prefixed `.op-gate`; nothing here touches the base
+   `.status-pill` (app.css:2923-2938) or any other host's copy of it — the
+   GR25/D198 quarantine on the status-pill family is honoured by construction,
+   and the diff's own hunk is a PURE INSERT (old length zero), which is the
+   proof rather than this sentence.
+
+   THE DEFECT: `.op-gate` is `display: flex` and the base `.status-pill`
+   declares no `flex`, so the pill inherits the initial `flex-shrink: 1` and the
+   gate sentence squeezes it — the chip renders narrower than the word "Gate"
+   it contains, so its own label paints outside it. Non-monotonic in viewport
+   width: red across the phone band, clean around 620-720 where the shell folds
+   and the sentence gets the full column, and RED AGAIN across roughly 740-800
+   on `operator-zero-staging` (the sidebar returns above 720 and re-narrows the
+   column), clean again from 830.
+
+   ONE DECLARATION, NOT THE FIVE-DECLARATION WRAP RECIPE. Charter D220: the
+   recipe this epic copied onto three other hosts was DRIVEN here and does not
+   fix this one — every clipped cell stays clipped, the label stays unreadable,
+   and the horizontal score goes green while the words are still wrong. The
+   pill must simply refuse to shrink; the sentence beside it is the flexible
+   part. `flex` is not one of E14's five core properties, so this block starts
+   no recipe it must then finish (__css_check.mjs E14, design choice 1). */
+.op-gate .status-pill { flex: 0 0 auto; }
+
 /* The rollout's own vocabulary, stated once under the rows. */
 .op-foot {
   margin: var(--space-4) 0 0;
@@ -4581,7 +6138,52 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 15px; font-weight: 600;
 }
 .am-who { min-width: 0; flex: 1 1 auto; }
-.am-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+/* cch-w23-s2 — THE NAME IS AN EMAIL LOCAL PART, AND IT WAS UNBOUNDED.
+   `.am-name` is not a display name: `accountModel()`
+   (grep -n 'function accountModel' app.js) sets
+   `name: email.split("@")[0]`, so what paints here is the part of the person's
+   own address before the "@". `BarkparkCloud.Accounts.User` has NO `:name`
+   field and no `validate_length(:name, …)`; the governing cap is
+   `validate_length(:email, max: 160)` (cloud/lib/barkpark_cloud/accounts/user.ex:165),
+   so the longest local part a person can actually own is 158 characters
+   (160 minus the "@" minus at least one domain character). A 255-char fixture
+   — which the backlog row cchi-w22-bl-am-name-unbounded-every-width asked for —
+   is a string NO PERSON CAN PRODUCE, so it proves nothing; 158 is the number
+   this rule is measured against.
+   THE ASYMMETRY IS THE DEFECT: the sibling `.am-line` below carries the full
+   ellipsis triple (overflow/text-overflow/white-space) and this rule carried
+   font-size, font-weight and line-height and nothing else — computed
+   overflow:visible / text-overflow:clip / white-space:normal /
+   overflow-wrap:normal, i.e. an unbreakable 158-glyph run with nothing to
+   break it.
+   WHAT A PERSON SEES — and it is NOT the page. Measured on pre-fix bytes with
+   the committed 158-char fixture (`account-modal-revoke`, Chrome
+   150.0.7871.187, font pinned): `.am-name` scrollWidth 1276 against clientWidth
+   172 @320 and 297 @1440 — the SAME 1276 at both ends, so it is a CONTENT
+   defect, not a responsive one — and `.modal-root` 1374/320 @320, 1811/1440
+   @1440, while `documentElement.scrollWidth == clientWidth` in EVERY cell
+   (320/320, 360/360 … 1440/1440). The overflow is confined to `.modal-root`
+   (:1114), whose `overflow-y: auto` makes `overflow-x` compute `auto` with no
+   x control of its own — so the symptom is A MODAL THAT SCROLLS SIDEWAYS
+   1054px at 320, not a page that does, and every page-level leg in
+   overflow-guard.mjs walks straight past it. (The slice brief quotes 1362 /
+   1461 / ~1141px: same cap, a different 158-character stem. The px are
+   string-conditional, the ORDINAL fact is not.)
+   THE REMEDY IS ONE DECLARATION, folded into this block rather than given a
+   new head. `overflow-wrap: anywhere` is this stylesheet's idiom for a machine
+   string with no break opportunity (`.site-meta .mono`, :1599) and — unlike
+   `word-break: break-word` — it also lowers the element's MIN-CONTENT
+   contribution, which is what stops `.am-identity`'s flex track (and with it
+   `.modal-root`) from sizing to the whole run.
+   NO ELLIPSIS TRIPLE HERE, deliberately, and not for symmetry's sake: charter
+   D253 measured this epic's inert-ellipsis doctrine false at the pixel, and a
+   cue that replaces the person's own identity with "…" hides exactly the thing
+   the row exists to show. Height is left UNBOUNDED for the same reason — a
+   line clamp on an identity trades a sideways scroll for a name its owner
+   cannot read, and the modal already scrolls vertically (:1114) for the
+   nine-session shape, so the extra lines cost nothing a person cannot reach.
+   Guarded by overflow-guard.mjs's W23-account-modal-identity-bounded leg. */
+.am-name { font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .am-line {
   font-size: 12px; color: var(--muted-text); font-family: var(--mono);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -4635,6 +6237,127 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .a2f-codes-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 14px; }
 .a2f-saved { flex: 0 0 auto; }
+
+/* ---- the account modal's PHONE BAND (cch-w22-s4) -------------------------
+   THE DEFECT, measured (Chrome 150.0.7871.187, `?scen=account-modal-2fa-badcode
+   &modal=account`, both themes, mobile emulation): the account card has a hard
+   ~460.45px MIN-CONTENT FLOOR, and NEITHER max-width binds below it.
+   `.modal-card { width: 100%; max-width: 420px }` and
+   `.modal-root:has(.am-modal) .modal-card { max-width: 520px }` are both CAPS —
+   they can only make the card narrower than the space offered, never narrower
+   than its own content demands. `.modal-root` is a GRID; its implicit `auto`
+   column's minimum is the item's min-content, so the track sizes to 460.45 no
+   matter how small the viewport is, and `overflow-y: auto` makes `overflow-x`
+   compute `auto` — so the root becomes a horizontal scroller: scrollWidth 508
+   against clientWidth 320/360/390/430/480, in the 2FA-OFF phase AND the enroll
+   phase (the floor is NOT the enrollment row's fault; bisected below).
+
+   WHAT A PERSON SEES, AT REST, in the enroll phase (viewport-relative rects):
+     @320  root rests at scrollLeft 184; the QR sits at -135..-17 and #a2f-otp
+           at -1..107 — both OFF-SCREEN.
+     @360  #a2f-copy-secret 416.33..448.45 and #a2f-confirm 301..368.86 — both
+           OFF-SCREEN.
+     @390  #a2f-copy-secret 416.33..448.45 — OFF-SCREEN.
+     @430  #a2f-copy-secret 416.33..448.45 — OFF-SCREEN.
+     @480  everything on screen; the band ends there.
+   NOT "unreachable" — measured, both recover: scrolling `.modal-root` to its
+   end puts Copy at 268..300 (in view) at 360, and at scrollLeft 0 the QR sits
+   at 49..167 (in view) at 320. The honest claim is OFF-SCREEN AT REST, BEHIND A
+   HORIZONTAL SCROLL WITH NO VISIBLE AFFORDANCE — with overlay scrollbars there
+   is no cue that the pane scrolls at all, and on a phone the QR cannot be
+   scanned by the device showing it, so Copy IS the enrollment path.
+   WHY NO INSTRUMENT SAW IT: `documentElement.scrollWidth == clientWidth` at
+   every one of those widths (320/320, 360/360, 390/390, 430/430, 480/480) —
+   only `.modal-root` scrolls, so a page-level scorer reads clean.
+
+   THE FLOOR IS NOT THE 2FA ROW. Bisected by forcing `width: min-content` on
+   every descendant in turn: `.am-identity` measures 410.45 (= 38 avatar + 12
+   gap + `.am-who` 237.61 + 12 gap + the nowrap "Change password" link) and the
+   card adds 24+24 padding + 2 border = 460.45. `.a2f-enroll` is only 319.86 and
+   `.session-row` 246.55. So the remedy has to lower the min-content CONTRIBUTION
+   of the card's rows, not just the enrollment one — and per the house lesson
+   already recorded on `.detail-head--inst` (the 620 block above), CLAMPING an
+   item does not lower a flex container's min-content contribution: `.am-who`
+   already carries `min-width: 0` and contributes 237.61 anyway. What does lower
+   it is changing the container's SHAPE — a wrapping flex container's min-content
+   is the LARGEST item contribution, not the sum.
+
+   620 IS DELIBERATELY NOT A NEW BREAKPOINT. The overflow ends at 508.45px, so a
+   508- or 520-keyed block would fit tighter — but every new breakpoint in this
+   stylesheet owes `breakpoint-sweep.mjs`'s BREAKPOINTS list an entry, and this
+   slice is fenced out of all three instruments this round. 620 is an EXISTING
+   head (six blocks already declare it), so the derived breakpoint axis stays
+   [620, 720, 740, 768, 830, 899] and the sweep's boundary walk is unchanged.
+   The cost is that 509..620 also reflows; it is paid for by `flex-basis`, not
+   by the query — every rule below wraps only when the content genuinely stops
+   fitting, so at 480..620 the QR still sits BESIDE the manual column exactly as
+   drawn, and the stack appears at 430 and below where it is the only honest
+   composition.
+
+   `.a2f-secret-value` IS DELIBERATELY UNTOUCHED, and this is the one rule in
+   this block that is NOT here (charter D254): the secret is server-generated —
+   `TwoFactor.gen_secret/0` is 20 bytes → `Base.encode32(padding: false)` = 32
+   chars, and `secretGroups()` (app.js) inserts a space every 4 — so the string
+   is ALWAYS 39 chars with a longest WORD of 4. It has no content axis and no
+   overflow to fix: measured scrollWidth == clientWidth at every width, before
+   (212/212 at 320..480, 272/272 at 620/900) and after this band. Narrowing its
+   box makes it wrap into two groups-of-four lines, which is exactly what a
+   hand-typed secret wants. No `overflow-wrap` is shipped here.
+
+   Px are font-conditional (D218). The ORDINAL fact — a control past the
+   viewport edge at rest — is not. */
+@media (max-width: 620px) {
+  /* THE TRACK, which is the actual cause. `minmax(0, 1fr)` replaces the implicit
+     `auto` column whose minimum IS the card's min-content; `min-width: 0` lets
+     the card (a grid item, so `min-width: auto` by default) shrink to it.
+     SCOPED to `:has(.am-modal)`, following the GR57 precedent two rules above,
+     and this scoping is NOT tidiness — unscoped it is a REGRESSION for the 15+
+     other modal bodies that share `.modal-card`. Their min-content floors are
+     equally unmeasured, but nothing in this slice reflows their CONTENT: clamp
+     their track and the card box shrinks to the viewport while the content it
+     is supposed to hold keeps its old width and spills OVER the card's own
+     border and background. `.modal-root` would scroll by the same amount it
+     already does and the modal would merely look broken as well. Their floors
+     are filed, not fixed here. */
+  .modal-root:has(.am-modal) { grid-template-columns: minmax(0, 1fr); }
+  .modal-root:has(.am-modal) .modal-card { min-width: 0; }
+
+  /* Identity: the avatar keeps the name/email column beside it down to 140px,
+     then "Change password" drops to its own line under the text column rather
+     than forcing the whole card 410px wide. */
+  .am-identity { flex-wrap: wrap; row-gap: 6px; }
+  .am-who { flex: 1 1 140px; }
+  .am-identity > .am-link { margin-left: 50px; }
+
+  /* Section heads and session rows: the right-hand affordance wraps below its
+     heading instead of pinning the card open. */
+  .am-head { flex-wrap: wrap; row-gap: 2px; }
+  .session-row { flex-wrap: wrap; row-gap: 8px; }
+
+  /* Enrollment: the QR keeps its plate beside the manual column while that
+     column can hold 240px, and centres itself above it once it cannot. The auto
+     inline margins are inert while the row is intact — `.a2f-manual` grows into
+     all the free space, so there is none left for them to absorb. */
+  .a2f-enroll { flex-wrap: wrap; row-gap: 14px; }
+  .a2f-manual { flex: 1 1 240px; }
+  .a2f-qr { margin-inline: auto; width: 148px; height: 148px; }
+
+  /* The action row: the code field takes the width it is given rather than a
+     fixed 108px, and Confirm wraps under it only if even that is not enough. */
+  .a2f-confirm-row { flex-wrap: wrap; row-gap: 10px; }
+  .a2f-otp { flex: 1 1 120px; width: auto; }
+
+  /* The one-shot recovery sheet. HONEST LABEL: this one is a LEGIBILITY call,
+     not a measured overflow — driven both ways at 320 on `account-modal` with
+     the confirm arm succeeding, four across gives 8 chips of 70px (62px inside
+     the padding) against an 8-character mono code measuring ~60px, i.e. ~2px of
+     headroom, and two across gives 107px. Nothing overflowed at four; it is
+     2px from doing so, and D218 says every one of those px is font-conditional.
+     The recovery sheet is shown exactly once and is the last thing between a
+     person and a locked account, so it does not get to be the rule that is
+     2px from breaking. */
+  .a2f-codes { grid-template-columns: repeat(2, 1fr); }
+}
 
 /* GR56: `.modal-x` carries data-close, so a pin DEADENS it. An author rule beats
    the UA sheet regardless of specificity, so `.modal-x { display: grid }` would
@@ -4703,3 +6426,199 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .offload-watch { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
 .offload-watch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .offload-watch-title { font-weight: 600; font-size: 13px; color: var(--text); }
+
+/* ====================================== W16-S3 PILL TEXT STAYS IN ITS CHIP
+   Pays TWO filed rows — `cch-w14-bl-status-pill-label-overflows-rail` and
+   `cch-w15-bl-fleet-support-detail-truncated-stacked-band`. They are ONE
+   banner because they share this anchor and `cssom-heads.baseline`, NOT
+   because they share a rule: they fail in different containers, on different
+   children, in disjoint bands.
+
+   GR11/GR25 CARVE-OUT, ARGUED NOT ASSUMED. GR25 forbids EDITING the four
+   quarantined pill families. Nothing below edits one: every declaration here
+   is an ADD under a WRAPPER selector (`.detail-rail`, `.fleet-status` —
+   app.css:2270 already states both are wrappers), the base blocks at
+   :2913-2957 are byte-identical, and this is the D157 precedent ("an ADD, not
+   a restyle") plus D191's inheritance statement. `git diff` on this file
+   touches no existing declaration.
+
+   THE METRIC. Every "fixed" below is `scrollWidth <= clientWidth` on BOTH the
+   pill and its offending child, never the right-edge delta
+   `label.right - pill.right`. The delta is a FALSE-CLEAN oracle: the measured
+   candidate `.detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0 }`
+   ALONE drives it +36.52 -> -12.00 (a perfect score) while
+   `label.scrollWidth 130 > clientWidth 81` and `pill.scrollWidth 155 >
+   clientWidth 117` — the label BOX shrank 49px, the glyphs did not move, and
+   `.status-pill-label` declares no overflow, so 38% of "No content binding"
+   still paints outside the chip. `flex: 0 0 auto` at :2935 is ALREADY on disk,
+   so re-declaring it is a measured no-op; the shrink line below only earns its
+   place NEXT TO `white-space: normal`, which is what actually moves glyphs.
+
+   THE VERTICAL TRAP. A wrap without `height: auto` scores clean on every
+   HORIZONTAL metric while a 36px label sits inside a 24px chip
+   (`pill.scrollHeight 29 > clientHeight 22`) and the second line paints below
+   the capsule. No instrument in __preview__ measured any vertical dimension
+   before this slice; overflow-guard's W15 leg now asserts
+   `pill.scrollHeight <= pill.clientHeight`, mutation-proven by deleting
+   `height: auto` here.
+
+   THE 2px IS DERIVED, NOT TASTE. The base chip is `height: 24px` + 1px border
+   each side around an 18px label line box, i.e. a 2px optical inset per side.
+   `padding-top/bottom: 2px` REPRODUCES that inset exactly, so a single-line
+   pill measures 24px before and after (2+18+2+2 = 24) and only a WRAPPED pill
+   grows. `min-height: 24px` keeps the floor when the label is short. The 8/12/
+   16/20/24 --space-* scale has no 4px step, so a token was not available and
+   none is invented. */
+.detail-rail .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+/* The shrink+wrap pair. `min-width: 0` lets the label fall below its
+   max-content width; `flex: 0 1 auto` lets flexbox ask. Neither means anything
+   without `white-space: normal` above — see THE METRIC. */
+.detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0; }
+
+/* The fleet row's money message: "verify: no heartbeat within the provisioning
+   budget (listener never came online)" measured scrollWidth 463 against clientWidth 142 at 320 (69% of the
+   sentence unrendered) and 295/343 at 721/769 — the operator could not read WHY
+   the instance failed. The filed row's title says "721 and 769"; the driven band
+   is 320/360/390/430/620/721/769/800/830/860, clean at >= 899.
+   `align-items: flex-start` puts the dot on the FIRST line instead of the
+   vertical middle of a two-line chip; `margin-top` centres the 7px dot on that
+   18px line box ((18-7)/2 = 5.5px — derived from the measured line box, not
+   eyeballed). `overflow: visible; text-overflow: clip` retires the ellipsis
+   machinery the wrap makes unreachable, so nothing can silently re-truncate. */
+.fleet-status .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+.fleet-status .status-pill-dot { margin-top: 5.5px; }
+.fleet-status .status-pill-detail { overflow: visible; text-overflow: clip; }
+
+/* ═════════════════ W18-S1 THE FRONT SCREEN SAYS WHY A BOX IS DEGRADED
+   Pays `cch-w16-bl-attention-pill-detail-truncated-front-screen`. On merged-main
+   bytes the LANDING route hid the reason: `.instance-card-head
+   .status-pill-detail` rendered 56 of 165px of "Health down · Agent offline" at
+   320 (66.1% unreadable), 96/165 at 360, 126/165 at 390 — and on `mixed-fleet`
+   45 of 237px of "Payment failed — subscription past due" (81.0%), still cut at
+   430 where the attention fixture is already clean. Light and dark are
+   byte-identical in every cell: theme is not an axis for this row.
+
+   WHY THE PILL ABSORBS ALL OF IT. Inside `.instance-card-head` the pill shares
+   the line with `.instance-card-name`, which carries `margin-right: auto` and no
+   `min-width: 0` — the name holds its min-content width and the pill takes 100%
+   of the deficit. `.attention-row`'s pill sits beside `.attention-main`
+   (`flex: 1; min-width: 0`), which shrinks instead. Two hosts, disjoint bands,
+   opposite shapes; one wrapper-scoped fix cannot pay both, and the tablet host
+   is a separate filed row (task-802585b77fc136b1), untouched here.
+
+   GR11/GR25 CARVE-OUT, BY CONSTRUCTION RATHER THAN BY INSPECTION. GR25 forbids
+   EDITING the four quarantined pill families, not CONSUMING them.
+   `.instance-card-head` is a WRAPPER in exactly the vocabulary app.css:2270
+   uses for `.fleet-status`/`.fleet-main`: it is not one of the four families and
+   no pill rule block is touched. Every line below is an ADD (D157 "an ADD, not a
+   restyle"), so `git diff -U0` on this file shows this block as a hunk of OLD
+   LENGTH ZERO and :2913-2957 is untouched without anyone having to check.
+   THE FOURTH HEAD IS THAT PROOF'S PRICE: `flex-wrap` could have been folded
+   into the existing `.instance-card-head` at app.css:3064 for +3 heads instead
+   of +4, and D198 refused that — it edits an existing declaration line and
+   forfeits the old-length-zero construction. +4 and the carve-out proof are the
+   same decision.
+
+   THE THIRD COPY OF THIS RECIPE IS DELIBERATE (D210). `.detail-rail`,
+   `.fleet-status` and now `.instance-card-head` each carry a wrapper-scoped
+   clone of the same five-declaration wrap. A shared `.status-pill--wrap`
+   variant was PRICED AND REFUSED: it saves ZERO rule heads (the variant is
+   itself a head), forfeits the old-length-zero proof this block rests on, needs
+   an app.js change through the shared statusPill() factory to emit the class on
+   three call sites, and authors a new head INSIDE the GR25-quarantined family —
+   which is the exact ground on which D198 refused the cheaper +3 variant above.
+   THE EXTRACTION TRIGGER IS THE FOURTH HOST, not this one.
+
+   THE NUMBERS BELOW ARE PILL HEIGHTS, NEVER CARD HEIGHTS (D205). Driven on this
+   fixture: the pill is 42px at 320 (the head row wraps, the pill takes the full
+   width and runs to two lines) and back to exactly 24px from 620 up. As CARD
+   height the same change costs +52 at 320 — a real design change to the
+   most-seen screen, ratified by D197; the candidate without `flex-wrap` costs
+   +54 at 320 and is 16px TALLER at 360/390, which is why `flex-wrap` is
+   load-bearing and not decoration.
+
+   THE BOUNDARY IS A PROPERTY OF THE STRING (D206). 42px-at-320 / 24px-from-620
+   holds for the fixture "Health down · Agent offline". The production-dominant
+   "Health unknown · Agent offline" is three characters longer, is 42px at 360
+   too, and moves the wrap boundary from 425/430 to 450/460. overflow-guard's
+   W18-overview-card-pill leg therefore asserts INVARIANTS at every width
+   (detail.scrollWidth == clientWidth, pill.scrollHeight <= pill.clientHeight,
+   detail.bottom <= pill.bottom) and pins no height at all.
+
+   THE 2px INSET IS DERIVED, as in the two blocks above: 24px chip = 1px border
+   + 2px + an 18px line box + 2px + 1px, so `padding-top/bottom: 2px` reproduces
+   the existing optical inset exactly and a one-line pill measures 24px before
+   and after. THE DOT OFFSET IS RE-DERIVED, NOT COPIED: `.fleet-status`'s 5.5px
+   came from an 18px line box at 13px font; this pill's own first line box was
+   MEASURED at 18px (12px font, inherited line-height), so (18 - 7) / 2 = 5.5px
+   is the same number for a different reason — and it is the measurement, not
+   the precedent, that puts the dot on the centre of the FIRST line.
+
+   `overflow: visible; text-overflow: clip` retires the ellipsis machinery the
+   wrap makes unreachable, so nothing can silently re-truncate the reason. */
+/* cch-w24-s2 — THE FOURTH PILL HOST, APPENDED TO THE PRELUDES ABOVE RATHER THAN
+   AUTHORED AS ITS OWN BLOCK. `.detail-title-row` is the instance's OWN detail
+   header, and it is the one screen a person opens to read WHY provisioning
+   failed. Driven on `?scen=fleet-cruel-content#instance/…c2`, pre-fix, light,
+   every `.status-pill-detail` iterated with its wrapper scope MEASURED (not
+   `querySelector`): `.detail-title-row` detail len 512, computed white-space
+   `nowrap`, overflow `hidden`, text-overflow `ellipsis`, 3754/208 at 320 —
+   about 30 of 512 characters readable, and no gesture reaches the rest.
+
+   THE HOST IS `.detail-title-row`, NOT `.detail-rail`. `.detail-rail
+   .status-pill` is a real `white-space: normal` rule, but it reaches ZERO
+   `.status-pill-detail`: only `statusPill()` emits a detail span and no call
+   site lands in a rail. A `.detail-rail .status-pill-detail` selector matches
+   NOTHING. The scope histogram over every non-empty detail on the console reads
+   20 `.attention-row` / 5 `.detail-title-row` / 40 `.fleet-status` / 40
+   `.instance-card-head` / 0 `.detail-rail` — that census is a survey artefact,
+   not something the guard reprints on a green run (the W21 leg names a wrapper
+   scope only on a FAILING element), so re-derive it by walking every
+   `.status-pill-detail` and reading `el.closest()` against the five wrappers.
+
+   WHY COMMA MEMBERS AND NOT A FOURTH COPY (D291). The three blocks above are
+   already the SAME five declarations three times; a fourth copy costs +2 CSSOM
+   rule heads, and `cssom-parity.mjs` holds the head baseline this wave abstains
+   from moving. Appended here the cost is Δheads 0 — measured, PARITY PASS, exit
+   0 — and the D210 "third copy is deliberate" note above keeps its meaning:
+   this is not a fourth clone, it is the third clone gaining a second scope.
+   `.detail-title-row` already declares `flex-wrap: wrap` of its own, so the
+   `.instance-card-head` head on the line below stays single-scoped. */
+.instance-card-head { flex-wrap: wrap; }
+.instance-card-head .status-pill,
+.detail-title-row .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+/* THE DOT COMES WITH THE PRELUDE, and it is a THIRD comma member rather than
+   the two the slice was cut for — stated plainly because it is a deviation.
+   `align-items: flex-start` above is what stops a wrapped pill centring its dot
+   against a 348px-tall capsule, and it puts the dot at the content-box top:
+   MEASURED at 320 on the cruel detail, dot top 423 with the first line box at
+   424 and 15px tall, so the dot's centre sat 5px above the centre of the line
+   it marks. 5.5px lands it at 432 against a line centre of 431.5. The same
+   number for a THIRD different reason — the head above derived it from an 18px
+   line box at 13px, the head below from an 18px line box at 12px, and this
+   scope from a 15px line box at 12px — so it is re-derived, never inherited.
+   Δheads 0: appending to an existing prelude authors no new rule. */
+.instance-card-head .status-pill-dot,
+.detail-title-row .status-pill-dot { margin-top: 5.5px; }
+.instance-card-head .status-pill-detail,
+.detail-title-row .status-pill-detail { overflow: visible; text-overflow: clip; }

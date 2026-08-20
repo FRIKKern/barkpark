@@ -273,6 +273,91 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       assert BlockOps.normalize_render_shapes([list, table, callout]) == [list, table, callout]
     end
 
+    test "normalizes every expanded live list/table dialect recursively" do
+      text = fn value -> [%{"type" => "text", "value" => value}] end
+
+      blocks = [
+        %{
+          "type" => "expandable",
+          "children" => [
+            %{"type" => "bulletList", "items" => [Jason.encode!(text.("camel alias"))]},
+            %{"type" => "bullet_list", "items" => [Jason.encode!(text.("snake alias"))]},
+            %{
+              "type" => "bulleted_list",
+              "content" => [%{"type" => "list_item", "content" => text.("bulleted alias")}]
+            },
+            %{"type" => "ordered-list", "items" => [Jason.encode!(text.("ordered alias"))]},
+            %{
+              "type" => "list",
+              "content" => [%{"type" => "listItem", "content" => text.("content list")}]
+            },
+            %{
+              "type" => "table",
+              "content" => %{
+                "header" => ["Surface", "Proof"],
+                "rows" => [["TUI", "visible"]]
+              }
+            },
+            %{
+              "type" => "table",
+              "content" => [
+                %{
+                  "type" => "tableRow",
+                  "content" => [
+                    %{"type" => "tableCell", "header" => true, "content" => text.("Claim")}
+                  ]
+                },
+                %{
+                  "type" => "tableRow",
+                  "content" => [
+                    %{"type" => "tableCell", "content" => text.("proven")}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+
+      assert {:error, {:invalid_paper_structure, _}} = BlockOps.validate_render_shapes(blocks)
+      [expandable] = normalized = BlockOps.normalize_render_shapes(blocks)
+
+      [camel, snake, bulleted, ordered, content_list, object_table, row_table] =
+        expandable["children"]
+
+      assert camel == %{"type" => "list", "ordered" => false, "items" => [text.("camel alias")]}
+      assert snake == %{"type" => "list", "ordered" => false, "items" => [text.("snake alias")]}
+
+      assert bulleted == %{
+               "type" => "list",
+               "ordered" => false,
+               "items" => [text.("bulleted alias")]
+             }
+
+      assert ordered == %{
+               "type" => "list",
+               "ordered" => true,
+               "items" => [text.("ordered alias")]
+             }
+
+      assert content_list == %{
+               "type" => "list",
+               "ordered" => false,
+               "items" => [text.("content list")]
+             }
+
+      assert object_table["head"] == [text.("Surface"), text.("Proof")]
+      assert object_table["rows"] == [[text.("TUI"), text.("visible")]]
+      assert row_table["head"] == [text.("Claim")]
+      assert row_table["rows"] == [[text.("proven")]]
+      assert :ok = BlockOps.validate_render_shapes(normalized)
+      assert BlockOps.normalize_render_shapes(normalized) == normalized
+
+      ambiguous = [%{"type" => "bulletList", "items" => [%{"payload" => "keep"}]}]
+      assert BlockOps.normalize_render_shapes(ambiguous) == ambiguous
+      assert {:error, {:invalid_paper_structure, _}} = BlockOps.validate_render_shapes(ambiguous)
+    end
+
     test "preserves list item ids and promotes metadata-bearing table headers" do
       blocks = [
         %{
@@ -311,7 +396,9 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
     end
 
     test "canonicalizes declared record tables and cell-marked header rows" do
-      [record, cell_header] =
+      text = fn value -> [%{"type" => "text", "value" => value}] end
+
+      [record, cell_header, scalar_header] =
         BlockOps.normalize_render_shapes([
           %{
             "type" => "table",
@@ -343,6 +430,11 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
                 ]
               }
             ]
+          },
+          %{
+            "type" => "table",
+            "columns" => ["Corner", "Proof"],
+            "rows" => [["writer", "does not crash"]]
           }
         ])
 
@@ -362,6 +454,54 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
 
       assert cell_header["head"] == [[%{"type" => "text", "value" => "Head"}]]
       assert cell_header["rows"] == [[[%{"type" => "text", "value" => "Body"}]]]
+      refute Map.has_key?(scalar_header, "columns")
+      assert scalar_header["head"] == [text.("Corner"), text.("Proof")]
+
+      # Bare-string body cells now get the per-cell rescue (pe-w1: the gate
+      # refused them as "has no renderable inline content" even though the
+      # text is fully derivable) — canonical inline arrays, render-identical.
+      assert scalar_header["rows"] == [[text.("writer"), text.("does not crash")]]
+    end
+
+    test "promotes a boolean table header marker without rendering it as a cell" do
+      text = fn value -> [%{"type" => "text", "value" => value}] end
+
+      [table, redundant, empty_head] =
+        normalized =
+        BlockOps.normalize_render_shapes([
+          %{
+            "type" => "table",
+            "header" => true,
+            "rows" => [
+              [text.("Surface"), text.("Proof")],
+              [text.("TUI"), text.("visible")]
+            ]
+          },
+          %{
+            "type" => "table",
+            "header" => true,
+            "head" => [text.("Already canonical")],
+            "rows" => [[text.("Body")]]
+          },
+          %{
+            "type" => "table",
+            "header" => true,
+            "head" => [],
+            "rows" => [[text.("Promote me")], [text.("Remain body")]]
+          }
+        ])
+
+      refute Map.has_key?(table, "header")
+      assert table["head"] == [text.("Surface"), text.("Proof")]
+      assert table["rows"] == [[text.("TUI"), text.("visible")]]
+      refute Map.has_key?(redundant, "header")
+      assert redundant["head"] == [text.("Already canonical")]
+      assert redundant["rows"] == [[text.("Body")]]
+      refute Map.has_key?(empty_head, "header")
+      assert empty_head["head"] == [text.("Promote me")]
+      assert empty_head["rows"] == [[text.("Remain body")]]
+      assert :ok = BlockOps.validate_render_shapes(normalized)
+      assert BlockOps.normalize_render_shapes(normalized) == normalized
     end
 
     test "does not stringify structured record-table values" do

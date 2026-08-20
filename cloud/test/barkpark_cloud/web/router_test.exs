@@ -20,6 +20,18 @@ defmodule BarkparkCloud.Web.RouterTest do
 
   @opts Router.init([])
 
+  # The register handler spends the node-global "register:" ETS bucket on EVERY
+  # call (arpss w3 — the check precedes validation by design), and Plug.Test
+  # conns all arrive as 127.0.0.1, so this module's register calls accumulate
+  # against ONE 30/60s budget across the whole run. Today's call count keeps the
+  # margin, but a mystery 429 in an unrelated register test is the worst kind of
+  # flake — start every test with a clean limiter. async: false (above), so no
+  # concurrent spender races the reset.
+  setup do
+    BarkparkCloud.DeviceAuth.RateLimiter.reset()
+    :ok
+  end
+
   @password "correct-horse-battery"
   @worker_token "worker-token-test-fixed"
 
@@ -403,6 +415,32 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert row["slug"] == "prod"
       assert row["health_status"] == "unknown"
       assert row["team_id"] == team.id
+    end
+
+    test "the fleet row carries the reachability counters (cch-w34-s2)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{name: "Prod", slug: "prod"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # A fresh row: BOTH keys present, carrying their honest zero/false — a
+      # client can state "0 missed heartbeat windows", not infer it.
+      conn = call(:get, "/v1/barkparks", nil, token)
+      [row] = json_body(conn)["barkparks"]
+      assert Map.has_key?(row, "unreachable_count")
+      assert Map.has_key?(row, "unreachable_notification_sent")
+      assert row["unreachable_count"] == 0
+      assert row["unreachable_notification_sent"] == false
+
+      # After the staleness sweep has bumped and latched, the counters are the
+      # evidence behind the health axis.
+      {:ok, bumped} = Registry.bump_unreachable(bp)
+      {:ok, _} = Registry.mark_offline(bumped)
+
+      conn2 = call(:get, "/v1/barkparks", nil, token)
+      [row2] = json_body(conn2)["barkparks"]
+      assert row2["unreachable_count"] == 1
+      assert row2["unreachable_notification_sent"] == true
+      assert row2["health_status"] == "unknown"
     end
 
     test "the fleet row carries the BP-ONB-09 verify verdict fields" do
@@ -2094,6 +2132,52 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert conn.status == 403
     end
 
+    # cch-w36-s1 — THE CROWN CHAIN, WALKED BY ONE PRINCIPAL. Every leg of this
+    # already had a single-hop test; none of them walked the chain, which is the
+    # only way the contradiction is visible: the 402 hands the admin a
+    # `checkout_path` the SAME admin is then refused at. Two authorities disagree
+    # by design (launch is team-admin, paying is owner) — this pins that they
+    # both SAY which one they wanted.
+    test "cch-w36-s1: an admin with a spent trial walks launch(402) → its own checkout_path(403 owner)" do
+      {_a, team, a_token} = user_with_role("admin")
+      exhaust_trial(team)
+
+      launch = call(:post, "/v1/launch", %{provider: "hetzner", name: "Crown"}, a_token)
+      assert launch.status == 402
+      launch_body = json_body(launch)
+      assert launch_body["error"] == "no_active_subscription"
+      checkout_path = launch_body["checkout_path"]
+      assert checkout_path == "/v1/billing/checkout"
+
+      # The SAME principal knocks on the door the 402 just handed them.
+      checkout = call(:post, checkout_path, %{plan: "supporter"}, a_token)
+      assert checkout.status == 403
+
+      assert json_body(checkout) == %{
+               "error" => "forbidden",
+               "required" => "owner",
+               "scope" => "team"
+             }
+    end
+
+    test "cch-w36-s1: a plain member is refused BEFORE the 402, and the refusal names 'admin'" do
+      # Full-map equality, not a slug check: the whole point is the evidence
+      # BESIDE the slug — without it this body is byte-identical to the
+      # owner-only billing refusal above, and the console guessed "plan limit".
+      {_m, team, m_token} = user_with_role("member")
+      exhaust_trial(team)
+
+      conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Crown"}, m_token)
+
+      assert conn.status == 403
+
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
     test "member → DELETE /v1/barkparks/:id ⇒ 403; admin ⇒ 200 removed" do
       {_m, team_m, m_token} = user_with_role("member")
       bp_m = barkpark_fixture(team_m)
@@ -2465,6 +2549,97 @@ defmodule BarkparkCloud.Web.RouterTest do
         |> Router.call(@opts)
 
       assert untrusted.remote_ip == {172, 18, 0, 1}
+    end
+  end
+
+  # wave 13 S2. `Sites.Deploy.fail/2` writes the SAME string to `failure_reason`
+  # and to `detail`, and the build console is raw remote output — so scrubbing
+  # only `failure_reason` would ship a redacted field sitting beside its
+  # unredacted twin in ONE response. Driven as a plain authenticated NON-admin
+  # team member through GET /v1/sites/:id/deployments/:dep_id.
+  describe "deployment_json — the failure capture is scrubbed on every field, not just one" do
+    @deploy_secret "sk-live-9aB3xQ7zLmNpR4tV6wY2"
+    @deploy_capture "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
+    @deploy_scrubbed "ssh: remote said Authorization: Bearer [redacted]"
+
+    test "failure_reason, detail AND console all refuse the secret; the DB row stays raw" do
+      {user, team} = user_with_team()
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+
+      {:ok, d} =
+        Registry.create_deployment(site, %{git_ref: "v1-sha", artifact_url: "file:///tmp/v1.tgz"})
+
+      # What Sites.Deploy.fail/2 writes: the same string in both fields, plus the
+      # console line the stage fold appended.
+      {:ok, d} =
+        Registry.transition_deployment(d, %{
+          status: "failed",
+          failure_reason: @deploy_capture,
+          detail: @deploy_capture,
+          # "BUILD" — a stage name Sites.Deploy.stages/1 actually RECOGNIZES, so
+          # the stage fold below is exercised rather than filtered away. A
+          # lowercase name here made the whole-payload assertion vacuously green.
+          console: [
+            %{
+              "line" => @deploy_capture,
+              "detail" => @deploy_capture,
+              "stage" => "BUILD",
+              "status" => "failed"
+            }
+          ]
+        })
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token)
+      assert conn.status == 200
+
+      dep = json_body(conn)["deployment"]
+
+      # No field in the payload carries it, and none is redacted while a twin is not.
+      refute Jason.encode!(dep) =~ @deploy_secret
+      assert dep["failure_reason"] == @deploy_scrubbed
+      assert dep["detail"] == @deploy_scrubbed
+      assert [%{"line" => @deploy_scrubbed, "detail" => @deploy_scrubbed}] = dep["console"]
+
+      # The stage fold recomputes from the RAW row (Sites.Deploy.stages/1 reads
+      # d.console, not this serializer's output), so it is its own boundary.
+      assert %{"detail" => @deploy_scrubbed} =
+               Enum.find(dep["stages"], &(&1["name"] == "BUILD"))
+
+      # The store is untouched — ops recovery reads the raw bytes.
+      raw = Repo.get(Registry.Deployment, d.id)
+      assert raw.failure_reason == @deploy_capture
+      assert raw.detail == @deploy_capture
+      assert [%{"line" => @deploy_capture}] = raw.console
+    end
+
+    test "the commit a person deployed survives — a git SHA is not redacted" do
+      {user, team} = user_with_team()
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+      {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+
+      {:ok, d} =
+        Registry.create_deployment(site, %{git_ref: "v1-sha", artifact_url: "file:///tmp/v1.tgz"})
+
+      sha_line = "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
+
+      {:ok, d} =
+        Registry.transition_deployment(d, %{
+          status: "failed",
+          failure_reason: sha_line,
+          detail: sha_line
+        })
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token)
+      assert conn.status == 200
+
+      dep = json_body(conn)["deployment"]
+      assert dep["failure_reason"] == sha_line
+      assert dep["detail"] == sha_line
     end
   end
 end

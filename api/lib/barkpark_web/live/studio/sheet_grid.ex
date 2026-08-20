@@ -72,24 +72,96 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   minus every editing affordance — formula bar, hook, menus, resize handles
   and tab mutation buttons all drop away.
 
-  ## Read-only hosting (M4 — the public reader)
+  ## THREE PROPS, THREE AXES — every host MUST pass all three
 
-  A host passing `read_only={true}` (the `/sheets/:slug` reader) gets the
-  bare published grid: no document header, no formula bar, no hook, no menus,
-  no active-cell highlight — the tab strip keeps ONLY its switch buttons. The
-  guard is server-side too: `Ops.send_ops/2` drops every mutation while
-  read-only, so a forged client event can never write through an
-  unauthenticated mount.
+  There used to be ONE prop (`read_only`) doing three unrelated jobs, and a
+  wave-42 run measured what that cost: a Studio member entitled to READ a
+  sheet was served the PUBLISHED row while a colleague with write held the
+  live draft session open — two people, one sheet, different numbers. The
+  flag has been split along the three axes it was conflating:
 
-  PUBLISHED-ONLY for read-only hosts: content comes from `@doc.content` (the
-  published perspective) and NEVER from `Session.peek` — a live session is
-  draft-backed, so peeking it would leak unpublished edits. Session deltas
-  do NOT apply either: the `{:sheets_op, …}` update clause is a no-op while
-  read-only (the reader also stops forwarding them and stops peeking on
-  refetch — each read path sealed independently, fail closed). A read-only
-  host refreshes via the `%{published_content: …}` update clause when a
-  publish lands. The editable (Studio) host keeps peeking the live session
-  and applying every delta.
+    * `write_capable` — AUTHORIZATION. May this principal mutate the sheet?
+      Gates the eight write heads, `Ops.send_ops/2`, and (derived, never a
+      fourth prop) `@editable`, which fans the write affordances out across
+      the template. DEFAULTS FALSE: a host that omits it gets a grid nobody
+      can write through, which is the only safe direction to fail.
+
+    * `live_session` — LIVENESS / CONTENT SOURCE. May this principal see
+      DRAFT bytes? True: `Session.peek` backs the cold open, `{:sheets_op,…}`
+      deltas apply, persist frames show, `announce_commit/2` may read the
+      session. False: `@doc.content` (the published perspective) only, every
+      read path sealed independently. DEFAULTS FALSE.
+
+    * `chrome` — PRESENTATION. `:studio` (document header, editor identity,
+      selection highlight, keyboard navigation) or `:reader` (the bare
+      published grid at `/sheets/:slug`). Carries NO authority.
+
+  The axes are independent ON PURPOSE. `live_session` is NOT a function of
+  `chrome`: the reader's liveness is off for a SECURITY reason (a draft-backed
+  session must not stream to an anonymous principal), so deriving it from
+  chrome would make `BARKPARK_PUBLIC_DEMO_STUDIO` — Studio chrome on a
+  principal-less socket — a permanent draft leak by design. Equally,
+  `write_capable` is NOT chrome: keying the navigation heads on it would
+  freeze keyboard navigation for a member entitled to use it.
+
+  ## Why the capability must arrive as a PROP
+
+  A `phx-target`ed event carries a component cid, and LiveView runs the
+  COMPONENT socket's lifecycle for it — the parent socket's `:handle_event`
+  hooks (the Studio `Caps` deny-gate among them) are never consulted. So no
+  hook on the host LiveView can gate this surface; the host's write capability
+  has to arrive HERE. Both hosts pass all three props: the `/sheets/:slug`
+  reader passes `{false, false, :reader}`, Studio passes
+  `{sheet_write_capable?(assigns), true, :studio}`
+  (`grep -n 'sheet_write_capable?' lib/barkpark_web/live/studio/studio_live/components.ex`).
+
+  ## The three shapes this component renders
+
+  | host | write_capable | live_session | chrome |
+  |---|---|---|---|
+  | Studio, write-capable member | true | true | :studio |
+  | Studio, write-DENIED member  | false | true | :studio |
+  | `/sheets/:slug` public reader | false | false | :reader |
+
+  The public reader gets the bare published grid: no document header, no
+  formula bar, no hook, no menus, no active-cell highlight — the tab strip
+  keeps ONLY its switch buttons. The guard is server-side too:
+  `Ops.send_ops/2` drops every mutation without write capability, so a forged
+  client event can never write through an unauthenticated mount.
+
+  PUBLISHED-ONLY without `live_session`: content comes from `@doc.content` and
+  NEVER from `Session.peek` — a live session is draft-backed, so peeking it
+  would leak unpublished edits. Session deltas do NOT apply either: the
+  `{:sheets_op, …}` update clause is a no-op (the reader also stops forwarding
+  them and stops peeking on refetch — each read path sealed independently,
+  fail closed). Such a host refreshes via the `%{published_content: …}` update
+  clause when a publish lands.
+
+  READ MODE HAS THE HOOK (wave 43, closing wave 42's one deliberate
+  user-facing harm). `phx-hook="SheetGrid"` keys on `@hookable`
+  (`chrome == :studio`, derived beside `@editable` in `GridData`), NOT on
+  `@editable` — because the hook is the SOLE PRODUCER of selection: cell-click /
+  head-click / nav / nav-edge / nav-corner / select-all have no server-rendered
+  `phx-click` anywhere. Gating it on `@editable` left a write-DENIED member — and
+  a fully write-capable member who flipped the View chip, since `@editable` is
+  `mode == :edit and write_capable` — staring at a selection highlight frozen on
+  A1 that nothing could move; the TSV copy, which reads `td.sheet-sel`, was
+  downstream of that. The three navigation heads already refused only
+  `chrome: :reader`, so nothing new is server-side reachable.
+
+  What still governs writes is unchanged: `@editable` fans the write affordances
+  out across the template, and `Ops.send_ops/2`'s `write_capable: false` clause
+  is the last wall. The client's read-mode allowlist (`READ_MODE_EVENTS` in
+  bp-sheet-grid.js, derived from the absent `data-fns`) is a UX-and-honesty
+  layer on top of that wall, not the wall — with one behaviour that is its own:
+  `edit-start` is the only mutation with no `send_ops` terminus, so dropping it
+  client-side is what keeps a read-mode socket from broadcasting "editing A1" to
+  every peer while no editor renders.
+
+  STILL OPEN (`pds-w43-bl-sheetgrid-reader-half`): the `/sheets/:slug` reader.
+  `Geometry.grid_sel(_, _, :reader)` is `{0, 0, 0, 0}`, so no `<td>` ever carries
+  `sheet-sel` and the same hook would be a silent no-op there; giving the reader
+  a selection is a chrome-policy decision, not this re-key.
 
   ## Per-user undo/redo (M4)
 
@@ -221,7 +293,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        # colors the ACTIVE tab (@tab), so a tab switch closes it (below).
        tab_color_open: false,
        mode: :edit,
-       read_only: false,
+       # The three axes (see the moduledoc). The two that carry authority
+       # default CLOSED — a host that forgets them writes nothing and sees no
+       # draft byte. `chrome` carries none, so it defaults to this component's
+       # home surface; both hosts pass all three explicitly anyway.
+       write_capable: false,
+       live_session: false,
+       chrome: :studio,
        user_id: nil,
        presence_topic: nil,
        presences: [],
@@ -269,11 +347,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   # A session delta forwarded by StudioLive's `{:sheets_op, …}` handle_info.
-  # Read-only hosts (the public reader) drop it: session deltas carry
-  # unpublished draft edits and must never stream to anonymous viewers.
+  # LIVENESS axis: hosts without `live_session` (the public reader) drop it —
+  # session deltas carry unpublished draft edits and must never stream to a
+  # principal not entitled to draft bytes. A write-DENIED Studio member IS so
+  # entitled, and keeps receiving them.
   @impl true
   def update(%{sheets_op: payload}, socket) do
-    if socket.assigns.read_only do
+    if not socket.assigns.live_session do
       {:ok, socket}
     else
       # Any op delta — this editor's own OR a peer's — means the session is
@@ -294,14 +374,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   # A persist-outcome frame from the session (see Session.broadcast_persisted/2).
-  # Read-only hosts never show save state. A failed persist reads :error (the
+  # LIVENESS axis: a host with no live session has no save state to show — it
+  # is looking at the published row, which no persist moves. A failed persist reads :error (the
   # session keeps retrying on the debounce). A success reads :saved ONLY when it
   # is not stale — same epoch (nil before the first delta) and a rev at least as
   # new as what this client has rendered; a persist that lands after the client
   # advanced past it stays :saving. Anything else leaves the indicator untouched.
   def update(%{sheets_persisted: p}, socket) do
     cond do
-      socket.assigns.read_only ->
+      not socket.assigns.live_session ->
         {:ok, socket}
 
       p.ok == false ->
@@ -332,7 +413,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           :doc,
           :dataset,
           :is_draft,
-          :read_only,
+          :write_capable,
+          :live_session,
+          :chrome,
           :user_id,
           :presence_topic,
           :presences
@@ -347,19 +430,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       doc = assigns.doc
       slug = Content.published_id(doc.doc_id)
 
-      # Editable hosts: a live session's memory is authoritative; the
-      # persisted row backs the cold open (same draft-first row the session
-      # itself loads). Read-only hosts (the public reader) NEVER peek — the
-      # session is draft-backed, so its memory would leak unpublished edits;
-      # content comes from the published `@doc.content` only.
+      # THE PUBLISHED-PERSPECTIVE SWITCH. Keyed on LIVENESS, never on write
+      # capability: a live session's memory is authoritative for anyone
+      # entitled to draft bytes (the persisted row backs the cold open — the
+      # same draft-first row the session itself loads). Without `live_session`
+      # (the public reader) NEVER peek — the session is draft-backed, so its
+      # memory would leak unpublished edits; content comes from the published
+      # `@doc.content` only.
       content =
-        if socket.assigns.read_only do
-          doc.content || %{}
-        else
+        if socket.assigns.live_session do
           case Session.peek(slug, assigns.dataset) do
             {:ok, content} -> content
             {:error, :no_session} -> doc.content || %{}
           end
+        else
+          doc.content || %{}
         end
 
       {:ok, socket |> assign(slug: slug, content: content) |> GridData.derive_grid()}
@@ -435,11 +520,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # Ctrl/Cmd+A — select the USED range (v1; Excel's second Ctrl+A, the whole
   # sheet, is deferred). Active snaps to the window's top-left and the anchor
-  # to the used range's last cell, so `selection_rect` spans the data. Pure
-  # navigation, but the read-only clause fails closed anyway (the reader
-  # suppresses selection rendering via the grid_sel sentinel — a forged event
-  # should not even move state), mirroring the fill/autofit guards.
-  def handle_event("select-all", _params, %{assigns: %{read_only: true}} = socket),
+  # to the used range's last cell, so `selection_rect` spans the data.
+  #
+  # CHROME AXIS, NOT AUTHORIZATION: this mutates only @active/@anchor — no op,
+  # no document byte — so it pairs with `Geometry.grid_sel/3`, whose `:reader`
+  # branch suppresses the highlight this would move. Keying it on
+  # `write_capable` would freeze keyboard navigation for a member entitled to
+  # read the sheet.
+  def handle_event("select-all", _params, %{assigns: %{chrome: :reader}} = socket),
     do: {:noreply, socket}
 
   def handle_event("select-all", _params, socket) do
@@ -459,7 +547,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # extends the selection to the edge target (Ctrl+Shift+Arrow). The target
   # row clamps into the rendered row window — the same honest bound `move`
   # uses; paging is what crosses pages.
-  def handle_event("nav-edge", _params, %{assigns: %{read_only: true}} = socket),
+  # Chrome axis (see select-all): pure selection state, no op.
+  def handle_event("nav-edge", _params, %{assigns: %{chrome: :reader}} = socket),
     do: {:noreply, socket}
 
   def handle_event("nav-edge", %{"dir" => dir} = params, socket)
@@ -486,7 +575,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # `jump_to` (which PAGES the row window so an off-page target renders — the
   # same fix name-jump/find lean on); Shift extends the selection instead,
   # clamped into the current window like nav-edge.
-  def handle_event("nav-corner", _params, %{assigns: %{read_only: true}} = socket),
+  # Chrome axis (see select-all): pure selection state, no op.
+  def handle_event("nav-corner", _params, %{assigns: %{chrome: :reader}} = socket),
     do: {:noreply, socket}
 
   def handle_event("nav-corner", %{"corner" => corner} = params, socket)
@@ -626,7 +716,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, socket |> assign(editing: nil) |> Ops.push_presence(%{editing: nil})}
   end
 
-  def handle_event("edit-commit", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("edit-commit", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("edit-commit", %{"value" => value} = params, socket) do
@@ -641,7 +731,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> Ops.push_presence(%{editing: nil})}
   end
 
-  def handle_event("bar-commit", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("bar-commit", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("bar-commit", %{"value" => value} = params, socket) do
@@ -698,7 +788,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # the nub's own dblclick gesture composes a mousedown+mouseup first, and
   # that degenerate drag must not fill anything. Up/left fills are a v1
   # carve-out, matching the keyboard fill's down/right-only vocabulary.
-  def handle_event("fill-range", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("fill-range", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("fill-range", %{"to" => to_ref}, socket) do
@@ -712,7 +802,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # from the selection to the last contiguous data row of the adjacent column
   # (left of the rect when occupied there, else right). No adjacent data, or
   # an extent not past the rect → no-op.
-  def handle_event("fill-extent", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("fill-extent", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("fill-extent", _params, socket) do
@@ -731,7 +821,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # clamped), riding the EXISTING set_col_width op so undo/redo and the delta
   # path come free; an empty column sends nothing. Rows never wrap, so the
   # row variant resets to the single-line default height.
-  def handle_event("autofit", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("autofit", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("autofit", %{"kind" => "col", "index" => i}, socket) do
@@ -807,7 +897,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   # Sort the current selection A→Z / Z→A (SF-AM2). Sort is an EDIT mutation:
-  # the read_only guard clause fails closed even on a forged event, and
+  # the write_capable guard clause fails closed even on a forged event, and
   # send_ops' read-only drop is the last wall (SF-AM2d). A WHOLE-COLUMN
   # selection (rows span the rendered window, the head-click shape) expands to
   # the USED DATA RECT — all occupied columns × occupied rows, r1 just below
@@ -815,7 +905,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # below the band. The key is the ACTIVE cell's column (Excel's sort-by-
   # active-column). All clipping is here — the caller-clips-below-the-frozen-
   # band contract (SF-D5); the op never re-clips.
-  def handle_event("sort-selection", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("sort-selection", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("sort-selection", %{"dir" => dir}, socket)
@@ -850,7 +940,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # header selects+offers to sort"). SELECTS the whole rendered column (so the
   # user sees B:B highlighted) AND dispatches the used-data-rect sort keyed by
   # that column in one action. Same triple gate + guards as sort-selection.
-  def handle_event("sort-column", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("sort-column", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("sort-column", %{"col" => col, "dir" => dir}, socket)
@@ -959,7 +1049,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # token off the wire. An empty / unknown token (the "Split…" placeholder) or a
   # multi-column selection is a no-op / refusal; a single cell is a valid
   # one-row split.
-  def handle_event("text-to-columns", _params, %{assigns: %{read_only: true}} = socket),
+  def handle_event("text-to-columns", _params, %{assigns: %{write_capable: false}} = socket),
     do: {:noreply, socket}
 
   def handle_event("text-to-columns", %{"delim" => token}, socket) do
@@ -1496,9 +1586,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   defp note_own_refs(socket, []), do: socket
 
-  # Read-only hosts never write (Ops.send_ops drops the ops), so tracking
-  # would only accumulate refs that no echo ever consumes.
-  defp note_own_refs(%{assigns: %{read_only: true}} = socket, _refs), do: socket
+  # AUTHORIZATION axis. A host without write capability never writes
+  # (Ops.send_ops drops the ops), so tracking would only accumulate refs that
+  # no echo ever consumes. NOTE for readers chasing the "presence asymmetry":
+  # this is echo-suppression BOOKKEEPING, not peer visibility — a viewer's
+  # cursor reaches peers through `Ops.push_presence/2`, which this axis (and
+  # the old flag before it) never gated. A write-denied member is, and was,
+  # visible to peers.
+  defp note_own_refs(%{assigns: %{write_capable: false}} = socket, _refs), do: socket
 
   defp note_own_refs(socket, refs),
     do: assign(socket, own_refs: MapSet.union(socket.assigns.own_refs, MapSet.new(refs)))
@@ -2168,10 +2263,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # is read straight from the session (authoritative post-recompute) because
   # the delta that patches `@content` arrives asynchronously — this handler's
   # own assigns still carry the pre-commit value.
-  # The read-only reader must never peek the live (draft) Session — a forged
-  # commit event would otherwise leak draft cell values through @status. Fail
-  # closed: return the socket untouched so committed_display is never reached.
-  defp announce_commit(%{assigns: %{read_only: true}} = socket, _pos), do: socket
+  # LIVENESS axis, and it stays there: `committed_display/2` PEEKS the live
+  # (draft) Session, so a host not entitled to draft bytes must never reach it
+  # — a forged commit event would otherwise leak draft cell values through
+  # @status, the one path that reads the session outside update/2. Fail closed.
+  defp announce_commit(%{assigns: %{live_session: false}} = socket, _pos), do: socket
 
   defp announce_commit(socket, pos) do
     if socket.assigns.notice == nil do
@@ -2475,18 +2571,31 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     ~H"""
     <div
       id={@id}
-      class={"editor-panel sheet-editor" <> if(@read_only, do: " sheet-reader", else: "")}
+      class={"editor-panel sheet-editor" <> if(@chrome == :reader, do: " sheet-reader", else: "")}
       data-role="content"
-      data-test-id={if @read_only, do: "sheet-reader", else: "studio-sheet-editor"}
+      data-test-id={if @chrome == :reader, do: "sheet-reader", else: "studio-sheet-editor"}
     >
-      <.document_header :if={not @read_only} dataset={@dataset} title={@doc.title || @slug}>
+      <%!-- CHROME axis: the header belongs to the Studio surface, not to write
+            capability. A write-denied member is in Studio and keeps it — the
+            wave-42 measurement found them staring at a headerless panel that
+            called itself `sheet-reader`. --%>
+      <.document_header :if={@chrome == :studio} dataset={@dataset} title={@doc.title || @slug}>
         <:status_pill>
           <span class={"badge badge-#{if @is_draft, do: "draft", else: "published"}"}>
             <%= if @is_draft, do: "draft", else: "published" %>
           </span>
         </:status_pill>
         <:actions>
+          <%!-- AUTHORIZATION axis, and the header's ONE authority-bearing item.
+                `toggle-mode` flips @mode, but @editable is `mode == :edit and
+                write_capable`, so without the capability the toggle changes
+                nothing a viewer can see: the label stays "Edit", the toolbar
+                never appears, and the button is the dead affordance this split
+                exists to remove (same rule as the cell context menu below).
+                A member who may not write is permanently in View and has
+                nothing to toggle between. --%>
           <button
+            :if={@write_capable}
             type="button"
             class="btn btn-ghost btn-sm"
             phx-click="toggle-mode"
@@ -2570,8 +2679,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               head-click shape: rows span the rendered window) expands to the
               used data rect; any other selection sorts in place — both keyed by
               the active cell's column. EDIT-ONLY, triple-gated: rendered only
-              inside the @editable toolbar, a read_only guard on the event, and
-              send_ops' read-only drop as the last wall (SF-AM2d). --%>
+              inside the @editable toolbar, a `write_capable` guard on the
+              event, and send_ops' capability drop as the last wall (SF-AM2d). --%>
         <button
           type="button"
           class="btn btn-ghost btn-sm"
@@ -2823,12 +2932,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       <%!-- Find-in-sheet (Ctrl+F, find-only). The match runs SERVER-side over the
             sparse cells map — the 500-row DOM window makes a client search
             structurally wrong (off-page cells never render). Shown on Ctrl+F in
-            the editor (the hook fires find-open; Escape closes); ALWAYS shown in
-            the read-only reader, which has no hook to open it — mirroring the
-            pager's reader-safe pattern. Enter / ↓ find forward, ↑ finds back;
-            both are plain phx events, so find works without the JS hook. --%>
+            the editor (the hook fires find-open; Escape closes); ALWAYS shown to
+            a viewer with NO hook to open it with — the public reader and, since
+            wave 42, the write-denied member (the hook is @editable-gated, so
+            they cannot fire find-open either). Enter / ↓ find forward, ↑ finds
+            back; both are plain phx events, so find works without the JS hook.
+            View mode's missing find bar is a pre-existing gap this slice does
+            not widen: it keys on write capability, not on @editable. --%>
       <div
-        :if={@find_open or @read_only}
+        :if={@find_open or not @write_capable}
         class="sheet-find"
         role="search"
         data-test-id="sheet-find"
@@ -2921,36 +3033,53 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         <% end %>
       </div>
 
-      <%!-- ONE wrapper for both modes (id + hook flip with @editable, so a
-            mode toggle still remounts the hook) and the peer layer OUTSIDE
-            the if-block: an `if` block is a single tracked dynamic whose
-            dependencies are everything inside it — peer assigns in there
-            would make every presence frame re-render the whole grid body
-            (measured ~15ms extra; see the moduledoc). --%>
+      <%!-- ONE wrapper for both modes (the id still flips with @editable, so a
+            mode toggle remounts the hook against the new DOM shape) and the
+            peer layer OUTSIDE the if-block: an `if` block is a single tracked
+            dynamic whose dependencies are everything inside it — peer assigns
+            in there would make every presence frame re-render the whole grid
+            body (measured ~15ms extra; see the moduledoc).
+
+            THREE ATTRIBUTES KEY ON @hookable, NOT @editable (wave 43): the
+            hook, the role, and the aria selection contract. They are the
+            SELECTION axis — a `:studio` grid has a real `grid_sel` rect and the
+            hook is its only producer, so a write-denied member (and anyone in
+            View mode) used to sit on a highlight frozen at A1. `data-fns` /
+            `data-fn-sigs` stay @editable-gated ON PURPOSE: their absence is
+            exactly what the hook derives `_readOnly` from, which is what drops
+            every write event client-side. --%>
       <div
         id={if @editable, do: "#{@id}-grid", else: "#{@id}-grid-view"}
         class="sheet-grid-wrap"
-        phx-hook={if @editable, do: "SheetGrid"}
+        phx-hook={if @hookable, do: "SheetGrid"}
         tabindex="0"
-        role={if @editable, do: "application", else: "region"}
+        role={if @hookable, do: "application", else: "region"}
         aria-label="Spreadsheet grid"
-        aria-describedby={@editable && "#{@id}-grid-instructions"}
-        aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
+        aria-describedby={@hookable && "#{@id}-grid-instructions"}
+        aria-activedescendant={
+          @hookable && Cells.cell_dom_id(if(@editable, do: @id, else: "#{@id}-view"), @active)
+        }
         data-fns={@editable && Enum.join(@fn_names, " ")}
         data-fn-sigs={@editable && Jason.encode!(@fn_sigs)}
         data-row-offset={@row_offset}
       >
         <%!-- WCAG 2.1.2: the grid traps Tab (it walks the selection). This
               hidden note tells a keyboard/AT user the one-shot escape hatch —
-              Escape then Tab falls through to the browser (see the hook). --%>
+              Escape then Tab falls through to the browser (see the hook). The
+              read-mode half of the sentence is the honest one: navigation and
+              copy work, editing does not. --%>
         <span
-          :if={@editable}
+          :if={@hookable}
           id={"#{@id}-grid-instructions"}
           class="sr-only"
           style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"
         >
-          Press Escape then Tab to leave the grid; F2 or Enter to edit the cell;
-          Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+          Press Escape then Tab to leave the grid.
+          <%= if @editable do %>
+            F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+          <% else %>
+            Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only.
+          <% end %>
         </span>
         <div class="sheet-scroll">
           <%= if @editable do %>
@@ -2969,7 +3098,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               row_heights={@row_heights}
               frozen_cols={@frozen_cols}
               frozen_rows={if @row_offset == 0, do: @frozen_rows, else: 0}
-              sel={Geometry.grid_sel(@active, @anchor, @read_only)}
+              sel={Geometry.grid_sel(@active, @anchor, @chrome)}
               matches={@find_hits}
               active={@active}
               editing={@editing}
@@ -2995,9 +3124,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               row_heights={@row_heights}
               frozen_cols={@frozen_cols}
               frozen_rows={if @row_offset == 0, do: @frozen_rows, else: 0}
-              sel={Geometry.grid_sel(@active, @anchor, @read_only)}
+              sel={Geometry.grid_sel(@active, @anchor, @chrome)}
               matches={@find_hits}
-              active={Geometry.grid_cursor(@active, @read_only)}
+              active={Geometry.grid_cursor(@active, @chrome)}
               editing={nil}
               menu={nil}
               filters={@filters}
@@ -3029,8 +3158,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             item reuses an EXISTING op — cut/copy/paste ride the OS clipboard
             client-side (data-menu-action, bp-sheet-grid.js), clear/insert/delete
             are the same phx-click server events the keyboard path calls. --%>
+      <%!-- AUTHORIZATION axis: every item below is a mutation (clear / insert /
+            delete row-col / paste). A member who cannot write must not be
+            handed a menu of buttons that bounce off a guard — that is the
+            dead-affordance failure the three-way split exists to avoid. --%>
       <div
-        :if={not @read_only and match?({:cell, _, _}, @menu)}
+        :if={@write_capable and match?({:cell, _, _}, @menu)}
         class="sheet-context-menu"
         role="menu"
         aria-label="Cell actions"
@@ -3277,8 +3410,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   active criterion; the popover is this viewer's per-column
                   predicate editor. Filtering is socket view-state — clicking
                   Apply sends NO op (SF-D2). The funnel is a READ affordance
-                  (SF-AM4): it renders in ALL modes including the read_only
-                  /sheets reader, OUTSIDE the @editable block above — readers can
+                  (SF-AM4): it renders in ALL modes including the `:reader`
+                  /sheets surface, OUTSIDE the @editable block above — readers can
                   filter but the sort menu items stay edit-only. --%>
             <button
               type="button"
@@ -3422,7 +3555,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <td
               id={Cells.cell_dom_id(@id, {c, r})}
               class={Cells.cell_class(c, r, @sel, @active, cell, @matches)}
-              aria-selected={Cells.aria_selected(@sel, c, r, @editable)}
+              aria-selected={Cells.aria_selected(@sel, c, r)}
               aria-colindex={c + 1}
               data-ref={ref}
               data-r={r}

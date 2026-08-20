@@ -96,7 +96,7 @@ defmodule BarkparkWeb.MediaController do
            ) do
         {:file, full_path} ->
           conn
-          |> Delivery.put_file_cache_headers(full_path)
+          |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
           |> maybe_send_file(full_path, mime)
 
         {:redirect, url} ->
@@ -139,7 +139,7 @@ defmodule BarkparkWeb.MediaController do
       mime = MIME.from_path(full_path)
 
       conn
-      |> Delivery.put_file_cache_headers(full_path)
+      |> Delivery.put_file_cache_headers(full_path, Access.visibility(doc))
       |> maybe_send_file(full_path, mime)
     else
       {:error, :not_found} ->
@@ -361,8 +361,12 @@ defmodule BarkparkWeb.MediaController do
 
   @doc "Delete a media file."
   def delete(conn, %{"id" => id}) do
-    with {:ok, _} <- Media.delete_file(id, scope_opts(conn)) do
-      json(conn, %{deleted: id})
+    # RECEIPT LAW (pds w39): `Media.delete_file/2` returns the row `Repo.delete/2`
+    # removed (media.ex:425-452). This used to discard it and echo the `:id` path
+    # param; `filename` is stored state the request never carries, so reverting
+    # to the echo reds the differential.
+    with {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+      json(conn, %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset})
     end
   end
 

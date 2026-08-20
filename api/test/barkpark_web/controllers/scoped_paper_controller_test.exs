@@ -78,6 +78,34 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       assert_revision_headers(conn, paper)
     end
 
+    test "PIPELINE ORDER: a conditional replay through the ROUTER is a CSP-free 304 with the pinned cache-control",
+         %{conn: conn, ws: ws, project: project} do
+      with_shares("#{ws.slug}/#{project.slug}/#{@dataset}:papers:read")
+
+      conn200 = get(conn, paper_path(ws, project, "shared-paper"))
+      assert [etag] = get_resp_header(conn200, "etag")
+
+      conn304 =
+        build_conn()
+        |> put_req_header("if-none-match", etag)
+        |> get(paper_path(ws, project, "shared-paper"))
+
+      assert conn304.status == 304
+      assert conn304.resp_body == ""
+      assert get_resp_header(conn304, "etag") == [etag]
+
+      assert get_resp_header(conn304, "cache-control") ==
+               ["private, max-age=0, must-revalidate"]
+
+      # Second-review condition 3: on the scoped route PaperRevisionHeaders is
+      # the LAST plug of :shared_paper_browser, so the 304 halt must keep
+      # :paper_reader_csp from ever minting a nonce (and the delete strips the
+      # pipeline's own static CSP). Only a ROUTER-level test can catch a future
+      # pipeline reorder that leaks a fresh-nonce CSP onto a 304 — the direct
+      # plug-call test structurally cannot.
+      assert get_resp_header(conn304, "content-security-policy") == []
+    end
+
     test "block-backed scoped reader rejects a conflicting body_html cache", %{
       conn: conn,
       ws: ws,
@@ -474,8 +502,11 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
 
     assert get_resp_header(conn, "x-barkpark-paper-revision") == [paper.released_revision_id]
 
+    # http-edge-truth D9: weak, 7-day-bucketed validator — W/"sha256:<digest>.<bucket>".
+    bucket = div(System.os_time(:second), 604_800)
+
     assert get_resp_header(conn, "etag") == [
-             ~s("sha256:#{EpicFleet.canonical_digest(paper.content)}")
+             ~s(W/"sha256:#{EpicFleet.canonical_digest(paper.content)}.#{bucket}")
            ]
   end
 

@@ -13,6 +13,13 @@
 #     enumerating via `git ls-files` printed "OK: every repo-root read is
 #     covered" and exited 0 with the mutation fixture sitting untracked on disk
 #   * a neutered scanner must red rather than report clean  (case 5)
+#   * a PARTIALLY neutered scanner must red too             (case 5b) — the
+#     mutation the old whole-population floor could not see: deleting `api/test`
+#     from list_escapes' `find` collapsed the census 29 -> 11 on origin/main and
+#     still printed OK, exit 0, inside the REQUIRED Elixir gate. Case 5 only
+#     ever exercised a TOTAL collapse, so it certified a floor that could not
+#     fire on the failure its own comment named.
+#   * a scanner door with no declared floor must red        (case 5c)
 # A harness with only green cases is the defect, not the proof.
 
 set -euo pipefail
@@ -55,19 +62,32 @@ trap cleanup EXIT
 
 # Build a synthetic mini-repo whose api/ tree escapes to known repo-root paths.
 # `covered_rel` is a path INSIDE a declared set; `uncovered_rel` is not in any.
+#
+# THE FIXTURE MUST CLEAR EVERY IDIOM FLOOR, not one aggregate number. The
+# ratchet now floors each of its four doors separately (`--print-floors`:
+# test-cwd 8, test-dir 8, lib-cwd 5, lib-dir 5), so a fixture that reads only
+# from api/test would red on `lib-*: 0` and the coverage cases below would
+# "prove" coverage using a floor failure. Every `../../../…` literal written
+# from api/{lib,test}/barkpark resolves identically under BOTH bases — the
+# file's own directory and `api/` — so one literal feeds one `-dir` row and one
+# `-cwd` row. Hence: ten literals in the api/test file, six in the api/lib file,
+# which leaves real headroom over 8 and 5 rather than sitting exactly on them.
 make_fixture() {
   local root="$1"
   mkdir -p "$root/api/lib/barkpark" "$root/api/test/barkpark" \
     "$root/internal/taskboard" "$root/internal/chat/testdata" \
+    "$root/internal/pdrender/testdata" "$root/cmd/barkpark/testdata" \
     "$root/.codex/skills/epic-cycle/scripts" "$root/design" "$root/web/__tests__/fixtures"
   : >"$root/internal/taskboard/components.go"
   : >"$root/internal/taskboard/tokens_gen.go"
   : >"$root/internal/chat/testdata/workflow_summary.json"
+  : >"$root/internal/pdrender/testdata/blocks.json"
+  : >"$root/cmd/barkpark/testdata/preview-parity.json"
   : >"$root/.codex/skills/epic-cycle/scripts/run_concurrency_benchmark.py"
   : >"$root/design/status-manifest.json"
+  : >"$root/design/tokens.json"
   : >"$root/web/__tests__/fixtures/preview-parity.json"
-  # Nine covered reads — comfortably over the floor of 8 so the coverage cases
-  # exercise coverage, not the floor.
+  # Ten covered reads from api/test -> test-dir 10, test-cwd 10 (floors: 8, 8).
   cat >"$root/api/test/barkpark/covered_test.exs" <<'EX'
   @a Path.expand("../../../internal/taskboard/components.go", __DIR__)
   @b Path.expand("../../../internal/taskboard/tokens_gen.go", __DIR__)
@@ -77,10 +97,24 @@ make_fixture() {
   @f Path.expand("../../../web/__tests__/fixtures/preview-parity.json", __DIR__)
   @g Path.expand("../../../internal/chat/testdata", __DIR__)
   @h Path.expand("../../../web/__tests__/fixtures", __DIR__)
+  @j Path.expand("../../../internal/pdrender/testdata/blocks.json", __DIR__)
+  @k Path.expand("../../../cmd/barkpark/testdata/preview-parity.json", __DIR__)
   @i File.read!("../design/status-manifest.json")
   # traversal-attack fixtures: asserted on, never read — must NOT be counted
   @x "../etc/passwd"
   @y "../up"
+EX
+  # Six covered reads from api/lib -> lib-dir 6, lib-cwd 6 (floors: 5, 5). The
+  # real tree reads across both halves (mix tasks in api/lib, tests in
+  # api/test); a fixture that only had one half could not exercise the doors
+  # that catch the other half going blind.
+  cat >"$root/api/lib/barkpark/covered.ex" <<'EX'
+  @a Path.expand("../../../design/status-manifest.json", __DIR__)
+  @b Path.expand("../../../design/tokens.json", __DIR__)
+  @c Path.expand("../../../cmd/barkpark/testdata/preview-parity.json", __DIR__)
+  @d Path.expand("../../../internal/pdrender/testdata/blocks.json", __DIR__)
+  @e Path.expand("../../../internal/taskboard/components.go", __DIR__)
+  @f Path.expand("../../../internal/chat/testdata/workflow_summary.json", __DIR__)
 EX
 }
 
@@ -98,11 +132,43 @@ else
 fi
 # The count is the anti-vacuity signal: a run that says "0 reads" is a broken
 # scanner, and this case would notice it even if the floor were removed.
+#
+# NO HARD-CODED POPULATION HERE. This assertion used to read `-ge 20` under a
+# label claiming the measured population was 24 — a PASSING test whose own name
+# was stale by five (the tree measures 29), and a threshold nine under the live
+# population, so the census could have lost nine reads and still said ok. Both
+# halves are DERIVED now, and neither can rot:
+#   (a) --check's count must agree with --list-escapes' own distinct count. Two
+#       modes, one census; if they disagree, one of them is lying.
+#   (b) every idiom the script declares a floor for must actually clear that
+#       floor in --list-escapes. Computed from --list-escapes and --print-floors,
+#       so it does not just re-read --check's arithmetic back to itself.
 n="$(printf '%s' "$out" | sed -n 's/^elixir-path-escape-check: \([0-9]*\) distinct.*/\1/p')"
-if [ "${n:-0}" -ge 20 ]; then
-  ok "resolved $n repo-root reads (measured population is 24)"
+listed="$("$SCRIPT" --list-escapes | cut -f1 | sed '/^$/d' | sort -u | wc -l | tr -d ' ')"
+if [ "${n:-0}" = "$listed" ] && [ "${n:-0}" -gt 0 ]; then
+  ok "--check's count ($n) agrees with --list-escapes' distinct census"
 else
-  no "resolved only ${n:-0} repo-root reads — scanner is under-matching"
+  no "--check says ${n:-0} reads, --list-escapes says $listed — the two modes disagree"
+fi
+census_tagged="$("$SCRIPT" --list-escapes | cut -f1,3 | sed '/^$/d' | sort -u)"
+floors="$("$SCRIPT" --print-floors)"
+thin_idioms=0
+while IFS= read -r frow; do
+  [ -n "$frow" ] || continue
+  fidiom="${frow%%	*}"
+  fmin="${frow##*	}"
+  fgot="$(printf '%s\n' "$census_tagged" | awk -F'\t' -v k="$fidiom" '$2 == k' | wc -l | tr -d ' ')"
+  if [ "$fgot" -ge "$fmin" ]; then
+    ok "idiom $fidiom is live: $fgot read(s), floor $fmin"
+  else
+    no "idiom $fidiom resolved $fgot read(s) but its floor is $fmin — this door is blind"
+    thin_idioms=$((thin_idioms + 1))
+  fi
+done <<<"$floors"
+if [ "$thin_idioms" -eq 0 ]; then
+  ok "every declared idiom clears its own floor on the real tree"
+else
+  no "$thin_idioms idiom(s) are under their floor"
 fi
 if has "$out" "exempt: scripts/claude-pinned-version.txt"; then
   ok "the :real_binary-only read is reported as exempt, not silently dropped"
@@ -213,11 +279,90 @@ else
   no "wrong diagnosis: $out"
 fi
 # and the floor is NOT overridable outside the harness
-out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX3" ELIXIR_ESCAPE_MIN=1 "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX3" ELIXIR_ESCAPE_IDIOM_MIN='test-dir	0
+test-cwd	0
+lib-dir	0
+lib-cwd	0' "$SCRIPT" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then
-  ok "ELIXIR_ESCAPE_MIN in the environment cannot lower the floor"
+  ok "ELIXIR_ESCAPE_IDIOM_MIN in the environment cannot lower the floors"
 else
-  no "the floor was lowered by an env var — that is a one-line CI bypass"
+  no "the floors were lowered by an env var — that is a one-line CI bypass"
+fi
+echo
+
+# ── case 5b: THE PARTIAL BLINDING — one door goes dark, on the REAL tree ────
+# This is the case the old whole-population floor could not have: it never
+# exercised anything but a TOTAL collapse (case 5's one-read fixture), so it
+# certified a floor that could not fire on the failure its own comment named.
+#
+# Measured on origin/main at the time this case was written: deleting `api/test`
+# from list_escapes' `find` — ONE WORD — collapsed the census 29 -> 11, a 62%
+# loss of scanner coverage, and the ratchet printed `OK` and exited 0 inside the
+# REQUIRED Elixir gate. The surviving api/lib reads alone cleared the old floor
+# of 8. So the mutation is applied to a COPY of the real script and run against
+# the REAL repository: a partially-blinded scanner must red, and it must accuse
+# itself rather than the repo.
+echo "case 5b: blinding ONE door (api/test) reds on the real tree"
+MUT="$TMPROOT/mutant-no-api-test.sh"
+sed 's|find api/lib api/test|find api/lib|' "$SCRIPT" >"$MUT"
+if ! cmp -s "$MUT" "$SCRIPT"; then
+  ok "the mutation applied (the find in list_escapes really changed)"
+else
+  no "the mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$REAL_ROOT" bash "$MUT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) when the api/test door goes blind"
+else
+  no "a scanner that lost api/test reported CLEAN — the exact origin/main defect"
+fi
+if has "$out" "idiom 'test-dir' resolved only 0 repo-root read"; then
+  ok "names the blind door: test-dir"
+else
+  no "did not name the blind door: $out"
+fi
+if has "$out" "idiom 'test-cwd' resolved only 0 repo-root read"; then
+  ok "names the blind door: test-cwd"
+else
+  no "did not name the blind door: $out"
+fi
+if has "$out" "SCANNER is broken, not the repo clean"; then
+  ok "accuses the scanner, not the repository"
+else
+  no "wrong diagnosis: $out"
+fi
+# …and the surviving door is reported LIVE in the same breath, so the operator
+# can see which half went dark instead of guessing.
+if has "$out" "idiom lib-dir: "; then
+  ok "still reports the surviving door's population"
+else
+  no "no per-idiom breakdown to diagnose from: $out"
+fi
+echo
+
+# ── case 5c: a door with NO floor entry is an unguarded door ────────────────
+# The floor table doubles as the idiom inventory. Widening list_escapes' `find`
+# without adding a floor would ship a new door that nothing can catch going
+# blind, so the tag it emits (`other-*`) must red on sight.
+echo "case 5c: a scanner door with no floor entry reds"
+MUT2="$TMPROOT/mutant-undeclared-door.sh"
+sed 's|find api/lib api/test|find api/lib api/test scripts|' "$SCRIPT" >"$MUT2"
+FX4="$TMPROOT/newdoor"
+make_fixture "$FX4"
+mkdir -p "$FX4/scripts"
+cat >"$FX4/scripts/probe.exs" <<'EX'
+  @a Path.expand("../design/status-manifest.json", __DIR__)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX4" bash "$MUT2" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) when the scanner emits an undeclared idiom"
+else
+  no "an undeclared door shipped with no floor and the ratchet said OK"
+fi
+if has "$out" "has no entry in ELIXIR_ESCAPE_IDIOM_MIN"; then
+  ok "names the unguarded door"
+else
+  no "did not name the unguarded door: $out"
 fi
 echo
 
@@ -515,6 +660,34 @@ gate() {
 gate_says() {
   if grep -q -- "$1" "$GATE_OUT"; then ok "$2"; else no "$2 (not in the step output)"; fi
 }
+# gate_names <must-name> <must-not-name> — D770/D771.
+#
+# `gate_says` reads the whole step OUTPUT, which has always named the failing
+# job in its log. This reads the `::error::` ANNOTATION ONLY — the single line
+# the check-run API carries, and therefore the only line a human at the merge
+# button or the merge queue ever sees. Until this slice that line said "at least
+# one upstream job" and stopped.
+#
+# It is a PAIR by construction: naming the job that failed is worth nothing on
+# its own (a hardcoded sentence satisfies it), so the same call also refuses an
+# annotation that names a job which PASSED in this very run.
+gate_names() {
+  local ann named
+  ann="$(grep '^::error' "$GATE_OUT" | tr '\n' ' ')"
+  named="${ann#*NOT IN THE ALLOW-SET: }"
+  if [ -z "$ann" ] || [ "$named" = "$ann" ]; then
+    no "  …but the annotation names no job at all: ${ann:-<no ::error:: line>}"
+    return 0
+  fi
+  case "$named" in
+    *"$1"*) ok "  …and the annotation names the refusing '$1'" ;;
+    *) no "  …but the annotation never named the refusing '$1': $ann" ;;
+  esac
+  case "$named" in
+    *"$2"*) no "  …and it names '$2', which PASSED in this run: $ann" ;;
+    *) ok "  …and does not name the passing '$2'" ;;
+  esac
+}
 
 # (a) the happy path: a full api/** PR, everything ran and passed
 gate "full run, all green" 0 \
@@ -531,6 +704,7 @@ gate_says "legitimately not dispatched" "…and says so, rather than claiming th
 gate "mix-test failed" 1 \
   R_CHANGES=success R_TEST=failure R_PROD=skipped R_PERF=success R_ESCAPE=success \
   O_COMPILE=true O_TEST=true
+gate_names "mix-test" "validation-perf"
 
 # (d) THE BYPASS THIS SLICE EXISTS TO CLOSE: prod-compile `skipped` only
 #     because its dependency died, while the dispatcher said it WAS needed.
@@ -538,6 +712,10 @@ gate "prod-compile skipped behind a live gate (upstream died)" 1 \
   R_CHANGES=success R_TEST=success R_PROD=skipped R_PERF=success R_ESCAPE=success \
   O_COMPILE=true O_TEST=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
+# …and the SKIP arm accumulates too, not just the failure arm: this red never
+# passes through `failure`, so an accumulator wired only there would leave the
+# annotation contentless on exactly the bypass this shape exists to close.
+gate_names "mix-prod-compile" "mix-test"
 
 # (e) the dispatcher itself failing reds it, with empty outputs
 gate "dispatcher failed, outputs empty" 1 \

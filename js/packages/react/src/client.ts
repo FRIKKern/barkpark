@@ -171,10 +171,15 @@ async function hydrateAsciicast(root: ParentNode): Promise<number> {
   for (const el of nodes) {
     const src = el.dataset.castSrc
     if (!src) continue
-    // Same options the Phoenix `runAsciicast` mounts with.
+    // Same options the Phoenix `runAsciicast` mounts with. `poster` is the ONE
+    // per-block option: the emitter writes `data-cast-poster` only when the
+    // block names a resting frame (an npt timestamp, or `end`), so an unset
+    // one falls back to `npt:0:1` and nothing changes for existing content. A
+    // recording that opens on a banner + a reading pause is near-empty black at
+    // t=1s; naming a later frame makes the resting state show real terminal.
     player.create(src, el, {
       fit: 'width',
-      poster: 'npt:0:1',
+      poster: el.dataset.castPoster || 'npt:0:1',
       idleTimeLimit: 2,
       theme: 'asciinema',
     })

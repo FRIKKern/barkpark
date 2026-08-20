@@ -33,10 +33,22 @@ defmodule BarkparkWeb.SiteDeployController do
       arrived WHOLE and still has nothing to serve.
     * **409** `already_running` — a run for THAT SLUG is in flight. A different
       slug (or an unrelated self-update) never collides.
+    * **409** `box_at_capacity` — a DIFFERENT slug is building and the box's
+      fleet build slot is taken (`BUILD_GATE_SLOTS=1`). The refusal happens at
+      the door, before the artifact is even unpacked, because the alternative
+      is what the box used to do: answer 202 and let the engine queue inside
+      its own unit for up to 900s, where an operator reads a queue as a hang.
+      Only `mode: "deploy"` can draw it — a rollback or teardown never touches
+      the build gate. Retry when the in-flight build finishes.
     * **202** `started` — with the fresh run status.
     * **500** `runner_start_failed` — the feature IS enabled but the command
       could not spawn (missing script, bad cd). Distinct from 503: telling an
       admin to set an env var they already set would be actively wrong.
+    * **500** `site_provision_failed` — the site's SOURCE could not be
+      materialized, so the build never started. Carries a scrubbed `reason`
+      (the failed action + path). Distinct from `runner_start_failed`, which it
+      used to be silently folded into: the two have different operators and
+      different fixes.
 
   `GET /v1/admin/site-deploy?slug=<slug>` returns the run status for one slug:
   state, the six parsed `stages` (retained separately from the log ring, so a
@@ -93,10 +105,50 @@ defmodule BarkparkWeb.SiteDeployController do
           }
         })
 
+      {:error, :box_at_capacity} ->
+        # The box is BUILDING something else. `code` is exactly
+        # "box_at_capacity" (lowercase snake, no prefix) and `message` is
+        # NON-EMPTY on purpose: the control plane renders a refusal as
+        # "<code> — <message>" and classifies on the head of that split, so a
+        # code with an empty message collides with the request-id stamp the
+        # relay appends and the deferral lands unclassified.
+        slots = DeployRunner.build_slot_capacity()
+
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: %{
+            code: "box_at_capacity",
+            message:
+              "the box is at its build capacity (#{slots} of #{slots} build slots in use) — " <>
+                "another site is building; retry when it finishes"
+          }
+        })
+
       {:error, :disabled} ->
-        # The apply flag flipped off (or the Runner died) between the guard and
-        # the call — still fail-closed.
+        # The apply flag flipped off between the guard and the call — still
+        # fail-closed, and still the operator's flag to set. This arm is ONLY
+        # the Runner's own considered `:disabled` reply now; a Runner that
+        # could not answer lands below.
         feature_not_configured(conn)
+
+      {:error, :runner_unavailable} ->
+        # The Runner did not answer inside the call budget, or was not alive to
+        # answer. This used to arrive here as `{:error, :disabled}` and render
+        # `feature_not_configured` — telling an operator to set
+        # BARKPARK_SITE_DEPLOY_APPLY=1 on a box that had carried it for 75
+        # minutes, at 5039ms, WHILE the build the door had just accepted ran to
+        # completion behind the answer. 207 rows in 24h, 24.5% of the fleet's
+        # failure numerator, wrong about the cause AND about the outcome.
+        #
+        # Its own typed code now, and the message never names the flag. Same
+        # 503 as before ON PURPOSE (charter D115): the control plane keys its
+        # refusal class on the STATUS, so moving this would refile the rows into
+        # the very class this wave is emptying. The CODE is what changed, and
+        # `transient_refusal?/1` in the control plane graces it in the SAME PR —
+        # so this now BUYS a start retry and 45 poll-grace beats where it used
+        # to spend a build.
+        runner_unavailable(conn)
 
       {:error, {:artifact_rejected, code, message}} ->
         # The box REFUSED the caller's prebuilt bytes. 400 with the extractor's
@@ -104,6 +156,26 @@ defmodule BarkparkWeb.SiteDeployController do
         # has a symlink in it" from "the box is broken", and must never read a
         # refusal as a licence to let the box build the site instead.
         bad_request(conn, code, message)
+
+      {:error, {:provision_failed, reason}} ->
+        # The site's SOURCE could not be materialized, so the build never
+        # started. This used to collapse into `runner_start_failed` after a bare
+        # Logger.warning — which is why a `%File.Error{}` that explained 63% of
+        # this fleet's failures reached journald and nothing else, across 25
+        # consecutive attempts on one site. It is now its own code carrying the
+        # scrubbed reason (the failed action AND path), so a caller can tell
+        # "your box cannot write the sites dir" from "the runner would not
+        # spawn". It is NOT a stage: site-spawner D34 keeps PROVISION a silent
+        # pre-BUILD step, and the six stage names are untouched.
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{
+          error: %{
+            code: "site_provision_failed",
+            message: "site source could not be provisioned — the deploy never started",
+            reason: reason
+          }
+        })
 
       {:error, :start_failed} ->
         conn
@@ -192,6 +264,32 @@ defmodule BarkparkWeb.SiteDeployController do
         message:
           "site deploys are not enabled on this instance " <>
             "(set BARKPARK_SITE_DEPLOY_APPLY=1)"
+      }
+    })
+  end
+
+  # The door is CONFIGURED and the Runner is supervised — it just did not answer
+  # in time. Deliberately says nothing about the apply flag: this refusal is not
+  # about configuration, and the operator who "fixes" it by setting a flag that
+  # is already set has been sent to the wrong place.
+  #
+  # It is also honest about the outcome it does not know: a trigger that outran
+  # the call budget may ALREADY be running on the box, in which case the retry
+  # this refusal invites meets a 409 `already_running` (which the control plane
+  # turns into a counted deferral, never a second build).
+  @runner_unavailable_retry_after_s 15
+
+  defp runner_unavailable(conn) do
+    conn
+    |> put_status(:service_unavailable)
+    |> put_resp_header("retry-after", Integer.to_string(@runner_unavailable_retry_after_s))
+    |> json(%{
+      error: %{
+        code: "deploy_runner_unavailable",
+        message:
+          "the deploy runner did not answer in time — the box is busy or wedged, " <>
+            "not unconfigured; retry in #{@runner_unavailable_retry_after_s}s " <>
+            "(if the trigger did land, the retry answers already_running)"
       }
     })
   end

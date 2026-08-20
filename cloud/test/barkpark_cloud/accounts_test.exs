@@ -523,6 +523,35 @@ defmodule BarkparkCloud.AccountsTest do
       assert [survivor] = Accounts.list_user_sessions(user)
       assert survivor.token_hash == UserToken.hash_token(keep)
     end
+
+    # cch-w53-s4. The sweep is `context in ["session", "sse"]`, and the two tests
+    # below are the fences on each side of that widening: everything a signed-out
+    # user could still stream with must die, and NOTHING else may.
+    test "it also burns the user's live SSE stream tickets" do
+      user = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      ticket = elem(Accounts.create_sse_ticket(user), 1)
+
+      # Without this, a ticket minted a second before "sign out everywhere"
+      # opened a fresh authenticated /v1/events stream for the rest of its 60s
+      # TTL — the row-level half of the "signed out immediately" claim.
+      assert {:ok, 1} = Accounts.revoke_all_user_sessions(user)
+      assert Accounts.consume_sse_ticket(ticket) == nil
+    end
+
+    test "the count it reports is SESSIONS only — tickets are not padding" do
+      # The number goes straight to the console as `{revoked: N}` ("N sessions
+      # signed out"). Counting swept tickets would inflate it into a new number
+      # the product cannot support, which is the exact defect class this wave is
+      # closing. Two sessions + two tickets is still 2.
+      user = user_fixture()
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_user_session_token(user)
+      {:ok, _} = Accounts.create_sse_ticket(user)
+      {:ok, _} = Accounts.create_sse_ticket(user)
+
+      assert {:ok, 2} = Accounts.revoke_all_user_sessions(user)
+    end
   end
 
   describe "update_user_password/4 (change password ⇒ sign out everywhere)" do
@@ -752,6 +781,36 @@ defmodule BarkparkCloud.AccountsTest do
       assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(pat_plain)
     end
 
+    test "the SSE widening stops at 'sse' — a PAT row is not swept with it" do
+      # cch-w53-s4 widened the sweep from `context == "session"` to
+      # `context in ["session", "sse"]`. One character further ("pat" in the same
+      # list, or dropping the context filter for a plain user_id sweep) kills the
+      # user's programmatic credentials on a password change and nothing in the
+      # UI would say so. Assert on the ROWS, not just on verify/2, so a future
+      # verify that tolerates revoked_at cannot hide it.
+      {user, team} = user_with_team()
+      {:ok, _s} = Accounts.create_user_session_token(user)
+      {:ok, _ticket} = Accounts.create_sse_ticket(user)
+
+      {:ok, _pat_plain, pat} =
+        Accounts.create_personal_access_token(user, team, %{name: "ci-key", abilities: ["read"]})
+
+      assert {:ok, 1} = Accounts.revoke_all_user_sessions(user)
+
+      live = fn context ->
+        Repo.one(
+          from t in UserToken,
+            where: t.user_id == ^user.id and t.context == ^context and is_nil(t.revoked_at),
+            select: count(t.id)
+        )
+      end
+
+      assert live.("session") == 0
+      assert live.("sse") == 0
+      assert live.("pat") == 1
+      assert is_nil(Repo.get!(UserToken, pat.id).revoked_at)
+    end
+
     test "a password change does NOT revoke the user's PATs" do
       {user, team} = user_with_team()
 
@@ -778,7 +837,10 @@ defmodule BarkparkCloud.AccountsTest do
       assert Enum.all?(rows, &(&1.context == "session"))
     end
 
-    test "member removal (delete_user_session_tokens) preserves the user's PATs" do
+    # The session eviction PRIMITIVE never touches PATs. Membership removal
+    # itself does end them, but through the separate, team-scoped
+    # `revoke_team_pats/2` step — see the describe block below.
+    test "delete_user_session_tokens/1 alone preserves the user's PATs" do
       {user, team} = user_with_team()
 
       {:ok, pat_plain, _} =
@@ -797,6 +859,108 @@ defmodule BarkparkCloud.AccountsTest do
       # The PAT's row id is not a session → :not_found (no cross-context revoke).
       assert {:error, :not_found} = Accounts.revoke_user_session(user, pat.id)
       refute Repo.get(UserToken, pat.id).revoked_at
+    end
+  end
+
+  describe "membership changes revoke team-scoped PATs (cch-w30-s6)" do
+    test "remove_member/2 revokes every PAT the ex-member held on THAT team" do
+      {_owner, team} = user_with_team()
+      user = user_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "admin")
+      other_team = team_fixture()
+      {:ok, _} = Accounts.add_member(other_team, user, "admin")
+
+      {:ok, here, _} =
+        Accounts.create_personal_access_token(user, team, %{name: "here", abilities: ["read"]})
+
+      {:ok, elsewhere, _} =
+        Accounts.create_personal_access_token(user, other_team, %{
+          name: "elsewhere",
+          abilities: ["read"]
+        })
+
+      assert {:ok, :removed} = Accounts.remove_member(team, user)
+
+      assert Accounts.verify_personal_access_token(here) == nil
+      # Team-scoped: the other team's credential is NOT collateral.
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(elsewhere)
+    end
+
+    test "update_member_role/3 demotion revokes only the PATs the new role could not mint" do
+      {owner, team} = user_with_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      # Keep the owner around so the last-owner guard is not what we measure.
+      assert Accounts.team_role(owner, team) == "owner"
+
+      {:ok, deploy, _} =
+        Accounts.create_personal_access_token(admin, team, %{
+          name: "deploy",
+          abilities: ["deploy"]
+        })
+
+      {:ok, read, _} =
+        Accounts.create_personal_access_token(admin, team, %{name: "read", abilities: ["read"]})
+
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role(team, admin, "member")
+
+      assert Accounts.verify_personal_access_token(deploy) == nil
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(read)
+    end
+
+    test "a promotion (member -> admin) revokes nothing" do
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      {:ok, read, _} =
+        Accounts.create_personal_access_token(member, team, %{name: "read", abilities: ["read"]})
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role(team, member, "admin")
+
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(read)
+    end
+
+    test "revoked PAT rows survive as tombstones (stamped, never deleted)" do
+      {_owner, team} = user_with_team()
+      user = user_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+      {:ok, _plain, pat} = Accounts.create_personal_access_token(user, team, %{name: "audit-me"})
+
+      assert {:ok, :removed} = Accounts.remove_member(team, user)
+
+      row = Repo.get(UserToken, pat.id)
+      assert row, "the PAT row must remain for audit"
+      refute is_nil(row.revoked_at)
+    end
+
+    test "a PAT cannot be minted without a team — the revoke filter's own precondition" do
+      # cch-w30-s6 review. `revoke_team_pats/2` is scoped `team_id == ^tid`
+      # (team-scoped on purpose: a user_id-only sweep would cross tenants), so a
+      # PAT row with a NULL team_id is INVISIBLE to it and would outlive the
+      # membership it was minted under — the very defect this slice fixes,
+      # reintroduced through the back door.
+      #
+      # The column is nullable (session rows legitimately leave it NULL) and the
+      # only thing binding PATs to a team was one cond branch at POST /v1/tokens
+      # (`is_nil(current_team)` → 422). That is a property of a ROUTE, not of the
+      # row: a second minting call site would have produced credentials nothing
+      # could revoke. The changeset now refuses, so the precondition holds for
+      # every caller present and future.
+      {user, _team} = user_with_team()
+
+      cs =
+        UserToken.pat_changeset(%UserToken{}, %{
+          token_hash: :crypto.strong_rand_bytes(32),
+          name: "teamless",
+          abilities: ["read"],
+          user_id: user.id
+        })
+
+      refute cs.valid?, "a PAT with no team_id must not be mintable"
+      assert %{team_id: ["can't be blank"]} = errors_on(cs)
     end
   end
 

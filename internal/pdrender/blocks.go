@@ -283,10 +283,39 @@ func (dividerRenderer) Render(_ Block, ctx RenderCtx) []string {
 type sectionRenderer struct{ reg *Registry }
 
 func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
+	// FRAMED variant (charter D19 — the framed-finale device): a SQUARE
+	// lipgloss.NormalBorder frame in rule color REPLACES the two-rule band.
+	// Honest degrade below MinWidth (the boxLines discipline): too narrow for
+	// the border+padding chrome → fall through to the byte-identical band path
+	// rather than emit a crushed frame. Any other variant value falls through
+	// too (fail-soft, mirroring the web reader's unknown-variant bytes).
+	const frameChrome = 4 // border (2) + padding (2)
+	if attrStr(b.Attrs, "variant") == "framed" && ctx.Width-frameChrome >= MinWidth {
+		body := sr.body(b, ctx.WithWidth(ctx.Width-frameChrome))
+		frame := lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder()).
+			BorderForeground(ruleColor(ctx.Theme)).
+			Padding(0, 1).
+			Width(clampWidth(ctx.Width - 2)) // 2 = the border's two columns
+		return strings.Split(frame.Render(strings.Join(body, "\n")), "\n")
+	}
+
 	w := clampWidth(ctx.Width)
 	rule := ctx.Theme.Rule.Render(strings.Repeat("─", w))
 
 	out := []string{rule}
+	out = append(out, sr.body(b, ctx)...)
+	out = append(out, rule)
+	return out
+}
+
+// body renders the section's interior — optional bold title + child blocks
+// (grid or stack) — WITHOUT the surrounding chrome (the two-rule band or the
+// framed border), so both chromes wrap the exact same lines. Extracted
+// verbatim from the pre-frame Render loop: the band path's output is
+// byte-identical to before.
+func (sr sectionRenderer) body(b Block, ctx RenderCtx) []string {
+	var out []string
 	if title := attrStr(b.Attrs, "title"); title != "" {
 		out = append(out, ctx.Theme.Heading[1].Render(sanitizeText(title)))
 		out = append(out, "")
@@ -309,9 +338,7 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 	// through to the byte-identical stack loop below.
 	if layout, ok := b.Attrs["layout"].(map[string]any); ok && attrStr(layout, "mode") == "grid" {
 		if grid := sr.gridBody(b, layout, childCtx, inner, pad); grid != nil {
-			out = append(out, grid...)
-			out = append(out, rule)
-			return out
+			return append(out, grid...)
 		}
 	}
 
@@ -332,7 +359,6 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 		emitted++
 	}
 
-	out = append(out, rule)
 	return out
 }
 

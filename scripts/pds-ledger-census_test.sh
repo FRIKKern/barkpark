@@ -83,6 +83,17 @@ paper() {
   { printf 'HTTP %s\n' "$status"; printf '%s' "$body"; } > "$dir/paper-$slug.http"
 }
 
+# `drafts_page <dir> <index> <status> <json>` cans the SECOND lens --
+# GET /v1/data/query?...&perspective=drafts. It is keyed on its own filename, so
+# a fixture that cans NO drafts page models a source that does not offer the
+# lens (reported UNREAD), and one that cans page 0 and then stops is still a
+# TRUNCATED READ and still fails closed.
+drafts_page() {
+  local dir=$1 index=$2 status=$3 body=$4
+  mkdir -p "$dir"
+  { printf 'HTTP %s\n' "$status"; printf '%s' "$body"; } > "$dir/drafts-page-$index.http"
+}
+
 # A well-formed page envelope.
 envelope() {
   local count=$1 offset=$2 limit=$3 docs=$4
@@ -109,6 +120,75 @@ build_healthy() {
   p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot')"
   page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
   page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+}
+
+# A well-formed page envelope for the SECOND lens. The perspective it echoes is
+# a PARAMETER, because the interesting failure is a source that answers
+# `published` to a `perspective=drafts` request -- which is what the API does to
+# an anonymous or public-read caller, silently.
+drafts_envelope() {
+  local count=$1 offset=$2 limit=$3 perspective=$4 docs=$5
+  printf '{"result":{"count":%s,"offset":%s,"limit":%s,"perspective":"%s","documents":[%s]}}' \
+    "$count" "$offset" "$limit" "$perspective" "$docs"
+}
+
+# THE BLIND-SPOT CORPUS. The healthy board plus TWO rows that carry the epic's
+# slug prefix and hang off a foreign parent -- one LIVE (work this epic owns and
+# cannot see) and one DONE (bookkeeping). The live one's parent is a PARAMETER:
+# the same fixture built with a parent INSIDE the closure is the mutation that
+# proves the arm is derived from the corpus and not from a name someone typed.
+build_blind() {
+  local dir=$1 stray_parent=$2
+  local p1 p2
+  build_healthy "$dir"
+  p1="$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),"
+  p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),"
+  p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot'),"
+  p1+="$(row pds-stray-open "$stray_parent" open open 'stray row six. REOPEN: golf')"
+  p2="$(row pds-stray-done '"foreign-epic"' done closed 'stray row seven. REOPEN: hotel')"
+  page "$dir" 1 200 "$(envelope 4 4 4 "$p1")"
+  page "$dir" 2 200 "$(envelope 1 8 4 "$p2")"
+}
+
+# THE DRAFTS LENS, CANNED. Four rows, one of each kind the split must tell
+# apart, plus one OUT OF SCOPE row that must never be named:
+#   drafts.pds-hidden-x  -> no published twin           = HIDDEN WORK
+#   drafts.kid-b         -> published twin is `done`    = PHANTOM (edit shadow)
+#   drafts.kid-a         -> published twin is `open`    = already in the denominator
+#   drafts.foreign       -> parent outside the closure  = not this epic's at all
+# The second page is EMPTY and present on purpose: the drafts read pages exactly
+# like the published one, and a short page is what ends it.
+build_blind_drafts() {
+  local dir=$1
+  local d0
+  d0="$(row drafts.pds-hidden-x '"kid-a"' open open 'never published at all. REOPEN: india'),"
+  d0+="$(row drafts.kid-b "\"$ROOT_SLUG\"" open open 'edit shadow of a DONE row. REOPEN: juliet'),"
+  d0+="$(row drafts.kid-a "\"$ROOT_SLUG\"" open open 'edit shadow of a LIVE row. REOPEN: kilo'),"
+  d0+="$(row drafts.foreign 'null' open open 'another epic entirely. REOPEN: lima')"
+  drafts_page "$dir" 0 200 "$(drafts_envelope 4 0 4 drafts "$d0")"
+  drafts_page "$dir" 1 200 "$(drafts_envelope 0 4 4 drafts '')"
+}
+
+# THE HOSTILE WORKING DIRECTORY. `plant_stray <path> <module>` writes a stray
+# copy of a stdlib module that the census imports transitively. It is FAITHFUL
+# on purpose: it announces itself on stderr and then loads the REAL module off
+# the stdlib path and re-exports it, so the census keeps working and its exit
+# code stays correct. That is the dangerous shape -- 23 of the 49 names reachable
+# from this census's imports execute a stray's top level while the run still
+# exits 0 -- and it is why the isolation check cannot be an exit-code assertion.
+STRAY_SENTINEL='PDS-STRAY-EXECUTED'
+plant_stray() {
+  local path=$1 module=$2
+  cat > "$path" <<STRAYEOF
+import sys
+sys.stderr.write("$STRAY_SENTINEL $module\n")
+import importlib.util, os, os.path
+_real = os.path.join(os.path.dirname(os.__file__), "$module.py")
+_spec = importlib.util.spec_from_file_location("_pds_real_$module", _real)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+globals().update({k: v for k, v in vars(_mod).items() if not k.startswith("__")})
+STRAYEOF
 }
 
 # --- assertion helpers --------------------------------------------------------
@@ -250,6 +330,43 @@ expect_json_stdout() {
   printf '  ok    %-52s exit %d  (%s ok, %s bytes on stdout)\n' "$label" "$got" "$validator" "$bytes"
 }
 
+# THE INTERPRETER LAUNCH IS PART OF THE CONTRACT, AND ONLY THIS HELPER CAN SEE
+# IT. The census feeds its program to python3 on STDIN, which puts the CURRENT
+# WORKING DIRECTORY on sys.path[0] unless the interpreter is started isolated --
+# so any *.py in the CWD whose name collides with a module the census imports
+# transitively is EXECUTED by the instrument that certifies this epic's round.
+# The exit code cannot see that: a faithful stray leaves every code path and
+# every status correct and merely runs first. So this check asserts BOTH halves,
+# the census's own exit code AND the absence of the stray's sentinel, and plants
+# TWO strays reached by two different import chains, so a green here is a
+# property of how the interpreter is launched and not of one module's name.
+expect_isolated() {
+  local label=$1 want=$2
+  shift 2
+  CHECKS=$((CHECKS + 1))
+  local got=0 hits
+  local hostile="$TMP/hostile.$CHECKS"
+  mkdir -p "$hostile"
+  plant_stray "$hostile/bisect.py" bisect
+  plant_stray "$hostile/random.py" random
+  local out="$TMP/hostile-out.$CHECKS"
+  ( cd "$hostile" && "$@" ) > "$out" 2>&1 || got=$?
+  hits=$(grep -cF -- "$STRAY_SENTINEL" "$out" || true)
+  if [[ $got -ne $want ]]; then
+    printf 'SELFTEST FAIL: %s — expected exit %d, got %d (from a CWD holding stray bisect.py/random.py)\n%s\n' \
+      "$label" "$want" "$got" "$(cat "$out")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if [[ $hits -ne 0 ]]; then
+    printf 'SELFTEST FAIL: %s — exit %d was right but the census EXECUTED %d stray module(s) it found in the working directory; a correct exit code proves nothing when foreign code ran first\n%s\n' \
+      "$label" "$got" "$hits" "$(cat "$out")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s exit %d  (0 strays executed)\n' "$label" "$got"
+}
+
 run() {
   bash "$CENSUS" --root "$ROOT_SLUG" --pace 0 --retries 0 "$@"
 }
@@ -285,6 +402,9 @@ expect_output_contains "no off-vocabulary dispositions" "(none)" \
 # The done-condition must be able to be GREEN too. A predicate that is red on
 # everything is not a predicate.
 expect_status "--assert-round-done PASSES on a clean board" 0 \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
+# ...and it must green WITHOUT executing anything it happens to find next to it.
+expect_isolated "a shadowed CWD is neither read nor run" 0 \
   run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
 echo
 
@@ -660,6 +780,250 @@ expect_output_contains "an uppercase CLOSED is off-vocabulary, not a contradicti
 echo
 
 # =============================================================================
+# CLAUSE 7 — THE LEDGER LAPSE (PDS-D638). THREE SHAPES, TWO KEYS, AND A MUTANT
+# THAT CAN FIRE.
+#
+# Two waves running, slice rows lapsed to `open` with their work DONE, and each
+# debrief wrote the same paragraph. The paragraph becomes an arm here — and the
+# arm's whole difficulty is that its shapes DO NOT SHARE A KEY:
+#
+#   SHAPE A keys on claim.expired_at (+ previous_worker, + a null worker, + no
+#   released_at/closed_at): the TTL sweeper's exact fingerprint.
+#
+#   SHAPE B CANNOT. A shape-B row does NOT carry expired_at BY CONSTRUCTION —
+#   the lease is still HELD and the REAP is what writes that field — so a check
+#   keyed on expired_at passes VACUOUSLY on shape B 100% of the time, forever.
+#   Its only honest key is the HELD LEASE'S AGE against the TTL. And because
+#   shape B self-heals into shape A within <= TTL+60s, a live board has no
+#   shape-B row most instants: an arm that merely watched the board would be a
+#   permanent green that has NEVER ONCE FIRED. So STALELEASE below INJECTS a
+#   synthetic in_progress row whose claim.ts_iso is older than the TTL. That
+#   fixture is the difference between an arm and a decoration.
+#
+#   SHAPE C is reported on its own line and never folded: `open` while still
+#   wearing a finished claim. A worker-keyed check reads it as HELD; an
+#   expiry-keyed check cannot see it at all.
+#
+# THE GREENS ARE LOAD-BEARING, as everywhere else in this file: a RELEASED
+# claim, a FRESH lease and a TERMINAL row wearing an expired claim must all stay
+# silent, or the arm is just "always red" and proves nothing when it fires.
+# =============================================================================
+echo "clause 7 — the ledger lapse, in three shapes that do not share a key"
+
+# `claim_row` is `row` plus the top-level `claim` object /v1/data/query serves
+# beside it. The claim is passed as raw JSON so a fixture can express EXACTLY
+# which fields the sweeper left behind — which is the entire key of shape A.
+claim_row() {
+  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5 claim=$6
+  printf '{"_id":"%s","_type":"task","_updatedAt":"2020-01-01T00:00:00.000000Z","parent_id":%s,"lifecycle_status":"%s","disposition":"%s","disposition_reason":"%s","claim":%s}' \
+    "$id" "$parent" "$lifecycle" "$disposition" "$reason" "$claim"
+}
+
+# The two rows every clause-7 page 1 keeps, so nothing ELSE in the file's
+# predicate can red and be mistaken for this clause firing.
+CLAUSE7_TAIL="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')"
+
+# A stale lease and a fresh one. The FRESH one is generated at RUN TIME on
+# purpose: a fixture that hard-coded "recently" would rot into a stale lease and
+# the green control would flip red on a day nobody was looking.
+STALE_TS='2020-01-01T00:00:00.000000Z'
+FRESH_TS=$(date -u +%Y-%m-%dT%H:%M:%S.000000Z)
+
+# (a) SHAPE A — reverted to `open` by the sweeper, work evidence still on it.
+LAPSEA="$TMP/lapse-shape-a"
+build_healthy "$LAPSEA"
+page "$LAPSEA" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z","now":{"text":"gating; branch pushed"}}'),$CLAUSE7_TAIL")"
+expect_status_matching "a reverted-to-open lapsed claim reds the predicate" 1 "row(s) are SHAPE A" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --assert-round-done
+expect_status_matching "and it NAMES the lapsed row and its remedy" 1 "REMEDY: re-claim and close on the evidence already there: deep-a" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --assert-round-done
+expect_output_contains "the work-evidence sub-count is reported beside the shape" \
+  "shape A  reverted-to-open after expiry       1   (1 carrying work evidence)" \
+  run --page-limit 4 --fixture-dir "$LAPSEA"
+expect_output_contains "lapse_shape_a is a ROW-ID LIST in --json, never a count" \
+  "$(printf '"lapse_shape_a": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --json
+expect_output_contains "and the work evidence is its own list" \
+  "$(printf '"lapse_shape_a_work_evidence": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --json
+# A lapsed row with NO now-line is still shape A — the sub-count is a sub-count,
+# not the key. A key that demanded work evidence would miss every lapse that
+# happened before the worker wrote one.
+LAPSEANOEV="$TMP/lapse-shape-a-no-evidence"
+build_healthy "$LAPSEANOEV"
+page "$LAPSEANOEV" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-41","expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_output_contains "a lapse with no now-line is still shape A, with 0 evidence" \
+  "shape A  reverted-to-open after expiry       1   (0 carrying work evidence)" \
+  run --page-limit 4 --fixture-dir "$LAPSEANOEV"
+
+# (b) THE GREENS FOR SHAPE A. A RELEASE writes released_at and a CLOSE writes
+# closed_at; only a LAPSE nulls the worker while preserving previous_worker. If
+# either of those rows counted, the arm would be reporting ordinary lifecycle as
+# a defect.
+RELEASED="$TMP/lapse-released-not-lapsed"
+build_healthy "$RELEASED"
+page "$RELEASED" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","released_at":"2026-07-30T10:05:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "a RELEASED claim is not a lapse (released_at present)" 0 \
+  run --page-limit 4 --fixture-dir "$RELEASED" --assert-round-done
+expect_output_contains "and shape A stays empty for it" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$RELEASED" --json
+# EVERY CONJUNCT OF SHAPE A'S KEY IS LOAD-BEARING, and these three fixtures are
+# what make that TRUE rather than asserted. Drop any one of them from the key and
+# one of these greens flips red:
+#   - no expired_at  -> a vacancy nobody can attribute to the sweeper. The remedy
+#     ("re-claim and close on the evidence") rests on the reap having happened;
+#     without the stamp there is no evidence it did.
+#   - no previous_worker -> a claim object that never named a holder is not a
+#     lapse, it is an empty claim.
+#   - closed_at present -> the row was CLOSED after the lapse. That is the
+#     lifecycle working, not a re-open lie.
+NOEXPIRY="$TMP/lapse-vacated-no-expiry"
+build_healthy "$NOEXPIRY"
+page "$NOEXPIRY" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","ts_iso":"2026-07-30T09:00:00.000000Z","now":{"text":"gating"}}'),$CLAUSE7_TAIL")"
+expect_status "a vacated claim with NO expired_at is not an expiry" 0 \
+  run --page-limit 4 --fixture-dir "$NOEXPIRY" --assert-round-done
+expect_output_contains "and shape A stays empty without the sweeper's stamp" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$NOEXPIRY" --json
+NOPREV="$TMP/lapse-no-previous-worker"
+build_healthy "$NOPREV"
+page "$NOPREV" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "an expired claim that never named a holder is not a lapse" 0 \
+  run --page-limit 4 --fixture-dir "$NOPREV" --assert-round-done
+LAPSETHENCLOSED="$TMP/lapse-then-closed"
+build_healthy "$LAPSETHENCLOSED"
+page "$LAPSETHENCLOSED" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","closed_at":"2026-07-30T12:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "a lapse that was then CLOSED is the lifecycle working" 0 \
+  run --page-limit 4 --fixture-dir "$LAPSETHENCLOSED" --assert-round-done
+TERMLAPSE="$TMP/lapse-terminal"
+build_healthy "$TERMLAPSE"
+page "$TERMLAPSE" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' done closed 'deep a reason four, finished. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "a TERMINAL row wearing an expired claim does NOT red" 0 \
+  run --page-limit 4 --fixture-dir "$TERMLAPSE" --assert-round-done
+
+# (c) SHAPE B — THE ARM THAT WOULD OTHERWISE NEVER FIRE. A synthetic
+# `in_progress` row whose lease is older than the TTL. IT CARRIES NO
+# `expired_at`, exactly as a live shape-B row cannot: this fixture is what makes
+# an expired_at-keyed shape-B check provably vacuous rather than arguably so.
+STALELEASE="$TMP/lapse-shape-b-stale-lease"
+build_healthy "$STALELEASE"
+page "$STALELEASE" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' "$(printf '{"worker":"epic-builder-that-finished","epoch":3,"ts_iso":"%s","now":{"text":"committing"}}' "$STALE_TS")"),$CLAUSE7_TAIL")"
+expect_status_matching "a lease held past the TTL reds the predicate" 1 "row(s) are SHAPE B" \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --assert-round-done
+expect_status_matching "and its remedy is bp task release, not a re-claim" 1 "REMEDY: \`bp task release\`: deep-a" \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --assert-round-done
+# THE SUBSTITUTION, PINNED. The fixture that reds shape B carries NO expired_at,
+# so an expired_at-keyed shape-B check greens on it — and shape A must ALSO stay
+# empty here, or the two shapes would be reading the same key after all.
+expect_output_contains "the shape-B row carries NO expired_at, so shape A is empty" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --json
+expect_output_contains "lapse_shape_b is its own ROW-ID LIST" \
+  "$(printf '"lapse_shape_b": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --json
+expect_output_contains "and the arm prints the TTL it judged against" "TTL 2700s, key: instant - claim.ts_iso" \
+  run --page-limit 4 --fixture-dir "$STALELEASE"
+
+# THE KEY IS THE TTL, AND THE TTL IS THE SERVER'S. Widen it past the fixture's
+# age and the SAME row greens; that is the proof the arm reads a lease age and
+# not a hard-coded year.
+expect_status "the same stale lease GREENS under a wider TTL" 0 \
+  env BARKPARK_TASK_LEASE_TTL_SECONDS=100000000000 \
+  bash "$CENSUS" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$STALELEASE" --assert-round-done
+expect_status_matching "an unreadable TTL env is a usage error, never a fallback" 3 "refusing to fall back" \
+  env BARKPARK_TASK_LEASE_TTL_SECONDS=soon \
+  bash "$CENSUS" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$STALELEASE"
+
+# (d) THE GREEN FOR SHAPE B: a lease taken JUST NOW. A held lease inside its TTL
+# is a worker working, not a lapse.
+FRESHLEASE="$TMP/lapse-fresh-lease"
+build_healthy "$FRESHLEASE"
+page "$FRESHLEASE" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' "$(printf '{"worker":"epic-builder-still-working","epoch":1,"ts_iso":"%s","now":{"text":"building"}}' "$FRESH_TS")"),$CLAUSE7_TAIL")"
+expect_status "a lease taken just now does NOT red" 0 \
+  run --page-limit 4 --fixture-dir "$FRESHLEASE" --assert-round-done
+expect_output_contains "and shape B is empty for it" '"lapse_shape_b": []' \
+  run --page-limit 4 --fixture-dir "$FRESHLEASE" --json
+
+# (e) FAIL CLOSED ON A HELD LEASE THAT CANNOT BE PLACED. An `in_progress` row
+# held by a worker with no readable claim.ts_iso sits on neither side of the
+# TTL, and a row the arm cannot place is never counted as fresh — exit 2,
+# exactly as clause 5 does for _updatedAt.
+NOLEASETS="$TMP/lapse-no-ts-iso"
+build_healthy "$NOLEASETS"
+page "$NOLEASETS" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-unplaceable","epoch":1}'),$CLAUSE7_TAIL")"
+expect_status_matching "a held lease with no ts_iso fails closed" 2 "never counted as fresh" \
+  run --page-limit 4 --fixture-dir "$NOLEASETS" --assert-round-done
+BADLEASETS="$TMP/lapse-bad-ts-iso"
+build_healthy "$BADLEASETS"
+page "$BADLEASETS" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-unplaceable","ts_iso":"last tuesday"}'),$CLAUSE7_TAIL")"
+expect_status_matching "an unreadable ts_iso fails closed too" 2 "cannot be placed on either side" \
+  run --page-limit 4 --fixture-dir "$BADLEASETS" --assert-round-done
+
+# (f) SHAPE C — `open` while still wearing a finished claim. It is NEITHER of
+# the other two shapes and its remedy is a third thing, so it gets its own line.
+SHAPEC="$TMP/lapse-shape-c"
+build_healthy "$SHAPEC"
+page "$SHAPEC" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-wave-40","epoch":2,"ts_iso":"2026-07-29T09:00:00.000000Z","closed_at":"2026-07-29T11:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status_matching "an open row wearing a closed claim reds the predicate" 1 "row(s) are SHAPE C" \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --assert-round-done
+expect_status_matching "and its remedy is a THIRD thing: clear the stale claim" 1 "REMEDY: clear the stale claim: deep-a" \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --assert-round-done
+expect_output_contains "shape C is NOT folded into shape A" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --json
+expect_output_contains "shape C is NOT folded into shape B either" '"lapse_shape_b": []' \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --json
+expect_output_contains "shape C is its own ROW-ID LIST" \
+  "$(printf '"lapse_shape_c": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --json
+
+# (g) THE CONTROL. A board with no claims at all is silent on all three shapes —
+# an arm that reds on the healthy corpus would make every red above meaningless.
+expect_status "the healthy corpus is silent on all three shapes" 0 \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
+expect_output_contains "shape A reads 0 on a healthy board" \
+  "shape A  reverted-to-open after expiry       0" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "shape B reads 0 on a healthy board" \
+  "shape B  in_progress held past the lease     0" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "shape C reads 0 on a healthy board" \
+  "shape C  open with a claim never cleared     0" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+
+# (h) THE LENS IS PRINTED, AND IT IS DERIVED. /v1/data/query answers
+# perspective: published, so a lapsed `drafts.` row is invisible to this arm and
+# visible to `bp task ls --all`. The perspective is read back off
+# result.perspective rather than asserted in a comment.
+expect_output_contains "the arm prints the LENS it read, derived from the response" \
+  "lens        /v1/data/query perspective:published" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+# THE CAVEAT IS AMENDED, NOT RETIRED (wave 47). It still says the two lenses
+# disagree BY CONSTRUCTION -- that part was never in doubt -- but the DIRECTION
+# it implied was wrong, and the amendment carries the measurement that settles
+# it: shape A 24 -> 27, the +3 being edit shadows of `done` rows. Both halves are
+# pinned, so retiring either one reds.
+expect_output_contains "the caveat still says the lenses DISAGREE by construction" \
+  "the two lenses DISAGREE by construction" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and it now carries the MEASURED direction, not an implication" \
+  "shape A 24 -> 27" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and refuses to quote B/C as verified (0 on both lenses)" \
+  "UNDISCRIMINATED" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "the lens is machine-readable in --json" '"lens_perspective": "published"' \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+# A source that does NOT say which perspective it answered with is reported as
+# `<unset>`, never assumed to be published.
+NOPERSP="$TMP/lapse-no-perspective"
+build_healthy "$NOPERSP"
+page "$NOPERSP" 0 200 '{"result":{"count":4,"offset":0,"limit":4,"documents":['"$(row "$ROOT_SLUG" 'null' open open 'root row. REOPEN: never'),$(row kid-a "\"$ROOT_SLUG\"" open open 'kid a reason one. REOPEN: alpha'),$(row kid-b "\"$ROOT_SLUG\"" done closed 'kid b reason two. REACTIVATE: bravo'),$(row kid-c "\"$ROOT_SLUG\"" blocked parked 'kid c reason three. REOPEN: charlie' 'TRIGGER: charlie ships')"']}}'
+expect_output_contains "a source that names no perspective is <unset>, not assumed" \
+  "perspective:<unset>+published" \
+  run --page-limit 4 --fixture-dir "$NOPERSP"
+echo
+
+# =============================================================================
 # CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/D365). 4(a) unanchored is
 # structurally unreachable by any round that discovers work: a row is BORN bare,
 # so a round that files one row can never certify. The anchor says WHICH ROUND
@@ -835,6 +1199,149 @@ expect_stdout_only_contains "and so does the certifying verdict" \
 echo
 
 # =============================================================================
+# THE DENOMINATOR AND THE REFUSAL (wave 47). A census that prints one number and
+# names nothing outside it is a claim about a population it never looked outside
+# of. Two arms, both DERIVED, both mutation-proven here over FIXTURES -- never
+# against the live board, whose numbers move while this wave files rows.
+#
+# THE MUTATION IS THE PROOF. `pds-stray-open` is ONE row built twice: once
+# parented OUTSIDE the closure (it must be named as a blind spot) and once
+# INSIDE it (it must vanish from the block and land in the closure instead). An
+# arm that printed a transcribed name would pass the first and fail the second.
+# =============================================================================
+echo "denominator + blind spots — derived, named, and mutation-proven"
+BLIND_OUT="$TMP/blind-outside"
+build_blind "$BLIND_OUT" '"foreign-epic"'
+build_blind_drafts "$BLIND_OUT"
+
+# THE DENOMINATOR NAMES ITS LENS AND ITS INSTANT. `open` is 2 here (kid-a,
+# deep-a) -- COUNTED, and printed beside the rule that counted it.
+expect_output_contains "the denominator is printed with its LENS named" \
+  "open rows in the closure             2   lens: published + lifecycle_status == \`open\` (case-exact)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and it refuses the two rejected keys by name" \
+  "NOT live/non-terminal" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and it carries the command that re-derives it" \
+  "re-derive   bash scripts/pds-ledger-census.sh" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+# THE GUARD THIS INSTRUMENT HAS, NOT THE ONE A READER WOULD ASSUME. Measured:
+# `echo scripts/pds-ledger-census.sh | bash scripts/elixir-path-escape-check.sh
+# --match test` answers false; the same command answers true for
+# scripts/pds-door-census.sh. So CI never runs these checks.
+expect_output_contains "the UNGATED limit is printed, not left to be assumed" \
+  "The REQUIRED Elixir" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+
+# ARM 1 -- OUTSIDE THE CLOSURE, BY NAME.
+expect_output_contains "a PDS-slugged row on a foreign parent is NAMED" \
+  "pds-stray-open   (open, parent foreign-epic)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and a TERMINAL one outside is counted APART, not as hidden work" \
+  "+ 1 terminal row(s) outside the closure" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and the slug-prefix heuristic is declared as one" \
+  "LIMIT: keyed on a SLUG PREFIX" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+
+# THE MUTATION. The SAME row, re-parented INSIDE the closure: it must leave the
+# block entirely and be counted by it instead.
+BLIND_IN="$TMP/blind-inside"
+build_blind "$BLIND_IN" '"kid-a"'
+build_blind_drafts "$BLIND_IN"
+expect_output_lacks "re-parented INSIDE the closure, it is no longer a blind spot" \
+  "pds-stray-open   (open, parent" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+expect_output_contains "it is COUNTED instead -- the closure grew by one" \
+  "closure     6 descendants" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+expect_output_contains "and the denominator grew with it" \
+  "open rows in the closure             3" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+expect_output_contains "with arm 1 now empty, and saying so" \
+  "(1) OUTSIDE THE CLOSURE      0" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+
+# ARM 2 -- THE DRAFTS LENS, SPLIT. A never-published row is HIDDEN WORK; a draft
+# whose published twin is finished is an EDIT SHADOW. Summing them overcounts,
+# which is exactly how 379 was reached on the live board.
+expect_output_contains "a never-published draft is named as HIDDEN WORK" \
+  "drafts.pds-hidden-x   (no published twin)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "a draft over a DONE twin is named a PHANTOM, with the twin" \
+  "drafts.kid-b   (published twin: done)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and phantoms are called edit shadows, not work" \
+  "an EDIT SHADOW, never hidden work. Adding these to the denominator OVERCOUNTS." \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "a draft over a LIVE twin is neither -- it is already counted" \
+  "drafts.kid-a   (published twin: open)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_lacks "a draft OUTSIDE the closure is not this epic's blind spot" \
+  "drafts.foreign" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+# THE ARITHMETIC IS THE WHOLE POINT: the honest total adds the never-published
+# row and NOT the phantom. If the split collapsed, this line would read 4.
+expect_output_contains "the honest total adds hidden work and NOT the phantom" \
+  "honest total                         3   = 2 + 1 never-published open row(s) below" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and the overcount is shown as the overcount it is" \
+  "OVERCOUNT if phantoms added          4   1 phantom(s) are edit shadows" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "clause 7's drafts delta is MEASURED on this run, not asserted" \
+  "THIS RUN: drafts-lens delta  A +0  B +0  C +0" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "the blind spots are machine-readable in --json" \
+  '"id": "drafts.pds-hidden-x"' \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT" --json
+
+# THE UNREAD STATE IS AN ABSENCE, NEVER A ZERO. Two ways to lose the lens, and
+# both must SAY so: a source that cans no drafts page at all, and one that
+# answers `published` to a perspective=drafts request -- which is precisely what
+# the API does to an anonymous or public-read caller, silently.
+expect_output_contains "no drafts fixture at all is UNREAD, not zero" \
+  "(2) NEVER PUBLISHED      UNREAD   source offers no drafts perspective" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and the honest total is then UNMEASURED, not printed anyway" \
+  "honest total                     UNMEASURED" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+IGNORED="$TMP/blind-lens-ignored"
+build_blind "$IGNORED" '"foreign-epic"'
+drafts_page "$IGNORED" 0 200 "$(drafts_envelope 1 0 4 published "$(row drafts.pds-hidden-x '"kid-a"' open open 'pinned to published. REOPEN: mike')")"
+expect_output_contains "a source that IGNORES the lens is UNREAD, never counted as 0" \
+  "the lens was IGNORED, so the never-published class is UNMEASURED, not zero" \
+  run --page-limit 4 --fixture-dir "$IGNORED"
+expect_output_lacks "and the row it did serve is NOT reported as hidden work" \
+  "drafts.pds-hidden-x   (no published twin)" \
+  run --page-limit 4 --fixture-dir "$IGNORED"
+
+# THE SOFTENING IS SCOPED TO THE FIRST PAGE AND TO NOTHING ELSE. A drafts read
+# that starts and then stops is a TRUNCATED READ and still fails closed -- the
+# same discipline the published read has always had.
+TRUNCDRAFTS="$TMP/blind-drafts-truncated"
+build_blind "$TRUNCDRAFTS" '"foreign-epic"'
+drafts_page "$TRUNCDRAFTS" 0 200 "$(drafts_envelope 4 0 4 drafts "$(row drafts.pds-hidden-x '"kid-a"' open open 'one. REOPEN: november'),$(row drafts.kid-b "\"$ROOT_SLUG\"" open open 'two. REOPEN: oscar'),$(row drafts.kid-a "\"$ROOT_SLUG\"" open open 'three. REOPEN: papa'),$(row drafts.foreign 'null' open open 'four. REOPEN: quebec')")"
+expect_status_matching "a TRUNCATED drafts read still fails closed" 2 \
+  "that is a truncated read, not a smaller board" \
+  run --page-limit 4 --fixture-dir "$TRUNCDRAFTS"
+# ...and so does a drafts page that errors. A 500 on the second lens is not an
+# absence, and smoothing it over is the defect this whole file refuses.
+FIVEDRAFTS="$TMP/blind-drafts-500"
+build_blind "$FIVEDRAFTS" '"foreign-epic"'
+drafts_page "$FIVEDRAFTS" 0 500 '{"ok":false}'
+expect_status_matching "a 500 on the drafts read is never an absence" 2 \
+  "a non-2xx is never a leaf" \
+  run --page-limit 4 --fixture-dir "$FIVEDRAFTS"
+
+# THE PAGER'S OWN BLIND SPOT IS STATED, NOT FIXED. Explicit offsets over a
+# mutating key can skip a row, and a second walk reading through the same pager
+# inherits the skip -- so agreement between them is not a proof.
+expect_output_contains "the census states the blind spot it did NOT fix" \
+  "Two such walks AGREEING does not rule it out." \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+echo
+
+# =============================================================================
 # THE PAGED READ HAS A TOTAL ORDER. Without one, explicit offsets page the
 # server's default `desc: updated_at` — a MUTATING key. A concurrent write
 # teleports its row to index 0 and shifts every row between; the duplicate half
@@ -941,6 +1448,42 @@ INCOHERENT (exit 4, and the payload is still non-empty: the predicate is a pure
 function computed BEFORE the single emit site precisely so that stays true). The
 payload carries `round_done` and `round_done_failures`, so a consumer never has
 to scrape a text stream for a verdict.
+
+THE DENOMINATOR IS DERIVED AND THE REFUSAL IS NAMED (wave 47). The open count
+is printed with the lens that produced it (published + `lifecycle_status` ==
+`open`, case-exact, transitive slug-keyed closure), the instant it was taken and
+the command that re-derives it -- no literal is pinned, because this board moves
+while the wave reading it files rows. Beside it, the BLIND SPOTS block names
+what that count cannot see: rows carrying the epic's slug prefix whose parent
+chain never reaches the root (unreachable at ANY depth), and -- through a SECOND
+paged read at `perspective=drafts` -- `open` drafts in scope of the root, SPLIT
+by their published twin. The split is the finding: a draft with no twin is
+HIDDEN WORK and joins the honest total, a draft whose twin is TERMINAL is an
+EDIT SHADOW and joining it OVERCOUNTS (this is exactly how 379 was reached on
+the live board where 376 was honest). Both arms are mutation-proven here: ONE
+fixture row, `pds-stray-open`, is built twice -- parented outside the closure it
+is NAMED, re-parented inside it the block is empty and the closure grew by one.
+The drafts lens has an UNREAD state that is an ABSENCE and never a zero: a
+source that cans no drafts page, and a source that answers `published` to a
+`perspective=drafts` request (what the API silently does to an anonymous or
+public-read caller) both print UNMEASURED. The softening stops there -- a drafts
+read that truncates mid-lens, or answers 500, still fails closed.
+
+CLAUSE 7's DRAFTS CAVEAT IS AMENDED, NOT RETIRED, and the amendment carries the
+measurement that settles it: shape A 24 -> 27 over a drafts-inclusive read, the
++3 being edit shadows of `done` rows, so the published read does not UNDERCOUNT
+shape A -- the drafts read MANUFACTURES three false lapses. Shapes B and C were
+0 on BOTH lenses and are named UNDISCRIMINATED rather than quoted as agreement.
+The per-run delta is scored by the SAME `lapse_shapes()` the published closure
+is scored by, so it is a property of the lens and not of two key sets that
+drifted apart.
+
+THE GUARD IS PRINTED, INCLUDING WHAT IT IS NOT. `echo scripts/pds-ledger-census.sh
+| bash scripts/elixir-path-escape-check.sh --match test` answers `false` while
+the same command answers `true` for scripts/pds-door-census.sh: the required
+Elixir gate does NOT dispatch this path, so every check in this file is
+local-only and the census says so in its own output rather than letting a reader
+assume CI coverage.
 
 THE PAGED READ HAS A TOTAL ORDER: `order=_createdAt:asc`, reported back as
 `page_order` so the discipline can be read rather than believed. Both traps are

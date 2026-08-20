@@ -74,8 +74,19 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     {:ok, marker} = Deploy.enqueue(site, bp, true, "manual")
 
     site
-    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Ecto.Changeset.change(current_deployment_id: went_live(marker).id)
     |> Repo.update!()
+  end
+
+  # A site's CURRENT release is a build that FINISHED. deploy-truth W1 re-keyed
+  # the active-deployment index onto (site_id, environment), so a marker left
+  # `queued` would also (correctly) refuse the very sweep these tests exercise —
+  # one build in flight per site.
+  defp went_live(deployment) do
+    Enum.reduce(~w(building pushing live), deployment, fn status, d ->
+      {:ok, next} = Registry.transition_deployment(d, %{status: status})
+      next
+    end)
   end
 
   # Mark the site deployed with a PREBUILT current release — bytes uploaded from
@@ -85,7 +96,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     assert marker.source == "prebuilt"
 
     site
-    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Ecto.Changeset.change(current_deployment_id: went_live(marker).id)
     |> Repo.update!()
   end
 
@@ -431,6 +442,36 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
       StudioLinkFakeHttpClient.program(%{})
       assert {:ok, %{refused: 1}} = sweep()
       assert analytics_reads() == 0
+    end
+  end
+
+  # deploy-reliability W17 S5: the supervisor refuses the child, so nothing
+  # builds. The sweep used to run this through `:ok = Deploy.start(row)` — a
+  # wrapper spec'd `:: :ok`, i.e. a match that could not fail — so a tick in
+  # which EVERY spawn was refused still reported `enqueued: N`.
+  defmodule RefusingStarter do
+    @moduledoc false
+    @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+    @impl true
+    def start(_deployment_id), do: {:error, :max_children}
+  end
+
+  describe "deploy-reliability W17 S5: a sweep that started no build says so" do
+    test "a refused driver spawn counts `failed`, never `enqueued`, and leaves the row queued" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      site = site_fixture(bp, "static", "astro") |> deployed(bp)
+
+      Process.put(:site_deploy_starter, RefusingStarter)
+
+      assert {:ok, %{enqueued: 0, failed: 1, duplicate: 0, skipped: 0}} = sweep()
+
+      # The row IS minted (so the next tick collapses to `duplicate` rather than
+      # storming) but nothing drove it — it is still queued, and the sweep's
+      # counters say a build did not happen.
+      assert [%Deployment{status: "queued"}] =
+               deployments(site) |> Enum.filter(&(&1.trigger == "template-auto"))
     end
   end
 

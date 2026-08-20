@@ -115,6 +115,26 @@ func scaffyMockPagingCommandServer(t *testing.T, docs []map[string]any) *httptes
 	return srv
 }
 
+// scaffyMutableCommandServer serves {"documents": *docs} — a POINTER-backed
+// catalog so a test can drift the SAME server after a pull: mutate a doc's
+// fields (source/rev) in place, or reassign *docs to shrink the catalog
+// (doc-gone). This is what lets a server-drift test change the very server the
+// sidecar was pulled from, instead of pointing --check at a different server —
+// the D104 distinction the fix turns on.
+func scaffyMutableCommandServer(t *testing.T, docs *[]map[string]any) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.Contains(r.URL.Path, "/v1/data/query/") || !strings.HasSuffix(r.URL.Path, "/command") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"documents": *docs})
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
 // scaffyGeneratedCatalog builds n served command docs with distinct
 // concept/description per row — enough to overflow one page and to prove the
 // description column survives across page boundaries.
@@ -369,6 +389,60 @@ func TestScaffyPullValidationRefusalWritesNothing(t *testing.T) {
 			names = append(names, e.Name())
 		}
 		t.Errorf("refused pull left files behind: %v", names)
+	}
+}
+
+// TestScaffyPullTraversalDomainRefusesAndWritesNothing is the path-escape
+// regression (BOUNDARY-1). The served doc carries a hostile domain
+// "../../../tmp/evil" — a raw JSON metadata field with no charset gate. The pull
+// id (fmt.Sprintf("%s--%s--%s", domain, concept, variant)) then becomes
+// "../../../tmp/evil--note--default", and filepath.Join Cleans it OUT of
+// scaffy/commands/ to ../tmp/evil--note--default.scaffy — a write outside the
+// base dir against an untrusted server. The containment guard must REFUSE before
+// any MkdirAll/WriteFile and leave nothing on disk anywhere.
+//
+// MUTATION-PROOF: reverting the guard in scaffy_remote_cmd.go (the
+// scaffyPathWithinBase / id char check before MkdirAll) reds this test — the
+// pull returns exitOK and the escaped file lands at ../tmp/evil--note--default
+// .scaffy, outside scaffy/commands/. The '/'-bearing, ".."-bearing domain is the
+// forward-slash "../" vector, the only one that escapes on non-Windows.
+func TestScaffyPullTraversalDomainRefusesAndWritesNothing(t *testing.T) {
+	withTempConfigHome(t)
+	root := chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "../../../tmp/evil", scaffyRemoteNoteSrc),
+	})
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "note")
+	if code != exitValidation {
+		t.Fatalf("traversal pull exit = %d, want %d (containment guard must refuse)\nstdout:\n%s\nstderr:\n%s",
+			code, exitValidation, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "nothing written") {
+		t.Errorf("refusal should state nothing was written:\n%s", stderr)
+	}
+
+	// The Cleaned escape target — ../tmp/evil--note--default.scaffy relative to
+	// the temp cwd — must NOT exist. This is the file the pre-fix code writes.
+	escaped := filepath.Join(root, "..", "tmp", "evil--note--default.scaffy")
+	if _, err := os.Stat(escaped); err == nil {
+		t.Errorf("traversal pull wrote OUTSIDE scaffy/commands at %s", escaped)
+		_ = os.Remove(escaped)
+	}
+	escapedSidecar := filepath.Join(root, "..", "tmp", "evil--note--default.provenance.json")
+	if _, err := os.Stat(escapedSidecar); err == nil {
+		t.Errorf("traversal pull wrote a sidecar OUTSIDE scaffy/commands at %s", escapedSidecar)
+		_ = os.Remove(escapedSidecar)
+	}
+
+	// NOTHING landed under the temp root either — not the base dir, not a file.
+	entries, _ := os.ReadDir(root)
+	if len(entries) != 0 {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("refused traversal pull left files behind under the tree: %v", names)
 	}
 }
 
@@ -664,24 +738,27 @@ func TestScaffyPullCheckLocalEditRedsR004(t *testing.T) {
 	}
 }
 
-// TestScaffyPullCheckServerDriftRedsR005: the sidecar is pulled against one
-// server state, then a DIFFERENT mocked server serves changed source (new sha
-// + rev) for the same doc id — R-005, exit 5.
+// TestScaffyPullCheckServerDriftRedsR005: real server-side drift — the command
+// is pulled from a server, then THAT SAME server (prov.Server) drifts its served
+// source (new sha + rev). --check must red R-005 (D104: the check re-fetches the
+// command's own source server, not the connected one). Re-semanticized from the
+// old two-server form, which mislabeled a wrong-server mismatch as legitimate
+// drift; drift is now provoked on the very server the sidecar records.
 func TestScaffyPullCheckServerDriftRedsR005(t *testing.T) {
 	withTempConfigHome(t)
 	chdirTemp(t)
-	origin := scaffyMockCommandServer(t, []map[string]any{
+	docs := []map[string]any{
 		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
-	})
-	pullNoteAgainst(t, origin.URL)
+	}
+	srv := scaffyMutableCommandServer(t, &docs)
+	pullNoteAgainst(t, srv.URL)
 
-	// The server's source drifts: a byte appended AND the rev advances.
+	// The SAME server's source drifts: a byte appended AND the rev advances.
 	drifted := scaffyRemoteNoteSrc + "\nASSERT FILE \"docs/{{.note-name}}.txt\" CONTAINS \"note\"\n"
-	moved := scaffyMockCommandServer(t, []map[string]any{
-		scaffyRemoteDoc("docs--note--default", "9", "note", "default", "docs", drifted),
-	})
+	docs[0]["source"] = drifted
+	docs[0]["_rev"] = "9"
 
-	code, stdout, stderr := runScaffyTest(t, globals{server: moved.URL}, "", "pull", "--check")
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
 	if code != exitValidation {
 		t.Fatalf("server-drift --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
 	}
@@ -698,18 +775,24 @@ func TestScaffyPullCheckServerDriftRedsR005(t *testing.T) {
 	}
 }
 
-// TestScaffyPullCheckServerDocGoneRedsR005: the doc vanishes from the catalog
-// entirely — still R-005 (no longer served), exit 5.
+// TestScaffyPullCheckServerDocGoneRedsR005: the doc vanishes from its OWN source
+// server's catalog entirely — still R-005 (no longer served), exit 5. Re-
+// semanticized to shrink the same server the sidecar was pulled from (D104),
+// rather than the old form which pointed --check at an unrelated empty server.
 func TestScaffyPullCheckServerDocGoneRedsR005(t *testing.T) {
 	withTempConfigHome(t)
 	chdirTemp(t)
-	origin := scaffyMockCommandServer(t, []map[string]any{
+	docs := []map[string]any{
 		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
-	})
-	pullNoteAgainst(t, origin.URL)
+	}
+	srv := scaffyMutableCommandServer(t, &docs)
+	pullNoteAgainst(t, srv.URL)
 
-	empty := scaffyMockCommandServer(t, []map[string]any{})
-	code, stdout, _ := runScaffyTest(t, globals{server: empty.URL}, "", "pull", "--check")
+	// The SAME server drops the doc from its catalog.
+	docs = []map[string]any{}
+	_ = docs // reassignment is observed through the pointer the server holds
+
+	code, stdout, _ := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
 	if code != exitValidation {
 		t.Fatalf("gone-doc --check exit = %d, want %d\n%s", code, exitValidation, stdout)
 	}
@@ -718,29 +801,150 @@ func TestScaffyPullCheckServerDocGoneRedsR005(t *testing.T) {
 	}
 }
 
-// TestScaffyPullCheckBothAxesTogether: a file edited locally AND drifted on the
-// server yields both R-004 and R-005 in one audit, exit 5.
+// TestScaffyPullCheckBothAxesTogether: a file edited locally AND drifted on its
+// OWN source server yields both R-004 and R-005 in one audit, exit 5. Re-
+// semanticized to drift the same server the sidecar records (D104), so the R-005
+// is genuine server drift rather than a wrong-server mismatch.
 func TestScaffyPullCheckBothAxesTogether(t *testing.T) {
 	withTempConfigHome(t)
 	chdirTemp(t)
-	origin := scaffyMockCommandServer(t, []map[string]any{
+	docs := []map[string]any{
 		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
-	})
-	pullNoteAgainst(t, origin.URL)
+	}
+	srv := scaffyMutableCommandServer(t, &docs)
+	pullNoteAgainst(t, srv.URL)
 
 	if err := os.WriteFile(scaffyPulledNoteDest, []byte(scaffyRemoteNoteSrc+"\n# local\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	moved := scaffyMockCommandServer(t, []map[string]any{
-		scaffyRemoteDoc("docs--note--default", "9", "note", "default", "docs", scaffyRemoteNoteSrc+"\n# server\n"),
-	})
+	// Same server drifts its served source.
+	docs[0]["source"] = scaffyRemoteNoteSrc + "\n# server\n"
+	docs[0]["_rev"] = "9"
 
-	code, stdout, _ := runScaffyTest(t, globals{server: moved.URL}, "", "pull", "--check")
+	code, stdout, _ := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
 	if code != exitValidation {
 		t.Fatalf("both-axes --check exit = %d, want %d\n%s", code, exitValidation, stdout)
 	}
 	if !strings.Contains(stdout, "R-004") || !strings.Contains(stdout, "R-005") {
 		t.Errorf("both axes should red together:\n%s", stdout)
+	}
+}
+
+// ---- D104 two-server regression probe -------------------------------------
+//
+// These three tests are the permanent form of the two-live-httptest-server
+// probe that reproduced D104: `pull --check` audited each sidecar against the
+// server bp was CONNECTED to, not the server the command was PULLED FROM
+// (prov.Server). Every assertion here is INVERTED against the pre-fix code —
+// each fails on the old scaffyCheckOne(p, ctx.Server, byID) and passes on the
+// per-provenance-server fix. They cover the three failure shapes the bug
+// produced: a false R-005, a coincidental-collision false clean, and a
+// realistic cross-server drift that must stay isolated per source server.
+
+// TestScaffyPullCheckAuditsProvenanceServerNotConnected (false-R005): a command
+// pulled from source server A, audited while bp is CONNECTED to a different
+// server B that never served it. Pre-fix: --check audits B, the doc is absent,
+// and it reds a FALSE R-005 "no longer served". Post-fix: --check audits A (the
+// sidecar's own server, untouched) and stays clean, exit 0.
+func TestScaffyPullCheckAuditsProvenanceServerNotConnected(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	serverA := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, serverA.URL)
+
+	// Connected server B knows nothing of this doc.
+	serverB := scaffyMockCommandServer(t, []map[string]any{})
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: serverB.URL}, "", "pull", "--check")
+	if code != exitOK {
+		t.Fatalf("wrong-connected-server --check exit = %d, want %d (pre-fix reds a false R-005 against server B)\nstdout:\n%s\nstderr:\n%s",
+			code, exitOK, stdout, stderr)
+	}
+	if strings.Contains(stdout, "R-005") {
+		t.Errorf("no drift on the sidecar's own server A — a false R-005 against the connected server B is the D104 bug:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "clean:") {
+		t.Errorf("audit against the correct provenance server (A) should report clean:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckCoincidentalCollisionNoFalseClean (coincidental-collision
+// false-clean): a command pulled from source server A that then DRIFTS on A,
+// while the CONNECTED server B coincidentally serves the same doc id at the
+// sidecar's original bytes. Pre-fix: --check audits B, the sha matches, and it
+// reports a FALSE clean — silently missing A's real drift. Post-fix: --check
+// audits A and reds R-005.
+func TestScaffyPullCheckCoincidentalCollisionNoFalseClean(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	docsA := []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	}
+	serverA := scaffyMutableCommandServer(t, &docsA)
+	pullNoteAgainst(t, serverA.URL)
+
+	// A drifts AFTER the pull — genuine upstream drift on the sidecar's server.
+	docsA[0]["source"] = scaffyRemoteNoteSrc + "\n# drifted on A\n"
+	docsA[0]["_rev"] = "9"
+
+	// Connected server B coincidentally serves the SAME doc id at the SAME
+	// original bytes the sidecar recorded — the sha collides.
+	serverB := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: serverB.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("coincidental-collision --check exit = %d, want %d (pre-fix false-clean against server B misses A's drift)\nstdout:\n%s\nstderr:\n%s",
+			code, exitValidation, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "R-005") || !strings.Contains(stdout, "server source changed") {
+		t.Errorf("A's real drift must red R-005 even though connected server B coincidentally matches the recorded sha:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckCrossServerDriftIsolated (realistic cross-server drift):
+// two commands pulled from two different servers — the note from A (untouched),
+// the memo from B (drifts). Connected to B, --check must isolate per source
+// server: pre-fix it audits everything against B, so the note (absent on B)
+// reds a FALSE R-005; post-fix the note (A) stays clean and only the memo (B)
+// reds R-005.
+func TestScaffyPullCheckCrossServerDriftIsolated(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	serverA := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	docsB := []map[string]any{
+		scaffyRemoteDoc("docs--memo--default", "3", "memo", "default", "docs", scaffyRemoteNoteSrc),
+	}
+	serverB := scaffyMutableCommandServer(t, &docsB)
+
+	pullNoteAgainst(t, serverA.URL)
+	if code, stdout, stderr := runScaffyTest(t, globals{server: serverB.URL}, "", "pull", "memo"); code != exitOK {
+		t.Fatalf("setup pull memo exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitOK, stdout, stderr)
+	}
+
+	// B drifts the memo; A's note is untouched.
+	docsB[0]["source"] = scaffyRemoteNoteSrc + "\n# drifted memo\n"
+	docsB[0]["_rev"] = "9"
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: serverB.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("cross-server --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	noteFile := "scaffy/commands/docs--note--default.scaffy"
+	memoFile := "scaffy/commands/docs--memo--default.scaffy"
+	// The discriminating assertion: the note (source server A, untouched) must
+	// carry NO R-005 — pre-fix it reds a false one against connected server B.
+	if regexp.MustCompile(regexp.QuoteMeta(noteFile) + `:\d+: R-005 `).MatchString(stdout) {
+		t.Errorf("the note (source server A, untouched) must not red — a false R-005 against connected server B is the D104 bug:\n%s", stdout)
+	}
+	// The memo (drifted on its own server B) must red R-005.
+	if !regexp.MustCompile(regexp.QuoteMeta(memoFile) + `:\d+: R-005 `).MatchString(stdout) {
+		t.Errorf("the memo (drifted on its own source server B) must red R-005:\n%s", stdout)
 	}
 }
 
@@ -817,21 +1021,80 @@ func TestScaffyPullCheckJSONEnvelope(t *testing.T) {
 	}
 }
 
-// TestScaffyPullCheckNetworkFailureIsHardError: with a pulled command present
-// but the server unreachable, --check cannot complete axis (b) and fails loud
-// (exitGeneric), never a false-clean.
-func TestScaffyPullCheckNetworkFailureIsHardError(t *testing.T) {
+// TestScaffyPullCheckUnreachableProvenanceServerRedsR005: with a pulled command
+// present but its OWN source server unreachable, --check cannot complete axis (b)
+// for that command — so it emits a distinct NAMED R-005 finding (exit 5), never a
+// silent skip and never a false-clean. Re-semanticized from the old
+// hard-error form: under per-server grouping (D104) one unreachable server must
+// not blank-abort the whole audit (other servers + the local axis still resolve),
+// so an unreachable server is a finding on its commands, loudly named.
+func TestScaffyPullCheckUnreachableProvenanceServerRedsR005(t *testing.T) {
 	withTempConfigHome(t)
 	chdirTemp(t)
 	srv := scaffyMockCommandServer(t, []map[string]any{
 		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
 	})
 	pullNoteAgainst(t, srv.URL)
-	srv.Close() // now unreachable
+	srv.Close() // the sidecar's own provenance server is now unreachable
 
-	code, _, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
-	if code != exitGeneric {
-		t.Fatalf("unreachable --check exit = %d, want %d\nstderr:\n%s", code, exitGeneric, stderr)
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("unreachable --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	// The finding names the axis (R-005), the unreachable server, and that drift
+	// was left unverified — never silent.
+	if !strings.Contains(stdout, "R-005") || !strings.Contains(stdout, "unreachable") || !strings.Contains(stdout, "unverified") {
+		t.Errorf("unreachable provenance server must red a named R-005 'unreachable … unverified' finding:\n%s", stdout)
+	}
+	// The local axis still ran: the on-disk file is untouched, so NO R-004.
+	if strings.Contains(stdout, "R-004") {
+		t.Errorf("untouched local file must not red R-004 even when the server is unreachable:\n%s", stdout)
+	}
+}
+
+// TestScaffyPullCheckEmptyProvenanceServerRedsR005: a sidecar whose server
+// field is empty cannot have axis (b) verified against ANY catalog — D104
+// demands a distinct NAMED R-005 finding (exit 5), never a silent skip and
+// never a verdict borrowed from the connected server.
+func TestScaffyPullCheckEmptyProvenanceServerRedsR005(t *testing.T) {
+	withTempConfigHome(t)
+	chdirTemp(t)
+	srv := scaffyMockCommandServer(t, []map[string]any{
+		scaffyRemoteDoc("docs--note--default", "3", "note", "default", "docs", scaffyRemoteNoteSrc),
+	})
+	pullNoteAgainst(t, srv.URL)
+
+	// Blank the sidecar's server field in place (a hand-edited or
+	// legacy-migrated sidecar) — everything else stays intact.
+	sidecar := "scaffy/commands/docs--note--default.provenance.json"
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var prov map[string]any
+	if err := json.Unmarshal(raw, &prov); err != nil {
+		t.Fatal(err)
+	}
+	prov["server"] = ""
+	blanked, err := json.Marshal(prov)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sidecar, blanked, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runScaffyTest(t, globals{server: srv.URL}, "", "pull", "--check")
+	if code != exitValidation {
+		t.Fatalf("empty-server --check exit = %d, want %d\nstdout:\n%s\nstderr:\n%s", code, exitValidation, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "R-005") || !strings.Contains(stdout, "records no source server") {
+		t.Errorf("empty prov.Server must red a named R-005 'records no source server' finding:\n%s", stdout)
+	}
+	// The connected server still serves the doc at matching bytes — the
+	// finding must come from the EMPTY server field, never a borrowed clean.
+	if strings.Contains(stdout, "clean:") {
+		t.Errorf("an empty prov.Server must never audit clean:\n%s", stdout)
 	}
 }
 

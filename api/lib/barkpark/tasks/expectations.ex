@@ -71,11 +71,24 @@ defmodule Barkpark.Tasks.Expectations do
   """
   @spec driven_tasks(binary(), keyword()) :: %{tasks: [driven_task()], truncated: boolean()}
   def driven_tasks(paper_id, opts \\ []) when is_binary(paper_id) do
-    referencers =
-      paper_id
-      |> Content.published_id()
-      |> Graph.reverse_referencers(opts)
-      |> Enum.filter(&(&1.type == "task"))
+    paper_id
+    |> Content.published_id()
+    |> Graph.reverse_referencers(opts)
+    |> driven_tasks_from_referencers(opts)
+  end
+
+  @doc """
+  `driven_tasks/2` fed an ALREADY-COMPUTED `Graph.reverse_referencers/2` list —
+  the am-w1-s3 reader dedupe seam. A caller that needs the referencers for
+  another section too (the Bulldocs reader renders backlinks AND driven tasks
+  off the same paper) runs the walk ONCE and hands the list to both; `opts`
+  must be the SAME scope keywords the walk itself ran under (they still scope
+  the per-task hydration here). Non-task referencers are ignored.
+  """
+  @spec driven_tasks_from_referencers([map()], keyword()) ::
+          %{tasks: [driven_task()], truncated: boolean()}
+  def driven_tasks_from_referencers(referencers, opts \\ []) when is_list(referencers) do
+    referencers = Enum.filter(referencers, &(&1.type == "task"))
 
     # A task may cite the paper via more than one field (design_doc AND the
     # papers list) — one entry per task, `via` carrying every edge kind, first
@@ -93,37 +106,47 @@ defmodule Barkpark.Tasks.Expectations do
     tasks =
       doc_ids
       |> Enum.take(budget)
-      |> Enum.flat_map(&entry(&1, Map.fetch!(kinds_by_doc, &1), opts))
+      |> entries(kinds_by_doc, opts)
 
     %{tasks: tasks, truncated: truncated}
   end
 
-  # One task entry, hydrated under the caller's scope. A source that vanished
-  # between the edge read and this fetch (or that the scope rejects) drops —
-  # the same fail-closed posture as reverse_referencers' own hydration.
-  defp entry(doc_id, kinds, opts) do
+  # Hydrate the citing tasks in ONE batched, scope-identical read
+  # (`Content.get_documents_by_ids/3`) instead of a `get_document/4` per task —
+  # the am-w1-s3 N+1 fix (4.0 statements per citing task per leg at the
+  # baseline). Fail-closed exactly like the per-doc read it replaces: a source
+  # that vanished between the edge read and this fetch, that the scope rejects,
+  # or that is no longer a `task` drops entirely — the batch read is TYPELESS,
+  # so the type gate `get_document(_, "task", _, _)` used to apply moves to the
+  # post-fetch filter here.
+  defp entries([], _kinds_by_doc, _opts), do: []
+
+  defp entries(doc_ids, kinds_by_doc, opts) do
     dataset = Keyword.get(opts, :dataset, "production")
+    docs_by_id = Content.get_documents_by_ids(doc_ids, dataset, opts)
 
-    case Content.get_document(doc_id, "task", dataset, opts) do
-      {:ok, doc} ->
-        content = doc.content || %{}
-        progress = Criteria.progress(content)
+    Enum.flat_map(doc_ids, fn doc_id ->
+      case Map.get(docs_by_id, doc_id) do
+        %{type: "task"} = doc -> [entry(doc, Map.fetch!(kinds_by_doc, doc_id))]
+        _ -> []
+      end
+    end)
+  end
 
-        [
-          %{
-            doc_id: doc.doc_id,
-            title: doc.title,
-            lifecycle_status: string_or_nil(Map.get(content, "lifecycle_status")),
-            via: Enum.uniq(kinds),
-            criteria: criteria_rows(content),
-            criteria_progress: progress,
-            satisfied: progress != nil and progress.met == progress.total
-          }
-        ]
+  # One hydrated task entry.
+  defp entry(doc, kinds) do
+    content = doc.content || %{}
+    progress = Criteria.progress(content)
 
-      _ ->
-        []
-    end
+    %{
+      doc_id: doc.doc_id,
+      title: doc.title,
+      lifecycle_status: string_or_nil(Map.get(content, "lifecycle_status")),
+      via: Enum.uniq(kinds),
+      criteria: criteria_rows(content),
+      criteria_progress: progress,
+      satisfied: progress != nil and progress.met == progress.total
+    }
   end
 
   # The per-claim rows the reverse view shows. Same garbage tolerance as

@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "not_found",
+    "message": "volume not found",
+    "details": {}
+  }
+}

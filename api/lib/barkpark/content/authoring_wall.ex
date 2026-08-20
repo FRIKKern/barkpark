@@ -140,10 +140,56 @@ defmodule Barkpark.Content.AuthoringWall do
         emit_wall_rejection(:duplicate_of, type, dataset)
         error
 
+      # E4 could not RUN (its bounded scan timed out / the pool died). A
+      # DIFFERENT rejection code from :duplicate_of on purpose: this one is
+      # TRANSIENT and countable as an outage, not as a policy refusal — and it
+      # must reach the caller, because swallowing it here is exactly the silent
+      # fail-open the DedupWall rewrite killed.
+      {:error, {:dedup_unavailable, _}} = error ->
+        emit_wall_rejection(:dedup_unavailable, type, dataset)
+        error
+
       {:error, {:invalid_epic_paper_quality, _}} = error ->
         emit_wall_rejection(:invalid_epic_paper_quality, type, dataset)
         error
     end
+  end
+
+  @doc """
+  Dry-run the whole wall and return EVERY failing gate at once (BPML
+  masterplan W0's validate-all): where `enforce/5` is a `with` chain that
+  stops at the first refusal — correct for a real write — this runs each gate
+  independently and collects the raw error tuples, so a producer learns all
+  its violations in ONE round trip instead of one 4xx at a time.
+
+  Deliberately side-effect-free: no exemption ratchet (a dry-run must never
+  spend a grandfathering), no rejection telemetry (dashboards count real
+  refusals, not rehearsals), nothing persisted. Returns `[]` on a clean pass.
+  """
+  @spec validate_all(Document.t() | map(), String.t(), String.t() | nil, String.t(), keyword()) ::
+          [{atom(), term()}]
+  def validate_all(ref, type, pid, dataset, opts \\ []) do
+    exempt? = type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset)
+
+    [
+      case label_gate(ref, type, pid, exempt?) do
+        {:ok, _spine_passed?} -> nil
+        {:error, tuple} -> tuple
+      end,
+      case epic_quality_gate(ref, type) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end,
+      case TagRegistry.validate_publish(ref, dataset, opts) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end,
+      case dedup_gate(ref, type, dataset, opts, exempt?) do
+        :ok -> nil
+        {:error, tuple} -> tuple
+      end
+    ]
+    |> Enum.reject(&is_nil/1)
   end
 
   # The wall's first observability (charter D28): a structured telemetry event
@@ -151,7 +197,7 @@ defmodule Barkpark.Content.AuthoringWall do
   # attributable in prod logs and countable on a dashboard (BarkparkWeb.Telemetry
   # can subscribe a counter tagged by :code/:type/:dataset). `code` is the
   # rejection atom (`:label_spine` | `:unknown_tag` | `:invalid_epic_paper_quality`
-  # | `:duplicate_of`).
+  # | `:duplicate_of` | `:dedup_unavailable`).
   defp emit_wall_rejection(code, type, dataset) do
     :telemetry.execute(
       [:barkpark, :authoring, :wall_rejection],
@@ -217,6 +263,13 @@ defmodule Barkpark.Content.AuthoringWall do
 
       {:error, {:duplicate_of, _payload}} = error ->
         error
+
+      # The wall could not RUN (bounded scan timed out / pool death). Forward it
+      # — swallowing it here would restore the exact silent fail-open the
+      # DedupWall rewrite killed, with publish answering 200 on a duplicate
+      # check that never happened. `content.dedup_bypass: true` is the escape.
+      {:error, {:dedup_unavailable, _message}} = error ->
+        error
     end
   end
 
@@ -280,10 +333,7 @@ defmodule Barkpark.Content.AuthoringWall do
     content = content_of(ref) || %{}
     blocks = List.wrap(content["blocks"])
 
-    spacer_count =
-      Enum.count(blocks, fn b ->
-        is_map(b) and b["type"] == "paragraph" and List.wrap(b["content"]) == []
-      end)
+    spacer_count = count_spacer_paragraphs(blocks)
 
     if content["style"] == "article" and spacer_count > 0 do
       Warnings.put(
@@ -298,6 +348,39 @@ defmodule Barkpark.Content.AuthoringWall do
   end
 
   defp emit_spacing_norm_advisory(_ref, _pid, _type), do: :ok
+
+  # The advisory's counter mirrors the tagged HARD gate's semantics
+  # (`EpicQuality.empty_paragraph?/1` and its whole-tree walk): a paragraph is
+  # a spacer only when it has no content AND no non-blank `text` key — a
+  # text-keyed paragraph is legal prose, not a scaffold — and every container
+  # key the gate's walk descends is descended HERE too, read from
+  # `EpicQuality.nested_keys/0` (one owner), so the advisory warns exactly
+  # where the tagged gate would refuse instead of passing an author it later
+  # 422s. The independent review of #11616 caught the previous two-key walk
+  # missing spacers inside columns/steps/panels/tabs/sections/content/items/rows.
+  defp count_spacer_paragraphs(blocks) when is_list(blocks),
+    do: blocks |> Enum.map(&spacer_paragraphs_in/1) |> Enum.sum()
+
+  defp count_spacer_paragraphs(_), do: 0
+
+  defp spacer_paragraphs_in(%{"type" => "paragraph"} = block) do
+    text = Map.get(block, "text")
+
+    if List.wrap(block["content"]) == [] and not (is_binary(text) and String.trim(text) != ""),
+      do: 1,
+      else: 0
+  end
+
+  defp spacer_paragraphs_in(%{} = block) do
+    Enum.reduce(EpicQuality.nested_keys(), 0, fn key, acc ->
+      case Map.get(block, key) do
+        children when is_list(children) -> acc + count_spacer_paragraphs(children)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp spacer_paragraphs_in(_), do: 0
 
   defp content_of(%Document{content: content}), do: content
   defp content_of(%{content: content}), do: content

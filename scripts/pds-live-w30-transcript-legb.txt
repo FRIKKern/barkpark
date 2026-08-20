@@ -1,0 +1,57 @@
+PDS WAVE 30 — THE EPIC'S FIRST L1, LEG B: five real bp write verbs, every receipt
+checked against the server's own INDEPENDENT read.
+
+REPRODUCE:  scripts/pds-live-bp-write-receipt.sh --run
+PREFLIGHT:  scripts/pds-live-bp-write-receipt.sh --selftest   (no writes)
+
+This is a RECORD of a run, not the proof itself — the proof is the RUNNER. No
+token value appears below; the runner never prints one.
+────────────────────────────────────────────────────────────────────────────────
+
+== 0 PREFLIGHT
+  PASS    bp resolved a WRITING principal of its own: the listing has the right shape AND whoami reports auth_tier=admin
+  CREDENTIAL RUNG THAT PAID: config-file (~/.config/barkpark/config.json, the `bp login` rung), auth_tier=admin
+  (the rung is derived by re-probing without BARKPARK_TOKEN, not by reading env-var names)
+  PASS    independent reader ready: curl -> https://guerrilla.barkpark.cloud/v1/data/query/production/pdsliveproof (a different client on a different code path)
+
+== 1 FENCE
+  PASS    reserved type "pdsliveproof" holds 0/0/0 under published/drafts/raw
+  FENCE: one reserved type, one reserved _id prefix, dataset=production. Nothing this runner writes touches an existing type.
+
+== 2 CREATE
+  PASS    create -> operation=create _id=drafts.pds-live-w30-20260731T201709Z-22478 _rev=278aa38f59a6e8ce76e0932bccd12889; INDEPENDENT /v1/data/query (perspective=drafts) reports the SAME _rev
+
+== 3 PATCH — the receipt's _rev must MOVE, and the server must agree it moved
+  PASS    patch -> operation=update _id=drafts.pds-live-w30-20260731T201709Z-22478 _rev=159143abdd32f9a6a77a3ca7031cf858; INDEPENDENT /v1/data/query (perspective=drafts) reports the SAME _rev
+  PASS    _rev moved 278aa38f59a6e8ce76e0932bccd12889 -> 159143abdd32f9a6a77a3ca7031cf858, and the INDEPENDENT read moved with it
+
+== 4 PUBLISH — the document must appear under the PUBLISHED perspective
+  PASS    publish -> operation=publish _id=pds-live-w30-20260731T201709Z-22478 _rev=cbe97f6f871c38ce7e69dc58f2e131e9; INDEPENDENT /v1/data/query (perspective=published) reports the SAME _rev
+  PASS    published/drafts/raw = 1 1 1 — the published perspective now holds it
+
+== 5 UNPUBLISH — it must fall back to DRAFTS
+  PASS    unpublish -> operation=unpublish _id=drafts.pds-live-w30-20260731T201709Z-22478 _rev=ddcf52e091a3660ad3b0712a84e38735; INDEPENDENT /v1/data/query (perspective=drafts) reports the SAME _rev
+  PASS    published/drafts/raw = 0 1 1 — gone from published, still a draft
+
+== 6 DELETE — and the independent reader must stop seeing it
+  PASS    bp receipt: operation=delete _id=drafts.pds-live-w30-20260731T201709Z-22478
+
+== 7 CLEANUP VERIFIED UNDER ALL THREE PERSPECTIVES — observed, not claimed
+  PASS    published/drafts/raw = 0 0 0, and the raw perspective holds neither pds-live-w30-20260731T201709Z-22478 nor drafts.pds-live-w30-20260731T201709Z-22478
+
+== 8 WHAT THIS RUN PROVED, AND WHAT IT DID NOT
+  PROVED (direction: NO FALSE REFUSAL). Five real bp write verbs ran against a
+  real Barkpark, and every receipt's _id and _rev was corroborated by an
+  INDEPENDENT /v1/data/query read taken with a different client — including that
+  the _rev MOVED on patch, that publish moved the document into the published
+  perspective, and that delete removed it from all three.
+
+  NOT PROVED (direction: THE REFUSAL). Nothing here shows a receipt refusing a
+  server that disagrees with it. A correct Barkpark will not report a _rev its
+  store does not hold, so that arm cannot be staged live at all; it stays proven
+  only by the fakes in the Go tests.
+
+  Anyone quoting this transcript as "the write receipts are proven against
+  production" is over-reading it by exactly one direction.
+
+  PASS    LIVE WRITE PROOF COMPLETE — credential rung: config-file (~/.config/barkpark/config.json, the `bp login` rung), auth_tier=admin

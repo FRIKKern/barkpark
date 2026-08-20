@@ -18,9 +18,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
+  alias Barkpark.Access
   alias Barkpark.Content
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -67,6 +69,153 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> assign(save_status: "Read-only")
   end
 
+  # pds-w42 — THE PRINCIPAL GATE, AT THE CHOKEPOINT.
+  #
+  # The paper editor's composite field blocks (`composite` / `arrayOf` /
+  # `codelist` / `localizedText`) render as a nested `PaperFieldBlock`
+  # LiveComponent, and that component does NOT write: it does
+  # `send(self(), {:paper_op, op})`, which lands in `StudioLive`'s
+  # `handle_info({:paper_op, …})` and arrives HERE. `Caps.attach/1`'s
+  # `:studio_caps_gate` is an `attach_hook(_, :handle_event, _)`, and no
+  # `handle_event` hook — parent socket or component socket — can see a
+  # `handle_info`. So a write-denied principal reached persisted state through
+  # this door while the SAME intent sent as the `paper-op` EVENT was halted by
+  # the socket gate. A capability PROP on the component (the wave-41 SheetGrid
+  # remedy) would be inert here for the same reason: the component is not the
+  # writer.
+  #
+  # ONE RULE, NOT A FORK: the predicate is `Caps.write_capable?/2` — the same
+  # single copy the socket-level gate uses — fed FRESH caps (`Caps.derive/1`
+  # reloads grants, so mid-session expiry denies immediately). The flash is the
+  # gate's own wording so both seams speak one vocabulary.
+  #
+  # SCOPE, HONESTLY: this denies any principal `Caps` denies write — a
+  # read-only api_token or read-only member. It is silent on a principal-LESS
+  # socket, because `write_capable?/2` returns TRUE there BY DESIGN (the
+  # intentionally-open public-demo posture). Nobody may read this as
+  # "anonymous is now denied".
+  @write_denied_notice "You don't have access to do that."
+
+  defp write_denied?(socket) do
+    not Caps.write_capable?(socket.assigns, Caps.derive(socket))
+  end
+
+  defp refuse_write_denied(socket) do
+    socket
+    |> put_flash(:error, @write_denied_notice)
+    |> assign(save_status: "Read-only")
+  end
+
+  # pds-w44 (PDS-D644) — THE GRANT'S OWN NARROWING, TRAVELLED INTO THE DOOR.
+  #
+  # `write_denied?/1` above answers "may this PRINCIPAL write at all". It has no
+  # TARGET, and it cannot get one: `Caps.write_capable?/2` takes an assigns map
+  # plus a caps map, and it is the SheetGrid component prop's predicate too
+  # (components.ex `read_only=`) — widening it would move a second surface and
+  # still have no doc to reason about.
+  #
+  # But a GRANT is scoped down to a single `type`/`doc_id`, and for a
+  # grant-graded socket that per-TARGET containment is the whole authorization.
+  # `LiveScope.attach_write_gate/2` arms it as `attach_hook(_, :handle_event, _)`
+  # (live_scope.ex) — and this door is a `handle_INFO`: `PaperFieldBlock.persist/2`
+  # does `send(self(), {:paper_op, op})`, so no `handle_event` hook, parent or
+  # component, ever observes it. Reproduced by run on origin/main: a signed-in
+  # non-member holding a write grant naming ONE doc, mounting a DIFFERENT doc on
+  # the same desk (read reach from a second, read-only grant), wrote it —
+  # `%{"amount" => "ESCALATED"}` landed in the store. `Caps.derive/1` reports
+  # `write: true` there quite correctly, because `Access.admits_desk?/3`
+  # auto-satisfies the grant's OWN type/doc_id at desk granularity.
+  #
+  # So the door asks the SECOND question the socket gate would have asked: does
+  # some ACTIVE grant admit `:write` at the scope of the doc ACTUALLY BEING
+  # WRITTEN? The predicate is `Access.validate/3` — the same containment ladder
+  # `attach_write_gate/2`'s `write_target_permitted?/4` uses, no parallel copy.
+  #
+  # NOT `Access.admits_desk?/3`: that helper OVERWRITES the requested scope's
+  # `:type`/`:doc_id` with the grant's own before validating (its documented job
+  # — a desk cannot name a type or a doc), which is exactly the mechanism that
+  # lets a doc-scoped grant self-satisfy against any desk. Here the target's
+  # real type + doc_id must survive into the check.
+  #
+  # ARMED ONLY FOR GRANT-DERIVED WRITE. A membership-derived socket carries no
+  # `caller_context` and no `write_gate?`, so `grant_graded?/1` is false and this
+  # arm returns `false` without loading anything — the member path is
+  # byte-identical (no extra query, no new denial). Grants are loaded FRESH per
+  # op, mirroring `Caps.derive/1`'s own unconditional reload, so a grant that
+  # expired mid-session stops admitting immediately.
+  #
+  # FAIL-CLOSED on an unresolvable target (no workspace / project / dataset / no
+  # loaded doc), matching `LiveScope.write_target/3`'s `:error -> halt`.
+  @outside_grant_notice "That action is outside your access grant's scope"
+
+  defp grant_target_denied?(socket, type, doc_id) do
+    grant_graded?(socket.assigns) and not grant_admits_target?(socket, type, doc_id)
+  end
+
+  # The doc's `type` / `doc_id`, read TOTALLY: a pane doc is a `%Content.Document{}`
+  # in the live path but a bare map in the unit fixtures, so `doc.type` would
+  # raise a KeyError on a shape that has always been legal here. A missing key
+  # yields nil, which `write_target_scope/3` treats as an unresolvable target
+  # (fail-closed for a grant-graded socket, inert for every other one).
+  defp doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
+  defp doc_field(_doc, _key), do: nil
+
+  # The two assigns that mean "this socket's write descends from a GRANT":
+  # `LiveScope.assign_grant_scope/2` sets `caller_context`, and
+  # `attach_write_gate/2` sets `write_gate?`.
+  defp grant_graded?(assigns) do
+    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
+  end
+
+  defp grant_admits_target?(socket, type, doc_id) do
+    case write_target_scope(socket, type, doc_id) do
+      %{} = target ->
+        socket
+        |> active_grants()
+        |> Enum.any?(&(Access.validate(&1, :write, target) == :ok))
+
+      nil ->
+        false
+    end
+  end
+
+  # The desk levels come from the MOUNT and the leaf levels from the DOC being
+  # written — the same broad→narrow ladder `LiveScope.write_target/3` feeds
+  # `Access.validate/3`, including its `Content.published_id/1` normalisation so
+  # a draft id is matched against the grant by its published identity.
+  defp write_target_scope(socket, type, doc_id) do
+    ws = socket.assigns[:current_workspace]
+    proj = socket.assigns[:current_project]
+    dataset = socket.assigns[:dataset]
+
+    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
+         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
+         is_binary(doc_id) do
+      %{
+        workspace_id: ws.id,
+        project_id: proj.id,
+        dataset: dataset,
+        type: type,
+        doc_id: Content.published_id(doc_id)
+      }
+    end
+  end
+
+  # Grants bind to a grantee USER; only a `current_user` can hold any. Fresh,
+  # active-filtered load — the same call `Caps.derive/1` makes for expiry truth.
+  defp active_grants(socket) do
+    case socket.assigns[:current_user] do
+      %{id: uid} when is_binary(uid) -> Access.list_active_grants_for_grantee(uid)
+      _ -> []
+    end
+  end
+
+  defp refuse_outside_grant(socket) do
+    socket
+    |> put_flash(:error, @outside_grant_notice)
+    |> assign(save_status: "Read-only")
+  end
+
   @doc false
   def paper_pane_op(socket, op) do
     paper = socket.assigns[:paper_doc]
@@ -74,6 +223,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     cond do
+      # pds-w42 — FIRST, because a denied principal must not learn anything
+      # from the pane's own vetoes. See write_denied?/1.
+      write_denied?(socket) ->
+        refuse_write_denied(socket)
+
+      # pds-w44 — SECOND: capable, but is THIS doc inside the grant? See
+      # grant_target_denied?/3. Silent for membership-derived write.
+      grant_target_denied?(socket, doc_field(paper, :type), slug) ->
+        refuse_outside_grant(socket)
+
       read_only_pane?(socket) ->
         refuse_read_only_pane(socket)
 
@@ -135,6 +294,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     cond do
+      # pds-w42 — same principal gate as paper_pane_op/2, for the same reason
+      # the read-only-pane guard is duplicated here: a batch reaches this seam
+      # WITHOUT passing through paper_pane_op/2. See write_denied?/1.
+      write_denied?(socket) ->
+        refuse_write_denied(socket)
+
+      # pds-w44 — the batch path needs the target narrowing for the same reason
+      # it needs the principal gate: a canvas run reaches this seam WITHOUT
+      # passing through paper_pane_op/2. Same doc, same predicate.
+      grant_target_denied?(socket, doc_field(paper, :type), slug) ->
+        refuse_outside_grant(socket)
+
       # Same v1 read-only guard as paper_pane_op/2 — see its comment. The batch
       # path needs its own: a canvas run reaches here without passing through
       # paper_pane_op/2.
@@ -342,7 +513,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   #
   # Keep aligned with run-convert.js CANVAS_DATAVIZ_TYPES and
   # paper_canvas.ex @canvas_dataviz_types.
-  @dataviz_render_types ~w(stat stats stat-grid heatmap chart)
+  @dataviz_render_types ~w(stat stats stat-grid heatmap chart duel lineage)
 
   @doc false
   # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
@@ -531,12 +702,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
 
-    case Content.apply_document_block_op(doc.doc_id, type, op, dataset, Shared.hook_opts(socket)) do
-      {:ok, _result} ->
-        sync_editor_blocks(socket)
+    cond do
+      # pds-w42 — paper_op/2's OTHER branch. The `{:paper_op, …}` message is
+      # routed by the same handle_info regardless of which branch it lands in,
+      # so the Beta document block editor is reachable from the same
+      # hook-invisible hop. Gate it with the one predicate. See write_denied?/1.
+      write_denied?(socket) ->
+        refuse_write_denied(socket)
 
-      {:error, _reason} ->
-        put_flash(socket, :error, "Edit failed")
+      # pds-w44 — the BETA per-document editor writes `editor_doc`, not
+      # `paper_doc`, so the target the grant must admit is THAT doc. Same arm,
+      # fed the seam's own doc. See grant_target_denied?/3.
+      grant_target_denied?(socket, type, doc_field(doc, :doc_id)) ->
+        refuse_outside_grant(socket)
+
+      true ->
+        case Content.apply_document_block_op(
+               doc.doc_id,
+               type,
+               op,
+               dataset,
+               Shared.hook_opts(socket)
+             ) do
+          {:ok, _result} ->
+            sync_editor_blocks(socket)
+
+          {:error, _reason} ->
+            put_flash(socket, :error, "Edit failed")
+        end
     end
   end
 

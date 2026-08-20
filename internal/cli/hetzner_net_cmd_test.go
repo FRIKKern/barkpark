@@ -76,6 +76,12 @@ func TestHetznerVolumeAttach(t *testing.T) {
 	f.mux.HandleFunc("POST /volumes/9/actions/attach", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"action":{"id":32,"command":"attach_volume","status":"running","progress":0}}`)
 	})
+	// THE POST-READ (PDS wave 32). attach rides an ACTION endpoint that returns
+	// `{action}` and nothing else, so the receipt is now built from this
+	// single-resource GET on the RESOLVED id — never from the --server flag.
+	f.mux.HandleFunc("GET /volumes/9", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"volume":{"id":9,"name":"data-1","size":10,"status":"available","server":42}}`)
+	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":32,"status":"success","progress":100}]}`)
 	})
@@ -97,8 +103,162 @@ func TestHetznerVolumeAttach(t *testing.T) {
 	if f.count("GET", "/actions") == 0 {
 		t.Error("volume attach never polled the running action — fire-and-forget")
 	}
+	if f.count("GET", "/volumes/9") == 0 {
+		t.Error("volume attach never re-read the volume — the receipt is an exit code with extra steps")
+	}
 	if !strings.Contains(stdout, "✓ attach — volume data-1 (id 9)") {
 		t.Errorf("attach output = %q, want the ✓ receipt line", stdout)
+	}
+	if !strings.Contains(stdout, "confirmed_present: true") || !strings.Contains(stdout, "server_id: 42") {
+		t.Errorf("attach output = %q, want the OBSERVED server id and confirmed_present", stdout)
+	}
+}
+
+// TestHetznerVolumeAttachRefusesAnotherServer is the REFUSAL half: the API
+// accepts the attach and the volume comes back on a DIFFERENT server. Before
+// wave 32 that printed `✓ attach — volume data-1` with `server: web-1`, the
+// string the operator typed.
+func TestHetznerVolumeAttachRefusesAnotherServer(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /volumes", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"volumes":[{"id":9,"name":"data-1","size":10,"status":"available"}]}`)
+	})
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"servers":[{"id":42,"name":"web-1","status":"running","public_net":{"ipv4":{"ip":"192.0.2.10"}}}]}`)
+	})
+	f.mux.HandleFunc("POST /volumes/9/actions/attach", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":32,"command":"attach_volume","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /volumes/9", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"volume":{"id":9,"name":"data-1","size":10,"status":"available","server":99}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":32,"status":"success","progress":100}]}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "volume", "attach", "data-1", "--server", "web-1")
+	if code == exitOK {
+		t.Fatalf("attach exited 0 with the volume on server 99; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, "server id 99") || !strings.Contains(stderr, "post-condition is UNMET") {
+		t.Errorf("stderr = %q, want the named field, what the server said, and the refusal", stderr)
+	}
+}
+
+// TestHetznerVolumeAttachDetachBothDirections is the pair proof. The SAME
+// fixture state — a volume reporting server 42 — must make attach agree and
+// detach REFUSE, and the inverse state must flip both. A payment that wired the
+// present-observer onto both arms passes every arm of the receipt census (no
+// census arm reads a direction branch) and fails only here.
+func TestHetznerVolumeAttachDetachBothDirections(t *testing.T) {
+	volume := func(t *testing.T, body string) *fakeHzAPI {
+		t.Helper()
+		f := newFakeHzAPI(t)
+		f.mux.HandleFunc("GET /volumes", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, `{"volumes":[{"id":9,"name":"data-1","size":10,"status":"available"}]}`)
+		})
+		f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, `{"servers":[{"id":42,"name":"web-1","status":"running","public_net":{"ipv4":{"ip":"192.0.2.10"}}}]}`)
+		})
+		f.mux.HandleFunc("POST /volumes/9/actions/attach", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 201, `{"action":{"id":32,"command":"attach_volume","status":"running","progress":0}}`)
+		})
+		f.mux.HandleFunc("POST /volumes/9/actions/detach", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 201, `{"action":{"id":32,"command":"detach_volume","status":"running","progress":0}}`)
+		})
+		f.mux.HandleFunc("GET /volumes/9", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, body)
+		})
+		f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, `{"actions":[{"id":32,"status":"success","progress":100}]}`)
+		})
+		return f
+	}
+	const attached = `{"volume":{"id":9,"name":"data-1","size":10,"status":"available","server":42}}`
+	const free = `{"volume":{"id":9,"name":"data-1","size":10,"status":"available"}}`
+
+	for _, tc := range []struct {
+		name    string
+		body    string
+		args    []string
+		wantOK  bool
+		wantErr string
+	}{
+		{"attach agrees when the volume reports the server", attached, []string{"attach", "data-1", "--server", "web-1"}, true, ""},
+		{"detach REFUSES the same state", attached, []string{"detach", "data-1"}, false, "STILL attached to server id 42"},
+		{"detach agrees when the volume reports none", free, []string{"detach", "data-1"}, true, ""},
+		{"attach REFUSES the same state", free, []string{"attach", "data-1", "--server", "web-1"}, false, "no server at all"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			volume(t, tc.body)
+			_, stderr, code := runHzCLI(t, "table", append([]string{"hetzner", "volume"}, tc.args...)...)
+			if tc.wantOK && code != exitOK {
+				t.Fatalf("exited %d, want 0; stderr: %s", code, stderr)
+			}
+			if !tc.wantOK {
+				if code == exitOK {
+					t.Fatalf("exited 0 on a state the verb did not produce")
+				}
+				if !strings.Contains(stderr, tc.wantErr) {
+					t.Errorf("stderr = %q, want %q", stderr, tc.wantErr)
+				}
+			}
+		})
+	}
+}
+
+// TestHetznerVolumeResizeRefusesShortRead pins the resize post-condition: the
+// API accepts the resize and the volume comes back at its OLD size.
+func TestHetznerVolumeResizeRefusesShortRead(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /volumes", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"volumes":[{"id":9,"name":"data-1","size":10,"status":"available"}]}`)
+	})
+	f.mux.HandleFunc("POST /volumes/9/actions/resize", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":36,"command":"resize_volume","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /volumes/9", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"volume":{"id":9,"name":"data-1","size":10,"status":"available"}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":36,"status":"success","progress":100}]}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "volume", "resize", "data-1", "--size", "20")
+	if code == exitOK {
+		t.Fatalf("resize exited 0 with the volume still 10GB; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, `field "size_gb"`) {
+		t.Errorf("stderr = %q, want the named post-condition field", stderr)
+	}
+	if f.count("GET", "/volumes/9") == 0 {
+		t.Error("resize never re-read the volume")
+	}
+}
+
+// TestHetznerVolumeChangeProtectionObserves pins that the receipt reports the
+// protection the VOLUME carries, not the flag that asked for it.
+func TestHetznerVolumeChangeProtectionObserves(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /volumes", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"volumes":[{"id":9,"name":"data-1","size":10,"status":"available"}]}`)
+	})
+	f.mux.HandleFunc("POST /volumes/9/actions/change_protection", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":37,"command":"change_protection","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /volumes/9", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"volume":{"id":9,"name":"data-1","size":10,"status":"available","protection":{"delete":false}}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":37,"status":"success","progress":100}]}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "volume", "change-protection", "data-1", "--enable")
+	if code == exitOK {
+		t.Fatalf("change-protection exited 0 while the volume reports delete=false; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, `field "delete_protection"`) {
+		t.Errorf("stderr = %q, want the named post-condition field", stderr)
 	}
 }
 
@@ -157,6 +317,12 @@ func TestHetznerNetworkAddSubnet(t *testing.T) {
 	f.mux.HandleFunc("POST /networks/5/actions/add_subnet", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"action":{"id":33,"command":"add_subnet","status":"running","progress":0}}`)
 	})
+	// THE POST-READ (PDS wave 32) on the RESOLVED id.
+	f.mux.HandleFunc("GET /networks/5", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"network":{"id":5,"name":"backend","ip_range":"10.0.0.0/16",
+			"subnets":[{"type":"cloud","ip_range":"10.0.1.0/24","network_zone":"eu-central"}],
+			"routes":[],"servers":[]}}`)
+	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":33,"status":"success","progress":100}]}`)
 	})
@@ -177,8 +343,192 @@ func TestHetznerNetworkAddSubnet(t *testing.T) {
 	if f.count("GET", "/actions") == 0 {
 		t.Error("add-subnet never polled the running action — fire-and-forget")
 	}
+	if f.count("GET", "/networks/5") == 0 {
+		t.Error("add-subnet never re-read the network — the receipt is an exit code with extra steps")
+	}
 	if !strings.Contains(stdout, "✓ add-subnet — network backend (id 5)") {
 		t.Errorf("add-subnet output = %q, want the ✓ receipt line", stdout)
+	}
+	if !strings.Contains(stdout, "subnet_observed: true") {
+		t.Errorf("add-subnet output = %q, want the OBSERVED subnet", stdout)
+	}
+}
+
+// hzNetworkPairFake stands up the network fake both membership pairs share: the
+// name lookup, both route actions, both subnet actions, and ONE post-read whose
+// body the caller pins.
+func hzNetworkPairFake(t *testing.T, body string) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /networks", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"networks":[{"id":5,"name":"backend","ip_range":"10.0.0.0/16","subnets":[],"routes":[],"servers":[]}]}`)
+	})
+	for _, action := range []string{"add_route", "delete_route", "add_subnet", "delete_subnet"} {
+		f.mux.HandleFunc("POST /networks/5/actions/"+action, func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 201, `{"action":{"id":60,"command":"network","status":"running","progress":0}}`)
+		})
+	}
+	f.mux.HandleFunc("GET /networks/5", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, body)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":60,"status":"success","progress":100}]}`)
+	})
+	return f
+}
+
+// TestHetznerNetworkRouteBothDirections is THE instrument for the shared
+// dispatcher. runHetznerNetworkRoute emits ONE receipt site for TWO (kind,
+// action) keys, and NO arm of the receipt census reads the direction branch: a
+// payment that confirmed "route present" on both add-route AND delete-route is
+// fully green there, exact pins included. Only a fake driven in both directions
+// against the same state can catch it, so both arms are pinned here.
+func TestHetznerNetworkRouteBothDirections(t *testing.T) {
+	const withRoute = `{"network":{"id":5,"name":"backend","ip_range":"10.0.0.0/16","subnets":[],
+		"routes":[{"destination":"10.100.0.0/16","gateway":"10.0.0.1"}],"servers":[]}}`
+	const withoutRoute = `{"network":{"id":5,"name":"backend","ip_range":"10.0.0.0/16","subnets":[],"routes":[],"servers":[]}}`
+	route := []string{"--destination", "10.100.0.0/16", "--gateway", "10.0.0.1"}
+
+	for _, tc := range []struct {
+		name    string
+		body    string
+		verb    string
+		wantOK  bool
+		wantErr string
+	}{
+		{"add-route agrees when the route is there", withRoute, "add-route", true, ""},
+		{"delete-route REFUSES the same state", withRoute, "delete-route", false, "is STILL present"},
+		{"delete-route agrees when the route is gone", withoutRoute, "delete-route", true, ""},
+		{"add-route REFUSES the same state", withoutRoute, "add-route", false, `field "routes"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := hzNetworkPairFake(t, tc.body)
+			stdout, stderr, code := runHzCLI(t, "table",
+				append([]string{"hetzner", "network", tc.verb, "backend"}, route...)...)
+			if f.count("GET", "/networks/5") == 0 {
+				t.Fatal("the dispatcher never re-read the network")
+			}
+			if tc.wantOK {
+				if code != exitOK {
+					t.Fatalf("%s exited %d, want 0; stderr: %s", tc.verb, code, stderr)
+				}
+				if !strings.Contains(stdout, "confirmed_present: true") {
+					t.Errorf("%s output = %q, want confirmed_present", tc.verb, stdout)
+				}
+				return
+			}
+			if code == exitOK {
+				t.Fatalf("%s exited 0 on a state it did not produce; stdout: %s", tc.verb, stdout)
+			}
+			if !strings.Contains(stderr, tc.wantErr) {
+				t.Errorf("stderr = %q, want %q", stderr, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestHetznerNetworkSubnetBothDirections is the same proof for the OTHER
+// network membership pair. These two verbs are separate call sites, so the
+// census can see them apart — but nothing in the census says which observer
+// each one wired up, and a swap reads green there too.
+func TestHetznerNetworkSubnetBothDirections(t *testing.T) {
+	const withSubnet = `{"network":{"id":5,"name":"backend","ip_range":"10.0.0.0/16",
+		"subnets":[{"type":"cloud","ip_range":"10.0.1.0/24","network_zone":"eu-central"}],"routes":[],"servers":[]}}`
+	const withoutSubnet = `{"network":{"id":5,"name":"backend","ip_range":"10.0.0.0/16","subnets":[],"routes":[],"servers":[]}}`
+
+	for _, tc := range []struct {
+		name    string
+		body    string
+		args    []string
+		wantOK  bool
+		wantErr string
+	}{
+		{"add-subnet agrees", withSubnet,
+			[]string{"add-subnet", "backend", "--type", "cloud", "--network-zone", "eu-central", "--ip-range", "10.0.1.0/24"}, true, ""},
+		{"delete-subnet REFUSES the same state", withSubnet,
+			[]string{"delete-subnet", "backend", "--ip-range", "10.0.1.0/24"}, false, "is STILL present"},
+		{"delete-subnet agrees when it is gone", withoutSubnet,
+			[]string{"delete-subnet", "backend", "--ip-range", "10.0.1.0/24"}, true, ""},
+		{"add-subnet REFUSES the same state", withoutSubnet,
+			[]string{"add-subnet", "backend", "--type", "cloud", "--network-zone", "eu-central", "--ip-range", "10.0.1.0/24"}, false, `field "subnets"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hzNetworkPairFake(t, tc.body)
+			_, stderr, code := runHzCLI(t, "table", append([]string{"hetzner", "network"}, tc.args...)...)
+			if tc.wantOK {
+				if code != exitOK {
+					t.Fatalf("exited %d, want 0; stderr: %s", code, stderr)
+				}
+				return
+			}
+			if code == exitOK {
+				t.Fatal("exited 0 on a state the verb did not produce")
+			}
+			if !strings.Contains(stderr, tc.wantErr) {
+				t.Errorf("stderr = %q, want %q", stderr, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestHetznerNetworkCreateAdvisoryUsesTheNormalisedRange pins the one advisory
+// trap wave 32 named: hzCIDR is bare net.ParseCIDR and MASKS HOST BITS, so
+// enrolling the RAW --ip-range flag would fire `you asked for 10.0.0.5/16, the
+// server reports 10.0.0.0/16` on a create that did EXACTLY what was asked. The
+// asked side is the POST-normalisation token, so a non-canonical CIDR is silent.
+func TestHetznerNetworkCreateAdvisoryUsesTheNormalisedRange(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /networks", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"network":{"id":5,"name":"backend","ip_range":"10.0.0.0/16","subnets":[],"routes":[],"servers":[]}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "network", "create", "--name", "backend", "--ip-range", "10.0.0.5/16")
+	if code != exitOK {
+		t.Fatalf("network create exited %d, stderr: %s", code, stderr)
+	}
+	if strings.Contains(stdout, "divergence") {
+		t.Errorf("a CORRECT create fired an advisory: %q — the asked side must be the post-hzCIDR token", stdout)
+	}
+	if !strings.Contains(stdout, "ip_range: 10.0.0.0/16") {
+		t.Errorf("output = %q, want the OBSERVED ip_range", stdout)
+	}
+}
+
+// TestHetznerNetworkCreateAdvisoryFiresOnRealDivergence is the other half: the
+// advisory must still be able to fire, or the pair above is decorative. The API
+// answers with a DIFFERENT range than the (normalised) one asked for.
+func TestHetznerNetworkCreateAdvisoryFiresOnRealDivergence(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /networks", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"network":{"id":5,"name":"backend","ip_range":"10.9.0.0/16","subnets":[],"routes":[],"servers":[]}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "network", "create", "--name", "backend", "--ip-range", "10.0.0.0/16")
+	if code != exitOK {
+		t.Fatalf("an advisory must never change the exit code; exited %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "you asked for 10.0.0.0/16, the server reports 10.9.0.0/16") {
+		t.Errorf("output = %q, want the divergence line", stdout)
+	}
+}
+
+// TestHetznerNetworkCreateRefusesAnIDLessResponse pins the EMPTY-ID COLLAPSE.
+// hcloud-go's generated NetworkFromSchema takes a schema VALUE and returns a
+// freshly-allocated pointer, so the naive `obj == nil` refusal is UNREACHABLE:
+// without the collapse this exits 0 with confirmed_present:true and empty
+// observed fields, which is worse than the argv echo it replaced.
+func TestHetznerNetworkCreateRefusesAnIDLessResponse(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /networks", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "network", "create", "--name", "backend", "--ip-range", "10.0.0.0/16")
+	if code == exitOK {
+		t.Fatalf("a create response carrying no network exited 0; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, "NOT READABLE") {
+		t.Errorf("stderr = %q, want the not-readable refusal", stderr)
 	}
 }
 
@@ -198,6 +548,11 @@ func TestHetznerFirewallApplyToServer(t *testing.T) {
 	})
 	f.mux.HandleFunc("POST /firewalls/3/actions/apply_to_resources", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"actions":[{"id":34,"command":"apply_firewall","status":"running","progress":0}]}`)
+	})
+	// THE POST-READ (PDS wave 32) on the RESOLVED id.
+	f.mux.HandleFunc("GET /firewalls/3", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"firewall":{"id":3,"name":"web-fw","rules":[],
+			"applied_to":[{"type":"server","server":{"id":42}}]}}`)
 	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":34,"status":"success","progress":100}]}`)
@@ -223,8 +578,120 @@ func TestHetznerFirewallApplyToServer(t *testing.T) {
 	if f.count("GET", "/actions") == 0 {
 		t.Error("apply-to-resource never polled the running action — fire-and-forget")
 	}
+	if f.count("GET", "/firewalls/3") == 0 {
+		t.Error("apply-to-resource never re-read the firewall")
+	}
 	if !strings.Contains(stdout, "✓ apply-to-resource — firewall web-fw (id 3)") {
 		t.Errorf("apply output = %q, want the ✓ receipt line", stdout)
+	}
+	if !strings.Contains(stdout, "attachment_observed: true") {
+		t.Errorf("apply output = %q, want the OBSERVED attachment", stdout)
+	}
+}
+
+// hzFirewallPairFake is the shared executor's fake: both directions, one
+// post-read body the caller pins.
+func hzFirewallPairFake(t *testing.T, body string) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /firewalls", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"firewalls":[{"id":3,"name":"web-fw","rules":[],"applied_to":[]}]}`)
+	})
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"servers":[{"id":42,"name":"web-1","status":"running","public_net":{"ipv4":{"ip":"192.0.2.10"}}}]}`)
+	})
+	for _, action := range []string{"apply_to_resources", "remove_from_resources"} {
+		f.mux.HandleFunc("POST /firewalls/3/actions/"+action, func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 201, `{"actions":[{"id":61,"command":"firewall","status":"running","progress":0}]}`)
+		})
+	}
+	f.mux.HandleFunc("GET /firewalls/3", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, body)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":61,"status":"success","progress":100}]}`)
+	})
+	return f
+}
+
+// TestHetznerFirewallResourceBothDirections is the second shared dispatcher's
+// pair proof — the same blind spot as the route pair, on the other executor.
+func TestHetznerFirewallResourceBothDirections(t *testing.T) {
+	const applied = `{"firewall":{"id":3,"name":"web-fw","rules":[],"applied_to":[{"type":"server","server":{"id":42}}]}}`
+	const clean = `{"firewall":{"id":3,"name":"web-fw","rules":[],"applied_to":[]}}`
+
+	for _, tc := range []struct {
+		name    string
+		body    string
+		verb    string
+		wantOK  bool
+		wantErr string
+	}{
+		{"apply agrees when the server is attached", applied, "apply-to-resource", true, ""},
+		{"remove REFUSES the same state", applied, "remove-from-resource", false, "is STILL attached"},
+		{"remove agrees when it is detached", clean, "remove-from-resource", true, ""},
+		{"apply REFUSES the same state", clean, "apply-to-resource", false, `field "applied_to"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hzFirewallPairFake(t, tc.body)
+			_, stderr, code := runHzCLI(t, "table", "hetzner", "firewall", tc.verb, "web-fw", "--server", "web-1")
+			if tc.wantOK {
+				if code != exitOK {
+					t.Fatalf("%s exited %d, want 0; stderr: %s", tc.verb, code, stderr)
+				}
+				return
+			}
+			if code == exitOK {
+				t.Fatalf("%s exited 0 on a state it did not produce", tc.verb)
+			}
+			if !strings.Contains(stderr, tc.wantErr) {
+				t.Errorf("stderr = %q, want %q", stderr, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestHetznerFirewallResourceUnionIsSwitchedOnType pins PDS-D399 trap (b) on
+// this surface: `applied_to` is a oneOf union hcloud-go flattens into ONE
+// struct, so reading .Server on a LABEL-SELECTOR attachment yields a zero value
+// rather than an error. A predicate that skipped the Type switch would confirm
+// a --server apply against a label-selector attachment (server id 0 == 0).
+func TestHetznerFirewallResourceUnionIsSwitchedOnType(t *testing.T) {
+	hzFirewallPairFake(t, `{"firewall":{"id":3,"name":"web-fw","rules":[],
+		"applied_to":[{"type":"label_selector","label_selector":{"selector":"env=prod"}}]}}`)
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "firewall", "apply-to-resource", "web-fw", "--server", "web-1")
+	if code == exitOK {
+		t.Fatal("a label-selector attachment confirmed a --server apply — the union switch is missing")
+	}
+	if !strings.Contains(stderr, "label_selector") {
+		t.Errorf("stderr = %q, want the refusal to report what IS attached", stderr)
+	}
+}
+
+// TestHetznerFirewallCreateAdvisoryCountsRules pins the create pair: the
+// receipt reports an OBSERVED rule_count (the old `rules` key was a pure argv
+// echo of len(rules)), the COUNT grade is stated, and a divergence is ADVISORY —
+// the API accepted the create, so the exit code must not move.
+func TestHetznerFirewallCreateAdvisoryCountsRules(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /firewalls", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"firewall":{"id":3,"name":"web-fw","rules":[],"applied_to":[]},"actions":[]}`)
+	})
+	rulesPath := filepath.Join(t.TempDir(), "rules.json")
+	if err := writeTempFile(rulesPath, `[{"direction":"in","protocol":"tcp","port":"80","source_ips":["0.0.0.0/0"]}]`); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "firewall", "create", "--name", "web-fw", "--rules-file", rulesPath)
+	if code != exitOK {
+		t.Fatalf("an advisory must never change the exit code; exited %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "rule_count — you asked for 1, the server reports 0") {
+		t.Errorf("output = %q, want the rule_count divergence", stdout)
+	}
+	if !strings.Contains(stdout, "COUNT — equal counts do not mean equal rules") {
+		t.Errorf("output = %q, want the COUNT grade stated in the receipt", stdout)
 	}
 }
 
@@ -237,6 +704,15 @@ func TestHetznerFirewallSetRules(t *testing.T) {
 	})
 	f.mux.HandleFunc("POST /firewalls/3/actions/set_rules", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"actions":[{"id":35,"command":"set_firewall_rules","status":"running","progress":0}]}`)
+	})
+	// THE POST-READ, EXPLICITLY REGISTERED (PDS-D401). Omitting it does NOT
+	// prove the confirming read: ServeMux's default 404 is text/plain, which
+	// hcloud-go cannot decode as an API error, so it becomes a TRANSPORT error
+	// and lands in the "not confirmed" arm at exit 0 — green for the wrong
+	// reason.
+	f.mux.HandleFunc("GET /firewalls/3", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"firewall":{"id":3,"name":"web-fw","applied_to":[],
+			"rules":[{"direction":"in","protocol":"tcp","port":"80","source_ips":["0.0.0.0/0","::/0"]}]}}`)
 	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":35,"status":"success","progress":100}]}`)
@@ -269,6 +745,42 @@ func TestHetznerFirewallSetRules(t *testing.T) {
 	}
 	if f.count("GET", "/actions") == 0 {
 		t.Error("set-rules never polled the running action — fire-and-forget")
+	}
+	if f.count("GET", "/firewalls/3") == 0 {
+		t.Error("set-rules never re-read the firewall")
+	}
+}
+
+// TestHetznerFirewallSetRulesRefusesACountMismatch is set-rules' refusal half.
+// set-rules REPLACES the whole set, so a firewall that reports a different
+// number of rules afterwards did not take what was sent. The grade is still
+// COUNT — equal counts do not mean equal rules — and the receipt says so.
+func TestHetznerFirewallSetRulesRefusesACountMismatch(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /firewalls", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"firewalls":[{"id":3,"name":"web-fw","rules":[],"applied_to":[]}]}`)
+	})
+	f.mux.HandleFunc("POST /firewalls/3/actions/set_rules", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"actions":[{"id":35,"command":"set_firewall_rules","status":"running","progress":0}]}`)
+	})
+	f.mux.HandleFunc("GET /firewalls/3", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"firewall":{"id":3,"name":"web-fw","rules":[],"applied_to":[]}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":35,"status":"success","progress":100}]}`)
+	})
+
+	rulesPath := filepath.Join(t.TempDir(), "rules.json")
+	if err := writeTempFile(rulesPath, `[{"direction":"in","protocol":"tcp","port":"80","source_ips":["0.0.0.0/0"]}]`); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "firewall", "set-rules", "web-fw", "--rules-file", rulesPath)
+	if code == exitOK {
+		t.Fatalf("set-rules exited 0 with the firewall reporting no rules; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, `field "rule_count"`) {
+		t.Errorf("stderr = %q, want the named post-condition field", stderr)
 	}
 }
 
@@ -329,6 +841,14 @@ func TestHetznerLBAddTarget(t *testing.T) {
 	})
 	f.mux.HandleFunc("POST /load_balancers/7/actions/add_target", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"action":{"id":37,"command":"add_target","status":"running","progress":0}}`)
+	})
+	// THE POST-READ (pds-w29-pay-lb): add-target now confirms on the RESOLVED
+	// id, so the single-resource GET must exist or the verb lands in the
+	// honest "not confirmed" arm. Note the LIST above still says `targets: []`
+	// — that stale collection body is exactly the trap a by-name post-read
+	// would fall into, and hetzner_lb_cmd_test.go pins it.
+	f.mux.HandleFunc("GET /load_balancers/7", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"load_balancer":{"id":7,"name":"web-lb","public_net":{"enabled":true,"ipv4":{},"ipv6":{}},"algorithm":{"type":"round_robin"},"services":[],"targets":[{"type":"server","server":{"id":42},"use_private_ip":true}]}}`)
 	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":37,"status":"success","progress":100}]}`)
@@ -391,6 +911,11 @@ func TestHetznerFloatingIPAssign(t *testing.T) {
 	})
 	f.mux.HandleFunc("POST /floating_ips/11/actions/assign", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"action":{"id":38,"command":"assign_floating_ip","status":"running","progress":0}}`)
+	})
+	// THE POST-READ (pds-w29-pay-lb): assign now confirms the assignment on the
+	// resolved floating-ip id. The nested server ref carries an ID and no name.
+	f.mux.HandleFunc("GET /floating_ips/11", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"floating_ip":{"id":11,"name":"web-vip","ip":"192.0.2.99","type":"ipv4","dns_ptr":[],"server":42}}`)
 	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":38,"status":"success","progress":100}]}`)
@@ -724,6 +1249,11 @@ func TestHetznerDNSZoneUpdateTTL(t *testing.T) {
 	f.mux.HandleFunc("POST /zones/1/actions/change_ttl", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"action":{"id":50,"command":"change_zone_ttl","status":"running","progress":0}}`)
 	})
+	// THE POST-READ (PDS wave 32): change_ttl returns `{action}` and nothing
+	// else, so the settled TTL comes from this GET on the RESOLVED id.
+	f.mux.HandleFunc("GET /zones/1", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"zone":{"id":1,"name":"example.com","mode":"primary","ttl":600,"status":"ok","record_count":0}}`)
+	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":50,"status":"success","progress":100}]}`)
 	})
@@ -749,6 +1279,149 @@ func TestHetznerDNSZoneUpdateTTL(t *testing.T) {
 	}
 	if payload["ok"] != true || payload["action"] != "update" || payload["ttl"] != float64(600) {
 		t.Errorf("receipt = %v, want ok/update/ttl=600", payload)
+	}
+	if payload["confirmed_present"] != true {
+		t.Errorf("receipt = %v, want confirmed_present — the ttl must come from the re-read", payload)
+	}
+	if f.count("GET", "/zones/1") == 0 {
+		t.Error("dns zone update never re-read the zone")
+	}
+}
+
+// TestHetznerDNSZoneUpdateRefusesAStaleTTL is the refusal half: the API accepts
+// change_ttl and the zone comes back with the OLD value. Before wave 32 this
+// printed `ttl: 600` because 600 is what the operator typed.
+func TestHetznerDNSZoneUpdateRefusesAStaleTTL(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /zones/example.com", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"zone":{"id":1,"name":"example.com","mode":"primary","ttl":3600,"status":"ok","record_count":0}}`)
+	})
+	f.mux.HandleFunc("POST /zones/1/actions/change_ttl", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":50,"command":"change_zone_ttl","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /zones/1", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"zone":{"id":1,"name":"example.com","mode":"primary","ttl":3600,"status":"ok","record_count":0}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":50,"status":"success","progress":100}]}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "dns", "zone", "update", "example.com", "--ttl", "600")
+	if code == exitOK {
+		t.Fatalf("zone update exited 0 with the zone still at 3600; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, `field "ttl"`) {
+		t.Errorf("stderr = %q, want the named post-condition field", stderr)
+	}
+}
+
+// TestHetznerDNSZoneCreateAdvisoryUsesTheRawMode pins zone/create's advisory
+// pair: the RAW --mode token, because the resolved mode would be degenerately
+// always-equal and hzResDivergence skips an EMPTY asked (so an unset --mode is
+// simply not compared).
+func TestHetznerDNSZoneCreateAdvisoryUsesTheRawMode(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /zones", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{
+			"zone":{"id":1,"name":"example.com","mode":"secondary","ttl":3600,"status":"ok","record_count":0},
+			"action":{"id":51,"command":"create_zone","status":"running","progress":0}
+		}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":51,"status":"success","progress":100}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "dns", "zone", "create", "--name", "example.com", "--mode", "primary")
+	if code != exitOK {
+		t.Fatalf("an advisory must never change the exit code; exited %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "mode — you asked for primary, the server reports secondary") {
+		t.Errorf("output = %q, want the mode divergence", stdout)
+	}
+	if !strings.Contains(stdout, "mode: secondary") {
+		t.Errorf("output = %q, want the OBSERVED mode, not the flag", stdout)
+	}
+}
+
+// TestHetznerDNSRecordCreateRefusesAnRRSetLessResponse pins the EMPTY-ID
+// COLLAPSE on record/create — the measured trap. hcloud-go's generated
+// ZoneRRSetFromSchema takes a schema VALUE and returns a freshly-allocated
+// pointer assigned unconditionally, so `result.RRSet == nil` is UNREACHABLE:
+// without the collapse, a 201 whose body OMITS the rrset key exits 0 with
+// confirmed_present:true and EMPTY observed fields.
+func TestHetznerDNSRecordCreateRefusesAnRRSetLessResponse(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /zones/example.com/rrsets", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":41,"command":"create_rrset","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":41,"status":"success","progress":100}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "dns", "record", "create",
+		"--zone", "example.com", "--type", "A", "--name", "www", "--value", "192.0.2.10")
+	if code == exitOK {
+		t.Fatalf("a create response carrying no rrset exited 0; stdout: %s", stdout)
+	}
+	if !strings.Contains(stderr, "NOT READABLE") {
+		t.Errorf("stderr = %q, want the not-readable refusal", stderr)
+	}
+}
+
+// TestHetznerDNSRecordUpdateObservesTheRRSet pins that `record` IS payable
+// (GetRRSetByNameAndType exists and 404-swallows into the hzResGoneRead shape),
+// independently of the harvest slice's refusal to HARVEST the kind: the receipt
+// reports the values the rrset NOW holds, order-insensitively.
+func TestHetznerDNSRecordUpdateObservesTheRRSet(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /zones/example.com/rrsets/www/A/actions/set_records", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":43,"command":"set_rrset_records","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /zones/example.com/rrsets/www/A", func(w http.ResponseWriter, r *http.Request) {
+		// The API is free to REORDER an rrset's records, so the comparison is
+		// order-insensitive: this body returns them back-to-front on purpose.
+		hzWriteJSON(w, 200, `{"rrset":{"id":"www/A","name":"www","type":"A","ttl":300,
+			"records":[{"value":"192.0.2.11"},{"value":"192.0.2.10"}]}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":43,"status":"success","progress":100}]}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "dns", "record", "update",
+		"--zone", "example.com", "--type", "A", "--name", "www", "--value", "192.0.2.10", "--value", "192.0.2.11")
+	if code != exitOK {
+		t.Fatalf("record update exited %d, stderr: %s", code, stderr)
+	}
+	if f.count("GET", "/zones/example.com/rrsets/www/A") == 0 {
+		t.Fatalf("record update never re-read the rrset; requests: %v", f.requests())
+	}
+	if !strings.Contains(stdout, "confirmed_present: true") {
+		t.Errorf("output = %q, want confirmed_present", stdout)
+	}
+}
+
+// TestHetznerDNSRecordUpdateRefusesAStaleRRSet is the refusal half: the API
+// accepts set_records and the rrset still reports the OLD value.
+func TestHetznerDNSRecordUpdateRefusesAStaleRRSet(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /zones/example.com/rrsets/www/A/actions/set_records", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":43,"command":"set_rrset_records","status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /zones/example.com/rrsets/www/A", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"rrset":{"id":"www/A","name":"www","type":"A","ttl":300,"records":[{"value":"198.51.100.7"}]}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":43,"status":"success","progress":100}]}`)
+	})
+	_ = f
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "dns", "record", "update",
+		"--zone", "example.com", "--type", "A", "--name", "www", "--value", "192.0.2.10")
+	if code == exitOK {
+		t.Fatalf("record update exited 0 with the rrset still on the old value; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, `field "values"`) {
+		t.Errorf("stderr = %q, want the named post-condition field", stderr)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -47,6 +48,8 @@ func run(args []string) int {
 		healthURL  = fs.String("health-url", "", "this server's public origin for the health gate (empty skips it)")
 		healthTok  = fs.String("health-token", "", "token for the health gate's DB-read probe (optional)")
 		printCmds  = fs.Bool("print-allowed-commands", false, "print the approved command allowlist and exit")
+		sitesDir   = fs.String("sites-dir", "", "sites root measured per-slug (empty resolves BARKPARK_SITES_DIR, then "+defaultSitesDir+")")
+		spaceEvery = fs.Duration("space-interval", agent.DefaultSpaceInterval, "cadence of the space report (its own, slower than --interval)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -69,17 +72,55 @@ func run(args []string) int {
 		return 1
 	}
 
+	// The sites root is RESOLVED here, once, and travels in the payload — never
+	// re-derived downstream. BARKPARK_SITES_DIR is set on no box in the fleet
+	// (the agent's own environ carries only BARKPARK_CONTROL_URL and
+	// BARKPARK_HEALTH_URL), so an env-read silently falls back on every box;
+	// reporting the path that was actually read makes a wrong root visible
+	// rather than silent (charter D59).
+	resolvedSitesDir := resolveSitesDir(*sitesDir, os.Getenv("BARKPARK_SITES_DIR"))
+
 	a := &agent.Agent{
 		ControlURL: *controlURL,
 		Token:      token,
 		Interval:   *interval,
 		Runner:     agent.ExecRunner{},
+		// Space rides its OWN cadence and its OWN route — not the 60s beat
+		// (charter D58). Every probe is bounded and direct-argv (D59); each
+		// failure keeps its unmeasured sentinel rather than landing a partial
+		// number.
+		SpaceInterval: *spaceEvery,
+		SpaceProbes: agent.SpaceConfig{
+			RootProbe:    agent.NewRootSpaceProbe(),
+			JournalProbe: agent.NewJournalSpaceProbe(),
+			// The database measures itself — the SAME probes the beat uses,
+			// never a du over PGDATA.
+			PGSizeProbe:         agent.NewPGSizeProbe(*checkout),
+			PGTopRelationsProbe: agent.NewPGTopRelationsProbe(*checkout),
+			SitesDir:            resolvedSitesDir,
+			SitesProbe:          agent.NewSitesSpaceProbe(resolvedSitesDir),
+		},
 		ReportProbes: agent.ReportConfig{
 			Checkout:  *checkout,
 			DiskProbe: dfRootProbe,
 			CPUProbe:  cpuProcProbe,
 			MemProbe:  memProcProbe,
 			LoadProbe: loadProcProbe,
+			// Swap is the vital mem_used_percent hides: MemAvailable looks
+			// comfortable precisely BECAUSE the BEAM has been paged out.
+			SwapProbe: swapProcProbe,
+			// The BEAM's own footprint — the biggest single consumer, and the
+			// process the kernel keeps OOM-killing.
+			BeamProbe: beamSmapsProbe,
+			// Postgres size + its named consumers. These shell out to psql
+			// using the checkout's own DATABASE_URL (agent runs as root, where
+			// a bare psql has no role), each under its own short deadline. On a
+			// box without psql or without a readable .env they ERROR, so the
+			// fields keep their -1 sentinel — exactly what those boxes report
+			// today. db_size has read "unmetered" on every box until now
+			// because this declared probe was never wired.
+			PGSizeProbe:         agent.NewPGSizeProbe(*checkout),
+			PGTopRelationsProbe: agent.NewPGTopRelationsProbe(*checkout),
 			// Request stats ride the SAME base+token seam as the health gate: the
 			// probe GETs the instance RequestStats route at *healthURL. Empty
 			// health-url → nil probe → req/s + p95 report their -1 sentinels.
@@ -97,6 +138,13 @@ func run(args []string) int {
 		if err := a.RunOnce(ctx); err != nil {
 			fmt.Fprintf(os.Stderr, "barkpark-agent: cycle failed: %v\n", err)
 			return 1
+		}
+		// The space cycle runs too, but does NOT decide the exit code: a
+		// control plane that predates the space route answers 404, and a smoke
+		// test of the beat must not fail because of that skew. The error is
+		// printed, so the skew is visible instead of silent.
+		if err := a.ReportSpaceOnce(ctx); err != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-agent: space cycle failed: %v\n", err)
 		}
 		return 0
 	}
@@ -124,6 +172,26 @@ func agentHealthGateOpts(base, token string) setup.HealthGate {
 		RequireDatabaseStatusOperational: true,
 		StubsOptional:                    true,
 	}
+}
+
+// defaultSitesDir is where site deploys land when nothing says otherwise —
+// the same default deploy/site-deploy.sh:128 applies.
+const defaultSitesDir = "/opt/barkpark/sites"
+
+// resolveSitesDir picks the sites root the space probe will read, in
+// precedence order: the explicit --sites-dir flag, then BARKPARK_SITES_DIR,
+// then defaultSitesDir. It NEVER returns empty, and the answer is carried in
+// the payload: BARKPARK_SITES_DIR is set on no box today, so every box takes
+// the fallback, and a fallback nobody can see is a wrong number nobody can
+// explain (charter D59).
+func resolveSitesDir(flagValue, envValue string) string {
+	if d := strings.TrimSpace(flagValue); d != "" {
+		return d
+	}
+	if d := strings.TrimSpace(envValue); d != "" {
+		return d
+	}
+	return defaultSitesDir
 }
 
 // readToken reads, trims, and validates the agent token from path. An empty
@@ -246,21 +314,200 @@ func memProcProbe() (int, error) {
 	return clampPercent(float64(total-avail) / float64(total) * 100), nil
 }
 
-// loadProcProbe reports the 1-minute load average (first field of /proc/loadavg).
-func loadProcProbe() (float64, error) {
+// loadProcProbe reports the 1-minute AND 15-minute load averages from
+// /proc/loadavg. Like swapProcProbe below, the file read is separated from the
+// parse on purpose: parseLoadAvg is pure and table-tested against a REAL
+// captured kernel line, which the sibling cpu/mem probes still are not.
+func loadProcProbe() (load1 float64, load15 float64, err error) {
 	data, err := os.ReadFile("/proc/loadavg")
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
+	return parseLoadAvg(data)
+}
+
+// parseLoadAvg extracts the 1-minute and 15-minute load averages from
+// /proc/loadavg content — fields[0] and fields[2] of the kernel's line
+// (`0.64 1.50 1.89 3/382 67892`).
+//
+// THE 15-MINUTE FIELD IS THE POINT (charter D67). `/v1/barkparks` serves exactly
+// ONE beat — Registry.latest_health_payload_map/1 is a DISTINCT ON … ORDER BY
+// inserted_at DESC and merge_pressure/2 folds that single row — so a "2 of the
+// last 3 beats" sustain rule is NOT COMPUTABLE by any consumer of the payload
+// the console and `bp cloud status` both read. load15 IS a sustained
+// measurement: a 15-minute EWMA the kernel already maintains, delivered as one
+// scalar, needing no window, no client state and no new syscall. This function
+// reads the same bytes the old one-minute-only parser already had in memory.
+//
+// BOTH FIELDS OR NEITHER: a short/garbled line errors rather than landing a
+// half-measurement, because the caller maps an error to the -1 sentinel and a
+// load1 landed beside a fabricated load15 would be indistinguishable from a
+// quiet box.
+func parseLoadAvg(data []byte) (load1 float64, load15 float64, err error) {
 	fields := strings.Fields(string(data))
-	if len(fields) == 0 {
-		return 0, fmt.Errorf("loadavg: empty")
+	if len(fields) < 3 {
+		return 0, 0, fmt.Errorf("loadavg: want >=3 fields, got %d", len(fields))
 	}
-	l, err := strconv.ParseFloat(fields[0], 64)
+	l1, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
-		return 0, fmt.Errorf("loadavg: %w", err)
+		return 0, 0, fmt.Errorf("loadavg: load1: %w", err)
 	}
-	return l, nil
+	l15, err := strconv.ParseFloat(fields[2], 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("loadavg: load15: %w", err)
+	}
+	return l1, l15, nil
+}
+
+// swapProcProbe reports (swap used percent, swap total bytes) from
+// /proc/meminfo. The file read is separated from the arithmetic on purpose:
+// parseSwapPercent below is pure and table-tested, which the sibling cpu/mem/
+// load probes are not (they read inline and are unreachable from a test).
+//
+// No watchdog is needed around the read itself: /proc/meminfo is generated by
+// the kernel on read with no I/O behind it, unlike the psql probes, which carry
+// their own deadline (agent.pgProbeTimeout).
+func swapProcProbe() (int, int64, error) {
+	data, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return -1, -1, err
+	}
+	return parseSwapPercent(data)
+}
+
+// parseSwapPercent extracts SwapTotal/SwapFree from /proc/meminfo content and
+// returns (used percent 0..100, total bytes).
+//
+// A SWAPLESS BOX RETURNS (0, 0, nil) — NOT AN ERROR AND NOT THE -1 SENTINEL.
+// SwapTotal: 0 is the ordinary state of a box with no swap configured; it was
+// measured, and the answer is none. This diverges from memProcProbe above by
+// exactly one branch: memProcProbe errors on `total <= 0` because MemTotal: 0
+// can only mean a bad read. Copying that guard here would turn every swapless
+// box into "could not measure", which is the precise dishonesty the sentinel
+// doctrine forbids — and the companion swap_total_bytes is what lets a consumer
+// tell "none configured" (0,0) from "idle" (0, >0) from "unmeasurable" (-1,-1).
+// TestSwaplessBoxIsZeroNotSentinel pins this.
+//
+// Fields are matched by EQUALITY, never by prefix: /proc/meminfo also carries a
+// SwapCached: line, and a prefix match reads it as swap sizing.
+func parseSwapPercent(data []byte) (pct int, totalBytes int64, err error) {
+	var total, free int64
+	var haveTotal, haveFree bool
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		switch fields[0] {
+		case "SwapTotal:":
+			v, e := strconv.ParseInt(fields[1], 10, 64)
+			if e != nil {
+				return -1, -1, fmt.Errorf("meminfo: SwapTotal: %w", e)
+			}
+			total, haveTotal = v, true
+		case "SwapFree:":
+			v, e := strconv.ParseInt(fields[1], 10, 64)
+			if e != nil {
+				return -1, -1, fmt.Errorf("meminfo: SwapFree: %w", e)
+			}
+			free, haveFree = v, true
+		}
+	}
+	if !haveTotal || !haveFree {
+		return -1, -1, fmt.Errorf("meminfo: missing SwapTotal/SwapFree")
+	}
+	if total < 0 || free < 0 {
+		return -1, -1, fmt.Errorf("meminfo: negative swap values")
+	}
+	if total == 0 {
+		// Swapless. Measured; the answer is none. See the doc comment.
+		return 0, 0, nil
+	}
+	if free > total {
+		free = total // a torn read must not produce a negative percent
+	}
+	// /proc/meminfo is in kB.
+	return clampPercent(float64(total-free) / float64(total) * 100), total * 1024, nil
+}
+
+// beamComm is the process name the BEAM runs under. It is the OOM killer's most
+// frequent victim on a Barkpark box, which is why its footprint is a vital.
+const beamComm = "beam.smp"
+
+// beamSmapsProbe reports the BEAM's (PSS, swap) bytes from
+// /proc/<pid>/smaps_rollup. Both -1 when no beam.smp is running or the rollup
+// cannot be read — an un-run BEAM is not a zero-footprint BEAM.
+func beamSmapsProbe() (int64, int64, error) {
+	return beamSmapsProbeIn("/proc")
+}
+
+// beamSmapsProbeIn is beamSmapsProbe with an injectable /proc root so both the
+// found and the not-found paths are testable on any host.
+func beamSmapsProbeIn(procRoot string) (int64, int64, error) {
+	pid, err := findBeamPID(procRoot)
+	if err != nil {
+		return -1, -1, err
+	}
+	data, err := os.ReadFile(filepath.Join(procRoot, pid, "smaps_rollup"))
+	if err != nil {
+		return -1, -1, err
+	}
+	return parseSmapsRollup(data)
+}
+
+// findBeamPID scans procRoot for a process whose comm is beam.smp. An
+// unreadable /proc, or no such process, is an error — never a guessed pid.
+func findBeamPID(procRoot string) (string, error) {
+	entries, err := os.ReadDir(procRoot)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(e.Name()); err != nil {
+			continue // not a pid directory
+		}
+		comm, err := os.ReadFile(filepath.Join(procRoot, e.Name(), "comm"))
+		if err != nil {
+			continue // the process exited between the scan and the read
+		}
+		if strings.TrimSpace(string(comm)) == beamComm {
+			return e.Name(), nil
+		}
+	}
+	return "", fmt.Errorf("no %s process found under %s", beamComm, procRoot)
+}
+
+// parseSmapsRollup sums the Pss: and Swap: lines of a smaps_rollup file (kB)
+// and returns them as bytes. Both keys must be present — a rollup missing one
+// is a kernel we do not understand, not a zero.
+func parseSmapsRollup(data []byte) (pssBytes int64, swapBytes int64, err error) {
+	var pss, swap int64
+	var havePss, haveSwap bool
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		v, e := strconv.ParseInt(fields[1], 10, 64)
+		if e != nil {
+			continue
+		}
+		switch fields[0] {
+		case "Pss:":
+			pss, havePss = pss+v, true
+		case "Swap:":
+			// Matched by equality: SwapPss: is a DIFFERENT number and must not
+			// be folded into the swap total.
+			swap, haveSwap = swap+v, true
+		}
+	}
+	if !havePss || !haveSwap {
+		return -1, -1, fmt.Errorf("smaps_rollup: missing Pss/Swap")
+	}
+	return pss * 1024, swap * 1024, nil
 }
 
 // clampPercent rounds v to the nearest int and pins it into 0..100.

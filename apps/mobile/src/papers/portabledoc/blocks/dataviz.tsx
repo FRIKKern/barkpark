@@ -24,18 +24,23 @@
 // Stroke thicknesses stay in points — the web's own `vector-effect:
 // non-scaling-stroke`.
 //
-// REGISTER (D50): dataviz carries no prose runs. Every string here is
-// apparatus — a mono row label, a digit, an axis tick — so it rides the chrome
-// scale rather than `bodyText(ctx)`, and the two registers render identically.
-// That blindness is legitimate and belongs on the crown's REGISTER_BLIND
-// allowlist alongside divider/table.
+// REGISTER (D50): the round-1/2 dataviz blocks carry no prose runs. Every
+// string there is apparatus — a mono row label, a digit, an axis tick — so it
+// rides the chrome scale rather than `bodyText(ctx)`, and the two registers
+// render identically. That blindness is legitimate and belongs on the crown's
+// REGISTER_BLIND allowlist alongside divider/table. The jarl figure family
+// (duel / lineage, below) is the recorded EXCEPTION: a duel row label and a
+// lineage title/body are document voice — the web inherits the paper's serif
+// face into `.bp-duel__label` / `.bp-lineage__title` / `.bp-lineage__body` —
+// so those runs ride `bodyText(ctx)` and the two types are register-SENSITIVE
+// (NOT allowlisted).
 import type { ReactNode } from 'react'
 import { ScrollView, Text, View } from 'react-native'
 
 import type { Theme } from '../../../ui/theme'
 import { roles, scale } from '../../../ui/typography'
 import { asList, isMap, num, str } from '../model'
-import { MONO, type BlockCtx, type Render } from '../register'
+import { MONO, bodyText, type BlockCtx, type Render } from '../register'
 
 /* ── coercion (the dataviz.ts twins) ───────────────────────────────────────── */
 
@@ -292,6 +297,65 @@ function emptyDataviz(kind: string, ctx: BlockCtx, key: number): ReactNode {
   )
 }
 
+/* ── kilde (source provenance — THE KILDE LAW) ─────────────────────────────── */
+//
+// Every figure datum carries a source ref — `commit:<sha>` | `paper:<slug>` |
+// `task:<id>` | `https://…` — surfaced as a small dim «Kilde» line under the
+// figure. A ref that does not parse renders NOTHING: a bad ref is not
+// evidence. The parse is parseSourceRef from the canonical JS emitter
+// (js/packages/react/src/blocks/dataviz.ts), verbatim; dedup is by RAW ref in
+// first-use order; per-item `source` falls back to the block's
+// `sourceDefault`. Mobile narrows the https case to plain provenance text (no
+// link-out), matching how commit/paper/task print on the web.
+
+interface SourceRef {
+  raw: string
+  label: string
+}
+
+export function parseSourceRef(ref: unknown): SourceRef | null {
+  if (typeof ref !== 'string') return null
+  if (/^commit:[0-9a-f]{7,40}$/.test(ref)) return { raw: ref, label: 'commit:' + ref.slice(7, 14) }
+  if (/^paper:[a-z0-9][a-z0-9-]*$/.test(ref)) return { raw: ref, label: ref }
+  if (/^task:[A-Za-z0-9._-]+$/.test(ref)) return { raw: ref, label: ref }
+  if (ref.startsWith('https://') && ref.length > 8) {
+    return { raw: ref, label: ref.replace(/^https:\/\//, '').replace(/\/+$/, '') }
+  }
+  return null
+}
+
+/** Only datum-bearing items (per `isDatum`) carry the provenance obligation;
+ * each takes its own `source` or the figure's `sourceDefault`; invalid refs
+ * drop; dedup by raw ref in first-use order (authored order, never sorted). */
+function figureRefs(
+  items: Record<string, unknown>[],
+  dflt: string,
+  isDatum: (it: Record<string, unknown>) => boolean,
+): SourceRef[] {
+  const out: SourceRef[] = []
+  const seen = new Set<string>()
+  for (const it of items) {
+    if (!isDatum(it)) continue
+    const own = displayString(it.source)
+    const ref = parseSourceRef(own === '' ? dflt : own)
+    if (ref === null || seen.has(ref.raw)) continue
+    seen.add(ref.raw)
+    out.push(ref)
+  }
+  return out
+}
+
+/** The «kilde» stamp: a dim mono "Kilde: …" / "Kilder: a · b" line. */
+function kildeLine(refs: SourceRef[], ctx: BlockCtx): ReactNode {
+  if (refs.length === 0) return null
+  const word = refs.length > 1 ? 'Kilder' : 'Kilde'
+  return (
+    <Text style={{ ...scale.micro, fontFamily: MONO, color: ctx.theme.textMuted, marginTop: 8 }}>
+      {word}: {refs.map((r) => r.label).join(' · ')}
+    </Text>
+  )
+}
+
 /* ── stat / stats / stat-grid ──────────────────────────────────────────────── */
 
 const SPARK_W = 120
@@ -320,6 +384,14 @@ function statCard(item: Record<string, unknown>, ctx: BlockCtx, key: number): Re
   if (value === '') return null
   const denom = str(item.denom)
   const label = str(item.label)
+  // Unit/qualifier riding after the number ("%", "USD", "dager") — a separate
+  // run, never fused into the display string (dataviz.ts statHtml, jarl figure
+  // family). `body` is the one-sentence prose under the label; `source` is the
+  // kilde law's per-stat provenance stamp. All three are absent-safe: a stat
+  // without them renders byte-identically to before.
+  const unit = displayString(item.unit)
+  const body = displayString(item.body)
+  const ref = parseSourceRef(displayString(item.source))
   // THE BAR'S LAW, canonical in react (blocks/dataviz.ts statHtml) and agreed by
   // Go (stat.go): the track EXISTS whenever `max` is above zero REGARDLESS of
   // value, and the fill is a STRICT numeric parse of value else zero, clamped
@@ -377,9 +449,17 @@ function statCard(item: Record<string, unknown>, ctx: BlockCtx, key: number): Re
         {denom !== '' && (
           <Text style={{ fontSize: scale.md.fontSize, color: ctx.theme.textMuted }}>/{denom}</Text>
         )}
+        {unit !== '' && (
+          <Text style={{ fontSize: scale.xs.fontSize, fontFamily: MONO, color: ctx.theme.textMuted }}>
+            {' '}
+            {unit}
+          </Text>
+        )}
       </Text>
       {label !== '' && <Text style={{ ...scale.xs, color: ctx.theme.textMuted }}>{label}</Text>}
+      {body !== '' && <Text style={{ ...scale.xs, color: ctx.theme.textMuted }}>{body}</Text>}
       {sparkline(numberList(item.spark), ctx)}
+      {kildeLine(ref === null ? [] : [ref], ctx)}
     </View>
   )
 }
@@ -389,7 +469,213 @@ const stat: Render = (b, ctx, key) => statCard(b, ctx, key)
 const stats: Render = (b, ctx, key) => {
   const items = asList(b.items).filter(isMap)
   if (items.length === 0) return emptyDataviz('stats', ctx, key)
-  return <View key={key} style={{ marginVertical: 6 }}>{items.map((it, i) => statCard(it, ctx, i))}</View>
+  // Kilde law, aggregated (dataviz.ts stats): per-cell `source` (fallback
+  // `sourceDefault`) rolls into ONE deduped footer — cells never stamp their
+  // own, so `source: undefined` masks the key before statCard sees it.
+  const refs = figureRefs(items, displayString(b.sourceDefault), (it) => str(it.value) !== '')
+  return (
+    <View key={key} style={{ marginVertical: 6 }}>
+      {items.map((it, i) => statCard({ ...it, source: undefined }, ctx, i))}
+      {kildeLine(refs, ctx)}
+    </View>
+  )
+}
+
+/* ── duel (two-arm comparison, jarl figure family) ─────────────────────────── */
+//
+// duel: {legendA, legendB, sourceDefault?, rows:[{label, delta?, valueA,
+// valueB, unit?, source?}]} — dataviz.ts's two-column comparison table as flex
+// rows (THE DRAWING LAW: no new dependencies). Arm A carries the accent
+// (legend AND values); the authored delta ("−30 %") rides small under the row
+// label; values are authored DISPLAY strings, never reformatted; one unit per
+// row rides dim after both values. Both legends are REQUIRED — an unnamed
+// column is a meaningless comparison → the honest empty state. The row label
+// is document voice and rides bodyText(ctx) — REGISTER-SENSITIVE (see the
+// file header).
+const DUEL_VAL_W = 72
+
+const duel: Render = (b, ctx, key) => {
+  const legendA = displayString(b.legendA)
+  const legendB = displayString(b.legendB)
+  const rows = asList(b.rows)
+    .filter(isMap)
+    .filter((r) => ['label', 'valueA', 'valueB'].some((k) => displayString(r[k]) !== ''))
+  if (rows.length === 0 || legendA === '' || legendB === '') return emptyDataviz('duel', ctx, key)
+  const refs = figureRefs(
+    rows,
+    displayString(b.sourceDefault),
+    (r) => displayString(r.valueA) !== '' || displayString(r.valueB) !== '',
+  )
+  const legendStyle = {
+    ...scale.micro,
+    fontFamily: MONO,
+    fontWeight: '600' as const,
+    textTransform: 'uppercase' as const,
+    letterSpacing: 0.5,
+    minWidth: DUEL_VAL_W,
+    textAlign: 'right' as const,
+  }
+  return card(
+    ctx,
+    key,
+    <View>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 10, paddingBottom: 6 }}>
+        <View style={{ flex: 1 }} />
+        <Text numberOfLines={1} style={{ ...legendStyle, color: ctx.theme.accent }}>
+          {legendA}
+        </Text>
+        <Text numberOfLines={1} style={{ ...legendStyle, color: ctx.theme.textMuted }}>
+          {legendB}
+        </Text>
+      </View>
+      {rows.map((r, i) => {
+        const delta = displayString(r.delta)
+        const unit = displayString(r.unit)
+        const unitRun =
+          unit === '' ? null : (
+            <Text style={{ fontSize: scale.micro.fontSize, fontFamily: MONO, color: ctx.theme.textMuted }}>
+              {' '}
+              {unit}
+            </Text>
+          )
+        return (
+          <View
+            key={i}
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 10,
+              borderTopWidth: 1,
+              borderTopColor: ctx.theme.border,
+              paddingVertical: 6,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text
+                style={{
+                  ...bodyText(ctx),
+                  fontSize: scale.sm.fontSize,
+                  lineHeight: scale.sm.lineHeight,
+                  fontWeight: '600',
+                }}
+              >
+                {displayString(r.label)}
+              </Text>
+              {delta !== '' && (
+                <Text style={{ ...scale.micro, fontFamily: MONO, color: ctx.theme.textMuted }}>{delta}</Text>
+              )}
+            </View>
+            <Text
+              style={{ ...scale.sm, fontFamily: MONO, color: ctx.theme.accent, minWidth: DUEL_VAL_W, textAlign: 'right' }}
+            >
+              {displayString(r.valueA)}
+              {unitRun}
+            </Text>
+            <Text
+              style={{ ...scale.sm, fontFamily: MONO, color: ctx.theme.text, minWidth: DUEL_VAL_W, textAlign: 'right' }}
+            >
+              {displayString(r.valueB)}
+              {unitRun}
+            </Text>
+          </View>
+        )
+      })}
+      {kildeLine(refs, ctx)}
+    </View>,
+  )
+}
+
+/* ── lineage (dated nodes on a line, jarl figure family) ───────────────────── */
+//
+// lineage: {sourceDefault?, nodes:[{overline?, title?, body?, value?, unit?,
+// source?}]} — `overline` carries the date/period ("jan–sep 2025", "i dag"),
+// value+unit an optional accent datum. Nodes render in AUTHORED order as a
+// vertical stack (the web's auto-fit grid collapses to one column at phone
+// width anyway); a node with nothing to say contributes nothing; an empty
+// list → the honest empty state. Title and body are document voice and ride
+// bodyText(ctx) — REGISTER-SENSITIVE (see the file header). Kilde law:
+// datum-bearing nodes (those with a `value`) carry the provenance obligation.
+const lineage: Render = (b, ctx, key) => {
+  const nodes = asList(b.nodes)
+    .filter(isMap)
+    .filter((n) => ['overline', 'title', 'body', 'value'].some((k) => displayString(n[k]) !== ''))
+  if (nodes.length === 0) return emptyDataviz('lineage', ctx, key)
+  const refs = figureRefs(nodes, displayString(b.sourceDefault), (n) => displayString(n.value) !== '')
+  return card(
+    ctx,
+    key,
+    <View>
+      {nodes.map((n, i) => {
+        const overline = displayString(n.overline)
+        const title = displayString(n.title)
+        const value = displayString(n.value)
+        const unit = displayString(n.unit)
+        const body = displayString(n.body)
+        return (
+          <View
+            key={i}
+            style={{
+              borderTopWidth: i === 0 ? 0 : 1,
+              borderTopColor: ctx.theme.border,
+              paddingTop: i === 0 ? 0 : 8,
+              marginTop: i === 0 ? 0 : 8,
+              gap: 2,
+            }}
+          >
+            {overline !== '' && (
+              <Text
+                style={{
+                  ...scale.micro,
+                  fontFamily: MONO,
+                  color: ctx.theme.textMuted,
+                  textTransform: 'uppercase',
+                  letterSpacing: 0.5,
+                }}
+              >
+                {overline}
+              </Text>
+            )}
+            {title !== '' && (
+              <Text
+                style={{
+                  ...bodyText(ctx),
+                  fontSize: scale.sm.fontSize,
+                  lineHeight: scale.sm.lineHeight,
+                  fontWeight: '600',
+                }}
+              >
+                {title}
+              </Text>
+            )}
+            {value !== '' && (
+              <Text style={{ ...scale.md, fontFamily: MONO, fontWeight: '700', color: ctx.theme.accent }}>
+                {value}
+                {unit !== '' && (
+                  <Text style={{ fontSize: scale.micro.fontSize, fontWeight: '500', color: ctx.theme.textMuted }}>
+                    {' '}
+                    {unit}
+                  </Text>
+                )}
+              </Text>
+            )}
+            {body !== '' && (
+              <Text
+                style={{
+                  ...bodyText(ctx),
+                  fontSize: scale.xs.fontSize,
+                  lineHeight: scale.xs.lineHeight,
+                  color: ctx.theme.textMuted,
+                }}
+              >
+                {body}
+              </Text>
+            )}
+          </View>
+        )
+      })}
+      {kildeLine(refs, ctx)}
+    </View>,
+  )
 }
 
 /* ── heatmap: three variants ───────────────────────────────────────────────── */
@@ -1114,6 +1400,8 @@ export const datavizRenderers: Record<string, Render> = {
   'stat-grid': stats,
   chart,
   heatmap,
+  duel,
+  lineage,
   'gauge-list': gaugeList,
   'bar-chart': barChart,
   'criteria-progress': criteriaProgress,

@@ -67,9 +67,12 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   ## Error classification
 
     * doc gone (upsert fetch returns `{:error, :not_found}`) → `{:cancel, :doc_gone}`.
-    * transient (DB connection blip surfaced as an exception) → `{:snooze, 60}`.
-    * anything else (the projector returns `{:error, _}`) → `{:error, _}` so
-      Oban applies its normal backoff.
+    * a raise (DB blip, transaction timeout, poison doc) → `{:error, e}` — Oban
+      applies its normal backoff and DISCARDS at `max_attempts` (fail-loud
+      doctrine). NEVER `{:snooze, _}` here: Oban's `snooze_job` refunds the
+      attempt (`inc: [max_attempts: 1]`), so a snoozing rescue turned every
+      poison job into an IMMORTAL retry loop — `max_attempts: 5` was decorative.
+    * the projector returns `{:error, _}` → `{:error, _}`, same backoff/discard.
   """
 
   use Oban.Worker,
@@ -88,7 +91,6 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   alias Barkpark.Tenancy
 
   @debounce_seconds 5
-  @snooze_seconds 60
 
   @doc """
   Build a debounced REBUILD job for `scope` (the default op). `opts` may carry
@@ -188,7 +190,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
 
   # Full per-scope rebuild: list the published corpus across the declared types
   # and hand it to Projector.rebuild_scope/3 (atomic DELETE+bulk-add in a
-  # transaction). A DB blip surfaces as an exception → snooze.
+  # transaction). A DB blip surfaces as an exception → {:error, e} (real
+  # backoff, discard at max_attempts — never snooze, see moduledoc).
   #
   # FAIL-CLOSED tenancy (Goal ges/graph-edge-seam, FIX 3): in a multi-tenant
   # install a rebuild enqueued with NO workspace_id (a nil-scope doc whose
@@ -230,7 +233,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
       |> Enum.flat_map(fn type ->
         content_mod(args).list_documents(type, scope, list_opts)
       end)
-      |> Enum.map(&hydrate_task_edges/1)
+      |> hydrate_task_edges()
 
     case projector_mod(args).rebuild_scope(scope, docs, project_opts) do
       {:ok, %{added: added, deleted: deleted}} ->
@@ -250,12 +253,12 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     end
   rescue
     e ->
-      Logger.warning(
-        "EdgeProjector.ProjectorWorker: rebuild raised for scope=#{scope}, snoozing: " <>
-          Exception.message(e)
+      Logger.error(
+        "EdgeProjector.ProjectorWorker: rebuild raised for scope=#{scope}, erroring " <>
+          "(attempt consumed): " <> Exception.message(e)
       )
 
-      {:snooze, @snooze_seconds}
+      {:error, e}
   end
 
   # Per-doc incremental upsert. Fetches the SINGLE doc by _id (+ type) — never
@@ -288,12 +291,12 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     end
   rescue
     e ->
-      Logger.warning(
-        "EdgeProjector.ProjectorWorker: upsert raised for scope=#{scope}, snoozing: " <>
-          Exception.message(e)
+      Logger.error(
+        "EdgeProjector.ProjectorWorker: upsert raised for scope=#{scope}, erroring " <>
+          "(attempt consumed): " <> Exception.message(e)
       )
 
-      {:snooze, @snooze_seconds}
+      {:error, e}
   end
 
   defp do_upsert(scope, id, doc, args) do
@@ -372,12 +375,12 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     end
   rescue
     e ->
-      Logger.warning(
-        "EdgeProjector.ProjectorWorker: delete raised for scope=#{scope}, snoozing: " <>
-          Exception.message(e)
+      Logger.error(
+        "EdgeProjector.ProjectorWorker: delete raised for scope=#{scope}, erroring " <>
+          "(attempt consumed): " <> Exception.message(e)
       )
 
-      {:snooze, @snooze_seconds}
+      {:error, e}
   end
 
   defp first_type([t | _]) when is_binary(t) and t != "", do: t
@@ -391,14 +394,21 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   defp normalize_types(types) when is_list(types), do: types |> Enum.uniq() |> Enum.sort()
   defp normalize_types(types), do: types
 
-  # Hydrate a task doc's payload with its authoritative `task_edges` rows BEFORE
-  # the pure projection runs (gap #1 fix — `content.dependencies` is a DEAD KEY;
-  # `task_edges` is the only authoritative dependency store). This is the
-  # DB-touching layer, so reading `task_edges` here keeps the plugin
-  # `extract_edges/2` callback pure. `Tasks.hydrate_edges/1` is a no-op for any
-  # non-task doc, so calling it on every corpus doc is safe. The Tasks plugin is
-  # first-party + always compiled; the guard only protects a doc payload that is
-  # not a map (never crashes the projection).
+  # Hydrate task docs' payloads with their authoritative `task_edges` rows
+  # BEFORE the pure projection runs (gap #1 fix — `content.dependencies` is a
+  # DEAD KEY; `task_edges` is the only authoritative dependency store). This is
+  # the DB-touching layer, so reading `task_edges` here keeps the plugin
+  # `extract_edges/2` callback pure. The rebuild path hands the WHOLE corpus to
+  # the batched `Tasks.hydrate_edges_batch/1` — ONE task_edges query over every
+  # task PK plus ONE Document id map, instead of one query per doc + one
+  # `Repo.get` per edge row. Non-task docs pass through unchanged. The upsert
+  # path still hydrates its single doc via `Tasks.hydrate_edges/1`. The Tasks
+  # plugin is first-party + always compiled; the fallback clause only protects
+  # a doc payload that is not a map (never crashes the projection).
+  defp hydrate_task_edges(docs) when is_list(docs) do
+    Barkpark.Plugins.Tasks.hydrate_edges_batch(docs)
+  end
+
   defp hydrate_task_edges(doc) when is_map(doc) do
     Barkpark.Plugins.Tasks.hydrate_edges(doc)
   end

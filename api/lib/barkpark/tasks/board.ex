@@ -203,12 +203,32 @@ defmodule Barkpark.Tasks.Board do
     end
   end
 
-  # Fetch every task doc for the dataset, then collapse each logical id's
-  # draft/published twins to a single canonical card (published wins). The board
-  # is a supervisor read — it shows one card per task, not the draft shadow the
-  # github-bookkeeping stamp can leave behind.
+  # The board's SAFETY CAP (felix W25) — a NAMED failure-mode fix: the bounded
+  # HTTP task reader (`tasks/query.ex`, which clamps at 500/1000 via `clamp_limit`)
+  # had an UNBOUNDED LiveView twin here. `load_task_docs/1` is re-run every 15s
+  # PER connected Studio board socket (`board_live.ex` @refresh_ms), so an
+  # unbounded `Repo.all` over the whole `type:task` corpus is a load amplifier
+  # that grows with the corpus. This attribute caps the scan well above today's
+  # ~6k-doc corpus (query.ex's 1000 clamp would truncate a real board, so the
+  # HTTP limit is NOT reusable as the board bound) and is config-overridable so
+  # ops can retune without a redeploy and tests can shrink it.
+  #
+  # This is a SAFETY CAP, not pagination: twin collapse (below) happens in Elixir
+  # AFTER `Repo.all`, so the cap bounds the ROW scan, not the card count — it is
+  # deliberately NOT query.ex's SQL `collapse_twins` (different collapse
+  # semantics = a behavior change, out of scope for this improvement-only slice).
+  @snapshot_max 10_000
+  defp snapshot_max, do: Application.get_env(:barkpark, :board_snapshot_max, @snapshot_max)
+
+  # Fetch every task doc for the dataset (up to the safety cap above), then
+  # collapse each logical id's draft/published twins to a single canonical card
+  # (published wins). The board is a supervisor read — it shows one card per
+  # task, not the draft shadow the github-bookkeeping stamp can leave behind.
   defp load_task_docs(dataset) do
-    from(d in Document, where: d.type == "task" and d.dataset == ^dataset)
+    from(d in Document,
+      where: d.type == "task" and d.dataset == ^dataset,
+      limit: ^snapshot_max()
+    )
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
     |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)

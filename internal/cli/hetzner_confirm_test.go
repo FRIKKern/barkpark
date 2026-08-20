@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -134,10 +135,26 @@ func TestHetznerServerDeleteNonTTYStillFires(t *testing.T) {
 // representative surface (a resource without action-wait).
 func TestHetznerVolumeDeleteNonTTYStillFires(t *testing.T) {
 	f := newFakeHzAPI(t)
+	// STATEFUL, deliberately. This fixture used to answer a static 200 forever,
+	// which meant it kept handing the volume back AFTER the DELETE — and once
+	// destroys started re-reading (PDS wave 29) it red as a refused claim. The
+	// harness was right and the fixture was lying: a delete that leaves the
+	// resource readable IS a failed destroy. Fixed by making the fake honest.
+	var mu sync.Mutex
+	gone := false
 	f.mux.HandleFunc("GET /volumes/7", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if gone {
+			hzJSON404(w, "volume")
+			return
+		}
 		hzWriteJSON(w, 200, `{"volume":{"id":7,"name":"data-7","status":"available","size":10}}`)
 	})
 	f.mux.HandleFunc("DELETE /volumes/7", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		gone = true
+		mu.Unlock()
 		hzWriteJSON(w, 204, `{}`)
 	})
 	swapHzStdin(t, strings.NewReader(""))

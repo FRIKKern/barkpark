@@ -92,10 +92,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   defp refetch(socket, rev, structure) do
     socket =
       cond do
-        # Read-only hosts NEVER peek — the session is draft-backed. This is
-        # unreachable once read-only deltas no-op (sheet_grid.ex update/2),
-        # but sealed anyway: fail closed, every read path independently.
-        socket.assigns[:read_only] ->
+        # LIVENESS axis: a host not entitled to draft bytes NEVER peeks — the
+        # session is draft-backed. This is unreachable once those deltas no-op
+        # (sheet_grid.ex update/2), but sealed anyway: fail closed, every read
+        # path independently. `[]` access + `!=` so a socket that predates the
+        # assign reads as NOT live.
+        socket.assigns[:live_session] != true ->
           assign(socket, rev: rev)
 
         true ->
@@ -404,8 +406,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   # broadcasts the delta (which updates this and every other client) and
   # debounce-persists. The component never mutates `content` here. Ops are
   # stamped with the studio identity's user_id so the session records
-  # per-user undo stacks. Read-only hosts (the public reader) drop EVERY
-  # mutation here — the server-side half of stripping the affordances.
+  # per-user undo stacks. A host without `write_capable` (the public reader,
+  # and any Studio principal `Caps` denies write) drops EVERY mutation here —
+  # the server-side half of stripping the affordances.
   #
   # The session refuses batches over its per-call bound (batch_too_large) —
   # a big TSV paste or clear-selection can exceed it, so the batch chunks
@@ -413,7 +416,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   # per-op semantics (individual rejection, LWW) are unchanged.
   def send_ops(socket, []), do: socket
 
-  def send_ops(%{assigns: %{read_only: true}} = socket, _ops), do: socket
+  # THE LAST WALL — the authorization axis, and the only site here that reads
+  # it. Everything above may be forged by a client; nothing gets past this.
+  def send_ops(%{assigns: %{write_capable: false}} = socket, _ops), do: socket
 
   def send_ops(socket, ops) do
     ops =

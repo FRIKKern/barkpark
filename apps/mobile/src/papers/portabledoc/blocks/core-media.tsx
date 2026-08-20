@@ -292,6 +292,12 @@ const video: Render = degradeCard((b, ctx, key) => {
 // island, and D42 ruled WebView islands out for anything but the Mermaid one
 // that already exists. There is no native path, so this card IS the ceiling
 // rather than a stop on the way to one.
+//
+// `poster` (an npt timestamp naming the frame the WEB player rests on before
+// play) is therefore INERT here, by the same rule as video's `loop`: it is a
+// player option, and there is no player. Unlike video's `poster` — an image URL
+// this card CAN show — there is no image to resolve, only a timestamp into a
+// stream nothing on this surface decodes.
 const asciicast: Render = degradeCard((b, ctx, key) => {
   const src = str(b.src).trim()
   const url = resolveImageSrc(src, ctx)

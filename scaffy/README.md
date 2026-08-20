@@ -35,14 +35,16 @@ The fast path *is* the standard path — standards become executable.
 
 - **Masterplan** — the full design case: [`/papers/scaffy-commands-as-content`](/papers/scaffy-commands-as-content)
 - **Showcase** — every W1 command shown in full, with file trees, run mocks and a remove demo: [`/papers/scaffy-command-showcase`](/papers/scaffy-command-showcase)
+- **Benchmark** — the measured case: byte-identical to the agent at $0 wherever the catalog covers the chore, with the boundary where it does not: [`/papers/scaffy-benchmark`](/papers/scaffy-benchmark)
 
-## Status — corpus first, no engine yet
+## Status — engine shipped, catalog served
 
-Wave 1 ships the **command corpus + showcase**, deliberately **without an engine**. These
-are full-text, copy-ready `.scaffy` documents — never sketches, never elided `…` bodies —
-that a human can hand-apply *today* (see [Hand-applying a command today](#hand-applying-a-command-today)).
-They also *are* the specification: the corpus defines the hardened v2 grammar by example,
-and it becomes the parser's test fixtures in the next wave.
+The **engine is live** — `bp scaffy validate` / `fmt` / `run` / `remove` (W2–W3) apply,
+receipt, and reverse commands from marks, and the corpus is **served from the connected
+Barkpark** (W4). The `.scaffy` documents are still full-text, copy-ready and hand-applicable
+*today* (see [Hand-applying a command today](#hand-applying-a-command-today)); they also *are*
+the specification — the corpus defines the hardened v2 grammar by example and is the parser's
+own test fixtures.
 
 | Wave | Ships | State |
 |---|---|---|
@@ -51,6 +53,17 @@ and it becomes the parser's test fixtures in the next wave.
 | **W3** — engine | `bp scaffy run` / `bp scaffy remove`: apply with marks + receipts (`.scaffy/receipts/`), dry-run diff, idempotent re-run, symmetric remove | **shipped** |
 | **W4** — commands as content | a `command` document type, the corpus served from the connected Barkpark, `bp scaffy pull <concept>/<variant>` + `bp scaffy ls --remote` (validate-first + consent gate) | **shipped** |
 | **W5** — ONEOF + the frequency-mined seven | the `ONEOF` enum primitive (D56, lint `E-021`), 7 new commands (add-error-shape, add-canonical-marker, ensure-import, ensure-cli-noun, add-backfill-task, add-schema-type, classify-block-type), the flagship's pd-parity leg, corpus reconciled at 14 and seeded | **shipped** |
+
+The CLI surface is **eight verbs**: `validate` / `fmt` (W2), `run` / `remove` (W3),
+`pull` / `ls --remote` (W4), plus **`bp scaffy discover`** — a deterministic, read-only,
+zero-token git-mining pass that ranks the tree's accretion hotspots into new command
+candidates — and **`go run ./scaffy/seed --check`**, which syncs the corpus to the served
+catalog and is its drift tripwire.
+
+**The merged-is-served law.** A `.scaffy` edit changes the source's `sha256`, so the served
+copy must be re-seeded or it silently falls behind `main`. `seed --check` (and the ACTING
+`scaffy-catalog-drift` gate that runs it post-merge on main and daily) reds the moment a
+touched command drifts — served bytes must equal merged bytes.
 
 ## The command corpus
 
@@ -86,7 +99,7 @@ steps, zero hand-bridged registrations.
 | **ensure-root-layout-zones** | Plants the two named `scaffy:zone` marker comments in `root.html.heex` — the repo's #2 accretion file, which W1/W7 ruled un-anchorable. Zero variables: a one-time reversible plant of a head anchor at each genuinely append-shaped neighborhood (new script assets after `{@inner_content}`, new LiveView hooks after `let Hooks = {};`), so later appends land at a named mark. The other two streams are cut with evidence in the command prose: theme blocks are emitter-owned (`design/emit.mjs` generated region) and feature CSS placement is contextual by design (the W1 CSS-leg cut, re-affirmed). |
 | **ensure-router-zones** | Same repair, router spelling: plants three `scaffy:zone` comments in `router.ex` — the #1 unserved accretion file (175 commits/12 months, 68% PURE_ADD), twice ruled un-anchorable because route order is semantics. Each zone sits where an append is ordering-safe **by construction** and its comment states the contract it guards in words (pipeline definitions are position-free; new plugin auth-buckets land before the dynamic-tailed `:ticket_key` run; scoped mirrors are order-neutral at the tail given a novel `/v1/<noun>` suffix). The flat-core `/v1` stream is cut with evidence: those adds are neighbor-bound (in-scope appends, "sibling routes below" prose, noun-local static-before-dynamic pins no generic zone can encode). |
 | **add-plugin-bucket** | The zones' first consumer: a new plugin auth-tier as 2 `INSERT AFTER FIRST` ops anchored at the router zones' mark lines — the `pipeline :<bucket>` definition in the router-pipelines zone + the `scope <mount> … plugin_routes(scope: :<bucket>)` wrapper in the plugin-buckets zone (5 such bucket adds since April). Requires ensure-router-zones applied first, **by loud refusal**: the anchors don't exist on a virgin tree, so the engine's D20 conservatism refuses (exit 5, nothing written) and the command's prose carries the 2-run recipe — run-proven that recipe + refusal beats a composition primitive. `MountPath` is a `ONEOF` (`/v1/plugins`\|`/v1`); the auth plug is deliberately open. Router leg only — the plugin's `register_routes/1` entries are add-plugin-route's job; the JS manifest-parity tripwire is separate (non-scaffy) work. |
-| **ensure-console-hook-zones** | The cloud-console repair: plants three `scaffy:zone` comments across the Cloud console SPA pair — app.js (#7 discover hotspot, 81 commits/60 MOSTLY_ADD) + its co-accreting node harness `__app.test.mjs` (55/82 commits ride together). One zone per mechanically append-shaped seam: new pure-helper declarations (IIFE scope + eval-tail hook call make position semantics-free), new `__bpTestHook` export entries (order-free keys, house trailing commas), new test groups (node:test registration order is semantics-free). The console vein's other legs are cut with evidence in the command prose: the cloud router is a 9968-line `Plug.Router` of bespoke inline handler bodies with noun-local ordering pins (the flat-core ruling, re-affirmed), registry.ex is an Ecto context accreting bespoke `@doc + def` business functions, and app.css is emitter-owned at the head (design/emit.mjs GENERATED tokens) + contextual-by-section in the hand region. Includes the corpus's second and third `INSERT BEFORE FIRST`. |
+| **ensure-console-hook-zones** | The cloud-console repair: plants three `scaffy:zone` comments across the Cloud console SPA pair — app.js (#7 discover hotspot, 81 commits/60 MOSTLY_ADD) + its co-accreting node harness `__app.test.mjs` (55/82 commits ride together). One zone per mechanically append-shaped seam: new pure-helper declarations (IIFE scope + eval-tail hook call make position semantics-free), new `__bpTestHook` export entries (order-free keys, house trailing commas), new test groups (node:test registration order is NOT semantics-free — a `test()` registered above a top-level `await` is drained before the later top-level `const`s initialise and TDZ-crashes, measured cch-w61-s1 on node 20 *and* node 22 — so this zone is planted at the harness TAIL, below every top-level await). The console vein's other legs are cut with evidence in the command prose: the cloud router is a 9968-line `Plug.Router` of bespoke inline handler bodies with noun-local ordering pins (the flat-core ruling, re-affirmed), registry.ex is an Ecto context accreting bespoke `@doc + def` business functions, and app.css is emitter-owned at the head (design/emit.mjs GENERATED tokens) + contextual-by-section in the hand region. Includes the corpus's second and third `INSERT BEFORE FIRST`. |
 | **add-console-helper** | The zones' consumer: one node-pinned pure helper across the pair in a single run — the `function` skeleton in the console-helpers zone, its export entry in the console-hook-map zone, its starter test group in the console-tests zone. Requires ensure-console-hook-zones first **by loud refusal** (the add-plugin-bucket recipe: absent anchors exit 5, nothing written). The starter is an identity passthrough with a test pinning exactly that, deliberately: growing the body reds the starter test and forces the test group to grow in the same change. Closes on the pair's own CI-enforced gate run LOCAL: `node --test cloud/priv/static/__app.test.mjs` (438+ tests, ~250 ms, zero deps — console-harness.yml runs the same suite on PRs). |
 | **add-site-template** | The overpowered one: births a complete deployable cloud site template in one run — a 13-file Astro static starter tree under `templates/<slug>/` (manifest + schema + seed + app skeleton, modeled on astro-starter) **plus all 13 catalog-family and deploy-axis injections across 12 files** (both cloud allowlists, the `/new` display catalog, both bootstrap lock literals, the pinned deploy-test message, the `DeployRequest` clause + message, the Provisioner row, the runtime.exs env override — the touch point the historical astro-search-starter addition missed — the Go exact-set lock, the CLI usage line, MANIFEST.md). Closes on the repo's own drift gates: `make provisioner-catalog-sync` (glob-driven mirror), the Go catalog lock both directions, and the Elixir lock tests (ci). The reverse-drift trap (a manifest without its family reds the tree) is exactly why it is ONE command. Honest line: framework fixed to Astro/static; `package-lock.json` is a documented manual step (`npm ci` needs resolved hashes scaffy cannot synthesize). |
 | **add-plugin-route** | The in-plugin leg: one route tuple planted at the **head** of a plugin's `register_routes/1` list — the route auto-folds into the host router at compile time via the runtime collector, so this single list entry is the whole authoring moment (no `router.ex` edit, ever). Targets the six block-list plugins (tickets, quiz, pulse, tasks, bulldocs, github) through a **variable** `IN` path; sheets/onixedit refuse loud at anchor resolution. Head-insert is the house ordering law, not a compromise: history's own adds moved head-ward (`/tasks/prime` "must mount BEFORE `/tasks/:doc_id`"), so a new static path can never be shadowed by an existing dynamic catchall. `Method` is a `ONEOF` over the closed `http_verb` set (`:live` is a different tuple shape, out of scope by name); `AuthBucket` is open by design — add-plugin-bucket mints new tiers, and the host router silently drops unknown buckets until their wrapper lands. Guard = the tuple's method+path head, so a hand-authored duplicate route refuses injection. |
@@ -207,7 +220,7 @@ generated slice never has a path/identifier mismatch.
 
 ### Amendments — D12 (A1–A5), binding on every W1 command
 
-**A1 — snake_case is a first-class spelling.** Four canonical spellings-as-transforms of one
+**A1 — snake_case is a first-class spelling.** Five canonical spellings-as-transforms of one
 variable:
 
 | Token | Case | Example (`WorkerName=SmokeReaper`) |
@@ -216,6 +229,13 @@ variable:
 | `{{.worker-name}}` | kebab | `smoke-reaper` |
 | `{{.workerName}}` | camel | `smokeReaper` |
 | `{{.worker_name}}` | snake | `smoke_reaper` |
+| `{{.WORKER_NAME}}` | SCREAMING | `SMOKE_REAPER` |
+
+SCREAMING_SNAKE is the constant-name spelling JS, Rust and Python share
+(`SMOKE_REAPER_PROJECTION` and friends); it joined the set after the four-joiner era
+(first external consumer: gyldendal.no's create-widget const stems), rides **last** in the
+collapse-precedence order so no pre-existing one-word resolution moves, and is **not** a
+path-legal spelling (E-009 still admits only kebab and snake in path positions).
 
 Elixir and Go **file paths derive via snake** (`lib/barkpark/workers/{{.worker_name}}.ex`).
 Without a snake spelling, no Elixir or Go command could derive its own paths.
@@ -337,7 +357,7 @@ VARIABLE 3 "CountAfter" OPAQUE SUCCESSOR "CountBefore" TITLE "Registry count aft
 ```
 
 Non-opaque (transform) variables resolve through **one shared word-list** — `_`, `-` and
-case boundaries are equivalent — and the four deterministic joiners of A1. Not all four
+case boundaries are equivalent — and the five deterministic joiners of A1. Not all five
 spellings must appear in a file, but every spelling that *does* appear must be a joiner
 output of the declared name.
 
@@ -393,7 +413,7 @@ Motivating command: **`add-schema-type`** — pick a visibility (`public`|`priva
 composition tier (`element`|`widget`|`section`); free text there is a class of error the
 grammar can now refuse rather than a mistake caught only at review. `ONEOF` composes with
 every other annotation: `OPAQUE ONEOF` (verbatim member, path-casing exempt) and transform
-`ONEOF` (the member still resolves through the four A1 joiners — `widget` → `Widget` /
+`ONEOF` (the member still resolves through the five A1 joiners — `widget` → `Widget` /
 `widget` / …) are both legal.
 
 The constraint is enforced on **both halves of the D37 split**, exactly like `SHAPE`:
@@ -488,8 +508,8 @@ Before the W3 engine shipped, a Scaffy command was applied **by hand** — and t
 designed so that's unambiguous (D7). To apply `scaffy/commands/<name>.scaffy`:
 
 1. **Bind the variables.** Read the `VARIABLE` declarations at the top and pick your values
-   (`--var BlockName=timeline`). Expand every `{{.…}}` token through its four spellings (A1):
-   Pascal / kebab / camel / snake.
+   (`--var BlockName=timeline`). Expand every `{{.…}}` token through its five spellings (A1):
+   Pascal / kebab / camel / snake / SCREAMING.
 2. **Do the CREATEs (`●`).** For each `CREATE FILE`, write the file with tokens expanded. These
    are the new-file half — the part a plain generator could also do.
 3. **Do the INJECTs (`○`) in order.** For each mutating op, open the `IN` file, find the

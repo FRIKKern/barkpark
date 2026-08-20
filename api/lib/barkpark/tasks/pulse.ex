@@ -40,11 +40,10 @@ defmodule Barkpark.Tasks.Pulse do
   # the `/v1/tasks/events` feed projects it) and mirrors the PubSub broadcast
   # post-commit so live boards tick without polling.
 
-  import Ecto.Query, only: [from: 2]
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       current_epoch: 1,
       check_holder: 2,
       insert_mutation_event!: 5,
@@ -161,16 +160,9 @@ defmodule Barkpark.Tasks.Pulse do
 
     new_content = Map.put(content, "claim", new_claim)
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %Document{doc | content: new_content, rev: new_rev}
-
+    # PDS-D451: the receipt is the STORED row, not a reconstruction of intent.
+    case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_mutation_event!(
             updated,
@@ -185,7 +177,7 @@ defmodule Barkpark.Tasks.Pulse do
 
         {:ok, updated, [task_broadcast(updated, @event_task_pulse, ev, observed_rev)]}
 
-      0 ->
+      :stale ->
         {:error, :stale_claim}
     end
   end

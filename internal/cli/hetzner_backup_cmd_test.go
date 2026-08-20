@@ -173,6 +173,48 @@ func TestHetznerBackupCreate(t *testing.T) {
 	if manifest["database"] != "barkpark" || manifest["bytes"] != float64(len(dump)) || manifest["sha256"] == "" {
 		t.Errorf("manifest = %v, want database=barkpark bytes=%d sha256 set", manifest, len(dump))
 	}
+
+	// …and the receipt is built from a HEAD of that key, not from the key the
+	// library composed. `database` rides along DECLARED, because no object store
+	// can report which database produced a blob of gzip.
+	if _, ok := f.find("HEAD", "/"+key); !ok {
+		t.Errorf("no confirming HEAD on /%s; requests: %+v", key, f.requests())
+	}
+	if payload["confirmed_present"] != true || payload["bytes"] == nil {
+		t.Errorf("receipt = %v, want confirmed_present with the STORED length", payload)
+	}
+	if payload["database_confirmed"] != false {
+		t.Errorf("receipt = %v, want database_confirmed false — the store cannot report a database name", payload)
+	}
+}
+
+// TestHetznerBackupCreateSilentDropRefuses is the receipt that matters most in
+// this file. The endpoint completes the whole multipart conversation with 200s
+// and persists NOTHING — and the pre-slice verb printed
+// `✓ create — backup prod/<stamp>.sql.gz / database: barkpark`, a green backup
+// receipt for a dump that exists nowhere. That is the failure this epic is
+// named for: nobody discovers it until a restore.
+func TestHetznerBackupCreateSilentDropRefuses(t *testing.T) {
+	f, _ := multipartS3()
+	f.dropWrites = true
+	withFakeS3(t, f)
+	withFixedDump(t, "barkpark", []byte("CREATE TABLE parks (id serial);\n"))
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "backup", "create",
+		"--database-url", "postgres://bp@db.internal/barkpark", "--bucket", "bkt", "--prefix", "prod")...)
+	if code == exitOK {
+		t.Fatalf("a backup that was never stored exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "NOT READABLE") || !strings.Contains(said, "prod/") {
+		t.Errorf("the refusal must name the backup key that is not there:\n%s", said)
+	}
+	for _, r := range f.requests() {
+		if r.Method == "HEAD" {
+			return
+		}
+	}
+	t.Errorf("no HEAD was issued at all — the refusal came from somewhere other than the post-read: %+v", f.requests())
 }
 
 // TestHetznerBackupCreateNoPgDump: with an empty PATH the real seam refuses
@@ -195,34 +237,19 @@ func TestHetznerBackupCreateNoPgDump(t *testing.T) {
 	}
 }
 
-// backupListingS3 fakes a bucket with three backups (manifests included) —
-// shared by the list and prune tests.
+// backupListingS3 SEEDS a bucket holding three backups and their manifests —
+// real stored objects, so the listing, the manifest GETs and the prune DELETEs
+// all read and write the same state. Shared by the list and prune tests.
 func backupListingS3() *fakeS3 {
 	manifest := func(db, stamp string) string {
 		return fmt.Sprintf(`{"database":%q,"bytes":100,"sha256":"abc","created_at":%q}`, db, stamp)
 	}
-	f := &fakeS3{}
-	f.handler = func(r s3Req) (int, string) {
-		switch {
-		case r.Method == "GET" && r.Query.Get("list-type") == "2":
-			return 200, `<?xml version="1.0"?><ListBucketResult><Name>bk</Name><KeyCount>6</KeyCount><IsTruncated>false</IsTruncated>
-				<Contents><Key>prod/20260601T000000Z.sql.gz</Key><Size>10</Size><LastModified>2026-06-01T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260601T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-06-01T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260615T000000Z.sql.gz</Key><Size>11</Size><LastModified>2026-06-15T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260615T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-06-15T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260701T000000Z.sql.gz</Key><Size>12</Size><LastModified>2026-07-01T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260701T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-07-01T00:00:01.000Z</LastModified></Contents>
-			</ListBucketResult>`
-		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260601T000000Z.sql.gz.manifest.json"):
-			return 200, manifest("barkpark", "2026-06-01T00:00:00Z")
-		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260615T000000Z.sql.gz.manifest.json"):
-			return 200, manifest("barkpark", "2026-06-15T00:00:00Z")
-		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260701T000000Z.sql.gz.manifest.json"):
-			return 200, manifest("barkpark", "2026-07-01T00:00:00Z")
-		case r.Method == "DELETE":
-			return 204, ""
-		}
-		return 404, `<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`
+	f := newFakeS3()
+	for _, stamp := range []string{"20260601T000000Z", "20260615T000000Z", "20260701T000000Z"} {
+		created := stamp[:4] + "-" + stamp[4:6] + "-" + stamp[6:8] + "T00:00:00Z"
+		key := "prod/" + stamp + ".sql.gz"
+		f.seedObject("bkt", key, "gz-bytes", created)
+		f.seedObject("bkt", key+".manifest.json", manifest("barkpark", created), created)
 	}
 	return f
 }
@@ -327,12 +354,7 @@ func TestHetznerBackupRestore(t *testing.T) {
 	if err := gzw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeS3{handler: func(r s3Req) (int, string) {
-		if r.Method == "GET" {
-			return 200, gz.String()
-		}
-		return 200, ""
-	}}
+	f := newFakeS3().seedObject("bkt", "prod/20260701T000000Z.sql.gz", gz.String(), "")
 	withFakeS3(t, f)
 
 	var got []byte
@@ -368,6 +390,20 @@ func TestHetznerBackupRestore(t *testing.T) {
 	}
 	if payload["ok"] != true || payload["action"] != "restore" {
 		t.Errorf("restore receipt = %v, want ok/restore", payload)
+	}
+	// THE DECLARED EXEMPTION, asserted as data. A restore's post-condition is
+	// inside the target Postgres and this verb holds S3 credentials only, so the
+	// receipt must SAY the restored state is not confirmed rather than carry a
+	// confirmed_present nothing read.
+	if payload["confirmation"] != "unavailable" || payload["confirmed_present"] != false {
+		t.Errorf("restore receipt = %v, want confirmation:unavailable and confirmed_present:false", payload)
+	}
+	note, _ := payload["note"].(string)
+	if !strings.Contains(note, "not confirmed") || !strings.Contains(note, "Postgres") {
+		t.Errorf("restore receipt note = %q, want it to name the unconfirmed post-condition and where it lives", note)
+	}
+	if _, invented := payload["bytes"]; invented {
+		t.Errorf("restore receipt = %v, must not invent a byte count for a stream it did not measure", payload)
 	}
 }
 

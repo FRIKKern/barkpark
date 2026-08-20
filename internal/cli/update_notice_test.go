@@ -192,6 +192,44 @@ func TestNoticeStaleCacheFetchesAndStamps(t *testing.T) {
 	}
 }
 
+// TestNoticeResolveWritesReleaseCache: the update-notice background resolve is
+// network-bearing, so it must also warm the release cache a later network-free
+// whoami reads its freshness verdict from — not only update-check.json.
+func TestNoticeResolveWritesReleaseCache(t *testing.T) {
+	noticeFixture(t)
+	withCLIVersion(t, "0.0.1")
+	srv := fakeReleaseTree(t, "cli-v0.0.2", nil)
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	// A cold release cache before the run makes the write observable.
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("release cache must start cold")
+	}
+	var stderr bytes.Buffer
+	finishUpdateNotice(&stderr, startUpdateCheck("whoami"))
+
+	rc, fresh := readReleaseCache()
+	if !fresh || rc.Latest != "0.0.2" {
+		t.Fatalf("release cache = %+v fresh=%v, want fresh latest 0.0.2 from the notice resolve", rc, fresh)
+	}
+}
+
+// TestNoticeFailedResolveWritesNoReleaseCache: a fetch that fails must leave the
+// release cache untouched — no verdict is cached from a resolve that never
+// produced one.
+func TestNoticeFailedResolveWritesNoReleaseCache(t *testing.T) {
+	noticeFixture(t)
+	withCLIVersion(t, "0.0.1")
+	deadReleaseBase(t) // connection refused → the fetch fails fast
+
+	var stderr bytes.Buffer
+	finishUpdateNotice(&stderr, startUpdateCheck("whoami"))
+
+	if _, fresh := readReleaseCache(); fresh {
+		t.Errorf("a failed notice resolve must write no release cache")
+	}
+}
+
 func TestNoticeNetworkFailureIsSilentButStamps(t *testing.T) {
 	root := noticeFixture(t)
 	withCLIVersion(t, "0.0.1")

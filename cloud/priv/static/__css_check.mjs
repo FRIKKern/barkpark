@@ -75,9 +75,9 @@
 //       `node __css_check.mjs --orphan-check __css_check.orphan.fixture.css`
 //       (exit 1). Both fixture proofs are executed by __app.test.mjs.
 //   E11 banned source line-number citation (charter D41; bp-honest-gates D5):
-//       any scanned SPA / preview-harness file (top-level *.js|*.mjs +
-//       __preview__/*) citing `app.js:<line>` (also `app.js ~<line>` or an
-//       `app.js:<a>-<b>` range). THE RULING is a BAN,
+//       any scanned SPA / preview-harness / STYLESHEET file (top-level
+//       *.js|*.mjs|*.css + __preview__/*) citing `app.js:<line>` (also
+//       `app.js ~<line>` or an `app.js:<a>-<b>` range). THE RULING is a BAN,
 //       not a resolver: three separate blocks in one wave cited line numbers
 //       that were wrong on arrival or wrong the moment a sibling slice shifted
 //       the file +39 lines, so every live occurrence was ALREADY stale — there
@@ -94,6 +94,77 @@
 //       check 19 focus rules painted a 1.19–1.52:1 band while E5 was green. A
 //       rule carrying an opaque border-color is compliant (that border IS the
 //       indicator); full predicate on focusIndicatorErrors below.
+//   E13 an unpainted deployment status: a status in DEPLOY_STATUSES with no
+//       `.dep-<status>` rule in app.css. The `dep-pill dep-` E3 allowlist waives
+//       the whole dynamic head, so the emitted VALUE SPACE was unchecked and
+//       `cancelled` shipped ruleless — falling through to the .dep-pill base,
+//       which is byte-identical to .dep-queued, so an aborted deploy painted as
+//       one still waiting. Full boundary on DEPLOY_STATUSES below.
+//   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
+//
+//         A rule whose selector is WRAPPER-SCOPED onto the pill
+//         (`<wrapper> .status-pill` — one or more descendant/child steps then
+//         `.status-pill`, and nothing after it) AND which declares AT LEAST ONE
+//         of the five CORE properties must declare ALL FIVE, at the canonical
+//         value: white-space: normal | height: auto | min-height: 24px |
+//         padding-top: 2px | padding-bottom: 2px.
+//
+//       WHY AN INSTRUMENT AND NOT AN EXTRACTION. This epic hand-built the same
+//       five-declaration wrap three times (`.detail-rail`, `.fleet-status`,
+//       `.instance-card-head`). D210 ruled the third copy deliberate and made
+//       THE FOURTH HOST the extraction trigger. Wave 19 reached the fourth host
+//       and REFUSED the trigger, because driving it showed the axis was wrong:
+//       the five-declaration recipe applied to `.op-gate` does NOT fix it (every
+//       clipped cell stays clipped — it hides the symptom and leaves the label
+//       unreadable), while ONE declaration, `.op-gate .status-pill { flex: 0 0
+//       auto }`, is 64/64 at every width. Host COUNT is not the sin. DIVERGENCE
+//       between the copies is, and nothing measured it. E14 measures it, so a
+//       fourth copy that drifts from the shared core stops being possible.
+//       THREE DESIGN CHOICES ARE LOAD-BEARING — each proven by a driven leg in
+//       __app.test.mjs; do not "simplify" any of them:
+//         1. TRIGGER ON DECLARATION, NOT ON SELECTOR. "every wrapper-scoped
+//            `.status-pill` rule must carry the core" would false-red a future
+//            `.foo .status-pill { margin-left: 4px }`. Triggering on
+//            declares-any-core-property makes the rule SELF-SCOPING: start the
+//            recipe and you must finish it; don't start it and E14 is silent.
+//         2. DO NOT ASSERT THE JACKET. `align-items: flex-start` (2 of 3
+//            copies), the `-dot`/`-detail`/`-label` sibling rules and the
+//            wrapper's own `flex-wrap` are per-HOST. `.detail-rail` carries no
+//            `align-items` and no `-dot`/`-detail` rules and must GREEN; a
+//            jacketless synthetic fourth host must GREEN.
+//         3. PIN THE CORE AS A LITERAL (WRAP_CORE below), never derive it as
+//            the intersection of what the copies happen to declare — that is
+//            self-fulfilling: a fourth copy dropping `min-height` would shrink
+//            the intersection and pass.
+//       THE BASE `.status-pill` IS EXCLUDED BY SELECTOR SHAPE, NOT BY AN
+//       ALLOWLIST: it declares `height: 24px` and `white-space: nowrap` — core
+//       PROPERTIES at non-core VALUES, by design. Requiring at least one
+//       descendant/child combinator excludes it structurally, so the exclusion
+//       cannot go stale when the base rule is renamed or moved.
+//       TWO ANTI-VACUITY GUARDS, because a scan that stops seeing the copies
+//       would otherwise report clean: zero wrapper-scoped copies is itself an
+//       error, and the three known survivor selectors are PINNED as
+//       required-present (same-file pins under pin-your-own/derive-foreign),
+//       which closes the PARTIAL blindness the zero-guard misses.
+//       COVERAGE BOUNDARY (charter D40 — a check states what it does NOT own):
+//       E14 is STATIC and owns the DECLARATION-PARITY class ONLY.
+//         • It cannot see whether a copy actually WRAPS when rendered. The host
+//           needs `flex-wrap: wrap` on the WRAPPER; a copy with all five core
+//           declarations inside a non-wrapping host is GREEN here and broken on
+//           screen. The complement is overflow-guard.mjs's rendered legs — a
+//           DELIBERATE SPLIT, not a duplicate.
+//         • It cannot see a host that SHOULD have copied the recipe and did
+//           not. Nothing static knows which wrappers hold a long-labelled pill.
+//         • It asserts nothing about the base `.status-pill`, and nothing about
+//           the jacket (see choice 2).
+//         • It reads LONGHAND declarations only: a `padding: 2px 11px`
+//           shorthand neither triggers E14 nor satisfies `padding-top`. The
+//           three live copies are longhand and the canonical recipe is stated
+//           in longhand; a shorthand copy is a shape this check does not see.
+//       Fixture: __css_check.wrapparity.fixture.css; targeted run:
+//       `node __css_check.mjs --wrap-parity-check
+//       __css_check.wrapparity.fixture.css` (exit 1). Executed, both
+//       directions, by __app.test.mjs.
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -190,7 +261,7 @@ const ALLOW_PREFIXES = [
   "choice-ico sm ",    // provider row mini-tile: + m.cls (same brand-* set)
   "token-row",         // token row (GR33 lean line item, no longer a .fleet-row): + (revoked ? " is-revoked" : "")
   "dot ",              // badge(): + esc(kind) (up | down | unknown | online | offline | warn)
-  "dep-pill dep-",     // deployment status pill: + esc(st) (live | failed | building | pushing | queued)
+  "dep-pill dep-",     // deployment status pill: + esc(st) — the value space is NOT this comment's; it is DEPLOY_STATUSES below, and E13 checks it
   "deploy-fail",       // deploy-fail row: + (failureTone === "blocked" ? " deploy-fail--blocked" : "")
   "deploy-console",    // + (open ? "" : " is-collapsed")
   "tier",              // + " tier-current" / " tier-free" conditionals
@@ -234,7 +305,55 @@ const ALLOW_PREFIXES = [
   "set-matrix-cell",               // notifMatrixCellHtml(): + (isDefault ? " set-matrix-cell--default" : "")
   "fresh-badge fresh-badge--",     // freshnessBadge(): + m.dot (up | down | deploy | rebuild) + optional " is-rebuilding"
   "usage-bar-quota",               // usageMeterHtml(): + (tone === "ok" ? " dim" : "") (.usage-bar-quota / .dim)
+  // cch-w26-s5: promoted OUT of KNOWN_GAPS. The demotion's stated reason —
+  // "the suffix set comes from fixture text" — is REFUTED by the emitter.
+  // coherenceFixtureToHtml() (grep -n 'function coherenceFixtureToHtml' app.js)
+  // replaces on `/\b(info|warn|ok|danger)\b/g`: a CLOSED four-way alternation
+  // written in CODE. The fixture only chooses among the four the regex already
+  // names; it cannot introduce a fifth. `bp-lc-hex` is a SEPARATE literal head
+  // in the same function, not a capture. All five composable classes have rules
+  // (grep -n 'bp-lc' app.css). So this head is MORE bounded than most entries
+  // above, whose closed sets live only in a trailing comment. The closed-ness
+  // itself is pinned by a leg that can lose in __app.test.mjs (role-adjacent
+  // words outside the set emit no bp-lc- span) — widening the alternation reds
+  // that test, which an allowlist entry alone could never do.
+  "bp-lc-",                        // coherenceFixtureToHtml(): + captured role word (info | warn | ok | danger) — closed alternation in code
 ];
+
+// ── E13: the .dep-* VALUE SPACE, derived instead of described ───────────────
+// The `dep-pill dep-` entry above is an E3 allowlist: it waives the whole
+// dynamic head, so before this list existed NOTHING checked which suffixes the
+// head can actually take. The comment on that entry claimed five statuses and
+// the server has six — `cancelled` shipped with no rule at all and fell through
+// to the .dep-pill base, which is byte-identical to .dep-queued, so a terminal
+// abort painted as "still waiting". A comment cannot fail; this list can.
+//
+// THE SOURCE OF TRUTH is Ecto: BarkparkCloud.Registry.Deployment's @statuses
+// (grep: `grep -n '@statuses' cloud/lib/barkpark_cloud/registry/deployment.ex`
+// — verified at review; the module and path both resolve, which is the point of
+// citing them at all).
+// It is COMMITTED here rather than parsed out of the .ex file on purpose — this
+// checker is a zero-dependency static reader of three static assets and must not
+// grow a cross-language parser (E11's cross-language boundary, same reasoning).
+// The cost of the copy is that a SEVENTH server status lands here unnoticed; the
+// mitigation is that adding a status to the Ecto enum without adding it here is
+// the same review that must add the CSS rule anyway, and app.js emits
+// `dep-` + esc(st) for whatever the server sends, so the omission is visible the
+// first time that status renders.
+//
+// WHAT E13 OWNS: every status in this list has SOME rule in app.css whose
+// selector names `.dep-<status>` (grouped selectors count — `.dep-building,
+// .dep-pushing {…}` satisfies both). WHAT IT DOES NOT OWN: whether that rule
+// says anything DISTINCT. A rule that only re-states the base would pass here;
+// what stops that is CONTRAST_PAIRS plus the driven computed-style proof in the
+// slice's evidence, not this check.
+// cch-w64-s6: "deferred" added — the enum this list claims to mirror
+// (registry/deployment.ex) carries SEVEN values, and the missing word is why the
+// check called `.dep-deferred`'s total ABSENCE of a rule green while the raw
+// status rode into the DOM. The word alone REDS origin/main (E13, naming
+// `.dep-deferred`), so it co-merges with the rule in the same commit — a
+// deliberate guard+fix co-merge, not a guard weakened to fit.
+const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled", "deferred"];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
@@ -273,16 +392,19 @@ const KNOWN_GAPS = [
   // "notice-" E2 (fleetRolloutBannerHtml now emits whole class names), and the
   // E3 head:"" entry (all THREE var-then-concat sites — notifMatrixCellHtml,
   // freshnessBadge and usageMeterHtml's quota trailer — are inline-concat now).
-  // E3 — dynamic class heads the static walker cannot classify (var-then-concat).
-  // The SOLE survivor, and it is NOT a missing-rule gap: .bp-lc-info|warn|ok|
-  // danger|hex all have rules now, but E3 is an ALLOW_PREFIXES MEMBERSHIP
-  // question, not a rule-existence one, so authoring the CSS clears the
-  // "bp-lc-hex" E2 and leaves this firing. Kept demoted rather than allowlisted
-  // deliberately: unlike every other allowlisted head, the composed suffix here
-  // is a REGEX CAPTURE from an arbitrary committed fixture file, so the closed
-  // role set (info|warn|ok|danger) is an assumption about that file's contents
-  // rather than a property of this code. Demoting keeps it printed on every run.
-  { file: "app.js", head: "bp-lc-", why: "coherenceFixtureToHtml paints regex-captured role words as `bp-lc-` + word; .bp-lc-* rules now exist, but the suffix set comes from fixture text, so this stays reported rather than allowlisted" },
+  // cch-w26-s5 retired the LAST entry — the E3 `bp-lc-` head. It was demoted on
+  // the stated reason that "the composed suffix is a REGEX CAPTURE from an
+  // arbitrary committed fixture file, so the closed role set is an assumption
+  // about that file's contents rather than a property of this code." That reason
+  // is false against the emitter: coherenceFixtureToHtml() in app.js replaces on
+  // a CLOSED four-way alternation `/\b(info|warn|ok|danger)\b/g` written in code
+  // (grep -n 'function coherenceFixtureToHtml' app.js), so the fixture selects
+  // among four and cannot introduce a fifth. It is now an ALLOW_PREFIXES member,
+  // with the closed-ness pinned by a test that reds if the alternation widens.
+  //
+  // THE LIST IS NOW EMPTY, AND THAT IS THE POINT: the checker no longer exits 0
+  // by having been told to ignore a row it attributes to an open backlog task.
+  // Whatever lands here next must carry an owner and a way out, not a waiver.
 ];
 
 // E6 — the conscious raw-color exceptions (decision 28). EXACT trimmed line
@@ -317,6 +439,7 @@ const CONTRAST_PAIRS = [
   { fg: "--muted-text", bg: "--surface", min: 4.5, why: "secondary copy on cards" },
   { fg: "--dim", bg: "--bg", min: 4.5, why: "tertiary copy (.dim)" },
   { fg: "--dim", bg: "--muted-surface", min: 4.5, why: "tertiary copy on muted" },
+  { fg: "--dim", bg: "--surface", min: 4.5, why: ".dep-cancelled pill text — the chip is hollow (background: transparent), so its label composites straight onto the .deploys card" },
   { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "avatar label / step dots" },
   { fg: "--btn-fg", bg: "--btn-bg", min: 4.5, why: ".btn-primary label" },
   { fg: "--btn-danger-fg", bg: "--btn-danger-bg", min: 4.5, why: ".btn-danger label" },
@@ -327,6 +450,10 @@ const CONTRAST_PAIRS = [
   { fg: "--danger", bg: "--surface", min: 4.5, why: "error text (.deploy-fail, .wh-del-err)" },
   { fg: "--danger", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".dep-failed pill text" },
   { fg: "--warn-strong", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".dep-building pill text" },
+  // cch-w64-s6: `.dep-deferred` keeps the warn hue but gives up the filled chip
+  // (it no longer holds a build slot), so its ground is the CARD itself — the
+  // one pair the tinted variant would not have owed.
+  { fg: "--warn-strong", bg: "--surface", min: 4.5, why: ".dep-deferred pill text on an open chip" },
   { fg: "--text", bg: "--ok-soft", over: "--surface", min: 4.5, why: ".notice-ok copy" },
   { fg: "--text", bg: "--warn-soft", over: "--surface", min: 4.5, why: ".notice-warn copy" },
   { fg: "--text", bg: "--danger-soft", over: "--surface", min: 4.5, why: ".notice-error copy" },
@@ -519,6 +646,100 @@ export function orphanCommentErrors(cssRawText, file = "app.css") {
   return errs;
 }
 
+// ── E14: wrap-recipe declaration parity (charter D220) ───────────────────────
+// The full ruling, the three load-bearing design choices and the coverage
+// boundary are stated in the E14 entry of this file's header. What follows is
+// the executable form of that invariant — the durable artifact.
+//
+// THE CORE, PINNED AS A LITERAL (design choice 3). Deriving it from the copies
+// would let a fourth copy dropping a property redefine the contract.
+const WRAP_CORE = [
+  ["white-space", "normal"],
+  ["height", "auto"],
+  ["min-height", "24px"],
+  ["padding-top", "2px"],
+  ["padding-bottom", "2px"],
+];
+// The three copies that survived wave 18, pinned as REQUIRED-PRESENT. A
+// same-file pin is the correct form here (pin-your-own, derive-foreign): it
+// closes the PARTIAL-blindness case the zero-copies guard cannot see — a scan
+// that degrades to finding 1 of 3 still reports "clean" without this.
+// W20-S6 added `.attention-row` as the FOURTH copy and it is pinned here in the
+// same commit. Without this line the fourth copy was COUNTED but not
+// REQUIRED — a scan degrading to 3-of-4 that lost exactly the attention
+// queue's copy would still have reported clean, which is the partial
+// blindness these pins exist to close.
+const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"];
+// WRAPPER-SCOPED: one or more descendant/child steps, then `.status-pill`, and
+// NOTHING after it. The trailing anchor keeps `.detail-rail .status-pill-label`
+// and `.status-pill--ok .status-pill-dot` out; requiring a leading step keeps
+// the BASE `.status-pill` out structurally rather than by allowlist.
+const WRAPPER_SCOPED_PILL = /^\s*(\S[^{}]*?)[\s>]+\.status-pill\s*$/;
+
+export function wrapParityErrors(cssRawText, file = "app.css") {
+  const stripped = stripCssComments(cssRawText);
+  const errs = [];
+  const copies = []; // { selector, host, line, declared: Map }
+  // Innermost `{…}` blocks only: a prelude cannot contain a brace, so an
+  // `@media` wrapper never matches as a selector and its inner rules do.
+  for (const m of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const prelude = m[1];
+    const body = m[2];
+    const declared = new Map();
+    for (const seg of body.split(";")) {
+      const c = seg.indexOf(":");
+      if (c === -1) continue;
+      const prop = seg.slice(0, c).trim().toLowerCase();
+      if (!/^[a-z-]+$/.test(prop)) continue;
+      declared.set(prop, seg.slice(c + 1).trim().replace(/\s*!important$/, ""));
+    }
+    // DESIGN CHOICE 1 — the trigger is the DECLARATION, not the selector. A
+    // wrapper-scoped rule that touches none of the five is not a wrap copy and
+    // is not even counted.
+    if (!WRAP_CORE.some(([p]) => declared.has(p))) continue;
+    for (const part of prelude.split(",")) {
+      const hit = part.match(WRAPPER_SCOPED_PILL);
+      if (!hit) continue;
+      const selector = part.trim().replace(/\s+/g, " ");
+      const line = lineOf(stripped, m.index + prelude.indexOf(part.replace(/^\s+/, "")));
+      copies.push({ selector, host: hit[1].trim().replace(/\s+/g, " "), line, declared });
+      const missing = WRAP_CORE.filter(([p, v]) => declared.get(p) !== v).map(
+        ([p, v]) => `${p}: ${v} (${declared.has(p) ? `declared "${declared.get(p)}"` : "not declared"})`,
+      );
+      if (missing.length) {
+        errs.push(
+          `E14 ${file}:${line}  ${selector} declares ${WRAP_CORE.filter(([p]) => declared.has(p))
+            .map(([p]) => p)
+            .join(", ")} — starting the wrap recipe — but DIVERGES from the shared core: ` +
+            `${missing.join("; ")}. A wrapper-scoped .status-pill rule that declares ANY of the five ` +
+            `must declare ALL five at the canonical value (white-space: normal; height: auto; ` +
+            `min-height: 24px; padding-top: 2px; padding-bottom: 2px) — charter D220. The jacket ` +
+            `(align-items, the -dot/-detail rules, the wrapper's flex-wrap) is per-host and is NOT asserted.`,
+        );
+      }
+    }
+  }
+  // ANTI-VACUITY 1 — zero copies is a broken scan, not a clean stylesheet.
+  if (!copies.length) {
+    errs.push(
+      `E14 ${file}  ZERO wrapper-scoped .status-pill wrap copies found — a vacuous green. ` +
+        `This check exists because three such copies ship; seeing none means the scan stopped ` +
+        `seeing them (a selector shape changed, a parse broke), not that they agree.`,
+    );
+  }
+  // ANTI-VACUITY 2 — a scan degrading to 1-of-3 also reports clean without this.
+  for (const host of WRAP_REQUIRED_HOSTS) {
+    if (!copies.some((c) => c.host === host)) {
+      errs.push(
+        `E14 ${file}  the pinned wrap copy \`${host} .status-pill\` is MISSING — either the copy ` +
+          `was deleted (a shipped wrap regression) or the scan can no longer see it (partial ` +
+          `blindness). Re-derive by grep before editing this pin.`,
+      );
+    }
+  }
+  return { errors: errs, copies };
+}
+
 // ── E11: banned source line-number citation (charter D41; bp-honest-gates D5) ─
 // THE RULING — a BAN, not a resolver. Argued from maintenance cost and from the
 // three measured occurrences, not taste: (a) every live `app.js:<line>` was
@@ -567,16 +788,41 @@ export function bannedSourceCitationErrors(src, file) {
   return errs;
 }
 
-// The files E11 scans: every top-level *.js|*.mjs plus __preview__/*.js|*.mjs.
-// Read from the directory (never a hardcoded list) so a NEW harness file is
-// covered the moment it lands — a fixed list is the enumerate-don't-ban shape
-// bp-honest-gates D5 forbids.
+// The files E11 scans: every top-level *.js|*.mjs|*.css plus __preview__/* of
+// the same extensions. Read from the directory (never a hardcoded list) so a
+// NEW harness file is covered the moment it lands — a fixed list is the
+// enumerate-don't-ban shape bp-honest-gates D5 forbids.
+//
+// WHY .css IS IN THE SET, AND WHY THE REGEX IS NOT THE LEVER (charter D292).
+// This scan read `/\.m?js$/` only — 15 files, and app.css was not one of them —
+// while app.css carried THREE live `app.js:<n>` citations and the gate reported
+// `0 error(s)`. The guard was green over a violation of the rule it enforces.
+// The defect was REACH, not SHAPE: an `app.js:<n>` inside a stylesheet is
+// unreachable at ANY regex width, so widening the CITATION pattern could not
+// have found it. Paired mutation that pins the diagnosis: the identical string
+// pasted into a scanned .mjs reds by name, and removed returns exit 0 — same
+// string, one file away, opposite outcomes.
+//
+// THE OTHER HALF IS DELIBERATELY NOT HERE. Widening the CITATION alternation
+// (cross-file `<name>.<ext>:<line>` shapes) surfaces 72 findings across the
+// existing scan set; shipping a tripwire together with 72 repairs reds the
+// fail-before gate, so that half stays on its own row,
+// cch-w16-s7-citation-anchors-e11-widening. This function widens the FILE SET
+// only, which surfaced exactly three — all repaired in the same commit that
+// widened it, which is why the widened guard is green here rather than vacuous.
+//
+// SCOPE OF THE EXTENSION, stated so the next reader does not have to measure:
+// the .css members of this set are app.css plus the three __css_check fixture
+// stylesheets. The fixtures are deliberately malformed CSS, but E11 is a
+// full-TEXT regex and never parses, so their content cannot destabilise it —
+// they are scanned for citations exactly like everything else. Re-derive the
+// membership with: ls cloud/priv/static/*.css cloud/priv/static/__preview__/
 function citationScanFiles() {
   const out = [];
-  const jsLike = (f) => /\.m?js$/.test(f);
-  for (const f of fs.readdirSync(dir)) if (jsLike(f)) out.push(f);
+  const scanned = (f) => /\.(m?js|css)$/.test(f);
+  for (const f of fs.readdirSync(dir)) if (scanned(f)) out.push(f);
   const pv = path.join(dir, "__preview__");
-  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (jsLike(f)) out.push(path.join("__preview__", f));
+  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
   return out.sort();
 }
 
@@ -609,6 +855,27 @@ function citationScanFiles() {
     const errs = orphanCommentErrors(fs.readFileSync(f, "utf8"), path.basename(f));
     for (const e of errs) console.error("FAIL  " + e);
     console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
+    process.exit(errs.length ? 1 : 0);
+  }
+}
+
+// Targeted fixture mode: `node __css_check.mjs --wrap-parity-check <file.css>`
+// runs ONLY the E14 wrap-recipe parity scan against one file and exits non-zero
+// if it fires — the committed D220 proof (see __css_check.wrapparity.fixture.css).
+// Symmetric with --swallow-check and --orphan-check above, and added for the
+// same reason they were: an instrument with no way to be run against a known-bad
+// input is an instrument that cannot fail. Per E9's own lesson, every diagnostic
+// below cites the file it ACTUALLY read, never a hard-coded app.css.
+{
+  const i = process.argv.indexOf("--wrap-parity-check");
+  if (i !== -1) {
+    const f = process.argv[i + 1];
+    const { errors: errs, copies } = wrapParityErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    for (const e of errs) console.error("FAIL  " + e);
+    console.log(
+      `__css_check --wrap-parity-check ${f}: ${copies.length} wrapper-scoped wrap copy(ies) ` +
+        `[${copies.map((c) => `${c.selector}:${c.line}`).join(", ")}], ${errs.length} E14 error(s)`,
+    );
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1194,6 +1461,20 @@ for (const b of badTokens) {
   );
 }
 
+// E13 — every server-side deployment status is painted. Derived from
+// DEPLOY_STATUSES (the Ecto @statuses enum), never from the E3 allowlist's
+// prose. `css` is comment-stripped, so a selector that survives only inside a
+// comment does NOT count.
+for (const st of DEPLOY_STATUSES) {
+  if (cssClasses.has(`dep-${st}`)) continue;
+  errors.push(
+    `E13 app.css  deployment status "${st}" has no .dep-${st} rule — the ` +
+      `dep-pill dep- head emits it, so it falls through to the .dep-pill base ` +
+      `and paints as an untouched/queued deployment. Add a rule next to the ` +
+      `other .dep-* rules in the DEPLOYMENTS section.`,
+  );
+}
+
 // E5 — the contrast manifest, both themes.
 runContrast(errors);
 
@@ -1208,6 +1489,13 @@ for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 // E10 — comment nesting coherence: an orphan `*/` swallows the next whole rule
 // (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
 for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
+
+// E14 — wrap-recipe declaration parity (charter D220): the three hand-built
+// copies share a byte-identical five-declaration core wearing three different
+// jackets, and nothing asserted that the core still agrees. The copy inventory
+// is printed below so the count is the SCAN's claim, never a comment's.
+const wrapParity = wrapParityErrors(cssRaw);
+for (const e of wrapParity.errors) errors.push(e);
 
 // E11 — banned source line-number citation (charter D41 / bp-honest-gates D5):
 // `app.js:<line>` in a comment of any scanned SPA / harness file. The shape is
@@ -1341,6 +1629,14 @@ if (process.env.CSS_CHECK_VERBOSE) {
     );
   }
 }
+
+// E14 inventory: the copies the scan actually SAW, with their true line
+// numbers. Printed unconditionally so a scan degrading to fewer copies is
+// visible in the log even before the pins turn it red.
+console.log(
+  `\nE14 ${wrapParity.copies.length} wrapper-scoped .status-pill wrap copy(ies): ` +
+    `${wrapParity.copies.map((c) => `${c.selector} (app.css:${c.line})`).join(", ")}`,
+);
 
 if (unconsumed.length) {
   console.log(`\nR2  defined but not yet consumed: ${unconsumed.join(", ")}`);

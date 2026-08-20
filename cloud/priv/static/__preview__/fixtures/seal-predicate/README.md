@@ -12,6 +12,7 @@ predicate so it is a test, not a manual run.
 | `orphan-residue.json` | a resolvable successor AND one unforwarded live row — proves the refusals did not replace clause (a) |
 | `self-successor.json` | R4: the successor IS the epic, with every live row in `forwarded` — the shape that measured `a=PASS` over 83 live rows before R4 existed |
 | `terminal-clean.json` | TERMINAL accepted: live==0 AND considering==0, read from the roster |
+| `terminal-empty-roster.json` | `terminal-clean.json` with `children` EMPTIED: the live-only empty-roster floor does not apply to a fixture, so this is the hermetic, history-free way to pin the `Sealed 0 children of …` fabrication the floor exists to prevent |
 | `terminal-one-live-row.json` | TERMINAL refuted by one open row — the token is not the claim |
 | `terminal-one-considering-row.json` | TERMINAL refuted by one `considering` row |
 | `considering-residue.json` | a `considering` row is residue: counted into clause (a) and named, never silently exempt |

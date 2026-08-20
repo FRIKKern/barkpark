@@ -397,6 +397,55 @@ func (r *supportAddRun) run() int {
 }
 
 // ── narration helpers ────────────────────────────────────────────────────────
+//
+// The three composers below are PURE: no receiver, no I/O, one server answer in
+// and the printed sentence out. They exist so the success-claim registry
+// (success_claim_registry_test.go) can CALL the production sentence instead of
+// mirroring its format string — stepOnline and stepDNS drive ssh + network and
+// cannot be rendered, and a mirror only ever pins the mirror.
+//
+// PDS-D431: each one takes the SERVER'S ANSWER WHOLE and does its own
+// extraction. Handing them pre-destructured leaves (a status, a capacity map, a
+// fqdn list) would move the destructuring back into the caller — and an
+// argument the caller stops passing is exactly the drop these rows exist to
+// catch, so the hole would re-open one frame up.
+
+// supportOnlineNarration composes stepOnline's ONLINE receipt from the MAIN'S
+// ROSTER ROW — a decoded JSON body (supportRosterRow returns map[string]any),
+// never from anything the local verb already knew. Both measured facts (the
+// row's status and its capacity) are read HERE.
+func supportOnlineNarration(name string, row map[string]any) string {
+	st, _ := row["status"].(string)
+	capMap, _ := row["capacity"].(map[string]any)
+	return fmt.Sprintf("%s reads %s with capacity %s on the main's roster", name, st, supportCompactJSON(capMap))
+}
+
+// supportDNSNarration composes stepDNS's sweep receipt — BOTH branches, so the
+// clean/swept fork and the fqdn mapping live in one place. `deleted` is what
+// the ZONE returned (the rrset names it actually removed), and the names are
+// qualified against the zone here rather than by the caller.
+func supportDNSNarration(zone, ip string, deleted []string) string {
+	if len(deleted) == 0 {
+		return fmt.Sprintf("no A records in %s resolve to %s (already clean)", zone, ip)
+	}
+	fqdns := make([]string, 0, len(deleted))
+	for _, n := range deleted {
+		fqdns = append(fqdns, cloud.Fqdn(n, zone))
+	}
+	return fmt.Sprintf("%d A record(s) deleted: %s (the census re-reads the zone)", len(deleted), strings.Join(fqdns, ", "))
+}
+
+// supportCapacityNarration renders the box's MEASURED size class for the human
+// receipt. Until now max_class rode the machine envelope only, so the human
+// sentence carried no measured fact at all and arm 3 had nothing to attribute
+// on both surfaces. A degraded measure is stated as degraded — never silently
+// omitted and never guessed.
+func supportCapacityNarration(maxClass string) string {
+	if maxClass == "" {
+		return "not measured (degraded) — the listener measures itself at each beat"
+	}
+	return maxClass + " (measured on the box by fleet-run.sh capacity)"
+}
 
 func (r *supportAddRun) state(step, msg string) { r.out.progressf("→ %s: %s", step, msg) }
 func (r *supportAddRun) done(step, msg string)  { r.out.progressf("✓ %s — %s", step, msg) }
@@ -591,7 +640,15 @@ func (r *supportAddRun) stepBind() (int, bool) {
 				written,
 				"the Cloud session is missing or dead — not logged in; run `bp login` first, then re-run `bp cloud support add "+r.name+"`",
 				exitAuth)
-		case status == http.StatusUnprocessableEntity && supportCPErrorCode(resp) == "no_team":
+		// The teamless refusal, on BOTH sides of the control plane's status
+		// conversion: today 422 {"error":"no_team"}, after #9956
+		// 403 {"error":"forbidden","reason":"no_team","scope":"team"}. Reading the
+		// STATUS alone would drop this caller into the 403 arm below and hand a
+		// user who HAS NO TEAM a sentence about a team-admin ROLE — which cannot be
+		// granted without a team, and which points at re-authenticating a
+		// credential that is fine. The CAUSE the server named decides, so the
+		// sentence, the fix and the exit code are identical across the flip.
+		case supportCPNoTeam(status, resp):
 			return r.fail("bind", "control-plane support registration refused: "+reason,
 				written,
 				"your Cloud login has no active team — run `bp team use <team>`, then re-run `bp cloud support add "+r.name+"`",
@@ -796,7 +853,7 @@ func (r *supportAddRun) stepOnline() (int, bool) {
 			lastStatus = st
 			capMap, hasCap := row["capacity"].(map[string]any)
 			if (st == "idle" || st == "working" || st == "blocked") && hasCap && len(capMap) > 0 {
-				r.done("online", fmt.Sprintf("%s reads %s with capacity %s on the main's roster", r.name, st, supportCompactJSON(capMap)))
+				r.done("online", supportOnlineNarration(r.name, row))
 				return exitOK, false
 			}
 		}
@@ -838,6 +895,7 @@ func (r *supportAddRun) success() int {
 	r.out.outf("  main:   %s (%s/%s, scrubbed pull)", r.base, r.ws, r.dataset)
 	r.out.outf("  box:    %s at %s (hetzner, label %s=%s)", r.host.Name, r.host.IP, cloud.FleetSupportLabelKey, r.name)
 	r.out.outf("  agent:  %s (hand it %s via the ssh one-liner above)", r.agent, spec.keyVar)
+	r.out.outf("  size:   max class %s", supportCapacityNarration(r.maxClass))
 	r.out.outf("  next:   `bp fleet roster` shows it; route an order by naming assignee=%s", r.name)
 	return exitOK
 }
@@ -1225,15 +1283,7 @@ func (r *supportRemoveRun) stepDNS() (int, bool) {
 		r.out.errf("⚠ dns: sweep failed: %s%s — continuing; the census below is the truth", err, got)
 		return exitOK, false
 	}
-	if len(deleted) == 0 {
-		r.done("dns", fmt.Sprintf("no A records in %s resolve to %s (already clean)", zone, ip))
-		return exitOK, false
-	}
-	fqdns := make([]string, 0, len(deleted))
-	for _, n := range deleted {
-		fqdns = append(fqdns, cloud.Fqdn(n, zone))
-	}
-	r.done("dns", fmt.Sprintf("%d A record(s) deleted: %s (the census re-reads the zone)", len(deleted), strings.Join(fqdns, ", ")))
+	r.done("dns", supportDNSNarration(zone, ip, deleted))
 	return exitOK, false
 }
 
@@ -1453,6 +1503,40 @@ func supportCPErrorCode(body []byte) string {
 		return ""
 	}
 	return m.Error
+}
+
+// supportCPRefusalReason reads the CAUSE an authority gate names alongside the
+// generic code — {"error":"forbidden","reason":"no_team","scope":"team"}. Decoded
+// SEPARATELY from the code (the cloudclient idiom) so a route sending a non-string
+// reason costs only the reason, never the code the branch above keys on.
+func supportCPRefusalReason(body []byte) string {
+	var m struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(m.Reason)
+}
+
+// supportCPNoTeam reports whether the control plane refused because the caller's
+// login has NO ACTIVE TEAM, in either shape the team gate emits: the 422 whose
+// code IS the cause, and the 403 whose code is the generic "forbidden" and whose
+// `reason` names it. One predicate, so the two shapes cannot drift into two
+// different narrations.
+func supportCPNoTeam(status int, body []byte) bool {
+	switch status {
+	case http.StatusUnprocessableEntity:
+		return supportCPErrorCode(body) == "no_team"
+	case http.StatusForbidden:
+		// Either shape at the new status: the cause in `reason` beside the generic
+		// code, or the cause AS the code. Reading only the first would drop a flat
+		// 403 {"error":"no_team"} into the role arm — the exact mis-narration this
+		// predicate exists to prevent, one status later.
+		return supportCPRefusalReason(body) == "no_team" || supportCPErrorCode(body) == "no_team"
+	default:
+		return false
+	}
 }
 
 // supportParseCPRowID reads the created row id out of the CP's 201 {barkpark}.

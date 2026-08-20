@@ -1243,8 +1243,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
       ) do
     socket =
       case socket.assigns.streaming do
-        text when is_binary(text) and text != "" -> append_message(socket, :assistant, text)
-        _ -> socket
+        %{text: text} when is_binary(text) and text != "" ->
+          append_message(socket, :assistant, text)
+
+        _ ->
+          socket
       end
 
     line =
@@ -1275,6 +1278,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
        socket,
        StudioChat.rail_apply_codex_item(socket.assigns.rail, item, lifecycle)
      )}
+  end
+
+  # Codex runtime FAILURE events (codex/protocol.ex): `:protocol_error` (framing
+  # buffer overflow at :139, malformed JSONL at :157), a bare `:error` frame, and
+  # `:process_failed` (the codex process exiting non-zero). Each carries an `error`
+  # map with the reason. Without a clause they fell to the bare %Runtime.Event{}
+  # catch-all below and rendered NOTHING — a hard failure left the transcript
+  # silent (recorder.ex records these kinds; only this LiveView surface was dark).
+  # Surface the reason as an honest :system line. Purely additive: the turn
+  # lifecycle (status/streaming) is left to the terminal turn_completed / DOWN
+  # paths, so a mid-stream malformed line does not falsely settle the turn.
+  def handle_info(
+        {:studio_chat_runtime_event, %Runtime.Event{kind: kind, error: error}},
+        socket
+      )
+      when kind in [:protocol_error, :error, :process_failed] do
+    {:noreply, append_message(socket, :system, codex_failure_line(kind, error))}
   end
 
   def handle_info({:studio_chat_runtime_event, %Runtime.Event{}}, socket),
@@ -1824,6 +1844,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
        :system,
        "Couldn't publish the approved plan as a Paper — the plan is still approved."
      )}
+  end
+
+  # The Session hit its stdout buffer cap (claude_chat.ex D126): the CLI streamed
+  # bytes without a newline past the reassembly cap, so the Session force-closed
+  # the port and stopped itself. It sends this NAMED reason before the DOWN
+  # follows; without a clause it fell through to the catch-all no-op and the user
+  # saw only the generic "ended unexpectedly" DOWN banner. Surface the captured
+  # reason honestly, mirroring the :claude_chat_exit path (the stderr tail is
+  # appended when the CLI wrote one). Ordered before the DOWN handler so the
+  # named message wins the race against the bare process-down that follows.
+  def handle_info({:claude_chat_error, :buffer_overflow, stderr_tail}, socket) do
+    reason = stderr_reason(stderr_tail)
+
+    base =
+      "Claude sent more data than this session can buffer, so it was stopped. " <>
+        "Send a message to resume it."
+
+    message = if reason != "", do: base <> "\n" <> reason, else: base
+
+    {:noreply, teardown_session(socket, message)}
   end
 
   # A bare process DOWN with no prior exit frame (an unexpected Session crash, or
@@ -5075,6 +5115,48 @@ defmodule BarkparkWeb.Studio.ChatLive do
     do: %{model: model, session_id: nil, permission_mode: nil}
 
   defp replay_init(_), do: nil
+
+  # Honest failure copy for a codex runtime failure event (protocol_error /
+  # error / process_failed). Names the failure class, then the scrubbed reason
+  # from protocol.ex's `error` map (message/detail, with the machine code in
+  # parens) when one is present.
+  defp codex_failure_line(kind, error) do
+    label =
+      case kind do
+        :process_failed -> "The codex process exited unexpectedly"
+        :protocol_error -> "The codex stream hit a protocol error"
+        _ -> "The codex turn ended with an error"
+      end
+
+    case codex_error_detail(error) do
+      "" -> label <> "."
+      detail -> label <> " — " <> detail <> "."
+    end
+  end
+
+  defp codex_error_detail(error) when is_map(error) do
+    reason =
+      [error["message"], error["detail"]]
+      |> Enum.map(&codex_error_text/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+      |> Enum.join(" — ")
+
+    code = codex_error_text(error["code"])
+
+    cond do
+      reason != "" and code != "" -> reason <> " (" <> code <> ")"
+      reason != "" -> reason
+      code != "" -> code
+      true -> ""
+    end
+  end
+
+  defp codex_error_detail(_), do: ""
+
+  defp codex_error_text(value) when is_binary(value), do: String.trim(value)
+  defp codex_error_text(value) when is_integer(value), do: Integer.to_string(value)
+  defp codex_error_text(_), do: ""
 
   defp append_message(socket, role, text, opts \\ []) do
     id = socket.assigns.next_id

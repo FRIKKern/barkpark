@@ -47,7 +47,8 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # scaffy:add-block-type ApiEndpoint MARK:parity-count-test-api-endpoint
     # scaffy:add-block-type CodeTabs MARK:parity-count-test-code-tabs
     # scaffy:add-block-type Tabs MARK:parity-count-test-tabs
-    assert length(GenPdParity.types()) == 60
+    # jdf-bl-historiene-renderer-reconciliation: +duel +lineage
+    assert length(GenPdParity.types()) == 62
   end
 
   test "both members of all 3 alias pairs are present" do

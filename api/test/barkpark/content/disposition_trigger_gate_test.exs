@@ -16,10 +16,15 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
 
   This file is the probe that measured both, kept as the regression fence. The
   four PROBE cases below are quoted from the pre-fix measurement; three of them
-  RED on pre-fix code and one PASSES on purpose — case (c) documents an
-  inherited, unclosed exemption (see `mutations.ex`, "RESIDUAL HARM, MEASURED
-  (disposition)"), and its inversion later would be the intended signal, not a
-  regression.
+  RED on pre-fix code, and case (c) pinned an inherited exemption that wave 24
+  could not close at its own seam.
+
+  PDS wave 28 closed case (c). It now asserts the REFUSAL its own comment asked
+  for — "if this test ever inverts, that is the intended signal that the birth
+  fence landed" — against `Writer.ensure_task_born_adjudicated/5`, and a
+  companion case proves the fence did not become a ban on filing an
+  already-adjudicated row. The rest of the birth/adoption surface lives in
+  `Barkpark.Content.TaskBirthFenceTest`.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -330,27 +335,30 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
     end
   end
 
-  # ── PROBE (c) — the inherited exemption, PINNED, not closed ────────────────
+  # ── PROBE (c) — the inherited exemption, NOW CLOSED (PDS wave 28) ──────────
 
-  describe "PROBE (c): the fresh-create exemption" do
-    test "a createOrReplace on a BRAND-NEW id carrying a hollow park is still ACCEPTED",
+  describe "PROBE (c): the fresh-create exemption, closed" do
+    test "a createOrReplace on a BRAND-NEW id carrying a hollow park is now REFUSED",
          %{scope: scope} do
       id = uniq("disp-fresh")
 
-      # THIS TEST PASSES ON PURPOSE, PRE-FIX AND POST-FIX. The exemption is
-      # inherited and unclosable at this seam: `ensure_*("task", nil, ...)`
-      # returns :ok for every sibling guard, and the plain `create` clause calls
-      # no guard at all. A birth has no prior revision and no prior term, so a
-      # guard here would degrade from a fence into a ban on FILING an
-      # already-adjudicated row — which is exactly the dataset-importer shape
-      # the substrate anticipates.
+      # THIS TEST IS THE INVERSION THE PRE-WAVE-28 VERSION ASKED FOR, VERBATIM:
+      # "If this test ever inverts, that is the intended signal that the birth
+      # fence landed — not a regression." It used to assert {:ok, _} and pin the
+      # residual harm named in mutations.ex — a fleet file-order minting rows
+      # with createOrReplace could birth a hollow park, and because the term
+      # never changed again the update-path fence could never see it.
       #
-      # The residual harm is real and named in mutations.ex rather than implied
-      # away: a fleet file-order that mints rows with createOrReplace can still
-      # birth a hollow park. Closing it needs an attribution requirement on task
-      # BIRTHS, which is a separate fence. If this test ever inverts, that is
-      # the intended signal that the birth fence landed — not a regression.
-      assert {:ok, _} =
+      # The fence is `Writer.ensure_task_born_adjudicated/5`, a sibling of
+      # `Tasks.Dedup.check_new_task/5` in do_create_document's `with` chain —
+      # the one place where prev_doc is resolved (so "birth" is expressible) and
+      # opts is in hand (so replication keeps its carve-out). It did NOT become
+      # "a ban on FILING an already-adjudicated row": the importer shape the old
+      # comment defends still works — a COMPLETE adjudication is born (see
+      # Barkpark.Content.TaskBirthFenceTest), and only a hollow or
+      # off-vocabulary one is refused. What changed is that the birth door now
+      # refuses exactly what the sanctioned verb refuses.
+      assert {:error, {:invalid_task_content, %{"reopen_trigger" => [message]}}} =
                mutate(
                  [
                    %{
@@ -369,8 +377,38 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
                  scope
                )
 
+      assert message =~ "required when a task is BORN"
+      assert message =~ "bp task stage"
+
+      # And the refusal is side-effect-free — no half-born row.
+      assert {:error, _} = Content.get_document("drafts." <> id, "task", @dataset, scope)
+    end
+
+    test "the SAME birth with a reopen trigger is accepted — a fence, not a ban", %{scope: scope} do
+      id = uniq("disp-fresh-ok")
+
+      assert {:ok, _} =
+               mutate(
+                 [
+                   %{
+                     "createOrReplace" => %{
+                       "_id" => id,
+                       "_type" => "task",
+                       "title" => id,
+                       "content" => %{
+                         "kind" => "task",
+                         "lifecycle_status" => "open",
+                         "disposition" => "parked",
+                         "reopen_trigger" => "when the importer's upstream row moves"
+                       }
+                     }
+                   }
+                 ],
+                 scope
+               )
+
       assert content_of(id, scope)["disposition"] == "parked"
-      refute Map.has_key?(content_of(id, scope), "reopen_trigger")
+      assert content_of(id, scope)["reopen_trigger"] == "when the importer's upstream row moves"
     end
   end
 end

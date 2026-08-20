@@ -22,7 +22,15 @@ defmodule BarkparkWeb.Telemetry do
       # `prometheus_metrics/0` and holds the running aggregates in ETS; the
       # token-gated `GET /v1/instance/metrics` route scrapes them. It runs in
       # EVERY env (not dev-gated) so the prod hole cannot reopen unnoticed.
-      {TelemetryMetricsPrometheus.Core, name: :barkpark_metrics, metrics: prometheus_metrics()}
+      {TelemetryMetricsPrometheus.Core, name: :barkpark_metrics, metrics: prometheus_metrics()},
+
+      # Distributions in Core keep every observation in ETS until a scrape folds
+      # them into buckets. `prometheus_metrics/0` puts distributions on
+      # `barkpark.repo.query.*`, which fire per QUERY, so an instance nobody
+      # scrapes grows that table without bound — see the module doc for the
+      # measurements. This prunes only when the endpoint looks unused, so an
+      # instance with a real Prometheus attached is unaffected.
+      BarkparkWeb.Telemetry.DistributionPruner
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -74,6 +82,38 @@ defmodule BarkparkWeb.Telemetry do
       last_value("vm.memory.total",
         unit: {:byte, :kilobyte},
         description: "Total BEAM memory — watch for a monotonic climb (leak → OOM)."
+      ),
+      # Q: "WHICH subsystem is growing?" — the total above says a leak exists but
+      # not where it lives. telemetry_poller's default vm measurement already
+      # emits the full nine-key `:erlang.memory()` map on [:vm, :memory] every
+      # 10s; only the subscription was narrow. These four break the total down
+      # into the answers that change what you do: processes (a leaking GenServer
+      # state / mailbox), binary (the classic refc-binary leak), ets (an
+      # unbounded cache table), code (module churn / hot-loading).
+      #
+      # UNIT DISCIPLINE (charter D64): every BEAM gauge here carries
+      # `unit: {:byte, :kilobyte}` to match `vm.memory.total` above.
+      # TelemetryMetricsPrometheus.Core scales the value but keeps the
+      # event-derived NAME, so these render unsuffixed (`vm_memory_processes`,
+      # not `..._kilobytes`) — an unsuffixed BYTE gauge sitting beside these
+      # unsuffixed KILOBYTE ones is exactly how a 1024x unit error renders as a
+      # phantom memory leak. Same unit or an explicit `_bytes` suffix, never
+      # neither.
+      last_value("vm.memory.processes",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory held by processes — climbs on leaking state or mailboxes."
+      ),
+      last_value("vm.memory.binary",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory in refc binaries — the classic binary leak."
+      ),
+      last_value("vm.memory.ets",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory in ETS tables — climbs on an unbounded cache."
+      ),
+      last_value("vm.memory.code",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory holding loaded code — climbs on module churn."
       ),
       # Q: "is the scheduler backing up?" — run-queue length is the twin health
       # signal to memory; a sustained non-zero backlog means the box is overloaded

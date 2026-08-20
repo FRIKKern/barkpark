@@ -190,10 +190,23 @@ defmodule BarkparkCloud.Accounts.UserToken do
   end
 
   @doc """
-  Changeset for a PAT row. Forces `context = "pat"`, requires a name + owner,
-  validates the abilities against the bounded vocabulary, and ENFORCES the
+  Changeset for a PAT row. Forces `context = "pat"`, requires a name + owner +
+  TEAM, validates the abilities against the bounded vocabulary, and ENFORCES the
   exclusivity rules server-side (never trust the client) via
   `normalize_abilities/1`.
+
+  `team_id` IS REQUIRED, and that is a security invariant rather than tidiness
+  (cch-w30-s6 review). `Accounts.revoke_team_pats/2` ends a removed member's
+  programmatic access with `where: t.team_id == ^tid` — team-scoped on purpose,
+  since a `user_id`-only blast radius would cross tenants. A PAT row with a NULL
+  `team_id` is therefore invisible to that filter and would OUTLIVE the
+  membership it was minted under: a credential still reading and writing on a
+  team its holder was removed from, which is the exact defect s6 exists to fix.
+  The column is nullable (session rows legitimately leave it NULL) and until now
+  the only thing keeping PATs team-bound was the `is_nil(current_team)` → 422
+  `no_team` guard at `POST /v1/tokens` — one route's cond branch, not a property
+  of the row. A second minting call site would have silently produced
+  unrevokable credentials. Now the row itself refuses.
   """
   def pat_changeset(token, attrs) do
     token
@@ -207,7 +220,7 @@ defmodule BarkparkCloud.Accounts.UserToken do
       :team_id
     ])
     |> put_change(:context, "pat")
-    |> validate_required([:token_hash, :name, :user_id])
+    |> validate_required([:token_hash, :name, :user_id, :team_id])
     |> validate_length(:name, min: 3, max: 255)
     |> validate_subset(:abilities, @abilities)
     |> normalize_abilities()

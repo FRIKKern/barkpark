@@ -21,9 +21,12 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
        This IS the health gate — a slow/failing update blocks advancement.
     3. ADVANCE — otherwise trigger the next eligible `behind` instance
        (`Registry.next_autoupdate_candidate/0`, oldest-stale first) and stamp it
-       in-flight. A 202/409 is accepted (it is updating); a 503 means the box
-       never armed one-click apply, so we pause it rather than retry forever; any
-       other outcome is transient and simply retried next tick.
+       in-flight. ONLY a 202 is a run THIS tick started; a 409 is the instance's
+       `already_running` — a run in flight that is NOT ours, marked in-flight and
+       left to the settle grace, never announced as ours and never paused for
+       being busy (cch-w58-s2). A 503 means the box never armed one-click apply,
+       so we pause it rather than retry forever; any other outcome is transient
+       and simply retried next tick.
 
   Serial (cohort of 1) is the SAFEST v1 canary — every instance is proven live
   on the new release before the next is touched. Parallel cohorts that grow once
@@ -118,42 +121,76 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
   # eligible only when the staging gate is GREEN — either no staging box is
   # registered (fail-OPEN) or a staging box has settled current on the latest
   # release. A staging box that is behind/in-flight/paused blocks prod.
+  #
+  # WHAT A 202 MEANS AND WHAT A 409 MEANS ARE NOT THE SAME SENTENCE (cch-w58-s2,
+  # CORRECTED IN REVIEW). Only a 202 is a run THIS TICK started. A 409 is the
+  # instance's `already_running` and nothing else on this route — the box's own
+  # handler answers 202 started / 409 already_running / 503 disabled / 500
+  # start_failed (`api/lib/barkpark_web/controllers/self_update_controller.ex`
+  # `trigger/2`), and `Registry.trigger_self_update/2` relays that status intact.
+  #
+  # So a 409 is NOT a refusal. A run IS in flight; it simply is not ours (a human
+  # pressing Apply in the Console, or a tick whose 202 we never saw). Three things
+  # follow, and the first shipped build of this slice got the last two backwards:
+  #
+  #   * we do NOT say we triggered it — the log states what actually happened.
+  #   * we do NOT pause the box. Pausing a merely-BUSY box would disable
+  #     autoupdate on it until an operator resumes, on the strength of a customer
+  #     doing exactly what the Console invites them to do.
+  #   * we do NOT step past it to another box. Serial-of-1 is this worker's
+  #     stated safety property — "every instance is proven live on the new
+  #     release before the next is touched" — and triggering a second box while
+  #     this one is mid-run would make that sentence unsupportable.
+  #
+  # The row IS in flight, so it is marked in flight, and the SETTLE path bounds it
+  # exactly as it bounds our own runs: settles current → cleared; still not
+  # current after the grace → paused for investigation. That containment can lose,
+  # and it is the only thing that ever paused a wedged runner.
   defp advance do
     case next_gated_candidate() do
       nil ->
         :ok
 
       bp ->
-        case Registry.trigger_self_update(bp) do
-          {:ok, status, _body} when status in [202, 409] ->
-            _ = Registry.mark_autoupdate_triggered(bp)
-
-            Logger.info(
-              "autoupdate: triggered #{bp.slug} (HTTP #{status}) → #{bp.update_latest_release}"
-            )
-
-          {:ok, 503, _body} ->
-            _ = Registry.pause_autoupdate(bp)
-
-            Logger.warning(
-              "autoupdate: #{bp.slug} has no one-click apply (503) — paused (needs BARKPARK_SELF_UPDATE_APPLY=1)"
-            )
-
-          {:ok, status, _body} ->
-            Logger.warning(
-              "autoupdate: #{bp.slug} trigger returned HTTP #{status} — will retry next tick"
-            )
-
-          {:error, reason} ->
-            Logger.warning(
-              "autoupdate: #{bp.slug} trigger failed (#{inspect(reason)}) — will retry next tick"
-            )
-        end
+        trigger_candidate(bp)
     end
   rescue
     e ->
       Logger.error("autoupdate: advance failed: #{Exception.message(e)}")
       :ok
+  end
+
+  defp trigger_candidate(bp) do
+    case Registry.trigger_self_update(bp) do
+      {:ok, 202, _body} ->
+        _ = Registry.mark_autoupdate_triggered(bp)
+
+        Logger.info("autoupdate: triggered #{bp.slug} (HTTP 202) → #{bp.update_latest_release}")
+
+      {:ok, 409, _body} ->
+        _ = Registry.mark_autoupdate_triggered(bp)
+
+        Logger.warning(
+          "autoupdate: #{bp.slug} already had a run in flight (HTTP 409 already_running) — NOT started by this tick; waiting for it to settle"
+        )
+
+      {:ok, 503, _body} ->
+        _ = Registry.pause_autoupdate(bp)
+
+        Logger.warning(
+          "autoupdate: #{bp.slug} has no one-click apply (503) — paused (needs BARKPARK_SELF_UPDATE_APPLY=1)"
+        )
+
+      {:ok, status, _body} ->
+        Logger.warning(
+          "autoupdate: #{bp.slug} trigger returned HTTP #{status} — will retry next tick"
+        )
+
+      {:error, reason} ->
+        Logger.warning(
+          "autoupdate: #{bp.slug} trigger failed (#{inspect(reason)}) — will retry next tick"
+        )
+    end
   end
 
   # Staging first; prod only behind a green staging gate. A behind staging box is

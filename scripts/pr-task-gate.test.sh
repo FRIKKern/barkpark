@@ -181,6 +181,14 @@ done
 if [ -z "$port" ]; then echo "TEST HARNESS FAIL: the fixture server never announced a port" >&2; exit 99; fi
 BASE="http://127.0.0.1:$port"
 
+# Hermeticity: the token-matrix rows below distinguish token-PRESENT from
+# token-ABSENT, and check()'s subshell INHERITS the caller's environment — a
+# developer running this harness with LEDGER_TOKEN exported (say, after poking
+# the gate by hand) would red every token-absent row for a reason that has
+# nothing to do with the gate. CI never sets it on the self-test step; make the
+# local run match.
+unset LEDGER_TOKEN
+
 pass=0 fail=0
 check() { # check <label> <expected_exit> <env...>
   local label="$1" want="$2"; shift 2
@@ -214,7 +222,7 @@ check_says() { # check_says <label> <expected_exit> <substring> <env...>
 check "active task passes"          0 'TASK_ID=active'
 check "open task fails"             1 'TASK_ID=openone'
 check "in_progress but unclaimed"   1 'TASK_ID=claimless'
-check "nonexistent task fails"      1 'TASK_ID=ghost'
+check "nonexistent task fails"      1 'TASK_ID=ghost LEDGER_TOKEN=harness-token'
 check "garbled json is neutral"     2 'TASK_ID=garbled'
 check "no task ref fails"           1 'TASK_ID='
 check "wrong worker fails"          1 'TASK_ID=active EXPECTED_WORKER=nobody'
@@ -272,16 +280,99 @@ check "done needs no PR_OPENED_AT"        0 'TASK_ID=doneclosed'
 check "lapsed actor matches worker"  0 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=fable-tob"
 check "lapsed actor wrong worker"    1 "TASK_ID=lapserecent PR_OPENED_AT=$PR_OPEN EXPECTED_WORKER=nobody"
 
+# -- THE RED MUST CARRY THE WHOLE CURE, not a third of it ---------------------
+# Wave 24: six PRs green on every code gate sat red for hours on this one
+# required context. The message named the violation and handed over `bp task
+# claim` — and stopped there, one step short of landing anything. Re-claiming
+# does NOT re-fire this check (a ledger write is not a pull_request event), and
+# releasing the claim afterwards trips the ordering clause FOREVER (release
+# merges released_at into the surviving claim and never touches expired_at). An
+# exit code cannot see any of that: all three renderings exit 1 either way, so
+# these assert the WORDS. Delete any one clause from CURE and exactly the cases
+# below go red.
+# REVIEW ADDITION: the cure is owed by every refusal a re-claim actually fixes,
+# not just the two the brief named. All six 'open'/in_progress claim refusals
+# below land a reader in the same place — the ledger is wrong, a fresh claim is
+# the fix, and the check will not re-evaluate on its own. Leaving four of them
+# carrying only `bp task claim` reproduced the exact wave-24 stall on a narrower
+# input: the reader does the claim, watches the red sit, and gives up. The
+# RELEASED refusal is the sharpest of the four — it is the terminal state the
+# other messages warn about, so it is the one message a reader most needs the
+# re-fire clause on.
+for _who in "lapsed-before-open:1:TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN" \
+            "open-with-live-worker:1:TASK_ID=lapseworker PR_OPENED_AT=$PR_OPEN" \
+            "never-claimed:1:TASK_ID=openone PR_OPENED_AT=$PR_OPEN" \
+            "no-previous-worker:1:TASK_ID=lapsenoprev PR_OPENED_AT=$PR_OPEN" \
+            "no-readable-expiry:1:TASK_ID=lapsenodate PR_OPENED_AT=$PR_OPEN" \
+            "unreadable-expiry:1:TASK_ID=lapsebadtime PR_OPENED_AT=$PR_OPEN" \
+            "future-expiry:1:TASK_ID=lapsefuture PR_OPENED_AT=$PR_OPEN" \
+            "released-claim:1:TASK_ID=lapsereleased PR_OPENED_AT=$PR_OPEN" \
+            "in-progress-no-worker:1:TASK_ID=claimless"; do
+  _label="${_who%%:*}"; _rest="${_who#*:}"; _want="${_rest%%:*}"; _env="${_rest#*:}"
+  check_says "$_label red gives the claim cmd" "$_want" "bp task claim " "$_env"
+  check_says "$_label red says re-fire"        "$_want" "gh run rerun "  "$_env"
+  check_says "$_label red warns on release"    "$_want" "NO re-fire can clear" "$_env"
+done
+
+# The run id is INTERPOLATED when Actions supplies one, and degrades to a
+# readable literal when it does not. Both renderings are asserted because the
+# failure modes are opposite: a hardcoded placeholder in CI hands the reader a
+# command they must then go hunt the id for (and the check-runs API paginates at
+# 30, which is how a 36-check sha reported "no such run"), while a bare
+# `gh run rerun  --failed` outside CI reads as a broken command.
+check_says "re-fire interpolates the real run id" 1 "gh run rerun 29999999999 --failed" \
+  "TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN GITHUB_RUN_ID=29999999999"
+check_says "re-fire degrades outside Actions"     1 "gh run rerun <this run id> --failed" \
+  "TASK_ID=lapsestale PR_OPENED_AT=$PR_OPEN GITHUB_RUN_ID="
+
+# The refusal CITES the ordering clause by line number, which is the one part of
+# the message that rots silently: an edit above it shifts the clause and the
+# reader is sent to whatever now sits on that line. So read the citation back
+# OUT of the gate's own output and check what is actually there.
+: > "$fixtures/says.out"
+( TASK_ID=lapsestale PR_OPENED_AT="$PR_OPEN" LEDGER_BASE="$BASE" bash "$GATE" ) \
+  > "$fixtures/says.out" 2>&1
+cited_line="$(grep -oE 'pr-task-gate\.sh:[0-9]+' "$fixtures/says.out" | head -1)"
+cited_line="${cited_line##*:}"
+cited_src="$([ -n "$cited_line" ] && awk -v n="$cited_line" 'NR==n' "$GATE")"
+if [ -n "$cited_line" ] && printf '%s' "$cited_src" | grep -q 'released_ge_expired'; then
+  pass=$((pass+1)); printf 'ok   %-40s (line %s is the ordering clause)\n' "cited ordering-clause line is real" "$cited_line"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s cited line %s reads: %s\n' "cited ordering-clause line is real" "${cited_line:-<none>}" "${cited_src:-<nothing>}"
+fi
+
 # -- A 200 that carries no document is UNCHECKED, never an accusation (D59) ---
 # Both shapes used to print "task does not exist on the ledger" at a PR whose
 # task is fine. A genuine nonexistent task answers 404 and stays a definitive
 # red (`ghost`, above and below), so this reroute loses zero true detection.
 check_says "200 with result:null is UNCHECKED" 2 "carried no task document" 'TASK_ID=nullresult'
 check_says "200 with a bare doc is UNCHECKED"  2 "carried no task document" 'TASK_ID=baredoc'
-# ...and the 404 keeps the accusation, because there it is TRUE. Assert the
-# words: an exit code alone cannot tell "does not exist" from "could not check",
-# and printing the wrong one of those at a reader is the whole defect.
-check_says "404 still accuses definitively"    1 "does not exist on the ledger" 'TASK_ID=ghost'
+# ...and the 404 keeps the accusation WHEN WE READ AS OURSELVES, because there it
+# is TRUE: an authenticated read that gets 404 means the task really is not there.
+# Assert the words: an exit code alone cannot tell "does not exist" from "could
+# not check", and printing the wrong one of those at a reader is the whole defect.
+# (Token PRESENT is load-bearing here — a token-ABSENT 404 is UNCHECKED now; see
+# the token-matrix section below.)
+check_says "404 still accuses definitively"    1 "does not exist on the ledger" 'TASK_ID=ghost LEDGER_TOKEN=harness-token'
+
+# -- Authenticated ledger read: the private-flip token matrix (wave 3) ---------
+# fetch_doc sends `Authorization: Bearer $LEDGER_TOKEN` ONLY when the token is
+# non-empty, so a future flip of tasks to private cannot make main unmergeable:
+# authenticated reads still see the task. The three states that matter:
+#   token PRESENT + 404 → the task genuinely is not there → definitive FAIL (1).
+#   token ABSENT  + 404 → cannot tell missing from private → UNCHECKED (2), and
+#                         the message must NAME the secret so a reader knows the
+#                         fix is provisioning, not editing their PR.
+#   token PRESENT + 2xx → the happy path is unbroken; the auth header does not
+#                         perturb a task that reads fine.
+# MUTATION PROOF (recorded here so the guard is falsifiable): delete the `-H
+# Authorization` construction / the token-absent arm of the 404 case in
+# scripts/pr-task-gate.sh and the "token absent, 404 is UNCHECKED" row below
+# reds (a token-absent ghost reverts to the exit-1 accusation) — the row is not
+# satisfiable by the pre-change gate.
+check_says "token present, 404 accuses"        1 "does not exist on the ledger" 'TASK_ID=ghost LEDGER_TOKEN=harness-token'
+check_says "token absent, 404 is UNCHECKED"    2 "BARKPARK_TASK_TOKEN"          'TASK_ID=ghost'
+check      "token present, happy path passes"  0 'TASK_ID=active LEDGER_TOKEN=harness-token'
 
 # -- Bounded retry, then FAIL (D24) -------------------------------------------
 # A flaky ledger that 500s the first N requests per id and then answers. This is
@@ -338,14 +429,16 @@ check "two 500s then 200 passes"      0 "TASK_ID=blip1 LEDGER_BASE=$FLAKY PR_TAS
 check "one attempt does not retry"    2 "TASK_ID=blip2 LEDGER_BASE=$FLAKY PR_TASK_GATE_RETRIES=1"
 check "permanent 500 is UNCHECKED"    2 "TASK_ID=perma500 LEDGER_BASE=$FLAKY PR_TASK_GATE_RETRIES=3"
 check "unreachable host is UNCHECKED" 2 "TASK_ID=active LEDGER_BASE=http://127.0.0.1:1 PR_TASK_GATE_RETRIES=2"
-# A 404 is an ANSWER, not an outage, so it must not be retried: with a 5s
-# backoff and 3 attempts, a retried 404 could not finish inside 5s. Retrying an
-# answer would only make the verdict a function of the wall clock.
+# A 404 is an ANSWER, not an outage, so it must not be retried — and this holds
+# on the NEW token-absent branch too, which reroutes a 404 to UNCHECKED (exit 2):
+# with a 5s backoff and 3 attempts, a retried 404 could not finish inside 5s.
+# Retrying an answer would only make the verdict a function of the wall clock. No
+# LEDGER_TOKEN, so ghost's 404 takes the exit-2 arm; it must still fail FAST.
 t404=$SECONDS
 ( TASK_ID=ghost LEDGER_BASE="$BASE" PR_TASK_GATE_RETRIES=3 PR_TASK_GATE_RETRY_DELAY=5 bash "$GATE" ) >/dev/null 2>&1
 rc404=$?; el404=$((SECONDS - t404))
-if [ "$rc404" = 1 ] && [ "$el404" -lt 5 ]; then pass=$((pass+1)); printf 'ok   %-40s (exit 1, %ss)\n' "404 fails at once, never retried" "$el404"
-else fail=$((fail+1)); printf 'FAIL %-40s want exit 1 under 5s, got %s in %ss\n' "404 fails at once, never retried" "$rc404" "$el404"; fi
+if [ "$rc404" = 2 ] && [ "$el404" -lt 5 ]; then pass=$((pass+1)); printf 'ok   %-40s (exit 2, %ss)\n' "token-absent 404 fails fast, never retried" "$el404"
+else fail=$((fail+1)); printf 'FAIL %-40s want exit 2 under 5s, got %s in %ss\n' "token-absent 404 fails fast, never retried" "$rc404" "$el404"; fi
 
 # A retry count that is not a positive integer would make the bound test error
 # out, which reads as FALSE and retries forever — a gate that hangs instead of
@@ -508,11 +601,11 @@ mkdir -p "$gitrepo"
 SHA_PRE="$(cat "$gitrepo/.sha-pre")"
 SHA_POST="$(cat "$gitrepo/.sha-post")"
 
-cutoff_case() { # cutoff_case <label> <base_sha> <want_exit> <want_in_GITHUB_OUTPUT|-> [want_absent]
-  local label="$1" sha="$2" want="$3" wantout="$4" absent="${5:-}" got
+cutoff_case() { # cutoff_case <label> <base_sha> <want_exit> <want_in_GITHUB_OUTPUT|-> [want_absent] [want_in_stdout] [repo]
+  local label="$1" sha="$2" want="$3" wantout="$4" absent="${5:-}" saysub="${6:-}" repo="${7:-$gitrepo}" got
   local go="$fixtures/cutoff.output" ss="$fixtures/cutoff.summary" so="$fixtures/cutoff.out"
   : > "$go"; : > "$ss"; : > "$so"
-  ( cd "$gitrepo" && GITHUB_OUTPUT="$go" GITHUB_STEP_SUMMARY="$ss" BASE_SHA="$sha" \
+  ( cd "$repo" && GITHUB_OUTPUT="$go" GITHUB_STEP_SUMMARY="$ss" BASE_SHA="$sha" \
     bash --noprofile --norc -e -o pipefail "$fixtures/body.cutoff" ) > "$so" 2>&1
   got=$?
   cat "$ss" >> "$so"
@@ -524,6 +617,12 @@ cutoff_case() { # cutoff_case <label> <base_sha> <want_exit> <want_in_GITHUB_OUT
   fi
   if [ -n "$absent" ] && grep -qF -- "$absent" "$go"; then
     fail=$((fail+1)); printf 'FAIL %-40s GITHUB_OUTPUT contains %s and must not\n' "$label" "$absent"; return
+  fi
+  # What the step SAYS is part of the contract, not decoration: a grandfathered
+  # run is a green that verified nothing, and the only channel that reaches the
+  # check-run API is an annotation. Asserted on stdout+summary.
+  if [ -n "$saysub" ] && ! grep -qF -- "$saysub" "$so"; then
+    fail=$((fail+1)); printf 'FAIL %-40s output lacks %s (got: %s)\n' "$label" "$saysub" "$(tr '\n' ' ' < "$so")"; return
   fi
   pass=$((pass+1)); printf 'ok   %-40s (exit %s)\n' "$label" "$got"
 }
@@ -541,12 +640,46 @@ else
 fi
 
 cutoff_case "step cutoff: post-gate enforces"  "$SHA_POST" 0 "enforced=1"
-cutoff_case "step cutoff: pre-gate grandfathers" "$SHA_PRE" 0 "enforced=0"
+# REWRITTEN (wave 56 S4). This line used to read
+#   cutoff_case "step cutoff: pre-gate grandfathers" "$SHA_PRE" 0 "enforced=0"
+# and that expectation was WRONG — not about the exit code, about what the exit
+# code was allowed to mean. `enforced=0` makes every downstream step skip
+# (`if: enforced == '1'`), so this required context concluded SUCCESS having
+# verified no task at all, and on the check-run API that green is byte-identical
+# to one where a live claim was proven. The old assertion PINNED that silence as
+# correct: a run that said nothing passed, and so would a gate that had been
+# quietly disarmed. Grandfathering is still legitimate and still exits 0 — what
+# is no longer optional is SAYING SO on the channel that reaches the check run,
+# the same `nothing ran` disclosure the other three required contexts emit.
+cutoff_case "step cutoff: pre-gate grandfathers, and SAYS SO" "$SHA_PRE" 0 "enforced=0" "" \
+  "::notice title=PR task gate: green — nothing evaluated::"
 # The defect: an unresolvable base used to take the grandfather branch, which
 # skipped every downstream step and reported SUCCESS having checked nothing.
 # UNKNOWN must be a loud red, and must never write enforced= at all.
 cutoff_case "step cutoff: unknown base reds" "0000000000000000000000000000000000000000" 1 "-" "enforced="
 cutoff_case "step cutoff: garbage base reds" "not-a-sha-at-all" 1 "-" "enforced="
+
+# -- the rename tripwire: the cutoff must not outlive the file it tests for ----
+# The predicate is a hard-coded literal path to the workflow's OWN file. Move or
+# rename that file and the literal goes stale in silence: every open PR's base
+# lacks the path, so `enforced=0` FLEET-WIDE and the required context goes green
+# on every PR while checking nothing — and the PR performing the rename passes
+# too, because at ITS base the old path still exists. One rename, a disarmed
+# required gate, no red anywhere.
+# So the checkout is now self-checked: absent at HEAD = the cutoff cannot be
+# believed = FAIL CLOSED. This fixture is the guard's losing case — it hands the
+# step a base that DOES contain the gate (the enforcing path, i.e. the case that
+# would otherwise sail through) inside a checkout where the file has been
+# renamed away, and demands a red that names the reason.
+renamedrepo="$fixtures/basegit-renamed"
+cp -R "$gitrepo" "$renamedrepo" 2>/dev/null || { echo "TEST HARNESS FAIL: could not copy the hermetic base repo" >&2; exit 99; }
+(
+  cd "$renamedrepo" || exit 99
+  git mv .github/workflows/pr-task-gate.yml .github/workflows/pr-task-gate-renamed.yml
+  git commit -qm "rename the gate out from under its own predicate"
+) >/dev/null 2>&1 || { echo "TEST HARNESS FAIL: could not build the renamed-gate repo" >&2; exit 99; }
+cutoff_case "step cutoff: renamed gate fails closed" "$SHA_POST" 1 "-" "enforced=" \
+  "cannot trust its own cutoff" "$renamedrepo"
 
 # -- hotfix step: the emergency exit must engage regardless of LABEL ORDER -----
 # Until this block existed, `for _s in verify cutoff` extracted exactly two step
@@ -635,6 +768,151 @@ record_case() { # record_case <label> <token> <ledger base> <want exit> <want su
 record_case "hotfix record: no token REDS"   ""    "$REC_BASE"        1 "::error title=Hotfix override not recorded::"
 record_case "hotfix record: dead ledger REDS" "tok" "http://127.0.0.1:1" 1 "::error title=Hotfix override not recorded::"
 record_case "hotfix record: filed passes"    "tok" "$REC_BASE"        0 "::notice title=Hotfix lane::"
+
+# -- THE ESCAPE-LANE CENSUS, BIDIRECTIONAL ------------------------------------
+# THE DEFECT THIS EXISTS FOR: this workflow's exit-2 ::error told a blocked
+# human "if it stays down, the hotfix! lane is the documented override", and
+# merge-gates.md said in two places that without BARKPARK_TASK_TOKEN "the lane
+# still passes". The token is unprovisioned and the `hotfix!` label DOES exist,
+# so following that advice engaged a lane whose only surviving step exits 1 —
+# a required context turned into a guaranteed red, at 2am, by the gate's own
+# instructions. Prose and behaviour disagreed and nothing could notice.
+#
+# THE LAW, in both directions:
+#   the lane REFUSES  =>  no surface may promise it as an escape (zero hits)
+#   the lane PASSES   =>  some surface must document the escape (>= one hit)
+# Side A is a PROCESS EXIT CODE (this workflow's own hotfix_record body, run
+# verbatim). Side B is TEXT IN A DIFFERENT FILE. Neither can satisfy the other
+# by construction, so this is not a tautology.
+#
+# HONEST LIMIT OF SIDE B — READ THIS BEFORE TRUSTING IT. The scan is a fixed,
+# hand-maintained vocabulary of the KNOWN promissory phrasings ("still passes",
+# "documented override", "the lane passes"). It catches DRIFT-BACK of those
+# exact claims anywhere in the scanned surfaces; it is NOT a complete census of
+# escape promises, and a freshly-worded promise ("the label waives the check")
+# would pass it unseen. Widen PROMISES when you meet a new phrasing. What the
+# guard does guarantee is that the three sentences this slice deleted cannot
+# quietly return.
+#
+# SENTENCE-SCOPED, NOT LINE-SCOPED. merge-gates.md soft-wraps prose, so
+# origin/main's promise reads "the lane still\npasses" and a line-scoped grep
+# found 1 of the 3 promises — a vacuously partial green. The fixtures below pin
+# that difference with the pre-fix bytes themselves, and with a promise wrapped
+# across FOUR lines.
+promise_count() { # promise_count <line|sentence> <file>... -> hit count
+  python3 - "$@" <<'PY'
+import re, sys
+mode, paths = sys.argv[1], sys.argv[2:]
+# The hand-maintained vocabulary. See the honest-limit note above.
+PROMISES = [
+    r"still\s+passes",
+    r"documented\s+override",
+    r"lane\s+(?:still\s+)?passes",
+]
+hits = 0
+for p in paths:
+    text = open(p, encoding="utf-8").read()
+    if mode == "line":
+        units = text.splitlines()
+    else:
+        # Rejoin every wrapped line into one flat stream, then cut it into
+        # sentence-ish windows. A promise split across any number of lines
+        # lands inside exactly one window.
+        units = re.split(r"(?<=[.;:])\s", re.sub(r"\s+", " ", text))
+    for u in units:
+        if any(re.search(r, u, re.I) for r in PROMISES):
+            hits += 1
+print(hits)
+PY
+}
+
+# SIDE A — BEHAVIOUR. Run the workflow's own hotfix_record body with NO token
+# against a HEALTHY ledger stub. Healthy is deliberate: if a refactor ever moves
+# the token check below the curl, this case must red rather than quietly measure
+# an outage at the same exit 1. Hence the assertion is on the emitted ::error
+# TITLE and on the missing-secret wording, never on the bare RC.
+lane_out="$fixtures/census.laneA.out"
+: > "$lane_out"
+( GITHUB_STEP_SUMMARY="$fixtures/census.laneA.summary" LEDGER_BASE="$REC_BASE" TASK_TOKEN="" \
+  PR_NUMBER=4242 PR_TITLE="urgent: the roof is on fire" \
+  PR_URL="https://github.com/example/repo/pull/4242" \
+  bash --noprofile --norc -e -o pipefail "$fixtures/body.hotfix_record" ) > "$lane_out" 2>&1
+lane_rc=$?
+lane_title="$(sed -n 's/.*::error title=\([^:]*\)::.*/\1/p' "$lane_out" | head -1)"
+lane_can_pass=0
+[ "$lane_rc" = "0" ] && lane_can_pass=1
+if [ "$lane_rc" = "0" ]; then
+  fail=$((fail+1)); printf 'FAIL %-40s the lane PASSED with no token — the census law inverts, and the doc must now document it\n' "census A: no-token lane refuses"
+elif [ "$lane_title" != "Hotfix override not recorded" ]; then
+  fail=$((fail+1)); printf 'FAIL %-40s exit %s but the annotation title was [%s]\n' "census A: no-token lane refuses" "$lane_rc" "$lane_title"
+elif ! grep -qF -- 'BARKPARK_TASK_TOKEN is not set' "$lane_out"; then
+  fail=$((fail+1)); printf 'FAIL %-40s reds for the wrong reason (no missing-secret wording; the token check may have moved below the curl)\n' "census A: no-token lane refuses"
+elif grep -qF -- 'returned HTTP' "$lane_out"; then
+  fail=$((fail+1)); printf 'FAIL %-40s reported a LEDGER OUTAGE against a healthy stub — this case is measuring the wrong failure\n' "census A: no-token lane refuses"
+else
+  pass=$((pass+1)); printf 'ok   %-40s (exit %s, title=%s)\n' "census A: no-token lane refuses" "$lane_rc" "$lane_title"
+fi
+
+# SIDE B — PROSE. The doc that owns the topic, plus this workflow's own ::error
+# strings (the text a blocked human actually reads).
+census_errors="$fixtures/census.workflow-errors.txt"
+grep -F '::error' "$WORKFLOW" > "$census_errors" || :
+[ -s "$census_errors" ] || { echo "TEST HARNESS FAIL: no ::error strings found in $WORKFLOW — side B would be vacuous" >&2; exit 99; }
+census_doc="docs/ops/merge-gates.md"
+[ -f "$census_doc" ] || { echo "TEST HARNESS FAIL: $census_doc not found — side B would be vacuous" >&2; exit 99; }
+promises="$(promise_count sentence "$census_doc" "$census_errors")"
+
+if [ "$lane_can_pass" = "0" ] && [ "$promises" != "0" ]; then
+  fail=$((fail+1)); printf 'FAIL %-40s the lane REFUSES but %s surface(s) still promise it as an escape (scan: %s + %s ::error strings)\n' "census law: refusal => no promises" "$promises" "$census_doc" "$WORKFLOW"
+elif [ "$lane_can_pass" = "1" ] && [ "$promises" = "0" ]; then
+  fail=$((fail+1)); printf 'FAIL %-40s the lane PASSES but no surface documents the escape\n' "census law: passing => documented"
+else
+  pass=$((pass+1)); printf 'ok   %-40s (lane_can_pass=%s, promises=%s)\n' "census law holds in both directions" "$lane_can_pass" "$promises"
+fi
+
+# NECESSITY OF THE SENTENCE SCAN, pinned on the PRE-FIX BYTES. These three are
+# origin/main verbatim, wraps included: two from merge-gates.md and the one that
+# lived in this workflow's exit-2 ::error.
+prefix_doc="$fixtures/census.prefix.md"
+cat > "$prefix_doc" <<'EOF'
+   **hotfix lane** — a `hotfix!` label passes AND auto-files an override
+   task (needs the `BARKPARK_TASK_TOKEN` secret; without it the lane still
+   passes but logs that the record was not filed);
+- **`BARKPARK_TASK_TOKEN`** repo secret — a guerrilla write token, so the
+  `hotfix!` lane can auto-file its override task. Without it the lane still
+  passes (logs a warning); the token only closes the record-keeping gap.
+EOF
+prefix_err="$fixtures/census.prefix.err"
+cat > "$prefix_err" <<'EOF'
+            echo "::error title=Ledger unreachable::Re-run this check once the ledger is up; if it stays down, the hotfix! lane is the documented override (docs/ops/merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+EOF
+got_sentence="$(promise_count sentence "$prefix_doc" "$prefix_err")"
+got_line="$(promise_count line "$prefix_doc" "$prefix_err")"
+if [ "$got_sentence" = "3" ]; then
+  pass=$((pass+1)); printf 'ok   %-40s (3 of 3 on the pre-fix bytes)\n' "census B: sentence scan finds all 3"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s wanted 3 promises on the pre-fix bytes, got %s\n' "census B: sentence scan finds all 3" "$got_sentence"
+fi
+if [ "$got_line" = "1" ]; then
+  pass=$((pass+1)); printf 'ok   %-40s (line scan sees 1 of 3 — the wrapped ones are invisible)\n' "census B: line scan is insufficient"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s the line-scoped variant was expected to find exactly 1 of 3 (got %s); if it now finds 3 the sentence scan is untested, if 0 the fixture drifted\n' "census B: line scan is insufficient" "$got_line"
+fi
+
+# ...and a promise soft-wrapped across FOUR lines, which is the shape a future
+# `fmt` pass produces and which no line-scoped grep can ever see.
+wrapped="$fixtures/census.wrapped.md"
+cat > "$wrapped" <<'EOF'
+Note that when the secret is absent the
+lane
+still
+passes, which is why nobody worries about it.
+EOF
+if [ "$(promise_count sentence "$wrapped")" = "1" ] && [ "$(promise_count line "$wrapped")" = "0" ]; then
+  pass=$((pass+1)); printf 'ok   %-40s (caught across 4 wrapped lines; line scan blind)\n' "census B: 4-line wrap is caught"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s sentence=%s line=%s (want 1 and 0)\n' "census B: 4-line wrap is caught" "$(promise_count sentence "$wrapped")" "$(promise_count line "$wrapped")"
+fi
 
 # -- the refusal must be MACHINE-READABLE, not just human-readable -------------
 # A red required check exposed output.title=null, output.summary=null and one

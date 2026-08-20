@@ -47,7 +47,11 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
 
   Options:
 
-    * `:start` — the reply to `start_deploy/2` (default `{:ok, 202, %{"status" => "started"}}`)
+    * `:start` — the reply to `start_deploy/2` (default `{:ok, 202, %{"status" => "started"}}`).
+      A LIST is consumed in order and the last entry repeats — the same semantics
+      `:polls` has, so a test can drive a start RETRY (deploy-truth W2: a
+      transient 5xx on the trigger, then the 409 the box answers once the run it
+      already took is in flight).
     * `:polls` — a list of `poll_deploy/3` replies, consumed in order; the last repeats
     * `:rollback` — the reply to `rollback/2` (default: a successful flip)
   """
@@ -131,7 +135,11 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
   @impl true
   def start_deploy(_bp, payload) do
     record({:start_deploy, payload})
-    fetch(:start, {:ok, 202, %{"status" => "started"}})
+
+    case fetch(:start, {:ok, 202, %{"status" => "started"}}) do
+      replies when is_list(replies) -> next_start(replies)
+      reply -> reply
+    end
   end
 
   @impl true
@@ -155,6 +163,22 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
   ## ---------------------------------------------------------------------------
   ## Store
   ## ---------------------------------------------------------------------------
+
+  # A sequenced `:start`, same contract as `:polls` — consumed in order, the last
+  # entry repeats so a driver that retries more than the test programmed sees a
+  # stable answer rather than a surprise default. `replies` is never empty here
+  # (an empty list would have been fetched as the falsy-safe default).
+  defp next_start(replies) do
+    key = owner()
+
+    Agent.get_and_update(@store, fn state ->
+      case get_in(state, [key, :start]) do
+        [only] -> {only, state}
+        [next | rest] -> {next, put_in(state, [key, :start], rest)}
+        _ -> {List.last(replies), state}
+      end
+    end)
+  end
 
   defp next_poll do
     ensure_store()

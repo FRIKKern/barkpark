@@ -416,6 +416,25 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     marker: 'bp-chart',
   },
   {
+    type: 'duel',
+    block: {
+      type: 'duel',
+      legendA: 'Med katalogen',
+      legendB: 'Bare hendene',
+      rows: [{ label: 'jobb', delta: '−30 %', valueA: '1 478', valueB: '2 121', source: 'commit:591fdcd53' }],
+    },
+    marker: 'bp-duel',
+  },
+  {
+    type: 'lineage',
+    block: {
+      type: 'lineage',
+      sourceDefault: 'paper:scaffy-benchmark',
+      nodes: [{ overline: '2026', title: 'Scaffy', value: '22', unit: 'kommandoer', body: 'B' }],
+    },
+    marker: 'bp-lineage',
+  },
+  {
     type: 'form',
     block: {
       type: 'form',
@@ -546,7 +565,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type ApiEndpoint MARK:js-count-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:js-count-code-tabs
     // scaffy:add-block-type Tabs MARK:js-count-tabs
-    expect(registered).toHaveLength(70)
+    expect(registered).toHaveLength(72)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {
@@ -593,6 +612,39 @@ describe('PortableDoc — the type-keyed renderer', () => {
     const html = renderPortableDocument([{ type: 'heading', level: 1, text: '<script>x</script>' }])
     expect(html).toContain('&lt;script&gt;')
     expect(html).not.toContain('<script>')
+  })
+
+  it('api-endpoint method never breaks out of the class attribute (XSS, fully-live surface)', () => {
+    // FULLY-LIVE surface: this emitter string is injected via
+    // dangerouslySetInnerHTML with no CSP and no sanitizer. The method-class
+    // modifier was raw `--${method.toLowerCase()}`; a quote+tag payload broke
+    // out of the class attribute into a live <img>. The fail-closed
+    // [a-z0-9-] slug neutralizes it. REDS if the slug fix is reverted.
+    const html = renderPortableDocument([
+      {
+        type: 'api-endpoint',
+        method: '"><img src=x onerror=alert(1)>',
+        path: '/x',
+      },
+    ])
+    // No attribute breakout — nothing escapes the class="…" quotes.
+    expect(html).not.toContain('"><img')
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('<script')
+    expect(html).not.toContain('onerror=')
+    // The badge text is HTML-escaped, not dropped (method is upper-cased first).
+    expect(html).toContain('&quot;&gt;&lt;IMG SRC=X ONERROR=ALERT(1)&gt;')
+    // The modifier slug keeps only [a-z0-9-] — no stray quote/angle bracket.
+    expect(html).toContain('bp-api-endpoint__method bp-api-endpoint__method--imgsrcxonerroralert1')
+  })
+
+  it('api-endpoint legit methods keep their byte-identical method--<m> class', () => {
+    for (const m of ['GET', 'POST', 'PUT', 'PATCH', 'DELETE']) {
+      const html = renderPortableDocument([{ type: 'api-endpoint', method: m, path: '/x' }])
+      expect(html).toContain(
+        `<span class="bp-api-endpoint__method bp-api-endpoint__method--${m.toLowerCase()}">${m}</span>`,
+      )
+    }
   })
 
   // ── Elixir-fidelity regressions caught by the cross-surface parity harness ──
@@ -822,6 +874,35 @@ describe('PortableDoc — the type-keyed renderer', () => {
       expect(html).not.toContain(
         "color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif\">rec",
       )
+    })
+
+    // `poster` — the block's optional resting frame. Twin of
+    // Figures.asciicast_html/4; the pd-golden fixture freezes the SET leg's
+    // bytes, these pin the UNSET leg and the escaping.
+    it('an asciicast poster rides data-cast-poster, between src and style', () => {
+      const html = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec', poster: 'npt:0:12' },
+      ])
+      expect(html).toContain(
+        'data-cast-src="https://ex.com/c.cast" data-cast-poster="npt:0:12" style=',
+      )
+    })
+
+    it('an unset / blank poster emits NO attribute (client keeps npt:0:1)', () => {
+      const unset = renderPortableDocument([{ type: 'asciicast', src: 'https://ex.com/c.cast' }])
+      expect(unset).not.toContain('data-cast-poster')
+      const blank = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', poster: '   ' },
+      ])
+      expect(blank).not.toContain('data-cast-poster')
+    })
+
+    it('a poster is attribute-escaped, never a mount-point breakout', () => {
+      const html = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', poster: 'npt:0:1" onerror="x' },
+      ])
+      expect(html).not.toContain('onerror="x')
+      expect(html).toContain('&quot;')
     })
   })
 

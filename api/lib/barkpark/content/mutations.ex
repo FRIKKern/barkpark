@@ -177,6 +177,7 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
+         :ok <- ensure_adoption_adjudicated(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
@@ -269,6 +270,7 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
+         :ok <- ensure_adoption_adjudicated(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <-
            Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
@@ -314,6 +316,7 @@ defmodule Barkpark.Content.Mutations do
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
+           :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
@@ -344,6 +347,7 @@ defmodule Barkpark.Content.Mutations do
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
+           :ok <- ensure_adoption_adjudicated(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
@@ -671,24 +675,35 @@ defmodule Barkpark.Content.Mutations do
   # `:source` is server-set (`MutateController` prepends `source: :api`), so a
   # request body can never reach the `:sync` value.
   #
-  # RESIDUAL HARM, MEASURED (disposition). The FRESH-CREATE exemption is
-  # inherited and unclosable at this seam: `ensure_*("task", nil, …), do: :ok`
-  # is the head of every sibling guard, and the plain `create` clause calls no
-  # guard at all. So a `createOrReplace` on a BRAND-NEW id carrying
-  # `disposition: "parked"` and no trigger is STILL ACCEPTED — measured, not
-  # assumed, and pinned by `test "a createOrReplace on a BRAND-NEW id carrying a
-  # hollow park is still ACCEPTED"`. That is not a preference: a birth has no
-  # prior revision and no prior term, so a guard there would degrade from a
-  # fence into a ban on FILING an already-adjudicated row and would break the
+  # THE FRESH-CREATE EXEMPTION IS STILL INHERITED HERE, AND IS NOW CLOSED
+  # DOWNSTREAM (PDS wave 28). `ensure_*("task", nil, …), do: :ok` is still the
+  # head of every sibling guard on this seam and the plain `create` clause still
+  # calls none of them — that is unchanged and correct, because a birth has no
+  # prior revision and no prior term for a CHANGE guard to compare against.
+  # What changed is that the create-family doors all funnel into
+  # `Content.create_document/4`, and `Writer.ensure_task_born_adjudicated/5` now
+  # sits in that chain where `prev_doc == nil` IS expressible: a birth carrying
+  # an off-vocabulary term, or a park with no reopen trigger, is refused there.
+  # It is a fence and not a ban — a COMPLETE adjudication is born, so the
   # dataset-importer shape the substrate anticipates (migration
-  # 20260528100000). The exposure is real and is stated rather than implied
-  # away: a fleet file-order that mints rows with `createOrReplace` can still
-  # birth a hollow park. Closing it needs an attribution requirement on task
-  # BIRTHS — a separate fence, tracked as its own row. If that pinning test ever
-  # inverts, that is the intended signal that the birth fence landed.
+  # 20260528100000) still works. The pinning test inverted on purpose.
+  #
+  # WHAT REMAINS, STATED NOT IMPLIED AWAY: a birth carrying NO disposition at
+  # all is logged and allowed (see that function's comment for why a hard
+  # requirement is a protocol change, not a fence), so "every task row is
+  # adjudicated" is NOT true by construction yet.
   @disposition_key "disposition"
   @reopen_trigger_key "reopen_trigger"
   @trigger_required_dispositions ~w(parked)
+
+  # PDS wave 28: the FOURTH durable key gets the SAME raw-door treatment as the
+  # term. `Tasks.Stage` screens a rerun that cannot fail (`git -C`, a `test`
+  # predicate, command substitution, `merge-base --is-ancestor`, a pipe-masked
+  # formatting tail) at the write seam — a screen a raw patch would walk
+  # straight past, leaving the sanctioned-writer property as decoration. Any
+  # CHANGE of the key through this door is refused and named to the verb;
+  # `now == was` is not a change, so bookkeeping passes untouched.
+  @disposition_rerun_key "disposition_rerun"
 
   defp ensure_disposition_via_verb("task", nil, _merged, _opts), do: :ok
 
@@ -707,6 +722,11 @@ defmodule Barkpark.Content.Mutations do
       now_term != was_term ->
         {:error, {:invalid_task_content, disposition_bypass_error(was_term, now_term)}}
 
+      # The RERUN changed through the raw door — the same bypass one field
+      # over. Route it to the verb, which screens a rerun that cannot fail.
+      merged[@disposition_rerun_key] != was[@disposition_rerun_key] ->
+        {:error, {:invalid_task_content, rerun_bypass_error(merged[@disposition_rerun_key])}}
+
       # The term is unchanged, but the trigger that makes a park honest is
       # being erased underneath it.
       now_term in @trigger_required_dispositions and
@@ -719,6 +739,68 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp ensure_disposition_via_verb(_type, _existing, _merged, _opts), do: :ok
+
+  # ── ADOPTION-BY-REPARENT (PDS wave 28, the birth fence's second half) ──────
+  #
+  # A birth-scoped fence is STRUCTURALLY BLIND to adoption. A task filed outside
+  # an epic carries no `parent_id`; giving it one later is an UPDATE with
+  # `prev_doc` non-nil, so `Writer.ensure_task_born_adjudicated/5` — and every
+  # other birth-scoped gate — never sees it. Without this guard the closure has
+  # a side door: file bare, then reparent in, and the row is inside the epic's
+  # denominator having never been adjudicated by anything.
+  #
+  # So: a `type:task` write that CHANGES `content.parent_id` must leave the row
+  # carrying a disposition. It reads `merged` (the write's RESULT, not the
+  # patch) for the same reason its siblings do — a patch that sets only
+  # `parent_id` still has to be judged on what the row will BE.
+  #
+  # The vocabulary check is deliberate, not decorative: `disposition: "maybe"`
+  # would otherwise satisfy a mere-presence test while meaning nothing, and the
+  # raw door has no normaliser (`Tasks.Stage` is the one writer).
+  #
+  # THIS COMPOSES WITH `ensure_disposition_via_verb/4` INTO A DELIBERATE ORDER
+  # OF OPERATIONS, and callers must know it: that guard refuses any raw CHANGE
+  # of the term, so a bare row cannot be reparented and adjudicated in the same
+  # mutate — the disposition has to be written FIRST, through the verb, and the
+  # reparent comes after. That is the intended shape (adopt only rows that have
+  # been judged), and the message says so rather than leaving the caller to
+  # discover a two-guard interaction by trial.
+  #
+  # Replication is exempt first, same reason as every sibling: a mirror applies
+  # verbatim or wedges the batch.
+  @parent_key "parent_id"
+
+  defp ensure_adoption_adjudicated("task", nil, _merged, _opts), do: :ok
+
+  defp ensure_adoption_adjudicated("task", existing, merged, opts) do
+    was = existing.content || %{}
+    was_parent = was[@parent_key]
+    now_parent = merged[@parent_key]
+
+    cond do
+      Keyword.get(opts, :source, :api) != :api -> :ok
+      was_parent == now_parent -> :ok
+      merged[@disposition_key] in Barkpark.Tasks.Stage.dispositions() -> :ok
+      true -> {:error, {:invalid_task_content, adoption_error(was_parent, now_parent)}}
+    end
+  end
+
+  defp ensure_adoption_adjudicated(_type, _existing, _merged, _opts), do: :ok
+
+  defp adoption_error(was_parent, now_parent) do
+    %{
+      @parent_key => [
+        "cannot be changed from #{inspect(was_parent)} to #{inspect(now_parent)} on a task " <>
+          "carrying no adjudication. Reparenting is ADOPTION: it moves the row into (or out " <>
+          "of) a parent's closure, and a row that joins a closure unjudged is exactly the " <>
+          "bare row a birth-time fence cannot see, because giving a task a parent later is an " <>
+          "update, not a birth. Adjudicate it FIRST through the sanctioned verb (`bp task " <>
+          "stage <id> <state> --disposition <open|parked|closed> --note <why>`, " <>
+          "POST /v1/tasks/:id/stage) — the disposition cannot be written in this same " <>
+          "mutate, because the raw door refuses any change of it — then reparent."
+      ]
+    }
+  end
 
   # A trigger is "erased" when the row carried a real one and the write's result
   # carries none. A blank string is not a trigger — the verb normalises the same
@@ -747,6 +829,27 @@ defmodule Barkpark.Content.Mutations do
           "--note <why> --reopen-trigger <what would reconsider it>`, " <>
           "POST /v1/tasks/:id/stage), which normalises the term and writes term, reason and " <>
           "trigger in one atomic write — and refuses a park with no trigger."
+      ]
+    }
+  end
+
+  # Same `invalid_task_content` family, keyed on the field the caller wrote,
+  # and the message is the retry instruction. It states the property the raw
+  # door would destroy: the rerun is screened at the verb's write seam, so a
+  # rerun written raw is one nobody has checked can fail.
+  defp rerun_bypass_error(now) do
+    %{
+      @disposition_rerun_key => [
+        "cannot be set to #{inspect(now)} through /v1/data/mutate. The rerun is the one " <>
+          "thing that could prove a durable reason WRONG, and it is screened at the verb's " <>
+          "write seam — a rerun that cannot fail (`git -C`, a `test` predicate, `$( … )` " <>
+          "command substitution, `git merge-base --is-ancestor`, or a pipe-masked " <>
+          "formatting tail like `| head -1`) is refused there. Written raw it bypasses that " <>
+          "screen, which is a check nobody has checked. A revision precondition does NOT " <>
+          "unlock this. Write it through the sanctioned verb instead " <>
+          "(`bp task stage <id> <state> --rerun \"git cat-file -e origin/main:<path>\"`), " <>
+          "POST /v1/tasks/:id/stage — and omitting the rerun is always allowed: a reason " <>
+          "may honestly refuse to be checkable."
       ]
     }
   end

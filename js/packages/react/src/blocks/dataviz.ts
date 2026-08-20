@@ -107,6 +107,13 @@ function statHtml(block: unknown): string {
   const spark = numberList(get(block, 'spark'))
   const denom = displayString(get(block, 'denom'))
   const denomHtml = denom === '' ? '' : `<span class="bp-stat__denom">/${escapeHtml(denom)}</span>`
+  // Unit/qualifier riding after the number ("%", "USD", "dager") — a separate
+  // span, never fused into the display string (jarl figure family).
+  const unit = displayString(get(block, 'unit'))
+  const unitHtml = unit === '' ? '' : `<span class="bp-stat__unit">${escapeHtml(unit)}</span>`
+  // One-sentence prose under the label — what the tile's number means.
+  const body = displayString(get(block, 'body'))
+  const bodyHtml = body === '' ? '' : `<div class="bp-stat__body">${escapeHtml(body)}</div>`
   let bar = ''
   if (max !== null && max > 0) {
     const nv = numeric(value)
@@ -114,13 +121,175 @@ function statHtml(block: unknown): string {
     bar = `<div class="bp-stat__bar"><i style="width:${fmt(pct * 100)}%"></i></div>`
   }
   const labelHtml = label === '' ? '' : `<div class="bp-stat__l">${escapeHtml(label)}</div>`
-  return `<div class="bp-stat">${bar}<div class="bp-stat__v">${escapeHtml(value)}${denomHtml}</div>${labelHtml}${sparkSvg(spark)}</div>`
+  // THE KILDE LAW: a stat is a datum, and a datum carries its provenance.
+  const ref = parseSourceRef(displayString(get(block, 'source')))
+  const kilde = kildeHtml(ref === null ? [] : [ref])
+  return `<div class="bp-stat">${bar}<div class="bp-stat__v">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
 }
 
 const stats: Emit = (block) => {
   const items = asArr(get(block, 'items')).filter(isMap)
   if (items.length === 0) return empty('stats')
-  return `<div class="bp-stats">${items.map(statHtml).join('')}</div>`
+  // Kilde law, aggregated: per-cell `source` (fallback `sourceDefault`) rolls
+  // into ONE deduped footer — cells never stamp their own.
+  const dflt = displayString(get(block, 'sourceDefault'))
+  const refs = figureRefs(items, dflt, (it) => displayString(get(it, 'value')) !== '')
+  const cells = items.map((it) => statHtml(omitSource(it))).join('')
+  return `<div class="bp-stats">${cells}${kildeHtml(refs)}</div>`
+}
+
+/* ── kilde (source provenance) ─────────────────────────────────────────────── */
+//
+// THE KILDE LAW (jdf-bl-historiene-renderer-reconciliation): every figure
+// datum carries a source ref — `commit:<sha>` | `paper:<slug>` | `task:<id>` |
+// `https://…` — surfaced as a small «kilde» stamp under the figure. A ref that
+// does not parse never renders: a bad ref is not evidence. Only https refs
+// link out; commit/paper/task print as plain provenance text.
+
+interface SourceRef {
+  raw: string
+  label: string
+  href: string | null
+}
+
+export function parseSourceRef(ref: unknown): SourceRef | null {
+  if (typeof ref !== 'string') return null
+  if (/^commit:[0-9a-f]{7,40}$/.test(ref)) {
+    return { raw: ref, label: 'commit:' + ref.slice(7, 14), href: null }
+  }
+  if (/^paper:[a-z0-9][a-z0-9-]*$/.test(ref)) return { raw: ref, label: ref, href: null }
+  if (/^task:[A-Za-z0-9._-]+$/.test(ref)) return { raw: ref, label: ref, href: null }
+  if (ref.startsWith('https://') && ref.length > 8) {
+    const label = ref.replace(/^https:\/\//, '').replace(/\/+$/, '')
+    return { raw: ref, label, href: ref }
+  }
+  return null
+}
+
+// Only datum-bearing items (per `isDatum`) carry the provenance obligation;
+// each takes its own `source` or the figure's `sourceDefault`; invalid refs
+// drop; dedup by raw ref in first-use order (authored order is never sorted).
+function figureRefs(
+  items: unknown[],
+  dflt: string,
+  isDatum: (it: unknown) => boolean,
+): SourceRef[] {
+  const out: SourceRef[] = []
+  const seen = new Set<string>()
+  for (const it of items) {
+    if (!isDatum(it)) continue
+    const own = displayString(get(it, 'source'))
+    const ref = parseSourceRef(own === '' ? dflt : own)
+    if (ref === null || seen.has(ref.raw)) continue
+    seen.add(ref.raw)
+    out.push(ref)
+  }
+  return out
+}
+
+// The «kilde» stamp: "Kilde" (one ref) / "Kilder" (several), then each ref.
+function kildeHtml(refs: SourceRef[]): string {
+  if (refs.length === 0) return ''
+  const word = refs.length > 1 ? 'Kilder' : 'Kilde'
+  const spans = refs
+    .map((r) => {
+      const inner =
+        r.href === null
+          ? escapeHtml(r.label)
+          : `<a href="${escapeHtml(r.href)}">${escapeHtml(r.label)}</a>`
+      return `<span class="bp-kilde__ref">${inner}</span>`
+    })
+    .join('')
+  return `<p class="bp-kilde"><span class="bp-kilde__word">${word}</span>${spans}</p>`
+}
+
+function omitSource(it: unknown): unknown {
+  if (!isMap(it)) return it
+  const rest = { ...it }
+  delete rest.source
+  return rest
+}
+
+/* ── duel (two-arm comparison, jarl figure family) ─────────────────────────── */
+//
+// Named legend columns (arm A carries the accent), rows of
+// {label, delta, valueA, valueB, unit, source}. The delta annotation rides
+// under the row label — authored display text ("−30 %"), never computed. Both
+// legends are REQUIRED — unnamed columns are a meaningless comparison → the
+// honest empty box. Kilde law: every row is a datum; per-row `source`
+// (fallback `sourceDefault`) aggregates into the stamp.
+
+function duelRowHtml(r: unknown): string {
+  const label = displayString(get(r, 'label'))
+  const delta = displayString(get(r, 'delta'))
+  const unit = displayString(get(r, 'unit'))
+  const va = displayString(get(r, 'valueA'))
+  const vb = displayString(get(r, 'valueB'))
+  const deltaHtml = delta === '' ? '' : `<span class="bp-duel__delta">${escapeHtml(delta)}</span>`
+  const unitHtml = unit === '' ? '' : `<span class="bp-duel__unit">${escapeHtml(unit)}</span>`
+  return (
+    `<tr class="bp-duel__row"><th class="bp-duel__label" scope="row">${escapeHtml(label)}${deltaHtml}</th>` +
+    `<td class="bp-duel__val bp-duel__val--a">${escapeHtml(va)}${unitHtml}</td>` +
+    `<td class="bp-duel__val">${escapeHtml(vb)}${unitHtml}</td></tr>`
+  )
+}
+
+const duel: Emit = (block) => {
+  const legendA = displayString(get(block, 'legendA'))
+  const legendB = displayString(get(block, 'legendB'))
+  const rows = asArr(get(block, 'rows'))
+    .filter(isMap)
+    .filter((r) => ['label', 'valueA', 'valueB'].some((k) => displayString(get(r, k)) !== ''))
+  if (rows.length === 0 || legendA === '' || legendB === '') return empty('duel')
+  const dflt = displayString(get(block, 'sourceDefault'))
+  const refs = figureRefs(
+    rows,
+    dflt,
+    (r) => displayString(get(r, 'valueA')) !== '' || displayString(get(r, 'valueB')) !== '',
+  )
+  const head =
+    `<thead><tr><th class="bp-duel__th"></th>` +
+    `<th class="bp-duel__th bp-duel__th--a" scope="col">${escapeHtml(legendA)}</th>` +
+    `<th class="bp-duel__th" scope="col">${escapeHtml(legendB)}</th></tr></thead>`
+  const body = rows.map(duelRowHtml).join('')
+  return `<div class="bp-duel"><table class="bp-duel__table">${head}<tbody>${body}</tbody></table>${kildeHtml(refs)}</div>`
+}
+
+/* ── lineage (dated nodes on a line, jarl figure family) ───────────────────── */
+//
+// Each node is {overline, title, body, value, unit, source} — `overline`
+// carries the date/period ("jan–sep 2025", "i dag") or qualifier, value+unit
+// an optional datum. Nodes render in authored order; a node with nothing to
+// say contributes nothing. Kilde law: datum-bearing nodes (those with a
+// `value`) carry the provenance obligation (own `source`, else
+// `sourceDefault`).
+
+function lineageNodeHtml(n: unknown): string {
+  const overline = displayString(get(n, 'overline'))
+  const title = displayString(get(n, 'title'))
+  const value = displayString(get(n, 'value'))
+  const unit = displayString(get(n, 'unit'))
+  const body = displayString(get(n, 'body'))
+  const unitHtml = unit === '' ? '' : `<span class="bp-lineage__unit">${escapeHtml(unit)}</span>`
+  const parts =
+    (overline === '' ? '' : `<div class="bp-lineage__overline">${escapeHtml(overline)}</div>`) +
+    (title === '' ? '' : `<div class="bp-lineage__title">${escapeHtml(title)}</div>`) +
+    (value === '' ? '' : `<div class="bp-lineage__value">${escapeHtml(value)}${unitHtml}</div>`) +
+    (body === '' ? '' : `<div class="bp-lineage__body">${escapeHtml(body)}</div>`)
+  return `<li class="bp-lineage__node">${parts}</li>`
+}
+
+const lineage: Emit = (block) => {
+  const nodes = asArr(get(block, 'nodes'))
+    .filter(isMap)
+    .filter((n) =>
+      ['overline', 'title', 'body', 'value'].some((k) => displayString(get(n, k)) !== ''),
+    )
+  if (nodes.length === 0) return empty('lineage')
+  const dflt = displayString(get(block, 'sourceDefault'))
+  const refs = figureRefs(nodes, dflt, (n) => displayString(get(n, 'value')) !== '')
+  const lis = nodes.map(lineageNodeHtml).join('')
+  return `<div class="bp-lineage"><ol class="bp-lineage__nodes">${lis}</ol>${kildeHtml(refs)}</div>`
 }
 
 /* ── heatmap ───────────────────────────────────────────────────────────────── */
@@ -437,13 +606,17 @@ const chart: Emit = (block) => {
   const capHtml = caption === '' ? '' : `<div class="bp-chart__t">${escapeHtml(caption)}</div>`
   const plot = kind === 'bars' ? plotBars(series, minV, maxV, n) : plotLine(series, minV, maxV, n)
 
+  // The svg rides its own scroll container, mirroring data_viz.ex: CSS pins
+  // the svg at its viewBox width so tick/label text never paints below its
+  // authored px at narrow viewports — the figure scrolls instead of shrinking.
   return (
     `<div class="bp-chart">${capHtml}` +
+    `<div class="bp-chart__scroll">` +
     `<svg viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="none" role="img">` +
     gridSvg(minV, maxV) +
     plot +
     xLabelsSvg(xLabels) +
-    `</svg>${legendHtml(series)}</div>`
+    `</svg></div>${legendHtml(series)}</div>`
   )
 }
 
@@ -630,6 +803,8 @@ export const datavizEmitters: Record<string, Emit> = {
   'stat-grid': stats,
   heatmap,
   chart,
+  duel,
+  lineage,
   'gauge-list': gaugeList,
   'bar-chart': barChart,
   'criteria-progress': criteriaProgress,

@@ -185,11 +185,84 @@ defmodule BarkparkCloud.Web.RouterProvidersCatalogTest do
       assert conn.status == 200
       body = json_body(conn)
 
-      assert body["provider"] == %{"kind" => "azure", "label" => "az"}
+      assert %{"kind" => "azure", "label" => "az", "identity" => _} = body["provider"]
       assert is_list(body["regions"])
       assert Enum.all?(body["server_types"], &(Enum.sort(Map.keys(&1)) == @server_type_keys))
     end
+
+    # cch wave 13 — the header names WHICH cloud account the connection points
+    # at, so a person reads it BEFORE committing a credential rotation.
+    test "azure header echoes the STORED subscription id, marked as stored (never 'verified')" do
+      {user, team} = user_with_team()
+      {:ok, _} = connect_azure(team)
+
+      body = json_body(call(:get, "/v1/providers/azure/overview", nil, session_token(user)))
+
+      assert body["provider"]["identity"] == %{
+               "label" => "Subscription",
+               "value" => azure_blob()["subscription_id"],
+               "source" => "stored",
+               "reason" => nil
+             }
+
+      # Provenance, not a verdict: nothing here may read as a server-confirmed
+      # account. Azure.verify/1 echoes back the id it was handed.
+      refute conn_body_contains?(body, "verified")
+    end
+
+    test "hetzner header states the absence out loud — an unknown identity is NEVER a blank" do
+      {user, team} = user_with_team()
+      {:ok, _} = connect_hetzner(team)
+      program_hetzner_catalog()
+
+      body = json_body(call(:get, "/v1/providers/hetzner/overview", nil, session_token(user)))
+
+      # The key is always present, the value is explicitly nil, and the reason
+      # is the honest one: hetzner_token_ok?/1 matches on status class alone and
+      # nothing in the tree fetches a Hetzner account/project identifier.
+      assert body["provider"]["identity"] == %{
+               "label" => "Project",
+               "value" => nil,
+               "source" => "unavailable",
+               "reason" => "Hetzner doesn't report which project this token belongs to."
+             }
+    end
+
+    test "a plain MEMBER (no admin, no operator) reads the identity — Auth.require_user only" do
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+      {:ok, _} = connect_azure(team)
+
+      conn = call(:get, "/v1/providers/azure/overview", nil, session_token(member))
+      assert conn.status == 200
+      assert json_body(conn)["provider"]["identity"]["value"] == azure_blob()["subscription_id"]
+    end
+
+    test "the plain catalog route is UNCHANGED — identity rides the overview header only" do
+      {user, team} = user_with_team()
+      {:ok, _} = connect_azure(team)
+
+      body = json_body(call(:get, "/v1/providers/azure/catalog", nil, session_token(user)))
+      assert Enum.sort(Map.keys(body)) == ["currency", "regions", "server_types"]
+    end
   end
+
+  # Does any string anywhere in the decoded body carry `needle`? Used to pin the
+  # copy NEGATIVE (the identity must never read as a verification).
+  defp conn_body_contains?(value, needle) when is_map(value),
+    do:
+      Enum.any?(value, fn {k, v} ->
+        conn_body_contains?(k, needle) or conn_body_contains?(v, needle)
+      end)
+
+  defp conn_body_contains?(value, needle) when is_list(value),
+    do: Enum.any?(value, &conn_body_contains?(&1, needle))
+
+  defp conn_body_contains?(value, needle) when is_binary(value),
+    do: String.contains?(String.downcase(value), needle)
+
+  defp conn_body_contains?(_value, _needle), do: false
 
   describe "the existing /v1/hetzner/* routes still work (different concern)" do
     test "/v1/hetzner/catalog still serves the action catalog (resource/verb/tier/params)" do

@@ -59,6 +59,22 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           do: "",
           else: ~s|<span class="bp-stat__denom">/#{escape_html(denom)}</span>|
 
+      # Unit/qualifier riding after the number ("%", "USD", "dager"). A separate
+      # span, never fused into the display string — the number keeps its own
+      # typography (jarl figure family, jdf-bl-historiene-renderer-reconciliation).
+      unit = block |> get("unit") |> display_string()
+
+      unit_html =
+        if unit == "",
+          do: "",
+          else: ~s|<span class="bp-stat__unit">#{escape_html(unit)}</span>|
+
+      # One-sentence prose under the label — what the tile's number means.
+      body = block |> get("body") |> display_string()
+
+      body_html =
+        if body == "", do: "", else: ~s|<div class="bp-stat__body">#{escape_html(body)}</div>|
+
       bar =
         if max != nil and max > 0 do
           pct =
@@ -75,26 +91,243 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       label_html =
         if label == "", do: "", else: ~s|<div class="bp-stat__l">#{escape_html(label)}</div>|
 
+      # THE KILDE LAW: a stat is a datum, and a datum carries its provenance —
+      # `source` (commit:|paper:|task:|https://) surfaced as the «kilde» stamp.
+      kilde =
+        block
+        |> get("source")
+        |> display_string()
+        |> parse_source_ref()
+        |> List.wrap()
+        |> kilde_html()
+
       ~s|<div class="bp-stat">| <>
         bar <>
-        ~s|<div class="bp-stat__v">#{escape_html(value)}#{denom_html}</div>| <>
-        label_html <> spark_svg(spark) <> "</div>"
+        ~s|<div class="bp-stat__v">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
+        label_html <> body_html <> spark_svg(spark) <> kilde <> "</div>"
     end
   end
 
   def stat_html(_), do: empty("stat")
 
-  @doc "The plural KPI grid: N stat cells in an auto-fit grid."
+  @doc """
+  The plural KPI grid: N stat cells in an auto-fit grid. Per-cell `source`
+  refs (with the grid's `sourceDefault` as fallback) aggregate into ONE
+  deduped kilde footer — cells never stamp their own.
+  """
   def stats_html(block) when is_map(block) do
     items = block |> get("items") |> as_list() |> Enum.filter(&is_map/1)
 
     case items do
-      [] -> empty("stats")
-      _ -> ~s|<div class="bp-stats">| <> Enum.map_join(items, "", &stat_html/1) <> "</div>"
+      [] ->
+        empty("stats")
+
+      _ ->
+        default = block |> get("sourceDefault") |> display_string()
+        refs = figure_refs(items, default, &(display_string(get(&1, "value")) != ""))
+        cells = Enum.map_join(items, "", &stat_html(Map.delete(&1, "source")))
+        ~s|<div class="bp-stats">| <> cells <> kilde_html(refs) <> "</div>"
     end
   end
 
   def stats_html(_), do: empty("stats")
+
+  # ── kilde (source provenance) ────────────────────────────────────────────────
+  #
+  # THE KILDE LAW (jdf-bl-historiene-renderer-reconciliation): every figure
+  # datum carries a source ref — `commit:<sha>` | `paper:<slug>` | `task:<id>` |
+  # `https://…` — surfaced as a small «kilde» stamp under the figure. A ref that
+  # does not parse never renders: a bad ref is not evidence. Only https refs
+  # link out; commit/paper/task print as plain provenance text.
+
+  @doc "Parse one source ref into %{raw, label, href} — nil when it is not a valid ref."
+  def parse_source_ref(ref) when is_binary(ref) do
+    cond do
+      Regex.match?(~r/^commit:[0-9a-f]{7,40}$/, ref) ->
+        %{raw: ref, label: "commit:" <> binary_part(ref, 7, 7), href: nil}
+
+      Regex.match?(~r/^paper:[a-z0-9][a-z0-9-]*$/, ref) ->
+        %{raw: ref, label: ref, href: nil}
+
+      Regex.match?(~r/^task:[A-Za-z0-9._-]+$/, ref) ->
+        %{raw: ref, label: ref, href: nil}
+
+      String.starts_with?(ref, "https://") and byte_size(ref) > 8 ->
+        label = ref |> String.replace_prefix("https://", "") |> String.trim_trailing("/")
+        %{raw: ref, label: label, href: ref}
+
+      true ->
+        nil
+    end
+  end
+
+  def parse_source_ref(_), do: nil
+
+  # Collect the kilde refs for a figure's items: only datum-bearing items
+  # (per `datum?`) carry the provenance obligation; each takes its own
+  # `source` or the figure's `sourceDefault`; invalid refs drop; dedup by raw
+  # ref in first-use order (authored order is never re-sorted).
+  defp figure_refs(items, default, datum?) do
+    items
+    |> Enum.filter(datum?)
+    |> Enum.map(fn it ->
+      s = it |> get("source") |> display_string()
+      if s == "", do: default, else: s
+    end)
+    |> Enum.map(&parse_source_ref/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq_by(& &1.raw)
+  end
+
+  # The «kilde» stamp: "Kilde" (one ref) / "Kilder" (several), then each ref.
+  defp kilde_html([]), do: ""
+
+  defp kilde_html(refs) do
+    word = if length(refs) > 1, do: "Kilder", else: "Kilde"
+
+    spans =
+      Enum.map_join(refs, "", fn r ->
+        inner =
+          if r.href,
+            do: ~s|<a href="#{escape_html(r.href)}">#{escape_html(r.label)}</a>|,
+            else: escape_html(r.label)
+
+        ~s|<span class="bp-kilde__ref">#{inner}</span>|
+      end)
+
+    ~s|<p class="bp-kilde"><span class="bp-kilde__word">#{word}</span>| <> spans <> "</p>"
+  end
+
+  # ── duel ─────────────────────────────────────────────────────────────────────
+
+  @doc """
+  Two-arm comparison table (jarl figure family): named legend columns (arm A
+  carries the accent), rows of `%{label, delta, valueA, valueB, unit, source}`.
+  The delta annotation rides under the row label — it is authored display text
+  ("−30 %"), never computed. Both legends are REQUIRED — unnamed columns are a
+  meaningless comparison → the honest empty box. Kilde law: every row is a
+  datum; per-row `source` (fallback `sourceDefault`) aggregates into the stamp.
+  """
+  def duel_html(block) when is_map(block) do
+    legend_a = block |> get("legendA") |> display_string()
+    legend_b = block |> get("legendB") |> display_string()
+
+    rows =
+      block
+      |> get("rows")
+      |> as_list()
+      |> Enum.filter(&is_map/1)
+      |> Enum.filter(fn r ->
+        Enum.any?(["label", "valueA", "valueB"], &(display_string(get(r, &1)) != ""))
+      end)
+
+    if rows == [] or legend_a == "" or legend_b == "" do
+      empty("duel")
+    else
+      default = block |> get("sourceDefault") |> display_string()
+
+      refs =
+        figure_refs(rows, default, fn r ->
+          display_string(get(r, "valueA")) != "" or display_string(get(r, "valueB")) != ""
+        end)
+
+      head =
+        ~s|<thead><tr><th class="bp-duel__th"></th>| <>
+          ~s|<th class="bp-duel__th bp-duel__th--a" scope="col">#{escape_html(legend_a)}</th>| <>
+          ~s|<th class="bp-duel__th" scope="col">#{escape_html(legend_b)}</th></tr></thead>|
+
+      body = Enum.map_join(rows, "", &duel_row_html/1)
+
+      ~s|<div class="bp-duel"><table class="bp-duel__table">| <>
+        head <> "<tbody>" <> body <> "</tbody></table>" <> kilde_html(refs) <> "</div>"
+    end
+  end
+
+  def duel_html(_), do: empty("duel")
+
+  defp duel_row_html(r) do
+    label = r |> get("label") |> display_string()
+    delta = r |> get("delta") |> display_string()
+    unit = r |> get("unit") |> display_string()
+    va = r |> get("valueA") |> display_string()
+    vb = r |> get("valueB") |> display_string()
+
+    delta_html =
+      if delta == "", do: "", else: ~s|<span class="bp-duel__delta">#{escape_html(delta)}</span>|
+
+    unit_html =
+      if unit == "", do: "", else: ~s|<span class="bp-duel__unit">#{escape_html(unit)}</span>|
+
+    ~s|<tr class="bp-duel__row"><th class="bp-duel__label" scope="row">#{escape_html(label)}#{delta_html}</th>| <>
+      ~s|<td class="bp-duel__val bp-duel__val--a">#{escape_html(va)}#{unit_html}</td>| <>
+      ~s|<td class="bp-duel__val">#{escape_html(vb)}#{unit_html}</td></tr>|
+  end
+
+  # ── lineage ──────────────────────────────────────────────────────────────────
+
+  @doc """
+  Dated nodes on a line (jarl figure family): each node is
+  `%{overline, title, body, value, unit, source}` — `overline` carries the
+  date/period ("jan–sep 2025", "i dag") or qualifier, `value`+`unit` an
+  optional datum. Nodes render in authored order; a node with nothing to say
+  contributes nothing. Kilde law: datum-bearing nodes (those with a `value`)
+  carry the provenance obligation (own `source`, else `sourceDefault`).
+  """
+  def lineage_html(block) when is_map(block) do
+    nodes =
+      block
+      |> get("nodes")
+      |> as_list()
+      |> Enum.filter(&is_map/1)
+      |> Enum.filter(fn n ->
+        Enum.any?(["overline", "title", "body", "value"], &(display_string(get(n, &1)) != ""))
+      end)
+
+    case nodes do
+      [] ->
+        empty("lineage")
+
+      _ ->
+        default = block |> get("sourceDefault") |> display_string()
+        refs = figure_refs(nodes, default, &(display_string(get(&1, "value")) != ""))
+        lis = Enum.map_join(nodes, "", &lineage_node_html/1)
+
+        ~s|<div class="bp-lineage"><ol class="bp-lineage__nodes">| <>
+          lis <> "</ol>" <> kilde_html(refs) <> "</div>"
+    end
+  end
+
+  def lineage_html(_), do: empty("lineage")
+
+  defp lineage_node_html(n) do
+    overline = n |> get("overline") |> display_string()
+    title = n |> get("title") |> display_string()
+    value = n |> get("value") |> display_string()
+    unit = n |> get("unit") |> display_string()
+    body = n |> get("body") |> display_string()
+
+    unit_html =
+      if unit == "",
+        do: "",
+        else: ~s|<span class="bp-lineage__unit">#{escape_html(unit)}</span>|
+
+    parts =
+      if(overline == "",
+        do: "",
+        else: ~s|<div class="bp-lineage__overline">#{escape_html(overline)}</div>|
+      ) <>
+        if(title == "",
+          do: "",
+          else: ~s|<div class="bp-lineage__title">#{escape_html(title)}</div>|
+        ) <>
+        if(value == "",
+          do: "",
+          else: ~s|<div class="bp-lineage__value">#{escape_html(value)}#{unit_html}</div>|
+        ) <>
+        if body == "", do: "", else: ~s|<div class="bp-lineage__body">#{escape_html(body)}</div>|
+
+    ~s|<li class="bp-lineage__node">| <> parts <> "</li>"
+  end
 
   # ── heatmap ──────────────────────────────────────────────────────────────────
 
@@ -457,15 +690,22 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
         ann = annotations_of(block)
 
+        # The svg rides its own scroll container (same idiom as the calendar
+        # heatmap's bp-heat__scroll): CSS gives the svg a min-width at the
+        # viewBox size, so viewBox-unit text never paints below its authored px
+        # at narrow viewports — the figure scrolls instead of shrinking its
+        # labels away (probe-figure-fidelity-2026-08-12 measured 11px ticks
+        # painting 4.26px at a 360 viewport under plain width:100%).
         ~s|<div class="bp-chart">| <>
           cap_html <>
+          ~s|<div class="bp-chart__scroll">| <>
           ~s|<svg viewBox="0 0 #{@vw} #{@vh}" preserveAspectRatio="none" role="img">| <>
           grid_svg(min_v, max_v) <>
           regions_svg(ann, n) <>
           plot_svg(series, kind, min_v, max_v, n) <>
           overlays_svg(ann, series, min_v, max_v, n) <>
           x_labels_svg(x_labels) <>
-          "</svg>" <> legend_html(series) <> "</div>"
+          "</svg></div>" <> legend_html(series) <> "</div>"
     end
   end
 
@@ -577,15 +817,36 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           x = x_at(i, n)
           y = y_at(value, min_v, max_v)
           ly = if y < @pad_t + 20, do: y + 16, else: y - 8
+          anchor = ann_anchor(x, label)
 
           ~s|<circle class="bp-chart__pt" cx="#{fmt(x)}" cy="#{fmt(y)}" r="3.5"/>| <>
-            ~s|<text class="bp-chart__ann" x="#{fmt(x)}" y="#{fmt(ly)}" text-anchor="middle">#{escape_html(label)}</text>|
+            ~s|<text class="bp-chart__ann" x="#{fmt(x)}" y="#{fmt(ly)}" text-anchor="#{anchor}">#{escape_html(label)}</text>|
         else
           ""
         end
       end)
 
     lines <> marks
+  end
+
+  # Edge-aware anchor for the point call-out label — the horizontal clamp the
+  # regions/reflines already have (their labels are pinned mid-region / hard
+  # right). A blanket text-anchor middle let a last-index label paint past the
+  # viewBox (probe-figure-fidelity-2026-08-12 measured bbox right 654.1 vs 640).
+  # The SVG is emitted server-side, so the text box can't be measured; estimate
+  # the 10px mono label at ~3.1 viewBox units per half-char (SF Mono advance
+  # ≈6.2/char at scale 1, slightly generous) and flip the anchor when the
+  # estimated box would cross a viewBox edge: near the right edge the label
+  # ends at the datum, near the left it starts there, everywhere else it stays
+  # centered. The circle marker keeps the exact datum x either way.
+  defp ann_anchor(x, label) do
+    half = String.length(label) * 3.1
+
+    cond do
+      x + half > @vw - 2 -> "end"
+      x - half < 2 -> "start"
+      true -> "middle"
+    end
   end
 
   # The called-out datum: series si (author order, clamped in-range), point at
@@ -1101,6 +1362,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       empty_email("stat", theme)
     else
       label = block |> get("label") |> display_string()
+      unit = block |> get("unit") |> display_string()
+      body = block |> get("body") |> display_string()
       max = numeric(get(block, "max"))
 
       bar =
@@ -1122,14 +1385,176 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           else:
             ~s|<div style="font-size:12px;color:#{sk.muted};margin-top:2px">#{escape_html(label)}</div>|
 
+      unit_html =
+        if unit == "",
+          do: "",
+          else:
+            ~s| <span style="font-size:12px;font-weight:400;color:#{sk.muted}">#{escape_html(unit)}</span>|
+
+      body_html =
+        if body == "",
+          do: "",
+          else:
+            ~s|<div style="font-size:12px;color:#{sk.ink};margin-top:4px">#{escape_html(body)}</div>|
+
+      kilde =
+        block
+        |> get("source")
+        |> display_string()
+        |> parse_source_ref()
+        |> List.wrap()
+        |> kilde_email_html(sk)
+
       ~s|<div style="display:inline-block;min-width:120px;background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
         bar <>
-        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}</div>| <>
-        label_html <> "</div>"
+        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}#{unit_html}</div>| <>
+        label_html <> body_html <> kilde <> "</div>"
     end
   end
 
   def stat_email_html(_, theme), do: empty_email("stat", theme)
+
+  # Email leg of the kilde stamp — same law, inline styles (D4/D8: classed
+  # markup arrives unstyled in a stylesheet-less client).
+  defp kilde_email_html([], _sk), do: ""
+
+  defp kilde_email_html(refs, sk) do
+    word = if length(refs) > 1, do: "Kilder", else: "Kilde"
+
+    labels =
+      Enum.map_join(refs, " · ", fn r ->
+        if r.href,
+          do:
+            ~s|<a href="#{escape_html(r.href)}" style="color:#{sk.muted}">#{escape_html(r.label)}</a>|,
+          else: escape_html(r.label)
+      end)
+
+    ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:11px;color:#{sk.muted};margin-top:8px">#{word}: #{labels}</div>|
+  end
+
+  @doc "Email-safe duel: a real bordered <table>, arm A accented, kilde as a dim line."
+  def duel_email_html(block, theme \\ :evergreen)
+
+  def duel_email_html(block, theme) when is_map(block) do
+    sk = email_skin(theme)
+    legend_a = block |> get("legendA") |> display_string()
+    legend_b = block |> get("legendB") |> display_string()
+
+    rows =
+      block
+      |> get("rows")
+      |> as_list()
+      |> Enum.filter(&is_map/1)
+      |> Enum.filter(fn r ->
+        Enum.any?(["label", "valueA", "valueB"], &(display_string(get(r, &1)) != ""))
+      end)
+
+    if rows == [] or legend_a == "" or legend_b == "" do
+      empty_email("duel", theme)
+    else
+      default = block |> get("sourceDefault") |> display_string()
+
+      refs =
+        figure_refs(rows, default, fn r ->
+          display_string(get(r, "valueA")) != "" or display_string(get(r, "valueB")) != ""
+        end)
+
+      mono = Barkpark.PortableDoc.Render.Palettes.font_mono()
+
+      head =
+        ~s|<tr><td style="padding:6px 10px"></td>| <>
+          ~s|<td style="padding:6px 10px;font-size:12px;text-align:right;color:#{sk.accent};font-weight:700">#{escape_html(legend_a)}</td>| <>
+          ~s|<td style="padding:6px 10px;font-size:12px;text-align:right;color:#{sk.muted};font-weight:700">#{escape_html(legend_b)}</td></tr>|
+
+      body =
+        Enum.map_join(rows, "", fn r ->
+          label = r |> get("label") |> display_string()
+          delta = r |> get("delta") |> display_string()
+          unit = r |> get("unit") |> display_string()
+          va = r |> get("valueA") |> display_string()
+          vb = r |> get("valueB") |> display_string()
+          unit_sfx = if unit == "", do: "", else: " " <> escape_html(unit)
+
+          delta_html =
+            if delta == "",
+              do: "",
+              else:
+                ~s|<div style="font-family:#{mono};font-size:11px;color:#{sk.muted}">#{escape_html(delta)}</div>|
+
+          ~s|<tr><td style="padding:6px 10px;border-top:1px solid #{sk.border};font-size:13px;color:#{sk.ink}">#{escape_html(label)}#{delta_html}</td>| <>
+            ~s|<td style="padding:6px 10px;border-top:1px solid #{sk.border};font-family:#{mono};font-size:13px;text-align:right;color:#{sk.accent}">#{escape_html(va)}#{unit_sfx}</td>| <>
+            ~s|<td style="padding:6px 10px;border-top:1px solid #{sk.border};font-family:#{mono};font-size:13px;text-align:right;color:#{sk.ink}">#{escape_html(vb)}#{unit_sfx}</td></tr>|
+        end)
+
+      ~s|<div style="margin:12px 0"><table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%;background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px">| <>
+        head <> body <> "</table>" <> kilde_email_html(refs, sk) <> "</div>"
+    end
+  end
+
+  def duel_email_html(_, theme), do: empty_email("duel", theme)
+
+  @doc "Email-safe lineage: stacked dated nodes, kilde as a dim line."
+  def lineage_email_html(block, theme \\ :evergreen)
+
+  def lineage_email_html(block, theme) when is_map(block) do
+    sk = email_skin(theme)
+
+    nodes =
+      block
+      |> get("nodes")
+      |> as_list()
+      |> Enum.filter(&is_map/1)
+      |> Enum.filter(fn n ->
+        Enum.any?(["overline", "title", "body", "value"], &(display_string(get(n, &1)) != ""))
+      end)
+
+    case nodes do
+      [] ->
+        empty_email("lineage", theme)
+
+      _ ->
+        default = block |> get("sourceDefault") |> display_string()
+        refs = figure_refs(nodes, default, &(display_string(get(&1, "value")) != ""))
+        mono = Barkpark.PortableDoc.Render.Palettes.font_mono()
+
+        body =
+          Enum.map_join(nodes, "", fn n ->
+            overline = n |> get("overline") |> display_string()
+            title = n |> get("title") |> display_string()
+            value = n |> get("value") |> display_string()
+            unit = n |> get("unit") |> display_string()
+            text = n |> get("body") |> display_string()
+            unit_sfx = if unit == "", do: "", else: " " <> escape_html(unit)
+
+            parts =
+              if(overline == "",
+                do: "",
+                else:
+                  ~s|<div style="font-family:#{mono};font-size:11px;color:#{sk.muted};text-transform:uppercase;letter-spacing:.04em">#{escape_html(overline)}</div>|
+              ) <>
+                if(title == "",
+                  do: "",
+                  else:
+                    ~s|<div style="font-size:14px;font-weight:700;color:#{sk.ink}">#{escape_html(title)}</div>|
+                ) <>
+                if(value == "",
+                  do: "",
+                  else:
+                    ~s|<div style="font-family:#{mono};font-size:16px;color:#{sk.accent}">#{escape_html(value)}#{unit_sfx}</div>|
+                ) <>
+                if text == "",
+                  do: "",
+                  else: ~s|<div style="font-size:13px;color:#{sk.ink}">#{escape_html(text)}</div>|
+
+            ~s|<div style="padding:10px 0;border-top:1px solid #{sk.border}">| <>
+              parts <> "</div>"
+          end)
+
+        ~s|<div style="margin:12px 0">| <> body <> kilde_email_html(refs, sk) <> "</div>"
+    end
+  end
+
+  def lineage_email_html(_, theme), do: empty_email("lineage", theme)
 
   @doc "Email-safe KPI grid: one row of stat cells."
   def stats_email_html(block, theme \\ :evergreen)
@@ -1138,8 +1563,16 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     items = block |> get("items") |> as_list() |> Enum.filter(&is_map/1)
 
     case items do
-      [] -> empty_email("stats", theme)
-      _ -> ~s|<div>| <> Enum.map_join(items, "", &stat_email_html(&1, theme)) <> "</div>"
+      [] ->
+        empty_email("stats", theme)
+
+      _ ->
+        # Kilde law, aggregated exactly like the :article grid: cells never
+        # stamp their own — one deduped footer under the row.
+        default = block |> get("sourceDefault") |> display_string()
+        refs = figure_refs(items, default, &(display_string(get(&1, "value")) != ""))
+        cells = Enum.map_join(items, "", &stat_email_html(Map.delete(&1, "source"), theme))
+        ~s|<div>| <> cells <> kilde_email_html(refs, email_skin(theme)) <> "</div>"
     end
   end
 

@@ -150,12 +150,16 @@
            shows exactly one from the parsed route (shellNavLayer). -->
       <aside class="sidebar" aria-label="Primary">
         <!-- workspace switcher + plan chip → opens the Account modal -->
-        <button class="ws-switch" id="ws-switch" type="button" aria-label="Workspace and account">
-          <span class="ws-avatar" id="account-avatar" aria-hidden="true">B</span>
-          <span class="ws-name" id="account-team">My team</span>
-          <span class="ws-plan" id="ws-plan" hidden></span>
-          <svg class="ws-caret" width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><polyline points="2,5.2 5,2.2 8,5.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="2,8.8 5,11.8 8,8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
+        <div class="ws-switch-wrap">
+        <button class="ws-switch" id="ws-switch" type="button" aria-label="Switch team"
+                    aria-haspopup="menu" aria-expanded="false">
+            <span class="ws-avatar" id="account-avatar" aria-hidden="true">B</span>
+            <span class="ws-name" id="account-team">My team</span>
+            <span class="ws-plan" id="ws-plan" hidden></span>
+            <svg class="ws-caret" width="10" height="14" viewBox="0 0 10 14" aria-hidden="true"><polyline points="2,5.2 5,2.2 8,5.2" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><polyline points="2,8.8 5,11.8 8,8.8" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="team-menu" id="team-menu" role="menu" hidden></div>
+        </div>
 
         <!-- Find / ⌘K → the EXISTING command palette (never a fork) -->
         <button class="nav-find" id="nav-find" type="button">
@@ -183,15 +187,30 @@
             <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><polyline points="1,8 4.5,8 6.5,3 9,12 10.8,8 14,8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
             <span>Activity</span>
           </a>
-          <div class="nav-group">
-            <span class="nav-eyebrow">Settings</span>
+          <!-- Settings is a native <details> DISCLOSURE (cch-w14-s2). Six always-
+               open sub-links were 225px of the 690px strip that the folded shell
+               (@media max-width:720px) stacks ABOVE the page, so on every phone
+               and every 621-720px viewport .content began at y=745.88 — below the
+               fold on an 800px-tall screen, entirely off-screen at 390x667.
+               <details> is deliberate over a button+div: the expanded state and
+               the keyboard are the platform's, not ours — the AX tree reports
+               role DisclosureTriangle, name SETTINGS, focusable true, expanded
+               false -> true (driven via CDP Accessibility, both states). It ships
+               `open`, and app.js's syncNavDisclosure() collapses it ONLY while the
+               shell is folded — and never while the route you are on lives inside
+               it, so the active Settings screen is never sealed behind a summary. -->
+          <details class="nav-group" id="nav-settings" open>
+            <summary class="nav-eyebrow nav-group-summary">
+              <span>Settings</span>
+              <svg class="nav-group-caret" width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><polyline points="1,1.6 4.5,4.8 8,1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
             <a href="#settings/billing" class="nav-link nav-sub" data-view="billing">Billing</a>
             <a href="#settings/providers" class="nav-link nav-sub" data-view="providers">Providers</a>
             <a href="#settings/notifications" class="nav-link nav-sub" data-view="notifications">Notifications</a>
             <a href="#settings/tokens" class="nav-link nav-sub" data-view="tokens">API tokens</a>
             <a href="#settings/members" class="nav-link nav-sub" data-view="members">Members</a>
             <a href="#settings/env" class="nav-link nav-sub" data-view="env">Environment variables</a>
-          </div>
+          </details>
         </div>
 
         <!-- LAYER: instance morph — back row + ctx + the instance's sections
@@ -297,9 +316,13 @@
           <div id="fleet-body" class="fleet-body" aria-live="polite"></div>
 
           <!-- S14 portable archives: a team's archived-instance bundles, read
-               straight from object storage. The console shows each bundle + a
-               copy-paste `bp cloud instance resurrect` affordance (it does not
-               execute resurrect this wave). loadArchives() fills #archives-body. -->
+               straight from object storage. Every reader gets each bundle + a
+               copy-paste `bp cloud instance resurrect` affordance; a team admin
+               or owner ALSO gets a live Resurrect button that POSTs
+               /v1/resurrect. cch-w47-s3: that button used to render for anyone
+               who could see the row, including a plain member the route refuses
+               — it is now omitted unless /v1/me has confirmed the authority.
+               loadArchives() fills #archives-body. -->
           <section class="archives-panel" aria-labelledby="archives-heading">
             <h2 id="archives-heading" class="archives-title">Archives</h2>
             <p class="dim archives-sub">Portable bundles you can resurrect on Hetzner or Azure.</p>
@@ -354,12 +377,18 @@
           <!-- gr-p4 G-02: the connected roster (member-readable) + the inline
                hybrid connect card (admin-only, verify+save in a .set-save-row).
                loadProviders() paints both; a member sees the roster without any
-               Disconnect… affordance and no connect card at all. -->
+               Disconnect… affordance and no connect card at all. This sentence
+               speaks for loadProviders() ONLY — the GitHub card below is a
+               separate mount with its own authority arm (cch-w48-s3). -->
           <div id="provider-roster" aria-live="polite"></div>
           <div id="provider-connect"></div>
 
           <!-- gh-2: GitHub App connection card. Renders connected / connect /
-               not-configured from GET /v1/github/installation. -->
+               not-configured from GET /v1/github/installation.
+               cch-w48-s3 — AUTHORITY: both write affordances are team-admin-only
+               on the server, so githubCardHtml(g, providerCanWrite()) OMITS the
+               Disconnect button and the Connect anchor for a member (never a
+               disabled ghost); the read — state, account, badge — is unchanged. -->
           <div id="github-card" aria-live="polite"></div>
 
           <!-- gr-p4 G-03: the honest capability matrix (member-readable). -->
@@ -447,7 +476,11 @@
           <header class="view-head">
             <div>
               <h1>Environment variables</h1>
-              <p class="dim">Team-wide values injected into your instances at boot. Keys are visible; values are encrypted and never shown again.</p>
+              <!-- cch-w53-s1: this header renders BEFORE app.js paints and survives every
+                   panel error state, so it was a second, independent custody claim. It
+                   promised delivery to every instance; nothing on any instance consumes
+                   these values, so it now states storage only. -->
+              <p class="dim">Team-wide values, stored encrypted. They are not delivered to any instance yet — nothing running or newly provisioned reads them. Keys are visible; values are never shown again.</p>
             </div>
           </header>
 

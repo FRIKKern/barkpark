@@ -305,5 +305,44 @@ defmodule Barkpark.Content.EdgeExtractTest do
       # Exactly one row for the triple.
       assert length(Content.list_outbound_edges(from_doc.id)) == 1
     end
+
+    # The batched write path (one insert_all statement) must not trip
+    # Postgres's "ON CONFLICT DO UPDATE cannot affect row a second time" on a
+    # repeated triple, and must converge on the same final metadata the
+    # sequential upserts did (last occurrence wins).
+    test "one batch repeating the same triple stores ONE row — last weight wins, same id" do
+      publish!("author", "auth-batch-dup")
+      src = publish!("article", "art-batch-dup", %{"author" => "auth-batch-dup"})
+
+      [edge] = src |> Content.extract_edges() |> Enum.filter(&(&1.field == "author"))
+
+      results =
+        Content.add_edges(
+          [Map.put(edge, :weight, 1.0), Map.put(edge, :weight, 2.0)],
+          dataset: @dataset
+        )
+
+      assert [{:ok, e1}, {:ok, e2}] = results
+      assert e1.id == e2.id, "both occurrences report the same canonical row"
+      assert e1.weight == 2.0 and e2.weight == 2.0, "last occurrence's weight wins"
+
+      {:ok, from_doc} = Content.get_document("art-batch-dup", "article", @dataset)
+      assert length(Content.list_outbound_edges(from_doc.id)) == 1
+    end
+
+    test "a mixed batch returns per-edge results IN INPUT ORDER (ok / no_target)" do
+      publish!("author", "auth-mixed")
+      resolvable = publish!("article", "art-mixed", %{"author" => "auth-mixed"})
+      dangling = publish!("article", "art-mixed-ghost", %{"author" => "ghost-mixed"})
+
+      [good] = resolvable |> Content.extract_edges() |> Enum.filter(&(&1.field == "author"))
+      [bad] = dangling |> Content.extract_edges() |> Enum.filter(&(&1.field == "author"))
+
+      assert [{:error, :no_target}, {:ok, %Edge{} = stored}, {:error, :no_target}] =
+               Content.add_edges([bad, good, bad], dataset: @dataset)
+
+      {:ok, from_doc} = Content.get_document("art-mixed", "article", @dataset)
+      assert stored.from_id == from_doc.id
+    end
   end
 end

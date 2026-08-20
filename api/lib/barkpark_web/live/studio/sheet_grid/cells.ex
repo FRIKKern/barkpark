@@ -220,17 +220,22 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   # stamps on every data `<td>` so `aria-activedescendant` can point at the
   # active cell; `aria_selected` shares the SAME sel-rect membership
   # predicate `cell_class` uses for its `sheet-sel` mark (nil sel → false).
-  # A NOT-editable grid (the View toggle / the read-only reader) has no
-  # selection at all, so it returns nil — LiveView omits the attribute
-  # entirely rather than stamping a meaningless aria-selected="false" on
-  # every cell.
+  #
+  # IT KEYS ON THE SELECTION AXIS, NEVER ON EDITABILITY (wave 43). The old
+  # arity-4 form took `editable` and returned nil for every not-editable grid,
+  # on the reasoning that such a grid "has no selection at all" — which was
+  # false for exactly the population this surface was hurting: a Studio grid in
+  # View mode, or a write-DENIED member, gets a real `Geometry.grid_sel/3` rect
+  # and paints `sheet-sel`, so a keyboard-navigable selection was silent to
+  # assistive tech. The axis is now read off `sel` itself: the reader's
+  # degenerate `{0, 0, 0, 0}` (grid_sel/3's `:reader` clause — off the 1-based
+  # grid, no cell can ever match) is the ONE shape with genuinely no selection,
+  # and only it returns nil so LiveView omits the attribute entirely.
   def cell_dom_id(table_id, {c, r}), do: "#{table_id}-cell-#{c}-#{r}"
 
-  def aria_selected(sel, c, r, editable \\ true)
+  def aria_selected({0, 0, 0, 0}, _c, _r), do: nil
 
-  def aria_selected(_sel, _c, _r, false), do: nil
-
-  def aria_selected(sel, c, r, _editable),
+  def aria_selected(sel, c, r),
     do: if(in_sel_rect?(sel, c, r), do: "true", else: "false")
 
   # Status-bar selection aggregate — Sheets shows SUM/AVG/COUNT for the

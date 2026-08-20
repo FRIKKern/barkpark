@@ -141,6 +141,50 @@ run_sampler() { # <fixture-dir> -> sets OUT / RC
   set -e
 }
 
+# ── DERIVED expectations, never hard-coded counts ────────────────────────────
+# The fixtures name real repo paths, and whether a given path is CONSOLE-, CLOUD-,
+# BOTH- or NEITHER-shape is decided by the two ratchets, which MOVE. #11082
+# (0e94b99fe) widened CLOUD_PATHS with `internal/**`; the control fixture's
+# `internal/tui/x.go` head silently stopped being NEITHER-shape and three
+# hard-coded `of which NEITHER` expectations went stale at once — the harness
+# red-flagged a sampler that was reporting the truth. So the harness asks the
+# SAME ratchets the sampler asks, and asserts the sampler AGREES with them,
+# rather than pinning a number that a future widening (or narrowing) inverts.
+#
+# This is not a tautology: the derivation below is an independent walk over the
+# fixture's own head list, so an arithmetic, exclusion or aggregation bug in the
+# sampler (which is what these assertions exist to catch) still reds. Only a
+# wrong RATCHET would fool both — and this file's doctrine is already that path
+# classification is delegated, never mocked (see the header).
+shape_of() { # <fixture-dir> <sha> -> EMPTY | NEITHER | CONSOLE | CLOUD | BOTH
+  local paths console cloud
+  paths="$(cat "$1/changed-$2.txt")"
+  if [ -z "$paths" ]; then printf 'EMPTY'; return 0; fi
+  # HERE-STRING, never `printf … | script`: `--match` ends in `grep -Eq`, and a
+  # pipe writer taking SIGPIPE would promote 141 over the answer (D37).
+  console="$(bash "$HERE/console-path-escape-check.sh" --match console <<<"$paths")"
+  cloud="$(bash "$HERE/cloud-path-escape-check.sh"     --match cloud   <<<"$paths")"
+  case "$console:$cloud" in
+    false:false) printf 'NEITHER' ;;
+    true:true)   printf 'BOTH'    ;;
+    true:false)  printf 'CONSOLE' ;;
+    *)           printf 'CLOUD'   ;;
+  esac
+}
+
+neither_among() { # <fixture-dir> <sha...> -> how many are NEITHER-shape
+  local d="$1" n=0 s
+  shift
+  for s in "$@"; do
+    if [ "$(shape_of "$d" "$s")" = 'NEITHER' ]; then n=$((n + 1)); fi
+  done
+  printf '%d' "$n"
+}
+
+neither_line() { # <count> -> the summary line the sampler must print
+  printf '  of which NEITHER    %s   (need >= 1)' "$1"
+}
+
 echo "registration-sample.test.sh"
 echo
 
@@ -153,7 +197,15 @@ run_sampler "$CONTROL"
 if [ "$RC" -eq 0 ]; then ok "control exits 0"; else no "control exited $RC, expected 0"; echo "$OUT" >&2; fi
 if has "$OUT" 'the bar is cleared'; then ok "control prints the cleared verdict"; else no "control never printed the cleared verdict"; fi
 if has_line "$OUT" 'qualifying            4   (need >= 2)'; then ok "control counts 4 qualifying heads"; else no "control qualifying count wrong"; echo "$OUT" >&2; fi
-if has_line "$OUT" '  of which NEITHER    3   (need >= 1)'; then ok "control counts 3 NEITHER-shape qualifiers"; else no "control neither-shape count wrong"; echo "$OUT" >&2; fi
+# Qualifying heads in the control are H1..H4; how many of them are NEITHER-shape
+# is the ratchets' call, not this file's.
+CONTROL_NEITHER="$(neither_among "$CONTROL" "$H1" "$H2" "$H3" "$H4")"
+if [ "$CONTROL_NEITHER" -ge 1 ]; then
+  ok "the control fixture still carries $CONTROL_NEITHER NEITHER-shape qualifier(s) (derived from the ratchets)"
+else
+  no "no fixture head is NEITHER-shape any more — both path sets have swallowed the control diffs, so the shape clause is UNEXERCISED. Give one head a path outside CONSOLE_PATHS and CLOUD_PATHS."
+fi
+if has_line "$OUT" "$(neither_line "$CONTROL_NEITHER")"; then ok "control counts $CONTROL_NEITHER NEITHER-shape qualifiers, agreeing with the ratchets"; else no "control neither-shape count wrong (ratchets say $CONTROL_NEITHER)"; echo "$OUT" >&2; fi
 if has_line "$OUT" 'shim defects          0   (need 0)'; then ok "control reports zero shim defects"; else no "control shim-defect count wrong"; fi
 # The four-cause classifier must be visible in the GREEN case, not only the reds.
 if has "$OUT" 'ABSENT:NO-RUN'; then ok "control resolves one absence as NO-RUN"; else no "control never showed NO-RUN"; fi
@@ -178,7 +230,10 @@ if has "$OUT" 'ABSENT:SHIM-DEFECT'; then ok "plant A names the cause SHIM-DEFECT
 if has_line "$OUT" 'shim defects          1   (need 0)'; then ok "plant A counts exactly one shim defect"; else no "plant A shim-defect count wrong"; echo "$OUT" >&2; fi
 # THE POINT: the count bar is still satisfied. A count-only precondition passes here.
 if has_line "$OUT" 'qualifying            3   (need >= 2)'; then ok "plant A still satisfies the COUNT bar (3 >= 2)"; else no "plant A qualifying count wrong — the mutation moved more than the shim"; echo "$OUT" >&2; fi
-if has_line "$OUT" '  of which NEITHER    2   (need >= 1)'; then ok "plant A still satisfies the SHAPE bar (2 >= 1)"; else no "plant A neither-shape count wrong"; echo "$OUT" >&2; fi
+# H2 is the shim-defect head, so the qualifiers left are H1, H3, H4.
+PA_NEITHER="$(neither_among "$PA" "$H1" "$H3" "$H4")"
+if [ "$PA_NEITHER" -ge 1 ]; then ok "plant A's mutation leaves $PA_NEITHER NEITHER-shape qualifier(s) — the shape bar is still satisfiable"; else no "plant A now has no NEITHER-shape qualifier, so the shape clause would ALSO trip and the mutation is no longer isolated"; fi
+if has_line "$OUT" "$(neither_line "$PA_NEITHER")"; then ok "plant A still satisfies the SHAPE bar ($PA_NEITHER >= 1)"; else no "plant A neither-shape count wrong (ratchets say $PA_NEITHER)"; echo "$OUT" >&2; fi
 if has "$OUT" 'REFUSE: 1 shim defect'; then ok "plant A refuses ON the shim defect, with the count bar green"; else no "plant A refusal did not cite the shim defect"; fi
 if has "$OUT" 'REFUSE: only'; then no "plant A also tripped the count clause — the mutation is not isolated"; else ok "plant A trips ONLY the shim-defect clause"; fi
 echo
@@ -196,7 +251,11 @@ run_sampler "$PB"
 
 if [ "$RC" -ne 0 ]; then ok "plant B reds (exit $RC)"; else no "plant B exited 0 — a shape-blind sample passed"; echo "$OUT" >&2; fi
 if has_line "$OUT" 'qualifying            4   (need >= 2)'; then ok "plant B still satisfies the COUNT bar (4 >= 2)"; else no "plant B qualifying count wrong"; echo "$OUT" >&2; fi
-if has_line "$OUT" '  of which NEITHER    0   (need >= 1)'; then ok "plant B has zero NEITHER-shape qualifiers"; else no "plant B neither-shape count wrong"; echo "$OUT" >&2; fi
+# The mutation's whole claim is that NO qualifier is NEITHER-shape any more; ask
+# the ratchets whether it still does what it says before believing the sampler.
+PB_NEITHER="$(neither_among "$PB" "$H1" "$H2" "$H3" "$H4")"
+if [ "$PB_NEITHER" -eq 0 ]; then ok "plant B's reshape genuinely removes every NEITHER-shape qualifier (derived from the ratchets)"; else no "plant B's reshape has decayed — the ratchets still score $PB_NEITHER qualifier(s) NEITHER, so the shape clause is not what reds"; fi
+if has_line "$OUT" "$(neither_line "$PB_NEITHER")"; then ok "plant B has $PB_NEITHER NEITHER-shape qualifiers"; else no "plant B neither-shape count wrong (ratchets say $PB_NEITHER)"; echo "$OUT" >&2; fi
 if has "$OUT" 'touch NEITHER path set, need 1'; then ok "plant B refuses ON the shape clause"; else no "plant B refusal did not cite the shape clause"; echo "$OUT" >&2; fi
 if has "$OUT" 'REFUSE: only'; then no "plant B also tripped the count clause — not isolated"; else ok "plant B does not trip the count clause"; fi
 if has_line "$OUT" 'shim defects          0   (need 0)'; then ok "plant B reports no shim defect"; else no "plant B also reported a shim defect — not isolated"; fi
@@ -234,7 +293,10 @@ make_control "$PD"
 run_sampler "$PD"
 if has "$OUT" 'EXCLUDED (empty diff'; then ok "an empty-diff head is EXCLUDED, never scored NEITHER"; else no "empty-diff head was not excluded"; echo "$OUT" >&2; fi
 if has_line "$OUT" 'empty-diff (excluded) 1'; then ok "the empty-diff exclusion is counted in the summary"; else no "empty-diff count missing from the summary"; fi
-if has_line "$OUT" '  of which NEITHER    2   (need >= 1)'; then ok "the excluded head did not inflate the NEITHER count"; else no "the empty-diff head leaked into the NEITHER count"; echo "$OUT" >&2; fi
+# H1 is the emptied head, so the qualifiers left are H2, H3, H4. If H1 leaked in
+# it would score NEITHER and read one HIGHER than the ratchets allow.
+PD_NEITHER="$(neither_among "$PD" "$H2" "$H3" "$H4")"
+if has_line "$OUT" "$(neither_line "$PD_NEITHER")"; then ok "the excluded head did not inflate the NEITHER count (ratchets say $PD_NEITHER)"; else no "the empty-diff head leaked into the NEITHER count (ratchets say $PD_NEITHER)"; echo "$OUT" >&2; fi
 
 # The sampler must delegate every path decision. A `/**` glob or a `.github/`
 # literal in the executable body means it has started to fork the ratchets.

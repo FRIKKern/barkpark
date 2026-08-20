@@ -214,10 +214,42 @@ func runHetznerBackupCreate(out *writer, args []string) int {
 	if err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	return hzResDone(out, "create", "backup", key, key, map[string]any{
-		"bucket":   bucket,
-		"database": src.Database(),
-	})
+	// THE POST-READ (PDS-D427): the key backup.Backup returns is the one it
+	// COMPOSED, not one anybody read. A HEAD on it is what turns this receipt
+	// from "the upload call did not error" into "the object is there" — and a
+	// backup that is not there is the one lie in this CLI that costs a database.
+	// The basis names the HEAD (PDS-D437). It is the weaker of the two things a
+	// reader might hope for: the key holds bytes. That the bytes are THIS dump
+	// is not confirmed, which is why hzObserveBackupStored declares `database`
+	// rather than asserting it.
+	return hzResObserved(out, hetznerCtx(), "create", "backup", key, key, nil,
+		hzS3HeadRead(c, bucket, key), hzObserveBackupStored(bucket, src.Database()), hzResBasisHead)
+}
+
+// hzObserveBackupStored reads the dump's receipt off the HEAD of its stored key,
+// and DECLARES the one field that read cannot carry.
+func hzObserveBackupStored(bucket, database string) hzResObserveFn[hzS3Head] {
+	return func(h *hzS3Head) hzResObservation {
+		extra := map[string]any{
+			"bucket": bucket,
+			// DECLARED, NEVER CONFIRMED: an object store can confirm that a KEY
+			// holds bytes; it cannot report which database produced them. The
+			// name comes from --database-url, and the receipt says so rather
+			// than letting it sit beside observed fields as if it were one.
+			"database":           database,
+			"database_confirmed": false,
+			"database_basis": "declared from --database-url — the object store can confirm the KEY exists, " +
+				"never which database produced its bytes",
+		}
+		if h.length != nil {
+			extra["bytes"] = *h.length
+		} else {
+			extra["bytes_verified"] = false
+			extra["bytes_reason"] = "the endpoint declared no length for the stored dump, so its size is UNKNOWN " +
+				"— the key's existence is what this receipt confirms"
+		}
+		return hzResAgrees(extra)
+	}
 }
 
 func runHetznerBackupList(out *writer, args []string) int {
@@ -306,7 +338,31 @@ func runHetznerBackupRestore(out *writer, args []string) int {
 	if err := backup.Restore(hetznerCtx(), c, bucket, key, sink); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	return hzResDone(out, "restore", "backup", key, key, map[string]any{"bucket": bucket})
+	return hzResDone(out, "restore", "backup", key, key, hzRestoreNotConfirmed(bucket))
+}
+
+// hzRestoreNotConfirmed is `backup restore`'s DECLARED EXEMPTION, spelled as
+// code so the census can name a SYMBOL rather than trust a sentence.
+//
+// Every other write in this file earns its ✓ by re-reading what it wrote. This
+// one cannot, and the reason is a boundary rather than a cost: the post-condition
+// of a restore lives INSIDE THE TARGET POSTGRES — that the tables are now there
+// — and this verb holds S3 credentials, not database ones. The bytes it can
+// account for (the object streamed, gunzipped, and accepted by psql) it already
+// accounted for; the state it cannot see it REFUSES TO FABRICATE. So the receipt
+// carries the same `confirmation: unavailable` vocabulary the destroy half uses
+// when its read fails, and says in words that the restored state is not
+// confirmed — instead of a confirmed_present key nothing read.
+func hzRestoreNotConfirmed(bucket string) map[string]any {
+	return map[string]any{
+		"bucket":              bucket,
+		hzKeyConfirmation:     hzConfirmUnavail,
+		hzKeyConfirmedPresent: false,
+		hzKeyConfirmBasis:     "none — DECLARED EXEMPTION",
+		"note": "the dump was streamed into the target database and the restore sink accepted it; whether that " +
+			"database now HOLDS it is a post-condition inside Postgres, outside this verb's S3 credential plane, " +
+			"so the restored state is " + hzNotConfirmedPhras + " (verify with a query against the target)",
+	}
 }
 
 func runHetznerBackupPrune(out *writer, args []string) int {

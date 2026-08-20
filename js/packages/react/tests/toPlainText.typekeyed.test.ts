@@ -57,7 +57,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-corpus-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-corpus-code-tabs
     // scaffy:add-block-type Tabs MARK:typekeyed-corpus-tabs
-    expect(cases.length).toBe(60)
+    expect(cases.length).toBe(62)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -96,7 +96,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type Video MARK:typekeyed-textless-video
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-textless-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-textless-code-tabs
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(34)
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(36)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 

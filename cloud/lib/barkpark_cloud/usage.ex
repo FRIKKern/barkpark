@@ -148,6 +148,19 @@ defmodule BarkparkCloud.Usage do
 
   @unmetered "unmetered"
 
+  # The typed reasons a meter read can FAIL — the vocabulary `within_deadline/2`
+  # and the fan-outs already mint, carried through to the surfaces instead of
+  # being flattened into the deliberate "not metered" state. Anything outside
+  # this set normalises to "unknown" (never a raw internal atom on the wire).
+  # `unreachable` means the box NEVER ANSWERED (a client-level failure: refused
+  # connection, DNS, TLS handshake, socket close). A box that DID answer and said
+  # no is a different fact and gets its own word — `unauthorized` (it rejected
+  # our admin credential), `instance_error` (it failed on its own side) or
+  # `refused` (any other delivered non-2xx). Telling a paying customer "we could
+  # not reach your box" about a credential rejection sends them to their network.
+  @unavailable_reasons ~w(exception deadline_exceeded unreachable unauthorized refused
+                          instance_error bad_shape too_many_datasets)
+
   # The trailing window `history/2` reads — matches the sampler's 14-day
   # `usage_samples` retention (AgentRetentionWorker prune), so the sparkline is
   # never asking for rows that were pruned away.
@@ -201,13 +214,47 @@ defmodule BarkparkCloud.Usage do
 
   # ── Meter builders ──────────────────────────────────────────────────────────
 
-  # An instance inventory count: a landed `{:ok, n}` is the number; a failure,
-  # an explicit `:unmetered`, or an absent input all degrade to "unmetered" with
-  # the source still named (never a fake zero on an unreachable box).
+  # An instance inventory count. A landed `{:ok, n}` is the number; everything
+  # else degrades to "unmetered" with the source still named (never a fake zero
+  # on an unreachable box) — but NOT into one identical map, because the inputs
+  # mean two OPPOSITE things:
+  #
+  #   * `:unmetered` / an absent input — nobody attempted a read (the box is not
+  #     live, or carries no admin token). "Not yet metered" is the honest word.
+  #   * `{:error, reason}` / a shape we cannot trust — the read WAS attempted and
+  #     it FAILED. `within_deadline/2` already mints `{:error, :exception}` for a
+  #     real raise, distinct from `{:error, :deadline_exceeded}`; the fan-outs add
+  #     `:unreachable`, `:bad_shape`, `:too_many_datasets`. This clause used to
+  #     throw all of that away, so a CRASHED meter rendered in the product's own
+  #     words for a DELIBERATE non-measurement. The typed reason now rides along
+  #     as `:unavailable_reason` so every surface can say "we could not measure
+  #     this" instead.
+  #
+  # `:unavailable_reason` is a CONDITIONAL key (the `seats` meter's
+  # `:pending_invitations` precedent): a meter that measured fine, or one that is
+  # deliberately unmetered, does not carry it at all.
   defp instance_meter({:ok, n}, source) when is_integer(n) and n >= 0,
     do: meter(n, source, nil)
 
-  defp instance_meter(_other, source), do: meter(@unmetered, source, nil)
+  defp instance_meter(:unmetered, source), do: meter(@unmetered, source, nil)
+  defp instance_meter(nil, source), do: meter(@unmetered, source, nil)
+  defp instance_meter({:error, reason}, source), do: unavailable_meter(source, reason)
+  defp instance_meter(_other, source), do: unavailable_meter(source, :bad_shape)
+
+  # A meter whose read was attempted and failed: value still degrades to
+  # "unmetered" (never a fake zero) with the TYPED reason attached. The reason is
+  # normalised to a known string so the envelope can never leak an arbitrary
+  # internal atom to the browser — an unrecognised one is honestly "unknown".
+  defp unavailable_meter(source, reason) do
+    Map.put(meter(@unmetered, source, nil), :unavailable_reason, unavailable_reason(reason))
+  end
+
+  defp unavailable_reason(reason) when is_atom(reason) do
+    name = Atom.to_string(reason)
+    if name in @unavailable_reasons, do: name, else: "unknown"
+  end
+
+  defp unavailable_reason(_), do: "unknown"
 
   # DB size in bytes, from the agent's latest health beat. The agent reports `-1`
   # verbatim until the PGSizeBytes probe lands (report.go:170/194/246), so a bare
@@ -688,6 +735,9 @@ defmodule BarkparkCloud.Usage do
           {:ok, %{status: status, body: body}} when status in 200..299 ->
             parse_dataset_slugs(body)
 
+          {:ok, %{status: status}} ->
+            {:error, delivered_failure(status)}
+
           _ ->
             {:error, :unreachable}
         end
@@ -777,6 +827,9 @@ defmodule BarkparkCloud.Usage do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         decode_list_count(body, "webhooks")
 
+      {:ok, %{status: status}} ->
+        {:error, delivered_failure(status)}
+
       _ ->
         {:error, :unreachable}
     end
@@ -796,10 +849,22 @@ defmodule BarkparkCloud.Usage do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
         decode_scalar_total(body, "total_documents")
 
+      {:ok, %{status: status}} ->
+        {:error, delivered_failure(status)}
+
       _ ->
         {:error, :unreachable}
     end
   end
+
+  # A DELIVERED non-2xx: the box ANSWERED. Which word it earns is a
+  # user-facing judgement, so it is made in ONE place for all three reads —
+  # 401/403 is our credential being rejected, a 5xx is the instance failing on
+  # its own side, and anything else is a refused read. None of these is
+  # `unreachable`: the packets arrived.
+  defp delivered_failure(status) when status in [401, 403], do: :unauthorized
+  defp delivered_failure(status) when status in 500..599, do: :instance_error
+  defp delivered_failure(_status), do: :refused
 
   # `{"<key>": [...]}` → `{:ok, length}`; any other shape → an honest degrade.
   defp decode_list_count(body, key) when is_binary(body) do

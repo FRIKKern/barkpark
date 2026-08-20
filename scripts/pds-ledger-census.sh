@@ -249,6 +249,108 @@
 #       An all-NULL sort key is an UNSPECIFIED order that can skip and duplicate
 #       with no concurrent write at all — strictly worse than the bug.
 #
+# CLAUSE 7 — THE LEDGER LAPSE, AND WHY ONE KEY CANNOT SEE BOTH ITS SHAPES
+# (wave 43, PDS-D638). Two waves running, slice rows lapsed to `open` with their
+# work DONE — three in wave 41, two in wave 42 — and each debrief wrote the same
+# paragraph about it. A lesson restated is not a lesson learned; it is a defect
+# with good manners. So it stops being a paragraph here and becomes an arm with
+# a fixture that can go red.
+#
+# `claim` rides /v1/data/query as a TOP-LEVEL doc key, so this arm reads a field
+# already inside bytes the paged read above already fetched: ZERO extra requests,
+# zero new transport, nothing to rate-limit.
+#
+# THE THREE SHAPES DO NOT SHARE A KEY, AND THAT IS THE WHOLE FINDING.
+#
+#   SHAPE A — REVERTED-TO-OPEN AFTER EXPIRY. Key: lifecycle_status == `open`
+#   AND claim.worker is null AND claim.previous_worker is set AND
+#   claim.expired_at is set AND there is NO claim.released_at AND NO
+#   claim.closed_at. That is the TTL sweeper's exact fingerprint: a release
+#   writes released_at, a close writes closed_at, and ONLY a lapse nulls worker
+#   while preserving previous_worker. The row is now a RE-OPEN LIE — the board
+#   offers work that was already done. `claim.now.text` is reported as a
+#   sub-count, because a lapsed row that carries a now-line is one whose worker
+#   was demonstrably mid-flight.
+#
+#   SHAPE B — IN_PROGRESS HELD BY A FINISHED WORKER, AND IT IS THE REASON THIS
+#   ARM HAS TWO KEYS. A shape-B row DOES NOT CARRY expired_at, BY CONSTRUCTION:
+#   the lease is still held and the REAP is what writes that field. A check
+#   keyed on expired_at therefore passes VACUOUSLY on shape B, 100% of the time,
+#   forever — the precise vacuous green this whole instrument exists to make
+#   impossible, relocated into its own fix. Shape B's only honest key is
+#   lifecycle_status == `in_progress` AND (the census's own named instant minus
+#   claim.ts_iso) > the lease TTL (LEASE_TTL_SECONDS below: 2700s, overridable
+#   by BARKPARK_TASK_LEASE_TTL_SECONDS, sweeper cron `* * * * *`). Shape B
+#   self-heals INTO shape A within <= TTL+60s, so a live board simply has no
+#   shape-B rows most instants — which is why the selftest INJECTS a synthetic
+#   stale in_progress row rather than waiting for one. An arm that has never
+#   fired is not an arm.
+#
+#   SHAPE C — OPEN WITH A CLAIM THAT WAS NEVER CLEARED. Key: lifecycle_status ==
+#   `open` AND claim.worker is set AND claim.closed_at is set: a reopened row
+#   still wearing the finished claim. A worker-keyed check reads it as HELD; an
+#   expiry-keyed check ignores it entirely. Reported on its own line, never
+#   folded into A or B, because its remedy is a third thing.
+#
+# THREE SHAPES, THREE REMEDIES, AND THE OUTPUT SAYS WHICH: A is a re-open lie
+# (re-claim and close it on the evidence already on the row); B needs
+# `bp task release` (it cannot self-heal while the lease is held); C needs the
+# stale claim CLEARED. A single "lapsed: N" counter would name none of them.
+#
+# FAIL CLOSED ON A HELD ROW WHOSE LEASE CANNOT BE READ. An `in_progress` row
+# carrying a claim with a worker but a missing or unreadable `claim.ts_iso`
+# cannot be placed on either side of the TTL, and a row the arm cannot place is
+# never silently counted as fresh — exit 2, exactly as clause 5 does for
+# `_updatedAt` and clause 4(a) does for `_createdAt`.
+#
+# DECLARE THE LENS, AND DERIVE IT. /v1/data/query answers with
+# perspective: published, so a lapsed DRAFT row is INVISIBLE to this arm and
+# VISIBLE to `bp task ls --all` — the two disagree BY CONSTRUCTION, and one of
+# the six fully-complete-but-open rows measured live on 2026-08-02 was a
+# `drafts.` row. The perspective is read back off `result.perspective` and
+# PRINTED rather than asserted in a comment: a lens nobody can read back is a
+# claim.
+#
+# CLAUSE 8 — THE DENOMINATOR, AND THE REFUSAL BESIDE IT (wave 47)
+#
+# The open-PDS denominator had FIVE circulating answers (344 / 354 / 374 / 379 /
+# 405). Settled by measurement, and one inherited premise REFUTED: `parent_id` is
+# NOT mixed-keyed — 0 of 4,592 non-null values resolve as a UUID id and 4,537 as
+# the slug, so the "344 UUID closure" was a DEPTH-1 TRUNCATION (a walk pushing
+# `id` onto the frontier matches no parent_id and halts at level 1), never a
+# lens. This census inherits no such hole: build_closure keys on the corpus's own
+# `_id` — the space parent_id lives in — walks transitively and asserts a
+# fixpoint.
+#
+# ONE FIELD: `lifecycle_status == "open"`, CASE-EXACT. NOT `disposition` (216
+# live rows carry none, and a disposition-keyed denominator drops all of them).
+# NOT "live / non-terminal" (that folds in `considering`, which by the task-funnel
+# doctrine PRECEDES open — a considering row is not a claim that a defect is
+# live). The number is DERIVED on every run and printed with its lens, its
+# instant and the command that re-derives it. NOTHING pins it: it was 374 at
+# 2026-08-04T12:35Z and the wave that measured it was filing rows as it read.
+#
+# AND THE COUNT NAMES WHAT IT CANNOT SEE. A denominator printed alone is a claim
+# about a population nobody looked outside of, so the census prints a BLIND-SPOT
+# block with NAMES, never a count:
+#   (1) rows carrying the epic's slug prefix whose parent chain never reaches the
+#       root — unreachable by ANY closure anchored there, at any depth, under any
+#       key. Measured 2026-08-04: exactly one is open,
+#       `pds-bl-merge-gated-criteria-carry-the-flag`, parented to a DIFFERENT
+#       epic, and its subject is the merge-gated criteria class itself.
+#   (2) a SECOND paged read at `perspective=drafts`, SPLIT by the published twin:
+#       no twin = HIDDEN WORK (joins the honest total); a TERMINAL twin = a
+#       PHANTOM, an unpublished edit shadow, and adding it OVERCOUNTS — this is
+#       precisely how 379 was reached where 376 was honest.
+# The drafts lens has an UNREAD state that is an ABSENCE and NEVER a zero: a
+# tokenless or public-read caller is silently pinned to `published` by
+# AnonPerspective, and counting that answer as "no drafts exist" would
+# manufacture a clean board out of a permission the caller does not have.
+#
+# STATED AND NOT FIXED: the read pages by explicit offsets over `_createdAt:asc`,
+# so a row created mid-page is invisible to it — and to any independent walk
+# reading through the same pager. Two such walks agreeing does not rule it out.
+#
 # READ-ONLY. This instrument never writes, never creates, never publishes.
 # Charter PDS-D334 (a bare patch writes the DRAFT and the published route
 # serves the PRE-WRITE value for a variable 5-40s) is therefore not in play,
@@ -288,7 +390,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 3
 fi
 
-exec python3 - "$@" <<'PYEOF'
+exec python3 -I - "$@" <<'PYEOF'
 import argparse
 import hashlib
 import json
@@ -347,6 +449,54 @@ REOPEN_TRIGGER_RE = re.compile(r"\b(RE-?OPEN|REACTIVATE)\b\s*(TRIGGER)?\s*[:\-]"
 # a row must not be able to dodge the trigger requirement by shouting PARKED.
 PARKED_DISPOSITION = "parked"
 
+# CLAUSE 7's ONE TUNABLE: the task lease TTL, in seconds. `Tasks` reaps a claim
+# that has not been renewed inside this window, so "held longer than this" is
+# the ONLY honest key for shape B — expired_at is written BY the reap and is
+# therefore absent on every shape-B row, forever. The env var is the same one
+# the server reads, so an instance running a non-default TTL is measured against
+# ITS lease and not against this file's opinion of one.
+DEFAULT_LEASE_TTL_SECONDS = 2700
+LEASE_TTL_ENV = "BARKPARK_TASK_LEASE_TTL_SECONDS"
+
+# The lifecycle values clause 7 keys on. Both are LIVE (neither is in
+# TERMINAL_LIFECYCLE), and they are CASE-EXACT like every other value read here.
+LIFECYCLE_OPEN = "open"
+LIFECYCLE_IN_PROGRESS = "in_progress"
+
+# THE DENOMINATOR'S LENS, IN ONE PLACE. Every "N of the open PDS rows" claim
+# divides by the count of closure rows whose `lifecycle_status` is EXACTLY this
+# value. The alternatives were measured and refused (wave 47):
+#   - `disposition`-keyed: 216 live rows carry NO disposition, so a
+#     disposition-keyed denominator silently drops them.
+#   - "live / non-terminal": folds in `considering` and `blocked`, and by the
+#     task-funnel doctrine `considering` PRECEDES open -- a considering row is
+#     not a claim that a defect is live.
+# The number itself is NEVER written down here. It was 374 through this lens at
+# 2026-08-04T12:35Z and the wave that measured it also files rows, so a literal
+# would be stale before it was committed -- which is the exact undescended
+# assertion this epic exists to refuse. It is derived on every run, printed with
+# the instant it was taken and with the command that re-derives it.
+DENOMINATOR_FIELD = "lifecycle_status"
+REDERIVE_COMMAND = "bash scripts/pds-ledger-census.sh"
+
+# THE BLIND-SPOT ARM'S ONE HEURISTIC, NAMED AS ONE. A row that belongs to this
+# epic by NAME but hangs off another epic's parent is unreachable by any closure
+# anchored at the root, at any depth, under any key -- so the closure cannot see
+# it and must say so. The key is a SLUG PREFIX, which is a naming convention and
+# not a structural fact: an epic row named without it is invisible to this arm
+# too, and the output says that rather than implying coverage it does not have.
+EPIC_SLUG_PREFIX = "pds-"
+
+# THE SECOND LENS. `/v1/data/query?perspective=drafts` serves draft rows under a
+# `drafts.`-prefixed `_id`. A published-only read cannot see a row that was
+# never published -- not as a zero, as an ABSENCE -- so the census reads the
+# drafts lens too and reports what it finds there SEPARATELY. It is never summed
+# into the denominator: a draft whose published twin is terminal is an edit
+# shadow, not hidden work (measured wave 47: 3 of the 5 in-scope draft-open rows
+# are exactly that).
+DRAFT_ID_PREFIX = "drafts."
+DRAFT_PERSPECTIVE = "drafts"
+
 # The API's page cap. Asking for more is answered with a silently smaller page.
 DEFAULT_PAGE_LIMIT = 1000
 
@@ -366,6 +516,18 @@ EXIT_ROUND_NOT_DONE = 1
 EXIT_FAIL_CLOSED = 2
 EXIT_USAGE = 3
 EXIT_INCOHERENT = 4
+
+
+class LensAbsent(Exception):
+    """The SECOND lens could not be read AT ALL, and that is not a zero.
+
+    Raised only where a source can honestly not offer the drafts perspective (a
+    fixture that cans no drafts pages; a token the endpoint answers in the
+    published perspective anyway). It is never raised for a transport failure --
+    a 429 or a 500 on the drafts read fails closed exactly like one on the
+    published read, because a smoothed-over error is the defect this file
+    exists to refuse.
+    """
 
 
 def die(code, msg, detail=None):
@@ -396,7 +558,10 @@ class HttpTransport(object):
     def describe(self):
         return self.server
 
-    def get(self, path, query, page_index, attempt):
+    def get(self, path, query, page_index, attempt, kind="page"):
+        # `kind` is the fixture transport's file key. Over HTTP the lens rides
+        # in the query string the caller already built, so there is nothing to
+        # branch on here -- and nothing to get out of sync with it.
         return self._request("%s%s?%s" % (self.server, path, query))
 
     def get_doc(self, path, slug):
@@ -438,11 +603,18 @@ class FixtureTransport(object):
     def describe(self):
         return "fixture://%s" % self.dir
 
-    def get(self, path, query, page_index, attempt):
-        path_i = os.path.join(self.dir, "page-%d-attempt-%d.http" % (page_index, attempt))
+    def get(self, path, query, page_index, attempt, kind="page"):
+        path_i = os.path.join(self.dir, "%s-%d-attempt-%d.http" % (kind, page_index, attempt))
         if not os.path.exists(path_i):
-            path_i = os.path.join(self.dir, "page-%d.http" % page_index)
+            path_i = os.path.join(self.dir, "%s-%d.http" % (kind, page_index))
         if not os.path.exists(path_i):
+            # A fixture that cans NO page of a secondary lens is a source that
+            # does not offer that lens -- an ABSENCE, reported as one. A fixture
+            # that cans page 0 and then stops is still a TRUNCATED READ and
+            # still fails closed below: the softening applies to the first page
+            # of a non-default lens and to nothing else.
+            if kind != "page" and page_index == 0:
+                raise LensAbsent("fixture cans no %s-0.http" % kind)
             die(EXIT_FAIL_CLOSED,
                 "fixture exhausted: no %s (the read wanted another page and the "
                 "source stopped answering -- that is a truncated read, not a "
@@ -477,14 +649,17 @@ class FixtureTransport(object):
 # --- paged, shape-asserted read ----------------------------------------------
 
 
-def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, retries):
+def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, retries,
+               perspective_param=None, kind="page"):
     # The order is NOT optional. Explicit offsets over the server's default
     # `desc: updated_at` page a MUTATING key and can skip a row with no error.
     query = "limit=%d&offset=%d&order=%s" % (limit, offset, PAGE_ORDER)
+    if perspective_param:
+        query += "&perspective=%s" % perspective_param
     path = "/v1/data/query/%s/%s" % (dataset, doctype)
     attempt = 0
     while True:
-        status, body = transport.get(path, query, page_index, attempt)
+        status, body = transport.get(path, query, page_index, attempt, kind)
 
         # CLAUSE 3, first half: the status decides, before the body is looked at.
         if status == 429:
@@ -554,18 +729,30 @@ def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, ret
                 die(EXIT_FAIL_CLOSED, "page at offset %d carries a row with no _id" % offset)
 
         time.sleep(pace)
-        return docs
+        # CLAUSE 7's LENS, DERIVED. `result.perspective` is what the endpoint
+        # says it answered with; it is reported, never assumed. A page that does
+        # not say is reported as `<unset>` rather than assumed published.
+        perspective = result.get("perspective")
+        if not isinstance(perspective, str) or not perspective.strip():
+            perspective = "<unset>"
+        return docs, perspective.strip()
 
 
-def read_corpus(transport, dataset, doctype, limit, pace, retries):
+def read_corpus(transport, dataset, doctype, limit, pace, retries,
+                perspective_param=None, kind="page", require_rows=True):
     """CLAUSE 1 + CLAUSE 4: explicit offsets, serial, paced, short page ends it."""
     by_id = {}
     pages = []
     offset = 0
     duplicates = []
+    perspectives = []
     for page_index in range(MAX_PAGES):
-        docs = fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, retries)
+        docs, perspective = fetch_page(
+            transport, dataset, doctype, page_index, offset, limit, pace, retries,
+            perspective_param, kind)
         pages.append(len(docs))
+        if perspective not in perspectives:
+            perspectives.append(perspective)
         for doc in docs:
             doc_id = doc["_id"]
             if doc_id in by_id:
@@ -578,11 +765,36 @@ def read_corpus(transport, dataset, doctype, limit, pace, retries):
         die(EXIT_FAIL_CLOSED,
             "read did not terminate after %d pages of %d -- refusing to report a "
             "partial board" % (MAX_PAGES, limit))
-    if not by_id:
+    if not by_id and require_rows:
         die(EXIT_FAIL_CLOSED,
             "empty population: zero %s rows. A census with nothing in it has not "
             "passed, it has failed to run." % doctype)
-    return by_id, pages, duplicates
+    return by_id, pages, duplicates, perspectives
+
+
+def read_drafts_lens(transport, dataset, doctype, limit, pace, retries):
+    """THE SECOND LENS, WITH AN HONEST UNREAD STATE.
+
+    Returns (rows_by_id, unread_reason). Exactly one of them is set. The lens is
+    UNREAD -- never zero -- when the source cans no drafts page at all, or when
+    it answers a perspective it was not asked for (a tokenless or public-read
+    caller is silently PINNED to `published` by AnonPerspective, and a run that
+    counted that response as "no drafts exist" would manufacture a clean board
+    out of a permission it does not have). Every other failure fails closed
+    inside fetch_page, unchanged.
+    """
+    try:
+        rows, _pages, _dupes, perspectives = read_corpus(
+            transport, dataset, doctype, limit, pace, retries,
+            perspective_param=DRAFT_PERSPECTIVE, kind="drafts-page", require_rows=False)
+    except LensAbsent as absent:
+        return None, "source offers no drafts perspective (%s)" % absent
+    answered = [p for p in perspectives if p != DRAFT_PERSPECTIVE]
+    if answered:
+        return None, ("source answered perspective:%s for a perspective=%s read -- the "
+                      "lens was IGNORED, so the never-published class is UNMEASURED, "
+                      "not zero" % ("+".join(answered), DRAFT_PERSPECTIVE))
+    return rows, None
 
 
 # --- closure ------------------------------------------------------------------
@@ -663,6 +875,56 @@ def structured_trigger(row):
     return value.strip() if isinstance(value, str) else ""
 
 
+def claim_of(row):
+    """CLAUSE 7's ONLY source: the top-level `claim` object /v1/data/query
+    serves beside the row. A row with no claim has never been held and is no
+    shape at all; a `claim` that is not an object is not read as one."""
+    value = row.get("claim")
+    return value if isinstance(value, dict) else None
+
+
+def claim_field(claim, key):
+    """A claim field as a TRIMMED string. `null`, absent and empty are the SAME
+    thing here on purpose: shape A's whole key is which of these fields the
+    sweeper left behind, and `"worker": null` versus no `worker` key at all is a
+    serialisation detail, never a difference in what happened to the row."""
+    value = claim.get(key)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def claim_work_evidence(claim):
+    """`claim.now.text` — the worker's own now-line. A lapsed row carrying one is
+    a row whose worker was demonstrably mid-flight when the lease was reaped,
+    which is what makes shape A a LIE and not merely a vacancy."""
+    now = claim.get("now")
+    if not isinstance(now, dict):
+        return False
+    text = now.get("text")
+    return isinstance(text, str) and bool(text.strip())
+
+
+def lease_ttl_seconds():
+    """The lease TTL, from the SAME env var the server reads, or the default.
+
+    An unreadable value is a USAGE error, never a silent fallback: a TTL that
+    quietly reverts to 2700 on an instance running 300 would measure shape B
+    against a lease that does not exist.
+    """
+    raw = os.environ.get(LEASE_TTL_ENV)
+    if raw is None or not raw.strip():
+        return DEFAULT_LEASE_TTL_SECONDS, "default"
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        die(EXIT_USAGE, "%s=%r is not an integer number of seconds -- refusing to "
+                        "fall back to %d, which would measure shape B against a "
+                        "lease this instance does not run"
+                        % (LEASE_TTL_ENV, raw, DEFAULT_LEASE_TTL_SECONDS))
+    if value < 1:
+        die(EXIT_USAGE, "%s=%d must be >= 1" % (LEASE_TTL_ENV, value))
+    return value, LEASE_TTL_ENV
+
+
 def parse_instant(value):
     if not isinstance(value, str):
         return None
@@ -712,7 +974,166 @@ def resolve_anchor_from_paper(transport, dataset, slug):
     return born, raw
 
 
-def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None):
+def lapse_shapes(rows, started, lease_ttl):
+    """CLAUSE 7 (PDS-D638): THE LEDGER LAPSE, IN THREE SHAPES THAT DO NOT SHARE
+    A KEY. Read straight off the `claim` object the paged read already fetched.
+
+    SHAPE B IS THE REASON THERE ARE TWO KEYS AND NOT ONE. It is keyed on the
+    HELD LEASE'S AGE and NEVER on `claim.expired_at`, because expired_at is
+    written BY the reap: no shape-B row can carry it, so an expired_at-keyed
+    check would pass vacuously on shape B 100% of the time, forever. That is
+    the exact vacuous green this instrument exists to make impossible, and it
+    would have been shipped INSIDE the fix for it.
+
+    ONE FUNCTION, TWO LENSES. The published closure and the drafts lens are
+    scored by THIS code and no other, so the per-shape delta between them is a
+    property of the LENS and never of two hand-copied key sets that drifted.
+    """
+    lapse_a = []
+    lapse_a_work = []
+    lapse_b = []
+    lapse_b_overdue = {}
+    lapse_c = []
+    for row in rows:
+        claim = claim_of(row)
+        if claim is None:
+            continue
+        row_lifecycle = row.get("lifecycle_status") or ""
+        worker = claim_field(claim, "worker")
+        if (row_lifecycle == LIFECYCLE_OPEN
+                and not worker
+                and claim_field(claim, "previous_worker")
+                and claim_field(claim, "expired_at")
+                and not claim_field(claim, "released_at")
+                and not claim_field(claim, "closed_at")):
+            # SHAPE A. The TTL sweeper's exact fingerprint: a release writes
+            # released_at, a close writes closed_at, only a lapse nulls worker
+            # while preserving previous_worker.
+            lapse_a.append(row["_id"])
+            if claim_work_evidence(claim):
+                lapse_a_work.append(row["_id"])
+        if row_lifecycle == LIFECYCLE_IN_PROGRESS and worker:
+            # SHAPE B. NOT expired_at -- see above. The clock is the census's
+            # OWN named instant, so the age descends from the same window
+            # clause 5 asserts coherence over.
+            raw = claim.get("ts_iso")
+            held_since = parse_instant(raw)
+            if held_since is None:
+                die(EXIT_FAIL_CLOSED,
+                    "row %s is `%s` and HELD by %r but its claim.ts_iso is missing "
+                    "or unreadable (%r) -- the lease cannot be placed on either "
+                    "side of the %ds TTL, and a row the arm cannot place is never "
+                    "counted as fresh"
+                    % (row["_id"], LIFECYCLE_IN_PROGRESS, worker, raw, lease_ttl))
+            age = (started - held_since).total_seconds()
+            if age > lease_ttl:
+                lapse_b.append(row["_id"])
+                lapse_b_overdue[row["_id"]] = round(age - lease_ttl, 2)
+        if row_lifecycle == LIFECYCLE_OPEN and worker and claim_field(claim, "closed_at"):
+            # SHAPE C. Reported on its own line and NEVER folded: a worker-keyed
+            # check reads it as held, an expiry-keyed check cannot see it at all,
+            # and its remedy is a third thing.
+            lapse_c.append(row["_id"])
+    return {
+        "shape_a": sorted(lapse_a),
+        "shape_a_work_evidence": sorted(lapse_a_work),
+        "shape_b": sorted(lapse_b),
+        "shape_b_overdue_seconds": lapse_b_overdue,
+        "shape_c": sorted(lapse_c),
+    }
+
+
+def blind_spots(corpus, closure, root, drafts, drafts_unread, started, lease_ttl):
+    """WHAT THE DENOMINATOR STRUCTURALLY CANNOT SEE -- BY NAME, NEVER AS A COUNT.
+
+    A census that prints one number and nothing else is a claim about a
+    population it never looked outside of. Two mechanical arms, no transcription:
+
+      (1) OUTSIDE THE CLOSURE. Rows whose slug carries the epic prefix and whose
+          parent chain does NOT reach the root. No closure anchored at the root
+          can reach them at ANY depth, under any key -- so they are not a
+          deeper walk away, they are unreachable. Terminal ones are listed
+          apart: a done row outside the closure is bookkeeping, a LIVE one is
+          work this epic owns and cannot see.
+
+      (2) THE DRAFTS LENS. Draft rows in scope of the root that are `open`,
+          split by what their PUBLISHED twin says, because the two halves are
+          not the same kind of thing:
+            - NO published twin -> genuinely never published. HIDDEN WORK. It
+              is added to the honest total.
+            - twin is TERMINAL -> a PHANTOM: an unpublished edit shadow of a
+              row that is finished. Adding it OVERCOUNTS (measured 2026-08-04:
+              3 of 5, and adding them turns 376 into 379).
+            - twin is LIVE -> already inside the denominator; the draft is an
+              edit in flight, not a second row.
+
+    The scope rule for (2) is the same parent_id key clause 2 walks: a draft is
+    in scope when its parent is the root or a closure member, or when its own
+    base slug is already in the closure.
+    """
+    closure_set = set(closure)
+    scope = closure_set | {root}
+
+    outside_live = []
+    outside_terminal = []
+    for doc_id, doc in sorted(corpus.items()):
+        if doc_id in closure_set or doc_id == root:
+            continue
+        if not doc_id.startswith(EPIC_SLUG_PREFIX):
+            continue
+        lifecycle = doc.get("lifecycle_status") or "<unset>"
+        entry = {"id": doc_id, "lifecycle_status": lifecycle,
+                 "parent_id": doc.get("parent_id")}
+        (outside_terminal if lifecycle in TERMINAL_LIFECYCLE else outside_live).append(entry)
+
+    report = {
+        "epic_slug_prefix": EPIC_SLUG_PREFIX,
+        "outside_closure_live": outside_live,
+        "outside_closure_terminal": [e["id"] for e in outside_terminal],
+        "drafts_lens": "unread" if drafts is None else "read",
+        "drafts_unread_reason": drafts_unread,
+        "never_published": [],
+        "phantoms": [],
+        "draft_shadows_of_live": [],
+        "drafts_in_scope": [],
+        "lapse_delta": None,
+    }
+    if drafts is None:
+        return report
+
+    in_scope = []
+    for doc_id, doc in sorted(drafts.items()):
+        if not doc_id.startswith(DRAFT_ID_PREFIX):
+            continue
+        base = doc_id[len(DRAFT_ID_PREFIX):]
+        if doc.get("parent_id") in scope or base in scope:
+            in_scope.append((doc_id, base, doc))
+    report["drafts_in_scope"] = [d for d, _b, _r in in_scope]
+
+    for doc_id, base, doc in in_scope:
+        if (doc.get("lifecycle_status") or "") != LIFECYCLE_OPEN:
+            continue
+        twin = corpus.get(base)
+        if twin is None:
+            report["never_published"].append({"id": doc_id, "twin": None})
+        elif (twin.get("lifecycle_status") or "") in TERMINAL_LIFECYCLE:
+            report["phantoms"].append(
+                {"id": doc_id, "twin": twin.get("lifecycle_status")})
+        else:
+            report["draft_shadows_of_live"].append(
+                {"id": doc_id, "twin": twin.get("lifecycle_status")})
+
+    # CLAUSE 7's CAVEAT, MEASURED INSTEAD OF ASSERTED. The same lapse_shapes()
+    # that scored the published closure, re-run over the in-scope draft rows.
+    # A shape whose count is 0 on BOTH lenses is UNDISCRIMINATED -- its delta is
+    # not evidence that the lens agrees, only that neither read found anything.
+    draft_rows = [row for _d, _b, row in in_scope]
+    report["lapse_delta"] = lapse_shapes(draft_rows, started, lease_ttl)
+    return report
+
+
+def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None,
+           lease_ttl=DEFAULT_LEASE_TTL_SECONDS):
     rows = [corpus[i] for i in closure]
     lifecycle = Counter((r.get("lifecycle_status") or "<unset>") for r in rows)
     live = [r for r in rows if (r.get("lifecycle_status") or "") not in TERMINAL_LIFECYCLE]
@@ -779,6 +1200,18 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
     live_contradiction = sorted(
         r["_id"] for r in live if disposition_of(r) == CLOSED_DISPOSITION)
 
+    # CLAUSE 7 (PDS-D638). ONE implementation of the three keys, called here for
+    # the published closure and AGAIN for the drafts lens (see blind_spots) --
+    # a second hand-written copy of these keys is how a "the drafts read finds
+    # more" claim gets to be true of a different rule than the one it is
+    # compared against.
+    lapse = lapse_shapes(rows, started, lease_ttl)
+    lapse_a = lapse["shape_a"]
+    lapse_a_work = lapse["shape_a_work_evidence"]
+    lapse_b = lapse["shape_b"]
+    lapse_b_overdue = lapse["shape_b_overdue_seconds"]
+    lapse_c = lapse["shape_c"]
+
     off_vocab = Counter()
     off_vocab_samples = defaultdict(list)
     for row in rows:
@@ -813,6 +1246,11 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
         "closure_size": len(rows),
         "max_depth": max(depth_of.values()) if depth_of else 0,
         "live": len(live),
+        # THE DENOMINATOR, DERIVED. One field, one value, case-exact -- and it
+        # is a COUNT of the rows above, never a number this file remembers.
+        "open_denominator": lifecycle.get(LIFECYCLE_OPEN, 0),
+        "open_denominator_field": DENOMINATOR_FIELD,
+        "open_denominator_value": LIFECYCLE_OPEN,
         "lifecycle": dict(lifecycle),
         "dispositions": dict(dispositions),
         "reasons_non_empty": len(reasons),
@@ -826,6 +1264,12 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
         "live_adjudicated_no_reason": live_adjudicated_no_reason,
         "live_park_no_trigger": live_park_no_trigger,
         "live_contradiction": live_contradiction,
+        "lapse_shape_a": sorted(lapse_a),
+        "lapse_shape_a_work_evidence": sorted(lapse_a_work),
+        "lapse_shape_b": sorted(lapse_b),
+        "lapse_shape_b_overdue_seconds": lapse_b_overdue,
+        "lapse_shape_c": sorted(lapse_c),
+        "lease_ttl_seconds": lease_ttl,
         "off_vocabulary": dict(off_vocab),
         "off_vocabulary_samples": {k: v for k, v in off_vocab_samples.items()},
         "off_vocabulary_total": sum(off_vocab.values()),
@@ -840,6 +1284,86 @@ def _eg(ids, limit=3):
         return ""
     tail = ", ..." if len(ids) > limit else ""
     return "   e.g. %s%s" % (", ".join(ids[:limit]), tail)
+
+
+def render_blind_spots(report, root):
+    """THE REFUSAL: what this denominator cannot see, BY NAME.
+
+    A count and no names is the same failure the rest of this file refuses --
+    a number nobody can turn back into rows. Every id here is derived from the
+    corpus on this run; none of them is written down in this file.
+    """
+    blind = report.get("blind_spots") or {}
+    outside_live = blind.get("outside_closure_live") or []
+    outside_terminal = blind.get("outside_closure_terminal") or []
+    never = blind.get("never_published") or []
+    phantoms = blind.get("phantoms") or []
+    shadows = blind.get("draft_shadows_of_live") or []
+    unread = blind.get("drafts_lens") != "read"
+
+    # `LIVE`, NEVER `open`, IS THE WORD FOR ARM 1. A row outside the closure is
+    # kept when its lifecycle is non-terminal, which is a WIDER set than the
+    # denominator's own case-exact `open` -- it also holds `considering`,
+    # `blocked` and `in_progress`. Calling all of them "open rows the
+    # denominator cannot see" would over-claim in exactly the direction this
+    # epic files against: `considering` PRECEDES open and is excluded from the
+    # denominator ON PURPOSE, so it is not a row the denominator MISSED. Both
+    # numbers are therefore derived and printed, and every row prints its own
+    # lifecycle beside it.
+    outside_open = [e for e in outside_live
+                    if (e.get("lifecycle_status") or "") == LIFECYCLE_OPEN]
+
+    out = []
+    out.append("BLIND SPOTS -- live rows this denominator CANNOT see, by name (not a count)")
+    if unread:
+        out.append("  total       %d NAMED (%d of them `%s`) + the drafts lens UNREAD "
+                   "(never-published class UNMEASURED)"
+                   % (len(outside_live), len(outside_open), LIFECYCLE_OPEN))
+    else:
+        out.append("  total       %d live row(s) named below and counted by NO closure anchored "
+                   "at %s -- %d of them `%s`, the denominator's own lens"
+                   % (len(outside_live) + len(never), root,
+                      len(outside_open) + len(never), LIFECYCLE_OPEN))
+    out.append("  (1) OUTSIDE THE CLOSURE  %5d   slug carries `%s`, parent chain never reaches the root"
+               % (len(outside_live), blind.get("epic_slug_prefix", EPIC_SLUG_PREFIX)))
+    out.append("      unreachable at ANY depth, under any key -- a deeper walk does not find these")
+    for entry in outside_live:
+        out.append("      %s   (%s, parent %s)"
+                   % (entry["id"], entry["lifecycle_status"], entry["parent_id"]))
+    if not outside_live:
+        out.append("      (none)")
+    out.append("      + %d terminal row(s) outside the closure -- bookkeeping, not hidden work%s"
+               % (len(outside_terminal), _eg(outside_terminal)))
+    out.append("      LIMIT: keyed on a SLUG PREFIX, which is a naming convention and not a")
+    out.append("      structural fact. An epic row named without `%s` is invisible to this arm too."
+               % blind.get("epic_slug_prefix", EPIC_SLUG_PREFIX))
+    if unread:
+        out.append("  (2) NEVER PUBLISHED      UNREAD   %s" % (blind.get("drafts_unread_reason") or ""))
+        out.append("      This is an ABSENCE, not a zero: the honest total is UNMEASURED on this run.")
+        return out
+    out.append("  (2) NEVER PUBLISHED      %5d   `open` draft, NO published twin -- HIDDEN WORK, added"
+               % len(never))
+    for entry in never:
+        out.append("      %s   (no published twin)" % entry["id"])
+    if not never:
+        out.append("      (none)")
+    out.append("  (3) PHANTOMS             %5d   `open` draft whose PUBLISHED twin is TERMINAL --"
+               % len(phantoms))
+    out.append("      an EDIT SHADOW, never hidden work. Adding these to the denominator OVERCOUNTS.")
+    for entry in phantoms:
+        out.append("      %s   (published twin: %s)" % (entry["id"], entry["twin"]))
+    if not phantoms:
+        out.append("      (none)")
+    if shadows:
+        out.append("  (4) DRAFT OVER A LIVE ROW %4d   the published twin is already IN the denominator"
+                   % len(shadows))
+        for entry in shadows:
+            out.append("      %s   (published twin: %s)" % (entry["id"], entry["twin"]))
+    out.append("  KNOWN AND UNFIXED: the read pages with explicit offsets over %s, so a row created"
+               % report["page_order"])
+    out.append("  mid-page is invisible to it -- and to any independent walk reading through the same")
+    out.append("  pager. Two such walks AGREEING does not rule it out.")
+    return out
 
 
 def render(report, corpus_size, pages, page_limit, source, root, lens):
@@ -860,10 +1384,48 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("  closure     %d descendants over parent_id (lens=%s, max depth %d)"
                % (report["closure_size"], lens, report["max_depth"]))
     out.append("  live        %d  (terminal: %s)" % (report["live"], ", ".join(TERMINAL_LIFECYCLE)))
+    # THE GUARD THIS INSTRUMENT ACTUALLY HAS, PRINTED, so a reader never assumes
+    # the one it does not. MEASURED, not asserted: `echo scripts/pds-ledger-census.sh
+    # | bash scripts/elixir-path-escape-check.sh --match test` prints `false` while
+    # the same command prints `true` for scripts/pds-door-census.sh -- the required
+    # Elixir gate does not dispatch on this path, so nothing in CI runs the checks
+    # below on a PR that only touches this file.
+    out.append("  guard       LOCAL-ONLY: `bash scripts/pds-ledger-census_test.sh`. The REQUIRED Elixir")
+    out.append("              gate does NOT dispatch this path (elixir-path-escape-check --match test")
+    out.append("              answers `false` for this script and `true` for scripts/pds-door-census.sh),")
+    out.append("              so every number below is guarded by a check CI never runs. Run it yourself.")
     out.append("")
     out.append("lifecycle_status (closure, case-exact)")
     for key, count in sorted(report["lifecycle"].items(), key=lambda kv: (-kv[1], kv[0])):
         out.append("  %-16s %5d" % (key, count))
+    out.append("")
+    # THE DENOMINATOR, WITH ITS LENS NAMED AND ITS INSTANT ATTACHED. Every "N of
+    # the open PDS rows" claim divides by THIS number, so it is printed with the
+    # rule that produced it, the moment it was taken, and the command that takes
+    # it again. It is never written down: this board moves while the wave that
+    # reads it files rows.
+    blind = report.get("blind_spots") or {}
+    honest_extra = len(blind.get("never_published") or [])
+    phantom_n = len(blind.get("phantoms") or [])
+    out.append("open denominator (THE number every `N of the open PDS rows` claim divides by)")
+    out.append("  open rows in the closure         %5d   lens: published + %s == `%s` (case-exact)"
+               % (report["open_denominator"], report["open_denominator_field"],
+                  report["open_denominator_value"]))
+    out.append("              closure: transitive descendants of %s over parent_id, keyed on the SLUG" % root)
+    out.append("              NOT disposition-keyed (live rows carry none, and those would vanish)")
+    out.append("              NOT live/non-terminal (%d folds in `considering`, which PRECEDES open)"
+               % report["live"])
+    out.append("  taken at    %s   (this board moves; the number is derived, never pinned)"
+               % report["instant"]["started"])
+    out.append("  re-derive   %s" % REDERIVE_COMMAND)
+    if blind.get("drafts_lens") == "read":
+        out.append("  honest total                     %5d   = %d + %d never-published open row(s) below"
+                   % (report["open_denominator"] + honest_extra,
+                      report["open_denominator"], honest_extra))
+        out.append("  OVERCOUNT if phantoms added      %5d   %d phantom(s) are edit shadows, NOT work -- see below"
+                   % (report["open_denominator"] + honest_extra + phantom_n, phantom_n))
+    else:
+        out.append("  honest total                     UNMEASURED -- the drafts lens is UNREAD (see blind spots)")
     out.append("")
     out.append("disposition (closure, CASE-EXACT -- `%s` and `%s` are different values)"
                % (CANONICAL_OPEN, CANONICAL_OPEN.upper()))
@@ -894,6 +1456,52 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("  live AND dispositioned `%s`    %5d   (CLAIMABLE and adjudicated shut)%s"
                % (CLOSED_DISPOSITION, len(report["live_contradiction"]),
                   _eg(report["live_contradiction"])))
+    out.append("")
+    # CLAUSE 7. THREE SHAPES, THREE KEYS, THREE REMEDIES — and the lens they
+    # were read through, printed, because a lens nobody can read back is a claim.
+    out.append("claim lapse (three shapes, three KEYS, three REMEDIES -- clause 7)")
+    # THE CAVEAT, AMENDED (wave 47) -- NOT retired. It was honest and it pointed
+    # the WRONG WAY. Measured 2026-08-04 by running THIS file's lapse_shapes()
+    # over both lenses: shape A 24 published -> 27 drafts-inclusive, and the +3
+    # are EXACTLY the three phantoms (drafts.pds-w29-s3-fake-fails-closed,
+    # drafts.pds-w27-census-self-honesty, drafts.pds-bl-tagregistry-guard-no-rung
+    # -- each an unpublished edit shadow whose PUBLISHED twin is `done`). So the
+    # published read does not UNDERCOUNT shape A; the drafts read MANUFACTURES
+    # three false lapses. Shapes B and C were 0 on BOTH lenses and are therefore
+    # UNDISCRIMINATED: their delta is not evidence the lenses agree. The live
+    # delta is printed below from the current run, never from this comment.
+    out.append("  lens        /v1/data/query perspective:%s -- the two lenses DISAGREE by construction"
+               % report["lens_perspective"])
+    out.append("              (a lapsed `drafts.` row is invisible here and visible to `bp task ls --all`).")
+    out.append("              MEASURED 2026-08-04, and the direction is the SURPRISE: shape A 24 -> 27 over a")
+    out.append("              drafts-inclusive read, and the +3 are EXACTLY the three PHANTOMS below -- edit")
+    out.append("              shadows of `done` rows. The published read does not UNDERCOUNT shape A; the")
+    out.append("              drafts read MANUFACTURES three false lapses. Shapes B and C were 0 on BOTH")
+    out.append("              lenses: UNDISCRIMINATED, so their deltas prove nothing either way.")
+    delta = (report.get("blind_spots") or {}).get("lapse_delta")
+    if delta is None:
+        out.append("              THIS RUN: drafts lens UNREAD, so the per-shape delta is UNMEASURED, not 0.")
+    else:
+        out.append("              THIS RUN: drafts-lens delta  A +%d  B +%d  C +%d%s"
+                   % (len(delta["shape_a"]), len(delta["shape_b"]), len(delta["shape_c"]),
+                      _eg(delta["shape_a"])))
+    out.append("  shape A  reverted-to-open after expiry   %5d   (%d carrying work evidence)%s"
+               % (len(report["lapse_shape_a"]), len(report["lapse_shape_a_work_evidence"]),
+                  _eg(report["lapse_shape_a"])))
+    out.append("           key: open + claim.worker null + previous_worker + expired_at, no released_at/closed_at")
+    out.append("           REMEDY: the row is a RE-OPEN LIE -- re-claim it and close it on the evidence it carries")
+    out.append("  shape B  in_progress held past the lease %5d   (TTL %ds, key: instant - claim.ts_iso)%s"
+               % (len(report["lapse_shape_b"]), report["lease_ttl_seconds"],
+                  _eg(report["lapse_shape_b"])))
+    out.append("           key: in_progress + held longer than the TTL -- NEVER expired_at, which the REAP")
+    out.append("           writes, so an expired_at-keyed check passes VACUOUSLY on this shape forever")
+    out.append("           REMEDY: `bp task release` -- shape B cannot self-heal while the lease is held")
+    out.append("  shape C  open with a claim never cleared %5d%s"
+               % (len(report["lapse_shape_c"]), _eg(report["lapse_shape_c"])))
+    out.append("           key: open + claim.worker SET + claim.closed_at SET")
+    out.append("           REMEDY: clear the stale claim -- a worker-keyed check reads this row as HELD")
+    out.append("")
+    out.extend(render_blind_spots(report, root))
     out.append("")
     out.append("off-vocabulary disposition values (vocabulary: %s)"
                % ", ".join(DISPOSITION_VOCABULARY))
@@ -1010,6 +1618,43 @@ def round_done_predicate(report):
                            ", ".join(contradiction[:8])
                            + (", ..." if len(contradiction) > 8 else "")))
 
+    # CLAUSE 7 -- the lapse (PDS-D638). THREE LINES, never one: the shapes do
+    # not share a key and they do not share a remedy, so a single "lapsed: N"
+    # line would name none of them. Each can say no on its own.
+    lapse_a = report["lapse_shape_a"]
+    lapse_b = report["lapse_shape_b"]
+    lapse_c = report["lapse_shape_c"]
+    lines.append("  claims NOT lapsed-to-open (shape A)           %d/%d    %s   (re-open lie: %d carry work evidence)"
+                 % (report["live"] - len(lapse_a), report["live"],
+                    "PASS" if not lapse_a else "FAIL",
+                    len(report["lapse_shape_a_work_evidence"])))
+    if lapse_a:
+        failures.append("%d row(s) are SHAPE A -- reverted to `open` by the TTL sweeper with "
+                        "the claim's previous_worker and expired_at still on them (%d carry a "
+                        "now-line, so the work was mid-flight). REMEDY: re-claim and close on "
+                        "the evidence already there: %s"
+                        % (len(lapse_a), len(report["lapse_shape_a_work_evidence"]),
+                           ", ".join(lapse_a[:8]) + (", ..." if len(lapse_a) > 8 else "")))
+    lines.append("  leases held INSIDE the TTL (shape B)          %d/%d    %s   (TTL %ds, NEVER keyed on expired_at)"
+                 % (report["live"] - len(lapse_b), report["live"],
+                    "PASS" if not lapse_b else "FAIL", report["lease_ttl_seconds"]))
+    if lapse_b:
+        failures.append("%d row(s) are SHAPE B -- `%s` and held past the %ds lease with no reap "
+                        "(a check keyed on claim.expired_at would pass VACUOUSLY here, forever). "
+                        "REMEDY: `bp task release`: %s"
+                        % (len(lapse_b), LIFECYCLE_IN_PROGRESS, report["lease_ttl_seconds"],
+                           ", ".join(lapse_b[:8]) + (", ..." if len(lapse_b) > 8 else "")))
+    lines.append("  open rows with NO stale claim (shape C)       %d/%d    %s   (worker SET and closed_at SET)"
+                 % (report["live"] - len(lapse_c), report["live"],
+                    "PASS" if not lapse_c else "FAIL"))
+    if lapse_c:
+        failures.append("%d row(s) are SHAPE C -- `open` while still wearing a finished claim "
+                        "(worker SET and closed_at SET); a worker-keyed check reads them as HELD "
+                        "and an expiry-keyed check cannot see them at all. REMEDY: clear the "
+                        "stale claim: %s"
+                        % (len(lapse_c),
+                           ", ".join(lapse_c[:8]) + (", ..." if len(lapse_c) > 8 else "")))
+
     return lines, failures
 
 
@@ -1095,7 +1740,7 @@ def main(argv):
 
     # CLAUSE 5: the window is named before the first byte is read.
     started = datetime.now(timezone.utc)
-    corpus, pages, duplicates = read_corpus(
+    corpus, pages, duplicates, perspectives = read_corpus(
         transport, args.dataset, args.doctype, args.page_limit, args.pace, args.retries)
     finished = datetime.now(timezone.utc)
 
@@ -1109,7 +1754,26 @@ def main(argv):
         die(EXIT_FAIL_CLOSED,
             "root %s has zero descendants in a %d-row corpus" % (args.root, len(corpus)))
 
-    report = census(corpus, closure, depth_of, started, finished, duplicates, anchor)
+    # CLAUSE 7's ONE TUNABLE, resolved from the SAME env var the server reads.
+    lease_ttl, lease_ttl_source = lease_ttl_seconds()
+
+    # THE SECOND LENS, READ AFTER the window clause 5 asserts coherence over is
+    # CLOSED. It is a different perspective on the same rows, so folding it into
+    # that window would make the snapshot an average of two reads -- exactly the
+    # thing clause 5 refuses. Nothing it finds enters the denominator; it enters
+    # the REFUSAL beside it.
+    drafts, drafts_unread = read_drafts_lens(
+        transport, args.dataset, args.doctype, args.page_limit, args.pace, args.retries)
+
+    report = census(corpus, closure, depth_of, started, finished, duplicates, anchor,
+                    lease_ttl)
+    report["blind_spots"] = blind_spots(
+        corpus, closure, args.root, drafts, drafts_unread, started, lease_ttl)
+    report["lease_ttl_source"] = lease_ttl_source
+    # THE LENS IS DERIVED, NOT DECLARED. If the pages disagreed about the
+    # perspective they answered with, ALL of them are named -- an averaged lens
+    # is the same lie as an averaged snapshot.
+    report["lens_perspective"] = "+".join(perspectives) if perspectives else "<unset>"
     report["round_anchor"] = (
         anchor.isoformat().replace("+00:00", "Z") if anchor is not None else None)
     report["round_anchor_source"] = anchor_source

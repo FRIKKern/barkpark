@@ -220,9 +220,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	}
 
 	// Prod write-guard: a write against a prod-looking target needs confirmation
-	// unless --yes. (scoped_admin still attempts — the guard is local UX, not the
-	// client preflight-refuse that rule #2 forbids.)
-	if cmd.Writes && isProd(ctx, m) && !g.yes {
+	// unless --yes, or unless the server itself advertises production:false on
+	// /v1/meta (absence of the field falls back fail-closed). (scoped_admin still
+	// attempts — the guard is local UX, not the client preflight-refuse that
+	// rule #2 forbids.)
+	if cmd.Writes && isProd(ctx, m) && !g.yes && !serverDeclaredNonProd(ctx.Server) {
 		if !confirmProdWrite(out, cmd, ctx) {
 			out.errf("aborted: prod write not confirmed")
 			return exitUsage
@@ -242,6 +244,12 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return exitGeneric
 	}
 	if status >= 200 && status < 300 {
+		if code, refused := refuseUnreadableDefaultPage(out, cmd, status, respBody); refused {
+			return code
+		}
+		if code, handled := screenWriteReceipt(out, cmd, status, respBody); handled {
+			return code
+		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
 		emitHelpHints(out, respBody)
 	}
@@ -318,6 +326,195 @@ func topLevelHelpStrings(body []byte) []string {
 		}
 	}
 	return hs
+}
+
+// unreadableListPageHint is the one wording both list-page refusals share —
+// the --all walk (runPaginatedAll) and the DEFAULT single page
+// (refuseUnreadableDefaultPage). It names the transport, not the query,
+// because that is what an unreadable 200 always means.
+const unreadableListPageHint = "the transport, not the query: a proxy/gateway page, a truncated or non-Barkpark response. Retry, then check the server URL and that the API is up."
+
+// refuseUnreadableDefaultPage is the DEFAULT-read half of the PDS reader law
+// (wave 28): no bp verb may report success on an exit code alone. Wave 27
+// taught the --all walk to refuse an HTTP-200 body it cannot read as a list
+// envelope, but that refusal sits behind `cmd.Paginated && g.all && !cmd.Writes`
+// and --all is the RARE invocation. The DEFAULT single-page read — what every
+// `bp task ready` / `bp doc ls` actually runs — laundered all nine of wave 27's
+// poisons into rc=0: `-o minimal` printed the literal word "ok" over `null`, an
+// unknown envelope and `{}`; `-o json` printed an ERROR ENVELOPE as a
+// successful body; `-o table` printed nothing at all for `{}`. Twenty-four of
+// twenty-seven poison×shape runs said nothing on any channel.
+//
+// The sentinel was already computed one line below and thrown away:
+// warnIfDefaultPageMayBeTruncated does `rows, _ := extractListRows(…)` and then
+// goes quiet on exactly these bodies, because an unreadable body yields 0 rows
+// and 0 < limit.
+//
+// PLACEMENT IS LOAD-BEARING (PDS-D396). It lives HERE, at runCommand's post-2xx
+// hook — the one site proven to fire in all four output shapes — and NOT:
+//
+//   - in renderMinimal, where extractListRows returns the "" sentinel for five
+//     of seven REAL write receipts (the mutate transaction receipt, the
+//     {ok,doc} claim receipt, {ok:false,reason}, the workspace-create slug
+//     receipt, the publish {rev,id} receipt), so a fence there would red every
+//     write verb in the CLI — measured, not feared
+//     (TestExtractListRowsBlindToWriteReceipts);
+//   - behind the neighbour's `g.limitSet` skip, which would let
+//     `bp task ready --limit 5` against a proxy 502 stay silent — the same lie
+//     one flag away;
+//   - behind `g.all`, which already returned at the runPaginatedAll branch.
+//
+// Honest reads are untouched: every one of the seven `paginated: true` commands
+// emits a key listEnvelopeKeys knows (TestPaginatedCommandsUseKnownEnvelopeKeys
+// re-derives that population from the API source), and an EMPTY array still
+// matches its key — a genuinely empty queue is readable, and stays rc=0.
+func refuseUnreadableDefaultPage(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+	if !cmd.Paginated || cmd.Writes {
+		return 0, false
+	}
+	if _, key := extractListRows(unwrapResult(respBody)); key != "" {
+		return 0, false
+	}
+
+	msg := fmt.Sprintf(
+		"unreadable list page: HTTP %d carried no known list envelope (%d bytes): %s",
+		status, len(respBody), bodyPreview(respBody),
+	)
+	if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
+		out.userErr("%s", msg)
+	}
+	return exitGeneric, true
+}
+
+// unreadableWriteReceiptHint is the one wording the write-receipt refusal
+// carries. It names the transport like its read-side sibling, but it must ALSO
+// say the thing a read never has to: an unconfirmable write is not a failed
+// write. The mutation may well have landed; the receipt is what did not arrive.
+const unreadableWriteReceiptHint = "the transport, not the write: a proxy/gateway page, a truncated or non-Barkpark response. The write may still have landed — re-read the target before retrying, then check the server URL and that the API is up."
+
+// screenWriteReceipt is the WRITE half of the PDS reader law (wave 29): no bp
+// verb may report success on an exit code alone. Waves 27 and 28 fenced the
+// --all walk and the DEFAULT single-page read, but BOTH are gated on
+// `cmd.Paginated && !cmd.Writes` — so every one of the 93 write verbs sat
+// outside them BY CONSTRUCTION. Measured on origin/main against a fake API:
+// `bp task next w1` printed `ok` at rc=0 over `null`, `{}`, `{"result":null}`
+// and `[]`; `-o table` over `{}` printed ZERO BYTES on both channels at rc=0;
+// an HTML 502 proxy page was echoed verbatim; and an ERROR envelope arriving on
+// a 2xx was printed as the SUCCESS body under `-o json`.
+//
+// PLACEMENT IS LOAD-BEARING (PDS-D407), and it is NOT where it looks. It lives
+// HERE, at runCommand's post-2xx hook — the one site proven to fire in all four
+// output shapes — and NOT inside renderMinimal, whose "ok" fallback was
+// instrumented on a clean build and found to be reached by three HONEST write
+// receipts as well as five poisons, ONLY in -o minimal: zero bytes, an HTML
+// page, an error envelope and plaintext never arrive there at all, and 26 of
+// the 93 write verbs never render through renderMinimal in the first place.
+//
+// THE DISCRIMINATOR IS "did the server say anything at all", NEVER "does the
+// body carry a key we recognise". An object under keys the CLI cannot summarise
+// PASSES by design (see TestWriteReceiptPassesUnknownKeys): on a write that is
+// a receipt the CLI cannot summarise, not a lie — and an allowlist there would
+// red `{"ok":true}` and `{"deleted":true,…}` TODAY.
+//
+// It returns (exit code, handled) and has TWO honest outcomes, not one:
+//
+//   - a refusal at exitGeneric for a body that said nothing;
+//   - a DECLARED empty receipt at exitOK for HTTP 204/205 with an empty body —
+//     `chat.approve` really does answer `send_resp(conn, :no_content, "")`, so a
+//     naive "empty body ⇒ refuse" would red an honest verb. That arm is not
+//     silence: main printed a BARE EMPTY LINE there, and it now names what
+//     happened. An UNDECLARED empty 200 still refuses.
+func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+	if !cmd.Writes {
+		return 0, false
+	}
+
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(respBody)) == 0 {
+		reason := fmt.Sprintf("HTTP %d, no content returned — the server declared no receipt for this write", status)
+		if !out.emitStructured(map[string]any{"ok": true, "confirmed": false, "reason": reason}) {
+			out.outf("not confirmed: %s", reason)
+		}
+		return exitOK, true
+	}
+
+	reason := unreadableWriteReceipt(respBody)
+	if reason == "" {
+		return 0, false
+	}
+
+	msg := fmt.Sprintf(
+		"unreadable write receipt: HTTP %d %s (%d bytes): %s",
+		status, reason, len(respBody), bodyPreview(respBody),
+	)
+	if !renderErrorEnvelope(out, "unreadable_write_receipt", msg, "", unreadableWriteReceiptHint) {
+		out.userErr("%s", msg)
+	}
+	return exitGeneric, true
+}
+
+// unreadableWriteReceipt names WHY a 2xx write body said nothing, or "" when
+// the body is a receipt worth rendering. The refusals are exactly the bodies
+// that carry no statement about the write: non-JSON bytes (a proxy page, an
+// interstitial, plaintext), an empty body with no 204/205 declaration, the JSON
+// literal `null`, a `{"result":null}` envelope, an empty object, an empty
+// array, and an error envelope that arrived on a 2xx. Everything else — every
+// scalar, every non-empty array, every object regardless of its keys — passes.
+func unreadableWriteReceipt(body []byte) string {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "returned an empty body without declaring one (no 204/205 no-content status)"
+	}
+	var raw any
+	if json.Unmarshal(body, &raw) != nil {
+		return "carried a body that is not JSON"
+	}
+	var payload any
+	if json.Unmarshal(unwrapResult(body), &payload) != nil {
+		return `carried a {"result": …} envelope whose payload is not JSON`
+	}
+	switch t := payload.(type) {
+	case nil:
+		if raw == nil {
+			return "carried the JSON literal null"
+		}
+		return `carried {"result":null} — the envelope was empty`
+	case map[string]any:
+		if len(t) == 0 {
+			return "carried an empty JSON object"
+		}
+		if code, isErr := errorEnvelopeOn2xx(t); isErr {
+			return fmt.Sprintf("carried an ERROR envelope (%s) on a success status", code)
+		}
+	case []any:
+		if len(t) == 0 {
+			return "carried an empty JSON array"
+		}
+	}
+	return ""
+}
+
+// errorEnvelopeOn2xx reports whether a 2xx payload is really the canonical
+// failure envelope — `ok:false` AND an `error` member. That CONJUNCTION is the
+// whole discriminator: `{"ok":false,"reason":"no_ready"}` is an HONEST 200 from
+// the task queue (an empty queue is an outcome, not an error) and must stay
+// rc=0, while `{"ok":false,"error":{…}}` on a 200 is a server contradicting
+// itself. The returned code names the error for the refusal message.
+func errorEnvelopeOn2xx(m map[string]any) (string, bool) {
+	if ok, present := m["ok"].(bool); !present || ok {
+		return "", false
+	}
+	switch e := m["error"].(type) {
+	case map[string]any:
+		if code, _ := e["code"].(string); code != "" {
+			return code, true
+		}
+		return "unnamed", true
+	case string:
+		if e != "" {
+			return e, true
+		}
+	}
+	return "", false
 }
 
 // warnIfDefaultPageMayBeTruncated keeps the normal single-page path honest: a
@@ -1056,18 +1253,25 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 }
 
 // renderError renders a classified API error. Under -o json/yaml it emits the
-// canonical {ok:false, error:{code, message, request_id, hint}} envelope on
-// stdout (same contract as the cloud built-ins' useError, richer because apiError
-// carries request_id + hint) so a scripted `bp … -o json | jq` gets a parseable
-// body rather than empty stdout. For table/minimal it prints the human shape to
-// stderr: the message line, an indented fix-suggestion hint when one is
-// registered, and — under -v — the machine code and request id for support.
-// Centralised so every error path (single request, paginated reads) is identical.
+// canonical {ok:false, error:{code, message, request_id, hint, details}} envelope
+// on stdout (same contract as the cloud built-ins' useError, richer because
+// apiError carries request_id + hint + details) so a scripted `bp … -o json | jq`
+// gets a parseable body rather than empty stdout. For table/minimal it prints the
+// human shape to stderr: the message line, the server's `details` as sorted
+// `key: value` lines, an indented fix-suggestion hint when one is registered,
+// and — under -v — the machine code and request id for support. details comes
+// FIRST of the continuation lines because it is the specific fact (which filter,
+// which field, which rule) while the hint is the generic advice; a reader who
+// stops after one line should get the fact. Centralised so every error path
+// (single request, paginated reads) is identical.
 func renderError(out *writer, ae apiError) {
-	if renderErrorEnvelope(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint()) {
+	if renderErrorEnvelopeDetailed(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details) {
 		return
 	}
 	out.userErr("%s", ae.errorMessage())
+	for _, line := range detailLines(ae.details) {
+		out.errf("  %s", line)
+	}
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
 	}
@@ -1490,8 +1694,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 				"unreadable list page at offset %d: HTTP %d carried no known list envelope (%d bytes): %s",
 				offset, status, len(respBody), bodyPreview(respBody),
 			)
-			hint := "the transport, not the query: a proxy/gateway page, a truncated or non-Barkpark response. Retry, then check the server URL and that the API is up."
-			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", hint) {
+			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
 				out.userErr("%s", msg)
 			}
 			return exitGeneric
@@ -1630,18 +1833,70 @@ func confirmProdWrite(out *writer, cmd manifest.Command, ctx manifest.Context) b
 	return line == "y" || line == "yes"
 }
 
+// isLocalHost is THE pinned classifier for the prod write-guard: true only
+// when server dials a provably-loopback target, decided by EXACT host (hostOf)
+// — never substring. Both guard twins (isProd here, isProdServer in
+// tasks_create_cmd.go) collapse onto it; there must never be a second copy.
+//
+// EXACT-HOST (onb-backlog-isprod-localhost-substring-corner): the previous
+// shape substring-matched "localhost"/"127.0.0.1"/"0.0.0.0" anywhere in the
+// URL, so a hostile hostname that merely EMBEDS a local token
+// (localhost.evil.com, my-127.0.0.1.attacker.net) classified local and
+// skipped the destructive-write confirm — the last fail-open escape after the
+// #12033 fail-closed flip. Now the host is parsed out, lowercased, ONE
+// trailing dot stripped (DNS root form), and matched exactly:
+// {localhost, 0.0.0.0, ::1, [::1]} ∪ IPv4 127.0.0.0/8 (covers Debian's
+// 127.0.1.1). Empty/unparseable → NOT local (the guard fails closed).
+//
+// Deliberately NARROWER than ServerKind (config.go), which is a UX classifier:
+// RFC1918 LAN ranges, *.local mDNS names, and *.localhost stay PROD here —
+// those dial OTHER machines (or resolver-dependent names), and a false prompt
+// is the safe failure; --yes and /v1/meta production:false are the sanctioned
+// exits. Do NOT "unify" the two — the divergence pin test in
+// isprod_localhost_test.go reds if someone tries.
+func isLocalHost(server string) bool {
+	host := strings.ToLower(hostOf(server))
+	host = strings.TrimSuffix(host, ".")
+	if host == "" {
+		return false // fail closed: no provable host means PROD
+	}
+	switch host {
+	case "localhost", "0.0.0.0", "::1", "[::1]":
+		return true
+	}
+	if isIPv4(host) {
+		return atoiByte(strings.Split(host, ".")[0]) == 127 // loopback 127.0.0.0/8
+	}
+	return false
+}
+
 // isProd decides whether the target is production via a name/url heuristic on
-// the manifest's server identity and the resolved server URL.
+// the manifest's server identity and the dialed server URL.
+//
+// FAIL CLOSED (onb-backlog-isprod-custom-host-write-confirm): the old shape
+// defaulted to non-prod unless the host matched a substring allowlist
+// (api.barkpark.cloud / "prod"), so a custom production hostname like
+// cms.gyldendal.no skipped the destructive-write confirm entirely — and every
+// live fleet host emits the generic server.name "barkpark", so the name leg
+// caught no real prod either. Now any host that is not provably local IS prod:
+// localhost/loopback/0.0.0.0 stay unprompted, everything else confirms. The
+// two ways out are --yes (the sole client-side bypass — no env carve-out) and
+// the server itself advertising production:false on /v1/meta
+// (serverDeclaredNonProd — consulted by the write-guard call sites, not here,
+// so this stays a pure offline heuristic that whoami can always evaluate).
+//
+// Classification reads ctx.Server ALONE (D35): m.Server.BaseURL is the
+// server's own echo of the dialed host — display-only elsewhere — and letting
+// it into the classifier handed the server a guard-suppression channel (a
+// manifest base_url containing "localhost" masked a non-local ctx.Server).
+// The name leg below only ever ADDS prod, so a server can tighten the guard
+// on itself but never loosen it.
 func isProd(ctx manifest.Context, m *manifest.Manifest) bool {
 	name := strings.ToLower(m.Server.Name)
 	if name == "prod" || name == "production" {
 		return true
 	}
-	s := strings.ToLower(ctx.Server + " " + m.Server.BaseURL)
-	if strings.Contains(s, "localhost") || strings.Contains(s, "127.0.0.1") || strings.Contains(s, "0.0.0.0") {
-		return false
-	}
-	return strings.Contains(s, "api.barkpark.cloud") || strings.Contains(s, "prod")
+	return !isLocalHost(ctx.Server)
 }
 
 // dryRun prints the resolved method/path/headers(redacted)/body and exits 0

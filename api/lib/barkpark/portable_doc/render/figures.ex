@@ -38,9 +38,20 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # The doc.css `hr.section` look: a centered "§" glyph straddling a hairline
   # rule. The glyph sits in an inline-block box with the parchment page colour
   # as its background, masking the rule that runs behind it across the column.
+  #
+  # The `bp-section-divider` class carries NO styling here — every value stays
+  # inline, and view_edit_parity_test.exs §8 still compares those inline
+  # declarations against the edit mirror. It is a HANDLE: this was the last
+  # article block emitting a class-less box, so the reader shell had no way to
+  # say anything about a divider's position, and "a divider that sits directly in
+  # front of a section head is drawing a boundary the head already draws" is
+  # exactly such a claim (paper-surface.css, §divider dedup). The name is the one
+  # the edit surface has bound its mirror to since the divider-lockstep slice
+  # (`.bp-section-divider` / `.bp-section-divider__mark`), so this closes an
+  # asymmetry rather than inventing a second vocabulary for one block.
   def section_divider_html do
-    ~s|<div style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
-      ~s|<span style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
+    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
+      ~s|<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
       ~s|background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
   end
 
@@ -76,6 +87,15 @@ defmodule Barkpark.PortableDoc.Render.Figures do
     end
   end
 
+  # The EVIDENCE BREAKOUT rides these inline styles rather than a stylesheet rule,
+  # for the same reason the air beat above it does: a figure has to survive a sink
+  # with no paper-surface.css, so the width and the re-centering pull are inline
+  # `var(--bp-evidence-*, <fallback>)` reads. Every fallback resolves to "stay in
+  # the column" (`100%` / `0px`), so a stylesheet-less sink loses the breakout and
+  # nothing else. ARTICLE MODE ONLY — the email/default clauses below keep their
+  # flat `margin:16px 0` and no width at all, because an email client has neither
+  # a container to measure nor a viewport worth breaking out of.
+  #
   # The canonical paper-article figure for a Mermaid diagram. Article mode: a
   # bordered, parchment, inset card mirroring doc.css `figure`; the figcaption
   # is muted/italic with the bold "Figure N." run-in. Email mode degrades to the
@@ -85,10 +105,10 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       if caption == "" do
         ""
       else
-        ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>|
+        ~s|<figcaption style="margin-top:0.8rem;color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
       end
 
-    ~s|<figure style="margin:1.6rem 0;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px">| <>
+    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">| <>
       ~s(<pre class="mermaid">#{encode_mermaid(source)}</pre>) <>
       cap <>
       "</figure>"
@@ -116,21 +136,38 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # at runtime. The cast URL is carried in `data-cast-src` via `safe_url` (scheme
   # allowlist + attribute escape). The figcaption reuses diagram_html's article
   # styling. Email / default mode: no player runtime — degrade to a plain link.
-  def asciicast_html(src, caption, :article) do
+  #
+  # `poster` is the block's OPTIONAL resting frame — the asciinema-player
+  # `poster` option, an npt timestamp (`"npt:1:23"`) or `"end"`. A recording
+  # that opens on a banner and a reading pause posters as near-empty black at
+  # the hardcoded `npt:0:1` default, so a block may name a later, FULL frame.
+  # It rides `data-cast-poster` and is emitted ONLY when set — an unset poster
+  # leaves the mount byte-identical to before, so every existing paper (and the
+  # pd-golden/pd-parity fixtures) is untouched and the two client twins keep
+  # owning the `npt:0:1` fallback. The value is attribute-escaped and handed to
+  # the player verbatim (asciinema ignores a poster it cannot parse); it is NOT
+  # a URL, so `safe_url` (the `src`/video-poster helper) does not apply.
+  def asciicast_html(src, caption, poster, :article) do
     cap =
       if caption == "" do
         ""
       else
-        ~s(<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
+        # `~s|…|`, not `~s(…)`: the caption measure is a `var(…)` read, and a
+        # paren-delimited sigil ends at the first `)` — the same reason the
+        # diagram figcaption above already uses the pipe form.
+        ~s|<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif;max-width:var(--bp-evidence-caption, 72ch)">#{figcaption_inner(caption)}</figcaption>|
       end
 
-    ~s(<figure style="margin:1.6rem 0">) <>
-      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
+    poster_attr =
+      if poster == "", do: "", else: ~s( data-cast-poster="#{escape_html(poster)}")
+
+    ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
+      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
       cap <>
       "</figure>"
   end
 
-  def asciicast_html(src, caption, _style) do
+  def asciicast_html(src, caption, _poster, _style) do
     # Email / default: no asciinema runtime, so link to the recording instead of
     # mounting a player. The `bp-asciicast` mount point is intentionally ABSENT
     # here — the hook must not be triggered in email contexts.
@@ -166,7 +203,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
         ~s(<track kind="captions"#{lang_attr} src="#{safe_url(track_src)}">)
       end)
 
-    ~s(<figure style="margin:1.6rem 0">) <>
+    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
       ~s(<video controls playsinline style="max-width:100%;border-radius:6px"#{poster_attr}#{loop_attr} src="#{safe_url(src)}">) <>
       tracks <>
       "</video></figure>"

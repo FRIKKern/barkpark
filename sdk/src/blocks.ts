@@ -15,7 +15,7 @@
  *   action    -> { href, label, priority? }
  *   code      -> { value }                    (NOT lang/code — the renderer reads "value")
  *   diagram   -> { source, caption? }         (NOT "mermaid" — the renderer reads "source")
- *   asciicast -> { src, caption? }
+ *   asciicast -> { src, caption?, poster? }  (poster = an npt resting frame, e.g. "npt:0:12")
  *   image     -> { src, alt, width?, height? }
  *   table     -> { head?, rows }
  *   divider   -> {}
@@ -193,6 +193,10 @@ export interface AsciicastBlock {
   type: "asciicast";
   src: string;
   caption?: string;
+  /** The frame the player rests on before play — an asciinema `poster`: an npt
+   * timestamp ("npt:0:12") or "end". Omit to keep the renderer's `npt:0:1`
+   * default, which is near-empty for a cast that opens on a reading pause. */
+  poster?: string;
 }
 export interface ImageBlock {
   id: string;
@@ -313,9 +317,15 @@ export function diagram(source: string, caption?: string, id?: string): DiagramB
   return block;
 }
 
-export function asciicast(src: string, caption?: string, id?: string): AsciicastBlock {
+export function asciicast(
+  src: string,
+  caption?: string,
+  opts: { poster?: string } = {},
+  id?: string,
+): AsciicastBlock {
   const block: AsciicastBlock = { id: withId(id), type: "asciicast", src };
   if (caption !== undefined) block.caption = caption;
+  if (opts.poster !== undefined) block.poster = opts.poster;
   return block;
 }
 

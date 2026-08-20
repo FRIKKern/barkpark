@@ -123,6 +123,8 @@ export const TEXTLESS_SKIP: Record<string, string> = {
   stat: 'data-viz metric — `label`/`value` are viz chrome, not prose',
   'stat-grid': 'data-viz metric grid — label/value chrome',
   stats: 'data-viz metric grid (alias of stat-grid) — label/value chrome',
+  duel: 'data-viz two-arm comparison (jarl figure family) — legend/value/delta chrome, not prose',
+  lineage: 'data-viz dated nodes (jarl figure family) — overline/value chrome; node bodies are figure captions, not reading flow',
   'status-legend': 'data-viz legend — generated glyph/name/meaning chrome, no content',
   pipeline: 'data-viz flow diagram — node titles are diagram labels',
   stage: 'data-viz flow node — kind/title/detail are diagram labels',

@@ -150,8 +150,9 @@ func TestFlowchartDeterministic(t *testing.T) {
 	}
 }
 
-// TestDiagramDispatch confirms a flowchart source DRAWS (boxes + Figure caption,
-// no folded-source header) while a sequence source still FOLDS honestly.
+// TestDiagramDispatch confirms a flowchart source DRAWS (boxes + the AUTHOR'S
+// caption — pdrender numbers nothing — no folded-source header) while a sequence
+// source still FOLDS honestly.
 func TestDiagramDispatch(t *testing.T) {
 	ctx := RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}
 	flow := Block{Type: "diagram", Attrs: map[string]any{
@@ -160,7 +161,7 @@ func TestDiagramDispatch(t *testing.T) {
 	if strings.Contains(got, "◇ Mermaid diagram") {
 		t.Errorf("flowchart should draw, not fold:\n%s", got)
 	}
-	if !strings.Contains(got, "Start") || !strings.Contains(got, "Figure") {
+	if !strings.Contains(got, "Start") || !strings.Contains(got, "Flow.") {
 		t.Errorf("flowchart render missing box/caption:\n%s", got)
 	}
 

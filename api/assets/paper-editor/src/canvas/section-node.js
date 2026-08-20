@@ -177,6 +177,17 @@ export const Section = Node.create({
         renderHTML: (attrs) =>
           attrs.title != null ? { "data-title": attrs.title } : {},
       },
+      // FRAMED-FINALE (charter D34) — variant, a SCALAR string ("framed"). PRESENT-ONLY
+      // (null/absent round-trips ABSENT, byte-mirrors title). This declaration is
+      // LOAD-BEARING: ProseMirror STRIPS undeclared attrs on setContent, so even with
+      // the run-convert threads in place an undeclared variant dies at the schema.
+      variant: {
+        default: null,
+        parseHTML: (el) =>
+          el.hasAttribute("data-variant") ? el.getAttribute("data-variant") : null,
+        renderHTML: (attrs) =>
+          attrs.variant != null ? { "data-variant": attrs.variant } : {},
+      },
       // STEP-2 LAYOUT ENGINE — two PRESENT-ONLY JSON data-attrs (the bpColumnAtom
       // bpBlock precedent: a JSON object survives setContent→getJSON because it rides
       // a data-attr, not a dropped node key).
@@ -360,6 +371,15 @@ export const Section = Node.create({
       };
 
       const paint = (n) => {
+        // ── FRAMED-FINALE (charter D34): show the frame in the canvas. The reader's
+        // `.bp-section--framed` class rides the canvas wrapper too (root.html.heex
+        // inline editor styles + styles.css carry the rule pair: hairline border,
+        // direct-child .bp-hr hidden). ignoreMutation already swallows attribute
+        // mutations on `dom`, so this class write never churns PM.
+        dom.classList.toggle(
+          "bp-section--framed",
+          (n.attrs && n.attrs.variant) === "framed",
+        );
         // ── STEP-2: paint the body layout. Grid mode swaps the body to the SHARED
         // `bp-section__grid` class + sets --bp-tracks/--bp-grid-gap; stack mode keeps
         // today's `bp-section__body` flex-column (byte-unchanged DOM). PM lays the

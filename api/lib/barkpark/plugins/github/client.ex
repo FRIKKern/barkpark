@@ -58,6 +58,15 @@ defmodule Barkpark.Plugins.Github.Client do
   @default_max_retries 3
   @default_retry_delay_ms 200
   @github_api_version "2022-11-28"
+  # Upper bound on a peer-supplied backoff. The value flows into an Oban
+  # {:snooze, n} (Github.MirrorJob), and a snooze never consumes an attempt, so
+  # an absurd Retry-After or a skewed clock would park the job effectively
+  # forever and leak a scheduled row the Pruner never reclaims. 300s matches the
+  # numeric precedent in Barkpark.Webhooks.Dispatcher (@retry_after_max_ms
+  # 300_000); it is deliberately NOT wired to that webhooks-namespaced bound,
+  # nor to @rate_limit_budget_seconds elsewhere (an in-process sleep budget, far
+  # too small to serve as a park ceiling).
+  @retry_after_max_seconds 300
 
   # ---------------------------------------------------------------------------
   # Public API
@@ -331,17 +340,28 @@ defmodule Barkpark.Plugins.Github.Client do
       get_header(headers, "x-ratelimit-remaining") == "0"
   end
 
-  defp retry_after_seconds(headers) do
-    cond do
-      ra = get_header(headers, "retry-after") ->
-        parse_int(ra)
+  # X-RateLimit-Reset is an ABSOLUTE epoch instant transmitted by the peer, so
+  # subtracting local wall clock is the only correct computation — a monotonic
+  # read is meaningless against GitHub's epoch. What is guarded here is the
+  # missing UPPER bound on an externally supplied value, not the clock source.
+  # `now` is injectable so the clamp is provable without sleeps (same shape as
+  # Github.DrainWorker.backoff_ms/1); the production call site stays arity-1.
+  @doc false
+  @spec retry_after_seconds(term(), integer()) :: non_neg_integer()
+  def retry_after_seconds(headers, now \\ System.system_time(:second)) do
+    seconds =
+      cond do
+        ra = get_header(headers, "retry-after") ->
+          parse_int(ra)
 
-      reset = get_header(headers, "x-ratelimit-reset") ->
-        max(0, parse_int(reset) - System.system_time(:second))
+        reset = get_header(headers, "x-ratelimit-reset") ->
+          max(0, parse_int(reset) - now)
 
-      true ->
-        0
-    end
+        true ->
+          0
+      end
+
+    seconds |> max(0) |> min(@retry_after_max_seconds)
   end
 
   defp get_header(headers, name) when is_map(headers) and not is_struct(headers) do

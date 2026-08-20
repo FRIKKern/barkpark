@@ -77,6 +77,33 @@ set -euo pipefail
 #   scripts/async_env_seam_scan.exs
 #       cloud/test/…/async_global_seam_guard_test.exs Code.require_file()s the
 #       scanner and drives it. The scanner IS the code under test there.
+#   internal/cloudclient/** — dr-w10-s4.
+#       cloud/test/…/payload_key_set_census_test.exs reads the Go package's
+#       `json:"…"` struct tags and censuses them AGAINST the Elixir serializers'
+#       emitted key sets, in both directions. The Go side is half the contract,
+#       so a Go-only edit is a change to the thing under test: adding a struct
+#       field there without an emitter, or deleting one that had an emitter,
+#       moves the census — and unfiltered, the census would never run on the PR
+#       that moved it. Declared as a DIRECTORY because the census reads the whole
+#       package (every non-test .go), not one pinned file.
+#   internal/provisioner/** — cch-w53-s2.
+#       cloud/test/…/web/claim_payload_manifest_test.exs censuses the claim
+#       payloads the control plane RETURNS on the worker-token claim routes
+#       against the `json:"…"` tags reachable at each `json.Unmarshal` call site
+#       in this package. Go's encoding/json DISCARDS an unmodelled key in
+#       silence, and DisallowUnknownFields appears zero times here — so a key
+#       the plane ships and the worker has no field for is dropped with no
+#       error, no log line and no other failing test. The Go side is half that
+#       contract: deleting a JobSpec field, moving a decode site, or changing a
+#       field's TYPE moves the census, and unfiltered the census would never run
+#       on the PR that moved it. Declared as a DIRECTORY, exactly like
+#       internal/cloudclient/** above and for the same reason — the manifest
+#       reads the whole package (every non-test .go), not one pinned file, and
+#       the tolerated-dialect decode it depends on is an INLINE anonymous struct
+#       that no per-file pin would survive a move of. Cost measured over the last
+#       60 days: 48 commits touched internal/provisioner, 24 of which already
+#       dispatch this set, so 24 newly dispatch it — affordable against the
+#       47-of-54 that got `templates/**` REFUSED (D270).
 #
 # js/packages/create-barkpark-app/templates/** is the VENDORED-TEMPLATE DRIFT
 # TRIPWIRE, inherited verbatim from the workflow-level filter this shim
@@ -94,13 +121,123 @@ set -euo pipefail
 # covers every change to the scanning logic itself; what remains uncovered is a
 # new api/test fixture that the scanner would newly flag. That residue is named
 # here rather than left for a reader to discover.
+#
+# deploy/site-deploy.sh — cch-w27-s2. `sites_deploy_stage_caption_test.exs`
+# DERIVES its corpus from the box engine rather than typing it: it reads the
+# FATAL line `build_failure_reason()` greps first and asserts the preview fixture
+# in `scenarios.mjs` still equals it. That is deliberate (a hand-authored failure
+# string is how a rail guard ends up green by construction), and it makes the
+# engine a real dependency of the Cloud suite — an edit to that line must re-run
+# this suite, or the fixture and its producer drift apart behind a green check.
+#
+# DELIBERATELY NOT DECLARED — internal/cli/**. dr-w18-s4's empty-audience census
+# (`deploy_signal_audience_census_test.exs`) derives each deploy-health signal's
+# audience from Go SOURCE, and it reads `internal/cloudclient/**` ONLY, which is
+# already declared above. It could have read `internal/cli/cloud_status_cmd.go`
+# or `cloud_deploy_census_cmd.go` instead — and that would have been a guard
+# publishing a GREEN required context on every PR where it never ran, because the
+# dispatcher returns false for `internal/cli/**`. The choice was to keep the
+# guard's reads inside the already-declared package rather than widen the set:
+# `internal/cli/**` would hand every Go CLI edit the full Postgres-backed Cloud
+# suite, and listing individual reader files rots the moment a reader moves. No
+# extra rule enforces this — the ratchet below already does: a census read of an
+# undeclared repo-root file is an `UNCOVERED repo-root read` and exit 1.
+#
+# internal/caddyfile/caddyfile.go — cch-w56-s2. `promise_actor_manifest_test.exs`
+#     resolves the console's "Custom domains with automatic TLS" promise as
+#     `{:external_armed_here, …}`: the renewing actor is Caddy's own binary, and
+#     the only thing this tree can prove is that it ARMS it — the rendered
+#     Caddyfile carries `on_demand_tls { ask … }`. That assertion is an equality
+#     against THIS FILE's bytes, so an edit to it is an edit to the thing under
+#     test; undeclared, the row would publish green on the very PR that
+#     disarmed the promise. Declared as an EXACT FILE, never `internal/**` or
+#     `internal/caddyfile/**` (D270): measured over the last 60 days / 4663
+#     commits on main, this file appears in 8 newly-dispatching commits, against
+#     145 for `.github/workflows/**` and 76 for `deploy/**`. Directories are
+#     unaffordable at that ratio; exact files are nearly free.
+#
+# templates/astro-search-starter/src/lib/bp.ts — dr-w16-s1.
+# templates/search-starter/lib/markers.corpus-status.test.ts — dr-w16-s1.
+#     `deploy_ledger_test.exs` reads these TWO repo-root starter files and
+#     censuses the deploy markers they PRODUCE against the ledger's parser. They
+#     are the producer half of that contract, so an edit to either is a change to
+#     the thing under test — unfiltered, the census would never run on the PR
+#     that moved it. Declared as EXACT FILES, not `templates/*/**` (D270): the
+#     tests read exactly these two files, and the directory glob is the expensive
+#     shape. Measured over the last 60 days — 54 commits touched `templates/`; of
+#     those, 47 dispatch nothing in this set today and a templates glob would
+#     newly hand every one of them the Postgres-backed Cloud `test` job, against
+#     5 for the exact files. Declaring what is actually read is both the honest
+#     and the cheap answer; widen only when a test starts reading more.
+#
+# THE CALLER CORPUS — dr-w26-s4. `payload_key_set_census_test.exs`'s caller arm
+# scores every `/v1/internal/**` WRITE route against a POSITIVELY declared caller
+# corpus: it walks `.github/workflows/deploy.yml`, `scripts`, `internal`,
+# `cloud/lib` and `deploy`, and reds when a write route ships with no caller in
+# any of them. Those are whole-directory reads, so the honest declaration is a
+# whole-directory glob — an exact-file pin rots the moment a caller moves one
+# file over, and the arm would then report "caller-less" about a route that IS
+# called: a FALSE RED that reads exactly like the true one.
+#
+#   internal/**  supersedes the four exact `internal/…` entries below. They are
+#       KEPT, redundantly, because each carries its own ruling and deleting a
+#       ruling to save a line is how a set stops explaining itself. The cost is
+#       the real one: this is the `internal/cli/**` widening refused above on
+#       CI-cost grounds, and dr-w26-s4 overrules that refusal for the caller arm
+#       — internal/cli IS where `bp cloud` calls the worker seam, so refusing it
+#       would make the corpus lie about which routes have callers. The refusal
+#       was a COST decision; borrowing it as a caller-corpus decision was the
+#       category error.
+#   deploy/**    likewise supersedes the two `deploy/site-deploy*.sh` entries.
+#   cloud/lib/** is REDUNDANT under `cloud/**` and is declared anyway, so that
+#       every root the arm walks appears here BY NAME. The arm asserts exactly
+#       that, which is what turns this block from a voluntary note into
+#       something that can lose: delete a root here and the Cloud suite reds.
+#   .github/workflows/deploy.yml is declared as an EXACT FILE, not
+#       `.github/workflows/**`. It is the only workflow the arm reads (the
+#       recorder seam), and the directory glob is both the expensive shape
+#       (D270: 145 newly-dispatching commits / 60 days) and one the harness pins
+#       against — cloud-path-escape-check.test.sh asserts elixir.yml does NOT
+#       match. Before this line a deploy.yml-only PR dispatched NOTHING in this
+#       set: the recorder could land, or vanish, with no code gate at all.
+#
+# cloud/priv/audit-actions.json — cch-w69-s1. The audit verb table, REDUNDANT
+# under `cloud/**` and declared anyway, by name, because it used to live at
+# design/audit-actions.json as a declared cross-tree read: audit_event.ex
+# compile-time-read it from cloud/lib, which this ratchet COVERED (dispatch-wise)
+# while the control-plane image — built from cloud/ alone — could never contain
+# it, and every cp deploy failed at `mix compile` (D841/D842). The move into
+# cloud/priv is what fixed that, this line keeps the table's dispatch story
+# explicit, and the cloud/lib-reader arm below is what makes the design/-era
+# shape FATAL rather than covered.
+#
+# RESIDUE, named rather than left to be found: `scripts/` is represented here by
+# three EXACT files, not `scripts/**`, because the harness pins exact-entry
+# semantics through `scripts/async_env_seam_scan.exs.orig` and a directory glob
+# turns that case red (measured: 164 passed, 1 failed). So a caller added in a
+# NEW scripts/ file does not itself dispatch this suite. The direction is safe —
+# the arm keeps scoring that route caller-less until the next Cloud-dispatching
+# PR, i.e. a LATE red, never a false green — but it is a hole, and closing it
+# means widening the harness first.
 CLOUD_PATHS='cloud/**
+cloud/lib/**
 .github/workflows/cloud.yml
+.github/workflows/deploy.yml
+cloud/priv/audit-actions.json
+deploy/**
+deploy/site-deploy.sh
+deploy/site-deploy-node.sh
+internal/**
+internal/caddyfile/caddyfile.go
 internal/cli/cloud/providers_capabilities.json
+internal/cloudclient/**
+internal/provisioner/**
 js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
 scripts/cloud-path-escape-check.sh
-scripts/cloud-path-escape-check.test.sh'
+scripts/cloud-path-escape-check.test.sh
+templates/astro-search-starter/src/lib/bp.ts
+templates/search-starter/lib/markers.corpus-status.test.ts'
 
 # EXEMPT — census rows that resolve to a real repo-root file but are NOT a
 # repo-root DEPENDENCY. Two shapes qualify, and nothing else does:
@@ -116,21 +253,36 @@ scripts/cloud-path-escape-check.test.sh'
 # literal's REAL target is itself covered by the declared set.
 CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin_env_test.exs:189 reads Path.join(__DIR__, "../../docker-compose.yml"), which is cloud/docker-compose.yml (covered by cloud/**). The repo-root file of the same name is reached only by the `cloud/` cwd base, and that base does not apply to a __DIR__-anchored literal.'
 
-# The census floor. The measured population is 4 resolved repo-root reads: the
-# two cross-tree reads above, the vendored-template directory, and the one
-# EXEMPT phantom above; the floor is 4. Its job is to catch a NEUTERED SCANNER:
+# The census floor — a LOWER BOUND, not a headcount. It was set from a
+# population of 6 resolved repo-root reads (the population only grows): the
+# two cross-tree reads above, the vendored-template directory, the one EXEMPT
+# phantom above, (cch-w27-s2) the box engine `deploy/site-deploy.sh` that
+# `sites_deploy_stage_caption_test.exs` derives its failure corpus from, and
+# (dr-w10-s4) `internal/cloudclient/` that `payload_key_set_census_test.exs`
+# reads the decoder half of the payload contract from; the floor is 6.
+# Its job is to catch a NEUTERED SCANNER:
 # a regex or find that silently stopped matching would otherwise report "0
 # uncovered reads" and exit 0 — clean-looking, and completely blind.
 #
-# It is deliberately EQUAL to the population, not comfortably under it, because
-# the population is small: a floor of 1 here would let two thirds of the scanner
-# die unnoticed. A legitimate new escape RAISES this number in the same commit
-# that declares the path.
+# It is set CLOSE to the population, not far under it, because the population is
+# small: a floor of 1 here would let two thirds of the scanner die unnoticed. It
+# was originally set EQUAL to the then-population of 6, and that equality is
+# history, not a rule — as producer reads are declared the population grows past
+# it and the floor stays put.
+#
+# A legitimate new escape does NOT raise this number (dr-w16-s1). The floor is a
+# LOWER BOUND on a scanner's liveness, and the harness proves that bound against
+# a synthetic fixture (cloud-path-escape-check.test.sh:59-73) that emits only
+# FIVE covered reads. Raise the floor past what that fixture can produce and the
+# harness's own fixture-tree cases go red on the floor instead of exercising
+# coverage — measured on this tree, a floor of 7 turns a clean
+# "158 passed, 0 failed" into "152 passed, 6 failed". Widen the fixture first,
+# or leave the floor alone.
 #
 # It is a CONSTANT on purpose. An env-var override would be a one-line CI bypass
 # of the only check that can tell "clean" from "blind", and the harness asserts
 # that setting CLOUD_ESCAPE_MIN changes nothing.
-CLOUD_ESCAPE_MIN=4
+CLOUD_ESCAPE_MIN=6
 
 # CLOUD_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
@@ -331,8 +483,57 @@ echo "cloud-path-escape-check: $count distinct repo-root read(s) resolved from c
 # FAIL-CLOSED on a neutered scanner. "Nothing found" is never good news here.
 if [ "$count" -lt "$CLOUD_ESCAPE_MIN" ]; then
   echo "::error::cloud-path-escape-check: only $count repo-root read(s) found, floor is $CLOUD_ESCAPE_MIN." >&2
-  echo "  The SCANNER is broken, not the repo clean — the measured population is 4." >&2
+  echo "  The SCANNER is broken, not the repo clean — the measured population is 6." >&2
   echo "  Check the grep/find in list_escapes before touching the floor." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# the cloud/lib reader arm (cch-w69-s1) — a DISTINCT failing arm, not coverage
+# ---------------------------------------------------------------------------
+# The coverage arm below answers "does cloud.yml dispatch on this read?" — and
+# that question is the WRONG one for a reader under cloud/lib/, which is why
+# this arm runs FIRST: a covered-and-declared read must still die here, and an
+# undeclared one must red as THIS failure, not as a missing-declaration red that
+# invites declaring it. cloud/lib is compiled
+# INTO the control-plane image, and that image builds from cloud/ alone
+# (cloud/docker-compose.yml `build: .`; the Dockerfile COPYs only mix.exs
+# mix.lock config lib priv). A repo-root read from cloud/lib therefore compiles
+# clean locally and in CI, can be fully DECLARED here — and still detonates at
+# image-build `mix compile`, where the file does not exist. Exactly that shipped
+# in #11723: audit_event.ex compile-time-read design/audit-actions.json, the
+# path was in CLOUD_PATHS, everything was green, and every cp deploy failed with
+# `could not read file "/design/audit-actions.json"` (D841/D842).
+#
+# So: any census row whose READER is under cloud/lib/ is FATAL, covered or not,
+# exempt or not. There is no legitimate instance of this shape — the fix is
+# always to move the file under cloud/ (cloud/priv rides the image's `COPY priv`
+# layer) or to stop reading it from compiled code. cloud/test readers stay the
+# coverage ratchet's business: tests never run inside the image.
+in_image_violations=0
+while IFS='	' read -r p src; do
+  [ -n "$p" ] || continue
+  case "$src" in
+    cloud/lib/*)
+      in_image_violations=$((in_image_violations + 1))
+      echo "::error::cloud-path-escape-check: IN-IMAGE READER ESCAPES THE BUILD CONTEXT: $src reads $p" >&2
+      ;;
+  esac
+done <<<"$census"
+
+if [ "$in_image_violations" -gt 0 ]; then
+  cat >&2 <<'MSG'
+
+A file under cloud/lib/ reads outside cloud/. cloud/lib is COMPILED INTO the
+control-plane image, and the image is built from cloud/ alone — the file above
+cannot exist in-container, so this compiles green everywhere except the deploy,
+where `mix compile` dies (the #11723 / D841 failure class). Declaring the path
+in CLOUD_PATHS does not help: dispatch coverage cannot put a file inside a
+docker build context.
+
+Fix: move the file under cloud/ (cloud/priv/ rides the Dockerfile's `COPY priv`
+layer), or stop reading it from compiled code.
+MSG
   exit 1
 fi
 
@@ -366,3 +567,4 @@ MSG
 fi
 
 echo "OK: every repo-root read from cloud/lib + cloud/test is dispatched on."
+echo "OK: no cloud/lib reader escapes the image build context."

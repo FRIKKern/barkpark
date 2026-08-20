@@ -32,13 +32,21 @@ import (
 const cacheFilePrefix = "taskboard-cache-"
 
 // cacheKey derives a short, filesystem-safe identity for a board's scope from
-// its server + workspace + project. It is the sha256 hex prefix of the joined
-// identity: stable across runs for the same scope, distinct across scopes, and
-// safe as a filename component (no slashes or host characters leak through). A
-// NUL separator between the three parts stops "ab"+""+"c" from hashing the same
-// as "a"+"b"+"c" — distinct scopes must never share a cache file.
-func cacheKey(server, workspace, project string) string {
-	sum := sha256.Sum256([]byte(server + "\x00" + workspace + "\x00" + project))
+// its server + workspace + project + dataset. It is the sha256 hex prefix of the
+// joined identity: stable across runs for the same scope, distinct across scopes,
+// and safe as a filename component (no slashes or host characters leak through).
+// A NUL separator between the parts stops "ab"+""+"c" from hashing the same as
+// "a"+"b"+"c" — distinct scopes must never share a cache file.
+//
+// Dataset joins the key (charter wave-22 D125): the /v1/tasks reads are
+// dataset-flat, so two datasets on the same server/workspace/project see the
+// same corpus and a shared cache is not a correctness bug — but folding it in is
+// cheap future-proofing (one one-time cold paint per new scope) that keeps the
+// key aligned with the rest of the scope tuple the board threads (Config.Dataset
+// already scopes the live listener), so a later dataset-scoped read can never
+// silently reuse another dataset's first-paint cache.
+func cacheKey(server, workspace, project, dataset string) string {
+	sum := sha256.Sum256([]byte(server + "\x00" + workspace + "\x00" + project + "\x00" + dataset))
 	return hex.EncodeToString(sum[:])[:16]
 }
 

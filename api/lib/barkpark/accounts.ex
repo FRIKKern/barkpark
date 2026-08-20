@@ -197,7 +197,12 @@ defmodule Barkpark.Accounts do
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :invalid_current}
   def update_user_password(%User{} = user, current_password, attrs) do
     if User.valid_password?(user, current_password) do
-      do_reset_password(user, attrs)
+      # Drops the revoked-session count deliberately: this arity publishes no
+      # claim about sessions, so it has nothing to carry it to.
+      case do_reset_password(user, attrs) do
+        {:ok, updated, _revoked} -> {:ok, updated}
+        err -> err
+      end
     else
       {:error, :invalid_current}
     end
@@ -316,27 +321,48 @@ defmodule Barkpark.Accounts do
     end
   end
 
-  @doc "Revoke a single session by plaintext (idempotent)."
-  @spec revoke_user_session_token(binary()) :: :ok
+  @doc """
+  Revoke a single session by plaintext (idempotent). Returns `{:ok, revoked}` —
+  the NUMBER OF ROWS the revoke actually stamped: 1 for a live session, 0 when
+  there was nothing left to revoke (an already-revoked, expired or unknown
+  token).
+
+  The count is the post-condition the caller's receipt implies, so it is
+  returned rather than swallowed here — a hardcoded `:ok` discarded the outcome
+  AT THE SOURCE, leaving every caller's "signed out" claim unreadable in
+  principle (PDS-D523, same widening as `revoke_all_user_sessions/1` in
+  PDS-D503). Idempotence is preserved: 0 is a normal answer, not an error.
+  """
+  @spec revoke_user_session_token(binary()) :: {:ok, non_neg_integer()}
   def revoke_user_session_token(plaintext) when is_binary(plaintext) do
     hash = UserSession.hash_token(plaintext)
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    from(t in UserSession, where: t.token_hash == ^hash and is_nil(t.revoked_at))
-    |> Repo.update_all(set: [revoked_at: now])
+    {revoked, _} =
+      from(t in UserSession, where: t.token_hash == ^hash and is_nil(t.revoked_at))
+      |> Repo.update_all(set: [revoked_at: now])
 
-    :ok
+    {:ok, revoked}
   end
 
-  @doc "Revoke all of a user's sessions (\"sign out everywhere\")."
-  @spec revoke_all_user_sessions(User.t()) :: :ok
+  @doc """
+  Revoke all of a user's live sessions ("sign out everywhere"). Returns
+  `{:ok, revoked}` — the NUMBER OF ROWS the revoke actually stamped.
+
+  The count is the post-condition every caller's receipt implies: a bare `:ok`
+  reads identically whether three sessions died or zero did (PDS-D503). Callers
+  that publish a "sessions were killed" claim MUST carry this number, not
+  re-assert it from the fact the call returned.
+  """
+  @spec revoke_all_user_sessions(User.t()) :: {:ok, non_neg_integer()}
   def revoke_all_user_sessions(%User{id: uid}) do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    from(t in UserSession, where: t.user_id == ^uid and is_nil(t.revoked_at))
-    |> Repo.update_all(set: [revoked_at: now])
+    {revoked, _} =
+      from(t in UserSession, where: t.user_id == ^uid and is_nil(t.revoked_at))
+      |> Repo.update_all(set: [revoked_at: now])
 
-    :ok
+    {:ok, revoked}
   end
 
   @doc """
@@ -499,10 +525,32 @@ defmodule Barkpark.Accounts do
   # route malformed input onto the existing :error → 422 path, never a 500.
   def confirm_user(_), do: :error
 
-  @doc "Reset a password from a `\"reset\"` token plaintext, then revoke all sessions."
+  @doc """
+  Reset a password from a `"reset"` token plaintext, then revoke all sessions.
+
+  Drops the revoked-session count — use `reset_user_password_counting/2` on any
+  path whose receipt CLAIMS the sessions died (PDS-D503).
+  """
   @spec reset_user_password(term(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | :error
-  def reset_user_password(plaintext, attrs) when is_binary(plaintext) do
+  def reset_user_password(plaintext, attrs) do
+    case reset_user_password_counting(plaintext, attrs) do
+      {:ok, user, _revoked} -> {:ok, user}
+      other -> other
+    end
+  end
+
+  @doc """
+  `reset_user_password/2` widened by its post-condition: returns
+  `{:ok, user, sessions_revoked}`, where `sessions_revoked` is the number of
+  live sessions the reset actually stamped `revoked_at` on.
+
+  This is what `POST /v1/auth/reset` reports. Without it the receipt is
+  byte-identical whether "sign out everywhere" killed three sessions or none.
+  """
+  @spec reset_user_password_counting(term(), map()) ::
+          {:ok, User.t(), non_neg_integer()} | {:error, Ecto.Changeset.t()} | :error
+  def reset_user_password_counting(plaintext, attrs) when is_binary(plaintext) do
     with %UserEmailToken{user_id: uid} = tok <- fetch_email_token(plaintext, "reset"),
          %User{} = user <- Repo.get(User, uid) do
       # Atomic reset + token-consume: reset the password FIRST so a policy-failing
@@ -512,9 +560,9 @@ defmodule Barkpark.Accounts do
       txn =
         Repo.transaction(fn ->
           case do_reset_password(user, attrs, reset_mfa: true) do
-            {:ok, reset_user} ->
+            {:ok, reset_user, revoked} ->
               case Repo.delete(tok, stale_error_field: :id) do
-                {:ok, _} -> reset_user
+                {:ok, _} -> {reset_user, revoked}
                 {:error, _cs} -> Repo.rollback(:stale)
               end
 
@@ -524,7 +572,7 @@ defmodule Barkpark.Accounts do
         end)
 
       case txn do
-        {:ok, reset_user} -> {:ok, reset_user}
+        {:ok, {reset_user, revoked}} -> {:ok, reset_user, revoked}
         {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
         {:error, :stale} -> :error
       end
@@ -534,7 +582,7 @@ defmodule Barkpark.Accounts do
   end
 
   # Fail soft on a non-binary token — mirrors confirm_user/1's catch-all above.
-  def reset_user_password(_, _), do: :error
+  def reset_user_password_counting(_, _), do: :error
 
   # `reset_mfa: true` (the forgot-password / account-recovery path) also wipes
   # TOTP + recovery codes — MEDIUM-8: a token-based reset must FULLY recover a
@@ -557,8 +605,8 @@ defmodule Barkpark.Accounts do
 
     case Repo.update(changeset) do
       {:ok, user} ->
-        revoke_all_user_sessions(user)
-        {:ok, user}
+        {:ok, revoked} = revoke_all_user_sessions(user)
+        {:ok, user, revoked}
 
       err ->
         err
@@ -646,6 +694,60 @@ defmodule Barkpark.Accounts do
   wins; the loser sees zero rows updated and is rejected as a replay. The stamp
   is therefore also monotonic (a winner always moves it forward).
   """
+  # ── CITED SAFE — class A, and the ordering guard is UPSTREAM, not missing
+  # (clock-semantics wave, 2026-08-19). Read this before "fixing" the CAS.
+  #
+  # Provenance: swept as a candidate of the class-C bucket-key defect closed by
+  # #12628 (8598c4efe7) and the atomicity defect closed by #12579 (e45f1377bb).
+  # This site is neither: `last_totp_at` is an ABSOLUTE STORED INSTANT compared
+  # against a persisted column, which is precisely the case where wall clock is
+  # CORRECT and `System.monotonic_time` would be meaningless (process-local,
+  # gone on restart, incomparable across nodes).
+  #
+  # (a) STRUCTURAL, before any consequence argument: the CAS below
+  #     (`cas_last_totp/2`) is EQUALITY-only — `u.last_totp_at == ^seen` — with
+  #     no ordering predicate, and the doc above asserts the stamp is
+  #     monotonic. That assertion HOLDS, but not for the reason the code shape
+  #     suggests. Ordering is enforced BEFORE the write, by NimbleTOTP's reuse
+  #     gate: `reused?/3` (nimble_totp 1.0.0, lib/nimble_totp.ex:250-252) is
+  #     `Integer.floor_div(time, period) <= Integer.floor_div(to_unix(since),
+  #     period)` => reused => invalid. That is STRICT at step granularity, so
+  #     acceptance requires floor(now/30) > floor(since/30), which arithmetically
+  #     implies now > since. `totp_opts/1` below is what feeds `since:`.
+  #
+  # (b) PROVEN, not argued. An exhaustive sweep over a 3-step neighbourhood
+  #     (121 x 121 = 14641 (time, since) pairs, each with its own matching code)
+  #     found the accepted-with-time-<=-since set EMPTY. End to end: forcing
+  #     `last_totp_at` 600 s into the FUTURE — arithmetically identical to a
+  #     rewound host clock — makes `verify_totp/2` return `:error` with the
+  #     stored value byte-identical; the CAS never runs at all.
+  #     CLOCK STEP, both directions: BACKWARD fails CLOSED (the code is rejected
+  #     as reuse before any write). FORWARD also fails closed for replay — it
+  #     can only advance the consumed step, never rewind it. There is no
+  #     direction in which a step admits a replayed code.
+  #
+  # So the absent `u.last_totp_at < ^now` predicate is REDUNDANT, not
+  # absent-and-dangerous, and shipping it would be claiming a defect that does
+  # not exist.
+  #
+  # RESIDUAL — a DEPENDENCY COUPLING, and this is the durable value of the note:
+  # the ordering invariant is enforced by a third party's internals, not by
+  # anything in this file. A nimble_totp version bump that loosens `reused?/3`
+  # to `<`, anyone adding a `time:` option to the `valid?` call, or anyone
+  # dropping `since:` from `totp_opts/1`, silently converts this redundant CAS
+  # into the real defect — with no test here failing. If you touch any of those
+  # three, add the ordering predicate.
+  # CONTRAST, deliberately: cloud's twin does NOT rely on the dependency. It
+  # stores a step INDEX and guards it in SQL —
+  # `u.two_factor_last_step < ^step` in the WHERE at
+  # cloud/lib/barkpark_cloud/accounts.ex:2186 — a different mechanism that
+  # needs its own guard and has it.
+  #
+  # WHAT THIS VERDICT DOES NOT REST ON: the MEDIUM-6 / LOW red-team stamps
+  # recorded in the doc above. Those graded the read-then-write race between two
+  # concurrent verifiers; neither examined what a clock step does to the stamp.
+  # The two grounds above are the upstream strict inequality and an exhaustive
+  # sweep; neither leans on that history.
   @spec verify_totp(User.t(), String.t()) :: {:ok, User.t()} | :error
   def verify_totp(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code) do
@@ -677,6 +779,11 @@ defmodule Barkpark.Accounts do
     end
   end
 
+  # No ordering predicate here BY VERDICT, not by omission — clock-semantics
+  # wave 2026-08-19 classified this class A / CITED SAFE. NimbleTOTP's strict
+  # step gate makes `now > seen` a precondition of ever reaching this write; see
+  # the block above `verify_totp/2` for the proof and for the dependency
+  # coupling that is the residual.
   defp cas_last_totp(query, nil), do: where(query, [u], is_nil(u.last_totp_at))
   defp cas_last_totp(query, seen), do: where(query, [u], u.last_totp_at == ^seen)
 

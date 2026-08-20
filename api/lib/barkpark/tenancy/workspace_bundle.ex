@@ -315,6 +315,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   """
   @spec import_bundle_file(Path.t(), keyword()) ::
           {:ok, stats()} | {:error, {:workspace_slug_conflict, map()} | term()}
+  # `dir` is derived from Plug's server-chosen upload path plus a unique suffix,
+  # and Archive validates every tar member before extraction. No manifest member
+  # can choose the directory removed by the `after` clause.
+  # sobelow_skip ["Traversal.FileModule"]
   def import_bundle_file(bundle_path, opts \\ []) when is_binary(bundle_path) do
     mode = import_mode!(opts)
     dir = Path.join(Path.dirname(bundle_path), "members-#{System.unique_integer([:positive])}")
@@ -363,7 +367,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp run_import(manifest, dumps, mode) do
     Repo.transaction(
       fn ->
-        # FIRST: drain the deferred-trigger queue, or the DDL below cannot run.
+        # FIRST OF ALL: refuse any manifest table the export could never have
+        # written, before ANY write — the shell-adopt delete, the FK/trigger
+        # DDL and every COPY/INSERT run only over membership-checked names.
+        assert_member_tables!(manifest)
+
+        # THEN: drain the deferred-trigger queue, or the DDL below cannot run.
         # The epic-ledger FKs into `documents` are DEFERRABLE INITIALLY
         # DEFERRED (20260715001200/1300), so any earlier delete of documents in
         # THIS transaction (the ExUnit sandbox wraps a whole test in one — its
@@ -498,12 +507,66 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end)
   end
 
+  # Search-path visibility, NOT nspname='public' (felix-w27): the unqualified
+  # COPY/INSERT below resolves `table` via search_path — pg_catalog implicit-
+  # FIRST — so this classifier must answer the same question COPY asks, or a
+  # pg_catalog relation (pg_authid) slips OUT of `assert_member_tables!/1`'s
+  # `foreign` set instead of being refused. `relkind = 'r'` is KEPT: a bare
+  # pg_table_is_visible would match views/indexes/sequences too.
+  # RESIDUAL (accepted): this resolves the search-path WINNER, so a public
+  # member shadowed by a same-named pg_catalog relation would classify as the
+  # catalog copy; no app table name collides with pg_catalog today.
   defp table_exists?(table) do
     Repo.query!(
-      "SELECT 1 FROM pg_class cl JOIN pg_namespace n ON n.oid = cl.relnamespace " <>
-        "WHERE n.nspname = 'public' AND cl.relname = $1 AND cl.relkind = 'r'",
+      "SELECT 1 FROM pg_class cl " <>
+        "WHERE cl.relname = $1 AND cl.relkind = 'r' " <>
+        "AND pg_catalog.pg_table_is_visible(cl.oid)",
       [table]
     ).rows != []
+  end
+
+  # ── Catalog-membership guard (felix-w25-s3, charter D165) ────────────────────
+  #
+  # NAMED FAILURE MODE: a manifest-named table reaches the interpolated
+  # COPY/INSERT path with no membership check — `qi/1` quotes the identifier
+  # but never restricts WHICH table, and `table_exists?/1` gates existence,
+  # not membership. The export builds member specs PURELY from
+  # `[root_table] ++ live_e1/e2/e3 ++ allowlist keys` (do_export/2), so a
+  # table outside that enumeration (`users`, `oban_jobs`, `schema_migrations`)
+  # cannot come out of a legit export — a manifest naming one is
+  # crafted/foreign, and it is refused HERE, before the shell-adopt delete,
+  # the FK/trigger DDL and any COPY/INSERT.
+  #
+  # The allow-set is DERIVED from the same live enumeration export reads —
+  # never the pinned lists — so a new tenant table is a member on both sides
+  # the moment it exists. Two filters, two jobs: a manifest table ABSENT on
+  # this schema version has unknowable membership here and keeps today's
+  # cross-version tolerance (`table_exists?/1` 0-row skip; a row-carrying one
+  # fails on its own COPY exactly as before) — only a table that EXISTS on
+  # the target AND is not a member is refused.
+  defp assert_member_tables!(manifest) do
+    members =
+      MapSet.new(
+        [Catalog.root_table()] ++
+          Catalog.live_e1(Repo) ++
+          Catalog.live_e2(Repo) ++
+          Catalog.live_e3(Repo) ++
+          Map.keys(Catalog.allowlist())
+      )
+
+    foreign =
+      (manifest["tables"] || [])
+      |> Enum.map(& &1["name"])
+      |> Enum.reject(&MapSet.member?(members, &1))
+      |> Enum.filter(&table_exists?/1)
+
+    if foreign != [] do
+      raise InvalidBundleError,
+        code: "invalid_bundle",
+        message:
+          "manifest names table(s) a #{Archive.format()} export could never have written: " <>
+            Enum.join(Enum.sort(foreign), ", ")
+    end
   end
 
   # ── Export ───────────────────────────────────────────────────────────────────
@@ -1045,9 +1108,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # Provably EMPTY (PDS-D9): zero documents AND zero media_files. Anything
   # populated is refused, never silently replaced — fail-closed.
   defp empty_shell?(ws_id) do
-    scalar!("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [ws_id]) == 0 and
-      scalar!("SELECT count(*) FROM media_files WHERE workspace_id = $1::text::uuid", [ws_id]) ==
-        0
+    document_count =
+      Repo.query!("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [ws_id]).rows
+      |> hd()
+      |> hd()
+
+    media_count =
+      Repo.query!("SELECT count(*) FROM media_files WHERE workspace_id = $1::text::uuid", [ws_id]).rows
+      |> hd()
+      |> hd()
+
+    document_count == 0 and media_count == 0
   end
 
   # ── COPY sources: a binary dump or a member file on disk ─────────────────────
@@ -1060,12 +1131,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # wire protocol does anyway).
   @copy_chunk_bytes 65_536
 
+  # File-backed members are paths returned by Archive.unpack_to_dir/2 after its
+  # separator/type traversal gate; callers cannot supply an arbitrary path here.
+  # sobelow_skip ["Traversal.FileModule"]
   defp copy_source({:file, path}), do: File.stream!(path, @copy_chunk_bytes)
   defp copy_source(dump) when is_binary(dump), do: [dump]
 
   # Free the member the MOMENT it is in Postgres. Peak transient disk is what
   # this slice trades BEAM peak for, so holding every extracted member until the
   # import finishes would make the scratch as large as the whole bundle again.
+  # The same Archive traversal gate proves this is an extracted member path.
+  # sobelow_skip ["Traversal.FileModule"]
   defp release_member({:file, path}), do: File.rm(path)
   defp release_member(dump) when is_binary(dump), do: :ok
 
@@ -1100,6 +1176,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   # Direct COPY FROM STDIN into the real table (clean target). Postgres
   # re-generates any generated column absent from the column list.
+  # Every interpolated identifier is double-quoted by qi/1; COPY data remains a
+  # protocol stream and never enters the SQL text.
+  # sobelow_skip ["SQL.Stream"]
   defp copy_into(qualified_table, col_list, dump) do
     stream =
       Ecto.Adapters.SQL.stream(Repo, "COPY #{qualified_table} (#{col_list}) FROM STDIN", [])
@@ -1111,6 +1190,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # INSERT … SELECT … ON CONFLICT DO NOTHING so a shared, non-workspace-unique
   # row (e.g. authoring_exemptions (doc_id, dataset)) is a no-op instead of a
   # crash. COPY-to-temp does the text→type casting for free.
+  # `table`, every column, and the generated temp name are identifier-quoted by
+  # qi/1; none of the streamed COPY bytes are interpolated into SQL.
+  # sobelow_skip ["SQL.Query", "SQL.Stream"]
   defp insert_on_conflict(table, col_list, dump) do
     tmp = "_bp_imp_#{:erlang.unique_integer([:positive])}"
 
@@ -1140,6 +1222,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # back to all columns only for a PK-less table, which would have no arbiter
   # index; fail loudly rather than guess). Degenerate all-key tables have
   # nothing to update → DO NOTHING against the same arbiter.
+  # All manifest identifiers pass through qi/1, including the conflict arbiter
+  # and update targets; `action` is assembled only from fixed SQL tokens.
+  # sobelow_skip ["SQL.Query", "SQL.Stream"]
   defp merge_upsert(table, cols, order_cols, dump)
        when is_list(order_cols) and order_cols != [] do
     col_list = cols |> Enum.map(&qi/1) |> Enum.join(", ")
@@ -1185,8 +1270,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           "got #{inspect(order_cols)} — re-export the bundle with a current manifest"
   end
 
-  defp scalar!(sql, params), do: Repo.query!(sql, params).rows |> hd() |> hd()
-
   # ── SQL identifier / hashing helpers ─────────────────────────────────────────
 
   # Double-quote an identifier (column/table name). The quote-doubling is the
@@ -1196,16 +1279,22 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   #   * export: names come from the live catalog (`table_exists?/1`-filtered),
   #     so nothing attacker-shaped reaches this function.
   #   * import: `import_member/3` reads `entry["name"]` and `entry["columns"]`
-  #     straight off the uploaded tar manifest. The DDL passes filter members
-  #     through `table_exists?/1`, but the COPY / INSERT path does NOT — so
-  #     seven of the interpolated statements below carry manifest strings.
+  #     straight off the uploaded tar manifest. `assert_member_tables!/1`
+  #     (felix-w25-s3) now refuses, before any write, any manifest TABLE that
+  #     exists on the target but is outside the export-side catalog
+  #     enumeration — but that is a membership gate, NOT input laundering:
+  #     member COLUMN names, and the name of a table ABSENT on this schema
+  #     version (tolerated for cross-version bundles), still reach the
+  #     interpolated statements below as manifest strings.
   #
-  # Those sites are defended by quoting plus an ADMIN GATE (the router's
-  # `:require_admin` pipeline), with `:merge` additionally fail-closed behind
-  # the `:allow_bundle_import` config. That is the honest waiver: request-derived
-  # identifiers behind correct quoting plus an admin gate. Calling them
-  # catalog-derived would be a FALSE annotation on the one bucket where a real
-  # injection could hide — so do not weaken the quoting, and do not extend this
-  # helper's callers on the import path without a `table_exists?/1` check.
+  # Those sites are defended by quoting plus the membership guard plus an
+  # ADMIN GATE (the router's `:require_admin` pipeline), with `:merge`
+  # additionally fail-closed behind the `:allow_bundle_import` config. That is
+  # the honest waiver: request-derived identifiers behind correct quoting, a
+  # membership refusal for existing non-member tables, and an admin gate.
+  # Calling them catalog-derived would still be a FALSE annotation on the one
+  # bucket where a real injection could hide — so do not weaken the quoting,
+  # and do not extend this helper's callers on the import path without a
+  # `table_exists?/1` check.
   defp qi(ident), do: ~s("#{String.replace(ident, "\"", "\"\"")}")
 end

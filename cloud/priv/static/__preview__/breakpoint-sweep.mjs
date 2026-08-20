@@ -1,0 +1,1907 @@
+#!/usr/bin/env node
+// breakpoint-sweep.mjs — the CONTINUOUS responsive sweep. Its axes are a
+// FUNCTION of the artifact (app.css's own @media set, index.html's own
+// section.view set, its own two data-theme modes, scenarios.mjs's own scenario
+// list) rather than a list somebody typed, and it REFUSES — in BOTH directions
+// — when the artifact grows a value the sweep does not cover, or drops one the
+// sweep is still driving.
+//
+// FIVE AXES, AND WHAT EACH ONE IS WORTH (cch-w16-s2 widened it from two):
+//   WIDTH     derived · a real yield axis, and the reason this file exists.
+//   SCREEN    derived · every registered section.view must have a live cell.
+//   THEME     derived, 2 members · COVERAGE, NOT YIELD. app.css's dark rules
+//             touch only background/color/border-color, so the CSS structurally
+//             cannot produce a theme-dependent geometry defect. Driven anyway,
+//             as a FRESH ?theme= LOAD (never an attribute flip — see legRender),
+//             so the day a dark rule changes a box, the sweep is already there.
+//             ACCENT IDENTITY (data-bp-theme: charple/ember/evergreen/fjord/
+//             iris, five values generated from BP_THEMES — re-derive with
+//             `grep -n 'var BP_THEMES' app.js`) is a DIFFERENT axis and this
+//             sweep does not claim it — its owner is
+//             gr-blk-accent-scenario-sweep. Scoping the derivation to
+//             `data-theme` exactly is load-bearing: "any data-*theme* selector"
+//             derives SEVEN members and reds on an untouched tree.
+//   HEIGHT    declared, derived half VACUOUSLY GREEN · app.css has ZERO
+//             height-bearing @media, so the derived refusal refuses nothing
+//             today and legA's own output says so. The declared HEIGHTS set
+//             carries a written reason per value.
+//   SCENARIO  111 scenarios, 26 rendered, 85 in a COMMITTED residue literal.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHY THIS EXISTS (cch wave 14, slice S1)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Every instrument this epic owns is wide on ONE axis and pinned on the other:
+//    · the 2026-07-20 audit — 84 scenarios, exactly TWO widths;
+//    · overflow-guard.mjs   — WIDTHS starts at 721, PHONE_WIDTHS ends at 620,
+//                             so 621-720 is swept by NOTHING;
+//    · all of them          — ask ONE question (does the page scroll sideways),
+//                             which is structurally blind to a control whose
+//                             text is cut with no cue and to a screen whose
+//                             content starts below the fold.
+//  A hand-written width list reopens a hole at the next breakpoint somebody
+//  adds; a hand-written route list reopens one at the next screen. Wave 13
+//  measured the consequence: 621-768 — every iPad in portrait, every half-
+//  screen laptop split — had never been rendered by any instrument in this
+//  epic, and seven whole screens had never been rendered at tablet width at
+//  all.
+//
+//  So: DERIVE BOTH AXES, AND REFUSE ON A GAP. A guard that starts at 721 and a
+//  guard that starts at 620 both leave a band. A sweep that WALKS the
+//  breakpoints is the only shape that does not.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  HONEST LIMIT — WHAT THIS PROTECTS TODAY
+// ─────────────────────────────────────────────────────────────────────────────
+//  Leg A (the coverage refusal) is wired into console-harness.yml's existing
+//  Node-20 `console-unit` job. `Console gate` — the aggregator that job reaches
+//  branch protection through — is ADVISORY on this repo today: the live
+//  required set is `Elixir gate` and `PR references an active task` only. So
+//  this leg RUNS on every console-touching PR and its red is VISIBLE, but it
+//  does not block a merge by itself. Say that plainly rather than implying
+//  otherwise. Leg B (--render) is wired to NOTHING and must not be: it costs
+//  MINUTES, not seconds (see COST below).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG A — THE COVERAGE REFUSAL (default mode; browserless; ~50ms)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Parses app.css for width-bearing @media preludes and index.html for its
+//  registered `section.view` ids, and compares BOTH against the sweep's OWN
+//  tables — WIDTHS (the boundary walk Leg B actually drives) and CELLS (the
+//  scenario x route table Leg B actually renders). The tables are IMPORTED,
+//  never restated: a second literal would make the refusal protect a
+//  declaration instead of the sweep, and shrinking the real width loop would
+//  leave it green. Shrink WIDTHS and this leg exits 2 — that is the test.
+//
+//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css:2131 contains the
+//  string "@media (max-width: 720px) shell fold" INSIDE a CSS comment.
+//  MEASURED ON THIS TREE (cch-w16-s2 corrected these — the previous three
+//  numbers had rotted to 21/20/20 while the file was edited around them):
+//  `grep -c '@media' app.css` says 23; comment-stripped it is 21; the CSSOM
+//  reports 21 media rules. legA prints the raw count from the bytes it just
+//  read rather than restating it, so these cannot rot again. A naive regex
+//  invents phantom blocks — and the day a comment mentions a width nobody
+//  covers, a phantom refusal.
+//
+//  RANGE SYNTAX AND min-width ARE HANDLED, AND THE UNPARSEABLE IS REFUSED.
+//  `@media (width <= 812px)` is the same breakpoint as `(max-width: 812px)` and
+//  must be seen as one. Any condition containing the token `width` that the
+//  parser cannot resolve to an integer px boundary exits 2 naming it — silent
+//  disappearance is the exact failure mode this leg exists to prevent. app.css
+//  today is all max-width and has ZERO min-width; that is a fact about today,
+//  not a licence.
+//
+//  `--cssom` asserts the parsed axis equals the axis walked from
+//  `document.styleSheets` in a real browser, and exits 2 on parity=DIVERGED.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG B — THE RENDER SWEEP (`--render`)
+// ─────────────────────────────────────────────────────────────────────────────
+//  WIDTH AXIS = a boundary walk B-1 / B / B+1 over every derived breakpoint.
+//  That is six breakpoints (620, 720, 740, 768, 830, 899) giving 18 widths. THE
+//  WIDTH 900 IS STILL WALKED, as 899+1 — dropping 900 from the axis cost
+//  exactly ONE width, 901, and nothing else. (It was five breakpoints and 13
+//  widths until cch-w16-s8 deleted app.css's only `max-width: 900px` rule —
+//  the `@media (min-width: 900px)` block that remains parses as the boundary
+//  899 — four/12 until W17-S6 added `@media (max-width: 830px)`, the
+//  breakpoint that keeps the past-due money message whole, and five/15 until
+//  W20-S8 added 740, the breakpoint that keeps that same message whole in the
+//  shell-fold band below it.)
+//
+//  SCREEN AXIS = SCENARIO x ROUTE, never section.view alone. Content is
+//  scenario-bound: on scen=mixed-fleet the notifications/tokens/env/sites/
+//  activity/members screens render EMPTY and #notif-matrix is ABSENT at every
+//  width. A view-keyed sweep leaves 79 of 338 cells RENDER-DEAD (78 showing
+//  view-overview while asking for operator/instance/site) and every one of them
+//  returns a plausible q1=0, q2=0 — for the wrong screen.
+//
+//  PER-CELL RENDER-LIVENESS REFUSAL, THREE CLAUSES, HARD exit 2 — never a
+//  warning: (1) the live section.view id is the one requested, (2) it is not
+//  hidden and has non-zero height, AND (3) the cell's SCENARIO-SPECIFIC
+//  SENTINEL is present. Clause 3 is not ceremony: a cell pointed at a
+//  non-populating scenario reports hidden:false, h:307, textLen:195 — clauses
+//  1+2 alone PASS it and then measure an empty-state box. The sentinel table is
+//  a MAINTAINED artifact, paired with Leg A so a new screen fails on the
+//  sentinel it lacks rather than passing empty.
+//
+//  THREE QUESTIONS PER CELL
+//   Q1 SIDEWAYS            documentElement.scrollWidth > clientWidth.
+//   Q2 CLIPPED WITHOUT CUE two corrections it cannot ship without:
+//      (a) NATIVE FORM CONTROLS ARE CLASSIFIED BY TAG. A <select> is UA-painted
+//          and computes overflow-x: visible no matter how badly its selected
+//          option is cut. Two independent CSSOM-keyed prototypes both reported
+//          CLIP_NO_CUE = 0 while a person was reading a truncated control.
+//          SELECT/INPUT/TEXTAREA/BUTTON compare scrollWidth vs clientWidth
+//          directly.
+//      (b) THE CUE TEST IS "reserved track > 0 OR an authored edge cue is live"
+//          — not "is overflow-x auto", and NOT "a scrollbar rendered". The
+//          reserved horizontal track measures 0px at every width under BOTH
+//          --hide-scrollbars and real classic scrollbars, so a track test alone
+//          would condemn every scroller in the console. An authored cue is a
+//          `--*fade*`/`--*cue*` custom property reading > 0 (.set-matrix's
+//          --set-matrix-fade is 48px while clipped, 0px when it fits) OR a
+//          computed `text-overflow: ellipsis`, which IS the affordance that
+//          tells a person the string continues — for NON-form elements only,
+//          since a UA-painted control computes an ellipsis it does not
+//          necessarily paint and that would silence correction (a).
+//          CUE_STUCK (a note, never a failure) reports the IFF half: a cue live
+//          on something that FITS. It is asked ONLY of scroll containers,
+//          because custom properties INHERIT — every descendant of a cued
+//          scroller otherwise reports a cue it does not own.
+//      SHIPPED GENERAL, WITH NO ALLOWLIST. The measured census over the
+//      data-bearing cells is one distinct selector — select#site-theme-select
+//      .rail-select, which slice S4 pays. Visually-hidden is handled by a NAMED
+//      list of hiding utilities, never a className regex.
+//      VISIBLE_SPILL is NOT the failing set. The failing sub-case is
+//      cutByViewport > 0, and it takes two qualifiers to mean anything:
+//        · CONTAINED elements are excluded. Anything inside a clipping or
+//          scrolling ancestor is scrolling, not spilling — .set-matrix's own
+//          descendants report 21 spills at 768 and every one of them is the
+//          cued matrix doing its job.
+//        · THE PAINTED RIGHT EDGE, not the box. A block-level row is clamped
+//          to its container's width, so `rect.right` reads "inside the
+//          viewport" while its min-content children push the page sideways.
+//          Non-clipping elements are measured at rect.left + scrollWidth;
+//          clipping ones (and form controls) at rect.right, since that is all
+//          they paint. Measured on origin/main at 769: #fleet-body +21,
+//          div.fleet-row +20 — the exact cells this sub-case exists for.
+//   Q3 BELOW THE FOLD      ONE number — the viewport y of `.content` — against
+//      a fraction of viewport height, not a general rule. It measures 745.88px
+//      at every width <= 720 and 56 above. Slice S2 fixes that; THIS slice must
+//      not wait for it, so Q3 ships with a NAMED PIN in the shape
+//      overflow-guard.mjs uses for FLEET_ROW_RESIDUAL: an explicit allowance
+//      citing cch-w13-bl-folded-shell-nav-wall that reds if the number GROWS.
+//      Pin removal is the follow-up row cch-w14-bl-sweep-navwall-pin-removal.
+//
+//  DO NOT RAISE app.css:4241. Wave 13 measured that raising the shell fold
+//  RELOCATES the cliff and exports a 746px nav wall to every tablet.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  COST, HONESTLY
+// ─────────────────────────────────────────────────────────────────────────────
+//  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
+//  costs roughly a second per cell. The full render leg is 27 cells x 2 themes
+//  x 18 boundary widths = 972 renders: budget MINUTES. The width numeral here is
+//  the DERIVED boundary walk (`WIDTHS.length`, printed by `--census` as "18
+//  boundary widths"), not the 15 that this file's residue prose still repeats —
+//  that stale numeral has no arm and is owned by
+//  cch-w63-bl-the-derived-width-axis-has-no-arm-and-its-prose-propagated.
+//  Measured, not assumed: `--render --cell inst-update-refused` reports 36
+//  renders for ONE cell (18 x 2). The theme axis DOUBLED that, for an
+//  axis stated above to be coverage rather than yield — slice it with
+//  `--theme light` when you are chasing a width, not a mode. Two traps proven the hard way: Page.navigate to
+//  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
+//  rules and stale stylesheets survive into the next cell (hence a fresh target
+//  parked on about:blank per cell); and a double-requestAnimationFrame settle
+//  HANGS under headless=new — a plain 16ms sleep does not.
+//
+//  RUN
+//    node cloud/priv/static/__preview__/breakpoint-sweep.mjs            # Leg A
+//    node …/breakpoint-sweep.mjs --cssom                # + browser axis parity
+//    node …/breakpoint-sweep.mjs --tiers5               # Leg T (5-plan fixture)
+//    node …/breakpoint-sweep.mjs --render               # Leg B (minutes)
+//    node …/breakpoint-sweep.mjs --render --widths 900 --cell fleet     # slice
+//    node …/breakpoint-sweep.mjs --render --cell fleet,billing-trial    # several
+//                                     # an unknown name in the list EXITS 2 by
+//                                     # name — it never narrows silently
+//    BREAKPOINT_SWEEP_ROOT=<dir> …    # measure an exported tree (origin/main)
+//    node …/breakpoint-sweep.mjs --render --theme dark   # one theme member
+//    BREAKPOINT_SWEEP_CSS=<file> …    # parse a DIFFERENT app.css than is served
+//    BREAKPOINT_SWEEP_HTML=<file> …   # ditto for the shell (the `light` theme
+//                                     # member is declared ONLY there, so
+//                                     # without this it has no mutation seam)
+//    CHROME=/path/to/chrome …         # browser override
+//
+//  EXIT VOCABULARY (the epic's, unchanged): 0 = clean · 1 = a measured defect
+//  · 2 = REFUSED (environment, a coverage gap, an unparseable width, or a dead
+//  cell). 1 is a claim about the product; 2 is a claim about the instrument or
+//  its inputs, and the two must never be confused.
+//
+//  ZERO DEPENDENCIES — node builtins plus the Cdp class and findChrome() taken
+//  unchanged from cssom-parity.mjs / overflow-guard.mjs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { IDS, SCENARIOS } from "./scenarios.mjs";
+import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
+import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
+const CSS_PATH = process.env.BREAKPOINT_SWEEP_CSS || path.join(ROOT, "app.css");
+// The shell's twin of BREAKPOINT_SWEEP_CSS. Without it a theme member declared
+// ONLY in index.html (`light` — app.css has no light selector) has no mutation
+// seam at all, so a "the theme axis refuses in both directions" claim could
+// only ever be proven for the CSS-side member. Parsing-only, like its twin:
+// Leg B still serves and drives the real tree.
+const HTML_PATH = process.env.BREAKPOINT_SWEEP_HTML || path.join(ROOT, "index.html");
+const PORT = Number(process.env.BREAKPOINT_SWEEP_PORT || 4207);
+const BASE = `http://127.0.0.1:${PORT}`;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE SWEEP'S OWN TABLES — the ONLY declaration of either axis. Leg A imports
+//  these; it does not restate them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The boundary walk. A breakpoint at B changes behaviour BETWEEN B and B+1, so
+// the only widths that can see the change are B-1 (safely below), B (the last
+// width on the low side) and B+1 (the first on the high side).
+export function boundaryWalk(breakpoints) {
+  const out = new Set();
+  for (const b of breakpoints) { out.add(b - 1); out.add(b); out.add(b + 1); }
+  return [...out].sort((a, b) => a - b);
+}
+
+// W17-S6 ADDED 830. `@media (max-width: 830px)` is where GR116's topbar tighten
+// now lives — the width at which the past-due money message ("Payment failed ·
+// fix billing", scrollWidth 168) last fits beside the liveness chip. Leg A
+// caught its absence exactly as designed: with the rule shipped and this list
+// unchanged the sweep exited 2, "UNCOVERED breakpoint 830px — the boundary walk
+// is missing 829, 830, 831." A CSS slice that adds a breakpoint owes this list
+// an entry, and the sweep will not let it forget.
+//
+// W20-S8 ADDED 740, and Leg A caught its absence the same way, on the first run
+// after the CSS landed: exit 2, "UNCOVERED breakpoint 740px — the boundary walk
+// is missing 739, 740, 741." It is the upper edge of
+// `@media (min-width: 621px) and (max-width: 740px)`, the block that keeps the
+// past-due money message whole across the 721-740 shell-fold band (the guard's
+// GR108 leg asserts those widths strictly now, with no tolerance). The prelude's
+// LOWER edge costs no entry: 620 is already declared, and 621 is walked as
+// 620+1.
+//
+// Derived from app.css: 620, 720, 740, 768, 830, 899. Declared here as the sweep's
+// committed axis so Leg A can refuse when the stylesheet grows a breakpoint
+// this list does not carry — and, since cch-w15's phantom half, when it loses
+// one. 900 LEFT THIS LIST because cch-w16-s8 deleted app.css's only
+// `max-width: 900px` rule (the `.tier-grid { 1fr 1fr }` that forced two tier
+// tracks onto every phone). The surviving `@media (min-width: 900px)` block is
+// parsed as the boundary 899, which is why 899 stays. THE WIDTH 900 IS STILL
+// DRIVEN — boundaryWalk emits 899+1 — so the only width this shrink costs is
+// 901.
+export const BREAKPOINTS = [620, 720, 740, 768, 830, 899];
+export const WIDTHS = boundaryWalk(BREAKPOINTS);
+
+const INST = IDS.liveInstance;
+const SITE = IDS.siteWeb;
+const REFUSED = IDS.refusedInstance;
+
+// The screen axis: SCENARIO x ROUTE. `view` is the section.view that MUST be
+// live, `ready` is what the driver polls for, and `sentinel` is clause 3 of the
+// liveness refusal — a selector that exists ONLY when this scenario actually
+// populated this screen. A sentinel that is merely "the screen's container"
+// would be satisfied by an empty state, which is the whole failure this table
+// exists to catch.
+export const CELLS = [
+  { name: "overview-fleet", scen: "mixed-fleet", hash: "#overview", view: "view-overview", sentinel: "#overview-body .ov-card, #overview-body .card, #overview-body section" },
+  { name: "overview-past-due", scen: "overview-past-due", hash: "#overview", view: "view-overview", sentinel: "#billing-chip:not([hidden])" },
+  { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", sentinel: ".fleet-row" },
+  { name: "fleet-archives", scen: "fleet-archives-stored", hash: "#fleet", view: "view-fleet", sentinel: "#archives-body .archive-row" },
+  { name: "billing-trial", scen: "billing-trial", hash: "#settings/billing", view: "view-billing", sentinel: "#billing-tiers:not([hidden]) .tier" },
+  { name: "billing-past-due", scen: "billing-past-due", hash: "#settings/billing", view: "view-billing", sentinel: "#billing-manage-section:not([hidden])" },
+  { name: "providers-connected", scen: "providers-connected", hash: "#settings/providers", view: "view-providers", sentinel: "#provider-roster .prov-row" },
+  { name: "providers-connect", scen: "providers-empty", hash: "#settings/providers", view: "view-providers", sentinel: "#provider-connect .set-section" },
+  { name: "notifications", scen: "notif-configured", hash: "#settings/notifications", view: "view-notifications", sentinel: "#notif-matrix" },
+  { name: "notifications-error", scen: "notif-deliveries-error", hash: "#settings/notifications", view: "view-notifications", sentinel: "#notif-matrix" },
+  { name: "sites", scen: "sites", hash: "#sites", view: "view-sites", sentinel: "#sites-body .site-row, #sites-body .fleet-row" },
+  { name: "activity", scen: "activity", hash: "#activity", view: "view-activity", sentinel: "#activity-body .tlv-row" },
+  { name: "tokens", scen: "tokens-populated", hash: "#settings/tokens", view: "view-tokens", sentinel: "#token-list .token-row" },
+  { name: "tokens-member", scen: "tokens-member", hash: "#settings/tokens", view: "view-tokens", sentinel: "#token-list .token-row" },
+  { name: "members", scen: "members-populated", hash: "#settings/members", view: "view-members", sentinel: "#members-body .mem-row, #members-body .set-row" },
+  { name: "members-member", scen: "members-member", hash: "#settings/members", view: "view-members", sentinel: "#members-body .mem-row, #members-body .set-row" },
+  { name: "env", scen: "env-populated", hash: "#settings/env", view: "view-env", sentinel: "#env-body .set-row" },
+  { name: "env-editor", scen: "env-editor", hash: "#settings/env", view: "view-env", sentinel: "#env-body .set-section" },
+  { name: "operator", scen: "operator-console", hash: "#operator", view: "view-operator", sentinel: "#operator-body .set-section, #operator-body .op-row" },
+  { name: "operator-halted", scen: "operator-halted", hash: "#operator", view: "view-operator", sentinel: "#operator-body .set-section, #operator-body .op-row" },
+  { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", sentinel: ".detail-grid--instance" },
+  { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", sentinel: "#instance-tabpanel .tlv-row" },
+  { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", sentinel: "#instance-tabpanel .metrics-grid" },
+  { name: "inst-webhooks", scen: "webhooks-panel", hash: `#instance/${INST}/webhooks`, view: "view-instance", sentinel: "#instance-tabpanel .wh-card" },
+  { name: "inst-update-refused", scen: "instance-update-credential-refused", hash: `#instance/${REFUSED}`, view: "view-instance", sentinel: '#instance-tabpanel .update-badge[data-update-state="unknown"]' },
+  { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
+  { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
+];
+
+// The view axis Leg B actually covers, derived from the cell table.
+export const COVERED_VIEWS = [...new Set(CELLS.map((c) => c.view))].sort();
+
+// ── AXIS: THEME ──────────────────────────────────────────────────────────────
+// The two modes Leg B loads, and the ONLY declaration of that axis. Derived
+// census (parseThemeMembers over app.css + index.html) must equal this exactly,
+// in BOTH directions.
+export const THEMES = ["dark", "light"];
+
+// ── AXIS: HEIGHT ─────────────────────────────────────────────────────────────
+// NO ARTIFACT DECLARES A HEIGHT AXIS — app.css has ZERO height-bearing @media
+// and its 16 vh-bearing declarations are continuous rules, not boundaries. So
+// this set is DECLARED, not derived, and every value carries a written reason.
+// The derived half (parseMediaBreakpoints().heights) is the refusal that fires
+// the day a height-bearing @media appears; it is VACUOUSLY GREEN today and
+// legA says so in its own output rather than letting the tick read as a find.
+export const HEIGHTS = [390, 667, 800];
+export const HEIGHT_REASONS = {
+  390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
+  667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
+  800: "THE DRIVEN DEFAULT. Leg B renders at 800 (RENDER_HEIGHT below) and every Q3 number this epic quotes was taken there; naming it makes the render height part of the declared axis instead of a bare module const.",
+};
+// THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
+// HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
+// asserted at 667/390, and this sweep drives 800. 900 is deliberately NOT in
+// HEIGHTS — declaring a height Leg B does not drive would make the set a wish
+// list. Reconciling the three is gr-blk-accent-scenario-sweep's neighbour work,
+// not this instrument's to assert.
+export const UNDRIVEN_HEIGHTS = { 900: "overflow-guard.mjs / modal-oracle drive 900; this sweep does not, so it does not claim it." };
+// The height Leg B actually renders at. It used to be a bare module const with
+// no flag, no env override and no relation to anything — naming it a MEMBER of
+// the declared axis is what makes HEIGHTS a description of the sweep rather
+// than a wish (the unit suite pins the membership).
+export const RENDER_HEIGHT = 800;
+
+// ── AXIS: SCENARIO ───────────────────────────────────────────────────────────
+// A scenario's FAMILY, derived from the artifact (charter D180): its pathname
+// when it has one, else the head of its deepLink, else no-deeplink. The naive
+// name-prefix split gives 27 families and does not survive mutation.
+export function familyOf(scen) {
+  if (!scen) return null;
+  if (scen.pathname && scen.pathname !== "/") return `path:${scen.pathname}`;
+  if (scen.deepLink) return `hash:${scen.deepLink.split("/")[0]}`;
+  return "no-deeplink";
+}
+
+// The 13 families the residue falls into, each with the reason Leg B does not
+// render it. These are REASONS, not an allowlist: the allowlist is the 85
+// name-keyed entries below, which is what makes a 112th scenario refusable.
+export const RESIDUE_FAMILY_REASONS = {
+  "hash:#instance": "The instance detail screen is swept by five cells (panel-overview/timeline/metrics/webhooks/update-refused). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the five cells would see.",
+  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 11 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity, and cch-w48-s6's `overview-member-empty-fleet` (the first fixture to combine a MEMBER actor with a zero-instance fleet, so the first able to paint launchFlow's pre-hoc refusal card at all) — over a grid already walked at all 15 widths. The refusal swaps the runway's form for ONE .empty-state block, the same geometry the `empty` cell's neighbours already walk.",
+  "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 10 vary binding/verify content inside the same .detail-grid — plus cch-w48-s6's `site-member`, which moves the ACTOR (the first member ever to enter the site layer) over the exact fixtures the `rollback` cell already walks at all 15 widths. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
+  "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 9 are member-role, ACTOR-IDENTITY and empty-state variants of those same panels: cch-w45-s1's `members-admin-actor` and `members-peer-owner` vary WHICH CONTROLS a row is offered (the rank-relative predicates), not the geometry of the .set-row that carries them — the two members cells already walk that row at all 15 widths, and a row with fewer buttons is strictly narrower than the one they walk.",
+  "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
+  "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner.",
+  "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
+  "path:/new": "The launch/theater page is likewise its own document outside the shell.",
+  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 4 vary member-role, cancelling copy, the portal return and cch-w39-s1's `billing-me-unreadable` inside those same panels — the last swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
+  "hash:#operator": "The operator console is swept by two cells (console, halted). These 4 vary zero-staging / denied / route-unreadable / me-unreadable states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 15 widths.",
+  "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
+  "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
+  "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
+};
+
+// THE RESIDUE — 85 scenarios that exist and are NOT rendered by any cell,
+// COMMITTED AS A LITERAL, name-keyed to the family that explains them.
+//
+// WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
+// derived from the current residue is green under EVERY mutation, because it
+// grows with the artifact and can never refuse anything: it looks itemised, it
+// is even "artifact-derived", and it is 100% vacuous. Typed out, a 112th
+// scenario has nowhere to hide.
+// WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
+// mutations — it swallows a new scenario with no deepLink, swallows one inside
+// the 22-member `hash:#instance` family, and goes green while its entry rots
+// when a multi-member-family scenario gains a cell.
+// THE CENSUS THIS RECONCILES AGAINST: 111 scenarios · 27 cells over 26 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 85 · 13 families.
+// cch-w21-s3 moved it by one: `fleet-cruel-content` was the 101st scenario and
+// the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
+// \"fleet-cruel-content\" (family hash:#fleet)") until that line and the entry
+// below were written. That refusal is the literal doing its job, not friction.
+// cch-w25-s3 moved it again, and the same refusal fired: `site-deploy-rail-
+// failed` is the 102nd scenario and the 77th residue entry, and this sweep
+// exited 2 with `UNLISTED scenario "site-deploy-rail-failed" (family
+// hash:#site)` until the entry below was written.
+// cch-w38-s1 moved it a fifth time: `panel-overview-member` is the 104th
+// scenario and the 79th residue entry — residue for the same reason its owner
+// twin `panel-overview` is a CELL: it varies the CONTENT of a panel the four
+// instance cells already walk at all 15 widths, not its geometry.
+// cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` is the
+// 103rd scenario and the 78th residue entry — residue, not a cell, the same
+// home its sibling `overview-attention` has, so it is rendered and asserted by
+// smoke.mjs without claiming a width walk it does not get.
+// cch-w37-s6 moved it a fifth time: `operator-me-unreadable` — the first
+// fixture able to fail the /v1/me READ while keeping the account present, and
+// so the first to reach meState()=="failed" at all — is the 104th scenario and
+// the 79th residue entry, in the family its three siblings already occupy. The
+// sweep exited 2 with `UNLISTED scenario "operator-me-unreadable" (family
+// hash:#operator)` until the entry above was written.
+// cch-w45-s1 moved it a seventh time, by TWO: `members-admin-actor` and
+// `members-peer-owner` — the first fixtures in which the acting principal is
+// not the roster's row 0, so the first able to ask a rank-relative predicate
+// about a row the actor does NOT outrank — are the 107th and 108th scenarios
+// and the 82nd and 83rd residue entries. The sweep exited 2 with `UNLISTED
+// scenario "members-admin-actor" (family hash:#settings)` (and the twin) until
+// the entries below were written; the four numbers here were then RE-READ from
+// `scenarioReport`, never carried from the brief.
+// cch-w48-s6 moved it an EIGHTH time, by TWO, and deliberately in ONE commit:
+// `overview-member-empty-fleet` (the first fixture combining a member actor with
+// a zero-instance fleet — the exact frame launchFlow's pre-hoc refusal exists
+// for) and `site-member` (the first member to enter the site layer at all) are
+// the 109th and 110th scenarios and the 84th and 85th residue entries. ONE
+// owner, ONE merge window, on purpose: main is strict:false, so two green PRs
+// each bumping this literal by one merge without conflict and red main on the
+// second (the 104->105 precedent). The sweep exited 2 with `UNLISTED scenario
+// "overview-member-empty-fleet" (family hash:#overview)` and the twin until the
+// entries below were written, and all five numerals were then RE-READ from
+// `scenarioReport`, never carried from the brief.
+// `familyOf` over all 111 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 85 is the RESIDUE, not the census.
+//
+// WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
+// "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
+// spanning SEVEN lines, and three of the numbers under it were owned by
+// nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
+// that reads these bytes. Every numeral in this block is now named by the arm
+// that reds when it drifts, all in breakpoint-sweep.test.mjs:
+//   * 111 / 27 / 26 / 85 / 13 — "the census reconciles: …", whose TITLE is now
+//     built from `scenarioReport` by template literal rather than typed, so the
+//     printed line has no second copy left to rot.
+//   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
+//     "the two ZERO-residue families are named, and 15 families over all
+//     scenarios is not 13".
+//   * each `// <family> — N` group header below, their SUM against the literal,
+//     and the header COUNT against the family count (the reformat tripwire) —
+//     "every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
+//     the literal itself".
+//   * each `These N` in RESIDUE_FAMILY_REASONS above — "every `These N` clause
+//     in RESIDUE_FAMILY_REASONS is recounted from the literal". Five reasons
+//     spell no count and are honestly SKIPPED by that arm; their membership is
+//     covered by the header arm, which spans all 13.
+// THE PRECEDENT THIS EXISTS FOR: the prose here once said 99/74 while the
+// literal below already held 75 — #8849's `sites-on-instance` moved the census
+// and only the TEST literals were updated. A census that two files spell
+// differently is the staleness this file exists to make fatal, and until
+// cch-w47-s4 this file was carrying two of them: `hash:#billing — 3` over four
+// entries, and a `These 9` over ten.
+// STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
+// longer exists, or one that has since gained a cell, exits 2.
+export const SCENARIO_RESIDUE = {
+  // hash:#instance — 22
+  "sites-on-instance": "hash:#instance",
+  "panel-overview-member": "hash:#instance",
+  "provisioning": "hash:#instance",
+  "usage-quota": "hash:#instance",
+  "failed": "hash:#instance",
+  "timeline-events-only": "hash:#instance",
+  "verify-pass": "hash:#instance",
+  "verify-fail": "hash:#instance",
+  "verify-never": "hash:#instance",
+  "shell-instance": "hash:#instance",
+  "timeline-coalesced": "hash:#instance",
+  "webhooks-autodisabled": "hash:#instance",
+  "metrics-stale": "hash:#instance",
+  "metrics-absent": "hash:#instance",
+  "fleet-support-provisioning": "hash:#instance",
+  "fleet-support-online": "hash:#instance",
+  "fleet-support-failed": "hash:#instance",
+  "fleet-support-empty": "hash:#instance",
+  "offload-filing": "hash:#instance",
+  "offload-working": "hash:#instance",
+  "offload-done": "hash:#instance",
+  "offload-blocked": "hash:#instance",
+  // hash:#overview — 11
+  "loggedout": "hash:#overview",
+  "empty": "hash:#overview",
+  "fleet-usage": "hash:#overview",
+  "shell-root": "hash:#overview",
+  "operator-visible": "hash:#overview",
+  "identity-iris": "hash:#overview",
+  "loggedout-twofactor": "hash:#overview",
+  "overview-trial-runway": "hash:#overview",
+  "overview-attention": "hash:#overview",
+  "overview-never-reported": "hash:#overview",
+  "overview-member-empty-fleet": "hash:#overview",
+  // hash:#site — 10
+  "promote-failure": "hash:#site",
+  "promote-in-flight": "hash:#site",
+  "promote-retry": "hash:#site",
+  "promote-migrated": "hash:#site",
+  "shell-site": "hash:#site",
+  "site-deploy-rail-failed": "hash:#site",
+  "site-binding-bound": "hash:#site",
+  "site-binding-unknown": "hash:#site",
+  "site-binding-mismatch": "hash:#site",
+  "site-member": "hash:#site",
+  // hash:#settings — 9
+  "members-admin-actor": "hash:#settings",
+  "members-peer-owner": "hash:#settings",
+  "env-write-once-409": "hash:#settings",
+  "env-member": "hash:#settings",
+  "tokens-empty": "hash:#settings",
+  "tokens-revoke": "hash:#settings",
+  "tokens-reveal": "hash:#settings",
+  "providers-unverified": "hash:#settings",
+  "providers-member": "hash:#settings",
+  // hash:# — 6
+  "loggedout-invited": "hash:#",
+  "invite-joined": "hash:#",
+  "invite-expired": "hash:#",
+  "invite-already-member": "hash:#",
+  "invite-invalid": "hash:#",
+  "loggedout-reset": "hash:#",
+  // no-deeplink — 5
+  "account-modal": "no-deeplink",
+  "account-modal-tall": "no-deeplink",
+  "account-modal-revoke": "no-deeplink",
+  "account-modal-2fa-badcode": "no-deeplink",
+  "account-modal-2fa-on": "no-deeplink",
+  // path:/activate — 5
+  "activate-entry": "path:/activate",
+  "activate-confirm": "path:/activate",
+  "activate-gone": "path:/activate",
+  "activate-rate-limited": "path:/activate",
+  "activate-logged-out": "path:/activate",
+  // path:/new — 4
+  "new-launch": "path:/new",
+  "theater-midflight": "path:/new",
+  "theater-failed": "path:/new",
+  "theater-ready": "path:/new",
+  // hash:#billing — 4
+  "billing-portal-return": "hash:#billing",
+  "billing-member": "hash:#billing",
+  "billing-me-unreadable": "hash:#billing",
+  "billing-cancelling": "hash:#billing",
+  // hash:#operator — 4
+  "operator-zero-staging": "hash:#operator",
+  "operator-denied": "hash:#operator",
+  "operator-unreadable": "hash:#operator",
+  "operator-me-unreadable": "hash:#operator",
+  // hash:#notifications — 2
+  "notif-empty": "hash:#notifications",
+  "notif-member": "hash:#notifications",
+  // hash:#fleet — 2
+  "fleet-v4": "hash:#fleet",
+  "fleet-cruel-content": "hash:#fleet",
+  // hash:#signup — 1
+  "loggedout-signup": "hash:#signup",
+};
+
+// `--cell a,b,c` — SELECTION, AND A PER-NAME REFUSAL. The per-name check is the
+// point, not the split: a comma split that keeps the old `if (!cells.length)`
+// guard reds ONLY when EVERY name is unknown, so `--cell fleet,fleeet` quietly
+// narrows to ONE cell and prints `verdict clean`, exit 0 — a typo silently
+// shrinking the sweep to a fraction of what the operator asked for is exactly
+// the false green this epic exists to kill. Returns the selection AND the
+// unknown names so the caller can name each one; order follows the FILTER (an
+// operator who writes `--cell billing-trial,fleet` gets that order), duplicates
+// collapse, and blank members (`--cell fleet,`) are ignored rather than being
+// reported as an unknown cell called "".
+export function selectNames(all, filter) {
+  if (filter == null) return { selected: [...all], unknown: [], asked: null };
+  const asked = String(filter).split(",").map((s) => s.trim()).filter(Boolean);
+  const known = new Set(all);
+  const unknown = asked.filter((n) => !known.has(n));
+  const selected = [];
+  for (const n of asked) if (known.has(n) && !selected.includes(n)) selected.push(n);
+  return { selected, unknown, asked };
+}
+
+// The same selection over the cell table, keyed by cell name.
+export function selectCells(all, filter) {
+  const byName = new Map(all.map((c) => [c.name, c]));
+  const r = selectNames([...byName.keys()], filter);
+  return { cells: r.selected.map((n) => byName.get(n)), unknown: r.unknown, asked: r.asked };
+}
+
+// `.content` must start inside the top FOLD_FRACTION of the viewport, at EVERY
+// width — there is no longer an exemption for the widths the shell fold owns.
+// 0.4 of 800 = 320px; the measured value above 720 is 56.
+//
+// THE PIN THAT USED TO LIVE HERE IS GONE (cch-w15-s1, removal row
+// cch-w14-bl-sweep-navwall-pin-removal). It allowed `.content` to start 745.88px
+// down at every width <= 720 — 2.27x this budget — so the folded shell was the
+// one region of the width axis this sweep was not actually measuring, and the
+// shipped `34vh` cap (0.34H + 56 = 0.4100 of H at 800, 0.4239 at 667, 0.4836 at
+// landscape 390) sat OVER the budget under it, reported green. The fold now
+// clears the bar on its own: `max-height: calc(40vh - 60px)` cancels the 56px
+// topbar and makes contentTop = 0.4H - 4 an identity at every height.
+export const FOLD_FRACTION = 0.4;
+
+// Q2's named hiding utilities. A className regex would swallow any class with
+// "hidden" as a substring (`.is-hidden-until-hover` is not hidden), so the list
+// is enumerated.
+export const HIDING_UTILITIES = ["visually-hidden", "sr-only", "screen-reader-only", "u-hidden", "is-hidden"];
+// Authored edge cues are discovered by walking computed custom properties, but
+// a browser that does not enumerate them must not silently report "no cue on
+// anything" — these are checked by name as well.
+export const NAMED_CUE_PROPS = ["--set-matrix-fade", "--matrix-fade", "--scroll-fade"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG A — parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Strip /* … */ comments. CSS comments do not nest; a comment opened and never
+// closed swallows the rest of the file (which is exactly bug #4592's shape, and
+// __css_check.mjs E10 owns detecting it — here the safe reading is "everything
+// after an unterminated opener is a comment", i.e. contributes no breakpoints).
+export function stripCssComments(css) {
+  let out = "";
+  let i = 0;
+  while (i < css.length) {
+    const open = css.indexOf("/*", i);
+    if (open === -1) { out += css.slice(i); break; }
+    out += css.slice(i, open);
+    const close = css.indexOf("*/", open + 2);
+    if (close === -1) break; // unterminated — the rest is comment
+    i = close + 2;
+  }
+  return out;
+}
+
+const NUM = "(\\d+(?:\\.\\d+)?)";
+const UNIT = "([a-z%]*)";
+
+// Resolve one comparison to the BOUNDARY width — the largest width at which the
+// low side of the comparison still holds. max-width:N and (width <= N) are both
+// N; min-width:N and (width >= N) are both N-1, because the change happens
+// between N-1 and N. Returns null for a unit this parser will not guess at.
+export function boundaryOf(kind, value, unit) {
+  if (unit !== "px" && unit !== "") return null;
+  if (!Number.isInteger(value)) return null;
+  switch (kind) {
+    case "max": return value;      // (max-width: N) / (width <= N)
+    case "lt": return value - 1;   // (width < N)
+    case "min": return value - 1;  // (min-width: N) / (width >= N)
+    case "gt": return value;       // (width > N)
+    default: return null;
+  }
+}
+
+// Parse ONE media query (one comma-separated clause of a prelude) along ONE
+// axis — `width` or `height`. Returns { boundaries: number[], unresolved:
+// string[] }. A clause with no token for THIS axis at all
+// (prefers-reduced-motion, print, or a pure width query when asked about
+// height) contributes nothing and is not unresolved — it is simply not
+// axis-bearing.
+//
+// THE AXIS IS A PARAMETER BECAUSE THE HEIGHT HALF WAS BEING EATEN. Until
+// cch-w16-s2 this function was width-only and returned early on
+// `!/\bwidth\b/`, so a `@media (max-height: 600px)` prelude was PARSED,
+// COUNTED in `rep.preludes.length`, and then silently discarded — and
+// `(max-width: 720px) and (max-height: 400px)` was worse: the width eater
+// consumed the only `width` token before the residue test, so the height half
+// vanished with NO `unresolved` entry at all. Asking the same parser the same
+// question about the other axis is what makes the discard impossible.
+export function parseAxisClause(clause, axis = "width") {
+  const boundaries = [];
+  const tok = new RegExp(`\\b${axis}\\b`);
+  if (!tok.test(clause)) return { boundaries, unresolved: [] };
+  let rest = clause;
+  // CONSUME ONLY WHAT WE RESOLVED. `take` returns the boundaries it understood,
+  // or null. On null the matched text is left in `rest` ON PURPOSE, so the
+  // "still carries the token width" check below fires: an em-based or
+  // calc()-based width that the parser eats but cannot resolve would DISAPPEAR
+  // SILENTLY, which is precisely the failure this leg exists to prevent
+  // (measured: `(max-width: 50em)` originally exited 0 with the axis unchanged).
+  const eat = (re, take) => {
+    rest = rest.replace(re, (...m) => {
+      const b = take(m);
+      if (b == null) return m[0];
+      for (const x of [].concat(b)) boundaries.push(x);
+      return " ";
+    });
+  };
+  const both = (a, b) => (a == null || b == null ? null : [a, b]);
+  // (min-width: 700px) / (max-width: 720px)
+  eat(new RegExp(`\\(\\s*(min|max)-${axis}\\s*:\\s*${NUM}${UNIT}\\s*\\)`, "gi"),
+    (m) => boundaryOf(m[1].toLowerCase(), Number(m[2]), m[3].toLowerCase()));
+  // (400px <= width <= 800px) — two-sided range, both edges are breakpoints
+  eat(new RegExp(`${NUM}${UNIT}\\s*(<=|<)\\s*${axis}\\s*(<=|<)\\s*${NUM}${UNIT}`, "gi"),
+    (m) => both(
+      boundaryOf(m[3] === "<=" ? "min" : "gt", Number(m[1]), m[2].toLowerCase()),
+      boundaryOf(m[4] === "<=" ? "max" : "lt", Number(m[5]), m[6].toLowerCase()),
+    ));
+  // (width <= 812px) / (width > 900px)
+  eat(new RegExp(`${axis}\\s*(<=|<|>=|>)\\s*${NUM}${UNIT}`, "gi"),
+    (m) => boundaryOf({ "<=": "max", "<": "lt", ">=": "min", ">": "gt" }[m[1]], Number(m[2]), m[3].toLowerCase()));
+  // (812px >= width) — the mirrored one-sided form
+  eat(new RegExp(`${NUM}${UNIT}\\s*(<=|<|>=|>)\\s*${axis}`, "gi"),
+    (m) => boundaryOf({ "<=": "min", "<": "gt", ">=": "max", ">": "lt" }[m[3]], Number(m[1]), m[2].toLowerCase()));
+  // (width: 800px) — an exact-width query is a boundary on both sides of itself
+  eat(new RegExp(`\\(\\s*${axis}\\s*:\\s*${NUM}${UNIT}\\s*\\)`, "gi"),
+    (m) => { const b = boundaryOf("max", Number(m[1]), m[2].toLowerCase()); return b == null ? null : [b - 1, b]; });
+
+  // Anything still carrying this axis's token was NOT understood. Refuse rather
+  // than drop it — a width this sweep cannot read is a width it cannot cover.
+  const unresolved = tok.test(rest) ? [clause.trim()] : [];
+  return { boundaries, unresolved };
+}
+
+export const parseWidthClause = (clause) => parseAxisClause(clause, "width");
+export const parseHeightClause = (clause) => parseAxisClause(clause, "height");
+
+// Every axis-bearing @media prelude in a stylesheet → its boundaries, for BOTH
+// axes. `breakpoints`/`unresolved` are the width axis (the names predate the
+// height half and the whole epic quotes them); `heights`/`heightUnresolved` are
+// the height axis, which on today's app.css is EMPTY — see legA's output, which
+// says so out loud rather than printing a green that means nothing.
+export function parseMediaBreakpoints(css) {
+  const src = stripCssComments(css);
+  const preludes = [];
+  const re = /@media([^{]*)\{/g;
+  let m;
+  while ((m = re.exec(src)) !== null) preludes.push(m[1].trim());
+  const boundaries = new Set();
+  const heights = new Set();
+  const unresolved = [];
+  const heightUnresolved = [];
+  for (const p of preludes) {
+    for (const clause of p.split(",")) {
+      const r = parseWidthClause(clause);
+      for (const b of r.boundaries) boundaries.add(b);
+      unresolved.push(...r.unresolved);
+      // THE SAME CLAUSE, ASKED AGAIN ABOUT THE OTHER AXIS. This is what stops
+      // `(max-width: 720px) and (max-height: 400px)` from losing its height
+      // half: the width pass eats the width tokens and reports the clause
+      // clean, and this pass reads 400 out of the same string.
+      const h = parseHeightClause(clause);
+      for (const b of h.boundaries) heights.add(b);
+      heightUnresolved.push(...h.unresolved);
+    }
+  }
+  return {
+    preludes,
+    breakpoints: [...boundaries].sort((a, b) => a - b), unresolved,
+    heights: [...heights].sort((a, b) => a - b), heightUnresolved,
+  };
+}
+
+// The registered screens: `<section class="view" id="view-…">`. Class-first so a
+// `<section class="archives-panel">` nested INSIDE a view is not counted.
+export function parseViewIds(html) {
+  const ids = [];
+  const re = /<section\b[^>]*\bclass="view"[^>]*\bid="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html)) !== null) ids.push(m[1]);
+  return ids;
+}
+
+// cch-w46-s7 — THE STATIC SHELL'S OWN CONTROLS, for an instrument that cannot
+// otherwise see them.
+//
+// WHY THIS LIVES HERE AND NOT IN THE SWEEP: it is a pure regex over the SAME
+// artifact parseViewIds above already reads, in the same shape, and this file
+// is the one place in the harness that owns "what index.html statically
+// declares". The member-authority sweep imports it.
+//
+// WHY IT IS NEEDED AT ALL: smoke.mjs NEVER reads index.html — its only
+// readFileSync targets ../app.js and makeDom() synthesizes an EMPTY document.
+// So every control the shell authors statically (#overview-launch,
+// #fleet-launch) is invisible to a registry-bytes sweep: it has no mount whose
+// innerHTML carries it. This reader is the only door to them.
+//
+// SCOPE, deliberately narrow and stated: id-bearing control tags only. A
+// control the shell authors WITHOUT an id is not returned — it has no stable
+// identity to account for, and inventing an ordinal one over a hand-authored
+// file would red on any reflow. That omission is named in the sweep's header
+// as a blind spot rather than hidden here.
+const STATIC_CONTROL_TAGS = "button|a|input|select|textarea|summary";
+export function parseStaticControlIds(html) {
+  const ids = [];
+  const re = new RegExp("<(" + STATIC_CONTROL_TAGS + ")\\b([^>]*)>", "gi");
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const id = /\bid="([^"]+)"/.exec(m[2] || "");
+    if (id) ids.push(id[1]);
+  }
+  return ids;
+}
+
+// The THEME axis, derived from the two artifacts and NOTHING else.
+//
+// SCOPED TO `data-theme` EXPLICITLY, AND THAT SCOPE IS LOAD-BEARING. The console
+// carries a SECOND, ORTHOGONAL switch: `data-bp-theme` accent IDENTITY, five
+// values in app.css (charple, ember, evergreen, fjord, iris) generated from
+// BP_THEMES (`grep -n 'var BP_THEMES' app.js`), and the shell's root element
+// carries one of them. A derivation written as "any data-*theme* selector"
+// derives SEVEN members, not two, and
+// reds on an unmutated tree the day it lands. Identity is a SEPARATE AXIS with
+// its own owner — gr-blk-accent-scenario-sweep — and this sweep does not claim
+// it.
+//
+// The `light` member is declared in the SHELL, not the stylesheet: app.css has
+// 19 `[data-theme="dark"]` selectors and no light ones, because light is the
+// `:root` default that index.html's root element names. Reading both artifacts
+// is what makes the census 2 rather than 1.
+// The OTHER theme attribute, counted only so the header can name what this
+// sweep is NOT claiming. Never part of the theme axis.
+export function accentIdentities(css) {
+  const out = new Set();
+  const re = /\[data-bp-theme\s*=\s*["']?([a-z0-9_-]+)["']?\s*\]/gi;
+  let m;
+  const src = stripCssComments(css);
+  while ((m = re.exec(src)) !== null) out.add(m[1].toLowerCase());
+  return [...out].sort();
+}
+
+export function parseThemeMembers(css, html) {
+  const members = new Set();
+  const re = /\[data-theme\s*=\s*["']?([a-z0-9_-]+)["']?\s*\]/gi;
+  let m;
+  const src = stripCssComments(css);
+  while ((m = re.exec(src)) !== null) members.add(m[1].toLowerCase());
+  // The shell's ROOT default — read from the <html> tag ONLY, never from the
+  // pre-paint script that merely calls setAttribute("data-theme", …).
+  const root = html.match(/<html\b[^>]*>/i);
+  if (root) {
+    const a = root[0].match(/\bdata-theme\s*=\s*["']([^"']+)["']/i);
+    if (a) members.add(a[1].toLowerCase());
+  }
+  return [...members].sort();
+}
+
+// ONE helper, BOTH directions, for every axis. `uncovered` = the artifact
+// declares a value the sweep does not drive; `phantom` = the sweep drives a
+// value the artifact no longer declares.
+//
+// THE PHANTOM HALF IS NOT SYMMETRY FOR ITS OWN SAKE — it is the whole of
+// cch-w15-bl-lega-cannot-refuse-removed-breakpoint. Before this, a stylesheet
+// that DROPPED the 900px breakpoint exited 0 while BREAKPOINTS still declared
+// it: Leg B kept driving 899/900/901 against a rule that no longer existed, and
+// Leg A printed a header whose two halves disagreed — four breakpoints DERIVED
+// from the stylesheet against thirteen boundary widths walked from the five the
+// literal still declared — under a green coverage tick.
+//   THAT EXACT STATE WAS THEN REACHED FOR REAL, and the refusal caught it:
+// cch-w16-s8 deleted the `max-width: 900px` tier rule, and with the literal not
+// yet shrunk Leg A exited 2 naming `PHANTOM breakpoint 900px`. Four breakpoints
+// is now the CORRECT derived count at the time (620/720/768/899 -> 12 widths;
+// W17-S6 has since added 830, making it five and 15); the tell was
+// never the number four, it was four derived against a thirteen-width walk.
+export function axisCoverage(derived, declared) {
+  const d = new Set(declared.map(String));
+  const s = new Set(derived.map(String));
+  return {
+    uncovered: derived.filter((x) => !d.has(String(x))),
+    phantom: declared.filter((x) => !s.has(String(x))),
+  };
+}
+
+// The SCENARIO axis: every scenario is either rendered by a cell or carries a
+// committed residue entry naming its family. Four refusals, all fatal:
+//   · unlisted  — a new scenario with neither a cell nor a residue entry
+//   · stale     — a residue entry naming a scenario that no longer exists
+//   · promoted  — a residue entry for a scenario that has since gained a cell
+//   · drift     — a residue entry whose recorded family is no longer the family
+//                 `familyOf` derives (the reason it points at stopped applying)
+// plus two on the reason table itself: a family with no written reason, and a
+// written reason no entry uses.
+export function scenarioReport({ scenarios, cells = CELLS, residue = SCENARIO_RESIDUE, reasons = RESIDUE_FAMILY_REASONS }) {
+  const names = Object.keys(scenarios);
+  const known = new Set(names);
+  const covered = new Set(cells.map((c) => c.scen));
+  const listed = Object.keys(residue);
+
+  const unlisted = names.filter((n) => !covered.has(n) && !(n in residue));
+  const stale = listed.filter((n) => !known.has(n));
+  const promoted = listed.filter((n) => covered.has(n));
+  const drift = listed
+    .filter((n) => known.has(n) && !covered.has(n))
+    .map((n) => ({ name: n, was: residue[n], now: familyOf(scenarios[n]) }))
+    .filter((r) => r.was !== r.now);
+  const phantomCells = [...covered].filter((s) => !known.has(s));
+  const families = [...new Set(listed.map((n) => residue[n]))].sort();
+  const unexplained = families.filter((f) => !reasons[f]);
+  const staleReasons = Object.keys(reasons).filter((f) => !families.includes(f));
+
+  return {
+    total: names.length, cells: cells.length, distinctCovered: covered.size,
+    residue: listed.length, families: families.length,
+    unlisted, stale, promoted, drift, phantomCells, unexplained, staleReasons,
+    ok: !unlisted.length && !stale.length && !promoted.length && !drift.length &&
+      !phantomCells.length && !unexplained.length && !staleReasons.length,
+  };
+}
+
+// The whole of Leg A's judgement, as a pure function of the artifacts and the
+// sweep's own tables. Everything the refusal compares against is PASSED IN (the
+// caller hands it WIDTHS/CELLS/THEMES/HEIGHTS/…) so the refusal is about what
+// the sweep DRIVES, never about a second literal that could drift from it.
+export function coverageReport({
+  css, html, widths = WIDTHS, cells = CELLS,
+  breakpointsDeclared = BREAKPOINTS, themes = THEMES, heights = HEIGHTS,
+  scenarios = SCENARIOS, residue = SCENARIO_RESIDUE,
+}) {
+  const { preludes, breakpoints, unresolved, heights: derivedHeights, heightUnresolved } = parseMediaBreakpoints(css);
+  const views = parseViewIds(html);
+  const w = new Set(widths);
+  const covered = new Set(cells.map((c) => c.view));
+
+  const uncoveredBreakpoints = breakpoints
+    .map((b) => ({ b, missing: [b - 1, b, b + 1].filter((x) => !w.has(x)) }))
+    .filter((r) => r.missing.length > 0);
+  // The other direction: a breakpoint the sweep still declares and drives that
+  // the stylesheet has stopped declaring.
+  const phantomBreakpoints = axisCoverage(breakpoints, breakpointsDeclared).phantom;
+  const uncoveredViews = views.filter((v) => !covered.has(v));
+  const phantomViews = [...covered].filter((v) => !views.includes(v));
+
+  const derivedThemes = parseThemeMembers(css, html);
+  const theme = axisCoverage(derivedThemes, themes);
+
+  // HEIGHT IS ASYMMETRIC ON PURPOSE. `uncovered` is real: a height-bearing
+  // @media the declared set does not carry must refuse. `phantom` is NOT asked
+  // — HEIGHTS is a DECLARED axis (no artifact declares one; see the block above
+  // HEIGHTS), so every one of its values would read as phantom and the sweep
+  // would red permanently on an untouched tree. Saying which half is asked is
+  // the difference between an honest instrument and one that looks thorough.
+  const height = { uncovered: axisCoverage(derivedHeights, heights).uncovered, derived: derivedHeights };
+
+  const scen = scenarioReport({ scenarios, cells, residue });
+
+  return {
+    preludes, breakpoints, views, unresolved,
+    widths: [...widths], cells: cells.length,
+    uncoveredBreakpoints, phantomBreakpoints, uncoveredViews, phantomViews,
+    themes: { derived: derivedThemes, declared: [...themes], ...theme },
+    heights: { declared: [...heights], derived: derivedHeights, uncovered: height.uncovered, unresolved: heightUnresolved },
+    scenarios: scen,
+    ok: unresolved.length === 0 && heightUnresolved.length === 0 &&
+      uncoveredBreakpoints.length === 0 && phantomBreakpoints.length === 0 &&
+      uncoveredViews.length === 0 && phantomViews.length === 0 &&
+      theme.uncovered.length === 0 && theme.phantom.length === 0 &&
+      height.uncovered.length === 0 && scen.ok,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  browser plumbing (findChrome + Cdp taken from cssom-parity.mjs, unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function findChrome() {
+  if (process.env.CHROME) {
+    try { fs.accessSync(process.env.CHROME, fs.constants.X_OK); return process.env.CHROME; }
+    catch { return null; }
+  }
+  const candidates = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ];
+  for (const c of candidates) {
+    try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
+  }
+  return null;
+}
+
+class Cdp {
+  constructor(ws) {
+    this.ws = ws;
+    this.seq = 0;
+    this.pending = new Map();
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.id == null) return;
+      const p = this.pending.get(msg.id);
+      if (!p) return;
+      this.pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.method + ": " + JSON.stringify(msg.error)));
+      else p.resolve(msg.result);
+    });
+    ws.addEventListener("close", () => {
+      for (const [, p] of this.pending) p.reject(new Error("CDP socket closed"));
+      this.pending.clear();
+    });
+  }
+
+  static async connect(wsUrl) {
+    const ws = new WebSocket(wsUrl);
+    await new Promise((resolve, reject) => {
+      ws.addEventListener("open", resolve, { once: true });
+      ws.addEventListener("error", () => reject(new Error("CDP connect failed: " + wsUrl)), { once: true });
+    });
+    return new Cdp(ws);
+  }
+
+  send(method, params = {}, sessionId) {
+    const id = ++this.seq;
+    const frame = { id, method, params };
+    if (sessionId) frame.sessionId = sessionId;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject: (e) => reject(Object.assign(e, { method })) });
+      try { this.ws.send(JSON.stringify(frame)); }
+      catch (e) { this.pending.delete(id); reject(e); }
+    });
+  }
+
+  close() { try { this.ws.close(); } catch { /* already gone */ } }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  the in-page probes
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The axis the BROWSER sees: every media rule's conditionText, walked
+// recursively (a @media nested in @supports is still a media rule).
+const CSSOM_AXIS_JS = `(function(){
+  var out=[];
+  function walk(rules){
+    for (var i=0;i<rules.length;i++){
+      var r=rules[i];
+      if (r.media && r.conditionText!=null) out.push(r.conditionText);
+      if (r.cssRules) walk(r.cssRules);
+    }
+  }
+  for (var s=0;s<document.styleSheets.length;s++){
+    var sh=document.styleSheets[s];
+    try { walk(sh.cssRules); } catch(e) { /* cross-origin */ }
+  }
+  return out;
+})()`;
+
+function cellProbeJs(cell) {
+  const hiding = JSON.stringify(HIDING_UTILITIES);
+  const cueProps = JSON.stringify(NAMED_CUE_PROPS);
+  return `(function(){
+  var HIDING=${hiding}, CUEPROPS=${cueProps};
+  var FORM={SELECT:1,INPUT:1,TEXTAREA:1,BUTTON:1};
+  var CLIPPY={hidden:1,clip:1,auto:1,scroll:1};
+  var d=document.documentElement;
+  var vw=d.clientWidth;
+  function sel(el){
+    var s=el.tagName.toLowerCase();
+    if (el.id) s+='#'+el.id;
+    var cl=(el.getAttribute('class')||'').trim().split(/\\s+/).filter(Boolean).slice(0,2);
+    if (cl.length) s+='.'+cl.join('.');
+    return s;
+  }
+  // ── liveness, three clauses ────────────────────────────────────────────────
+  var live=null, views=document.querySelectorAll('section.view');
+  for (var i=0;i<views.length;i++){ if(!views[i].hidden){ live=views[i]; break; } }
+  var want=document.getElementById(${JSON.stringify(cell.view)});
+  var liveId = live ? live.id : null;
+  var wantBox = want ? want.getBoundingClientRect() : null;
+  var sentinel = document.querySelector(${JSON.stringify(cell.sentinel)});
+  var liveness = {
+    liveId: liveId,
+    hidden: want ? !!want.hidden : true,
+    h: wantBox ? Math.round(wantBox.height*100)/100 : 0,
+    textLen: want ? (want.textContent||'').trim().length : 0,
+    sentinel: !!sentinel,
+    // what IS present, so a stale sentinel is debuggable rather than opaque
+    present: live ? Array.prototype.slice.call(live.querySelectorAll('*'))
+        .map(function(e){return sel(e);}).slice(0,25) : [],
+  };
+  liveness.ok = (liveId===${JSON.stringify(cell.view)}) && !liveness.hidden && liveness.h>0 && liveness.sentinel;
+
+  // ── Q1 sideways ────────────────────────────────────────────────────────────
+  var q1={sw:d.scrollWidth, cw:d.clientWidth, over:d.scrollWidth>d.clientWidth};
+
+  // ── Q2 clipped without a cue ───────────────────────────────────────────────
+  var q2=[], hiddenSkipped=0;
+  var all=document.body.querySelectorAll('*');
+  for (var k=0;k<all.length;k++){
+    var el=all[k];
+    if (el.hasAttribute('hidden')) continue;
+    var cs=getComputedStyle(el);
+    if (cs.display==='none'||cs.visibility==='hidden') continue;
+    var cls=(el.getAttribute('class')||'').split(/\\s+/);
+    var hid=false;
+    for (var h=0;h<HIDING.length;h++) if (cls.indexOf(HIDING[h])!==-1) hid=true;
+    if (hid) { hiddenSkipped++; continue; }
+    var r=el.getBoundingClientRect();
+    if (r.width<1||r.height<1) continue;
+    var isForm=!!FORM[el.tagName];
+    // (a) native controls are UA-painted: ask the box directly, never the CSSOM
+    var clipped = isForm
+      ? (el.scrollWidth > el.clientWidth+1)
+      : (!!CLIPPY[cs.overflowX] && el.scrollWidth > el.clientWidth+1);
+    // VISIBLE_SPILL's failing sub-case. An element inside a scroller is not
+    // spilling — it is scrolling, which is what .set-matrix (correctly cued,
+    // gr-backlog-setmatrix-scroll-affordance is done) does with 21 of its own
+    // descendants at 768. Only an element with NO clipping ancestor between it
+    // and <html> can push the PAGE, and only then does a right edge past the
+    // viewport mean a person is looking at a cut-off box.
+    // The right edge of what this element actually PAINTS: its own box, or its
+    // content when the content is wider than the box. A block-level row is
+    // clamped to its container's width, so rect.right alone reads "inside the
+    // viewport" while its min-content children push the page 21px sideways —
+    // measured on #fleet-body at 769, the exact cell this sub-case exists for.
+    // An element that CLIPS its own overflow paints only up to its box (that is
+    // what .set-matrix does, correctly cued, with content 29px wider than the
+    // viewport at 768). Only a NON-clipping element paints its whole content.
+    var paintedRight = (CLIPPY[cs.overflowX] || isForm) ? r.right : Math.max(r.right, r.left + el.scrollWidth);
+    var cut = Math.round((paintedRight - vw)*100)/100;
+    if (cut > 0.5 && !contained(el)) q2.push({kind:'CUT_BY_VIEWPORT', sel:sel(el), cut:cut});
+    if (!clipped) {
+      // The IFF half: a cue live on something that FITS is a lie too. Asked
+      // ONLY of scroll containers — custom properties INHERIT, so every
+      // descendant of a cued scroller reads its parent's fade and would
+      // otherwise report a cue it does not own.
+      if (!isForm && CLIPPY[cs.overflowX]) {
+        var cf=cueOf(el);
+        if (cf.cue>0) q2.push({kind:'CUE_STUCK', sel:sel(el), cue:cf.cue});
+      }
+      continue;
+    }
+    var c=cueOf(el);
+    // text-overflow: ellipsis IS an authored cue — the "…" is the affordance
+    // that tells a person the string continues. It counts ONLY for non-form
+    // elements: a UA-painted <select> computes an ellipsis it does not
+    // necessarily paint, which would silence correction (a) — measured on
+    // select#site-theme-select.rail-select, the one selector this sweep is
+    // supposed to catch.
+    if (!isForm && cs.textOverflow==='ellipsis') c.cue=Math.max(c.cue,1);
+    if (c.track<=0 && c.cue<=0) {
+      q2.push({kind:'CLIP_NO_CUE', sel:sel(el), tag:el.tagName, sw:el.scrollWidth, cw:el.clientWidth,
+               overflowX:cs.overflowX, text:(el.tagName==='SELECT'&&el.selectedOptions&&el.selectedOptions[0]?el.selectedOptions[0].text:(el.textContent||'').trim().slice(0,40))});
+    }
+  }
+  // Does anything between el and <html> clip or scroll? If so el is CONTAINED:
+  // its overhang is the container's business, not the page's.
+  function contained(el){
+    for (var n=el.parentElement; n && n!==document.documentElement; n=n.parentElement){
+      var s=getComputedStyle(n);
+      if (CLIPPY[s.overflowX]) return true;
+    }
+    return false;
+  }
+  function cueOf(el){
+    // (b) the reserved horizontal track — 0px in this console under BOTH
+    //     --hide-scrollbars and classic scrollbars, which is exactly why it
+    //     cannot be the only cue test.
+    var cs=getComputedStyle(el);
+    var bl=parseFloat(cs.borderLeftWidth)||0, br=parseFloat(cs.borderRightWidth)||0;
+    var track=Math.round((el.offsetWidth - el.clientWidth - bl - br)*100)/100;
+    var cue=0;
+    for (var n=el; n && n!==document.documentElement; n=n.parentElement){
+      var s=getComputedStyle(n);
+      for (var i=0;i<s.length;i++){
+        var p=s[i];
+        if (p.slice(0,2)==='--' && /(fade|cue)/.test(p)){
+          var v=parseFloat(s.getPropertyValue(p));
+          if (v>0) cue=Math.max(cue,v);
+        }
+      }
+      for (var j=0;j<CUEPROPS.length;j++){
+        var v2=parseFloat(s.getPropertyValue(CUEPROPS[j]));
+        if (v2>0) cue=Math.max(cue,v2);
+      }
+      if (cue>0) break;
+    }
+    return {track:track, cue:cue};
+  }
+
+  // ── Q3 below the fold ──────────────────────────────────────────────────────
+  var content=document.querySelector('.content');
+  var q3={top: content ? Math.round(content.getBoundingClientRect().top*100)/100 : null,
+          vh: window.innerHeight};
+
+  // ── the theme this page ACTUALLY loaded ────────────────────────────────────
+  // Reported, not assumed. The ?theme= param is seeded into localStorage by mock.js
+  // before first paint; if that ever stops working the sweep would render 2N
+  // cells of the SAME mode and call it a two-theme run. The body background is
+  // carried alongside because it is the cheapest proof that the two loads are
+  // not the same pixels — a flipped attribute leaves it unchanged.
+  var themeState = {attr: d.getAttribute('data-theme'),
+                    bg: getComputedStyle(document.body).backgroundColor};
+
+  return {liveness:liveness, q1:q1, q2:q2, q3:q3, hiddenSkipped:hiddenSkipped,
+          themeState: themeState,
+          sentinelProp: getComputedStyle(d).getPropertyValue('--bpsweep-cell')};
+})()`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  the run
+// ─────────────────────────────────────────────────────────────────────────────
+
+const argv = process.argv.slice(2);
+const has = (f) => argv.includes(f);
+const valOf = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
+
+const out = (s) => process.stdout.write(s);
+// A path a human can act on: repo-relative when we are inside the tree, and the
+// absolute path when we are measuring an exported one (a ../../../.. chain is
+// not a location, it is a puzzle).
+const rel = (p) => { const r = path.relative(process.cwd(), p); return !r ? "." : (r.startsWith("..") ? p : r); };
+// SYNCHRONOUS stderr. `process.stderr.write` to a PIPE is asynchronous, so a
+// refusal that writes and then calls process.exit() loses most of its own
+// message the moment anyone runs this under `| tail` — measured: a 6-cell
+// dead-cell report printed ONE cell. A refusal nobody can read is a refusal
+// that did not happen.
+const shout = (msg) => {
+  // fs.writeSync to a PIPE can write PARTIALLY — measured: a multi-cell
+  // refusal truncated mid-word. Loop until every byte is out.
+  const buf = Buffer.from(msg, "utf8");
+  let off = 0;
+  while (off < buf.length) {
+    try { off += fs.writeSync(2, buf, off, buf.length - off); }
+    catch (e) { if (e.code === "EAGAIN") continue; process.stderr.write(buf.slice(off).toString("utf8")); return; }
+  }
+};
+const refuse = (msg) => { shout(`\n!! BREAKPOINT SWEEP (exit 2): ${msg}\n`); process.exit(2); };
+
+function readOr(p, what) {
+  try { return fs.readFileSync(p, "utf8"); }
+  catch { refuse(`cannot read ${what} at ${p}. Environment refusal — nothing has been measured.`); }
+}
+
+function legA() {
+  const css = readOr(CSS_PATH, "the stylesheet");
+  const html = readOr(HTML_PATH, "the shell");
+  const rep = coverageReport({ css, html });
+
+  const rawMedia = (css.match(/@media/g) || []).length;
+  out(`>> source     ${rel(CSS_PATH)} · ${rel(HTML_PATH)}\n`);
+  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts ${rawMedia} — app.css:2131 names a breakpoint INSIDE a comment)\n`);
+  out(`>> axis       ${rep.breakpoints.length} breakpoints [${rep.breakpoints.join(",")}] -> ${rep.widths.length} boundary widths [${rep.widths.join(",")}]\n`);
+  out(`>> screens    ${rep.views.length} registered views · ${rep.cells} scenario x route cells covering ${COVERED_VIEWS.length}\n`);
+  out(`>> themes     derived [${rep.themes.derived.join(",")}] vs declared [${rep.themes.declared.join(",")}] — COVERAGE, NOT YIELD: ` +
+    `app.css's dark rules touch only background/color/border-color, so the CSS structurally cannot produce a theme-dependent geometry defect. ` +
+    `A green here means both modes were LOADED, not that a bug was found. Accent identity (data-bp-theme, ${accentIdentities(css).length} values: ` +
+    `${accentIdentities(css).join(",")}) is a SEPARATE axis, owned by gr-blk-accent-scenario-sweep — this sweep does not claim it.\n`);
+  out(`>> heights    declared [${rep.heights.declared.join(",")}] · derived ${rep.heights.derived.length} height-bearing @media` +
+    (rep.heights.derived.length === 0
+      ? ` — VACUOUSLY GREEN: app.css declares ZERO height-bearing @media today, so the derived half refuses NOTHING. It exists for the day one appears.\n`
+      : ` [${rep.heights.derived.join(",")}]\n`));
+  out(`>> scenarios  ${rep.scenarios.total} scenarios · ${rep.scenarios.distinctCovered} distinct covered by ${rep.scenarios.cells} cells · ` +
+    `${rep.scenarios.residue} residue over ${rep.scenarios.families} families (committed literal)\n`);
+
+  const problems = [];
+  for (const u of rep.unresolved) problems.push(`UNPARSEABLE width condition: "${u}" — the sweep will not guess at a width it cannot read.`);
+  for (const u of rep.heights.unresolved) problems.push(`UNPARSEABLE height condition: "${u}" — the sweep will not guess at a height it cannot read.`);
+  for (const r of rep.uncoveredBreakpoints) problems.push(`UNCOVERED breakpoint ${r.b}px — the boundary walk is missing ${r.missing.join(", ")}. Add it to BREAKPOINTS.`);
+  for (const b of rep.phantomBreakpoints) problems.push(`PHANTOM breakpoint ${b}px — BREAKPOINTS declares it and Leg B drives ${[b - 1, b, b + 1].join("/")}, but the stylesheet no longer declares it. Dead widths under a green tick is what this refusal exists to stop (cch-w15-bl-lega-cannot-refuse-removed-breakpoint).`);
+  for (const v of rep.uncoveredViews) problems.push(`UNCOVERED screen #${v} — no cell in CELLS renders it. Add a scenario x route cell (with a sentinel).`);
+  for (const v of rep.phantomViews) problems.push(`PHANTOM screen #${v} — CELLS drives it but index.html no longer registers it.`);
+  for (const t of rep.themes.uncovered) problems.push(`UNCOVERED theme "${t}" — the artifacts declare it and Leg B never loads it. Add it to THEMES.`);
+  for (const t of rep.themes.phantom) problems.push(`PHANTOM theme "${t}" — THEMES drives it but neither app.css nor the shell declares it any more.`);
+  for (const h of rep.heights.uncovered) problems.push(`UNCOVERED height ${h}px — a height-bearing @media the declared HEIGHTS [${rep.heights.declared.join(",")}] does not carry. Add it to HEIGHTS with a written reason.`);
+  const S = rep.scenarios;
+  for (const n of S.unlisted) problems.push(`UNLISTED scenario "${n}" (family ${familyOf(SCENARIOS[n])}) — no cell renders it and SCENARIO_RESIDUE does not carry it. Give it a cell, or a residue entry naming why not.`);
+  for (const n of S.stale) problems.push(`STALE residue entry "${n}" — the literal names a scenario scenarios.mjs no longer defines. Prune it. (This is exit 2, NOT a console.log — __css_check's stale-allowlist reporter exits 0 and that is the one thing not to copy.)`);
+  for (const n of S.promoted) problems.push(`STALE residue entry "${n}" — it has GAINED a cell, so the residue reason no longer applies. Remove it from SCENARIO_RESIDUE.`);
+  for (const d of S.drift) problems.push(`DRIFTED residue entry "${d.name}" — recorded family ${d.was}, derived family is now ${d.now}. The reason it points at is about a different route.`);
+  for (const s of S.phantomCells) problems.push(`PHANTOM cell scenario "${s}" — a cell drives it but scenarios.mjs no longer defines it.`);
+  for (const f of S.unexplained) problems.push(`UNEXPLAINED residue family ${f} — entries point at it and RESIDUE_FAMILY_REASONS has no written reason for it.`);
+  for (const f of S.staleReasons) problems.push(`STALE residue reason ${f} — RESIDUE_FAMILY_REASONS explains a family no entry uses any more.`);
+
+  if (problems.length) {
+    shout(`\n!! BREAKPOINT SWEEP (exit 2): the sweep has no coverage for what the artifact now declares.\n` +
+      problems.map((p) => `   · ${p}\n`).join(""));
+    process.exit(2);
+  }
+  out(`   ✓ coverage — every declared breakpoint is boundary-walked (and every walked one is still declared), every registered screen has a cell,\n` +
+    `               both theme members are declared and driven, no height-bearing @media is uncovered, and all ${rep.scenarios.total} scenarios are either rendered or named in the residue\n`);
+  return rep;
+}
+
+// ── shared browser bring-up for --cssom / --render ───────────────────────────
+const SERVER_CAP = 8000, DEVTOOLS_CAP = 15000, SETTLE_CAP = 5000, BROWSER_CLOSE_CAP = 2000;
+const TERM_POLL_CAP = 3000, KILL_POLL_CAP = 2000;
+
+async function withBrowser(fn) {
+  const chromeBin = findChrome();
+  if (!chromeBin) {
+    refuse(process.env.CHROME
+      ? `CHROME=${process.env.CHROME} is not an executable file. Environment refusal, not a layout defect.`
+      : "no Chrome/Chromium found. Set CHROME=/path/to/chrome.");
+  }
+  // THE EXPORT'S OWN serve.mjs. serve.mjs roots itself at its own parent
+  // directory, so measuring an exported origin/main tree means running THAT
+  // tree's server — not this worktree's server pointed elsewhere.
+  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: "ignore" });
+  let chrome = null, cdp = null, profile = null;
+  const alive = (p) => { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } };
+  const reap = async (p) => {
+    if (!alive(p)) return;
+    try { p.kill("SIGTERM"); } catch { /* gone */ }
+    let waited = 0;
+    while (alive(p) && waited < TERM_POLL_CAP) { await sleep(50); waited += 50; }
+    if (alive(p)) {
+      try { p.kill("SIGKILL"); } catch { /* gone */ }
+      waited = 0;
+      while (alive(p) && waited < KILL_POLL_CAP) { await sleep(50); waited += 50; }
+      if (alive(p)) process.stderr.write(`!! TEARDOWN SHOUT: pid ${p.pid} SURVIVED SIGKILL. Reap it by hand: kill -9 ${p.pid}\n`);
+    }
+  };
+  const teardown = async () => {
+    if (cdp) { await Promise.race([cdp.send("Browser.close").catch(() => {}), sleep(BROWSER_CLOSE_CAP)]); cdp.close(); }
+    await reap(chrome);
+    await reap(serveChild);
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
+  };
+  const die = async (msg, code = 2) => { await teardown(); process.stderr.write(`\n!! BREAKPOINT SWEEP (exit ${code}): ${msg}\n`); process.exit(code); };
+
+  let up = false;
+  for (let w = 0; w < SERVER_CAP; w += 100) {
+    try { const r = await fetch(`${BASE}/app.css`, { cache: "no-store" }); if (r.ok) { up = true; break; } } catch { /* not yet */ }
+    await sleep(100);
+  }
+  if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+
+  // SERVED BYTES == DISK BYTES. 20 worktrees share this checkout and a foreign
+  // preview server has squatted this port class before, making a patched run
+  // print baseline numbers. Refuse rather than certify bytes we did not author.
+  for (const rel of ["/app.css", "/app.js", "/__preview__/mock.js", "/__preview__/scenarios.mjs"]) {
+    const served = Buffer.from(await (await fetch(`${BASE}${rel}`, { cache: "no-store" })).arrayBuffer());
+    const disk = fs.readFileSync(path.join(ROOT, rel.slice(1)));
+    if (!served.equals(disk)) {
+      // NAME THE DIFFERENCE, NOT THE SIZES. This compares CONTENT, so a
+      // length-preserving edit — a digit changed in a width, a token renamed to
+      // the same length — used to print "served 233681 B, disk holds 233681 B"
+      // and offer two EQUAL numbers as its evidence of inequality. The first
+      // differing byte offset (with both bytes) says what actually differs; the
+      // lengths follow only when they differ too.
+      let at = 0;
+      const min = Math.min(served.length, disk.length);
+      while (at < min && served[at] === disk[at]) at++;
+      const where = at < min
+        ? `first differs at byte ${at}: served 0x${served[at].toString(16).padStart(2, "0")}, disk 0x${disk[at].toString(16).padStart(2, "0")}`
+        : `identical through ${min} B, then TRUNCATED/EXTENDED`;
+      const sizes = served.length === disk.length
+        ? `both ${served.length} B`
+        : `served ${served.length} B, disk holds ${disk.length} B`;
+      return die(`STALE SERVER on :${PORT} — ${rel} differs from disk (${sizes}; ${where}). A server rooted at a DIFFERENT tree is squatting this port; measuring against it would certify the wrong bytes.`);
+    }
+  }
+  out(`>> serve      :${PORT} — served bytes == disk bytes (${rel(ROOT)})\n`);
+
+  // D101 BRING-UP RETRY (deploy-reliability wave 8). Bounded, a FRESH profile
+  // dir per attempt (it used to be mkdtemp'd once, so a retry would re-race the
+  // same DevToolsActivePort path), and every failed attempt's Chrome stderr is
+  // printed — `stdio: "ignore"` discarded exactly the line that says why.
+  //
+  // THE LINE THIS RETRY MUST NOT CROSS. cch-w19-bl-gr115's "do not paper over
+  // the race" ruling governs exit-1 MEASURED intermittency — the browser came
+  // up, the sweep measured, and it disagreed with itself between runs. This
+  // retries only the exit-2 case where Chrome never came up: no width was
+  // rendered, so there is no claim for a retry to hide. Everything after
+  // `devPort` is a measurement and is never retried.
+  let attemptSpawnError = null;
+  const brought = await bringUpChrome({
+    label: "breakpoint-sweep",
+    attempts: BRINGUP_ATTEMPTS,
+    newProfile: () => fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-")),
+    launch: (dir) => {
+      attemptSpawnError = null;
+      const child = spawn(chromeBin, [
+        "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+        "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+        "--disable-background-networking", "--hide-scrollbars",
+        `--user-data-dir=${dir}`, "--remote-debugging-port=0", "about:blank",
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+      child.on("error", (e) => { attemptSpawnError = e; });
+      return { child, readStderr: captureStderr(child) };
+    },
+    awaitDevToolsPort: async ({ profile: dir }) => {
+      const portFile = path.join(dir, "DevToolsActivePort");
+      for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+        if (attemptSpawnError) break;
+        try {
+          const raw = fs.readFileSync(portFile, "utf8").split("\n");
+          if (raw[0] && Number(raw[0])) return Number(raw[0]);
+        } catch { /* not written yet */ }
+        await sleep(100);
+      }
+      if (attemptSpawnError) {
+        throw new Error(`Chrome could not be executed (${attemptSpawnError.code || attemptSpawnError.message}): ${chromeBin}`);
+      }
+      return null;
+    },
+    abandon: async ({ profile: dir, child }) => {
+      await reap(child);
+      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+    },
+    log: (s) => process.stderr.write(s),
+  }).catch((err) => (err && err.refused ? { refusal: err } : Promise.reject(err)));
+
+  // exit 2, `die`'s default: the browser never started on any bounded attempt.
+  if (brought.refusal) return die(brought.refusal.message);
+  chrome = brought.child;
+  profile = brought.profile;
+  const devPort = brought.devPort;
+
+  let version;
+  try {
+    version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    out(`>> chrome     ${version.Browser} · node ${process.version}\n`);
+    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
+  } catch (err) {
+    return die(`CDP bring-up failed: ${err.message}`);
+  }
+
+  // A FRESH TARGET PER CELL is what buys liveness: Page.navigate to a URL that
+  // differs only in its hash is a SAME-DOCUMENT navigation, so a previous
+  // cell's stylesheet state and injected rules survive into the next one.
+  const openCell = async () => {
+    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    return { targetId, sessionId };
+  };
+  const closeCell = async (targetId) => { try { await cdp.send("Target.closeTarget", { targetId }); } catch { /* gone */ } };
+  // Navigate a cell's own target (always cross-document — the target was parked
+  // on about:blank) and poll until the screen has PAINTED. The 16ms settle is
+  // deliberate: a double-requestAnimationFrame settle HANGS under headless=new.
+  //
+  // WHAT IS POLLED IS THE CELL'S SENTINEL, NOT A SHELL CONTAINER. Measured the
+  // hard way: #token-list, #activity-body, #archives-body and #instance-tabpanel
+  // are all STATIC in index.html, so polling them returns true on the first
+  // tick — before the SPA has painted anything — and the cell then measures an
+  // empty shell. Six cells read DEAD for exactly that reason and passed the
+  // moment they were driven alone (a timing artefact, not a content one).
+  //
+  // A miss RETURNS FALSE rather than throwing: the three-clause liveness
+  // refusal below owns the verdict, and its message carries the `present:`
+  // diagnostic a bare timeout does not.
+  const navSettle = async (sessionId, url, readyExpr, cap = SETTLE_CAP) => {
+    await cdp.send("Page.navigate", { url }, sessionId);
+    for (let w = 0; w < cap; w += 50) {
+      let ready = false;
+      // Pinned OUTSIDE the catch: a swallowed refusal would burn the whole cap
+      // and then report the three-clause liveness miss — a font fault wearing
+      // a dead-cell's clothes.
+      try { ready = !!(await evalJs(sessionId, `!!(${readyExpr})`)); } catch { /* navigating */ }
+      if (ready) { await pinFonts(sessionId, url); await sleep(16); return true; }
+      await sleep(50);
+    }
+    await sleep(16);
+    return false;
+  };
+
+  // THE FONT PIN (D218). Every cell height and every clipped-text verdict this
+  // sweep prints is a layout of whatever face resolved; until both families are
+  // proven present, every green here is font-conditional. See font-pin.mjs for
+  // why load() precedes ready (a ready-only pin reports two SHIPPED mono
+  // weights false on a perfectly healthy page).
+  //
+  // It needs its OWN Runtime.evaluate because evalJs below passes
+  // `awaitPromise: false` — through that helper the pin would come back as an
+  // unresolved Promise handle, i.e. truthy garbage, and the guard would be
+  // green by construction.
+  //
+  // Refusal is exit 2 via die(): a missing woff2 is an ENVIRONMENT fault, not
+  // a cell that overflows.
+  const pinFonts = async (sessionId, url) => {
+    let report = null;
+    try {
+      const r = await cdp.send(
+        "Runtime.evaluate",
+        { expression: FONT_PIN_JS, returnByValue: true, awaitPromise: true },
+        sessionId,
+      );
+      if (r.exceptionDetails) {
+        return die(fontPinRefusal(url, null) +
+          ` The pin itself threw: ${r.exceptionDetails.exception?.description || r.exceptionDetails.text}`);
+      }
+      report = r.result.value;
+    } catch (err) {
+      return die(fontPinRefusal(url, null) + ` CDP evaluate failed: ${err.message}`);
+    }
+    if (!report || !report.ok) return die(fontPinRefusal(url, report));
+  };
+
+  const evalJs = async (sessionId, expression) => {
+    const r = await cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: false }, sessionId);
+    if (r.exceptionDetails) throw new Error("page eval threw: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
+    return r.result.value;
+  };
+
+  try {
+    return await fn({ cdp, evalJs, navSettle, openCell, closeCell, die, teardown });
+  } finally {
+    await teardown();
+  }
+}
+
+async function legCssom(rep) {
+  return withBrowser(async ({ evalJs, navSettle, openCell, closeCell, die }) => {
+    const { targetId, sessionId } = await openCell();
+    if (!await navSettle(sessionId, `${BASE}/?scen=empty&theme=light`, `document.styleSheets.length>0`)) {
+      return die(`the preview shell never loaded a stylesheet — nothing to compare the parsed axis against.`);
+    }
+    const conditions = await evalJs(sessionId, CSSOM_AXIS_JS);
+    await closeCell(targetId);
+
+    const browser = new Set();
+    const unresolved = [];
+    for (const c of conditions) {
+      const r = parseWidthClause(c);
+      for (const b of r.boundaries) browser.add(b);
+      unresolved.push(...r.unresolved);
+    }
+    const browserAxis = [...browser].sort((a, b) => a - b);
+    const sourceAxis = rep.breakpoints;
+    out(`>> cssom      ${conditions.length} media rules -> [${browserAxis.join(",")}]\n`);
+    out(`>> source     ${rep.preludes.length} preludes    -> [${sourceAxis.join(",")}]\n`);
+    const same = browserAxis.length === sourceAxis.length && browserAxis.every((b, i) => b === sourceAxis[i]);
+    if (!same || unresolved.length) {
+      out(`   parity=DIVERGED\n`);
+      const only = (a, b) => a.filter((x) => !b.includes(x));
+      if (only(sourceAxis, browserAxis).length) out(`   · source-only: ${only(sourceAxis, browserAxis).join(",")}\n`);
+      if (only(browserAxis, sourceAxis).length) out(`   · browser-only: ${only(browserAxis, sourceAxis).join(",")}\n`);
+      for (const u of unresolved) out(`   · UNPARSEABLE in the CSSOM: "${u}"\n`);
+      return die(`--cssom parity=DIVERGED — the axis this sweep parses is NOT the axis the browser builds. Nothing has been certified.`);
+    }
+    out(`   ✓ parity=IDENTICAL — the parsed axis is the axis the browser builds\n`);
+    return 0;
+  });
+}
+
+
+async function legRender(rep) {
+  const widthFilter = valOf("--widths");
+  const cellFilter = valOf("--cell");
+  const widths = widthFilter ? widthFilter.split(",").map(Number) : rep.widths;
+  const { cells, unknown } = selectCells(CELLS, cellFilter);
+  // NAME EACH UNKNOWN ONE. "matches no cell" over the whole filter is what let a
+  // typo narrow the run silently — the operator has to be told WHICH name the
+  // sweep did not recognise, and the run must not proceed on the remainder.
+  if (unknown.length) {
+    refuse(`--cell named ${unknown.length} cell${unknown.length > 1 ? "s" : ""} that do${unknown.length > 1 ? "" : "es"} not exist: ` +
+      `${unknown.map((n) => `"${n}"`).join(", ")}. Refusing rather than narrowing to the ${cells.length} that matched — a run over ` +
+      `fewer cells than you asked for reports a clean verdict for a sweep that never happened.\n   Known: ${CELLS.map((c) => c.name).join(", ")}`);
+  }
+  if (!cells.length) refuse(`--cell "${cellFilter}" selected no cell. Known: ${CELLS.map((c) => c.name).join(", ")}`);
+
+  // The THEME axis, sliceable the same way and refusing the same way.
+  const themeFilter = valOf("--theme");
+  const { selected: themes, unknown: unknownThemes } = selectNames(THEMES, themeFilter);
+  if (unknownThemes.length) {
+    refuse(`--theme named ${unknownThemes.length} theme${unknownThemes.length > 1 ? "s" : ""} that do${unknownThemes.length > 1 ? "" : "es"} not exist: ` +
+      `${unknownThemes.map((t) => `"${t}"`).join(", ")}. Known: ${THEMES.join(", ")}`);
+  }
+  if (!themes.length) refuse(`--theme "${themeFilter}" selected no theme. Known: ${THEMES.join(", ")}`);
+
+  return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
+    const total = cells.length * themes.length * widths.length;
+    out(`\n>> render     ${cells.length} cells x ${themes.length} themes x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
+    const dead = [], q1f = [], q2f = [], q3f = [], notes = [];
+    const bgSeen = new Map();
+    const t0 = Date.now();
+    let done = 0;
+
+    for (const cell of cells) {
+     for (const theme of themes) {
+      const row = [];
+      for (const width of widths) {
+        const { targetId, sessionId } = await openCell();
+        try {
+          await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: RENDER_HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
+          // A FRESH `?theme=` LOAD PER CELL, NEVER A RUNTIME ATTRIBUTE FLIP.
+          // A flip leaves the console lying about itself — a verifier measured
+          // the body background UNCHANGED at rgb(244,245,247) after flipping
+          // data-theme=dark, and #theme-label reads the opposite string under a
+          // flip than under a load (`themeLabelText` — re-derive with
+          // `grep -n 'function themeLabelText' app.js`), so a flipped run
+          // would measure the wrong control text and could not see a
+          // theme-differentiated defect at all. mock.js seeds ?theme= into
+          // localStorage before first paint, which is why the load is honest.
+          const url = `${BASE}/?scen=${cell.scen}&theme=${theme}${cell.hash}`;
+          let m = null;
+          try {
+            await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`);
+            m = await evalJs(sessionId, cellProbeJs(cell));
+          } catch (err) {
+            dead.push({ cell: cell.name, theme, width, why: err.message.slice(0, 160), present: [] });
+            row.push(`${width}:DEAD`);
+            continue;
+          }
+          // ── the theme axis is DRIVEN, and that is checked ────────────────
+          // A cell that asked for dark and rendered light is the theme-axis
+          // twin of a render-dead cell: it publishes a plausible number for a
+          // mode nobody measured.
+          if (m.themeState.attr !== theme) {
+            dead.push({
+              cell: cell.name, theme, width, present: [],
+              why: `asked for ?theme=${theme} and the document loaded data-theme=${m.themeState.attr} — the fresh load did not take, so this cell measured the wrong mode.`,
+            });
+            row.push(`${width}:DEAD`);
+            continue;
+          }
+          bgSeen.set(theme, m.themeState.bg);
+
+          // ── clause 1+2+3, hard ────────────────────────────────────────────
+          if (!m.liveness.ok) {
+            const L = m.liveness;
+            // THE COUNTER-EXAMPLE, stated in the report rather than left to be
+            // inferred: when the right screen is live and populated-LOOKING but
+            // the sentinel is absent, a two-clause check (right view + visible)
+            // would have PASSED this cell and measured an empty-state box.
+            const weakWouldPass = L.liveId === cell.view && !L.hidden && L.h > 0 && !L.sentinel;
+            dead.push({
+              cell: cell.name, theme, width,
+              why: `live view #${L.liveId} (wanted #${cell.view}), hidden:${L.hidden}, h:${L.h}, textLen:${L.textLen}, sentinel(${cell.sentinel}):${L.sentinel}` +
+                (weakWouldPass ? `\n     CLAUSE 3 IS WHY THIS IS DEAD: clauses 1+2 alone (right view, hidden:${L.hidden}, h:${L.h}, textLen:${L.textLen}) would have PASSED this cell and measured an empty state.` : ""),
+              present: L.present,
+            });
+            row.push(`${width}:DEAD`);
+            continue;
+          }
+          if (m.q1.over) q1f.push({ cell: cell.name, theme, width, sw: m.q1.sw, cw: m.q1.cw });
+          for (const f of m.q2) {
+            if (f.kind === "CUE_STUCK") notes.push({ cell: cell.name, theme, width, ...f });
+            else q2f.push({ cell: cell.name, theme, width, ...f });
+          }
+          const top = m.q3.top;
+          if (top != null) {
+            if (top > FOLD_FRACTION * m.q3.vh) {
+              q3f.push({ cell: cell.name, theme, width, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
+            }
+          }
+          row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
+        } finally {
+          await closeCell(targetId);
+          done++;
+        }
+      }
+      out(`   ${`${cell.name}/${theme}`.padEnd(26)} ${row.join(" ")}\n`);
+     }
+    }
+
+    const ms = Date.now() - t0;
+    out(`\n>> cost       ${total} cells in ${(ms / 1000).toFixed(1)}s (${(ms / total / 1000).toFixed(2)}s/cell)\n`);
+
+    if (dead.length) {
+      // One cell per DISTINCT (cell, reason) — a dead cell is dead at every
+      // width, and 13 copies of the same line buries the other five.
+      const seen = new Set();
+      let msg = `\n!! BREAKPOINT SWEEP (exit 2): ${dead.length}/${total} cells were RENDER-DEAD. A dead cell reports a plausible q1=0/q2=0 for the WRONG SCREEN — refusing to publish any of these numbers.\n`;
+      for (const d of dead) {
+        const key = `${d.cell}/${d.theme}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        msg += `   · ${d.cell}/${d.theme}@${d.width}: ${d.why}\n`;
+        if (d.present.length) msg += `     present: ${d.present.slice(0, 16).join(" ")}\n`;
+      }
+      shout(msg);
+      process.exit(2);
+    }
+    out(`   ✓ liveness — ${total}/${total} cells rendered the screen they asked for, populated (3-clause)\n`);
+    // NOT VACUOUS, AND SAID SO WITH A NUMBER: every cell was loaded at the
+    // theme it asked for, and these are the body backgrounds those loads
+    // produced. Identical values across themes would mean the axis is driving
+    // the same pixels twice.
+    out(`   ✓ themes — ${[...bgSeen].map(([t, bg]) => `${t} loaded (body ${bg.replace(/\s+/g, "")})`).join(" · ")}\n`);
+
+    for (const f of q1f) out(`   ✗ Q1 SIDEWAYS  ${f.cell}/${f.theme}@${f.width}: scrollWidth ${f.sw} > viewport ${f.cw}\n`);
+    for (const f of q2f) {
+      if (f.kind === "CLIP_NO_CUE") {
+        // Name the blind spot at the point of evidence: a UA-painted control
+        // whose computed overflow-x is not a clipping value is invisible to
+        // every CSSOM-keyed version of this question.
+        const uaBlind = ["SELECT", "INPUT", "TEXTAREA", "BUTTON"].includes(f.tag) && !["hidden", "clip", "auto", "scroll"].includes(f.overflowX);
+        out(`   ✗ Q2 CLIP_NO_CUE  ${f.cell}/${f.theme}@${f.width}: ${f.sel} <${f.tag}> scrollWidth ${f.sw} > clientWidth ${f.cw} (overflow-x:${f.overflowX}) "${f.text}"` +
+          (uaBlind ? ` — CLASSIFIED BY TAG: a CSSOM-keyed rule (overflow-x in {hidden,clip}) reports 0 for this cell` : "") + `\n`);
+      }
+      else out(`   ✗ Q2 CUT_BY_VIEWPORT  ${f.cell}/${f.theme}@${f.width}: ${f.sel} extends ${f.cut}px past the viewport\n`);
+    }
+    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}/${f.theme}@${f.width}: .content starts ${f.top}px down (budget ${f.budget}px)\n`);
+    for (const n of notes) out(`   · note CUE_STUCK  ${n.cell}/${n.theme}@${n.width}: ${n.sel} shows a ${n.cue}px edge cue while it FITS\n`);
+
+    const failed = q1f.length + q2f.length + q3f.length;
+    if (failed) {
+      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length}) — exit 1\n`);
+      return 1;
+    }
+    out(`\n>> verdict    clean across ${total} cells — exit 0\n`);
+    return 0;
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG T — THE FIVE-TIER SEAM (--tiers5)
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHY A FIXTURE AT ALL. The shipped catalog has THREE plans, and at wide
+//  viewports a three-plan corpus is BLIND to the `.tier-grid` track floor:
+//  `auto-fit` collapses the surplus tracks to a literal `0px`, so floors 230
+//  and 180 render byte-identically (three cards at 308.664px at 1700). Driven,
+//  not reasoned: the 230 value is unguarded across roughly 186-230 at 901 and
+//  at EVERY width above it. Adding a fourth plan is a business decision that
+//  would today ship a cut CTA at 1700 with every gate green.
+//
+//  THE GEOMETRY, CORRECTED (D178's arithmetic was off). `.content` caps at
+//  1040px and `#billing-plan-section.set-section` adds 20px of padding each
+//  side, so the grid box measures 950px — not 992 — at every viewport at or
+//  above ~1040. With a 12px gap, n tracks need 242n - 12 px: four 230px tracks
+//  need 956px and are UNREACHABLE at any viewport; three fit at 308.664px and
+//  five cards wrap 3+2. The real five-track threshold is a floor <= 180.4px
+//  (not 188.8): 5 tracks need 5f + 48 <= 950.
+//
+//  ZERO PRODUCTION CHANGE, AND THE LIMIT THAT BUYS. `tierCardHtml` and
+//  `planCatalog` are ALREADY exported on `__bpTestHook`; this leg installs the
+//  hook receiver with `Page.addScriptToEvaluateOnNewDocument` BEFORE app.js
+//  runs, then splices five hook-rendered cards into the REAL `#billing-tiers`
+//  under the REAL app.css. app.js gains no branch on test state (it has zero
+//  today and must keep zero), and there is no `GET` plans route to fixture
+//  through instead.
+//    THE LIMIT, STATED WHERE IT IS INCURRED: splicing bypasses `renderTiers()`,
+//  which is what wires `data-plan` / `data-portal-plan` click handlers. This
+//  leg therefore proves LAYOUT — that five real tier cards fit without cutting
+//  a control — and NEVER behaviour. A five-plan catalog whose cards render but
+//  whose Subscribe buttons do nothing would pass this leg.
+//
+//  WHAT THIS LEG STILL DOES NOT GUARD, DRIVEN: it is a GEOMETRIC guard like
+//  the render leg, so it reds where the geometry actually breaks — a 180px
+//  floor reds twice (`3trk@185px` at 901, `5trk@180.391px` at 1700, both
+//  cutting Free's "Yours when the trial ends") but a 186px floor passes all
+//  five widths. Nothing in a browser refuses 186; only the byte-pin in
+//  __app.test.mjs refuses the 230 VALUE itself. That is the whole reason the
+//  guard ships as a pair plus this seam, and none of the three is redundant.
+//
+//  Widths are absolute, not boundary-walked: this is a question about the grid
+//  box, which only changes at 900 (the two-column @media) and at ~1040 (where
+//  `.content` stops growing). 619 is the narrowest cell the sweep drives.
+const TIERS5_WIDTHS = [619, 901, 1040, 1200, 1700];
+
+// This leg's OWN render height, deliberately not the module-level one it used to
+// borrow. cch-w16-s2 lands in this same file and renames that bare `HEIGHT` const
+// to `RENDER_HEIGHT` as a member of a declared height axis — a rename git merges
+// CLEANLY against this leg, leaving `HEIGHT is not defined` at run time with no
+// conflict marker and no test to catch it (driven on a trial merge of the two
+// branches: `!! BREAKPOINT SWEEP (exit 2): unhandled — ReferenceError: HEIGHT is
+// not defined`). The height is not a shared axis question here: this leg asks
+// about the grid BOX, which is a width question, and 800 only has to be tall
+// enough that five cards are laid out rather than reflowed by a scrollbar.
+const TIERS5_HEIGHT = 800;
+
+// The two plans that do not exist. Shaped exactly like PLAN_CATALOG's entries
+// (`grep -n 'var PLAN_CATALOG' app.js`) so `tierCardHtml` renders them through
+// the real path; the copy
+// is deliberately plausible-length rather than adversarially long — the point
+// is the TRACK WIDTH, not a pathological string.
+const TIERS5_EXTRA = [
+  { plan: "team", name: "Team", price: "$1,499", per: "/mo", note: "Shared ownership and audit trails.", instances: 25 },
+  { plan: "scale", name: "Scale", price: "$3,999", per: "/mo", note: "Dedicated capacity and a support SLA.", instances: 100 },
+];
+
+// Runs at document start, before mock.js and before app.js. See the call site
+// for why this is an accessor rather than an assignment.
+const TIERS5_HOOK_TAP = `(function () {
+  var downstream = null;
+  Object.defineProperty(globalThis, '__bpTestHook', {
+    configurable: true,
+    get: function () {
+      return function (h) {
+        globalThis.__bpHooks = h;
+        if (typeof downstream === 'function') downstream(h);
+      };
+    },
+    set: function (fn) { downstream = fn; },
+  });
+})()`;
+
+function tiers5ProbeJs() {
+  return `(function(){
+  var hooks = globalThis.__bpHooks;
+  if (!hooks || typeof hooks.tierCardHtml !== 'function' || !Array.isArray(hooks.planCatalog))
+    return { refused: '__bpTestHook delivered no tierCardHtml/planCatalog — app.js\\'s export tail changed shape, so this fixture is measuring nothing'
+      + ' (receiver typeof=' + (typeof globalThis.__bpTestHook) + ', hooks typeof=' + (typeof globalThis.__bpHooks)
+      + ', keys=' + (globalThis.__bpHooks ? Object.keys(globalThis.__bpHooks).length : 0) + ')' };
+  var grid = document.querySelector('#billing-tiers');
+  if (!grid || grid.hidden) return { refused: '#billing-tiers is absent or hidden — the billing screen never populated' };
+  var catalog = hooks.planCatalog;
+  if (catalog.length !== 3) return { refused: 'the shipped catalog now has ' + catalog.length + ' plans; this fixture adds 2 to reach FIVE and its arithmetic assumes 3' };
+  var five = catalog.concat(${JSON.stringify(TIERS5_EXTRA)});
+  // 'trial' is the active plan: that is the ONE state in which a person sees
+  // the Free tier's "Yours when the trial ends" — the widest CTA in the deck
+  // and the exact control D178 measured cut.
+  grid.innerHTML = five.map(function (t) { return hooks.tierCardHtml(t, 'trial', false); }).join('');
+  var cards = grid.querySelectorAll('.tier');
+  var btns = grid.querySelectorAll('.tier .btn');
+  if (cards.length !== 5 || btns.length !== 5)
+    return { refused: 'the fixture rendered ' + cards.length + ' cards / ' + btns.length + ' buttons, not 5/5 — a card with no control makes this assertion vacuous' };
+  var cs = getComputedStyle(grid);
+  var tracks = cs.gridTemplateColumns.split(' ').filter(function (s) { return s; });
+  var round = function (n) { return Math.round(n * 1000) / 1000; };
+  var clipped = [];
+  Array.prototype.forEach.call(btns, function (b) {
+    if (b.scrollWidth > b.clientWidth) {
+      var tier = b.closest('.tier');
+      clipped.push({
+        plan: tier ? (tier.querySelector('.tier-name') || {}).textContent : '?',
+        sw: b.scrollWidth, cw: b.clientWidth, text: (b.textContent || '').trim(),
+      });
+    }
+  });
+  return {
+    gridW: round(grid.getBoundingClientRect().width),
+    tracks: tracks,
+    trackW: round(cards[0].getBoundingClientRect().width),
+    rows: new Set(Array.prototype.map.call(cards, function (c) { return Math.round(c.getBoundingClientRect().top); })).size,
+    clipped: clipped,
+  };
+})()`;
+}
+
+async function legTiers5() {
+  return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
+    const cell = CELLS.filter((c) => c.name === "billing-trial")[0];
+    if (!cell) return die(`the billing-trial cell is gone from CELLS — this leg has nothing to splice into.`);
+    out(`\n>> tiers5     the 3-plan catalog + 2 fixture plans, spliced through __bpTestHook.tierCardHtml\n`);
+    out(`              LAYOUT ONLY — splicing bypasses renderTiers(), so data-plan/data-portal-plan wiring is NOT proven here\n`);
+
+    const bad = [];
+    for (const width of TIERS5_WIDTHS) {
+      const { targetId, sessionId } = await openCell();
+      try {
+        // Install the hook receiver BEFORE app.js parses. app.js calls
+        // globalThis.__bpTestHook(...) at the tail of its IIFE if it is a
+        // function; nothing else about its behaviour changes.
+        //
+        // AN ACCESSOR, NOT AN ASSIGNMENT — measured, not defensive. mock.js
+        // installs its OWN `globalThis.__bpTestHook = …` — re-derive it with
+        // `grep -n '__bpTestHook' __preview__/mock.js` — keeping the hooks in a
+        // module-private `appHooks` to drive the account modal, and it loads
+        // AFTER this document-start script, so a plain assignment here is
+        // silently overwritten: the first attempt reported
+        // `receiver typeof=function, hooks typeof=undefined` — a receiver that
+        // was installed, replaced, and never called. The accessor lets both
+        // observers win: mock.js's function is remembered by the setter and
+        // still invoked, and this leg gets its copy.
+        await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
+        await cdp.send("Emulation.setDeviceMetricsOverride",
+          { width, height: TIERS5_HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
+        const url = `${BASE}/?scen=${cell.scen}&theme=light${cell.hash}`;
+        if (!await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`)) {
+          return die(`billing-trial@${width}: the tier grid never populated — refusing to publish a measurement of an empty screen.`);
+        }
+        const m = await evalJs(sessionId, tiers5ProbeJs());
+        if (m.refused) return die(`billing-trial@${width}: ${m.refused}`);
+        const line = `   ${String(width).padEnd(5)} grid ${String(m.gridW).padEnd(9)} ${m.tracks.length}trk@${m.trackW}px  ${m.rows} row(s)`;
+        if (m.clipped.length) {
+          out(`${line}  ✗ ${m.clipped.length} clipped\n`);
+          for (const c of m.clipped) {
+            out(`         ✗ CLIPPED CTA  ${String(c.plan).trim()} "${c.text}" ${c.sw}>${c.cw}\n`);
+            bad.push({ width, ...c, tracks: m.tracks.length, trackW: m.trackW });
+          }
+        } else {
+          out(`${line}  ✓\n`);
+        }
+      } finally {
+        await closeCell(targetId);
+      }
+    }
+
+    if (bad.length) {
+      out(`\n>> verdict    ${bad.length} clipped control(s) across ${TIERS5_WIDTHS.length} widths — a FIVE-plan catalog would ship a cut CTA today. exit 1\n`);
+      return 1;
+    }
+    out(`\n>> verdict    five tier cards fit at every width in [${TIERS5_WIDTHS.join(",")}] — exit 0\n`);
+    return 0;
+  });
+}
+
+async function main() {
+  const rep = legA();
+  let code = 0;
+  if (has("--cssom")) code = (await legCssom(rep)) || code;
+  if (has("--render")) code = (await legRender(rep)) || code;
+  if (has("--tiers5")) code = (await legTiers5()) || code;
+  process.exit(code);
+}
+
+// Importable (the test file imports the pure half) — only run when executed.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => { process.stderr.write(`\n!! BREAKPOINT SWEEP (exit 2): unhandled — ${err && err.stack ? err.stack : err}\n`); process.exit(2); });
+}

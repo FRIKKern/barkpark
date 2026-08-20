@@ -440,6 +440,8 @@ const CENSUS: Record<string, Record<string, number>> = {
   },
   'papers/portabledoc/blocks/dataviz.tsx': {
     'roles.statValue': 1,
+    // The jarl figure family's lineage value figure: mono `md` bold accent.
+    'scale.md': 1,
     'scale.md.fontSize': 1,
     // The round-2 natives (mob-zb-s5, D56) are apparatus-heavy: `micro` is the
     // axis tick / heat label / marginal-sum voice and `xs` the proportional
@@ -447,10 +449,23 @@ const CENSUS: Record<string, Record<string, number>> = {
     // read in the family — the chart's y tick is centred on its gridline by
     // half its own line box, which is exactly the kind of computed offset the
     // ESLint ban pushes through the token module rather than a literal.
-    'scale.micro': 7,
+    //
+    // The jarl figure family (duel / lineage + the kilde stamp + the stat
+    // unit/body extension) grew the census: micro 7→11 (duel legends/delta,
+    // lineage overline, the two nested unit runs' fontSize, the kilde line),
+    // xs 4→5 (stat body prose beside the label), and the `.fontSize`/
+    // `.lineHeight` singles — nested Text runs take `<token>.fontSize` only
+    // (the nested-run law statCard records), while the duel label and lineage
+    // title/body override `bodyText(ctx)`'s measure with the sm/xs pair.
+    'scale.micro': 11,
+    'scale.micro.fontSize': 2,
     'scale.micro.lineHeight': 1,
-    'scale.sm': 2,
-    'scale.xs': 4,
+    'scale.sm': 4,
+    'scale.sm.fontSize': 2,
+    'scale.sm.lineHeight': 2,
+    'scale.xs': 5,
+    'scale.xs.fontSize': 2,
+    'scale.xs.lineHeight': 1,
   },
   'papers/portabledoc/blocks/sheet.tsx': {
     'scale.base': 1,

@@ -343,8 +343,19 @@ defmodule BarkparkWeb.SessionController do
     user_id = get_session(conn, "studio_mfa_user")
     at = get_session(conn, "studio_mfa_at")
 
+    # RECENCY predicate (class A — `at` is a server-written instant stamped by
+    # `complete_sign_in/3` on an earlier request and transmitted back through the
+    # SIGNED session cookie, so the wall clock is the CORRECT source and must
+    # stay). What was wrong is the SIDEDNESS: with only an upper bound, an
+    # anchor LATER than now — what a backward wall-clock step on this node
+    # produces — kept the 5-minute pending window open indefinitely. The floor
+    # (`at <= now`) rejects a nonsensical anchor. Deliberately NOT `abs/1`:
+    # every two-sided gate in this repo guards a REMOTE-supplied signature
+    # timestamp, where two-sidedness is mandatory; `at` is ours.
+    now = System.system_time(:second)
+
     fresh? =
-      is_integer(at) and System.system_time(:second) - at <= 300
+      is_integer(at) and at <= now and now - at <= 300
 
     with true <- is_binary(user_id) and fresh?,
          %Barkpark.Accounts.User{} = user <- Barkpark.Accounts.get_user(user_id),
@@ -405,19 +416,29 @@ defmodule BarkparkWeb.SessionController do
     # Revoke the account session server-side (not just the cookie) — parity
     # with DELETE /v1/auth/logout; the API-token session key needs no
     # revocation (dropping the cookie is the whole grant).
-    case get_session(conn, "user_session") do
-      token when is_binary(token) and token != "" ->
-        Barkpark.Accounts.revoke_user_session_token(token)
+    revoked =
+      case get_session(conn, "user_session") do
+        token when is_binary(token) and token != "" ->
+          {:ok, n} = Barkpark.Accounts.revoke_user_session_token(token)
+          n
 
-      _ ->
-        :ok
-    end
+        _ ->
+          0
+      end
 
     conn
     |> configure_session(drop: true)
-    |> put_flash(:info, "Signed out.")
+    |> put_flash(:info, sign_out_flash(revoked))
     |> redirect(to: "/studio")
   end
+
+  # The receipt names what actually happened instead of asserting it. Both are
+  # successes — the cookie is dropped either way, so a benign double sign-out is
+  # never an error — but "a live session was revoked" and "there was nothing
+  # left to revoke" no longer arrive at the user as the same sentence over a
+  # count nobody read (PDS-D523).
+  defp sign_out_flash(0), do: "You were already signed out."
+  defp sign_out_flash(_revoked), do: "Signed out."
 
   # Harden the one-time-link response: never cached/stored, and the ticket URL
   # is never leaked onward as a Referer.

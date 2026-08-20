@@ -1,0 +1,767 @@
+{
+  "label": "mechanical-spacing-doctrine",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "mechanical-spacing-doctrine__light__1280",
+      "file": "mechanical-spacing-doctrine__light__1280.jpeg",
+      "scale": 2,
+      "bytes": 812237,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 12,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Why the old doctrine failed",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The keyboard contract",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The invariant",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What proves the repair",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "How existing Papers migrate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 70,
+      "proseCplSamples": 2,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(45, 94, 143)",
+          "background": "rgb(233, 239, 247)",
+          "accent": "rgb(45, 94, 143)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 11,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 6,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 852.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1388.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1867.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2468.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2950.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "mechanical-spacing-doctrine__light__1920",
+      "file": "mechanical-spacing-doctrine__light__1920.jpeg",
+      "scale": 2,
+      "bytes": 879509,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 12,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Why the old doctrine failed",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The keyboard contract",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The invariant",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What proves the repair",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "How existing Papers migrate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 70,
+      "proseCplSamples": 2,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1105.2,
+          "offCentre": 0,
+          "left": 407.4,
+          "right": 1512.6,
+          "inkWidth": 1105.2,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(45, 94, 143)",
+          "background": "rgb(233, 239, 247)",
+          "accent": "rgb(45, 94, 143)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 11,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 6,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 852.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1388.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1781.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2382.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2864.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "mechanical-spacing-doctrine__dark__1280",
+      "file": "mechanical-spacing-doctrine__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 809215,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 12,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Why the old doctrine failed",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The keyboard contract",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The invariant",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What proves the repair",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "How existing Papers migrate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 70,
+      "proseCplSamples": 2,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(157, 184, 255)",
+          "background": "rgb(23, 32, 50)",
+          "accent": "rgb(157, 184, 255)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 11,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 6,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 852.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1388.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1867.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2468.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2950.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "mechanical-spacing-doctrine__dark__1920",
+      "file": "mechanical-spacing-doctrine__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 876891,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 12,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "Why the old doctrine failed",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The keyboard contract",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "The invariant",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "What proves the repair",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        },
+        {
+          "kind": "heading",
+          "head": "How existing Papers migrate",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 0
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 70,
+      "proseCplSamples": 2,
+      "captionCpl": null,
+      "captionWidth": null,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1105.2,
+          "offCentre": 0,
+          "left": 407.4,
+          "right": 1512.6,
+          "inkWidth": 1105.2,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(157, 184, 255)",
+          "background": "rgb(23, 32, 50)",
+          "accent": "rgb(157, 184, 255)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "absent": "not in this fixture"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--ok": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 11,
+        "heavy": 5,
+        "structuralHeavy": 5,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 6,
+          "2": 5
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 852.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1388.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 1781.1,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2382.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 2864.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    }
+  ]
+}

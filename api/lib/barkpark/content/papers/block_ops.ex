@@ -170,18 +170,39 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # existing row's scope preserved) and hydration scopes by the existing row.
     scope_opts = paper_scope_opts(attrs)
 
-    scope_attrs =
+    # Fail-closed scope stamp (felix-w26): put_scope_attrs now returns
+    # {:ok, attrs} | {:error, reason} — a refused dataset resolution surfaces
+    # as the error (this fn is already error-shaped for every caller), never a
+    # silent dataset_id=NULL stamp. The UPDATE-without-explicit-scope arm
+    # stamps nothing, exactly as before.
+    scope_attrs_result =
       cond do
         scope_opts != [] ->
-          Map.delete(Content.put_scope_attrs(%{"dataset" => dataset}, scope_opts), "dataset")
+          stamped_scope_attrs(dataset, scope_opts)
 
         existing ->
-          %{}
+          {:ok, %{}}
 
         true ->
-          Map.delete(Content.put_scope_attrs(%{"dataset" => dataset}, []), "dataset")
+          stamped_scope_attrs(dataset, [])
       end
 
+    with {:ok, scope_attrs} <- scope_attrs_result do
+      upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs)
+    end
+  end
+
+  # Stamp a one-key attrs map to harvest ONLY the resolved scope ids — the
+  # "dataset" key is the resolver's input, not part of the stamp.
+  defp stamped_scope_attrs(dataset, scope_opts) do
+    with {:ok, stamped} <- Content.put_scope_attrs(%{"dataset" => dataset}, scope_opts) do
+      {:ok, Map.delete(stamped, "dataset")}
+    end
+  end
+
+  # The post-stamp tail of do_upsert_blocks_doc/3 — body unchanged, split out
+  # so the fail-closed scope stamp above can error before any content build.
+  defp upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs) do
     embed_scope =
       if scope_attrs == %{} and existing do
         %{
@@ -793,7 +814,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
     constraints = Papers.Template.paper_declarations()
 
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
-      with {:ok, next} <- Patch.apply_patch(acc, op, constraints: constraints),
+      # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
+      # once after it. Two defects share this one root — the batch used to read
+      # its receipt one step BEFORE the id existed, and to thread a still-id-less
+      # block into the next op:
+      #
+      #   1. RECEIPT. `locate_paper_affected` reads the id out of the post-op
+      #      list. Minting after the fold meant an id-less append/insert-after
+      #      located a `nil` block_id, the `nil -> ids` clause below dropped it,
+      #      and the batch answered `{"ok":true,…,"block_ids":[]}` about a block
+      #      it HAD minted and persisted — `ok: true` withholding the only
+      #      addressable identifier it created. The single-op path (:582) always
+      #      minted before locate and reported it correctly; the two shapes of
+      #      one route disagreed.
+      #   2. COLLISION. `Patch`'s duplicate guard is `id_exists?(blocks, block_id
+      #      (block))`, and `block_id/1` is a bare `Map.get` — so an id-less
+      #      block asks "does any block have id nil?". With minting deferred, the
+      #      FIRST id-less append left a nil-id block in the accumulator and the
+      #      SECOND one collided with it: 422 `duplicate_id` on a batch with no
+      #      duplicates. Minting per op leaves no nil-id block in `acc`, so the
+      #      real duplicate check (a literal id already present) still fires and
+      #      the phantom one cannot.
+      #
+      # Additive + idempotent, exactly as at the other chokepoints: a batch of
+      # id-bearing ops is byte-identical through it, and the post-fold
+      # `ensure_block_ids` at the caller is then a no-op that stays as the
+      # belt-and-braces chokepoint.
+      with {:ok, patched} <- Patch.apply_patch(acc, op, constraints: constraints),
+           next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(op, next) do
         new_ids =
           case affected.block_id do
@@ -1203,9 +1251,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Identical to the former Barkpark.Papers.locate_affected/2, except the
   # append/insert clauses now read the STORED block out of `new_blocks` rather
   # than trusting the op payload — so an op whose `block` carried no id reports
-  # the id `ensure_block_ids` just minted (the op-fold runs ensure_block_ids over
-  # `new_blocks` before this locate), keeping the broadcast frame's block_id and
-  # the persisted block in sync.
+  # the id `ensure_block_ids` just minted, keeping the broadcast frame's block_id
+  # and the persisted block in sync.
+  #
+  # CALLER CONTRACT (was falsified until PDS-D458, and this comment asserted the
+  # false half): a caller that wants a non-nil `block_id` for an id-less
+  # append/insert-after MUST run `ensure_block_ids` over `new_blocks` BEFORE
+  # calling this. `apply_paper_block_op/4` does so at :582; the BATCH fold did
+  # NOT — it minted once AFTER the fold, so this function was handed a list
+  # whose freshly-appended block was still id-less, which is exactly how the
+  # batch receipt came to withhold the id it had minted and persisted.
+  # `fold_paper_ops/2` now mints per op, so both paper paths honour it.
+  # `apply_document_block_op/5` still does not (its ids are minted downstream in
+  # `upsert_document`), so an id-less block op on a DOCUMENT reports block_id
+  # nil — a known, untouched gap on a different surface, not this contract.
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
     position = length(new_blocks) - 1
     stored = Enum.at(new_blocks, position) || block
@@ -1430,12 +1489,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
   The transform is deliberately conservative: wrappers carrying metadata are
   retained byte-for-byte for the tolerant readers, while unambiguous wrappers
   are reduced to the canonical wire shape. It is recursive and idempotent.
+
+  Beyond the wrapper reductions, two rescue arms run here (the ONE write
+  chokepoint every producer path routes through — pe-w1-write-path-normalizer):
+
+    * `notes`/`cards` ITEMS that arrive as bare strings (or inline arrays)
+      become text maps, and `pipeline` NODES become TITLE maps (the key its
+      readers render) — the readers address item FIELDS
+      through `get/2`, which is nil on a binary, so the raw shape renders an
+      EMPTY row while the paper answers 200 (live: `heggemsnes-act`). The arm
+      is TYPE-KEYED, never generic over `items` — `byline` string items are
+      the canonical designed shape (compose.ex joins stringish items; 215
+      live papers) and pass through byte-identical.
+    * text-KEYED inline leaves (`%{"type" => "text", "text" => …}`, the
+      TipTap dialect) become value-keyed — the renderer reads ONLY `value`
+      (render/inline.ex), so a text-keyed leaf renders as the empty string
+      and a paragraph whose only leaf carries it VANISHES (live:
+      `deploy-reliability-wave-4-2026-08-06`). Leaves already carrying a
+      `value` are left byte-identical.
   """
   @spec normalize_render_shapes(list()) :: list()
   def normalize_render_shapes(blocks) when is_list(blocks) do
     blocks
     |> normalize_list_items()
     |> Enum.map(&normalize_render_block/1)
+    |> Enum.map(&normalize_inline_leaf_dialect/1)
   end
 
   def normalize_render_shapes(other), do: other
@@ -1495,6 +1573,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
+  defp render_block_errors(%{"type" => type}, path)
+       when type in [
+              "bulletList",
+              "bullet_list",
+              "bullet-list",
+              "bulletedList",
+              "bulleted_list",
+              "bulleted-list",
+              "orderedList",
+              "ordered_list",
+              "ordered-list"
+            ],
+       do: ["#{path}.type must be list before the block reaches readers"]
+
   defp render_block_errors(%{"type" => "table"} = block, path) do
     rows = Map.get(block, "rows")
 
@@ -1525,10 +1617,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp render_block_errors(block, path) do
-    case Map.get(block, "blocks") do
-      children when is_list(children) -> render_shape_errors(children, "#{path}.blocks")
-      _ -> []
-    end
+    Enum.flat_map(["blocks", "children"], fn key ->
+      case Map.get(block, key) do
+        children when is_list(children) -> render_shape_errors(children, "#{path}.#{key}")
+        _ -> []
+      end
+    end)
   end
 
   defp render_table_row_errors(%{"cells" => cells}, path) when is_list(cells),
@@ -1564,7 +1658,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
         do: Enum.map(columns, &Map.get(&1, "key")),
         else: []
 
-    Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+    Enum.all?(columns, &is_map/1) and
+      Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
       Enum.uniq(keys) == keys and
       Enum.all?(columns, fn column ->
         label = Map.get(column, "label")
@@ -1578,9 +1673,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp valid_record_table?(_block, _rows), do: false
 
+  defp normalize_render_block(%{"type" => type} = block)
+       when type in [
+              "bulletList",
+              "bullet_list",
+              "bullet-list",
+              "bulletedList",
+              "bulleted_list",
+              "bulleted-list",
+              "orderedList",
+              "ordered_list",
+              "ordered-list"
+            ] do
+    normalize_legacy_list_shape(block, type in ["orderedList", "ordered_list", "ordered-list"])
+  end
+
+  defp normalize_render_block(%{"type" => "list", "content" => content} = block)
+       when is_list(content) do
+    normalize_legacy_list_shape(block, Map.get(block, "ordered") == true)
+  end
+
   defp normalize_render_block(%{"type" => "list", "items" => items} = block)
        when is_list(items) do
     Map.put(block, "items", Enum.map(items, &normalize_wrapped_list_item/1))
+  end
+
+  defp normalize_render_block(%{"type" => "table", "content" => content} = block)
+       when is_list(content) or is_map(content) do
+    normalize_legacy_table_shape(block)
   end
 
   defp normalize_render_block(%{"type" => "table"} = block) do
@@ -1601,17 +1721,205 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  defp normalize_render_block(block) when is_map(block) do
-    case Map.get(block, "blocks") do
-      children when is_list(children) ->
-        Map.put(block, "blocks", normalize_render_shapes(children))
+  # `notes`/`cards` items are addressed as MAPS by every reader
+  # (`components.ex` reads `label`/`title`/`text` through `get/2`, which is
+  # nil on a binary) — an agent raised on prose blocks hands them bare strings
+  # (or inline arrays) and the row renders EMPTY behind a 200. Rescue the two
+  # derivable shapes into the text-map dialect; canonical map items pass
+  # byte-identical (idempotent).
+  # TYPE-KEYED on purpose: `byline` string items are the DESIGNED shape
+  # (compose.ex:231-245 joins stringish items; 215 live papers = 28% of the
+  # corpus) — a generic items-must-be-maps arm is forbidden.
+  defp normalize_render_block(%{"type" => type, "items" => items} = block)
+       when type in ["notes", "cards"] and is_list(items) do
+    Map.put(block, "items", Enum.map(items, &normalize_widget_item/1))
+  end
 
-      _ ->
-        block
-    end
+  # Pipeline nodes get their OWN rescue key: every pipeline reader renders
+  # `title` (components.ex pipeline_html, pdrender stageRenderer, the web
+  # projection's `title`/`detail`) and NONE reads `text` — a `%{"text" => s}`
+  # rescue here would rewrite stored bytes into a shape that still renders an
+  # empty node (proven against Components.pipeline_html/1 in the independent
+  # second review of #11616).
+  defp normalize_render_block(%{"type" => "pipeline", "nodes" => nodes} = block)
+       when is_list(nodes) do
+    Map.put(block, "nodes", Enum.map(nodes, &normalize_pipeline_node/1))
+  end
+
+  defp normalize_render_block(block) when is_map(block) do
+    Enum.reduce(["blocks", "children"], block, fn key, normalized ->
+      case Map.get(normalized, key) do
+        children when is_list(children) ->
+          Map.put(normalized, key, normalize_render_shapes(children))
+
+        _ ->
+          normalized
+      end
+    end)
   end
 
   defp normalize_render_block(block), do: block
+
+  # ONE widget item/node → the text-map dialect the readers understand. A map
+  # (the canonical shape) is untouched; a bare string becomes `%{"text" => s}`;
+  # an inline ARRAY flattens to its plain text. An inline array with NO
+  # derivable text — or any other scalar — is left as-is: this is a rescue
+  # arm, never a destroyer.
+  defp normalize_widget_item(item) when is_binary(item), do: %{"text" => item}
+
+  defp normalize_widget_item(item) when is_list(item) do
+    case inline_plain_text(item) do
+      "" -> item
+      text -> %{"text" => text}
+    end
+  end
+
+  defp normalize_widget_item(item), do: item
+
+  # ONE pipeline node → the title-map dialect the pipeline readers render.
+  # Same rescue discipline as normalize_widget_item, different key.
+  defp normalize_pipeline_node(node) when is_binary(node), do: %{"title" => node}
+
+  defp normalize_pipeline_node(node) when is_list(node) do
+    case inline_plain_text(node) do
+      "" -> node
+      text -> %{"title" => text}
+    end
+  end
+
+  defp normalize_pipeline_node(node), do: node
+
+  # Flatten an inline array (or one inline node) to concatenated PLAIN text,
+  # marks dropped: a leaf contributes its `value` (or TipTap `text`), a mark
+  # node its flattened `children`/`content`, a bare string itself.
+  defp inline_plain_text(nodes) when is_list(nodes),
+    do: nodes |> Enum.map(&inline_plain_text/1) |> Enum.join()
+
+  defp inline_plain_text(s) when is_binary(s), do: s
+  defp inline_plain_text(n) when is_number(n), do: to_string(n)
+
+  defp inline_plain_text(%{} = node) do
+    cond do
+      is_binary(Map.get(node, "value")) -> Map.get(node, "value")
+      is_binary(Map.get(node, "text")) -> Map.get(node, "text")
+      is_list(Map.get(node, "children")) -> inline_plain_text(Map.get(node, "children"))
+      is_list(Map.get(node, "content")) -> inline_plain_text(Map.get(node, "content"))
+      true -> ""
+    end
+  end
+
+  defp inline_plain_text(_), do: ""
+
+  # ── inline-leaf dialect (TipTap `text` → canonical `value`) ────────────────
+  #
+  # The renderer reads ONLY `value` on a text leaf (render/inline.ex — no
+  # `text` fallback), so a TipTap-dialect leaf renders as "" and a paragraph
+  # whose only leaf carries it VANISHES behind a 200. Normalize at the write
+  # chokepoint over every inline-bearing surface: block `content`, list
+  # `items`, table `rows`/`head` cells, and nested `blocks`/`children`
+  # containers. A leaf already carrying `value` is left byte-identical
+  # (`value` wins at render), as is everything that is not a text leaf.
+  defp normalize_inline_leaf_dialect(%{} = block) do
+    block
+    |> normalize_inline_under("content")
+    |> normalize_list_item_leaves()
+    |> normalize_table_leaves()
+    |> normalize_nested_block_leaves()
+  end
+
+  defp normalize_inline_leaf_dialect(other), do: other
+
+  defp normalize_inline_under(%{} = block, key) do
+    case Map.get(block, key) do
+      nodes when is_list(nodes) -> Map.put(block, key, normalize_inline_nodes(nodes))
+      _ -> block
+    end
+  end
+
+  defp normalize_list_item_leaves(%{"type" => "list", "items" => items} = block)
+       when is_list(items) do
+    Map.put(
+      block,
+      "items",
+      Enum.map(items, fn
+        item when is_list(item) -> normalize_inline_nodes(item)
+        item -> item
+      end)
+    )
+  end
+
+  defp normalize_list_item_leaves(block), do: block
+
+  defp normalize_table_leaves(%{"type" => "table"} = block) do
+    block =
+      case Map.get(block, "rows") do
+        rows when is_list(rows) ->
+          Map.put(block, "rows", Enum.map(rows, &normalize_table_row_leaves/1))
+
+        _ ->
+          block
+      end
+
+    case Map.get(block, "head") do
+      cells when is_list(cells) -> Map.put(block, "head", normalize_table_cells_leaves(cells))
+      _ -> block
+    end
+  end
+
+  defp normalize_table_leaves(block), do: block
+
+  defp normalize_table_row_leaves(row) when is_list(row), do: normalize_table_cells_leaves(row)
+
+  defp normalize_table_row_leaves(%{"cells" => cells} = row) when is_list(cells),
+    do: Map.put(row, "cells", normalize_table_cells_leaves(cells))
+
+  defp normalize_table_row_leaves(row), do: row
+
+  defp normalize_table_cells_leaves(cells) do
+    Enum.map(cells, fn
+      cell when is_list(cell) ->
+        normalize_inline_nodes(cell)
+
+      %{"content" => content} = cell when is_list(content) ->
+        Map.put(cell, "content", normalize_inline_nodes(content))
+
+      cell ->
+        cell
+    end)
+  end
+
+  defp normalize_nested_block_leaves(block) do
+    Enum.reduce(["blocks", "children"], block, fn key, acc ->
+      case Map.get(acc, key) do
+        children when is_list(children) ->
+          Map.put(acc, key, Enum.map(children, &normalize_inline_leaf_dialect/1))
+
+        _ ->
+          acc
+      end
+    end)
+  end
+
+  defp normalize_inline_nodes(nodes), do: Enum.map(nodes, &normalize_inline_node/1)
+
+  defp normalize_inline_node(%{"type" => "text", "text" => text} = leaf) when is_binary(text) do
+    if Map.has_key?(leaf, "value") do
+      leaf
+    else
+      leaf |> Map.delete("text") |> Map.put("value", text)
+    end
+  end
+
+  defp normalize_inline_node(%{} = node) do
+    Enum.reduce(["children", "content"], node, fn key, acc ->
+      case Map.get(acc, key) do
+        list when is_list(list) -> Map.put(acc, key, normalize_inline_nodes(list))
+        _ -> acc
+      end
+    end)
+  end
+
+  defp normalize_inline_node(other), do: other
 
   defp normalize_wrapped_list_item(%{"content" => content} = item)
        when is_list(content) and map_size(item) == 1,
@@ -1622,6 +1930,220 @@ defmodule Barkpark.Content.Papers.BlockOps do
        do: [%{"type" => "text", "value" => text}]
 
   defp normalize_wrapped_list_item(item), do: item
+
+  defp normalize_legacy_list_shape(block, ordered_default) do
+    source =
+      Enum.find_value(["items", "content", "children"], fn key ->
+        case Map.get(block, key) do
+          items when is_list(items) -> items
+          _ -> nil
+        end
+      end)
+
+    with items when is_list(items) <- source,
+         {:ok, normalized_items} <- map_legacy_inline_items(items) do
+      style =
+        String.downcase(to_string(Map.get(block, "style") || Map.get(block, "listStyle") || ""))
+
+      ordered =
+        ordered_default or Map.get(block, "ordered") == true or
+          style in ~w(ordered number numbered decimal)
+
+      block
+      |> Map.drop(["content", "children", "items", "style", "listStyle"])
+      |> Map.put("type", "list")
+      |> Map.put("ordered", ordered)
+      |> Map.put("items", normalized_items)
+    else
+      _ -> block
+    end
+  end
+
+  defp map_legacy_inline_items(items) do
+    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, acc} ->
+      case normalize_legacy_list_item(item) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      :error -> :error
+    end
+  end
+
+  defp normalize_legacy_list_item(%{"id" => id} = item) when is_binary(id) do
+    if Map.keys(item) -- ["id", "content", "text"] == [] and
+         (is_list(Map.get(item, "content")) or is_binary(Map.get(item, "text"))) do
+      {:ok, item}
+    else
+      normalize_legacy_inline(item)
+    end
+  end
+
+  defp normalize_legacy_list_item(item), do: normalize_legacy_inline(item)
+
+  defp normalize_legacy_inline(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} when is_list(decoded) or is_map(decoded) ->
+        normalize_legacy_inline(decoded)
+
+      _ ->
+        {:ok, [%{"type" => "text", "value" => value}]}
+    end
+  end
+
+  defp normalize_legacy_inline(nil), do: {:ok, []}
+
+  defp normalize_legacy_inline(value) when is_number(value) or is_boolean(value),
+    do: {:ok, [%{"type" => "text", "value" => to_string(value)}]}
+
+  defp normalize_legacy_inline(values) when is_list(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+      case normalize_legacy_inline(value) do
+        {:ok, inline} -> {:cont, {:ok, acc ++ inline}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp normalize_legacy_inline(%{"type" => "text", "value" => value} = node)
+       when is_binary(value),
+       do: {:ok, [Map.delete(node, "text")]}
+
+  defp normalize_legacy_inline(%{"type" => type, "content" => content})
+       when type in [
+              "paragraph",
+              "listItem",
+              "list_item",
+              "tableCell",
+              "table_cell",
+              "tableHeader",
+              "table_header"
+            ] and is_list(content),
+       do: normalize_legacy_inline(content)
+
+  defp normalize_legacy_inline(%{"content" => content} = wrapper)
+       when is_list(content) and map_size(wrapper) == 1,
+       do: normalize_legacy_inline(content)
+
+  defp normalize_legacy_inline(%{"text" => text} = wrapper)
+       when is_binary(text) and map_size(wrapper) == 1,
+       do: {:ok, [%{"type" => "text", "value" => text}]}
+
+  defp normalize_legacy_inline(%{"type" => type} = inline) when is_binary(type) and type != "",
+    do: {:ok, [inline]}
+
+  defp normalize_legacy_inline(_value), do: :error
+
+  defp normalize_legacy_table_shape(%{"content" => content} = block) do
+    {head, rows} =
+      case content do
+        content when is_map(content) ->
+          {Map.get(content, "head") || Map.get(content, "header"), Map.get(content, "rows")}
+
+        content when is_list(content) ->
+          {nil, content}
+
+        _ ->
+          {nil, nil}
+      end
+
+    with rows when is_list(rows) <- rows,
+         {:ok, normalized_rows, header_flags} <- normalize_legacy_table_rows(rows),
+         {:ok, explicit_head} <- normalize_optional_legacy_head(head) do
+      {resolved_head, resolved_rows} =
+        cond do
+          is_list(explicit_head) -> {explicit_head, normalized_rows}
+          normalized_rows != [] and hd(header_flags) -> {hd(normalized_rows), tl(normalized_rows)}
+          true -> {nil, normalized_rows}
+        end
+
+      normalized =
+        block
+        |> Map.drop(["content", "head", "header", "rows"])
+        |> Map.put("type", "table")
+        |> Map.put("rows", resolved_rows)
+
+      if is_list(resolved_head), do: Map.put(normalized, "head", resolved_head), else: normalized
+    else
+      _ -> block
+    end
+  end
+
+  defp normalize_legacy_table_shape(block), do: block
+
+  defp normalize_legacy_table_rows(rows) do
+    Enum.reduce_while(rows, {:ok, [], []}, fn row, {:ok, row_acc, flag_acc} ->
+      case normalize_legacy_table_row(row) do
+        {:ok, cells, header?} ->
+          {:cont, {:ok, [cells | row_acc], [header? | flag_acc]}}
+
+        :error ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed_rows, reversed_flags} ->
+        {:ok, Enum.reverse(reversed_rows), Enum.reverse(reversed_flags)}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp normalize_legacy_table_row(row) when is_list(row),
+    do: normalize_legacy_table_cells(row, false)
+
+  defp normalize_legacy_table_row(row) when is_map(row) do
+    cells =
+      if is_list(Map.get(row, "content")),
+        do: Map.get(row, "content"),
+        else: Map.get(row, "cells")
+
+    if is_list(cells) do
+      cell_headers =
+        Enum.map(cells, fn
+          %{"header" => true} -> true
+          %{"type" => type} when type in ["tableHeader", "table_header"] -> true
+          _ -> false
+        end)
+
+      header? = Map.get(row, "header") == true or (cells != [] and Enum.all?(cell_headers))
+      normalize_legacy_table_cells(cells, header?)
+    else
+      :error
+    end
+  end
+
+  defp normalize_legacy_table_row(_row), do: :error
+
+  defp normalize_legacy_table_cells(cells, header?) do
+    case map_legacy_inline_values(cells) do
+      {:ok, normalized} -> {:ok, normalized, header?}
+      :error -> :error
+    end
+  end
+
+  defp normalize_optional_legacy_head(nil), do: {:ok, nil}
+
+  defp normalize_optional_legacy_head(head) when is_list(head),
+    do: map_legacy_inline_values(head)
+
+  defp normalize_optional_legacy_head(_head), do: :error
+
+  defp map_legacy_inline_values(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+      case normalize_legacy_inline(value) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      :error -> :error
+    end
+  end
 
   defp normalize_table_shape(%{"rows" => rows} = block) when is_list(rows) do
     case normalize_record_table(block, rows) do
@@ -1643,7 +2165,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
         else: []
 
     valid? =
-      Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+      Enum.all?(columns, &is_map/1) and
+        Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
         Enum.uniq(keys) == keys and
         Enum.all?(columns, fn column ->
           label = Map.get(column, "label")
@@ -1685,24 +2208,50 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp record_table_text(nil), do: ""
   defp record_table_text(value), do: to_string(value)
 
+  defp table_head_or_header(block) do
+    case Map.get(block, "head") do
+      nil -> Map.get(block, "header")
+      [] -> Map.get(block, "header")
+      head -> head
+    end
+  end
+
   defp normalize_array_table(block, rows) do
     block =
-      case {Map.get(block, "head") || Map.get(block, "header"), Map.get(block, "columns")} do
+      if is_list(Map.get(block, "head")) and Map.get(block, "head") != [] and
+           Map.get(block, "header") == true,
+         do: Map.delete(block, "header"),
+         else: block
+
+    block =
+      case {table_head_or_header(block), Map.get(block, "columns")} do
         {head, columns} when head in [nil, []] and is_list(columns) and columns != [] ->
-          if Enum.all?(columns, fn
-               %{"text" => text} = column when is_binary(text) -> map_size(column) == 1
-               _ -> false
-             end) do
-            block
-            |> Map.delete("columns")
-            |> Map.put(
-              "head",
-              Enum.map(columns, fn %{"text" => text} ->
-                [%{"type" => "text", "value" => text}]
-              end)
-            )
-          else
-            block
+          cond do
+            Enum.all?(columns, fn
+              %{"text" => text} = column when is_binary(text) -> map_size(column) == 1
+              _ -> false
+            end) ->
+              block
+              |> Map.delete("columns")
+              |> Map.put(
+                "head",
+                Enum.map(columns, fn %{"text" => text} ->
+                  [%{"type" => "text", "value" => text}]
+                end)
+              )
+
+            Enum.all?(columns, &record_table_scalar?/1) ->
+              block
+              |> Map.delete("columns")
+              |> Map.put(
+                "head",
+                Enum.map(columns, fn value ->
+                  [%{"type" => "text", "value" => record_table_text(value)}]
+                end)
+              )
+
+            true ->
+              block
           end
 
         _ ->
@@ -1710,7 +2259,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
       end
 
     {block, rows} =
-      case {Map.get(block, "head") || Map.get(block, "header"), rows} do
+      case {table_head_or_header(block), rows} do
+        {true, [first | rest]} ->
+          case normalize_legacy_table_row(first) do
+            {:ok, cells, _header?} ->
+              {block |> Map.delete("header") |> Map.put("head", cells), rest}
+
+            :error ->
+              {block, rows}
+          end
+
         {head, [%{"header" => true, "cells" => cells} = row | rest]}
         when head in [nil, []] and is_list(cells) and map_size(row) == 2 ->
           {Map.put(block, "head", Enum.map(cells, &normalize_wrapped_table_cell/1)), rest}
@@ -1728,7 +2286,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
       end
 
     rows = Enum.map(rows, &normalize_wrapped_table_row/1)
-    Map.put(block, "rows", rows)
+    block = Map.put(block, "rows", rows)
+
+    # An explicit `head` (one row of cells) gets the same per-cell rescue the
+    # body rows get — a bare-string head cell (`"head" => ["Name", "Age"]`)
+    # would otherwise refuse at the gate while its body twin publishes.
+    case Map.get(block, "head") do
+      head when is_list(head) ->
+        Map.put(block, "head", Enum.map(head, &normalize_wrapped_table_cell/1))
+
+      _ ->
+        block
+    end
   end
 
   defp normalize_wrapped_table_row(%{"cells" => cells} = row)
@@ -1742,6 +2311,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp normalize_wrapped_table_row(row) when is_list(row),
     do: Enum.map(row, &normalize_wrapped_table_cell/1)
 
+  # A cells-map row carrying EXTRA keys (id, header flags, …) keeps its wrapper
+  # — the gate accepts the shape — but its CELLS still get the per-cell rescue,
+  # so a bare-string cell inside it publishes instead of refusing.
+  defp normalize_wrapped_table_row(%{"cells" => cells} = row) when is_list(cells),
+    do: Map.put(row, "cells", Enum.map(cells, &normalize_wrapped_table_cell/1))
+
   defp normalize_wrapped_table_row(row), do: row
 
   defp normalize_wrapped_table_cell(%{"content" => content} = cell)
@@ -1751,6 +2326,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp normalize_wrapped_table_cell(%{"text" => text} = cell)
        when is_binary(text) and map_size(cell) == 1,
        do: [%{"type" => "text", "value" => text}]
+
+  # A bare-string cell becomes ONE canonical inline array — the renderer
+  # already tolerates the bare binary (render/inline.ex scalar clause), but the
+  # gate refused it ("has no renderable inline content") even though its text
+  # is fully derivable. Truly unrescuable cells (textless maps, numbers, nil)
+  # still fall through to the gate's existing refusal.
+  defp normalize_wrapped_table_cell(cell) when is_binary(cell),
+    do: [%{"type" => "text", "value" => cell}]
 
   defp normalize_wrapped_table_cell(cell), do: cell
 

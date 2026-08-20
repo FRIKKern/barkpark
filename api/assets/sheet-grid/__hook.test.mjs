@@ -271,13 +271,24 @@ function headEvent({ c, r }, opts = {}, guards = {}) {
 }
 
 // mount a fresh hook instance with isolated listener/timer state.
-function mountHook() {
+//
+// THE DEFAULT MOUNT IS THE EDITABLE GRID (wave 43). The editable wrapper stamps
+// `data-fns` (the function vocabulary) and the read-mode wrapper omits it, which
+// is what the hook self-derives `_readOnly` from — so a mount with an empty
+// dataset is the READ-MODE DOM shape, and every write gesture it is handed is
+// dropped by the read-mode allowlist. Before wave 43 that distinction was
+// invisible (the flag only gated formula chrome) and every check here mounted a
+// read-mode element while asserting write pushes. Pass `{ readOnly: true }` for
+// the read-mode grid; the five point-mode fail-closed cases below do exactly
+// that, and the wave-43 read-mode block builds on it.
+function mountHook({ readOnly = false } = {}) {
   sandbox.window._listeners = {};
   timers.length = 0;
   const pushed = [];
   const hook = Object.create(sandbox.window.BarkparkSheetGrid);
   const root = fakeEl(null); // .sheet-editor — keydown/input bind here
   hook.el = fakeEl(root); // .sheet-grid-wrap — the phx-hook element
+  if (!readOnly) hook.el.dataset.fns = "SUM AVERAGE COUNT";
   // vm-realm objects have a foreign Object.prototype; the JSON round-trip
   // normalizes them so deepEqual against a plain object works.
   hook.pushEventTo = (_t, event, payload) =>
@@ -1731,15 +1742,19 @@ check("Escape ladder order: dropdown → ghost → point session → cancel", ()
 });
 
 // Read-only fail-closed (Decision 12): a hook with no data-fns never enters
-// point-mode — a click COMMITS the draft via today's click-away path.
-check("read-only sheet never points: a click COMMITS the draft (fail closed)", () => {
-  const h = mountHook(); // default: no data-fns → _readOnly true
+// point-mode — a click falls through to today's click-away SELECTION path.
+// Wave 43 amends the payload, not the route: the click still selects B3, but the
+// `commit` ride is stripped (a read-mode grid can hold no cell editor — the
+// template gates .sheet-cell-input on @editable and edit-start is denied — so
+// the ride is defence against a shape that cannot occur, kept fail-closed).
+check("read-only sheet never points: a click selects, commit ride stripped (fail closed)", () => {
+  const h = mountHook({ readOnly: true }); // no data-fns → _readOnly true
   assert.equal(h._readOnly, true);
   const inp = openEditor(h, "=sum(");
   h.el.dispatch("mousedown", cellEvent("B3"));
   assert.deepEqual(
     h._pushed.filter((p) => p.event === "cell-click"),
-    [{ event: "cell-click", payload: { ref: "B3", shift: false, commit: "=sum(" } }],
+    [{ event: "cell-click", payload: { ref: "B3", shift: false } }],
   );
   assert.equal(inp.value, "=sum("); // never mutated by a point insert
 });
@@ -1750,7 +1765,7 @@ check("read-only sheet never points: a click COMMITS the draft (fail closed)", (
 // read-only hook (same tactic as the click case) and prove F4 / the phantom
 // arrow / the ghost predictor each stay inert — a keystroke never point-mutates.
 check("read-only sheet never points: F4 is inert, no $-anchoring cycle (fail closed)", () => {
-  const h = mountHook(); // _readOnly true
+  const h = mountHook({ readOnly: true }); // _readOnly true
   const inp = openEditor(h, "=A1");
   h.el.dispatch("keydown", cellKey("F4", inp));
   assert.equal(inp.value, "=A1"); // no cycleDollar mutation
@@ -1758,7 +1773,7 @@ check("read-only sheet never points: F4 is inert, no $-anchoring cycle (fail clo
 });
 
 check("read-only sheet never points: an arrow drives no phantom ref (fail closed)", () => {
-  const h = mountHook(); // _readOnly true
+  const h = mountHook({ readOnly: true }); // _readOnly true
   h.el._active = { dataset: { ref: "C5" } };
   const inp = openEditor(h, "=A1+");
   h.el.dispatch("keydown", cellKey("ArrowUp", inp));
@@ -1767,17 +1782,19 @@ check("read-only sheet never points: an arrow drives no phantom ref (fail closed
 });
 
 check("read-only sheet never points: the ghost is never offered (fail closed)", () => {
-  const h = mountHook(); // _readOnly true
+  const h = mountHook({ readOnly: true }); // _readOnly true
   h.el._active = { dataset: { ref: "B6" } };
   h._getCell = () => (c, r) => (c === 2 && r >= 3 && r <= 5 ? { t: "n" } : null);
   const inp = openEditor(h, "=sum(");
   h.el.dispatch("input", { target: inp });
   assert.equal(h._ghost.offered, null); // never offered on a read-only sheet
-  // …so a following Enter commits the RAW draft, never a phantom ghost range.
+  // …and since wave 43 the following Enter pushes NOTHING AT ALL: `edit-commit`
+  // is outside the read-mode allowlist, so the commit never leaves the client
+  // (the server's write_capable:false clause dropped it before too — this is the
+  // client half declining to ask). The ghost inertness is what the case pins;
+  // the raw draft it WOULD have committed is "=SUM()" (see the editable twin).
   h.el.dispatch("keydown", cellKey("Enter", inp));
-  assert.deepEqual(h._pushed, [
-    { event: "edit-commit", payload: { value: "=SUM()", move: "down" } },
-  ]);
+  assert.deepEqual(h._pushed, []);
 });
 
 // A printable typed after a point insert LOCKS the hot ref: a subsequent click
@@ -1955,7 +1972,7 @@ check("bar Enter (form submit) normalizes the bar value before LiveView serializ
 // Read-only twin: the server drops a read-only bar-commit, so the client must
 // never rewrite a value that cannot commit (fail closed, Decision 12).
 check("read-only sheet: bar submit never rewrites the value (fail closed)", () => {
-  const h = mountHook(); // default: no data-fns → _readOnly true
+  const h = mountHook({ readOnly: true }); // no data-fns → _readOnly true
   const bar = { value: "=sum(a1", dataset: { raw: "" } };
   const form = {
     closest: (sel) => (sel === ".sheet-bar-form" ? form : null),
@@ -2570,6 +2587,251 @@ check("a click NOT on a menu-action button pushes nothing (no interference)", ()
   const h = mountHook();
   h.root.dispatch("click", { target: { closest: () => null } });
   assert.deepEqual(h._pushed, []);
+});
+
+
+// ── READ MODE (wave 43): the write-denied member navigates and copies ────────
+//
+// The Studio wrapper attaches this hook for EVERY `chrome == :studio` grid, so
+// a write-DENIED member — and a write-capable member in View mode — finally has
+// a producer for selection (cell-click / head-click / nav / nav-edge /
+// nav-corner / select-all have no server-rendered phx-click anywhere). That
+// grid stamps no `data-fns`, so the hook self-derives `_readOnly` and routes
+// every push through `_push`, which drops anything outside READ_MODE_EVENTS.
+//
+// THE DENYLIST IS THE COMPLEMENT OF THE ALLOWLIST, NOT A HAND-PICKED SET. These
+// cases dispatch the gestures at the hook and assert on the WHOLE push list, so
+// a name that slipped through would show up as an extra entry regardless of
+// whether anyone thought to name it. And the map is UX + honesty, not the
+// security boundary: every one of these events already dies at Ops.send_ops/2's
+// `write_capable: false` clause. The exception with real teeth is `edit-start`,
+// which has no send_ops terminus — it broadcasts presence `%{editing: ref}`, so
+// letting it through would tell every peer "this person is editing A1" while no
+// editor renders.
+
+check("read mode: the hook derives _readOnly from the absent data-fns", () => {
+  const h = mountHook({ readOnly: true });
+  assert.equal(h._readOnly, true);
+  assert.equal(h._fns.length, 0);
+  // The editable twin is the control: data-fns present → not read-only.
+  assert.equal(mountHook()._readOnly, false);
+});
+
+// THE HARM, ENDED: copy works off the selection the hook can now move, and the
+// gesture is 100% client-side — nothing is asked of the server at all.
+check("read mode: copy yields the selection TSV and the push list stays EMPTY", () => {
+  const h = mountHook({ readOnly: true });
+  h.el._sel = [
+    selCell({ r: "1", c: "1", v: "a" }),
+    selCell({ r: "1", c: "2", v: "b" }),
+    selCell({ r: "2", c: "1", v: "1" }),
+    selCell({ r: "2", c: "2", v: "2" }),
+  ];
+  const ce = copyEvent();
+  h.el.dispatch("copy", ce);
+  assert.equal(ce._data["text/plain"], "a\tb\n1\t2");
+  assert.equal(ce.prevented, true);
+  assert.deepEqual(h._pushed, []); // ZERO pushes — the copy never touches the wire
+});
+
+// Values only, and correctly so: `data-f` is @editable-gated server-side, so a
+// read-mode copy degrades to computed VALUES (Excel/Sheets interop intact) and
+// arms no formula clipboard that a denied paste could ever consume.
+check("read mode: copy carries values only (no data-f is stamped)", () => {
+  const h = mountHook({ readOnly: true });
+  h.el._sel = [selCell({ r: "2", c: "2", v: "3" })];
+  const ce = copyEvent();
+  h.el.dispatch("copy", ce);
+  assert.equal(ce._data["text/plain"], "3");
+  // (JSON round-trip: the clip is built in the vm realm, foreign prototype.)
+  assert.deepEqual(JSON.parse(JSON.stringify(h._formulaClip.formulas)), [[null]]);
+});
+
+// The six the brief named, plus the ones the branch structure exposes that a
+// gesture list would miss: fill (Cmd+D/R), rowcol-key (Cmd+Alt+=/-), the
+// dblclick trio (edit-start / fill-extent / autofit), cell-menu-open
+// (contextmenu), paste and edit-commit. Each row dispatches at a FRESH
+// read-mode hook and asserts the entire push list is empty.
+check("read mode: the derived denylist — no mutation gesture pushes anything", () => {
+  const gestures = {
+    // ── the six a naive attach would expose ──
+    "edit-start (Enter)": (h) => h.el.dispatch("keydown", keydown("Enter")),
+    "edit-start (F2)": (h) => h.el.dispatch("keydown", keydown("F2")),
+    "edit-start (printable)": (h) => h.el.dispatch("keydown", keydown("x")),
+    "edit-start (Space, non-checkbox)": (h) => {
+      h.el._active = { dataset: { ref: "A1" }, classList: { contains: () => false } };
+      h.el.dispatch("keydown", keydown(" "));
+    },
+    "cell-toggle (Space on a checkbox cell)": (h) => {
+      h.el._active = { dataset: { ref: "A1" }, classList: { contains: () => true } };
+      h.el.dispatch("keydown", keydown(" "));
+    },
+    "clear-selection (Delete)": (h) => h.el.dispatch("keydown", keydown("Delete")),
+    "clear-selection (Backspace)": (h) => h.el.dispatch("keydown", keydown("Backspace")),
+    undo: (h) => h.el.dispatch("keydown", keydown("z", { metaKey: true })),
+    redo: (h) => h.el.dispatch("keydown", keydown("z", { metaKey: true, shiftKey: true })),
+    "toggle-style (Cmd+B)": (h) => h.el.dispatch("keydown", keydown("b", { metaKey: true })),
+    "toggle-style (Cmd+I)": (h) => h.el.dispatch("keydown", keydown("i", { metaKey: true })),
+    // ── the ones a 27-gesture list does not name ──
+    "fill (Cmd+D)": (h) => h.el.dispatch("keydown", keydown("d", { metaKey: true })),
+    "fill (Cmd+R)": (h) => h.el.dispatch("keydown", keydown("r", { metaKey: true })),
+    "rowcol-key (Cmd+Alt+=)": (h) =>
+      h.el.dispatch("keydown", { ...keydown("="), code: "Equal", metaKey: true, altKey: true }),
+    "rowcol-key (Cmd+Alt+-)": (h) =>
+      h.el.dispatch("keydown", { ...keydown("-"), code: "Minus", metaKey: true, altKey: true }),
+    "edit-start (double-click a cell)": (h) => h.el.dispatch("dblclick", cellEvent("A1")),
+    "fill-extent (double-click the nub)": (h) =>
+      h.el.dispatch("dblclick", {
+        target: { closest: (s) => (s === ".sheet-fillnub" ? {} : null) },
+      }),
+    "autofit (double-click a resize handle)": (h) =>
+      h.el.dispatch("dblclick", {
+        target: {
+          closest: (s) => (s === ".sheet-rsz" ? { dataset: { kind: "col", index: "2" } } : null),
+        },
+      }),
+    paste: (h) =>
+      h.el.dispatch("paste", {
+        target: { matches: () => false },
+        clipboardData: { getData: () => "1\t2" },
+        preventDefault() {},
+      }),
+  };
+
+  for (const [name, fire] of Object.entries(gestures)) {
+    const h = mountHook({ readOnly: true });
+    fire(h);
+    assert.deepEqual(h._pushed, [], `${name} must push nothing in read mode`);
+  }
+});
+
+// The control that makes the row above mean something: the IDENTICAL gestures
+// on an editable hook DO push. Without this a broken dispatcher would show as a
+// silent green.
+check("editable twin: those same gestures DO push (the denylist is not vacuous)", () => {
+  const cases = [
+    ["Enter", {}, "edit-start"],
+    ["Delete", {}, "clear-selection"],
+    ["z", { metaKey: true }, "undo"],
+    ["b", { metaKey: true }, "toggle-style"],
+    ["d", { metaKey: true }, "fill"],
+  ];
+  for (const [key, opts, event] of cases) {
+    const h = mountHook();
+    h.el.dispatch("keydown", keydown(key, opts));
+    assert.deepEqual(h._pushed.map((p) => p.event), [event]);
+  }
+  // Space on a checkbox cell, and the dblclick/paste routes.
+  const hc = mountHook();
+  hc.el._active = { dataset: { ref: "A1" }, classList: { contains: () => true } };
+  hc.el.dispatch("keydown", keydown(" "));
+  assert.deepEqual(hc._pushed, [{ event: "cell-toggle", payload: { ref: "A1" } }]);
+  const hd = mountHook();
+  hd.el.dispatch("dblclick", cellEvent("A1"));
+  assert.deepEqual(hd._pushed, [{ event: "edit-start", payload: {} }]);
+});
+
+// The read half: navigation, whole-row/col selection, select-all and the find
+// bar all still ride. These are the events the three server heads already
+// accept for `chrome: :studio` — nothing new is reachable.
+check("read mode: every allowed read gesture still pushes", () => {
+  const cases = [
+    ["nav", (h) => h.el.dispatch("keydown", keydown("ArrowDown"))],
+    ["nav", (h) => h.el.dispatch("keydown", keydown("Tab"))],
+    ["nav-edge", (h) => h.el.dispatch("keydown", keydown("ArrowDown", { metaKey: true }))],
+    ["nav-corner", (h) => h.el.dispatch("keydown", keydown("Home", { metaKey: true }))],
+    ["select-all", (h) => h.el.dispatch("keydown", keydown("a", { metaKey: true }))],
+    ["find-open", (h) => h.el.dispatch("keydown", keydown("f", { metaKey: true }))],
+    ["cell-click", (h) => h.el.dispatch("click", cellEvent("B2"))],
+    ["cell-click", (h) => h.el.dispatch("mousedown", cellEvent("B2"))],
+    ["head-click", (h) => h.el.dispatch("click", headEvent({ c: "3" }))],
+  ];
+  for (const [event, fire] of cases) {
+    const h = mountHook({ readOnly: true });
+    fire(h);
+    assert.deepEqual(h._pushed.map((p) => p.event), [event]);
+  }
+});
+
+// Shift+Space / Ctrl+Space ride the head-click path with the active cell's own
+// index — whole-row / whole-col selection, read-safe, and still allowed.
+check("read mode: Shift+Space selects the row, Ctrl+Space the column", () => {
+  const h = mountHook({ readOnly: true });
+  h.el._active = { dataset: { ref: "B2", r: "2", c: "2" }, classList: { contains: () => false } };
+  h.el.dispatch("keydown", keydown(" ", { shiftKey: true }));
+  h.el.dispatch("keydown", keydown(" ", { ctrlKey: true }));
+  assert.deepEqual(h._pushed, [
+    { event: "head-click", payload: { kind: "row", index: 2, shift: false } },
+    { event: "head-click", payload: { kind: "col", index: 2, shift: false } },
+  ]);
+});
+
+// An ALLOWED event can still carry a WRITE: the #813/#858 click-away ride
+// (`commit` = the open cell draft, `bar_commit` = the dirty formula bar). A
+// read-mode grid can hold neither node, but the payload is narrowed anyway —
+// the selection move survives, the commit does not.
+check("read mode: the write-ride keys are stripped from an allowed cell/head click", () => {
+  const h = mountHook({ readOnly: true });
+  h.el._input = fakeInput("=sum(");
+  h.root._bar = { value: "=1+1", dataset: { raw: "" } };
+  sandbox.document.activeElement = h.root._bar;
+  h.el.dispatch("mousedown", cellEvent("B3"));
+  assert.deepEqual(h._pushed, [{ event: "cell-click", payload: { ref: "B3", shift: false } }]);
+
+  // A header click on its own hook (a cell mousedown arms _suppressClick, which
+  // would swallow the very next click — the drag/click seal, unrelated here).
+  const hh = mountHook({ readOnly: true });
+  hh.el._input = fakeInput("=sum(");
+  hh.root._bar = h.root._bar;
+  hh.el.dispatch("click", headEvent({ c: "4" }));
+  sandbox.document.activeElement = null;
+  assert.deepEqual(hh._pushed, [
+    { event: "head-click", payload: { kind: "col", index: 4, shift: false } },
+  ]);
+  // The editable twin proves the key was really on offer (a plain draft, so the
+  // mousedown takes the click-away commit path rather than point-mode).
+  const e = mountHook();
+  e.el._input = fakeInput("42");
+  e.el.dispatch("mousedown", cellEvent("B3"));
+  assert.deepEqual(e._pushed, [
+    { event: "cell-click", payload: { ref: "B3", shift: false, commit: "42" } },
+  ]);
+});
+
+// PRESENCE IS THE TRAP. `presence-meta` is allowed (a peer should see where a
+// reader's cursor is), but ONLY as active + selection — and `edit-start`, the
+// one denied event with no send_ops terminus, must never reach the server to
+// broadcast `%{editing: ref}` for an editor that does not render.
+check("read mode: presence carries active + selection only, and never an editing flag", () => {
+  const h = mountHook({ readOnly: true });
+  h.el._active = { dataset: { ref: "B2", r: "2", c: "2" }, classList: { contains: () => false } };
+  h.el._sel = [
+    selCell({ r: "2", c: "2", v: "1" }),
+    selCell({ r: "3", c: "3", v: "2" }),
+  ];
+  // A denied edit-start attempt (Enter) — the gesture that would have armed the
+  // "editing A1" broadcast server-side.
+  h.el.dispatch("keydown", keydown("Enter"));
+  timers.forEach((t) => t());
+  const frames = h._pushed.filter((p) => p.event === "presence-meta");
+  assert.equal(frames.length, 1);
+  assert.deepEqual(Object.keys(frames[0].payload).sort(), ["active", "selection"]);
+  assert.deepEqual(frames[0].payload, { active: "B2", selection: "B2:C3" });
+  // …and the edit-start itself never left the client.
+  assert.deepEqual(h._pushed.filter((p) => p.event === "edit-start"), []);
+});
+
+// A hand-forged payload cannot smuggle the flag either: _push narrows
+// presence-meta by CONSTRUCTION (it rebuilds the object), not by deletion.
+check("read mode: a forged editing key on a presence frame is narrowed away", () => {
+  const h = mountHook({ readOnly: true });
+  assert.equal(h._push("presence-meta", { active: "A1", selection: null, editing: "A1" }), true);
+  assert.deepEqual(h._pushed, [
+    { event: "presence-meta", payload: { active: "A1", selection: null } },
+  ]);
+  // …and _push reports the drop for a denied name rather than failing silently.
+  assert.equal(h._push("edit-start", {}), false);
+  assert.equal(h._push("nav", { key: "ArrowDown", shift: false }), true);
 });
 
 if (failures > 0) {

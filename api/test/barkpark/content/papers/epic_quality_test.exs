@@ -80,6 +80,80 @@ defmodule Barkpark.Content.Papers.EpicQualityTest do
     assert "outline_heading_level_jump" in details["failures"]
   end
 
+  test "the outline arms read headings inside containers, not only the top level" do
+    nested_jump =
+      update_in(valid_content(), ["blocks"], fn blocks ->
+        blocks ++
+          [
+            %{
+              "type" => "expandable",
+              "summary" => "Appendix",
+              "children" => [
+                %{"type" => "heading", "level" => 4, "text" => "Skips a level while nested"},
+                paragraph("The nested body still reads as part of one outline.")
+              ]
+            }
+          ]
+      end)
+
+    assert {:error, {:invalid_epic_paper_quality, jump_details}} =
+             EpicQuality.validate(nested_jump)
+
+    assert "outline_heading_level_jump" in jump_details["failures"]
+
+    nested_second_h1 =
+      update_in(valid_content(), ["blocks"], fn blocks ->
+        blocks ++
+          [
+            %{
+              "type" => "expandable",
+              "summary" => "Appendix",
+              "children" => [
+                h1("A second title hidden one level down"),
+                paragraph("Two H1s are two outlines, wherever the second one hides.")
+              ]
+            }
+          ]
+      end)
+
+    assert {:error, {:invalid_epic_paper_quality, h1_details}} =
+             EpicQuality.validate(nested_second_h1)
+
+    assert "outline_requires_one_h1" in h1_details["failures"]
+  end
+
+  test "numeric-string heading levels are read the way the renderer reads them" do
+    string_h1 = %{
+      valid_content()
+      | "blocks" => [
+          %{"type" => "heading", "level" => "1", "text" => "A decisive title"},
+          ingress(),
+          stats(),
+          paragraph("The evidence explains the result and its consequence.")
+        ]
+    }
+
+    assert :ok = EpicQuality.validate(string_h1)
+
+    string_jump =
+      update_in(valid_content(), ["blocks"], fn blocks ->
+        blocks ++ [%{"type" => "heading", "level" => "4", "text" => "Skips a level"}]
+      end)
+
+    assert {:error, {:invalid_epic_paper_quality, jump_details}} =
+             EpicQuality.validate(string_jump)
+
+    assert "outline_heading_level_jump" in jump_details["failures"]
+    refute "outline_requires_one_h1" in jump_details["failures"]
+
+    non_numeric =
+      update_in(valid_content(), ["blocks"], fn blocks ->
+        blocks ++ [%{"type" => "heading", "level" => "h2", "text" => "Not a level at all"}]
+      end)
+
+    assert :ok = EpicQuality.validate(non_numeric)
+  end
+
   test "an explicitly declared reader suite must name five passing readers" do
     checks = %{
       "public" => "pass",

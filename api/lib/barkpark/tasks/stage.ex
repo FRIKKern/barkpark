@@ -129,13 +129,72 @@ defmodule Barkpark.Tasks.Stage do
   verb as the retry instruction. The two doors are complementary and both are
   needed: a stage-side requirement cannot see a raw patch, and a raw-side guard
   would leave the only sanctioned writer unfenced.
-  """
 
-  import Ecto.Query, only: [from: 2]
+  ## The reason carries its own falsifier (PDS wave 28)
+
+  Waves 23–25 gave every adjudication a durable TERM, a durable WHY and a
+  durable WHEN-RECONSIDERED. Nothing in that triple can be shown WRONG. A
+  census can assert that 213 reasons are byte-distinct and nothing more — so a
+  STALE, INVENTED or PARTIAL reason passes exactly as well as a re-derived one.
+
+  A mechanical floor was tried first and REFUTED by measurement (PDS-D387):
+  scraping shas and `path:line` out of prose reds 14 rows of which ONE is a real
+  refutation (precision 0.07) and misses 2 of the 3 real defects (recall 0.33),
+  and four independent extractors gave four different prose-only counts over the
+  same 172 strings (64 / 69 / 76 / 118) — the class SIZE is not measurable by
+  extraction. So the burden moves to the AUTHOR:
+
+    * `content.disposition_rerun` — the DURABLE fourth key: one command an
+      auditor can run to try to prove this reason WRONG.
+
+  It is written in the same CAS update as the other three, by this same one
+  writer, and the raw `/v1/data/mutate` door refuses it exactly as it refuses
+  `disposition`.
+
+  ### The field is OPTIONAL, and that is the point
+
+  A reason is ALLOWED to refuse to be checkable — parked on a licence, a
+  runtime-only probe, a judgment call. Saying so is a PASS: an absent rerun
+  lands at L6 (truth-grip D3, demoted never rejected) and is NEVER refused. What
+  is refused is a rerun that CANNOT FAIL, because a check that cannot fail is
+  the vacuous green this epic exists to kill, one level up.
+
+  ### The write-seam screen (PDS-D390)
+
+  Refused BEFORE anything is written, so a refused rerun leaves the row
+  byte-identical:
+
+    * `git -C` in any spelling (also `--git-dir` / `--work-tree`) — it retargets
+      the repository the check runs against, so the auditor and the author are
+      not looking at the same thing;
+    * a `test` / `[` filesystem predicate — it asserts about the CHECKOUT, which
+      is per-machine state, not about `origin/main`;
+    * `$( )` / backtick command substitution — the exit code becomes the OUTER
+      command's, so the inner probe's failure is swallowed;
+    * `git merge-base --is-ancestor` — refused by truth-grip's own screen, and
+      PDS does not patch another epic's module to route around it;
+    * a PIPE-MASKED tail: a pipeline whose LAST stage is a formatter
+      (`head`, `tail`, `wc`, `cat`, `jq`, …). `git show origin/main:<gone> |
+      head -1` exits **0** while the bare `git show` exits **128** — the
+      formatter's success is reported as the check's.
+
+  Every refusal NAMES a legal substitute — the `rev-list` / `cat-file` / `grep`
+  forms spelled out in `legal_rerun_substitutes/0`, each of which reports the
+  probe's OWN failure as a non-zero exit.
+
+  ### Distinctness is NOT extended to this field (PDS-D391b / PDS-D336(a))
+
+  Distinctness is a PROSE clause. A SHARED rerun over distinct reasons is the
+  HONEST shape — one command can falsify a whole family of rows, exactly as a
+  shared family `reopen_trigger` already does. D336(a) ruled this once for
+  `reopen_trigger` and pinned it with the SHAREDTRIG fixture; a distinctness
+  check here would repeat that mistake under a new field name.
+  """
 
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 5,
       caller_stamp: 1,
       task_broadcast: 4,
@@ -168,6 +227,43 @@ defmodule Barkpark.Tasks.Stage do
   # both owned by this verb, both written in the same CAS update as the reason.
   @disposition_key "disposition"
   @reopen_trigger_key "reopen_trigger"
+
+  # The FOURTH durable key (PDS wave 28): the command that could prove the
+  # reason WRONG. Same writer, same CAS update, same raw-door refusal — and
+  # OPTIONAL, because a reason is allowed to say it cannot be checked.
+  @disposition_rerun_key "disposition_rerun"
+
+  # What a refused rerun is told to write instead. Each of these reports the
+  # PROBE's own failure as a non-zero exit, which is the whole property the
+  # screen exists to preserve.
+  @legal_rerun_substitutes [
+    "git rev-list --count origin/main..<sha> | grep -qx 0",
+    "git cat-file -e origin/main:<path>",
+    "git grep -n <token> origin/main -- <path>"
+  ]
+
+  # The shapes a rerun may not take (PDS-D390), each with the reason it cannot
+  # fail honestly. Matched in order; the FIRST match is what the refusal names,
+  # so the most specific/most misleading shapes come first.
+  @forbidden_rerun_shapes [
+    {:repo_redirect, ~r/(?<![\w.-])git\s+(?:-C\b|--git-dir\b|--work-tree\b)/,
+     "`git -C` (and `--git-dir` / `--work-tree`) retargets the repository the check runs " <>
+       "against, so the auditor and the author are not looking at the same tree"},
+    {:merge_base_ancestor, ~r/merge-base\b[^|;&]*--is-ancestor\b/,
+     "`git merge-base --is-ancestor` is refused by truth-grip's own screen, and this epic " <>
+       "does not route around another epic's module"},
+    {:command_substitution, ~r/\$\(|`/,
+     "command substitution (`$( … )` / backticks) reports the OUTER command's exit code, " <>
+       "so the inner probe's failure is swallowed"},
+    {:filesystem_predicate, ~r/(?:^|[|;&]\s*)(?:test|\[)\s/,
+     "a `test` / `[` predicate asserts about the local CHECKOUT — per-machine state that " <>
+       "says nothing about origin/main"}
+  ]
+
+  # The pipeline tails that report THEIR success as the check's. `git show
+  # origin/main:<deleted> | head -1` exits 0; the bare `git show` exits 128.
+  @rerun_formatting_tails ~w(head tail cat less more wc awk sed cut tr sort uniq
+                             jq column tee xargs echo printf rev nl fold paste)
 
   # The three-class vocabulary, lowercase-canonical. Normalising here is what
   # closes the measured two-case split (OPEN 57 / open 47): the ONE writer is
@@ -208,6 +304,29 @@ defmodule Barkpark.Tasks.Stage do
   """
   @spec reopen_trigger_key() :: String.t()
   def reopen_trigger_key, do: @reopen_trigger_key
+
+  @doc """
+  The content key the RERUN is written to (PDS wave 28) — one command an
+  auditor can run to try to prove the durable reason wrong. Optional: an
+  absent rerun is an honest "this cannot be checked", never a refusal.
+  """
+  @spec disposition_rerun_key() :: String.t()
+  def disposition_rerun_key, do: @disposition_rerun_key
+
+  @doc """
+  The rerun shapes a refusal names as the legal substitute — each reports the
+  probe's OWN failure as a non-zero exit.
+  """
+  @spec legal_rerun_substitutes() :: [String.t()]
+  def legal_rerun_substitutes, do: @legal_rerun_substitutes
+
+  @doc """
+  The refused rerun shapes (PDS-D390) as `{code, why}` pairs, in match order.
+  Exposed so a test can enumerate the screen instead of restating it.
+  """
+  @spec forbidden_rerun_shapes() :: [{atom(), String.t()}]
+  def forbidden_rerun_shapes,
+    do: Enum.map(@forbidden_rerun_shapes, fn {c, _re, why} -> {c, why} end)
 
   @doc """
   The lowercase-canonical adjudication vocabulary. A `:disposition` is trimmed
@@ -273,6 +392,12 @@ defmodule Barkpark.Tasks.Stage do
       Durable, written to `content.#{@reopen_trigger_key}`. Blank is treated
       as absent. REQUIRED when `:disposition` is one of
       `#{inspect(@trigger_required)}` and the row does not already carry one.
+    * `:rerun` (alias `:disposition_rerun`) — the command that could prove the
+      reason WRONG (PDS wave 28). Durable, written to `content.#{@disposition_rerun_key}`.
+      OPTIONAL and blank-is-absent: a reason may honestly refuse to be
+      checkable. What is refused is a rerun that CANNOT FAIL — see
+      `forbidden_rerun_shapes/0` — with `{:error, {:unfalsifiable_rerun, code,
+      value}}` and NOTHING written.
     * `:caller_token_id` — audit stamp for the mutation_event.
 
   Returns `{:ok, doc}`, or:
@@ -287,6 +412,8 @@ defmodule Barkpark.Tasks.Stage do
       `#{inspect(@dispositions)}`.
     * `{:error, {:missing_reopen_trigger, disposition}}` — a park with no
       reopen condition, on the stage or on the row. NOTHING is written.
+    * `{:error, {:unfalsifiable_rerun, code, value}}` — a rerun that cannot
+      fail. NOTHING is written.
     * `{:error, :stale_claim}` — CAS lost (rare under the advisory lock).
   """
   @spec stage(binary(), String.t(), keyword()) ::
@@ -297,12 +424,14 @@ defmodule Barkpark.Tasks.Stage do
              | {:illegal_transition, String.t(), String.t()}
              | {:invalid_object, term()}
              | {:invalid_disposition, term()}
-             | {:missing_reopen_trigger, String.t()}}
+             | {:missing_reopen_trigger, String.t()}
+             | {:unfalsifiable_rerun, atom(), term()}}
   def stage(task_id, to, opts \\ []) when is_binary(task_id) and is_binary(to) do
     object = Keyword.get(opts, :object) || "research"
     holder = Keyword.get(opts, :holder)
     note = normalize_note(Keyword.get(opts, :note) || Keyword.get(opts, :disposition_reason))
     reopen_trigger = normalize_note(Keyword.get(opts, :reopen_trigger))
+    rerun = normalize_note(Keyword.get(opts, :rerun) || Keyword.get(opts, :disposition_rerun))
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
@@ -324,11 +453,13 @@ defmodule Barkpark.Tasks.Stage do
             with :ok <- check_stageable(from, to),
                  :ok <- check_object(to, object),
                  {:ok, disposition} <- check_disposition(Keyword.get(opts, :disposition)),
-                 :ok <- check_reopen_trigger(doc, disposition, reopen_trigger) do
+                 :ok <- check_reopen_trigger(doc, disposition, reopen_trigger),
+                 :ok <- check_rerun(rerun) do
               adj = %{
                 note: note,
                 disposition: disposition,
-                reopen_trigger: reopen_trigger
+                reopen_trigger: reopen_trigger,
+                rerun: rerun
               }
 
               do_stage(doc, from, to, object, holder, adj, caller_token_id)
@@ -428,6 +559,57 @@ defmodule Barkpark.Tasks.Stage do
 
   defp check_reopen_trigger(_doc, _disposition, _trigger), do: :ok
 
+  # THE WRITE-SEAM SCREEN (PDS wave 28 / PDS-D390).
+  #
+  # ABSENCE IS A PASS, and that is load-bearing: a reason may honestly refuse
+  # to be checkable and land at L6, demoted never rejected. The screen fires
+  # ONLY on a rerun that was actually supplied — and only to refuse the shapes
+  # that CANNOT FAIL. It does not, and cannot, judge whether a well-formed
+  # rerun actually falsifies its reason; that is the author's burden, which is
+  # exactly what PDS-D387 moved here after a mechanical floor measured
+  # precision 0.07 / recall 0.33.
+  #
+  # NOTHING IS WRITTEN ON REFUSAL. Like every other check in the `with`, this
+  # runs under the advisory lock and BEFORE the CAS update, so a refused stage
+  # leaves the row byte-identical — the caller's retry is the whole remedy.
+  #
+  # NO DISTINCTNESS (PDS-D391b / PDS-D336(a)): a SHARED rerun over distinct
+  # rows is the honest shape. There is deliberately no cross-row check here.
+  defp check_rerun(nil), do: :ok
+
+  defp check_rerun(rerun) when is_binary(rerun) do
+    case Enum.find(@forbidden_rerun_shapes, fn {_code, re, _why} -> Regex.match?(re, rerun) end) do
+      {code, _re, _why} -> {:error, {:unfalsifiable_rerun, code, rerun}}
+      nil -> check_rerun_pipe_tail(rerun)
+    end
+  end
+
+  # A pipeline reports its LAST stage's exit code. `git show origin/main:<gone>
+  # | head -1` is therefore 0 where the bare `git show` is 128 — the formatter
+  # launders a failure into a pass. A last stage that COMPARES (grep -q, diff,
+  # cmp, …) is fine; a last stage that merely formats is not.
+  defp check_rerun_pipe_tail(rerun) do
+    if String.contains?(rerun, "|") and formatting_tail?(last_pipeline_stage(rerun)) do
+      {:error, {:unfalsifiable_rerun, :pipe_masked, rerun}}
+    else
+      :ok
+    end
+  end
+
+  defp last_pipeline_stage(rerun) do
+    rerun
+    |> String.split("|")
+    |> List.last()
+    |> String.trim()
+  end
+
+  defp formatting_tail?(stage) do
+    case String.split(stage, ~r/\s+/, trim: true) do
+      [command | _] -> Path.basename(command) in @rerun_formatting_tails
+      [] -> false
+    end
+  end
+
   defp content_map(content) when is_map(content), do: content
   defp content_map(_), do: %{}
 
@@ -455,17 +637,11 @@ defmodule Barkpark.Tasks.Stage do
       |> apply_durable_reason(adj.note)
       |> apply_adjudication_key(@disposition_key, adj.disposition)
       |> apply_adjudication_key(@reopen_trigger_key, adj.reopen_trigger)
+      |> apply_adjudication_key(@disposition_rerun_key, adj.rerun)
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %Document{doc | content: new_content, rev: new_rev}
-
+    # PDS-D451: the receipt is the STORED row, not a reconstruction of intent.
+    case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_mutation_event!(
             updated,
@@ -480,7 +656,7 @@ defmodule Barkpark.Tasks.Stage do
 
         {:ok, updated, [task_broadcast(updated, @event_task_staged, ev, observed_rev)]}
 
-      0 ->
+      :stale ->
         {:error, :stale_claim}
     end
   end
@@ -568,6 +744,8 @@ defmodule Barkpark.Tasks.Stage do
         "disposition_key" => adj.disposition && @disposition_key,
         "reopen_trigger" => adj.reopen_trigger,
         "reopen_trigger_key" => adj.reopen_trigger && @reopen_trigger_key,
+        "disposition_rerun" => adj.rerun,
+        "disposition_rerun_key" => adj.rerun && @disposition_rerun_key,
         "lapses_at" => engagement && Map.get(engagement, "lapses_at")
       }
     }

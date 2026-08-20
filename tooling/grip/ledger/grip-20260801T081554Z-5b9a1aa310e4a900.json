@@ -1,0 +1,53 @@
+{
+  "run_id": "grip-20260801T081554Z",
+  "recipes": [
+    {
+      "subject": "cmd:git",
+      "quantity": "grep:-c:0679c5dcb",
+      "rerun": "git rev-list origin/main --max-count=100000 | grep -c 0679c5dcb",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-08-01T08:15:54Z"
+    },
+    {
+      "subject": "docs/decisions/success-claim-census.md",
+      "quantity": "grep:-n:write-routed sites by hand",
+      "rerun": "git show origin/main:docs/decisions/success-claim-census.md | grep -n 'write-routed sites by hand' -A2",
+      "derived_level": "L2",
+      "deps": [
+        "docs/decisions/success-claim-census.md"
+      ],
+      "observed_at": "2026-08-01T08:15:54Z"
+    },
+    {
+      "subject": "internal/cli/hetzner_respost.go",
+      "quantity": "git:grep",
+      "rerun": "git grep -n 'DISCRIMINATOR' origin/main -- internal/cli/hetzner_respost.go",
+      "derived_level": "L3",
+      "deps": [
+        "internal/cli/hetzner_respost.go"
+      ],
+      "observed_at": "2026-08-01T08:15:54Z"
+    },
+    {
+      "subject": "tooling/grip/ledger.mjs",
+      "quantity": "grep:-n:VALUE-STORED\\|UNKNOWN-FIELD",
+      "rerun": "git show origin/main:tooling/grip/ledger.mjs | grep -n 'VALUE-STORED\\|UNKNOWN-FIELD'",
+      "derived_level": "L2",
+      "deps": [
+        "tooling/grip/ledger.mjs"
+      ],
+      "observed_at": "2026-08-01T08:15:54Z"
+    },
+    {
+      "subject": "internal/cli/hetzner_respost_basis_test.go",
+      "quantity": "grep:-n:hzResBasisRRSetKey",
+      "rerun": "git show origin/main:internal/cli/hetzner_respost_basis_test.go | grep -n 'hzResBasisRRSetKey'",
+      "derived_level": "L2",
+      "deps": [
+        "internal/cli/hetzner_respost_basis_test.go"
+      ],
+      "observed_at": "2026-08-01T08:15:54Z"
+    }
+  ]
+}

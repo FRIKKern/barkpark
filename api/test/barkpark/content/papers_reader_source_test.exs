@@ -100,7 +100,7 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
     assert {:blocks, ^labeled} = Content.Papers.reader_source(paper, "test", [])
   end
 
-  test "HTML-only source is sanitized without changing safe bytes and conflicting mixed provenance fails" do
+  test "HTML-only source is sanitized without changing safe bytes and unstamped mixed provenance serves blocks" do
     html = "<h1>Exact &amp; authored</h1>\n<p>two spaces  stay</p>"
 
     legacy = %Document{
@@ -150,7 +150,12 @@ defmodule Barkpark.Content.PapersReaderSourceTest do
       content: %{"blocks" => blocks, "body_html" => "<p>Different richer HTML</p>"}
     }
 
-    assert {:error, :ambiguous_source} = Content.Papers.reader_source(mixed, "test", [])
+    # An unstamped mixed row claims nothing about the current renderer, so since
+    # pe-w2-reader-stamp-guard it is LAGGING, not divergent: blocks are
+    # canonical, the derived HTML cache is rewritten. Only a row stamped with the
+    # current digest can still fail closed — pinned in
+    # test/barkpark/content/papers/reader_lagging_stamp_test.exs.
+    assert {:blocks, ^blocks} = Content.Papers.reader_source(mixed, "test", [])
   end
 
   test "reader source rejects punctuation-only block and HTML bodies" do

@@ -72,10 +72,21 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Errors, Warnings}
+  alias Barkpark.PortableDoc.Bpml.UnprintableError
   alias Barkpark.Tenancy
 
-  # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
-  @op_kinds ~w(append-block insert-after patch-block replace-block remove-block)
+  # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
+  #
+  # PDS-D458: `move-block` was absent here while `Patch.apply_to_blocks/2`
+  # implemented it, `Patch`'s moduledoc documented it, `BlockOps
+  # .locate_paper_affected/2` handled it and the Studio LiveView emitted it —
+  # so over HTTP it 422'd `malformed_op` / "every op must name a known
+  # DocPatchOp": an error saying a KNOWN verb is unknown. It is ADDED rather
+  # than refused, because there was no rule keeping it out — only an
+  # un-updated allowlist. (`Papers.Proposals`' `@insert_op_kinds` stays the
+  # narrower `append-block`/`insert-after` pair: that one IS a real rule —
+  # proposals may never touch an existing block — and it is not drift.)
+  @op_kinds ~w(append-block insert-after patch-block replace-block remove-block move-block)
 
   # Learn-pointer advisory for the legacy body_html leg (authoring-excellence
   # ae-ingest-learn-pointer). The errors-as-instructions pattern teaches what
@@ -86,6 +97,497 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # (D36/D42): this is that pipe's FIRST content-shape consumer, not a duplicate.
   @body_html_learn_code "legacy_body_html"
   @body_html_learn_message "This paper was ingested as opaque body_html; the preferred path is a native `blocks` list (in-canvas editing, ~50 block types). Learn the block vocabulary and composition grammar in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan, then re-ingest with `blocks`."
+
+  @doc """
+  `POST /v1/plugins/bulldocs/papers/validate` — the validate-all dry-run (BPML
+  masterplan W0). Accepts the SAME body shapes as ingest (`blocks` or `bpml`,
+  plus `slug`/`title`/`tags`/`description`) and returns EVERY violation in one
+  reply, nothing persisted:
+
+    * BPML parse errors (strict grammar, teaching hints, line numbers) — when
+      the document doesn't parse, wall gates can't run and the parse errors ARE
+      the reply;
+    * every failing publish-wall gate at once (`AuthoringWall.validate_all/5`:
+      label spine, tag registry, dedup, epic quality) instead of one 4xx at a
+      time;
+    * the paper structural gates: template declarations and the hollow-body
+      check.
+
+  Always 200 with `{valid, violations}` — the VALIDATION ran successfully; the
+  paper's shortcomings are data, not transport errors. Advisory by design: the
+  real write's wall stays authoritative.
+  """
+  def validate(conn, params) do
+    case validate_normalize(params) do
+      {:error, bpml_errors} ->
+        json(conn, %{valid: false, violations: Enum.map(bpml_errors, &bpml_violation/1)})
+
+      {:ok, slug, blocks, merged} ->
+        ref = %Barkpark.Content.Document{
+          doc_id: slug,
+          type: "paper",
+          dataset: Content.paper_default_dataset(),
+          title: merged["title"],
+          content: %{
+            "blocks" => blocks,
+            "tags" => merged["tags"],
+            "description" => merged["description"]
+          }
+        }
+
+        violations = paper_wall_violations(conn, ref) ++ paper_structure_violations(blocks)
+        json(conn, %{valid: violations == [], violations: violations})
+    end
+  end
+
+  # The wall gates as ONE violation list — `AuthoringWall.validate_all/4` over a
+  # synthesized in-memory ref, each tuple routed through the shared v1 envelope
+  # (status dropped: these are data inside a reply, not the reply's transport).
+  # SHARED by the validate dry-run and the create-on-push arm below so the two
+  # doors cannot drift: what the dry-run reports IS what a create enforces.
+  defp paper_wall_violations(conn, ref) do
+    Barkpark.Content.AuthoringWall.validate_all(ref, "paper", ref.doc_id, ref.dataset)
+    |> Enum.map(fn tuple ->
+      {:error, tuple} |> Errors.to_envelope(conn) |> Map.delete(:status)
+    end)
+  end
+
+  # The paper structural gates (template declarations + the hollow-body check)
+  # as violation maps — the other shared half of the dry-run/create parity.
+  defp paper_structure_violations(blocks) do
+    structure =
+      Barkpark.Content.Papers.Template.validate(blocks || []) ++
+        if Barkpark.Content.Papers.Hollow.hollow?(blocks) do
+          [
+            %{
+              code: "hollow_paper",
+              message: "the paper is a skeleton — a title with no content blocks",
+              hint: "add body blocks before publishing"
+            }
+          ]
+        else
+          []
+        end
+
+    Enum.map(structure, &structure_violation/1)
+  end
+
+  @doc """
+  `POST /v1/plugins/bulldocs/papers/:slug/sync` — the working-copy push (BPML
+  masterplan W3). The client sends its edited BPML document plus the rev its
+  pull anchored on; the SERVER parses strictly, derives the op batch from an
+  id-keyed diff (`Bpml.Diff.derive/2`, replay-proven before anything applies),
+  and applies it atomically under `if_rev`. Nobody hand-writes an op, and the
+  grammar keeps its single Elixir owner — the CLI never parses BPML.
+
+    * parse failure → 422 with the collected teaching errors;
+    * the slug does not exist → CREATE-ON-PUSH (pe-w6 / charter D41): the parsed
+      document births the paper through the FULL publish wall — the same
+      `AuthoringWall.validate_all` + `Template.validate` + `Hollow` gates the
+      validate dry-run reports (shared helpers, so the doors cannot drift),
+      then `Content.upsert_paper` (which re-runs the wall as the authority
+      BEFORE any Repo write). A wall refusal is a 422 `create_wall` envelope
+      carrying EVERY violation under `errors`, and writes NOTHING — no draft,
+      no partial row. `baseRev` is not consulted on this arm (the scaffold
+      anchors at rev 0; an EXISTING slug still 412s on a stale anchor). The
+      document's own `<paper slug>` must match the pushed path slug (422
+      `slug_mismatch` otherwise — the path is the identity);
+    * the paper's CURRENT blocks are unprintable → 422 `bpml_unprintable`
+      BEFORE any op derives (a BPML document cannot describe them, so a sync
+      would silently delete every non-kernel block behind a 200);
+    * applied but the post-write state is unprintable → still 200 with `rev`
+      (the write LANDED — a 500 would strand the anchor) and `bpml: nil` plus a
+      `bpml_unprintable` marker;
+    * `baseRev` ≠ current rev → 412 (pull first — conflicts surface, nothing
+      is silently lost);
+    * no changes → 200 `{ok, unchanged: true}`;
+    * applied → 200 `{ok, rev, op_count, bpml}` where `bpml` is the CANONICAL
+      print of the persisted blocks (post-normalization) — the client
+      overwrites its file with it, so working copies always converge on the
+      server's truth.
+  """
+  def sync(conn, %{"slug" => slug} = params) do
+    bpml = params["bpml"]
+    base_rev = params["baseRev"]
+    dataset = params["dataset"] || Content.paper_default_dataset()
+    scope = paper_scope_opts(conn, params)
+
+    cond do
+      not is_binary(bpml) ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{error: %{code: "malformed", message: "sync needs a bpml (string) body"}})
+
+      not (is_binary(base_rev) and base_rev != "") ->
+        conn
+        |> put_status(:bad_request)
+        |> json(%{
+          error: %{
+            code: "malformed",
+            message: "sync needs baseRev — the rev your pull anchored on (x-paper-rev)"
+          }
+        })
+
+      true ->
+        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+          {:error, errors} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{code: "bpml", message: "the BPML document did not parse", errors: errors}
+            })
+
+          {:ok, parsed} ->
+            sync_apply(conn, slug, parsed, base_rev, dataset, scope)
+        end
+    end
+  end
+
+  defp sync_apply(conn, slug, parsed, base_rev, dataset, scope) do
+    case Content.get_paper(slug, dataset, scope) do
+      nil ->
+        sync_create(conn, slug, parsed, dataset, scope)
+
+      paper ->
+        # The paper-level integer rev — the same value the ops if_rev guard
+        # compares (content["rev"]), and the same one pull anchors in
+        # x-paper-rev. NEVER the row's _rev hash.
+        current_rev = to_string(get_in(paper.content || %{}, ["rev"]))
+        current_blocks = get_in(paper.content || %{}, ["blocks"]) || []
+        unprintable = unprintable_current(current_blocks)
+
+        cond do
+          # ENTRY GUARD, before anything derives. If the paper's CURRENT blocks
+          # cannot be printed as BPML, the pushed document cannot describe them
+          # either — and `Diff.derive/2` would faithfully remove every block the
+          # (necessarily kernel-only) parse does not carry: a silent DESTRUCTION
+          # behind a 200. Nothing legitimate breaks, because pull already
+          # refuses such a paper (422) — no client can hold a working copy of
+          # one. Ordered before the rev check on purpose: an unprintable paper
+          # has no honest BPML sync at ANY rev, so "pull first" would be a lie.
+          unprintable != nil ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: "bpml_unprintable",
+                message:
+                  "this paper's current blocks cannot be printed as BPML, so a BPML document cannot describe them — syncing would delete everything outside the kernel: #{unprintable}",
+                hint:
+                  "edit this paper with block ops (or bp bulldocs publish); BPML sync works once every block is inside the kernel vocabulary"
+              }
+            })
+
+          current_rev != to_string(base_rev) ->
+            conn
+            |> put_status(:precondition_failed)
+            |> json(%{
+              error: %{
+                code: "precondition_failed",
+                message: "paper is at rev #{current_rev}, your copy anchored on #{base_rev}",
+                hint: "bp paper pull to absorb the drift, re-apply your edit, push again"
+              }
+            })
+
+          true ->
+            case Barkpark.PortableDoc.Bpml.Diff.derive(current_blocks, parsed["blocks"] || []) do
+              {:error, :diff_verification_failed} ->
+                conn
+                |> put_status(:unprocessable_entity)
+                |> json(%{
+                  error: %{
+                    code: "bpml",
+                    message: "the derived op batch failed its replay proof — nothing was applied",
+                    hint: "this is a server-side differ bug; fall back to bp bulldocs publish"
+                  }
+                })
+
+              {:ok, _minted, []} ->
+                conn
+                |> put_resp_header("x-paper-rev", current_rev)
+                |> json(%{ok: true, slug: slug, unchanged: true, rev: current_rev, op_count: 0})
+
+              {:ok, _minted, ops} ->
+                sync_persist(conn, slug, ops, base_rev, dataset, scope)
+            end
+        end
+    end
+  end
+
+  defp sync_persist(conn, slug, ops, base_rev, dataset, scope) do
+    case Content.apply_paper_block_ops(slug, ops, dataset, scope ++ [if_rev: base_rev]) do
+      {:ok, result} ->
+        {canonical, echo_refusal} =
+          case Content.get_paper(slug, dataset, scope) do
+            nil -> {nil, nil}
+            paper -> canonical_echo(paper)
+          end
+
+        payload = %{
+          ok: true,
+          slug: result.slug,
+          # STRING on the wire, like x-paper-rev and the unchanged leg — one
+          # rev spelling for the working copy to anchor on.
+          rev: to_string(result.rev),
+          op_count: result.op_count,
+          bpml: canonical
+        }
+
+        conn
+        |> put_resp_header("x-paper-rev", to_string(result.rev))
+        |> json(maybe_mark_echo(payload, echo_refusal))
+
+      {:error, :precondition_failed} ->
+        conn
+        |> put_status(:precondition_failed)
+        |> json(%{
+          error: %{
+            code: "precondition_failed",
+            message: "another write landed mid-sync; no ops applied",
+            hint: "bp paper pull, re-apply your edit, push again"
+          }
+        })
+
+      {:error, {:constraint, message, op_kind}} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
+      {:error, _other} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "invalid_op", message: "the derived batch could not be applied"}
+        })
+    end
+  end
+
+  # Create-on-push (pe-w6 / charter D41): the sync door's birth arm. An absent
+  # slug + a parsed document = the paper does not exist yet, so CREATE it —
+  # through the FULL publish wall, never around it, and never via the
+  # RequireIngestToken ingest route (this stays the sync route the working
+  # copy already authenticated on).
+  #
+  # Wall order, deliberately validate-first: the SAME shared helpers the
+  # validate dry-run uses (`paper_wall_violations/2` + `paper_structure_
+  # violations/1`) run over the parsed document and, on ANY violation, refuse
+  # with every violation in ONE 422 — before `upsert_paper` is even called, so
+  # a wall-refused create provably writes NOTHING. The upsert then re-runs the
+  # wall as the AUTHORITY (enforce_blocks_wall sits before the Repo insert in
+  # BlockOps — its own refusals also precede any write); its residual errors
+  # (a dedup race, a changeset) route through the same envelopes as ingest.
+  #
+  # NOTE the deliberate absence of a locked title stamp: BPML cannot spell
+  # `role`/`locked`, and `Diff.derive/2` compares blocks by FULL map equality —
+  # a locked-title paper's every future push would derive a replace-block that
+  # strips `locked`, which `Patch.check_locked_placement/3` rejects. The one
+  # door must birth papers the same door can keep editing, so the created
+  # paper keeps its plain h1 (whose text still becomes the row title via
+  # `BlockOps.paper_title/2`), and `Template.validate/1` passes it under the
+  # additive no-locked-blocks rule — exactly as the validate dry-run does.
+  defp sync_create(conn, slug, parsed, dataset, scope) do
+    doc_slug = parsed["slug"]
+
+    if is_binary(doc_slug) and doc_slug != "" and doc_slug != slug do
+      conn
+      |> put_status(:unprocessable_entity)
+      |> json(%{
+        error: %{
+          code: "slug_mismatch",
+          message:
+            "the document says <paper slug=\"#{doc_slug}\"> but you pushed to #{slug} — nothing was written",
+          hint:
+            "the pushed path is the paper's identity; rename the file or fix the <paper slug> so they agree"
+        }
+      })
+    else
+      blocks = parsed["blocks"] || []
+
+      ref = %Barkpark.Content.Document{
+        doc_id: slug,
+        type: "paper",
+        dataset: dataset,
+        title: create_title(blocks, parsed, slug),
+        content: %{
+          "blocks" => blocks,
+          "tags" => parsed["tags"],
+          "description" => parsed["description"]
+        }
+      }
+
+      case paper_wall_violations(conn, ref) ++ paper_structure_violations(blocks) do
+        [] ->
+          sync_create_persist(conn, slug, parsed, blocks, dataset, scope)
+
+        violations ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            error: %{
+              code: "create_wall",
+              message:
+                "no paper #{slug} exists yet; creating it ran the full publish wall, which refused — nothing was written",
+              hint:
+                "fix each violation below; see them before pushing with the dry-run: bp paper push #{slug} --check (POST /v1/plugins/bulldocs/papers/validate)",
+              errors: violations
+            }
+          })
+      end
+    end
+  end
+
+  defp sync_create_persist(conn, slug, parsed, blocks, dataset, scope) do
+    attrs =
+      %{
+        "slug" => slug,
+        "blocks" => blocks,
+        "style" => parsed["style"] || "article",
+        "tags" => parsed["tags"],
+        "description" => parsed["description"],
+        "dataset" => dataset
+      }
+      |> maybe_put("workspace_id", scope[:workspace_id])
+      |> maybe_put("project_id", scope[:project_id])
+
+    # Advisory channel — same reset+drain pair as the ingest legs (D36/D42),
+    # so the wall's advise band (soft-dup near-miss, off-norm tag count) rides
+    # the created receipt instead of being silently dropped.
+    Warnings.reset()
+
+    case Content.upsert_paper(attrs) do
+      {:ok, paper} ->
+        {canonical, echo_refusal} = canonical_echo(paper)
+        rev = to_string(get_in(paper.content || %{}, ["rev"]))
+
+        payload = %{
+          ok: true,
+          slug: paper.doc_id,
+          created: true,
+          rev: rev,
+          op_count: length(get_in(paper.content || %{}, ["blocks"]) || []),
+          bpml: canonical
+        }
+
+        conn
+        |> put_resp_header("x-paper-rev", rev)
+        |> json(maybe_mark_echo(with_warnings(payload), echo_refusal))
+
+      # The residual refusals AFTER the validate-first precheck (a dedup race,
+      # an encryption seal failure, a changeset) — routed exactly like the
+      # ingest legs so every wall shape keeps its one envelope. None of these
+      # arms follow a write: enforce_blocks_wall precedes the Repo insert.
+      {:error, {:halted, reason}} ->
+        conn
+        |> put_status(:conflict)
+        |> json(%{error: %{code: "halted", message: reason}})
+
+      {:error, {:label_spine, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:invalid_paper_structure, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:unknown_tag, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:duplicate_of, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        invalid_paper_error(conn, changeset)
+
+      {:error, _reason} = err ->
+        render_error(conn, err)
+    end
+  end
+
+  # The create precheck's title, derived the way the upsert wall will derive it
+  # (`BlockOps.paper_title/2`: first heading's text wins) so the dry-run-shaped
+  # precheck walls the SAME title the authoritative wall sees.
+  defp create_title(blocks, parsed, slug) do
+    heading_text =
+      Enum.find_value(blocks, fn b ->
+        if is_map(b) and b["type"] == "heading" and is_binary(b["text"]) and b["text"] != "",
+          do: b["text"]
+      end)
+
+    heading_text || parsed["title"] || slug
+  end
+
+  # The sync entry guard's probe: nil when every current block is printable,
+  # else the printer's typed refusal message (kind+type). A print is pure string
+  # work on blocks already in memory — cheap enough to run before deriving.
+  defp unprintable_current(blocks) do
+    _ = Barkpark.PortableDoc.Bpml.print_blocks(blocks)
+    nil
+  rescue
+    e in UnprintableError -> Exception.message(e)
+  end
+
+  # The canonical echo AFTER a successful write. The ops already committed, so an
+  # unprintable post-write state must NOT change the verdict: a 500 would strand
+  # the client's rev anchor on a write that landed, and a 422 would simply lie.
+  # It degrades to `bpml: nil` plus an explicit marker, and the rev is still the
+  # anchor to pull from. Only UnprintableError is rescued — a real printer bug
+  # still crashes loudly (charter D3).
+  # Public (not an action — no route names it) so the degrade contract is
+  # directly testable: the sync path itself can no longer REACH an unprintable
+  # post-write state now that the entry guard closes that door, and a rescue
+  # nobody can prove is a rescue nobody should trust.
+  @doc false
+  def canonical_echo(paper) do
+    bpml =
+      Barkpark.PortableDoc.Bpml.print_paper(%{
+        "slug" => paper.doc_id,
+        "title" => paper.title,
+        "blocks" => get_in(paper.content || %{}, ["blocks"]) || []
+      })
+
+    {bpml, nil}
+  rescue
+    e in UnprintableError -> {nil, Exception.message(e)}
+  end
+
+  @doc false
+  def maybe_mark_echo(payload, nil), do: payload
+
+  def maybe_mark_echo(payload, refusal) do
+    Map.merge(payload, %{
+      bpml_unprintable: refusal,
+      hint:
+        "the ops applied and `rev` is your new anchor, but the persisted blocks can no longer be printed as BPML — pull format=json to see them"
+    })
+  end
+
+  # Normalize the two accepted validate bodies down to {slug, blocks, merged}.
+  defp validate_normalize(%{"bpml" => bpml}) when is_binary(bpml) do
+    case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+      {:ok, parsed} -> {:ok, parsed["slug"] || "unvalidated-paper", parsed["blocks"], parsed}
+      {:error, errors} -> {:error, errors}
+    end
+  end
+
+  defp validate_normalize(%{} = params) do
+    {:ok, params["slug"] || "unvalidated-paper", params["blocks"], params}
+  end
+
+  defp bpml_violation(e),
+    do: %{code: "bpml-" <> e.code, message: e.message, line: e.line, hint: e.hint}
+
+  defp structure_violation(%{code: _} = v), do: v
+  defp structure_violation(other) when is_binary(other), do: %{code: "structure", message: other}
+  defp structure_violation(other), do: %{code: "structure", message: inspect(other)}
 
   # Native portable-doc blocks path (preferred). Renders in article mode so
   # the doc shows native typography at /papers/:slug. `style` defaults to
@@ -109,13 +611,59 @@ defmodule BarkparkWeb.BulldocsIngestController do
           invalid_text(conn)
         end
 
+      # BPML leg (masterplan W1): the body carries a whole <paper> document as
+      # readable markup. Parse (strict, teaching errors) → the parsed doc's
+      # slug/title/description/tags/blocks feed the SAME blocks path as native
+      # JSON — BPML is a spelling, never a second pipeline. Explicit top-level
+      # params win over the parsed document's fields.
+      %{"bpml" => bpml} = accepted when is_binary(bpml) ->
+        case Barkpark.PortableDoc.Bpml.parse_paper(bpml) do
+          {:ok, parsed} ->
+            merged =
+              parsed
+              |> Map.delete("blocks")
+              |> Map.merge(Map.delete(accepted, "bpml"))
+
+            slug = merged["slug"]
+
+            cond do
+              not (is_binary(slug) and slug != "") ->
+                conn
+                |> put_status(:bad_request)
+                |> json(%{
+                  error: %{
+                    code: "malformed",
+                    message: "no slug: pass it on <paper slug=\"…\"> or as a top-level param"
+                  }
+                })
+
+              not valid_ingest_text?(Map.put(merged, "blocks", parsed["blocks"])) ->
+                invalid_text(conn)
+
+              true ->
+                ingest_blocks(conn, slug, parsed["blocks"], merged)
+            end
+
+          {:error, errors} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: "bpml",
+                message: "the BPML document did not parse",
+                errors: errors
+              }
+            })
+        end
+
       _malformed ->
         conn
         |> put_status(:bad_request)
         |> json(%{
           error: %{
             code: "malformed",
-            message: "slug plus either blocks (list) or body_html (string) are required"
+            message:
+              "slug plus either blocks (list), body_html (string), or bpml (string) are required"
           }
         })
     end
@@ -196,8 +744,39 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, changeset} ->
+      # The wall's FIFTH shape (deploy-reliability D541). Hand-routing only the
+      # four above meant this tuple fell into the changeset catch-all below, and
+      # a bare variable matches a tuple: invalid_paper_error/2 handed the WALL
+      # TUPLE to Ecto.Changeset.traverse_errors/2 (one clause, `%Changeset{}`) →
+      # FunctionClauseError → 500 "unknown error", while the wall had already
+      # computed the named failures. 33 of 299 distinct trailing-24h 500s on
+      # guerrilla's live slot were this, including the epic cycle's own
+      # wave-Paper publish. The 422 envelope already exists (errors.ex).
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      # The wall's SIXTH shape, and the only TRANSIENT one: the duplicate scan
+      # could not RUN (pool saturation / blown query budget). Its own arm, NOT
+      # render_error/2 — the shared envelope stamps the plugin-veto hint
+      # ("A plugin's lifecycle hook vetoed this write"), which describes an
+      # outage as a policy refusal and sends the caller to fix a document that
+      # is fine (charter D542). The wire code/status stay `halted` 409 (what
+      # errors.ex already emits and docs/api-v1.md §9 documents); the honest
+      # 503 `dedup_unavailable` is the separately-filed contract change
+      # (dr-w32-bl-dedup-unavailable-is-an-outage-called-a-veto) so a wall fix
+      # and a vocabulary change do not ride one PR.
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         invalid_paper_error(conn, changeset)
+
+      # Any OTHER non-changeset reason goes through the shared envelope rather
+      # than the changeset renderer. The 500 this head cured WAS a non-changeset
+      # reason reaching a changeset-only renderer; a bare tail would rebuild it
+      # for the next shape the wall learns.
+      {:error, _reason} = err ->
+        render_error(conn, err)
     end
   end
 
@@ -265,8 +844,19 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, changeset} ->
+      # Wall shapes five and six — see the blocks head above (D541/D542). This
+      # leg is walled identically, so it 500'd identically.
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         invalid_paper_error(conn, changeset)
+
+      {:error, _reason} = err ->
+        render_error(conn, err)
     end
   end
 
@@ -324,8 +914,21 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:duplicate_of, _}} = err ->
         render_error(conn, err)
 
-      {:error, changeset} ->
+      # Shape-parity with the paper legs (D541/D542) — dead code for "session"
+      # today (`@walled_types` is `~w(paper task)`), live the day a walled
+      # blocks-type joins the whitelist, which is exactly when a bare catch-all
+      # would 500 again.
+      {:error, {:invalid_epic_paper_quality, _}} = err ->
+        render_error(conn, err)
+
+      {:error, {:dedup_unavailable, reason}} ->
+        dedup_unavailable_error(conn, reason)
+
+      {:error, %Ecto.Changeset{} = changeset} ->
         invalid_paper_error(conn, changeset)
+
+      {:error, _reason} = err ->
+        render_error(conn, err)
     end
   end
 
@@ -592,6 +1195,92 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # is the prior behaviour). Threaded into Content.apply_paper_block_ops/2 as the
   # `:if_rev` opt so the check happens inside the atomic load, not racily here.
   def apply_op(conn, %{"slug" => slug, "ops" => ops} = params) when is_list(ops) do
+    case expand_bpml_ops(ops) do
+      {:error, errors} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{
+          error: %{code: "bpml", message: "a BPML op fragment did not parse", errors: errors}
+        })
+
+      {:ok, ops} ->
+        apply_op_batch(conn, slug, ops, params)
+    end
+  end
+
+  def apply_op(conn, %{"slug" => slug} = params) do
+    op = Map.delete(params, "slug")
+
+    cond do
+      not valid_op_shape?(op) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+
+      true ->
+        dataset = params["dataset"] || Content.paper_default_dataset()
+
+        case Content.apply_paper_block_op(
+               slug,
+               op,
+               dataset,
+               paper_scope_opts(conn, params)
+             ) do
+          {:ok, result} ->
+            conn
+            |> put_status(:ok)
+            |> json(%{
+              ok: true,
+              slug: slug,
+              op: result.op_kind,
+              rev: result.rev,
+              block_id: result.block_id,
+              fragment_html: result.fragment_html,
+              position: result.position
+            })
+
+          {:error, :not_found} ->
+            conn
+            |> put_status(:not_found)
+            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
+
+          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
+          {:error, {:constraint, message, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
+
+          {:error, {code, target, op_kind}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              error: %{
+                code: to_string(code),
+                message: "#{op_kind} failed on #{inspect(target)}",
+                op: op_kind,
+                target: target
+              }
+            })
+
+          {:error, {:invalid_op, _}} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+
+          {:error, {:halted, reason}} ->
+            conn
+            |> put_status(:conflict)
+            |> json(%{error: %{code: "halted", message: reason}})
+
+          {:error, _other} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+        end
+    end
+  end
+
+  defp apply_op_batch(conn, slug, ops, params) do
     cond do
       not Enum.all?(ops, &valid_op_shape?/1) ->
         conn
@@ -680,75 +1369,41 @@ defmodule BarkparkWeb.BulldocsIngestController do
     end
   end
 
-  def apply_op(conn, %{"slug" => slug} = params) do
-    op = Map.delete(params, "slug")
+  # An op MAY spell its payload as BPML: {"op":"replace-block","id":…,"bpml":"<callout …>"}.
+  # The fragment must parse to EXACTLY one block — one op, one block, so op
+  # receipts and counts stay truthful; multi-block edits are multiple ops.
+  defp expand_bpml_ops(ops) do
+    ops
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn
+      {%{"bpml" => bpml} = op, idx}, {:ok, acc} when is_binary(bpml) ->
+        case Barkpark.PortableDoc.Bpml.parse_blocks(bpml) do
+          {:ok, [block]} ->
+            {:cont, {:ok, [op |> Map.delete("bpml") |> Map.put("block", block) | acc]}}
 
-    cond do
-      not valid_op_shape?(op) ->
-        conn
-        |> put_status(:unprocessable_entity)
-        |> json(%{error: %{code: "malformed_op", message: "op must name a known DocPatchOp"}})
+          {:ok, blocks} ->
+            {:halt,
+             {:error,
+              [
+                %{
+                  code: "bpml-fragment-arity",
+                  message:
+                    "op #{idx} bpml fragment parsed to #{length(blocks)} blocks — an op carries exactly one",
+                  line: 1,
+                  hint: "split into one op per block"
+                }
+              ]}}
 
-      true ->
-        dataset = params["dataset"] || Content.paper_default_dataset()
-
-        case Content.apply_paper_block_op(
-               slug,
-               op,
-               dataset,
-               paper_scope_opts(conn, params)
-             ) do
-          {:ok, result} ->
-            conn
-            |> put_status(:ok)
-            |> json(%{
-              ok: true,
-              slug: slug,
-              op: result.op_kind,
-              rev: result.rev,
-              block_id: result.block_id,
-              fragment_html: result.fragment_html,
-              position: result.position
-            })
-
-          {:error, :not_found} ->
-            conn
-            |> put_status(:not_found)
-            |> json(%{error: %{code: "not_found", message: "no paper for slug #{slug}"}})
-
-          # Constraint-vocabulary veto (pdd-t20) — see the batch clause above.
-          {:error, {:constraint, message, op_kind}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "constraint", message: message, op: op_kind}})
-
-          {:error, {code, target, op_kind}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{
-              error: %{
-                code: to_string(code),
-                message: "#{op_kind} failed on #{inspect(target)}",
-                op: op_kind,
-                target: target
-              }
-            })
-
-          {:error, {:invalid_op, _}} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
-
-          {:error, {:halted, reason}} ->
-            conn
-            |> put_status(:conflict)
-            |> json(%{error: %{code: "halted", message: reason}})
-
-          {:error, _other} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
+          {:error, errors} ->
+            {:halt, {:error, Enum.map(errors, &Map.put(&1, :op_index, idx))}}
         end
+
+      {op, _idx}, {:ok, acc} ->
+        {:cont, {:ok, [op | acc]}}
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      error -> error
     end
   end
 
@@ -886,7 +1541,13 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # see the render_error/2 comment above); `details` is ADDITIVE — the per-field
   # validation errors, so a caller can see exactly what failed instead of
   # guessing from the flat message.
-  defp invalid_paper_error(conn, changeset) do
+  # The %Ecto.Changeset{} pattern is LOAD-BEARING, not decoration: this head is
+  # changeset-only (traverse_errors/2 has exactly one clause and matches
+  # `%Changeset{}`), and the untyped head it replaces silently accepted the wall
+  # tuples the case clauses above forgot, turning a computed 422 into a 500
+  # "unknown error" (deploy-reliability D541). A future unrouted shape now fails
+  # at the case, visibly, instead of inside Ecto.
+  defp invalid_paper_error(conn, %Ecto.Changeset{} = changeset) do
     conn
     |> put_status(:unprocessable_entity)
     |> json(%{
@@ -896,6 +1557,37 @@ defmodule BarkparkWeb.BulldocsIngestController do
         details: changeset_field_errors(changeset)
       }
     })
+  end
+
+  # The dedup wall could not RUN. Nothing was written and nothing was refused on
+  # the merits — so the caller's correct move is to RESEND THE SAME REQUEST, not
+  # to edit the paper. It is BUILT by the shared envelope (so code, message,
+  # status and — the part a hand-rolled body silently dropped — `request_id` stay
+  # byte-identical to what every other v1 error carries, and an operator can
+  # actually quote the failing request) and then has exactly ONE field replaced:
+  # the code-keyed `halted` hint, which reads "A plugin's lifecycle hook vetoed
+  # this write" and is the one sentence that would send an author editing a
+  # document that is fine (charter D542). The wire code/status stay `halted` 409
+  # (docs/api-v1.md §9) — the honest 503 `dedup_unavailable` code is a
+  # vocabulary change filed on its own task, because registering a new code
+  # forces an errors.ex + byte-capped docs edit.
+  @dedup_unavailable_hint "Transient: the duplicate-scan could not complete, so this paper was neither written nor refused on its merits. Resend the identical request. If it keeps failing the database is degraded — this is an outage to report, not a document to fix."
+
+  defp dedup_unavailable_error(conn, reason) do
+    env = Errors.to_envelope({:error, {:dedup_unavailable, reason}}, conn)
+
+    body =
+      env
+      |> Map.delete(:status)
+      |> Map.put(:hint, @dedup_unavailable_hint)
+
+    conn
+    # `retry-after` makes the transience machine-readable. 5s is a floor, not a
+    # measurement — nothing yet measures how long a saturated pool takes to
+    # recover, and a caller that retries later is never worse off.
+    |> put_resp_header("retry-after", "5")
+    |> put_status(env.status)
+    |> json(%{error: body})
   end
 
   defp changeset_field_errors(changeset) do

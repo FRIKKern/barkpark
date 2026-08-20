@@ -48,10 +48,19 @@ defmodule BarkparkCloud.Registry.DeploymentTest do
   describe "W1 static-build changeset fields" do
     @site_id "33333333-3333-3333-3333-333333333333"
 
-    test "status enum is unchanged — the six visible stages do NOT widen it" do
+    test "the six visible STAGES do NOT widen the status enum (only a real outcome does)" do
       # STAGE telemetry (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE) rides the nullable
       # `stage` column, never the coarse status lifecycle.
-      assert Deployment.statuses() == ~w(queued building pushing live failed cancelled)
+      #
+      # deploy-truth W1 (charter D9) adds exactly ONE status, and it is an
+      # OUTCOME, not a stage: `deferred` — the box was busy, this build did not
+      # happen, and a rebuild has been re-queued. It exists because writing that
+      # `failed` was the fleet's largest failure class (8,830 of 17,171 failed
+      # rows) and made a transient refusal indistinguishable from a broken build.
+      assert Deployment.statuses() ==
+               ~w(queued building pushing live failed cancelled deferred)
+
+      refute Enum.any?(Deployment.statuses(), &(&1 in BarkparkCloud.Sites.Deploy.stages()))
     end
 
     test "changeset casts build_id and content_rev on create" do
@@ -128,11 +137,23 @@ defmodule BarkparkCloud.Registry.DeploymentPersistenceTest do
     assert {:ok, _} = Registry.create_deployment(site_b, %{build_id: "b_shared"})
   end
 
-  test "two build_id-less deployments coexist (the partial index exempts NULLs)" do
+  # deploy-truth W1 (charter D10): this used to assert that two build_id-less
+  # deployments COEXIST. They did — and that is precisely the hole the re-key
+  # closed: the active index keyed on `git_ref` (NULL on 26,395 of 26,423
+  # production rows), so two builds for one site were always allowed to race and
+  # the box answered the second one 409. Two build_id-less rows still coexist
+  # across the site's HISTORY; what is refused is two of them ACTIVE at once.
+  test "two build_id-less deployments coexist across history, but never two ACTIVE at once" do
     site = site_fixture()
 
-    {:ok, _} = Registry.create_deployment(site, %{git_ref: "sha1"})
-    # A second container-style deployment with no build_id must NOT collide.
+    {:ok, first} = Registry.create_deployment(site, %{git_ref: "sha1"})
+
+    assert {:error, cs} = Registry.create_deployment(site, %{git_ref: "sha2"})
+    assert {"a build for this site is already in progress", _} = cs.errors[:git_ref]
+
+    # Once the first build is settled the slot is free — the build_id partial
+    # index still exempts NULLs, so a second build_id-less row inserts fine.
+    {:ok, _} = Registry.transition_deployment(first, %{status: "failed"})
     assert {:ok, _} = Registry.create_deployment(site, %{git_ref: "sha2"})
   end
 
