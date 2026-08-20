@@ -942,7 +942,7 @@ defmodule Barkpark.Tenancy do
     if slug_value(ws_attrs) == @default_slug do
       {:error, singleton_slug_error(ws_attrs)}
     else
-      do_create_owned_workspace(ws_attrs, principal_id, principal_type)
+      do_create_owned_workspace(ws_attrs, principal_id, principal_type, co_owner_user_id)
     end
   end
 
@@ -999,7 +999,7 @@ defmodule Barkpark.Tenancy do
     |> Map.put(:action, :insert)
   end
 
-  defp do_create_owned_workspace(ws_attrs, principal_id, principal_type) do
+  defp do_create_owned_workspace(ws_attrs, principal_id, principal_type, co_owner_user_id) do
     Repo.transaction(fn ->
       with {:ok, workspace} <- create_workspace(ws_attrs),
            {:ok, _membership} <-
