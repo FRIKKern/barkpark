@@ -93,7 +93,7 @@ is the status the API actually returns for that code.
 | `csrf_required` | 403 | `3` | CSRF token missing (session-cookie path). | `csrf required` — rare from the CLI; treat as auth. |
 | `forbidden_field` | 422 | `3` | Filter/order over a field the caller may not read. | `forbidden field: <field>` — use a token that can read it (keys on code, not the 422). |
 | `malformed` | 400 | `2` | Request body/args were invalid. | `bad request: <message>` — name the offending arg. |
-| `invalid_filter` | 400 | `2` | Unknown filter operator. | `invalid filter operator: <op>` — print the valid set from the message. |
+| `invalid_filter` | 400 | `2` | Unknown filter operator, or a `filter[<key>]` the route cannot honour (`GET /v1/tasks`). | `invalid filter operator: <op>` — print the valid set from the message. |
 | `validation_failed` | 422 | `5` | Document failed schema validation. | `validation failed` — print `details`/`errors` field paths. |
 | `invalid_paper` | 422 | `5` | Bulldocs paper payload invalid. | `invalid paper: <message>`. |
 | `malformed_op` | 422 | `5` | Bulldocs block-op malformed. | `malformed op: <message>`. |
