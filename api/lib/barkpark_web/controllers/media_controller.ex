@@ -12,6 +12,49 @@ defmodule BarkparkWeb.MediaController do
 
   action_fallback BarkparkWeb.FallbackController
 
+  # ── Unscoped-read confinement (task-2e4a3692adf5c565) ───────────────────────
+  #
+  # `AssignDefaultScope` passes the conn through UNTOUCHED when nothing is
+  # seeded at slug "default" (its own moduledoc says so — it never halts), so
+  # `scope_opts/1` emits no `:workspace_id`, and the `Media` read helpers hand
+  # that nil to `Content.Scope.scope_to_workspace_or_global/3`, whose nil arm
+  # returns the query UNTOUCHED. Every flat read below then answered from EVERY
+  # tenant's rows, to an anonymous caller. Reachable in one admin call:
+  # `DELETE /api/workspaces/default` has no guard against removing the seeded
+  # Default, and `Seeds.Shared.ensure_default_scope/0` runs only from mix seeds,
+  # never at boot — so the absence is permanent once taken.
+  #
+  # THE RULE: an unscoped caller may see only the SHARED/GLOBAL layer
+  # (`workspace_id IS NULL`) — never another tenant's rows. Deliberately a
+  # per-ROW rule rather than a blanket refusal, because only a per-row rule does
+  # both jobs at once: a legacy single-tenant install (every row NULL) keeps
+  # serving everything unchanged, while a multi-tenant install with a missing
+  # Default refuses foreign rows. `scope_to_workspace_including_global/3`
+  # (content/scope.ex:178) already expresses the same distinction query-side.
+  #
+  # Applied HERE and not inside `Media`, deliberately: `Media.list_files/1`
+  # (plugins/media/assets.ex:205), `Media.get_file_by_path/2` (preview.ex:120)
+  # and the unscoped reads in media_test.exs are legitimate internal global
+  # callers, so narrowing the shared helper would change behaviour well outside
+  # this route family. Making an empty scope fail CLOSED at the Content/Media
+  # boundary — which would retire this whole fail-open class rather than its
+  # third instance — is filed separately.
+  #
+  # RESIDUAL, stated rather than left implicit: a NEW flat read action added to
+  # this controller fails open again until that boundary work lands. Route any
+  # new read through `confine_one/2` or `confine_many/2`.
+  defp scope_bound?(opts), do: not is_nil(Keyword.get(opts, :workspace_id))
+
+  defp confine_one(opts, %MediaFile{} = file) do
+    if scope_bound?(opts) or is_nil(file.workspace_id),
+      do: {:ok, file},
+      else: {:error, :not_found}
+  end
+
+  defp confine_many(opts, files) do
+    if scope_bound?(opts), do: files, else: Enum.filter(files, &is_nil(&1.workspace_id))
+  end
+
   @doc "Upload a file via multipart form data."
   def upload(conn, %{"file" => upload}) do
     dataset = Map.get(conn.params, "dataset", "production")
@@ -42,7 +85,12 @@ defmodule BarkparkWeb.MediaController do
   def index(conn, params) do
     dataset = Map.get(params, "dataset", "production")
     mime_filter = Map.get(params, "type")
-    files = Media.list_files(dataset, [mime_type: mime_filter] ++ scope_opts(conn))
+    opts = scope_opts(conn)
+
+    files =
+      dataset
+      |> Media.list_files([mime_type: mime_filter] ++ opts)
+      |> then(&confine_many(opts, &1))
 
     json(conn, %{
       files: Enum.map(files, &render_file(&1, conn)),
@@ -59,7 +107,10 @@ defmodule BarkparkWeb.MediaController do
   (the felix W14 field-visibility leak). Fails CLOSED: private + anonymous → 403.
   """
   def show(conn, %{"id" => id}) do
-    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+    opts = scope_opts(conn)
+
+    with {:ok, file} <- Media.get_file(id, opts),
+         {:ok, file} <- confine_one(opts, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :view) do
       json(conn, render_file(file, conn))
@@ -75,8 +126,10 @@ defmodule BarkparkWeb.MediaController do
   @doc "Serve a file — from disk, or via redirect to the object-storage backend."
   def serve(conn, %{"path" => path_parts}) do
     relative_path = Enum.join(path_parts, "/")
+    opts = scope_opts(conn)
 
-    with {:ok, file} <- Media.get_file_by_path(relative_path, scope_opts(conn)),
+    with {:ok, file} <- Media.get_file_by_path(relative_path, opts),
+         {:ok, file} <- confine_one(opts, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :original) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
@@ -132,7 +185,10 @@ defmodule BarkparkWeb.MediaController do
   reachable only via the scoped route (P4) or an item share link.
   """
   def serve_rendition(conn, %{"id" => id, "preset" => preset}) do
-    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+    opts = scope_opts(conn)
+
+    with {:ok, file} <- Media.get_file(id, opts),
+         {:ok, file} <- confine_one(opts, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :preview),
          watermark = Access.watermark_profile(doc),
