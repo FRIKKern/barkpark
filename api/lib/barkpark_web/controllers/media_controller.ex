@@ -5,6 +5,8 @@ defmodule BarkparkWeb.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.{Blobstore, Delivery, Renditions}
   alias Barkpark.Media.Storage.{Access, MediaFile}
+  alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -233,18 +235,48 @@ defmodule BarkparkWeb.MediaController do
   path so `serve/2` (which derives the disk path from the row's `path`) finds
   the bytes. The body is written VERBATIM — no re-encode, no MIME inspection.
 
-  Path safety is enforced by `Media.put_blob/2`'s strict allowlist (each
+  Path safety is enforced by `Media.put_blob/3`'s strict allowlist (each
   `/`-segment must match the server-blob shape; `.`/`..`/absolute/empty
   rejected), so a traversal or malformed path is refused with 422 BEFORE any
   byte touches disk. This is a bare infra route — deliberately NOT in the
   capabilities manifest.
-  """
-  def put_blob(conn, %{"path" => path_parts}) do
-    relative_path = Enum.join(path_parts, "/")
 
+  TENANCY. `:workspace_slug` is BINDING, not decoration. It used to be dropped
+  on the floor — the head matched only `%{"path" => path_parts}` — while the
+  router's `:require_admin` pipeline checks a workspace-BLIND global permission
+  (`Auth.has_permission?(token, "admin")`). Any admin token could therefore
+  write arbitrary bytes at any key in the instance-wide blob store, including
+  over another tenant's objects. Two halves close it, and neither alone is
+  sufficient:
+
+    * the caller is bound to the named workspace with `TenancyAuth.member?/2` —
+      the same predicate `WorkspaceController` uses on `create_project`,
+      `projects` and `datasets`. An unknown slug and a non-member both collapse
+      to 404, the no-existence-leak convention that family already follows.
+    * the KEY is bound to the workspace by `Media.put_blob/3` — a legitimate
+      admin of workspace B naming B in the URL still cannot address a key
+      workspace A owns.
+
+  The authorize half runs BEFORE `read_full_body/1`, so an unauthorized caller
+  is refused without this node buffering up to 100 MB of its body.
+  """
+  def put_blob(conn, %{"workspace_slug" => slug, "path" => path_parts}) do
+    token = conn.assigns[:api_token]
+
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.member?(token, workspace.id) do
+      write_blob(conn, Enum.join(path_parts, "/"), workspace)
+    else
+      # Unknown slug OR a real workspace the caller is not a member of — never
+      # confirm a workspace exists to a non-member.
+      _ -> not_found(conn, "workspace not found")
+    end
+  end
+
+  defp write_blob(conn, relative_path, workspace) do
     case read_full_body(conn) do
       {:ok, body, conn} ->
-        case Media.put_blob(relative_path, body) do
+        case Media.put_blob(relative_path, body, workspace_id: workspace.id) do
           {:ok, written, receipt} ->
             conn
             |> put_status(:ok)
@@ -278,6 +310,19 @@ defmodule BarkparkWeb.MediaController do
 
           {:error, :invalid_path} ->
             unprocessable(conn, "invalid_path", "invalid blob path")
+
+          # The key is claimed by a different workspace (or by an unscoped row
+          # every tenant reads). 404, not 403: a 403 would confirm to workspace
+          # B that some OTHER tenant holds an object at exactly that path.
+          {:error, :blob_key_not_owned} ->
+            not_found(conn, "blob path not found in this workspace")
+
+          # Unreachable from HTTP — this action always supplies the resolved
+          # workspace. Kept explicit so a future caller that forgets gets an
+          # honest 5xx instead of falling through to the storage catch-all and
+          # being mislabeled a disk fault.
+          {:error, :unscoped_blob_write} ->
+            {:error, :storage_unavailable}
 
           {:error, :empty_body} ->
             # A zero-byte blob is never legitimate media. The common cause is a

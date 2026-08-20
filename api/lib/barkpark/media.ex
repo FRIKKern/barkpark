@@ -576,6 +576,14 @@ defmodule Barkpark.Media do
       succeeded and DISAGREED with the received count (502). A disagreement is
       a failure, never a 200 with a discrepancy field.
     * `{:error, :invalid_path}` — the path is not a safe server-blob shape (422).
+    * `{:error, :unscoped_blob_write}` — `opts` carried no `:workspace_id`. There
+      is no unscoped blob write; the caller must name the owning workspace.
+    * `{:error, :blob_key_not_owned}` — a `media_files` row at this key belongs to
+      a DIFFERENT workspace, or to none at all. The blob keyspace is flat (the
+      store is addressed by the very string `media_files.path` holds), so the
+      tenant wall is OWNERSHIP of the key. See `authorize_blob_key/2` below for
+      why ownership rather than a `w/<id>/` prefix: the read seam resolves
+      `file.path` verbatim, so a prefix would orphan every object already stored.
     * `{:error, :empty_body}` — a zero-byte body (422). No real media blob is
       empty; the common cause is a caller mislabeling the content-type (e.g.
       `application/json`), which lets `Plug.Parsers` consume the body before the
@@ -586,41 +594,96 @@ defmodule Barkpark.Media do
   Non-raising file ops mirror `upload/3`: a read-only mount / ENOSPC returns a
   typed error, never a bare 500.
   """
-  @spec put_blob(String.t(), binary()) ::
+  @spec put_blob(String.t(), binary(), keyword()) ::
           {:ok, String.t(), Blobstore.receipt()}
           | {:error,
              :invalid_path
              | :empty_body
+             | :unscoped_blob_write
+             | :blob_key_not_owned
              | :storage_unavailable
              | :not_stored
              | {:storage_mismatch, non_neg_integer(), non_neg_integer()}}
-  def put_blob(_relative_path, ""), do: {:error, :empty_body}
+  def put_blob(relative_path, body, opts \\ [])
 
-  def put_blob(relative_path, body) when is_binary(relative_path) and is_binary(body) do
-    if valid_blob_path?(relative_path) do
-      # The read-back lives BELOW this line, inside the backend (Blobstore's
-      # stat_blob/1 callback) — deliberately not here. This module also owns
-      # `file_path/1`, and a File.stat against that path is exactly the check
-      # the S3 backend's write-through cache defeats: it returns the expected
-      # size for an object the bucket never took.
-      case Blobstore.put_bytes(relative_path, body, []) do
-        {:ok, %{stored: :unverified} = receipt} ->
-          {:ok, relative_path, receipt}
+  def put_blob(_relative_path, "", _opts), do: {:error, :empty_body}
 
-        {:ok, %{stored: stored, received: received} = receipt} when stored == received ->
-          {:ok, relative_path, receipt}
-
-        {:ok, %{stored: stored, received: received}} ->
-          {:error, {:storage_mismatch, received, stored}}
-
-        {:error, :not_stored} ->
-          {:error, :not_stored}
-
-        {:error, _reason} ->
-          {:error, :storage_unavailable}
-      end
+  def put_blob(relative_path, body, opts)
+      when is_binary(relative_path) and is_binary(body) and is_list(opts) do
+    with true <- valid_blob_path?(relative_path) or {:error, :invalid_path},
+         :ok <- authorize_blob_key(relative_path, opts) do
+      put_validated_blob(relative_path, body)
     else
-      {:error, :invalid_path}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # The blob keyspace is FLAT and instance-wide: `Blobstore` resolves an object
+  # by the very string that `media_files.path` holds (serve/2 →
+  # `Blobstore.serve_strategy(file.path)`, `delete_file/2` →
+  # `Blobstore.delete(file.path)`). A key is therefore OWNED by whatever
+  # workspace owns the `media_files` row(s) at that path, and the tenant wall for
+  # this route is ownership of the key — NOT a prefix on it. Prefixing would
+  # change the layout of every object already in the store, which the read side
+  # (which reads `file.path` verbatim) could not resolve without a data
+  # migration; see the `:blob_key_not_owned` note in `put_blob/3`'s doc.
+  #
+  # FAIL CLOSED on three shapes:
+  #   * no `:workspace_id` in opts → `:unscoped_blob_write`. There is exactly one
+  #     production caller (MediaController.put_blob/2) and it always supplies one;
+  #     an omission is a bug, never an "unscoped" licence.
+  #   * a row at this key owned by a DIFFERENT workspace → `:blob_key_not_owned`.
+  #     This is the cross-tenant overwrite.
+  #   * a row at this key owned by NO workspace (`workspace_id IS NULL`) → also
+  #     `:blob_key_not_owned`. `Content.Scope.scope_to_workspace_or_global/3`
+  #     serves an unscoped row to EVERY tenant, so letting one workspace rewrite
+  #     its bytes poisons an object every other tenant reads.
+  #
+  # A key NO row claims stays writable: that is the live contract of this route
+  # (a bundle import COPIes the rows first and pushes the bytes after — see
+  # `internal/cli/cloud_workspace_cmd.go` `importWorkspace` → `uploadWorkspaceBlobs`
+  # — and `scripts/pds-scratch-target.sh` probes a bare path). Squatting an
+  # unclaimed key is not a path to another tenant's data: both ways a workspace
+  # acquires a key (`upload/3`'s `Blobstore.put_file`, or its own blob push)
+  # write the bytes themselves, overwriting any squat.
+  defp authorize_blob_key(relative_path, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      workspace_id when is_binary(workspace_id) ->
+        foreign? =
+          MediaFile
+          |> where([m], m.path == ^relative_path)
+          |> where([m], is_nil(m.workspace_id) or m.workspace_id != ^workspace_id)
+          |> Repo.exists?()
+
+        if foreign?, do: {:error, :blob_key_not_owned}, else: :ok
+
+      _ ->
+        {:error, :unscoped_blob_write}
+    end
+  end
+
+  # Reached only after `valid_blob_path?/1` AND `authorize_blob_key/2` passed.
+  defp put_validated_blob(relative_path, body) do
+    # The read-back lives BELOW this line, inside the backend (Blobstore's
+    # stat_blob/1 callback) — deliberately not here. This module also owns
+    # `file_path/1`, and a File.stat against that path is exactly the check
+    # the S3 backend's write-through cache defeats: it returns the expected
+    # size for an object the bucket never took.
+    case Blobstore.put_bytes(relative_path, body, []) do
+      {:ok, %{stored: :unverified} = receipt} ->
+        {:ok, relative_path, receipt}
+
+      {:ok, %{stored: stored, received: received} = receipt} when stored == received ->
+        {:ok, relative_path, receipt}
+
+      {:ok, %{stored: stored, received: received}} ->
+        {:error, {:storage_mismatch, received, stored}}
+
+      {:error, :not_stored} ->
+        {:error, :not_stored}
+
+      {:error, _reason} ->
+        {:error, :storage_unavailable}
     end
   end
 
