@@ -708,22 +708,36 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireAdmin)
   end
 
-  # Admin gate for the FLAT search-surface-config settings routes that must
-  # attribute per-workspace (charter D45/D49 — close the LIVE cross-tenant
-  # config-overwrite bleed). A naive `[:api, :require_admin]` cannot: `:api`
-  # runs `AssignDefaultScope` (stamps `current_workspace = Default`) BEFORE the
-  # admin gate, and `DeriveWorkspaceFromToken` is no-op-if-set, so appending it
-  # after `:api` would be a pure no-op (Default always wins). This bespoke
-  # pipeline mirrors `:media_mutate`'s ordering — token-resolve →
-  # DeriveWorkspaceFromToken → AssignDefaultScope → admin — so the admin token's
-  # OWN workspace is resolved and `SurfaceConfigs.get/upsert` key on it. It
-  # re-includes every `:api` security plug (AcceptBarkparkVendor, accepts json,
-  # ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit, TenantLogMetadata)
-  # so the surface is byte-identical to `:api` apart from the derivation order.
-  # ONE plug (DeriveWorkspaceFromToken) is controller-agnostic (reads only
-  # :api_token + :current_workspace) so it attributes BOTH the documents and
-  # media settings routes.
-  pipeline :search_settings_admin do
+  # THE admin gate for every FLAT (`/v1/...`, no `/w/:ws/p/:project` in the
+  # path) admin route that must attribute per-workspace. It is the flat twin of
+  # `:scoped_admin`, and it REPLACES `:api` — never layers on it.
+  #
+  # ORDER IS THE ENTIRE FIX (charter D45/D49; task-2b396416a680ff0b). A naive
+  # `[:api, :require_admin]` cannot attribute per-workspace: `:api` runs
+  # `AssignDefaultScope`, which stamps `current_workspace = <seeded Default>`
+  # BEFORE the admin gate, and `ScopeHelpers.scope_opts/1` reads exactly that
+  # assign — so every caller, from every workspace, converges on Default.
+  # `DeriveWorkspaceFromToken` is NO-OP-IF-SET, so appending it after `:api` is
+  # a pure no-op: Default has already won. Only this ordering works —
+  # token-resolve → DeriveWorkspaceFromToken → AssignDefaultScope → admin
+  # (the same shape as `:media_mutate`). `BarkparkWeb.FlatAdminTenancyTest`
+  # reads this block and goes RED if the two are ever swapped.
+  #
+  # It re-includes every `:api` security plug (AcceptBarkparkVendor, accepts
+  # json, ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit,
+  # TenantLogMetadata) so the surface is byte-identical to `[:api,
+  # :require_admin]` apart from the derivation order. The only set delta is
+  # `OptionalToken` → `DeriveWorkspaceFromToken`: `RequireToken` (which
+  # `:require_admin` ran anyway, one plug later) is a strict superset of
+  # `OptionalToken` — same `Auth.verify_token`, same
+  # `share_token_off_surface?/2` refusal — so the old pair resolved the token
+  # twice and an admin route can never serve an anonymous caller regardless.
+  #
+  # `DeriveWorkspaceFromToken` is controller-agnostic (it reads only
+  # `:api_token` + `:current_workspace`), which is why ONE pipeline attributes
+  # search settings, schemas, structure and webhooks alike — do NOT clone it
+  # per controller. Adding a flat admin surface? Mount it HERE.
+  pipeline :flat_admin_api do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
@@ -1968,7 +1982,7 @@ defmodule BarkparkWeb.Router do
   # bespoke pipeline (charter D85/D86 — repoint) so their reads and writes land
   # on the caller's own workspace instead of collapsing to Default.
   scope "/v1/data", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/search/:dataset/settings", SearchController, :search_settings)
     put("/search/:dataset/settings", SearchController, :update_search_settings)
@@ -1977,12 +1991,12 @@ defmodule BarkparkWeb.Router do
   # insights + synonyms — per-workspace attributed (charter D85/D86). Repointed
   # off `[:api, :require_admin]` (which ran AssignDefaultScope with NO
   # DeriveWorkspaceFromToken → collapsed every caller to Default) onto the
-  # bespoke `:search_settings_admin` pipeline: DeriveWorkspaceFromToken (fail-
+  # bespoke `:flat_admin_api` pipeline: DeriveWorkspaceFromToken (fail-
   # SOFT) runs before AssignDefaultScope, so a workspace-bound admin token
   # resolves ITS workspace while a nil-workspace token still falls through to
   # Default/global (READs stay global-legacy by D59 — never over-blocked).
   scope "/v1/data", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/search/:dataset/insights", SearchController, :search_insights)
     get("/search/:dataset/synonyms", SearchController, :search_synonyms)
@@ -1993,15 +2007,22 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Desk structure — the canonical Studio tree, served for the TUI ──────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: the desk tree is built from
+  # `Structure.build(dataset, scope_opts(conn))`, so on the naive pipeline every
+  # caller was served the SEEDED DEFAULT workspace's tree (D45/D49).
   scope "/v1/structure", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     get("/:dataset", StructureController, :show)
   end
 
   # ── Schema management — requires admin token ────────────────────────────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: `upsert`/`delete` stamp and
+  # filter on `scope_opts(conn)`, so on the naive pipeline a non-Default
+  # workspace's admin read AND MUTATED the Default workspace's content model
+  # (D45/D49). The scoped `/w/:ws/p/:project` twin below is unaffected.
   scope "/v1/schemas", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     get("/:dataset", SchemaController, :index)
     get("/:dataset/:name", SchemaController, :show)
@@ -2078,8 +2099,13 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: the sharpest row of the
+  # D45/D49 remainder. `create_webhook` stamps `workspace_id` from
+  # `scope_opts(conn)`, so on the naive pipeline any workspace's admin token
+  # registered a hook in the SEEDED DEFAULT workspace and received Default's
+  # content-change stream; `show`/`rotate` reach Default's webhook secrets.
   scope "/v1/webhooks", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     get("/:dataset", WebhookController, :index)
     get("/:dataset/:id", WebhookController, :show)
@@ -2175,18 +2201,18 @@ defmodule BarkparkWeb.Router do
   # media search-surface-config settings — per-workspace attributed (charter
   # D45/D49), same bespoke admin pipeline as the documents settings routes.
   scope "/v1/media", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/:dataset/search/settings", V1.MediaController, :search_settings)
     put("/:dataset/search/settings", V1.MediaController, :update_search_settings)
   end
 
   # media insights + synonyms — per-workspace attributed (charter D85/D86),
-  # repointed onto the same bespoke `:search_settings_admin` pipeline as the
+  # repointed onto the same bespoke `:flat_admin_api` pipeline as the
   # documents block above so a workspace-bound admin token resolves ITS workspace
   # instead of collapsing to Default; a nil-workspace token still falls through.
   scope "/v1/media", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/:dataset/search/insights", V1.MediaController, :search_insights)
     get("/:dataset/search/synonyms", V1.MediaController, :search_synonyms)
