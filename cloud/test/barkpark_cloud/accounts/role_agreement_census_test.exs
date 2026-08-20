@@ -109,7 +109,23 @@ defmodule BarkparkCloud.Accounts.RoleAgreementCensusTest do
   # ARM C/D's domain: every role a membership row can actually hold, plus the
   # absence of a row. `nil` means "no membership at all" — the non-member case
   # both predicates must also agree on.
-  defp full_role_domain, do: TeamMembership.roles() ++ [nil] ++ @off_ladder
+  #
+  # DERIVED FROM BOTH LADDERS, never re-typed. ARM C compares a RANK THRESHOLD
+  # (`TeamMembership.@ranks`, via `Accounts.team_admin?/2`) against SET
+  # MEMBERSHIP (`Authz.@admin_roles`, via `Authz.team_admin?/2`) — two
+  # hand-maintained tables in two modules. A domain that re-typed
+  # `~w(owner admin ...)` would pin the literal against itself and could never
+  # lose: a role added to ONE ladder only would never enter the domain, so the
+  # split it creates would ship green. Reading `ranked_roles/0` and
+  # `admin_roles/0` means a single-limb edit puts its own new role into the
+  # population that convicts it. `Enum.uniq/1` keeps the order stable and makes
+  # the union free on clean main, where the two ladders already agree.
+  defp full_role_domain do
+    (TeamMembership.roles() ++
+       TeamMembership.ranked_roles() ++
+       Authz.admin_roles() ++ [nil] ++ @off_ladder)
+    |> Enum.uniq()
+  end
 
   # A team plus a user standing at `role` in it. Canonical roles go through the
   # public `add_member/3`; off-ladder roles are written straight to the column

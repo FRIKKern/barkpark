@@ -61,6 +61,46 @@ type Config struct {
 	KnownServers []ServerEntry `json:"known_servers,omitempty"`
 }
 
+// configPersist is Config WITHOUT its MarshalJSON method: converting to a
+// distinct defined type drops the method set, so json.Marshal of a
+// *configPersist uses the DEFAULT struct marshalling and emits the real token
+// fields. It exists solely so SaveConfig can persist live credentials to the
+// 0600 config.json — it MUST be marshalled ONLY by SaveConfig. Every other
+// marshal of a Config (a debug dump, a future `-o json` of the resolved
+// context) goes through Config.MarshalJSON below and is redacted.
+type configPersist Config
+
+// MarshalJSON redacts every token-bearing field so a PUBLIC marshal of a Config
+// can never serialize a live credential. It blanks the four flat tokens (Token,
+// AdminToken, IngestToken, CloudToken) AND the nested per-server
+// KnownServers[].Token, deep-copying KnownServers first so the caller's live
+// Config is never mutated — a slice shares its backing array, so blanking in
+// place would wipe the real token from the in-memory config the caller still
+// holds. The value receiver means both a Config and a *Config redact. The only
+// path that persists real tokens is SaveConfig, which marshals a configPersist
+// (no MarshalJSON) to write the 0600 config.json.
+//
+// NOTE: the literal filed hazard — retagging Config.Token to json:"-" — is
+// REFUTED: SaveConfig marshals the SAME *Config it persists, so json:"-" would
+// silently stop writing the token to disk (a silent-logout regression, not a
+// leak-plug). Redacting at the public marshal seam while persisting through
+// configPersist plugs the leak WITHOUT breaking persistence.
+func (c Config) MarshalJSON() ([]byte, error) {
+	redacted := c
+	redacted.Token = ""
+	redacted.AdminToken = ""
+	redacted.IngestToken = ""
+	redacted.CloudToken = ""
+	if len(c.KnownServers) > 0 {
+		redacted.KnownServers = make([]ServerEntry, len(c.KnownServers))
+		copy(redacted.KnownServers, c.KnownServers)
+		for i := range redacted.KnownServers {
+			redacted.KnownServers[i].Token = ""
+		}
+	}
+	return json.Marshal(configPersist(redacted))
+}
+
 // CloudTokenEnv is the environment variable a NON-INTERACTIVE client (a GitHub
 // Action, any CI job) sets to authenticate against the Cloud control plane
 // without a config.json — there is no `bp login` in CI to write one.
@@ -326,7 +366,11 @@ func SaveConfig(c *Config) error {
 		return fmt.Errorf("mkdir config dir %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, "config.json")
-	raw, err := json.MarshalIndent(c, "", "  ")
+	// Marshal through configPersist (which has NO MarshalJSON) so the persisted
+	// 0600 file carries the REAL tokens. Marshalling c directly would hit
+	// Config.MarshalJSON and redact every credential — a silent logout on every
+	// save. This is the ONLY sanctioned marshal of a configPersist.
+	raw, err := json.MarshalIndent((*configPersist)(c), "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal config: %w", err)
 	}

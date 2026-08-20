@@ -457,7 +457,9 @@ const CENSUS: Record<string, Record<string, number>> = {
     // `.lineHeight` singles — nested Text runs take `<token>.fontSize` only
     // (the nested-run law statCard records), while the duel label and lineage
     // title/body override `bodyText(ctx)`'s measure with the sm/xs pair.
-    'scale.micro': 11,
+    // route grew micro 11→12: the meta row (sport · distance · elevation ·
+    // duration) is one micro mono run under the track, the chart-tick idiom.
+    'scale.micro': 12,
     'scale.micro.fontSize': 2,
     'scale.micro.lineHeight': 1,
     'scale.sm': 4,

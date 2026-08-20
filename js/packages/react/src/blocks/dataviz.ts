@@ -797,6 +797,115 @@ const criteriaProgress: Emit = (block) => {
   return `<div class="bp-criteria-progress">${body}</div>`
 }
 
+/* ── route (sport track) ─────────────────────────────────────────────────────
+ * The JS twin of data_viz.ex §route: `polyline` carries a Google encoded
+ * polyline; the render is a self-contained SVG track shape (equirectangular,
+ * cos(mid-lat) x-scale; start ring green, finish dot terracotta) + the meta
+ * row and caption. Byte-mirrors the Elixir :article emitter — same projection,
+ * same 2-decimal formatting, same evergreen skin literals — so the golden
+ * parity harness proves shape equality per type. */
+
+const ROUTE_W = 640
+const ROUTE_MAX_H = 400
+const ROUTE_PAD = 16
+const ROUTE_START = '#2f9e63'
+const ROUTE_FINISH = '#c65a3f'
+const ROUTE_TRACK = 'var(--paper-accent, #1e5347)'
+const ROUTE_MUTED = '#55635e'
+const ROUTE_BORDER = '#dde7e2'
+
+/** Google encoded-polyline decoder — the same drop-at-last-whole-pair contract
+ * as the Elixir/Go twins: a malformed tail never invents a point. */
+export function decodePolyline(s: string): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  let lat = 0
+  let lng = 0
+  let i = 0
+
+  const next = (): number | null => {
+    let shift = 0
+    let acc = 0
+    while (i < s.length) {
+      const c = s.charCodeAt(i)
+      if (c < 63 || c > 126) return null
+      i++
+      acc |= ((c - 63) & 0x1f) << shift
+      if (((c - 63) & 0x20) === 0) return (acc & 1) !== 0 ? -((acc >> 1) + 1) : acc >> 1
+      shift += 5
+    }
+    return null
+  }
+
+  while (i < s.length) {
+    const dlat = next()
+    if (dlat === null) break
+    const dlng = next()
+    if (dlng === null) break
+    lat += dlat
+    lng += dlng
+    out.push([lat / 1e5, lng / 1e5])
+  }
+  return out
+}
+
+const fmt2 = (v: number): string => v.toFixed(2)
+
+const route: Emit = (block) => {
+  const points = decodePolyline(displayString(get(block, 'polyline')))
+  if (points.length < 2) return empty('route')
+
+  const midLat = points.reduce((a, p) => a + p[0], 0) / points.length
+  const k = Math.cos((midLat * Math.PI) / 180)
+  const projected = points.map((p): [number, number] => [p[1] * k, -p[0]])
+  const minX = Math.min(...projected.map((q) => q[0]))
+  const minY = Math.min(...projected.map((q) => q[1]))
+  const spanX = Math.max(Math.max(...projected.map((q) => q[0])) - minX, 1e-9)
+  const spanY = Math.max(Math.max(...projected.map((q) => q[1])) - minY, 1e-9)
+
+  const innerW = ROUTE_W - 2 * ROUTE_PAD
+  const scale = Math.min(innerW / spanX, (ROUTE_MAX_H - 2 * ROUTE_PAD) / spanY)
+  const h = Math.round(spanY * scale) + 2 * ROUTE_PAD
+
+  const coords = projected.map(([x, y]): [string, string] => [
+    fmt2((x - minX) * scale + ROUTE_PAD),
+    fmt2((y - minY) * scale + ROUTE_PAD),
+  ])
+
+  const first = coords[0]
+  const last = coords[coords.length - 1]
+  if (first === undefined || last === undefined) return empty('route')
+
+  const d = coords.map(([x, y], i2) => `${i2 === 0 ? 'M' : 'L'}${x},${y}`).join(' ')
+  const [sx, sy] = first
+  const [fx, fy] = last
+
+  const svg =
+    `<svg class="bp-route__map" viewBox="0 0 ${ROUTE_W} ${h}" role="img" aria-label="route track" style="display:block;width:100%;max-width:${ROUTE_W}px;height:auto;">` +
+    `<path d="${d}" fill="none" stroke="${ROUTE_TRACK}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>` +
+    `<circle cx="${sx}" cy="${sy}" r="5.5" fill="none" stroke="${ROUTE_START}" stroke-width="3"/>` +
+    `<circle cx="${fx}" cy="${fy}" r="5.5" fill="${ROUTE_FINISH}"/>` +
+    `</svg>`
+
+  const meta = ['sport', 'distance', 'elevation', 'duration']
+    .map((key) => displayString(get(block, key)))
+    .filter((v) => v !== '')
+
+  const metaHtml =
+    meta.length === 0
+      ? ''
+      : `<div class="bp-route__meta" style="font-size:13px;color:${ROUTE_MUTED};margin-top:6px;">` +
+        meta.map(escapeHtml).join(` <span style="color:${ROUTE_BORDER};">·</span> `) +
+        '</div>'
+
+  const caption = displayString(get(block, 'caption'))
+  const captionHtml =
+    caption === ''
+      ? ''
+      : `<div class="bp-route__caption" style="font-size:13px;color:${ROUTE_MUTED};font-style:italic;margin-top:2px;">${escapeHtml(caption)}</div>`
+
+  return `<div class="bp-route">${svg}${metaHtml}${captionHtml}</div>`
+}
+
 export const datavizEmitters: Record<string, Emit> = {
   stat,
   stats,
@@ -808,4 +917,5 @@ export const datavizEmitters: Record<string, Emit> = {
   'gauge-list': gaugeList,
   'bar-chart': barChart,
   'criteria-progress': criteriaProgress,
+  route,
 }
