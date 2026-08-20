@@ -1097,9 +1097,11 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
     test "reveal_field is REFUSED for a workspace-B-only admin — typed secret stays masked, no reveal audit",
          %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
-      # The typed path: seed bokbasen (spec-backed), load it (loading renders
-      # MASKED values and is not credential-revealing), then attempt the
-      # per-field reveal. Same env hygiene as the typed-renderer suite: a host
+      # The typed path: seed bokbasen (spec-backed), attempt a load — which the
+      # D274 follow-up now REFUSES for this principal too, so the panel stays
+      # empty — then attempt the per-field reveal on top of that refused state
+      # and prove it is refused in its own right (no reveal audit, row
+      # unchanged). Same env hygiene as the typed-renderer suite: a host
       # carrying BOKBASEN_* env config must not perturb the spec resolution.
       prev = Application.get_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
       Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
@@ -1157,6 +1159,166 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute audited?("w35-victim", "reveal")
       refute html =~ @w35_secret
       assert html =~ "installation-admin authority"
+    end
+  end
+
+  # ── Installation-admin gate on the LOAD path (D274 follow-up) ──────────
+  #
+  # W35 sealed reveal / reveal_field / save / delete and left `load` open to any
+  # `:scoped_admin`. That residue is a SCOPE MISMATCH, not a forgotten line: the
+  # live_session authorizes admin OF THE URL WORKSPACE, while the
+  # `plugin_settings` store `load` reads is installation-GLOBAL. The masked
+  # projection it rendered is partial, not anonymous — an admin of workspace B
+  # and ONLY B could harvest, for any plugin name they cared to type:
+  #
+  #   * the LAST FOUR characters of every secret, verbatim (`Masking.mask/1`
+  #     emits "********" <> last4 for any binary longer than 4 chars),
+  #   * every non-`:masked` typed field in FULL plaintext (bokbasen's
+  #     api_base / oauth_token_url / client_role),
+  #   * the credential INVENTORY — stored key names, plus a found/not-found
+  #     presence oracle over the whole installation ("No settings yet for …").
+  #
+  # ORACLE LAW (D268/D266). Two load-bearing oracles, neither a flash substring:
+  #   (a) STATE — `Settings.get/2` writes a "read" audit row on every successful
+  #       read, so a count of ZERO proves the guard refused before ANY store
+  #       access (fail-closed, not mask-harder);
+  #   (b) DOM — asserted against the exact `Masking.mask/1` output and its bare
+  #       last-4 suffix, with the installation-admin POSITIVE CONTROL below
+  #       proving both literals are reachable on this very page from this very
+  #       row. Without that control the refutations could pass vacuously.
+  describe "installation-admin gate on the credential LOAD path (D274 follow-up)" do
+    # Longer than 4 chars ON PURPOSE: at <= 4 `Masking.mask/1` returns a bare
+    # "****" with NO suffix and every refutation below would be vacuous.
+    @load_secret "installation-load-secret-Qv7Z"
+    @load_suffix String.slice(@load_secret, -4, 4)
+    @typed_secret "w35-load-typed-secret-Bk9Q"
+
+    setup %{conn: conn} do
+      # Same principal shape as the W35 block: admin OF WORKSPACE B by
+      # membership role (clears the `:scoped_admin` mount gate) with NO global
+      # "admin" permission, hence no installation-level authority.
+      {:ok, b_admin_tok} =
+        Auth.create_token("w35l-b-admin-raw", "w35 load b-only admin", "production", [
+          "read",
+          "write"
+        ])
+
+      {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "w35l-wb", name: "W35L Cred WS B"})
+      {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "W35LPB"})
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_b.id, b_admin_tok.id, "admin")
+
+      # The installation-global row every tenant shares — the harvest target.
+      {:ok, _} = Settings.put("w35-load-victim", %{"api_key" => @load_secret})
+
+      conn = init_test_session(conn, %{"api_token" => "w35l-b-admin-raw"})
+      {:ok, conn: conn, ws_b: ws_b, proj_b: proj_b}
+    end
+
+    test "load is REFUSED for a workspace-B-only admin — no mask suffix, no key inventory, ZERO store read",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+
+      html =
+        view
+        |> form("form[phx-submit=load]", %{plugin_name: "w35-load-victim"})
+        |> render_submit()
+
+      # (b) DOM ORACLE FIRST, deliberately: with the guard disarmed this is the
+      # assertion that reds, and it reds NAMING the leak ("********Qv7Z" in the
+      # page) rather than an audit count nobody can read as a disclosure.
+      refute html =~ Masking.mask(@load_secret)
+      refute html =~ @load_suffix
+      # …nor the stored key names (the inventory half of the leak).
+      refute html =~ "api_key"
+      # The panel never advanced past the empty state (`@loaded?` mirror).
+      assert html =~ "Status: empty"
+      # (a) STATE ORACLE: zero reads of the installation-global store — the
+      # refusal is fail-closed, not mask-harder. `Settings.get/2` audits every
+      # successful read; the POSITIVE CONTROL below shows this counter DOES move
+      # to 1 when the store is touched, so a 0 here is a live instrument.
+      assert audit_count("w35-load-victim", "read") == 0
+      assert html =~ "installation-admin authority"
+    end
+
+    test "POSITIVE CONTROL: an installation admin loading the SAME row still gets the masked suffix and a read audit",
+         %{} do
+      # Anti-vacuity: proves the mask literal, its bare suffix AND the "read"
+      # audit increment are all producible on this page from this row — so the
+      # refutations above fail when the guard is disarmed, and criterion 2
+      # (installation-admin behaviour unchanged) holds on the same fixture.
+      conn = init_test_session(build_conn(), %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @settings_path)
+
+      html =
+        view
+        |> form("form[phx-submit=load]", %{plugin_name: "w35-load-victim"})
+        |> render_submit()
+
+      assert html =~ Masking.mask(@load_secret)
+      assert html =~ @load_suffix
+      assert html =~ "api_key"
+      assert html =~ "Status: loaded"
+      assert audit_count("w35-load-victim", "read") == 1
+      refute html =~ @load_secret
+    end
+
+    test "the TYPED load path is refused too — no plaintext config, no secret tail, ZERO store read",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      # bokbasen is spec-backed, so `load` would take `load_typed` — which masks
+      # only `:masked` fields and renders api_base / oauth_token_url /
+      # client_role in FULL plaintext. Same env hygiene as the typed suite: a
+      # host carrying BOKBASEN_* config must not perturb spec resolution.
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen, prev),
+          else: Application.delete_env(:barkpark, Barkpark.Plugins.OnixEdit.Bokbasen)
+      end)
+
+      Settings.put("bokbasen", %{
+        "api_base" => "https://api-sandbox.bokbasen.example",
+        "oauth_token_url" => "https://login.bokbasen.example/oauth2/token",
+        "client_id" => "w35-load-client-id-long",
+        "client_secret" => @typed_secret,
+        "client_role" => "distributor"
+      })
+
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+
+      html =
+        view
+        |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
+        |> render_submit()
+
+      # DOM ORACLE FIRST (see the generic arm): no masked tail, and none of the
+      # plaintext config the typed renderer would have shown in the clear.
+      refute html =~ Masking.mask(@typed_secret)
+      refute html =~ String.slice(@typed_secret, -4, 4)
+      refute html =~ "https://api-sandbox.bokbasen.example"
+      refute html =~ "https://login.bokbasen.example/oauth2/token"
+      assert html =~ "Status: empty"
+      # STATE ORACLE: the typed path never reached the store either.
+      assert audit_count("bokbasen", "read") == 0
+      assert html =~ "installation-admin authority"
+    end
+
+    test "a load for a plugin with NO row is refused IDENTICALLY — no found/not-found presence oracle",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+
+      absent =
+        view
+        |> form("form[phx-submit=load]", %{plugin_name: "w35-load-no-such-plugin"})
+        |> render_submit()
+
+      # The not-found flash IS the presence signal — it must never appear, and
+      # the disposition must be the same refusal the existing row produced.
+      refute absent =~ "No settings yet for"
+      assert absent =~ "installation-admin authority"
+      assert absent =~ "Status: empty"
+      assert audit_count("w35-load-no-such-plugin", "read") == 0
     end
   end
 end
