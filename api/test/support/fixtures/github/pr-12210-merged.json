@@ -1,0 +1,13 @@
+{
+  "action": "closed",
+  "pull_request": {
+    "number": 12210,
+    "merged": true,
+    "merge_commit_sha": "209cd542e83b09e11fcd970a4d712f49d4f531f8",
+    "body": "Docs-only. Wave-6 reconciliation of `task-lifecycle-visibility-epic` \u2014 the ledger's own subject applied to itself.\n\n## What this wave did\nReconcile-and-close, **no builders dispatched** (movement 4 found no offline+mutation-provable finish).\n\n- **True split, re-derived from L1:** 24 done / 17 open / 1 considering / 2 cancelled (child_count 44 is NOT the open count).\n- **One evidence-close, handed to LEAD** (sole unmet criterion is merge-gated): `ledger-merge-criterion-autostamp` (4/5) \u2014 built by #5742 = `9e7132846f` (exact `Task:` trailer, ancestor of origin/main). Pay **0-based `--criterion 4`**, never 5.\n- **One clean re-parent, PERFORMED + verified:** `pds-bl-merge-gated-criteria-carry-the-flag` \u2192 PDS epic `task-2ac1f95237c4a8e5` (parent_id re-read to confirm).\n- **Kept (not moved):** cloud-console-data-query-id-prefix-bug (owner epic closing today; bug is api-side), the eal/spd/graph/task-hash rows (no foreign umbrella), the considering row (epic-native).\n- **LEAVE (residue):** tlv-s5 / tlv-s8 (Fable-gated live-surface seal-blockers), offline-buildable backlog, live/prod-gated backlog.\n\n## Convergence verdict\nRecommend **against** seal-and-spin: tlv-s5 + tlv-s8 are genuine above-bar defects that cannot be built this wave (Fable capped to Aug 21, live surface). Next: a Fable wave after the cap lifts.\n\nFiles: the charter wave-6 log entry + four verify re-derivation recipes under `tooling/grip/ledger/`.\n\nWave paper: `task-lifecycle-visibility-wave-2026-08-18`\n\nTask: task-lifecycle-visibility-wave-6-log",
+    "state": "closed",
+    "title": "docs(task-lifecycle): wave-6 reconciliation log + verify recipes",
+    "html_url": "https://github.com/FRIKKern/barkpark/pull/12210",
+    "merged_at": "2026-08-18T06:03:46Z"
+  }
+}

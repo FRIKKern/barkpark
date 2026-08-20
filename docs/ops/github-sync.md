@@ -56,10 +56,23 @@ GitHub → Settings → Developer settings → **GitHub Apps → New GitHub App*
 - **Webhook URL**: `https://<instance-public-host>/v1/plugins/github/webhook`
 - **Webhook secret**: generate a strong random string — you will paste it into the instance as
   `github.webhook_secret`. This is what the inbound signature plug verifies (X-Hub-Signature-256).
-- **Repository permissions**: Issues **Read & write**, Contents Read-only, Metadata Read-only.
+- **Repository permissions**: Issues **Read & write**, Pull requests **Read-only**, Contents
+  Read-only, Metadata Read-only.
   For Projects v2: **Projects Read & write** (organization or user, matching where the board lives).
-- **Subscribe to events**: **Issues** only (the intake acts on `issues.opened`; everything else is a
-  2xx no-op). Do not subscribe to more than you need.
+- **Subscribe to events**: **Issues** and **Pull requests**. Nothing else. Issues drives intake and
+  the detach bookkeeping; Pull requests drives the merge-gate autostamp
+  (`Plugins.Github.MergeEvents`) — without it that handler is never called and every
+  `merge_gate:true` criterion waits for a human forever. `pull_request` cannot be subscribed
+  without the Pull requests: Read permission above.
+
+> **Updating an App that already exists.** `default_events` in
+> `scripts/github-app-bootstrap.py` applies at CREATE time only — editing it does not touch an App
+> already created from an older manifest. To add an event to a live App: App settings →
+> *Permissions & events* → set the permission, tick the event, save — then the **installation must
+> accept the new permission** (GitHub emails the installer a review link; until it is accepted the
+> permission is pending and the event does not deliver). Verify with
+> `scripts/merge-gate-autostamp-liveness.sh`, which reads the ledger for real bridge writes and is
+> the only check here that can tell you the delivery path is actually alive.
 - After creation: note the **App ID**; **generate a private key** (downloads a `.pem`).
 - **Install the App** on FRIKKern/barkpark; note the **Installation ID** (in the install URL /
   `GET /app/installations`).
