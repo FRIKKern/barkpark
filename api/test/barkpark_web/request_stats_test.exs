@@ -181,6 +181,7 @@ defmodule BarkparkWeb.RequestStatsTest do
                access_principal
                api
                cycle_api
+               flat_admin_api
                media_mutate
                require_admin
                require_chat_access
@@ -191,7 +192,6 @@ defmodule BarkparkWeb.RequestStatsTest do
                scoped_browser
                scoped_media_mutate
                scoped_mutate
-               search_settings_admin
                session_token_root
                shared_docs_api
                shared_media_api

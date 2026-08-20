@@ -5,7 +5,7 @@ defmodule BarkparkWeb.MediaSynonymsScopingTest do
   (`/v1/media/:dataset/search/*`) was byte-identical to the documents block:
   `pipe_through([:api, :require_admin])`, so a workspace-bound admin token
   collapsed to the seeded Default workspace and read/wrote Default's media
-  synonyms. The fix repoints it onto `:search_settings_admin`
+  synonyms. The fix repoints it onto `:flat_admin_api`
   (`DeriveWorkspaceFromToken` fail-SOFT before `AssignDefaultScope`).
 
   MUTATION-PROOF (fail-before). Revert ONLY the pipe flip on the media flat block

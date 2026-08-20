@@ -17,7 +17,7 @@ defmodule Barkpark.Search.SurfaceConfigCrossTenantTest do
   tokens wrote/read the SAME row and B saw A's value.
 
   GREEN after the fix: the runtime key became `(workspace_id, surface, scope)`
-  and a bespoke `:search_settings_admin` pipeline derives the caller's OWN
+  and a bespoke `:flat_admin_api` pipeline derives the caller's OWN
   workspace from its admin token BEFORE `AssignDefaultScope`, so A's write and
   B's read land on DISTINCT physical rows.
 
