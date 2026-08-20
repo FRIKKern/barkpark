@@ -1,21 +1,21 @@
 [
  {
-  "name": "PortableText (import { PortableText }) \u2014 shares the renderer chunk",
+  "name": "PortableText (import { PortableText }) \u2014 shares the renderer chunk (measured 20.59 KB; +0.75 KB for the route block emitter \u2014 polyline decoder + SVG track, a whole new figure type)",
   "path": "dist/index.mjs",
   "import": "{ PortableText }",
-  "limit": "19.75 KB",
+  "limit": "20.65 KB",
   "gzip": true
  },
  {
-  "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs) \u2014 22.5 KB + 250 B for BarkparkReference error discrimination (measured 22.7 KB, +0.98%, under the 2% regression bar)",
+  "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs) (measured 23.57 KB; +0.75 KB for the route block emitter \u2014 polyline decoder + SVG track, a whole new figure type)",
   "path": "dist/index.mjs",
-  "limit": "22.75 KB",
+  "limit": "23.65 KB",
   "gzip": true
  },
  {
-  "name": "RSC server entry (dist/server.mjs \u2014 PortableDoc + toPlainText closure)",
+  "name": "RSC server entry (dist/server.mjs \u2014 PortableDoc + toPlainText closure) (measured 22.53 KB; +0.75 KB for the route block emitter)",
   "path": "dist/server.mjs",
-  "limit": "21.7 KB",
+  "limit": "22.6 KB",
   "gzip": true
  },
  {

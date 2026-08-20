@@ -324,6 +324,18 @@ func fleetRowState(meters map[string]cloudclient.UsageMeter) string {
 // as if the pipe were merely dark, so a sick box could read calm), an unmetered
 // (blind) meter outranks a plain live one so a partially-dark row never poses as
 // fully healthy, and "live" is the floor.
+//
+// "live" is cased EXPLICITLY and the default is the ATTENTION side — an
+// unrecognised token ranks at the blind rung, above "live", so a state nobody
+// remembered to rank can never roll its row up as fully healthy. This mirrors
+// attentionBucket in cloud_status_cmd.go, the shipped precedent: its boundary is
+// a membership switch defaulting to "attention" for the same reason. An unknown
+// is BLIND, not TRIPPED, so it deliberately stays BELOW over_limit/near_limit —
+// it must not manufacture a breach either.
+//
+// Honest severity: today this is LATENT, not a live bug. usageStateToken can
+// only return the five tokens cased here, so nothing unknown reaches the switch
+// yet; the fail-open would go live the instant a sixth token is added.
 func usageStateSeverity(token string) int {
 	switch token {
 	case "over_limit":
@@ -334,8 +346,12 @@ func usageStateSeverity(token string) int {
 		return 2
 	case "unmetered":
 		return 1
-	default: // "live"
+	case "live":
 		return 0
+	default:
+		// An unranked token is a meter this build cannot read — blind, like
+		// "unmetered", never the healthy floor.
+		return 1
 	}
 }
 

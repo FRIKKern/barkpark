@@ -210,6 +210,37 @@ stop_slot()    { systemctl disable --now "barkpark-site@$(slot_inst "$1")" 2>/de
 slot_running() { systemctl is-active --quiet "barkpark-site@$(slot_inst "$1")" 2>/dev/null; }
 
 # ---------------------------------------------------------------------------
+# THE ROUTE-MARKER PREDICATE (D345) — an IDENTITY, not a substring. Carried
+# VERBATIM from the static engine (deploy/site-deploy.sh); arm, disarm, the
+# active-port read and the port flip must all agree or one of them re-opens the
+# defect.
+#
+# `BARKPARK_SITE_ROUTE:<slug>` read as a bare substring is not an identity: a
+# slug can be a strict PREFIX of another slug, and then `grep -q "$marker"` and
+# awk `index($0, m)` match the SIBLING'S block. Measured live on guerrilla:
+# `search` is a prefix of `search-capstone`, so active_caddy_port read the
+# SIBLING's port 8506, active_slot matched neither PORT_A nor PORT_B and printed
+# nothing, CUR_SLOT came back EMPTY, every run took the phantom first-deploy ARM
+# branch, and the arm's already-armed guard matched the sibling and returned 0
+# WITHOUT WRITING — 208 deploys reporting SWITCH ok at exit 0 over a public 404,
+# with blue/green rollback silently absent (206 `for slot a`, zero slot b).
+#
+# `grep -qw` IS NOT THE FIX: `-w` treats `-` as a NON-word character, so
+# `…ROUTE:search` still word-matches `…ROUTE:search-capstone`. Anchor the
+# DELIMITER instead — and the delimiter is "any character a slug cannot
+# contain", NOT "whitespace". valid_slug() is `^[a-z0-9][a-z0-9-]{0,62}$`, so a
+# sibling can only ever continue the marker with `[a-z0-9-]`; rejecting exactly
+# that class is necessary AND sufficient. Whitespace-only would still be right
+# for markers this engine writes (always `# …:<slug> — …`) but would read a
+# HAND-EDITED marker (`…:<slug>:` / `…:<slug>#`) as not-armed and re-arm a
+# working route into a DUPLICATE handle — the dangerous direction. The slug
+# carries no ERE metacharacter (a `-` LAST in a bracket expression is literal),
+# so it interpolates literally into grep -E AND awk's dynamic regex alike.
+# ---------------------------------------------------------------------------
+site_route_marker_re() { printf 'BARKPARK_SITE_ROUTE:%s([^a-z0-9-]|$)' "$SITE_SLUG"; }
+has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
+
+# ---------------------------------------------------------------------------
 # Marker-anchored per-site Caddy read: the ACTIVE upstream port is the one inside
 # THIS site's marker block (BARKPARK_SITE_ROUTE:<slug>), never a global grep — two
 # node sites can legitimately share a port literal elsewhere in the file, and the
@@ -218,8 +249,8 @@ slot_running() { systemctl is-active --quiet "barkpark-site@$(slot_inst "$1")" 2
 # ---------------------------------------------------------------------------
 active_caddy_port() {
   [ -f "$CADDYFILE" ] || return 0
-  awk -v m="BARKPARK_SITE_ROUTE:$SITE_SLUG" '
-    index($0, m) { inb = 1 }
+  awk -v m="$(site_route_marker_re)" '
+    $0 ~ m { inb = 1 }
     inb && match($0, /reverse_proxy[[:space:]]+localhost:[0-9]+/) {
       p = substr($0, RSTART, RLENGTH); sub(/.*localhost:/, "", p); print p; exit
     }
@@ -260,7 +291,12 @@ arm_caddy_node_route() { # <port>
   local port="$1" marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — cannot arm /sites/$SITE_SLUG"; return 1; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — cannot arm /sites/$SITE_SLUG"; return 1; }
-  if grep -q "$marker" "$CADDYFILE"; then return 0; fi
+  # DELIMITER-ANCHORED (D345): a bare-substring guard matched a prefix SIBLING's
+  # marker and returned "already armed" for a site that was never armed at all.
+  if has_site_route_marker "$CADDYFILE"; then
+    ROUTE_DETAIL="already armed: $CADDYFILE already carries this site's own $marker block, so the arm wrote nothing (only the upstream port moves on a re-deploy)"
+    return 0
+  fi
   if ! grep -qE 'reverse_proxy[[:space:]]+localhost:(4000|4001)([[:space:]]|$)' "$CADDYFILE"; then
     log "no slot 'reverse_proxy localhost:...' site in $CADDYFILE — cannot arm /sites/$SITE_SLUG"
     return 1
@@ -314,26 +350,38 @@ SITEROUTE
     !ins && $0 ~ /reverse_proxy[[:blank:]]+localhost:(4000|4001)([[:blank:]]|$)/ { print blk; ins = 1 }
     { print }
   ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
-  commit_caddyfile "$tmp"
+  if commit_caddyfile "$tmp"; then
+    ROUTE_DETAIL="armed: this run wrote the $marker block into $CADDYFILE and reloaded Caddy, so https://$HEALTH_HOST/sites/$SITE_SLUG/ now proxies to localhost:$port"
+    return 0
+  fi
+  return 1
 }
 
 # Flip the reverse_proxy port INSIDE this site's marker block, in place. Replaces
 # ONLY the first reverse_proxy localhost:<port> after the marker — never a global
 # sed. 0 flipped, 1 rejected/reverted.
 flip_caddy_node_port() { # <new-port>
-  local port="$1" marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
+  local port="$1" marker="BARKPARK_SITE_ROUTE:$SITE_SLUG" mre
+  mre="$(site_route_marker_re)"
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — cannot flip /sites/$SITE_SLUG"; return 1; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — cannot flip /sites/$SITE_SLUG"; return 1; }
-  grep -q "$marker" "$CADDYFILE" || { log "no $marker block in $CADDYFILE — cannot flip"; return 1; }
+  # DELIMITER-ANCHORED (D345) on BOTH reads: the guard below and the awk that
+  # finds the block. A bare substring would let this rewrite a prefix SIBLING's
+  # upstream port — the same collision, in its most destructive direction.
+  has_site_route_marker "$CADDYFILE" || { log "no $marker block in $CADDYFILE — cannot flip"; return 1; }
   local tmp; tmp="$(mktemp)"
-  awk -v m="$marker" -v p="$port" '
-    index($0, m) { inb = 1 }
+  awk -v m="$mre" -v p="$port" '
+    $0 ~ m { inb = 1 }
     inb && !done && $0 ~ /reverse_proxy[[:blank:]]+localhost:[0-9]+/ {
       sub(/localhost:[0-9]+/, "localhost:" p); inb = 0; done = 1
     }
     { print }
   ' "$CADDYFILE" > "$tmp" || { rm -f "$tmp"; return 1; }
-  commit_caddyfile "$tmp"
+  if commit_caddyfile "$tmp"; then
+    ROUTE_DETAIL="already armed: this site's $marker block was already in $CADDYFILE, so this run only moved its upstream to localhost:$port (no route was added)"
+    return 0
+  fi
+  return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -618,6 +666,8 @@ if [ "$MODE" = selftest ]; then
   free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()'; }
   T_PORT_A="$(free_port)"; T_PORT_B="$(free_port)"; T_PORT_C="$(free_port)"; T_PORT_D="$(free_port)"
   T_PORT_E="$(free_port)"; T_PORT_F="$(free_port)"   # basePath site's two slots
+  T_PORT_G="$(free_port)"; T_PORT_H="$(free_port)"   # prefix-collision: the LONGER sibling
+  T_PORT_I="$(free_port)"; T_PORT_J="$(free_port)"   # prefix-collision: the PREFIX slug
 
   FAKEBIN="$TD/bin"; SLOTPIDS="$TD/slotpids"; SENV="$TD/slots"; SRC="$TD/src"
   mkdir -p "$FAKEBIN" "$SLOTPIDS" "$SENV" "$SRC"
@@ -819,6 +869,75 @@ FAKENPM
   check "STAGE pulled .next/static in"   [ -f "$N_SITE/releases/n1/.next/static/chunk.js" ]
   check "STAGE pulled public/ in"        [ -f "$N_SITE/releases/n1/public/robots.txt" ]
   check "Caddy armed to slot a :A"       [ "$(cf_port)" = "$T_PORT_A" ]
+  # D346 — the arm decision on the DURABLE channel. This engine spoke SWITCH
+  # only, so `arm` vs `flip` (first deploy vs blue/green) was unrecoverable
+  # after the fact: log() writes stdout, which nothing persists.
+  check "ROUTE ok says ARMED on the durable machine channel (D346)" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=n1 detail="armed: ' "$TD/out.log"
+  check "…and the ROUTE detail names the port it armed" \
+    grep -q "proxies to localhost:$T_PORT_A" "$TD/out.log"
+  # ROUTE must stay OUTSIDE DeployRunner's @stage_names, or this report becomes a
+  # verdict: parse_stage_line/2 would fold it into `stages` and stage_exit_code/1
+  # could turn a green deploy red. Report, never verdict (charter D327).
+  RUNNER_EX="$(cd "$(dirname "$SELF")/.." && pwd)/api/lib/barkpark/sites/deploy_runner.ex"
+  if [ ! -f "$RUNNER_EX" ]; then
+    # A silent skip here is the same vacuum as the flock skip below: extracted
+    # without api/, this row disappears and the suite still prints PASS at a
+    # lower total. Skip honestly on a partial checkout; NEVER in CI.
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - the DeployRunner @stage_names proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but $RUNNER_EX is missing — this engine was extracted without api/, so the only assertion that ROUTE stays OUTSIDE the runner's whitelist did not run; a skipped doctrine proof must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP DeployRunner @stage_names doctrine (ROUTE stays a report) — needs api/lib/barkpark/sites/deploy_runner.ex in the tree"
+  else
+    check "DeployRunner's @stage_names still has no ROUTE arm (the node report cannot flip a verdict)" \
+      sh -c "! grep -q '^  @stage_names .*ROUTE' '$RUNNER_EX'"
+  fi
+
+  # -------------------------------------------------------------------------
+  # THE MARKER DELIMITER CLASS (D345), asserted DIRECTLY on the predicate.
+  #
+  # #10607's fix landed in BOTH engines, but only the static engine could SEE
+  # it: every marker THIS script writes has a space after the slug, so reverting
+  # site_route_marker_re to a whitespace-only ([[:space:]]|$) predicate left this
+  # suite at 177/177 PASS while the same mutation red the static engine's two
+  # hand-edited-delimiter rows. The hardening in the file that governs every live
+  # Node site's public route was mutation-INVISIBLE — an L4 claim in an L1 suit.
+  #
+  # The dangerous direction is a marker this script did NOT write: a hand-edited
+  # `…:<slug>:` in a live Caddyfile reads as NOT ARMED under a whitespace-only
+  # predicate, and the arm re-writes a working route into a duplicate handle.
+  # So the delimiter is "any character a slug cannot contain" ([^a-z0-9-]),
+  # which is right in BOTH directions — it accepts every real delimiter and
+  # still rejects the only thing a sibling slug can continue with.
+  # -------------------------------------------------------------------------
+  echo "[selftest] the marker delimiter is 'not a slug character', not merely whitespace (D345)"
+  mrk() { # <slug> <line> -> 0 if the predicate says "this line is that slug's marker"
+    # ${SITE_SLUG:-}: the selftest runs with `set -u` and no slug of its own —
+    # the deploy path is what sets this global.
+    local __save="${SITE_SLUG:-}" __rc=0
+    printf '%s\n' "$2" > "$TD/mrk.txt"
+    SITE_SLUG="$1"; has_site_route_marker "$TD/mrk.txt" || __rc=$?
+    SITE_SLUG="$__save"; return "$__rc"
+  }
+  check "delimiter: a space after the slug matches (what this script writes)" \
+    mrk search '# BARKPARK_SITE_ROUTE:search — node site'
+  check "delimiter: end-of-line matches" \
+    mrk search '# BARKPARK_SITE_ROUTE:search'
+  check "delimiter: a hand-edited ':' after the slug STILL reads as armed (no duplicate re-arm)" \
+    mrk search '# BARKPARK_SITE_ROUTE:search: node site'
+  check "delimiter: a hand-edited '#' after the slug STILL reads as armed" \
+    mrk search '# BARKPARK_SITE_ROUTE:search#1'
+  if mrk search '# BARKPARK_SITE_ROUTE:search-capstone — node site'; then
+    check "delimiter: a PREFIX sibling ('-') is REJECTED" false
+  else
+    check "delimiter: a PREFIX sibling ('-') is REJECTED" true
+  fi
+  if mrk search '# BARKPARK_SITE_ROUTE:search2 — node site'; then
+    check "delimiter: an alnum-extended sibling is REJECTED" false
+  else
+    check "delimiter: an alnum-extended sibling is REJECTED" true
+  fi
   check "slot a env RELEASE_DIR=n1"      grep -q "RELEASE_DIR=$N_SITE/releases/n1" "$SENV/selftest__a.env"
   # GNU stat first (-c; on Linux `stat -f` SUCCEEDS with filesystem info, so a
   # BSD-first fallback never fires and the check reads garbage on CI runners),
@@ -841,6 +960,8 @@ FAKENPM
   check "HEALTH ok on the new slot"      saw HEALTH ok n2
   check "SWITCH ok"                      saw SWITCH ok n2
   check "Caddy flipped to slot b :B"     [ "$(cf_port)" = "$T_PORT_B" ]
+  check "ROUTE ok says ALREADY-ARMED on a flip, not armed (D346)" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=n2 detail="already armed: ' "$TD/out.log"
   check "marker block flipped in place, single reverse_proxy inside it" \
     [ "$(awk 'index($0,"BARKPARK_SITE_ROUTE:selftest"){i=1} i&&/reverse_proxy/{c++} i&&/}/{i=0} END{print c+0}' "$CF")" = 1 ]
   check "old port :A fully gone from the marker block" \
@@ -1147,6 +1268,71 @@ FAKENPM
     test -s "$R_LOG"
   check "reattach: the log carries RAW child output, not BPSTAGE lines" \
     sh -c "grep -q 'building the site' '$R_LOG' && ! grep -q '^BPSTAGE' '$R_LOG'"
+
+  # -------------------------------------------------------------------------
+  # THE PREFIX COLLISION (D345) — the whole corrupted-read chain, end to end.
+  #
+  # LIVE SHAPE: `search` is a strict PREFIX of `search-capstone`. With a
+  # bare-substring marker read, active_caddy_port returns the SIBLING'S port,
+  # active_slot compares it to this site's PORT_A/PORT_B, matches NEITHER and
+  # prints nothing, CUR_SLOT comes back EMPTY — so EVERY deploy takes the
+  # phantom first-deploy ARM branch, the arm's already-armed guard matches the
+  # sibling and returns 0 WITHOUT WRITING, and the run emits SWITCH ok at exit 0
+  # over a public 404. Measured: 208 deploys in 36h, 206 of them "for slot a",
+  # ZERO slot b, no .previous file — i.e. blue/green rollback silently absent too.
+  #
+  # BOTH DIRECTIONS, because a too-strict predicate silently un-arms every site
+  # that works today: the prefix slug must arm and then FLIP on its own ports,
+  # and the sibling's upstream must never move when the prefix site deploys.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: a PREFIX slug gets its own route, its own slots and a real blue/green flip (D345)"
+  px_port() { # <slug> — the upstream port inside THAT slug's marker block, anchored
+    awk -v m="BARKPARK_SITE_ROUTE:$1([[:space:]]|\$)" \
+      '$0 ~ m {i=1} i&&match($0,/localhost:[0-9]+/){print substr($0,RSTART+10,RLENGTH-10);exit}' "$CF"
+  }
+  px_deploy() { # <slug> <build_id> <port_a> <port_b>
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG="$1" BUILD_ID="$2" CONTENT_REV="rev-$2" \
+      SITE_SRC="$SRC" SITE_PORT_A="$3" SITE_PORT_B="$4" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/px-$1.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_SITE_HEALTH_PATH=/ BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" > "$TD/px-$2.out" 2>&1; echo $?
+  }
+  # (1) the LONGER sibling arms, then flips onto its OWN second slot.
+  rc="$(px_deploy pfxn-capstone q1 "$T_PORT_G" "$T_PORT_H")"
+  check "prefix/node: the LONGER sibling's first deploy exits 0"   [ "$rc" = 0 ]
+  rc="$(px_deploy pfxn-capstone q2 "$T_PORT_G" "$T_PORT_H")"
+  check "prefix/node: the sibling flipped onto its second slot"    [ "$(px_port pfxn-capstone)" = "$T_PORT_H" ]
+  # (2) THE CASE — the prefix slug deploys with the sibling's marker already in
+  #     the file. Every assertion below REDS on a bare-substring predicate.
+  rc="$(px_deploy pfxn q3 "$T_PORT_I" "$T_PORT_J")"
+  check "prefix/node: the PREFIX slug's first deploy exits 0"      [ "$rc" = 0 ]
+  check "prefix/node: it ARMED ITS OWN marker block" \
+    grep -qE 'BARKPARK_SITE_ROUTE:pfxn([[:space:]]|$)' "$CF"
+  check "prefix/node: its upstream is ITS OWN slot-a port, not the sibling's" \
+    [ "$(px_port pfxn)" = "$T_PORT_I" ]
+  check "prefix/node: ROUTE reports ARMED on the durable channel" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=q3 detail="armed: ' "$TD/px-q3.out"
+  check "prefix/node: the sibling's upstream did NOT move"         [ "$(px_port pfxn-capstone)" = "$T_PORT_H" ]
+  # (3) THE CHAIN IS BROKEN: active_caddy_port -> active_slot -> CUR_SLOT is no
+  #     longer empty, so the SECOND deploy is a real blue/green FLIP and not
+  #     another phantom first deploy (208 of which happened live).
+  rc="$(px_deploy pfxn q4 "$T_PORT_I" "$T_PORT_J")"
+  check "prefix/node: the prefix slug's SECOND deploy exits 0"     [ "$rc" = 0 ]
+  check "prefix/node: it FLIPPED to slot b (CUR_SLOT was read, not empty)" \
+    [ "$(px_port pfxn)" = "$T_PORT_J" ]
+  check "prefix/node: ROUTE says already-armed, i.e. NOT a phantom first deploy" \
+    grep -q '^BPSTAGE name=ROUTE status=ok build_id=q4 detail="already armed: ' "$TD/px-q4.out"
+  check "prefix/node: .previous now exists (blue/green rollback is possible at all)" \
+    [ -s "$TD/sites/pfxn/.previous" ]
+  check "prefix/node: exactly ONE marker for the prefix slug (never re-armed)" \
+    [ "$(grep -cE 'BARKPARK_SITE_ROUTE:pfxn([[:space:]]|$)' "$CF" | tr -d ' ')" = 1 ]
+  # (4) THE REVERSE DIRECTION — the blast-radius guard. The stricter predicate
+  #     must still match a site's OWN marker, or it un-arms the sites that work.
+  rc="$(px_deploy pfxn-capstone q5 "$T_PORT_G" "$T_PORT_H")"
+  check "prefix/node/reverse: the LONGER slug still finds its own block"  [ "$rc" = 0 ]
+  check "prefix/node/reverse: and flips back onto its own slot a"   [ "$(px_port pfxn-capstone)" = "$T_PORT_G" ]
+  check "prefix/node/reverse: the PREFIX site's upstream was untouched"   [ "$(px_port pfxn)" = "$T_PORT_J" ]
 
   echo "[selftest] e2e: --teardown stops BOTH slots, disarms the Caddy route, deletes the tree"
   # selftest was armed into $CF with two slot units; tear the whole site down. The
@@ -1502,12 +1688,14 @@ fi
 disarm_caddy_node_route() {
   command -v caddy >/dev/null 2>&1 || { log "caddy not installed — skipping /sites/$SITE_SLUG disarm"; return 0; }
   [ -f "$CADDYFILE" ] || { log "no $CADDYFILE — nothing to disarm"; return 0; }
-  local marker="BARKPARK_SITE_ROUTE:$SITE_SLUG"
-  grep -q "$marker" "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
+  local marker; marker="$(site_route_marker_re)"
+  # DELIMITER-ANCHORED (D345) — a bare substring would excise a prefix SIBLING's
+  # live route block on this site's teardown.
+  has_site_route_marker "$CADDYFILE" || { log "caddy /sites/$SITE_SLUG route not armed — nothing to disarm"; return 0; }
   local tmp; tmp="$(mktemp)"
   BP_MARK="$marker" awk '
     BEGIN { m = ENVIRON["BP_MARK"] }
-    !inb && index($0, m) { inb = 1; depth = 0; opened = 0; next }
+    !inb && $0 ~ m { inb = 1; depth = 0; opened = 0; next }
     inb {
       o = gsub(/[{]/, "&"); c = gsub(/[}]/, "&"); depth += o - c
       if (o > 0) opened = 1
@@ -1771,6 +1959,19 @@ emit HEALTH ok "$HEALTH_DETAIL"
 # (arm the block on the first deploy). Fail-closed: a rejected flip stops the new
 # slot and leaves the live slot serving.
 emit SWITCH started
+# THE ARM DECISION GETS A DURABLE CHANNEL (D346). This engine spoke SWITCH only,
+# and every route fact reached the operator through log() — i.e. stdout, which
+# nothing persists (the durable .log holds raw npm child output, the durable
+# .status holds BPSTAGE lines). So `arm` vs `flip` — the difference between a
+# first deploy and a blue/green flip — was unmeasurable after the fact, which is
+# exactly why 208 phantom first deploys went unnoticed. ROUTE is the channel: it
+# is a BPSTAGE line, so it lands in the durable .status fold, and it is
+# deliberately OUTSIDE DeployRunner's @stage_names whitelist
+# (PLAN/BUILD/STAGE/HEALTH/SWITCH/RETIRE), so parse_stage_line/2 skips it and it
+# can NEVER reach stage_exit_code/1 or flip a verdict. Report, not verdict —
+# charter D327 stands and dr-w19-bl-arm-route-incidence-then-fatal owns the
+# fatal question; this is what makes that question answerable.
+ROUTE_DETAIL=""
 CUR_BUILD=""; CUR_PORT=""
 if [ -n "$CUR_SLOT" ]; then CUR_BUILD="$(read_slot_build "$CUR_SLOT")"; CUR_PORT="$(slot_port "$CUR_SLOT")"; fi
 if [ -z "$CUR_SLOT" ]; then
@@ -1791,6 +1992,8 @@ fi
 if [ -n "$CUR_SLOT" ] && [ "$CUR_SLOT" != "$TARGET_SLOT" ]; then
   printf '%s %s %s\n' "$CUR_SLOT" "$CUR_PORT" "$CUR_BUILD" > "$ROOT/.previous"
 fi
+log "ROUTE: $ROUTE_DETAIL"
+emit ROUTE ok "$ROUTE_DETAIL"
 log "SWITCH: '$SITE_SLUG' Caddy upstream -> slot $TARGET_SLOT :$TARGET_PORT (build $BUILD_ID)"
 emit SWITCH ok "Caddy upstream -> slot $TARGET_SLOT :$TARGET_PORT"
 

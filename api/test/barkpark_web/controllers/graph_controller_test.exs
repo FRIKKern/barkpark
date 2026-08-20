@@ -88,7 +88,9 @@ defmodule BarkparkWeb.GraphControllerTest do
   describe "route presence (stale-router-beam guard)" do
     test "GET /v1/graph/<id> is NOT 404 — the route is mounted", %{conn: conn, scope: scope} do
       doc_id = uniq("graph-route")
-      _post = mk_post!(doc_id, scope)
+      # Published: the default perspective resolves ONLY a published root
+      # (graph_draft_leak_test.exs — the draft-only fallback was a title leak).
+      _post = mk_published_post!(doc_id, scope)
 
       resp = conn |> authed() |> get("/v1/graph/#{doc_id}")
 
@@ -105,7 +107,7 @@ defmodule BarkparkWeb.GraphControllerTest do
   describe "GET /v1/graph/:id" do
     test "roots on a NON-task content doc (gap #4 generic root)", %{conn: conn, scope: scope} do
       doc_id = uniq("graph-post")
-      _post = mk_post!(doc_id, scope)
+      _post = mk_published_post!(doc_id, scope)
 
       resp = conn |> authed() |> get("/v1/graph/#{doc_id}")
       assert resp.status == 200
@@ -204,7 +206,7 @@ defmodule BarkparkWeb.GraphControllerTest do
       register_task_schemas!(scope)
       paper_id = uniq("rv-root")
       task_id = uniq("rv-task")
-      mk_post!(paper_id, scope)
+      mk_published_post!(paper_id, scope)
 
       publish_task_citing!(paper_id, task_id, scope, %{
         "acceptance_criteria" => [
@@ -242,7 +244,7 @@ defmodule BarkparkWeb.GraphControllerTest do
       register_task_schemas!(scope)
       paper_id = uniq("rv-nocrit-root")
       task_id = uniq("rv-nocrit-task")
-      mk_post!(paper_id, scope)
+      mk_published_post!(paper_id, scope)
       publish_task_citing!(paper_id, task_id, scope, %{})
       drain_projector!()
 
@@ -258,7 +260,7 @@ defmodule BarkparkWeb.GraphControllerTest do
 
     test "a root nothing cites returns an empty list", %{conn: conn, scope: scope} do
       doc_id = uniq("rv-lonely")
-      mk_post!(doc_id, scope)
+      mk_published_post!(doc_id, scope)
 
       resp = conn |> authed() |> get("/v1/graph/#{doc_id}/tasks")
       assert resp.status == 200

@@ -338,7 +338,15 @@ function makeDom() {
 }
 
 // ── per-scenario boot ────────────────────────────────────────────────────────
-function bootScenario(name) {
+// OPTIONS (cch-w46-s3), all smoke-only and all defaulting to the shipped boot:
+//   • deferMe — HOLD every GET /v1/me response until the returned resolveMe()
+//     is called. The scenario boots, routes and paints with the authority read
+//     STILL IN FLIGHT, which is the state a deep link into a slow control plane
+//     actually produces; resolveMe() then lands the answer LATE, so a surface
+//     that read /v1/me at paint time and never again is observable as such
+//     (before/after bytes). Without it the whole corpus resolves /v1/me on the
+//     first microtask and no late-answer defect can be represented at all.
+function bootScenario(name, opts) {
   const { registry, document } = makeDom();
 
   // Backing stores we control so each scenario boots clean.
@@ -391,18 +399,31 @@ function bootScenario(name) {
   const calls = [];
 
   // fetch → scenario router → a Response-like the app's api() understands.
+  // cch-w46-s3: the held /v1/me responses, drained (in request order) by the
+  // resolveMe() bootScenario hands back. Empty unless opts.deferMe.
+  const heldMe = [];
+  const resolveMe = () => { heldMe.splice(0).forEach((land) => land()); };
+
   function fetchStub(url, init) {
     const method = (init && init.method) || "GET";
     const p = String(url);
     calls.push({ method, path: p.split("?")[0] });
-    const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
-    return Promise.resolve({
-      ok: res.status >= 200 && res.status < 300,
-      status: res.status,
-      headers: { get: (h) => (String(h).toLowerCase() === "content-type" ? "application/json" : null) },
-      json: () => Promise.resolve(res.body),
-      text: () => Promise.resolve(JSON.stringify(res.body)),
-    });
+    // Routed at LANDING time, not at call time, so a deferred response still
+    // reflects whatever the fixture state is when it actually answers.
+    const answer = () => {
+      const res = route(name, method, p, fixtureState) || { status: 404, body: { error: "not_found" } };
+      return {
+        ok: res.status >= 200 && res.status < 300,
+        status: res.status,
+        headers: { get: (h) => (String(h).toLowerCase() === "content-type" ? "application/json" : null) },
+        json: () => Promise.resolve(res.body),
+        text: () => Promise.resolve(JSON.stringify(res.body)),
+      };
+    };
+    if (opts && opts.deferMe && p.split("?")[0].endsWith("/v1/me")) {
+      return new Promise((resolve) => heldMe.push(() => resolve(answer())));
+    }
+    return Promise.resolve(answer());
   }
 
   function EventSourceStub() {
@@ -449,7 +470,7 @@ function bootScenario(name) {
   vm.createContext(sandbox);
   vm.runInContext(APP_JS, sandbox, { filename: "app.js" });
 
-  return { registry, hooks: captured.hooks, calls, fixtureState };
+  return { registry, hooks: captured.hooks, calls, fixtureState, resolveMe };
 }
 
 // Flush all pending microtasks (both realms share Node's one microtask queue).
@@ -459,6 +480,58 @@ async function flush() {
     await new Promise((r) => setImmediate(r));
   }
 }
+
+// ── cch-w46-s3 · THE LATE-/v1/me GUARD, and it runs BEFORE the corpus ────────
+// Not an EXPECTATION (those own their scenarios; this owns a HARNESS
+// CAPABILITY): it boots ONE existing scenario twice-over in a single run — with
+// the authority read held open past the paint, then landed — and asserts the
+// instance rail actually repainted. It is deliberately pinned on `usage-quota`,
+// the tab reloadInstanceView() HARD-RETURNS on: the obvious
+// `if (currentView() === "instance") reloadInstanceView()` seam was built and
+// measured, and it left this exact rail byte-identical while Overview looked
+// fixed. So a fix that only covers Overview reds here.
+//
+// It runs at module top level, ahead of main(), so a broken seam is named at
+// the START of the run rather than inferred from a scenario failing downstream.
+async function assertLateMeRepaintsTheRail() {
+  const boot = bootScenario("usage-quota", { deferMe: true });
+  await flush();
+  const railEl = boot.registry.get("inst-lifecycle-actions");
+  const before = (railEl && railEl.innerHTML) || "";
+  boot.resolveMe();
+  await flush();
+  const after = (railEl && railEl.innerHTML) || "";
+
+  const broken = [];
+  if (!before) broken.push("the rail never painted with /v1/me in flight — the scenario or the mount moved");
+  if (before.indexOf("data-me-retry") === -1) {
+    broken.push("an UNKNOWN authority rendered no exit: no [data-me-retry] in the in-flight rail, so the only " +
+      "way out of \"Checking capabilities…\" is a full page reload");
+  }
+  if (after === before) {
+    broken.push("a /v1/me that answered LATE left the rail BYTE-IDENTICAL (" + before.length + " bytes) — the " +
+      "authority is still read at paint time only. Note the tab: reloadInstanceView() refuses #usage, so a seam " +
+      "routed through it passes on Overview and fails here.");
+  }
+  if (after.indexOf('data-life-verb="decommission"') === -1) {
+    broken.push("the landed answer (an owner) did not restore the live destroy verb — the repaint fired but " +
+      "painted the wrong model");
+  }
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " late-/v1/me   — usage tab rail: " + before.length +
+    " bytes in flight (exit: " + (before.indexOf("data-me-retry") !== -1) + ") → " + after.length +
+    " bytes once it landed (repainted: " + (after !== before) + ")\n");
+  if (broken.length) {
+    process.stdout.write("\nlate-/v1/me guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+// cch-w46-s7 — THIS CALL MOVED INTO main(). It used to fire at module top level,
+// which made `import("./smoke.mjs")` boot a scenario and leak its verdict line to
+// stdout (measured: 117 bytes). A module that runs a corpus on import cannot be a
+// host for another instrument, so the two top-level awaits (this one and the
+// billing guard below main()) now run as main()'s FIRST two steps — same order,
+// same output, same exit codes, but only when smoke.mjs is the entry point.
 
 // ── EXPECTATIONS: the per-scenario view skeleton (edit HERE when markup moves) ─
 const EXPECTATIONS = {
@@ -795,6 +868,52 @@ const EXPECTATIONS = {
     includes: ["runway-hero", "Launch your first Barkpark", "runway-sub"],
     excludes: ['class="fleet-row"'],
   },
+  // cch-w48-s6: the frame this epic's crown is named for, rendered for the first
+  // time. A member on a ZERO-instance team gets the welcome runway, and until
+  // cch-w47-s1 that runway was a full launch form — a name field, two provider
+  // tabs and a submit — against `go_live`, which answers a plain member 403
+  // {required:"admin"} BEFORE it ever reaches the entitlement check. This is the
+  // corpus proof of that fix: the refusal card is what renders, and the form is
+  // GONE rather than merely disabled (a disabled submit leaves three live
+  // controls still selling the refusal).
+  "overview-member-empty-fleet": {
+    what: "a member with no instances is REFUSED up front, in the server's own words — the launch form is withheld, not disabled",
+    container: "overview-body",
+    includes: [
+      "empty-state",
+      "You can&#39;t launch for this team",
+      "Launching needs the admin role on this team. Ask a team admin to launch it, or to give you that role.",
+    ],
+    // The whole form, named control by control — the name field, the provider
+    // seg-buttons and the submit. `launch-form` alone would go green on a form
+    // that lost only its wrapper class.
+    excludes: [
+      "launch-form",
+      "launch-flow-name-",
+      "seg-btn",
+      'type="submit"',
+      "Create your first Barkpark",
+    ],
+  },
+  // cch-w48-s6: the site layer, entered by a MEMBER for the first time. This is
+  // the PAIRED POSITIVE CONTROL — it asserts what a member legitimately keeps,
+  // so the fences cch-w48-s2/s3 draw around this screen cannot be satisfied by
+  // an empty page. It deliberately says NOTHING about `#site-github`: s2 omits
+  // that control for a member, and an expectation pinning today's unfenced
+  // render would freeze the defect into the baseline.
+  "site-member": {
+    what: "a member on the site screen keeps every member-legal control — deploy, rollback, promote rows, env",
+    container: "site-body",
+    includes: [
+      'id="site-deploy"',
+      'id="site-rollback"',
+      'data-kind="redeploy"',
+      'data-kind="rollback"',
+      ">Roll back to this<",
+      'id="site-env-edit"',
+      "dep-current",
+    ],
+  },
   "loggedout-invited": {
     what: "the sign-in banner announcing the parked invitation",
     check(reg) {
@@ -828,10 +947,71 @@ const EXPECTATIONS = {
   },
   // Rollback/redeploy (charter D7): the current live row offers Redeploy + the
   // Current chip, the prior live row offers rollback, the failed row neither.
+  //
+  // cch-w67-followup (wave 68): CONVERTED from an `includes` list to a `check`,
+  // because the one line that joins every control on this screen to its code —
+  // `var sdel = $("#site-delete"); if (sdel) sdel.addEventListener("click", …)`
+  // in loadSite — was driven by NOTHING. The W67 destroy tier shipped behind
+  // five green gates and not one of them could fail on a dead button: the
+  // binding census greps the fetch path out of runSiteDelete's SOURCE, the
+  // member-authority sweep proves #site-delete RENDERS, the review pass enters
+  // AT runSiteDelete with a hand-built ctl. A typo in the attach line ships a
+  // Delete that does nothing, and every gate stays green — the epic's own
+  // vacuous-green shape. The hole belongs to the ROW, not to Delete: the same
+  // one line wires Deploy, Roll back, the retries, GitHub, Edit env and the
+  // theme select.
+  //
+  // WHY HERE AND NOT IN A NEW SCENARIO. This scenario already boots loadSite's
+  // SUCCESS branch, so every attach has already run by the time the check
+  // reads. Dispatching a real event and counting the handlers that ran is the
+  // whole proof, and it costs no fixture and no scenario (PIN_TOTAL_SCENARIOS
+  // is untouched — D817 refused that bump for the crown itself).
+  //
+  // THE RUNNER RETURNS EARLY ON `check` (runScenario, below) — an `includes`
+  // list beside one is SILENTLY DROPPED, not merged. The five needles this
+  // expectation has always shipped are therefore re-asserted VERBATIM first,
+  // before any dispatch, so the conversion adds a proof and subtracts none.
+  //
+  // `> 0`, NEVER `=== 1`: the #id registry is IMMORTAL and handlers ACCUMULATE
+  // across re-renders (this scenario measures 2 per control today, because
+  // loadSite paints twice). The count that means DEAD is 0 — which is exactly
+  // what deleting an addEventListener line produces here, measured.
   rollback: {
-    what: "deployment rows with Redeploy / Roll-back actions + the Current chip",
-    container: "site-body",
-    includes: ['data-kind="redeploy"', ">Redeploy<", ">Roll back to this<", "dep-current", "live since "],
+    what: "deployment rows with Redeploy / Roll-back actions + the Current chip — and every control loadSite wires DISPATCHES",
+    check(reg) {
+      const body = reg.get("site-body").innerHTML || "";
+      for (const needle of ['data-kind="redeploy"', ">Redeploy<", ">Roll back to this<", "dep-current", "live since "]) {
+        assert.ok(body.includes(needle), "#site-body missing " + JSON.stringify(needle));
+      }
+
+      // Every listener loadSite attaches on the success branch, with the event
+      // type it was registered for — the shim dispatches PER TYPE, so a control
+      // wired for "change" and clicked reports 0 (site-theme-select, measured).
+      const WIRED = [
+        ["site-delete", "click"],       // confirmSiteDelete — the W67 destroy tier
+        ["site-deploy", "click"],       // confirmDeploy
+        ["site-rollback", "click"],     // confirmSiteRollback
+        ["site-deploys-retry", "click"], // loadSite(id, { quiet: true })
+        ["site-github", "click"],       // openSiteGithub
+        ["site-env-edit", "click"],     // openSiteEnvModal
+        ["site-theme-select", "change"], // the PATCH …/sites/:id theme write
+      ];
+      for (const [id, type] of WIRED) {
+        const el = reg.get(id);
+        assert.ok(el, "#" + id + " was never even looked up — loadSite's attach line for it is gone");
+        assert.ok(el.dispatchEvent({ type }) > 0,
+          "#" + id + " renders but no \"" + type + "\" handler ran — the control is DEAD " +
+          "(loadSite's addEventListener for it never attached)");
+      }
+
+      // NEGATIVE CONTROL, so the seven greens above mean something: #site-load-retry
+      // belongs to the DEGRADE path (siteLoadFailureHtml), which this successful
+      // read never paints — loadSite never looks it up, so it is absent from the
+      // registry entirely. If this ever resolves, the success and failure branches
+      // have merged and the assertions above are reading the wrong screen.
+      assert.equal(reg.get("site-load-retry"), undefined,
+        "#site-load-retry must NOT exist on a successful site read — it is the failure branch's control");
+    },
   },
   // The 409-failure twin boots to the same skeleton; the inline-failure morph
   // itself is click-driven (covered by the vm unit tests + live browser).
@@ -1195,25 +1375,37 @@ const EXPECTATIONS = {
 
   // ── gr-p2 plan & dunning (C-03/C-04): trial CTA, GR17 dunning, portal return ─
   "billing-trial": {
-    what: "the trial billing state — countdown chip, the RATIFIED CTA verbatim, quota-honest open plan grid, trial topbar chip",
+    what: "the trial billing state — countdown chip, the warranted CTA verbatim, open plan grid, trial topbar chip",
     check(reg) {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
       // The ratified CTA (task-2ed0ea068f37345d), VERBATIM — never the
-      // prototype's superseded draft.
-      assert.ok(box.includes("Pick a plan below to keep it. No card needed."),
-        "the ratified trial CTA must render verbatim");
+      // prototype's superseded draft. cch-w49-s1 retired the second sentence
+      // ("No card needed."): the ratification warranted teardown + the T-3/T-1
+      // reminders, never card collection, and checkout does collect a card.
+      assert.ok(box.includes("Pick a plan below to keep it."),
+        "the warranted trial CTA must render verbatim");
+      assert.ok(!box.includes("No card needed"),
+        "the trial card must not promise a card-free path into a mode=subscription checkout");
       assert.ok(box.includes('class="trial-chip"'), "the countdown chip must render");
       assert.ok(box.includes("14 days left"), "the chip must carry the server's days-remaining");
-      // Trial expiry is a real teardown — the dunning suspend promise must NOT
-      // leak into trial copy.
-      assert.ok(!box.includes("suspended — not deleted"), "trial copy must never borrow the dunning suspend promise");
-      // The plan grid opens right below the CTA ("below" must be true) and is
-      // quota-honest: real ceilings, no unlimited fiction.
+      // Trial expiry is a real teardown — the dunning copy must NOT leak into
+      // trial copy. cch-w54-s5 retired "suspended — not deleted" from both
+      // dunning banners (the suspension it promised has no executor), so this
+      // inverse pin is RE-POINTED at the sentence that replaced it. Left on the
+      // dead phrase it would have gone vacuously green.
+      assert.ok(!box.includes("Isolation, not shutdown"), "trial copy must never borrow the dunning isolation sentence");
+      assert.ok(!box.includes("suspended — not deleted"), "nor the retired dunning suspend promise, if it ever returns");
+      // The plan grid opens right below the CTA ("below" must be true) and
+      // still names all three tiers with their actions. It states no ceiling
+      // and no price — this actor is on plan "trial", which the catalog has no
+      // card for, and nothing on this screen ever asks the server for a quota.
+      // The numeral absence itself is guarded corpus-wide by
+      // assertBillingStatesNoNumeralItCannotSupport().
       assert.equal(reg.get("billing-tiers").hidden, false, "the plan grid must be open under the CTA");
       const grid = reg.get("billing-tiers").innerHTML || "";
-      for (const q of ["1 managed instance", "3 managed instances", "10 managed instances"]) {
-        assert.ok(grid.includes(q), "tier cards must state the real ceiling " + JSON.stringify(q));
+      for (const q of ["Free", "Supporter", "Support++"]) {
+        assert.ok(grid.includes(">" + q + "<"), "tier cards must name the tier " + JSON.stringify(q));
       }
       assert.ok(!grid.includes("Unlimited managed instances"), "the unlimited fiction must be gone");
       // GR20: the topbar chip reads trial (XOR — never the past-due skin).
@@ -1234,11 +1426,29 @@ const EXPECTATIONS = {
     check(reg) {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
-      // GR17 strings, data-driven: both date slots filled from current_period_end.
-      assert.ok(box.includes("Your card was declined on "), "the banner must open with the failed date");
-      assert.ok(box.includes("Your instances keep running until "), "the banner must carry the suspend date");
-      assert.ok(box.includes("then they're suspended — not deleted — and come right back the moment payment succeeds."),
-        "the suspended-not-deleted sentence must render verbatim");
+      // cch-w54-s5: DATELESS. Both date slots came off current_period_end, which
+      // mark_past_due/2 re-anchors to now+3d on every webhook delivery, and the
+      // suspension they pointed at has no executor on any production path. The
+      // banner now states the consequence entitled?/1 actually gates.
+      assert.ok(box.includes("Your card was declined. Nothing stops and nothing is deleted"),
+        "the banner must open with the honest isolation lead");
+      assert.ok(box.includes("this team can't launch a new instance until payment succeeds"),
+        "the banner must name the go-live gate, the one real consequence of a lapsed grace");
+      assert.ok(box.includes("Isolation, not shutdown — and it lifts the moment payment succeeds."),
+        "the isolation sentence must render verbatim, with the backed restore tail");
+      // The two negatives are scoped to the BANNER BODY by name — the card below
+      // it legitimately dates "since {started_at}", and suspendedCardBannerHtml
+      // (elsewhere on the console) legitimately says "Suspended".
+      const dunningBody = (box.match(/<p class="dunning-body">([\s\S]*?)<\/p>/) || [])[1] || "";
+      assert.ok(dunningBody.length > 0, "the dunning body must render");
+      assert.ok(!/suspend/i.test(dunningBody), "the past-due banner must promise no suspension");
+      assert.ok(!/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{1,2}\/\d{1,2}/.test(dunningBody),
+        "and must name no calendar day");
+      // The member-visible line beside it is dateless too (one edit inside
+      // billingPeriodLine moves the owner and non-owner twins together).
+      assert.ok(box.includes("Grace period running — new instance launches stop when it ends"),
+        "the plan-meta period line states the lapse without a sliding deadline");
+      assert.ok(!box.includes("Grace period ends "), "the retracted deadline must not survive anywhere on the screen");
       assert.ok(box.includes(">Past due<"), "the banner must carry the Past due title");
       assert.ok(box.includes(">Supporter<"), "the banner must chip the plan name");
       assert.ok(box.includes(">Update payment method<"), "the GR17 portal CTA must render verbatim");
@@ -1270,7 +1480,9 @@ const EXPECTATIONS = {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
       assert.ok(box.includes(">Supporter<"), "the current plan card must render after the round-trip");
-      assert.ok(box.includes("3 managed instances"), "the features must state the real Supporter ceiling");
+      // cch-w49-s1: the card states the plan and its features, never a ceiling
+      // this screen never fetched (Usage.instance_quota is not read here at all).
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "the features must render");
       // G-01 anatomy: the portal CTA rides the Manage-billing .set-section now.
       assert.ok((reg.get("billing-manage").innerHTML || "").includes(">Manage billing<"), "the portal CTA must render in its section");
       assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage-billing section shows for the active plan");
@@ -1401,14 +1613,29 @@ const EXPECTATIONS = {
     what: "GR17 overview dunning banner + the suspended instance-card banner, verbatim, no runway",
     check(reg) {
       const state = (reg.get("overview-state") || {}).innerHTML || "";
-      assert.ok(state.includes("Your payment failed on"), "the GR17 overview banner lead sentence renders verbatim");
-      assert.ok(state.includes("they're suspended — not deleted"), "the GR17 keep-running sentence renders verbatim");
+      // cch-w54-s5: dateless, and ISOLATION rather than a suspension no code
+      // performs (maybe_enforce/1's suspend arm is unreachable in production).
+      assert.ok(state.includes("Your payment failed. Nothing stops and nothing is deleted"),
+        "the overview banner lead sentence renders verbatim");
+      assert.ok(state.includes("this team can't launch a new instance until payment succeeds"),
+        "the overview banner names the go-live gate, the one real consequence");
+      assert.ok(state.includes("Isolation, not shutdown."), "the isolation sentence renders verbatim");
+      assert.ok(!/suspend/i.test(state), "the overview banner must promise no suspension");
+      assert.ok(!/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{1,2}\/\d{1,2}/.test(state),
+        "and must name no calendar day — the failed-on day was back-computed from a sliding anchor");
       assert.ok(state.includes("Update payment method"), "the portal CTA renders");
       assert.ok(!state.includes("runway-card"), "the runway is suppressed on the past-due path");
       const grid = (reg.get("overview-instances") || {}).innerHTML || "";
       assert.ok(grid.includes("suspended-card-banner"), "the suspended box carries the GR17 card banner");
-      assert.ok(grid.includes("The server is stopped, not destroyed"), "the suspended-card body renders verbatim");
+      // cch-w54-s1 — the card names what suspension actually withdrew (Cloud's
+      // management), not a stop nothing in this plane performs. The rendered
+      // DOM is the pin, so a helper that stopped being called would red here.
+      assert.ok(grid.includes("Barkpark Cloud has stopped managing it"), "the suspended-card body renders verbatim");
+      assert.ok(!grid.includes("The server is stopped"), "the console never paints a stop it does not perform");
       assert.ok(!grid.includes("suspended — not deleted"), "trial-expiry copy never leaks onto the suspended card");
+      // The pill beside it moved with the copy: the WORD is Suspended, and the
+      // `bp-inst--stopped` S4 token (the hue) is deliberately unchanged.
+      assert.ok(!/inst-life-label">Stopped</.test(grid), "no pill paints the literal word Stopped");
     },
   },
   // ── gr-p3 D-01: the v4 Fleet list + Archives (screens/01) ──────────────────
@@ -1494,13 +1721,29 @@ const EXPECTATIONS = {
     },
   },
   "fleet-archives-stored": {
-    what: "the Archives panel lists portable bundles, each with a per-provider resurrect",
-    check(reg) {
+    what: "the Archives panel lists portable bundles, each with its CLI command — and a live Resurrect only for an actor the route will accept",
+    check(reg, hooks) {
       const arch = (reg.get("archives-body") || {}).innerHTML || "";
       assert.ok(arch.includes("archive-list"), "the populated archive list renders");
       assert.ok(countMatches(arch, 'class="archive-row"') >= 2, "one row per bundle");
       assert.ok(arch.includes("shop-9f2c1"), "a bundle is named by its fqdn");
-      assert.ok(arch.includes("archive-resurrect-btn"), "each row offers Resurrect");
+      // cch-w47-s3 — THIS ASSERTION USED TO BE A CONSTANT ("each row offers
+      // Resurrect") and it passed for a reason it never named: this scenario's
+      // actor is the DEFAULT OWNER (me() defaults role to "owner"), and the
+      // button was drawn on slug presence alone, so it would have passed just
+      // the same for the plain member the route refuses with a 403. The offer
+      // is now decided by instanceAdminAuthority, so the expectation is DERIVED
+      // from the actor this scenario actually boots with: an owner still MUST
+      // see it (the grant arm is not weakened), and if a future corpus edit
+      // demotes this actor, the button must vanish with it.
+      const granted = hooks.meState() === "loaded" &&
+        (hooks.meFlags().role === "owner" || hooks.meFlags().role === "admin");
+      assert.equal(granted, true,
+        "fleet-archives-stored boots the DEFAULT OWNER — got " + hooks.meState() + "/" + JSON.stringify(hooks.meFlags().role));
+      assert.equal(arch.includes("archive-resurrect-btn"), granted,
+        "the live Resurrect is offered exactly to an actor holding team-admin authority");
+      // The CLI command is NOT authority-gated — it teaches, it does not write.
+      assert.ok(arch.includes("bp cloud instance resurrect"), "every reader keeps the copy-paste CLI affordance");
       assert.ok(!arch.includes("archives-note--unconfigured"), "a configured store never shows the unconfigured state");
     },
   },
@@ -1535,7 +1778,8 @@ const EXPECTATIONS = {
       for (const verb of ["archive", "resurrect", "adopt", "audit"]) {
         assert.ok(card.includes("bp cloud instance " + verb + " Production"), "the " + verb + " command chip renders");
       }
-      assert.ok(card.includes("a stopped server still bills"), "the foot renders the conduit's own pause sentence");
+      assert.ok(card.includes("bills for as long as it exists"), "the foot renders the conduit's own pause sentence");
+      assert.ok(!card.includes("archive it instead"), "the foot never prescribes archiving as a way to stop paying (cch-w55-s2)");
       assert.ok(card.includes('data-life-verb="decommission"'), "the typed-confirm Decommission anchors the foot");
       // The golden-path verify card fills its slot off the events feed
       // (no verify event in the fixture → the honest never-run invite).
@@ -1570,6 +1814,39 @@ const EXPECTATIONS = {
       const bpPath = "/v1/barkparks/" + bp.id;
       assert.equal(ctx.countCalls("DELETE", bpPath), 0,
         "Decommission tore down the server on the row click — the typed-confirm gate is gone");
+
+      // ── cch-w57-s3: THE FIRST ASSERTIONS THIS COPY HAS EVER HAD ───────────
+      // The consequence bullets were unpinned in the whole tree (grep returned
+      // exactly one hit per string, app.js itself), so the sheet was free to
+      // promise an erasure the plane does not perform. This leg already renders
+      // the REAL sheet into #modal-body; it just never read the words.
+      // The three residues asserted here are all MEASURED, not stylistic: the
+      // archive bundle has no delete path at all, DELETE /v1/barkparks/:id
+      // reaches no Billing function, and a customer-owned DNS record is never
+      // retracted. The FORBIDDEN half matters as much: no window and
+      // no number of days may appear, because there is no reaper to back one.
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes('class="cm-consequences"'),
+        "the destroy sheet must render its consequence list; got: " + sheet.slice(0, 200));
+      assert.ok(sheet.includes("Tears down the server for good"),
+        "the live arm must still say plainly what it destroys; got: " + sheet.slice(0, 400));
+      assert.ok(sheet.includes("archive bundle") && sheet.includes("no way to delete it"),
+        "the sheet must disclose the archive bundle the control plane cannot delete");
+      assert.ok(sheet.includes("Billing does not stop here"),
+        "the sheet must stop implying the teardown cancels the subscription");
+      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(sheet),
+        "the sheet named a window in days — there is no reaper, and inventing one is the very defect this fixes: " +
+        sheet.slice(0, 400));
+      assert.ok(sheet.includes("stays behind"),
+        "the finality line must be about the row, with the residue named beside it");
+      // THE CONDITIONAL, BOTH WAYS. The fixture instance carries NO custom host
+      // (derived, never typed), so the DNS sentence must be absent here…
+      const inst = ctx.state.barkparks[0];
+      assert.equal(inst.custom_host, null,
+        "this branch assertion is only meaningful while the fixture carries no custom host; got: " + inst.custom_host);
+      assert.ok(!sheet.includes("your own DNS record"),
+        "the customer-DNS sentence fired on an instance with no custom host at all");
+
       assertDestroySheetDisarmed(reg, "Decommission");
       reg.get("cm-confirm").click();
       await ctx.settle();
@@ -1589,6 +1866,107 @@ const EXPECTATIONS = {
       const decomToast = (reg.get("toast-stack") || {}).innerHTML || "";
       assert.ok(decomToast.includes("Decommissioning " + bp.name) && decomToast.includes("is gone"),
         "the teardown must report itself, with the server's own 200-vs-202 distinction; got: " + decomToast.slice(0, 200));
+
+      // ── cch-w57-s3: THE CUSTOM-DOMAIN BRANCH, RENDERED FOR REAL ───────────
+      // Attach writes `dns_zone: nil` for a non-platform FQDN and there is no
+      // detach route anywhere, so a customer's own A record outlives the box and
+      // keeps pointing at an address Hetzner will hand to someone else. The
+      // discriminator is the PLATFORM SUFFIX (externalCustomHost in app.js), and
+      // a sentence that fires on the wrong side is worse than none — so BOTH
+      // sides are driven here, through the same real click that opened the sheet
+      // above. `inst` is the per-boot fixture row the rail closed over (the
+      // route serves the state bag's objects by reference), so writing the field
+      // is what the console would see on a box that carries one. Nothing is
+      // armed after this point: these clicks re-render the sheet and issue no
+      // request (the DELETE count assertions above are already sealed).
+      const hostBefore = inst.custom_host;
+      inst.custom_host = "console.acme.example";
+      assert.equal(decomm[0].click(), 1, "the Decommission handler died before the custom-host branch could render");
+      const extSheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(extSheet.includes("console.acme.example is your own DNS record"),
+        "an EXTERNAL custom host must be named as the customer's own record; got: " + extSheet.slice(0, 500));
+      assert.ok(extSheet.includes("Hetzner") && extSheet.includes("someone else"),
+        "and the released IP that Hetzner recycles must be stated, not implied");
+      // Read around the apostrophe: consequences ride through esc(), which
+      // renders "can't" as "can&#39;t" — an assertion typed with the raw
+      // character would be red for a reason that has nothing to do with the copy.
+      assert.ok(extSheet.includes("repoint the record for you"),
+        "and the console must admit it cannot fix that record for them; got: " + extSheet.slice(0, 500));
+      assert.ok(!/\b\d+\s*(day|days|week|weeks|month|months)\b/i.test(extSheet),
+        "the custom-host branch named a window in days; got: " + extSheet.slice(0, 500));
+      // …and the PLATFORM side, whose zone the control plane does own end to end
+      // (the attach modal accepts <name>.barkpark.cloud and nothing else), must
+      // stay silent — the sentence is about a record we never held.
+      inst.custom_host = "production-5b2c1e.barkpark.cloud";
+      assert.equal(decomm[0].click(), 1, "the Decommission handler died before the platform-host branch could render");
+      const platSheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(!platSheet.includes("your own DNS record"),
+        "the customer-DNS sentence fired on a PLATFORM host, whose zone Barkpark Cloud owns; got: " + platSheet.slice(0, 500));
+      assert.ok(platSheet.includes("archive bundle"),
+        "…while the residues that are NOT conditional must still render on that same sheet");
+      inst.custom_host = hostBefore;
+    },
+  },
+
+  // ── cch-w38-s1: the instance rail as a plain MEMBER ────────────────────────
+  // cch-w38-s1: the SAME screen, as a plain MEMBER.
+  // The BEFORE frame (browser-measured on origin/main, chrome-devtools against
+  // serve.mjs): {"port":"4187","meRole":"member","decommission":{"disabled":
+  // false,"visible":true},"totalDisabled":0} — a member was offered the
+  // destroy-tier verb the server answers 403. The AFTER contract (D428): the
+  // control is DISABLED and carries the server's OWN sentence, never hidden.
+  // The reason asserted below is FORBIDDEN_ROLE_COPY.admin verbatim — if a
+  // future edit mints fresh copy for this arm, this expectation says so.
+  "panel-overview-member": {
+    what: "a plain member's instance rail refuses the destroy verb UP-FRONT, in the server's own words — no live control, no post-click 403",
+    check(reg) {
+      const card = (reg.get("inst-lifecycle-actions") || {}).innerHTML || "";
+      assert.ok(card.length > 0, "#inst-lifecycle-actions rendered empty");
+      assert.ok(card.includes("Manage this instance via the bp CLI"), "the CLI card still renders in full — the rail is never hidden from a member");
+      // The remedy: a disabled control + the server's own role sentence.
+      assert.ok(card.includes("inst-life-disabled"), "the refused verb renders through the disable-and-explain arm");
+      assert.ok(card.includes("You need the admin role on this team — an admin on this team can grant it."),
+        "the visible reason is the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
+      assert.ok(card.includes("inst-life-reason"), "the sentence rides the shipped reason span, not new markup");
+      // And the live affordance is GONE: no click hook, no danger button. This
+      // assertion names the attribute the mount binds on, so an added
+      // `disabled` cannot slip past it the way a [^>]* window would.
+      assert.ok(!card.includes('data-life-verb="decommission"'), "no click hook is wired for a verb the server will refuse");
+      assert.ok(!card.includes("btn-danger"), "the destroy-tier styling goes with the destroy-tier affordance");
+      // NOT a checking state: /v1/me answered, and it said member.
+      assert.ok(!card.includes("Checking capabilities"), "an ANSWERED /v1/me is not a checking state");
+
+      // ── cch-w45-s5: and the rail is not the only place the screen was
+      // selling this member a 403. Measured on the PRE-FIX tree by booting THIS
+      // scenario: #instance-body carried a LIVE `id="inst-domain"` button and a
+      // LIVE `data-rollback="1"` button, both against require_primary_team_admin
+      // routes, while every read the screen makes is `user`. Same remedy, same
+      // sentence, same grammar — asserted on the BODY, not the CLI card.
+      const body = (reg.get("instance-body") || {}).innerHTML || "";
+      assert.ok(body.includes("Attach domain"), "the Attach domain affordance is never hidden from a member — it explains itself");
+      assert.ok(body.includes("Roll back"), "nor is Rollback");
+      assert.ok(!body.includes('id="inst-domain"'),
+        "no click hook is wired for the domain attach the server will refuse");
+      assert.ok(!body.includes("data-rollback"),
+        "no click hook is wired for the rollback the server will refuse");
+      assert.ok(body.includes("You need the admin role on this team — an admin on this team can grant it."),
+        "both refusals speak the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
+      // cch-w47-s2: FOUR now, not two — the same screen was also offering this
+      // member the autoupdate policy toggles (patch /v1/barkparks/:id/autoupdate,
+      // require_primary_team_admin). With bpBase carrying the CP's real policy
+      // block, `autoupdateActions` offers Pause + Pin on this row, and
+      // adminWriteControlHtml emits ONE wrapper PER control: domain + rollback +
+      // pause + pin = 4. Add Support takes the OMIT arm (D514) and adds none.
+      assert.equal(countMatches(body, '<div class="inst-life-disabled">'), 4,
+        "exactly the four member-reachable writes render through the disable-and-explain arm");
+      assert.ok(!body.includes('data-au='),
+        "no click hook is wired for the autoupdate policy writes the server will refuse");
+      assert.ok(!body.includes("fleet-add-support"),
+        "and the add-support affordance is omitted outright for a member (D514)");
+      assert.ok(!body.includes("Checking capabilities"),
+        "an ANSWERED /v1/me is not a checking state on the body either");
+      assert.ok(!body.includes("data-me-retry"),
+        "and an answered read offers no /v1/me retry — the exit belongs to the unknown arm alone");
     },
   },
 
@@ -1623,7 +2001,7 @@ const EXPECTATIONS = {
       const open = hooks.timelineFeedHtml(entries, { openGroups: [gkey] });
       assert.ok(open.includes('aria-expanded="true">Collapse<'), "the open group offers Collapse");
       assert.ok(open.includes("tlv-coalesce-members"), "the member rail renders");
-      assert.equal(countMatches(open, 'data-tlv-key="'), 14, "10 members + status + tls + the 2 audit rows all render");
+      assert.equal(countMatches(open, 'data-tlv-key="'), 13, "10 members + status + the 2 audit rows all render");
     },
   },
 
@@ -1794,13 +2172,13 @@ const EXPECTATIONS = {
       // cruel row — a 255-char single-token name on a 253-char host). Every
       // integer in this check is now ALSO pinned in FIXTURE_SHAPE_PINS, so the
       // next edit to sitesListRows is named before this check ever runs.
-      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 7,
+      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 8,
         "one v4 density row per fixture site");
       // cch-w16-s4 — THE CONTRADICTION, ASSERTED PER ROW, NOT PER PAGE. A page
       // total can be satisfied by the wrong four rows; this splits the list on
       // its own row head and reads each row's own two claims.
       const rows = body.split('<div class="site-row').slice(1);
-      assert.equal(rows.length, 7, "the split found every row");
+      assert.equal(rows.length, 8, "the split found every row");
       const undeployed = rows.filter((r) => r.includes(">Not deployed<"));
       assert.equal(undeployed.length, 2,
         "acme-labs (never deployed) and acme-previews (preview-only) both say so");
@@ -1809,7 +2187,7 @@ const EXPECTATIONS = {
           "a row that says Not deployed offers NO door: " + (r.match(/site-name">([^<]*)/) || [])[1]);
       }
       const deployed = rows.filter((r) => !r.includes(">Not deployed<"));
-      assert.equal(deployed.length, 5, "five rows have served a build");
+      assert.equal(deployed.length, 6, "six rows have served a build");
       for (const r of deployed) {
         // …AND THE OTHER DIRECTION: rebuilding and deploy-failed rows are still
         // SERVING their previous build, so stripping their door would be the
@@ -1818,8 +2196,8 @@ const EXPECTATIONS = {
         assert.ok(r.includes('class="site-open"'),
           "a site that has served a build KEEPS its door: " + (r.match(/site-name">([^<]*)/) || [])[1]);
       }
-      assert.equal(countMatches(body, 'title="Open the live site"'), 5,
-        "exactly five live-site doors on the page");
+      assert.equal(countMatches(body, 'title="Open the live site"'), 6,
+        "exactly six live-site doors on the page");
       // The leading status pill, states-complete across the four rows.
       assert.ok(body.includes("status-pill--ok"), "the live site reads an ok pill");
       assert.ok(body.includes("status-pill--warn"), "the rebuilding site reads a warn pill");
@@ -1830,6 +2208,19 @@ const EXPECTATIONS = {
       // harness for the first time — one spelling ("Cancelled", not "Canceled"),
       // on a neutral pill (a cancel is neither a success nor a failure).
       assert.ok(body.includes(">Cancelled<"), "a cancelled deploy says Cancelled — one spelling of the deploy noun");
+      // cch-w64-s6: the deferred head row, rendered by a harness for the first
+      // time. It reads AMBER and names who refused — not the neutral shrug the
+      // generic else painted, which made a refused build look as calm as a
+      // healthy one. Asserted on the ROW, because a page-level pill count is
+      // already satisfied by the rebuilding site.
+      const deferredRow = rows.filter((r) => r.includes(">acme-media<"))[0];
+      assert.ok(deferredRow, "the deferred site renders a row");
+      assert.ok(deferredRow.includes("status-pill--warn"),
+        "a build the box REFUSED is amber, never the neutral pill it used to wear");
+      assert.ok(deferredRow.includes(">Deferred by the box<"),
+        "and it names WHO refused, echoing the shipped CLI phrase");
+      assert.ok(!/will never build|minutes|shortly|soon/i.test(deferredRow),
+        "no loss claim and no time promise rides in with it");
       assert.ok(!body.includes(">Canceled<"), "never the American spelling for the DEPLOY noun");
       // Real fields: the site's OWN name, its host, framework, the instance link,
       // and a recency segment.
@@ -1858,9 +2249,9 @@ const EXPECTATIONS = {
       const body = (reg.get("instance-sites") || {}).innerHTML || "";
       assert.ok(body.length > 0, "#instance-sites rendered empty");
       const rows = body.split('<div class="site-row').slice(1);
-      assert.equal(rows.length, 7, "one instance row per fixture site");
-      assert.equal(countMatches(body, 'class="site-open"'), 5,
-        "five doors: the two that never served a build get none");
+      assert.equal(rows.length, 8, "one instance row per fixture site");
+      assert.equal(countMatches(body, 'class="site-open"'), 6,
+        "six doors: the two that never served a build get none");
       // Named, so a fixture reshuffle cannot silently move the gate.
       const rowOf = (name) => rows.filter((r) => r.includes(">" + name + "<"))[0];
       for (const name of ["acme-labs", "acme-previews"]) {
@@ -1945,9 +2336,13 @@ const EXPECTATIONS = {
     check(reg) {
       const box = reg.get("billing-recommended").innerHTML || "";
       assert.ok(box.length > 0, "#billing-recommended rendered empty");
-      // The plan STATE reads honestly (real name + real ceiling) …
+      // The plan STATE reads honestly (the real plan name, and the features) …
+      // cch-w49-s1 retired the ceiling pin that used to sit here: it called a
+      // hand-typed client constant "the real quota-honest ceiling" inside the
+      // required Console gate, which made this gate certify the fiction. The
+      // member's screen issues no usage/summary call, so it states no ceiling.
       assert.ok(box.includes(">Supporter<"), "the member sees the real plan name");
-      assert.ok(box.includes("3 managed instances"), "the member sees the real quota-honest ceiling");
+      assert.ok(box.includes("Automated provisioning &amp; updates"), "the member sees the plan features");
       // … but with ZERO write affordances — never a disabled ghost (GR36).
       assert.ok(!/<button/i.test(box), "the read-only plan card renders NO button");
       assert.ok(!box.includes("plan-more") && !box.includes("plan-continue"), "no grid-toggle / subscribe CTA for a member");
@@ -1960,6 +2355,39 @@ const EXPECTATIONS = {
       // section carries a Manage/Cancel action, and Cancel is retired entirely.
       assert.ok(!manage.includes(">Manage billing<"), "no Manage-billing button for a member");
       assert.equal(reg.get("billing-cancel-section").hidden, true, "no Cancel section for a member");
+    },
+  },
+  // cch-w39-s1 — THE FAIL-BEFORE PIN. Every assertion below is FAULT-DEPENDENT:
+  // it reds on origin/main's bytes, where billingIsOwner() answered false for an
+  // unread /v1/me and the owner was handed the member surface verbatim.
+  "billing-me-unreadable": {
+    what: "an OWNER whose /v1/me 500s — billing REPORTS the failed check with a retry, and never accuses them of not being the owner",
+    check(reg) {
+      const manage = reg.get("billing-manage").innerHTML || "";
+      // THE DEFECT, DRIVEN. On main this exact sentence is what an owner reads.
+      assert.ok(!manage.includes("Only the team owner can manage billing."),
+        "an unread /v1/me is not evidence that this person is not the owner; got: " + manage);
+      assert.ok(manage.includes("We couldn't check your account"),
+        "it says what actually happened; got: " + manage);
+      // HONEST ABOUT THE FAULT CLASS: a 500 is ours, not the person's input —
+      // and this string can only come from meFailureCopy() classifying the
+      // RETAINED fault, so it cannot pass without the fault actually landing.
+      assert.ok(manage.includes("broke on our side"), "a 5xx is reported as a 5xx; got: " + manage);
+      assert.ok(manage.includes("data-me-retry"), "…and the unknown arm carries the shared retry the member surface never had");
+      // NO CAUSE THE READ DID NOT RETURN (charter D438): /v1/me has no rate
+      // limiter, and nothing here may invent a next step.
+      assert.ok(!/rate limit|slow down|too many/i.test(manage), "no cause is named that the read did not return");
+      assert.ok(!/check your (internet|connection)|ask (your|the) team owner/i.test(manage),
+        "no newly authored next step");
+      // FAIL-CLOSED: an unknown role gets ZERO billing write affordances. The
+      // plan card is /v1/subscription's truth (role-free) and still renders, so
+      // the person is not blinded to what they are paying for.
+      const box = reg.get("billing-recommended").innerHTML || "";
+      assert.ok(box.includes(">Supporter<"), "the real plan still renders — it was never a role claim");
+      assert.ok(!/<button/i.test(box), "the plan region offers no write affordance while the role is unknown");
+      assert.ok(!manage.includes(">Manage billing<"), "no portal button on an unproven role");
+      assert.equal(reg.get("billing-cancel-section").hidden, true, "no Cancel section on an unproven role");
+      assert.equal(reg.get("billing-tiers").hidden, true, "the plan grid stays closed while the role is unknown");
     },
   },
   "billing-cancelling": {
@@ -2012,7 +2440,7 @@ const EXPECTATIONS = {
       }
       assert.ok(matrix.includes("cap-mark"), "a supported cell shows an affirmative mark");
       assert.ok(matrix.includes("cap-dash"), "an unsupported cell shows a dash");
-      assert.ok(matrix.includes("Hetzner has no pause primitive"), "a false cell carries the server-owned gap reason verbatim");
+      assert.ok(matrix.includes("bills for as long as it exists"), "a false cell carries the server-owned gap reason verbatim");
       assert.ok(matrix.includes("Adopt needs an existing resource-group import"), "the azure adopt gap renders verbatim");
       // dev-tier `fake` is FILTERED — it is never a matrix column.
       assert.ok(!matrix.includes(">Fake<"), "the dev-tier provider is filtered out of the matrix");
@@ -2114,6 +2542,18 @@ const EXPECTATIONS = {
       assert.ok(!connect.includes("set-section"), "the connect region is empty for a member");
       const matrix = (reg.get("provider-matrix") || {}).innerHTML || "";
       assert.ok(matrix.includes("cap-matrix"), "the honest matrix still renders read-only for a member");
+      // cch-w48-s6: the GitHub card, arm 1. Before this fixture every scenario
+      // fell through to the /v1/ catch-all's `{}`, which renderGithub reads as
+      // the NOT-CONFIGURED arm — so the connected arm had never been painted by
+      // any instrument and nothing could be asserted about it, true or false.
+      // WHAT IS DELIBERATELY NOT ASSERTED: `#github-disconnect`. That control is
+      // cch-w48-s3's fence, and pinning its presence here would freeze today's
+      // unfenced render into the baseline and force a second edit to delete it.
+      const gh = (reg.get("github-card") || {}).innerHTML || "";
+      assert.ok(gh.includes("acme-engineering"), "the connected account is named — the card reports WHICH GitHub account, never a bare 'connected'");
+      assert.ok(gh.includes("Connected"), "the connected arm renders at all (arm 1 of renderGithub)");
+      assert.ok(!gh.includes("Loading GitHub"), "an ANSWERED /v1/github/installation is not a loading state");
+      assert.ok(!gh.includes("aren&#39;t configured"), "the fixture answers connected — the not-configured arm must NOT be what renders");
     },
   },
   // ── G-04 notifications (the crown): the settings-anatomy page ───────────────
@@ -2385,6 +2825,24 @@ const EXPECTATIONS = {
       // Manage affordances present for the admin; Remove is the destroy path.
       assert.ok(body.includes(">Change role<") && body.includes(">Remove<"), "manager rows carry Change role + Remove");
 
+      // ── cch-w45-s2, PROVED IN THE LIVE DOM AND NOT ONLY IN THE UNIT ────────
+      // This scenario IS the sole-owner case: ada is the only owner AND the
+      // acting principal, so every in-range self role change is a demotion
+      // do_update_role rolls back with :last_owner (409). The unit tests pin the
+      // predicate; this pins that the RENDERED panel a person actually sees
+      // withheld the control — and that the omission is EXPLAINED rather than
+      // silently missing. `>Change role<` above stays true from the two peers,
+      // which is exactly why a substring check could never have seen this.
+      {
+        const roleBtns = reg.get("members-body").querySelectorAll("[data-member-role]");
+        const roleEmails = roleBtns.map((b) => b.getAttribute("data-email")).sort();
+        assert.deepEqual(roleEmails, ["lin@acme.com", "rex@acme.com"],
+          "the SOLE owner's own row must not offer a role change the server 409s — offered on " +
+          JSON.stringify(roleEmails));
+        assert.ok(body.includes("only owner") && body.includes("promote another member to owner first"),
+          "a withheld control with no sentence is a silently missing control; got: " + body.slice(0, 400));
+      }
+
       // ── cch-w10 LEG 2/5: REMOVE MEMBER, CLICKED FOR REAL ──────────────────
       // The path carries the team id, which this check has no business
       // hard-coding — so the wire assertion matches the SHAPE and reads the id
@@ -2455,6 +2913,71 @@ const EXPECTATIONS = {
       assert.ok(!body.includes(">Change role<") && !body.includes(">Remove<"), "a member sees no manage affordances");
       // The header Invite button stays hidden for a plain member.
       assert.equal(reg.get("members-invite").hidden, true, "the Invite button is hidden for a member");
+    },
+  },
+  // cch-w45-s1: the acting ADMIN who is NOT row 0 of the roster. Asserted BY ROW
+  // — the set of emails each control is offered on — never by a substring of the
+  // panel, because "the panel contains >Change role<" is true of any roster with
+  // one manageable row and would go green with the owner's row over-offered.
+  // Both member buttons carry data-email, so the offered set is readable exactly.
+  "members-admin-actor": {
+    what: "Members (admin actor lin, not the owner) — ada's row offers NOTHING, lin's own row only Change role, rex's row both",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const panel = reg.get("members-body");
+      const body = panel.innerHTML || "";
+      // IDENTITY, not rank: the acting principal is lin, and the whole envelope
+      // moved with the id — a corpus that shipped ada's email under lin's id
+      // would tag the wrong row "(you)" and every predicate below would be a
+      // coincidence.
+      assert.ok(body.includes("lin@acme.com <span class=\"dim\">(you)</span>"),
+        "lin's row must be the self row — the actor identity, not just the actor rank; got: " + body.slice(0, 400));
+      assert.ok(!body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+        "ada must NOT be self-tagged when the acting principal is lin");
+      const emailsFor = (attr) =>
+        panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
+      const roleOffers = emailsFor("data-member-role");
+      const removeOffers = emailsFor("data-member-remove");
+      // ada OUTRANKS the acting admin: the server 403s `outranked` on both verbs,
+      // so neither control may be painted on her row.
+      assert.ok(!roleOffers.includes("ada@acme.com"),
+        "an acting ADMIN was offered Change role on the team OWNER's row — the server 403s outranked; offered on " + JSON.stringify(roleOffers));
+      assert.ok(!removeOffers.includes("ada@acme.com"),
+        "an acting ADMIN was offered Remove on the team OWNER's row — the server 403s outranked; offered on " + JSON.stringify(removeOffers));
+      // The exact sets, so an over-offer ANYWHERE reds and names the row.
+      assert.deepEqual(roleOffers, ["lin@acme.com", "rex@acme.com"],
+        "Change role belongs on the self row (self-demotion is legal) and the outranked member — got " + JSON.stringify(roleOffers));
+      assert.deepEqual(removeOffers, ["rex@acme.com"],
+        "Remove belongs ONLY on the outranked member's row — got " + JSON.stringify(removeOffers));
+      // An admin still manages: the invitations card is there, so the absences
+      // above are RANK refusals and not a plain-member panel by accident.
+      assert.ok(body.includes("Pending invitations"), "an acting admin still sees the invitations card");
+    },
+  },
+  // cch-w45-s1: the acting OWNER on a roster with a PEER OWNER — the one cell
+  // where the server's two member verbs disagree (remove_member_as/3 has an
+  // owner escape hatch, update_member_role_as/4 does not).
+  "members-peer-owner": {
+    what: "Members (owner) — the PEER OWNER row carries Remove and NOT Change role; the two server verbs disagree",
+    check(reg) {
+      assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
+      const panel = reg.get("members-body");
+      const body = panel.innerHTML || "";
+      assert.ok(body.includes("ozz@acme.com"), "the peer owner renders on the roster");
+      assert.ok(body.includes("ada@acme.com <span class=\"dim\">(you)</span>"),
+        "the acting owner is still ada — this scenario moves the ROSTER, never the default actor");
+      const emailsFor = (attr) =>
+        panel.querySelectorAll("[" + attr + "]").map((b) => b.getAttribute("data-email")).sort();
+      const roleOffers = emailsFor("data-member-role");
+      const removeOffers = emailsFor("data-member-remove");
+      assert.ok(!roleOffers.includes("ozz@acme.com"),
+        "an owner was offered Change role on a PEER OWNER's row — update_member_role_as/4 has no owner escape hatch and 403s; offered on " + JSON.stringify(roleOffers));
+      assert.ok(removeOffers.includes("ozz@acme.com"),
+        "an owner must be offered Remove on a PEER OWNER's row — remove_member_as/3's owner escape hatch permits it; offered on " + JSON.stringify(removeOffers));
+      assert.deepEqual(roleOffers, ["ada@acme.com", "lin@acme.com", "rex@acme.com"],
+        "Change role reaches the two outranked rows and the actor's OWN (self-demotion is a 409 state refusal, not an authority one) — got " + JSON.stringify(roleOffers));
+      assert.deepEqual(removeOffers, ["lin@acme.com", "ozz@acme.com", "rex@acme.com"],
+        "Remove reaches every row but the actor's own — got " + JSON.stringify(removeOffers));
     },
   },
   // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
@@ -2567,9 +3090,15 @@ const EXPECTATIONS = {
       assert.ok(warm.includes("there's no total to compare against"), "the honest no-denominator caption renders");
       assert.ok(!warm.includes("usage-bar") && !warm.includes("%"), "no bar and no percentage");
 
-      // 4. DIGEST — empty is the true state, and there is NO send-now button.
+      // 4. DIGEST — an EMPTY OPERATOR LIST and NO send-now button. cch-w55-s3
+      // called this empty a query artifact, because the writer stamped a real
+      // team_id while the reader filtered is_nil(team_id). cch-w56-s3 FIXED the
+      // reader (event-only, notifications.ex:930), so the list can see the
+      // receipts and empty is an honest empty: nothing recorded.
       const digest = reg.get("op-digest-body").innerHTML || "";
-      assert.ok(digest.includes("No fleet digest has been sent yet"), "the honest empty state renders");
+      assert.ok(!digest.includes("never land in this list"), "the receipts DO land here now — the reader filters on the event alone");
+      assert.ok(digest.includes("an empty list means nothing was recorded"), "the honest empty state renders");
+      assert.ok(digest.includes("06:00 UTC"), "the one backed clock claim survives (config.exs:334)");
       assert.ok(!/Send (one )?now/i.test(page + digest), "no send-now button anywhere (GR40)");
     },
   },
@@ -2607,9 +3136,12 @@ const EXPECTATIONS = {
       assert.ok(warm.includes("The pool is empty right now"), "an empty pool reads as a designed state");
       assert.ok(!warm.includes("unavailable"), "an empty pool is never reported as unreadable");
       assert.ok(!warm.includes("usage-bar") && !warm.includes("%"), "no bar, no invented denominator");
-      // And the digest is honestly empty rather than absent.
+      // And the digest is honestly empty rather than absent — since cch-w56-s3
+      // fixed the reader (event-only), this list carries every team's receipts,
+      // so empty means nothing was recorded.
       const digest = reg.get("op-digest-body").innerHTML || "";
-      assert.ok(digest.includes("No fleet digest has been sent yet"), "the honest empty digest renders");
+      assert.ok(digest.includes("an empty list means nothing was recorded"), "the honest empty digest renders");
+      assert.ok(!digest.includes("platform-operator addresses"), "the audience is team members, not platform admins (dr-w19-s5)");
     },
   },
   "operator-denied": {
@@ -2797,6 +3329,81 @@ const EXPECTATIONS = {
       const panel = hooks.offloadWatchPanelHtml({ id: "x", title: "Summarise the release notes" }, watch);
       assert.ok(panel.includes("notice-warn"), "the blocked terminal shows the honest banner");
       assert.ok(panel.includes('class="new-step failed'), "the ladder snaps on the failed rung");
+    },
+  },
+  // ── cch-w61-s2: the Updates panel finally renders in a SECOND state, and the
+  // Roll back button is wired in this harness AT ALL ─────────────────────────
+  // TWO defects meet here, and neither was visible from the other side:
+  //   (a) the corpus had ONE update state across every committed scenario
+  //       (`current`) and NO mock route for POST …/rollback, so a preview click
+  //       "succeeded" against a fixture that could never refuse;
+  //   (b) `wireUpdatePanel` opened with a compound descendant selector this
+  //       shim's query() cannot parse — measured `Roll back click dispatched
+  //       handlers = 0`, in every scenario, since the button shipped. The
+  //       shipped fallback to the `#instance-body` mount fixes it (handlers = 1,
+  //       asserted below). Widening PARSED_TAGS instead was measured WORSE: 6
+  //       scenarios red and still 0 handlers.
+  // The positive click count is MANDATORY here: an empty node list dispatches
+  // nothing and reads as a clean pass — the exact false green this harness exists
+  // to refuse.
+  "instance-update-credential-refused": {
+    what: "credential-refused box — Roll back is WIRED (handlers=1), its 409 renders terminally, and the recovery issues no second POST",
+    async check(reg, hooks, ctx) {
+      const body = reg.get("instance-body");
+      const html = (body || {}).innerHTML || "";
+      assert.ok(html.includes("update-panel"), "the Updates panel must render — this box HAS a host");
+      // cch-w63-s5 — THESE TWO ASSERTIONS WERE THE LIE, AND THEY ARE MOVED, NOT
+      // WORKED AROUND. They read `Checked 45m ago` + `Unknown` and justified it as
+      // "what update_state actually is for a refused box". update_state IS
+      // "unknown" — the wire's own word, and the data attribute below still pins
+      // it (charter D778) — but this fixture carries
+      // update_unavailable_reason:"identity_refused", i.e. the control plane
+      // NAMED the cause. The probe ran and the box refused it; nothing was
+      // "checked", so the panel must not say so.
+      assert.ok(html.includes("Tried 45m ago — the instance rejected our access credential"),
+        "the panel states what was TRIED and why it failed, echoing usageUnavailableText('unauthorized') verbatim");
+      assert.equal(html.includes("Checked"), false,
+        "…and never asserts a completed check about a probe the box refused");
+      assert.ok(html.includes("Could not check"), "the badge names the failure instead of shrugging");
+      assert.ok(html.includes('data-update-state="unknown"'),
+        "…while the STATE literal stays `unknown` — the label moved, the wire's word did not");
+
+      const rb = body.querySelectorAll("[data-rollback]");
+      assert.equal(rb.length, 1, "exactly one Roll back control renders");
+      const handlers = rb[0].dispatchEvent({ type: "click" });
+      assert.ok(handlers > 0,
+        "Roll back dispatched " + handlers + " handlers — wireUpdatePanel had never wired anything in " +
+        "this harness before the #instance-body fallback (measured: 0)");
+
+      // The sheet's LABEL lives on #modal-body's parsed child; the STATE app.js
+      // writes lives on the #id registry node. They are different objects (the
+      // D54 correction above) — read each fact off the one that carries it.
+      const sheet = (reg.get("modal-body") || {}).innerHTML || "";
+      assert.ok(sheet.includes(">Roll back<"), "the danger confirm sheet must mount, labelled");
+      assert.ok(sheet.includes("btn-danger"), "…on the danger tier");
+      assert.equal(sheet.indexOf("cm-typed"), -1, "…danger-no-echo: no typed field");
+      const confirm = reg.get("cm-confirm");
+      assert.ok(confirm, "the shared confirm trigger must exist");
+
+      const posts = () => ctx.calls.filter((c) => c.method === "POST" && /\/rollback$/.test(c.path)).length;
+      assert.equal(posts(), 0, "opening a confirm sheet POSTs nothing");
+
+      confirm.dispatchEvent({ type: "click" });
+      await ctx.settle();
+      assert.equal(posts(), 1, "confirming issues exactly one POST");
+
+      // THE FIX, END TO END, against a fixture that CAN refuse.
+      assert.equal(confirm.textContent, "Close",
+        "a 409 identity_refused is permanent — the recovery is Close, never a Try again that re-POSTs");
+      const msg = (reg.get("cm-error-msg") || {}).textContent || "";
+      assert.ok(msg.includes("the instance rejected our access credential"),
+        "the inline failure names what actually happened: " + JSON.stringify(msg));
+      assert.equal(msg.indexOf("Please try again in a moment."), -1,
+        "…and never sells a permanent refusal as a transient one");
+
+      confirm.dispatchEvent({ type: "click" });
+      await ctx.settle();
+      assert.equal(posts(), 1, "clicking the terminal recovery issues NO second POST");
     },
   },
 };
@@ -3047,7 +3654,8 @@ const FIXTURE_SHAPE_PINS = [
   {
     scenario: "sites",
     path: "sites.length",
-    expected: 7,
+    // cch-w64-s6: 7 → 8, the deferred head row (acme-media).
+    expected: 8,
     why: 'EXPECTATIONS["sites"].check pins the row count TWICE (countMatches over site-row--global, then the length of the split) and every per-row filter after it is arithmetic on this array — and `sites-on-instance` reads the SAME array through the other builder, so one appended row reds two scenarios that name neither the array nor each other',
   },
   {
@@ -3059,19 +3667,23 @@ const FIXTURE_SHAPE_PINS = [
   {
     scenario: "sites",
     path: "sites.#with(current_deployment_id)",
-    expected: 5,
+    // cch-w64-s6: 5 → 6. A deferral does not tear down what is already serving,
+    // so the deferred row keeps its pointer and its door.
+    expected: 6,
     why: 'the served population: siteHasEverDeployed reads current_deployment_id and NOTHING else, so this count IS the number of site-open doors and the number of title="Open the live site" anchors the check pins — including cch-w24-s7\'s cruel row, whose 253-char host is only worth rendering because it kept its door',
   },
   {
     scenario: "sites-on-instance",
     path: "sites.length",
-    expected: 7,
+    // cch-w64-s6: 7 → 8, the same shared array through the other row builder.
+    expected: 8,
     why: 'the instance Sites card renders the SAME sitesListRows through siteRow, and its check reds FIRST on rows.length — pinning it here means an edit to the shared array is named as a shape change once, rather than discovered separately by each builder',
   },
   {
     scenario: "sites-on-instance",
     path: "sites.#with(current_deployment_id)",
-    expected: 5,
+    // cch-w64-s6: 5 → 6, the deferred row's door through the compact builder.
+    expected: 6,
     why: 'the same served population through the compact builder: the check pins countMatches(body, class="site-open") to it, and siteRow has no status pill for a never-served site, so this count is the ONLY thing standing between a door-gating regression and a silent pass',
   },
   {
@@ -3141,7 +3753,99 @@ function assertFixtureShapePins() {
   return false;
 }
 
+// ── cch-w49-s1 · THE MONEY SCREEN'S ABSENT-ARM GUARD ─────────────────────────
+// An ABSENT-arm assertion, not a presence one: it asserts the billing surface
+// states NO currency numeral and NO instance-count numeral, on every actor who
+// can reach it. It exists because the console used to state $0/$69/$499 and
+// 1/3/10 managed instances as FACT under a button that opens a real Stripe
+// session, with nothing server-side those numbers could ever be checked against
+// — no amount exists in the tree at all (STRIPE_PRICE_* are price IDs, not
+// amounts), and the ceiling is not fetched on this screen by ANY billing actor.
+// The remedy was to OMIT, so the guard that can lose is one that reds the
+// moment a numeral comes back.
+//
+// WHY IT IS A GUARD AND NOT A NEW SCENARIO: it needs no fixture — it re-reads
+// the corpus that already exists. The scenario set is DERIVED from the corpus
+// (`deepLink === "#billing"`), so a seventh billing actor is covered on the day
+// it is minted rather than on the day someone remembers this file.
+//
+// THE TWO WAYS THIS COULD HAVE BEEN A FALSE GREEN, both refused below:
+//   • an EMPTY corpus slice — if a deepLink is renamed the filter would answer
+//     [] and an assertion over nothing passes, so the count is floored (6, the
+//     set derived by running: billing-trial, billing-past-due,
+//     billing-portal-return, billing-member, billing-me-unreadable,
+//     billing-cancelling);
+//   • an EMPTY container — a mount that moved would leave both ids blank and
+//     "no numeral" would be trivially true, so the union must be non-empty for
+//     every actor.
+// The container union {#billing-recommended, #billing-tiers} was derived by
+// scanning the ENTIRE registry of all six booted actors for either numeral, not
+// from a named list: billing-trial carries it in #billing-tiers, the other five
+// in #billing-recommended, and NO third id carries one. A guard scoped to
+// #billing-tiers alone would have covered 1 actor of 6.
+//
+// It reads innerHTML STRINGS deliberately: this shim's parse is FLAT and its
+// document-level querySelectorAll hard-returns [], so a selector-shaped
+// assertion here matches nothing and passes vacuously. And it does NOT open the
+// grid with a #plan-more click: renderBilling repaints #billing-recommended
+// 4-5x per boot while the registry hands back the same node, so listeners
+// accumulate and an even count makes the toggle dead — a click-opened grid
+// measures the harness, not the app.
+const MONEY_CURRENCY_RE = /\$\s?\d[\d,]*/;
+const MONEY_CEILING_RE = /\b\d+\s+managed instances?\b/;
+const MONEY_CONTAINERS = ["billing-recommended", "billing-tiers"];
+
+async function assertBillingStatesNoNumeralItCannotSupport() {
+  const names = SCENARIO_NAMES.filter((n) => (SCENARIOS[n].deepLink || "") === "#billing");
+  const broken = [];
+  if (names.length < 6) {
+    broken.push("only " + names.length + " scenario(s) deep-link #billing (6 are committed) — the corpus slice this " +
+      "guard reads has shrunk, and an assertion over a shrunken slice is a false green, not a pass");
+  }
+  for (const name of names) {
+    const boot = bootScenario(name, {});
+    await flush();
+    // The parts are filtered BEFORE joining, deliberately: joining two empty
+    // strings yields "\n", which is truthy, and an emptiness test against that
+    // can never fire — measured, by moving both ids and watching this guard
+    // pass. The vacuity arm below only works over the filtered union.
+    const parts = MONEY_CONTAINERS.map((id) => {
+      const el = boot.registry.get(id);
+      return (el && typeof el.innerHTML === "string" ? el.innerHTML : "") || "";
+    }).filter(Boolean);
+    const union = parts.join("\n");
+    if (!union) {
+      broken.push(name + ": both " + MONEY_CONTAINERS.map((i) => "#" + i).join(" and ") + " rendered EMPTY — the " +
+        "billing surface moved, so \"states no numeral\" is vacuously true here rather than proven");
+      continue;
+    }
+    const cur = union.match(MONEY_CURRENCY_RE);
+    const ceil = union.match(MONEY_CEILING_RE);
+    if (cur || ceil) {
+      broken.push(name + ": the billing surface STATES " +
+        [cur ? "a price " + JSON.stringify(cur[0]) : null,
+         ceil ? "a ceiling " + JSON.stringify(ceil[0]) : null].filter(Boolean).join(" and ") +
+        " — no server value backs either one (no amount exists in the tree; the ceiling is never fetched on this " +
+        "screen), so the console must state the tier, the features and the CTA, and state no number");
+    }
+  }
+  process.stdout.write(
+    "  " + (broken.length ? "FAIL" : "ok  ") + " billing-numerals — " + names.length +
+    " #billing actor(s) × " + MONEY_CONTAINERS.length + " container(s): " +
+    (broken.length ? broken.length + " stating a numeral no server value supports" : "no unsupported numeral stated") + "\n");
+  if (broken.length) {
+    process.stdout.write("\nbilling absent-arm guard failed:\n  " + broken.join("\n  ") + "\n");
+    process.exit(1);
+  }
+}
+// cch-w46-s7 — this call moved into main() too (see the note at the late-/v1/me
+// guard). Both harness-capability guards keep their original ORDER relative to
+// each other and to the corpus: late-/v1/me, then billing-numerals, then the
+// census guard and the scenarios.
+
 async function main() {
+  await assertLateMeRepaintsTheRail();
+  await assertBillingStatesNoNumeralItCannotSupport();
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
     process.exit(1);
@@ -3167,4 +3871,21 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-main();
+// ── the module boundary (cch-w46-s7) ─────────────────────────────────────────
+// smoke.mjs is now BOTH an entry point and a HOST: member-authority-sweep.mjs
+// imports bootScenario/flush to read the rendered bytes of the same corpus
+// instead of re-implementing a second DOM shim that could drift from this one.
+// Two properties are load-bearing and both are asserted by the sweep's own
+// import-silence probe:
+//   1. `node smoke.mjs` behaves EXACTLY as before — same lines, same order,
+//      same exit code.
+//   2. `import("./smoke.mjs")` runs NOTHING and writes ZERO bytes. That is not
+//      the guard below alone: the two harness guards above had to move inside
+//      main(), because a top-level `await` executes at import time no matter
+//      what guards the tail call.
+export { bootScenario, makeDom, flush };
+
+// Importable (the sweep imports the boot half) — only run when executed.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main();
+}

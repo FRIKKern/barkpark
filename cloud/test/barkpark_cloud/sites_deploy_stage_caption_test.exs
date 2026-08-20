@@ -215,7 +215,7 @@ defmodule BarkparkCloud.SitesDeployStageCaptionTest do
              "the classifying fixture does not classify — the guard below would be green by construction"
 
       assert FailureCopy.humanize(derived) ==
-               "The hosting provider rejected our credentials. We're on it — try again shortly."
+               "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
 
       # …and the wave-26 pair does NOT move. A rail-vs-row parity assertion built
       # on either one passes whether the fix exists or not.

@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,6 +33,85 @@ import (
 // the server so the report tells the truth about THIS binary.
 const Version = "0.1.0"
 
+// agentVersion is the build stamp of the agent binary ITSELF — what produced
+// THIS beat, as opposed to the hand-maintained Version const above, which only
+// says what the source tree called itself when a human last edited it and so
+// cannot distinguish two boxes running binaries months apart.
+//
+// It is a var, not a const, so a blessed release can inject it:
+//
+//	go build -ldflags "-X github.com/FRIKKern/barkpark/internal/agent.agentVersion=v0.2.26" ./cmd/barkpark-agent
+//
+// It is EMPTY here on purpose. The fleet's agent is (re)built on-box by
+// scripts/apply-update.sh and scripts/deploy-rebuild.sh with a plain
+// `go build`, which injects no -X — but which DOES embed the checkout's
+// vcs.revision in the module build info. AgentVersion falls back to that, so an
+// un-stamped, self-updating box still dates its own beat.
+var agentVersion = ""
+
+// AgentVersionUnknown is the explicit marker AgentVersion returns when the
+// binary carries no build stamp at all. It is the string-side twin of the -1
+// sentinel the numeric vitals use (see ReqPerS/P95Ms below): a value that
+// plainly reads "we could not determine this", never a value a consumer could
+// mistake for a determination.
+//
+// The agent_version key is ALWAYS emitted and NEVER emitted as "": an absent
+// key and an empty string each mean two incompatible things at once ("old
+// binary that predates the field" vs "new binary that could not tell"), and
+// that ambiguity is exactly the silence this field exists to break.
+const AgentVersionUnknown = "unknown"
+
+// AgentVersion is the running agent binary's own version stamp, resolved once
+// per call from the binary itself: the -X-injected agentVersion if a release
+// build set one, else the VCS revision Go embeds in the build info, else the
+// explicit AgentVersionUnknown marker. It never returns an empty string.
+func AgentVersion() string {
+	return resolveAgentVersion(agentVersion, debug.ReadBuildInfo)
+}
+
+// resolveAgentVersion is AgentVersion's pure core, with both of its inputs
+// injected so BOTH arms — stamped and unstamped — are provable in a test
+// (a test binary's own build info is not a stable stand-in for either).
+func resolveAgentVersion(injected string, readBuildInfo func() (*debug.BuildInfo, bool)) string {
+	if v := strings.TrimSpace(injected); v != "" {
+		return v
+	}
+	if readBuildInfo == nil {
+		return AgentVersionUnknown
+	}
+	info, ok := readBuildInfo()
+	if !ok || info == nil {
+		return AgentVersionUnknown
+	}
+	var revision, modified string
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			revision = s.Value
+		case "vcs.modified":
+			modified = s.Value
+		}
+	}
+	if rev := strings.TrimSpace(revision); rev != "" {
+		if len(rev) > 12 {
+			rev = rev[:12]
+		}
+		// A dirty tree is carried, not hidden: a box beating a binary built
+		// from uncommitted code is a deploy-hygiene fact, same as DirtyTree.
+		if modified == "true" {
+			rev += "-dirty"
+		}
+		return "git-" + rev
+	}
+	// A tagged module build (`go install …@v0.2.26`) carries no vcs settings but
+	// does carry a main-module version. "(devel)" is Go's placeholder for
+	// "nothing to say" and is not a stamp.
+	if v := strings.TrimSpace(info.Main.Version); v != "" && v != "(devel)" {
+		return v
+	}
+	return AgentVersionUnknown
+}
+
 // Report is the payload the agent POSTs to /v1/agent/report. It is the honest
 // superset of the cloud-9 registry's health columns
 // (health_status/version/git_commit/agent_status/last_seen_at) plus the
@@ -44,11 +124,37 @@ type Report struct {
 	AgentStatus string `json:"agent_status"`
 	// Version is the agent binary version (Version const above).
 	Version string `json:"version"`
+	// AgentVersion dates the PRODUCER of this beat — which agent binary emitted
+	// it — from the binary's own build stamp (see AgentVersion above), not from
+	// a constant a human maintains.
+	//
+	// It exists because the fleet is split by binary age and nothing reported
+	// it: a vital added to the agent (cpu_cores, load15, swap_used_percent)
+	// lands only on boxes whose binary has been rebuilt since, and on every
+	// other box the key is simply absent — which, from the payload alone, is
+	// INDISTINGUISHABLE from a healthy box that measured fine. A fence that
+	// divides by an absent cpu_cores is uncomputable, and uncomputable read as
+	// silence is how a sick box passes. The only other route to the producer's
+	// identity was the binary's mtime over SSH, and SSH host keys change.
+	//
+	// The control plane needs no change to read it: the beat payload is stored
+	// as raw jsonb, so `select payload->>'agent_version'` works the moment a box
+	// ships a binary carrying this field. Until every box does, an absent key is
+	// itself the answer — that box predates the field.
+	AgentVersion string `json:"agent_version"`
 	// GitCommit is `git rev-parse HEAD` in the checkout (the deployed code's
 	// commit). Empty + DirtyTree=false when the probe could not read it.
 	GitCommit string `json:"git_commit"`
-	// DirtyTree is true when `git status --porcelain` is non-empty — the
-	// deployed checkout has uncommitted changes (a deploy-hygiene red flag).
+	// DirtyTree is true when `git status --porcelain --untracked-files=no` is
+	// non-empty — the deployed checkout has uncommitted changes to TRACKED
+	// files (a deploy-hygiene red flag).
+	//
+	// The `--untracked-files=no` flag is load-bearing, not a tidy-up: without
+	// it, every working production box is dirty FOREVER. Boxes accrue untracked
+	// operational junk (built binaries, worktrees, .env backups, spawned site
+	// dirs) that no deploy can clear, so the gauge would be pinned true and
+	// could never report the good state — a light that is always on says
+	// nothing. Do not re-add untracked counting.
 	DirtyTree bool `json:"dirty_tree"`
 
 	// HealthStatus rolls the health-gate up to the registry's enum
@@ -301,10 +407,13 @@ func (g gitProbe) commit() string {
 	return strings.TrimSpace(out)
 }
 
-// dirty returns true iff `git status --porcelain` is non-empty (uncommitted
-// changes). A probe error reports false — we do not invent dirtiness.
+// dirty returns true iff `git status --porcelain --untracked-files=no` is
+// non-empty — uncommitted changes to TRACKED files. Untracked files are
+// deliberately excluded: a live box always carries some (see DirtyTree above),
+// so counting them pins the gauge true forever and it can never say clean.
+// A probe error reports false — we do not invent dirtiness.
 func (g gitProbe) dirty() bool {
-	out, err := g.git("status", "--porcelain")
+	out, err := g.git("status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return false
 	}
@@ -386,8 +495,11 @@ type ReportConfig struct {
 // box still phones home with whatever it can prove.
 func gatherReport(cfg ReportConfig) Report {
 	r := Report{
-		AgentStatus:     "online",
-		Version:         Version,
+		AgentStatus: "online",
+		Version:     Version,
+		// Always emitted, never "" — AgentVersion falls back to the explicit
+		// AgentVersionUnknown marker rather than to silence.
+		AgentVersion:    AgentVersion(),
 		HealthStatus:    "unknown",
 		DiskUsedPercent: -1,
 		PGSizeBytes:     -1,

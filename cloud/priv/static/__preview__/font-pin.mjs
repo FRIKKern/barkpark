@@ -89,49 +89,116 @@ export const EXPECTED_FACES = [
 // evaluate it with `awaitPromise: true` (both existing evalJs helpers pass
 // awaitPromise false/undefined, so each caller opens its own Runtime.evaluate).
 //
-// Returns { ok, status, size, faces[], families[], summary } — never throws for
-// a missing font: a face that fails to load resolves as status "error", which
-// is a VERDICT the caller reports, not an exception the caller's catch would
-// remap to exit 1.
+// Returns { ok, status, size, faces[], families[], summary, captured, retries }
+// — never throws for a missing font: a face that fails to load resolves as
+// status "error", which is a VERDICT the caller reports, not an exception the
+// caller's catch would remap to exit 1.
+//
+// THE CAPTURE-THEN-REPORT RACE, AND WHY THE RETRY IS GATED WHERE IT IS
+// ────────────────────────────────────────────────────────────────────
+// One pass of this pin reads `document.fonts` TWICE, either side of two awaits:
+// the face set is snapshotted BEFORE `load()`/`ready`, and `document.fonts.size`
+// is read AFTER them. Fire the pin at the instant a navigation commits and the
+// snapshot can land on a document whose stylesheet is not parsed yet — the
+// snapshot is EMPTY, the awaits then span the stylesheet's arrival, and the pin
+// refuses while reporting the four faces that showed up in the meantime. That is
+// the recorded CI string, reproduced character for character on a 600ms-delayed
+// /app.css, 4 runs of 4:
+//
+//   Inter [declared 0/1 face(s): none] · IBM Plex Mono [declared 0/3 face(s): none]
+//   document.fonts.status=loaded size=4
+//
+// `declared 0` beside `size 4` is not a contradiction; it is the signature of
+// that split. It reds the REQUIRED Console gate on roughly one run in eight, on
+// every cloud PR, including PRs with no console surface at all.
+//
+// SO THE RETRY GUARD IS `!ok && captured === 0` AND NOTHING ELSE. `captured` is
+// how many faces THIS pass snapshotted: zero means the pass measured a document
+// it had not yet read, which is a statement about the pin's timing, never about
+// the fonts on disk. A genuinely missing woff2 goes the other way — hiding
+// IBMPlexMono-SemiBold-latin.woff2 yields `declared 3/3 ... 600=error/check:false`
+// with `size=4` and `captured === 4`, so the retry cannot fire on it and cannot
+// launder a real defect into a pass. A retry gated on `size === 0`, or on `!ok`
+// alone, would do exactly that.
+//
+// THE BOUND IS A GUESS AND SHIPS SAYING SO (bringup-retry.mjs's doctrine: an
+// unbounded retry is a slower lie). 20 x 100ms = 2s of ceiling was measured
+// sufficient to close the 600ms-delayed reproduction 4/4 with room over, and is
+// otherwise arbitrary — nothing derives it from a stylesheet budget. When it is
+// exhausted the pin REFUSES on the last pass it actually took, carrying
+// `retries` so the refusal says how long it waited rather than pretending it
+// asked once.
+//
+// NOT A nav() COMMIT FENCE. A per-navigation document-identity sentinel
+// discriminates correctly in isolation but is HARMFUL wired into nav():
+// overflow-guard's W27-failed-retry-reachable-after-flick re-navigates the SAME
+// fragment-bearing URL three times, a same-document navigation no such sentinel
+// can see past, which converts a 1-in-8 false refusal into a 100% false timeout
+// at exit 2. Correctness there needs Page.navigate's loaderId compared across
+// 25+ call sites; the race is closed here instead, in the one file all three
+// instruments share.
 export const FONT_PIN_JS = `(async () => {
   var expected = ${JSON.stringify(EXPECTED_FACES)};
   var unquote = function (s) { return String(s || "").replace(/^['"]|['"]$/g, ""); };
-  // A declared face's own load(), for EVERY declared weight — not a guess at
-  // which weights matter. face.weight is "400" or a variable range "100 900";
-  // the first number is a weight the face genuinely covers.
-  var faces = Array.from(document.fonts).map(function (f) {
-    return { face: f, family: unquote(f.family), weight: String(f.weight || "400"), style: String(f.style || "normal") };
-  });
   var probeWeight = function (w) { var m = String(w).match(/-?\\d+(\\.\\d+)?/); return m ? m[0] : "400"; };
-  await Promise.all(faces.map(function (e) {
-    // load() REJECTS when the woff2 is gone. Swallow it here: e.face.status
-    // carries the same fact as data, and the caller owns the verdict.
-    return e.face.load().catch(function () {});
-  }));
-  await document.fonts.ready;
-  var report = faces.map(function (e) {
-    var spec = probeWeight(e.weight) + " 16px \\"" + e.family + "\\"";
-    var checked = false;
-    try { checked = document.fonts.check(spec); } catch (err) { checked = false; }
-    return { family: e.family, weight: e.weight, style: e.style, status: String(e.face.status), check: checked, ok: e.face.status === "loaded" && checked };
-  });
-  var families = expected.map(function (x) {
-    var mine = report.filter(function (r) { return r.family === x.family; });
+  var sleep = function (ms) { return new Promise(function (done) { setTimeout(done, ms); }); };
+  // Arbitrary, and deliberately named as such — see the comment above.
+  var RETRY_LIMIT = 20;
+  var RETRY_DELAY_MS = 100;
+  var measure = async function () {
+    // A declared face's own load(), for EVERY declared weight — not a guess at
+    // which weights matter. face.weight is "400" or a variable range "100 900";
+    // the first number is a weight the face genuinely covers.
+    var faces = Array.from(document.fonts).map(function (f) {
+      return { face: f, family: unquote(f.family), weight: String(f.weight || "400"), style: String(f.style || "normal") };
+    });
+    var captured = faces.length;
+    await Promise.all(faces.map(function (e) {
+      // load() REJECTS when the woff2 is gone. Swallow it here: e.face.status
+      // carries the same fact as data, and the caller owns the verdict.
+      return e.face.load().catch(function () {});
+    }));
+    await document.fonts.ready;
+    var report = faces.map(function (e) {
+      var spec = probeWeight(e.weight) + " 16px \\"" + e.family + "\\"";
+      var checked = false;
+      try { checked = document.fonts.check(spec); } catch (err) { checked = false; }
+      return { family: e.family, weight: e.weight, style: e.style, status: String(e.face.status), check: checked, ok: e.face.status === "loaded" && checked };
+    });
+    var families = expected.map(function (x) {
+      var mine = report.filter(function (r) { return r.family === x.family; });
+      return {
+        family: x.family,
+        declared: mine.length,
+        expected: x.min,
+        ok: mine.length >= x.min && mine.every(function (r) { return r.ok; }),
+        weights: mine.map(function (r) { return r.weight + (r.ok ? "=ok" : "=" + r.status + "/check:" + r.check); }),
+      };
+    });
     return {
-      family: x.family,
-      declared: mine.length,
-      expected: x.min,
-      ok: mine.length >= x.min && mine.every(function (r) { return r.ok; }),
-      weights: mine.map(function (r) { return r.weight + (r.ok ? "=ok" : "=" + r.status + "/check:" + r.check); }),
+      ok: families.every(function (f) { return f.ok; }),
+      captured: captured,
+      report: report,
+      families: families,
     };
-  });
+  };
+  var pass = await measure();
+  var retries = 0;
+  // ONLY the race signature: not ok AND this pass saw no faces at all.
+  while (!pass.ok && pass.captured === 0 && retries < RETRY_LIMIT) {
+    retries = retries + 1;
+    await sleep(RETRY_DELAY_MS);
+    pass = await measure();
+  }
   return {
-    ok: families.every(function (f) { return f.ok; }),
+    ok: pass.ok,
     status: String(document.fonts.status),
     size: document.fonts.size,
-    faces: report,
-    families: families,
-    summary: families.map(function (f) { return f.family + "=" + (f.ok ? "true" : "false"); }).join(" "),
+    captured: pass.captured,
+    retries: retries,
+    faces: pass.report,
+    families: pass.families,
+    summary: pass.families.map(function (f) { return f.family + "=" + (f.ok ? "true" : "false"); }).join(" "),
   };
 })()`;
 
@@ -154,8 +221,16 @@ export function fontPinRefusal(where, report) {
   const detail = (report.families || [])
     .map((f) => `${f.family} [declared ${f.declared}/${f.expected} face(s): ${(f.weights || []).join(", ") || "none"}]`)
     .join(" · ");
+  // `captured`/`retries` are what separate an environment fault from the
+  // capture-then-report race: a refusal that waited out the full bound and still
+  // saw no faces reads differently from one that saw all four and found a broken
+  // one, and a reader should not have to guess which happened.
+  const waited = report.retries
+    ? ` re-collected ${report.retries}x after an empty capture and still refused`
+    : "";
   return `FONT PIN REFUSED on ${where} — ${report.summary || "no summary"}. ` +
-    `${detail}. document.fonts.status=${report.status} size=${report.size}. ` +
+    `${detail}. document.fonts.status=${report.status} size=${report.size} ` +
+    `captured=${report.captured}${waited}. ` +
     `Every px this harness prints is a layout of the face that actually resolved, so a missing or ` +
     `substituted face makes the measurement a fiction — this is an ENVIRONMENT refusal (exit 2), ` +
     `NOT a measured screen defect (exit 1). Check cloud/priv/static/fonts/ against the @font-face ` +

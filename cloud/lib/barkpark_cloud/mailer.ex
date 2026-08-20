@@ -15,11 +15,15 @@ defmodule BarkparkCloud.Mailer do
 
   ## Per-team transport
 
-  For ALERT email whose team chose `transport: "smtp"`/`"api"`, the context
-  passes a per-call config override to `deliver/2` (Swoosh accepts a keyword list
-  that wins over the module config), so ONE mailer module serves both the
-  platform and the per-team paths — no second Mailer module. `transport:
-  "instance"` passes no override and rides the platform adapter above.
+  For ALERT email whose team chose `transport: "smtp"`, the context passes a
+  per-call config override to `deliver/2` (Swoosh accepts a keyword list that
+  wins over the module config), so ONE mailer module serves both the platform
+  and the per-team paths — no second Mailer module. `transport: "instance"`
+  passes no override and rides the platform adapter above.
+
+  There is no third transport. `"api"` was offered by the schema and the console
+  with no adapter behind it and was deleted in cch-w52-s1; the two-way guard is
+  `test/barkpark_cloud/notifications/transport_manifest_test.exs`.
   """
   use Swoosh.Mailer, otp_app: :barkpark_cloud
 

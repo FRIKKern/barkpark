@@ -89,14 +89,14 @@ defmodule BarkparkCloud.Templates do
       slug: "search-starter",
       title: "Search Starter",
       description:
-        "The flagship search site: instant typo-tolerant live search, an interactive corpus graph, a listings map, and canonical PortableDoc document pages — over any Barkpark dataset.",
+        "The flagship search site: instant live search with misspellings widened server-side by Postgres trigram, an interactive corpus graph, and canonical PortableDoc document pages — over any Barkpark dataset.",
       framework: "nextjs",
       demo_content: true,
       what_you_get: [
         "Instant per-keystroke live search (Phoenix WebSocket, HTTP fallback)",
         "A zero-dependency Canvas2D corpus graph — documents lit by relevance",
         "An `entry` content type seeded reference-rich, so the graph is alive from minute one",
-        "Document pages rendered by the canonical @barkpark/react PortableDoc (all 42 block types)"
+        "Document pages rendered by the canonical @barkpark/react PortableDoc"
       ],
       env_keys: @env_common ++ ~w(BARKPARK_DOC_TYPE),
       repo: @repo,

@@ -12,6 +12,11 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     * **Mark accepted as-is** — sets `staleness_acknowledged: true` on
       the document's `content` map. Subsequent loads classify the
       document's previously-stale refs as `:acknowledged` (gray pill).
+      The write is state-preserving (raw `Repo.update`, keeping the
+      published book row published) but rejoins the canonical Content
+      event spine after commit — a `mutation_events` row plus
+      `Content.broadcast_document_mutation/3` — so SSE, webhooks, and
+      cache revalidation see the acknowledge edit (felix-w25-s4).
 
   ## Auth
 
@@ -39,6 +44,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
   import Ecto.Query
 
+  alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Codelists.Codelist
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.OnixEdit.Codelists.StalenessChecker
@@ -107,6 +114,17 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
            doc
            |> Document.changeset(%{"content" => updated_content})
            |> Repo.update() do
+      # NAMED FAILURE MODE (cross-context write bypassing the Content event
+      # path): the raw Repo.update above is state-preserving (charter D170 keeps
+      # it — Content.upsert_document would force a draft twin and coerce the
+      # published book row published→draft), but on its own it is INVISIBLE to
+      # the SSE /v1/data/listen endpoint, webhooks, and cache revalidation.
+      # Rejoin the canonical event spine AFTER commit: (i) a self-written
+      # mutation_events row — the listen controller drops frames whose msg has no
+      # :event_id, so the broadcast MUST reference a real row — and (ii) the
+      # canonical fan-out on documents:<dataset> + per-doc + workspace topics.
+      emit_canonical_mutation(updated_doc, doc.rev)
+
       rows =
         Enum.map(socket.assigns.rows, fn r ->
           if r.doc_id == doc_id do
@@ -224,6 +242,23 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
       <% end %>
     </div>
     """
+  end
+
+  # ── canonical event spine ────────────────────────────────────────────
+
+  # Write the mutation_events row + fire the canonical broadcast for a raw
+  # cross-context write, so bypass-writers rejoin the same seam every
+  # `Barkpark.Content.*` write travels. `"update"` is the canonical document
+  # mutation action (the same string Content's own write path stamps), so SSE
+  # frames and webhook payloads for this edit are indistinguishable from an
+  # ordinary content update. `previous_rev` is the rev observed before the write.
+  defp emit_canonical_mutation(%Document{} = doc, previous_rev) do
+    ev = Broadcast.save_event(doc, doc.type, doc.dataset, "update", previous_rev, :onixedit)
+
+    Content.broadcast_document_mutation(doc, "update",
+      event_id: ev.id,
+      previous_rev: previous_rev
+    )
   end
 
   # ── data loaders ─────────────────────────────────────────────────────

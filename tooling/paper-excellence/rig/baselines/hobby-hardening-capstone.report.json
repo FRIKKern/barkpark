@@ -1,0 +1,1583 @@
+{
+  "label": "hobby-hardening-capstone",
+  "deviceScaleFactor": 2,
+  "fullPage": true,
+  "format": "jpeg",
+  "jpegQuality": 72,
+  "allowedHost": "127.0.0.1",
+  "blocked": [
+    "cdn.jsdelivr.net (mermaid, asciinema-player)",
+    "all non-loopback hosts"
+  ],
+  "excludedFromAssertions": [
+    "diagram/mermaid",
+    "asciicast",
+    "remote images"
+  ],
+  "shots": [
+    {
+      "cell": "hobby-hardening-capstone__light__1280",
+      "file": "hobby-hardening-capstone__light__1280.jpeg",
+      "scale": 2,
+      "bytes": 10222131,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 27,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The grand view",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The corrected defect model",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The proposed shape — three epics on the risk",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Ground truth — how the system works today",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Files likely to change — the consolidated pi",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Absorb, cite, defer — the ownership rulings",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Contradictions and resolutions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Proof obligations — every done-claim can fai",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Risks, unknowns, and the judgment calls",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The recommendation and the first wave",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The paper stack — where to descend",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.6,
+      "proseCplSamples": 19,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1085.9,
+          "inkOffCentre": 22.9
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(45, 94, 143)",
+          "background": "rgb(233, 239, 247)",
+          "accent": "rgb(45, 94, 143)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(138, 100, 32)",
+          "background": "rgb(247, 240, 223)",
+          "accent": "rgb(138, 100, 32)"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "color": "rgb(21, 33, 29)",
+          "background": "rgb(234, 241, 238)",
+          "accent": "rgb(37, 99, 235)"
+        },
+        ".bp-card--ok": {
+          "color": "rgb(21, 33, 29)",
+          "background": "rgb(234, 241, 238)",
+          "accent": "rgb(13, 148, 136)"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 142,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 131,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2117.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4217.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6618.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 15352.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 18877.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22020.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23904.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 25401,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 26890.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 29191.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 30710.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "hobby-hardening-capstone__light__1920",
+      "file": "hobby-hardening-capstone__light__1920.jpeg",
+      "scale": 2,
+      "bytes": 10857273,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 27,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The grand view",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The corrected defect model",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The proposed shape — three epics on the risk",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Ground truth — how the system works today",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Files likely to change — the consolidated pi",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Absorb, cite, defer — the ownership rulings",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Contradictions and resolutions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Proof obligations — every done-claim can fai",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Risks, unknowns, and the judgment calls",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The recommendation and the first wave",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The paper stack — where to descend",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.6,
+      "proseCplSamples": 19,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(45, 94, 143)",
+          "background": "rgb(233, 239, 247)",
+          "accent": "rgb(45, 94, 143)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(30, 107, 82)",
+          "background": "rgb(231, 242, 236)",
+          "accent": "rgb(30, 107, 82)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(138, 100, 32)",
+          "background": "rgb(247, 240, 223)",
+          "accent": "rgb(138, 100, 32)"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "color": "rgb(21, 33, 29)",
+          "background": "rgb(234, 241, 238)",
+          "accent": "rgb(37, 99, 235)"
+        },
+        ".bp-card--ok": {
+          "color": "rgb(21, 33, 29)",
+          "background": "rgb(234, 241, 238)",
+          "accent": "rgb(13, 148, 136)"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 142,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 131,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2098.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4198.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6369.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 14931,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 17850.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 20504.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22245,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23568.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 24913.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 27215,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 28733.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "hobby-hardening-capstone__dark__1280",
+      "file": "hobby-hardening-capstone__dark__1280.jpeg",
+      "scale": 2,
+      "bytes": 9988231,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 27,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The grand view",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The corrected defect model",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The proposed shape — three epics on the risk",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Ground truth — how the system works today",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Files likely to change — the consolidated pi",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Absorb, cite, defer — the ownership rulings",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Contradictions and resolutions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Proof obligations — every done-claim can fai",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Risks, unknowns, and the judgment calls",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The recommendation and the first wave",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The paper stack — where to descend",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.6,
+      "proseCplSamples": 19,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1040,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 999.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1085.9,
+          "inkOffCentre": 22.9
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1040,
+          "offCentre": 0,
+          "left": 120,
+          "right": 1160,
+          "inkWidth": 1040,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(157, 184, 255)",
+          "background": "rgb(23, 32, 50)",
+          "accent": "rgb(157, 184, 255)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(227, 182, 97)",
+          "background": "rgb(42, 34, 16)",
+          "accent": "rgb(227, 182, 97)"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "color": "rgb(231, 237, 233)",
+          "background": "rgb(19, 29, 25)",
+          "accent": "rgb(96, 165, 250)"
+        },
+        ".bp-card--ok": {
+          "color": "rgb(231, 237, 233)",
+          "background": "rgb(19, 29, 25)",
+          "accent": "rgb(45, 212, 191)"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        7
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1280,
+      "rules": {
+        "total": 142,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 131,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2117.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4217.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6618.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 15352.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 18877.2,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22020.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23904.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 25401,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 26890.5,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 29191.6,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 30710.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    },
+    {
+      "cell": "hobby-hardening-capstone__dark__1920",
+      "file": "hobby-hardening-capstone__dark__1920.jpeg",
+      "scale": 2,
+      "bytes": 10841965,
+      "wrapper": true,
+      "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
+      "paragraphs": 27,
+      "sectionBeats": [
+        {
+          "kind": "heading",
+          "head": "The grand view",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The corrected defect model",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The proposed shape — three epics on the risk",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Ground truth — how the system works today",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Files likely to change — the consolidated pi",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Absorb, cite, defer — the ownership rulings",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Contradictions and resolutions",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Proof obligations — every done-claim can fai",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "Risks, unknowns, and the judgment calls",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The recommendation and the first wave",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        },
+        {
+          "kind": "heading",
+          "head": "The paper stack — where to descend",
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
+          "skippedEmpty": 2
+        }
+      ],
+      "nestedH2s": 0,
+      "doubledRules": [],
+      "columnWidth": 660,
+      "columnContentWidth": 580,
+      "maxWidth": "660px",
+      "proseCpl": 71.6,
+      "proseCplSamples": 19,
+      "captionCpl": 68.4,
+      "captionWidth": 453.5,
+      "evidenceBand": 1240,
+      "bandRows": [
+        {
+          "kind": "bp-stats",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "figure",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1199.6,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        },
+        {
+          "kind": "bp-table",
+          "width": 1240,
+          "offCentre": 0,
+          "left": 340,
+          "right": 1580,
+          "inkWidth": 1240,
+          "inkOffCentre": 0
+        }
+      ],
+      "ingressPresent": true,
+      "ingressRatio": 0.783,
+      "ingressNote": null,
+      "toneSamples": {
+        ".bp-callout--info": {
+          "color": "rgb(157, 184, 255)",
+          "background": "rgb(23, 32, 50)",
+          "accent": "rgb(157, 184, 255)"
+        },
+        ".bp-callout--success": {
+          "color": "rgb(95, 207, 156)",
+          "background": "rgb(18, 36, 28)",
+          "accent": "rgb(95, 207, 156)"
+        },
+        ".bp-callout--warning": {
+          "color": "rgb(227, 182, 97)",
+          "background": "rgb(42, 34, 16)",
+          "accent": "rgb(227, 182, 97)"
+        },
+        ".bp-callout--danger": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--info": {
+          "color": "rgb(231, 237, 233)",
+          "background": "rgb(19, 29, 25)",
+          "accent": "rgb(96, 165, 250)"
+        },
+        ".bp-card--ok": {
+          "color": "rgb(231, 237, 233)",
+          "background": "rgb(19, 29, 25)",
+          "accent": "rgb(45, 212, 191)"
+        },
+        ".bp-card--warn": {
+          "absent": "not in this fixture"
+        },
+        ".bp-card--danger": {
+          "absent": "not in this fixture"
+        }
+      },
+      "h2Px": {
+        "fontSize": "27px",
+        "fontWeight": "600"
+      },
+      "statTracks": [
+        8
+      ],
+      "statTracksNote": null,
+      "docOverflow": 0,
+      "clientWidth": 1920,
+      "rules": {
+        "total": 142,
+        "heavy": 11,
+        "structuralHeavy": 11,
+        "strayHeavy": 0,
+        "byWeight": {
+          "1": 131,
+          "2": 11
+        },
+        "heavyRules": [
+          {
+            "px": 2,
+            "y": 2098.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 4198.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 6369.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 14931,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 17850.9,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 20504.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 22245,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 23568.3,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 24913.8,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 27215,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 28733.7,
+            "width": 580,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          }
+        ]
+      },
+      "blockedRequests": 3
+    }
+  ]
+}

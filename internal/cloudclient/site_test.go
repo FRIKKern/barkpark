@@ -78,13 +78,17 @@ func TestSiteDeploymentTerminal(t *testing.T) {
 		"canceled", // the other spelling of the same end-state
 		"  LIVE  ", // whitespace + case are the server's business, not ours
 		"Cancelled",
+		// deferred settles as [] in the control plane's transition table, and it is
+		// 73.7% of settled attempts — this list named it in NEITHER direction until
+		// wave 32, which is why the majority outcome spun for ten minutes.
+		"deferred", "Deferred", "  deferred  ",
 	}
 	for _, s := range terminal {
 		if !SiteDeploymentTerminal(s) {
-			t.Fatalf("SiteDeploymentTerminal(%q) = false, want true — the deploy stream would poll ~10 min and then report it as in progress", s)
+			t.Fatalf("SiteDeploymentTerminal(%q) = false, want true — the deploy stream would poll its full 300×2s budget (~10 min) against a row that can never change and then print \"deploy in progress\" over a settled deploy", s)
 		}
 	}
-	// Every non-terminal status of the six-value enum, plus the empty string, must
+	// Every non-terminal status of the seven-value enum, plus the empty string, must
 	// keep the loop polling.
 	for _, s := range []string{"queued", "building", "pushing", "", "unknown"} {
 		if SiteDeploymentTerminal(s) {
@@ -145,5 +149,57 @@ func TestCloudErrorCarriesDetail(t *testing.T) {
 				t.Fatalf("cloudError = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestListSpawnSiteDeploymentsDecodesDeferralChain: deploy-reliability W13 S3.
+//
+// The control plane writes deferral_depth / deferral_bound / deferral_cause on
+// every deferred row (W12) and now emits them from its sole base deployment
+// serializer. Before this slice `SiteDeployment` declared NONE of the three, so
+// json.Unmarshal dropped a perfectly correct payload on the floor without a
+// word — which is why the CLI still recovers a wait's depth by regexing the
+// English out of failure_reason.
+//
+// IT CAN LOSE: delete the three fields from `SiteDeployment` and the first
+// block reds with nil pointers; make them plain ints and the second block reds,
+// because an absent chain would decode to 0 and read as "deferred zero times".
+func TestListSpawnSiteDeploymentsDecodesDeferralChain(t *testing.T) {
+	c := newFake(t, "sess-abc", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"deployments":[
+			{"id":"dep-1","site_id":"site-1","status":"deferred",
+			 "deferral_depth":3,"deferral_bound":12,
+			 "deferral_cause":"BOX_AT_CAPACITY_DEFERRED"},
+			{"id":"dep-2","site_id":"site-1","status":"live",
+			 "deferral_depth":null,"deferral_bound":null,"deferral_cause":null}
+		]}`))
+	})
+
+	page, err := c.ListSpawnSiteDeployments(context.Background(), "site-1", 0, "")
+	if err != nil {
+		t.Fatalf("ListSpawnSiteDeployments: %v", err)
+	}
+	if len(page.Deployments) != 2 {
+		t.Fatalf("decoded %d deployment(s), want 2", len(page.Deployments))
+	}
+
+	chain := page.Deployments[0]
+	if chain.DeferralDepth == nil || chain.DeferralBound == nil || chain.DeferralCause == nil {
+		t.Fatalf("the chain was on the wire and decoded nil: %+v", chain)
+	}
+	if *chain.DeferralDepth != 3 || *chain.DeferralBound != 12 {
+		t.Fatalf("depth/bound = %d/%d, want 3/12", *chain.DeferralDepth, *chain.DeferralBound)
+	}
+	// The frozen LEDGER CLASS, not a raw box code.
+	if *chain.DeferralCause != "BOX_AT_CAPACITY_DEFERRED" {
+		t.Fatalf("deferral_cause = %q", *chain.DeferralCause)
+	}
+
+	// A row with no chain stays UNKNOWN. Every deferral written before
+	// migration 20260807150000 is in this state, so a zero here would be the
+	// control plane confidently asserting a depth nobody ever recorded.
+	none := page.Deployments[1]
+	if none.DeferralDepth != nil || none.DeferralBound != nil || none.DeferralCause != nil {
+		t.Fatalf("a row with no chain must decode nil, got %+v", none)
 	}
 }

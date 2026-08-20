@@ -44,18 +44,37 @@
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
-//                                 `.launch-connect-provider` button, which
-//                                 renderLaunchConnect draws UNCONDITIONALLY.
-//                                 NO PREDICATE.
+//                                 `.launch-connect-provider` button, drawn by
+//                                 catalogPanelHtml. NO PREDICATE OF ITS OWN —
+//                                 and note the correction (cch-w48-s4): this
+//                                 file used to say the button "renders
+//                                 unconditionally", naming a `renderLaunchConnect`
+//                                 that app.js does not declare at all. What is
+//                                 true on main is narrower and does NOT make the
+//                                 row predicated: the button only exists inside
+//                                 the launch wizard, and launchFlow withholds
+//                                 that whole form unless launchAuthority() ===
+//                                 "grant" — a fence in a DIFFERENT band, three
+//                                 hops away, guarding a different route. See the
+//                                 row's own note.
 //   submitInlineProviderCred()  — reached only through renderConnectCard,
 //                                 which renderProviderPage mounts only when
 //                                 providerCanWrite().
 //
 //   (Re-derive both: grep -n 'function submitProviderCred' app.js, and the same
-//   for submitInlineProviderCred. Line numbers are NEVER written down here —
-//   they rot on any sibling shift, charter D41 / bp-honest-gates D5 — the PIN
-//   below is keyed on the function name for exactly that reason, and every line
-//   number this census prints is DERIVED at run time from the live file.)
+//   for submitInlineProviderCred. NO LINE NUMBER IS WRITTEN DOWN IN THIS FILE,
+//   and every line number this census prints — app.js sites and the six router
+//   overlay sites alike — is DERIVED at run time from the live file. That is a
+//   description of the file as it stands, not an aspiration: it was FALSE until
+//   charter D528, when the PIN's 79 documentary `line:` fields were deleted
+//   (nothing read them; all 79 were stale) and the inline-cond overlay's six
+//   typed-and-printed router lines were replaced by a resolver over the live
+//   router source. Line numbers rot on any sibling shift — charter D41 /
+//   bp-honest-gates D5 — so the PIN is keyed on the function name, and a
+//   printed numeral is only ever this run's reading of the tree. cch-w47-rv
+//   made that sentence a CHECK rather than a promise: (2h) below reads this
+//   file's own bytes and exits 2 on any typed `<file>:<digits>`. It had to —
+//   D528 left seven of them behind in `note:` prose, all seven already stale.)
 //
 // Route-keyed, those two collapse into one row, the row scores "predicated",
 // and the ONE REAL DEFECT this instrument exists to see becomes structurally
@@ -103,9 +122,26 @@
 //   { fn, verb, route,                     // the key: fn|VERB route
 //     elevated,                            // above plain team membership?
 //     predicate,                           // the client fn gating it, or null
+//     fence,                               // {band, read, decide} — or absent
 //     auth_fn,                             // the router's Auth.* guard, or null
 //     context_fn,                          // authority BELOW the router, or null
 //     note }
+//
+// `fence` is the arm-(2i) triple, and it is what makes a row's PREDICATE claim
+// losable instead of decorative (charter D540):
+//
+//   band   — the authority function whose answer decides the offer. Equal to
+//            `predicate`; it is spelled again here because the accounting in
+//            (2i-4) is keyed BY BAND, and a band with no fence row is simply
+//            outside this arm rather than silently half-checked.
+//   read   — the function (or functions) that CALL the band and thread its
+//            answer to the render path. This console splits read from decision
+//            on purpose (charter D530), so read is almost never the pinned `fn`.
+//   decide — the function that turns the threaded answer into a rendered offer
+//            or a withheld one. This is where the fence can be NEUTERED.
+//
+// A row with no `fence` is UNCHECKED BY (2i) and says so in the print. That is
+// a hole, not a pass.
 //
 // ── HONEST LIMITS, stated, because an unstated limit is the same lie ─────────
 //
@@ -116,6 +152,24 @@
 //   it, nor one that raises a route's tier under an unchanged call site. Those
 //   are the drift arm (deferred above). What it catches is GROWTH and LOSS of
 //   the population — which is the shape the disease actually takes.
+//
+//   NARROWED, NOT LIFTED, by arm (2i) (charter D540): for a row that pins a
+//   `fence`, removing the predicate around the call site IS now reachable —
+//   deleting the band read, neutering the decision, or dropping the fence pin
+//   itself each exit 2. The narrowing is exactly as wide as the fence pins go,
+//   and today that is ONE BAND. Every other predicated row is still LIMIT 1.
+//
+//   LIMIT 1b — (2i-4)'s ACCOUNTING IS OVER READ SITES, NOT OVER ROWS. It walks
+//   the band's live call sites and demands each enclosing function be claimed
+//   by some row's `read`. Several rows legitimately share one read: on the
+//   instance screen, loadInstance's single band read feeds the header, the
+//   updates panel and the support card alike. So a row whose read is ALREADY
+//   claimed by a sibling row is NOT auto-discovered by this arm — patchAutoupdate
+//   and submitAddSupport were both found by hand, and dropping either row's
+//   fence leaves the accounting green because rollbackInstance/attachDomain
+//   still claim loadInstance. (2i) is ANTI-DECAY BOOKKEEPING WITH DERIVED
+//   TEETH. It is not a discovery instrument, and reading it as one would put a
+//   fresh false claim inside the arm that exists to remove them.
 //
 //   LIMIT 2 — THE EXTRACTOR MATCHES `api("VERB", …)` LITERALLY. A write issued
 //   through a wrapper, or with the method in a variable, is invisible to it.
@@ -129,6 +183,16 @@
 //   conn.assigns.current_team)` form, so the check survives line drift — but it
 //   cannot tell WHICH route grew a seventh. It tells you to go look.
 //
+//   The overlay also PRINTS a `router.ex:NNNN` per route, and those six numbers
+//   are DERIVED by the same two regexes at run time — nothing compares them to
+//   anything, so they cannot red and cannot go stale. What IS pinned is the six
+//   ROUTE NAMES, and the print pairs name to line BY SOURCE ORDER. So the one
+//   thing this print can still get wrong is a router that REORDERS these six
+//   while keeping the count at six: the lines stay right and the names slide.
+//   On any count change the pairing is dropped and the derived lines print
+//   UNLABELED, because a mis-labelled failure message is a new false statement
+//   of exactly the kind this census exists to remove.
+//
 // Exit codes:
 //   0 — the derived call-site set EQUALS the pin, and every invariant holds
 //   1 — ADD and/or REMOVE: the set differs from the pin, both named
@@ -139,7 +203,7 @@
 //       observations do not match what it declares about itself
 //
 // Run: node cloud/priv/static/__binding_census.mjs
-//      node cloud/priv/static/__binding_census.mjs <app.js> <router.ex> <accounts.ex>
+//      node cloud/priv/static/__binding_census.mjs <app.js> <router.ex> <accounts.ex> <authz.ex>
 //   (the argv overrides exist so a mutation driver can point the census at a
 //    patched COPY without writing inside this slice's fence)
 //
@@ -154,10 +218,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-
 // ── THE FIXTURE MODE FLAG IS RESOLVED HERE, AT THE `APP` BINDING ────────────
 // Not downstream, and this placement is load-bearing rather than tidy. `src` is
-// read at module scope, four lines below, from whatever `APP` says — so a mode
+// read at module scope, a few lines below, from whatever `APP` says — so a mode
 // block placed after that read never runs: `--add-check` IS argv[2], and the
 // process dies first with `ENOENT: no such file or directory, open
 // '--add-check'`. __css_check.mjs's targeted modes sit far down its file and do
@@ -174,10 +237,22 @@ if (FIXTURE_MODE && !FIXTURE_FILE) {
 }
 
 const APP = FIXTURE_FILE || process.argv[2] || path.join(here, "app.js");
-// In a fixture mode argv[3]/argv[4] are the flag's own operands, never the
-// Elixir sources — bind the defaults so a stray path cannot be silently read.
+// In a fixture mode argv[3..5] are the flag's own operands, never the Elixir
+// sources — bind the defaults so a stray path cannot be silently read. The
+// four-source contract (app.js, router.ex, accounts.ex, authz.ex) is main's;
+// the fixture mode only overrides which JS subject is walked.
 const ROUTER = (FIXTURE_MODE ? null : process.argv[3]) || path.join(here, "../../lib/barkpark_cloud/web/router.ex");
 const ACCOUNTS = (FIXTURE_MODE ? null : process.argv[4]) || path.join(here, "../../lib/barkpark_cloud/accounts.ex");
+const AUTHZ = (FIXTURE_MODE ? null : process.argv[5]) || path.join(here, "../../lib/barkpark_cloud/accounts/authz.ex");
+// A context_fn names authority BELOW the router, and that authority does not
+// all live in one module: the rank-relative member writes decide in
+// `Accounts.*` but the router re-derives the refusal ARM through `Authz.*`.
+// So check (2e) resolves a context_fn through this module → source map rather
+// than assuming accounts.ex. A module-qualified context_fn whose module is
+// absent here is a FAILURE, not a skip — otherwise naming an unmapped module
+// would be the way to buy silence from the check.
+const CONTEXT_SOURCES = { Accounts: ACCOUNTS, Authz: AUTHZ };
+const MODULE_QUALIFIED = /^([A-Z][A-Za-z0-9_]*)\.(.+)$/;
 // Report against a stable repo-relative label so the output reads the same from
 // any cwd; a mutant copy passed as argv[2] keeps its own path.
 const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : APP;
@@ -187,9 +262,14 @@ const src = fs.readFileSync(APP, "utf8");
 // ═══════════════════════════════════════════════════════════════════════════
 // THE PIN — 79 write call sites, keyed by `fn|VERB route`.
 //
-// `line` is DOCUMENTARY ONLY. It is printed for orientation and never compared:
-// pinning line numbers would red on every edit above a call site and teach
-// people to re-pin without reading, which is how a pin becomes a rubber stamp.
+// A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
+// `app.js:NNNN` this census prints is DERIVED from the live file at run time
+// (`lineOf`, below) and looked up by KEY, so it is correct by construction. The
+// rows used to carry a documentary `line:` beside it; measured, all 79 were
+// stale (median drift 524, max 928, zero correct) and nothing read them —
+// setting one to 999999 left the report BYTE-IDENTICAL at rc 0. A number no
+// check can red and no reader can trust is not orientation, it is a second
+// answer that disagrees with the first. Deleted (charter D528).
 //
 // Adding a row is a DECISION — it means "this affordance is honest, or its
 // dishonesty is owned by a filed task". It is never a way to quiet the gate.
@@ -208,127 +288,165 @@ const H_TEAM_SITE_M = "with_team_site(conn, fn)";
 const H_PROXY = "proxy_instance_webhook/2";
 const C_TEAM_ADMIN = "Accounts.team_admin?/2";
 const C_PAT_ABILITIES = "Accounts.pat_abilities_allowed?/2";
+// The two rank-relative member writes. `with_team_role(conn, "admin")` is the
+// whole of their ROUTER authority and none of their real one: whether THIS
+// admin may touch THIS member is decided below the router, against a strict
+// rank ladder (team_membership.ex:48). PATCH decides in
+// `Accounts.update_member_role_as/4` (no owner escape hatch) and the router
+// re-runs `Authz.can_grant?/3` only to split the refusal into `outranked` vs
+// `cannot_grant_higher_role`; DELETE decides in `Accounts.remove_member_as/3`
+// (owner escape hatch present) and its cause is always `outranked`.
+const C_MEMBER_ROLE = "Accounts.update_member_role_as/4 + Authz.can_grant?/3";
+const C_MEMBER_REMOVE = "Accounts.remove_member_as/3";
+
+// THE INSTANCE-ADMIN BAND's fence constructor. `read` may be one function or
+// several: the lifecycle rail is offered by wireLifecycleActions and re-offered
+// by repaintLifecycleAuthority, and both genuinely re-read the band for the
+// SAME affordance. Listing both is honest bookkeeping; listing only one would
+// leave the other an orphan that (2i-4) then has to be told to ignore, and an
+// exemption is a hole where a claim would have been true.
+const INSTANCE_BAND = "instanceAdminAuthority";
+const F_INST = (read, decide) => ({ band: INSTANCE_BAND, read: read, decide: decide });
 
 const PIN = [
   // ── account & session self-service — every one of these acts on the caller's
   // ── OWN account, so plain membership is the honest tier.
-  { line: 1163, fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/enroll", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: enrol your own 2FA" },
-  { line: 1184, fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/confirm", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1224, fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/recovery-codes", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1246, fn: "run", verb: "DELETE", route: "/v1/account/two-factor", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `run` is the confirm-modal callback" },
-  { line: 1293, fn: "run", verb: "DELETE", route: "/v1/account/sessions", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: sign out your other sessions" },
-  { line: 1325, fn: "openAccountModal", verb: "DELETE", route: "/v1/auth/logout", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1410, fn: "loadSessions", verb: "DELETE", route: "/v1/account/sessions/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 1436, fn: "submitPasswordChange", verb: "PUT", route: "/v1/account/password", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/enroll", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: enrol your own 2FA" },
+  { fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/confirm", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "a2fWire", verb: "POST", route: "/v1/account/two-factor/recovery-codes", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "run", verb: "DELETE", route: "/v1/account/two-factor", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `run` is the confirm-modal callback" },
+  { fn: "run", verb: "DELETE", route: "/v1/account/sessions", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: sign out your other sessions" },
+  { fn: "openAccountModal", verb: "DELETE", route: "/v1/auth/logout", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "paint", verb: "DELETE", route: "/v1/account/sessions/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; `paint` is loadSessions' repaint closure (sessions fold)" },
+  { fn: "submitPasswordChange", verb: "PUT", route: "/v1/account/password", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
 
   // ── instance lifecycle — resurrect stands up (and bills) a real box.
-  { line: 1938, fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: null, auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:8290 refuses non-admins inside a cond; no Auth.* names it" },
+  { fn: "openResurrectModal", verb: "POST", route: "/v1/resurrect", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadArchives", "archiveRowHtml"), auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: loadArchives reads the band and threads it into archivesModel; archiveRowHtml emits .archive-resurrect-btn ONLY on a grant — refuse/unknown draw the CLI chip alone, with no button to mount. Was pinned UNPREDICATED, which stopped being true when the offer-time answer shipped. resurrect/1 still refuses non-admins inside a cond, so the context_fn and the overlay stay" },
 
   // ── providers — THE DECISIVE PAIR. Same route, opposite verdicts.
-  { line: 2313, fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. The launch wizard's .launch-connect-provider button renders unconditionally" },
-  { line: 2744, fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
-  { line: 2794, fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
+  { fn: "submitProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED — but NOT for the reason this row used to give. The old note said the .launch-connect-provider button 'renders unconditionally' and credited a renderLaunchConnect that app.js does not declare; both halves were false (cch-w48-s4). What is true: catalogPanelHtml draws the button, and it is only ever reached inside the launch wizard, which launchFlow withholds unless launchAuthority() === 'grant'. That fence is THREE HOPS away, belongs to the LAUNCH band, and guards POST /v1/launch — not this row's POST /v1/providers, whose own tier is require_team_admin. A predicate this row does not evaluate is not this row's predicate, so it stays null and stays owned" },
+  { fn: "submitInlineProviderCred", verb: "POST", route: "/v1/providers", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "renderConnectCard mounts only when providerCanWrite()" },
+  { fn: "run", verb: "DELETE", route: "/v1/providers/:*", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "wireProviderDisconnect runs only when providerCanWrite()" },
 
   // ── github (team-level installation)
-  { line: 2878, fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED. #github-disconnect is wired whenever an installation exists" },
+  // cch-w48-s3, re-pinned here in review: the old note ("wired whenever an
+  // installation exists") stopped being true the moment s3 landed —
+  // githubCardHtml(g, canWrite) emits #github-disconnect only when
+  // providerCanWrite() is true, and OMITS it otherwise. NOT fence-pinned:
+  // providerCanWrite is a boolean, not a three-valued band, so (2i-3)'s
+  // vocabulary derivation has nothing to read. LIMIT 1, and honest about it.
+  { fn: "disconnectGithub", verb: "DELETE", route: "/v1/github/installation", elevated: true, predicate: "providerCanWrite", auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s3: githubCardHtml OMITs #github-disconnect unless providerCanWrite()" },
 
   // ── notifications — every write is wired behind notifCanManage()
-  { line: 3683, fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
-  { line: 3720, fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
-  { line: 3740, fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
-  { line: 3742, fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
-  { line: 3788, fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
-  { line: 3798, fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
+  { fn: "saveNotifEmail", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "loadNotifications returns before wiring when !canManage" },
+  { fn: "next", verb: "PUT", route: "/v1/notifications/channels", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "chat-channel save; same wiring fence" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/settings", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → settings axis" },
+  { fn: "onNotifCellToggle", verb: "PUT", route: "/v1/notifications/events", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "matrix cell → per-event axis" },
+  { fn: "sendChatTest", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "per-channel test send" },
+  { fn: "sendTestNotification", verb: "POST", route: "/v1/notifications/test", elevated: true, predicate: "notifCanManage", auth_fn: A_TADMIN, context_fn: null, note: "#notif-test is hidden when !canManage" },
 
   // ── tokens — see ruling (c). NOT elevated; the cap is on the ability set.
-  { line: 4044, fn: "submitToken", verb: "POST", route: "/v1/tokens", elevated: false, predicate: "canMintAnyAbility", auth_fn: A_USER, context_fn: C_PAT_ABILITIES, note: "any member may mint; the owner/admin cap is on the requested abilities, below the router" },
-  { line: 4163, fn: "confirmRevokeToken", verb: "DELETE", route: "/v1/tokens/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: revoke your own token" },
+  { fn: "submitToken", verb: "POST", route: "/v1/tokens", elevated: false, predicate: "canMintAnyAbility", auth_fn: A_USER, context_fn: C_PAT_ABILITIES, note: "any member may mint; the owner/admin cap is on the requested abilities, below the router" },
+  { fn: "confirmRevokeToken", verb: "DELETE", route: "/v1/tokens/:*", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: revoke your own token" },
 
   // ── unauthenticated auth flows — no principal exists yet to elevate
-  { line: 4462, fn: "onSubmit", verb: "POST", route: "/v1/auth/two-factor-challenge", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the challenge token is the credential" },
-  { line: 4540, fn: "requestPasswordReset", verb: "POST", route: "/v1/auth/request-reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
-  { line: 4565, fn: "submitReset", verb: "POST", route: "/v1/auth/reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
-  { line: 4597, fn: "submitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the path is a two-way branch on authMode" },
+  { fn: "onSubmit", verb: "POST", route: "/v1/auth/two-factor-challenge", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the challenge token is the credential" },
+  { fn: "requestPasswordReset", verb: "POST", route: "/v1/auth/request-reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "submitReset", verb: "POST", route: "/v1/auth/reset", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "submitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; the path is a two-way branch on authMode" },
 
   // ── studio / onboarding
-  { line: 5544, fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { line: 6230, fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
+  { fn: "openStudio", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "dismissRunway", verb: "POST", route: "/v1/onboarding", elevated: true, predicate: "canManageOnboarding", auth_fn: A_PTADMIN, context_fn: null, note: "the runway renders with canManage: canManageOnboarding()" },
 
   // ── instance detail — the console's densest unpredicated cluster
-  { line: 6750, fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6776, fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6794, fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6750" },
-  { line: 6830, fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6893, fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 6954, fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 7245, fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:2058 refuses non-admin sessions inside a cond" },
-  { line: 7270, fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { line: 7637, fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits data-life-verb only on the live arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
+  { fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6750" },
+  { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook. cch-w48-s4 names the DECIDING function rather than the panel that hosts it: updatePanelHtml threads the answer through unchanged, and adminWriteControlHtml is where the data-rollback hook is withheld" },
+  { fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook — again by way of adminWriteControlHtml, which is the function that actually decides" },
+  { fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "fleetSupportCardHtml"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: fleetSupportCardHtml OMITS #fleet-add-support unless authority === \"grant\" (D514 rules this add OMITTED rather than disabled-and-explained). Found BY HAND, not by (2i-4): its read is loadInstance, which sibling rows already claim — see LIMIT 1b. POST /v1/fleet/supports still refuses non-admin sessions inside a cond, so the overlay stays" },
+  { fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: all four autoupdate controls (pause/resume/pin/unpin) are drawn by adminWriteControlHtml, which emits the data-au hook only when the answer is neither refuse nor unknown. Found BY HAND, not by (2i-4) — same shared read as rollbackInstance, see LIMIT 1b" },
 
   // ── operator console — the console's highest-privilege writes, and both of
   // ── them build their path from a constant (ruling (b)).
-  { line: 7732, fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
-  { line: 8107, fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
+  { fn: "fleetRolloutAction", verb: "POST", route: "/v1/operator/autoupdate/halt|/v1/operator/autoupdate/resume", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "the operator route refuses to render at all unless operatorRouteAllowed(meCache)" },
+  { fn: "operatorConfirmBrake", verb: "POST", route: "/v1/operator/autoupdate/halt", elevated: true, predicate: "operatorRouteAllowed", auth_fn: A_OPERATOR, context_fn: null, note: "same route fence" },
 
   // ── sites
-  { line: 8395, fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
+  { fn: "openCreateSiteModal", verb: "POST", route: "/v1/sites", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "any member may create a site" },
 
   // ── webhook catalog proxy — user-authed + team-scoped, member tier
-  { line: 9142, fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy: user-authed + team-scoped fail-closed" },
-  { line: 9189, fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9211, fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9340, fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9370, fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9411, fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
-  { line: 9472, fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "sendWebhookTest", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/test-send", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy: user-authed + team-scoped fail-closed" },
+  { fn: "toggleWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "rotateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/rotate", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "submitEditWebhook", verb: "PUT", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "submitCreateWebhook", verb: "POST", route: "/v1/barkparks/:*/api/webhooks", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "deleteWebhook", verb: "DELETE", route: "/v1/barkparks/:*/api/webhooks/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
+  { fn: "replayDelivery", verb: "POST", route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", elevated: false, predicate: null, auth_fn: null, context_fn: H_PROXY, note: "proxy" },
 
-  { line: 10206, fn: "runVerifyNow", verb: "POST", route: "/v1/barkparks/:*/verify", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "runVerifyNow", verb: "POST", route: "/v1/barkparks/:*/verify", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
 
   // ── site writes — ruling (a): require_ability is a no-op for a session
-  { line: 10801, fn: "loadSite", verb: "PATCH", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: A_ABILITY, context_fn: H_TEAM_SITE, note: "ruling (a): a session carries [\"root\"]" },
-  { line: 11078, fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
-  { line: 11437, fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
-  { line: 11649, fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
-  { line: 12059, fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
-  { line: 12223, fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
-  { line: 12317, fn: "submitSiteGithub", verb: "POST", route: "/v1/sites/:*/github/connect", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 12333, fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "loadSite", verb: "PATCH", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: A_ABILITY, context_fn: H_TEAM_SITE, note: "ruling (a): a session carries [\"root\"]" },
+  { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
+  { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
+  { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
+  { fn: "runSiteDelete", verb: "DELETE", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "cch-w67 crown: the console's FIRST caller of DELETE /v1/sites/:id. NOT elevated, and the judgement is re-derivable rather than inherited: the route is with_team_site(conn, {:ability,\"write\"}), a browser session is assigned [\"root\"], and Registry.get_team_site filters on TENANCY only — no role read exists anywhere on the path. The INSTANCE Decommission on the same screen family is require_primary_team_admin, a strictly higher tier; predicating this row on that band would withhold a control the server honours" },
+  { fn: "createAndDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
+  { fn: "runDeploy", verb: "POST", route: "/v1/sites/:*/deploy", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a); second call site on the same route as :12059" },
+  // cch-w48-s2, pinned here in review: BOTH of these routes are reached ONLY
+  // through #site-github, and siteDetailHtml now emits that control only on the
+  // literal "grant". The fence is pinned rather than merely noted because arm
+  // (2i-4) below FOUND it — loadSite's new instanceAdminAuthority() read was an
+  // orphan the moment s2 landed, which is precisely the FIX direction (2g) was
+  // blind to. MERGE ORDER: this pin requires cch-w48-s2 in the tree first.
+  { fn: "submitSiteGithub", verb: "POST", route: "/v1/sites/:*/github/connect", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadSite", "siteDetailHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s2: #site-github is emitted only on \"grant\"; a member gets a non-interactive chip (connected) or nothing (unconnected)" },
+  { fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadSite", "siteDetailHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s2: same door, same fence — disconnect is reached only from the connected arm of #site-github" },
 
-  { line: 12605, fn: "submitInviteAccept", verb: "POST", route: "/v1/invitations/accept", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the invitation token is the authority" },
-  { line: 12689, fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
+  { fn: "submitInviteAccept", verb: "POST", route: "/v1/invitations/accept", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the invitation token is the authority" },
+  { fn: "resumeStudioLogin", verb: "POST", route: "/v1/barkparks/:*/studio-link", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "second call site on the same route as :5544" },
 
   // ── launch + billing
-  { line: 13129, fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED. router.ex:8082 refuses non-admin sessions inside a cond" },
-  { line: 13222, fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
-  { line: 13513, fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
-  { line: 13621, fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
-  { line: 13781, fn: "subscribe", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
+  { fn: "submitLaunchFlow", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w47-s1, re-pinned cch-w48-s4: launchFlow withholds the WHOLE form unless launchAuthority() === \"grant\" — fail-closed on loading and on failed, so there is no submit to reach. NO `fence` PIN: arm (2i) is scoped to the instanceAdminAuthority band this wave, and pinning the launch band without doing its read accounting would be a claim this file cannot back. go_live/1 still refuses non-admin sessions inside a cond, so the overlay stays" },
+  { fn: "renderLaunchPlan", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the plan grid draws its CTA only for an owner authority" },
+  { fn: "openCancelPlanModal", verb: "POST", route: "/v1/billing/cancel", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "renderBilling returns read-only when !billingIsOwner()" },
+  { fn: "openBillingPortal", verb: "POST", route: "/v1/billing/portal", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
+  { fn: "subscribe", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "billingIsOwner", auth_fn: A_PTOWNER, context_fn: null, note: "same fence" },
 
-  { line: 14685, fn: "mintSseTicket", verb: "POST", route: "/v1/auth/sse-ticket", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
-  { line: 15135, fn: "bootOAuth", verb: "POST", route: "/v1/auth/oauth/exchange", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
+  { fn: "mintSseTicket", verb: "POST", route: "/v1/auth/sse-ticket", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope" },
+  { fn: "bootOAuth", verb: "POST", route: "/v1/auth/oauth/exchange", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session" },
 
   // ── the /new flow (a second, parallel console surface)
-  { line: 16240, fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
-  { line: 16345, fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED; second call site on the same route as :13129" },
-  { line: 16410, fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
-  { line: 17136, fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 17173, fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { line: 17207, fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
-  { line: 17284, fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6776" },
+  { fn: "newSubmitAuth", verb: "POST", route: "/v1/auth/login|/v1/auth/register", elevated: false, predicate: null, auth_fn: null, context_fn: null, note: "pre-session; two-way branch on newAuthMode" },
+  // cch-w48-s1, re-pinned here in review. This row was DELIBERATELY left
+  // unflipped when s4 was written — /new had its own renderer and it never
+  // called launchAuthority(). s1 changed exactly that: renderNewLaunch now
+  // takes launchAuthority()'s band through newLaunchOffer, which emits
+  // #new-launch-btn only on "grant". NOT fence-pinned: the launch band's read
+  // accounting is not done (cch-w48-bl-fence-pins-for-the-other-eight-bands).
+  { fn: "newLaunch", verb: "POST", route: "/v1/launch", elevated: true, predicate: "launchAuthority", auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s1: newLaunchOffer emits #new-launch-btn only on \"grant\"; refuse omits it, unknown withholds it and renders the one exit" },
+  { fn: "renderNewPricing", verb: "POST", route: "/v1/billing/checkout", elevated: true, predicate: "launchCheckoutAuthority", auth_fn: A_PTOWNER, context_fn: null, note: "cch-w36-s1: the /new plan grid draws its CTA only for an owner authority" },
+  { fn: "newVercelDeploy", verb: "POST", route: "/v1/barkparks/:*/vercel-deploy", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "newCreateRepo", verb: "POST", route: "/v1/github/repos", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "newSubmitSiteUrl", verb: "POST", route: "/v1/barkparks/:*/site-url", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
+  { fn: "newRenderFailed", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6776" },
 
   // ── team membership — every write behind assignableRoles(ctx.role)
-  { line: 18126, fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
-  { line: 18186, fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
-  { line: 18233, fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
-  { line: 18261, fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
+  { fn: "submitInvite", verb: "POST", route: "/v1/teams/:*/invitations", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "canManage = assignableRoles(ctx.role).length > 0" },
+  { fn: "openRoleModal", verb: "PATCH", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_ROLE, note: "same fence; RANK-RELATIVE below it — the same admin is refused on a peer and allowed on a member" },
+  { fn: "runRemoveMember", verb: "DELETE", route: "/v1/teams/:*/members/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: C_MEMBER_REMOVE, note: "same fence; RANK-RELATIVE below it, with an owner escape hatch the PATCH path lacks" },
+  { fn: "confirmRevokeInvite", verb: "DELETE", route: "/v1/teams/:*/invitations/:*", elevated: true, predicate: "assignableRoles", auth_fn: H_TEAM_ROLE, context_fn: null, note: "same fence" },
 
   // ── env vars — elevated, and ONLY the inline cond says so
-  { line: 18474, fn: "submitEnvVar", verb: "POST", route: "/v1/env-vars", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "router.ex:4302 refuses non-admins inside a cond; the form renders only when canWrite" },
-  { line: 18502, fn: "confirmDeleteEnvVar", verb: "DELETE", route: "/v1/env-vars/:*", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "router.ex:4360; the Delete action renders only when canWrite" },
+  { fn: "submitEnvVar", verb: "POST", route: "/v1/env-vars", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "POST /v1/env-vars refuses non-admins inside a cond; the form renders only when canWrite" },
+  { fn: "confirmDeleteEnvVar", verb: "DELETE", route: "/v1/env-vars/:*", elevated: true, predicate: "assignableRoles", auth_fn: A_USER, context_fn: C_TEAM_ADMIN, note: "DELETE /v1/env-vars/:id, same inline cond; the Delete action renders only when canWrite" },
 
   // ── device-link activation
-  { line: 18665, fn: "activateInspect", verb: "POST", route: "/v1/auth/device/inspect", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: inspect your own device code" },
-  { line: 18710, fn: "submitActivateDecision", verb: "POST", route: "/v1/auth/device/approve|/v1/auth/device/deny", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; THE LITERAL-PREFIX TRAP — see ruling (b)" },
+  { fn: "activateInspect", verb: "POST", route: "/v1/auth/device/inspect", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope: inspect your own device code" },
+  { fn: "submitActivateDecision", verb: "POST", route: "/v1/auth/device/approve|/v1/auth/device/deny", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "self-scope; THE LITERAL-PREFIX TRAP — see ruling (b)" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -358,7 +476,7 @@ const RESOLVERS = [
   // THE TRAP. A literal PREFIX with a variable last segment. A naive extractor
   // accepts it and mis-routes to "/v1/auth/device/" — a route that does not
   // exist. It is resolved here, by name, rather than silently believed.
-  { fn: "submitActivateDecision", verb: "POST", expr: '"/v1/auth/device/" + decision', route: "/v1/auth/device/approve|/v1/auth/device/deny", why: "decision is 'approve' | 'deny' (router.ex:952 / :974)" },
+  { fn: "submitActivateDecision", verb: "POST", expr: '"/v1/auth/device/" + decision', route: "/v1/auth/device/approve|/v1/auth/device/deny", why: "decision is 'approve' | 'deny' — both routes exist: grep -n 'post \"/v1/auth/device/' router.ex" },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -369,22 +487,64 @@ const RESOLVERS = [
 //
 // SIX, NOT SEVEN. cch-w36-s5's brief mandated "the SEVEN post-guard inline-cond
 // routes"; the grep it prescribed returns SIX. The seventh site BY CONTENT is
-// router.ex:4653 — `admin? = Accounts.team_admin?(user, team)` — invisible to
-// that grep because it binds a local. It is EXCLUDED BY NAME, not counted: it
+// the one reading `admin? = Accounts.team_admin?(user, team)` — invisible to
+// that grep because it binds a local; its line is DERIVED and printed as the
+// overlay's EXCLUDED row, never written down here. It is EXCLUDED BY NAME, not counted: it
 // is a self-scope NARROWING on a GET (the notification delivery log fences a
 // member to their own rows), never a refusal. Inventing a seventh row would
 // have made the overlay wrong in the other direction.
 // ═══════════════════════════════════════════════════════════════════════════
 
-const INLINE_COND_SITES = [
-  { line: 2058, route: "POST /v1/fleet/supports" },
-  { line: 2222, route: "DELETE /v1/fleet/supports/:id" },
-  { line: 4302, route: "POST /v1/env-vars" },
-  { line: 4360, route: "DELETE /v1/env-vars/:id" },
-  { line: 8082, route: "POST /v1/launch + POST /v1/go-live (go_live/1)" },
-  { line: 8290, route: "POST /v1/resurrect (resurrect/1)" },
+// THE ROUTES ARE PINNED. THE LINE NUMBERS ARE NOT, AND NEVER AGAIN WILL BE.
+// These six used to carry a typed `line:` that the census PRINTED, and all six
+// were stale (drift 82, 87, 94, 98, 230, 235; router.ex at the recorded 8082 is
+// now a bare `conn`). Pin-and-check was built and REFUSED: router.ex took 102
+// commits in 30 days and all six of these lines moved within a SINGLE calendar
+// day, so a numeral corrected at merge is wrong by the next one — and this
+// census runs FIRST of three in the same CI job (console-harness.yml), so a
+// drift red would convert an unrelated router insertion into a three-census
+// outage. DERIVE AND PRINT; never pin and compare.
+const INLINE_COND_ROUTES = [
+  "POST /v1/fleet/supports",
+  "DELETE /v1/fleet/supports/:id",
+  "POST /v1/env-vars",
+  "DELETE /v1/env-vars/:id",
+  "POST /v1/launch + POST /v1/go-live (go_live/1)",
+  "POST /v1/resurrect (resurrect/1)",
 ];
-const INLINE_COND_EXCLUDED = { line: 4653, why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
+const INLINE_COND_EXCLUDED = { why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
+
+// KEY ON THE TWO PRECISE FORMS, NEVER THE BARE STRING. `grep -n 'team_admin?'
+// router.ex` returns NINE hits, not eight — six refusal-form, one excluded
+// local binding, and TWO DECOYS that are not call sites of this predicate at
+// all. Re-derive them, do not trust a numeral: run that grep and you will find
+//
+//   · a DOC-COMMENT in the env-var route's `@doc`-style header, reading
+//     "… Write-gated to owner/admin (Accounts.team_admin?/2)." — prose, not code
+//   · `admin: Authz.team_admin?(user, team)` — a DIFFERENT MODULE's function,
+//     inside a payload map, not a refusal
+//
+// (Their line numbers are deliberately not recorded here. This file writes down
+// no line numbers at all — see the header — and two decoy numerals would be the
+// first to rot, in a comment nothing can red.) A resolver keying on the bare
+// string mis-splits by TWO: it reports eight refusals against six recorded
+// routes and reds on prose. The two regexes below are exactly the forms check
+// (2f) already counted, so deriving the lines changes nothing it tests.
+const REFUSAL_FORM = /Accounts\.team_admin\?\(conn\.assigns\.current_user, conn\.assigns\.current_team\)/;
+const LOCAL_FORM = /admin\?\s*=\s*Accounts\.team_admin\?\(user, team\)/;
+
+// One entry PER OCCURRENCE (a line carrying the form twice yields it twice), so
+// the derived array's LENGTH is exactly the occurrence count check (2f) tests —
+// deriving the lines must not quietly change what the check counts.
+function siteLines(source, re) {
+  const g = new RegExp(re.source, "g");
+  const out = [];
+  source.split("\n").forEach((text, i) => {
+    const n = (text.match(g) || []).length;
+    for (let k = 0; k < n; k++) out.push(i + 1);
+  });
+  return out;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // THE EXTRACTOR
@@ -760,15 +920,22 @@ console.log("                   (require_ability is NOT elevated for the console
 console.log("                    counting it would give 46, not " + pinnedElevated.length + ". See ruling (a) at the top of this file.)");
 console.log("");
 console.log(`THE ${pinnedUnpredicated.length} UNPREDICATED ELEVATED WRITES — an affordance a plain member can see, click, and be refused for.`);
-console.log("This census does NOT fix them. Fixing them is cch-w36-bl-unpredicated-write-affordances-fix,");
-console.log("which is still open and still the owner — its text says seventeen because it was written before");
-console.log("submitProviderCred was separated from submitInlineProviderCred by call-site keying. The population it owns is these 18.");
+console.log("This census does NOT fix them. Fixing them is cch-w38-bl-three-elevated-verbs-still-unpredicated,");
+console.log("which is still open and still the owner. The population it owns SHRINKS by re-pinning as well as by");
+console.log("fixing: cch-w48-s4 moved five rows out of this list because the console had already fenced them and");
+console.log("only the pin still said otherwise. A row leaves this list on a FENCE, never on a tidier note.");
 for (const r of pinnedUnpredicated) {
   const live = liveByKey(r);
   console.log(`  ${pad(`${LABEL}:${live ? live.line : "gone"}`, 34)}${pad(r.verb, 7)}${pad(r.route, 58)}${r.auth_fn || r.context_fn}`);
 }
 
-const withContext = PIN.filter((r) => r.context_fn && r.context_fn.startsWith("Accounts."));
+// A context_fn may name more than one function (the router's refusal ARM and
+// the function that actually decides it are not always the same), joined with
+// " + " — the same form `auth_fn` already uses. Only the module-qualified parts
+// are checkable targets; the unqualified ones (`with_team_role(conn, …)`,
+// `proxy_instance_webhook/2`) are router-local labels, as they were before.
+const contextParts = (name) => name.split(" + ").map((s) => s.trim());
+const withContext = PIN.filter((r) => r.context_fn && contextParts(r.context_fn).some((p) => MODULE_QUALIFIED.test(p)));
 console.log("");
 console.log("context_fn bindings — authority that lives BELOW the router, which no auth_fn can name:");
 for (const r of withContext) {
@@ -776,11 +943,7 @@ for (const r of withContext) {
   console.log(`  ${pad(`${LABEL}:${live ? live.line : "gone"}`, 34)}${pad(r.verb + " " + r.route, 52)}${pad(r.auth_fn || "—", 26)}→ ${r.context_fn}`);
 }
 
-console.log("");
-console.log("inline-cond overlay (charter D421): " + INLINE_COND_SITES.length + " router routes refuse non-admins inside a `cond`:");
-for (const s of INLINE_COND_SITES) console.log(`  router.ex:${pad(String(s.line), 8)}${s.route}`);
-console.log(`  EXCLUDED  router.ex:${INLINE_COND_EXCLUDED.line} — ${INLINE_COND_EXCLUDED.why}`);
-
+// The inline-cond overlay PRINTS BELOW, behind check (2f) — see the note there.
 // ═══════════════════════════════════════════════════════════════════════════
 // THE CHECKS. Ordered so the most fundamental failure is reported first: an
 // instrument that lost its footing (2) must never be read as a clean diff (1).
@@ -806,7 +969,41 @@ if (unresolved.length) {
 
 // (2b) PIN SELF-CONSISTENCY. A pin that no longer sums to its own doctrine is a
 //      pin someone edited without reading it.
-const EXPECT = { total: 79, elevated: 40, predicated: 22, unpredicated: 18 };
+// cch-w45-s5 MOVED THIS: predicated 22 → 24, unpredicated 18 → 16. The two
+// member-REACHABLE elevated writes on the instance screen (attachDomain,
+// rollbackInstance) are now decided at OFFER time by instanceAdminAuthority()
+// — a refused caller is served a disabled control with no mount hook, so the
+// call site is unreachable rather than a 403 waiting to happen. The population
+// itself did not move (79 rows, 40 elevated); only where two of them sit.
+// cch-w48-s4 MOVED IT AGAIN: predicated 24 → 29, unpredicated 16 → 11. FIVE
+// rows were still pinned UNPREDICATED against a tree where their offer had
+// already been fenced — openResurrectModal, runDecommission, submitAddSupport
+// and patchAutoupdate on the instance-admin band, submitLaunchFlow on the
+// launch band. Each is judged by the convention this pin ALREADY uses for
+// rollbackInstance and attachDomain: an offer withheld, or rendered as a
+// disabled control with no mount hook, is PREDICATED. The population did not
+// move (79 rows, 40 elevated); five rows changed column because the console
+// changed, and the pin had gone on describing the older tree. That decay is
+// what arm (2i) below exists to make expensive.
+//
+// AND THEN WAVE 48'S OWN REVIEW MOVED IT ONCE MORE: 29 → 33, 11 → 7. These four
+// are NOT re-pins of an older tree; they are THIS WAVE's three fences, which
+// were built in sibling worktrees and so could not be seen from here when the
+// row above was written. newLaunch (cch-w48-s1), disconnectGithub
+// (cch-w48-s3), and submitSiteGithub + disconnectSiteGithub (cch-w48-s2).
+// Leaving them at "UNPREDICATED" would have shipped the exact defect this epic
+// is about — a scoreboard telling a reader something the console no longer
+// supports — inside the slice that exists to stop that. The two site rows are
+// FENCE-pinned; arm (2i-4) found them itself, going red on loadSite's new
+// orphaned read, which is the first time this instrument has lost in the FIX
+// direction on a fence it did not already know about. MERGE ORDER, therefore:
+// cch-w48-s2 must be in the tree before this file, or (2i-2) reds on a
+// loadSite that does not yet call the band.
+// cch-w67 crown: 79 -> 80. ONE row moved — runSiteDelete, the console's first
+// DELETE /v1/sites/:id caller. `elevated` DELIBERATELY UNMOVED at 40: that route
+// is plain team membership (see the row's own note), so bumping it would be a
+// false statement about the router AND would red arm (2b) at rc=2.
+const EXPECT = { total: 80, elevated: 40, predicated: 33, unpredicated: 7 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||
@@ -836,19 +1033,27 @@ if (dupes.length) {
 //        if (!bare || !gated || keyOf(bare) === keyOf(gated) || !bp || !gp ||
 //            bp.predicate !== null || gp.predicate === null)
 //
-//      The last two terms are DIRECTIONAL. They demand that submitProviderCred
-//      stay UNPREDICATED forever and that submitInlineProviderCred stay
-//      predicated forever — so the fix this census exists to motivate, putting a
-//      client predicate in front of the launch wizard's provider button, reds
-//      its own instrument. Measured on main: predicating that PIN row AND moving
-//      EXPECT to {79, 40, 23, 17} in the same commit still exits 2. A guard that
-//      can only stay green while the disease stays untreated is not a guard, and
-//      it is the same failure mode as a positive control anchored to a real
-//      defect (cch-w38-bl). Both directional terms are RETIRED here.
+//      Both terms are DIRECTIONAL, but ONLY ONE OF THEM FREEZES THE DEFECT, and
+//      the first draft of this split retired both — which silently dropped a
+//      guard main was really running (measured at rescue time, see (2d-iii)).
+//
+//      `bp.predicate !== null` demands submitProviderCred stay UNPREDICATED
+//      forever, so the fix this census exists to motivate — putting a client
+//      predicate in front of the launch wizard's provider button — reds its own
+//      instrument. Measured on main: predicating that PIN row AND moving EXPECT
+//      in the same commit still exits 2. A guard that can only stay green while
+//      the disease stays untreated is not a guard; it is the same failure mode
+//      as a positive control anchored to a real defect (cch-w38-bl). That term
+//      is RETIRED.
+//
+//      `gp.predicate === null` demands submitInlineProviderCred stay predicated.
+//      That direction blocks NOTHING anyone wants to do: the fix touches the
+//      bare row, and a commit that nulls the gated row's pin is de-fencing a
+//      fence the tree still has. It is KEPT, as (2d-iii).
 //
 //      (2d-i) KEYING — permanent, and the reason the key is a call site at all.
 //      (2d-ii) VERDICT CONTRAST — NON-directional, and the honest residue of the
-//              retired terms: the pair may not go BOTH unpredicated.
+//              RETIRED term: the pair may not go BOTH unpredicated.
 //              submitInlineProviderCred IS fenced by providerCanWrite in the
 //              tree, so a pin recording no predicate on either row has forgotten
 //              a fence that exists — the pin has been flattened, not the tree
@@ -859,23 +1064,41 @@ if (dupes.length) {
 //              gated verdict), and the remove fixture — run through
 //              `--add-check`, the 2x2's cross cell — declares the same key
 //              must-clear. Measured firing AND measured staying silent.
+//      (2d-iii) GATED ROW STAYS FENCED — the surviving directional term, carried
+//              over from main verbatim in effect. Measured both ways at rescue
+//              time: with only (2d-i)+(2d-ii), predicating the bare row AND
+//              nulling the gated row's pin predicate in the same commit exits 0,
+//              where main exits 2. (2d-ii) cannot see that pair because one
+//              predicate is still standing. It is strictly the weaker rule, so
+//              (2d-iii) subsumes it; (2d-ii) is kept for its message, which
+//              names the flattening case a reader is most likely to hit.
 {
   const bare = sites.find((s) => s.fn === "submitProviderCred" && s.route === "/v1/providers");
   const gated = sites.find((s) => s.fn === "submitInlineProviderCred" && s.route === "/v1/providers");
   const bp = bare && pinByKey.get(keyOf(bare));
   const gp = gated && pinByKey.get(keyOf(gated));
   const keyingLost = !bare || !gated || keyOf(bare) === keyOf(gated) || !bp || !gp;
-  if (keyingLost || verdictContrastLost([bp, gp])) {
+  // (2d-iii) is evaluated only once keying holds — with no `gp` there is no
+  // verdict to read, and (2d-i) already owns that failure with a better message.
+  const gatedUnfenced = !keyingLost && gp.predicate === null;
+  const failed = keyingLost ? "2d-i" : gatedUnfenced ? "2d-iii" : verdictContrastLost([bp, gp]) ? "2d-ii" : null;
+  if (failed) {
     die2([
       "FAIL(2): the POST /v1/providers discrimination control is broken.",
-      keyingLost
+      failed === "2d-i"
         ? "  (2d-i) KEYING: both call sites must be present as TWO distinct keys."
+        : failed === "2d-iii"
+        ? "  (2d-iii) GATED ROW UNFENCED: submitInlineProviderCred is pinned with NO predicate."
         : "  (2d-ii) VERDICT CONTRAST: the pair is pinned BOTH unpredicated. renderConnectCard",
-      keyingLost
+      failed === "2d-i"
         ? "  Route-keyed, they collapse into one 'predicated' row and the one real defect on"
+        : failed === "2d-iii"
+        ? "  renderConnectCard mounts only when providerCanWrite(), so this row's fence is REAL."
         : "  mounts only when providerCanWrite(), so a pin with no predicate on either row has",
-      keyingLost
+      failed === "2d-i"
         ? "  this route becomes invisible. This control is the proof they have not collapsed."
+        : failed === "2d-iii"
+        ? "  Either the console de-fenced it (that is the bug) or the pin was flattened. Note that\n  predicating the BARE row is the fix this census motivates and does NOT trip this arm."
         : "  forgotten a fence that exists. Predicating the BARE row is the fix and passes here.",
       `    submitProviderCred       → ${bare ? LABEL + ":" + bare.line : "MISSING"}${bp ? " predicate=" + bp.predicate : ""}`,
       `    submitInlineProviderCred → ${gated ? LABEL + ":" + gated.line : "MISSING"}${gp ? " predicate=" + gp.predicate : ""}`,
@@ -887,14 +1110,30 @@ if (dupes.length) {
 //      has been renamed or deleted is exactly the class of lie this epic is for.
 {
   const missing = [];
-  const accounts = fs.existsSync(ACCOUNTS) ? fs.readFileSync(ACCOUNTS, "utf8") : null;
-  if (accounts === null) missing.push("  accounts.ex not readable at " + ACCOUNTS);
-  else {
-    for (const name of new Set(withContext.map((r) => r.context_fn))) {
-      const bare = name.replace(/\/\d+$/, "").replace(/^Accounts\./, "");
-      if (!new RegExp("\\bdefp?\\s+" + bare.replace(/[?!]/g, "\\$&") + "\\(").test(accounts)) {
-        missing.push("  " + name + " — no matching def/defp in " + ACCOUNTS);
-      }
+  const sourceCache = new Map();
+  const readSource = (file) => {
+    if (!sourceCache.has(file)) {
+      sourceCache.set(file, fs.existsSync(file) ? fs.readFileSync(file, "utf8") : null);
+    }
+    return sourceCache.get(file);
+  };
+  for (const target of new Set(withContext.flatMap((r) => contextParts(r.context_fn)))) {
+    const m = MODULE_QUALIFIED.exec(target);
+    if (!m) continue; // router-local label, not a module-qualified target
+    const [, mod] = m;
+    const file = CONTEXT_SOURCES[mod];
+    if (!file) {
+      missing.push("  " + target + " — module " + mod + " has no source file in CONTEXT_SOURCES");
+      continue;
+    }
+    const source = readSource(file);
+    if (source === null) {
+      missing.push("  " + target + " — " + mod + " source not readable at " + file);
+      continue;
+    }
+    const bare = m[2].replace(/\/\d+$/, "");
+    if (!new RegExp("\\bdefp?\\s+" + bare.replace(/[?!]/g, "\\$&") + "\\(").test(source)) {
+      missing.push("  " + target + " — no matching def/defp in " + file);
     }
   }
   if (missing.length) {
@@ -913,26 +1152,449 @@ if (dupes.length) {
   if (router === null) {
     die2(["FAIL(2): router.ex not readable at " + ROUTER + " — the inline-cond overlay cannot be checked."]);
   }
-  const refusalForm = /Accounts\.team_admin\?\(conn\.assigns\.current_user, conn\.assigns\.current_team\)/g;
-  const localForm = /admin\?\s*=\s*Accounts\.team_admin\?\(user, team\)/g;
-  const refusals = (router.match(refusalForm) || []).length;
-  const locals = (router.match(localForm) || []).length;
-  if (refusals !== INLINE_COND_SITES.length || locals !== 1) {
+  const refusalLines = siteLines(router, REFUSAL_FORM);
+  const localLines = siteLines(router, LOCAL_FORM);
+  const refusals = refusalLines.length;
+  const locals = localLines.length;
+  const paired = refusals === INLINE_COND_ROUTES.length;
+  if (!paired || locals !== 1) {
     die2([
       "FAIL(2): the inline-cond overlay moved.",
-      `  expected ${INLINE_COND_SITES.length} refusal-form sites and 1 excluded local-binding site`,
+      `  expected ${INLINE_COND_ROUTES.length} refusal-form sites and 1 excluded local-binding site`,
       `  found    ${refusals} refusal-form and ${locals} local-binding`,
       "",
-      refusals > INLINE_COND_SITES.length
+      refusals > INLINE_COND_ROUTES.length
         ? "  A router route grew an inline non-admin refusal. That is an ELEVATION no `Auth.*` grep\n" +
           "  can see — so no console predicate is likely to have followed it. Find it, decide whether\n" +
           "  the console call site in front of it is predicated, and record the row."
-        : "  An inline refusal disappeared. Either a route was lowered to plain member (update the\n" +
-          "  affected PIN rows' elevated/context_fn) or a refusal was LOST (that is the bug).",
+        : refusals < INLINE_COND_ROUTES.length
+          ? "  An inline refusal disappeared. Either a route was lowered to plain member (update the\n" +
+            "  affected PIN rows' elevated/context_fn) or a refusal was LOST (that is the bug)."
+          : "  The excluded local-binding site changed count. It is a self-scope narrowing, not a\n" +
+            "  refusal — if a second one appeared, decide which it is before touching this overlay.",
       "",
-      "  Recorded overlay:",
-      ...INLINE_COND_SITES.map((s) => `    router.ex:${s.line}  ${s.route}`),
-      `    EXCLUDED router.ex:${INLINE_COND_EXCLUDED.line} — ${INLINE_COND_EXCLUDED.why}`,
+      "  Recorded overlay ROUTES (the pinned half — line numbers are never recorded here):",
+      ...INLINE_COND_ROUTES.map((r) => `    ${r}`),
+      "",
+      // TRAP (iii): pairing derived lines to route names POSITIONALLY is only
+      // meaningful when there are as many lines as names. On an ADD there are
+      // more, and pairing would print 8 lines against 6 names — the gate's own
+      // failure text would become a NEW false statement, which is the exact
+      // defect class this instrument exists to close. Unlabeled instead.
+      paired
+        ? "  Derived refusal-form lines in router.ex, paired to those routes by source order:"
+        : "  Derived refusal-form lines in router.ex, UNLABELED — there are " + refusals + " of them and " +
+          INLINE_COND_ROUTES.length + " recorded routes,\n  so naming them positionally would mis-label every site after the change:",
+      ...(paired
+        ? refusalLines.map((l, i) => `    router.ex:${pad(String(l), 8)}${INLINE_COND_ROUTES[i]}`)
+        : refusalLines.map((l) => `    router.ex:${l}`)),
+      locals === 1
+        ? `    EXCLUDED router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`
+        : `    EXCLUDED local-binding form: ${locals} site(s)${locals ? " at router.ex:" + localLines.join(", router.ex:") : ""} — expected exactly 1, ${INLINE_COND_EXCLUDED.why}`,
+    ]);
+  }
+
+  // THE DERIVED PRINT SITS HERE, BEHIND THE CHECK — never in front of it.
+  // Reaching this line means the content-matched check already agreed that the
+  // overlay is the six routes it records, so pairing line to route by source
+  // order is sound. Put a drift check FIRST and a real elevation — a seventh
+  // inline-cond refusal — gets reported as "line numbers are stale", which is
+  // the misdiagnosis this ordering exists to prevent.
+  console.log("");
+  console.log("inline-cond overlay (charter D421): " + INLINE_COND_ROUTES.length + " router routes refuse non-admins inside a `cond`");
+  console.log("  (every line below DERIVED from the live router.ex just now, paired by source order):");
+  for (let i = 0; i < INLINE_COND_ROUTES.length; i++) {
+    console.log(`  router.ex:${pad(String(refusalLines[i]), 8)}${INLINE_COND_ROUTES[i]}`);
+  }
+  console.log(`  EXCLUDED  router.ex:${localLines[0]} — ${INLINE_COND_EXCLUDED.why}`);
+}
+
+// (2g) EVERY PINNED PREDICATE MUST NAME A REAL DECLARATION IN app.js.
+//
+//      WHAT THIS IS: DECAY PROTECTION. Nothing else. `predicate` is a PINNED
+//      JUDGEMENT (LIMIT 1 at the top of this file), so before this arm existed
+//      a predicate could be renamed or deleted out from under its pin and the
+//      census would keep printing the dead name as if it still guarded the
+//      call site — mutation-proven: `zzzNotARealPredicate`, zero occurrences in
+//      app.js, exited 0. This arm closes exactly that: a pin whose predicate no
+//      longer resolves to a declaration is a pin that has rotted, and typos die
+//      here too.
+//
+//      WHAT THIS IS NOT: it does NOT verify that the predicate FENCES the call
+//      site, and it cannot be read as if it did. It never looks at what the
+//      predicate asks. `function instanceAdminAuthority() { return true }` is
+//      GREEN under this check. Both stronger variants were measured and both
+//      are REFUTED, so do not "upgrade" this arm into them:
+//        · span containment ("the predicate appears inside the enclosing
+//          function") REDS 19 of the 22 true rows — the client predicate almost
+//          always fences the RENDER/WIRE path, not the SUBMIT path; only
+//          renderLaunchPlan, renderNewPricing and openRoleModal evaluate it in
+//          the same function as the write.
+//        · a call-graph hop walk has NO separating threshold: true rows reach at
+//          0..6 hops (one UNREACHABLE at 8) while deliberately-wrong pairings
+//          reach at 2..8, so threshold 4 certifies nonsense (disconnectGithub
+//          "fenced" by operatorRouteAllowed). It can never work here, because
+//          sendTestNotification's real fence is `testBtn.hidden = !canManage` —
+//          a DOM VISIBILITY relation. This console fences by hiding elements,
+//          and a call graph is blind to that by category.
+{
+  const declaresFn = (name) => {
+    const n = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp("\\bfunction\\s+" + n + "\\s*\\(").test(src) ||
+      new RegExp("\\b(?:const|let|var)\\s+" + n +
+        "\\s*=\\s*(?:async\\s+)?(?:function\\b|\\(|[A-Za-z_$][\\w$]*\\s*=>)").test(src);
+  };
+  const undeclared = PIN
+    .filter((r) => r.predicate && !declaresFn(r.predicate))
+    .map((r) => `  ${keyOf(r)} -> predicate ${r.predicate}`);
+  if (undeclared.length) {
+    die2([
+      "FAIL(2): a pinned predicate names a function that app.js does not declare.",
+      "  `predicate` is a pinned judgement, so a rename or deletion cannot reach it on its",
+      "  own — the pin just keeps printing a dead name as if the affordance were still",
+      "  fenced. Either restore the declaration or re-pin the row (and if the fence really",
+      "  is gone, the row is now UNPREDICATED and EXPECT moves with it).",
+      "",
+      ...undeclared,
+    ]);
+  }
+}
+
+// (2i) THE FENCE PINS, MADE LOSABLE IN THE FIX DIRECTION (charter D540).
+//
+//      WHAT (2g) LEFT OPEN. (2g) drops every row whose `predicate` is null
+//      BEFORE it checks anything, so it can only ever lose in the DELETE
+//      direction: rename a live predicate and it reds; ship a REAL fence for an
+//      unpinned row and the census stays byte-identical at rc 0. This wave
+//      measured exactly that — a genuine providerCanWrite() fence for
+//      #github-disconnect moved nothing — and the same asymmetry let SIX rows
+//      go on printing "NONE — a member can click it" over a console that had
+//      already fenced them. A number that cannot move when the disease is CURED
+//      is not an instrument, it is a slogan.
+//
+//      WHAT IS PINNED, AND WHY IT IS A TRIPLE. A row that claims a fence pins
+//      {band, read, decide} — the authority function, the function that reads
+//      it, and the function that turns the answer into an offer. It is three
+//      names and not one because this console SPLITS them on purpose (charter
+//      D530): the band is read at the DOM mount and threaded, as a value, into
+//      a pure helper that decides. A row is checked HERE because it pinned a
+//      fence — never because it happens to carry a predicate string.
+//
+//      TWO SHAPES ARE REFUTED. Do not "upgrade" this arm into either.
+//        · A CALL GRAPH. Charter D517 refuted it BY BUILDING IT: fail-green on
+//          the clean tree, and six of seven "fences" resolving through
+//          operatorRouteAllowed graph noise. There is no separating hop
+//          threshold, and this console fences by HIDING ELEMENTS, which a call
+//          graph is blind to by category. No hops are walked below.
+//        · A BODY SCOPE over the pinned `fn`. Refuted by measurement:
+//          openResurrectModal's own body contains ZERO occurrences of its band
+//          — the read lives thousands of lines away in loadArchives. Span
+//          containment reds 19 of the 22 true rows.
+//
+//      WHAT IT DOES INSTEAD — three pinned sub-checks and ONE DERIVED one:
+//        (2i-1) band, every read, and decide are DECLARED in app.js, and the
+//               row's `predicate` names the same band.
+//        (2i-2) each read's body still CALLS the band.
+//        (2i-3) decide's body still BRANCHES on a value the band can return —
+//               where the vocabulary is DERIVED from the band's own returns,
+//               not typed here.
+//        (2i-4) DERIVED ACCOUNTING over every live call site of every pinned
+//               band: each enclosing function must be claimed by some row's
+//               `read`. This is what reds when a row quietly reverts to no
+//               fence, with no graph and no hop walk.
+{
+  // Comments blanked, LENGTH PRESERVED, so every offset still maps to the same
+  // line in `src`. Blanking matters twice over: this file's own prose says
+  // "instanceAdminAuthority()" in half a dozen comments, and counting those as
+  // call sites would invent read sites that do not exist.
+  const codeMask = (s) => {
+    const out = s.split("");
+    let inS = null, esc = false;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (inS) {
+        if (esc) { esc = false; continue; }
+        if (c === "\\") { esc = true; continue; }
+        if (c === inS) inS = null;
+        continue;
+      }
+      if (c === '"' || c === "'" || c === "`") { inS = c; continue; }
+      if (c === "/" && s[i + 1] === "/") {
+        const nl = s.indexOf("\n", i);
+        const end = nl < 0 ? s.length : nl;
+        for (let k = i; k < end; k++) out[k] = " ";
+        i = end;
+        continue;
+      }
+      if (c === "/" && s[i + 1] === "*") {
+        const close = s.indexOf("*/", i + 2);
+        const end = close < 0 ? s.length : close + 2;
+        for (let k = i; k < end; k++) if (out[k] !== "\n") out[k] = " ";
+        i = end - 1;
+        continue;
+      }
+    }
+    return out.join("");
+  };
+  const code = codeMask(src);
+
+  const declsOf = (name) => fns.filter((f) => f.name === name);
+  const bodyOf = (f) => code.slice(f.start, f.end);
+  const esc0 = (n) => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const readsOf = (r) => (Array.isArray(r.fence.read) ? r.fence.read : [r.fence.read]);
+
+  const FENCED = PIN.filter((r) => r.fence);
+  const BANDS = [...new Set(FENCED.map((r) => r.fence.band))];
+
+  // A named hole, and every name on it must still be a live read site — a
+  // stale exemption is a hole that has stopped even being honest about what it
+  // covers, so it reds. Empty is the goal state, and for the instance-admin
+  // band it is the ACTUAL state: all four of its read sites are claimed.
+  const READ_EXEMPT = {
+    // band: [{ fn: "<enclosing fn>", why: "<a stated reason, because a hole nobody named is a lie>" }]
+  };
+
+  if (!FENCED.length) {
+    die2([
+      "FAIL(2i): no PIN row pins a fence any more.",
+      "  Arm (2i) is the only thing in this census that can red when a fence is SHIPPED or",
+      "  NEUTERED. Emptying it silently would restore the exact one-directional blindness it",
+      "  was built to remove, and every check below would pass over nothing.",
+    ]);
+  }
+
+  // ── (2i-1) band, reads and decide DECLARED; predicate agrees with band ────
+  {
+    const bad = [];
+    for (const r of FENCED) {
+      const slots = [["band", r.fence.band], ["decide", r.fence.decide]]
+        .concat(readsOf(r).map((n) => ["read", n]));
+      for (const [slot, name] of slots) {
+        if (!name) bad.push(`  ${keyOf(r)} -> ${slot} is empty`);
+        else if (!declsOf(name).length) bad.push(`  ${keyOf(r)} -> ${slot} ${name} — no \`function ${name}(\` in app.js`);
+      }
+      if (r.predicate !== r.fence.band) {
+        bad.push(`  ${keyOf(r)} -> predicate ${r.predicate === null ? "null" : r.predicate} but fence.band ${r.fence.band}`);
+      }
+    }
+    if (bad.length) {
+      die2([
+        "FAIL(2i-1): a pinned fence names something app.js does not declare, or disagrees with its own row.",
+        "  A fence is three names and they must all still be there: the band that answers, the",
+        "  function that reads it, the function that decides the offer. This arm needs the BODIES,",
+        "  so it wants a `function NAME(` declaration — converting one to a const arrow is a re-pin,",
+        "  not a silent pass. And `predicate` must name the same band the fence does, or the printed",
+        "  column and the checked fence are two different claims about one row.",
+        "",
+        ...bad,
+      ]);
+    }
+  }
+
+  // ── (2i-2) each READ still CALLS the band ────────────────────────────────
+  //     This is the direction charter D430 proved live: delete the band read
+  //     out of the render path and the shipped census did not move a byte.
+  {
+    const bad = [];
+    for (const r of FENCED) {
+      const call = new RegExp("\\b" + esc0(r.fence.band) + "\\s*\\(");
+      for (const name of readsOf(r)) {
+        const hit = declsOf(name).some((f) => call.test(bodyOf(f)));
+        if (!hit) bad.push(`  ${keyOf(r)} -> read ${name} no longer calls ${r.fence.band}()`);
+      }
+    }
+    if (bad.length) {
+      die2([
+        "FAIL(2i-2): a pinned read no longer reads its band.",
+        "  The row still claims an offer-time fence, but the function that was supposed to ASK",
+        "  the authority question does not ask it any more — so whatever the decide helper is",
+        "  branching on, it is not this band's answer. Either restore the read, or drop the",
+        "  fence and move the row back to UNPREDICATED (and move EXPECT with it).",
+        "",
+        ...bad,
+      ]);
+    }
+  }
+
+  // ── (2i-3) DECIDE still BRANCHES on the band's own vocabulary ────────────
+  //     The vocabulary is DERIVED from the band's `return` statements, never
+  //     typed here: a band that stops returning a vocabulary at all (the
+  //     `return true` neutering) leaves nothing to branch on and reds below,
+  //     and a band that gains a value does not need this file edited.
+  const vocabOf = {};
+  {
+    const bad = [];
+    for (const band of BANDS) {
+      const body = declsOf(band).map(bodyOf).join("\n");
+      const vocab = new Set();
+      const ret = /\breturn\b([^;]*)/g;
+      let m;
+      while ((m = ret.exec(body))) {
+        // A literal on the RIGHT of a comparison is an INPUT the band reads
+        // (`meCache.role === "owner"`), not a value it can answer with. Blank
+        // those first or the vocabulary quietly widens to include the role
+        // names, and (2i-3) would accept a decide branching on the wrong thing.
+        const answered = m[1].replace(/(===|!==|==|!=)\s*(?:"[^"\\]*"|'[^'\\]*')/g, "$1 0");
+        const lits = answered.match(/"([^"\\]*)"|'([^'\\]*)'/g) || [];
+        for (const l of lits) vocab.add(l.slice(1, -1));
+      }
+      vocabOf[band] = [...vocab];
+      if (!vocabOf[band].length) {
+        bad.push(`  band ${band} returns no string vocabulary at all — there is nothing left for a caller to branch on`);
+      }
+    }
+    for (const r of FENCED) {
+      const vocab = vocabOf[r.fence.band] || [];
+      if (!vocab.length) continue;
+      const body = declsOf(r.fence.decide).map(bodyOf).join("\n");
+      const branches = vocab.some((v) => new RegExp("(===|!==)\\s*[\"']" + esc0(v) + "[\"']").test(body));
+      if (!branches) {
+        bad.push(`  ${keyOf(r)} -> decide ${r.fence.decide} branches on none of ${r.fence.band}'s values [${vocab.join(", ")}]`);
+      }
+    }
+    if (bad.length) {
+      die2([
+        "FAIL(2i-3): a fence is still wired and no longer decides anything.",
+        "  The read still asks the question and the answer still arrives — and then the decide",
+        "  helper renders the same offer whatever it says. That is the NEUTERED fence: every",
+        "  other arm of this census goes green over it, and a plain member gets the button back.",
+        "  This check is a ratchet, not a proof: it asserts the comparison is still THERE, not",
+        "  that its two arms are still right.",
+        "",
+        ...bad,
+      ]);
+    }
+  }
+
+  // ── (2i-4) DERIVED ACCOUNTING over every live band call site ─────────────
+  //     No graph, no hops: find where the band is actually CALLED, take the
+  //     enclosing function, and demand some row claim it as a read.
+  const accounting = [];
+  {
+    const orphans = [];
+    const stale = [];
+    for (const band of BANDS) {
+      const claimed = new Set(FENCED.filter((r) => r.fence.band === band).flatMap(readsOf));
+      const exempt = READ_EXEMPT[band] || [];
+      const re = new RegExp("\\b" + esc0(band) + "\\s*\\(", "g");
+      const seen = new Map(); // enclosing fn -> [lines]
+      let m;
+      while ((m = re.exec(code))) {
+        // The band's own declaration is not a read of it.
+        if (/\bfunction\s+$/.test(code.slice(Math.max(0, m.index - 40), m.index))) continue;
+        const f = innermost(m.index);
+        const name = f ? f.name : "(top level)";
+        if (!seen.has(name)) seen.set(name, []);
+        seen.get(name).push(lineOf(m.index));
+      }
+      if (!seen.size) {
+        die2([
+          "FAIL(2i-4): a pinned band is never called in app.js.",
+          `  ${band} is pinned as the fence for ${claimed.size} read site(s) and the live file calls it`,
+          "  nowhere. A fence nothing reads is not a fence; the rows that claim it are unpredicated.",
+        ]);
+      }
+      for (const [name, lines] of seen) {
+        const ex = exempt.find((e) => e.fn === name);
+        if (!claimed.has(name) && !ex) {
+          for (const l of lines) orphans.push(`  ${LABEL}:${l}  ${band}() is read in ${name}, which NO row claims as a fence read`);
+        }
+      }
+      for (const e of exempt) {
+        if (!seen.has(e.fn)) stale.push(`  READ_EXEMPT[${band}] holds ${e.fn}, which no longer reads the band at all`);
+      }
+      accounting.push({
+        band: band,
+        sites: [...seen.values()].reduce((n, l) => n + l.length, 0),
+        readers: [...seen.keys()],
+        claimed: [...claimed],
+        exempt: exempt.map((e) => e.fn),
+      });
+    }
+    if (orphans.length || stale.length) {
+      die2([
+        "FAIL(2i-4): an authority band is read somewhere no PIN row accounts for.",
+        "  Every function that CALLS a pinned band is offering something on that band's answer.",
+        "  If no row claims it as a `read`, either an affordance was fenced and never pinned, or a",
+        "  row that used to pin this fence has quietly gone back to claiming nothing. Both are the",
+        "  pin decaying away from the tree, which is the whole disease.",
+        "",
+        "  THE HONEST LIMIT, stated here because a gate that overstates its reach is the same lie",
+        "  it is checking for: THIS ACCOUNTING IS OVER READ SITES, NOT OVER ROWS. Rows share reads —",
+        "  on the instance screen a single read in loadInstance feeds the header, the updates panel",
+        "  and the support card. So patchAutoupdate and submitAddSupport were found BY HAND, and",
+        "  dropping either row's fence would leave this check green, because sibling rows still",
+        "  claim the same read. This arm is anti-decay bookkeeping with derived teeth. It is NOT a",
+        "  discovery instrument, and it cannot tell you which unpinned affordance to fence next.",
+        "",
+        ...orphans,
+        ...stale,
+        "",
+        "  Fix it by PINNING (add the fence to the row that owns the affordance) or by naming the",
+        "  hole in READ_EXEMPT with a reason. An unexplained exemption is worse than a red.",
+      ]);
+    }
+  }
+
+  // THE PRINT SITS BEHIND THE CHECKS, never in front of them — the overlay's
+  // rule, for the overlay's reason: a summary printed ahead of its own gate
+  // gets read as the verdict.
+  console.log("");
+  console.log(`fence accounting (charter D540): ${FENCED.length} of ${pinnedPredicated.length} predicated rows pin a {band, read, decide} triple`);
+  for (const a of accounting) {
+    console.log(`  ${a.band}  —  ${a.sites} live read site(s) in ${a.readers.length} function(s), ${a.claimed.length} claimed by rows` +
+      (a.exempt.length ? `, ${a.exempt.length} exempt` : ", READ_EXEMPT empty") + ", 0 orphaned");
+    console.log(`    vocabulary DERIVED from its returns: ${vocabOf[a.band].map((v) => '"' + v + '"').join(" · ")}`);
+    console.log(`    read sites: ${a.readers.join(", ")}`);
+  }
+  const unfenced = pinnedPredicated.filter((r) => !r.fence);
+  const byBand = new Map();
+  for (const r of unfenced) byBand.set(r.predicate, (byBand.get(r.predicate) || 0) + 1);
+  console.log(`  NOT fence-pinned, so still LIMIT 1 and unchecked by (2i): ${unfenced.length} predicated row(s) across ` +
+    `${byBand.size} band(s) — ` + [...byBand].map(([b, n]) => `${b} ×${n}`).join(", "));
+  console.log("  The accounting is over READ SITES, not rows: rows share reads, so a row whose read a");
+  console.log("  sibling already claims is NOT discovered here. Anti-decay bookkeeping, never discovery.");
+}
+
+// (2h) THE HEADER'S OWN CLAIM, MADE LOSABLE (cch-w47-rv).
+//
+//      The header at the top of this file asserts, flatly, that NO LINE NUMBER
+//      IS WRITTEN DOWN HERE. Charter D528 made that true of the 79 PIN rows and
+//      of the six printed router lines — and left SEVEN behind in prose that
+//      nothing read and nothing could red: five `note:` strings naming
+//      router.ex lines for the inline-cond sites, the excluded local-binding
+//      site, and the two /v1/auth/device routes. Every one of them was already
+//      stale (the notes said 2058/4302/4360/8082/8290 against a router that
+//      derives 2140/4396/4458/8312/8525), which is precisely the defect class
+//      the D528 half-A deletion existed to remove — a claim of derivation with
+//      typed decoys underneath it.
+//
+//      So the claim is now a CHECK. This arm reads THIS file's own bytes and
+//      refuses any `<source file>:<digits>` literal. The derived prints are
+//      untouched by it: they are built at run time from template literals
+//      (`router.ex:${...}`, `${LABEL}:${s.line}`), so the SOURCE carries no
+//      digits for this regex to find. It fails LOUD rather than silently
+//      tolerating the next one somebody types into a comment.
+{
+  const selfSrc = fs.readFileSync(new URL(import.meta.url), "utf8");
+  const written = [];
+  selfSrc.split("\n").forEach((text, i) => {
+    const m = /\b(app\.js|router\.ex|index\.html|app\.css|[A-Za-z0-9_-]+\.mjs):\d+/.exec(text);
+    if (m) written.push(`  __binding_census.mjs:${i + 1}  ${m[0]}   ${text.trim().slice(0, 96)}`);
+  });
+  if (written.length) {
+    die2([
+      "FAIL(2h): a line number is written down in this file.",
+      "",
+      "  The header of this file claims that every line number it prints is DERIVED and that",
+      "  none is recorded here. A typed `file:NNNN` breaks that claim the moment a sibling",
+      "  shifts — and nothing else in this census can red on it, which is how the previous",
+      "  seven survived, all seven of them stale.",
+      "",
+      "  Name the CONTENT instead (a function name, a route, the grep that finds it), or let",
+      "  the derived print own the numeral. Never restate a numeral this file cannot check.",
+      "",
+      ...written,
     ]);
   }
 }
@@ -956,7 +1618,11 @@ if (arrivals.length || departures.length) {
   }
   for (const k of departures) {
     const r = pinByKey.get(k);
-    console.error(`  REMOVED   ${r.verb} ${r.route}  (was ${LABEL}:${r.line}, in ${r.fn})`);
+    // No line number here, and that is not an omission: the site is GONE from
+    // the live file, so there is nothing to derive it from. `${r.fn}` is the
+    // key's own half and stays true. Printing a remembered line would be the
+    // one number in this report that no live file backs.
+    console.error(`  REMOVED   ${r.verb} ${r.route}  (in ${r.fn}, no longer present in ${LABEL})`);
     console.error("            Its PIN row now describes a tree that no longer exists. Delete the row in");
     console.error("            the same commit that removed the call site, so the pin stays a description.");
   }

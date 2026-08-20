@@ -60,6 +60,7 @@ defmodule BarkparkCloud.Sites.Deploy do
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site, SiteArtifact}
   alias BarkparkCloud.Repo
+  alias BarkparkCloud.Sites.AutoDeployWorker
   alias BarkparkCloud.Sites.BoxRelay
   alias BarkparkCloud.Sites.NodePortAllocator
 
@@ -115,9 +116,9 @@ defmodule BarkparkCloud.Sites.Deploy do
       `merge_provision_steps` / `merge_provision_console`, where it would replace
       the only copy of the narration that exists.
 
-    * **anything else → `FailureCopy.scrub/1`.** A stage detail is a REMOTE
-      capture (an ssh stderr fold, a provider body, a build log line), so it is
-      redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
+    * **anything else → `FailureCopy.strip_ansi/1` THEN `FailureCopy.scrub/1`.**
+      A stage detail is a REMOTE capture (an ssh stderr fold, a provider body, a
+      build log line), so it is redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
       driven on a detail carrying `Authorization: Bearer <token>`, the HTTP
       console entry returned `Bearer [redacted]` while the SSE frame for the
       same bytes carried the live credential. Same bytes, two channels, one
@@ -130,7 +131,13 @@ defmodule BarkparkCloud.Sites.Deploy do
   """
   @spec stage_caption(term(), term()) :: term()
   def stage_caption("failed", detail), do: FailureCopy.humanize(detail)
-  def stage_caption(_status, detail), do: FailureCopy.scrub(detail)
+  # `scrub/1` alone is not a redaction boundary on build-log bytes: a build tool
+  # colourises its own output, so `api_key\e[0m=\e[33msk-live-…` puts ESC runs
+  # INSIDE the shape the scrubber matches on and the secret walks out in
+  # cleartext (with raw 0x1B bytes attached, which a console then interprets).
+  # Strip first, then redact — the order is the fix (dr-w8-s2).
+  def stage_caption(_status, detail),
+    do: detail |> FailureCopy.strip_ansi() |> FailureCopy.scrub()
 
   ## ---------------------------------------------------------------------------
   ## Mint
@@ -327,9 +334,45 @@ defmodule BarkparkCloud.Sites.Deploy do
   # no-op was never correct in the first place. A future change that made `force`
   # idempotent again would silently take prebuilt with it.
   defp maybe_prebuilt_nonce(config, "prebuilt"),
-    do: Map.put(config, :prebuilt_nonce, System.unique_integer([:positive, :monotonic]))
+    do: Map.put(config, :prebuilt_nonce, prebuilt_nonce())
 
   defp maybe_prebuilt_nonce(config, _source), do: config
+
+  @doc """
+  The prebuilt nonce VALUE — a wall clock, deliberately (clock-semantics class D).
+
+  This is an identity token, not an elapsed duration: the only property it owes
+  is "never repeats, never goes backwards ACROSS A RESTART". The obvious reflex —
+  `System.unique_integer([:positive, :monotonic])` — is exactly wrong for that,
+  because it is a node-global counter that RESTARTS FROM 1 on every BEAM boot (a
+  separate sequence from bare `[:positive]`, so nothing else in the node consumes
+  it: the Nth prebuilt mint since boot deterministically gets nonce N). Since
+  `cloud/**` auto-deploys on merge, a control-plane restart is routine, so the
+  overlap is guaranteed rather than improbable — and a repeated nonce means a
+  repeated build_id, which the (site_id, build_id) partial unique index refuses,
+  which `recover_conflict/3` answers `{:duplicate, existing}`, which the router
+  answers HTTP 200 with the OLD row, while `record_audit` lives only in the
+  `{:ok, _}` arm: the freshly uploaded dist is discarded with ZERO trace.
+
+  `System.system_time()` is the idiom already used by `maybe_force_nonce/2` and
+  it survives a restart. Three in-repo moduledocs state this same rule and reject
+  `unique_integer` for this same fence (`Sheets.Session`, `StudioChat.FleetHub`,
+  `Studio.SheetGrid`).
+
+  SEVERITY, stated honestly: this is SILENT DATA LOSS on an AUTHENTICATED,
+  opt-in-gated tenant path — `POST /v1/sites/:id/deploy` with
+  `{"source":"prebuilt"}`, gated on `site.prebuilt_enabled` (422 otherwise) and
+  reached through `with_team_site(conn, {:ability, "write"})`. It is NOT
+  unauthenticated and NOT an authorization defect, no caller can influence the
+  nonce, and it ranks BELOW any auth finding in this wave.
+
+  Public only as a test seam: the nonce is otherwise invisible through
+  `build_id/5` (which returns a hash) and no restart can be staged in `mix test`,
+  so a difference assertion cannot fail on the unfixed code. The deciding proof
+  is on the VALUE DOMAIN — see `sites_deploy_test.exs`.
+  """
+  @spec prebuilt_nonce() :: integer()
+  def prebuilt_nonce, do: System.system_time()
 
   ## ---------------------------------------------------------------------------
   ## Prebuilt artifacts (charter D91)
@@ -549,19 +592,11 @@ defmodule BarkparkCloud.Sites.Deploy do
   ## ---------------------------------------------------------------------------
 
   @doc """
-  Kick the driver for a minted deployment. Asynchronous by contract — the caller
-  (the deploy route) has already answered 201, and the build takes tens of
-  seconds. The spawn itself is a config seam (`:site_deploy_starter`) so tests can
-  drive `run/1` synchronously and deterministically instead of racing a Task.
-  """
-  @spec start(Deployment.t()) :: :ok
-  def start(%Deployment{} = deployment) do
-    _ = start_reported(deployment)
-    :ok
-  end
+  Kick the driver for a minted deployment, AND SAY WHAT HAPPENED (deploy-truth
+  W1, charter D9).
 
-  @doc """
-  `start/1`, but the outcome TRAVELS (deploy-truth W1, charter D9).
+  The spawn is a config seam (`:site_deploy_starter`) so tests can drive `run/1`
+  synchronously and deterministically instead of racing a Task.
 
   The old seam was spec'd `:: :ok` and the production starter returned a LITERAL
   `:ok` after `Task.Supervisor.start_child` — it discarded the spawn result AND
@@ -580,9 +615,15 @@ defmodule BarkparkCloud.Sites.Deploy do
       child, or the row could not be claimed). Nothing recorded the build, so the
       caller MUST NOT treat this as success.
 
-  `start/1` is kept as the fire-and-forget wrapper because several call sites
-  match `:ok = Deploy.start(row)`; new callers that can act on the outcome should
-  use this.
+  THIS IS THE ONLY SEAM. There used to be a fire-and-forget `start/1` beside it —
+  spec'd `:: :ok`, it called this function, DISCARDED the `{:error, reason}` and
+  returned a literal, so every `:ok = Deploy.start(row)` in the tree was a match
+  that COULD NOT FAIL: the MatchError meant to signal a refused driver spawn was
+  structurally unreachable. Four callers were blind through it — the manual deploy
+  route, the prebuilt artifact-upload route, the hourly freshness sweep, and,
+  worst, `resume_orphaned/0`, the reaper's own recovery pass, whose `resumed:`
+  metric counted rows FOUND rather than rows restarted. It is deleted; a caller
+  that cannot act on the outcome must at least SAY it did not happen.
   """
   @spec start_reported(Deployment.t()) ::
           {:ok, :started | :live | :failed | :deferred} | {:error, term()}
@@ -1139,6 +1180,26 @@ defmodule BarkparkCloud.Sites.Deploy do
         {:ok, :live}
 
       {:error, reason} ->
+        # THE WORST LOSS ON THIS PATH (deploy-reliability W27). SWITCH has already
+        # happened ON THE BOX — the release IS serving — and this is the write
+        # that tells the control plane so. A refused fence leaves the row
+        # non-live with the site pointer unflipped, and because the row is still
+        # `building` with a lease nobody renews, the StaleDeploymentReaper's
+        # over-budget pass then settles that SERVING build `failed`, blaming
+        # "exceeded max deploy claim attempts (stale builder lease)". Reachable
+        # in prod: `deployment_stale_after_seconds` defaults to 15 minutes and
+        # `record_stage/2` only heartbeats on a stage TRANSITION, so a long BUILD
+        # lets the reaper move the row under a driver that is still running.
+        #
+        # The return shape is unchanged — this arm already answered
+        # `{:error, reason}` and its caller discards it. The repair is speech.
+        Logger.error(
+          "site deploy settle-live for deployment #{ctx.id} (site #{ctx.site.slug}) " <>
+            "could not be recorded (fenced write #{inspect(reason)}): the box is serving this build, " <>
+            "but the row never went live and the site's live pointer was not flipped — " <>
+            "the stale-deployment reaper will terminally report this serving build as failed, blaming the builder lease"
+        )
+
         {:error, reason}
     end
   end
@@ -1164,6 +1225,57 @@ defmodule BarkparkCloud.Sites.Deploy do
   # The head-of-stream scan must reach past the LONGEST bound, or the longest
   # chain could never be counted to its own limit.
   @deferral_scan_depth @max_consecutive_capacity_deferrals + 2
+
+  # THE HARD CEILING ON THE DEFER BACKOFF (deploy-reliability W20, charter D352).
+  # `AutoDeployWorker`'s `@unique [period: 300]` is compared against the job's
+  # `inserted_at`, NOT its `scheduled_at` (Oban 2.23.0 `Basic.since_period/3`), so
+  # a job scheduled further out than the period ages OUT of its own unique window
+  # while still pending: the next enqueue sees no conflict and mints a SECOND
+  # job — the fan-out this backoff exists to cut, reintroduced by the backoff.
+  # 240 < 300 with headroom, and the alternative repair (`timestamp: :scheduled_at`
+  # on the unique) is deliberately NOT taken: the cap is one number a test can
+  # pin, the timestamp swap changes the coalescing semantics of every caller.
+  @deferral_backoff_cap_seconds 240
+
+  @doc """
+  THE DEPTH-DERIVED DEFER WINDOW (deploy-reliability W20), in seconds.
+
+  A refused deploy re-fires as a fresh debounced `AutoDeployWorker` job. Until
+  now that job scheduled at the flat publish debounce (60s live —
+  `AUTODEPLOY_DEBOUNCE_S` is unset on the control plane), which knows nothing
+  about the build it is queueing behind: measured over 2,262 consecutive
+  deferrals, p50 61.6s apart with 1,441 of them inside the 55-75s band and only 4
+  below 55s. The clock, not the box, paced the chain — and 807 chains carried
+  2,268 rows (mean 2.81, p90 5, max 11).
+
+  The window is a MULTIPLE OF THE OPERATOR'S OWN DEBOUNCE, never an independent
+  constant: `depth` 1 waits exactly as long as today, and each further round of
+  the SAME chain waits one more window, capped at
+  `#{@deferral_backoff_cap_seconds}s`. An operator who has already stretched the
+  debounce past the cap keeps their own longer window (the cap must never make a
+  deferral MORE eager than a plain publish).
+
+  It does NOT make publishes go live faster — with one build slot per box the
+  wait is set by the slot, not by this clock. What it removes is repetition:
+  fewer permanent terminal `deferred` rows and fewer box POSTs per publish.
+  """
+  @spec deferral_backoff_seconds(pos_integer() | Site.t()) :: pos_integer()
+  def deferral_backoff_seconds(depth) when is_integer(depth) and depth >= 1 do
+    base = AutoDeployWorker.debounce_seconds()
+    min(base * depth, max(base, @deferral_backoff_cap_seconds))
+  end
+
+  # The window for a site whose CHAIN DEPTH IS NOT IN HAND — `AutoDeployWorker`'s
+  # `defer_behind_running_build/2`, which holds only the site and the in-flight
+  # deployment, mints no row of its own, and therefore has no `cause` to count a
+  # chain of. It reads the depth off the head of the site's own deployment stream
+  # (the same head-of-stream scan `defer/3` counts with, keyed on whatever cause
+  # that head row carries) and adds the round now being deferred.
+  #
+  # A site with no deferral at the head reads depth 1 — today's window, unchanged.
+  def deferral_backoff_seconds(%Site{} = site) do
+    deferral_backoff_seconds(current_deferral_depth(site) + 1)
+  end
 
   # A BOX-BUSY DEFERRAL (charter D9). Not a failure, not a drop — a settled row
   # that says "this build did not happen, and here is the rebuild that will".
@@ -1194,16 +1306,64 @@ defmodule BarkparkCloud.Sites.Deploy do
         fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
 
       prior >= max_consecutive_deferrals(cause) - 1 ->
-        fail(
-          ctx,
-          reason <>
-            " — and it has now refused #{prior + 1} rebuilds in a row for this site, #{terminal_verdict(cause)}"
-        )
+        # THE ABANDONMENT STAMPS ITS OWN COLUMNS (deploy-reliability W28, S6).
+        # The terminal round of a chain is the one row an operator most needs to
+        # find — it is the publish the fleet GAVE UP ON — and it was the only
+        # deferral-chain row that carried NULL `deferral_depth` /
+        # `deferral_bound` / `deferral_cause`, because `fail/2` wrote status,
+        # failure_reason and detail and nothing else. Every abandonment on the
+        # live control plane was therefore findable ONLY by
+        # `failure_reason LIKE '%rebuilds in a row for this site%'` — a prose
+        # scan over the very sentence a reword would silently break — while the
+        # eleven DEFERRED rows beneath it were queryable as data.
+        #
+        # Nothing is computed here: `prior + 1`, the cause's bound and the cause
+        # are the three values this call site is ALREADY holding to write the
+        # sentence, so the columns and the prose come from one expression each
+        # and cannot drift apart.
+        #
+        # THE DEPTH IS `prior + 1`, NOT `prior`, and not the deferred rows' max.
+        # This branch fires at `prior >= bound - 1`, so the bound-th round is
+        # written `failed` and never `deferred`: the highest depth a DEFERRED
+        # row can carry is 11 (capacity) / 5 (busy), and the abandonment that
+        # follows it is 12 / 6 — the same number the sentence interpolates.
+        fail(ctx, abandonment_reason(reason, prior + 1, cause), %{
+          deferral_depth: prior + 1,
+          deferral_bound: max_consecutive_deferrals(cause),
+          deferral_cause: cause
+        })
 
       true ->
+        # THE DEPTH TRAVELS (deploy-reliability charter D99, PR #9905). `prior`
+        # was computed here, spent on the threshold above and interpolated into
+        # the terminal string and the Logger line — and then DISCARDED, so the
+        # operator-visible reason on refusal 1 and refusal 11 was byte-identical
+        # and a chain eight rounds deep read exactly like a first blip. It rides
+        # the EXISTING failure_reason/detail columns; no column was added.
+        #
+        # THE HONEST BOUND, and why the sentence says "zero-progress guard"
+        # instead of counting down: `consecutive_deferrals/2` counts deferrals OF
+        # THIS SAME CAUSE at the HEAD of the site's stream, scanned only
+        # @deferral_scan_depth rows deep. It is NOT a lifetime total — one
+        # successful deploy, or one deferral of a DIFFERENT cause, resets it to
+        # zero — so a site that deferred 75 times in 12h can legitimately read 3
+        # here, and did. A bare "3 of 12" would read as a countdown to a drop
+        # that a merely-slow box may never reach.
+        #
+        # The bound comes from `max_consecutive_deferrals/1`, never a literal:
+        # a capacity chain gets 12 and a busy/stuck chain gets 6, and a sentence
+        # that hardcoded either would misstate the other cause's whole budget.
+        bound = max_consecutive_deferrals(cause)
+
+        # The depth sits EARLY, before the re-queue promise: `detail` is the
+        # varchar(255) caption `short_detail/1` clamps, and a reason that carries
+        # the box's own words can already be ~200 chars — so anything appended
+        # last is the part the caption loses.
         detail =
           reason <>
-            " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
+            " — deferred: refusal #{prior + 1} of #{bound} in this site's current chain" <>
+            " — a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes" <>
+            " (the count is a zero-progress guard, not a countdown: only back-to-back refusals of this same cause count, and any successful deploy resets it to 0)"
 
         # THE PROMISE IS MADE FIRST, and the row only says `deferred` once it
         # holds. `deferred` is a TERMINAL status (`Deployment.@transitions` maps
@@ -1213,18 +1373,65 @@ defmodule BarkparkCloud.Sites.Deploy do
         # safe: the debounced job is unique per site and schedules ~60s out, so a
         # rebuild that outlives a failed transition is the same coalesced job the
         # next publish would have fired anyway.
-        case requeue_rebuild(site.id) do
+        # THE RE-FIRE STOPS BEING BLIND (W20): the depth already in hand above
+        # picks the window, so round 4 of a chain no longer knocks on the same
+        # busy box on the same 60s clock that round 1 did.
+        case requeue_rebuild(site.id, deferral_backoff_seconds(prior + 1)) do
           {:ok, _job} ->
-            _ =
+            deferral_write =
               Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
                 status: "deferred",
                 failure_reason: detail,
-                detail: short_detail(detail)
+                detail: short_detail(detail),
+                # THE CHAIN STOPS BEING PROSE (deploy-reliability W12, S6). The
+                # SAME three facts the sentence above states in English, written
+                # as data in the SAME write — one transition, one truth, so the
+                # columns can never disagree with the sentence beside them.
+                #
+                # The sentence is NOT replaced. Vercel keeps `readyStateReason`
+                # beside its `readyState` enum for the same reason: the prose is
+                # the operator's (it explains that the counter is a zero-progress
+                # guard, which no integer can), the columns are the aggregate's.
+                # Before this, "how deep do capacity chains get" was a regex over
+                # a sentence — `internal/cli/cloud_site_cmd.go`'s
+                # `siteDeferralChainRe` reads the depth back out of English, and
+                # one reworded clause would silently zero every such count.
+                #
+                # NOTHING READS THESE YET, on purpose: `DeployLedger` still
+                # classifies off the reason string this wave. Write first, read
+                # next wave — a reader flipped in the same change as its producer
+                # cannot be proven to have been broken before.
+                deferral_depth: prior + 1,
+                deferral_bound: bound,
+                deferral_cause: cause
               })
 
-            Logger.info(
-              "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
-            )
+            # A COUNTING DEFECT, not merely a narration one (deploy-reliability
+            # W27). The rebuild above really was enqueued, so the publish is not
+            # lost — but if this write loses its fence, the row never becomes
+            # `deferred` and `deferral_depth` / `deferral_bound` / `deferral_cause`
+            # are never written, so the deferral is invisible to every deferral
+            # census, to `consecutive_deferrals/2`'s chain scan, and to the
+            # post-door rate this epic publishes. A defect that removes rows from
+            # a numerator cannot be seen by reading the numerator.
+            #
+            # The narration rides the SAME branch: the pre-existing info line
+            # states "deferred … N in a row", which is a count read off the very
+            # write that just lost — true only when the CAS held.
+            case deferral_write do
+              {:ok, _updated} ->
+                Logger.info(
+                  "site deploy deferred for site #{site.id} (#{prior + 1} in a row, #{cause}): rebuild re-queued"
+                )
+
+              {:error, cas_error} ->
+                Logger.error(
+                  "site deploy deferral for deployment #{ctx.id} (site #{site.id}) " <>
+                    "could not be recorded (fenced write #{inspect(cas_error)}): the rebuild WAS re-queued, " <>
+                    "but the row never became deferred and deferral_depth / deferral_bound / deferral_cause " <>
+                    "were never written — this deferral is invisible to every deferral census and to the post-door rate"
+                )
+            end
 
             BarkparkCloud.Events.broadcast(site.team_id, "deployments")
             {:ok, :deferred}
@@ -1262,6 +1469,24 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
+  @doc """
+  The terminal ABANDONMENT sentence: the box's own refusal plus the driver's
+  admission that it has stopped retrying this publish.
+
+  PUBLIC ON PURPOSE, and it is the only place this sentence is written.
+  `DeployLedger.classify/2` has to recognise an abandoned row out of the RAW
+  `failure_reason` column, and its only handle on one is this prose — so a reword
+  here would silently degrade every abandoned row back to `BOX_BUSY_409`, whose
+  label ("the box was already deploying") is affirmatively false for a capacity
+  abandonment, with nothing failing anywhere. `deploy_ledger_test.exs` builds its
+  fixtures through THIS function, so the classifier reds at edit time instead.
+  """
+  @spec abandonment_reason(String.t(), pos_integer(), String.t() | nil) :: String.t()
+  def abandonment_reason(reason, rounds, cause) do
+    reason <>
+      " — and it has now refused #{rounds} rebuilds in a row for this site, #{terminal_verdict(cause)}"
+  end
+
   # The deferral's NAMED cause, from the same classifier the ledger reports with —
   # one owner for the taxonomy, so a chain and a census can never disagree about
   # what a row is.
@@ -1288,6 +1513,23 @@ defmodule BarkparkCloud.Sites.Deploy do
     do:
       "so the instance is refusing this site persistently for a cause the ledger cannot name; check its deploy runner"
 
+  # The head-of-stream chain depth WITHOUT a cause in hand: take the cause from
+  # the head deferral row itself, then count with the same scan `defer/3` uses.
+  # Anything else at the head (a live build, a failure, nothing at all) is depth
+  # 0 — there is no chain to back off from.
+  defp current_deferral_depth(%Site{} = site) do
+    site
+    |> Registry.list_deployments(@deferral_scan_depth, environment: "production")
+    |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
+    |> case do
+      [%{status: "deferred"} = head | _] ->
+        consecutive_deferrals(site, deferral_cause(head.stage, head.failure_reason))
+
+      _ ->
+        0
+    end
+  end
+
   # Deferrals of THE SAME CAUSE at the HEAD of this site's stream, i.e. how many
   # rounds the current chain has already run. Any other status — and any deferral
   # for a DIFFERENT cause — ends the count: a busy box and a full build queue are
@@ -1308,20 +1550,63 @@ defmodule BarkparkCloud.Sites.Deploy do
   # insert ALWAYS succeeds, so the re-queue-failure arm above — the one that
   # decides whether a lost publish is counted — was unreachable in a test and had
   # never been exercised at all. A check that cannot fail proves nothing.
-  defp requeue_rebuild(site_id) do
+  # The window travels with the re-queue (W20): `defer/3` already holds `prior`,
+  # so the depth is free here — it only had to be PLUMBED, since this arm is two
+  # hops from Oban. The process-local override keeps its arity-1 contract: it
+  # exists to make the re-queue FAILURE arm reachable under `testing: :manual`
+  # (where an insert always succeeds), and it does not care about the window.
+  defp requeue_rebuild(site_id, schedule_in) do
     case Process.get(:site_deploy_requeue) do
       fun when is_function(fun, 1) -> fun.(site_id)
-      _ -> BarkparkCloud.Sites.AutoDeployWorker.enqueue(site_id)
+      _ -> AutoDeployWorker.enqueue(site_id, schedule_in)
     end
   end
 
-  defp fail(ctx, reason) do
-    _ =
-      Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-        status: "failed",
-        failure_reason: reason,
-        detail: short_detail(reason)
-      })
+  # `extra` is the OPTIONAL structured half of a failure — columns the caller is
+  # already holding, written in the SAME transition as the sentence so the two
+  # can never disagree (W28, S6: the abandonment branch stamps its chain's depth,
+  # bound and cause). It defaults to empty because the other nine `fail/…` call
+  # sites have no chain to report, and a failure with no structure must keep
+  # writing NULL rather than a zero that would read as "a chain of depth 0".
+  defp fail(ctx, reason, extra \\ %{}) do
+    # THE FAILURE'S ONLY CARRIER (deploy-reliability W27). This CAS is the whole
+    # report: `Deploy.TaskStarter.start/1` returns the SPAWN result and throws
+    # this function's return value away, so in production nothing downstream ever
+    # sees `{:ok, :failed}`. When the fence refuses (our lease was swept and
+    # re-claimed), the row is NOT `failed`, `failure_reason` stays nil — and no
+    # alert fires either, because `maybe_dispatch_deployment_failed/2` lives
+    # INSIDE the won-CAS branch of `transition_deployment_fenced/4`. A failed
+    # build then has no carrier at all.
+    #
+    # The RETURN SHAPE IS DELIBERATELY UNCHANGED: `{:error, _}` from here would
+    # route through `AutoDeployWorker.start_and_report/2`'s "could not start the
+    # driver — retrying" arm — a NEW mis-report on a build that DID start, plus
+    # an Oban retry of it. So the repair is speech: the line NAMES the deployment
+    # and states both halves of what did not happen.
+    # THE SENTENCE WINS THE MERGE. `extra` is written UNDER the three fields
+    # this function exists to write, never over them: `fail/…` is the failure's
+    # only carrier, so a caller that passed a stray `:status` or
+    # `:failure_reason` key — by typo, or by reusing a map built for something
+    # else — must not be able to turn an abandonment into a different row than
+    # the one it just announced. Structure is additive here, by construction.
+    attrs =
+      Map.merge(
+        extra,
+        %{status: "failed", failure_reason: reason, detail: short_detail(reason)}
+      )
+
+    case Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, attrs) do
+      {:ok, _updated} ->
+        :ok
+
+      {:error, cas_error} ->
+        Logger.error(
+          "site deploy failure for deployment #{ctx.id} (site #{ctx.site.slug}) " <>
+            "could not be recorded (fenced write #{inspect(cas_error)}): the row was NOT marked failed, " <>
+            "failure_reason was not written, and no failure alert was dispatched " <>
+            "(the alert only fires on a won CAS) — the reason that was lost is: #{reason}"
+        )
+    end
 
     # `failed` is terminal too — the row is never re-driven (the reaper only
     # requeues rows that are still `queued`), so its bytes are equally dead
@@ -1387,10 +1672,19 @@ defmodule BarkparkCloud.Sites.Deploy do
   # grace budget is for. An untyped body with no code at all counts too: the
   # bodies `relay_with/5` synthesises for an undecodable 5xx are equally
   # authorless.
+  # `deploy_runner_unavailable` (dr-w8-s2) is the SECOND authorless shape. The
+  # box's door emits it when its Runner did not answer the trigger inside the
+  # call budget — a busy or wedged process, not a verdict about this build, and
+  # repeating the question is exactly what can change the answer. It used to
+  # arrive here wearing `feature_not_configured`, which is a TYPED refusal and
+  # therefore terminal on the first beat: 207 rows in 24h spent a build on a box
+  # that was merely slow. Naming it without grading it here would have kept the
+  # loss and only renamed it, so the two land in the SAME change (charter D114).
   defp transient_refusal?(body) when is_map(body) do
     case refusal_code(body) do
       nil -> true
       "internal_error" -> true
+      "deploy_runner_unavailable" -> true
       _ -> false
     end
   end
@@ -1450,6 +1744,21 @@ defmodule BarkparkCloud.Sites.Deploy do
   defp unreachable(%Barkpark{slug: slug}, :decrypt_failed),
     do: "instance #{slug}'s admin token could not be decrypted"
 
+  # THE REFUSAL THAT IS NOT A REACHABILITY PROBLEM (cloud-console-hardening
+  # D741/D757). `BoxRelay` refuses a WRITE to a box whose stored admin credential
+  # the box itself answered 401 — nothing went on the wire, so calling it
+  # "unreachable" would describe a network fault that did not happen. The sentence
+  # ECHOES the one #11337 ships on the instance seam rather than minting a third
+  # wording for one fact: the clause "the instance rejected our access credential"
+  # is `usageUnavailableText("unauthorized")` byte for byte, and the second
+  # sentence is that seam's verbatim. Only the opener is verb-neutral, because
+  # this clause serves BOTH the rollback and the teardown mint.
+  defp unreachable(%Barkpark{}, :identity_refused),
+    do:
+      "The request was never sent — the instance rejected our access credential. " <>
+        "Barkpark Cloud stops asking a box that refused it; the hourly update " <>
+        "check is what notices the credential working again."
+
   defp unreachable(%Barkpark{slug: slug}, _reason),
     do:
       "instance #{slug} is unreachable — the deploy could not be delivered; check instance health"
@@ -1481,7 +1790,9 @@ defmodule BarkparkCloud.Sites.Deploy do
   NOT answer 200.
   """
   @spec rollback(Site.t(), Barkpark.t()) ::
-          {:ok, map()} | {:error, non_neg_integer(), String.t()}
+          {:ok, map()}
+          | {:error, non_neg_integer(), String.t()}
+          | {:error, non_neg_integer(), String.t(), String.t()}
   def rollback(%Site{} = site, %Barkpark{} = bp) do
     was = site.current_deployment_id
 
@@ -1510,6 +1821,13 @@ defmodule BarkparkCloud.Sites.Deploy do
       {:ok, _status, body} ->
         {:error, 422, rollback_refusal(body, "the instance could not roll this site back")}
 
+      # THE REFUSED BOX (D741/D763). Nothing went on the wire, so this is a
+      # CONFLICT with the box's own verdict about our credential, not a 502 about
+      # the network — and it carries a TYPED code, because the console cannot
+      # classify a status the route labels `rollback_failed` on every error.
+      {:error, :identity_refused} ->
+        {:error, 409, unreachable(bp, :identity_refused), "identity_refused"}
+
       {:error, reason} ->
         {:error, 502, unreachable(bp, reason)}
     end
@@ -1524,7 +1842,10 @@ defmodule BarkparkCloud.Sites.Deploy do
   — the CALLER must only deregister the site row on `:ok`, or a still-serving box
   gets orphaned.
   """
-  @spec teardown(Site.t(), Barkpark.t()) :: :ok | {:error, pos_integer(), String.t()}
+  @spec teardown(Site.t(), Barkpark.t()) ::
+          :ok
+          | {:error, pos_integer(), String.t()}
+          | {:error, pos_integer(), String.t(), String.t()}
   def teardown(%Site{} = site, %Barkpark{} = bp) do
     case BoxRelay.teardown(bp, %{
            mode: "teardown",
@@ -1536,15 +1857,41 @@ defmodule BarkparkCloud.Sites.Deploy do
 
       {:ok, status, body} when status in 400..599 ->
         {:error, 422,
-         rollback_refusal(body, "the instance could not tear this site down (HTTP #{status})")}
+         teardown_refusal(body, "the instance could not tear this site down (HTTP #{status})")}
 
       {:ok, _status, body} ->
-        {:error, 422, rollback_refusal(body, "the instance could not tear this site down")}
+        {:error, 422, teardown_refusal(body, "the instance could not tear this site down")}
+
+      # Same fence, same typed conflict (D741/D763): the teardown was refused by
+      # the control plane before the wire, not lost on it.
+      {:error, :identity_refused} ->
+        {:error, 409, teardown_unreachable(bp, :identity_refused), "identity_refused"}
 
       {:error, reason} ->
-        {:error, 502, unreachable(bp, reason)}
+        {:error, 502, teardown_unreachable(bp, reason)}
     end
   end
+
+  # W68 (D814, Option A) — the DELETE receipt's OWN reachability copy. Two of
+  # `unreachable/2`'s sentences narrate a DEPLOY ("cannot drive a deploy on it",
+  # "the deploy could not be delivered"), and until this variant existed they
+  # reached a user who pressed DELETE byte-unchanged. The shared mint stays
+  # byte-frozen — `start_on_box/6`, `poll/4` and `rollback/2` still feed it, and
+  # `DeployLedger.classify/2` keys on its "is unreachable" substring (preserved
+  # here too) — so this variant is teardown-LOCAL: only `teardown/2`'s two
+  # `{:error, _}` arms call it. The verb-free sentences delegate rather than
+  # fork; `:identity_refused` in particular must stay byte-identical to the
+  # instance-seam copy `unreachable/2` deliberately echoes (D741).
+  defp teardown_unreachable(%Barkpark{slug: slug}, :no_admin_token),
+    do:
+      "instance #{slug} has no stored admin token — the control plane cannot drive a teardown on it"
+
+  defp teardown_unreachable(%Barkpark{slug: slug}, reason)
+       when reason not in [:not_live, :decrypt_failed, :identity_refused],
+       do:
+         "instance #{slug} is unreachable — the teardown could not be delivered; check instance health"
+
+  defp teardown_unreachable(%Barkpark{} = bp, reason), do: unreachable(bp, reason)
 
   # The box has flipped. Point the site at the deployment that owns the now-live
   # build so `bp cloud site status` tells the truth immediately (no polling
@@ -1561,6 +1908,26 @@ defmodule BarkparkCloud.Sites.Deploy do
         Registry.set_site_current_deployment(site, now_live.id)
       end
 
+    # THE WRITE THAT WAS NEVER ATTEMPTED (deploy-reliability W27). When the box
+    # names a build the control plane has no Deployment row for, `now_live` is
+    # nil, the pointer write above is SKIPPED — and this function still answers
+    # `{:ok, …}`, which the route turns into a 200. The CLI gates success on the
+    # HTTP status alone, so the user is told the rollback landed while
+    # `sites.current_deployment_id` still names the build they rolled AWAY from,
+    # upstream of the very transition fields the crown reads.
+    #
+    # This is the arm where the discarded result is the LEAST of it:
+    # `sites.current_deployment_id` carries no FK, so that `Repo.update` is
+    # near-unfailable. What is lost is the write that never ran.
+    if is_nil(now_live) do
+      Logger.error(
+        "site rollback for site #{site.slug} (#{site.id}) could not repoint the live deployment: " <>
+          "the box reports build #{inspect(target)} as now live, but the control plane has no Deployment row for it, " <>
+          "so the site-pointer write was SKIPPED while the rollback still answered success — " <>
+          "sites.current_deployment_id still names #{inspect(was)}"
+      )
+    end
+
     BarkparkCloud.Events.broadcast(site.team_id, "deployments")
 
     {:ok,
@@ -1571,8 +1938,18 @@ defmodule BarkparkCloud.Sites.Deploy do
      }}
   end
 
+  # W70 (D847/D854) — MIGRATED onto `refusal_detail/1`, the extractor the deploy
+  # path already trusts. The box's REAL pre-poll refusal transport is NESTED —
+  # `SiteDeployController` answers every refusal `%{error: %{code, message}}`
+  # and `BoxRelay.HTTP` relays a non-2xx verbatim before it ever polls — so the
+  # old flat `body["error"] || body["detail"] || body["reason"]` chain bound a
+  # MAP, failed the `is_binary` guard below, and the box's own sentence died
+  # into the generic fallback. `refusal_detail/1` tries the nested arm first and
+  # composes "code — message"; its flat arm is a strict superset of the old
+  # chain (it also reads `failure_reason`), so every settle_* sentence and
+  # await-timeout body still passes through unchanged.
   defp rollback_refusal(body, fallback) when is_map(body) do
-    case body["error"] || body["detail"] || body["reason"] do
+    case refusal_detail(body) do
       d when is_binary(d) and d != "" -> rollback_copy(d, fallback)
       _ -> fallback
     end
@@ -1580,7 +1957,43 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   defp rollback_refusal(_body, fallback), do: fallback
 
+  # W68 — a teardown refusal must never render ROLLBACK prose. The teardown 422
+  # arms used to launder the box's body through `rollback_refusal/2`, whose typed
+  # sentences narrate a rollback: a box answering `not_supported` to a teardown
+  # told the user who pressed DELETE "this site has no live release yet — there
+  # is nothing to roll back". Same extraction, teardown-safe rendering: the one
+  # verb-neutral typed sentence (`lock_held`) keeps its plain words, and every
+  # other detail — a box token like `not_supported`, or the transport's own
+  # await-teardown timeout sentence — travels VERBATIM rather than being dressed
+  # in another verb's prose.
+  # W70 (D847/D854) — same migration as `rollback_refusal/2` above: the nested
+  # envelope is the box's real pre-poll refusal transport, and `refusal_detail/1`
+  # is the one extractor that reads it. The one verb-neutral typed sentence
+  # (`lock_held`, an EXACT flat token) keeps its plain words; every other detail
+  # — a nested "code — message" composite, a box token, or the transport's own
+  # await-teardown timeout sentence — travels VERBATIM rather than being dressed
+  # in another verb's prose (the W68 rollback-copy leak stays fixed).
+  defp teardown_refusal(body, fallback) when is_map(body) do
+    case refusal_detail(body) do
+      "lock_held" -> "a deploy is running on the box — try again once it finishes"
+      d when is_binary(d) and d != "" -> d
+      _ -> fallback
+    end
+  end
+
+  defp teardown_refusal(_body, fallback), do: fallback
+
   # site-deploy.sh's typed rollback exits, in plain words.
+  #
+  # TYPED-TOKEN FATE (W70, decided): these clauses match EXACT bare tokens, which
+  # today's transports mint only as FLAT `%{"error" => token}` bodies — a shape
+  # that is fixture-only on the current wire (settle_* mints failure_reason
+  # sentences; pre-poll refusals are nested). They are KEPT as the friendly
+  # rendering for that flat shape, and they deliberately do NOT fire on a nested
+  # composite ("already_running — deploy already running for blog"): the box's
+  # own message travels verbatim instead of being replaced by canned prose. If a
+  # friendly sentence for a nested 409 is ever wanted, match `refusal_code/1` in
+  # the caller's 409 arm — never widen these token clauses.
   defp rollback_copy("no_previous", _fallback),
     do: "there is no previous build to roll back to — this site has only ever had one release"
 
@@ -1605,14 +2018,34 @@ defmodule BarkparkCloud.Sites.Deploy do
   the eternal spinner in a new costume.
 
   A row is an orphan (not a fresh mint) when it has been claimed before
-  (`claim_epoch > 0`). Fresh rows are driven by the deploy route itself. Returns
-  the number of rows re-driven.
+  (`claim_epoch > 0`). Fresh rows are driven by the deploy route itself.
+
+  Returns the number of rows ACTUALLY RE-DRIVEN — not the number found. This
+  counts because the value IS the reaper's recovery metric:
+  `StaleDeploymentReaper` puts it in the Oban job meta as `resumed`. It used to
+  be `length(orphans)` over a fire-and-forget `start/1` that could not fail, so a
+  sweep in which EVERY rescue was refused still reported `resumed: N` — the
+  recovery mechanism failing looked exactly like the recovery mechanism working.
+  A refusal is now counted out and logged; the rows it names stay `queued` for
+  the next sweep.
   """
   @spec resume_orphaned() :: non_neg_integer()
   def resume_orphaned do
-    orphans = Registry.list_orphaned_static_deployments()
-    Enum.each(orphans, &start/1)
-    length(orphans)
+    Registry.list_orphaned_static_deployments()
+    |> Enum.count(fn %Deployment{} = orphan ->
+      case start_reported(orphan) do
+        {:ok, _outcome} ->
+          true
+
+        {:error, reason} ->
+          Logger.warning(
+            "deploy resume could not re-drive orphaned deployment #{orphan.id} " <>
+              "(site #{orphan.site_id}): #{inspect(reason)} — the row is left queued for the next sweep"
+          )
+
+          false
+      end
+    end)
   end
 
   ## ---------------------------------------------------------------------------

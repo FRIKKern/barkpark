@@ -34,6 +34,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  # Bitwise ops for the encoded-polyline varint decoder (route block).
+  import Bitwise
 
   # ── stat ─────────────────────────────────────────────────────────────────────
 
@@ -690,15 +692,22 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
         ann = annotations_of(block)
 
+        # The svg rides its own scroll container (same idiom as the calendar
+        # heatmap's bp-heat__scroll): CSS gives the svg a min-width at the
+        # viewBox size, so viewBox-unit text never paints below its authored px
+        # at narrow viewports — the figure scrolls instead of shrinking its
+        # labels away (probe-figure-fidelity-2026-08-12 measured 11px ticks
+        # painting 4.26px at a 360 viewport under plain width:100%).
         ~s|<div class="bp-chart">| <>
           cap_html <>
+          ~s|<div class="bp-chart__scroll">| <>
           ~s|<svg viewBox="0 0 #{@vw} #{@vh}" preserveAspectRatio="none" role="img">| <>
           grid_svg(min_v, max_v) <>
           regions_svg(ann, n) <>
           plot_svg(series, kind, min_v, max_v, n) <>
           overlays_svg(ann, series, min_v, max_v, n) <>
           x_labels_svg(x_labels) <>
-          "</svg>" <> legend_html(series) <> "</div>"
+          "</svg></div>" <> legend_html(series) <> "</div>"
     end
   end
 
@@ -810,15 +819,36 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           x = x_at(i, n)
           y = y_at(value, min_v, max_v)
           ly = if y < @pad_t + 20, do: y + 16, else: y - 8
+          anchor = ann_anchor(x, label)
 
           ~s|<circle class="bp-chart__pt" cx="#{fmt(x)}" cy="#{fmt(y)}" r="3.5"/>| <>
-            ~s|<text class="bp-chart__ann" x="#{fmt(x)}" y="#{fmt(ly)}" text-anchor="middle">#{escape_html(label)}</text>|
+            ~s|<text class="bp-chart__ann" x="#{fmt(x)}" y="#{fmt(ly)}" text-anchor="#{anchor}">#{escape_html(label)}</text>|
         else
           ""
         end
       end)
 
     lines <> marks
+  end
+
+  # Edge-aware anchor for the point call-out label — the horizontal clamp the
+  # regions/reflines already have (their labels are pinned mid-region / hard
+  # right). A blanket text-anchor middle let a last-index label paint past the
+  # viewBox (probe-figure-fidelity-2026-08-12 measured bbox right 654.1 vs 640).
+  # The SVG is emitted server-side, so the text box can't be measured; estimate
+  # the 10px mono label at ~3.1 viewBox units per half-char (SF Mono advance
+  # ≈6.2/char at scale 1, slightly generous) and flip the anchor when the
+  # estimated box would cross a viewBox edge: near the right edge the label
+  # ends at the datum, near the left it starts there, everywhere else it stays
+  # centered. The circle marker keeps the exact datum x either way.
+  defp ann_anchor(x, label) do
+    half = String.length(label) * 3.1
+
+    cond do
+      x + half > @vw - 2 -> "end"
+      x - half < 2 -> "start"
+      true -> "middle"
+    end
   end
 
   # The called-out datum: series si (author order, clamped in-range), point at
@@ -1739,6 +1769,162 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   end
 
   # ── small helpers (Components conventions) ───────────────────────────────────
+
+  # ── route ────────────────────────────────────────────────────────────────────
+  #
+  # A sport track (cycling, running, …): the block's `polyline` carries a Google
+  # ENCODED POLYLINE string — the whole GPS trace as one compact ASCII value, the
+  # same "opaque data, renderer draws" contract as diagram/mermaid — plus display
+  # attrs (`sport`/`distance`/`elevation`/`duration`/`caption`, all author
+  # strings, never coerced). Rendered as a SELF-CONTAINED SVG track outline with
+  # start (○ green) / finish (● terracotta) markers and a meta row — deliberately
+  # NO map tiles and NO JS, so the identical figure works in the reader AND in
+  # email (interactive slippy maps stay a <demo> island until the pattern earns
+  # graduation). The projection is equirectangular with a cos(mid-lat) x-scale —
+  # exact enough for any single track; this draws a route's SHAPE, not a survey.
+  # The TUI twin rasterises the same polyline through the braille canvas
+  # (internal/pdrender/route.go).
+
+  @route_w 640
+  @route_max_h 400
+  @route_pad 16
+  # Track/marker colors: article reads the paper accent token (falling back to
+  # the evergreen brand hex); email carries literal hex — a stylesheet-less
+  # client must never paint the var() default (black blobs, see the email-skin
+  # note above). Start/finish greens/terracotta are SEMANTIC, not authorable.
+  @route_start "#2f9e63"
+  @route_finish "#c65a3f"
+
+  @doc "Sport track: encoded polyline → self-contained SVG shape + meta row."
+  def route_html(block, style \\ :article) when is_map(block) do
+    points = block |> get("polyline") |> display_string() |> decode_polyline()
+
+    if length(points) < 2 do
+      empty("route")
+    else
+      skin = email_skin(:evergreen)
+
+      track =
+        case style do
+          :article -> "var(--paper-accent, #{skin.accent})"
+          _ -> skin.accent
+        end
+
+      meta =
+        ["sport", "distance", "elevation", "duration"]
+        |> Enum.map(fn k -> block |> get(k) |> display_string() end)
+        |> Enum.reject(&(&1 == ""))
+
+      meta_html =
+        if meta == [] do
+          ""
+        else
+          ~s|<div class="bp-route__meta" style="font-size:13px;color:#{skin.muted};margin-top:6px;">| <>
+            Enum.map_join(
+              meta,
+              ~s| <span style="color:#{skin.border};">·</span> |,
+              &escape_html/1
+            ) <>
+            "</div>"
+        end
+
+      caption = block |> get("caption") |> display_string()
+
+      caption_html =
+        if caption == "",
+          do: "",
+          else:
+            ~s|<div class="bp-route__caption" style="font-size:13px;color:#{skin.muted};font-style:italic;margin-top:2px;">#{escape_html(caption)}</div>|
+
+      ~s|<div class="bp-route">| <>
+        route_svg(points, track) <> meta_html <> caption_html <> "</div>"
+    end
+  end
+
+  # The SVG shape: presentation attributes only (no stylesheet dependency), so
+  # the same bytes survive a CSS-less client. Width is fluid up to @route_w.
+  defp route_svg(points, track) do
+    {xs, ys} = project_route(points)
+    min_x = Enum.min(xs)
+    min_y = Enum.min(ys)
+    span_x = max(Enum.max(xs) - min_x, 1.0e-9)
+    span_y = max(Enum.max(ys) - min_y, 1.0e-9)
+
+    inner_w = @route_w - 2 * @route_pad
+    scale = min(inner_w / span_x, (@route_max_h - 2 * @route_pad) / span_y)
+    w = @route_w
+    h = round(span_y * scale) + 2 * @route_pad
+
+    coords =
+      Enum.zip(xs, ys)
+      |> Enum.map(fn {x, y} ->
+        {fmt2((x - min_x) * scale + @route_pad), fmt2((y - min_y) * scale + @route_pad)}
+      end)
+
+    d =
+      coords
+      |> Enum.with_index()
+      |> Enum.map_join(" ", fn {{x, y}, i} -> "#{if i == 0, do: "M", else: "L"}#{x},#{y}" end)
+
+    {sx, sy} = List.first(coords)
+    {fx, fy} = List.last(coords)
+
+    ~s|<svg class="bp-route__map" viewBox="0 0 #{w} #{h}" role="img" aria-label="route track" style="display:block;width:100%;max-width:#{w}px;height:auto;">| <>
+      ~s|<path d="#{d}" fill="none" stroke="#{track}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>| <>
+      ~s|<circle cx="#{sx}" cy="#{sy}" r="5.5" fill="none" stroke="#{@route_start}" stroke-width="3"/>| <>
+      ~s|<circle cx="#{fx}" cy="#{fy}" r="5.5" fill="#{@route_finish}"/>| <>
+      "</svg>"
+  end
+
+  # Equirectangular projection: x = lng·cos(mid-lat) so a track keeps its aspect
+  # away from the equator; y flips (north up) at the caller via (maxLat − lat) —
+  # here as negated lat, normalized later.
+  defp project_route(points) do
+    mid_lat = points |> Enum.map(&elem(&1, 0)) |> then(&(Enum.sum(&1) / length(&1)))
+    k = :math.cos(mid_lat * :math.pi() / 180.0)
+
+    {Enum.map(points, fn {_lat, lng} -> lng * k end),
+     Enum.map(points, fn {lat, _lng} -> -lat end)}
+  end
+
+  defp fmt2(f), do: :erlang.float_to_binary(f / 1, decimals: 2)
+
+  @doc """
+  Google encoded-polyline decoder (the Strava/OSRM/Google interchange format):
+  ASCII 63–126, 5-decimal fixed point, delta-encoded lat/lng pairs. Returns
+  `[{lat, lng}]`; a malformed tail is DROPPED at the last whole pair (render
+  what the data supports, never invent) and any non-string yields `[]`.
+  """
+  def decode_polyline(s) when is_binary(s), do: decode_polyline(s, 0, 0, [])
+  def decode_polyline(_), do: []
+
+  defp decode_polyline(<<>>, _lat, _lng, acc), do: Enum.reverse(acc)
+
+  defp decode_polyline(bin, lat, lng, acc) do
+    with {dlat, rest} <- decode_chunk(bin, 0, 0),
+         {dlng, rest} <- decode_chunk(rest, 0, 0) do
+      lat = lat + dlat
+      lng = lng + dlng
+      decode_polyline(rest, lat, lng, [{lat / 1.0e5, lng / 1.0e5} | acc])
+    else
+      _ -> Enum.reverse(acc)
+    end
+  end
+
+  # One varint chunk: 5-bit groups, char − 63, bit 0x20 continues; the sign
+  # rides the low bit (zig-zag).
+  defp decode_chunk(<<c, rest::binary>>, shift, acc) when c >= 63 and c <= 126 do
+    acc = acc ||| (c - 63 &&& 0x1F) <<< shift
+
+    if (c - 63 &&& 0x20) != 0 do
+      decode_chunk(rest, shift + 5, acc)
+    else
+      value = if (acc &&& 1) != 0, do: -((acc >>> 1) + 1), else: acc >>> 1
+      {value, rest}
+    end
+  end
+
+  defp decode_chunk(_bin, _shift, _acc), do: :malformed
 
   defp empty(kind),
     do: ~s|<div class="bp-dataviz bp-dataviz--empty">#{escape_html(kind)} — no data</div>|

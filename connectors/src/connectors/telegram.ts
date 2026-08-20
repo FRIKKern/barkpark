@@ -28,9 +28,11 @@ import { credentialBoundResolver } from "../tenant/resolve.js";
  * payload is even looked at. BYO-bot: each workspace registers its own
  * BotFather token.
  *
- * Why `polling` by default: getUpdates needs no public URL, so the smoke runs
- * on a laptop with no tunnel. Webhook mode is the same connector with
- * `mode: "webhook"` — a config value, not a code path.
+ * Why `polling`, and ONLY polling: getUpdates needs no public URL, so the smoke
+ * runs on a laptop with no tunnel. Webhook transport is not wired — the connector
+ * never registers a route and never calls setWebhook, so a webhook-configured bot
+ * would silently drop all traffic. Polling is the only transport this connector
+ * has (a future webhook wire is backlog connectors-telegram-webhook-wire).
  */
 
 export const TELEGRAM_PROVIDER = "telegram";
@@ -272,8 +274,15 @@ export async function startSupervisedPolling(
 }
 
 export interface TelegramConnectorOptions {
-  /** getUpdates long-polling (default) needs no public URL. */
-  mode?: "polling" | "webhook" | "auto";
+  /**
+   * Transport. Polling is the ONLY value: getUpdates long-polling needs no
+   * public URL. The former `"webhook"` and `"auto"` members were removed — a
+   * webhook-configured bot silently dropped all traffic (no route was ever
+   * mounted, setWebhook was never called), and the vendor's `"auto"` can select
+   * that dead webhook path. The field is retained (single-valued) so existing
+   * `{ mode: "polling" }` call sites stay explicit; it has no other effect.
+   */
+  mode?: "polling";
   /** Injected for `connect.validate` — tests NEVER hit the network. */
   fetch?: typeof fetch;
   /** Override the Bot API origin (tests point it at a local recorder). */
@@ -395,7 +404,6 @@ export function telegramBotIdFromToken(botToken: string): string {
 export function createTelegramConnector(
   options: TelegramConnectorOptions = {},
 ): Connector {
-  const mode = options.mode ?? "polling";
   const resolver = credentialBoundResolver();
   // Bound at construction, not read from the global at call time: a test that
   // injects a fetch must be certain no code path can reach the real network.
@@ -451,7 +459,10 @@ export function createTelegramConnector(
       }
       return createTelegramAdapter({
         botToken,
-        mode,
+        // Force polling. The vendor default is `"auto"`, which can select the
+        // webhook path — but this connector never mounts a webhook route, so
+        // "auto" would silently strand the bot. Polling is the only transport.
+        mode: "polling",
       });
     },
 
@@ -464,8 +475,8 @@ export function createTelegramConnector(
 
     /**
      * getUpdates long-polling under a Barkpark-owned watchdog (D84). No public
-     * URL, so the smoke runs on a laptop. In webhook mode the transport is the
-     * HTTP request, so there is nothing to start — and nothing to supervise.
+     * URL, so the smoke runs on a laptop. Polling is the only transport, so every
+     * mounted install starts a poll — there is no no-op transport arm.
      *
      * The watchdog survives BOTH a silent settle (the vendor loop ending on its
      * own → `isPolling` false with no error) and a synchronous mount throw (a
@@ -480,7 +491,6 @@ export function createTelegramConnector(
      * regained re-arms a FRESH poll (takeover), which the connector tests pin.
      */
     async listen(adapter: Adapter): Promise<void> {
-      if (mode === "webhook") return;
       if (sessions.has(adapter)) return; // idempotent: one watchdog per bot
 
       const session = await startSupervisedPolling({
@@ -497,8 +507,8 @@ export function createTelegramConnector(
      * for its loop to wind down BEFORE stopping the vendor poll loop, so the
      * health-check never observes the deliberate `isPolling === false` and
      * re-arms a bot the operator just took down — no zombie re-arm. The direct
-     * `stopPolling()` still runs when there is no session (webhook mode, or an
-     * adapter never handed to listen()), preserving the pre-watchdog behaviour.
+     * `stopPolling()` still runs when there is no session (an adapter never handed
+     * to listen()), preserving the pre-watchdog behaviour.
      */
     async stopListening(adapter: Adapter): Promise<void> {
       const session = sessions.get(adapter);

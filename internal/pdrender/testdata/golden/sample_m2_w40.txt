@@ -23,7 +23,7 @@
       ┌──────────────────────────┐      
       │ Viewport                 │      
       └──────────────────────────┘      
-Figure 1. The render pipeline as a flow.
+The render pipeline as a flow.          
                                         
 ╭──────────────────────────────────────╮
 │ ◇ Mermaid diagram (sequenceDiagram)  │
@@ -32,8 +32,8 @@ Figure 1. The render pipeline as a flow.
 │ ctx)                                 │
 │   Registry->>Renderer: dispatch      │
 │   Renderer-->>Caller: []string       │
-│ Figure 2. A sequence, for kind       │
-│ detection. (view in Studio)          │
+│ A sequence, for kind detection.      │
+│ (view in Studio)                     │
 ╰──────────────────────────────────────╯
                                         
 ╭──────────────────────────────────────╮

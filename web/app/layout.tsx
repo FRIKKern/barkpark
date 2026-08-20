@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Inter, Geist_Mono } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
@@ -35,11 +36,18 @@ export const metadata: Metadata = {
     "Headless CMS demo — published posts from the Barkpark production dataset.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The CSP proxy (proxy.ts) mints a per-request nonce and forwards it on the
+  // `x-nonce` request header. Read it here to nonce the inline theme-boot
+  // script below — an enforcing `script-src` without `'unsafe-inline'` would
+  // otherwise block it. `undefined` on the (proxy-excluded) paths that carry no
+  // header, which renders the attribute absent (nil-safe).
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
+
   return (
     <html
       lang="en"
@@ -57,6 +65,7 @@ export default function RootLayout({
                 palette. Identity and mode are independent (theme-system D23).
             The ThemeToggle island (styleguide) flips + persists these at runtime. */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html:
               "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.dataset.theme=t;document.documentElement.dataset.bpTheme=localStorage.getItem('bp_theme')||'evergreen';}catch(e){}})();",

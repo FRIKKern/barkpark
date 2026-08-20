@@ -29,6 +29,7 @@ defmodule Barkpark.Media.Blobstore do
   and tests can override per-case.
   """
 
+  alias Barkpark.Media
   alias Barkpark.Media.Blobstore.{Local, S3}
 
   @typedoc "Server-generated path relative to the media root — never raw client input."
@@ -133,9 +134,42 @@ defmodule Barkpark.Media.Blobstore do
   def put_bytes(relative_path, body, opts \\ []),
     do: impl().put_bytes(relative_path, body, opts)
 
-  def delete(relative_path), do: impl().delete(relative_path)
+  # ── READ/SERVE SEAM TRAVERSAL GUARD (felix scar-class defence-in-depth) ─────
+  #
+  # `relative_path` is typed as server-generated and "never raw client input"
+  # (see `t:relative_path/0`), but that is a CALLER-side invariant with no callee
+  # enforcement: `import_member/3` COPYs bundle rows straight into `media_files`
+  # past `MediaFile.changeset/2` (Blobstore.Local PATH PROVENANCE clause 2), so an
+  # admin bundle CAN plant `../../..` in `media_files.path`. Every DB-path read
+  # sink funnels through here — `serve_strategy/2` (share_link + tickets_attachments
+  # + media controllers), `ensure_local/1` (rendition source + probe) — plus the
+  # `File.rm` in `delete/1`. Promote the write seam's `Media.valid_blob_path?/1`
+  # per-segment allowlist to these verbs so a traversal-shaped path fails CLOSED to
+  # the existing missing-blob shapes (`{:error, :not_found}` / a skipped `delete`)
+  # BEFORE it reaches `send_file`/`File.rm`, rather than resolving and serving.
+  #
+  # ZERO SOBELOW DELTA — intentional. Sobelow has no taint model and fires on any
+  # non-empty extracted `File.*` argument, so routing through a guard does not
+  # retire a `Traversal.FileModule` finding (it just extracts the guard's name).
+  # This is scar-class defence-in-depth (the moduledoc invariant, ENFORCED not
+  # asserted), NOT a vulnerability fix — reachability is authorization-bounded.
+  #
+  # Renditions' `_renditions/<uuid>/…` cache paths do NOT pass this allowlist
+  # (leading `_`), but they never reach a Blobstore verb: they resolve via
+  # `Media.file_path/1` directly (renditions.ex) and stay on local disk by design
+  # (see the "Renditions are NOT routed through the backend" moduledoc note), so
+  # this guard leaves them untouched.
+  defp safe_blob_path?(relative_path), do: Media.valid_blob_path?(relative_path)
 
-  def ensure_local(relative_path), do: impl().ensure_local(relative_path)
+  def delete(relative_path) do
+    if safe_blob_path?(relative_path), do: impl().delete(relative_path), else: :ok
+  end
+
+  def ensure_local(relative_path) do
+    if safe_blob_path?(relative_path),
+      do: impl().ensure_local(relative_path),
+      else: {:error, :not_found}
+  end
 
   def stat_blob(relative_path), do: impl().stat_blob(relative_path)
 
@@ -168,8 +202,11 @@ defmodule Barkpark.Media.Blobstore do
     {:ok, %{received: received, stored: :unverified, verified_by: nil, unverified_reason: reason}}
   end
 
-  def serve_strategy(relative_path, opts \\ []),
-    do: impl().serve_strategy(relative_path, opts)
+  def serve_strategy(relative_path, opts \\ []) do
+    if safe_blob_path?(relative_path),
+      do: impl().serve_strategy(relative_path, opts),
+      else: {:error, :not_found}
+  end
 
   @doc """
   The active backend module. `:local` when unconfigured, so every existing

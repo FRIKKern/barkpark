@@ -28,7 +28,7 @@ defmodule BarkparkWeb.BulldocsEmailController do
   # interpolated into the response.
   # sobelow_skip ["XSS.SendResp"]
   def show(conn, %{"slug" => slug} = params) do
-    dataset = Map.get(params, "dataset") || Content.paper_default_dataset()
+    dataset = requested_dataset(params)
     scope = paper_scope(conn, params)
 
     case fetch_paper(slug, dataset, scope) do
@@ -84,6 +84,20 @@ defmodule BarkparkWeb.BulldocsEmailController do
             |> put_resp_content_type("text/html")
             |> send_resp(200, html)
         end
+    end
+  end
+
+  # `dataset` is QUERY-STRING sourced on the flat and scoped `/papers/:slug/email`
+  # routes (only `/d/:dataset/...` carries it as a path segment), so Plug hands
+  # us whatever `?dataset[]=x` / `?dataset[a]=b` decodes to — a list or a map.
+  # A non-binary lands on `x.dataset == ^dataset` against a :string column and
+  # raises Ecto.Query.CastError, which has no Plug.Exception impl → a raw 500.
+  # A dataset is a SCOPE SELECTOR with a documented default, so a malformed one
+  # fails soft to that default (same guard shape as MetaController.show/2).
+  defp requested_dataset(params) do
+    case Map.get(params, "dataset") do
+      ds when is_binary(ds) -> ds
+      _ -> Content.paper_default_dataset()
     end
   end
 

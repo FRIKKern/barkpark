@@ -23,7 +23,16 @@ defmodule Barkpark.Media do
   # `/` → empty first segment) is rejected, and an empty path is rejected. This
   # is a strict allowlist, NOT a blocklist, so an unforeseen escape shape fails
   # closed.
-  @blob_segment ~r/\A[A-Za-z0-9][A-Za-z0-9._-]*\z/
+  #
+  # A LEADING `-` is permitted: `unique_filename/1` genuinely emits `-<hex>.ext`
+  # when the client basename slugs to empty (CJK/emoji/space-only names), so
+  # those files exist on disk and in `media_files.path` — refusing them here
+  # would 404 the read/serve seam for legitimately stored blobs. A leading `-`
+  # has no path semantics (the joined path never starts with it), unlike a
+  # leading `.` (traversal/hidden — still refused) or a leading `_` (still
+  # refused, which keeps `_renditions/…` cache paths outside the Blobstore
+  # verbs by construction).
+  @blob_segment ~r/\A[A-Za-z0-9-][A-Za-z0-9._-]*\z/
 
   @doc """
   The media blob root.
@@ -88,23 +97,27 @@ defmodule Barkpark.Media do
          # as {:error, :not_stored} → the 503 below, instead of inserting a row
          # over bytes that are not there.
          {:ok, _receipt} <-
-           Blobstore.put_file(relative_path, temp_path, content_type: mime_type) do
-      # Create DB record. Tenancy scope (workspace_id/project_id) is stamped from
-      # `opts` when the caller supplied a resolved scope — mirrors
-      # `Barkpark.Content` write scoping so a new blob is owned by the workspace
-      # it was uploaded into. Without scope opts the keys are absent and the row
-      # keeps its pre-tenancy (nil) shape.
-      attrs =
-        %{
-          filename: filename,
-          original_name: original_name,
-          path: relative_path,
-          mime_type: mime_type,
-          size: size,
-          dataset: dataset
-        }
-        |> put_scope_attrs(opts)
-
+           Blobstore.put_file(relative_path, temp_path, content_type: mime_type),
+         # Create DB record. Tenancy scope (workspace_id/project_id) is stamped
+         # from `opts` when the caller supplied a resolved scope — mirrors
+         # `Barkpark.Content` write scoping so a new blob is owned by the
+         # workspace it was uploaded into. Without scope opts the keys are absent
+         # and the row keeps its pre-tenancy (nil) shape. FAIL-CLOSED: a
+         # caller-supplied `dataset` slug the Tenancy layer REFUSES returns
+         # {:error, {:invalid_dataset, _}} / {:error, :conflict} here (never a
+         # silent dataset_id=nil) — routed to 422/409 in the else block below.
+         {:ok, attrs} <-
+           put_scope_attrs(
+             %{
+               filename: filename,
+               original_name: original_name,
+               path: relative_path,
+               mime_type: mime_type,
+               size: size,
+               dataset: dataset
+             },
+             opts
+           ) do
       result =
         %MediaFile{}
         |> MediaFile.changeset(attrs)
@@ -135,6 +148,20 @@ defmodule Barkpark.Media do
         rejected
 
       {:error, :payload_too_large} = rejected ->
+        rejected
+
+      # put_scope_attrs refused a caller-supplied `dataset` slug AFTER the blob
+      # was persisted (it runs in the with-head after put_file). Remove the
+      # orphan blob, then surface the typed error UNCHANGED so FallbackController
+      # renders 422 validation_failed (invalid_dataset) / 409 conflict — NEVER
+      # the 503 storage catch-all below. These two clauses MUST precede the
+      # {:error, _reason} catch-all or the 422/409 is silently relabelled 503.
+      {:error, {:invalid_dataset, _details}} = rejected ->
+        _ = Blobstore.delete(relative_path)
+        rejected
+
+      {:error, :conflict} = rejected ->
+        _ = Blobstore.delete(relative_path)
         rejected
 
       {:error, _reason} ->
@@ -597,16 +624,27 @@ defmodule Barkpark.Media do
     end
   end
 
-  # A path is a safe server-blob path iff it is a non-empty relative path whose
-  # every `/`-segment matches @blob_segment (so `.`, `..`, an absolute leading
-  # `/`, a trailing `/`, and any `\`/null/space shape all fail closed).
-  defp valid_blob_path?(relative_path) do
+  @doc """
+  True iff `relative_path` is a safe server-blob path: a non-empty relative path
+  whose every `/`-segment matches `@blob_segment` (so `.`, `..`, an absolute
+  leading `/`, a trailing `/`, and any `\\`/null/space shape all fail closed).
+
+  Promoted from a private write-side check to a PUBLIC guard so the read/serve
+  seam can enforce the same invariant (`Barkpark.Media.Blobstore`'s
+  `serve_strategy`/`ensure_local`/`delete` reject a traversal-shaped `file.path`
+  before it reaches `send_file`/`File.rm`). See `put_blob/2` for the write seam.
+  """
+  @spec valid_blob_path?(term()) :: boolean()
+  def valid_blob_path?(relative_path) when is_binary(relative_path) do
     segments = String.split(relative_path, "/")
 
     relative_path != "" and
       not String.starts_with?(relative_path, "/") and
       Enum.all?(segments, &Regex.match?(@blob_segment, &1))
   end
+
+  # A non-binary path (e.g. nil) is never a safe blob path — fail closed.
+  def valid_blob_path?(_relative_path), do: false
 
   # Stamp tenancy scope (:workspace_id / :project_id) onto write attrs when the
   # caller supplied it via opts. Only non-nil keys are added, so an unscoped
@@ -615,15 +653,39 @@ defmodule Barkpark.Media do
   # W2 dual-write: also resolve the blob's `dataset` STRING → its `dataset_id`
   # (within the resolved project — opts `:project_id` or the seeded Default
   # project) and stamp BOTH. The string stays as a mirror; `dataset_id` is the
-  # new authoritative leaf for the (path, dataset_id) uniqueness. Degrades to no
-  # dataset_id (string-only) when the project/dataset can't be resolved.
+  # new authoritative leaf for the (path, dataset_id) uniqueness.
+  #
+  # FAIL-CLOSED (felix-w27-bl-media-dataset-swallow-mirror): mirrors #12071's
+  # `WriteScope` split in media's ATOM-key dialect. A dataset resolution the
+  # Tenancy layer REFUSED is an error, never a silent `dataset_id=nil` stamp.
+  # `:workspace_id`/`:project_id` are ALWAYS stamped from opts, independent of
+  # dataset resolution, so a workspace-scoped upload whose project can't be
+  # resolved still keeps its workspace stamp. Returns a tagged tuple threaded up
+  # through `upload/3`:
+  #
+  #   * `{:ok, attrs}` — scope stamped (`dataset_id` present when resolved, absent
+  #     on the legit-nil arms below).
+  #   * `{:error, {:invalid_dataset, details}}` — `get_or_create_dataset` rejected
+  #     the slug (format/length). 422 `validation_failed`; the changeset messages
+  #     are re-keyed under "dataset" (the key the caller sent — the row's `:slug`
+  #     is an internal name). Replaces the old silent degrade to `dataset_id=NULL`.
+  #   * `{:error, :conflict}` — the insert-ok/reload-nil race (`:dataset_not_found`
+  #     twice). 409. errors.ex has NO `:dataset_not_found` clause, so converting it
+  #     here is load-bearing: an unconverted `:dataset_not_found` would fall to
+  #     `upload/3`'s 503 storage catch-all and mislabel.
   defp put_scope_attrs(attrs, opts) do
     project_id = Keyword.get(opts, :project_id) || default_project_id()
 
-    attrs
-    |> maybe_put_scope_attr(:workspace_id, Keyword.get(opts, :workspace_id))
-    |> maybe_put_scope_attr(:project_id, Keyword.get(opts, :project_id))
-    |> maybe_put_scope_attr(:dataset_id, resolve_dataset_id(attrs, project_id))
+    scoped =
+      attrs
+      |> maybe_put_scope_attr(:workspace_id, Keyword.get(opts, :workspace_id))
+      |> maybe_put_scope_attr(:project_id, Keyword.get(opts, :project_id))
+
+    case resolve_dataset_id(scoped, project_id) do
+      {:ok, nil} -> {:ok, scoped}
+      {:ok, dataset_id} -> {:ok, Map.put(scoped, :dataset_id, dataset_id)}
+      {:error, _reason} = error -> error
+    end
   end
 
   defp default_project_id do
@@ -633,19 +695,71 @@ defmodule Barkpark.Media do
     end
   end
 
-  defp resolve_dataset_id(_attrs, nil), do: nil
+  # TOTAL split of the dataset resolution (mirrors
+  # `WriteScope.resolve_dataset_id_for_write`). `nil` arises at THREE sites; only
+  # the `get_or_create_dataset` error is a DEFECT that must fail closed:
+  #
+  #   * nil resolved project (incl. the Default-project fallback) — legit
+  #     input-absent → `{:ok, nil}`.
+  #   * non-binary dataset — legit; currently DEAD from the `is_binary(dataset)`
+  #     caller guard at `upload/3`, kept defensively → `{:ok, nil}`.
+  #   * `get_or_create_dataset` refused the slug — DEFECT, fail closed →
+  #     `{:error, {:invalid_dataset, _}}` / `{:error, :conflict}`.
+  defp resolve_dataset_id(_attrs, nil), do: {:ok, nil}
 
   defp resolve_dataset_id(attrs, project_id) do
     case Map.get(attrs, :dataset) || Map.get(attrs, "dataset") do
       dataset when is_binary(dataset) ->
-        case Barkpark.Tenancy.get_or_create_dataset(project_id, dataset) do
-          {:ok, %Barkpark.Tenancy.Dataset{id: id}} -> id
-          _ -> nil
-        end
+        resolve_dataset_id_with_retry(project_id, dataset)
 
       _ ->
-        nil
+        {:ok, nil}
     end
+  end
+
+  # Retry exactly once on the insert-ok/reload-nil race, then `{:error, :conflict}`
+  # (mirrors `WriteScope.resolve_dataset_id_with_retry`).
+  defp resolve_dataset_id_with_retry(project_id, dataset) do
+    case resolve_dataset_id_once(project_id, dataset) do
+      {:error, :dataset_not_found} ->
+        case resolve_dataset_id_once(project_id, dataset) do
+          {:error, :dataset_not_found} -> {:error, :conflict}
+          other -> other
+        end
+
+      other ->
+        other
+    end
+  end
+
+  defp resolve_dataset_id_once(project_id, dataset) do
+    case Barkpark.Tenancy.get_or_create_dataset(project_id, dataset) do
+      {:ok, %Barkpark.Tenancy.Dataset{id: id}} ->
+        {:ok, id}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        {:error, {:invalid_dataset, invalid_dataset_details(changeset)}}
+
+      {:error, :dataset_not_found} ->
+        {:error, :dataset_not_found}
+    end
+  end
+
+  # Flatten the Dataset changeset's per-field messages and RE-KEY them under the
+  # STRING "dataset" — the caller supplied a `dataset` string, not a `:slug`
+  # field. `Content.Errors.to_envelope` passes `details` through VERBATIM, so the
+  # re-key is the caller's job (mirrors `WriteScope.invalid_dataset_details/1`).
+  defp invalid_dataset_details(%Ecto.Changeset{} = changeset) do
+    messages =
+      changeset
+      |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {k, v}, acc ->
+          String.replace(acc, "%{#{k}}", to_string(v))
+        end)
+      end)
+      |> Enum.flat_map(fn {_field, msgs} -> msgs end)
+
+    %{"dataset" => messages}
   end
 
   defp maybe_put_scope_attr(attrs, _key, nil), do: attrs

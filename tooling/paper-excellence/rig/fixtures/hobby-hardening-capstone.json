@@ -1,0 +1,3431 @@
+{
+  "_id": "hobby-hardening-capstone",
+  "blocks": [
+    {
+      "id": "hhc-eyebrow",
+      "text": "BARKPARK PAPERS · DEEP INVESTIGATION · CROWN PAPER · 2026-08-08",
+      "type": "eyebrow"
+    },
+    {
+      "id": "hhc-h1",
+      "level": 1,
+      "text": "The Ultimate Plan — Hardening Barkpark at Hobby Scale",
+      "type": "heading"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-title",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The wish was 'the ultimate plan before assigning all this epics.' One strategy SWOT, five investigation lanes, and a twenty-five-agent evidence storm later, the plan exists — and it is smaller, sharper, and safer than the interview guessed. Three separately assignable epics, cut on the risk seam rather than the topic seam: E1 http-edge-truth, E2 anonymous-metering, E3 self-host-blessing. One interview candidate is struck because it is already a live epic at wave 18; one is filed as a candidate task and deliberately not built. Every claim below carries a file:line anchor on origin/main or a live curl against guerrilla; every proposed done-claim carries a proof designed to be able to fail. This paper stands alone — read it and you hold the whole program; descend into a lane paper only when you want that lane's full depth."
+        }
+      ],
+      "id": "hhc-ingress",
+      "type": "ingress"
+    },
+    {
+      "id": "hhc-byline",
+      "items": [
+        "Crown paper · five lanes + the SWOT folded into one argument",
+        "Funnel seeded: task-21cd02088dd2f762 (considering)",
+        "Nothing is built by this run — the next move is the user's"
+      ],
+      "type": "byline"
+    },
+    {
+      "id": "hhc-stats",
+      "items": [
+        {
+          "label": "epics to assign — plus two filed candidates, one struck, zero duplicated",
+          "value": "3"
+        },
+        {
+          "label": "cache lifetime stamped on access-gated-capable media — live on prod since 2026-05-25",
+          "value": "1 year"
+        },
+        {
+          "label": "Repo queries one anonymous paper view costs (largest bodies 546 KB, never a 304)",
+          "value": "14–18"
+        },
+        {
+          "label": "bytes in the literal SECRET_KEY_BASE a default compose boot hands Phoenix",
+          "value": "26"
+        }
+      ],
+      "type": "stats"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Cut three charters on the risk seam: E1 http-edge-truth (correctness on one-way cache doors — small, urgent, human-gated because api/** merges auto-deploy prod), E2 anonymous-metering (instrument first; its RequestStats counter is the program's first merge, and every later absorption or limiter claim is scored on it), and E3 self-host-blessing (packaging, whose 'supported' stamp is DAG-gated on E1 — blessed must never mean blessed-with-known-leaks). 'Deploy honesty' is STRUCK: it is the live deploy-reliability epic, and the swap-thrash finding this program was chartered to file was already filed as task-cbde37238506ed7c. The CJK engine is FILED, not built. The fused two-epic shape stays on record as the honest fallback if coordination budget is tight — the seeds concatenate cleanly."
+        }
+      ],
+      "id": "hhc-verdict",
+      "title": "Verdict — GO, as three charters",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "hhc-divider",
+      "type": "divider"
+    },
+    {
+      "id": "hhc-toc",
+      "items": [
+        {
+          "anchor": "blocks-hhc-h2-grand",
+          "level": 1,
+          "text": "The grand view"
+        },
+        {
+          "anchor": "blocks-hhc-h2-model",
+          "level": 1,
+          "text": "The corrected defect model"
+        },
+        {
+          "anchor": "blocks-hhc-h2-shape",
+          "level": 1,
+          "text": "The proposed shape — three epics on the risk seam"
+        },
+        {
+          "anchor": "blocks-hhc-h2-ground",
+          "level": 1,
+          "text": "Ground truth — how the system works today"
+        },
+        {
+          "anchor": "blocks-hhc-h2-files",
+          "level": 1,
+          "text": "Files likely to change — the consolidated picture"
+        },
+        {
+          "anchor": "blocks-hhc-h2-own",
+          "level": 1,
+          "text": "Absorb, cite, defer — the ownership rulings"
+        },
+        {
+          "anchor": "blocks-hhc-h2-contra",
+          "level": 1,
+          "text": "Contradictions and resolutions"
+        },
+        {
+          "anchor": "blocks-hhc-h2-proof",
+          "level": 1,
+          "text": "Proof obligations — every done-claim can fail"
+        },
+        {
+          "anchor": "blocks-hhc-h2-risk",
+          "level": 1,
+          "text": "Risks, unknowns, and the judgment calls"
+        },
+        {
+          "anchor": "blocks-hhc-h2-reco",
+          "level": 1,
+          "text": "The recommendation and the first wave"
+        },
+        {
+          "anchor": "blocks-hhc-h2-stack",
+          "level": 1,
+          "text": "The paper stack — where to descend"
+        }
+      ],
+      "type": "toc"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-g1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-g2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-grand",
+      "level": 2,
+      "text": "The grand view",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The program began as a critique. kopper's essay 'the web server deployment model breaks at hobby scale' (2026-08) walks through every trap that catches software hosted by strangers — static files, caches, database extensions, the fat-Docker surrender — and the SWOT paper ("
+        },
+        {
+          "marks": [
+            {
+              "type": "code"
+            }
+          ],
+          "type": "text",
+          "value": "/papers/barkpark-hobby-scale-swot"
+        },
+        {
+          "type": "text",
+          "value": ") tested each claim against this repo. Verdict there: Barkpark's two founding bets (the two-process monolith, Cloud as the 'control the whole machine' ending) are independently validated; the exposed flank is the HTTP edge and the orphaned Docker path. The interview then fixed the frame: edge defects first because they hurt our own prod and Cloud today, self-host adoption second, Docker blessed as a production path, CJK deferred but its seam documented — and the deliverable is 2–4 separately assignable epic charters with an explicit ordering story."
+        }
+      ],
+      "id": "hhc-grand-p1",
+      "type": "paragraph"
+    },
+    {
+      "caption": "The run that produced this paper, and what leaves it. Five lanes investigated to charter-seed depth; the crown cuts the final shape; only the charters and one candidate task travel forward.",
+      "id": "hhc-run-diagram",
+      "source": "flowchart TD\n  SWOT[\"SWOT paper<br/>barkpark-hobby-scale-swot<br/>7 mandates\"] --> L1[\"Lane 1<br/>http-edge<br/>route census + doctrine\"]\n  SWOT --> L2[\"Lane 2<br/>meter-free-lunch<br/>4-layer metering design\"]\n  SWOT --> L3[\"Lane 3<br/>selfhost-packaging<br/>compose blessing spec\"]\n  SWOT --> L4[\"Lane 4<br/>absorption-map<br/>ownership + fences\"]\n  SWOT --> L5[\"Lane 5<br/>charter-architecture<br/>rival shapes + proofs\"]\n  L1 --> CROWN[\"CROWN (this paper)<br/>hobby-hardening-capstone\"]\n  L2 --> CROWN\n  L3 --> CROWN\n  L4 --> CROWN\n  L5 --> CROWN\n  CROWN --> E1[\"Charter E1<br/>http-edge-truth\"]\n  CROWN --> E2[\"Charter E2<br/>anonymous-metering\"]\n  CROWN --> E3[\"Charter E3<br/>self-host-blessing\"]\n  CROWN --> TASK[\"task-21cd02088dd2f762<br/>considering\"]",
+      "type": "diagram"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "What the investigation established, in one breath: the HTTP edge is not policy-less — Plug.Conn quietly defaults every response to 'max-age=0, private, must-revalidate' (deps/plug conn.ex:241, live-verified), which is a safe policy — and the real defect set is exactly the departures from and under-uses of that default. Four defect classes: gated-capable media stamped public-immutable for a year (live on guerrilla, on both originals and renditions), an undigested Studio shell that goes stale after every deploy, a paper reader that mints an ETag it never honors (an exact If-None-Match replay returns 200 plus the full 200,809-byte body), and a query ETag that validates a body it does not fully describe. Meanwhile nothing measures anonymous traffic at all — no Caddy access logs, a volatile 60-second RequestStats window, zero consumers of the metrics endpoint — and the one stranger-friendly install route, docker compose, is not merely undocumented but booby-trapped: its SECRET_KEY_BASE pseudo-default is a shell substitution compose can never execute, so an unset var boots clean and 500s the first session touch; its environment allowlist passes 10 of ~105 read env vars, making every TLS-relevant knob a silent no-op."
+        }
+      ],
+      "id": "hhc-grand-p2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The edge is not policy-less — it is safe by default, and wrong in exactly the places that depart from the default."
+        }
+      ],
+      "id": "hhc-pullquote",
+      "type": "pullquote"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The program that answers all of it: "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "E1 makes the edge tell the truth"
+        },
+        {
+          "type": "text",
+          "value": " — every cacheable public response carries an explicit correct policy, every conditional request the server invites it honors, and no header promises an immutability the write paths can break. "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "E2 makes anonymous load measured, then bounded"
+        },
+        {
+          "type": "text",
+          "value": " — instrument, robots policy, in-app absorption, and a two-gate limiter that ships shadow-first because a false-positive 429 under auto-deploy is a one-way door. "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "E3 makes the stranger's cold start real"
+        },
+        {
+          "type": "text",
+          "value": " — a scripted clean-VM boot from the runbook alone, with the compose traps fixed before the blessing is honest. The ordering story is three laws: instrument before repairs (every later claim is scored on the baseline), correctness before absorption (wrong headers propagate into strangers' caches irreversibly), and bless last (E3's 'supported' stamp waits for E1's leak class to close)."
+        }
+      ],
+      "id": "hhc-grand-p3",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-m1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-m2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-model",
+      "level": 2,
+      "text": "The corrected defect model",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The run's most valuable property is that it corrected its own premises. The SWOT's bullets — and the interview's candidate list — must not be quoted forward; the rows below replace them. Each was settled by reading the code at file:line and, where it mattered, by curling guerrilla live."
+        }
+      ],
+      "id": "hhc-model-p1",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "we believed"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "the evidence says"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "anchor / proof"
+          }
+        ]
+      ],
+      "id": "hhc-model-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "'No Cache-Control on public JSON' (SWOT)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Plug.Conn defaults EVERY response to max-age=0, private, must-revalidate. The defect is absent EXPLICIT policy on public content plus one wrong explicit policy on media — not absent headers."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "deps/plug conn.ex:241 · live on /api/schemas, /login, both readers"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "'One ETag that never 304s' (SWOT)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "capabilities, query, media, and every Plug.Static asset 304 correctly. The never-304 defect is precisely the paper reader's plug — emits a sha256 ETag, never reads If-None-Match — and the flat /papers/:slug route has no ETag at all."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "paper_revision_headers.ex:13-42 · live: exact INM replay → 200 + 200,809 B"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "'The public reader is unmetered — including media' (SWOT)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Media reads ride the :api pipeline's 300/min bucket. The genuinely unmetered doors are :browser, :public_root (papers/sheets/quiz LiveViews — the real DB-hitting anonymous surface), :sso_browser, and the by-design-exempt :api_unlimited. RateLimit rides 13 pipelines, not 3."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "router.ex pipelines · rate_limit.ex:59-60"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "'Gated media is leaking on prod'"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The defect headers are LIVE (anonymous curls confirm public-immutable on originals AND renditions) — but guerrilla has ZERO mediaAsset docs, and Access.visibility(nil) hardcodes 'public', so today's realized harm is stale-bytes-locked-into-caches. The confidentiality leak is real-but-latent for any self-hoster who sets bp_visibility=private/token."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "urls.ex:11 · access.ex:13-37 · live curls + population census"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "'immutable is merely a risky header'"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "immutable is a lie three ways: put_blob overwrites paths with no exists-check (File.write truncates); renditions NEVER route through the blobstore even under S3 — the 302-safe branch covers originals only; and an ordinary edit to rights.watermarkProfile swaps rendition bytes under an unchanged URL."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "media.ex:572-598 · blobstore.ex moduledoc · renditions.ex:40-42 vs :54"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "'Deploy honesty is a charter candidate' (interview)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "It is the RUNNING deploy-reliability epic (wave 17 reviewed grade A, wave-18 charter PR open, 310 open children), and the swap-thrash root cause was already filed the same morning the 'unfiled' note was written. Inherit and cite; never recharter."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task-fb4fb869490b4213 · task-cbde37238506ed7c (open, priority 0)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "'The cch fence blocks reader-side work'"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Inverted. bulldocs_live.ex and finder_live.ex sit inside cch's fence but cch has zero hits on them across 49 waves; router.ex, plugs/, endpoint.ex are OUTSIDE cch by its own D357 text. The real router contention is site-spawner's ssw10 region plus open PR #9530 — a sequencing problem, not a duplication problem."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cch charter :125 · D357 · ssw10 task brief"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "'Blessing Docker is a light extraction job' (lane premise)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Overturned by the storm. The raw material exists in proven form (deploy.sh's inline Caddyfile, GO-LIVE.md's verify chain, backup-dr.md's drill skeleton) — but the docker first-boot and upgrade runbook sections exist NOWHERE, and two compose correctness defects must be fixed before any blessing is honest."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "docker-compose.yml:23 · runtime.exs:737-740 · cookie.ex:183-184"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The strongest violation of 'public, immutable' needs no admin token and no blob push: editing a document's rights.watermarkProfile changes which watermark-keyed disk file the UNCHANGED rendition URL resolves to, so fresh bytes ship under a URL every downstream cache was told would never change — driven by routine editing. This moves E1's immutability slice from 'tighten a header' to 'make the URL contract true': content-address the rendition URL (fold in the watermark profile) or cap the cache lifetime until it is. The plan sequences headers first, URL re-keying second, because rendition URLs are already embedded in published paper HTML — re-keying is a link-rot risk that deserves its own slice."
+        }
+      ],
+      "id": "hhc-sharpest",
+      "title": "The sharpest finding",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The cost side is equally concrete: one anonymous paper view runs the LiveView mount twice (dead render plus websocket join) at 7–9 Repo queries each — reverse_referencers computed twice, driven_tasks N+1 per citing task, task blocks unbatched — and the five largest papers ship 218–546 KB bodies that can never 304. The finder's connected mount forks a graph derivation the code's own comment prices at 'seconds on a loaded box', whose flat twin already caused a measured prod incident (#10016). And the quiz host LiveView spawns a Room GenServer for any visitor-supplied pin, bounded only by a global 10,000-child cap. None of this is hypothetical: the box has a documented swap-thrash 500 history, and load there comes from expensive work, not volume (p95 is anti-correlated with request count on guerrilla)."
+        }
+      ],
+      "id": "hhc-model-p2",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-s1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-s2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-shape",
+      "level": 2,
+      "text": "The proposed shape — three epics on the risk seam",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The interview asked for 2–4 epics. The lanes disagreed productively: the absorption map argued two charters (edge+metering fused), while the http-edge, metering, and charter-architecture lanes each independently landed on separation. The crown's ruling is three — because the seams that matter are risk seams, not topic seams. Edge correctness is small, urgent, and human-gated (one-way cache doors under auto-deploy). Metering is instrument-first and deliberately slow (a limiter that ships log-only until shadow data justifies enforcement). Packaging never touches the running edge at all but must build its own gate story, because no required check covers its files. Three different risk profiles, three different proof styles, three different 'done' shapes — one epic per profile."
+        }
+      ],
+      "id": "hhc-shape-p1",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "shape"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "partition"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "wins because"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "loses because"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "verdict"
+          }
+        ]
+      ],
+      "id": "hhc-shape-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "A — two epics"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "edge + metering fused (the absorption map's Charter A); packaging separate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one wave stream, no cross-epic rebases, one cch conversation; the two concerns do meet in the same plug and router files"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mixes a one-way-door data-leak lane with slow instrument-first metering; the overlap census proved the shared surface is ONE 45-line plug clause plus two router pipeline bodies — too narrow to force fusion"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "RUNNER-UP"
+            },
+            {
+              "type": "text",
+              "value": " — the recorded fallback; the E1/E2 seeds concatenate cleanly if chosen"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "B — three epics"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1 http-edge-truth · E2 anonymous-metering · E3 self-host-blessing"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "each epic has its own risk profile, gate story, and falsifiable done-claim; the only E1/E2 collision resolves with one ordering rule (E1 lands, E2 rebases one plug line and two pipeline bodies); matches the interview's 'separately assignable' wish"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "two concurrent api/** epics cost coordination; charter-ledger conflicts on wave PRs are a known tax (mitigated: new charters get NEW files)"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "RECOMMENDED"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "C — four epics"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "B plus a dogfood/drift epic"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "nothing — the fourth candidate measured out at ~2–3 tasks (webhook-verifier swap, doc drift)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "a backlog is not a charter; and the interview's fourth candidate, deploy honesty, is a LIVE epic — a rival charter would duplicate a running program"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "REJECTED — the dogfood tasks ride inside E3"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "caption": "The dependency DAG. The instrument merges first because every later claim — 'caches absorb X%', 'the limiter fired correctly' — is vacuous without a baseline. E3 runs parallel from day 1 but its BLESSED declaration waits for E1: a blessed install must not be blessed-with-known-leaks.",
+      "id": "hhc-dag",
+      "source": "graph TD\n  I[\"E2 w1 — traffic instrument:<br/>extend RequestStats (FIRST MERGE)\"] --> C[\"E1 — reader 304 + media cache policy<br/>(HUMAN-GATED slices)\"]\n  C --> L[\"E2 — limiter on reader pipelines<br/>(log-only window, then enforce, kill switch)\"]\n  C --> CC[\"E1 — explicit Cache-Control on public reads<br/>(scored on the instrument)\"]\n  P[\"E3 — compose fixes, .env.example,<br/>runbook, PG floor (parallel from day 1)\"] --> BL[\"E3 — the BLESSED declaration +<br/>clean-VM cold-start proof\"]\n  L --> BL\n  CC --> BL",
+      "type": "diagram"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Reading the edges: "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "instrument before repairs"
+        },
+        {
+          "type": "text",
+          "value": " is deploy-reliability's founding law transplanted verbatim — nothing today can even state the anonymous share of load, so the counter merges before anything it will score. "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "Correctness before absorption"
+        },
+        {
+          "type": "text",
+          "value": " — E1's policy slices precede the Cache-Control slices that invite strangers' caches to hold our bytes, and all four E1 fixes move in the safe direction only (shorten, privatize, validate), so they can ship under auto-deploy-on-merge without staging theater. "
+        },
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "Bless last"
+        },
+        {
+          "type": "text",
+          "value": " — E3's runbook may ship early marked experimental; the word 'supported' lands only after E1's media fix merges and E2's limiter can protect the documented box."
+        }
+      ],
+      "id": "hhc-shape-p2",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-e1a",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h3-e1",
+      "level": 3,
+      "text": "E1 · http-edge-truth — the edge tells the truth",
+      "type": "heading"
+    },
+    {
+      "id": "hhc-e1-notes",
+      "items": [
+        {
+          "label": "vision",
+          "lead": "Falsifiable: every cacheable public response carries an explicit, correct policy.",
+          "text": "Every conditional request the server invites, it honors; no header promises immutability the write paths can break. Dated baseline (2026-08-07, live): guerrilla serves anonymous media 'public, max-age=31536000, immutable' on both branches; the paper reader emits an ETag it never honors; the Studio shell caches heuristically stale."
+        },
+        {
+          "label": "slices",
+          "lead": "Five defect families, in risk order.",
+          "text": "(1) Reader 304: honor If-None-Match in paper_revision_headers.ex with the validator switched to released_revision_id (no per-request sha256), extended to the flat /papers/:slug route — halts before the LiveView dead render. (2) Media cache policy: the local-file branch becomes visibility-aware (public → short max-age + revalidate; private → no-store; token → user's call); the 302-to-blob branch is already correct. (3) Immutable made true or retired: cap everything below immutable now; content-address rendition URLs (fold in the watermark profile) as a follow-on slice — URL re-keying is a link-rot risk sequenced deliberately second. (4) Vary: Authorization on tier-keyed ETags (capabilities, query) + fix the representation-blind query ETag by omitting it when a token or ?fields= projection is present. (5) Port cloud's proven two-plug static doctrine to api's bare Plug.Static — fonts immutable, shell no-cache+etag — strictly cheaper than phx.digest (37 raw asset references, 0 sigils, no digest pipeline anywhere)."
+        },
+        {
+          "label": "fence",
+          "lead": "Plugs, media delivery, endpoint statics — never the router's public-read region.",
+          "text": "In: paper_revision_headers.ex, media/** delivery + renditions, media_controller.ex, endpoint.ex Plug.Static, capabilities/query controllers. OUT: public_read.ex and router.ex:461-471 (site-spawner ssw10's region, human-gated by dr D17 precedent); everything cch fences. All fix files sit outside the cch fence by design — the 304 fix lives in the plug, not the LiveViews."
+        },
+        {
+          "label": "gates",
+          "lead": "Cache-policy slices are HUMAN-GATED with a named reviewer.",
+          "text": "Every api/** merge auto-deploys guerrilla and a wrong long-lived header is un-recallable from strangers' caches. Each cache-policy slice carries a post-merge L1 proof: the curl transcript rerun against prod, pasted into the task before close. The epic also ships the program's first real header test suite — today only 2 of 11 override sites are pinned by any test, and Vary is untested outside CORS."
+        },
+        {
+          "label": "sizing",
+          "lead": "2–3 waves × 4–6 slices; absorbs bpb-step7-content-edge-cache.",
+          "text": "Not this epic: the public_read clamp (ssw10/ssw11), /v1/capabilities' RFC-9110 brief (ctx-b2-server-view-brief — cite as sibling and coordinate the one shared controller edit), deploy-ledger notification surfaces (deploy-reliability w18), CJK (filed candidate), and the scoped-media tier-bypass audit (dr-w2-s7 follow-up — a different defect class)."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The five-rule header doctrine every E1 slice is written under (lane 1's census deliverable):"
+        }
+      ],
+      "id": "hhc-e1-doctrine-intro",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-e1-doctrine",
+      "items": [
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "The default is the policy."
+          },
+          {
+            "type": "text",
+            "value": " Every response inherits Plug.Conn's 'max-age=0, private, must-revalidate'. Silence is safe; an absent header is a decision, not an omission."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Every override is a stated decision."
+          },
+          {
+            "type": "text",
+            "value": " Each departure carries a per-route-class justification in code and a test pinning the exact header string."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Lengthening a lifetime is the only one-way door."
+          },
+          {
+            "type": "text",
+            "value": " 'immutable' is permitted solely for content-addressed URLs. Nothing in api qualifies today."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "A validator must cover its representation."
+          },
+          {
+            "type": "text",
+            "value": " An ETag must change whenever the body can change — /v1/data/query's id:rev ETag vs a body varying by principal and ?fields= fails this today."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Vary: Authorization on tier-varying cacheable responses."
+          },
+          {
+            "type": "text",
+            "value": " Defense-in-depth: RFC 9111 §3.5-compliant caches already refuse these, but CloudFront's RECOMMENDED managed policies (MinTTL > 0) cache straight through 'private' per AWS's own documentation — a checkbox-level misconfiguration, not an exotic override."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "id": "hhc-e1-code",
+      "lang": "elixir",
+      "type": "code",
+      "value": "# api/lib/barkpark_web/endpoint.ex — the cloud two-plug port (target shape)\n# replaces the single bare Plug.Static (endpoint.ex:56-61)\nplug Plug.Static,\n  at: \"/fonts\", from: {:barkpark, \"priv/static/fonts\"},\n  headers: %{\"cache-control\" => \"public, max-age=31536000, immutable\"},\n  cache_control_for_etags: \"public, max-age=31536000, immutable\"\n\nplug Plug.Static,\n  at: \"/\", from: :barkpark,\n  only: ~w(assets images favicon.ico robots.txt),\n  gzip: not code_reloading?,\n  headers: %{\"cache-control\" => \"no-cache\"},   # no-cache = REVALIDATE, not don't-cache\n  cache_control_for_etags: \"no-cache\"\n# proven: cloud/lib/.../web/router.ex:326-421, pinned by router_test.exs:1999-2016\n# — the exact fix for the live stale-Studio-shell bug, with zero template rewrites"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-e2a",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h3-e2",
+      "level": 3,
+      "text": "E2 · anonymous-metering — measured, polite, cheap, bounded",
+      "type": "heading"
+    },
+    {
+      "id": "hhc-e2-notes",
+      "items": [
+        {
+          "label": "vision",
+          "lead": "Anonymous load is measured, then bounded — in that order.",
+          "text": "Falsifiable: the instance can state its anonymous read rate per route class, and no anonymous surface can take the box down. Dated baseline (2026-08-07): NOTHING measures public-reader hits — RequestStats is one global volatile number, the Prometheus scrape has zero consumers repo-wide, Caddy writes no access logs, and no historical data exists anywhere to size a scraper scenario."
+        },
+        {
+          "label": "layer 0",
+          "lead": "The instrument is the program's first merge.",
+          "text": "Extend RequestStats — its telemetry handler already fires on [:phoenix, :endpoint, :stop] with the full conn in scope and discarded. Widen the ETS key with a coarse route class (anon-browser / API / static / LV) and an authed? bit; group compute/4 by it. No new process, no Prometheus cardinality risk. One design unknown to verify first: whether optional_token resolution is present at endpoint-stop time for all route classes."
+        },
+        {
+          "label": "layers 1–2",
+          "lead": "Robots policy, then absorption — make the hit cheap before limiting it.",
+          "text": "Robots: api gets a real policy (Allow /papers/ and /sheets/; Disallow /finder, /quiz/, /studio, /login, /s/; AI-crawler stance = user's pick of three ready templates); cloud console gets Disallow-all (one-file cch coordination); web and spawned sites stay allow-all. Robots.txt structurally cannot stop the worst 2026 crawlers — enforcement is Layer 3's job. Absorption (stock Caddy has no cache module, so only an in-app cache protects the box): an ETS reader render cache keyed (dataset, slug, released_revision_id) evicted by the existing paper_topic PubSub; a per-dataset TTL/single-flight cache for the finder graph derivation; and query-shape dedupe in the reader (duplicate reverse_referencers walk, driven-tasks N+1, unbatched task blocks) — the dedupe alone halves the reader's floor cost with no cache at all."
+        },
+        {
+          "label": "layer 3",
+          "lead": "Two limiter gates, because one structurally cannot cover both lifecycles.",
+          "text": "Gate A: extend the existing RateLimit plug onto the browser pipelines with a new :browser class and a content-negotiated HTML 429 + Retry-After — meters the entire curl/crawler dead-render class. Gate B (websockets bypass every plug forever): declare :peer_data + :x_headers in the /live socket's connect_info (today it carries session only — a LiveView cannot even SEE the client IP), add a connect_info-shaped client_ip variant preserving the Caddy trust walk, and attach one on_mount + attach_hook(:handle_event) hook at the :public_root live_session emission plus FinderLive's session. Special case: a per-IP spawn budget on Quiz Room.ensure/1 — the census's one anonymous stateful-process DoS vector (any visitor-supplied pin spawns a GenServer; the only brake is a global 10,000-child cap)."
+        },
+        {
+          "label": "shadow law",
+          "lead": "The limiter ships log-only first. Non-negotiable.",
+          "text": "Merges auto-deploy, and a false-positive 429 on a real reader is this epic's one-way door. Refusals land as Layer-0 counter lines; promotion to enforcing is an explicit human decision against observed shadow data, with a kill switch and env-tunable budgets (the existing BARKPARK_RATE_LIMIT_* pattern)."
+        },
+        {
+          "label": "fence + sizing",
+          "lead": "2 waves × 3–5 slices; sequenced last onto router.ex.",
+          "text": "In: request_stats.ex, rate_limit.ex, rate_limiter.ex (additive client_ip variant), robots.txt files, router/plugins.ex, a new hooks module, quiz room.ex. bulldocs_live.ex + finder_live.ex edits ride a numbered cch carve-out (see Contradictions). The router pipeline edit is sequenced after E1's plug change and after the ssw10/#9530 residue settles — rebase cost, not semantic duplication. Not this epic: box memory/swap levers (deploy-reliability's dr-bl-* rows, cited by full slug), the playground limiter, the inline pulse/bulldocs-form limiters (already self-limiting)."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "caption": "Why the limiter needs two gates: the websocket lifecycle bypasses the router, so a plug meters only the curl/crawler dead-render class; connected mounts, live navigation, and events need a LiveView-native hook.",
+      "id": "hhc-e2-diagram",
+      "source": "flowchart LR\n  C[\"anonymous client\"] -->|\"HTTP GET (dead render)\"| P[\"Gate A: RateLimit plug<br/>new :browser class, HTML 429\"]\n  P --> DR[\"LiveView dead render\"]\n  C -->|\"WS upgrade /live\"| S[\"endpoint socket<br/>connect_info: session ONLY today\"]\n  S -.->|\"invisible to every plug, forever\"| M[\"connected mount,<br/>live nav, handle_event\"]\n  M --> H[\"Gate B: on_mount +<br/>attach_hook(:handle_event)\"]",
+      "type": "diagram"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-e3a",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h3-e3",
+      "level": 3,
+      "text": "E3 · self-host-blessing — a stranger stands up production Barkpark from the runbook alone",
+      "type": "heading"
+    },
+    {
+      "id": "hhc-e3-notes",
+      "items": [
+        {
+          "label": "vision",
+          "lead": "Falsifiable: a scripted clean-VM cold start, driven only by the runbook, reaches a serving instance.",
+          "text": "And the script can fail. Dated baseline (2026-08-07): no root .env.example, no SELF-HOST runbook, no TLS story, no CI job has ever built api/Dockerfile, and the compose file carries two silent booby-traps that boot clean and fail later."
+        },
+        {
+          "label": "first decision",
+          "lead": "D1 is the epic's own gate story — because no blocking gate covers its files.",
+          "text": "Root compose, docs/**, and deploy.sh sit in NO auto-deploy trigger set and NO required check's path population (honest-gates D18: paths-filtered workflows are structurally unrequirable). The charter's first decision builds its own gate: the CI compose smoke (S6) plus a recorded clean-VM proof re-run per wave. Until it exists, E3's proofs are a discipline, not a gate — and the charter says so honestly."
+        },
+        {
+          "label": "slices",
+          "lead": "Seven slices, dependency-honest: fix the traps before documenting around them.",
+          "text": "S1 compose correctness — delete the SECRET_KEY_BASE pseudo-default (hard-require it like the other secrets), widen the 10-of-~105 env allowlist with a grep-proof DoD (absorbing pdf-bl-limit-env-passthrough by name, fixing the cloud compose's LIMIT_* gap in the same slice), add the api healthcheck. S2 tiered root .env.example with secret-gen commands verbatim from deploy.sh, including the KEK exactly-32-bytes trap. S3 TLS — extract deploy.sh's inline Caddyfile as deploy/caddy/Caddyfile.example (host Caddy leads the runbook), one nginx block, and an opt-in --profile tls sidecar with a static ipam IP (satisfying the individual-IPs-only trusted-proxies doctrine without a carve-out). S4 the SELF-HOST runbook — first boot, admin-token capture from docker logs, verify chain, upgrade (incl. the PG major-version volume trap), backup/restore, symptom table; the docker sentences exist nowhere and are authored fresh. S5 Postgres policy — floor 15 warn-probe beside check_pg_trgm, recommended install 17, SETUP.md reconciled, deploy.sh pinned via PGDG. S6 CI compose smoke — the Dockerfile's first-ever gate. S7 executed upgrade + restore drills on a clean VM from only the runbook."
+        },
+        {
+          "label": "decided",
+          "lead": "Shared-box policy is decided: dedicated database, never schema prefix.",
+          "text": "183 migrations, zero Ecto :prefix support, auto-migrate on every container boot. All three extensions are trusted contrib — a plain db owner suffices on PG13+. Prebuilt image DEFERRED: Coolify and Dokploy build from source natively; only remote Portainer needs one, and CI must gate the build before anything publishes it. Laws kept: stock Postgres, 2-process minimum, a third process in the minimum install requires an ADR — the TLS sidecar therefore ships as an opt-in profile beside the minimum, never inside it."
+        },
+        {
+          "label": "sizing",
+          "lead": "2–3 waves × 3–5 slices; zero auto-deploy exposure.",
+          "text": "Scope creep is the named risk: the shared-box persona items (schema prefix, vendor-domain extraction from check_origin/CORS) would swell E3 from ~3 to ~5 waves — the charter takes or refuses them by number in D2, never drifts into them. Not this epic: guerrilla box sizing (deploy-reliability), the spawned-site pipeline (site-spawner), push-to-deploy artifacts (dwb — parked, cite only), Studio/console surfaces (cch)."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "id": "hhc-e3-code",
+      "lang": "yaml",
+      "type": "code",
+      "value": "# docker-compose.yml:23 — the broken pseudo-default E3-S1 deletes\n- SECRET_KEY_BASE=${SECRET_KEY_BASE:-$(openssl rand -base64 48)}\n\n# compose-spec interpolation grammar: only $NAME / ${...} are interpolated;\n# anything else is \"preserved without attempt to interpolate a value\".\n# => unset var yields the LITERAL 26-byte string \"$(openssl rand -base64 48)\".\n# runtime.exs:737-740 checks presence only, so the app BOOTS FINE —\n# then Plug's 64-byte floor (deps/plug session/cookie.ex:183-184) raises on the\n# first session/CSRF/LiveView token derive: boots clean, 500s the first user."
+    },
+    {
+      "children": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ cp .env.example .env && $EDITOR .env   # 4 secrets, generated per file comments"
+            }
+          ],
+          "id": "hhc-e3-t1",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ docker compose up -d && docker compose logs api | grep bp_admin_"
+            }
+          ],
+          "id": "hhc-e3-t2",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "$ curl -s localhost:4000/api/schemas | head -1   # 200 JSON"
+            }
+          ],
+          "id": "hhc-e3-t3",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "→ pass = a stranger reaches a working, token-held instance from the runbook alone"
+            }
+          ],
+          "id": "hhc-e3-t4",
+          "type": "paragraph"
+        }
+      ],
+      "footer": "clean VM · runbook only · no author present — run per wave, not once",
+      "id": "hhc-e3-terminal",
+      "title": "acceptance · the cold-start proof",
+      "type": "terminal"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-fc",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h3-filed",
+      "level": 3,
+      "text": "Filed, not built",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The interview mandated: defer CJK, plan the seam. The seam exists and is engine-neutral by construction: Barkpark.Search.Retriever is the behaviour (retriever.ex:3), Retrievers.resolve/1 reads the surface config's engine field and falls back to Postgres on ANY misconfiguration — a misconfigured engine never takes a surface dark (retrievers.ex:31-35). Indx is the one registered precedent: the entire integration surface of an engine is ONE module implementing the behaviour plus ONE :search_retrievers registry line (config.exs:236) plus per-surface opt-in. Rival worth pricing in that epic's survey: a no-engine 'simple'-config shadow tsvector with app-side tokenization — cheaper, weaker. Placement is constrained by ADR 0004: search is a content capability, so the engine lands OSS-core-first. Prior art: zero rows anywhere in the ledger — the filing is the first of its kind."
+        }
+      ],
+      "id": "hhc-cjk",
+      "title": "Candidate — CJK-capable search engine behind the retriever seam",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "hhc-filed-list",
+      "items": [
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Follow-on candidates the charters name but do not take: "
+          },
+          {
+            "type": "text",
+            "value": "a spawned-site robots 'private' template toggle; the published ghcr image + arch matrix (prerequisite: S6's CI build gate); a YunoHost package (native manifest packaging, no compose pathway); public papers becoming shared-cacheable (after E1's 304 path and E2's metering both land)."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Filed into OTHER epics, not ours: "
+          },
+          {
+            "type": "text",
+            "value": "the finder graph-truncation lie (finder_live.ex:197-234, search-template D67 territory) gets a follow-up task under that epic; the web-demo webhook-verifier dogfood kill (hand-rolled HMAC + race-prone Set dedup instead of the SDK's createWebhookHandler) rides E3 as its one dogfood slice."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-gt1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-gt2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-ground",
+      "level": 2,
+      "text": "Ground truth — how the system works today",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The consolidated mechanics map, deduplicated across all five lanes. Every file:line was verified byte-identical on origin/main; 'live' means proven by curl against guerrilla.barkpark.cloud during the run. This is the map a charter-cutter and a wave-1 surveyor both start from."
+        }
+      ],
+      "id": "hhc-ground-p1",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h3-ground-edge",
+      "level": 3,
+      "text": "The HTTP edge",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "mechanism"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "anchor"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "proof"
+          }
+        ]
+      ],
+      "id": "hhc-ground-edge",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Safe default: every response starts 'max-age=0, private, must-revalidate'"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "deps/plug conn.ex:241"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live on /api/schemas, /login, both readers, all JSON"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "The ONE unsafe override: the media local-file branch stamps public-immutable AFTER the Access.allowed? gate; it does honor If-None-Match"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "media_controller.ex:97-100, :141-143 · urls.ex:11, :53-65"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live: anonymous 200 + immutable on an original AND a rendition"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Gating classes visibility public|token|private + watermark live on a linked mediaAsset doc; visibility(nil) = 'public'"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "media/storage/access.ex:13-37"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "guerrilla: 0 mediaAsset docs → gating structurally inert there"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Renditions NEVER ride the blobstore — local disk on every deployment class; only originals can 302 to a presigned blob URL (that branch is correct: private, max-age=0)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "blobstore.ex moduledoc · media_controller.ex:199-203"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the highest-traffic media class is unconditionally on the defect branch"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Rendition URL carries no watermark key; the disk cache path does (.wm-{profile}); the cache is existence-gated and never invalidated short of full file delete"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "renditions.ex:40-42, :54, :88-96"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the byte-swap-under-stable-URL mechanism"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "put_blob: path-shape allowlist only, no exists-check; the local backend File.write truncates and overwrites"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "media.ex:572-598 · blobstore/local.ex:90-99"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "immutable can never be earned by these write paths as-is"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Paper-reader plug: emits sha256 ETag + revision header, never reads If-None-Match; matches the scoped path only; costs a redundant Repo.one + an uncached sha256 per request"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "paper_revision_headers.ex:13-42 · mounted router.ex:433"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live: exact INM replay → 200 + 200,809 B; flat route: no ETag at all"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Query ETag honored but representation-blind: id:rev inputs vs a body varying by caller_context and ?fields="
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "query_controller.ex:391,398 vs :522-529"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live: real 304 on anonymous replay"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Capabilities: tier-keyed ETag, honors If-None-Match incl. wildcard; no Vary, no explicit Cache-Control"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "capabilities_controller.ex:64-86"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live: real 304"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Statics: one bare Plug.Static, no headers option → bare 'public' → heuristic caching → stale Studio shell after deploys; no phx.digest anywhere in api"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "endpoint.ex:56-61 · barkpark_web.ex:7"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live: /assets/*.js and /fonts/*.woff2 both bare 'public'"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Cloud's proven counter-doctrine: fonts immutable + shell no-cache+etag, gzip siblings built in the Dockerfile, pinned by exact-string tests"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "cloud/.../web/router.ex:326-421 · cloud/Dockerfile:82 · router_test.exs:1999-2016"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "live: barkpark.cloud/app.js → no-cache (the fixed stale-console bug)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Caddy passes origin headers through (adds only vary: accept-encoding + alt-svc) — the app IS the entire edge policy; the only Vary ever emitted is 'Origin' (CORS)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "deploy/caddy/ · dataset_cors.ex:125,134"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "confirmed in live header captures"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "hhc-h3-ground-meter",
+      "level": 3,
+      "text": "Metering machinery and the packaging path",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "mechanism"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "anchor"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "the constraint it imposes"
+          }
+        ]
+      ],
+      "id": "hhc-ground-meter",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "RateLimit plug rides 13 pipelines (read 300/min, write 60/min, token-hash-or-IP keyed); the anonymous-reachable pipelines carry none: :browser, :public_root, :sso_browser, :api_unlimited (exempt by design)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "plugs/rate_limit.ex:33-95 · router.ex pipelines"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Gate A is an addition, not a modification; the 429 is JSON-only today"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "The client_ip trust walk (Caddy loopback) is Conn-shaped and solved once, marked @canonical"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "rate_limiter.ex:96-182, marker :115"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Gate B extracts a connect_info-shaped variant; never solve the trust walk twice"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "The /live socket declares connect_info: [session] ONLY — a LiveView cannot see the client IP at all"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "endpoint.ex:16-17"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Gate B's hard prerequisite: add :peer_data + :x_headers"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": ":public_root emits live_sessions with NO on_mount — one macro change attaches a hook to every public plugin LiveView at once"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "router/plugins.ex:44-51, 218-225"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the single-point attach for Gate B; that breadth is also the risk"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Quiz rooms have exactly one starter (Room.ensure/1); global cap 10,000 children; play/channel joins can never spawn"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "room.ex:99-111 · quiz.ex:55-68"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one choke point for the per-IP spawn budget"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "RequestStats: global 60s in-memory window, resets on restart; handler fires on [:phoenix, :endpoint, :stop] with the conn in scope and discarded; metrics route token-gated, zero consumers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "request_stats.ex:83-137 · router.ex:1605-1615"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Layer 0 extends this — no new process needed"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Reader invalidation signal already exists: BulldocsLive subscribes to Content.paper_topic PubSub"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bulldocs_live.ex:124-131"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the render cache's eviction is free — but must be mutation-tested"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Compose: build ./api, 10-key env allowlist of ~105 reads, ${VAR:?} on 4 secrets, db healthcheck present, api healthcheck absent"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "docker-compose.yml:18-40"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the allowlist gap makes PHX_SCHEME, BARKPARK_TRUSTED_PROXIES, SMTP_* silent no-ops"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "entrypoint.sh: migrate → seed → start on EVERY container boot; 183 migrations; the one-shot bp_admin_ token prints only to docker logs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "api/entrypoint.sh · seeds/clean.ex:99-150"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "auto-migrate IS the upgrade mechanism — and the concurrent-replica hazard the runbook must pin"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Postgres truth: compose 17-alpine · cloud compose 15-alpine · all four CI workflows 15 · SETUP.md '14+/tested 17.9' · deploy.sh unpinned apt (distro default 14/15/16/17) · no boot assertion; the only DB probe is check_pg_trgm, warn-and-continue"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "docker-compose.yml:3 · cloud/docker-compose.yml:97 · elixir.yml:269 · SETUP.md:15 · deploy.sh:65 · application.ex:332-357"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "six sources, no two agreeing — E3-S5 stamps one floor and adds the probe"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Auto-deploy triggers: api/**, internal/**, connectors/** → guerrilla; cloud/**, internal/**, cmd/** → control plane; root compose and docs/** in NEITHER; main's required checks are exactly four"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "deploy/README.md · gh api branches/main/protection (L1)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1/E2 slices are LIVE on merge; E3 must build its own gate"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "The engine seam for the CJK candidate: behaviour + registry + per-surface opt-in + guaranteed Postgres fallback"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "retriever.ex:3 · retrievers.ex:31-35 · config.exs:236"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one module + one line + one config field — the whole integration surface"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-f1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-f2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-files",
+      "level": 2,
+      "text": "Files likely to change — the consolidated picture",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Merged across all five lanes and deduplicated. CLEAN means the file-granular collision census (25 open PRs, the task board, 10 charter fences) found no owner. Two files are genuinely contested; everything else is free ground."
+        }
+      ],
+      "id": "hhc-files-p1",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "path"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "epic"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "why it changes"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "blast radius / status"
+          }
+        ]
+      ],
+      "id": "hhc-files-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/plugs/paper_revision_headers.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1, then E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "honor If-None-Match → 304 with a released_revision_id validator; cover the flat route; later E2's telemetry emit"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "every public paper view; CLEAN — the ONE file both epics touch, resolved by the ordering rule; the program's safest first code change"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark/media/delivery/urls.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "visibility-aware cache-header selection replaces the unconditional @immutable_cache"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all media serving; the one pinned test (media_delivery_test.exs:100,136) must co-change; HUMAN-GATED slice"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/controllers/media_controller.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "thread visibility/watermark class into serve/2 and serve_rendition/2; the 302 branch untouched"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "media read path; felix-pristine excludes it from its fence — no collision"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark/media/renditions.ex (+ media.ex put_blob)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1 phase 2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "watermark profile into URL/cache key (content-addressing that re-earns immutable honestly)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "rendition URLs embedded in published HTML — link-rot risk; deliberately sequenced after the header cap"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/endpoint.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1 + E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "two-plug static split (cloud port) · :peer_data/:x_headers in /live connect_info"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "disjoint regions ~30 lines apart; outside every fence; connect_info growth needs a no-assumption sweep"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/controllers/query_controller.ex + capabilities_controller.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "representation-fix the query ETag (omit when token/projection present); Vary: Authorization"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "documented envelope contract (docs/api-v1.md co-changes); coordinate the capabilities edit with ctx-b2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/request_stats.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "widen the ETS key with route class + authed?; group compute/4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "low, additive; dr has an untested-behaviours task nearby — cite it"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/plugs/rate_limit.ex + api/lib/barkpark/rate_limiter.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": ":browser class + content-negotiated 429 · connect_info-shaped client_ip variant"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CLEAN; 13 pipelines mount the plug — the class addition must not disturb existing keys"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/router.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E2 (sequenced LAST)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one plug line into the :browser-family pipeline bodies"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CONTESTED: open PR #9530; ssw10 residue (its PR #7870 merged 2026-07-30, task open 7/9, ssw11 unresolved); dr D17 gates the adjacent region — merge order is the whole game"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/plugs/public_read.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "none"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT touched — routed around by design"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "HUMAN-GATED (ssw D106 / dr D17); any future edit inherits the named-reviewer gate"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/router/plugins.ex + a new live/hooks module"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "attach the on_mount + handle_event hook at the :public_root live_session emission"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one macro line covers papers/sheets/quiz at once — the breadth is the risk; heaviest test burden in E2"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark_web/live/bulldocs_live.ex + finder_live.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "render cache + reverse_referencers dedupe · finder graph TTL/single-flight cache + :finder hook"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "INSIDE cch's fence (zero cch hits in 49 waves) — rides a numbered carve-out; product-visible if a TTL is wrong"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark/quiz/room.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "per-IP spawn budget in ensure/1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "low; the refusal needs a humane host-side message"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/priv/static/robots.txt + cloud/priv/static/robots.txt (new)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "real crawl policy · console Disallow-all"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CLEAN / one-file cch coordination; instantly live via auto-deploy; smoke-asserted byte-for-byte"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "docker-compose.yml + .env.example (new) + cloud/docker-compose.yml"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "S1 trap fixes + tls profile + healthcheck · S2 tiered example · the LIMIT_* passthrough gap"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "no open PR touches any compose file; absorbs pdf-bl-limit-env-passthrough by name"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "deploy/caddy/Caddyfile.example (new) + docs/setup/SELF-HOST.md (new) + SETUP.md + GO-LIVE.md"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "S3 TLS story · S4 runbook · PG floor reconcile + cross-links"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "doc contract applies (7-card cap — rides human-tier like GO-LIVE.md); SETUP.md's collision status was never independently swept — verify at wave 1"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "api/lib/barkpark/application.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Postgres floor warn-probe beside check_pg_trgm"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "every install route incl. our prod; warn-only by design (see judgment calls)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "deploy.sh + .github/workflows/ (new compose smoke)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "E3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "S5 PGDG pin · S6 the Dockerfile's first-ever gate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "deploy.sh is ACTIVE PDS territory (waves 48-49, go:embed banner) — read PDS wave notes before editing"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": ".claude/workflows/bp-{http-edge-truth,anonymous-metering,self-host-blessing}-charter.md (new)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "all"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "three charters in the measured house anatomy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NEW files by law — every live wave PR already collides in the shared ledger files"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-o1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-o2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-own",
+      "level": 2,
+      "text": "Absorb, cite, defer — the ownership rulings",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The absorption map's verdict, ratified: five of the SWOT's seven mandates are provably unowned at file granularity — exhaustive per-vocabulary ledger sweeps (cache-control, etag 304, vary, robots.txt, rate limit reader, docker self-host, postgres version, webhook verifier, CJK tokenizer, phx.digest) returned the SWOT itself and noise. The exceptions are known by name:"
+        }
+      ],
+      "id": "hhc-own-p1",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "item"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "state"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "ruling"
+          }
+        ]
+      ],
+      "id": "hhc-own-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "bpb-step7-content-edge-cache (bp-cloud-build epic)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "open · unclaimed · near-exact scope match, deferred by its own epic"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "ABSORB into E1"
+            },
+            {
+              "type": "text",
+              "value": " — close it into the new epic by name; never re-derive. (Absorbing rewrites another epic's plan — the etiquette ruling is the crown's: absorb-and-close with a pointer beats a dangling deferred row.)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ctx-b2-server-view-brief"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "open · unclaimed · owns the RFC 9110 ETag/Vary fix for /v1/capabilities"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "CITE as sibling"
+            },
+            {
+              "type": "text",
+              "value": " — same mechanism, different surface; E1 coordinates the one shared controller edit rather than duplicating it."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "pdf-bl-limit-env-passthrough (personal-dev-fleet)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "open · unclaimed · LIMIT_* env keys silently dropped by the cloud compose passthrough"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "ABSORB into E3-S1"
+            },
+            {
+              "type": "text",
+              "value": " — the same defect class as the root compose's allowlist gap; one slice fixes both files and closes the task by name."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ssw10-public-read-clamp + ssw11 (site-spawner)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task open 7/9 · its PR #7870 MERGED 2026-07-30 · human-gate precedent survives"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "DEFER + sequence"
+            },
+            {
+              "type": "text",
+              "value": " — E1/E2 fence router.ex's public-read region out entirely; E2's pipeline edit rebases after the residue settles."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "deploy-reliability (task-fb4fb869490b4213)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LIVE at wave 17-18 · 310 open children · swap-thrash filed (task-cbde37238506ed7c) · memory levers owned (dr-bl-* rows)"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "INHERIT"
+            },
+            {
+              "type": "text",
+              "value": " — every charter carries a 'Not this epic' line; E2 cites dr D3 (pinned-window law) verbatim. This program files NOTHING here."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "dwb — Deploy-with-Barkpark"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "epic open but self-declared PARKED (2026-07-11)"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "CITE only"
+            },
+            {
+              "type": "text",
+              "value": " — no scope contact; using its push-to-deploy lane requires re-activation, never a competing fix."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "cloud-console-hardening (cch)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LIVE at wave 49+ · fence: cloud/ + api/lib/barkpark_web/live/"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "COORDINATE"
+            },
+            {
+              "type": "text",
+              "value": " — E2's two LiveView files ride a numbered carve-out in cch's own style; the cloud robots.txt add is a one-file coordination. api's router/plugs/endpoint are outside the fence by cch's own D357."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "PDS"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ACTIVE on deploy.sh (waves 48-49)"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "READ FIRST"
+            },
+            {
+              "type": "text",
+              "value": " — E3's PGDG pin edits deploy.sh only after reading the PDS wave notes."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Everything else: robots.txt, PG version pin, root .env.example, phx.digest, webhook verifier, CJK"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NONE found anywhere"
+            }
+          ],
+          [
+            {
+              "marks": [
+                {
+                  "type": "bold"
+                }
+              ],
+              "type": "text",
+              "value": "CLEAN GROUND"
+            },
+            {
+              "type": "text",
+              "value": " — the charters claim these without collision."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Three rules bind every new charter. (1) NEVER add alert or email producers — dr D14 is fleet law and wave 18's D321 reaffirms it; the new epics emit headers and refusals, and any operator-notification consequence routes into deploy-reliability's existing rails. (2) Every new operator-facing signal must name its audience explicitly — PLATFORM_ADMIN_EMAILS is unset on prod (wave 18's founding finding), so a signal addressed to the default population is addressed to nobody. (3) New charters live in NEW files from day one — every live wave PR already collides in the shared charter-ledger files, and the union-merge recipe does not need three more tenants."
+        }
+      ],
+      "id": "hhc-interface-law",
+      "title": "Interface law with the live fleet",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-c1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-c2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-contra",
+      "level": 2,
+      "text": "Contradictions and resolutions",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Where lanes disagreed on a shared fact or ruling, the crown resolves it here — or says openly that it stays open. Each resolution names its evidence level; the highest level wins (a live gh/curl check beats a carried note)."
+        }
+      ],
+      "id": "hhc-contra-p1",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "disagreement"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "who said what"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "resolution"
+          }
+        ]
+      ],
+      "id": "hhc-contra-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Two charters or three?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "absorption-map: TWO (edge+metering fused as Charter A). http-edge, meter-free-lunch, charter-architecture: THREE (Shape B, one ordering rule)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "THREE. The fence evidence the absorption map leaned on (shared router/plug files) was priced by the overlap probe at one 45-line plug clause + two pipeline bodies — additive and trivially sequenced. Opposite risk profiles, opposite proof styles, and the interview's 'separately assignable' wish decide it. Shape A stays recorded as the fallback; the seeds concatenate cleanly."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "cch etiquette for bulldocs_live.ex / finder_live.ex"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "absorption-map: 'coordination note, not a carve-out.' meter-free-lunch: 'request a numbered carve-out in cch's own style.'"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CARVE-OUT. cch's charter law makes every fence widening a numbered, subject-scoped, not-to-be-widened dispensation — matching its own idiom costs one sentence and removes all ambiguity. The zero-hits-in-49-waves fact makes it a formality either way."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "ssw10's actual state"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "http-edge + meter lanes carried 'PR #7870 pushed, human-gate-blocked.' absorption-map verified via gh: MERGED 2026-07-30."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "MERGED (L1 beats carried notes). The gate survives as inherited precedent, not a pending collision — but the sequencing rule stands regardless, because PR #9530 and ssw11's reindex fallout still touch router.ex."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "The Postgres floor number"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "selfhost-packaging: floor 15 — 'the only version CI has ever tested; claiming 17 would be a number without a meter.' charter-architecture: '17 — the only number two artifacts already share', left open."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FLOOR 15, RECOMMEND 17 — the packaging lane's argument wins on the fleet's own doctrine (a floor must equal what a meter actually tests; distrust vacuous green). Ship 17 in compose as the recommended install; bump CI to 17 in a follow-on BEFORE the floor ever rises. Warn-vs-refuse teeth stay a user call."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "How bad is the media defect today?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SWOT: 'a real data-leak class, live.' Lanes: headers live, but guerrilla has zero mediaAsset docs — gating structurally inert there."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "BOTH, at different layers — and the charter language must keep the distinction: the MECHANISM is live on prod (proven by anonymous curls), the realized harm today is stale-cache lock-in, and the confidentiality leak is latent-for-self-hosters. Severity flipped, urgency did not: 2.5 months of immutable stamps are already un-recallable."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "What may be quoted forward from the SWOT"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SWOT: 'no Cache-Control on public JSON', 'one ETag that never 304s.' All lanes: both overstate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The corrected defect model (above) REPLACES the SWOT bullets. The SWOT remains the program's strategic frame — its mandates M1-M7 all survived — but its defect sentences are superseded by the census."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Is media metered?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SWOT/interview framing: 'unmetered public reader' including media. All lanes post-census: /media rides :api's 300/min bucket."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "METERED. The genuinely unmetered doors are the browser-class ones (:browser, :public_root, :sso_browser). E2 aims at those; media's remaining defect is cache-correctness and belongs to E1."
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-p1x",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-p2x",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-proof",
+      "level": 2,
+      "text": "Proof obligations — every done-claim can fail",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The builders inherit this table with the charters. House laws bind every row: distrust vacuous green, make the check able to fail, mutate don't read, measure on a quiet host."
+        }
+      ],
+      "id": "hhc-proof-p1",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "epic"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "mandate"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "proof"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "how it must be able to fail"
+          }
+        ]
+      ],
+      "id": "hhc-proof-table",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "E1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "reader honors If-None-Match"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "curl transcript: GET /papers/:slug with the stored ETag → 304, empty body"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mutation: publish a new revision → the SAME conditional request must flip to 200 with a new ETag"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "gated media never publicly cacheable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "repro script: seed a mediaAsset with bp_visibility=private on a test instance; anonymous curl the file — pre-fix observes public-immutable, post-fix observes deny or no-store"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the repro FAILING after the fix is the proof; a repro that never succeeded proves nothing (guerrilla cannot host it — zero gated docs — so it runs on a seeded instance)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tier-keyed ETags carry Vary: Authorization"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "two tokens of different tiers → distinct ETags AND the Vary header in both responses"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mutation: strip the header in a branch build → the cache-poison repro must succeed again"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E1"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "rendition URLs are content-honest"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "edit rights.watermarkProfile → the rendition URL CHANGES (or max-age is provably capped); the old URL never serves new bytes"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the pre-fix behavior (same URL, new bytes) is the failing baseline, captured as a transcript before the fix merges"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the instrument measures anonymous reader traffic"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "per-route-class anon/authed counters move under a scripted probe of N anonymous hits"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mutation: N authed hits must NOT move the anon counter; an unmapped route class must still reconcile in the total (nil-not-zero)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the limiter bounds the reader"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "429 transcript with Retry-After from a scripted burst, plus the instrument showing the burst; the websocket client shows a throttled connected mount AND a throttled handle_event — what no plug can see"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "counter-proof: raise the budget env → the same burst passes; kill switch → provably off; the log-only window must show would-be-429s in logs while serving 200s"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the quiz spawn budget holds"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the N+1th room for one IP refused while a second IP still succeeds"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "raise the per-IP budget → the refusal disappears"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "boot refuses bad secrets"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "compose up with SECRET_KEY_BASE unset → container exits nonzero naming the variable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mutation: a 64+-byte secret must boot; the check must cite LENGTH, not presence — the current presence-check is the vacuous-green baseline"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "one Postgres floor"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "boot against a below-floor Postgres → legible refusal or the charter-decided loud warning; a grep proves every version source states the same major"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "floor-1 container fails, floor container passes; the six-source grep re-runs in CI so future drift REDDENS"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "E3"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the runbook stands alone"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "scripted clean-VM cold start executing ONLY runbook commands, asserting /api/schemas + a served paper"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "delete a runbook step → the script must fail; run per wave, not once"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-r1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-r2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-risk",
+      "level": 2,
+      "text": "Risks, unknowns, and the judgment calls",
+      "type": "heading"
+    },
+    {
+      "id": "hhc-risk-notes",
+      "items": [
+        {
+          "label": "one-way doors",
+          "lead": "Merged means live, and cached means gone.",
+          "text": "Every api/** merge auto-deploys guerrilla; a long-lived header, once absorbed by strangers' caches, cannot be recalled. Structural mitigation: cache-policy slices human-gated with a named reviewer (dr D17 precedent), post-merge L1 curl transcripts, conservative max-ages until the immutability contract is made true. The sole irreversible residue: gated-capable bytes shipped public-immutable since 2026-05-25 — realized exposure priced at ~nil on guerrilla (zero gated docs), but 'probably nil' is an inference from queries, not an env read, and spawned instances were not sampled. Disclose; cannot recall."
+        },
+        {
+          "label": "router.ex",
+          "lead": "The most contended file in the program.",
+          "text": "Open PR #9530, ssw10's residue (task open 7/9, ssw11 unresolved), dr D17 gating the adjacent admission path. E2's one-line pipeline edits are sequenced dead last and rebase onto whatever lands — rebase cost, not semantic duplication. Entering unaware repeats the exact mistake the absorption lane exists to prevent."
+        },
+        {
+          "label": "ungated E3",
+          "lead": "E3's files can regress silently.",
+          "text": "No required check's population covers root compose, docs, or deploy.sh — and honest-gates D18 proves paths-filtered workflows are structurally unrequirable. Until S6's smoke exists, E3's proofs are per-wave re-runs of the cold-start script: a discipline, not a gate. The charter must say so honestly, and the allowlist sweep needs a repeatable check or S1's fix has a half-life (~105 env reads today and growing)."
+        },
+        {
+          "label": "limiter timing",
+          "lead": "Log-only delays the protection the SWOT calls an incident vector.",
+          "text": "AI-era crawlers on an unmetered reader over a box with a swap-thrash 500 history is a plausible outage — but the measured incident history is build memory pressure, not anonymous traffic, so the limiter defends a projected threat. The layer ordering is the hedge: absorption cuts today's observed cost first; shadow data then either justifies enforcement or quietly doesn't. The window length is the user's risk-tolerance call."
+        },
+        {
+          "label": "test debt",
+          "lead": "Almost nothing at the edge is pinned today.",
+          "text": "Two load-bearing header pins exist in the whole codebase (media immutable; cloud's two-plug doctrine). 9 of 11 override sites, all Vary behavior, and the statics policy are free-floating — regressions are currently invisible. Every E1 fix ships with mutation-proof pins; the suite is a deliverable, not a nicety."
+        },
+        {
+          "label": "demoted facts",
+          "lead": "A few externals ride DEMOTED-NO-RERUN provenance.",
+          "text": "Cloudflare/Fastly override behavior (search-synthesized — pin with direct fetches before the doctrine cites them), per-distro apt Postgres defaults, and the verbatim pgdata-mismatch FATAL. Each is re-derived by the epic that needs it (E1's doctrine appendix; E3's S7 drills). The CloudFront override, by contrast, is verbatim from AWS docs."
+        }
+      ],
+      "type": "notes"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "Left explicitly to the user"
+        },
+        {
+          "type": "text",
+          "value": " — the calls evidence cannot make, consolidated and deduplicated from all five lanes:"
+        }
+      ],
+      "id": "hhc-calls-p1",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-calls-list",
+      "items": [
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Ratify the shape: "
+          },
+          {
+            "type": "text",
+            "value": "three epics (recommended) vs the fused fallback. Everything below survives either answer."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Token-visibility media policy: "
+          },
+          {
+            "type": "text",
+            "value": "'private, max-age ≤ signature TTL' (keeps browser caching inside the grant window) vs 'no-store' (strictest — for the blessed self-host path where an unknown CDN may sit in front). Taste and threat model, not evidence."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Query ETag repair: "
+          },
+          {
+            "type": "text",
+            "value": "omit-when-scoped (recommended, simple) vs fold-principal-and-projection (correct per-principal validators, more machinery). Either edits the documented envelope contract in docs/api-v1.md."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "AI-crawler stance for robots.txt: "
+          },
+          {
+            "type": "text",
+            "value": "block-all-AI, allow-search-block-training, or allow-all-with-sitemap — three ready templates; pure taste; enforcement is the limiter's job either way."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Limiter budgets and the log-only window: "
+          },
+          {
+            "type": "text",
+            "value": "the default numbers are proposable, not derivable — and the promotion threshold from shadow to enforcing needs a named reader of the shadow counters."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Does /finder stay fully anonymous? "
+          },
+          {
+            "type": "text",
+            "value": "It is the flagship demo moment AND the single most expensive anonymous action. Click-to-load for anonymous visitors trades marketing for economics."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Postgres floor teeth: "
+          },
+          {
+            "type": "text",
+            "value": "warn-only (recommended start) vs refuse-to-boot below 15 — hard refusal would brick existing deploy.sh installs on Ubuntu 22.04's default 14."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "E3 scope: "
+          },
+          {
+            "type": "text",
+            "value": "take the shared-box persona items (vendor-domain extraction from check_origin/CORS — D4 — and any schema-prefix ambition) into E3 at ~5 waves, or refuse them by number at ~3 waves? Recommendation: refuse by number; file D4 as its own decision."
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Disclosure loudness: "
+          },
+          {
+            "type": "text",
+            "value": "the 2.5-month immutable exposure window — an epic-note (recommended, given the ~nil realized exposure) or a user-facing disclosure?"
+          }
+        ],
+        [
+          {
+            "marks": [
+              {
+                "type": "bold"
+              }
+            ],
+            "type": "text",
+            "value": "Where the CJK seam documentation lives: "
+          },
+          {
+            "type": "text",
+            "value": "a standalone Paper linked from the candidate task (recommended — keeps charters lean) or a section in E2's charter."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-rec1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-rec2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-reco",
+      "level": 2,
+      "text": "The recommendation and the first wave",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "bold"
+            }
+          ],
+          "type": "text",
+          "value": "GO — as three charters, in the house anatomy, in new files."
+        },
+        {
+          "type": "text",
+          "value": " The program is real: four live-proven defect classes on prod, a genuinely unmeasured anonymous surface, and a booby-trapped install path the interview already decided to bless. It is also unusually well-de-risked for a go: every fix moves in the safe direction, every contested file has a named sequencing rule, every absorbed task is named, and the two one-way doors (long-lived headers, false-positive 429s) both have structural guards (human gates; shadow mode). The coordination tax of three concurrent epics is the price of separately assignable work, and the DAG keeps them out of each other's way."
+        }
+      ],
+      "id": "hhc-reco-p1",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-reco-steps",
+      "steps": [
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "bp-http-edge-truth-charter.md, bp-anonymous-metering-charter.md, bp-self-host-blessing-charter.md — new files, house anatomy (epic task header, memory preamble, falsifiable vision + dated baseline, numbered decisions with measured Whys, fences with numbered widenings, roadmap table, 'Not this epic' lines, wave-log stub). The seeds in this paper and the lane papers carry everything the charters need."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Cut the three charters from the seeds."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Only #1 (shape) and #5 (limiter posture) block charter-cutting; the rest can be decided per-wave. Every recommendation above is marked."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Answer the ten judgment calls — or accept the recommendations inline."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "E2-w1: the RequestStats instrument (the program's first merge — everything later is scored on it) plus robots.txt and the reader query-shape dedupe: all reversible, all provable. E1-w1: the reader 304 fix in paper_revision_headers.ex (the program's safest code change — a CLEAN 45-line plug) and the media header cap, human-gated. E3-w1: S1 compose correctness + S2 .env.example, in parallel from day 1."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "First merges, in DAG order."
+        },
+        {
+          "blocks": [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "task-21cd02088dd2f762 sits in considering; stage it to open when the charters exist, then run each epic through bp-epic-cycle waves per the epics-always-via-epic-cycles rule."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "title": "Then promote the candidate task and launch epic cycles."
+        }
+      ],
+      "type": "steps"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The epic-candidate task is filed and published: task-21cd02088dd2f762 — 'Hobby-scale hardening program — three epics (http-edge-truth, anonymous-metering, self-host-blessing)', lifecycle considering, pointing at this paper and all five lanes. Per the task-funnel doctrine, open means ready — it stays in considering until the user ratifies the shape."
+        }
+      ],
+      "id": "hhc-funnel",
+      "title": "Funnel state",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-st1",
+      "type": "paragraph"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-st2",
+      "type": "paragraph"
+    },
+    {
+      "id": "hhc-h2-stack",
+      "level": 2,
+      "text": "The paper stack — where to descend",
+      "type": "heading"
+    },
+    {
+      "id": "hhc-stack-cards",
+      "items": [
+        {
+          "text": "Lane 1 — the route-class census, the five-rule header doctrine, the corrected defect model, RFC 9111/CDN evidence, and the E1 fix plan with the collision map. Descend for: the full route matrix, the live curl transcripts, the phx.digest-vs-port costing, and the CDN vendor table.",
+          "title": "hobby-hardening-http-edge",
+          "tone": "ok"
+        },
+        {
+          "text": "Lane 2 — the four-layer metering design priced against the code and the live box. Descend for: the per-surface anonymous cost table, the robots templates, the Gate A/Gate B mechanics with every prerequisite, and the acceptance proofs.",
+          "title": "hobby-hardening-meter-free-lunch",
+          "tone": "ok"
+        },
+        {
+          "text": "Lane 3 — the complete compose-blessing specification. Descend for: the env census (10 of ~105), the D1-D5 decision matrices, the platform verdicts (Coolify/Dokploy/Portainer/YunoHost), the runbook reuse map, and the S1-S7 slice details.",
+          "title": "hobby-hardening-selfhost-packaging",
+          "tone": "ok"
+        },
+        {
+          "text": "Lane 4 — the ownership map: every mandate checked against live epics, open tasks, open PRs, and charter fences. Descend for: the full fence quotes, the mandate-by-mandate ownership table, the cloud static doctrine verbatim, and the CJK seam mechanics.",
+          "title": "hobby-hardening-absorption-map",
+          "tone": "ok"
+        },
+        {
+          "text": "Lane 5 — the rival program shapes argued to a verdict, the dependency DAG, the three charter seeds in the house anatomy, and the proof-obligation table. Descend for: the shape argument in full and the charter-form specification.",
+          "title": "hobby-hardening-charter-architecture",
+          "tone": "ok"
+        },
+        {
+          "text": "The strategic frame that started the program: kopper's essay tested claim-by-claim against the repo, the SWOT itself, and the seven mandates. Its defect sentences are superseded by the corrected model above; its strategy stands.",
+          "title": "barkpark-hobby-scale-swot",
+          "tone": "info"
+        }
+      ],
+      "type": "cards"
+    },
+    {
+      "content": [],
+      "id": "hhc-gap-close",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Six published papers (this crown + five lanes), one epic-candidate task in considering, zero repo changes, and a program the user can assign tomorrow: three charters whose every mandate carries an anchor, an owner ruling, an ordering edge, and a proof designed to fail. The wish was the ultimate plan before assigning the epics. This is that plan — the next move is a go."
+        }
+      ],
+      "id": "hhc-closing",
+      "title": "What this run leaves behind",
+      "tone": "success",
+      "type": "callout"
+    }
+  ],
+  "source_rev": "8fab184e1e2d65eb621754717d5b40bb",
+  "style": "article",
+  "title": "The Ultimate Plan — Hardening Barkpark at Hobby Scale"
+}

@@ -172,6 +172,40 @@ defmodule BarkparkCloud.Registry.Deployment do
 
     field :became_live_at, :utc_datetime_usec
 
+    # deploy-reliability W12 (S6): THE CHAIN, AS DATA. Until now a deferral's
+    # position in its chain existed only as English inside `failure_reason`
+    # ("refusal 3 of 12 in this site's current chain") and the Go CLI read it
+    # back with a REGEX — producer and reader communicating through prose, so
+    # any aggregate over chain depth was a regex over a sentence.
+    #
+    # These ride ALONGSIDE the sentence, which is PRESERVED (Vercel keeps
+    # `readyStateReason` beside `readyState`): the prose is the operator's, the
+    # columns are the aggregate's. Written by `Sites.Deploy.defer/3` on
+    # `deferred` rows only — NULL on every other row and on pre-W12 deferrals,
+    # which are honestly unknown rather than backfilled out of their own prose.
+    #
+    # `deferral_bound` is the CAUSE's own budget (12 for capacity, 6 for a busy
+    # box), and `deferral_cause` is what makes the depth meaningful at all: two
+    # deferrals of different causes are not one chain.
+    field :deferral_depth, :integer
+    field :deferral_bound, :integer
+    field :deferral_cause, :string
+
+    # deploy-reliability W12 (S6): THE ATTEMPTS THAT MINTED NO ROW.
+    # `Sites.AutoDeployWorker.defer_behind_running_build/2` refuses a second
+    # concurrent build in the control plane and writes NO deployment row — the
+    # active-deployment index (correctly) refused to mint one, and the row in
+    # flight is a real build that must not be relabelled a deferral. So the
+    # attempt was invisible to every deployment-stream aggregate.
+    #
+    # It is counted HERE, on the in-flight row it coalesced ONTO, because that
+    # is the truthful place: the attempt did not produce a build, it joined one.
+    # Incremented by an atomic `UPDATE` (never a read-modify-write) so N
+    # publishes racing one build all land. Not castable on any changeset for the
+    # same reason.
+    field :coalesced_attempts, :integer, default: 0
+    field :coalesced_last_at, :utc_datetime_usec
+
     belongs_to :site, BarkparkCloud.Registry.Site
 
     timestamps(type: :utc_datetime_usec)
@@ -375,6 +409,20 @@ defmodule BarkparkCloud.Registry.Deployment do
       # phase of the six-stage pipeline (latest-wins). Distinct from the coarse
       # `status` lifecycle it rides alongside.
       :stage,
+      # deploy-reliability W12 (S6): the chain, as data. Cast HERE and nowhere
+      # else — a deferral is a TRANSITION (`queued|building|pushing → deferred`),
+      # so the structured chain is written by the same fenced write that settles
+      # the status and writes the prose sentence. Castable on create would let a
+      # caller be born claiming a chain depth it never earned.
+      #
+      # `coalesced_attempts` / `coalesced_last_at` are deliberately NOT here:
+      # they are incremented by an atomic UPDATE against the in-flight row from
+      # a DIFFERENT process than the one holding that row's claim, and a
+      # changeset write would be a read-modify-write that loses concurrent
+      # attempts — which is the entire count.
+      :deferral_depth,
+      :deferral_bound,
+      :deferral_cause,
       :claim_worker,
       :claimed_at,
       :claim_epoch

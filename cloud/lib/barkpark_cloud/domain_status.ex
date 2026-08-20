@@ -12,12 +12,17 @@ defmodule BarkparkCloud.DomainStatus do
   can render a Vercel-grade "DNS found → points here → TLS issued → serving"
   checklist that says exactly where a domain is stuck AND what to do about it.
 
-  ## The estate (never parse a URL ad hoc)
+  ## The estate (the name the plane actually serves)
 
-  Every instance has one PLATFORM domain — `Barkpark.provisioning_fqdn/1`, the
-  same FQDN the warm-pool worker provisions — and, when attached, one CUSTOM
-  domain (`custom_host`, a scalar: 0 or 1). Each is checked against the
-  instance's reported `host` (the box's actual address).
+  Every instance has one PLATFORM domain — the host of its stored `url`, which
+  is the name go-live reserved, the worker stood up, and TLS was issued for —
+  and, when attached, one CUSTOM domain (`custom_host`, a scalar: 0 or 1). Each
+  is checked against the instance's reported `host` (the box's actual address).
+
+  `Barkpark.provisioning_fqdn/1` is NOT that name in general: it is always the
+  suffixed `<slug>-<team_short_id>` form, while go-live prefers the clean
+  `<slug>` form whenever the label is free. It remains the fallback for a row
+  that has no `url` yet.
 
   ## The four ordered stages
 
@@ -193,16 +198,47 @@ defmodule BarkparkCloud.DomainStatus do
 
   # ── estate ──
 
-  # Platform FQDN always; the one custom host only when attached. Never parse the
-  # stored url — provisioning_fqdn/1 is the single source the worker also uses.
+  # The platform domain always; the one custom host only when attached.
+  #
+  # The platform domain is the host of the STORED `url` — NOT
+  # `Barkpark.provisioning_fqdn/1`. `provisioning_fqdn/1` is unconditionally the
+  # SUFFIXED `<slug>-<team_short_id>` form, but go-live PREFERS the clean form
+  # (`Registry.insert_with_url_reservation/4`: `if reserved?(slug), do: suffixed,
+  # else: clean_url(slug)`) and the router hands the provisioner
+  # `Barkpark.subdomain_from_url(bp)` — the url-derived label. So the name that
+  # is actually stood up, issued a certificate, and sent to the customer is the
+  # one in `url`, and checking the suffixed name instead left live instances
+  # stuck at `dns_found: pending` ("give it a moment and re-check") for a
+  # hostname nothing ever creates. `url` IS the domain of record; the suffixed
+  # FQDN is only the fallback for pre-reservation rows that have no url yet.
   defp domain_estate(bp) do
-    platform = {Barkpark.provisioning_fqdn(bp), "platform"}
+    platform = {platform_host(bp), "platform"}
 
     case bp.custom_host do
       host when is_binary(host) and host != "" -> [platform, {host, "custom"}]
       _ -> [platform]
     end
   end
+
+  # The hostname of the stored `url`: scheme stripped, path and any port
+  # dropped. A row with no url (or a url that yields no host) falls back to
+  # `provisioning_fqdn/1` — the pre-reservation shape, where the suffixed FQDN
+  # genuinely IS the only name there is.
+  defp platform_host(%Barkpark{url: url} = bp) when is_binary(url) do
+    host =
+      url
+      |> String.trim()
+      |> String.replace_prefix("https://", "")
+      |> String.replace_prefix("http://", "")
+      |> String.split("/", parts: 2)
+      |> hd()
+      |> String.split(":", parts: 2)
+      |> hd()
+
+    if host == "", do: Barkpark.provisioning_fqdn(bp), else: host
+  end
+
+  defp platform_host(bp), do: Barkpark.provisioning_fqdn(bp)
 
   # A Site's estate is its custom domains array (the apex, www, and any attached
   # hostnames). Each is a "custom" domain for remediation-copy purposes. A site

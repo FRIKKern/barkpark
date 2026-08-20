@@ -578,6 +578,60 @@ describe("webhook seam — fail-closed demux (one opaque 404)", () => {
     expect(response.headers.get("allow")).toBe("GET, POST");
     expect(calls).toEqual([]);
   });
+
+  /**
+   * THE /mcp PHANTOM (charter D34/D272). The bridge owns `/connectors` -> :4020 and
+   * serves EXACTLY ONE first segment under its prefix that reaches a tenant:
+   * `webhooks`. It NEVER serves `/mcp` — that path is the SEPARATE barkpark-mcp
+   * :4010 Caddy route, a different upstream on a different port. `parseRoute` closes
+   * this with `if (rest[0] !== "webhooks") return null;`, and every negative case
+   * above happens to target a `webhooks/...` first segment, so that guard was
+   * uncovered. These two cases exercise it directly: a non-`webhooks` first segment
+   * is the same opaque 404 as any unknown route, and no adapter is ever reached.
+   *
+   * NON-VACUITY (D266): delete that guard from webhook-server.ts and the
+   * two-segment case below RED-flips — `/connectors/mcp/slack` then parses as
+   * provider=`slack` (rest[1]), routes a `team_id:"T_AAA"` body to the mounted
+   * slack-A Chat, and answers 200 with a recorded call. The one-segment case stays
+   * 404 either way (rest[1] is undefined), so it documents the boundary; the
+   * two-segment case is what makes guard-removal fail.
+   */
+  it("404s a non-'webhooks' first segment (/connectors/mcp) — the bridge NEVER serves /mcp", async () => {
+    const h = await boot();
+
+    const response = await fetch(`${h.base}/connectors/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"team_id":"T_AAA"}',
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('{"error":"not_found"}');
+    expect(response.headers.get("content-type")).toBe(
+      "application/json; charset=utf-8",
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("404s a two-segment /connectors/mcp/<real-provider> without ever routing to that provider (guard-removal tripwire)", async () => {
+    const h = await boot();
+
+    // `slack` is a REAL, mounted, payload-keyed provider and `T_AAA` a REAL install
+    // (see PLAIN_ROWS + the default mounts). If `parseRoute`'s
+    // `rest[0] !== "webhooks"` guard were removed, this target would parse as
+    // provider=`slack` and this body would reach the slack-A Chat — so this is the
+    // case that turns guard-removal RED, not a vacuous "no such provider" 404.
+    const response = await fetch(`${h.base}/connectors/mcp/slack`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: '{"team_id":"T_AAA"}',
+    });
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toBe('{"error":"not_found"}');
+    // The load-bearing assertion: the mounted slack Chat was NEVER invoked.
+    expect(calls).toEqual([]);
+  });
 });
 
 describe("webhook seam — the provider's contract", () => {

@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
@@ -1265,4 +1267,247 @@ func TestSpaceProbeTimeoutsAreShortAndSeparate(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("boundedSpaceRunner did not return promptly after its deadline elapsed")
 	}
+}
+
+// buildInfoWith returns a ReadBuildInfo stand-in carrying the given vcs
+// settings — the shape `go build` embeds when it builds from a git checkout,
+// which is exactly how the fleet's agent is (re)built on-box.
+func buildInfoWith(mainVersion string, settings map[string]string) func() (*debug.BuildInfo, bool) {
+	return func() (*debug.BuildInfo, bool) {
+		bi := &debug.BuildInfo{}
+		bi.Main.Version = mainVersion
+		for k, v := range settings {
+			bi.Settings = append(bi.Settings, debug.BuildSetting{Key: k, Value: v})
+		}
+		return bi, true
+	}
+}
+
+// TestAgentVersionBothArms proves the beat dates its own producer in BOTH
+// directions: a build that carries a stamp emits that stamp, and a build that
+// carries none emits the explicit unknown marker — never "" and never a value
+// a reader could mistake for a measured version.
+func TestAgentVersionBothArms(t *testing.T) {
+	noBuildInfo := func() (*debug.BuildInfo, bool) { return nil, false }
+
+	for _, tc := range []struct {
+		name     string
+		injected string
+		read     func() (*debug.BuildInfo, bool)
+		want     string
+	}{
+		// STAMPED arm — a blessed release injects -X agentVersion.
+		{"ldflags stamp wins", "v0.2.26", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890"}), "v0.2.26"},
+		{"ldflags stamp is trimmed", "  v0.2.26\n", noBuildInfo, "v0.2.26"},
+		// STAMPED arm — a plain on-box `go build` from the checkout.
+		{"vcs revision, clean", "", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890abcd", "vcs.modified": "false"}), "git-abc123def456"},
+		{"vcs revision, dirty tree is carried", "", buildInfoWith("(devel)", map[string]string{"vcs.revision": "abc123def4567890abcd", "vcs.modified": "true"}), "git-abc123def456-dirty"},
+		{"tagged module build", "", buildInfoWith("v0.2.26", nil), "v0.2.26"},
+		// UNSTAMPED arm — every route to an identity is closed.
+		{"no build info at all", "", noBuildInfo, AgentVersionUnknown},
+		{"nil reader", "", nil, AgentVersionUnknown},
+		{"build info with nothing to say", "", buildInfoWith("(devel)", nil), AgentVersionUnknown},
+		{"blank revision is not a stamp", "", buildInfoWith("", map[string]string{"vcs.revision": "   "}), AgentVersionUnknown},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveAgentVersion(tc.injected, tc.read)
+			if got != tc.want {
+				t.Errorf("resolveAgentVersion = %q, want %q", got, tc.want)
+			}
+			if got == "" {
+				t.Error("resolveAgentVersion returned \"\" — an empty string reads as a measured value; the unknown arm must be explicit")
+			}
+		})
+	}
+
+	// The live resolver used by the real binary is held to the same floor.
+	if AgentVersion() == "" {
+		t.Error("AgentVersion() = \"\" — the agent must always date its own beat, even unstamped")
+	}
+}
+
+// TestReportCarriesAgentVersion proves the key the control plane reads out of
+// the raw jsonb payload — agent_version — is present on every beat with a
+// non-empty value, so a missing vital stops being indistinguishable from a
+// healthy one.
+func TestReportCarriesAgentVersion(t *testing.T) {
+	r := gatherReport(ReportConfig{})
+	if r.AgentVersion == "" {
+		t.Error("Report.AgentVersion = \"\" — never empty; unknown is spelled explicitly")
+	}
+	if r.AgentVersion != AgentVersion() {
+		t.Errorf("Report.AgentVersion = %q, want the binary's own stamp %q", r.AgentVersion, AgentVersion())
+	}
+
+	blob, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal Report: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(blob, &payload); err != nil {
+		t.Fatalf("unmarshal Report: %v", err)
+	}
+	v, ok := payload["agent_version"]
+	if !ok {
+		t.Fatalf("Report JSON missing \"agent_version\" — the CP reads this key verbatim out of raw jsonb; payload=%s", blob)
+	}
+	s, isString := v.(string)
+	if !isString {
+		t.Fatalf("agent_version = %T, want a string", v)
+	}
+	if s == "" {
+		t.Error("agent_version marshalled as \"\" — an absent-or-empty key means two things at once")
+	}
+
+	// The pre-existing version field is untouched by this addition.
+	if r.Version != Version {
+		t.Errorf("Report.Version = %q, want the unchanged %q", r.Version, Version)
+	}
+	if payload["version"] != Version {
+		t.Errorf("JSON version = %v, want the unchanged %q", payload["version"], Version)
+	}
+}
+
+// newTempGitRepo initialises a real git repository in a temp dir with one
+// committed file and returns its path. Identity and signing are pinned on the
+// command line so the test does not depend on the host's git config.
+func newTempGitRepo(t *testing.T) string {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	dir := t.TempDir()
+
+	runGitIn(t, dir, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	runGitIn(t, dir, "add", "tracked.txt")
+	runGitIn(t, dir, "commit", "--quiet", "--no-gpg-sign", "-m", "initial")
+	return dir
+}
+
+// runGitIn runs one git command in dir under a pinned identity and neutralised
+// global/system config, so the host's git settings can never change what these
+// tests measure. Any failure is fatal — a probe test over a half-built repo
+// would assert nothing.
+func runGitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.com",
+		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.com",
+		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// TestGitProbeDirtyIgnoresUntrackedFiles is the assertion that FAILS against
+// the unpatched probe (`git status --porcelain`, untracked counted). Every
+// working production box accrues untracked operational junk — a built `bp`
+// binary, .claude/worktrees/, .env backups, spawned sites/ — none of which any
+// deploy can clear. Counting it pins dirty_tree true forever, so the gauge can
+// never report the good state. This test is the proof it now can.
+func TestGitProbeDirtyIgnoresUntrackedFiles(t *testing.T) {
+	dir := newTempGitRepo(t)
+
+	// The exact shapes measured on guerrilla: a stray binary, a backup, a dir.
+	if err := os.WriteFile(filepath.Join(dir, "bp"), []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write untracked binary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".env.bak-20260706221850"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("write untracked backup: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "sites", "demo"), 0o755); err != nil {
+		t.Fatalf("mkdir untracked dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "sites", "demo", "index.html"), []byte("<p>"), 0o644); err != nil {
+		t.Fatalf("write untracked dir file: %v", err)
+	}
+
+	g := gitProbe{runner: ExecRunner{}, checkout: dir}
+	if g.dirty() {
+		t.Error("dirty() = true with ONLY untracked files present — the gauge is pinned true on every live box and can never say clean")
+	}
+	if g.commit() == "" {
+		t.Error("commit() = \"\" over a real repo — the sha probe must still read HEAD")
+	}
+}
+
+// TestGitProbeDirtyReportsModifiedTrackedFile is the mirror assertion: it fails
+// against an OVER-correction (hard-coded false, or a flag combination that
+// suppresses tracked changes too). A one-sided test would let the same bug ship
+// inverted — a gauge that can never say DIRTY is exactly as useless as one that
+// can never say clean.
+func TestGitProbeDirtyReportsModifiedTrackedFile(t *testing.T) {
+	dir := newTempGitRepo(t)
+
+	if err := os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("two\n"), 0o644); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+
+	g := gitProbe{runner: ExecRunner{}, checkout: dir}
+	if !g.dirty() {
+		t.Error("dirty() = false with a MODIFIED TRACKED file — the deploy-hygiene flag can no longer say dirty")
+	}
+}
+
+// TestGitProbeDirtyReportsIndexOnlyTrackedChanges pins the OTHER half of the
+// blast-radius claim: `--untracked-files=no` drops untracked files and NOTHING
+// else. A staged ADD (the file is in the index, so it is tracked) and a tracked
+// DELETION both still read dirty. Without these, "only untracked stops counting"
+// is asserted in prose and proven nowhere — and the next flag edit (`-uall`,
+// `--ignore-submodules=all`, a porcelain v2 switch) could quietly widen the
+// suppression with every existing test still green.
+func TestGitProbeDirtyReportsIndexOnlyTrackedChanges(t *testing.T) {
+	t.Run("staged add", func(t *testing.T) {
+		dir := newTempGitRepo(t)
+		if err := os.WriteFile(filepath.Join(dir, "added.txt"), []byte("new\n"), 0o644); err != nil {
+			t.Fatalf("write new file: %v", err)
+		}
+		runGitIn(t, dir, "add", "added.txt")
+
+		g := gitProbe{runner: ExecRunner{}, checkout: dir}
+		if !g.dirty() {
+			t.Error("dirty() = false with a STAGED ADD — a file in the index is tracked and must still read dirty")
+		}
+	})
+
+	t.Run("tracked deletion", func(t *testing.T) {
+		dir := newTempGitRepo(t)
+		if err := os.Remove(filepath.Join(dir, "tracked.txt")); err != nil {
+			t.Fatalf("delete tracked file: %v", err)
+		}
+
+		g := gitProbe{runner: ExecRunner{}, checkout: dir}
+		if !g.dirty() {
+			t.Error("dirty() = false with a DELETED TRACKED file — a missing committed file is the loudest hygiene red flag there is")
+		}
+	})
+}
+
+// TestGitProbeUnreadableStaysUnknown pins the contract documented on
+// Report.GitCommit: when the probe cannot read git at all, the sha is empty and
+// DirtyTree is false. "We could not measure" must not masquerade as "dirty" —
+// and the empty sha alongside it is what keeps unknown distinguishable from
+// clean.
+func TestGitProbeUnreadableStaysUnknown(t *testing.T) {
+	g := gitProbe{runner: errRunner{}, checkout: "/nonexistent-checkout"}
+
+	if sha := g.commit(); sha != "" {
+		t.Errorf("commit() = %q, want \"\" when the probe cannot read git", sha)
+	}
+	if g.dirty() {
+		t.Error("dirty() = true when the probe errored — we do not invent dirtiness")
+	}
+}
+
+// errRunner fails every command, standing in for a box where git is missing or
+// the checkout is unreadable.
+type errRunner struct{}
+
+func (errRunner) Run(string, ...string) (string, error) {
+	return "", errors.New("probe unreadable")
 }

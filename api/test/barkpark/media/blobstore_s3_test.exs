@@ -293,6 +293,38 @@ defmodule Barkpark.Media.Blobstore.S3Test do
     refute_received {:request, _, _}
   end
 
+  describe "download/2 caps the response body it will buffer" do
+    # HONESTY LIMIT: the Req.Test plug seam (Req's run_plug) PRE-BUFFERS the
+    # stub body and hands it to the `into:` collector as a SINGLE {:data} chunk,
+    # so this proves the over-cap REFUSAL, not a true mid-stream memory abort.
+    # In real (Finch) streaming the collector halts before the whole body lands
+    # in memory; here the full body is already in memory when the collector
+    # runs. What the test PINS is the fail-safe outcome: an over-cap body is
+    # refused and never written to the cache. Remove `into: download_collector()`
+    # from s3.ex download/2 and the full body is buffered, written and served —
+    # reddening BOTH assertions below.
+    test "an over-cap 200 body is refused and no truncated blob is cached" do
+      put_media_storage([])
+      rel = unique_rel("oversized.bin")
+      full = Media.file_path(rel)
+      on_exit(fn -> File.rm_rf(Path.dirname(full)) end)
+
+      # One byte past the 100 MB cap tied to the upload ceiling
+      # (endpoint.ex:155 / media_controller.ex:316). No legitimately-uploaded
+      # object can exceed it — an over-cap body is an out-of-band bucket writer.
+      oversized = :binary.copy("x", 100_000_001)
+
+      Req.Test.stub(__MODULE__, fn conn -> Plug.Conn.send_resp(conn, 200, oversized) end)
+
+      # Refused as a typed 503, exactly like any other download fault — the
+      # caller cannot tell an over-cap body from a black-hole bucket by shape.
+      assert {:error, :storage_unavailable} = S3.ensure_local(rel)
+
+      # The truncated partial body never reached the write-through cache.
+      refute File.exists?(full)
+    end
+  end
+
   test "ensure_local/1 answers {:error, :not_found} on a bucket 404 (row outlived blob)" do
     put_media_storage([])
 
@@ -371,6 +403,34 @@ defmodule Barkpark.Media.Blobstore.S3Test do
     # the read-back is namespaced by the same prefix — it must not probe the
     # un-prefixed key and report a false miss
     assert_received {:request, "HEAD", ^path}
+  end
+
+  describe "req/1 carries an explicit receive_timeout on every blob verb" do
+    # STRUCTURAL PIN, not behavioral: the Req.Test in-process plug seam consumes
+    # the request without ever honouring receive_timeout (it is a per-receive
+    # socket bound, and there is no socket), so a hung-bucket stall cannot be
+    # exercised here. The mutation-proof is therefore that the assembled opts
+    # carry the accessor value — remove or alter the literal and one of these
+    # two assertions reds.
+    #
+    # Corrected failure mode (see the note at s3.ex req/1): the read path is
+    # BUFFERED with an atomic rename, so a stall collapses a HEALTHY transfer to
+    # a spurious {:error, :storage_unavailable} 503 — never a truncated cache
+    # write. The 60s ceiling replaces Req's silent 15s default.
+    test "the accessor is the single source of truth, pinned at 60_000ms" do
+      assert S3.receive_timeout_ms() == 60_000
+    end
+
+    test "req/1's assembled opts thread receive_timeout: @receive_timeout" do
+      source = File.read!("lib/barkpark/media/blobstore/s3.ex")
+
+      # Anchored to the assembled-opts list itself (`retry: false, ` prefix), not
+      # the bare token — the failure note above req/1 also mentions the key in
+      # prose, so a looser match would be satisfied by the comment alone.
+      assert source =~ "retry: false, receive_timeout: @receive_timeout",
+             "req/1 must thread the module attribute onto every request's opts; " <>
+               "a per-verb literal or a dropped key would evade this pin"
+    end
   end
 
   test "selecting :s3 without its required keys fails loudly, not silently local" do

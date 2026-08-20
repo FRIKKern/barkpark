@@ -646,10 +646,17 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
       "The team's OWN switch: `alerts_enabled` off, or this event's toggle off. " <>
         "Charter D363's lens: a user's own disabled toggle is not a withhold — " <>
         "counting it would make 'withhold' mean 'any switch that is off'.",
-    {:deliver_fleet_digest, 1, 1, :do, "case(platform_admin_emails())>[]", :ok_atom} =>
-      "W6 — RECIPIENT-LESS BY CONSTRUCTION, one level up: an operator-scoped " <>
-        "send with an empty operator list. Same `validate_required` clause, same " <>
-        "D362 refusal to invent an address. Logged, and now named.",
+    {:deliver_fleet_digest, 1, 1, :do, "case(targets)>[]", :ok_atom} =>
+      "W6 — RECIPIENT-LESS BY CONSTRUCTION, one level up: a fleet digest with no " <>
+        "team that has a member. Same `validate_required` clause, same D362 " <>
+        "refusal to invent an address. Logged (WARNING + telemetry), and named. " <>
+        "dr-w19-s5 re-keyed this row from `case(platform_admin_emails())>[]`: the " <>
+        "audience moved off the empty platform allowlist onto each team's own " <>
+        "membership rows, so the branch that survives is the honest one — no team " <>
+        "in the fleet has a member at all. The recipient resolution is a SEPARATE " <>
+        "pass ahead of the case ON PURPOSE: sending inside that comprehension " <>
+        "would put `record_delivery/5` in this branch's prefix and absolve this " <>
+        "withhold, on a path where the comprehension ran zero times.",
     {:dispatch_site_event, 3, 1, :do, "with>else>_", :ok} =>
       "Charter D349(b): a since-deleted or non-UUID site has no team, so a row " <>
         "written here is returnable by NOBODY — 'a Logger line in a Delivery " <>

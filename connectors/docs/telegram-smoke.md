@@ -206,7 +206,9 @@ SELECT workspace_id, thread_id, session_uuid FROM chat_bridge.thread_session_map
 ## What this gate does NOT cover
 
 - Slack / Discord / Teams / WhatsApp / iMessage — **P3**, deliberately not wired.
-- Webhook mode (`mode: "webhook"`) — the connector supports it; only polling is smoked.
+- Webhook transport — **not implemented.** Polling (`getUpdates`) is the only
+  transport the connector wires; there is no webhook route and no `setWebhook`
+  call. A webhook wire is backlog (`connectors-telegram-webhook-wire`).
 - The sandboxed runner (**P1**) and tool connectors (**P4**).
 - A self-serve install flow: `upsertInstall()` (what this smoke calls) is an
   operator write path. Connecting a bot from Studio is P3 connect UX.

@@ -642,8 +642,12 @@ else
   # not been shown to detect anything.
   FACTS="$TMPROOT/console-yml-facts.txt"
   EMIT="$TMPROOT/emit-console-yml-facts.py"
+  # The emitter READS the instruments a job invokes (see the D776 block inside
+  # it), so it needs the real repo root even when the YAML it is pointed at is a
+  # mutated copy in a temp dir.
+  export CONSOLE_YML_REPO="$REAL_ROOT"
   cat >"$EMIT" <<'PY'
-import re, sys, yaml
+import os, re, sys, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 out = open(sys.argv[2], "w")
 on = wf.get(True, wf.get("on"))            # PyYAML parses bare `on:` as True
@@ -665,12 +669,38 @@ emit("agg_needs", ",".join(agg.get("needs", [])))
 coe = [n for n, j in jobs.items() if j.get("continue-on-error") is True]
 emit("coe_jobs", ",".join(sorted(coe)))
 emit("coe_in_needs", ",".join(sorted(set(coe) & set(agg.get("needs", [])))))
+# THE POST-VERDICT CATEGORY. Exactly one shape of blocking job legitimately
+# cannot live in `needs`: a reporter that runs AFTER the aggregator concluded,
+# to carry main's own red to a human. Wiring it in is not a trade-off, it is a
+# CYCLE (console-gate -> reporter -> console-gate) and GitHub refuses to load
+# it. A job is post-verdict iff ALL THREE hold:
+#   (1) needs == ["console-gate"] EXACTLY — so `needs` really is the cycle, not
+#       a choice somebody declined to make;
+#   (2) its `if:` starts with an ANCHORED failure(). The loose \bfailure\(\)
+#       admits `success() || failure()` — a job that runs on EVERY GREEN
+#       wearing post-verdict clothes. The anchor is load-bearing;
+#   (3) it is NOT continue-on-error, so it keeps its own exit-1. That retained
+#       can-lose property is what the exemption is granted in exchange for; a
+#       muted reporter is named by post_verdict_muted below, never exempted.
+POST_VERDICT_IF = re.compile(r"^failure\(\)(\s|&|$)")
+def post_verdict_shape(j):
+    return (list(j.get("needs") or []) == ["console-gate"]
+            and bool(POST_VERDICT_IF.match(str(j.get("if", "")).strip())))
+post_verdict = {n for n, j in jobs.items()
+                if post_verdict_shape(j) and j.get("continue-on-error") is not True}
+post_verdict_muted = {n for n, j in jobs.items()
+                      if post_verdict_shape(j) and j.get("continue-on-error") is True}
+emit("post_verdict_jobs", ",".join(sorted(post_verdict)))
+emit("post_verdict_muted", ",".join(sorted(post_verdict_muted)))
 # …and the mirror hazard, which the allow-set cannot see: a BLOCKING job added
 # to this workflow but never wired into `needs`. The aggregator cannot judge a
 # job nobody told it about, so it would green while that job is red.
+# Post-verdict jobs are subtracted — they are judged by the pinned roster
+# instead, which is STRICTER than this set difference, not laxer.
 blocking = {n for n, j in jobs.items()
             if j.get("continue-on-error") is not True and n != "console-gate"}
-emit("blocking_not_in_needs", ",".join(sorted(blocking - set(agg.get("needs", [])))))
+emit("blocking_not_in_needs",
+     ",".join(sorted(blocking - set(agg.get("needs", [])) - post_verdict)))
 # D36 — THE OTHER HALF OF THAT GUARD. Reaching `needs` alone changes nothing:
 # `needs.<job>.result` is only consulted if the job is bound to a step env var
 # AND that var is passed to `decide`. So walk the whole chain per job —
@@ -712,6 +742,77 @@ body = str(cst.get("run", ""))
 emit("cssom_refused", "title=CSSOM parity REFUSED" in body)
 emit("cssom_defect", "title=CSSOM parity DEFECT" in body)
 emit("cssom_set_e", bool(re.search(r"set -[a-z]*e[a-z]*u?o? ", body)))
+# ── D776 — THE VERDICT CHANNEL, AS A STRUCTURAL FACT ───────────────────────
+# `exit 2` means "this instrument REFUSED TO MEASURE": it made no claim in
+# either direction. `exit 1` means it measured a real defect. Both reach the
+# aggregate as `result: failure` and nothing else, so a job with no verdict
+# channel reads at the merge button exactly like a job that found a bug — which
+# is how run 31322709682 sent a reader hunting for an environment fault that was
+# not there. Wave 63 wired console-unit and left `path-escape` one job over.
+#
+# EXIT-2 CAPABILITY IS DERIVED, NOT LISTED. A job qualifies if any of its step
+# bodies can raise a 2 itself (a literal `exit 2`) or invokes an instrument that
+# can — the invoked file is READ, and shell scripts are searched for `exit 2`,
+# node instruments for `process.exit(2)`. So a new exit-2-capable job cannot
+# join this workflow without either declaring a channel or being named in the
+# exemption below; neither is possible by accident.
+# The repo root, NOT derived from argv[1]: the mutation matrix below runs this
+# same emitter over COPIES of the workflow in a temp dir, and a derived root
+# would silently make every invoked instrument unreadable — every job would
+# then look exit-2-incapable and the whole fact would go quietly vacuous.
+REPO = os.environ["CONSOLE_YML_REPO"]
+_seen = {}
+def file_can_exit_2(rel):
+    if rel not in _seen:
+        p = os.path.join(REPO, rel)
+        try:
+            txt = open(p, encoding="utf-8", errors="replace").read()
+        except OSError:
+            _seen[rel] = False
+        else:
+            _seen[rel] = bool(re.search(r"(^|\n)\s*exit 2\b", txt)
+                              or "process.exit(2)" in txt)
+    return _seen[rel]
+
+def job_can_exit_2(j):
+    bodies = "\n".join(str(s.get("run", "")) for s in j.get("steps", []))
+    if re.search(r"(^|\n)\s*exit 2\b", bodies):
+        return True
+    refs = re.findall(r"(?:bash|sh)\s+(scripts/[\w./-]+\.sh)", bodies)
+    refs += re.findall(r"node\s+([\w./-]+\.mjs)", bodies)
+    return any(file_can_exit_2(r) for r in refs)
+
+# THE DECIDE ARITY, per job: a channel that is declared but never passed to
+# `decide` is a channel the aggregate cannot read. Keyed on the SECOND
+# positional argument for the same reason `consumed` above is — the first is a
+# human label that deliberately does not match the job name.
+decide_arity = {}
+for m in re.finditer(
+        r'^\s*decide\s+"[^"]*"\s+"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"\s+"[^"]*"(\s+"[^"]*")?',
+        step.get("run", ""), re.M):
+    decide_arity[m.group(1)] = bool(m.group(2))
+
+exit2 = sorted(n for n, j in jobs.items() if n != "console-gate" and job_can_exit_2(j))
+emit("exit2_jobs", ",".join(exit2))
+# THE NAMED EXEMPTION, and there is exactly one. `changes` reaches an exit 2
+# through the ratchet's `--match` mode, but it is the DISPATCHER: it publishes
+# path outputs, not a verdict, and its own fail-closed contract already forbids
+# it to emit a path answer it could not measure. Giving it a channel is real
+# work in its own right and is filed, not smuggled in here
+# (cch-w64-bl-dispatcher-has-no-verdict-channel). It is written out as a fact so
+# extending the exemption costs a human an edit in this file.
+EXEMPT = {"changes"}
+emit("exit2_exempt", ",".join(sorted(EXEMPT)))
+emit("exit2_without_verdict_output",
+     ",".join(n for n in exit2
+              if n not in EXEMPT and "verdict" not in (jobs[n].get("outputs") or {})))
+emit("exit2_without_decide_verdict",
+     ",".join(n for n in exit2
+              if n not in EXEMPT and not decide_arity.get(var_for.get(n), False)))
+# Cardinality, for the same reason the three above carry one: an empty
+# difference proves nothing if the set it was computed from is empty. A parser
+# that stops matching `run:` bodies would report a serene "" forever.
+emit("exit2_jobs_count", len(exit2))
 out.close()
 PY
   python3 "$EMIT" "$WF" "$FACTS"
@@ -746,6 +847,54 @@ PY
   # future slice can add a blocking job and the required context stays green
   # while that job reds — the aggregator's one structural blind spot.
   assert_fact blocking_not_in_needs ""
+  # D776 — every exit-2-capable job publishes a verdict AND the aggregate reads
+  # it. Two facts, because either half alone is a channel nobody can hear: a
+  # declared `outputs.verdict` that no `decide` call takes as a 4th argument is
+  # never consulted, and a 4th argument bound to a job that publishes nothing is
+  # always the empty string.
+  assert_fact exit2_without_verdict_output ""
+  assert_fact exit2_without_decide_verdict ""
+  # The exemption is pinned, not open-ended: extending it must cost an edit here.
+  assert_fact exit2_exempt "changes"
+  # …and the population it was computed from is real. "" over an empty set is
+  # the shape a neutered parser returns.
+  assert_fact_min exit2_jobs_count 5
+  # THE POST-VERDICT ROSTER IS AN EXACT PIN, AND THAT DELIBERATELY DIVERGES
+  # FROM `assert_fact_min`'s "a lower bound, never an equality" convention
+  # above. Do NOT "fix" this into a _min bound: a lower bound is a blanket hole
+  # in BOTH directions. It passes a SMUGGLED second post-verdict-shaped job (a
+  # job that reaches `if: failure()` and is then exempt from every other
+  # structural check here), and it passes the reporter being DELETED (">= 1"
+  # cannot tell an empty roster from a full one once the bound is 0). Nothing
+  # else in this harness catches either — both are proven below. Adding a
+  # second post-verdict job is supposed to cost a human naming it right here.
+  #
+  # The roster is now EXACT: report-main-failure ships in this workflow, so the
+  # empty alternative that covered its absence is gone (PR #10155). Deleting the
+  # reporter now reds this ratchet directly, not only via the mutation matrix.
+  #
+  # ONE ENCODING OF THE ROSTER, consulted by the live assertion below AND by the
+  # mutation matrix's pin_reds. It used to be written twice, and the second copy
+  # drifted immediately: the matrix printed "the exact pin REDS it" for the
+  # DELETED mutant while the shipped pin, carrying the transitional "", happily
+  # accepted it. A ratchet that reports catching what it does not catch is the
+  # exact lie this harness exists to refuse, so the roster is a function and
+  # there is nothing left to keep in sync.
+  post_verdict_roster_ok() {
+    case "$1" in
+      "report-main-failure") return 0 ;;
+      *) return 1 ;;
+    esac
+  }
+  if post_verdict_roster_ok "$(fact post_verdict_jobs)"; then
+    ok "post_verdict_jobs = '$(fact post_verdict_jobs)' (inside the pinned roster)"
+  else
+    no "post_verdict_jobs = '$(fact post_verdict_jobs)' — outside the pinned roster {report-main-failure}"
+  fi
+  # A post-verdict job that mutes its own exit-1 has spent the exemption's
+  # price without paying it. Named as its own fact so it cannot hide inside
+  # `coe_jobs` if that assertion is ever relaxed.
+  assert_fact post_verdict_muted ""
   # …and every job that IS in needs must actually be judged (D36).
   assert_fact needs_without_decide ""
   assert_fact_min needs_count 4
@@ -828,6 +977,184 @@ PY
   else
     no "  mutation[paths]: a workflow-level paths key was NOT detected — the D18 fact is decorative"
   fi
+
+  # ── post-verdict mutation matrix ──────────────────────────────────────────
+  # The exemption above is worth exactly as much as its ability to REFUSE. Nine
+  # copies of the REAL console-harness.yml, one per way a job can wear
+  # post-verdict clothes without being one.
+  PVMUT="$TMPROOT/mutate-console-postverdict.py"
+  cat >"$PVMUT" <<'PY'
+import sys, yaml
+src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+wf = yaml.safe_load(open(src))
+jobs = wf["jobs"]
+assert mode in ("clean", "reporter", "coe", "always", "loose", "extra-needs",
+                "ordinary", "smuggled", "deleted"), mode   # a typo'd mode is not a pass
+def reporter():
+    # PR #10155's job, reproduced in shape: needs the aggregator, anchored
+    # failure(), main-only, no continue-on-error.
+    return {"name": "Report main-push failure to a human",
+            "needs": ["console-gate"],
+            "if": "failure() && github.ref == 'refs/heads/main'",
+            "runs-on": "ubuntu-latest",
+            "steps": [{"run": "bash scripts/file-ci-failure-issue.sh"}]}
+# Every mutant starts from the SAME base — the real console-harness.yml with any
+# reporter removed — so these expectations hold whether or not #10155 has
+# merged. The matrix must not change meaning the day the tree it reads gains the
+# job.
+jobs.pop("report-main-failure", None)
+if mode not in ("clean", "deleted"):
+    jobs["report-main-failure"] = reporter()
+r = jobs.get("report-main-failure")
+if mode == "coe":
+    r["continue-on-error"] = True                       # mutes its own exit-1
+elif mode == "always":
+    r["if"] = "always() && github.ref == 'refs/heads/main'"
+elif mode == "loose":
+    r["if"] = "(success() || failure()) && github.ref == 'refs/heads/main'"
+elif mode == "extra-needs":
+    r["needs"] = ["console-gate", "changes"]            # no longer a pure cycle
+elif mode == "ordinary":
+    jobs["ordinary-lint"] = {"runs-on": "ubuntu-latest",
+                             "steps": [{"run": "exit 1"}]}
+elif mode == "smuggled":
+    jobs["sneaky-lint"] = reporter()                    # a second post-verdict shape
+# `deleted` is the #10155 shape with the reporter taken back out — byte-identical
+# to `clean`, which is exactly the point: nothing in the FILE distinguishes "no
+# reporter yet" from "the reporter was removed", so only the pinned roster can.
+yaml.safe_dump(wf, open(dst, "w"))
+PY
+  # pv <mode> <post_verdict_jobs> <post_verdict_muted> <blocking_not_in_needs>
+  pv() {
+    local mode="$1" f="$TMPROOT/pv-$1.yml" ff="$TMPROOT/pv-$1.facts" key want got
+    python3 "$PVMUT" "$WF" "$f" "$mode"
+    python3 "$EMIT" "$f" "$ff"
+    for key in post_verdict_jobs post_verdict_muted blocking_not_in_needs; do
+      case "$key" in
+        post_verdict_jobs) want="$2" ;;
+        post_verdict_muted) want="$3" ;;
+        *) want="$4" ;;
+      esac
+      got="$(sed -n "s|^$key=||p" "$ff")"
+      if [ "$got" = "$want" ]; then
+        ok "  post-verdict[$mode]: $key = '$got'"
+      else
+        no "  post-verdict[$mode]: $key = '$got', wanted '$want'"
+      fi
+    done
+  }
+  pv clean       ""                    ""                    ""
+  pv reporter    "report-main-failure" ""                    ""
+  pv coe         ""                    "report-main-failure" ""
+  pv always      ""                    ""                    "report-main-failure"
+  pv loose       ""                    ""                    "report-main-failure"
+  pv extra-needs ""                    ""                    "report-main-failure"
+  pv ordinary    "report-main-failure" ""                    "ordinary-lint"
+  pv smuggled    "report-main-failure,sneaky-lint" ""        ""
+  pv deleted     ""                    ""                    ""
+  # The muted reporter reds TWICE: post_verdict_muted names it, and so does the
+  # `coe_jobs = ""` assertion above. Both, so relaxing either one alone leaves
+  # the escape closed.
+  if [ "$(sed -n 's|^coe_jobs=||p' "$TMPROOT/pv-coe.facts")" = "report-main-failure" ]; then
+    ok "  post-verdict[coe]: coe_jobs = report-main-failure — the SECOND red"
+  else
+    no "  post-verdict[coe]: coe_jobs did not name the muted reporter"
+  fi
+  # And the exactness of the pin, proven in both directions. A `_min`-style
+  # lower bound of 1 would PASS both of these — the smuggled job only adds a
+  # name, the deleted reporter only removes one — so only equality against the
+  # named roster reds them.
+  # pin_reds runs the mutant's fact through post_verdict_roster_ok — the SHIPPED
+  # roster, not a second copy of it — so it reports what this ratchet actually
+  # does on that tree, and cannot drift away from the assertion it describes.
+  pin_reds() {
+    local got
+    got="$(sed -n 's|^post_verdict_jobs=||p' "$TMPROOT/pv-$1.facts")"
+    if post_verdict_roster_ok "$got"; then
+      no "  post-verdict[$1]: the pin does NOT red it — post_verdict_jobs = '$got'"
+    else
+      ok "  post-verdict[$1]: the shipped roster REDS it (post_verdict_jobs = '$got')"
+    fi
+  }
+  pin_reds smuggled
+  # …and the DELETED mutant. This USED to be a known gap: the transitional ""
+  # alternative accepted a deleted reporter, so the harness could not red it.
+  # PR #10155 ships report-main-failure and drops that alternative, so the
+  # roster is now EXACT and this mutant reds like any other. Closes
+  # cch-w46-s4-followup-drop-empty-post-verdict-alternative.
+  pin_reds deleted
+
+  # ── D776 verdict-channel mutation matrix ─────────────────────────────────
+  # `exit2_without_verdict_output = ""` and `exit2_without_decide_verdict = ""`
+  # are worth nothing until the same emitter, on deliberately broken copies of
+  # the REAL console-harness.yml, returns a non-empty answer. Both directions,
+  # because they fail differently: an existing job losing its channel, and a NEW
+  # exit-2-capable job arriving without one.
+  VCMUT="$TMPROOT/mutate-console-verdict.py"
+  cat >"$VCMUT" <<'PY'
+import sys, yaml
+src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
+wf = yaml.safe_load(open(src))
+jobs = wf["jobs"]
+assert mode in ("clean", "drop-outputs", "drop-decide-arg", "fake-exit2"), mode
+if mode == "drop-outputs":
+    # The `outputs:` block this slice added, taken back out — the state
+    # path-escape shipped in until D776.
+    jobs["path-escape"].pop("outputs", None)
+elif mode == "drop-decide-arg":
+    # The channel is declared but the aggregate stops reading it: a verdict
+    # published into a line nobody consults.
+    step = next(s for s in jobs["console-gate"]["steps"] if "run" in s)
+    step["run"] = step["run"].replace(
+        'decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"          "${V_ESCAPE:-}"',
+        'decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"', 1)
+elif mode == "fake-exit2":
+    # A NEW blocking job that can refuse to measure, wired in the ordinary way
+    # and carrying no channel at all — the exact arrival this fact exists to
+    # refuse. It is wired all the way through `needs`/`env`/`decide` so the
+    # OTHER structural facts stay silent and only this one speaks.
+    jobs["a11y-ceiling"] = {"runs-on": "ubuntu-latest",
+                            "steps": [{"run": "exit 2"}]}
+    agg = jobs["console-gate"]
+    agg["needs"] = list(agg["needs"]) + ["a11y-ceiling"]
+    step = next(s for s in agg["steps"] if "run" in s)
+    step.setdefault("env", {})["R_A11Y"] = "${{ needs.a11y-ceiling.result }}"
+    step["run"] = step["run"].replace(
+        'decide "changes (dispatcher)"',
+        'decide "a11y ceiling"           "${R_A11Y}" "NEVER"\n'
+        'decide "changes (dispatcher)"', 1)
+yaml.safe_dump(wf, open(dst, "w"))
+PY
+  # vc <mode> <exit2_without_verdict_output> <exit2_without_decide_verdict>
+  vc() {
+    local mode="$1" f="$TMPROOT/vc-$1.yml" ff="$TMPROOT/vc-$1.facts" key want got
+    python3 "$VCMUT" "$WF" "$f" "$mode"
+    python3 "$EMIT" "$f" "$ff"
+    for key in exit2_without_verdict_output exit2_without_decide_verdict; do
+      case "$key" in
+        exit2_without_verdict_output) want="$2" ;;
+        *) want="$3" ;;
+      esac
+      got="$(sed -n "s|^$key=||p" "$ff")"
+      if [ "$got" = "$want" ]; then
+        ok "  verdict-channel[$mode]: $key = '$got'"
+      else
+        no "  verdict-channel[$mode]: $key = '$got', wanted '$want'"
+      fi
+    done
+  }
+  vc clean           ""             ""
+  vc drop-outputs    "path-escape"  ""
+  vc drop-decide-arg ""             "path-escape"
+  vc fake-exit2      "a11y-ceiling" "a11y-ceiling"
+  # …and the fake job must be invisible to the OTHER structural facts, so the
+  # red above is this fact's and not a neighbour's borrowed alarm.
+  if [ "$(sed -n 's|^blocking_not_in_needs=||p' "$TMPROOT/vc-fake-exit2.facts")" = "" ] \
+    && [ "$(sed -n 's|^needs_without_decide=||p' "$TMPROOT/vc-fake-exit2.facts")" = "" ]; then
+    ok "  verdict-channel[fake-exit2]: the wiring facts stay silent — only the channel fact speaks"
+  else
+    no "  verdict-channel[fake-exit2]: a neighbouring fact fired too; the channel fact is not what caught it"
+  fi
 fi
 echo
 
@@ -866,21 +1193,71 @@ gate() {
   # step body that never decided anything exits 1 too: an unbound variable under
   # `set -u`, a syntax error, a `decide` renamed out from under its call sites.
   # So also require the aggregator to have reached its own conclusion.
+  #
+  # THE RED PATH HAS TWO CONCLUSION LINES, NOT ONE, and until this slice only
+  # the plain one was ever reached: no case here supplied a verdict, so the
+  # refusals branch — and with it the whole REFUSED arm of `decide` — had never
+  # executed under test. Either line proves the body decided; neither is
+  # optional, so a run that printed NEITHER still reports a crash.
   local verdict
   if [ "$want" -eq 0 ]; then
     verdict="Console gate: every upstream job either succeeded"
+    if grep -qF -- "$verdict" "$GATE_OUT"; then
+      ok "  …and reached its own verdict line"
+    else
+      no "  …but printed NO verdict line — the step body crashed rather than decided"
+      sed 's/^/        /' "$GATE_OUT" >&2
+    fi
   else
-    verdict="::error::Console gate: at least one upstream job is not in the allow-set"
-  fi
-  if grep -qF -- "$verdict" "$GATE_OUT"; then
-    ok "  …and reached its own verdict line"
-  else
-    no "  …but printed NO verdict line — the step body crashed rather than decided"
-    sed 's/^/        /' "$GATE_OUT" >&2
+    if grep -qF -- "::error::Console gate: at least one upstream job is not in the allow-set" "$GATE_OUT" \
+      || grep -qF -- "title=Console gate RED — an instrument REFUSED TO MEASURE" "$GATE_OUT"; then
+      ok "  …and reached its own verdict line"
+    else
+      no "  …but printed NO verdict line — the step body crashed rather than decided"
+      sed 's/^/        /' "$GATE_OUT" >&2
+    fi
   fi
 }
 gate_says() {
   if grep -q -- "$1" "$GATE_OUT"; then ok "$2"; else no "$2 (not in the step output)"; fi
+}
+# The negative half, and the one that pins a SENTENCE rather than a branch. A
+# copy edit is unwitnessable without it: the wording this gate must NOT use is
+# not absent by accident, it was removed on purpose (D760), and only an
+# assertion that reds when it comes back keeps it removed.
+gate_denies() {
+  if grep -q -- "$1" "$GATE_OUT"; then no "$2 (the step output still says it)"; else ok "$2"; fi
+}
+# gate_names <must-name> <must-not-name> — D770/D771.
+#
+# `gate_says` and `gate_denies` read the whole step OUTPUT, which has always
+# named the failing job in its log. This reads the `::error::` ANNOTATION ONLY —
+# the single line the check-run API carries, and therefore the only line a human
+# at the merge button or the merge queue ever sees. Until this slice that line
+# said "at least one upstream job" and stopped, on every red where no upstream
+# published a REFUSED verdict.
+#
+# It is a PAIR by construction: naming the job that failed is worth nothing on
+# its own (a hardcoded sentence satisfies it), so the same call also refuses an
+# annotation that names a job which PASSED in this very run. Everything after
+# the first `%0A` belongs to a later clause (the measured-defect list).
+gate_names() {
+  local ann named nl='%0A'
+  ann="$(grep '^::error' "$GATE_OUT" | tr '\n' ' ')"
+  named="${ann#*NOT IN THE ALLOW-SET: }"
+  if [ -z "$ann" ] || [ "$named" = "$ann" ]; then
+    no "  …but the annotation names no job at all: ${ann:-<no ::error:: line>}"
+    return 0
+  fi
+  named="${named%%$nl*}"
+  case "$named" in
+    *"$1"*) ok "  …and the annotation names the refusing '$1'" ;;
+    *) no "  …but the annotation never named the refusing '$1': $ann" ;;
+  esac
+  case "$named" in
+    *"$2"*) no "  …and it names '$2', which PASSED in this run: $ann" ;;
+    *) ok "  …and does not name the passing '$2'" ;;
+  esac
 }
 
 # (a) the happy path: a console PR, everything ran and passed
@@ -898,6 +1275,7 @@ gate_says "legitimately not dispatched" "…and says so, rather than claiming th
 gate "console-unit failed" 1 \
   R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
   O_CONSOLE=true
+gate_names "console-unit" "cssom-parity"
 
 # (d) THE BYPASS THIS SLICE EXISTS TO CLOSE: cssom-parity `skipped` only because
 #     its dependency died, while the dispatcher said it WAS needed.
@@ -905,6 +1283,10 @@ gate "cssom-parity skipped behind a live gate (upstream died)" 1 \
   R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
+# …and the SKIP arm accumulates too, not just the failure arm: this red never
+# passes through `failure`, so an accumulator wired only there would leave the
+# annotation contentless on exactly the bypass this shape exists to close.
+gate_names "cssom-parity" "console-unit"
 
 # (e) the dispatcher itself failing reds it, with empty outputs
 gate "dispatcher failed, output empty" 1 \
@@ -951,6 +1333,103 @@ gate_says "overflow-guard: failure" "…and names overflow-guard (its decide lin
 #      walks needs -> env var -> decide's 2nd argument and is mutation-proven in
 #      four directions. This case is its behavioural companion, not a second
 #      copy of it.)
+
+# ── THE VERDICT CHANNEL, DRIVEN — cases (l)-(r) ───────────────────────────
+# MEASURED BEFORE THIS BLOCK EXISTED: `grep -c 'V_CSSOM\|V_TIER\|V_OVERFLOW'`
+# over this file returned 0. Not one case above supplies a verdict, so the
+# REFUSED arm of `decide`, the `refusals`/`measured` tallies and the refusal
+# banner had NEVER been executed by any test — gutting the entire `REFUSED)`
+# arm AND replacing the banner's title with `MUTATED — THE MOON IS MADE OF
+# CHEESE` still yielded `205 passed, 0 failed`. The copy in that arm was
+# therefore unwitnessable, which is how it came to assert, for two waves, a
+# Chrome bring-up failure for refusals that had parsed the stylesheet fine.
+# These cases make the arm able to lose, in both directions: what it must say,
+# and what it must never say again.
+
+# (l) A REFUSAL IS NAMED AS A REFUSAL — and names a cause SET, never one cause.
+gate "cssom-parity REFUSED (a verdict is published)" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_CSSOM=REFUSED
+gate_says "REFUSED TO MEASURE" "…and says the instrument refused, not that CSS is broken"
+gate_says "ONE code over MANY causes" "…and says exit 2 is one code over many causes"
+gate_says "COVERAGE fault in cloud/priv/static/__preview__" "…and lists the console-side cause the old copy DENIED"
+gate_says "READ THAT JOB'S OWN SUMMARY LINE" "…and sends the reader to the instrument that measured it (per-job arm)"
+gate_says "READ THE REFUSING JOB'S OWN SUMMARY LINE" "…and again in the aggregate banner"
+# The negative half. Every needle below is verbatim from the copy this slice
+# removed; each one asserted a single cause the refusing job's own log refutes.
+gate_denies "The browser never came up" "…and no longer asserts the browser never came up"
+gate_denies "could not bring headless Chrome up" "…and no longer asserts a Chrome bring-up failure"
+gate_denies "NOT ONE rule or element was measured" "…and no longer claims nothing was parsed"
+gate_denies "Fix the ENVIRONMENT, not the CSS" "…and no longer sends the reader to the runner"
+gate_denies "ENVIRONMENT REFUSAL" "…and no longer labels every refusal an environment refusal"
+
+# (m) THE SECOND REFUSAL THE GATE USED TO MISS. console-unit exited 2 on run
+#     31322709682 with the same refusal tier-floor-render published, and
+#     rendered as a bare `FAIL console-unit: failure` — it had `outputs:` None
+#     and its `decide` line took no verdict argument. Delete `V_UNIT` from the
+#     workflow's `env:`, or the 4th argument from its `decide` line, and this
+#     case is what notices.
+gate "console-unit REFUSED (the refusal the gate could not see)" 1 \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_UNIT=REFUSED
+gate_says "console-unit: failure" "…and names console-unit"
+gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal rather than a bare failure"
+gate_says "(exit 2): console-unit" "…and carries it into the refusals tally by name"
+
+# (m2) THE THIRD REFUSAL, AND THE LAST ONE STANDING (D776). `path-escape` runs
+#      scripts/console-path-escape-check.sh, whose `exit 2` sites include a path
+#      set that resolved to an EMPTY pattern — reachable from the bare `--check`
+#      invocation this job makes, with no argument at all. Until this slice the
+#      ratchet had no `outputs:` block and its `decide` line took three
+#      arguments, so that refusal reached the merge button as a bare
+#      `FAIL path-escape ratchet: failure`: indistinguishable from a ratchet that
+#      MEASURED an uncovered read. The structural half of this is the
+#      exit2_without_verdict_output fact in case 8; this is the behavioural half.
+gate "path-escape REFUSED (the last unwired refusal)" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=failure \
+  O_CONSOLE=true V_ESCAPE=REFUSED
+gate_says "path-escape ratchet: failure" "…and names the ratchet"
+gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a measured coverage defect"
+gate_says "(exit 2): path-escape ratchet" "…and carries it into the refusals tally by name"
+
+# (n) …and BOTH refusals in one run are both named, in decide order.
+gate "console-unit and cssom-parity both REFUSED" 1 \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_UNIT=REFUSED V_CSSOM=REFUSED
+gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refusals, not one"
+
+# (o) AN UNPUBLISHED VERDICT MUST STAY UNPUBLISHED. A job that fails without
+#     publishing anything is judged exactly as it was before this channel
+#     existed — the gate may not invent a refusal it was never told about, and
+#     the un-wrapped steps in console-unit (node --check, the two --test runs,
+#     smoke, the css gate) are precisely that case.
+gate "cssom-parity failed, no verdict published" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true
+gate_says "cssom-parity: failure" "…and still names the failing job"
+gate_denies "REFUSED TO MEASURE" "…and does NOT manufacture a refusal out of an absent verdict"
+gate_says "not in the allow-set" "…and reaches the plain red conclusion"
+
+# (p) a MEASURED defect is the opposite claim, and must not borrow the
+#     refusal's words.
+gate "tier-floor-render MEASURED_DEFECT" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_TIER=MEASURED_DEFECT
+gate_says "This one IS about the console's own bytes" "…and says the defect is real and console-side"
+gate_denies "REFUSED TO MEASURE" "…and does not call a measured defect a refusal"
+
+# (q) a verdict outside the published vocabulary is "cannot tell", not a pass.
+gate "overflow-guard publishes an unknown verdict" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_ESCAPE=success \
+  O_CONSOLE=true V_OVERFLOW=BANANA
+gate_says "outside the published vocabulary" "…and refuses to interpret it"
+
+# (r) verdict=OK on a FAILED job — the instrument said clean and the job died
+#     anyway. Still red, and still says why it cannot tell.
+gate "cssom-parity publishes OK but the job failed" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
+  O_CONSOLE=true V_CSSOM=OK
+gate_says "the instrument said clean and the job" "…and names the contradiction"
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0
@@ -1130,7 +1609,11 @@ else
   no "HEADS_BASELINE=/nonexistent -> exit $rc, wanted 1: $out"
 fi
 if has "$out" "title=CSSOM parity REFUSED"; then
-  ok "…and annotates it REFUSED (an ENVIRONMENT fault)"
+  # Deliberately NOT "(an ENVIRONMENT fault)", which is what this label used to
+  # say: the cause driven here is a MISSING cssom-heads.baseline sidecar — a
+  # committed file in cloud/priv/static/__preview__, i.e. the exact repo-side
+  # cause the banner's old copy denied could exist.
+  ok "…and annotates it REFUSED (here: a missing committed sidecar, not the runner)"
 else
   no "…but did not emit the REFUSED annotation: $out"
 fi
@@ -1171,6 +1654,37 @@ css_rc "a real parity miss"       1 1 "title=CSSOM parity DEFECT"
 css_rc "an instrument refusal"    2 1 "title=CSSOM parity REFUSED"
 css_rc "parity holds"             0 0 "authored CSS and the browser agree"
 css_rc "an exit outside the set"  7 1 "title=CSSOM parity UNINTERPRETABLE"
+
+# ── THE REFUSAL BANNER'S COPY, PINNED IN BOTH DIRECTIONS ────────────────────
+# The aggregate's REFUSED arm stopped naming one cause (cases (l)-(r) above),
+# but this per-instrument banner — a DIFFERENT step body, so none of those
+# cases could see it — still said "an ENVIRONMENT fault … app.css was never
+# parsed … fix the environment". Counted in cssom-parity.mjs, exit 2 has six
+# shapes; three are committed files under cloud/priv/static/__preview__ and one
+# fires after app.css has already been read. So the banner sent a reader to the
+# runner for half of its own causes, while its two siblings (tier-floor-render,
+# overflow-guard) already said "ENVIRONMENT or COVERAGE".
+#
+# This runs the REAL step body at rc=2 — the same extraction css_rc uses, so a
+# copy edit that reinstates either removed claim reds here rather than shipping
+# unwitnessed. Mutation-proved: restoring the old sentence in
+# console-harness.yml turns the two `denies` rows red; deleting the cause-set
+# clause turns the two `says` rows red.
+# `|| true`: the step body EXITS 1 on a refusal (that is the point of it), and
+# this file runs under `set -e`.
+REFOUT="$(STUB_RC=2 PATH="$STUBBIN:$PATH" bash --noprofile --norc "$CSS" 2>&1 || true)"
+css_copy() {
+  if has "$REFOUT" "$1"; then ok "$2"; else no "$2 (the banner never says it)"; fi
+}
+css_copy_denies() {
+  if has "$REFOUT" "$1"; then no "$2 (the banner still says it)"; else ok "$2"; fi
+}
+css_copy        "SIX causes"                "the refusal banner names a cause SET, not one cause"
+css_copy        "cssom-heads.baseline"      "…and names the committed sidecar among them"
+css_copy        "do NOT assume the environment" "…and tells the reader not to assume the runner"
+css_copy_denies "an ENVIRONMENT fault, not a stylesheet defect" "…and no longer calls every refusal an environment fault"
+css_copy_denies "app.css was never parsed"  "…and no longer claims the stylesheet was never read"
+css_copy_denies "fix the environment"       "…and no longer sends the reader to the runner"
 # The stub must really be the thing that ran — otherwise every case above
 # measured the real instrument (or nothing) and proves nothing about the wrapper.
 out="$(STUB_RC=0 PATH="$STUBBIN:$PATH" bash --noprofile --norc "$CSS" 2>&1)"
