@@ -7,7 +7,12 @@ defmodule BarkparkWeb.Plugs.AssignDefaultScope do
   Workspace / Default Project here.
 
   Only assigns `:current_workspace` / `:current_project` when they are not
-  already set — so it is harmless if it ever runs after a resolver. Never halts:
+  already set. That alone does NOT make it safe to run after a resolver, and
+  this moduledoc used to claim it did: a plug that sets only the WORKSPACE
+  leaves `:current_project` unset, so the project fallback below still fires.
+  Running it after a partial resolver is safe today because that fallback is
+  CONDITIONAL (see the next section) — not because of the not-already-set rule.
+  Never halts:
   when no Default has been seeded (a fresh DB before the backfill), it passes
   the conn through untouched and downstream code keeps its pre-tenancy shape.
 
