@@ -1,12 +1,18 @@
-# Epic charter — Media-pipeline robustness build (search+media correctness audit)
+# Epic charter — API Search & Media correctness audit
 
 Epic task: `api-search-media-correctness-audit`
-Wave Paper: `media-pipeline-robustness-wave-2026-08-18`
-Built against origin/main `9d2b4798c2a394a718926cfd5a083823def80153`.
+Wave Papers: `api-search-media-correctness-wave-2026-08-18` (wave 1) · `media-pipeline-robustness-wave-2026-08-18` (wave 2)
+Wave 1 audited against origin/main `e8603fb5d9b247d44fed3a802894dda8a8d1f35f`; wave 2 built against origin/main `9d2b4798c2a394a718926cfd5a083823def80153`.
 
 > Charter written to this epic-specific path (NOT the shared `bp-cloud-epic-charter.md` rotating slot) because that slot currently holds the live, uncommitted charter of the sibling web-templates wave — overwriting it would strand their work (the rotating-slot trap).
 
 ## Vision
+
+### Wave 1 — search + media correctness audit
+
+A Felix-style, improvement-only, evidence-based correctness/robustness sweep of the two large algorithmic-and-IO subsystems the security campaign did **not** own: the search engine (`api/lib/barkpark/search` — crystallizer, documents_retriever, highlighter, intelligence, media_intelligence, merge_pattern, golden_eval, hit_envelope) and the media pipeline (`api/lib/barkpark/media` — blobstore, delivery, image_backend, processing, renditions, storage, probe). NON-security: the tenancy scoping and callback auth were sealed elsewhere and must not be re-paved. The deliverable is an **honest per-class verdict** across four correctness classes — ranking/retrieval math, media decode/rendition, IO/concurrency, Ecto/error-handling — where every REAL finding carries a concrete failing input reproduced against origin/main and is fixed with a mutation-proof (or filed if larger), and every SAFE class is cited by the specific guard/clamp/size-cap/transaction/cleanup that makes it safe. The honest cited-safe verdict IS the A-grade; a finding quota is the failure mode.
+
+### Wave 2 — media-pipeline robustness build
 
 One robustness capstone for the media pipeline, delivered honestly across three severity-graded slices — every fix mutation-proven (a test that reds without it) and NEVER manufactured. Finished experience: an image upload that crashes mid-transcode no longer strands a perpetual "processing" spinner; a hostile or oversized bucket object cannot stream an unbounded body into the BEAM; and the one bounded delete-vs-generate race is closed with a small offline-provable guard. This is a BUILD wave over the three findings the wave-1 audit already filed (`asm-bl-s3-download-response-cap`, `asm-bl-rendition-delete-generate-race`, `asm-bl-stuck-processing-reconciliation`) plus a resolve-then-build on the one design question, not a fresh audit.
 
@@ -15,6 +21,20 @@ FINDING COUNT: 3. Outcome: 3 BUILD, 0 cited-safe. The callback-heals-a-stuck-row
 Fence: `api/lib/barkpark/media` + one new Oban worker under `api/lib/barkpark` + their `api/test` trees ONLY, plus the single cron-registration edit to `api/lib/barkpark/plugins/media.ex` (Path B). DISJOINT from the running web+templates wave (`web/`, `create-barkpark-app`) and the auth+accounts wave (`api/lib/barkpark/auth`, `accounts`). NO `search/`, `content/`, `portable_doc/`, `auth/`, `accounts/`, `barkpark_web`, `cloud/`, `js/`, or `web/` edits. Do NOT re-pave the merged search-tenancy or media-callback signed-token fixes; `api/lib/barkpark/media/delivery/cdn.ex` is READ-ONLY (design resolution only). Isolated worktree off clean origin/main, unique session-scoped name; never touch the primary checkout's uncommitted work.
 
 ## Decisions
+
+### Wave 1 — search + media correctness audit (unnumbered)
+
+- **ZERO code-fix builds this wave.** Twelve surveyors and six run-proof verifiers swept all four classes across both trees and NOT ONE reproduced a crash or wrong number against origin/main. 411 fenced search+media tests green; the divisor suites (golden_eval/intelligence/crystallizer/documents_retriever, 30 tests) and the breadth suites (highlighter/merge_pattern/probe/renditions/escape, 48 tests) green; the adversarial probe matrix (truncated/zero-byte/0x0/cap-boundary) all fail closed; the multibyte highlighter probe green. *Why: the honest per-class cited-safe verdict is the A-grade — manufacturing a fix on a guarded pattern is exactly the failure the wish forbids.*
+- **The sole live crash lead — `delivery/search.ex:702` `(sum) / max_weight` div-by-zero — is CLOSED SAFE.** Four independent guards: `normalize_media_field`'s `weight when weight > 0` drops zero fields before `Enum.max`; the `[] -> order_by inserted_at` branch avoids `Enum.max([])` entirely; the default media config is all-positive (10/8/6/4); `search/2` overwrites any caller `:pipeline_config` with `SurfaceConfigs.get`, and an upserted all-zero config still reads back positive defaults. Direct SQL confirms Postgres RAISES `division_by_zero` on `0.0::float8/0.0::float8`, so the `weight>0` guard is genuinely load-bearing, not vacuous. *Why: the digest's one open crash candidate is gone under execution.*
+- **Both flagged divisors (intelligence.ex:983, crystallizer.ex:243) are double-guarded — the direction's "still live" flag is retracted.** `if(m.transition_count > 0, ...)` fires before the schema-default-0 matters; `if search_count > 0, ...` is guarded AND `search_count = length(non-empty group) >= 1`. *Why: no live divisor survives re-derivation.*
+- **ONE build slice: bank the adversarial regression tests (improvement-only, api/test only).** The highlighter suite had ZERO CJK/emoji/multibyte tests and the probe suite had only happy-path decodes; the verifiers' throwaway probes (mutation-proven load-bearing — drop the `.us` u-flag and they red) fill exactly those gaps. *Why: converts the cited-safe verdict from ephemeral static re-derivation into a durable test-pinned regression guard — the wish's "bank the proof" improvement-only add, fence-clean with no lib edits.*
+- **FILE (backlog): stuck-processing has no out-of-band heal.** `processing.ex` runs three non-transactional upserts bracketing remote-fetch+probe+transcode IO; `set_status` swallows an upsert `{:error,_}` and a raise mid-pipeline is swallowed by `ResolverChain.safe_call`, both stranding the asset permanently at `bp_processing_status="processing"`. The only heal (`media_processing_controller.callback`) is inbound-only and never fires for an internal image pipeline; the Oban cron census has NO media reconciliation sweeper (`Webhooks.StuckDeliverySweeper` is the codebase's own precedent, applied to webhooks not media). *Why: real terminal-state gap, larger than an inline guard. The wish's transaction-wrap suggestion is WRONG (it would hold a DB transaction across remote IO); the correct fix is an Oban worker with retry/backoff and/or a StuckDeliverySweeper-style reconciliation cron — an architectural change with blast radius.*
+- **FILE (backlog): rendition delete-vs-generate race.** `Renditions.delete_for_file` (`rm_rf`) is uncoordinated with the on-demand `serve_rendition -> ensure -> generate` (`mkdir_p! + render`); a concurrent GET during a delete re-creates a rendition directory for a file row that no longer exists. *Why: real class-3 concurrency finding but bounded harm — the orphan is never served (the media row is gone → 404) and renditions are a regenerable cache, so it is wasted disk, not wrong data. Needs coordination (delete-after-generate ordering, tombstone, or a generation guard) or a periodic orphan GC — not a one-liner; the stuck-processing sweeper can absorb it.*
+- **FILE (backlog): `s3.download` has no `max_response_size`.** Req buffers the entire response body into memory; the unbounded-read safety hinges entirely on the 100MB upstream write cap (endpoint.ex:155 + media_controller.ex:316) being the ONLY way bytes reach the bucket. *Why: real class-3 unbounded-read shape, but the risk is out-of-band (a migration or another service writing the bucket beyond 100MB), so a `max_response_size` clamp mirroring probe's 512K discipline is defense-in-depth — appropriate for the backlog, not a build.*
+- **SKIP: `local.ex` put_bytes rm-on-error asymmetry.** `put_file` rms a partial on error; `put_bytes` does not. *Why: non-compounding, local-only (S3 in prod), the deterministic path is overwritten (truncate) on retry — tree-tidiness the wish explicitly excludes.*
+- **FILE (backlog): re-derive the unreached corners.** `media_intelligence.ex` got only grep-level coverage (no algorithm re-derivation), and a runtime NaN from a PostgreSQL NULL `similarity()`/`ts_rank` inside the ORDER BY fragment sits outside the pure-Elixir divisor scope that the verifiers exercised. *Why: coverage honesty — the gap belongs on the ledger as a named follow-up, never implied-verified.*
+
+### Wave 2 — media-pipeline robustness build (D1–D10)
 
 - **D1 — S3 download cap is built with Req's `into:` streaming collector, NOT `max_response_size`.** Why: Req 0.6.3 (mix.lock) has NO `max_response_size` option (verified: zero occurrences in `deps/req`). The cap is an `into: fn {:data,chunk},{req,resp} -> ...` that accumulates `byte_size` and halts past the cap; cap value `100_000_000` ties exactly to the upload ceiling at `endpoint.ex:155`/`media_controller.ex:316`.
 - **D2 (S3 crown-of-slice-1) — Overflow converts to an EXPLICIT error, never a silent truncated write.** Why: a naive `{:halt,...}` aborts mid-stream but Req still returns `{:ok, %Req.Response{}}` with the PARTIAL body, and `download/2`'s with-clause matches `status: 200` and would `File.write` a TRUNCATED blob and cache it. The builder stashes an overflow flag in `resp.private` (or returns `{:error, :too_large}`) so it falls into the existing `other ->` clause → `{:error, :storage_unavailable}`. The mutation test asserts the REFUSAL, not a Req-raised exception.
@@ -28,6 +48,23 @@ Fence: `api/lib/barkpark/media` + one new Oban worker under `api/lib/barkpark` +
 - **D10 — All three slices are round 1, file-disjoint, `opus@medium`.** Why: the fence partitions cleanly (`s3.ex` | `renditions.ex` | new sweeper + `plugins/media.ex`), no slice imports another's new code, so all build this run in parallel. Fable is capped until Aug 21 (the wish sets Opus) and none of these is a visually-designed surface; the crown is hard but well-specified by a copyable precedent, so a complete opus brief is the right call.
 
 ## Roadmap
+
+Wave 1 (this run):
+
+| Slice | task_id | round | model | gate |
+|---|---|---|---|---|
+| Bank adversarial regression tests (highlighter multibyte + probe fail-closed) | `asm-w1-bank-adversarial-tests` | 1 | opus | `cd api && CC=/usr/bin/clang MIX_ENV=test mix test test/barkpark/search/highlighter_multibyte_test.exs test/barkpark/media/probe_adversarial_test.exs` |
+
+Backlog (filed, not built this wave):
+
+| Task | task_id | priority | shape |
+|---|---|---|---|
+| Media stuck-processing has no reconciliation heal | `asm-bl-stuck-processing-reconciliation` | 1 | architectural (Oban worker / sweeper) |
+| Rendition delete-vs-generate orphan race | `asm-bl-rendition-delete-generate-race` | 2 | concurrency coordination / orphan GC |
+| s3.download unbounded response buffer | `asm-bl-s3-download-response-cap` | 2 | defense-in-depth size cap |
+| Re-derive unreached search corners | `asm-bl-unreached-corners-rederivation` | 3 | follow-up survey (media_intelligence, SQL NULL-rank NaN) |
+
+Future waves: none planned — the correctness frontier for these two trees is swept and cited-safe. Reopen only if the backlog findings' fixes are prioritized or a new corner is named.
 
 Wave 2 (this wave) — three file-disjoint round-1 slices, all opus@medium:
 
@@ -43,6 +80,18 @@ Backlog (filed, future waves):
 - `asm-bl-normalize-status-terminal-preservation` — `normalize_status(_)` defaults an unknown external callback status back to `"processing"`, so a rogue inbound callback could un-stick a `"failed"` row and re-arm the loop; low risk for internal uploads but a real tamper surface on the give-up terminal.
 
 ## Wave log
+
+### Wave 2026-08-18 — wave 1 (correctness sweep, zero builds + one test-bank), reviewed A
+
+The verdict held under review: ZERO code-fix builds. Twelve surveyors and six run-proof verifiers swept all four correctness classes (ranking/retrieval, media decode/rendition, IO/concurrency, Ecto/error-handling) across `api/lib/barkpark/search` and `api/lib/barkpark/media`, and not one reproduced a crash or a wrong number against origin/main `e8603fb5d9`. The sole live crash lead — `delivery/search.ex:702` `(sum) / max_weight` — is closed safe by four independent guards (the `weight > 0` filter is load-bearing; SQL confirms Postgres raises on `0.0/0.0`). The honest per-class cited-safe verdict IS the deliverable.
+
+Exactly one slice built, improvement-only, api/test ONLY, no lib edits: **S1 `asm-w1-bank-adversarial-tests`** — banks two adversarial regression suites the verifiers proved but that lived only in torn-down worktrees. `highlighter_multibyte_test.exs` (7 tests) drives the app-level highlighter (`highlight_documents`→`highlight_text`, `snippet_documents`→`snippet_text`, `clamp_brief_highlights`) over CJK padding beyond the snippet lead, emoji, a ZWJ family cluster, a multibyte match string, adjacent+overlapping needles and an entity-adjacent boundary; asserts `String.valid?`, `<mark>` depth never negative and ends 0, no U+FFFD, no re-inflation. `probe_adversarial_test.exs` (9 tests) proves `Probe.probe/2` fail-closes without raising on truncated-mid-SOF JPEG, a 50000-byte 0xFF storm, zero-byte, 0x0 headers, a mime-lying PNG, truncated PNG/GIF, an oversized non-image, and an IHDR pushed past the 512000-byte read cap. Both suites pin real code (the `.us`/`iu` unicode flags and the 512K cap are load-bearing, documented in the test @moduledocs).
+
+Review found the two files were NOT `mix format`-clean (the CI Elixir gate runs `--check-formatted` repo-wide, which would have red-flagged the PR); reformatted both in place and re-ran the gate green (`16 tests, 0 failures`). Final branch: `loop-epic/bank-adversarial-regression-tests-highli-0-r`. Ledger honest: task `in_progress`, 4/5 criteria met with quoted evidence, the LEAD-OWNED merge-gated "PR merged" row left `met:false` for the lead to close on merge. Not flip-prone — pure-unit tests over already-proven-safe code, no reachability/security/tenancy judgment; no second independent reviewer owed.
+
+Four findings filed to the backlog (not built, correctly — each is larger than an inline guard): `asm-bl-stuck-processing-reconciliation` (P1, terminal-state gap needing an Oban sweeper — the wish's transaction-wrap suggestion was correctly rejected as it would hold a DB txn across remote IO), `asm-bl-rendition-delete-generate-race` (P2, bounded-harm concurrency race — orphan never served, wasted disk not wrong data), `asm-bl-s3-download-response-cap` (P2, defense-in-depth unbounded-read cap), `asm-bl-unreached-corners-rederivation` (P3, coverage-honesty follow-up on media_intelligence + SQL NULL-rank NaN).
+
+Merge order: S1 is single-round, dependency-free — merge whenever Cloud + pr-task-gate are green; lead closes S1's criterion index 4 ("PR merged") on merge. Next wave: none needed for these two trees (frontier swept, cited-safe). If a wave is desired, take `asm-bl-stuck-processing-reconciliation` first (highest consequence: assets strand permanently at `processing`) — but it is an architectural Oban-worker slice, a design wave not a build slice. Wave Paper: `api-search-media-correctness-wave-2026-08-18` (debrief appended).
 
 ### Wave 2026-08-18 — media-pipeline robustness build (grade A-)
 
