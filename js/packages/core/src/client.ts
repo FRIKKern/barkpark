@@ -90,6 +90,42 @@ import {
 } from './tenancy'
 import { createHandshakeCache, type HandshakeCache } from './handshake'
 
+// V3 token-leak defense (arpss-js-core-token-serialize-redact). The config is
+// exposed as `client.config` with `token` an enumerable string, so
+// JSON.stringify(client), util.inspect(client), or a React Flight (RSC->browser)
+// serialization would otherwise ship the raw auth token. Attach redacting
+// `toJSON` + Node inspect hooks BEFORE Object.freeze (methods cannot be added
+// after freeze). Both hooks are NON-ENUMERABLE, so withConfig()'s
+// `{ ...frozen, ...patch }` spread drops them — but `token` stays ENUMERABLE and
+// survives the spread (a non-enumerable token would silently build a token-less
+// derived client and break auth), and createClient re-attaches the hooks on every
+// derived client. Direct `config.token` access (transport/listen/export) still
+// returns the real value — only the serialization surfaces are redacted.
+const INSPECT_CUSTOM = Symbol.for('nodejs.util.inspect.custom')
+
+function redactedConfig(config: BarkparkClientConfig): Record<string, unknown> {
+  const clone: Record<string, unknown> = { ...config }
+  if (typeof clone.token === 'string' && clone.token.length > 0) {
+    clone.token = '[REDACTED]'
+  }
+  return clone
+}
+
+function freezeConfigWithRedaction(config: BarkparkClientConfig): Readonly<BarkparkClientConfig> {
+  const copy = { ...config } as BarkparkClientConfig
+  const hook = {
+    value(this: BarkparkClientConfig) {
+      return redactedConfig(this)
+    },
+    enumerable: false,
+    writable: false,
+    configurable: false,
+  }
+  Object.defineProperty(copy, 'toJSON', hook)
+  Object.defineProperty(copy, INSPECT_CUSTOM, hook)
+  return Object.freeze(copy)
+}
+
 const API_VERSION_RE = /^\d{4}-\d{2}-\d{2}$/
 const DATASET_RE = /^[a-z0-9][a-z0-9_-]*$/
 // Workspace / project slugs mirror DATASET_RE — lowercase, leading alnum, then alnum/_/-.
@@ -272,7 +308,7 @@ export interface BarkparkClientWithHandshake extends BarkparkClient {
  */
 export function createClient(config: BarkparkClientConfig): BarkparkClient {
   validateConfig(config)
-  const frozen: Readonly<BarkparkClientConfig> = Object.freeze({ ...config })
+  const frozen: Readonly<BarkparkClientConfig> = freezeConfigWithRedaction(config)
 
   // Per-instance handshake cache — scoped to this client so tests stay
   // deterministic and withConfig() gets a fresh cache (projectUrl/dataset

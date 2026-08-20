@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/mattn/go-runewidth"
 )
 
 // seedServersConfig writes the same two-server config every snapshot case in
@@ -149,5 +151,61 @@ func TestRunServersPrintsHeaderBeforeRows(t *testing.T) {
 	}
 	if headerIdx >= rowIdx {
 		t.Errorf("header did not precede the entries (header at %d, first row at %d):\n%s", headerIdx, rowIdx, out)
+	}
+}
+
+// serverColumnOffset returns the terminal display-cell column (runewidth) at
+// which the given URL starts on its row — i.e. the display width of everything
+// printed before it. That is the SERVER column's true starting position.
+func serverColumnOffset(t *testing.T, out, url string) int {
+	t.Helper()
+	for _, ln := range strings.Split(out, "\n") {
+		if i := strings.Index(ln, url); i >= 0 {
+			return runewidth.StringWidth(ln[:i])
+		}
+	}
+	t.Fatalf("row for %q not found in:\n%s", url, out)
+	return -1
+}
+
+// The `bp servers` human table measures and pads the NAME/KIND columns. A
+// wide-CJK DisplayName is ONE rune but TWO display cells per glyph, so measuring
+// with utf8.RuneCountInString and padding with fmt's %-*s (both rune-count)
+// under-pads it: the SERVER column shears right on the CJK row relative to an
+// ASCII row. runewidth.StringWidth + runewidth.FillRight pad in display cells,
+// so the SERVER column must start at the SAME cell offset on both rows.
+//
+// On origin/main this reds — the CJK "日本語" name (3 runes, 6 cells) padded to
+// the 12-rune minimum yields 3+9=12 runes but 6+9=15 cells, so the SERVER column
+// on the CJK row starts 3 cells past the ASCII row (delta 3).
+func TestServersTableWideRuneColumnAlignment(t *testing.T) {
+	withTempConfigHome(t)
+	cfg := &Config{
+		// Neither known server is active, so every row carries the same 2-cell
+		// "  " mark and the offsets compare cleanly.
+		Server: "https://other.example.com",
+		KnownServers: []ServerEntry{
+			{Name: "prod", Server: "https://ascii.example.com", Tier: "starter"},
+			{Name: "日本語", Server: "https://cjk.example.com", Tier: "starter"},
+		},
+	}
+	if err := SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+
+	if code := runServers(w, nil); code != exitOK {
+		t.Fatalf("runServers exit = %d, want %d", code, exitOK)
+	}
+	out := stdout.String()
+
+	asciiOffset := serverColumnOffset(t, out, "https://ascii.example.com")
+	cjkOffset := serverColumnOffset(t, out, "https://cjk.example.com")
+	if asciiOffset != cjkOffset {
+		t.Errorf("SERVER column misaligned across rune widths: ASCII row starts at display cell %d, wide-CJK row at %d (delta %d) — the CJK NAME was padded by rune-count, not display cells:\n%s",
+			asciiOffset, cjkOffset, cjkOffset-asciiOffset, out)
 	}
 }

@@ -1709,6 +1709,21 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.gauge_list_email_html(b)}
   end
 
+  # scaffy:add-block-type Route MARK:ex-compose-route
+  # `route` (sport track, 2026-08-17): encoded polyline in `polyline` → a
+  # self-contained SVG track shape + meta row (DataViz.route_html/2 — no map
+  # tiles, no JS, so reader and email render the identical figure; the article
+  # variant reads the accent token, email carries literal hex). TUI twin:
+  # internal/pdrender/route.go rasterises the same polyline through the braille
+  # canvas.
+  def compose_block(%{"type" => "route"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.route_html(b, :article)}
+  end
+
+  def compose_block(%{"type" => "route"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.route_html(b, :email)}
+  end
+
   # Unknown / unregistered block type — degrade gracefully instead of crashing
   # every render surface (Studio paper view crash-loop, Bulldocs ingest 500,
   # every body_html rebuild 500, public /papers reader). Papers are schemaless,
