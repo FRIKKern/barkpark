@@ -4830,10 +4830,32 @@
   // hostname). The <input> stays as an off-screen copy buffer — never focused,
   // never in the tab order — because execCommand("copy") needs a form control
   // when navigator.clipboard is unavailable.
-  function tokenRevealHtml(plaintext, pat) {
+  //
+  // OPTS (cloud-agent onramp) — the SAME component, a second caller. `opts` is
+  // absent at the mint call site, and every default below reproduces the minted
+  // bytes exactly, so the reveal a person gets after POST /v1/tokens is
+  // unchanged. The instance-credential caller overrides only the three strings
+  // that would otherwise be FALSE for it:
+  //   * title  — "Token created" describes a mint; nothing is minted there.
+  //   * notice — "the only time you’ll see this token" is the load-bearing
+  //     sentence of the mint (pat_json carries no plaintext, so a refetch cannot
+  //     recover it). The instance admin token is stored ENCRYPTED and
+  //     GET /v1/barkparks/:id/credentials decrypts it on demand, so reprinting
+  //     that sentence there would be a lie that pushes people to store a secret
+  //     they could simply re-read. Its notice states the real risk instead.
+  //   * extraHtml — a non-secret line the reveal can carry beside the secret.
+  // What is NOT overridable is the handling of the secret itself: one esc()d
+  // <code> text node, one esc()d off-screen copy buffer, and the closure below.
+  function tokenRevealHtml(plaintext, pat, opts) {
+    opts = opts || {};
     var label = (pat && pat.name) ? esc(pat.name) : "Your new token";
-    return '<h2 class="modal-title" id="modal-title">Token created</h2>' +
-      '<div class="notice notice-warn" role="alert">This is the only time you’ll see this token. Copy it now and store it somewhere safe.</div>' +
+    var title = opts.title ? esc(opts.title) : "Token created";
+    var notice = opts.notice
+      ? esc(opts.notice)
+      : "This is the only time you’ll see this token. Copy it now and store it somewhere safe.";
+    return '<h2 class="modal-title" id="modal-title">' + title + "</h2>" +
+      '<div class="notice notice-warn" role="alert">' + notice + "</div>" +
+      (opts.extraHtml || "") +
       '<div class="field"><div class="label" id="token-reveal-label">' + label + "</div>" +
         '<div class="token-reveal">' +
           // REVIEW (cch-w21-s4-r): the accessible NAME comes from the field's own
@@ -4853,8 +4875,9 @@
       '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-done" type="button">Done</button></div>';
   }
 
-  function revealToken(plaintext, pat) {
-    openModal(tokenRevealHtml(plaintext, pat));
+  function revealToken(plaintext, pat, opts) {
+    opts = opts || {};
+    openModal(tokenRevealHtml(plaintext, pat, opts));
     var input = $("#token-reveal-value");
     var text = $("#token-reveal-text");
     // Focus lands on the SECRET itself (the <code> is tabbable), never on the
@@ -4904,7 +4927,12 @@
     });
     $("#token-done").addEventListener("click", function () {
       closeModal();
-      loadTokens();
+      // The mint's Done repaints the tokens list so the new row appears. A
+      // caller that did not mint anything passes its own no-op — calling
+      // loadTokens() from the instance screen would fire a settings-page fetch
+      // whose result has nowhere to land.
+      if (opts.onDone) opts.onDone();
+      else loadTokens();
     });
   }
 
@@ -6407,6 +6435,76 @@
     });
   }
 
+  // ── CONNECT AGENT (cloud-agent onramp) ──────────────────────────────────────
+  //
+  // The console's FIRST reader of GET /v1/barkparks/:id/credentials. The route
+  // has always existed and always stored the per-instance admin token encrypted;
+  // nothing in the SPA ever asked for it, so the only way to point an agent at a
+  // box was the SSH/rescue-reboot dance the route was written to end.
+  //
+  // Nothing is minted here — the credential already exists and this decrypts it,
+  // which is exactly why the reveal is driven with its own title and notice
+  // rather than the mint's (see tokenRevealHtml's opts block).
+  function connectAgent(bp, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = "Fetching…"; }
+    api("GET", "/v1/barkparks/" + encodeURIComponent(bp.id) + "/credentials").then(function (r) {
+      if (btn) { btn.disabled = false; btn.textContent = "Connect agent"; }
+      if (r.status === 200 && r.data && r.data.admin_token) {
+        revealInstanceCredential(bp, r.data);
+        return;
+      }
+      // faultCopy and not a hand-written sentence: the route's own slugs are
+      // already curated (`no_admin_token` reads "No stored credentials for this
+      // instance — it may need a re-provision.", `suspended` its own), and a 5xx
+      // or a dead transport must not be reported as a fact about the instance.
+      toast({
+        kind: "error",
+        title: "Couldn’t fetch the credentials",
+        body: faultCopy(r.status, r.data, "Please try again.", r.transport),
+      });
+    });
+  }
+
+  // The non-secret half of the reveal: the address the credential belongs to,
+  // in the SHIPPED `.detail-url` grammar the instance header already uses (same
+  // markup, same delegated [data-copy] affordance) — an agent needs both halves
+  // and this is the one moment both are on screen together. `data-copy` is
+  // correct HERE and would be wrong for the token: it persists in the attribute,
+  // which is precisely why the secret does not use it (see below).
+  function connectAgentExtraHtml(bp) {
+    var url = publicUrl(bp);
+    return '<div class="field"><div class="label">Instance URL</div>' +
+      '<div class="detail-url"><span class="detail-url-text">' + esc(url) + "</span>" +
+      '<button class="copy-btn" type="button" data-copy="' + esc(url) +
+      '" aria-label="Copy address">' + COPY_SVG + "</button></div></div>";
+  }
+
+  // THE SECRET IS HANDLED BY THE COMPONENT, NOT BESIDE IT. This calls
+  // revealToken — the same function the mint calls — so the plaintext gets the
+  // identical treatment main already worked out for it:
+  //   * it renders as an esc()d TEXT NODE in a <code> (wrapping, readable — the
+  //     cch-w21-s4 finding that an <input> can only scroll), plus the 1px
+  //     off-screen <input> that execCommand("copy") needs as a buffer;
+  //   * Copy reads the CLOSURE variable, never a `data-copy` attribute, so the
+  //     token is never written into markup that a later reader could scrape;
+  //   * the whole thing lives in #modal-body, which closeModal() empties — so
+  //     the credential leaves the DOM when the sheet closes.
+  // The notice is the one thing that MUST differ. "This is the only time you'll
+  // see this token" is true of a mint and false here: this route decrypts a
+  // stored credential and will answer again, so repeating it would push someone
+  // to stash a secret they can re-read on demand.
+  function revealInstanceCredential(bp, creds) {
+    revealToken(creds.admin_token, { name: bp.name }, {
+      title: "Connect agent",
+      notice: "This is a live admin credential for this instance — anyone holding it has full access to its content. " +
+        "Paste it into your agent’s environment; never commit it. You can reveal it again from this screen.",
+      extraHtml: connectAgentExtraHtml(bp),
+      // Nothing was minted, so there is no list to repaint. revealToken has
+      // already called closeModal() by the time this runs.
+      onDone: function () {},
+    });
+  }
+
   // Last fetched fleet, reused by the instance drill-down (avoids a second
   // round-trip on row click). Cleared after a launch so it refetches.
   var fleetCache = null;
@@ -7533,6 +7631,19 @@
       ? adminWriteControlHtml(authority, "Attach domain", 'id="inst-domain"', meRetryHtml())
       : "";
 
+    // cloud-agent onramp: reveal this instance's admin credential so an agent
+    // session (Claude Code, Cursor, a CI runner) can be pointed at the box.
+    // GET /v1/barkparks/:id/credentials is team-admin gated on BOTH credential
+    // kinds, so the OFFER is authority-gated by the SAME three-valued reader the
+    // two writes beside it use (D428 disable-and-explain) — a member gets the
+    // disabled control and the server's own sentence, never a 403 after a click.
+    // Gated on `lc.live`: a provisioning box has no stored admin token yet, and
+    // a suspended one is refused 409 by design (cch-w54-s2), so neither is
+    // offered a control that could only fail.
+    var connectBtn = lc.live
+      ? adminWriteControlHtml(authority, "Connect agent", 'id="inst-connect-agent"', meRetryHtml())
+      : "";
+
     // GR24 (screens/02): the "bp CLI ▾" disclosure — opens the CLI card
     // (#inst-lifecycle-actions, the conduit-driven lifecycle surface). Renders
     // exactly when the card itself does (showLifecycleRow), so the toggle can
@@ -7570,7 +7681,7 @@
               : bp.host
                 ? updateBtn +
                   '<button class="btn btn-primary btn-sm" id="inst-open-studio" type="button">Open Studio</button>' +
-                  domainBtn + cliToggle
+                  connectBtn + domainBtn + cliToggle
                 : "";
 
     // The failed case is owned by the timeline now (its fail block shows the
@@ -7707,6 +7818,11 @@
     wireUpdatePanel(bp); // isu-w5: per-instance pin/unpin/pause/resume policy buttons
     var domain = $("#inst-domain");
     if (domain) domain.addEventListener("click", function () { openAttachDomainModal(bp); });
+    // Same add-listener-if-present shape: on the refuse/unknown arms
+    // adminWriteControlHtml drops the id, so there is no hook to re-arm a dead
+    // click with.
+    var connect = $("#inst-connect-agent");
+    if (connect) connect.addEventListener("click", function () { connectAgent(bp, connect); });
     // GR24: the "bp CLI ▾" disclosure — show/hide the CLI card and remember the
     // choice across SSE repaints (module state, see instanceCliOpen).
     var cliT = $("#inst-cli-toggle");
@@ -24416,6 +24532,13 @@
       loadNewTemplates: loadNewTemplates,
       tokenRevealHtml: tokenRevealHtml, openTokenModal: openTokenModal,
       revealToken: revealToken, tokenRow: tokenRow,
+      // cloud-agent onramp — the instance-credential reveal built ON the mint's
+      // component. The pure half is node-pinned; revealInstanceCredential is
+      // exported too so the harness can drive the WHOLE call (the opts actually
+      // reaching tokenRevealHtml) rather than only the string it composes.
+      connectAgentExtraHtml: connectAgentExtraHtml,
+      revealInstanceCredential: revealInstanceCredential,
+      connectAgent: connectAgent,
       // gr-w3 v4 shell: the reset-route extractor (GR13 — was unexported), the
       // context-morph enum + fail-closed operator gate (both PURE, node-pinned;
       // the DOM appliers applyShellNav/applyOperatorGate are browser+smoke-driven),

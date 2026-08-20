@@ -11127,18 +11127,107 @@ test("cch-w45-s5: the answer reaches BOTH verbs through the one render seam (ins
   const refused = hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {}, "refuse");
   assert.doesNotMatch(refused, /id="inst-domain"/);
   assert.doesNotMatch(refused, /data-rollback/);
-  // cch-w47-s2: 5, not 4 — the two disable-and-explain verbs still carry it
-  // TWICE each (title attribute + reason span), and the support card's
-  // empty-state now carries it ONCE more: its add affordance is OMITTED (D514),
-  // so there is no disabled button to hang a title on, only the sentence. Still
-  // the SERVER's own bytes in every one of the five places — nothing fresh.
-  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 5,
+  // cch-w47-s2: was 5 — the two disable-and-explain verbs carry it TWICE each
+  // (title attribute + reason span), and the support card's empty-state carries
+  // it ONCE more: its add affordance is OMITTED (D514), so there is no disabled
+  // button to hang a title on, only the sentence.
+  //
+  // cloud-agent onramp: 7, because "Connect agent" is a THIRD disable-and-
+  // explain verb on this header and pays the same two (title + reason span).
+  // The number moved because a control arrived, NOT because a fresh sentence
+  // did — every one of the seven is still FORBIDDEN_ROLE_COPY.admin, the same
+  // bytes the server's own 403 renders through friendly(). That is the property
+  // this row exists to hold, and the split() count is what makes a hand-written
+  // lookalike sentence unable to pass here.
+  assert.equal(refused.split(CCH_W45_S5_ADMIN_SENTENCE).length - 1, 7,
     "every refused affordance on the screen carries the server's sentence");
+  // The new verb specifically: the click hook is GONE on refuse and PRESENT on
+  // grant. Without this pair the count above could be satisfied by a control
+  // that renders its excuse and stays clickable anyway.
+  assert.doesNotMatch(refused, /id="inst-connect-agent"/);
   // The default is the shipped screen, unchanged.
   const plainGrant = hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {});
   assert.equal(plainGrant, hooks.instanceDetailHtml(CCH_W45_S5_LIVE, "overview", {}, "grant"));
   assert.match(plainGrant, /id="inst-domain"/);
   assert.match(plainGrant, /data-rollback="1"/);
+  assert.match(plainGrant, /id="inst-connect-agent"/);
+});
+
+// ── CONNECT AGENT: the instance-credential reveal (cloud-agent onramp) ───────
+//
+// WHAT THIS BLOCK IS DEFENDING. GET /v1/barkparks/:id/credentials answers with
+// the PLAINTEXT per-instance admin token. The console had no reader for it at
+// all until this slice, so the reveal is new code holding an old secret, and the
+// question that matters is not "does a modal appear" but "is the secret handled
+// the way the mint's reveal already handles one". These rows pin that it is —
+// by driving the SAME component (tokenRevealHtml), not a lookalike.
+test("connect agent: the reveal is the MINT'S component, and the mint's bytes are unchanged", () => {
+  // The mint call site passes no opts. Its output must be byte-identical to what
+  // shipped, or generalising the component silently rewrote the one screen whose
+  // own copy says you will never see this again.
+  const minted = hooks.tokenRevealHtml("bpc_pat_MINTED", { name: "CI deploy key" });
+  assert.match(minted, /Token created/);
+  assert.ok(minted.toLowerCase().includes("only time"), "the mint keeps its only-time banner");
+  assert.equal(minted, hooks.tokenRevealHtml("bpc_pat_MINTED", { name: "CI deploy key" }, {}),
+    "an empty opts object must be indistinguishable from no opts at all");
+});
+
+test("connect agent: the reveal states the credential is RE-READABLE, never 'the only time'", () => {
+  const html = hooks.tokenRevealHtml("bp_admin_LIVE_SECRET", { name: "Acme prod" }, {
+    title: "Connect agent",
+    notice: "This is a live admin credential for this instance — anyone holding it has full access to its content. " +
+      "Paste it into your agent’s environment; never commit it. You can reveal it again from this screen.",
+    extraHtml: hooks.connectAgentExtraHtml({ id: "bp1", name: "Acme prod", url: "https://acme.barkpark.cloud" }),
+  });
+
+  assert.match(html, /Connect agent/);
+  // THE LIE THAT MUST NOT BE TOLD. The instance admin token is stored encrypted
+  // and this route decrypts it on demand, so "the only time you'll see this"
+  // would push someone to stash a secret they can simply re-read.
+  assert.ok(!html.toLowerCase().includes("only time"),
+    "the instance credential is re-readable — the mint's only-time sentence would be false here");
+  assert.match(html, /reveal it again/);
+  // …and it is still framed as dangerous. An honest "you can re-read this" must
+  // not read as "so it does not matter".
+  assert.match(html, /notice notice-warn/);
+  assert.match(html, /full access/);
+});
+
+test("connect agent: the SECRET is a text node and a closure — never a persisting attribute", () => {
+  const secret = "bp_admin_LIVE_SECRET";
+  const html = hooks.tokenRevealHtml(secret, { name: "Acme prod" }, {
+    title: "Connect agent",
+    notice: "re-readable",
+    extraHtml: hooks.connectAgentExtraHtml({ id: "bp1", name: "Acme prod", url: "https://acme.barkpark.cloud" }),
+  });
+
+  // This repo has shipped a credential into a persisting attribute before, and
+  // the mint's component deliberately does not: Copy reads the closure variable.
+  // `data-copy` IS present in this markup — for the instance URL, which is not a
+  // secret — so an assertion that merely looked for the attribute would pass
+  // vacuously. Pin the pairing instead: no data-copy anywhere CARRIES the token.
+  assert.match(html, /data-copy="https:\/\/acme\.barkpark\.cloud"/);
+  for (const m of html.matchAll(/data-copy="([^"]*)"/g)) {
+    assert.ok(!m[1].includes(secret), "the token must never be written into a data-copy attribute");
+  }
+  // Where the secret IS: the <code> text node the mint uses (wrapping, readable)
+  // and the off-screen 1px copy buffer execCommand needs. Both esc()d by the
+  // component; nothing here re-implements either.
+  assert.match(html, new RegExp('<code class="token-reveal-input"[^>]*>' + secret + "</code>"));
+  assert.match(html, new RegExp('id="token-reveal-value"[^>]*value="' + secret + '"'));
+  assert.match(html, /token-eye/);   // the same show/hide the mint offers
+  assert.match(html, />Copy</);
+});
+
+test("connect agent: the URL half is escaped and rides the shipped .detail-url grammar", () => {
+  const html = hooks.connectAgentExtraHtml({
+    id: "bp1", name: "x", url: 'https://evil"><script>alert(1)</script>.example',
+  });
+  assert.ok(!html.includes("<script>"), "the address is escaped, never injected");
+  assert.match(html, /class="detail-url"/);
+  // custom_host wins over the provisioning FQDN — publicUrl's rule, consumed.
+  const custom = hooks.connectAgentExtraHtml({ id: "bp1", name: "x", url: "https://a.barkpark.cloud", custom_host: "cms.acme.com" });
+  assert.match(custom, /https:\/\/cms\.acme\.com/);
 });
 
 // ── cch-w47-s2: the FOUR autoupdate policy buttons are decided at OFFER time
@@ -17039,6 +17128,63 @@ async function driveLoader(run, { status, payload, ids }) {
   }
   return { dom, fetch, html: () => dom.els[ids[0]].innerHTML };
 }
+
+// ── connect agent: the fetch->reveal wiring, driven (cloud-agent onramp) ─────
+//
+// The pins further up prove the reveal COMPOSES correctly. They cannot prove it
+// is REACHED, and reachability is where a credential surface actually fails: a
+// read that 403s must open no sheet at all, because a modal titled "Connect
+// agent" over an empty token line is a worse answer than a toast.
+//
+// `token-copy` and `token-done` are in the id list because revealToken binds
+// their click handlers UNGUARDED (main's shape, not this slice's) — the
+// recordingDom must be able to hand them back or the drive throws before it can
+// assert anything.
+const CONNECT_IDS = ["modal-root", "modal-body", "token-copy", "token-done"];
+const CONNECT_BP = { id: "bp-1", name: "Acme prod", host: "acme.example", url: "https://acme.barkpark.cloud" };
+
+const driveConnect = (status, payload) =>
+  driveLoader(() => hooks.connectAgent(CONNECT_BP, null), { status, payload, ids: CONNECT_IDS });
+
+test("connect agent: a 200 opens the reveal, and it asks the credentials route for THIS box", async () => {
+  const { dom, fetch } = await driveConnect(200, {
+    admin_token: "bp_admin_DRIVEN",
+    url: "https://acme.barkpark.cloud",
+    host: "acme.example",
+  });
+
+  assert.equal(fetch.calls.length, 1);
+  assert.match(fetch.calls[0].path, /\/v1\/barkparks\/bp-1\/credentials$/);
+
+  const body = dom.els["modal-body"].innerHTML;
+  assert.match(body, /Connect agent/);
+  assert.match(body, /bp_admin_DRIVEN/);
+  assert.match(body, /https:\/\/acme\.barkpark\.cloud/);
+  // Reached through the mint's component, not a second implementation.
+  assert.match(body, /token-reveal-input/);
+  assert.ok(!body.toLowerCase().includes("only time"));
+});
+
+test("connect agent: a REFUSED read opens NO sheet — an empty reveal is worse than a toast", async () => {
+  for (const [status, payload] of [
+    [403, { error: "forbidden", required: "root", scope: "token" }],
+    [404, { error: "no_admin_token" }],
+    [409, { error: "suspended" }],
+    [500, { error: "server_error" }],
+  ]) {
+    const { dom } = await driveConnect(status, payload);
+    assert.equal(dom.els["modal-body"].writes.length, 0,
+      "status " + status + " must not paint a reveal sheet");
+  }
+});
+
+test("connect agent: a 200 carrying NO token is treated as a failure, not as an empty reveal", async () => {
+  // The route can answer 200 only with a token, but the client must not assume
+  // it: `r.data.admin_token` absent would otherwise render the amber sheet with
+  // an empty <code> — a credential screen asserting a credential it does not have.
+  const { dom } = await driveConnect(200, { url: "https://acme.barkpark.cloud" });
+  assert.equal(dom.els["modal-body"].writes.length, 0);
+});
 
 const SITES_IDS = ["instance-sites", "site-new-btn"];
 const driveSites = (status, payload, bp) =>

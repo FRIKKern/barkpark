@@ -1951,14 +1951,25 @@ const EXPECTATIONS = {
         "no click hook is wired for the rollback the server will refuse");
       assert.ok(body.includes("You need the admin role on this team — an admin on this team can grant it."),
         "both refusals speak the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
-      // cch-w47-s2: FOUR now, not two — the same screen was also offering this
+      // cch-w47-s2: FOUR, not two — the same screen was also offering this
       // member the autoupdate policy toggles (patch /v1/barkparks/:id/autoupdate,
       // require_primary_team_admin). With bpBase carrying the CP's real policy
       // block, `autoupdateActions` offers Pause + Pin on this row, and
       // adminWriteControlHtml emits ONE wrapper PER control: domain + rollback +
       // pause + pin = 4. Add Support takes the OMIT arm (D514) and adds none.
-      assert.equal(countMatches(body, '<div class="inst-life-disabled">'), 4,
-        "exactly the four member-reachable writes render through the disable-and-explain arm");
+      //
+      // cloud-agent onramp: FIVE. "Connect agent" (GET
+      // /v1/barkparks/:id/credentials) joins them, and it is the first entry
+      // here that is not a WRITE — it is a READ that reveals the plaintext
+      // instance admin token, so it carries the same team-admin gate and takes
+      // the same arm. The wording below is widened to say so rather than left
+      // counting "writes" and quietly meaning something else.
+      assert.equal(countMatches(body, '<div class="inst-life-disabled">'), 5,
+        "exactly the five member-reachable admin-gated affordances render through the disable-and-explain arm");
+      assert.ok(body.includes("Connect agent"),
+        "the credential reveal is never hidden from a member — it explains itself like its neighbours");
+      assert.ok(!body.includes('id="inst-connect-agent"'),
+        "no click hook is wired for the credential reveal the server will refuse");
       assert.ok(!body.includes('data-au='),
         "no click hook is wired for the autoupdate policy writes the server will refuse");
       assert.ok(!body.includes("fleet-add-support"),

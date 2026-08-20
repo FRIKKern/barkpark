@@ -36,14 +36,33 @@ no() {
   echo "  FAIL — $1" >&2
 }
 
-# ── honest-gates D37: never `printf … | grep -q` ───────────────────────────
-# `printf '%s\n' "$x" | grep -q …` under `set -o pipefail` is a SIGPIPE trap on
-# BSD grep (macOS): grep exits 0 the instant it matches, printf is killed by
-# SIGPIPE, pipefail promotes 141 over grep's success, and the `if` takes the
-# ELSE branch — reporting a FALSE failure for a match that did occur. A
-# here-string has no writer process to kill, so these are deterministic on every
-# platform. Use them for EVERY match against a captured string; matches against
-# a FILE (`grep -q … "$f"`) were never at risk and stay as they are.
+# ── honest-gates D37: never read the status of a pipeline into `grep -q` ───
+# THE RULE IS ABOUT THE WRITER, NOT ABOUT WHAT IS BEING SEARCHED. Any
+# `A | grep -q …` whose exit status you read is unsafe whenever A can still have
+# bytes to write: `grep -q` exits the instant it matches, A takes SIGPIPE (141)
+# or EPIPE (2) on its next write, and `set -o pipefail` promotes that over
+# grep's success — so the `if` takes the ELSE branch for a match that DID occur.
+# The same applies to `| head` and `| grep -m N`, which also close early.
+#
+# A is not only `printf`. `sed … "$f" | grep -q`, `grep … "$f" | grep -q`, and
+# `awk … "$f" | grep -q` are pipelines with writers, NOT file matches — the
+# earlier wording of this rule ("matches against a FILE were never at risk")
+# was read that way and let exactly those three shapes survive; #12754 and
+# task-4f3acc2d18a7f047 are the cleanup. Only `grep -q PAT "$f"` with NO pipe
+# is a file match.
+#
+# Nor is it macOS-only: this was first seen on BSD grep, but the failure that
+# opened #12754 was GNU grep on Linux CI. It is a scheduling race, so a quiet
+# host can pass it a thousand times and a loaded runner still lose it.
+#
+# Triage note — the direction decides how bad it is. Where a MATCH means "the
+# good thing is present", a misread only costs a spurious red. Where a MATCH
+# means "the bad thing is present", a misread SILENTLY SKIPS the violation
+# report: the check does not fail, it stops being able to fail.
+#
+# The fixes: a here-string (no writer process at all), or materialise the
+# producer's output into a variable first and match that. Use them for EVERY
+# match against a captured string.
 has()      { grep -q  -- "$2" <<<"$1"; }   # substring/BRE anywhere in $1
 has_line() { grep -qx -- "$2" <<<"$1"; }   # a whole line of $1 equals the BRE
 

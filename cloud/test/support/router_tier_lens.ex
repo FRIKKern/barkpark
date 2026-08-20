@@ -66,7 +66,16 @@ defmodule BarkparkCloud.RouterTierLens do
     # outer guard is not the tier those routes enforce, so the composed key —
     # base guard + the elevation the body performs — is what gets mapped here.
     "require_user+forbidden:admin" => "admin",
-    "require_user_or_pat+ability:deploy+forbidden:admin" => "admin(d)"
+    "require_user_or_pat+ability:deploy+forbidden:admin" => "admin(d)",
+
+    # THE CONJUNCTION, and it is a DIFFERENT tier from the disjunction above.
+    # GET /v1/barkparks/:id/credentials (cloud-agent onramp) accepts either
+    # credential kind, but it enforces the team-admin ROLE on both AND requires
+    # `root` of a PAT — it hands back the plaintext instance admin token. So
+    # every caller that reaches it IS a team admin, and the honest tier column
+    # is a plain `admin`: `admin(d)` would advertise the deploy-PAT bargain
+    # ("no role needed") on a route that grants no such thing.
+    "require_user_or_pat+ability:root+forbidden:admin" => "admin"
   }
 
   @decl_re ~r/^\s*(get|post|put|patch|delete)[\s(]+"([^"]+)"/

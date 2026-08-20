@@ -22,6 +22,9 @@
 #   6. Every .md under _attic/docs-2026-06/ starts with "ARCHIVED" (G3;
 #      scoped to docs-2026-06 only — legacy attic predates the convention;
 #      .md only — log/xml/json residue would be corrupted by a banner).
+#   8. @canonical capability:<slug> markers are unique repo-wide, sit on a
+#      PUBLIC entry point, and their optional doc: backlink resolves — checked
+#      only AFTER a planted fixture proves the scan can still find a defect.
 #
 # WARN-only (never fails the gate):
 #   7. Duplication tripwires — prod IP literal, webhook signature literal,
@@ -508,41 +511,134 @@ tripwire 'barkpark-dev-token' \
 # from under a marker turns CI red instead of rotting silently like a prose
 # pointer. The .ex/.go/.exs/.ts trigger in doc-gates.yml is the keystone — without
 # it this never re-runs on a code-only rename (the exact way prose pointers rot).
-echo "== @canonical capability markers =="
-# (a) uniqueness
-CANON_DUPES=$(
-  grep -rHoE '@canonical capability:[A-Za-z0-9._-]+' \
-    --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
-    "${GREP_PRUNE[@]}" \
-    . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' \
-    | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' | sort | uniq -d || true
-)
-if [ -n "$CANON_DUPES" ]; then
-  for d in $CANON_DUPES; do
-    fail "@canonical capability:$d claimed by >1 impl (a copy-paste that kept the marker?)"
+#
+# WHY THIS SECTION CARRIES A POSITIVE CONTROL
+# -------------------------------------------
+# Both invariants are ABSENCE proofs: they print `ok:` when their scan comes back
+# with nothing to complain about — and a scan that returns NOTHING AT ALL prints
+# exactly the same `ok:`. §1 of this script already fails closed on that shape
+# ("no routing-table targets found in CLAUDE.md — table missing or reformatted");
+# §8 did not. The corpus is non-empty today, so this was not vacuous yet, but
+# nothing here would have said when it became so.
+#
+# The fix is NOT "assert the marker count is non-zero". CLAUDE.md is explicit
+# that markers are demand-driven and "should be REMOVED once dedup eliminates
+# its decoys" — an empty corpus is a legitimate future state, and a non-empty
+# assertion would eventually red on a correct tree. Instead: plant a tree with
+# a KNOWN duplicate, a KNOWN private-helper marker and a KNOWN dangling doc:
+# backlink, run the SAME scan over it, and require all three to be caught. With
+# the scanner certified, a report of zero markers is a fact about the repo
+# rather than a fact about the scanner, and §8 states the count out loud.
+# Modelled on scripts/committed-symlink-check.sh --selftest.
+
+CANON_INCLUDES=(--include='*.ex' --include='*.exs' --include='*.go'
+  --include='*.ts' --include='*.tsx')
+
+# Every `@canonical capability:` hit under $1, as file:line:text. The ONE reader
+# both invariants and the control go through, so a control that passes is a
+# statement about the shipping code path.
+canon_hits() {
+  grep -rn '@canonical capability:' "${CANON_INCLUDES[@]}" "${GREP_PRUNE[@]}" \
+    "$1" 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' || true
+}
+
+# The verdicts for one root, one per line, for the CALLER to interpret:
+#   DUP <slug>                     slug claimed by >1 impl
+#   PRIVATE <file>:<line> <slug>   no public def/func/export within 6 lines below
+#   DOCMISS <slug> <path>          doc: backlink points at a missing file
+#   OK <file>:<line> <slug>        a conforming marker
+# The gate turns findings into fail(); the control asserts they appear. Nothing
+# in here touches $FAIL, which is what lets the same code run over a tree that
+# is SUPPOSED to be dirty.
+canon_scan() {
+  local root="$1" hits cf rest cl slug dpath
+  hits="$(canon_hits "$root")"
+
+  printf '%s\n' "$hits" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' \
+    | grep . | sort | uniq -d | sed 's/^/DUP /' || true
+
+  { printf '%s\n' "$hits" | grep . || true; } | while IFS= read -r hit; do
+    cf=${hit%%:*}; rest=${hit#*:}; cl=${rest%%:*}
+    slug=$(printf '%s' "$hit" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/')
+    if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE '^[[:space:]]*(def |func |export )'; then
+      echo "OK $cf:$cl $slug"
+    else
+      echo "PRIVATE $cf:$cl $slug"
+    fi
+    dpath=$(printf '%s' "$hit" | sed -nE 's/.*doc:([A-Za-z0-9._/-]+\.md).*/\1/p')
+    if [ -n "$dpath" ] && [ ! -e "$dpath" ]; then echo "DOCMISS $slug $dpath"; fi
   done
-else
-  echo "ok:   @canonical capability slugs unique"
-fi
-# (b) each marker sits on a PUBLIC entry point (def / func / export within 6 lines below)
-grep -rn '@canonical capability:' \
-  --include='*.ex' --include='*.exs' --include='*.go' --include='*.ts' --include='*.tsx' \
-  "${GREP_PRUNE[@]}" \
-  . 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' > /tmp/canon-hits.$$ || true
-while IFS= read -r hit; do
-  [ -z "$hit" ] && continue
-  cf=${hit%%:*}; rest=${hit#*:}; cl=${rest%%:*}
-  slug=$(printf '%s' "$hit" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/')
-  if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE '^[[:space:]]*(def |func |export )'; then
-    echo "ok:   $cf:$cl capability:$slug"
-  else
-    fail "@canonical capability:$slug at $cf:$cl has no public def/func/export within 6 lines below (mark a PUBLIC entry point, not a private helper)"
+}
+
+echo "== @canonical capability markers =="
+
+# --- 8a. positive control: the scan must CATCH a planted defect --------------
+CANON_CTL="$(mktemp -d)"
+mkdir -p "$CANON_CTL/a" "$CANON_CTL/node_modules/vendor"
+printf '# @canonical capability:probe-dup\ndef probe_a do\nend\n'            > "$CANON_CTL/a/one.ex"
+printf '// @canonical capability:probe-dup\nfunc ProbeB() {}\n'              > "$CANON_CTL/a/two.go"
+printf '# @canonical capability:probe-private\ndefp probe_c do\nend\n'       > "$CANON_CTL/a/three.ex"
+printf '// @canonical capability:probe-doc doc:docs/no-such-card.md\nexport function d() {}\n' > "$CANON_CTL/a/four.ts"
+printf '# @canonical capability:probe-vendored\ndef v do\nend\n'             > "$CANON_CTL/node_modules/vendor/five.ex"
+printf '# @canonical capability:probe-unscanned\ndef u do\nend\n'            > "$CANON_CTL/a/six.rb"
+
+CANON_CTL_OUT="$(canon_scan "$CANON_CTL")"
+CANON_CTL_BAD=0
+canon_ctl_want() { # $1 = grep -E pattern, $2 = what it proves
+  if ! printf '%s\n' "$CANON_CTL_OUT" | grep -qE "$1"; then
+    CANON_CTL_BAD=$((CANON_CTL_BAD + 1))
+    fail "§8 SELFTEST — the @canonical scan did not $2 in its own planted fixture.
+      The scan is BROKEN, not the corpus clean: a wrong root, a dropped --include or a
+      changed marker syntax all look identical to 'no markers to complain about' from
+      here. Fix the scan before trusting any ok: from §8."
   fi
-  # optional doc: backlink must resolve (anti-rot, like §3c — a moved card turns CI red)
-  dpath=$(printf '%s' "$hit" | sed -nE 's/.*doc:([A-Za-z0-9._/-]+\.md).*/\1/p')
-  [ -n "$dpath" ] && [ ! -e "$dpath" ] && fail "@canonical capability:$slug doc: points at a missing doc: $dpath"
-done < /tmp/canon-hits.$$
-rm -f /tmp/canon-hits.$$
+}
+canon_ctl_reject() { # $1 = pattern that must be ABSENT, $2 = what it proves
+  if printf '%s\n' "$CANON_CTL_OUT" | grep -qE "$1"; then
+    CANON_CTL_BAD=$((CANON_CTL_BAD + 1))
+    fail "§8 SELFTEST — the @canonical scan $2, so it is reading a wider tree than §8 documents."
+  fi
+}
+canon_ctl_want '^DUP probe-dup$'          'catch a slug claimed by two impls'
+canon_ctl_want '^PRIVATE .*probe-private$' 'catch a marker sitting on a private defp'
+canon_ctl_want '^DOCMISS probe-doc docs/no-such-card\.md$' 'catch a dangling doc: backlink'
+canon_ctl_want '^OK .*probe-doc$'          'accept a marker on a public export'
+# node_modules is excluded TWICE — by --exclude-dir in CANON_INCLUDES' sibling
+# GREP_PRUNE and by the trailing `grep -vE '/node_modules/'`. This arm bites only
+# when BOTH are gone, which is the condition that actually matters.
+canon_ctl_reject 'probe-vendored'          'reached into node_modules'
+canon_ctl_reject 'probe-unscanned'         'matched an unscanned extension (.rb)'
+rm -rf "$CANON_CTL"
+# The success line is GATED on the control. A selftest that announces "ok" beside
+# its own failures is the vacuous shape this section exists to kill.
+if [ "$CANON_CTL_BAD" -eq 0 ]; then
+  echo "ok:   §8 selftest — the scan catches a planted dup, a private-helper marker and a dangling doc: backlink"
+else
+  echo "FAIL: §8 selftest — $CANON_CTL_BAD control assertion(s) failed; every ok: below is UNTRUSTWORTHY"
+fi
+
+# --- 8b. the real corpus ----------------------------------------------------
+CANON_OUT="$(canon_scan .)"
+CANON_N=$(printf '%s\n' "$CANON_OUT" | grep -cE '^(OK|PRIVATE) ' || true)
+
+{ printf '%s\n' "$CANON_OUT" | grep '^DUP ' || true; } | while IFS=' ' read -r _ d; do
+  echo "FAIL: @canonical capability:$d claimed by >1 impl (a copy-paste that kept the marker?)"
+done
+if printf '%s\n' "$CANON_OUT" | grep -q '^DUP '; then FAIL=1; else echo "ok:   @canonical capability slugs unique"; fi
+
+printf '%s\n' "$CANON_OUT" | grep '^OK ' | sed 's/^OK /ok:   /' | sed 's/ \([A-Za-z0-9._-]*\)$/ capability:\1/' || true
+{ printf '%s\n' "$CANON_OUT" | grep '^PRIVATE ' || true; } | while IFS=' ' read -r _ loc slug; do
+  echo "FAIL: @canonical capability:$slug at $loc has no public def/func/export within 6 lines below (mark a PUBLIC entry point, not a private helper)"
+done
+{ printf '%s\n' "$CANON_OUT" | grep '^DOCMISS ' || true; } | while IFS=' ' read -r _ slug dp; do
+  echo "FAIL: @canonical capability:$slug doc: points at a missing doc: $dp"
+done
+if printf '%s\n' "$CANON_OUT" | grep -qE '^(PRIVATE|DOCMISS) '; then FAIL=1; fi
+
+# Stated out loud, every run. Zero is a LEGITIMATE result — CLAUDE.md says
+# markers are demand-driven and get removed as dedup lands — so this reports the
+# count rather than asserting on it. 8a is what makes a zero here trustworthy.
+echo "ok:   §8 scanned $CANON_N @canonical marker(s) in the repo corpus"
 
 # --- summary ------------------------------------------------------------------
 echo ""
