@@ -28,9 +28,10 @@ defmodule BarkparkWeb.AdminStudioRedirectController do
   `resolve_scope/1` delegates to `BarkparkWeb.Studio.ScopeResolver`
   (sdl-w1-teleport) — the same brain behind the content-surface funnel:
   the Referer's membership-verified `/w/:ws/p/:proj` scope when present,
-  else the token's first slug-ordered membership workspace (anonymous →
+  else the principal's first slug-ordered membership workspace (anonymous →
   the seeded Default). So a flat admin link followed from inside a
-  workspace keeps you in THAT workspace.
+  workspace keeps you in THAT workspace. The principal is an api token OR an
+  account session's user (`ScopeResolver.principal/1`).
   """
   use BarkparkWeb, :controller
 
@@ -100,7 +101,9 @@ defmodule BarkparkWeb.AdminStudioRedirectController do
   # Returns {:ok, ws_slug, proj_slug} or :error when no workspace/project
   # can be resolved (an admin Studio cannot render without a project).
   defp resolve_scope(conn) do
-    case ScopeResolver.resolve_scope(conn, conn.assigns[:api_token]) do
+    # Same principal seam as the content funnel: `principal/1` covers the
+    # account session (`:current_user`) that reading `:api_token` alone missed.
+    case ScopeResolver.resolve_scope(conn, ScopeResolver.principal(conn)) do
       {:ok, ws, project} -> {:ok, ws.slug, project.slug}
       :error -> :error
     end
