@@ -437,8 +437,19 @@ jobs:
       # carries no fields= projection that would strip `preview` off the wire
       # (D22), and D10 stays executable law — grep -ri oembed over the source
       # tree is ZERO, anywhere, ever.
+      # --selftest FIRST (distrust vacuous green). Part 3's expected hit count is
+      # ZERO forever, which is also what a wrong cwd, a dropped --include or a
+      # renamed extension return — so the gate's clean line proves nothing on its
+      # own. The selftest plants oEmbed in a throwaway tree (once per scanned
+      # extension), re-invokes THIS script against it via PREVIEW_PARITY_SCAN_ROOT
+      # and requires the real gate to catch each one, then requires it to stay
+      # silent on a clean corpus, on vendored code and on unscanned extensions,
+      # and to exit 2 REFUSED TO MEASURE rather than report a clean tree it never
+      # read. It plants nothing in this repo and runs in about a second.
       - name: Preview parity + D10 no-oEmbed gate (fails this job)
-        run: bash scripts/preview-parity-check.sh
+        run: |
+          bash scripts/preview-parity-check.sh --selftest
+          bash scripts/preview-parity-check.sh
 
       # Unified-aesthetic design-token drift gate (unified-aesthetic W1.2).
       # design/tokens.json is the ONE source of the Barkpark design language; the
