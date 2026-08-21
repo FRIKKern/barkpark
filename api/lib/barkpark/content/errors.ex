@@ -38,7 +38,7 @@ defmodule Barkpark.Content.Errors do
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "label_spine" =>
-      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
+      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix, and you can repair the SAME draft in place rather than re-filing. If a published document appears to break the same rule, it is probably GRANDFATHERED: the wall reads an exemption once at entry and lets an exempt doc past a spine failure unchanged, while a birth is never exempt — so an incumbent is not evidence that your content passes. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
     "invalid_paper_structure" =>
       "Fix the listed block paths so every list item, table row/cell, and nested block has a reader-supported content shape, then republish.",
     "invalid_epic_paper_quality" =>
