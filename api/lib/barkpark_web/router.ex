@@ -2445,6 +2445,33 @@ defmodule BarkparkWeb.Router do
     post("/v1/tokens", TokenController, :create)
   end
 
+  # Scoped MEMBER administration (admin) — the workspace roster: who holds a
+  # seat, seat a human, change a role, remove a seat, plus the token inventory
+  # for this workspace. Same :scoped_admin gate as schema management and the
+  # token mint, so authority is the membership ROLE in the resolved workspace
+  # (`owner`/`admin`), never a token's global permissions.
+  #
+  # Every primitive underneath (Membership, create_membership/4,
+  # workspace_admin?/2) predates this block; what was missing was any endpoint
+  # at all, which is why an instance owner could not seat their own account in
+  # a workspace their token had created. The two safety rails live in
+  # `Barkpark.Tenancy.Members`: last-owner protection and an explicitly stated
+  # principal kind.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    get("/v1/members", MemberController, :index)
+    post("/v1/members", MemberController, :create)
+    patch("/v1/members/:principal_ref", MemberController, :update)
+    delete("/v1/members/:principal_ref", MemberController, :delete)
+
+    # Token inventory + revocation. `GET` answers "which credentials reach this
+    # workspace"; `DELETE` kills one, gated on that token actually holding a
+    # seat HERE (cross-tenant rail — an admin of A must not reach B's token).
+    get("/v1/tokens", MemberController, :tokens)
+    delete("/v1/tokens/:id", MemberController, :revoke_token)
+  end
+
   # Scoped CHAT token mint (admin) — mints a workspace-bound token whose
   # permission set is HARDCODED to ["chat"] (Connectors D36). Deliberately a
   # separate controller from TokenController above (whose allowlist is read-only

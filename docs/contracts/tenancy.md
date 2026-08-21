@@ -47,6 +47,22 @@ Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write
 
 → Plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`, `:scoped_api`/`:scoped_admin`), 404/403 table: **`docs/auth.md`**. URL shapes (`/w/:ws/p/:proj`, flat alias, Studio canonical): **`docs/api-v1.md` §1a**.
 
+### Administering the roster — `Barkpark.Tenancy.Members`
+
+Seats are administered through `api/lib/barkpark/tenancy/members.ex` (surface: `MemberController`, `:scoped_admin`), the answer to "who can reach this workspace, and how do I change that?". Before it existed every primitive was present and nothing exposed them, so an instance owner could not seat their own user account in a workspace their own token had created — `bp access grant` refuses (no-escalation: the grantor must already hold the capability *in that workspace*) and a claimed grant writes **no membership row**, so grants can never produce Studio visibility.
+
+| Verb | Route (under `/w/:ws/p/:proj`) | Notes |
+|---|---|---|
+| `bp workspace member-ls` | `GET /v1/members` | Both kinds — human seats AND token seats, with identity + role |
+| `bp workspace member-add <email>` | `POST /v1/members` | JIT-resolves the account (`Sso.find_or_create_user/1`); **sends no mail** |
+| `bp workspace member-role <ref> <role>` | `PATCH /v1/members/:principal_ref` | `ref` = e-mail or raw id (`?principal_type=` states the kind) |
+| `bp workspace member-rm <ref>` | `DELETE /v1/members/:principal_ref` | Ends the seat; does **not** revoke a token |
+| `bp token ls` / `bp token revoke <id>` | `GET`/`DELETE /v1/tokens` | Workspace token inventory; revoke is gated on the token holding a seat **here** |
+
+**Two rails, both mutation-tested.** *Last-owner protection*: demoting or removing a workspace's last `owner` is refused (`{:error, :last_owner}` → 409) — otherwise one call leaves a workspace nobody can administer, with no recovery short of DB access. *Explicit principal kind*: a bare UUID carries no kind, so callers pass a resolved `%{type:, id:}` (an e-mail resolves to `:user`; a raw id needs the kind stated) — the same hazard `Tenancy.Auth` documents for `membership/2`.
+
+Airdrop grants are deliberately **not** seats and are absent from the roster: a grant is a per-request capability overlay (`Barkpark.Access`) with its own listing (`bp access ls`). Folding them in would blur "is a member" with "currently holds a link".
+
 ## Data-layer scoping
 
 Canonical scope helpers in `api/lib/barkpark/content/scope.ex`:
