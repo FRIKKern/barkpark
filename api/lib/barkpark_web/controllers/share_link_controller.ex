@@ -124,10 +124,32 @@ defmodule BarkparkWeb.ShareLinkController do
   The host-admin proof (`share_link_test.exs`, "a host admin ... end to end") is
   a PERMISSIVE assertion and structurally CANNOT red under a full reversion of
   the confinement — removing a gate cannot break a request the gate allowed. It
-  is therefore mutation-verified against OVER-confinement instead (role floor
-  raised to `"owner"`; a Default-workspace membership refused), each of which
-  reds it. Calling it mutation-verified without that pair would be a hollow
-  stamp.
+  is therefore mutation-verified against OVER-confinement instead. Calling it
+  mutation-verified without such an arm would be a hollow stamp.
+
+  TWO ARMS WERE CLAIMED HERE AND ONLY ONE OF THEM IS REAL. Corrected 2026-08-21
+  rather than left standing. Both were re-run against origin/main in an isolated
+  tree; baseline `share_link_test.exs` is 18 tests / 0 failures.
+
+    * ROLE FLOOR RAISED TO `"owner"` in `workspace_admin?/2` — REDS, 13 failures,
+      including "HOST-ADMIN PRESERVED: a real-install admin does list -> show ->
+      revoke end to end", which fails `403 "workspace access required"` at mint.
+    * BINDING THE ACTOR'S OWN WORKSPACE (`actor.workspace_id == ws_id` — the
+      predicate #12404 proposed and this wave rejected) — REDS, the same 13.
+    * A DEFAULT-WORKSPACE MEMBERSHIP REFUSED — REDS NOTHING. This arm was claimed
+      and does not hold. It cannot bite, because the suite's own FIXTURE REPAIR
+      (`share_link_test.exs:37-44`) grants the admin its membership in `link-ws`,
+      so the link's workspace is never the Default one. The repair that made
+      these tests express tenancy at all is what removed the scenario this arm
+      was written to probe. Both changes are individually correct; the claim that
+      survived them was not.
+
+  The green was self-tested before being believed: forcing the refusal helper to
+  return true unconditionally reds 13, and forcing it true only when
+  `get_default_workspace()` resolves also reds 13. So the mutation site is live
+  and a Default workspace does exist in the test env — the arm is VACUOUS, not
+  dead code. A proof arm that cannot fail is worth less than no arm at all,
+  because it reads as coverage.
 
   `share_link_test.exs`'s older "list shows an item's links (no token/hash)"
   refutes two absent MAP KEYS and passed on the LEAKING code, because the secret
