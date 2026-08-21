@@ -414,8 +414,11 @@ defmodule Barkpark.Tenancy.Members do
 
   defp normalize_email(email) do
     case String.trim(email) do
-      "" -> {:error, :invalid_email}
-      trimmed -> if String.contains?(trimmed, "@"), do: {:ok, trimmed}, else: {:error, :invalid_email}
+      "" ->
+        {:error, :invalid_email}
+
+      trimmed ->
+        if String.contains?(trimmed, "@"), do: {:ok, trimmed}, else: {:error, :invalid_email}
     end
   end
 end

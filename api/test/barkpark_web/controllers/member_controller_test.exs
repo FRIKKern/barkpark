@@ -34,7 +34,9 @@ defmodule BarkparkWeb.MemberControllerTest do
 
   setup do
     %{ws: ws, project: project, admin_raw: admin_raw} = workspace_with_admin("a")
-    %{ws: other_ws, project: other_project, admin_raw: other_admin_raw} = workspace_with_admin("b")
+
+    %{ws: other_ws, project: other_project, admin_raw: other_admin_raw} =
+      workspace_with_admin("b")
 
     %{
       ws: ws,
@@ -85,7 +87,10 @@ defmodule BarkparkWeb.MemberControllerTest do
     # what the pipeline does rather than asserting a 401 it has never returned.
     # The 401-vs-403 nit for anonymous callers belongs to the pipeline, not to
     # this endpoint, and is reported separately.
-    test "no bearer → denied (403 from the role gate, per the pipeline)", %{ws: ws, project: project} do
+    test "no bearer → denied (403 from the role gate, per the pipeline)", %{
+      ws: ws,
+      project: project
+    } do
       body = build_conn() |> get("#{base(ws, project)}/members") |> json_response(403)
       assert body["error"]["code"] == "forbidden"
     end
@@ -126,7 +131,11 @@ defmodule BarkparkWeb.MemberControllerTest do
       refute body |> Jason.encode!() |> String.contains?(admin_raw)
     end
 
-    test "owners sort before admins before members", %{ws: ws, project: project, admin_raw: admin_raw} do
+    test "owners sort before admins before members", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw
+    } do
       seat_user!(ws, unique_email("zowner"), "owner")
       seat_user!(ws, unique_email("amember"), "member")
 
@@ -244,7 +253,11 @@ defmodule BarkparkWeb.MemberControllerTest do
              |> json_response(200)
     end
 
-    test "an unknown role is a 422 from the changeset", %{ws: ws, project: project, admin_raw: admin_raw} do
+    test "an unknown role is a 422 from the changeset", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw
+    } do
       email = unique_email("typo")
       seat_user!(ws, email, "member")
 

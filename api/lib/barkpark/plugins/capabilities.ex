@@ -1532,9 +1532,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "scoped_admin",
         args: [arg("email", true, "string", "E-mail of the person to seat.")],
         flags: [
-          flag("role", "string", "owner | admin | member (or a custom role).",
-            default: "member"
-          )
+          flag("role", "string", "owner | admin | member (or a custom role).", default: "member")
         ],
         writes: true,
         default_output: "minimal",

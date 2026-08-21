@@ -48,7 +48,7 @@ defmodule BarkparkWeb.MemberController do
   """
   def create(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
-         {:ok, email} <- fetch_string(params, "email"),
+         {:ok, email} <- fetch_string(params, "email", :missing_email),
          role <- Map.get(params, "role", @default_role) do
       case Members.add_user_member(ws_id, email, to_string(role)) do
         {:ok, member} ->
@@ -75,7 +75,7 @@ defmodule BarkparkWeb.MemberController do
   """
   def update(conn, %{"principal_ref" => ref} = params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
-         {:ok, role} <- fetch_string(params, "role"),
+         {:ok, role} <- fetch_string(params, "role", :missing_role),
          {:ok, principal} <- Members.resolve_principal(ref, principal_type(params)) do
       case Members.update_role(ws_id, principal, role) do
         {:ok, member} -> json(conn, %{member: member})
@@ -141,10 +141,17 @@ defmodule BarkparkWeb.MemberController do
          {:ok, token} <- Auth.revoke_token(token_id) do
       json(conn, %{revoked: %{id: token.id, label: token.label, revoked_at: token.revoked_at}})
     else
-      false -> not_found(conn, "no token with that id holds a seat in this workspace")
-      {:error, :not_found} -> not_found(conn, "no token with that id holds a seat in this workspace")
-      {:error, _} -> unprocessable(conn, "could not revoke token")
-      _ -> unresolved_workspace(conn)
+      false ->
+        not_found(conn, "no token with that id holds a seat in this workspace")
+
+      {:error, :not_found} ->
+        not_found(conn, "no token with that id holds a seat in this workspace")
+
+      {:error, _} ->
+        unprocessable(conn, "could not revoke token")
+
+      _ ->
+        unresolved_workspace(conn)
     end
   end
 
@@ -153,16 +160,20 @@ defmodule BarkparkWeb.MemberController do
   defp principal_type(%{"principal_type" => "api_token"}), do: :api_token
   defp principal_type(_), do: :user
 
-  defp fetch_string(params, key) do
+  # `on_missing` is a STATIC atom supplied by the call site. It used to be
+  # derived from the request key at runtime — atoms are never garbage
+  # collected, so deriving one from a request-controlled key is an atom-table
+  # exhaustion vector (Sobelow DOS.StringToAtom, and it caught this here).
+  defp fetch_string(params, key, on_missing) do
     case Map.get(params, key) do
       value when is_binary(value) ->
         case String.trim(value) do
-          "" -> {:error, String.to_atom("missing_#{key}")}
+          "" -> {:error, on_missing}
           trimmed -> {:ok, trimmed}
         end
 
       _ ->
-        {:error, String.to_atom("missing_#{key}")}
+        {:error, on_missing}
     end
   end
 
