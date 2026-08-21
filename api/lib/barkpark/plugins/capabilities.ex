@@ -1511,6 +1511,98 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table"
       ),
       core_cmd(
+        "workspace.member-ls",
+        "workspace",
+        "member-ls",
+        "The workspace roster — every seat (humans AND api tokens) with its role.",
+        "GET",
+        "/v1/members",
+        "scoped_admin",
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.member-add",
+        "workspace",
+        "member-add",
+        "Seat a human in the workspace by e-mail (creates the account if new; sends no mail).",
+        "POST",
+        "/v1/members",
+        "scoped_admin",
+        args: [arg("email", true, "string", "E-mail of the person to seat.")],
+        flags: [
+          flag("role", "string", "owner | admin | member (or a custom role).", default: "member")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.member-role",
+        "workspace",
+        "member-role",
+        "Change a seat's role. Refuses to demote the workspace's last owner.",
+        "PATCH",
+        "/v1/members/:principal_ref",
+        "scoped_admin",
+        args: [
+          arg("principal_ref", true, "string", "E-mail, or a principal id."),
+          arg("role", true, "string", "owner | admin | member (or a custom role).")
+        ],
+        flags: [
+          flag("principal_type", "string", "Kind of a RAW id — user | api_token.",
+            default: "user"
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.member-rm",
+        "workspace",
+        "member-rm",
+        "Remove a seat (does not revoke a token — see token revoke). Refuses the last owner.",
+        "DELETE",
+        "/v1/members/:principal_ref",
+        "scoped_admin",
+        args: [arg("principal_ref", true, "string", "E-mail, or a principal id.")],
+        flags: [
+          flag("principal_type", "string", "Kind of a RAW id — user | api_token.",
+            default: "user"
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "token.ls",
+        "token",
+        "ls",
+        "The token inventory for this workspace — label, permissions, revoked/expiry state.",
+        "GET",
+        "/v1/tokens",
+        "scoped_admin",
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "token.revoke",
+        "token",
+        "revoke",
+        "Revoke a token that holds a seat in this workspace (idempotent, audited).",
+        "DELETE",
+        "/v1/tokens/:id",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Token id (from token ls).")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "token.create",
         "token",
         "create",

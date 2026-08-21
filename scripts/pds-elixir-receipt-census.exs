@@ -391,6 +391,16 @@ defmodule PDS.Census do
   # back. Rows whose module this corpus does not carry are OUT OF SCOPE, never a red: a
   # disposition naming a module nobody can open judges nothing either way.
   @routed_excluded [
+    # THE FOUR MEMBER-ADMIN ARRIVALS (workspace roster surface). Each returns a
+    # DB-derived body — the persisted membership row, or the `revoked_at` the
+    # update stamped — but none emits the `ok: true` / `"ok" => true` literal
+    # THIS LENS keys on, and none carries a roster anchor, which is exactly what
+    # `status_only_receipt` names. Classified by the arriving change, not judged
+    # by it: the register/roster verdicts are the census owner's to derive.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/members", "BarkparkWeb.MemberController", :create, :status_only_receipt},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
