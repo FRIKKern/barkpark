@@ -417,8 +417,8 @@ defmodule Barkpark.Content.Errors do
       code: "invalid_filter",
       message:
         "unknown filter operator #{inspect(op)} on field #{inspect(field)}; " <>
-          "valid operators: eq, neq, in, nin, has, hasStrong, contains, startsWith, " <>
-          "endsWith, gt, gte, lt, lte, is",
+          "valid operators: " <>
+          Enum.join(Barkpark.Content.Query.valid_filter_ops(), ", "),
       status: 400,
       details: %{field: field, op: op}
     }

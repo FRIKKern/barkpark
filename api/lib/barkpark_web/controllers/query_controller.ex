@@ -597,7 +597,20 @@ defmodule BarkparkWeb.QueryController do
   # The documented public filter operators (api-v1.md §4). An op outside this set
   # has no `apply_field_op/4` clause, so it must be rejected up front — otherwise
   # it hits the catch-all and the filter is silently a no-op (returns every row).
-  @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is)
+  # ONE OWNER for the PUBLIC operator list (gfr-w1-filter-door-validator-drift).
+  # Derived at compile time from `Content.Query.valid_filter_ops/0` rather than
+  # re-spelled, so adding a documented op to the builder cannot leave the door
+  # silently refusing it — and so this module's "valid operators: …" message
+  # cannot drift from the set the builder actually honours.
+  #
+  # DELIBERATELY NOT a delegation to `Content.Query.validate_filter_map/1`. The
+  # builder is FIELD-AWARE and accepts `@doc_id_only_ops` (`starts_with`,
+  # `not_starts_with`) on `doc_id`/`_id`, which `query.ex` records as
+  # "builder-only spellings … no public wire form — QueryController's door
+  # rejects them". The door is SUPPOSED to be narrower than the builder here;
+  # delegating would put those spellings on the public wire. Pinned by
+  # `filter_ops_test.exs`, "the door stays narrower than the builder".
+  @valid_filter_ops Content.Query.valid_filter_ops()
 
   # `in`/`nin` bind a LIST (normalize_filter_op/1 splits their comma form into
   # one). EVERY OTHER op binds a SCALAR: array-bracket syntax
