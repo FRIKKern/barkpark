@@ -59,15 +59,17 @@ defmodule BarkparkWeb.ScopeHelpers do
   collapse its 9-call fan-out; sockets do NOT (see module doc, barkpark-sknf).
   """
   @spec scope_opts(Conn.t() | Socket.t() | Phoenix.Socket.t()) :: keyword()
-  def scope_opts(%Conn{assigns: assigns}), do: [memoize: true] ++ from_assigns(assigns)
-  def scope_opts(%Socket{assigns: assigns}), do: from_assigns(assigns)
+  def scope_opts(%Conn{assigns: assigns}),
+    do: [memoize: true] ++ from_assigns(assigns, :sentinel)
+
+  def scope_opts(%Socket{assigns: assigns}), do: from_assigns(assigns, :legacy)
   # The channel/transport socket — a distinct struct from the LiveView Socket
   # aliased above; matched fully-qualified so it can't collide with that alias.
-  def scope_opts(%Phoenix.Socket{assigns: assigns}), do: from_assigns(assigns)
+  def scope_opts(%Phoenix.Socket{assigns: assigns}), do: from_assigns(assigns, :legacy)
 
-  defp from_assigns(assigns) do
+  defp from_assigns(assigns, mode) do
     []
-    |> put_scope(:workspace_id, Map.get(assigns, :current_workspace))
+    |> put_workspace_scope(Map.get(assigns, :current_workspace), mode)
     |> put_scope(:project_id, Map.get(assigns, :current_project))
     |> Keyword.put(:caller_context, CallerContext.from_conn(%{assigns: assigns}))
     |> maybe_grant_scoped(assigns)
@@ -85,4 +87,49 @@ defmodule BarkparkWeb.ScopeHelpers do
   defp put_scope(opts, _key, nil), do: opts
   defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
   defp put_scope(opts, _key, _other), do: opts
+
+  # ── The empty-scope sentinel (task-3e2a70930c6df723) ────────────────────────
+  #
+  # A REQUEST that resolved no workspace now SAYS so, instead of omitting the
+  # key. Omission was the defect: an absent `:workspace_id` conflated two
+  # genuinely different intents, and the permissive one won for both —
+  #
+  #   1. a request arrived and the routing layer resolved no tenant
+  #        -> must read the SHARED layer (workspace_id IS NULL) only
+  #   2. an internal caller deliberately wants everything
+  #        -> must keep reading everything
+  #
+  # `AssignDefaultScope` passes the conn through untouched when nothing is
+  # seeded at slug "default" (its own moduledoc says so), so intent 1 arises in
+  # normal operation — and `Content.Scope.scope_to_workspace_or_global/3`'s nil
+  # arm then returned the query UNTOUCHED, i.e. every tenant's rows, to an
+  # unresolved caller.
+  #
+  # The sentinel separates the two intents rather than narrowing either. Only a
+  # REQUEST can produce `:shared_only` — every internal caller passes `nil` or
+  # omits the key, so `Media.list_files/1` (plugins/media/assets.ex),
+  # `Media.get_file_by_path/2` (preview.ex) and the deliberately-unscoped
+  # assertions in media_test.exs keep today's explicit-global read, untouched.
+  #
+  # The rule this expresses already exists in the codebase, correctly, in
+  # exactly one place: `query_controller.ex`'s counts read reaches for the
+  # fail-CLOSED `Scope.scope_to_workspace/3` while every leaking surface reaches
+  # for its permissive sibling. This is not a new idea — it is that idea,
+  # applied at the one seam every tenant-facing request passes through.
+  defp put_workspace_scope(opts, %{id: id}, _mode) when is_binary(id),
+    do: Keyword.put(opts, :workspace_id, id)
+
+  # HTTP requests get the sentinel; SOCKETS keep today's omission.
+  #
+  # Scoped deliberately, not universally. Every door this closes is an HTTP flat
+  # route. A LiveView/channel socket resolves its scope by a different path
+  # (`BarkparkWeb.Studio.ScopeResolver`) and is long-lived, so handing it the
+  # sentinel changed behaviour well outside the leak — it cost 13 of 19
+  # full-suite failures, chiefly Studio array-ops losing sight of the very
+  # document being edited. Widening to sockets is its own change with its own
+  # proof, not a free ride on this one.
+  defp put_workspace_scope(opts, _unresolved, :sentinel),
+    do: Keyword.put(opts, :workspace_id, :shared_only)
+
+  defp put_workspace_scope(opts, _unresolved, :legacy), do: opts
 end

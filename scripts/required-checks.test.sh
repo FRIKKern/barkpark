@@ -3115,11 +3115,16 @@ RC20_DG_YML="$REPO_ROOT/.github/workflows/doc-gates.yml"
 # fail the job, and the job blocks nothing. The count is what this clause is
 # about, so it must survive the rename; keeping the old arm means a workflow
 # that reverts to the old label is still counted rather than silently read as
-# zero. RESIDUE, recorded here rather than left for a reader to trip over:
-# merge-gates.md:828 still spells the label `(blocking)` in its prose. The
-# arithmetic below is unaffected (it compares NUMBERS), and the one-line label
-# correction is filed as cgsiw-s1-followup-merge-gates-step-label — it lives in
-# docs/, outside this wave fence.
+# zero. RESIDUE, DISCHARGED 2026-08-19: merge-gates.md used to spell the label
+# `(blocking)` in its prose, teach that word as current, and name
+# `grep -c '(blocking)' .github/workflows/doc-gates.yml` as the producer of the
+# 21 — a command that returns 1 on main and so refuted the page's own number.
+# cgsiw-s1-followup-merge-gates-step-label is closed by
+# pws-s2-merge-authority-corrections: the prose now quotes the old words as a
+# correction, names the anchored derivation
+# `grep -cE '^[[:space:]]*- name: .*\(fails this job\)'`, and states the
+# boundary negatively. The arithmetic below was never affected (it compares
+# NUMBERS) and is unchanged, including the pass message's `(blocking)` wording.
 #
 # The `|| true` is not a softening: `grep -c` exits 1 on a count of zero, and
 # under `set -e` that KILLED this suite mid-section-20 with no summary and no

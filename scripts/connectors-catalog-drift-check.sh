@@ -330,19 +330,19 @@ EOF
     echo "SELFTEST FAIL: extraction produced an empty connectable set"; return 1
   fi
   # The nil provider (teams) must NOT appear on the catalog side.
-  if printf '%s\n' "$cat_set" | grep -q '^teams '; then
+  if grep -q '^teams ' <<<"$cat_set"; then
     echo "SELFTEST FAIL: a nil connect_mode leaked into the connectable set"; return 1
   fi
   # The TOOL connector (github, direction:"tool") must NOT appear on the bridge
   # side — it has a connect member but is not a channel (connectors D69).
-  if printf '%s\n' "$agree_set" | grep -q '^github '; then
+  if grep -q '^github ' <<<"$agree_set"; then
     echo "SELFTEST FAIL: a tool-direction connector leaked into the channel connectable set"; return 1
   fi
   # The OAUTH tool connector (linear, direction:"tool" + linear-oauth.ts) must NOT
   # appear either — the OAUTH loop must exclude a tool the SAME way the paste loop
   # excludes github (connectors D77/D82). Without the oauth-loop fix "linear oauth"
   # leaks here and the agreeing catalog+bridge is misreported as drift below.
-  if printf '%s\n' "$agree_set" | grep -q '^linear '; then
+  if grep -q '^linear ' <<<"$agree_set"; then
     echo "SELFTEST FAIL: a tool-direction OAUTH connector leaked into the channel connectable set"; return 1
   fi
   if [ "$cat_set" != "$agree_set" ]; then
@@ -360,7 +360,7 @@ EOF
   # (a) The channel set is BYTE-UNCHANGED by the presence of a @tool_providers
   #     block: the tool entries (github/linear) must NEVER leak into the CHANNEL
   #     set. This is the exact regression the separate-block design prevents.
-  if printf '%s\n' "$cat_set" | grep -Eq '^(github|linear) '; then
+  if grep -Eq '^(github|linear) ' <<<"$cat_set"; then
     echo "SELFTEST FAIL: a @tool_providers entry leaked into the CHANNEL set"; return 1
   fi
   if [ "$cat_set" != "$(printf 'discord paste\nslack oauth\ntelegram paste')" ]; then

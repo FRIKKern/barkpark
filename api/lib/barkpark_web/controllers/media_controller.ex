@@ -5,10 +5,55 @@ defmodule BarkparkWeb.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.{Blobstore, Delivery, Renditions}
   alias Barkpark.Media.Storage.{Access, MediaFile}
+  alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   action_fallback BarkparkWeb.FallbackController
+
+  # ── Unscoped-read confinement (task-2e4a3692adf5c565) ───────────────────────
+  #
+  # `AssignDefaultScope` passes the conn through UNTOUCHED when nothing is
+  # seeded at slug "default" (its own moduledoc says so — it never halts), so
+  # `scope_opts/1` emits no `:workspace_id`, and the `Media` read helpers hand
+  # that nil to `Content.Scope.scope_to_workspace_or_global/3`, whose nil arm
+  # returns the query UNTOUCHED. Every flat read below then answered from EVERY
+  # tenant's rows, to an anonymous caller. Reachable in one admin call:
+  # `DELETE /api/workspaces/default` has no guard against removing the seeded
+  # Default, and `Seeds.Shared.ensure_default_scope/0` runs only from mix seeds,
+  # never at boot — so the absence is permanent once taken.
+  #
+  # THE RULE: an unscoped caller may see only the SHARED/GLOBAL layer
+  # (`workspace_id IS NULL`) — never another tenant's rows. Deliberately a
+  # per-ROW rule rather than a blanket refusal, because only a per-row rule does
+  # both jobs at once: a legacy single-tenant install (every row NULL) keeps
+  # serving everything unchanged, while a multi-tenant install with a missing
+  # Default refuses foreign rows. `scope_to_workspace_including_global/3`
+  # (content/scope.ex:178) already expresses the same distinction query-side.
+  #
+  # Applied HERE and not inside `Media`, deliberately: `Media.list_files/1`
+  # (plugins/media/assets.ex:205), `Media.get_file_by_path/2` (preview.ex:120)
+  # and the unscoped reads in media_test.exs are legitimate internal global
+  # callers, so narrowing the shared helper would change behaviour well outside
+  # this route family. Making an empty scope fail CLOSED at the Content/Media
+  # boundary — which would retire this whole fail-open class rather than its
+  # third instance — is filed separately.
+  #
+  # RESIDUAL, stated rather than left implicit: a NEW flat read action added to
+  # this controller fails open again until that boundary work lands. Route any
+  # new read through `confine_one/2` or `confine_many/2`.
+  defp scope_bound?(opts), do: not is_nil(Keyword.get(opts, :workspace_id))
+
+  defp confine_one(opts, %MediaFile{} = file) do
+    if scope_bound?(opts) or is_nil(file.workspace_id),
+      do: {:ok, file},
+      else: {:error, :not_found}
+  end
+
+  defp confine_many(opts, files) do
+    if scope_bound?(opts), do: files, else: Enum.filter(files, &is_nil(&1.workspace_id))
+  end
 
   @doc "Upload a file via multipart form data."
   def upload(conn, %{"file" => upload}) do
@@ -40,7 +85,12 @@ defmodule BarkparkWeb.MediaController do
   def index(conn, params) do
     dataset = Map.get(params, "dataset", "production")
     mime_filter = Map.get(params, "type")
-    files = Media.list_files(dataset, [mime_type: mime_filter] ++ scope_opts(conn))
+    opts = scope_opts(conn)
+
+    files =
+      dataset
+      |> Media.list_files([mime_type: mime_filter] ++ opts)
+      |> then(&confine_many(opts, &1))
 
     json(conn, %{
       files: Enum.map(files, &render_file(&1, conn)),
@@ -57,7 +107,10 @@ defmodule BarkparkWeb.MediaController do
   (the felix W14 field-visibility leak). Fails CLOSED: private + anonymous → 403.
   """
   def show(conn, %{"id" => id}) do
-    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+    opts = scope_opts(conn)
+
+    with {:ok, file} <- Media.get_file(id, opts),
+         {:ok, file} <- confine_one(opts, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :view) do
       json(conn, render_file(file, conn))
@@ -73,8 +126,10 @@ defmodule BarkparkWeb.MediaController do
   @doc "Serve a file — from disk, or via redirect to the object-storage backend."
   def serve(conn, %{"path" => path_parts}) do
     relative_path = Enum.join(path_parts, "/")
+    opts = scope_opts(conn)
 
-    with {:ok, file} <- Media.get_file_by_path(relative_path, scope_opts(conn)),
+    with {:ok, file} <- Media.get_file_by_path(relative_path, opts),
+         {:ok, file} <- confine_one(opts, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :original) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
@@ -130,7 +185,10 @@ defmodule BarkparkWeb.MediaController do
   reachable only via the scoped route (P4) or an item share link.
   """
   def serve_rendition(conn, %{"id" => id, "preset" => preset}) do
-    with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
+    opts = scope_opts(conn)
+
+    with {:ok, file} <- Media.get_file(id, opts),
+         {:ok, file} <- confine_one(opts, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :preview),
          watermark = Access.watermark_profile(doc),
@@ -233,18 +291,48 @@ defmodule BarkparkWeb.MediaController do
   path so `serve/2` (which derives the disk path from the row's `path`) finds
   the bytes. The body is written VERBATIM — no re-encode, no MIME inspection.
 
-  Path safety is enforced by `Media.put_blob/2`'s strict allowlist (each
+  Path safety is enforced by `Media.put_blob/3`'s strict allowlist (each
   `/`-segment must match the server-blob shape; `.`/`..`/absolute/empty
   rejected), so a traversal or malformed path is refused with 422 BEFORE any
   byte touches disk. This is a bare infra route — deliberately NOT in the
   capabilities manifest.
-  """
-  def put_blob(conn, %{"path" => path_parts}) do
-    relative_path = Enum.join(path_parts, "/")
 
+  TENANCY. `:workspace_slug` is BINDING, not decoration. It used to be dropped
+  on the floor — the head matched only `%{"path" => path_parts}` — while the
+  router's `:require_admin` pipeline checks a workspace-BLIND global permission
+  (`Auth.has_permission?(token, "admin")`). Any admin token could therefore
+  write arbitrary bytes at any key in the instance-wide blob store, including
+  over another tenant's objects. Two halves close it, and neither alone is
+  sufficient:
+
+    * the caller is bound to the named workspace with `TenancyAuth.member?/2` —
+      the same predicate `WorkspaceController` uses on `create_project`,
+      `projects` and `datasets`. An unknown slug and a non-member both collapse
+      to 404, the no-existence-leak convention that family already follows.
+    * the KEY is bound to the workspace by `Media.put_blob/3` — a legitimate
+      admin of workspace B naming B in the URL still cannot address a key
+      workspace A owns.
+
+  The authorize half runs BEFORE `read_full_body/1`, so an unauthorized caller
+  is refused without this node buffering up to 100 MB of its body.
+  """
+  def put_blob(conn, %{"workspace_slug" => slug, "path" => path_parts}) do
+    token = conn.assigns[:api_token]
+
+    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.member?(token, workspace.id) do
+      write_blob(conn, Enum.join(path_parts, "/"), workspace)
+    else
+      # Unknown slug OR a real workspace the caller is not a member of — never
+      # confirm a workspace exists to a non-member.
+      _ -> not_found(conn, "workspace not found")
+    end
+  end
+
+  defp write_blob(conn, relative_path, workspace) do
     case read_full_body(conn) do
       {:ok, body, conn} ->
-        case Media.put_blob(relative_path, body) do
+        case Media.put_blob(relative_path, body, workspace_id: workspace.id) do
           {:ok, written, receipt} ->
             conn
             |> put_status(:ok)
@@ -278,6 +366,19 @@ defmodule BarkparkWeb.MediaController do
 
           {:error, :invalid_path} ->
             unprocessable(conn, "invalid_path", "invalid blob path")
+
+          # The key is claimed by a different workspace (or by an unscoped row
+          # every tenant reads). 404, not 403: a 403 would confirm to workspace
+          # B that some OTHER tenant holds an object at exactly that path.
+          {:error, :blob_key_not_owned} ->
+            not_found(conn, "blob path not found in this workspace")
+
+          # Unreachable from HTTP — this action always supplies the resolved
+          # workspace. Kept explicit so a future caller that forgets gets an
+          # honest 5xx instead of falling through to the storage catch-all and
+          # being mislabeled a disk fault.
+          {:error, :unscoped_blob_write} ->
+            {:error, :storage_unavailable}
 
           {:error, :empty_body} ->
             # A zero-byte blob is never legitimate media. The common cause is a

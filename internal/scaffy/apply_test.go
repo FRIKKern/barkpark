@@ -96,10 +96,54 @@ func runFixture(t *testing.T, root string, vars map[string]string) *RunReport {
 // byte-identity across a no-op re-run is checkable.
 func snapshotTree(t *testing.T, root string) map[string]string {
 	t.Helper()
+	snap, err := walkSnapshot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return snap
+}
+
+// walkSnapshot is snapshotTree's body, error-returning so
+// TestSnapshotSkipsGitStore can assert on a walk FAILURE instead of
+// being aborted by t.Fatal.
+//
+// The fixture root's own .git/ is skipped, and that narrowing is
+// deliberate. These snapshots exist to assert byte-equality of the
+// WORKING TREE across a run→remove cycle; git's private store was
+// never part of that claim, and git is free to rewrite it at any
+// moment — `git commit` spawns a DETACHED `git maintenance run
+// --auto`, which creates and unlinks .git/objects/maintenance.lock
+// underneath a concurrent walk. On CI that produced two failure shapes
+// from this one cause: the walk's lstat racing the unlink
+// (`lstat …/.git/objects/maintenance.lock: no such file or directory`,
+// go-tests run 32355132650 on main) and a before-snapshot that caught
+// the lock meeting an after-snapshot that did not (`after remove: file
+// .git/objects/maintenance.lock vanished`, run 32314845330).
+//
+// Git STATE is still gated, and gated better, by
+// TestRemoveFullCycleByteClean's literal D34 arm: `git diff --stat`
+// EMPTY plus a `git status --porcelain` residue check, both of which
+// re-derive git's view rather than diffing its object files.
+//
+// The skip is EXACTLY the root .git and nothing else: no fs.ErrNotExist
+// is tolerated anywhere in the walk, so a file that vanishes elsewhere
+// still fails hard — catching precisely that is what the remove suite
+// is for. TestSnapshotSkipsGitStore pins both halves.
+func walkSnapshot(root string) (map[string]string, error) {
+	gitDir := filepath.Join(root, ".git")
 	snap := map[string]string{}
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
+		if err != nil {
 			return err
+		}
+		if path == gitDir {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil // a gitfile (worktree/submodule pointer)
+		}
+		if info.IsDir() {
+			return nil
 		}
 		b, err := os.ReadFile(path)
 		if err != nil {
@@ -110,9 +154,9 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 		return nil
 	})
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
-	return snap
+	return snap, nil
 }
 
 func TestApplyAddWidgetFixture(t *testing.T) {

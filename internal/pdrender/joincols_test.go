@@ -1,10 +1,12 @@
 package pdrender
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -158,39 +160,84 @@ func moduleRootFrom(t *testing.T) string {
 	}
 }
 
+// trackedGoFiles enumerates the module's OWN tracked .go files, repo-relative.
+//
+// THIS IS THE SCOPING INSTRUMENT, and it is the whole fix. The tripwire below
+// used to shell out to `grep -rn --include=*.go <pattern> .` rooted here. That
+// walk cannot tell the module apart from copies of the module: this repo hosts
+// agent worktrees under .claude/worktrees/ and .omx/, each a full checkout, so
+// the walk found 228 copies of joincols.go and the guard drowned in its own
+// reflections — a guaranteed ~150s FAIL in any working copy that has them, and
+// a guard that could no longer distinguish a real violation from an echo.
+//
+// Those trees are gitignored (.gitignore:118), which is exactly why CI never
+// saw this: a fresh actions/checkout has no worktrees, so go-tests.yml on main
+// stayed green while every local dev with agent worktrees ate a false red.
+// `git ls-files` inherits that same ignore semantics deliberately — it reports
+// what the module TRACKS, which is precisely the domain the tripwire means to
+// police, since a real violation arrives as committed code.
+//
+// Enumerating here also lets the match run in-process below, so the guard no
+// longer depends on grep's semantics at all. That matters on this host: an
+// interactive `grep` is a ugrep wrapper carrying --ignore-files, while
+// exec.Command resolves the real grep from PATH — the two disagree about
+// ignored paths, so a guard built on grep behaves differently depending on who
+// runs it. Go's regexp is the same engine everywhere.
+func trackedGoFiles(t *testing.T, root string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "ls-files", "-z", "--", "*.go")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files failed in %s (the tripwire cannot scope its walk): %v", root, err)
+	}
+	files := []string{}
+	for _, p := range strings.Split(string(out), "\x00") {
+		if p != "" {
+			files = append(files, p)
+		}
+	}
+	// A check that enumerates nothing would pass vacuously. Red instead.
+	if len(files) == 0 {
+		t.Fatal("git ls-files reported zero tracked .go files — the tripwire would pass vacuously")
+	}
+	return files
+}
+
 // TestNoInlineDivideFormulaOutsideSolver is the "one solver" tripwire: NO renderer
 // anywhere in the module may re-inline the per-cell width divide-formula assignment.
 // joincols.go is the single owner (and joincols_test.go carries the pattern as data);
 // a copy reappearing in any other .go file — a fresh renderer, internal/cli/, a web
-// helper — reds this test. Rooted at the module (go.mod walk-up) so the guard has
-// repo-wide reach, not just package-dir reach.
+// helper — reds this test. Scoped to the module's TRACKED sources (see
+// trackedGoFiles), so it keeps repo-wide reach over the real module without
+// mistaking nested agent checkouts for it.
 func TestNoInlineDivideFormulaOutsideSolver(t *testing.T) {
 	root := moduleRootFrom(t)
-	cmd := exec.Command("grep", "-rn", "--include=*.go", "cellW *:=.*[Gg]utter", ".")
-	cmd.Dir = root
-	out, err := cmd.CombinedOutput()
-	// grep exit status 1 == no matches at all; any OTHER failure (status 2, missing
-	// binary, unreadable root) must red the test rather than pass vacuously.
-	if err != nil {
-		if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 1 {
-			t.Fatalf("divide-formula grep failed (tripwire cannot run): %v\n%s", err, out)
-		}
-	}
+	// The same pattern the shelled-out grep asserted: the divide-formula
+	// assignment to cellW whose right-hand side mentions the gutter.
+	pattern := regexp.MustCompile(`cellW *:=.*[Gg]utter`)
+
 	lines := []string{}
 	ownerSeen := false
-	for _, ln := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if ln == "" {
-			continue
+	for _, rel := range trackedGoFiles(t, root) {
+		body, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			// A tracked file we cannot read is an unreadable guard, not a pass.
+			t.Fatalf("reading tracked file %s (tripwire cannot run): %v", rel, err)
 		}
-		path := strings.TrimPrefix(ln, "./")
 		// The solver itself is the one allowed OWNER; its test file legitimately
-		// carries the pattern as the grep string / measured fixtures.
-		if strings.HasPrefix(path, "internal/pdrender/joincols.go:") ||
-			strings.HasPrefix(path, "internal/pdrender/joincols_test.go:") {
-			ownerSeen = true
-			continue
+		// carries the pattern as the match string / measured fixtures.
+		owner := rel == "internal/pdrender/joincols.go" || rel == "internal/pdrender/joincols_test.go"
+		for i, ln := range strings.Split(string(body), "\n") {
+			if !pattern.MatchString(ln) {
+				continue
+			}
+			if owner {
+				ownerSeen = true
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("%s:%d:%s", rel, i+1, strings.TrimSpace(ln)))
 		}
-		lines = append(lines, ln)
 	}
 	// Liveness self-check: the solver ALWAYS carries the formula. Zero allowlisted
 	// hits means the pattern drifted from the code and the tripwire is dead.

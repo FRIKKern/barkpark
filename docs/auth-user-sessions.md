@@ -85,6 +85,13 @@ sign-in**: the anonymous Default-workspace demo posture is gated by
 `BARKPARK_PUBLIC_DEMO_STUDIO=1`) — flag-off anonymous browsers redirect to
 `/login`; published papers stay world-readable regardless.
 
+The machine path is the one-click login ticket (dwb-7):
+`POST /v1/auth/login-tickets` (bearer) mints a single-use 60s ticket bound
+to that raw token, and `GET /login/ticket/:t` consumes it atomically (one
+winner), sets `session["api_token"]` and redirects to `/studio`.
+Unknown/used/expired are indistinguishable (no oracle); the response is
+`no-store` + `no-referrer`. See `BarkparkWeb.LoginTicketController`.
+
 Browser password-reset rides the same email tokens as the JSON flow:
 `GET|POST /login/reset` ("Forgot password?", anti-enumeration — always the
 same confirmation) and `GET|POST /auth/reset/:token` (the emailed link's

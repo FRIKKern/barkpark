@@ -16,10 +16,12 @@ defmodule BarkparkWeb.StudioRedirectController do
   `BarkparkWeb.Studio.ScopeResolver` (shared with `PageController` and
   `LegacyRedirectController`). A flat link under-determines the workspace, so
   the resolver prefers, in order: (1) the Referer's `/w/:ws/p/:proj` scope when
-  the token is a member of it — so following a flat link keeps you in the
+  the principal is a member of it — so following a flat link keeps you in the
   workspace you came from instead of teleporting you to your first membership;
-  then (2) the token's first slug-ordered membership (anonymous → the seeded
-  Default). See the ScopeResolver moduledoc for the full order.
+  then (2) the principal's first slug-ordered membership, with the seeded
+  Default demoted for an account session (anonymous → Default). The principal
+  is EITHER the request's api token OR the account session's user — see
+  `ScopeResolver.principal/1` and the ScopeResolver moduledoc.
 
   Always **302** — the target depends on the token + Referer, so it must never
   be browser-cached (a 301 would misdeliver other users of a shared cache).
@@ -67,7 +69,11 @@ defmodule BarkparkWeb.StudioRedirectController do
   and `LegacyRedirectController` (retargeted deep links).
   """
   def scoped_studio_target(conn, dataset, path_segments \\ []) do
-    case ScopeResolver.resolve_scope(conn, conn.assigns[:api_token]) do
+    # The principal is derived by `ScopeResolver.principal/1`, never read off a
+    # single assign: an account session lives in `:current_user`, so reading
+    # `:api_token` here handed the resolver `nil` and 302'd every signed-in
+    # account into the seeded Default workspace (field report #34).
+    case ScopeResolver.resolve_scope(conn, ScopeResolver.principal(conn)) do
       {:ok, ws, project} ->
         ds = ScopeResolver.resolve_dataset(project, dataset)
 

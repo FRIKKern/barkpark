@@ -1303,7 +1303,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:316
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2505"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2695"},
     # barkpark_web/controllers/tasks_controller.ex:371
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
@@ -1323,7 +1323,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:652
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3217"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3407"},
     # barkpark_web/controllers/tasks_controller.ex:788
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
@@ -1373,7 +1373,7 @@ defmodule PDS.Census do
     # barkpark_web/controllers/tasks_controller.ex:1352
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.papers/2", "102968637", "84462998"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1794"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1984"},
     # barkpark_web/controllers/tasks_controller.ex:1379
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.sessions/2", "36243778", "84462998"},

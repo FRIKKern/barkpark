@@ -144,6 +144,140 @@ defmodule Barkpark.Content.WriterTest do
     end
   end
 
+  # ── [collide-refusal] the mixed shape is REFUSED, never silently stripped ─
+  #
+  # These are unit-level: the refusal fires BEFORE any Repo access (it is the
+  # first clause of `create_document/4`), so no sandbox is needed. The
+  # end-to-end HTTP proof — status 422, the envelope, all four create-family
+  # verbs — lives in mutate_controller_test.exs.
+  #
+  # MUTATION PROOF, RUN (2026-08-20): neutering the guard in
+  # `create_document/4` back to a pass-through and re-running
+  # `writer_test.exs + mutate_controller_test.exs` gave `73 tests, 8 failures`
+  # — the two refusal tests below, plus all six HTTP tests, every one of the
+  # latter reading exactly:
+  #
+  #     code:  assert resp.status == 422
+  #     left:  200
+  #     right: 422
+  #
+  # That 200 IS the field-report defect, reproduced on demand. Restoring the
+  # guard returns the four-file gate to `83 tests, 0 failures`. The same
+  # transcript is in the commit message of the branch that shipped this.
+  describe "create_document/4 mixed-shape refusal" do
+    test "MIXED shape: a content map plus flat siblings is refused, naming every key" do
+      attrs = %{
+        "_id" => "mix-1",
+        "title" => "T",
+        "content" => %{"body" => "hi"},
+        "slug" => "the-slug",
+        "publishedAt" => "2026-08-20",
+        "authorRef" => "a-1"
+      }
+
+      assert {:error, %Ecto.Changeset{} = cs} = Writer.create_document("post", attrs, "test")
+      assert [{:unknown_fields, {msg, opts}}] = cs.errors
+      assert opts[:fields] == "authorRef, publishedAt, slug"
+      assert msg =~ "would be silently"
+    end
+
+    test "COLLIDE shape: a pure flat document whose OWN field is named content is refused" do
+      # No legacy envelope was intended here — `content` is this document type's
+      # own editorial field (a Norwegian localized body). Before the refusal this
+      # returned 200 and stored ONLY %{"nb" => "brodtekst"}.
+      attrs = %{
+        "_id" => "collide-1",
+        "_type" => "post",
+        "title" => "Kollisjon",
+        "content" => %{"nb" => "brodtekst"},
+        "slug" => "kollisjon",
+        "publishedAt" => "2026-08-20",
+        "authorRef" => "forfatter-1"
+      }
+
+      assert {:error, %Ecto.Changeset{} = cs} = Writer.create_document("post", attrs, "test")
+      assert [{:unknown_fields, {_msg, opts}}] = cs.errors
+      assert opts[:fields] == "authorRef, publishedAt, slug"
+    end
+
+    test "the SCOPE COLUMNS are not orphans — they are cast, so they land" do
+      # `workspace_id` / `project_id` / `dataset_id` / `owner_id` are in
+      # `Document.changeset/2`'s cast whitelist, so on the content-present
+      # branch they are NOT discarded. Refusing them was a false positive that
+      # broke `flat_write_scope_leak_test.exs` — a file outside this slice's
+      # gate, which is why only a merge caught it. The refusal is keyed on
+      # "would be silently discarded", and these never are.
+      attrs = %{
+        "_id" => "scoped-1",
+        "title" => "T",
+        "workspace_id" => Ecto.UUID.generate(),
+        "project_id" => Ecto.UUID.generate(),
+        "dataset_id" => Ecto.UUID.generate(),
+        "owner_id" => Ecto.UUID.generate(),
+        "content" => %{"body" => "hi"}
+      }
+
+      assert :passed_the_guard == guard_verdict(attrs)
+    end
+
+    test "a reserved-keys-only payload is NOT refused" do
+      # Every @reserved_in member is legitimately consumed by from_envelope/1 or
+      # is a document column, so nothing is discarded and nothing is refused.
+      # The call proceeds past the guard to the Repo, which this async unit case
+      # has no sandbox for — reaching the Repo IS the proof it got through.
+      attrs = %{
+        "_id" => "reserved-1",
+        "_type" => "post",
+        "_rev" => "r1",
+        "title" => "T",
+        "status" => "draft",
+        "content" => %{"body" => "hi"}
+      }
+
+      assert :passed_the_guard == guard_verdict(attrs)
+    end
+
+    test "a SCALAR content field is not the legacy-envelope shape and is not refused" do
+      # `from_envelope/1` branches on `is_map(content)`, so a string `content`
+      # takes the FLAT branch and its siblings fold — there is no mixed shape
+      # and nothing for this refusal to say. (The scalar value itself is then
+      # dropped by the flat branch's own `Map.drop(@reserved_in)` — a narrower
+      # sibling defect, measured and pinned in mutate_controller_test.exs, out
+      # of this slice's scope.)
+      attrs = %{"_id" => "scalar-1", "title" => "T", "content" => "just text", "slug" => "s"}
+
+      assert :passed_the_guard == guard_verdict(attrs)
+    end
+  end
+
+  # `:refused` when the mixed-shape guard rejected the payload, `:passed_the
+  # _guard` for anything that got past it (the Repo call that follows blows up
+  # for want of a sandbox in this async unit case — that blow-up is the signal,
+  # not a failure).
+  #
+  # The rescue is NARROW on purpose. A bare `rescue _ -> :passed_the_guard`
+  # reports success for ANY exception — including one raised by the guard
+  # itself — so the two "is NOT refused" tests below could not have failed for
+  # the right reason. Only the sandbox's own ownership/connection errors count
+  # as "reached the Repo"; anything else re-raises and reds the test.
+  defp guard_verdict(attrs) do
+    case Writer.create_document("post", attrs, "test") do
+      {:error, %Ecto.Changeset{errors: [{:unknown_fields, _}]}} -> :refused
+      _ -> :passed_the_guard
+    end
+  rescue
+    e in [DBConnection.OwnershipError, DBConnection.ConnectionError] ->
+      _ = e
+      :passed_the_guard
+  catch
+    # An ownership failure can also arrive as an exit from the checkout proc.
+    :exit, {reason, _} when reason in [:noproc, :normal, :shutdown] ->
+      :passed_the_guard
+
+    :exit, {:timeout, _} ->
+      :passed_the_guard
+  end
+
   # ── validate_task_kind/2 ──────────────────────────────────────────────────
 
   describe "validate_task_kind/2" do

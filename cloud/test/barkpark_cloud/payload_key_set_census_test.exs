@@ -379,13 +379,23 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Go do
 
   @doc "Every non-test Go source in the package, concatenated."
   @spec source(binary) :: binary
-  def source(dir) do
+  def source(dir), do: dir |> paths() |> Enum.map_join("\n", &File.read!/1)
+
+  @doc """
+  The basenames of the non-test Go sources `source/1` concatenates.
+
+  Same `paths/1` as `source/1` on purpose: the SITE arm pins this list, so the
+  thing pinned and the thing scanned cannot drift apart.
+  """
+  @spec sources(binary) :: [binary]
+  def sources(dir), do: dir |> paths() |> Enum.map(&Path.basename/1)
+
+  defp paths(dir) do
     dir
     |> Path.join("*.go")
     |> Path.wildcard()
     |> Enum.reject(&String.ends_with?(&1, "_test.go"))
     |> Enum.sort()
-    |> Enum.map_join("\n", &File.read!/1)
   end
 
   @doc """
@@ -425,13 +435,27 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Go do
   @spec all_tags(binary) :: MapSet.t()
   def all_tags(src), do: tags(src)
 
-  defp tags(text) do
+  @doc """
+  Every json tag SITE in the package: tag NAME => how many times it is declared.
+
+  `all_tags/1` is this map with the multiplicities thrown away — and throwing
+  them away is precisely what made the go-tag floor unable to lose a site. It
+  is the SAME `tag_list/1`: same regex, same rejects, same reach, so the site
+  scan cannot grow a blind region the name scan does not already have. Any
+  divergence between the two is a broken scanner, and the SITE arm asserts
+  their key sets are equal for exactly that reason.
+  """
+  @spec tag_sites(binary) :: %{binary => pos_integer}
+  def tag_sites(src), do: src |> tag_list() |> Enum.frequencies()
+
+  defp tags(text), do: text |> tag_list() |> MapSet.new()
+
+  defp tag_list(text) do
     ~r/json:"([^"]*)"/
     |> Regex.scan(text, capture: :all_but_first)
     |> Enum.map(fn [t] -> t |> String.split(",") |> List.first() end)
     # `json:"-"` is an explicit DO-NOT-DECODE (DeployCensus.Raw), not a key.
     |> Enum.reject(&(&1 in ["", "-"]))
-    |> MapSet.new()
   end
 end
 
@@ -455,12 +479,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   repair. Widening a serializer to make it green would be the census fixing its
   own measurement — the shape that stops being an instrument.
 
-  ## The two arms
+  ## The three arms
 
     * UNREAD  — a key `cloud/` emits that matches NO `json:` tag anywhere in
       `internal/cloudclient/**`. Taken against the PACKAGE-WIDE union, not the
       paired struct, because "read by nobody" is the honest claim; a key decoded
       by a neighbouring struct is read.
+    * OFF-STRUCT — a key `cloud/` emits that SOME struct in the package declares
+      but its OWN paired struct does not (dr-w23-s6). This is the gap the UNREAD
+      arm creates by design: the union answers "does anything read this name",
+      and `json.Unmarshal` answers "does THIS struct read it" — so a name shared
+      with an unrelated struct greened four keys on `SiteDeployment` while the
+      wide deploy page could not print one of them. Disjoint from UNREAD by
+      construction (`UNREAD = emitted - all`; `OFF-STRUCT = (emitted AND all) -
+      own`), so one defect never reds both arms.
     * PHANTOM — a tag the PAIRED decoder declares that its own emitter never
       emits. Per-struct on purpose: a phantom is a decoder lying about ONE
       payload, and a union would launder it away.
@@ -471,15 +503,57 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   changelog. Set EQUALITY is asserted in both directions, so a new divergence
   reds AND an allowlist entry that stopped diverging reds.
 
-  ## Why this test is what enforces the dispatcher declaration
+  ## WHAT THIS CENSUS ACTUALLY BLOCKS — measured, not assumed
+
+  This file lives under `cloud/**`, so it runs in the Cloud gate, which is one
+  of the four REQUIRED contexts. The interesting question is which PRs it can
+  stop, and the honest answer is wider than this slice's own brief believed.
+
+  RE-DERIVED on this tree (dr-w23-s6), because the brief asserted the opposite
+  and a coverage claim nobody re-measures is how a census starts flattering
+  itself. The Cloud gate's dispatcher resolves its path verdict through
+  `scripts/cloud-path-escape-check.sh --match cloud`, whose `CLOUD_PATHS`
+  carries `internal/**` — not merely `internal/cloudclient/**`. Run against that
+  script directly:
+
+      internal/cli/cloud_site_cmd.go  -> cloud=true
+      cloud/lib/foo.ex                -> cloud=true
+      docs/INDEX.md                   -> cloud=false   (the discriminating control)
+
+  So an `internal/cli`-ONLY PR DOES dispatch the Cloud suite and this census
+  DOES block it. The brief's premise — "a PR that adds a dark instrument ONLY
+  under `internal/cli/**` trips ZERO required gates (D391)" — was true when D391
+  was measured and is STALE today; `CLOUD_PATHS` was widened to `internal/**`
+  since. The docs-only control is quoted beside the other two on purpose: a
+  matcher that answered `true` for everything would satisfy the first two lines
+  and prove nothing.
+
+  WHAT IT STILL DOES NOT COVER, stated so the paragraph above is not read as a
+  bigger claim than it is: a change that touches NEITHER `internal/**` NOR
+  `cloud/**` — a pure `js/`, `web/` or `docs/` PR — dispatches `cloud=false`,
+  and nothing here runs. This census's subject matter is the Elixir/Go wire, so
+  that is the correct scope rather than a hole; it is written down because the
+  difference between "does not apply" and "silently skipped" is the whole
+  business of this file.
 
   ## SCOPE (dr-w27-s2)
 
   The `PlatformDelivery.to_json/1` pair and the RENDER arm below own
-  **PlatformDelivery ONLY**. `dr-w23-s6-register-per-struct-unread` owns the
-  per-struct UNREAD arm and the render assertion for **SiteDeployment**; nothing
-  here generalises into that ground, because two owners on one mechanism is the
-  defect this epic keeps finding rather than a second layer of safety.
+  **PlatformDelivery ONLY**.
+
+  `dr-w23-s6-register-per-struct-unread` has since LANDED, and took the
+  per-struct arm as the OFF-STRUCT arm above — generalised across every pair
+  rather than added as a second SiteDeployment-shaped special case, which is why
+  it replaced the two hardcoded D260 spot-guards instead of joining them.
+
+  Its render half is a GO test (`TestSiteStatusRendersTheBuildIdentity` in
+  `internal/cli/cloud_site_cmd_test.go`), asserted on rendered bytes, NOT an
+  entry in the RENDER arm below — deliberately. That arm scans one reader file
+  for `d.<Field>`, and its honesty is asymmetric; the four keys it would have
+  covered are better served by a test that drives real wire bytes through the
+  real decoder into the real renderer. The wider decoded-but-unrendered
+  population for `SiteDeployment` (measured at 65, not the 18 a name-matching
+  probe reports) is filed separately and is NOT closed here.
 
   ## The RENDER arm's BOUND, stated up front rather than discovered later
 
@@ -682,8 +756,6 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
     {"DeployLedger.census/3", :unread, "boundaries",
      "dr-w18-s5 — the vocabulary-boundary LIST. Emitted by census/3 as of dr-w18-s2; the Go decode and render ride the round-2 slice, which is fenced out of this file. Until then a reader of `bp cloud deployments` sees the refusal but not the instant that caused it."},
-    {"DeployLedger.census/3", :unread, "coalesced_attempts",
-     "dr-w18-s5 — the gauge for attempts that minted NO row, with its refusing coverage floor. Same round-2 fence as `boundaries`; the value is on the wire and in `-o json` (census.Raw is verbatim) before any struct field exists."},
     {"DeployLedger.census/3", :unread, "completeness",
      "dr-w18-s5 — the second independent count reconciled against volume + not_attempted. It reds IN THE ENVELOPE today; the Go reader must learn to print `unaccounted` rather than a balanced-looking number."},
     {"DeployLedger.census/3", :unread, "total_sites",
@@ -930,8 +1002,200 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # name lost). The emitted floor does not move because this slice writes no new
   # Elixir serializer: it renders a menu `cloud/` already emits, which is again
   # the point of the pair.
+  #
+  # dr-w23-s4 (the deploy census renders its coalesced-attempt gauge) is the PR
+  # the merge hazard above named by number, and it landed after every delta
+  # listed here. The go-tag floor moves 271 -> 273 and the emitted floor HOLDS
+  # at 149 — BOTH re-measured by the 999-technique on this branch merged with
+  # main, never summed with the 225 -> 227 figure this slice measured against its
+  # own older base. That older number is stale by construction: it was taken
+  # before `deferral_wait`, the coverage envelope, `details` and `readable_types`
+  # moved the same union, which is precisely the failure mode the hazard note
+  # warns about. The slice declares SIX new json tag lines —
+  # `coalesced_attempts` on `DeployCensus` plus `value`, `refused`, `reason`,
+  # `since` and `basis` on the new `DeployCoalescedAttempts` — and the union
+  # grows by TWO (the 999-technique printed "273 json tag(s) found in
+  # internal/cloudclient, floor is EXACTLY 999" and "149 emitted key(s)
+  # collected"), because the refusal shape is deliberately the same shape a
+  # `DeployRate` refusal already declares. The emitted floor does not move: this
+  # slice writes no Elixir serializer, it DECODES one `cloud/` already emits.
+  #
+  # THE CO-EDIT IS NOT OPTIONAL. `coalesced_attempts` was a KNOWN OPEN :unread
+  # row above; the moment a Go field declares it, the census's "no longer unread
+  # — DELETE the allowlist row" arm reds. That arm is DESIGNED to force this
+  # co-edit in the same commit, and a Go-only PR never runs the Cloud job, so
+  # deferring it would have merged green and reddened main.
   @emitted_floor 149
-  @go_tag_floor 271
+  @go_tag_floor 273
+
+  # ---------------------------------------------------------------------------
+  # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
+  #
+  # `@go_tag_floor` counts NAMES, so it is a census of VOCABULARY and not of
+  # coverage: a name declared at twelve sites can lose eleven of them and the
+  # count never moves. MUTATION-PROVED on this tree, not predicted — turning
+  # `SiteDeleteResult.Status` (`internal/cloudclient/client.go`, `json:"status"`,
+  # a name declared at TWELVE sites) into `json:"-"` stops the CLI decoding the
+  # `status` key of the live `DELETE /v1/sites/:id` envelope that
+  # `renderSiteDeleted` prints, and left this file at 23 tests / 0 failures with
+  # `go test ./internal/cloudclient/...` green. Deleting a UNIQUE name reds three
+  # arms at once, which is the whole shape of the hole: the guard could only lose
+  # when the LAST site of a name died.
+  #
+  # THE REGISTER BELOW CLOSES IT, and the closure is a PARTITION, not a
+  # sampling. Every tag site in internal/cloudclient falls in exactly one class:
+  #
+  #   * a site of a name declared ONCE (172 of them) — deleting it deletes the
+  #     NAME, so `@go_tag_floor`'s `==` already reds. Not registered here.
+  #   * a site of a name declared MORE THAN ONCE (101 names, 348 sites) — this is
+  #     the blind class, and each row pins the exact multiplicity, so losing ONE
+  #     of twelve `status` sites reds BY NAME.
+  #
+  # 172 + 348 = 520, and the two classes are asserted to reconstruct exactly
+  # that total from `@go_tag_floor` and this register, so a register edited
+  # without the floor (or the reverse) reds rather than drifting. No tag site in
+  # the package can be deleted without a red — that is the claim, and the
+  # partition test is what makes it checkable rather than aspirational.
+  #
+  # MERGE HAZARD, the same one the floors already carry: these are `==`. A PR
+  # that declares a tag whose NAME already exists in internal/cloudclient does
+  # NOT move `@go_tag_floor` (it rides free on the union) but DOES move a row
+  # here — `team` and `scope` rode free in W19 S1, `sha`/`count`/`limit` in
+  # W26 S3. Re-measure by the 999-technique after the other PR lands; never sum.
+  #
+  # AND IT FIRED ON THE VERY NEXT MERGE, which is why the numbers above are the
+  # SECOND set this arm has carried. #12769 (this arm) was measured against a
+  # base without #12763, which merged one commit earlier and declares `git_ref`,
+  # `artifact_url`, `image_tag` and `detail` on `SiteDeployment`. All four names
+  # ALREADY existed package-wide — declared by `Deployment`, `SiteStage` and
+  # `WebhookProxyError` — which is precisely the laundering #12763 exists to
+  # end, so `@go_tag_floor` correctly did NOT move (273, both before and after)
+  # and both PRs were green on their own bases. The SITE total went 516 -> 520
+  # and main went red on the second merge. Re-measured here, never summed:
+  # `artifact_url` 1 -> 2, `git_ref` 1 -> 2, `image_tag` 1 -> 2 (three names
+  # crossing OUT of the once-declared class and INTO this register, so the
+  # register grows by three ROWS as well as by sites) and `detail` 7 -> 8.
+  #
+  # Read that as the arm working rather than as the arm being fragile: a
+  # four-site change that `@go_tag_floor` structurally cannot see is exactly the
+  # population this register was built to measure, and the first real one it met
+  # it caught. The cost is real too and is not hidden: a name-union floor can be
+  # bumped by whichever PR lands first, and this register cannot — it must be
+  # re-measured on the MERGED tree. Two co-scoped PRs that are each green apart
+  # will red main together, and the fix is always the same: measure, never sum.
+  @go_tag_sites %{
+    "artifact_url" => 2,
+    "as_of" => 5,
+    "at" => 2,
+    "barkpark_id" => 4,
+    "basis" => 6,
+    "became_live_at" => 2,
+    "build_log_url" => 2,
+    "bytes" => 2,
+    "censored" => 3,
+    "clock" => 3,
+    "code" => 3,
+    "content_rev" => 2,
+    "count" => 5,
+    "covered" => 2,
+    "current_deployment_id" => 2,
+    "dataset" => 2,
+    "deferred" => 3,
+    "delivered" => 2,
+    "deployment" => 3,
+    "deployments" => 2,
+    "detail" => 8,
+    "doc_type" => 2,
+    "domains" => 3,
+    "email" => 3,
+    "environment" => 4,
+    "error" => 8,
+    "evidence" => 2,
+    "failed" => 2,
+    "failure_class" => 2,
+    "failure_rate" => 2,
+    "failure_reason" => 2,
+    "framework" => 4,
+    "from" => 2,
+    "git_ref" => 2,
+    "headroom" => 2,
+    "host" => 6,
+    "id" => 13,
+    "image_tag" => 2,
+    "in_flight" => 2,
+    "inserted_at" => 8,
+    "instance" => 3,
+    "instances" => 2,
+    "kind" => 4,
+    "label" => 6,
+    "last_seen_at" => 2,
+    "live" => 2,
+    "max" => 2,
+    "measured_at" => 2,
+    "meters" => 2,
+    "min_sample" => 6,
+    "name" => 11,
+    "never_covered" => 3,
+    "next_cursor" => 2,
+    "ok" => 8,
+    "oldest_pending_seconds" => 2,
+    "p50" => 2,
+    "p95" => 2,
+    "pending" => 2,
+    "pinned_release" => 3,
+    "population" => 2,
+    "port" => 4,
+    "project" => 2,
+    "provider" => 3,
+    "quantile" => 2,
+    "reachable" => 3,
+    "reason" => 8,
+    "refused" => 4,
+    "required" => 2,
+    "role" => 4,
+    "runtime_target" => 3,
+    "sample" => 6,
+    "scale_mode" => 2,
+    "scope" => 4,
+    "seconds" => 2,
+    "series" => 2,
+    "sha" => 2,
+    "site" => 7,
+    "site_id" => 5,
+    "sites" => 3,
+    "slug" => 7,
+    "source" => 2,
+    "stage" => 3,
+    "stages" => 2,
+    "status" => 13,
+    "team" => 4,
+    "team_id" => 6,
+    "template" => 2,
+    "theme" => 2,
+    "to" => 2,
+    "token" => 2,
+    "trigger" => 3,
+    "unmetered" => 2,
+    "unreadable" => 2,
+    "unresolved" => 2,
+    "updated_at" => 5,
+    "url" => 5,
+    "usage" => 2,
+    "value" => 4,
+    "volume" => 2,
+    "window" => 2,
+    "workspace" => 2
+  }
+
+  # The SITE arm's corpus, pinned. `Go.source/1` globs `*.go` and drops
+  # `_test.go`, so its reach is whatever the directory happens to contain — and
+  # the multiplicities above are exact only for THIS file set. A new non-test
+  # source silently widens every count; pinning the list makes that a red with a
+  # name on it instead of a floor that quietly means something else. (This also
+  # corrects a fact in circulation: `client.go` has NOT been the whole corpus
+  # since `deliveries.go` landed in W26 S3.)
+  @cloudclient_sources ~w(client.go deliveries.go)
+  # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
@@ -1081,57 +1345,242 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
              "one tag of slack under the old `>=`)."
   end
 
-  # THE UNREAD ARM'S MEASURED BLIND SPOT (charter D260). `Go.all_tags/1` is
-  # FILE-GLOBAL: it unions every json tag in internal/cloudclient, so a key whose
-  # name collides with ANY unrelated struct's tag passes the UNREAD arm without a
-  # single line being added to the struct that actually decodes it.
+  # THE PER-STRUCT UNREAD ARM (dr-w23-s6) — the generalisation of charter D260.
   #
-  # Measured on this tree, not predicted: `RolloutState.InFlight` (client.go, the
-  # autoupdate feature) already declares `json:"in_flight"`, so `census/3`
-  # emitting `in_flight` would have gone GREEN through the UNREAD arm with
-  # DeployCensus carrying no such field at all — the CLI would decode nothing and
-  # nothing would say so. This test is the per-struct assertion the union cannot
-  # make. It is deliberately NOT a general fix (that is dr-w16's own slice for
-  # the collision-blind census); it pins THIS slice's keys to THIS struct.
-  test "D260: the census's own cohort keys are declared on DeployCensus ITSELF, not merely somewhere in the package" do
+  # `Go.all_tags/1` is FILE-GLOBAL: it unions every json tag in
+  # internal/cloudclient, so a key whose name collides with ANY unrelated
+  # struct's tag passes the UNREAD arm without a single line being added to the
+  # struct that actually decodes it. `json.Unmarshal` then drops the key on the
+  # floor and nothing in this file can say so.
+  #
+  # This arm was TWO HARDCODED SPOT-GUARDS until dr-w23-s6 — one pinning
+  # `census/3`'s cohort keys to `DeployCensus`, one pinning `site_row/2`'s `live`
+  # to `DeployCensusSite`. Each was written the day its own bug was found, and
+  # NEITHER covered the pair that was actually laundering. Measured across all
+  # NINE pairs at the time this arm landed (the slice's own brief said seven —
+  # two pairs were added between filing and build, which is why the arm reads
+  # `@pairs` and never a typed count):
+  #
+  #   site_deployment_json/3 -> SiteDeployment: emitted=31 own=25 LAUNDERED=4
+  #     artifact_url  (declared only by: Deployment)
+  #     detail        (declared only by: SiteStage, WebhookProxyError)
+  #     git_ref       (declared only by: Deployment)
+  #     image_tag     (declared only by: Deployment)
+  #   every other pair: LAUNDERED=0
+  #
+  # MECHANISM: `site_deployment_json/3` pipes the narrow producer
+  # `deployment_json/1`, so the WIDE wire carries the NARROW payload's fields.
+  # The narrow struct `Deployment` declares them, the wide `SiteDeployment` did
+  # not, and the file-global union greened it. The human consequence was two
+  # deploy readers on one platform, one silently poorer: `bp sites` printed
+  # image/git_ref/artifact and `bp cloud site status` could not.
+  #
+  # `detail` is the sharpest of the four and the reason a NAME-based union can
+  # never be trusted here: the top-level `detail` (the DEPLOYMENT's own caption,
+  # router.ex `deployment_json/1`) and `SiteStage.Detail` (the PER-STAGE caption,
+  # `Sites.Deploy.stages/1`) are different values that happen to share a name.
+  # The union cannot tell them apart. This arm does not have to — it asks only
+  # whether the struct that decodes THIS payload declares the key.
+  #
+  # SCOPE, stated rather than implied: this asks whether the key is DECLARED on
+  # its own struct, not whether anything RENDERS it. That is the RENDER arm's
+  # question, and it covers PlatformDelivery only today.
+  test "OFF-STRUCT: every emitted key the package decodes is declared on ITS OWN paired struct" do
     src = Go.source(@cloudclient)
-    census_tags = Go.struct_tags(src, "DeployCensus")
+    all = Go.all_tags(src)
 
-    for key <- ~w(live live_rate in_flight cancelled residual coverage_cohorts) do
-      assert key in census_tags,
-             "`#{key}` is emitted by census/3 but is NOT a json tag on DeployCensus itself. " <>
-               "The UNREAD arm cannot catch this: it compares against the FILE-GLOBAL tag " <>
-               "union, so an unrelated struct declaring the same name greens it silently."
-    end
+    # EVERY pair is measured before anything is asserted, and the report below
+    # prints ALL of them — including the ones with nothing to report. A per-pair
+    # `assert` inside the loop aborts at the first offender, which would leave a
+    # reader unable to tell "the other pairs are clean" from "the other pairs
+    # were never reached" — the same absence-vs-silence confusion this whole
+    # census exists to refuse.
+    rows =
+      for pair <- @pairs do
+        own = Go.struct_tags(src, pair.go)
 
-    # And the collision this guard exists for is REAL, not hypothetical: prove
-    # `in_flight` is declared by a second, unrelated struct too. If this ever
-    # fails, the blind spot has moved and the comment above is stale.
-    assert "in_flight" in Go.struct_tags(src, "RolloutState"),
-           "RolloutState no longer declares in_flight — re-derive D260's blind spot before " <>
-             "trusting the UNREAD arm on any cohort key."
+        assert own,
+               "#{pair.name}: internal/cloudclient declares no `type #{pair.go} struct` — the " <>
+                 "pair names a decoder that does not exist, so this arm is measuring nothing."
+
+        # DELIBERATELY intersected with the file-global union first. A key nothing
+        # in the package declares is the UNREAD arm's business, and reporting it
+        # here too would make one defect red two arms and invite a reader to
+        # allowlist it in the wrong one. The two arms are disjoint by construction:
+        # UNREAD = emitted - all; OFF-STRUCT = (emitted AND all) - own.
+        actual =
+          pair
+          |> emitted()
+          |> Map.fetch!(:keys)
+          |> MapSet.intersection(all)
+          |> MapSet.difference(own)
+
+        %{pair: pair, actual: actual, expected: allowed(pair.name, :off_struct)}
+      end
+
+    moved = Enum.reject(rows, &(&1.actual == &1.expected))
+
+    report =
+      Enum.map_join(rows, "\n", fn %{pair: pair, actual: a, expected: e} ->
+        newly = MapSet.difference(a, e)
+        gone = MapSet.difference(e, a)
+
+        status =
+          cond do
+            MapSet.size(newly) == 0 and MapSet.size(gone) == 0 -> "ok"
+            true -> "MOVED  newly laundered: #{fmt(newly)}  no longer laundered: #{fmt(gone)}"
+          end
+
+        "  #{String.pad_trailing(pair.name, 34)} -> #{String.pad_trailing(pair.go, 20)} #{status}"
+      end)
+
+    assert moved == [], """
+    the OFF-STRUCT set moved.
+
+    NEWLY LAUNDERED means: emitted, decoded by SOME struct in the package but NOT
+    by its own paired struct. The file-global UNREAD arm greens it while
+    `json.Unmarshal` drops it on the floor. Declare the tag on the paired struct,
+    or allowlist it with a reason.
+
+    NO LONGER LAUNDERED means: allowlisted, but the paired struct now declares it
+    — DELETE the allowlist row.
+
+    All #{length(rows)} pairs, including the clean ones:
+
+    #{report}
+    """
   end
 
-  # D260'S BLIND SPOT, ONE STRUCT OVER (dr-w19-s7). The guard above pins the
-  # cohort keys to `DeployCensus` — the FLEET struct — and `site_row/2` emits its
-  # own per-site `live`. Because `live` is already a tag on DeployCensus, the
-  # FILE-GLOBAL union greened `DeployCensusSite` while it carried six fields and
-  # no Live at all: the wire's per-site success decoded to nothing, and no test
-  # in this file could say so. Measured, not predicted — a real 200 on a team
-  # credential returned {"failed":1,"live":109,"deferred":325,"volume":435}.
-  test "D260: site_row/2's `live` is declared on DeployCensusSite ITSELF, not merely on DeployCensus" do
+  # ANTI-VACUITY FOR THE ARM ABOVE, and the preserved substance of the two D260
+  # spot-guards it replaced. The arm is only worth running if the file-global
+  # union is genuinely blind — if no emitted key were ever declared by a second
+  # struct, `all` and `own` would agree and the arm could never bite anything.
+  #
+  # Both collisions below are the ORIGINAL D260 findings, kept as measurements
+  # rather than as prose. If either stops holding, the blind spot has MOVED and
+  # the arm above needs re-deriving before it is trusted.
+  test "the file-global union is genuinely blind — the collisions this arm exists for are REAL" do
     src = Go.source(@cloudclient)
 
-    assert "live" in Go.struct_tags(src, "DeployCensusSite"),
-           "`live` is emitted by site_row/2 but is NOT a json tag on DeployCensusSite itself. " <>
-             "The UNREAD arm cannot catch this: `live` is already a tag on DeployCensus, so the " <>
-             "FILE-GLOBAL union greens the per-site key while nothing decodes it."
+    # D260 as first measured: `census/3` emits `in_flight`, and an unrelated
+    # struct declares that name, so the union would have greened DeployCensus
+    # carrying no such field at all.
+    assert "in_flight" in Go.struct_tags(src, "RolloutState"),
+           "RolloutState no longer declares in_flight — re-derive D260's blind spot before " <>
+             "trusting the union on any cohort key."
 
-    # The collision is REAL, not hypothetical: the fleet struct declares the same
-    # name, which is exactly what makes the union blind here.
+    # D260 one struct over (dr-w19-s7): the FLEET struct declares `live`, which
+    # is what blinded the union to `DeployCensusSite` carrying no Live at all.
     assert "live" in Go.struct_tags(src, "DeployCensus"),
            "DeployCensus no longer declares `live` — re-derive this blind spot before trusting " <>
-             "the UNREAD arm on any per-site key."
+             "the union on any per-site key."
+
+    # And the general property, measured rather than argued: at least one pair
+    # emits a key that a DIFFERENT struct also declares. That is the whole
+    # premise of this arm, and a tree where it stopped being true would make the
+    # arm a green that proves nothing.
+    all = Go.all_tags(src)
+
+    collisions =
+      for pair <- @pairs,
+          own = Go.struct_tags(src, pair.go),
+          own != nil,
+          key <- MapSet.intersection(emitted(pair).keys, all),
+          key in own,
+          Enum.count(struct_owners(src, key)) > 1,
+          do: {pair.go, key}
+
+    assert collisions != [],
+           "no emitted key is declared by more than one struct anywhere in internal/cloudclient. " <>
+             "The file-global union is no longer blind, so the OFF-STRUCT arm cannot bite — " <>
+             "re-derive its premise before believing its green."
+  end
+
+  # ---------------------------------------------------------------------------
+  # THE SITE ARM: the census can lose a SITE, not only the LAST site of a name
+  # ---------------------------------------------------------------------------
+
+  test "SITE: the arm's corpus is EXACTLY the declared non-test sources" do
+    assert Go.sources(@cloudclient) == @cloudclient_sources, """
+    the SITE arm's corpus moved: internal/cloudclient now compiles a different set of
+    non-test sources than `@cloudclient_sources` declares.
+
+      declared: #{Enum.join(@cloudclient_sources, ", ")}
+      on disk:  #{Enum.join(Go.sources(@cloudclient), ", ")}
+
+    Every multiplicity in `@go_tag_sites` is exact only for the pinned set. Re-measure
+    the register and `@go_tag_floor` against the new corpus before pinning it here —
+    a widened corpus that keeps the old numbers is an arm measuring something else.
+    """
+  end
+
+  test "SITE: every tag name declared more than once is registered at its EXACT multiplicity" do
+    src = Go.source(@cloudclient)
+    sites = Go.tag_sites(src)
+
+    # ANTI-VACUITY, both failure modes of a scanner that stopped scanning. A
+    # broken site regex reports an empty (or narrower) map and every row below
+    # would then red as "gone" rather than passing — but a map that is merely
+    # SHAPED right proves nothing, so pin the two properties that only a working
+    # frequency scan can have:
+    #   1. it sees the same vocabulary the name scanner does, and
+    #   2. it actually carries multiplicity rather than collapsing to a set.
+    assert MapSet.new(Map.keys(sites)) == Go.all_tags(src),
+           "the SITE scanner and the NAME scanner disagree about the vocabulary — the " <>
+             "SCANNER is broken, not the corpus."
+
+    assert Enum.sum(Map.values(sites)) > map_size(sites),
+           "every tag name counts exactly once — `tag_sites/1` has collapsed to a set and " <>
+             "the SITE arm is measuring vocabulary again."
+
+    actual = sites |> Enum.filter(fn {_name, count} -> count > 1 end) |> Map.new()
+
+    assert actual == @go_tag_sites, """
+    the tag SITE register moved.
+
+      sites LOST (a decoder stopped declaring a name it still declares elsewhere —
+      this is the blindness the arm exists for, and the name floor CANNOT see it):
+        #{fmt_sites(moved(@go_tag_sites, actual, &>/2))}
+
+      sites GAINED (a new declaration of an existing name — it rides free on the
+      NAME union, so `@go_tag_floor` does not move; bump the row here):
+        #{fmt_sites(moved(@go_tag_sites, actual, &</2))}
+
+      newly duplicated (a name that was declared once and now is not):
+        #{fmt_sites(Map.drop(actual, Map.keys(@go_tag_sites)))}
+
+      no longer duplicated (down to a single site — DELETE the row; the name
+      floor covers it from here):
+        #{fmt_sites(Map.drop(@go_tag_sites, Map.keys(actual)))}
+    """
+  end
+
+  test "SITE: the name floor and the multiplicity register PARTITION every tag site" do
+    # The totality claim, made checkable. Sites of once-declared names are
+    # covered by `@go_tag_floor`; sites of repeatedly-declared names by
+    # `@go_tag_sites`. If those two classes reconstruct the measured site total,
+    # nothing in the package is outside both — so no tag site can be deleted
+    # without one of the two arms reddening. If they do not, one of the two
+    # numbers was edited without the other and the coverage claim is void.
+    singles = @go_tag_floor - map_size(@go_tag_sites)
+    expected = singles + Enum.sum(Map.values(@go_tag_sites))
+    actual = Enum.sum(Map.values(Go.tag_sites(Go.source(@cloudclient))))
+
+    assert actual == expected, """
+    #{actual} tag site(s) found in internal/cloudclient, but `@go_tag_floor` (#{@go_tag_floor} names)
+    and `@go_tag_sites` (#{map_size(@go_tag_sites)} duplicated names, #{Enum.sum(Map.values(@go_tag_sites))} sites)
+    together account for #{expected}.
+
+    The floor and the register have drifted apart: one was bumped and the other was not,
+    and until they agree the "no site can be deleted silently" claim is NOT in force.
+    Re-measure BOTH by the 999-technique on this tree; never by arithmetic.
+    """
+
+    # The register's own definition, or the partition is not a partition: a row
+    # of 1 would be a site claimed by BOTH classes and counted twice above.
+    assert Enum.filter(@go_tag_sites, fn {_name, count} -> count < 2 end) == [],
+           "`@go_tag_sites` registers a name at fewer than 2 sites — that site belongs to " <>
+             "`@go_tag_floor`'s class, and registering it here double-counts the partition."
   end
 
   # ---------------------------------------------------------------------------
@@ -1260,8 +1709,41 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     assert length(@known_open) > 0
   end
 
+  # Rows present in BOTH maps whose count moved in the direction `cmp` says,
+  # carrying BOTH numbers: "which way and by how much" is the whole message.
+  defp moved(before, now, cmp) do
+    for {name, was} <- before,
+        is = now[name],
+        is != nil,
+        cmp.(was, is),
+        into: %{},
+        do: {name, {was, is}}
+  end
+
+  defp fmt_sites(map) when map_size(map) == 0, do: "(none)"
+
+  defp fmt_sites(map) do
+    map
+    |> Enum.sort()
+    |> Enum.map_join(", ", fn
+      {name, {was, is}} -> "#{name}: #{was} site(s) -> #{is}"
+      {name, count} -> "#{name} x#{count}"
+    end)
+  end
+
   defp barkpark, do: Enum.find(@pairs, &(&1.name == "barkpark_json/4"))
   defp pressure, do: Enum.find(@pairs, &(&1.name == "barkpark_json/4 pressure"))
+
+  # Every struct in internal/cloudclient that declares `key` as a json tag. Used
+  # only by the anti-vacuity test above, to show a name is claimed by more than
+  # one struct — which is what makes the file-global union blind in the first
+  # place.
+  defp struct_owners(src, key) do
+    ~r/^type (\w+) struct \{\n(.*?)\n\}$/ms
+    |> Regex.scan(src, capture: :all_but_first)
+    |> Enum.filter(fn [_name, body] -> key in Go.all_tags(body) end)
+    |> Enum.map(fn [name, _body] -> name end)
+  end
 
   defp fmt(set) do
     case Enum.sort(set) do

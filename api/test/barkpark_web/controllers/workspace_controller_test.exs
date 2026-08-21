@@ -13,6 +13,8 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.{Auth, Repo, Tenancy, TenancyFixtures}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
@@ -98,7 +100,9 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert member_proj.slug in project_slugs
     end
 
-    test "404 for a real workspace the caller is NOT a member of (no existence leak)", %{
+    # D13 Tier A: a REFUSAL is a refusal. This test asserted 404 before the
+    # denial-shape change — it is the one that flips.
+    test "403 for a real workspace the caller is NOT a member of (a refusal, not a lie)", %{
       conn: conn,
       raw_token: raw,
       other_ws: other_ws
@@ -108,8 +112,10 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
         |> authed(raw)
         |> get("/api/workspaces/#{other_ws.slug}/projects")
 
-      assert resp.status == 404
-      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+      # …and the refusal carries no interior detail about the workspace.
+      refute Jason.decode!(resp.resp_body)["projects"]
     end
 
     test "404 for an unknown workspace slug", %{conn: conn, raw_token: raw} do
@@ -153,7 +159,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert dataset.slug in dataset_slugs
     end
 
-    test "404 for a workspace the caller is NOT a member of (no existence leak)", %{
+    test "403 for a workspace the caller is NOT a member of (a refusal, not a lie)", %{
       conn: conn,
       raw_token: raw,
       other_ws: other_ws
@@ -162,6 +168,37 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
         conn
         |> authed(raw)
         |> get("/api/workspaces/#{other_ws.slug}/projects/other-proj/datasets")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+    end
+
+    test "404 for an unknown WORKSPACE slug (existence, not membership)", %{
+      conn: conn,
+      raw_token: raw
+    } do
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/no-such-ws/projects/whatever/datasets")
+
+      assert resp.status == 404
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
+    end
+
+    # TIER B, deliberately NOT widened: interior existence. The caller here is
+    # already a member — it could list these project slugs — so 404 on an
+    # unknown project confirms nothing, and 403 would be a lie in the other
+    # direction ("you may not", when in fact there is nothing there).
+    test "404 for an unknown PROJECT inside a workspace the caller IS a member of", %{
+      conn: conn,
+      raw_token: raw,
+      member_ws: member_ws
+    } do
+      resp =
+        conn
+        |> authed(raw)
+        |> get("/api/workspaces/#{member_ws.slug}/projects/no-such-proj/datasets")
 
       assert resp.status == 404
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
@@ -246,6 +283,60 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert resp.status == 401
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
     end
+
+    # M4 — the creator binding. Before this, POST /api/workspaces wrote exactly
+    # one membership row, principal_type "api_token", and the HUMAN who made
+    # the workspace was not a member of it: member?/2 false, workspace_admin?/2
+    # false, list_workspaces_for/1 empty. gyldendal is in that state on prod.
+    test "201 — an OWNED token also binds its human: BOTH an api_token and a user owner row",
+         %{conn: conn} do
+      user = owner_user("creator")
+      {raw, _token} = owned_token(user)
+      slug = "owned-ws-#{System.unique_integer([:positive])}"
+
+      resp = conn |> authed(raw) |> post("/api/workspaces", %{"name" => "Owned", "slug" => slug})
+
+      assert resp.status == 201
+      ws = Tenancy.get_workspace_by_slug(slug)
+      assert ws
+
+      # The token row, exactly as before.
+      token_membership = TenancyAuth.membership(body_token_id(raw), ws.id)
+      assert token_membership.role == "owner"
+      assert token_membership.principal_type == "api_token"
+
+      # …and the human's own row, which is what was missing.
+      user_membership = TenancyAuth.membership(user, ws.id)
+      assert user_membership, "the creator's user-typed owner membership was not written"
+      assert user_membership.role == "owner"
+      assert user_membership.principal_type == "user"
+
+      # The claim that actually matters to a human: they can reach it.
+      assert TenancyAuth.member?(user, ws.id)
+      assert TenancyAuth.workspace_admin?(user, ws.id)
+      assert slug in (Tenancy.list_workspaces_for(user) |> Enum.map(& &1.slug))
+    end
+
+    test "201 — an UNOWNED (CI/bootstrap) token creates the workspace and writes NO user row",
+         %{conn: conn, raw_token: raw} do
+      slug = "unowned-ws-#{System.unique_integer([:positive])}"
+
+      resp = conn |> authed(raw) |> post("/api/workspaces", %{"name" => "CI", "slug" => slug})
+
+      assert resp.status == 201
+      ws = Tenancy.get_workspace_by_slug(slug)
+      assert TenancyAuth.membership(body_token_id(raw), ws.id).principal_type == "api_token"
+
+      # CONDITIONAL, never unconditional: no NULL/placeholder membership row.
+      user_rows =
+        Repo.all(
+          from(m in Barkpark.Tenancy.Membership,
+            where: m.workspace_id == ^ws.id and m.principal_type == "user"
+          )
+        )
+
+      assert user_rows == []
+    end
   end
 
   describe "POST /api/workspaces/:workspace_slug/projects" do
@@ -272,7 +363,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert Tenancy.get_dataset(project, "production")
     end
 
-    test "404 for a NON-member workspace (no existence leak)", %{
+    test "403 for a NON-member workspace — and still writes nothing", %{
       conn: conn,
       raw_token: raw,
       other_ws: other_ws
@@ -282,9 +373,10 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
         |> authed(raw)
         |> post("/api/workspaces/#{other_ws.slug}/projects", %{"name" => "Sneaky"})
 
-      assert resp.status == 404
-      assert Jason.decode!(resp.resp_body)["error"]["code"] == "not_found"
-      # The leak guard: no project was created in the workspace we don't own.
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+      # The guard that matters is unchanged by the denial SHAPE: no project was
+      # created in the workspace we are not a member of.
       refute Tenancy.get_project(other_ws.slug, "sneaky")
     end
 
@@ -440,6 +532,73 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert orphans == [],
              "zero-orphan violated — rows survived the HTTP delete: #{inspect(orphans)}"
     end
+
+    # ── CROSS-TENANT CONFINEMENT (task-a5636ad31304b23a) ──────────────────
+    # The arms above (200 own / 403 non-admin / 401 anonymous) ALL pass against
+    # a workspace-blind gate, because the 200 arm's admin CREATED its own
+    # target. The arm that was missing is the only one the defect could ever
+    # fail: caller and target in DIFFERENT tenants.
+    test "CROSS-TENANT: a ws-A admin cannot delete ws-B — B survives", %{conn: conn} do
+      raw_a = "ws-xtenant-a-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      # A's OWN workspace — the caller is an `owner` here and nowhere else.
+      {:ok, _own} = Tenancy.create_workspace_with_owner(%{name: "A Home WS"}, admin_token(raw_a))
+
+      # B — a different tenant, owned by a different admin token.
+      raw_b = "ws-xtenant-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, victim} =
+        Tenancy.create_workspace_with_owner(%{name: "B Victim WS"}, admin_token(raw_b))
+
+      # FIXTURE HONESTY: the caller holds NO membership row in B at all, so this
+      # is a genuine cross-tenant request and not a same-workspace vacuity.
+      refute TenancyAuth.member?(admin_token(raw_a), victim.id)
+
+      resp =
+        conn
+        |> authed(raw_a)
+        |> delete("/api/workspaces/#{victim.slug}")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+
+      # STATE, not the status code: B is still there.
+      assert Tenancy.get_workspace_by_slug(victim.slug)
+    end
+
+    # PREDICATE STRENGTH. `member?/2` is existence-only, so it would ADMIT this
+    # caller. Deleting a whole workspace — irreversible, cascading to media
+    # blobs and a CDN purge — is a scoped-ADMIN act, so the shipped predicate is
+    # `workspace_admin?/2`: the same one #12701 landed on `/v1/shares` and the
+    # same one `RequireWorkspaceRole` enforces. This arm is what pins that
+    # choice — it reds the moment the gate is weakened to bare membership.
+    test "CROSS-TENANT predicate strength: a global admin holding a plain `member` row in B cannot delete B",
+         %{conn: conn} do
+      raw_a = "ws-xtenant-mem-a-#{System.unique_integer([:positive])}"
+      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      raw_b = "ws-xtenant-mem-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      {:ok, victim} =
+        Tenancy.create_workspace_with_owner(%{name: "B Member-Only WS"}, admin_token(raw_b))
+
+      # A is granted the LOWEST membership role in B.
+      {:ok, _m} = TenancyAuth.create_membership(victim.id, token_a.id, "member")
+
+      assert TenancyAuth.member?(admin_token(raw_a), victim.id)
+      refute TenancyAuth.workspace_admin?(admin_token(raw_a), victim.id)
+
+      resp =
+        conn
+        |> authed(raw_a)
+        |> delete("/api/workspaces/#{victim.slug}")
+
+      assert resp.status == 403
+      assert Tenancy.get_workspace_by_slug(victim.slug)
+    end
   end
 
   describe "GET /api/workspaces/:workspace_slug/export" do
@@ -588,6 +747,132 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       assert resp.status == 401
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "unauthorized"
+    end
+
+    # ── CROSS-TENANT CONFINEMENT (task-f416f96ef0860f47) ──────────────────
+    # Same omission as the DELETE block above: every existing arm's admin
+    # created its own target, so none of them crosses a tenant boundary. This
+    # one does — and it asserts on the BYTES, not on the status code, because a
+    # status cannot tell you whether the bundle leaked.
+    test "CROSS-TENANT: a ws-A admin cannot export ws-B — and not one byte of B reaches the wire",
+         %{conn: conn} do
+      raw_a = "ws-xexport-a-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      {:ok, _own} =
+        Tenancy.create_workspace_with_owner(%{name: "A Home Export WS"}, admin_token(raw_a))
+
+      raw_b = "ws-xexport-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      sentinel = "B Secret Export WS #{System.unique_integer([:positive])}"
+      {:ok, victim} = Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_b))
+
+      refute TenancyAuth.member?(admin_token(raw_a), victim.id)
+
+      # THE ORACLE IS NOT VACUOUS: B's own admin exports B and the sentinel IS
+      # in the tar. So the `refute` below is a real absence, not a string that
+      # never appears in a bundle in the first place.
+      allowed = conn |> authed(raw_b) |> get("/api/workspaces/#{victim.slug}/export")
+      assert allowed.status == 200
+      assert allowed.resp_body =~ sentinel
+
+      denied = conn |> authed(raw_a) |> get("/api/workspaces/#{victim.slug}/export")
+
+      assert denied.status == 403
+      assert Jason.decode!(denied.resp_body)["error"]["code"] == "forbidden"
+
+      # No attachment, and — the thing that actually matters — none of B's
+      # bundle. There is no undo for a read.
+      assert Plug.Conn.get_resp_header(denied, "content-disposition") == []
+      refute denied.resp_body =~ sentinel
+    end
+
+    # PREDICATE STRENGTH, and it bites harder here than on delete: a FULL
+    # profile bundle is the whole workspace, including the secret / credential /
+    # PII classes that `profile=dev` exists to scrub. A plain `member` must not
+    # be able to walk out with it, so the gate is `workspace_admin?/2`.
+    test "CROSS-TENANT predicate strength: a global admin holding a plain `member` row in B cannot export B",
+         %{conn: conn} do
+      raw_a = "ws-xexport-mem-a-#{System.unique_integer([:positive])}"
+      {:ok, token_a} = Auth.create_token(raw_a, "ws A admin", "test", ["read", "write", "admin"])
+
+      raw_b = "ws-xexport-mem-b-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_b, "ws B admin", "test", ["read", "write", "admin"])
+
+      sentinel = "B Member-Only Export WS #{System.unique_integer([:positive])}"
+      {:ok, victim} = Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_b))
+
+      {:ok, _m} = TenancyAuth.create_membership(victim.id, token_a.id, "member")
+
+      assert TenancyAuth.member?(admin_token(raw_a), victim.id)
+      refute TenancyAuth.workspace_admin?(admin_token(raw_a), victim.id)
+
+      denied = conn |> authed(raw_a) |> get("/api/workspaces/#{victim.slug}/export")
+
+      assert denied.status == 403
+      refute denied.resp_body =~ sentinel
+    end
+
+    # OPERATOR REMEDY (task-382829df2d7bf491). The binding above narrowed this
+    # route to `workspace_admin?/2`, and the three production consumers of it —
+    # `bp cloud workspace export` (internal/cli/cloud_workspace_cmd.go:165), the
+    # support pull (internal/cli/cloud_support_cmd.go:1736) and the provisioner
+    # (internal/provisioner/support.go:730) — all present an admin-permissioned
+    # operator token against a workspace they did NOT necessarily create. When
+    # that token holds no membership, the sanctioned remedy is an explicit
+    # `admin` GRANT, never weakening the predicate (that reopens the
+    # cross-tenant hole task-a5636ad31304b23a / task-f416f96ef0860f47 closed).
+    #
+    # THE GAP THIS FILLS: `@admin_roles` is ~w(owner admin), but every ALLOW arm
+    # on this route draws its authority from `create_workspace_with_owner` →
+    # role "owner", and every DENY arm uses "member" or no row at all. So the
+    # `admin` half of that constant is UNEXERCISED here. Narrow `@admin_roles`
+    # to ~w(owner) and the whole file still passes — while the documented
+    # operator remedy silently stops working in production. This arm is the
+    # tripwire for exactly that reversal.
+    #
+    # NOT VACUOUS BY CONSTRUCTION: the same token is asserted DENIED before the
+    # grant and ALLOWED after it, so the grant is provably what flipped the
+    # outcome — a 200 here cannot come from an accidental global bypass.
+    test "OPERATOR REMEDY: an explicitly granted `admin` membership — not ownership — restores export of a workspace the operator did not create",
+         %{conn: conn} do
+      raw_op = "ws-export-op-#{System.unique_integer([:positive])}"
+
+      {:ok, token_op} =
+        Auth.create_token(raw_op, "operator", "test", ["read", "write", "admin"])
+
+      # The target is created by a DIFFERENT principal — the production shape
+      # the provisioner/support chain actually faces (a workspace that arrived
+      # by seeds, a migration, an import, or another operator). The operator
+      # token is therefore NOT its owner.
+      raw_owner = "ws-export-op-owner-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_owner, "ws owner", "test", ["read", "write", "admin"])
+
+      sentinel = "Operator Grant Export WS #{System.unique_integer([:positive])}"
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: sentinel}, admin_token(raw_owner))
+
+      # BEFORE: admin PERMISSIONS but no membership row → denied. This is the
+      # negative control that makes the assertion after the grant meaningful.
+      refute TenancyAuth.member?(admin_token(raw_op), target.id)
+      before = conn |> authed(raw_op) |> get("/api/workspaces/#{target.slug}/export")
+      assert before.status == 403
+      refute before.resp_body =~ sentinel
+
+      # THE REMEDY: an explicit `admin` grant — the authority is a recorded
+      # grant, not a global bit. Deliberately NOT "owner": this is the half of
+      # @admin_roles nothing else on this route covers.
+      {:ok, membership} = TenancyAuth.create_membership(target.id, token_op.id, "admin")
+      assert membership.role == "admin"
+      assert TenancyAuth.workspace_admin?(admin_token(raw_op), target.id)
+
+      # AFTER: the identical token now exports, and the bundle really is this
+      # workspace's — asserted on the BYTES, not just the status code.
+      allowed = conn |> authed(raw_op) |> get("/api/workspaces/#{target.slug}/export")
+      assert allowed.status == 200
+      assert allowed.resp_body =~ sentinel
     end
   end
 
@@ -998,6 +1283,28 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   defp body_token_id(raw) do
     {:ok, token} = Auth.verify_token(raw)
     token.id
+  end
+
+  # A registered human, and a bearer token that NAMES them as its owner —
+  # the `api_tokens.owner_user_id` seam `Plugs.ResolveTokenOwner` reads.
+  defp owner_user(prefix) do
+    {:ok, u} =
+      Barkpark.Accounts.register_user(%{
+        email: "#{prefix}-#{System.unique_integer([:positive])}@example.com",
+        password: "correct horse battery"
+      })
+
+    u
+  end
+
+  defp owned_token(user) do
+    raw = "owned-token-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "owned", "test", ["read", "write"])
+
+    {:ok, token} =
+      token |> Ecto.Changeset.change(%{owner_user_id: user.id}) |> Repo.update()
+
+    {raw, token}
   end
 
   # The verified %ApiToken{} struct behind a raw bearer — the shape

@@ -6,7 +6,9 @@ defmodule BarkparkWeb.TasksController do
   Sixteen endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
 
-    * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label)
+    * `GET    /v1/tasks`                    — `Tasks` index (filters: kind/lifecycle_status/phase_id/parent/label,
+      flat or under the `filter[<key>]=` container; an unsupported filter key
+      is a 400, never a silently unfiltered page)
     * `GET    /v1/tasks/ready`              — `Tasks.ready/1`
     * `GET    /v1/tasks/prime`              — one-call agent rehydration (in_progress + ready head + recent events + counts)
     * `GET    /v1/tasks/:doc_id`            — single-task fetch (w7-08)
@@ -246,6 +248,19 @@ defmodule BarkparkWeb.TasksController do
   # the SQLite store.
 
   def index(conn, params) do
+    # gr-bl-tasks-route-parent-filter-ignored: the `filter[...]` container is
+    # PARSED before anything else and fail-CLOSED. Before this, `filter[parent_id]`
+    # (the spelling the data-query surface uses, and the one GR126 prescribes)
+    # was never read: the response was a 200 carrying the UNFILTERED page — a
+    # false confirmation an operator can act on. A filter this route cannot
+    # honour now 400s naming the key; one it can honour is applied below.
+    case Params.parse_index_filters(params) do
+      {:ok, filters} -> do_index(conn, params, filters)
+      {:error, reason} -> invalid_filter(conn, reason)
+    end
+  end
+
+  defp do_index(conn, params, filters) do
     scope = scope_opts(conn)
     workspace_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
@@ -267,7 +282,13 @@ defmodule BarkparkWeb.TasksController do
     # chronological child tasks of a task"). Order by inserted_at ASC (oldest
     # first) for that view; keep the default desc:updated_at "most recently
     # touched first" ordering for the un-parent-filtered list.
-    parent = params["parent"]
+    # `filter[parent]` / `filter[parent_id]` name the SAME edge as the flat
+    # `?parent=`; this binding drives the rail (inserted_at ASC) ordering below,
+    # so the bracket spelling reads as the parent's timeline exactly as the flat
+    # one does. The filter CLAUSES are applied independently (see the query
+    # below) — a caller who passes both spellings with different values gets the
+    # honest conjunction (zero rows), never a silently-dropped predicate.
+    parent = params["parent"] || filters["parent"] || filters["parent_id"]
 
     # dr-w34-s4: twin collapse (published-wins) — a `drafts.<id>` shadow whose
     # published twin exists in the same scope is suppressed, so a twinned task
@@ -294,8 +315,18 @@ defmodule BarkparkWeb.TasksController do
       |> Params.maybe_filter_kind(params["kind"])
       |> Params.maybe_filter_lifecycle(params["lifecycle_status"])
       |> Params.maybe_filter_parent(params["phase_id"])
-      |> Params.maybe_filter_parent_id(parent)
+      |> Params.maybe_filter_parent_id(params["parent"])
       |> Params.maybe_filter_label(params["label"])
+      # The bracket spelling composes as ADDITIONAL where-clauses on the same
+      # `Barkpark.Tasks.Query` fragments (nil = no-op), so `?kind=a&filter[kind]=b`
+      # is an AND that returns nothing rather than one param quietly winning.
+      |> Params.maybe_filter_type(filters["type"])
+      |> Params.maybe_filter_kind(filters["kind"])
+      |> Params.maybe_filter_lifecycle(filters["lifecycle_status"])
+      |> Params.maybe_filter_parent(filters["phase_id"])
+      |> Params.maybe_filter_parent_id(filters["parent"])
+      |> Params.maybe_filter_parent_id(filters["parent_id"])
+      |> Params.maybe_filter_label(filters["label"])
       |> Params.apply_index_order(parent)
 
     docs = Repo.all(query)
@@ -2007,6 +2038,22 @@ defmodule BarkparkWeb.TasksController do
 
   defp maybe_put_notices(map, []), do: map
   defp maybe_put_notices(map, notices), do: Map.put(map, :notices, notices)
+
+  # A `filter[...]` this route cannot honour (gr-bl-tasks-route-parent-filter-ignored).
+  # Distinct `reason` from the generic bad_request so a caller (and the CLI) can
+  # tell "your filter was refused" from "your body was malformed", and `details`
+  # carries the machine-readable key + the accepted set. Mirrors the
+  # `invalid_filter` code Content.Errors emits on the data-query surface.
+  defp invalid_filter(conn, reason) do
+    conn
+    |> put_status(:bad_request)
+    |> json(%{
+      ok: false,
+      reason: "invalid_filter",
+      message: Params.index_filter_message(reason),
+      details: Params.index_filter_details(reason)
+    })
+  end
 
   defp bad_request(conn, message) do
     conn

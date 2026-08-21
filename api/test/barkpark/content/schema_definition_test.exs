@@ -684,4 +684,88 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
                SchemaDefinition.parse(schema)
     end
   end
+
+  # ── desk_groups filter validation (gfr-w1-filter-chokepoint-strict) ────────
+  #
+  # `desk_groups` is a bare `{:array, :map}`, so NOTHING used to look inside one.
+  # A chip carrying a typo'd filter op was accepted at write, stored, and then
+  # detonated at render inside the Studio LiveView — the query builder refuses an
+  # unsupported op now instead of silently returning every row. The person who
+  # can fix the typo is the one who should get the error, at the moment they make
+  # it.
+  defp desk_changeset(desk_groups) do
+    SchemaDefinition.changeset(%SchemaDefinition{}, %{
+      "name" => "post",
+      "title" => "Post",
+      "dataset" => "sd_desk",
+      "desk_groups" => desk_groups
+    })
+  end
+
+  describe "changeset/2 — desk_groups filters" do
+    test "accepts a desk group whose filter uses documented operators" do
+      cs =
+        desk_changeset([
+          %{
+            "name" => "drafts",
+            "title" => "Drafts",
+            "filter" => %{"status" => %{"eq" => "draft"}}
+          },
+          %{"name" => "recent", "filter" => %{"_updatedAt" => %{"gt" => "2026-01-01T00:00:00Z"}}},
+          %{"name" => "all", "title" => "All", "filter" => %{}},
+          %{"name" => "no-filter-key", "title" => "All"}
+        ])
+
+      assert cs.valid?
+    end
+
+    test "REJECTS a desk group whose filter carries an unsupported operator" do
+      cs = desk_changeset([%{"name" => "bad", "filter" => %{"status" => %{"bogus" => "x"}}}])
+
+      refute cs.valid?
+      {message, _} = cs.errors[:desk_groups]
+      assert message =~ "desk group \"bad\""
+      assert message =~ "\"bogus\""
+      assert message =~ "status"
+      # The admin fixing this needs the vocabulary, not just a rejection.
+      assert message =~ "startsWith"
+    end
+
+    test "REJECTS the value-matched traps too — `is` and `hasStrong`" do
+      cs =
+        desk_changeset([%{"name" => "typo", "filter" => %{"status" => %{"is" => "published"}}}])
+
+      refute cs.valid?
+      assert {message, _} = cs.errors[:desk_groups]
+      assert message =~ "\"is\""
+
+      cs =
+        desk_changeset([
+          %{"name" => "hs", "filter" => %{"tags" => %{"hasStrong" => "floorless"}}}
+        ])
+
+      refute cs.valid?
+      assert {message, _} = cs.errors[:desk_groups]
+      assert message =~ "\"hasStrong\""
+    end
+
+    test "REJECTS a filter that is not a map at all" do
+      cs = desk_changeset([%{"name" => "junk", "filter" => "status=draft"}])
+
+      refute cs.valid?
+      {message, _} = cs.errors[:desk_groups]
+      assert message =~ "must be a map"
+    end
+
+    test "a schema with no desk_groups change is untouched by the guard" do
+      cs =
+        SchemaDefinition.changeset(%SchemaDefinition{}, %{
+          "name" => "post",
+          "title" => "Post",
+          "dataset" => "sd_desk"
+        })
+
+      assert cs.valid?
+    end
+  end
 end

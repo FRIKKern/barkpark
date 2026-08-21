@@ -152,6 +152,13 @@ defmodule BarkparkWeb.Router do
   # /w/:workspace_slug/p/:project_slug routes. Same base plugs as :api
   # (sans AssignDefaultScope — the resolvers set the real scope), then
   # resolves + membership-gates the workspace and resolves the project.
+  #
+  # Credential resolution is `:scoped_api_optional_credential` (below), NOT the
+  # plain OptionalToken this pipeline used to run — that is the gyldendal #15
+  # fix. Read its comment for the CSRF decision; the short version is that a
+  # browser session is admitted as a credential here, and on a state-changing
+  # method only behind the same `x-requested-with` check the media write
+  # pipelines already use.
   pipeline :scoped_api do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
@@ -160,10 +167,100 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(:scoped_api_optional_credential)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
+  # Soft credential resolution for :scoped_api — bearer ALWAYS, browser session
+  # only where it cannot drive a forged state change (gyldendal field report
+  # #15).
+  #
+  # THE BUG IT CLOSES. :scoped_api was the last media-adjacent pipeline with no
+  # `:fetch_session` and no `OptionalSessionToken`, so `ResolveWorkspace`'s
+  # `%User{}` arm was structurally unreachable on it: a signed-in Studio
+  # operator whose browser carries only the `user_session` cookie (no account
+  # login writes `session["api_token"]`, so the asset explorer renders
+  # `data-token=""`) resolved as ANONYMOUS and the membership gate 403'd every
+  # scoped media read. Proven live before the fix: anonymous flat
+  # `/v1/media/production` → 200, but `/w/default/p/default/v1/media/production`
+  # → 403 for the same operator. Media WRITES already authenticated a browser
+  # session (`:scoped_media_mutate` opens with fetch_session +
+  # OptionalSessionToken "so the membership gate below sees a session-only
+  # browser member too"); media READS did not.
+  #
+  # THE CSRF DECISION, stated here because :scoped_api — unlike
+  # :shared_media_api — also carries non-GET routes (search interaction, cycle
+  # opens, scoped secrets, media synonyms, and the [:scoped_api, :media_mutate]
+  # collections/checkout stack). We took BOTH halves of the constraint rather
+  # than picking one:
+  #
+  #   * GET/HEAD — the cookie is admitted unconditionally. These are
+  #     side-effect-free reads, which is precisely the justification
+  #     :shared_media_api and :session_token_root already carry; a read is not a
+  #     CSRF target, and `protect_from_forgery` is the wrong tool here (API and
+  #     Web-Component clients present no Phoenix CSRF token).
+  #   * every other method — the cookie is admitted ONLY when the request
+  #     carries `x-requested-with`, the identical check
+  #     `RequireBearerOrSessionToken` applies to its own cookie branch: a
+  #     cross-site form/img cannot set that header, and a cross-origin fetch
+  #     that sets it trips a CORS preflight the allowlist blocks. Without the
+  #     header the conn falls back to bearer-only resolution, so a forged
+  #     cross-site write sees exactly the anonymous request it saw before this
+  #     change.
+  #
+  # Bearer callers are untouched on every method (OptionalSessionToken prefers
+  # the Authorization header), and an anonymous conn still passes through
+  # unauthenticated to be denied by ResolveWorkspace — the fail-closed default
+  # is byte-identical.
+  #
+  # FREE BONUS: the [:scoped_api, :media_mutate] block (collections
+  # share/members, checkout) ran ResolveWorkspace BEFORE :media_mutate's
+  # `fetch_session`, so it 403'd a session-only browser member before its own
+  # cookie-aware gate could speak. Those routes are POST/DELETE and the Studio
+  # sends `x-requested-with`, so the header arm below now resolves the member's
+  # session token in time for the membership gate — and :media_mutate's
+  # RequireBearerOrSessionToken still runs afterwards as the hard gate.
+  #
+  # Sobelow Config.CSRF: the session is fetched on this pipeline, but every
+  # cookie-authorized request that can change state is header-checked above and
+  # then re-gated by the route's own write pipeline. Same posture as
+  # :shared_media_api / :media_mutate, both baselined.
+  #
+  # TWO DIVERGENCES from the OptionalToken arm, both checked rather than
+  # assumed. (1) `OptionalSessionToken` also honours `:dev_browser_token`, so on
+  # the cookie arm a dev machine's scoped GETs authenticate as the seeded dev
+  # token — config/dev.exs ONLY (grep: it is set nowhere in test.exs, runtime.exs
+  # or prod.exs), and it is the same convenience :scoped_media_mutate already
+  # grants. (2) `OptionalToken` refuses a scope-bound SHARE token presented off
+  # its surface and `OptionalSessionToken` has no such arm — a no-op here, not a
+  # hole: `RequireToken.share_token_off_surface?/2` is true only when
+  # `conn.path_params["workspace_slug"]` is absent, and EVERY :scoped_api route
+  # is mounted under /w/:workspace_slug, so the predicate is false on this
+  # pipeline by construction.
+  defp scoped_api_optional_credential(%Plug.Conn{} = conn, _opts) do
+    if cookie_credential_admissible?(conn) do
+      conn
+      |> Plug.Conn.fetch_session()
+      |> BarkparkWeb.Plugs.OptionalSessionToken.call([])
+    else
+      BarkparkWeb.Plugs.OptionalToken.call(
+        conn,
+        BarkparkWeb.Plugs.OptionalToken.init([])
+      )
+    end
+  end
+
+  defp cookie_credential_admissible?(%Plug.Conn{method: method} = conn) do
+    method in ["GET", "HEAD"] or csrf_header?(conn)
+  end
+
+  defp csrf_header?(conn) do
+    case Plug.Conn.get_req_header(conn, "x-requested-with") do
+      [val | _] when is_binary(val) and val != "" -> true
+      _ -> false
+    end
   end
 
   # Public-share variant of :scoped_api for the scoped READ document routes
@@ -654,9 +751,13 @@ defmodule BarkparkWeb.Router do
     # This pipeline has no ResolveWorkspace, so it would fall to AssignDefaultScope
     # and meter EVERY flat media write against the singleton Default Workspace.
     # Derive :current_workspace from the just-assigned api_token BEFORE
-    # AssignDefaultScope (which no-ops once the assign is set) so the write meters
-    # to its OWN workspace. A nil-workspace_id token falls through untouched and
-    # keeps today's Default-Workspace behavior.
+    # AssignDefaultScope so the write meters to its OWN workspace. AssignDefaultScope
+    # does NOT simply no-op here: it skips the workspace assign (already set) but
+    # still evaluates its PROJECT branch, and a token carries no project binding.
+    # That branch is conditional on the resolved workspace BEING the Default one
+    # for exactly this reason — see AssignDefaultScope's moduledoc. A
+    # nil-workspace_id token falls through untouched and keeps today's
+    # Default-Workspace behavior.
     plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
@@ -708,22 +809,36 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireAdmin)
   end
 
-  # Admin gate for the FLAT search-surface-config settings routes that must
-  # attribute per-workspace (charter D45/D49 — close the LIVE cross-tenant
-  # config-overwrite bleed). A naive `[:api, :require_admin]` cannot: `:api`
-  # runs `AssignDefaultScope` (stamps `current_workspace = Default`) BEFORE the
-  # admin gate, and `DeriveWorkspaceFromToken` is no-op-if-set, so appending it
-  # after `:api` would be a pure no-op (Default always wins). This bespoke
-  # pipeline mirrors `:media_mutate`'s ordering — token-resolve →
-  # DeriveWorkspaceFromToken → AssignDefaultScope → admin — so the admin token's
-  # OWN workspace is resolved and `SurfaceConfigs.get/upsert` key on it. It
-  # re-includes every `:api` security plug (AcceptBarkparkVendor, accepts json,
-  # ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit, TenantLogMetadata)
-  # so the surface is byte-identical to `:api` apart from the derivation order.
-  # ONE plug (DeriveWorkspaceFromToken) is controller-agnostic (reads only
-  # :api_token + :current_workspace) so it attributes BOTH the documents and
-  # media settings routes.
-  pipeline :search_settings_admin do
+  # THE admin gate for every FLAT (`/v1/...`, no `/w/:ws/p/:project` in the
+  # path) admin route that must attribute per-workspace. It is the flat twin of
+  # `:scoped_admin`, and it REPLACES `:api` — never layers on it.
+  #
+  # ORDER IS THE ENTIRE FIX (charter D45/D49; task-2b396416a680ff0b). A naive
+  # `[:api, :require_admin]` cannot attribute per-workspace: `:api` runs
+  # `AssignDefaultScope`, which stamps `current_workspace = <seeded Default>`
+  # BEFORE the admin gate, and `ScopeHelpers.scope_opts/1` reads exactly that
+  # assign — so every caller, from every workspace, converges on Default.
+  # `DeriveWorkspaceFromToken` is NO-OP-IF-SET, so appending it after `:api` is
+  # a pure no-op: Default has already won. Only this ordering works —
+  # token-resolve → DeriveWorkspaceFromToken → AssignDefaultScope → admin
+  # (the same shape as `:media_mutate`). `BarkparkWeb.FlatAdminTenancyTest`
+  # reads this block and goes RED if the two are ever swapped.
+  #
+  # It re-includes every `:api` security plug (AcceptBarkparkVendor, accepts
+  # json, ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit,
+  # TenantLogMetadata) so the surface is byte-identical to `[:api,
+  # :require_admin]` apart from the derivation order. The only set delta is
+  # `OptionalToken` → `DeriveWorkspaceFromToken`: `RequireToken` (which
+  # `:require_admin` ran anyway, one plug later) is a strict superset of
+  # `OptionalToken` — same `Auth.verify_token`, same
+  # `share_token_off_surface?/2` refusal — so the old pair resolved the token
+  # twice and an admin route can never serve an anonymous caller regardless.
+  #
+  # `DeriveWorkspaceFromToken` is controller-agnostic (it reads only
+  # `:api_token` + `:current_workspace`), which is why ONE pipeline attributes
+  # search settings, schemas, structure and webhooks alike — do NOT clone it
+  # per controller. Adding a flat admin surface? Mount it HERE.
+  pipeline :flat_admin_api do
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
@@ -765,8 +880,14 @@ defmodule BarkparkWeb.Router do
   # :api_token; ResolveWorkspace (in :scoped_api) sets :current_workspace and
   # already gates :read membership; RequireWorkspaceRole reads the per-grant
   # role — so a `member` of B with global admin perms is 403'd on admin ops.
-  # The FLAT admin routes keep :require_admin (global-perm gate) — the Default
-  # workspace + the dev token's owner/admin Default membership keep them green.
+  #
+  # THE FLAT ADMIN ROUTES DO NOT USE THIS PIPELINE, AND NO LONGER USE BARE
+  # `:require_admin` EITHER. They ride `:flat_admin_api` (defined ~40 lines
+  # above), which derives the workspace from the TOKEN before AssignDefaultScope
+  # can stamp Default. `:scoped_admin` is for the PATH-scoped
+  # /w/:ws/p/:project admin routes, where a resolver has already put the real
+  # workspace in `:current_workspace`. Adding a FLAT admin surface? Mount it on
+  # `:flat_admin_api`, not here and not on `[:api, :require_admin]`.
   pipeline :scoped_admin do
     plug(BarkparkWeb.Plugs.RequireToken)
     plug(BarkparkWeb.Plugs.RequireWorkspaceRole)
@@ -1968,7 +2089,7 @@ defmodule BarkparkWeb.Router do
   # bespoke pipeline (charter D85/D86 — repoint) so their reads and writes land
   # on the caller's own workspace instead of collapsing to Default.
   scope "/v1/data", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/search/:dataset/settings", SearchController, :search_settings)
     put("/search/:dataset/settings", SearchController, :update_search_settings)
@@ -1977,12 +2098,12 @@ defmodule BarkparkWeb.Router do
   # insights + synonyms — per-workspace attributed (charter D85/D86). Repointed
   # off `[:api, :require_admin]` (which ran AssignDefaultScope with NO
   # DeriveWorkspaceFromToken → collapsed every caller to Default) onto the
-  # bespoke `:search_settings_admin` pipeline: DeriveWorkspaceFromToken (fail-
+  # bespoke `:flat_admin_api` pipeline: DeriveWorkspaceFromToken (fail-
   # SOFT) runs before AssignDefaultScope, so a workspace-bound admin token
   # resolves ITS workspace while a nil-workspace token still falls through to
   # Default/global (READs stay global-legacy by D59 — never over-blocked).
   scope "/v1/data", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/search/:dataset/insights", SearchController, :search_insights)
     get("/search/:dataset/synonyms", SearchController, :search_synonyms)
@@ -1993,15 +2114,22 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Desk structure — the canonical Studio tree, served for the TUI ──────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: the desk tree is built from
+  # `Structure.build(dataset, scope_opts(conn))`, so on the naive pipeline every
+  # caller was served the SEEDED DEFAULT workspace's tree (D45/D49).
   scope "/v1/structure", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     get("/:dataset", StructureController, :show)
   end
 
   # ── Schema management — requires admin token ────────────────────────────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: `upsert`/`delete` stamp and
+  # filter on `scope_opts(conn)`, so on the naive pipeline a non-Default
+  # workspace's admin read AND MUTATED the Default workspace's content model
+  # (D45/D49). The scoped `/w/:ws/p/:project` twin below is unaffected.
   scope "/v1/schemas", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     get("/:dataset", SchemaController, :index)
     get("/:dataset/:name", SchemaController, :show)
@@ -2046,8 +2174,20 @@ defmodule BarkparkWeb.Router do
   # fleet-support-<name>) so a remote support machine works the ledger as a
   # distinct, attributable actor; DELETE revokes it at teardown. Admin gate =
   # WHO may mint, not the minted token's scope. Secret returned ONCE.
+  #
+  # :flat_admin_api, NOT [:api, :require_admin] (gyldendal field report, the
+  # last Class A remnant #12826 did not reach). `:api` runs AssignDefaultScope,
+  # which stamps `current_workspace = <seeded Default>` before the admin gate —
+  # and `create/2` binds the MINTED CREDENTIAL to that assign. So a tenant admin
+  # whose only membership is workspace X minted a live write token bound to
+  # Default, plus a `member` row in Default (Auth.create_token/5 writes the
+  # membership alongside the token), and that token then read Default's
+  # documents: a durable credential manufactured inside a workspace the caller
+  # was never a member of. :flat_admin_api derives the workspace from the
+  # CALLER'S TOKEN before the Default fallback, so the mint lands in the
+  # minter's own workspace. Same admin gate, same 401/403 surface.
   scope "/v1/fleet/support-tokens", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     post("/", FleetSupportTokenController, :create)
     delete("/:token_id", FleetSupportTokenController, :delete)
@@ -2078,8 +2218,13 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Webhooks — requires admin token ────────────────────────────────────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: the sharpest row of the
+  # D45/D49 remainder. `create_webhook` stamps `workspace_id` from
+  # `scope_opts(conn)`, so on the naive pipeline any workspace's admin token
+  # registered a hook in the SEEDED DEFAULT workspace and received Default's
+  # content-change stream; `show`/`rotate` reach Default's webhook secrets.
   scope "/v1/webhooks", BarkparkWeb do
-    pipe_through([:api, :require_admin])
+    pipe_through(:flat_admin_api)
 
     get("/:dataset", WebhookController, :index)
     get("/:dataset/:id", WebhookController, :show)
@@ -2160,11 +2305,14 @@ defmodule BarkparkWeb.Router do
   # bundle import on a TARGET instance copies the source's DB rows, then pushes
   # each source blob HERE by its server-generated relative path so `serve/2`
   # (which derives the disk path from the row's `path`) finds the bytes. The
-  # `*path` is validated to the server-blob shape by `Media.put_blob/2` (reject
+  # `*path` is validated to the server-blob shape by `Media.put_blob/3` (reject
   # traversal / absolute / malformed → 422) and the body is written verbatim.
   # DELIBERATELY a bare route — an infra primitive, NOT a public SDK verb, so it
-  # is absent from the capabilities manifest. `:workspace_slug` scopes the
-  # operation logically (the admin gate is global); blobs share the media root.
+  # is absent from the capabilities manifest. `:workspace_slug` is BINDING: the
+  # `:require_admin` gate below is workspace-BLIND, so the action itself resolves
+  # the slug, binds the caller with `TenancyAuth.member?/2`, and refuses any blob
+  # key another workspace owns. Blobs still share one media root — the tenant
+  # wall is ownership of the key, not a prefix on it (see `Media.put_blob/3`).
   scope "/api/workspaces/:workspace_slug/media", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
@@ -2175,18 +2323,18 @@ defmodule BarkparkWeb.Router do
   # media search-surface-config settings — per-workspace attributed (charter
   # D45/D49), same bespoke admin pipeline as the documents settings routes.
   scope "/v1/media", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/:dataset/search/settings", V1.MediaController, :search_settings)
     put("/:dataset/search/settings", V1.MediaController, :update_search_settings)
   end
 
   # media insights + synonyms — per-workspace attributed (charter D85/D86),
-  # repointed onto the same bespoke `:search_settings_admin` pipeline as the
+  # repointed onto the same bespoke `:flat_admin_api` pipeline as the
   # documents block above so a workspace-bound admin token resolves ITS workspace
   # instead of collapsing to Default; a nil-workspace token still falls through.
   scope "/v1/media", BarkparkWeb do
-    pipe_through(:search_settings_admin)
+    pipe_through(:flat_admin_api)
 
     get("/:dataset/search/insights", V1.MediaController, :search_insights)
     get("/:dataset/search/synonyms", V1.MediaController, :search_synonyms)
@@ -2623,11 +2771,19 @@ defmodule BarkparkWeb.Router do
   # ── Workspace DELETE — admin-gated destructive teardown ─────────────────
   # Separate scope (NOT the membership-scoped switcher above) because delete is
   # the destructive primitive eject / backup / abuse-isolation build on: it
-  # requires the GLOBAL `admin` permission, not mere membership. The
-  # `:require_admin` pipeline (RequireToken + RequireAdmin) 401s an absent token
-  # and 403s a non-admin BEFORE the action runs; the action delegates to
-  # `Tenancy.delete_workspace/1`, which cascades across every workspace_id-scoped
-  # table inside one rollback-on-failure transaction (zero orphans).
+  # requires the GLOBAL `admin` permission. The `:require_admin` pipeline
+  # (RequireToken + RequireAdmin) 401s an absent token and 403s a non-admin
+  # BEFORE the action runs; the action delegates to `Tenancy.delete_workspace/1`,
+  # which cascades across every workspace_id-scoped table inside one
+  # rollback-on-failure transaction (zero orphans).
+  #
+  # THE PIPELINE IS ONLY HALF THE GATE (task-a5636ad31304b23a). `:require_admin`
+  # proves a global permission and never reads a workspace, so it cannot say
+  # WHICH workspace the caller may destroy — on its own it let any admin token
+  # delete any tenant's workspace by slug. `WorkspaceController.delete/2` binds
+  # the verb to the URL's workspace with `TenancyAuth.workspace_admin?/2`.
+  # Do NOT read "admin-gated" here as "tenancy-gated": that inference is exactly
+  # what shipped the hole.
   scope "/api", BarkparkWeb do
     pipe_through([:api, :require_admin])
 
@@ -2656,7 +2812,24 @@ defmodule BarkparkWeb.Router do
   # engine (bp-export-v1): a complete, self-describing, round-trippable dump of
   # every workspace-scoped table. Same admin gate as delete above — the bundle
   # is the raw byte carrier that backup / eject / migration build on, so it
-  # requires the GLOBAL `admin` permission, not mere membership.
+  # requires the GLOBAL `admin` permission.
+  #
+  # AND, like delete, the pipeline is only half the gate (task-f416f96ef0860f47):
+  # `export/2` binds to the URL's workspace with `TenancyAuth.workspace_admin?/2`,
+  # because `:require_admin` alone streamed any tenant's complete bundle to any
+  # admin-permissioned token.
+  #
+  # `import` is DELIBERATELY not bound the same way, and that asymmetry is the
+  # reason this binding lives in the two ACTIONS rather than in a plug on this
+  # shared scope. `import/2` ignores its `workspace_slug` (it is underscored);
+  # the target comes from the uploaded bundle's manifest, and the normal restore
+  # case is a workspace that does NOT exist yet. A `ResolveWorkspace`-style plug
+  # on this pipeline would 404 exactly those legitimate restores before the
+  # action ran. Its own collision paths fail closed instead — clean mode's bare
+  # `COPY FROM STDIN` is a PK violation on a duplicate id, `unique_index(
+  # :workspaces, [:slug])` refuses a slug squat, and both roll back; merge mode
+  # sits behind the fail-closed `:allow_bundle_import` opt-in and
+  # `adopt_or_refuse_root_slug!/1`.
   #
   # DELIBERATELY a bare router+controller route with NO capabilities manifest
   # command: `docs/openapi.json` is manifest-derived, so a bare route is invisible

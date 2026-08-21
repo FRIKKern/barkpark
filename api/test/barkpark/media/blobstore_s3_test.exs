@@ -218,13 +218,17 @@ defmodule Barkpark.Media.Blobstore.S3Test do
                S3.put_bytes(rel, "abc", [])
     end
 
-    test "Media.put_blob/2 carries the receipt up; a short store is a failure, not a 200" do
+    test "Media.put_blob/3 carries the receipt up; a short store is a failure, not a 200" do
       put_media_storage([])
       _bucket = honest_bucket!()
       rel = "uploads/2026/07/readback-#{System.unique_integer([:positive])}.png"
+      # `:workspace_id` is REQUIRED — there is no unscoped blob write. No
+      # media_files row claims these keys, so the ownership check passes and
+      # this stays a pure receipt-plumbing test.
+      ws = [workspace_id: Ecto.UUID.generate()]
 
       assert {:ok, ^rel, %{received: 11, stored: 11, verified_by: :head}} =
-               Media.put_blob(rel, "hello-world")
+               Media.put_blob(rel, "hello-world", ws)
 
       # A store that answers a DIFFERENT size is a named failure. (The honest
       # bucket cannot lie, so this one is stubbed directly.)
@@ -236,7 +240,7 @@ defmodule Barkpark.Media.Blobstore.S3Test do
       end)
 
       short_rel = "uploads/2026/07/short-#{System.unique_integer([:positive])}.bin"
-      assert {:error, {:storage_mismatch, 11, 5}} = Media.put_blob(short_rel, "hello-world")
+      assert {:error, {:storage_mismatch, 11, 5}} = Media.put_blob(short_rel, "hello-world", ws)
     end
   end
 

@@ -1832,6 +1832,32 @@ type SiteDeployment struct {
 	BecameLiveAt string `json:"became_live_at"`
 	InsertedAt   string `json:"inserted_at"`
 	UpdatedAt    string `json:"updated_at"`
+	// dr-w23-s6: THE FOUR LAUNDERED KEYS. `site_deployment_json/3` pipes the
+	// narrow producer `deployment_json/1`, so the WIDE wire has always carried
+	// these four — and this struct did not declare them, so `json.Unmarshal`
+	// dropped every one of them on the floor.
+	//
+	// It was invisible to the payload census for a structural reason worth
+	// keeping: its UNREAD arm takes emitted keys against the FILE-GLOBAL union of
+	// json tags in this package, and all four names are declared by OTHER structs
+	// — `artifact_url`, `git_ref` and `image_tag` by the narrow `Deployment`,
+	// `detail` by `SiteStage` and `WebhookProxyError`. The union greened them
+	// while the struct that actually decodes this payload carried nothing. The
+	// per-struct OFF-STRUCT arm added by the same slice is what can say so.
+	//
+	// The human consequence was two deploy readers on one platform, one silently
+	// poorer: `bp sites` (the narrow path) printed the build identity and
+	// `bp cloud site status` (the wide page's only consumer) could not.
+	//
+	// Detail is NOT SiteStage.Detail. They share a name and nothing else: this is
+	// the DEPLOYMENT's own caption (`Sites.Deploy.stage_caption(d.status,
+	// d.detail)` at the payload's top level), while SiteStage.Detail is the
+	// PER-STAGE caption inside `stages[]`. A name-based union cannot tell those
+	// apart, which is precisely why it must not be the thing deciding.
+	GitRef      string `json:"git_ref"`
+	ArtifactURL string `json:"artifact_url"`
+	ImageTag    string `json:"image_tag"`
+	Detail      string `json:"detail"`
 }
 
 // SiteDeploymentPage is one keyset page of a site's deployments, newest first —
@@ -2305,7 +2331,38 @@ type DeployCensus struct {
 	// an unnamed population dressed as a named one. Nil MUST render as "the
 	// population was NOT NAMED", never as an empty team.
 	Scope *DeployCensusScope `json:"scope"`
-	Raw   []byte             `json:"-"`
+	// CoalescedAttempts is the dr-w23-s4 addition: the gauge for deploy attempts
+	// that minted NO deployment row at all (AutoDeployWorker coalesced them onto
+	// an in-flight build). It is DISJOINT from Volume and never folded into it —
+	// a deferred row IS in Volume; a coalesced attempt produced no row to count.
+	//
+	// It is a POINTER for the same reason Delivery is: every control plane older
+	// than this counter sends no key, and "this control plane does not measure
+	// the attempts it drops" must not decode to "it drops none". Before this
+	// field existed the value rode the wire and reached `-o json` only because
+	// `-o json` re-emits Raw verbatim — no Go struct in this package named it,
+	// so no human render could.
+	CoalescedAttempts *DeployCoalescedAttempts `json:"coalesced_attempts"`
+	Raw               []byte                   `json:"-"`
+}
+
+// DeployCoalescedAttempts is the coalesced-attempt gauge WITH its own refusal —
+// the same shape as a DeployRate and for the same reason: it has three endings
+// and none of them is a zero.
+//
+// Value is a POINTER because the producer sends `null` when it REFUSES. The
+// refusal is not a sampling floor but a COVERAGE floor: the counter column
+// landed in migration 20260807150000, and PostgreSQL materialised its `0`
+// default onto every pre-existing row, so a SUM over any window starting before
+// Since reads a confident `0` for days whose true coalesced volume ran into the
+// thousands. A reader that decodes that null into an int prints exactly the
+// false confidence the producer refused to print.
+type DeployCoalescedAttempts struct {
+	Value   *int   `json:"value"`
+	Refused bool   `json:"refused"`
+	Reason  string `json:"reason"`
+	Since   string `json:"since"`
+	Basis   string `json:"basis"`
 }
 
 // DeployDeliveryWindow is the delivery census's PINNED window WITH its width —

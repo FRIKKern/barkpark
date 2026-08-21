@@ -14,10 +14,13 @@ package builder
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -76,10 +79,19 @@ type Deployment struct {
 // full 40-char commit sha (ref names also work at the wire level, but
 // abbreviated shas are refused by the server with `couldn't find remote ref`,
 // so never abbreviate).
+//
+// Token is an optional short-lived GitHub App INSTALLATION token
+// (dwb-webhook-deploy-artifact-gap) minted by the control plane at claim time
+// for a PRIVATE connected repo. It is deliberately its own field rather than
+// credentials spliced into URL: a credential inside a remote URL gets written
+// into the clone workdir's config by `git remote add`, is echoed back in git's
+// own error text, and would ride every console line that narrates the URL.
+// Empty means "clone anonymously", which is all a public repo needs.
 type BuildSource struct {
-	Kind string `json:"kind"`
-	URL  string `json:"url"`
-	Ref  string `json:"ref"`
+	Kind  string `json:"kind"`
+	URL   string `json:"url"`
+	Ref   string `json:"ref"`
+	Token string `json:"token,omitempty"`
 }
 
 // CommandRunner runs a subprocess and writes its combined stdout+stderr to w.
@@ -433,7 +445,12 @@ func (b *Builder) resolveSource(ctx context.Context, d *claimedDeployment, con *
 		return dir, nil
 
 	case d.Source != nil && d.Source.Kind == "git":
-		con.logf("source: cloning %s @ %s (sha-first shallow fetch)", d.Source.URL, refOrNone(d.Source.Ref))
+		// Register the clone credential as a console secret BEFORE the first
+		// line that could carry it, so any git output echoing the token is
+		// scrubbed from the live console. The URL itself never holds it.
+		con.addSecret(d.Source.Token)
+		con.logf("source: cloning %s @ %s (%s shallow fetch)",
+			d.Source.URL, refOrNone(d.Source.Ref), authModeOf(d.Source))
 		dir, err := b.cloneGitSource(ctx, d.Source)
 		if err != nil {
 			return "", fmt.Errorf("git source: %w", err)
@@ -460,6 +477,31 @@ func (b *Builder) cloneGitSource(ctx context.Context, src *BuildSource) (string,
 	if src.URL == "" || src.Ref == "" {
 		return "", fmt.Errorf("source envelope incomplete (url=%q ref=%q) — the control plane must mint both", src.URL, src.Ref)
 	}
+	// A ref is an ARGUMENT to git, and git's option parser claims a leading '-'
+	// wherever it appears in argv. `git_ref` is caller-supplied on the manual
+	// deploy route (POST /v1/sites/:id/deploy {"git_ref": …}) and carries no
+	// format constraint in the changeset.
+	//
+	// The realized harm over the https transport is NOT command execution
+	// (`--upload-pack` is inert for http) — it is a SILENT WRONG BUILD:
+	// measured, `fetch --depth 1 origin --upload-pack=…` consumed the ref as an
+	// option, fell through to the DEFAULT refspec, and the builder checked out
+	// the branch TIP and reported success. That is precisely the moving branch
+	// head this lane exists to avoid, arrived at through argv instead of
+	// through a branch name.
+	//
+	// Two independent guards, because they fail differently: this refusal is
+	// terminal and says why, while the `--` separator below (measured: turns the
+	// same input into `fatal: invalid refspec`) holds even if this check is ever
+	// loosened to admit some leading-dash ref.
+	if strings.HasPrefix(src.Ref, "-") {
+		return "", fmt.Errorf("terminal: refusing ref %q — a ref may not start with '-' (git parses it as an option and silently builds the branch tip instead)", src.Ref)
+	}
+
+	authEnv, err := gitAuthEnv(src)
+	if err != nil {
+		return "", err
+	}
 
 	dir, err := os.MkdirTemp("", "bp-builder-git-")
 	if err != nil {
@@ -472,13 +514,16 @@ func (b *Builder) cloneGitSource(ctx context.Context, src *BuildSource) (string,
 		// credential.helper is cleared per-command so an OS keychain can't
 		// answer for a private repo either — combined with GIT_TERMINAL_PROMPT=0
 		// (on every git env, see gitCommand) the fetch FAILS FAST instead of
-		// hanging the builder on a username prompt it can never answer.
-		{"-c", "credential.helper=", "fetch", "--depth", "1", "origin", src.Ref},
+		// hanging the builder on a username prompt it can never answer. The
+		// installation token, when present, rides the ENVIRONMENT (gitAuthEnv)
+		// — never argv, which every other process on the host can read.
+		{"-c", "credential.helper=", "fetch", "--depth", "1", "origin", "--", src.Ref},
 		{"checkout", "--quiet", "FETCH_HEAD"},
 	}
 	for _, args := range steps {
 		var out bytes.Buffer
 		cmd := gitCommand(ctx, dir, args...)
+		cmd.Env = append(cmd.Env, authEnv...)
 		cmd.Stdout = &out
 		cmd.Stderr = &out
 		if err := cmd.Run(); err != nil {
@@ -486,6 +531,84 @@ func (b *Builder) cloneGitSource(ctx context.Context, src *BuildSource) (string,
 		}
 	}
 	return dir, nil
+}
+
+// gitAuthEnv renders src.Token as git configuration ON THE ENVIRONMENT:
+//
+//	GIT_CONFIG_COUNT=1
+//	GIT_CONFIG_KEY_0=http.<scheme>://<host>/.extraHeader
+//	GIT_CONFIG_VALUE_0=Authorization: Basic base64("x-access-token:<token>")
+//
+// Three properties are load-bearing:
+//
+//   - ENVIRONMENT, not argv: `git -c key=value` puts the credential in the
+//     process command line, which every other user on the shared builder host
+//     can read out of `ps`. /proc/<pid>/environ is owner-only.
+//   - SCOPED to the source's own origin, not bare `http.extraHeader`: a bare
+//     key attaches the Authorization header to ANY host git contacts, so a
+//     redirect would hand the installation token to a third party.
+//   - NOT in the URL: nothing writes it into the workdir's config, and the URL
+//     stays safe to narrate to the live console.
+//
+// Returns nil (no error) when the envelope has no token — a public repo.
+func gitAuthEnv(src *BuildSource) ([]string, error) {
+	if src.Token == "" {
+		return nil, nil
+	}
+
+	u, err := url.Parse(src.URL)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("terminal: cannot authenticate an unparseable clone url %q", src.URL)
+	}
+
+	// Never put a bearer credential on the wire in cleartext. The loopback
+	// carve-out exists only so the auth lane can be proven against a real
+	// `git http-backend` fixture in-process; those bytes never leave the host.
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && isLoopbackHost(u.Host):
+	default:
+		return nil, fmt.Errorf(
+			"terminal: refusing to send the clone credential over %s to %s — only https carries it",
+			u.Scheme, u.Host)
+	}
+
+	origin := u.Scheme + "://" + u.Host + "/"
+	header := "Authorization: Basic " +
+		base64.StdEncoding.EncodeToString([]byte(gitAuthUser+":"+src.Token))
+
+	return []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http." + origin + ".extraHeader",
+		"GIT_CONFIG_VALUE_0=" + header,
+	}, nil
+}
+
+// gitAuthUser is the username GitHub requires alongside an App installation
+// token in HTTP Basic auth. The token is the password.
+const gitAuthUser = "x-access-token"
+
+// isLoopbackHost reports whether host (an authority, possibly with a port) is
+// a loopback address. Used only to allow the hermetic http test fixture.
+func isLoopbackHost(host string) bool {
+	h := host
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		h = parsed
+	}
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(strings.Trim(h, "[]"))
+	return ip != nil && ip.IsLoopback()
+}
+
+// authModeOf renders how the clone will authenticate, for narration. Never
+// renders the token itself.
+func authModeOf(src *BuildSource) string {
+	if src != nil && src.Token != "" {
+		return "authenticated sha-first"
+	}
+	return "anonymous sha-first"
 }
 
 // gitCommand builds one clone-lane git invocation: cwd pinned to the workdir,
@@ -512,11 +635,23 @@ func gitCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
 //
 // Anything else is a normal build failure carrying the git output tail.
 func classifyGitFailure(src *BuildSource, args []string, output string, err error) error {
+	authRefused := strings.Contains(output, "could not read Username") ||
+		strings.Contains(output, "Authentication failed")
+
 	switch {
 	case strings.Contains(output, "not our ref"):
 		return fmt.Errorf("terminal: commit %s is no longer reachable on %s (force-push or branch delete since the deployment was created) — a retry cannot succeed; push again to deploy", src.Ref, src.URL)
-	case strings.Contains(output, "could not read Username"):
-		return fmt.Errorf("terminal: repository %s is not anonymously accessible (private or nonexistent) — a retry cannot succeed; authenticated GitHub access is not yet supported", src.URL)
+
+	// dwb-webhook-deploy-artifact-gap: the two auth refusals are DIFFERENT
+	// operator instructions, and conflating them sends the wrong person to fix
+	// the wrong thing. No token → the App is not wired or the team has not
+	// connected it. Token present and still refused → the installation exists
+	// but does not grant this repo.
+	case authRefused && src.Token == "":
+		return fmt.Errorf("terminal: repository %s is not anonymously accessible (private or nonexistent) and no GitHub App installation token was issued for it — a retry cannot succeed; connect GitHub for this team (and grant the App access to the repo) to deploy a private repository", src.URL)
+	case authRefused:
+		return fmt.Errorf("terminal: the GitHub App installation token was refused for %s — a retry cannot succeed; grant the Barkpark GitHub App access to this repository (or reinstall it) and push again", src.URL)
+
 	default:
 		return fmt.Errorf("git %s: %w — %s", strings.Join(args, " "), err, tailOf(output))
 	}

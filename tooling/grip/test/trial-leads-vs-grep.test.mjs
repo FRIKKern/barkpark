@@ -12,7 +12,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  mkdtempSync, writeFileSync, readFileSync, rmSync,
+  mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync,
   openSync, ftruncateSync, writeSync, closeSync, statSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,6 +30,7 @@ import {
   runLeadsJson,
   runGrep,
   runGrepCount,
+  REPO_WIDE_EXCLUDES,
   countNewlinesInBuffer,
   countLinesInFile,
   MAX_STRING_LENGTH,
@@ -311,14 +312,78 @@ test("scoreQuery reports the two readings and a bucket class, never a single bak
   }
 });
 
-test("scoreQuery repoWide:true counts the tree but EXCLUDES vendored/build dirs", () => {
-  const dir = makeFixtureStore();
+// ── the repo-wide arm: EXCLUSION is the claim, so exclusion is what is asserted ─
+//
+// The test this replaces was named "counts the tree but EXCLUDES vendored/build
+// dirs" and asserted only `typeof === "number"` and `> 0`. Mutation-proven
+// vacuous on its own headline: gutting REPO_WIDE_EXCLUDES to `[]` left all 21
+// tests passing. It also scanned the whole working checkout, which on a tree
+// carrying untracked agent state took ~11 minutes — paying eleven minutes for an
+// assertion that the number was a number.
+//
+// Both problems have the same fix: scan a fixture whose contents are KNOWN, so
+// the exact count is predictable and the exclusion becomes checkable.
+
+// The probe term. It is NOT absent from the repo — this very file contains the
+// literal — and that is exactly why every assertion below scans the FIXTURE it
+// just built and never ".". A test that plants a sentinel and then searches the
+// whole tree for it is counting its own source. (Proof that the distinction is
+// live: making scoreQuery ignore repoWideDir and scan "." returns 1 — this file.)
+const EXCLUDE_PROBE = "ZZQ_GRIP_REPOWIDE_EXCLUDE_PROBE_ZZQ";
+
+// The exclusion set, pinned by SET-EQUALITY rather than a floor. Adding a
+// directory to REPO_WIDE_EXCLUDES without extending this fixture reds here,
+// which is the point: a new exclude that nothing plants a file in is an exclude
+// nothing tests.
+const EXPECTED_EXCLUDES = [".git", "node_modules", "_build", "deps", ".turbo", "dist", "build"];
+
+// One file per excluded directory carrying ONE match, plus a kept directory
+// carrying TWO. Correct answer: 2. Un-excluded answer: 9.
+function makeExcludeFixture() {
+  const root = mkdtempSync(join(tmpdir(), "grip-repowide-"));
+  mkdirSync(join(root, "kept"), { recursive: true });
+  writeFileSync(join(root, "kept", "counted.txt"), `${EXCLUDE_PROBE}\nnoise\n${EXCLUDE_PROBE}\n`);
+  for (const d of EXPECTED_EXCLUDES) {
+    mkdirSync(join(root, d), { recursive: true });
+    writeFileSync(join(root, d, "vendored.txt"), `${EXCLUDE_PROBE}\n`);
+  }
+  return root;
+}
+
+test("REPO_WIDE_EXCLUDES is exactly the vendored/build set the fixture plants files in", () => {
+  assert.deepEqual([...REPO_WIDE_EXCLUDES].sort(), [...EXPECTED_EXCLUDES].sort());
+});
+
+test("the repo-wide grep counts kept files and EXCLUDES every vendored/build dir", () => {
+  const root = makeExcludeFixture();
   try {
-    const s = scoreQuery({ term: "internal/cli", prefix: "internal/cli" }, dir, { exact: false, repoWide: true });
+    // the exclusion is real: 9 matches exist, 7 of them inside excluded dirs
+    const excluded = runGrepCount(EXCLUDE_PROBE, root, { excludeDirs: REPO_WIDE_EXCLUDES });
+    assert.equal(excluded.count, 2, "only the two matches under kept/ are counted");
+
+    // the CONTROL that makes the number above mean something: without the
+    // exclude list the same corpus yields 9, so a count of 2 is the excludes
+    // working, not the fixture being empty or the probe being unfindable.
+    const unfiltered = runGrepCount(EXCLUDE_PROBE, root, { excludeDirs: [] });
+    assert.equal(unfiltered.count, 9, "all 9 planted matches are reachable when nothing is excluded");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("scoreQuery threads REPO_WIDE_EXCLUDES into its repo-wide count", () => {
+  // proves the WIRING, not just the helper: scoreQuery must pass the exclude set
+  // through, and must scan the directory it was handed.
+  const dir = makeFixtureStore();
+  const root = makeExcludeFixture();
+  try {
+    const s = scoreQuery({ term: EXCLUDE_PROBE, prefix: "internal/cli" }, dir,
+      { exact: false, repoWide: true, repoWideDir: root });
     assert.equal(typeof s.repo_wide_grep_lines, "number");
-    assert.ok(s.repo_wide_grep_lines > 0);
+    assert.equal(s.repo_wide_grep_lines, 2, "scoreQuery's repo-wide count honours the exclude set");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

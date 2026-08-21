@@ -339,11 +339,43 @@ jobs:
         with:
           node-version: "20"
 
+      # --selftest FIRST (distrust vacuous green). The 13-arm harness plants a
+      # real violation and re-invokes the shipping script for each one; it had
+      # NO CI caller, so it was rotting unexecuted — a harness nothing runs is
+      # indistinguishable from no harness, and worse, because its presence is
+      # what stops anyone writing one.
+      #
+      # Arms (j0)-(j2) are new and cover the half CI actually runs this script
+      # for. Every pre-existing arm exercises --span-only, which SKIPS the
+      # fixed-caps loop: measured 2026-08-20, blinding the CAPS heredoc dropped
+      # the gate from 35 size verdicts to 7 — CLAUDE.md, docs/api-v1.md and every
+      # contract doc unchecked — and it still printed PASS while the 11-arm
+      # selftest passed straight through. The gate now pins the row count against
+      # a committed literal and the harness proves that ratchet bites in both
+      # directions.
       - name: Doc byte budgets (fails this job)
-        run: bash scripts/check-doc-budgets.sh
+        run: |
+          bash scripts/check-doc-budgets.sh --selftest
+          bash scripts/check-doc-budgets.sh
 
+      # --selftest FIRST (distrust vacuous green). The harness landed in #12561
+      # with 18 cases — including §8's three: a duplicate capability slug, a
+      # marker over a private defp, and a dangling doc: backlink — and NO CI
+      # caller, so it had been rotting unexecuted. Every case plants ONE
+      # violation in a throwaway 4-file repo and re-invokes THIS script against
+      # it via DOCS_ANCHORS_ROOT, so the assertions drive the shipping gate
+      # rather than a copy. It plants nothing in this repo and takes ~4s.
+      #
+      # §8 is the section that most needs it: both its arms print `ok:` when the
+      # scan finds nothing to complain about, and a scan that returns NOTHING AT
+      # ALL prints exactly the same `ok:`. It must never grow a -z assertion —
+      # CLAUDE.md says @canonical markers are demand-driven and get REMOVED as
+      # dedup lands, so zero is a legitimate tree. The selftest is what makes a
+      # zero here mean "the repo has none" instead of "the scanner went blind".
       - name: Doc anchors + headers (fails this job)
-        run: bash scripts/docs-anchors-check.sh
+        run: |
+          bash scripts/docs-anchors-check.sh --selftest
+          bash scripts/docs-anchors-check.sh
 
       # Connectors chat_bridge DDL drift gate (connectors D54). The bridge OWNS
       # the chat_bridge.connector_installs DDL (charter D28: no Ecto migration),
@@ -437,8 +469,19 @@ jobs:
       # carries no fields= projection that would strip `preview` off the wire
       # (D22), and D10 stays executable law — grep -ri oembed over the source
       # tree is ZERO, anywhere, ever.
+      # --selftest FIRST (distrust vacuous green). Part 3's expected hit count is
+      # ZERO forever, which is also what a wrong cwd, a dropped --include or a
+      # renamed extension return — so the gate's clean line proves nothing on its
+      # own. The selftest plants oEmbed in a throwaway tree (once per scanned
+      # extension), re-invokes THIS script against it via PREVIEW_PARITY_SCAN_ROOT
+      # and requires the real gate to catch each one, then requires it to stay
+      # silent on a clean corpus, on vendored code and on unscanned extensions,
+      # and to exit 2 REFUSED TO MEASURE rather than report a clean tree it never
+      # read. It plants nothing in this repo and runs in about a second.
       - name: Preview parity + D10 no-oEmbed gate (fails this job)
-        run: bash scripts/preview-parity-check.sh
+        run: |
+          bash scripts/preview-parity-check.sh --selftest
+          bash scripts/preview-parity-check.sh
 
       # Unified-aesthetic design-token drift gate (unified-aesthetic W1.2).
       # design/tokens.json is the ONE source of the Barkpark design language; the

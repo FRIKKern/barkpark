@@ -8,15 +8,45 @@ defmodule BarkparkWeb.WorkspaceController do
       `Tenancy.list_workspaces_for/1` query, not here.
 
     * `GET /api/workspaces/:workspace_slug/projects` — the Projects under that
-      workspace, but ONLY when the caller is a member. A non-member (and an
-      unknown slug) both return 404 so the endpoint never leaks whether a
-      workspace exists. `:require_token` already 401s an absent/invalid token.
+      workspace, but ONLY when the caller is a member. An unknown slug is 404;
+      a member-refused caller on a KNOWN workspace is 403 (see DENIAL SHAPE).
+      `:require_token` already 401s an absent/invalid token.
 
     * `DELETE /api/workspaces/:workspace_slug` — permanently delete a workspace
-      and everything scoped to it. This one is ADMIN-gated (the `:require_admin`
-      pipeline), NOT membership-scoped — it is the destructive primitive eject /
-      backup / abuse-isolation build on, so it needs the global `admin`
-      permission, not mere membership.
+      and everything scoped to it. Gated on BOTH halves: the `:require_admin`
+      pipeline proves the global `admin` permission (the VERB), and the action
+      proves `TenancyAuth.workspace_admin?/2` against the workspace the URL
+      names (the TENANT). The global permission alone is not enough — it is
+      workspace-blind by construction, so on its own it let any admin token
+      destroy any tenant's workspace (task-a5636ad31304b23a).
+
+    * `GET /api/workspaces/:workspace_slug/export` — stream that workspace's
+      complete bundle. Same two-part gate, same reason: on the global
+      permission alone it streamed any tenant's whole workspace to any admin
+      token (task-f416f96ef0860f47).
+
+  ## DENIAL SHAPE (charter D13 Tier A, gyldendal field report)
+
+  `projects`, `datasets` and `create_project` used to fold BOTH "no such
+  workspace" and "you are not a member of this one" into 404, on the argument
+  that the endpoint must never confirm a workspace exists to a non-member.
+  `Plugs.ResolveWorkspace` answers the SAME question 403 on the
+  `/w/:workspace_slug/p/:project_slug` family — so one membership question got
+  two opposite answers depending only on which route family the caller used,
+  and the field report hit exactly that: a real refusal read as "your
+  workspace does not exist".
+
+  These three actions now agree with the plug. An UNKNOWN slug is still 404; a
+  KNOWN workspace the caller is refused is 403. This accepts that
+  workspace-slug existence is public, which is already the ratified posture on
+  the scoped family. It is deliberately NOT extended to the enumeration-
+  sensitive surfaces (query_controller, `Plugs.PublicRead`,
+  `Plugs.RequireShareScope`, access/share/auth) — those keep their 404, and
+  `PublicRead`'s own moduledoc names the export leak its 404 closed.
+
+  Interior existence stays 404: an unknown PROJECT inside a workspace the
+  caller was admitted to is `not_found`, because the caller is a member and
+  could list those slugs anyway.
 
   Token is assigned to `conn.assigns[:api_token]` by the `:require_token`
   pipeline. The JSON envelope mirrors the flat `/v1` controllers — a plain map
@@ -26,6 +56,7 @@ defmodule BarkparkWeb.WorkspaceController do
 
   require Logger
 
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle
@@ -46,6 +77,13 @@ defmodule BarkparkWeb.WorkspaceController do
   Any authenticated token may create a workspace; the creator is bound as an
   `"owner"` Membership in the same transaction, and a Default Project +
   "production" Dataset are bootstrapped so the workspace is immediately usable.
+
+  The creator binding is BOTH principals when there are two: the token gets its
+  `api_token`-typed owner row, and — when the token names a real owner user —
+  that human gets a `"user"`-typed owner row as well, so the person who made
+  the workspace can actually reach it as themselves (`Tenancy`
+  `create_workspace_with_owner/2`). A token with no owner user (CI/bootstrap)
+  writes the token row only; no placeholder membership is ever inserted.
   201 + the created workspace; 422 (via FallbackController) on an invalid /
   duplicate slug.
   """
@@ -64,25 +102,31 @@ defmodule BarkparkWeb.WorkspaceController do
   POST /api/workspaces/:workspace_slug/projects — create a Project (+ its
   "production" Dataset) under a workspace the caller is a MEMBER of.
 
-  A non-member (and an unknown slug) both collapse to 404 — the same no-leak
-  convention as the `projects` LIST action. 201 + the created project on
-  success; 422 on an invalid / duplicate slug.
+  An unknown slug is 404 and a refused caller on a known workspace is 403 —
+  the same denial shape as the `projects` LIST action (see DENIAL SHAPE in the
+  @moduledoc). 201 + the created project on success; 422 on an invalid /
+  duplicate slug.
   """
   def create_project(conn, %{"workspace_slug" => slug} = params) do
     token = conn.assigns[:api_token]
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         true <- TenancyAuth.member?(token, workspace.id),
-         {:ok, project} <-
-           Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
-      conn
-      |> put_status(:created)
-      |> json(%{project: render_project(project)})
-    else
-      # A changeset error flows to the FallbackController (422). Anything else
-      # (unknown slug / non-member) collapses to 404 — no existence leak.
-      {:error, %Ecto.Changeset{}} = err -> err
-      _ -> {:error, :not_found}
+    # D13 Tier A, same law as :projects — unknown slug 404, refused caller 403.
+    case Tenancy.get_workspace_by_slug(slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.member?(token, workspace.id) do
+          # A changeset error flows to the FallbackController (422).
+          with {:ok, project} <-
+                 Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
+            conn
+            |> put_status(:created)
+            |> json(%{project: render_project(project)})
+          end
+        else
+          {:error, :forbidden}
+        end
+
+      _ ->
+        {:error, :not_found}
     end
   end
 
@@ -92,10 +136,11 @@ defmodule BarkparkWeb.WorkspaceController do
 
   Admin-gated by the router's `:require_admin` pipeline (RequireToken +
   RequireAdmin — a caller without the global `admin` permission is refused 403
-  before this action runs; NOT membership-scoped like the LIST/create surface).
-  This is the HTTP primitive the destructive keystone consumers (eject, backup,
-  abuse-isolation) assume; `Tenancy.delete_workspace/1` already exists and is
-  tested but was unreachable over HTTP until now.
+  before this action runs) AND bound to the target workspace by this action —
+  see TENANT BINDING below. This is the HTTP primitive the destructive keystone
+  consumers (eject, backup, abuse-isolation) assume;
+  `Tenancy.delete_workspace/1` already exists and is tested but was unreachable
+  over HTTP until now.
 
   Delegates to `Tenancy.delete_workspace/1`, which cascades inside a single
   transaction — media blobs (File.rm + CDN purge via `Media.delete_file/2`),
@@ -105,9 +150,33 @@ defmodule BarkparkWeb.WorkspaceController do
   Unknown slug → 404 (`{:error, :not_found}` via the FallbackController). On
   success → 200 echoing the deleted workspace so the caller has immediate,
   concrete confirmation of exactly what was removed.
+
+  ## TENANT BINDING (task-a5636ad31304b23a)
+
+  `:require_admin` proves a GLOBAL permission and never reads a workspace —
+  `Auth.has_permission?/2` is literally `permission in (token.permissions ||
+  [])`. So the pipeline alone let ANY admin-permissioned token destroy ANY
+  workspace on the instance by slug, cascading to media blobs and a CDN purge,
+  irreversibly. The verb gate stays where it is; what was missing is the
+  binding of that verb to the workspace the URL names, so the action now runs
+  `TenancyAuth.workspace_admin?/2` against the RESOLVED target.
+
+  `workspace_admin?/2`, not `member?/2`: deleting a whole workspace is a
+  scoped-ADMIN act, and this is the predicate `RequireWorkspaceRole` already
+  enforces on every other scoped-admin surface and the one #12701 landed on
+  `/v1/shares`. One corridor, one tenancy rule. Nor `authorize/3` — its
+  api_token arm ORs membership with the token's GLOBAL `permissions[]`, so a
+  global-admin holding a plain `member` row in B would pass it.
+
+  Denial shape follows the shipped path-addressed law (`ResolveWorkspace` 404
+  unknown / `RequireWorkspaceRole` 403 unauthorized): an unknown slug is 404,
+  a real workspace the caller does not administer is 403.
   """
   def delete(conn, %{"workspace_slug" => slug}) do
+    token = conn.assigns[:api_token]
+
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.workspace_admin?(token, workspace.id),
          {:ok, deleted} <- Tenancy.delete_workspace(workspace) do
       json(conn, %{workspace: render_workspace(deleted), deleted: true})
     else
@@ -115,6 +184,10 @@ defmodule BarkparkWeb.WorkspaceController do
       # both collapse to 404. A rollback term ({:error, reason}) flows to the
       # FallbackController, which maps it to the structured error envelope.
       nil -> {:error, :not_found}
+      # The tenant boundary. Ordered ABOVE the `{:error, _}` catch-all because
+      # `false` matches none of the tuple clauses — without its own arm this is
+      # a WithClauseError (500), not a denial.
+      false -> {:error, :forbidden}
       {:error, :not_found} -> {:error, :not_found}
       {:error, _} = err -> err
     end
@@ -122,7 +195,30 @@ defmodule BarkparkWeb.WorkspaceController do
 
   @doc """
   GET /api/workspaces/:workspace_slug/export — stream the complete bp-export-v1
-  bundle for a workspace as an `application/x-tar` attachment (admin-gated).
+  bundle for a workspace as an `application/x-tar` attachment.
+
+  ## TENANT BINDING (task-f416f96ef0860f47)
+
+  Two-part gate, identical to `delete/2`'s and for the identical reason: the
+  `:require_admin` pipeline proves the global `admin` permission and never
+  reads a workspace, so on its own it streamed ANY tenant's complete bundle to
+  ANY admin-permissioned token. The action therefore runs
+  `TenancyAuth.workspace_admin?/2` against the resolved target BEFORE any
+  bundle is materialized — a denial never spends a COPY, never writes a temp
+  tar, and never opens a socket to the caller.
+
+  `workspace_admin?/2` rather than `member?/2` bites harder here than on
+  delete: a `profile=full` bundle is the whole workspace INCLUDING the
+  secret / credential / PII classes that `profile=dev` exists to scrub, so a
+  read-only `member` must not be able to walk out with it. And unlike a
+  destructive act there is no undo for a read — remediation cannot take the
+  bytes back.
+
+  Denial shape matches `delete/2` and the shipped path-addressed law: unknown
+  slug 404, real-but-not-administered 403. The pair is distinguishable to an
+  admin caller — the same ACCEPTED signal #12701 recorded on `/v1/shares`,
+  and the narrower of the two exposures by a wide margin (the existence of a
+  slug, versus the workspace's entire contents).
 
   SYNC, but CONSTANT-MEMORY: `WorkspaceBundle.export_to_file/2` streams the
   bundle to a per-request temp tar and this action `send_file/3`s it, so a
@@ -162,7 +258,10 @@ defmodule BarkparkWeb.WorkspaceController do
   # request input reaches the path, so it shares the SendFile argument above.
   # sobelow_skip ["Traversal.SendFile", "Traversal.FileModule"]
   def export(conn, %{"workspace_slug" => slug} = params) do
+    token = conn.assigns[:api_token]
+
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
+         true <- TenancyAuth.workspace_admin?(token, workspace.id),
          {:ok, path} <- export_bundle(workspace, params) do
       # The engine hands ownership of the tar to us. `send_file/3` has finished
       # writing to the socket by the time it returns, so deleting here is safe —
@@ -183,6 +282,13 @@ defmodule BarkparkWeb.WorkspaceController do
     else
       nil ->
         {:error, :not_found}
+
+      # The tenant boundary (task-f416f96ef0860f47). Needs its own arm: `false`
+      # matches none of the tuple clauses below, so without it a denial is a
+      # WithClauseError (500) rather than a 403. Ordered before every
+      # `{:error, _}` arm for the same reason.
+      false ->
+        {:error, :forbidden}
 
       {:error, {:export_scope, reason, message}} ->
         conn
@@ -338,7 +444,7 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp clean_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path) do
+    case WorkspaceBundle.import_bundle_file(path, grant_admin_to: operator_grant(conn)) do
       {:ok, stats} ->
         json(
           conn,
@@ -348,6 +454,9 @@ defmodule BarkparkWeb.WorkspaceController do
             provenance: stamp_provenance(stats.manifest)
           })
         )
+
+      {:error, {:blob_path_conflict, info}} ->
+        blob_path_conflict(conn, info)
 
       {:error, other} ->
         import_failed(conn, :clean, other)
@@ -359,7 +468,10 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   defp merge_import(conn, path, receipt) do
-    case WorkspaceBundle.import_bundle_file(path, mode: :merge) do
+    case WorkspaceBundle.import_bundle_file(path,
+           mode: :merge,
+           grant_admin_to: operator_grant(conn)
+         ) do
       {:ok, stats} ->
         json(
           conn,
@@ -387,6 +499,9 @@ defmodule BarkparkWeb.WorkspaceController do
             }
           }
         })
+
+      {:error, {:blob_path_conflict, info}} ->
+        blob_path_conflict(conn, info)
 
       {:error, other} ->
         import_failed(conn, :merge, other)
@@ -435,6 +550,27 @@ defmodule BarkparkWeb.WorkspaceController do
       :internal_server_error,
       "import_failed",
       "workspace bundle import failed: #{detail}"
+    )
+  end
+
+  # 409 for the cross-tenant blob-path refusal (task-918106d49c62563e). The
+  # engine rolled the whole import back at ROW-COPY time because the bundle's
+  # media paths are already owned by a resident workspace — and the flat blob
+  # keyspace means two owners at one path make the loser's own scoped read serve
+  # the winner's bytes. Named + actionable (the colliding paths ride in
+  # `details`) rather than the 500 `import_failed` an unmatched term would emit.
+  # Emitted from BOTH import arms — clean and merge — because this repo's error
+  # emitters are duplicated per arm and a one-arm fix is a half fix.
+  defp blob_path_conflict(conn, info) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      :conflict,
+      "blob_path_conflict",
+      "refusing the import: #{info.count} media blob path(s) in this bundle are already " <>
+        "owned by another workspace on this instance. Importing them would make one " <>
+        "workspace serve the other's bytes on its own media route. Re-path the colliding " <>
+        "rows and retry.",
+      %{workspace_id: info.workspace_id, count: info.count, sample: info.sample}
     )
   end
 
@@ -647,6 +783,51 @@ defmodule BarkparkWeb.WorkspaceController do
   # inside Postgres, on the SAME filesystem when the DB is local (guerrilla
   # carries `/`, `/tmp` and `/opt/barkpark` on one). Stated, not hidden.
   @disk_margin_bytes 268_435_456
+
+  # THE OPERATOR GRANT (task-ed7ae8110c7c8b41). An imported workspace arrives on
+  # this instance with ZERO valid administrators: the bundle carries only the
+  # SOURCE instance's `workspace_memberships` rows, naming principals that do
+  # not exist here. Nothing else on the import path writes one, so absent this
+  # the operator that just landed the workspace cannot push its blobs
+  # (`TenancyAuth.member?/2` -> 404 on PUT /media/blob/*path), re-export it or
+  # delete it (`TenancyAuth.workspace_admin?/2` on the two sibling routes) —
+  # `bp cloud workspace import --with-blobs` reports the import and then a wall
+  # of 404s.
+  #
+  # The gap PREDATES the tenancy binding (PRs #12824/#12826/#12827); the old
+  # workspace-blind `require_admin` was papering over it. NOT fixed with a
+  # global-admin bypass in `member?/2`, which would reinstate exactly the
+  # workspace-blind hole those PRs closed — this grants ONE principal ONE
+  # membership on ONE workspace, at the single moment that workspace enters the
+  # instance, and the engine writes it inside the import transaction so a failed
+  # import grants nothing.
+  #
+  # `:require_admin` runs `RequireToken`, so `:api_token` is always assigned on
+  # this route and the principal kind is always `"api_token"`; it is threaded
+  # explicitly anyway because the type is a discriminator column with an
+  # implicit default (see `TenancyAuth.create_membership/4`). The `nil` arm is
+  # unreachable through the router and exists so the grant fails CLOSED —
+  # granting nothing — rather than raising, if this action is ever mounted on a
+  # pipeline that does not resolve a token.
+  #
+  # DELIBERATELY ABOVE the spill block below, not between it and its `def`.
+  # A Sobelow skip annotation binds to the NEXT definition, so defining this
+  # function underneath one both STOLE `with_spilled_body`'s waiver (Sobelow
+  # then correctly flagged its `File.rm_rf`) and silently handed THIS function
+  # a Traversal.FileModule waiver it never needed and nobody had reasoned
+  # about. The second half is the dangerous one: an annotation migrating onto
+  # unrelated code is how a waiver ends up covering something no one weighed.
+  # Inserting a definition between a comment block and its `def` reassigns any
+  # annotation in that block — true for skip annotations, `@canonical
+  # capability:` markers and credo disable-for-next-line alike. This paragraph
+  # deliberately does not spell the annotation token literally, so it cannot be
+  # mistaken for one by a scanner or miscounted by a census grep.
+  defp operator_grant(conn) do
+    case conn.assigns[:api_token] do
+      %ApiToken{id: id} when is_binary(id) -> {id, "api_token"}
+      _ -> nil
+    end
+  end
 
   # Spill the raw tar body to a scratch directory, run `fun`, then always remove
   # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.
@@ -875,38 +1056,57 @@ defmodule BarkparkWeb.WorkspaceController do
   def projects(conn, %{"workspace_slug" => slug}) do
     token = conn.assigns[:api_token]
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
-         true <- TenancyAuth.member?(token, workspace.id) do
-      projects = Tenancy.list_projects(workspace)
+    # Denial shape (charter D13 Tier A): an UNKNOWN slug is 404, a KNOWN
+    # workspace the caller is refused is 403 — the same answer
+    # `Plugs.ResolveWorkspace` already gives on the /w/:ws/p/:project family.
+    # See DENIAL SHAPE in the @moduledoc for why these two must agree.
+    case Tenancy.get_workspace_by_slug(slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.member?(token, workspace.id) do
+          projects = Tenancy.list_projects(workspace)
 
-      json(conn, %{
-        workspace: render_workspace(workspace),
-        projects: Enum.map(projects, &render_project/1)
-      })
-    else
-      # Unknown slug OR a real workspace the caller is not a member of both
-      # collapse to 404 — never confirm a workspace exists to a non-member.
-      _ -> {:error, :not_found}
+          json(conn, %{
+            workspace: render_workspace(workspace),
+            projects: Enum.map(projects, &render_project/1)
+          })
+        else
+          {:error, :forbidden}
+        end
+
+      _ ->
+        {:error, :not_found}
     end
   end
 
   def datasets(conn, %{"workspace_slug" => ws_slug, "project_slug" => proj_slug}) do
     token = conn.assigns[:api_token]
 
-    with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
-         true <- TenancyAuth.member?(token, workspace.id),
-         %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, proj_slug) do
-      datasets = Tenancy.list_datasets(project)
+    # D13 Tier A on the WORKSPACE only. An unknown PROJECT inside a workspace
+    # the caller was admitted to stays 404 (Tier B): project-slug existence is
+    # tenant-interior, and the caller who reaches that clause is already a
+    # member, so 404 there confirms nothing it could not list anyway.
+    case Tenancy.get_workspace_by_slug(ws_slug) do
+      %Tenancy.Workspace{} = workspace ->
+        if TenancyAuth.member?(token, workspace.id) do
+          case Tenancy.get_project(ws_slug, proj_slug) do
+            %Tenancy.Project{} = project ->
+              datasets = Tenancy.list_datasets(project)
 
-      json(conn, %{
-        workspace: render_workspace(workspace),
-        project: render_project(project),
-        datasets: Enum.map(datasets, &render_dataset/1)
-      })
-    else
-      # Unknown workspace/project, or a non-member — collapse to 404, never
-      # confirming existence to a caller who cannot see it.
-      _ -> {:error, :not_found}
+              json(conn, %{
+                workspace: render_workspace(workspace),
+                project: render_project(project),
+                datasets: Enum.map(datasets, &render_dataset/1)
+              })
+
+            _ ->
+              {:error, :not_found}
+          end
+        else
+          {:error, :forbidden}
+        end
+
+      _ ->
+        {:error, :not_found}
     end
   end
 

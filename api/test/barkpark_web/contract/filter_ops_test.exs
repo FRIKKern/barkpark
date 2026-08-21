@@ -1,4 +1,46 @@
 defmodule BarkparkWeb.Contract.FilterOpsTest do
+  @moduledoc """
+  Black-box HTTP contract for the filter operators — real router, real DB.
+
+  ## The mutation proof lives HERE, and why it moved
+
+  `test/barkpark_web/controllers/query_controller_filter_test.exs` was the file
+  the fail-closed filter guard was nominally pinned by, and it is VACUOUS as a
+  mutation target: it is a white-box `use ExUnit.Case` file calling
+  `QueryController.invalid_filter_op_for_test/1` directly, so deleting the guard
+  makes it fail to COMPILE rather than fail an assertion — a compile error proves
+  nothing about what a caller receives. Every mutation proof for this behaviour is
+  measured against THIS file instead (ConnCase, real requests).
+
+  Three runs of `mix test` on THIS file, measured on the
+  gfr-w1-filter-chokepoint-strict branch:
+
+    | query.ex        | query_controller.ex:51 guard | result                |
+    |-----------------|------------------------------|-----------------------|
+    | strict (shipped)| intact (shipped)             | 22 tests, 0 failures  |
+    | strict (shipped)| guard arm DELETED            | 22 tests, 4 failures  |
+    | origin/main's   | guard arm DELETED            | 22 tests, 6 failures  |
+
+  Row 3 is what the guard alone was worth, and it is the defect this slice closes:
+  with the door removed and the builder still permissive, `?filter[title][bogus]=`
+  came back `left: 200, right: 400` — a 200 OK carrying EVERY row, from a filter
+  that never ran.
+
+  Row 2 is the relocation. The four failures are all the SAME shape:
+  `** (Barkpark.Content.InvalidFilterError)` raised out of
+  `Content.Query.apply_filter_map/2` — never a 200, never a 500. The request is
+  still refused with a 400 `invalid_filter` envelope (Phoenix's RenderErrors
+  renders and SENDS it before re-raising; `Phoenix.ConnTest` then re-raises into
+  the test, which is why a `get/2`-style assertion reds rather than reading the
+  body). The last describe below pins that sent envelope directly with
+  `assert_error_sent/2`.
+
+  The `in`-with-a-map case in the last describe needs no mutation at all: that
+  shape walked past the door's guard on unpatched main — the guard checks an ops
+  map's KEYS, plus the values of `is`/`hasStrong`/the range ops, but never the
+  value of `in`/`nin` — and was silently unfiltered.
+  """
+
   use BarkparkWeb.ConnCase, async: false
   alias Barkpark.Content
 
@@ -447,5 +489,296 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     # The message names the accepted flat grammar, hasStrong included.
     assert error["message"] =~ "hasStrong <tag>:<min>"
     assert is_binary(error["hint"]) and error["hint"] != ""
+  end
+
+  # ── the refusal moved to the query builder (gfr-w1-filter-chokepoint-strict) ─
+  #
+  # Everything above this line was refused by ONE door: `QueryController`'s
+  # `invalid_filter_op/1` guard. `Content.Query` itself fell open — an op with no
+  # clause hit `apply_field_op/4`'s catch-all, which returned the query UNCHANGED
+  # and handed the caller the UNFILTERED set. The refusal lives at the builder's
+  # chokepoint now (`apply_filter_map/2`), so a door that forgets to guard — the
+  # Studio desk, a plugin filter, a door written next year — inherits it.
+  describe "the builder is the chokepoint, not the controller door" do
+    # THESE TWO ARE DELIBERATELY NOT HTTP TESTS, and that is a correction.
+    #
+    # They were written as `assert_error_sent(400, ...)` against
+    # `?filter[title][in][x]=Alpha` — a shape `QueryController`'s door happened
+    # not to inspect, so the refusal ESCAPED the controller and Phoenix's
+    # RenderErrors sent the envelope. That made them a test of the DOOR'S
+    # BLINDNESS, not of the builder's refusal: the sibling slice
+    # `gfr-w1-filter-and-composition` widened the door's scalar/list guard to
+    # every op, so the door refuses this shape cleanly through
+    # `action_fallback`, nothing raises — and both tests went red on the
+    # combined tree while the client-visible behaviour got BETTER (a clean 400
+    # instead of a logged fault). A test that reds when a defect is fixed
+    # elsewhere is pinned to the wrong thing.
+    #
+    # The claims are about the BUILDER, so they are asserted at the builder: it
+    # raises rather than returning the unfiltered set, the refusal carries 400
+    # (never a 500) through `Plug.Exception`, and the envelope every door
+    # inherits via `ErrorJSON` is the canonical `invalid_filter` one. Whether
+    # any given door pre-guards the shape first is that door's business.
+    test "an `in` filter whose value is a MAP raises at the builder, never the unfiltered set" do
+      # `apply_field_op(_, _, "in", vs)` is is_list-guarded, so a MAP value used
+      # to miss it and land in the catch-all: the query came back UNCHANGED and
+      # the caller got EVERY row from a filter that never ran — the field
+      # report's #2b shape.
+      err =
+        assert_raise Barkpark.Content.InvalidFilterError, fn ->
+          Barkpark.Content.list_documents("post", "fops_http",
+            perspective: :raw,
+            filter_map: %{"title" => %{"in" => %{"x" => "Alpha"}}}
+          )
+        end
+
+      # Never a 500: an unsupported filter is the caller's fault, not the
+      # server's, and this is what a door WITHOUT a pre-guard inherits.
+      assert Plug.Exception.status(err) == 400
+    end
+
+    test "the builder-raised refusal is a canonical invalid_filter envelope that omits the FIELD" do
+      # `forbidden_query_field/4` — the field-visibility gate — runs BEFORE the
+      # query is built, and at non-HTTP doors it never runs at all. A refusal
+      # raised from INSIDE the builder does not inherit that ordering, so it
+      # names the OP (what the caller must fix) and the accepted vocabulary, and
+      # never the field. See `Barkpark.Content.InvalidFilterError`'s moduledoc.
+      err =
+        assert_raise Barkpark.Content.InvalidFilterError, fn ->
+          Barkpark.Content.list_documents("post", "fops_http",
+            perspective: :raw,
+            filter_map: %{"secretField" => %{"in" => %{"x" => "Alpha"}}}
+          )
+        end
+
+      # The exact envelope `ErrorJSON` renders for this struct (its
+      # `reason_for_template/2` pass-through hands `{:error, err}` to
+      # `Errors.to_envelope/2`), so this asserts what the CLIENT receives at any
+      # door that lets the refusal escape.
+      env = Barkpark.Content.Errors.to_envelope({:error, err}, nil)
+
+      assert env.code == "invalid_filter"
+      assert env.status == 400
+      assert env.details.op == "in"
+      assert is_binary(env.hint) and env.hint != ""
+      refute env.message =~ "secretField"
+      refute Map.has_key?(env.details, :field)
+      refute Map.has_key?(env.details, "field")
+    end
+
+    test "a legitimate `in` list is untouched by the new refusal", %{conn: conn} do
+      # The fail-closed check must not over-reject the shape the SDK actually
+      # sends (a comma string the door splits into a list).
+      %{"result" => body} =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bin%5D=Alpha,Gamma")
+        |> json_response(200)
+
+      assert body["count"] == 2
+    end
+  end
+
+  # Helpers for the AND-composition describes below. Rows are compared by _id
+  # because the point is WHICH rows came back, not how they render.
+  defp and_ids(body), do: body["documents"] |> Enum.map(& &1["_id"]) |> Enum.sort()
+
+  defp and_query(conn, qs) do
+    conn
+    |> get("/v1/data/query/fops_http/post?" <> qs)
+    |> json_response(200)
+    |> Map.fetch!("result")
+  end
+
+  defp flat(clause), do: "filter%5B%5D=" <> URI.encode_www_form(clause)
+
+  describe "a REPEATED filter param ANDs, end to end (Gyldendal #16)" do
+    setup %{conn: conn} do
+      # Two dimensions, and titles disjoint from the outer fixture, so an AND
+      # can return STRICTLY FEWER rows than either clause alone — the
+      # customer's actual ask, which merely REFUSING the second --filter would
+      # not have answered.
+      for {id, title, tier} <- [
+            {"and1", "Omega", "gold"},
+            {"and2", "Omega", "silver"},
+            {"and3", "Sigma", "gold"}
+          ] do
+        {:ok, _} =
+          Content.create_document(
+            "post",
+            %{"_id" => id, "title" => title, "tier" => tier},
+            "fops_http"
+          )
+
+        {:ok, _} = Content.publish_document(id, "post", "fops_http")
+      end
+
+      {:ok, conn: conn}
+    end
+
+    test "filter[]=a&filter[]=b returns the INTERSECTION, strictly fewer than either alone",
+         %{conn: conn} do
+      # MUTATION PROOF: delete the `when is_list(list)` clause from
+      # normalize_filter_map/1 and the pair falls through to the catch-all —
+      # before the seal that meant 200 with EVERY row, after the seal a 400.
+      # Either way this assertion reds; it cannot pass unpatched.
+      only_title = and_query(conn, flat("title=Omega"))
+      assert and_ids(only_title) == ["and1", "and2"]
+
+      only_tier = and_query(conn, flat("tier=gold"))
+      assert and_ids(only_tier) == ["and1", "and3"]
+
+      both = and_query(conn, flat("title=Omega") <> "&" <> flat("tier=gold"))
+
+      assert and_ids(both) == ["and1"]
+      assert both["count"] < only_title["count"]
+      assert both["count"] < only_tier["count"]
+    end
+
+    test "ORDER of the two clauses does not change the answer", %{conn: conn} do
+      # The reported defect: the same pair returned 3 rows or 17 depending
+      # PURELY on which value Plug's duplicate-scalar-key decode kept.
+      a = and_query(conn, flat("title=Omega") <> "&" <> flat("tier=gold"))
+      b = and_query(conn, flat("tier=gold") <> "&" <> flat("title=Omega"))
+      assert and_ids(a) == and_ids(b)
+      assert and_ids(a) == ["and1"]
+    end
+
+    test "the bracket form still ANDs (this slice did not touch the query builder)",
+         %{conn: conn} do
+      both = and_query(conn, "filter%5Btitle%5D%5Beq%5D=Omega&filter%5Btier%5D%5Beq%5D=gold")
+      assert and_ids(both) == ["and1"]
+    end
+
+    test "two clauses on ONE field with different ops AND into a range window", %{conn: conn} do
+      window = and_query(conn, flat("title>=Omega") <> "&" <> flat("title<Sigma"))
+      assert and_ids(window) == ["and1", "and2"]
+    end
+
+    test "the SAME field+op twice is a 400 that teaches `in`, not a silent pick", %{conn: conn} do
+      resp =
+        get(
+          conn,
+          "/v1/data/query/fops_http/post?" <> flat("title=Omega") <> "&" <> flat("title=Sigma")
+        )
+
+      assert resp.status == 400
+      error = json_response(resp, 400)["error"]
+      assert error["code"] == "invalid_filter"
+      assert error["details"] == %{"field" => "title", "op" => "eq"}
+      assert error["message"] =~ "in a,b"
+    end
+
+    test "ONE unparseable clause fails the WHOLE request, never half a filter", %{conn: conn} do
+      resp =
+        get(
+          conn,
+          "/v1/data/query/fops_http/post?" <>
+            flat("title=Omega") <> "&" <> flat("total garbage!!!")
+        )
+
+      assert resp.status == 400
+      assert json_response(resp, 400)["error"]["code"] == "invalid_filter"
+    end
+  end
+
+  describe "every other filter-param shape fails CLOSED" do
+    test "a list-valued filter param that parses to nothing is a 400, NOT the full page",
+         %{conn: conn} do
+      # Unpatched main: the LIST hit `normalize_filter_map(_) -> %{}`, the
+      # fail-closed op guard found nothing wrong with an empty map, and the
+      # caller got 200 + every row. This was the only HTTP shape still
+      # over-returning.
+      resp = get(conn, "/v1/data/query/fops_http/post?" <> flat("nonsense!!"))
+
+      assert resp.status == 400
+      assert json_response(resp, 400)["error"]["code"] == "invalid_filter"
+
+      # Prove what the alternative WAS, so the 400 is load-bearing rather than
+      # a refusal of something that would have returned nothing anyway.
+      all = conn |> get("/v1/data/query/fops_http/post") |> json_response(200)
+      assert all["result"]["count"] == 3
+    end
+
+    test "filter[title][eq][]=a is a real invalid_filter 400, not internal_error + 'Retry shortly'",
+         %{conn: conn} do
+      # Measured before: HTTP 400 with code `internal_error`, message "unknown
+      # error (Ecto.Query.CastError)" and a "Retry shortly" hint — a
+      # permanently malformed request dressed as a transient server fault,
+      # telling the caller to retry forever. The scalar-value guard covered
+      # gt/gte/lt/lte only, so `eq` slipped through into Ecto.
+      resp = get(conn, "/v1/data/query/fops_http/post?filter%5Btitle%5D%5Beq%5D%5B%5D=a")
+
+      assert resp.status == 400
+      error = json_response(resp, 400)["error"]
+      assert error["code"] == "invalid_filter"
+      assert error["details"] == %{"field" => "title", "op" => "eq"}
+      assert error["message"] =~ "takes a single value"
+      refute error["message"] =~ "CastError"
+      refute (error["hint"] || "") =~ "Retry"
+    end
+
+    test "a bare filter[title][]=a is refused too", %{conn: conn} do
+      resp = get(conn, "/v1/data/query/fops_http/post?filter%5Btitle%5D%5B%5D=a")
+
+      assert resp.status == 400
+      assert json_response(resp, 400)["error"]["code"] == "invalid_filter"
+    end
+  end
+
+  describe "refusal messages no longer contradict themselves" do
+    test "a malformed hasStrong VALUE is not reported as an unknown OPERATOR", %{conn: conn} do
+      # Before: `unknown filter operator "hasStrong" on field "tags"; valid
+      # operators: eq, neq, in, nin, has, hasStrong, …` — one sentence calling
+      # hasStrong unknown and then listing it as valid.
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5Btags%5D%5BhasStrong%5D=wired")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["code"] == "invalid_filter"
+      assert error["details"]["op"] == "hasStrong"
+      refute error["message"] =~ "unknown filter operator"
+      assert error["message"] =~ "<tag>:<min_strength>"
+    end
+
+    test "$or is refused as an unsupported GROUP, never with its index as the operator",
+         %{conn: conn} do
+      # Before: `unknown filter operator "0" on field "$or"` — "0" was never an
+      # operator; the caller wrote a boolean group this route has no form for.
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5B%24or%5D%5B0%5D%5Btitle%5D%5Beq%5D=Alpha")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["code"] == "invalid_filter"
+      assert error["details"] == %{"field" => "$or"}
+      assert error["message"] =~ "boolean filter groups are not supported"
+      refute error["message"] =~ ~s(operator "0")
+    end
+
+    test "an out-of-range `is` value says what `is` takes", %{conn: conn} do
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5Bstatus%5D%5Bis%5D=published")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["code"] == "invalid_filter"
+      refute error["message"] =~ "unknown filter operator"
+      assert error["message"] =~ ~s("null" or "notnull")
+    end
+
+    test "a genuinely unknown operator STILL says unknown operator", %{conn: conn} do
+      # The split must not swallow the case the old message was right about.
+      error =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter%5Btitle%5D%5Bbogus%5D=Alpha")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert error["message"] =~ ~s(unknown filter operator "bogus")
+    end
   end
 end

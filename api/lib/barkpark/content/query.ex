@@ -165,13 +165,147 @@ defmodule Barkpark.Content.Query do
 
   defp apply_perspective(query, _), do: query
 
+  # The documented public filter operators (docs/api-v1.md §4).
+  @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is)
+
+  # Builder-only spellings: `apply_field_op/4` has clauses for these on the
+  # `doc_id`/`_id` column ONLY (prefix matching for id-space queries). They have
+  # no public wire form — `QueryController`'s door rejects them — but internal
+  # callers and `Content.Query` tests use them, so validation must accept them
+  # exactly where a clause exists and nowhere else. Accepting them field-wide
+  # would let a desk chip pass write-validation and then raise at render.
+  @doc_id_only_ops ~w(starts_with not_starts_with)
+
+  # `in`/`nin` are the ONLY ops with an `is_list` clause in `apply_field_op/4`;
+  # every other op binds a SCALAR param. Array-bracket syntax
+  # (`?filter[price][gt][]=1`, `?filter[tags][has][]=x`) delivers a LIST, which
+  # `parse_number/1` cannot read and Postgrex cannot bind into a scalar SQL
+  # compare — a bare 500 rather than a refusal. Stating the rule from the LIST
+  # side rather than enumerating the scalar ops is deliberate: an op added later
+  # is scalar-checked by default, and enumerating gt/gte/lt/lte was exactly how
+  # `has` kept its 500 after the range ops were fixed.
+  @list_value_ops ~w(in nin)
+
+  # The columns the prefix ops above are spelled against.
+  @id_fields ~w(doc_id _id)
+
+  @doc """
+  The documented public filter operators (docs/api-v1.md §4). An op outside this
+  set has no `apply_field_op/4` clause.
+  """
+  @spec valid_filter_ops() :: [String.t()]
+  def valid_filter_ops, do: @valid_filter_ops
+
+  @doc """
+  Check a filter map WITHOUT building a query — `:ok`, or `{:error, {field, op}}`
+  naming the FIRST clause that has no SQL arm.
+
+  Same knowledge, same answer as the refusal `apply_filter_map/2` raises; this is
+  the LOOK-BEFORE-YOU-LEAP form, for callers that must not let an exception reach
+  their surface. Two of them ship with this function:
+
+    * `Barkpark.Content.SchemaDefinition.changeset/2` — a desk-group chip with a
+      typo'd op is refused at schema WRITE, so it never reaches the DB to detonate
+      later at render;
+    * `BarkparkWeb.Studio.PaneBuilder` — a chip stored BEFORE that validation
+      existed renders as an empty list plus an explicit pane notice, instead of
+      crashing the Studio LiveView.
+
+  A non-map filter is `{:error, {nil, :not_a_map}}` — fail closed, never `:ok`.
+  """
+  @spec validate_filter_map(term()) :: :ok | {:error, {term(), term()}}
+  def validate_filter_map(map) when is_map(map) do
+    case Enum.find_value(map, &offending_clause/1) do
+      nil -> :ok
+      {_field, _op} = bad -> {:error, bad}
+    end
+  end
+
+  def validate_filter_map(_other), do: {:error, {nil, :not_a_map}}
+
+  # THE CHOKEPOINT. Every read reaches this through `base_query/4`, so validating
+  # here — before a single clause is applied — is what makes the refusal total:
+  # a door added later inherits it by construction rather than having to remember
+  # its own guard. `QueryController` still pre-guards so the HTTP surface keeps
+  # its field-naming envelope (and its ordering behind `forbidden_query_field/4`);
+  # this is the floor under every OTHER door.
   defp apply_filter_map(query, map) when map_size(map) == 0, do: query
 
   defp apply_filter_map(query, map) do
+    case validate_filter_map(map) do
+      :ok -> :ok
+      {:error, {field, op}} -> raise Barkpark.Content.InvalidFilterError.new(field, op)
+    end
+
     Enum.reduce(map, query, fn
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
       {field, value}, q -> apply_field_op(q, field, "eq", value)
     end)
+  end
+
+  # `{field, ops}` -> the first {field, op} with no SQL arm, or nil.
+  #
+  # A bare `filter[field]=value` scalar carries no op (it is `eq` sugar) and is
+  # always accepted. Two ops need their VALUE checked as well, because their
+  # clauses are value-matched and a wrong value falls THROUGH to the catch-all:
+  # `is` has clauses only for "null"/"notnull" (so `[is]=published`, a plausible
+  # equality typo, would silently match everything), and `hasStrong` parses its
+  # `<tag>:<min>` value with `parse_has_strong/1`.
+  defp offending_clause({field, %{} = ops}) do
+    cond do
+      op = Enum.find(Map.keys(ops), fn op -> unsupported_op?(field, op) end) ->
+        {field, op}
+
+      Map.has_key?(ops, "is") and Map.get(ops, "is") not in ["null", "notnull"] ->
+        {field, "is"}
+
+      Map.has_key?(ops, "hasStrong") and parse_has_strong(Map.get(ops, "hasStrong")) == :error ->
+        {field, "hasStrong"}
+
+      op =
+          Enum.find(Map.keys(ops), fn op ->
+            op not in @list_value_ops and non_scalar_op_value?(ops, op)
+          end) ->
+        {field, op}
+
+      # `in`/`nin` bind a LIST (the HTTP door splits its comma string into one
+      # via `normalize_filter_op/1`); a scalar has no clause and would fall to
+      # the catch-all.
+      op = Enum.find(@list_value_ops, fn op -> non_list_op_value?(ops, op) end) ->
+        {field, op}
+
+      true ->
+        nil
+    end
+  end
+
+  defp offending_clause({_field, _scalar}), do: nil
+
+  # An op is supported for THIS field when a clause exists for the pair. The
+  # `doc_id`-only prefix ops are the one field-sensitive case; everything else is
+  # field-generic.
+  defp unsupported_op?(field, op) when is_binary(op) do
+    cond do
+      op in @valid_filter_ops -> false
+      op in @doc_id_only_ops -> field not in @id_fields
+      true -> true
+    end
+  end
+
+  defp unsupported_op?(_field, _op), do: true
+
+  defp non_scalar_op_value?(ops, op) do
+    case Map.fetch(ops, op) do
+      {:ok, v} -> is_list(v) or is_map(v)
+      :error -> false
+    end
+  end
+
+  defp non_list_op_value?(ops, op) do
+    case Map.fetch(ops, op) do
+      {:ok, v} -> not is_list(v)
+      :error -> false
+    end
   end
 
   defp apply_field_ops(query, field, ops) do
@@ -517,8 +651,13 @@ defmodule Barkpark.Content.Query do
           )
         )
 
+      # A value that does not parse used to return the query UNCHANGED, so a
+      # malformed `hasStrong` silently returned EVERY row. It is a refusal now —
+      # `validate_filter_map/1` catches this shape up front at the chokepoint, so
+      # reaching here means a caller built the clause past that check; either way
+      # the answer is a 400, never a silent unfiltered set.
       :error ->
-        query
+        raise Barkpark.Content.InvalidFilterError.new(field, "hasStrong")
     end
   end
 
@@ -545,7 +684,13 @@ defmodule Barkpark.Content.Query do
     )
   end
 
-  defp apply_field_op(query, _field, _op, _value), do: query
+  # THE CATCH-ALL, which used to `do: query` — an unsupported clause vanished and
+  # the caller got the UNFILTERED set. It is a structural backstop now: with
+  # `apply_filter_map/2` validating up front, nothing should reach here, and if a
+  # future clause is deleted or a new op is documented without an arm, this
+  # refuses loudly instead of over-returning silently.
+  defp apply_field_op(_query, field, op, _value),
+    do: raise(Barkpark.Content.InvalidFilterError.new(field, op))
 
   @doc """
   Parse a `hasStrong` filter value — `"<tag>:<min_strength>"`, split at the

@@ -38,8 +38,42 @@ defmodule Barkpark.Audit do
 
   Serializes on a per-workspace advisory lock, chains the sha256 hash off the
   workspace's last row, and inserts. Returns `{:ok, %Event{}}` or
-  `{:error, term}`. Safe to call inside an enclosing `Repo.transaction` — it
-  opens a savepoint, so a failed emit rolls back only itself.
+  `{:error, term}`.
+
+  ## WHAT A FAILED EMIT ACTUALLY DOES INSIDE YOUR TRANSACTION, said plainly
+
+  This doc used to say emit was "safe to call inside an enclosing
+  `Repo.transaction` — it opens a savepoint, so a failed emit rolls back only
+  itself". That was false, and it was load-bearing: `Content.Broadcast` cited
+  it to justify logging-and-continuing on an audit error.
+
+  Ecto opens NO savepoint for a nested `Repo.transaction`. The `Repo.transaction`
+  below JOINS the caller's transaction, and the `Repo.rollback/1` on the insert
+  error arm dooms the WHOLE thing — the caller's own writes included. The
+  `mode: :savepoint` that would change that is never passed here, and adding it
+  is not a drive-by (measured 2026-08-19: passing it on this call alone did not
+  change the outcome under the test sandbox).
+
+  Stated negatively, because that is the part a caller must plan around: a
+  failed emit ABORTS the enclosing transaction. It does not roll back only
+  itself, the caller's `{:error, changeset}` arrives on an already-doomed
+  connection, and no `rescue` at the call site can undo that. This is
+  reachable, not theoretical — `unique_index(:audit_events, [:hash])` exists
+  precisely to reject a replayed or forked chain, and a changeset drift (a
+  renamed category, a new required field) reaches the same arm.
+
+  The behaviour is deliberate and is NOT a bug to fix: an audit row that cannot
+  be written should take the unaudited change down with it. Callers that must
+  survive a failed emit have to emit OUTSIDE their transaction, not hope for a
+  savepoint. `audit_savepoint_claim_test.exs` pins today's behaviour and is
+  written to RED if a future change ever makes the old sentence true.
+
+  Distinct claim, do not confuse the two: the append-only guarantee in this
+  module's `@moduledoc` (the `BEFORE UPDATE/DELETE` trigger) is TRUE and
+  enforced — trigger `audit_events_no_update_delete` from migration
+  `20260705120000_create_audit_events.exs`, guarded by
+  `api/test/barkpark/audit_test.exs` ("UPDATE is rejected at the DB layer" /
+  "DELETE is rejected at the DB layer"), which red when the trigger is dropped.
   """
   # @canonical capability:audit-emit aka:audit,trail,tamper,security-log
   @spec emit(map()) :: {:ok, Event.t()} | {:error, term()}

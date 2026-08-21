@@ -488,7 +488,7 @@ defmodule BarkparkWeb.SearchController do
   end
 
   # The resolved tenant for per-workspace surface-config attribution (charter
-  # D45/D49). The bespoke `:search_settings_admin` pipeline derives
+  # D45/D49). The bespoke `:flat_admin_api` pipeline derives
   # `:current_workspace` from the admin token BEFORE `AssignDefaultScope`, so on
   # a multi-tenant instance this is the caller's OWN workspace — workspace A can
   # no longer overwrite workspace B's config on a shared dataset slug. `nil` on a

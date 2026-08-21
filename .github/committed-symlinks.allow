@@ -1,0 +1,17 @@
+# Committed symlinks that are DELIBERATE — the allowlist for
+# scripts/committed-symlink-check.sh.
+#
+# This file is empty, and that is the intended steady state. A committed symlink
+# is self-referential on exactly one machine and dangling on every other: PR
+# #2907 committed api/deps -> /opt/barkpark/api/deps, which stops `mix` running
+# on any checkout that is not the prod box.
+#
+# Before adding a line here, prefer: commit the real file or directory, or
+# generate the link at build/deploy time. If a symlink genuinely IS the artifact,
+# add its exact repo-relative path below with a comment saying why.
+#
+# An entry that stops describing a committed symlink FAILS the check — a stale
+# exemption is a hole nobody is watching, so exemptions cannot rot into
+# permanent ones.
+#
+# One repo-relative path per line. `#` starts a comment.

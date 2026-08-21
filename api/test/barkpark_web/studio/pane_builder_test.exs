@@ -909,4 +909,97 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
       end
     end
   end
+
+  # ── a STORED bad desk filter (gfr-w1-filter-chokepoint-strict) ─────────────
+  #
+  # `SchemaDefinition.changeset/2` now refuses a desk chip whose filter carries an
+  # unsupported op, so no NEW one can be written. Rows written BEFORE that guard
+  # existed are still out there, and the query builder no longer swallows them:
+  # it raises. Rendered naively that is a Studio LiveView crash — the whole desk
+  # goes down for one typo in one chip.
+  #
+  # PaneBuilder pre-flights instead: no items, and an explicit pane-level
+  # `filter_error`. Deliberately NOT a rescue — a rescue would swallow genuine
+  # builder bugs too, re-creating the silence one layer up.
+  # Write the bad chip the way history did: past the changeset, straight into
+  # the column. Going through the changeset would be REFUSED now (that is the
+  # write-side half of this fix, pinned in schema_definition_test.exs).
+  defp store_bad_desk_group!(dataset, filter) do
+    insert_schema!(%{
+      name: "post",
+      title: "Posts",
+      visibility: "public",
+      dataset: dataset,
+      fields: [%{"name" => "title", "type" => "string"}],
+      desk_groups: [%{"name" => "ok", "title" => "OK", "filter" => %{}}]
+    })
+
+    {1, _} =
+      Repo.update_all(
+        from(s in SchemaDefinition, where: s.dataset == ^dataset and s.name == "post"),
+        set: [desk_groups: [%{"name" => "bad", "title" => "Bad", "filter" => filter}]]
+      )
+
+    :ok
+  end
+
+  describe "a stored desk filter the query builder refuses" do
+    test "renders an empty list plus a filter error instead of raising" do
+      dataset = "pb_bad_desk"
+      store_bad_desk_group!(dataset, %{"status" => %{"bogus" => "x"}})
+      {:ok, _} = Content.create_document("post", %{"_id" => "bd1", "title" => "One"}, dataset)
+      {:ok, _} = Content.create_document("post", %{"_id" => "bd2", "title" => "Two"}, dataset)
+
+      {panes, _editor} = PaneBuilder.build(dataset, ["post"], desk: "bad")
+
+      pane = List.last(panes)
+      assert pane.type_name == "post"
+
+      # It does NOT raise (reaching this line is the assertion), it does NOT
+      # silently list everything, and it SAYS so.
+      assert pane.items == []
+      assert is_binary(pane.filter_error)
+      assert pane.filter_error =~ "bogus"
+      assert pane.filter_error =~ "status"
+    end
+
+    test "the SAME pane with no active desk is unaffected — the refusal is scoped" do
+      dataset = "pb_bad_desk_inactive"
+      store_bad_desk_group!(dataset, %{"status" => %{"bogus" => "x"}})
+      {:ok, _} = Content.create_document("post", %{"_id" => "bd3", "title" => "One"}, dataset)
+
+      {panes, _editor} = PaneBuilder.build(dataset, ["post"])
+
+      pane = List.last(panes)
+      assert pane.filter_error == nil
+      assert length(pane.items) == 1
+    end
+
+    test "a healthy desk chip still filters and carries no error" do
+      dataset = "pb_good_desk"
+
+      insert_schema!(%{
+        name: "post",
+        title: "Posts",
+        visibility: "public",
+        dataset: dataset,
+        fields: [%{"name" => "title", "type" => "string"}],
+        desk_groups: [
+          %{
+            "name" => "drafts",
+            "title" => "Drafts",
+            "filter" => %{"status" => %{"eq" => "draft"}}
+          }
+        ]
+      })
+
+      {:ok, _} = Content.create_document("post", %{"_id" => "gd1", "title" => "One"}, dataset)
+
+      {panes, _editor} = PaneBuilder.build(dataset, ["post"], desk: "drafts")
+
+      pane = List.last(panes)
+      assert pane.filter_error == nil
+      assert pane.active_desk == "drafts"
+    end
+  end
 end

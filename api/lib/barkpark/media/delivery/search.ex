@@ -203,6 +203,14 @@ defmodule Barkpark.Media.Delivery.Search do
 
   defp join_scope_workspace(query, nil, _project_id), do: query
 
+  # `:shared_only` — the request-side empty-scope sentinel
+  # (task-3e2a70930c6df723). A REQUEST that resolved no workspace sees the
+  # SHARED layer, never every tenant. Placed above the is_binary/1 clauses,
+  # which an atom matches none of: untranslated it is a FunctionClauseError (a
+  # 500), which is exactly how this consumer announced itself.
+  defp join_scope_workspace(query, :shared_only, _project_id),
+    do: where(query, [d], is_nil(d.workspace_id))
+
   defp join_scope_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
     where(query, [d], d.workspace_id == ^workspace_id or is_nil(d.workspace_id))
   end
@@ -402,8 +410,8 @@ defmodule Barkpark.Media.Delivery.Search do
   defp aggregate_facet(dataset, opts, "tags") do
     {sql, params} = tags_facet_sql(dataset, opts)
 
-    params
-    |> then(&Repo.query(sql, &1))
+    sql
+    |> run_tags_facet_sql(params)
     |> case do
       {:ok, %{rows: rows}} ->
         rows
@@ -417,6 +425,28 @@ defmodule Barkpark.Media.Delivery.Search do
   end
 
   defp aggregate_facet(_dataset, _opts, _unknown), do: []
+
+  # The ONLY raw-SQL call in this module, deliberately extracted into a
+  # SINGLE-CLAUSE function so this waiver has exactly one def to bind to.
+  #
+  # It was a line-anchored `.sobelow-skips` entry (`search.ex:406 SQL.Query`)
+  # until an unrelated +8 above it slid the anchor. Re-anchoring the line was not
+  # enough: `--skip` matches on the FINGERPRINT, which is position-coupled and
+  # can only be recomputed by `sobelow-baseline-reconcile.sh` on the pinned CI
+  # toolchain. An inline annotation has no fingerprint to go stale — which is why
+  # the repo is migrating this direction (baseline 135 -> 51, inline 57 -> 123).
+  #
+  # EXTRACTED RATHER THAN ANNOTATED IN PLACE. `aggregate_facet/3` has three
+  # clauses; Sobelow binds an annotation to ONE def, so annotating the "tags"
+  # clause would leave its siblings unwaived, and annotating all three would add
+  # waivers where no finding exists — silencing rather than accepting. One
+  # single-clause function makes the waiver's scope exactly the raw-SQL call.
+  #
+  # The finding is ACCEPTED, not silenced: `tags_facet_sql/2` builds the query
+  # text, and every caller-derived value it needs is a BOUND PARAMETER passed
+  # separately as `params` — the dataset and opts never enter the SQL string.
+  # sobelow_skip ["SQL.Query"]
+  defp run_tags_facet_sql(sql, params), do: Repo.query(sql, params)
 
   defp facet_group_query(dataset, opts, "bp_asset_kind") do
     build_query(dataset, opts)

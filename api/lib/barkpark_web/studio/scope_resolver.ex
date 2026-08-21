@@ -30,39 +30,84 @@ defmodule BarkparkWeb.Studio.ScopeResolver do
      membership is verified here, and the canonical scoped route re-authorizes
      at mount regardless. Cross-origin, unparseable, or non-member Referers are
      ignored — they fall through to step 3.
-  3. **Session / first-membership fallback** — the token's first slug-ordered
-     membership workspace (anonymous → the seeded Default workspace), then that
-     workspace's Default project (else its first project). This is the exact
-     pre-existing behavior, now the *last* resort instead of the only one.
+  3. **Session / first-membership fallback** — the principal's first
+     slug-ordered membership workspace (anonymous → the seeded Default
+     workspace), then that workspace's Default project (else its first
+     project). For an ACCOUNT principal the seeded Default is *demoted* below
+     any other membership — see `resolve_workspace/1`.
+
+  ## Principals: a token OR an account (gfr-w1-studio-principal-kind)
+
+  The principal is `%ApiToken{}` **or** `%Accounts.User{}` or `nil`. That is
+  not cosmetic: `OptionalSessionToken` assigns `:current_user` (NOT
+  `:api_token`) for an account session, so callers that read only
+  `conn.assigns[:api_token]` handed this module `nil` for every signed-in
+  account and got `Tenancy.get_default_workspace()` back — Gyldendal's field
+  report #34: an editor who is a member of exactly one workspace was 302'd
+  into Default and then truthfully told the document did not exist there.
+  Callers must derive the principal with `principal/1`, never by reaching for
+  one assign.
 
   Callers must always 302 (never 301): the target depends on the token +
   Referer, so it must never be browser-cached across users.
   """
 
+  alias Barkpark.Accounts.User
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.{Project, Workspace}
 
   @scope_prefix ~r{^/w/([^/]+)/p/([^/]+)(?:/|$)}
 
+  @typedoc """
+  Who is asking. A token session, an ACCOUNT session (`user_session` →
+  `:current_user`), or anonymous.
+  """
+  @type principal :: ApiToken.t() | User.t() | nil
+
+  @doc """
+  The scope principal for this conn — the ONE place the two session kinds are
+  reconciled. A token wins when both are present (it is the narrower,
+  explicitly-presented credential, and `OptionalSessionToken` already gives it
+  precedence); otherwise the account session's `%User{}`; otherwise `nil`.
+
+  Every flat→scoped caller must go through here. Reading
+  `conn.assigns[:api_token]` directly is what teleported every account session
+  to Default (field report #34).
+  """
+  @spec principal(Plug.Conn.t()) :: principal()
+  def principal(%Plug.Conn{assigns: assigns}), do: principal_from_assigns(assigns)
+
+  @doc """
+  The same precedence rule, for an assigns map that is NOT on a conn — a
+  LiveView socket's. `StudioChrome`'s scope switcher needs exactly this and
+  must not re-encode the rule: two copies of "token wins over user" drift, and
+  a switcher that disagrees with the funnel is #34's second half all over
+  again.
+  """
+  @spec principal_from_assigns(map()) :: principal()
+  def principal_from_assigns(assigns) when is_map(assigns),
+    do: assigns[:api_token] || assigns[:current_user]
+
   @doc """
   Resolve `{:ok, workspace, project}` for a flat Studio URL, or `:error` when
   no workspace/project is resolvable (the caller redirects to `/login`).
 
-  `token` is `conn.assigns[:api_token]` — an `%ApiToken{}` or `nil` (anonymous).
-  The Referer is read from `conn` and used only as a membership-verified scope
-  preference; see the module doc for the full order.
+  `principal` comes from `principal/1` — an `%ApiToken{}`, a `%User{}`
+  (account session), or `nil` (anonymous). The Referer is read from `conn` and
+  used only as a membership-verified scope preference; see the module doc for
+  the full order.
   """
   # @canonical capability:studio-scope-resolution aka:teleport,referer,flat-scoped,resolve_workspace
-  @spec resolve_scope(Plug.Conn.t(), ApiToken.t() | nil) ::
+  @spec resolve_scope(Plug.Conn.t(), principal()) ::
           {:ok, Workspace.t(), Project.t()} | :error
-  def resolve_scope(conn, token) do
-    case referer_scope(conn, token) do
+  def resolve_scope(conn, principal) do
+    case referer_scope(conn, principal) do
       {%Workspace{} = ws, %Project{} = project} ->
         {:ok, ws, project}
 
       nil ->
-        with %Workspace{} = ws <- resolve_workspace(token),
+        with %Workspace{} = ws <- resolve_workspace(principal),
              %Project{} = project <- resolve_project(ws) do
           {:ok, ws, project}
         else
@@ -72,18 +117,61 @@ defmodule BarkparkWeb.Studio.ScopeResolver do
   end
 
   @doc """
-  The session / first-membership workspace fallback (step 3): the token's
+  The session / first-membership workspace fallback (step 3): the principal's
   first slug-ordered membership workspace, else the seeded Default. `nil`
-  token (anonymous) → the Default workspace.
+  principal (anonymous) → the Default workspace.
+
+  ## The preference rule, stated (gfr-w1-studio-principal-kind)
+
+  For an ACCOUNT principal the seeded **Default workspace is demoted**: the
+  first slug-ordered membership that is NOT Default wins, and Default answers
+  only when it is the principal's only membership.
+
+  Threading the `%User{}` through without this rule is NOT enough, which is why
+  the rule lives here rather than at the call sites. A cloud/SSO account is
+  auto-granted a Default membership by
+  `SessionController.ensure_default_owner_membership/1` — the user never chose
+  it, the handoff issued it — and `"default"` sorts ahead of most real slugs,
+  so bare list order would still land Gyldendal's editor (member of
+  `gyl-b-…`) in Default. A membership someone was actually invited into
+  outranks one the system minted for them. The Referer preference (step 2)
+  still wins over this whenever the request came from inside a workspace.
+
+  The TOKEN arm deliberately keeps plain first-slug order: it is the
+  pre-existing contract (pinned by `scoped_studio_mount_test.exs`), tokens are
+  minted per-purpose rather than auto-granted, and #34 is an account-session
+  defect. Widening the demotion to tokens is a separate, deliberate change.
   """
-  @spec resolve_workspace(ApiToken.t() | nil) :: Workspace.t() | nil
+  @spec resolve_workspace(principal()) :: Workspace.t() | nil
   def resolve_workspace(nil), do: Tenancy.get_default_workspace()
+
+  def resolve_workspace(%User{} = user) do
+    user
+    |> Tenancy.list_workspaces_for()
+    |> prefer_non_default()
+    |> case do
+      %Workspace{} = ws -> ws
+      nil -> Tenancy.get_default_workspace()
+    end
+  end
 
   def resolve_workspace(token) do
     case Tenancy.list_workspaces_for(token) do
       [ws | _] -> ws
       _ -> Tenancy.get_default_workspace()
     end
+  end
+
+  defp prefer_non_default([]), do: nil
+
+  defp prefer_non_default(workspaces) do
+    default_id =
+      case Tenancy.get_default_workspace() do
+        %Workspace{id: id} -> id
+        _ -> nil
+      end
+
+    Enum.find(workspaces, &(&1.id != default_id)) || List.first(workspaces)
   end
 
   @doc """
@@ -137,19 +225,23 @@ defmodule BarkparkWeb.Studio.ScopeResolver do
 
   # ── Referer preference (step 2) ─────────────────────────────────────────
   #
-  # Only an authenticated token can express a membership-verified preference;
-  # an anonymous request (nil token) has no membership to check, so it skips
-  # straight to the fallback.
+  # Only an authenticated principal can express a membership-verified
+  # preference; an anonymous request (nil) has no membership to check, so it
+  # skips straight to the fallback. Both principal kinds qualify —
+  # `Tenancy.Auth.member?/2` discriminates `%ApiToken{}` from `%User{}` by
+  # `principal_type`, so an account session's Referer preference is verified
+  # exactly as strictly as a token's.
   defp referer_scope(_conn, nil), do: nil
 
-  defp referer_scope(conn, %ApiToken{} = token) do
+  defp referer_scope(conn, principal)
+       when is_struct(principal, ApiToken) or is_struct(principal, User) do
     with [referer | _] <- Plug.Conn.get_req_header(conn, "referer"),
          %URI{path: path} = uri when is_binary(path) <- URI.parse(referer),
          true <- same_origin?(conn, uri),
          {ws_slug, proj_slug} <- parse_scope_prefix(path),
          %Workspace{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          %Project{} = project <- Tenancy.get_project(ws_slug, proj_slug),
-         true <- Tenancy.Auth.member?(token, ws.id) do
+         true <- Tenancy.Auth.member?(principal, ws.id) do
       {ws, project}
     else
       _ -> nil

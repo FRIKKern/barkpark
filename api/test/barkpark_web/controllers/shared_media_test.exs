@@ -301,8 +301,19 @@ defmodule BarkparkWeb.SharedMediaTest do
   describe "(g) admin blob push" do
     @admin_token "pds-w1-blob-admin-token"
 
-    setup do
-      Auth.create_token(@admin_token, "dev", "pds-w1-blob-push", ["read", "write", "admin"])
+    setup %{ws_a: ws_a} do
+      # Bound to ws_a: `create_token/5` mints the token AND its ws_a membership
+      # in one transaction. `:workspace_slug` is binding on this route now, so a
+      # token with the global `admin` permission and no membership in the
+      # workspace it names is refused — see describe "(h)".
+      Auth.create_token(
+        @admin_token,
+        "dev",
+        "pds-w1-blob-push",
+        ["read", "write", "admin"],
+        ws_a.id
+      )
+
       :ok
     end
 
@@ -457,6 +468,169 @@ defmodule BarkparkWeb.SharedMediaTest do
         |> put("/api/workspaces/#{ws_a.slug}/media/blob/uploads/x/y.png", "X")
 
       assert resp.status in [401, 403]
+    end
+  end
+
+  # ── (h) BLOB PUSH TENANCY — the URL workspace is BINDING, not decoration ─────
+  # `PUT /api/workspaces/:workspace_slug/media/blob/*path` used to drop
+  # `workspace_slug` on the floor (media_controller `put_blob(conn, %{"path" =>
+  # path_parts})`) and write into a FLAT, instance-global keyspace
+  # (`Media.put_blob/2` → `Blobstore.put_bytes(relative_path, body, [])`). Two
+  # independent defects rode that: the caller was never bound to the workspace
+  # it named, and the stored key carried no tenant, so ANY token holding the
+  # workspace-blind `admin` permission could overwrite ANY tenant's bytes.
+  #
+  # Both arms below are the SAME primitive from two angles, and neither alone
+  # is sufficient — binding the caller still leaves a flat keyspace in which a
+  # legitimate member of B writes over A's object.
+  describe "(h) blob push is bound to the URL workspace" do
+    @outsider_admin_token "blob-tenancy-outsider-admin"
+    @b_admin_token "blob-tenancy-b-admin"
+
+    setup %{ws_b: ws_b} do
+      # A GLOBAL-admin token that is a member of a THIRD workspace — it clears
+      # `:require_admin` (Auth.has_permission?(token, "admin")) and has no
+      # membership whatsoever in ws_a or ws_b.
+      outsider_ws = create_workspace!("media-share-outsider")
+
+      {:ok, _} =
+        Auth.create_token(
+          @outsider_admin_token,
+          "dev",
+          "blob-tenancy",
+          ["read", "write", "admin"],
+          outsider_ws.id
+        )
+
+      # A GLOBAL-admin token that IS a legitimate member of ws_b. Nothing about
+      # this principal is illegitimate — it is an admin of the workspace it
+      # names in the URL. It must still not be able to reach ws_a's bytes.
+      {:ok, _} =
+        Auth.create_token(
+          @b_admin_token,
+          "dev",
+          "blob-tenancy",
+          ["read", "write", "admin"],
+          ws_b.id
+        )
+
+      {:ok, outsider_ws: outsider_ws}
+    end
+
+    defp put_blob_as(conn, token, ws, rel, body) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> put_req_header("content-type", "application/octet-stream")
+      |> put("/api/workspaces/#{ws.slug}/media/blob/#{rel}", body)
+    end
+
+    # (a) AUTHORIZE. The slug in the URL must bind the caller.
+    test "a global-admin token with NO membership in the named workspace cannot write into it",
+         %{conn: conn, ws_b: ws_b} do
+      rel = "uploads/shared-media-test/outsider-#{System.unique_integer([:positive])}.png"
+      full = Media.file_path(rel)
+      on_exit(fn -> File.rm_rf(full) end)
+
+      resp = put_blob_as(conn, @outsider_admin_token, ws_b, rel, "OUTSIDER-BYTES")
+
+      # Non-member and unknown-slug collapse to 404 — the no-existence-leak
+      # convention this controller family already uses (workspace_controller
+      # `projects`/`create_project`/`datasets`).
+      assert resp.status == 404,
+             "a non-member global-admin wrote into #{ws_b.slug} (status #{resp.status})"
+
+      refute File.exists?(full),
+             "the refused write still put bytes on disk at #{rel}"
+    end
+
+    # (b) NAMESPACE. Binding the caller is NOT enough: ws_b's own admin, naming
+    # ws_b in the URL, must not be able to address a key ws_a owns.
+    test "a legitimate ws_b admin cannot overwrite a blob ws_a owns", %{
+      conn: conn,
+      ws_b: ws_b,
+      file_a: file_a
+    } do
+      full_a = Media.file_path(file_a.path)
+      assert File.read!(full_a) == "BYTES-FROM-A", "fixture precondition"
+
+      resp = put_blob_as(conn, @b_admin_token, ws_b, file_a.path, "CLOBBERED-BY-B")
+
+      # The HARM first: whatever the status, ws_a's object must be untouched.
+      assert File.read!(full_a) == "BYTES-FROM-A",
+             "ws_a's bytes were replaced by a write issued under ws_b's slug " <>
+               "(status #{resp.status})"
+
+      assert resp.status in [403, 404],
+             "ws_b's admin addressed ws_a's blob key and got #{resp.status}"
+    end
+
+    # (c) The LEGITIMATE arm, end to end: an admin of the workspace writes a key
+    # that workspace owns, gets 200, and the EXISTING serve path reads the new
+    # bytes back. Read and write must agree on the namespace.
+    test "an admin of the workspace writes its own blob 200 and serve/2 reads it back", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      file_a: file_a
+    } do
+      {:ok, _} =
+        Auth.create_token(
+          "blob-tenancy-a-admin",
+          "dev",
+          "blob-tenancy",
+          ["read", "write", "admin"],
+          ws_a.id
+        )
+
+      body = "RE-POINTED-BYTES-FOR-A"
+      resp = put_blob_as(conn, "blob-tenancy-a-admin", ws_a, file_a.path, body)
+      assert resp.status == 200, "own-workspace admin write was refused (#{resp.status})"
+      assert json_response(resp, 200)["path"] == file_a.path
+
+      # Read-back through the EXISTING GET blob path, not a File.read.
+      with_shares(share(ws_a, proj_a, :media))
+      served = build_conn() |> get(serve_path(ws_a, proj_a, file_a))
+      assert served.status == 200
+      assert served.resp_body == body
+    end
+
+    test "a token without the admin permission is 403", %{conn: conn, ws_a: ws_a} do
+      {:ok, _} =
+        Auth.create_token(
+          "blob-tenancy-a-writer",
+          "dev",
+          "blob-tenancy",
+          ["read", "write"],
+          ws_a.id
+        )
+
+      rel = "uploads/shared-media-test/nonadmin-#{System.unique_integer([:positive])}.png"
+      resp = put_blob_as(conn, "blob-tenancy-a-writer", ws_a, rel, "X")
+      assert resp.status == 403
+      refute File.exists?(Media.file_path(rel))
+    end
+
+    # The context seam fails CLOSED on omission, not open. A future caller that
+    # forgets to thread a workspace must be refused, never handed the old
+    # instance-global write back by default.
+    test "Media.put_blob/3 without a :workspace_id is refused, not treated as unscoped" do
+      rel = "uploads/shared-media-test/unscoped-#{System.unique_integer([:positive])}.png"
+
+      assert {:error, :unscoped_blob_write} = Media.put_blob(rel, "X")
+      assert {:error, :unscoped_blob_write} = Media.put_blob(rel, "X", workspace_id: nil)
+      refute File.exists?(Media.file_path(rel))
+    end
+
+    test "an unauthenticated PUT is 401", %{conn: conn, ws_a: ws_a} do
+      rel = "uploads/shared-media-test/anon-#{System.unique_integer([:positive])}.png"
+
+      resp =
+        conn
+        |> put_req_header("content-type", "application/octet-stream")
+        |> put("/api/workspaces/#{ws_a.slug}/media/blob/#{rel}", "X")
+
+      assert resp.status == 401
+      refute File.exists?(Media.file_path(rel))
     end
   end
 end

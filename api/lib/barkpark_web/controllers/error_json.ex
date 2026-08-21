@@ -57,6 +57,23 @@ defmodule BarkparkWeb.ErrorJSON do
 
   defp reason_for_template("404" <> _, _assigns), do: {:error, :not_found}
 
+  # TYPED CONTENT REFUSAL pass-through. `Barkpark.Content.InvalidFilterError` is
+  # raised at the query builder's chokepoint (`Content.Query.apply_filter_map/2`)
+  # so that EVERY read door refuses an unsupported filter op instead of silently
+  # returning the unfiltered set. Its `Plug.Exception` status is already 400; this
+  # clause is what keeps the BODY canonical too — without it a builder-raised
+  # refusal collapses to the generic `internal_error` code and an SDK/CLI reading
+  # `error.code` cannot tell a bad filter from a server fault.
+  #
+  # Only THIS struct is passed through, and `Errors.build/1` re-derives its
+  # message from the struct's `op` alone — the general "never speak an exception's
+  # message" rule in the moduledoc above still holds for every other fault.
+  defp reason_for_template(_template, %{
+         kind: :error,
+         reason: %Barkpark.Content.InvalidFilterError{} = e
+       }),
+       do: {:error, e}
+
   defp reason_for_template(_template, assigns) do
     # A BINARY reason is carried verbatim as the message under the SAME
     # `internal_error` code (Errors.build/1); anything else falls back to the

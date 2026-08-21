@@ -192,7 +192,7 @@ check_file() {
   if [ -z "$accept" ]; then
     echo "FAIL[$label]: no HTTP accept-list regex (grep -qE '^(...)\$') in the control-plane smoke — the extractor is broken, or the probe was rewritten" >&2
     failures=$((failures + 1))
-  elif printf '%s\n' "$accept" | grep -q '404'; then
+  elif grep -q '404' <<<"$accept"; then
     echo "  DRIFT    accept-list accepts 404: $accept" >&2
     echo "           '/' is send_dashboard -> send_file(200, index.html), no Repo in the path:" >&2
     echo "           a 404-accepting gate certifies a box serving nothing but a 404 handler." >&2

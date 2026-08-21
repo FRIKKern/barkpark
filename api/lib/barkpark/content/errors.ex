@@ -38,7 +38,7 @@ defmodule Barkpark.Content.Errors do
     "halted" =>
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "label_spine" =>
-      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
+      "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix, and you can repair the SAME draft in place rather than re-filing. If a published document appears to break the same rule, it is probably GRANDFATHERED: the wall reads an exemption once at entry and lets an exempt doc past a spine failure unchanged, while a birth is never exempt — so an incumbent is not evidence that your content passes. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
     "invalid_paper_structure" =>
       "Fix the listed block paths so every list item, table row/cell, and nested block has a reader-supported content shape, then republish.",
     "invalid_epic_paper_quality" =>
@@ -192,6 +192,13 @@ defmodule Barkpark.Content.Errors do
                          # non-PK unique index) — 409 naming constraint + table
                          # (task-63a199c0a0ce2a06; used to escape as a blind 500).
                          "import_constraint_violation",
+                         # A bundle carrying media blob paths a RESIDENT
+                         # workspace (or an unscoped legacy row) already owns
+                         # (409, task-918106d49c62563e). The blob keyspace is
+                         # flat, so two owners at one path make the loser's own
+                         # scoped media read serve the winner's bytes — refused
+                         # at row-copy time, never imported silently.
+                         "blob_path_conflict",
                          # The import engine returned an {:error, term} no
                          # clause names — a logged, NAMED 500 whose message
                          # carries the term, replacing the silent internal_error
@@ -307,6 +314,32 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :forbidden}),
     do: %{code: "forbidden", message: "token lacks required permission", status: 403}
 
+  # MEMBERSHIP refusal, deliberately distinct from the permission-tier refusal
+  # above (gyldendal field report #15). `ResolveWorkspace` halts here when the
+  # caller is simply not a member of the workspace named in the URL — a question
+  # about WHO the caller is, not about which permissions their credential
+  # carries. The generic arm's copy ("token lacks required permission", hinting
+  # "use a token with write/admin permission") names a tier this gate never
+  # consulted, and that one sentence is what filed a Studio AUTHENTICATION bug
+  # as a permission bug: the reporter went hunting for a token scope while the
+  # browser was in fact sending no credential at all.
+  #
+  # `code` stays "forbidden" (stable machine key, already in the OpenAPI enum —
+  # clients keying on it are unchanged) and the STATUS stays 403: a read denial
+  # surfaces as 403, never as a 404 not-found. `reason` discriminates for a
+  # client that wants it, exactly as the `:replay` arm does under
+  # "unauthorized", and the arm carries its OWN hint — `put_hint/1` only fills
+  # in the code-keyed default when a `build/1` arm has not spoken for itself.
+  defp build({:error, :forbidden_membership}),
+    do: %{
+      code: "forbidden",
+      message: "caller is not a member of this workspace",
+      status: 403,
+      reason: "not_a_member",
+      hint:
+        "This is a MEMBERSHIP check, not a permission tier: sign in as — or send a token belonging to — a member of this workspace. A browser session authenticates only on routes that read the session cookie; a Web Component needs a real data-token."
+    }
+
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
@@ -390,6 +423,29 @@ defmodule Barkpark.Content.Errors do
       details: %{field: field, op: op}
     }
 
+  # The SAME refusal, raised from INSIDE the query builder rather than caught at
+  # a controller door — `Barkpark.Content.InvalidFilterError` (defined at the
+  # bottom of this file). Every door that does not pre-guard its filter map now
+  # inherits this envelope through `BarkparkWeb.ErrorJSON`, so the code stays
+  # `invalid_filter` and the status stays 400 instead of collapsing to a generic
+  # `internal_error` 500.
+  #
+  # It names the OP but NOT the field: a builder-raised refusal does not inherit
+  # `QueryController.forbidden_query_field/4`'s ordering (that gate runs before
+  # the query is built, and never runs at all for internal doors), so echoing a
+  # caller-supplied field name back out of the builder would sit past the
+  # field-visibility gate. See the exception's moduledoc.
+  defp build({:error, %Barkpark.Content.InvalidFilterError{} = e}),
+    do: %{
+      code: "invalid_filter",
+      message: e.message,
+      status: 400,
+      # `op` is caller data of ANY shape (an atom key, a nested map from
+      # array-bracket syntax), so it is rendered to a string here — a raw term
+      # would raise inside Jason and cost the client its response.
+      details: %{op: if(is_binary(e.op), do: e.op, else: inspect(e.op))}
+    }
+
   # The modern /v1/data/query flat `--filter` string (QueryController.
   # normalize_filter_map/1). A non-empty string neither grammar family parses
   # used to fall through to an EMPTY filter map — fail-OPEN, the filter
@@ -406,6 +462,21 @@ defmodule Barkpark.Content.Errors do
       status: 400,
       details: %{filter: raw}
     }
+
+  # A filter clause that names a DOCUMENTED operator but whose value or shape
+  # this route cannot honour — a non-scalar `eq`, a malformed `hasStrong`
+  # value, an out-of-range `is`, a `$or` boolean group, two conflicting clauses
+  # on one field. Same "invalid_filter" code (so it inherits the registered
+  # @hints entry) as its siblings, but the MESSAGE is caller-supplied: the
+  # shared `invalid_filter_op` wording CONTRADICTED ITSELF here — a malformed
+  # `hasStrong` VALUE was reported as `unknown filter operator "hasStrong"` by
+  # a message that went on to list hasStrong among the valid operators, and a
+  # `filter[$or][0][…]` group reported `"0"` as the offending operator. Details
+  # keep `field`/`op` where they are meaningful, so a caller parsing the
+  # envelope reads the same keys `invalid_filter_op` emits.
+  defp build({:error, {:invalid_filter_clause, message, details}})
+       when is_binary(message) and is_map(details),
+       do: %{code: "invalid_filter", message: message, status: 400, details: details}
 
   # The legacy `/api/documents/:type?filter=...` surface's flat "field=value"
   # string parser (LegacyController.parse_legacy_filter/1). A non-empty string
@@ -700,6 +771,12 @@ defmodule Barkpark.Content.Errors do
   defp schema_reason(reason), do: inspect(reason)
 
   defp humanize_atom(atom), do: atom |> to_string() |> String.replace("_", " ")
+
+  # Code-keyed DEFAULT hint. A `build/1` arm that already set its own `:hint`
+  # has spoken more precisely than the code-wide table can — two arms may share
+  # one `code` and still need different fixes (`:forbidden` vs
+  # `:forbidden_membership`) — so the arm's hint wins.
+  defp put_hint(%{hint: hint} = env) when is_binary(hint) and hint != "", do: env
 
   defp put_hint(env) do
     case @hints[env.code] do

@@ -107,6 +107,16 @@ const EXPECT = [
   { f: "loadTokens", p: '"/v1/tokens"', v: "guarded",
     proof: [/!r\.ok/, /Nothing was changed/],
     why: "cch-w34-s1: hoisted arm + the unconditional 'Nothing was changed' reassurance" },
+  // cloud-agent onramp: the console's first reader of the credentials route.
+  // `guarded` and not `sanctioned`: the read has no empty state to collapse INTO
+  // — a failure opens no modal at all and toasts through faultCopy, so the
+  // status classification (5xx = ours, 0 = the named transport, 4xx = the
+  // route's own curated slug) is what the person is told. The proof pins the
+  // whole faultCopy call, `transport` included: dropping that argument is
+  // exactly how a dead network starts reporting as a fact about the instance.
+  { f: "connectAgent", p: '"/v1/barkparks/" + encodeURIComponent(bp.id) + "/credentials"', v: "guarded",
+    proof: [/faultCopy\(r\.status, r\.data, "Please try again\.", r\.transport\)/],
+    why: "no empty state exists to collapse into: failure opens no reveal and toasts the classified fault" },
   { f: "ensureFleet", p: '"/v1/barkparks"', v: "guarded",
     proof: [/fleetFault = \{ status: r\.status/],
     why: "resolves null + retains the fault for null-guarded readers; only success is cached" },

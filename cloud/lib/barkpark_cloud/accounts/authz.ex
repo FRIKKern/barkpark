@@ -5,12 +5,59 @@ defmodule BarkparkCloud.Accounts.Authz do
   `api/lib/barkpark/tenancy/auth.ex`). The role IS the grant
   (`team_memberships.role` ∈ owner/admin/member); authority is read from the
   membership row, never derived from anything global about the user — the same
-  per-grant insight as the api/ cross-tenant P0 fix (barkpark-23yi).
+  per-grant insight as the api/ cross-tenant P0 fix (barkpark-23yi). "Mirror"
+  is a claim about SHAPE ONLY, and as of 2026-08-19 it is nothing to lean on:
+  api/'s own moduledoc carries the same totality phantom (`auth.ex:19` and
+  `:166`, unfixed on origin/main, in flight as arpss-w9). Nothing below is a
+  statement about api/.
 
-  `authorize/3` is the single entry point and is TOTAL — an unknown action, a
-  non-member, or a nil role returns `{:error, :forbidden}`, never raises (we
-  deliberately avoid Coolify's `Role::from` unknown-role throw, see
-  `app/Enums/Role.php`).
+  WHAT `authorize/3` ACTUALLY IS, said plainly: the POLICY TABLE, not the
+  single entry point. It has ZERO callers in `cloud/lib` (tests only).
+  Production reads the very same table through four other functions —
+  `team_admin?/2` (`Web.Auth.require_team_admin/2`,
+  `require_primary_team_admin/1`, and the inline `cond`s in `router.ex`),
+  `team_owner?/2` (`require_team_owner/2`, `require_primary_team_owner/1`),
+  `role/2` (PAT minting, `Accounts.create_personal_access_token/3`) and
+  `can_grant?/3` (`Accounts.add_member_as/4`, `update_member_role_as/4`).
+  A reader who hardens only `authorize/3` hardens nothing that runs.
+
+  TOTALITY, SAID EXACTLY — the previous wording ("`authorize/3` … is TOTAL …
+  never raises") was a phantom warrant, and the honest statement is three
+  clauses long:
+
+    * TOTAL OVER RESOLVED INPUTS. Given a `%User{}`/uuid actor and a `%Team{}`
+      or uuid team, every entry point here is total: a non-member, an unknown
+      action, a string action, and a nil action all return
+      `{:error, :forbidden}` / `nil` / `false` and never raise (we deliberately
+      avoid Coolify's `Role::from` unknown-role throw, see `app/Enums/Role.php`).
+    * LATENTLY NON-TOTAL AT THE CLAUSE LEVEL. Every entry point funnels into
+      `Accounts.get_membership/2`, which has THREE clauses and NO catch-all and
+      does an UNGUARDED `Repo.get_by` where `Repo.get_by_uuid/2` exists for
+      exactly this. So `team = ""` raises `Ecto.Query.CastError` and
+      `team = nil` raises `FunctionClauseError` — and `@type team ::
+      Team.t() | binary()` below ADMITS both of those inputs.
+    * AND NO REQUEST PATH REACHES THAT — by three NAMED guards, not by luck:
+      (1) `Web.Auth.resolve_team/2` launders the caller-supplied
+      `x-barkpark-team` header through `Accounts.get_team/1` =
+      `Repo.get_by_uuid/2` (nil on a malformed id) and falls back to
+      `primary_team/1`; that only attacker-controlled surface is already pinned
+      by `test/barkpark_cloud/web/router_team_switcher_test.exs:72`, which loops
+      `[foreign.id, "not-a-uuid", ""]`. (2) Every gate nil-checks
+      `:current_team` before calling in (`gate_role/4`,
+      `require_primary_team_admin/1`, `require_primary_team_owner/1`, and each
+      inline `Accounts.team_admin?` `cond` in `router.ex`). (3)
+      `Accounts.invite_member/4` and `update_member_role_as/4` pattern-match
+      `%Team{}` in their heads, and `with_team_role/3` resolves path params
+      through the uuid-guarded `Accounts.get_team/1` first. Measured: 48
+      request × header combinations over 6 routes and 2 role postures produced
+      200/403/422 only — zero 500s.
+
+  Both halves are now tripwired by
+  `test/barkpark_cloud/accounts/authz_call_site_census_test.exs`: ARM 1
+  measures the domain — including the raises — so a change that totalises
+  `get_membership/2` REDS this paragraph instead of silently staling it; ARM 2
+  censuses every `Authz`/`Accounts` membership call site in `cloud/lib` for one
+  of the guard forms above, so a new unguarded one reds.
 
   ## Policy table (action → minimum grant)
 
@@ -84,8 +131,11 @@ defmodule BarkparkCloud.Accounts.Authz do
 
   @doc """
   Authorize `actor` to perform `action` in `team`. `:ok` when their grant
-  satisfies the action; `{:error, :forbidden}` otherwise. Total — an unknown
-  action or a non-member ⇒ forbidden.
+  satisfies the action; `{:error, :forbidden}` otherwise. Total over RESOLVED
+  inputs — an unknown action or a non-member ⇒ forbidden — with the clause-level
+  caveat and the three call-site guards spelled out in the moduledoc. NOTE this
+  function has no callers in `cloud/lib`: it is the policy table, and the gates
+  read it through `team_admin?/2`, `team_owner?/2`, `role/2` and `can_grant?/3`.
   """
   @spec authorize(actor(), team(), action()) :: :ok | {:error, :forbidden}
   def authorize(actor, team, action) do

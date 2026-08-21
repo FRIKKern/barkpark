@@ -336,16 +336,97 @@ if [ "$MODE" = selftest ]; then
     *) fail_selftest "DOC_BUDGETS_SPAN_ONLY=1 still skipped the card-count section" ;;
   esac
 
-  echo "check-doc-budgets --selftest: PASS (11 arms: pristine, in-span plant," \
+  # (j) THE FIXED-CAPS TABLE CANNOT GO DARK. Every arm above runs --span-only,
+  #     which skips the caps loop entirely — so before this arm existed, a blind
+  #     CAPS heredoc passed the whole selftest AND the gate. Unlike the others
+  #     this one mutates a COPY OF THIS SCRIPT rather than a fixture tree,
+  #     because the corpus at risk IS the script's own data table; there is no
+  #     tree to plant in.
+  #
+  #     EVERY ARM HERE ASSERTS IT ACTUALLY BIT, NOT MERELY THAT THE GATE REDDED.
+  #     A gate that reds for an unrelated reason would satisfy a bare exit-code
+  #     check while testing nothing — so each case greps for its OWN message,
+  #     and the blinding step below is verified to have changed the copy before
+  #     the copy is ever run.
+  #     THE PROBE RUNS AGAINST AN EMPTY ROOT, DELIBERATELY. This script derives
+  #     REPO_ROOT from its own location (`dirname $(dirname "$SELF")`), so a copy
+  #     under $TMP/scripts/ roots at $TMP — a tree with no docs at all, where the
+  #     size and card arms red loudly and meaninglessly. That is fine and it is
+  #     the point: the row COUNT is computed from the script's own data table
+  #     before any file is read, so it is the one verdict that is a property of
+  #     the table rather than of the tree. These arms therefore assert on that
+  #     ONE line and ignore the probe's overall exit, which carries no signal.
+  mkdir -p "$TMP/scripts"
+  caps_probe="$TMP/scripts/caps-probe.sh"
+
+  # j0: the pinned literal agrees with the committed table. If these ever drift,
+  #     every assertion below is about a number nobody maintains.
+  # `grep -c` exits 1 on a count of ZERO, and under `set -e` that would kill the
+  # harness before it could report — while zero is precisely what arm j1 plants.
+  rows_in_table=$(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$SELF" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
+  expected_literal=$(grep -E '^CAPS_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  [ "$rows_in_table" = "$expected_literal" ] \
+    || fail_selftest "CAPS_ROWS_EXPECTED=$expected_literal but the table holds $rows_in_table row(s)"
+
+  # j1: blind the table -> the gate must RED, and name the row-count mismatch.
+  awk 'BEGIN { drop = 0 }
+       /^done <<.CAPS.$/ { print; drop = 1; next }
+       /^CAPS$/          { print; drop = 0; next }
+       drop == 0         { print }' "$SELF" > "$caps_probe"
+  probe_rows=$(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$caps_probe" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
+  [ "$probe_rows" -eq 0 ] \
+    || fail_selftest "the blinding step did not empty the CAPS table (still $probe_rows row(s)) — this arm would have proven nothing"
+  caps_out="$(bash "$caps_probe" 2>&1 || true)"
+  case "$caps_out" in
+    *"walked 0 row(s), expected $expected_literal"*) ;;
+    *) fail_selftest "a DARK fixed-caps table did not print \`walked 0 row(s), expected $expected_literal\` — the row-count ratchet is gone, so an empty CAPS heredoc would verdict on NOTHING and still exit 0" ;;
+  esac
+
+  # j2: a row ADDED without bumping the literal must RED too — the ratchet has
+  #     to bite in both directions or it is a one-way rubber stamp.
+  awk -v add="docs/INDEX.md 1200" '
+       { print }
+       /^done <<.CAPS.$/ && !done_add { print add; done_add = 1 }' "$SELF" > "$caps_probe"
+  probe_rows=$(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$caps_probe" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
+  [ "$probe_rows" -eq $((expected_literal + 1)) ] \
+    || fail_selftest "the row-adding step did not add a row (table has $probe_rows) — this arm would have proven nothing"
+  caps_out="$(bash "$caps_probe" 2>&1 || true)"
+  case "$caps_out" in
+    *"walked $((expected_literal + 1)) row(s), expected $expected_literal"*) ;;
+    *) fail_selftest "an UNPINNED extra cap row did not print \`walked $((expected_literal + 1)) row(s), expected $expected_literal\` — the ratchet only bites downward, so rows can be added without review" ;;
+  esac
+
+  echo "check-doc-budgets --selftest: PASS (13 arms: pristine, in-span plant," \
        "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
-       "span-cap clamp both directions, retired env var inert)"
+       "span-cap clamp both directions, retired env var inert, caps-table dark," \
+       "caps-table unpinned row)"
   exit 0
 fi
 
 # --- fixed caps (path<space>bytes) -----------------------------------------
+#
+# CAPS_ROWS_EXPECTED IS A COMMITTED LITERAL, AND THAT IS THE WHOLE POINT.
+# The rest of this gate fails closed: check_cap REDs on a missing file, and the
+# card arm REDs when the glob matches nothing (0 != 7). The CAPS table was the
+# one part that could go DARK — empty the heredoc, or break the `while read`,
+# and the loop verdicts on nothing while the card arm still prints its 7 lines
+# and the script still exits 0. Measured 2026-08-20: blinding the heredoc took
+# the gate from 35 `ok:` size verdicts to 7 — every one of the 28 rows below,
+# CLAUDE.md and docs/api-v1.md and every contract doc among them, went unchecked
+# — and it still printed `check-doc-budgets: PASS`. The 11-arm --selftest passed
+# straight through that mutation too: every arm runs --span-only, which skips
+# this loop entirely.
+#
+# Deriving the expected count FROM the table would be vacuous — a blind table
+# makes both sides zero and the check agrees with itself. So the number is
+# pinned here, by hand. Adding or removing a cap row is therefore a two-line
+# edit: the row, and this number. That is intended friction, not an oversight.
+CAPS_ROWS_EXPECTED=28
+CAPS_ROWS_WALKED=0
 if [ "$SPAN_ONLY" != "1" ]; then
 while read -r path cap; do
   [ -z "$path" ] && continue
+  CAPS_ROWS_WALKED=$((CAPS_ROWS_WALKED + 1))
   check_cap "$path" "$cap"
 done <<'CAPS'
 CLAUDE.md 10000
@@ -381,6 +462,14 @@ docs/decisions/success-claim-census.md 19307
 scripts/deploy-reliability-exit-2026-08-10.md 11200
 scripts/deploy-reliability-exit-2026-08-17.md 9800
 CAPS
+  if [ "$CAPS_ROWS_WALKED" -ne "$CAPS_ROWS_EXPECTED" ]; then
+    echo "FAIL: the fixed-caps table walked $CAPS_ROWS_WALKED row(s), expected $CAPS_ROWS_EXPECTED." \
+         "Either the table went dark (a broken heredoc verdicts on NOTHING and this gate still" \
+         "exits 0), or you added/removed a cap row and must bump CAPS_ROWS_EXPECTED to match."
+    FAIL=1
+  else
+    echo "ok:   fixed-caps table walked all $CAPS_ROWS_WALKED budget-gated row(s)"
+  fi
 fi
 
 # --- CODEX.md: cap applies OUTSIDE the pinned onramp span (D42) -------------

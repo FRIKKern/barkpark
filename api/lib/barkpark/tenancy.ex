@@ -911,27 +911,101 @@ defmodule Barkpark.Tenancy do
   """
   @spec create_workspace_with_owner(map(), User.t() | ApiToken.t() | binary()) ::
           {:ok, Workspace.t()} | {:error, Ecto.Changeset.t()}
-  def create_workspace_with_owner(attrs, %ApiToken{id: principal_id}),
-    do: do_create_workspace_with_owner(attrs, principal_id, "api_token")
+  def create_workspace_with_owner(attrs, %ApiToken{id: principal_id} = token),
+    do:
+      do_create_workspace_with_owner(
+        attrs,
+        principal_id,
+        "api_token",
+        resolvable_owner_user_id(token)
+      )
 
   # A User creator gets a `principal_type: "user"` owner-membership row, so
   # `authorize(%User{}, workspace, …)` can see the grant — otherwise the creator
   # would be locked out of the workspace they just made. Kept SEPARATE from the
   # raw-binary head (pinned to "api_token"); a bare id carries no kind.
   def create_workspace_with_owner(attrs, %User{id: principal_id}) when is_binary(principal_id),
-    do: do_create_workspace_with_owner(attrs, principal_id, "user")
+    do: do_create_workspace_with_owner(attrs, principal_id, "user", nil)
 
   def create_workspace_with_owner(attrs, principal_id) when is_binary(principal_id),
-    do: do_create_workspace_with_owner(attrs, principal_id, "api_token")
+    do: do_create_workspace_with_owner(attrs, principal_id, "api_token", nil)
 
-  defp do_create_workspace_with_owner(attrs, principal_id, principal_type)
+  # `co_owner_user_id` is the HUMAN behind an owning api_token, when there is
+  # one — see `resolvable_owner_user_id/1`. It gets a SECOND owner-membership
+  # row typed "user" in the same transaction, so the person who created the
+  # workspace over HTTP is a member of it. nil (a CI/bootstrap token with no
+  # human, or a user/bare-id creator) writes exactly one row, as before.
+  defp do_create_workspace_with_owner(attrs, principal_id, principal_type, co_owner_user_id)
        when is_binary(principal_id) and is_binary(principal_type) do
     ws_attrs = put_derived_slug(attrs)
 
+    if slug_value(ws_attrs) == @default_slug do
+      {:error, singleton_slug_error(ws_attrs)}
+    else
+      do_create_owned_workspace(ws_attrs, principal_id, principal_type, co_owner_user_id)
+    end
+  end
+
+  # ── Instance-singleton seat guard (task-94a6ed8ced1fc547) ───────────────────
+  #
+  # `get_default_workspace/0` identifies a security-relevant SINGLETON by a
+  # mutable string — `Repo.get_by(Workspace, slug: @default_slug)`. Whoever holds
+  # that slug IS the instance default: `AssignDefaultScope` binds every flat
+  # route to it, and `Content.WriteScope.resolve_write_scope/1` stamps an
+  # UNSCOPED WRITE with it. So while the seat is vacant, taking the slug takes
+  # the seat, and an unscoped write lands in the claimant's workspace.
+  #
+  # The seat goes vacant in NORMAL operation, not only via a destructive admin
+  # action: `SupportResetDefaultWorkspaceStep` deletes it and the following
+  # `SupportAdminTokenStep` re-mints it — the seat is vacant BETWEEN the two, and
+  # the bracket tolerates an absent workspace so re-runs converge.
+  #
+  # GUARDED HERE — after `put_derived_slug/1`, on the ONE chokepoint every
+  # ownership-claiming path funnels through — because the slug is DERIVED as
+  # often as it is typed. `slugify("Default") == "default"`, so three of the four
+  # claim paths never send a `slug` field at all:
+  #
+  #   * POST /api/workspaces {"slug":"default"}              explicit
+  #   * POST /api/workspaces {"name":"Default"}              derived
+  #   * Studio create-workspace (live/studio/.../scope.ex)   derived
+  #   * studio_chrome.ex                                     derived
+  #
+  # A controller-level check on `params["slug"]` sees only the first.
+  #
+  # `create_workspace/1` is deliberately NOT guarded: it is the INTERNAL creator
+  # that legitimately mints the singleton (`Seeds.Shared.ensure_default_scope/0`,
+  # `mix frt.seed`), and it is how the support bracket recovers. The line this
+  # guard draws is exactly "a PRINCIPAL is claiming ownership of a new
+  # workspace" — which must never yield the singleton — versus "the SYSTEM is
+  # establishing its own default".
+  #
+  # The refusal is a CHANGESET error, so it surfaces as the same 422 a duplicate
+  # slug already produces: the Studio handlers' existing `{:error, changeset}`
+  # branches and the support box's `case "$code" in 2*|409|422)` tolerance both
+  # keep working untouched.
+  #
+  # RESIDUE, stated rather than implied: renaming a workspace INTO the slug
+  # bypasses this, since `Workspace.changeset/2` casts `:slug`. There is no
+  # `update_workspace/2` and no HTTP update route today, so it is unreachable —
+  # but the end state is to stop identifying the singleton by a claimable string
+  # at all, which is a data-model change this guard does not attempt.
+  defp singleton_slug_error(attrs) do
+    %Workspace{}
+    |> Workspace.changeset(attrs)
+    |> Ecto.Changeset.add_error(
+      :slug,
+      "is reserved for the instance default workspace and cannot be claimed"
+    )
+    |> Map.put(:action, :insert)
+  end
+
+  defp do_create_owned_workspace(ws_attrs, principal_id, principal_type, co_owner_user_id) do
     Repo.transaction(fn ->
       with {:ok, workspace} <- create_workspace(ws_attrs),
            {:ok, _membership} <-
              TenancyAuth.create_membership(workspace.id, principal_id, "owner", principal_type),
+           {:ok, _user_membership} <-
+             maybe_create_user_owner_membership(workspace.id, co_owner_user_id),
            {:ok, project} <-
              create_project(workspace, %{
                slug: @default_project_slug,
@@ -948,6 +1022,112 @@ defmodule Barkpark.Tenancy do
         {:error, changeset} -> Repo.rollback(changeset)
       end
     end)
+  end
+
+  # The user principal an owning api_token stands for, or nil.
+  #
+  # Mirrors `BarkparkWeb.Plugs.ResolveTokenOwner`: a token with a non-nil
+  # `owner_user_id` naming a LOADABLE user resolves to that user; a NULL
+  # `owner_user_id` or a dangling FK resolves to nil. CONDITIONAL by
+  # construction — a CI/bootstrap token legitimately has no human, and a
+  # NULL/placeholder membership row is never written.
+  #
+  # The plug's precedence rule (a live account session always outranks a
+  # token's owner) does not apply here: `POST /api/workspaces` rides
+  # `[:api, :require_token]`, which resolves no session and assigns no
+  # `:current_user`, so the token's owner is the only human on the request.
+  defp resolvable_owner_user_id(%ApiToken{owner_user_id: owner_id}) when is_binary(owner_id) do
+    case Repo.get(User, owner_id) do
+      %User{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp resolvable_owner_user_id(%ApiToken{}), do: nil
+
+  defp maybe_create_user_owner_membership(_workspace_id, nil), do: {:ok, nil}
+
+  defp maybe_create_user_owner_membership(workspace_id, user_id) when is_binary(user_id),
+    do: TenancyAuth.create_membership(workspace_id, user_id, "owner", "user")
+
+  @doc """
+  Grant the HUMAN owner of an owning api_token a matching `"user"`-typed owner
+  membership on every workspace that has an api_token owner-membership and no
+  user-typed membership for that same human yet — the backfill for every
+  workspace created before `create_workspace_with_owner/2` bound the creator.
+
+  Those workspaces are unreachable for their creator as a `%User{}`
+  (`member?/2` false, `list_workspaces_for/1` empty) and there is no membership
+  verb anywhere in the product, so the state cannot be repaired by using
+  Barkpark — only by this.
+
+  IDEMPOTENT: the unique index on
+  `(workspace_id, principal_type, principal_id)` makes a re-run a no-op, and
+  rows that already exist are skipped before insert, so a second run reports
+  `granted: 0`.
+
+  HONEST ABOUT WHAT IT COULD NOT DO: returns
+  `%{granted: [...], unresolved: [...]}` where `granted` carries
+  `{workspace_id, user_id}` for every row written and `unresolved` carries
+  `{workspace_id, reason}` for every api_token-owned workspace left without a
+  human — `:no_owner_user` (the owning token has a NULL `owner_user_id`),
+  `:dangling_owner_user`, or `:insert_failed`. An unresolved workspace is NOT a
+  failure: a CI/bootstrap token has no human by design.
+
+  `:dangling_owner_user` is a fail-closed arm, not an expected outcome — the FK
+  is `on_delete: :nilify_all` (migration 20260708130000), so deleting a user
+  NULLs the column rather than orphaning it. It mirrors `ResolveTokenOwner`,
+  which likewise refuses to invent a user it cannot load.
+  """
+  @spec backfill_user_owner_memberships() :: %{
+          granted: [{binary(), binary()}],
+          unresolved: [{binary(), atom()}]
+        }
+  def backfill_user_owner_memberships do
+    token_owned =
+      Repo.all(
+        from m in Membership,
+          join: t in ApiToken,
+          on: t.id == m.principal_id,
+          where: m.principal_type == "api_token" and m.role == "owner",
+          select: {m.workspace_id, t.owner_user_id}
+      )
+
+    token_owned
+    |> Enum.reduce(%{granted: [], unresolved: []}, fn {ws_id, owner_user_id}, acc ->
+      # Prepend + reverse at the end: `acc.list ++ [x]` walks the whole
+      # accumulator on every workspace, and this runs over EVERY owner
+      # membership row on the box.
+      case backfill_one(ws_id, owner_user_id) do
+        {:granted, user_id} -> %{acc | granted: [{ws_id, user_id} | acc.granted]}
+        :already -> acc
+        {:unresolved, reason} -> %{acc | unresolved: [{ws_id, reason} | acc.unresolved]}
+      end
+    end)
+    |> then(&%{granted: Enum.reverse(&1.granted), unresolved: Enum.reverse(&1.unresolved)})
+  end
+
+  defp backfill_one(_ws_id, nil), do: {:unresolved, :no_owner_user}
+
+  defp backfill_one(ws_id, owner_user_id) do
+    cond do
+      is_nil(Repo.get(User, owner_user_id)) ->
+        {:unresolved, :dangling_owner_user}
+
+      Repo.exists?(
+        from m in Membership,
+          where:
+            m.workspace_id == ^ws_id and m.principal_type == "user" and
+                m.principal_id == ^owner_user_id
+      ) ->
+        :already
+
+      true ->
+        case TenancyAuth.create_membership(ws_id, owner_user_id, "owner", "user") do
+          {:ok, _} -> {:granted, owner_user_id}
+          {:error, _changeset} -> {:unresolved, :insert_failed}
+        end
+    end
   end
 
   @doc """

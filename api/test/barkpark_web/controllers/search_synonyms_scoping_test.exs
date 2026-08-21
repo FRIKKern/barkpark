@@ -9,13 +9,13 @@ defmodule BarkparkWeb.SearchSynonymsScopingTest do
   NO `DeriveWorkspaceFromToken`, and `require_admin` is a plain admin-permission
   gate mintable by a workspace-bound admin token — so such a token read and wrote
   DEFAULT's synonyms on any shared dataset slug. The fix repoints the block onto
-  the bespoke `:search_settings_admin` pipeline, which runs
+  the bespoke `:flat_admin_api` pipeline, which runs
   `DeriveWorkspaceFromToken` (fail-SOFT) BEFORE `AssignDefaultScope`, so a
   workspace-bound admin token resolves ITS workspace while a nil-workspace token
   still falls through to Default/global (READs stay global-legacy by D59).
 
   MUTATION-PROOF (fail-before). Revert ONLY the pipe flip on the documents flat
-  block (`pipe_through(:search_settings_admin)` → `pipe_through([:api,
+  block (`pipe_through(:flat_admin_api)` → `pipe_through([:api,
   :require_admin])`) and the THREE ws-resolution assertions in
   "workspace-bound token resolves its OWN workspace" go RED: token_a's GET no
   longer includes its own "alpha", it DOES see Default's "default-only", and its
@@ -104,7 +104,10 @@ defmodule BarkparkWeb.SearchSynonymsScopingTest do
       # POST create stamps the caller's OWN workspace — RED before the fix
       # (stamped Default's id).
       post_conn =
-        post(conn_for(raw), "/v1/data/search/#{@ds}/synonyms", %{"from" => "beta", "to" => "beta-to"})
+        post(conn_for(raw), "/v1/data/search/#{@ds}/synonyms", %{
+          "from" => "beta",
+          "to" => "beta-to"
+        })
 
       %{"result" => created} = json_response(post_conn, 200)
       row = Repo.get!(Barkpark.Search.Synonym, created["id"])

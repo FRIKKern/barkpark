@@ -57,11 +57,11 @@ defmodule Barkpark.Media do
   def upload(plug_upload, dataset, opts \\ []) when is_binary(dataset) do
     %Plug.Upload{filename: original_name, path: temp_path} = plug_upload
 
-    # Generate date-based path: uploads/2026/04/filename
+    # Generate date-based path: 2026/04/filename, under the owning dataset's key
+    # prefix once the scope resolves (see blob_key/3).
     now = DateTime.utc_now()
     date_dir = "#{now.year}/#{String.pad_leading("#{now.month}", 2, "0")}"
     filename = unique_filename(original_name)
-    relative_path = "#{date_dir}/#{filename}"
 
     # SECURITY — server-derived MIME + validate-before-persist.
     #
@@ -88,58 +88,38 @@ defmodule Barkpark.Media do
     # partial) blob so a rejected upload never orphans bytes.
     mime_type = MIME.from_path(original_name)
 
+    # ORDER IS LOAD-BEARING (task-918106d49c62563e): the scope resolves BEFORE
+    # any byte is written, because the blob key is DERIVED from the resolved
+    # `dataset_id`. Scope-then-write is also strictly better on the error path —
+    # a refused dataset slug no longer writes a blob it must then delete.
     with {:ok, %{size: size}} <- File.stat(temp_path),
          :ok <- validate_upload(mime_type, original_name, size),
-         # `{:ok, receipt}` — the backend's write ACK plus its post-condition
-         # read (see Blobstore.receipt/3). The row's `size` stays the SOURCE
-         # size (what the client uploaded); the receipt is not persisted here,
-         # it is the seam that lets a store which ACKs but does not store fail
-         # as {:error, :not_stored} → the 503 below, instead of inserting a row
-         # over bytes that are not there.
-         {:ok, _receipt} <-
-           Blobstore.put_file(relative_path, temp_path, content_type: mime_type),
-         # Create DB record. Tenancy scope (workspace_id/project_id) is stamped
-         # from `opts` when the caller supplied a resolved scope — mirrors
-         # `Barkpark.Content` write scoping so a new blob is owned by the
-         # workspace it was uploaded into. Without scope opts the keys are absent
-         # and the row keeps its pre-tenancy (nil) shape. FAIL-CLOSED: a
-         # caller-supplied `dataset` slug the Tenancy layer REFUSES returns
-         # {:error, {:invalid_dataset, _}} / {:error, :conflict} here (never a
-         # silent dataset_id=nil) — routed to 422/409 in the else block below.
+         # Tenancy scope (workspace_id/project_id) is stamped from `opts` when the
+         # caller supplied a resolved scope — mirrors `Barkpark.Content` write
+         # scoping so a new blob is owned by the workspace it was uploaded into.
+         # Without scope opts the keys are absent and the row keeps its
+         # pre-tenancy (nil) shape. FAIL-CLOSED: a caller-supplied `dataset` slug
+         # the Tenancy layer REFUSES returns {:error, {:invalid_dataset, _}} /
+         # {:error, :conflict} here (never a silent dataset_id=nil) — routed to
+         # 422/409 in the else block below.
          {:ok, attrs} <-
            put_scope_attrs(
              %{
                filename: filename,
                original_name: original_name,
-               path: relative_path,
                mime_type: mime_type,
                size: size,
                dataset: dataset
              },
              opts
            ) do
-      result =
-        %MediaFile{}
-        |> MediaFile.changeset(attrs)
-        |> Repo.insert()
-
-      case result do
-        {:ok, file} = ok ->
-          _ =
-            Barkpark.Plugins.Registry.run_after_media_upload(%{
-              media_file: file,
-              dataset: dataset
-            })
-
-          ok
-
-        error ->
-          # Insert (validation / DB) failed — the blob is already persisted, so
-          # remove it to avoid orphaning bytes with no owning row, then surface
-          # the original error unchanged (happy path + error shape preserved).
-          _ = Blobstore.delete(relative_path)
-          error
-      end
+      persist_upload(
+        attrs,
+        blob_key(date_dir, filename, Map.get(attrs, :dataset_id)),
+        temp_path,
+        mime_type,
+        dataset
+      )
     else
       # PART 2 rejects, raised by validate_upload BEFORE any blob is written — the
       # allowlist / size-cap veto. Nothing is persisted, so surface the typed error
@@ -150,28 +130,113 @@ defmodule Barkpark.Media do
       {:error, :payload_too_large} = rejected ->
         rejected
 
-      # put_scope_attrs refused a caller-supplied `dataset` slug AFTER the blob
-      # was persisted (it runs in the with-head after put_file). Remove the
-      # orphan blob, then surface the typed error UNCHANGED so FallbackController
-      # renders 422 validation_failed (invalid_dataset) / 409 conflict — NEVER
-      # the 503 storage catch-all below. These two clauses MUST precede the
-      # {:error, _reason} catch-all or the 422/409 is silently relabelled 503.
+      # put_scope_attrs refused a caller-supplied `dataset` slug. It now runs
+      # BEFORE the write, so there is no orphan blob to clean up — the typed
+      # error is surfaced UNCHANGED so FallbackController renders 422
+      # validation_failed (invalid_dataset) / 409 conflict, NEVER the 503 storage
+      # catch-all below. These two clauses MUST precede the {:error, _reason}
+      # catch-all or the 422/409 is silently relabelled 503.
       {:error, {:invalid_dataset, _details}} = rejected ->
-        _ = Blobstore.delete(relative_path)
         rejected
 
       {:error, :conflict} = rejected ->
-        _ = Blobstore.delete(relative_path)
         rejected
 
       {:error, _reason} ->
-        # stat(temp) or the backend write failed. A partial write may survive
-        # → best-effort cleanup so no orphan blob remains, then report storage
-        # as unavailable (503) rather than raising.
+        # stat(temp) failed. Nothing was written, so report storage as
+        # unavailable (503) rather than raising.
+        {:error, :storage_unavailable}
+    end
+  end
+
+  # THE BLOB KEY AND THE ROW'S `path` ARE ONE VARIABLE (task-918106d49c62563e).
+  #
+  # `persist_upload/5` receives exactly one `relative_path` and uses it for BOTH
+  # `Blobstore.put_file/3` (the object key) and `path:` on the inserted row (what
+  # `serve/2` resolves verbatim). They cannot drift, because there is nothing to
+  # drift from — which is what makes the dataset prefix safe with no migration:
+  # a store that accepts writes it cannot serve requires two variables, and there
+  # is only one.
+  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset) do
+    # `{:ok, receipt}` — the backend's write ACK plus its post-condition read
+    # (see Blobstore.receipt/3). The row's `size` stays the SOURCE size (what the
+    # client uploaded); the receipt is not persisted here, it is the seam that
+    # lets a store which ACKs but does not store fail as {:error, :not_stored} →
+    # a 503, instead of inserting a row over bytes that are not there.
+    case Blobstore.put_file(relative_path, temp_path, content_type: mime_type) do
+      {:ok, _receipt} ->
+        insert_uploaded_row(Map.put(attrs, :path, relative_path), relative_path, dataset)
+
+      {:error, _reason} ->
+        # The backend write failed. A partial write may survive → best-effort
+        # cleanup so no orphan blob remains, then report storage as unavailable
+        # (503) rather than raising.
         _ = Blobstore.delete(relative_path)
         {:error, :storage_unavailable}
     end
   end
+
+  defp insert_uploaded_row(attrs, relative_path, dataset) do
+    %MediaFile{}
+    |> MediaFile.changeset(attrs)
+    |> Repo.insert()
+    |> case do
+      {:ok, file} = ok ->
+        _ =
+          Barkpark.Plugins.Registry.run_after_media_upload(%{
+            media_file: file,
+            dataset: dataset
+          })
+
+        ok
+
+      error ->
+        # Insert (validation / DB) failed — the blob is already persisted, so
+        # remove it to avoid orphaning bytes with no owning row, then surface
+        # the original error unchanged (happy path + error shape preserved).
+        _ = Blobstore.delete(relative_path)
+        error
+    end
+  end
+
+  # THE TENANT-KEYED BLOB KEY (task-918106d49c62563e).
+  #
+  # A blob born under a resolved dataset is addressed `d/<dataset_id>/YYYY/MM/…`.
+  # Uniqueness on `media_files` is already `(path, dataset_id)`, so keying the
+  # OBJECT space on `dataset_id` makes key uniqueness mirror row uniqueness
+  # exactly: one row, one object, by construction. `workspace_id` would leave
+  # same-workspace cross-dataset sharing open at the identical cost.
+  #
+  # NO MIGRATION, and the reason is structural rather than optimistic: the prefix
+  # is chosen at BIRTH and never rewritten. A row inserted flat keeps its flat key
+  # and keeps resolving forever, because the read side reads `media_files.path`
+  # verbatim and both backends take arbitrary depth (local.ex File.mkdir_p; s3.ex
+  # `key_for/1` is a plain concat over an existing key_prefix). Mixed layouts are
+  # therefore coherent permanently — no cutover, no flag day, no object moves, no
+  # orphan risk, no in-flight window.
+  #
+  # AND THE PATH IS NEVER REWRITTEN AFTERWARDS, which is not a stylistic
+  # preference: `media_files.path` is a PUBLISHED REFERENCE. Studio's upload
+  # handler persists `"/media/files/\#{file.path}"` into a document's content
+  # (live/studio/studio_live/handlers/media.ex), and `serve/2` resolves that URL
+  # through `get_file_by_path/2` — a lookup keyed on the very string that was
+  # persisted. Rewriting an existing row's path orphans every document already
+  # pointing at it; pinned by
+  # `test/barkpark/media_path_is_a_published_reference_test.exs`.
+  #
+  # A NULL `dataset_id` has no prefix to apply and stays flat: that is the legacy
+  # / untenanted layer, untouched.
+  #
+  # PUBLIC so it has exactly ONE owner: any future write seam that needs to place
+  # a blob calls this instead of restating the rule, and the flat (legacy) clause
+  # is pinnable without a Default-project-free install.
+  #
+  # @canonical capability:tenant-blob-key aka:blob prefix,dataset key,media path prefix
+  @spec blob_key(String.t(), String.t(), String.t() | nil) :: String.t()
+  def blob_key(date_dir, filename, dataset_id) when is_binary(dataset_id),
+    do: "d/#{dataset_id}/#{date_dir}/#{filename}"
+
+  def blob_key(date_dir, filename, _no_dataset_id), do: "#{date_dir}/#{filename}"
 
   # PART 2 — config-gated upload allowlist + size cap. OFF by default: an unset /
   # empty allowlist and a nil cap short-circuit to :ok, so an unconfigured server
@@ -576,6 +641,17 @@ defmodule Barkpark.Media do
       succeeded and DISAGREED with the received count (502). A disagreement is
       a failure, never a 200 with a discrepancy field.
     * `{:error, :invalid_path}` — the path is not a safe server-blob shape (422).
+    * `{:error, :unscoped_blob_write}` — `opts` carried no `:workspace_id`. There
+      is no unscoped blob write; the caller must name the owning workspace.
+    * `{:error, :blob_key_not_owned}` — a `media_files` row at this key belongs to
+      a DIFFERENT workspace, or to none at all. The store is addressed by the very
+      string `media_files.path` holds, so the tenant wall on THIS route — where
+      the caller supplies the key — is OWNERSHIP of the key. Since
+      task-918106d49c62563e a key BORN through `upload/3` also carries a
+      `d/<dataset_id>/` prefix (see `blob_key/3`), so newly-written keys are
+      tenant-disjoint by construction and this predicate is the guard on
+      caller-supplied ones. It remains a WRITE-side predicate and structurally
+      cannot close a read-side substitution; see `blob_key/3` for what does.
     * `{:error, :empty_body}` — a zero-byte body (422). No real media blob is
       empty; the common cause is a caller mislabeling the content-type (e.g.
       `application/json`), which lets `Plug.Parsers` consume the body before the
@@ -586,41 +662,108 @@ defmodule Barkpark.Media do
   Non-raising file ops mirror `upload/3`: a read-only mount / ENOSPC returns a
   typed error, never a bare 500.
   """
-  @spec put_blob(String.t(), binary()) ::
+  @spec put_blob(String.t(), binary(), keyword()) ::
           {:ok, String.t(), Blobstore.receipt()}
           | {:error,
              :invalid_path
              | :empty_body
+             | :unscoped_blob_write
+             | :blob_key_not_owned
              | :storage_unavailable
              | :not_stored
              | {:storage_mismatch, non_neg_integer(), non_neg_integer()}}
-  def put_blob(_relative_path, ""), do: {:error, :empty_body}
+  def put_blob(relative_path, body, opts \\ [])
 
-  def put_blob(relative_path, body) when is_binary(relative_path) and is_binary(body) do
-    if valid_blob_path?(relative_path) do
-      # The read-back lives BELOW this line, inside the backend (Blobstore's
-      # stat_blob/1 callback) — deliberately not here. This module also owns
-      # `file_path/1`, and a File.stat against that path is exactly the check
-      # the S3 backend's write-through cache defeats: it returns the expected
-      # size for an object the bucket never took.
-      case Blobstore.put_bytes(relative_path, body, []) do
-        {:ok, %{stored: :unverified} = receipt} ->
-          {:ok, relative_path, receipt}
+  def put_blob(_relative_path, "", _opts), do: {:error, :empty_body}
 
-        {:ok, %{stored: stored, received: received} = receipt} when stored == received ->
-          {:ok, relative_path, receipt}
-
-        {:ok, %{stored: stored, received: received}} ->
-          {:error, {:storage_mismatch, received, stored}}
-
-        {:error, :not_stored} ->
-          {:error, :not_stored}
-
-        {:error, _reason} ->
-          {:error, :storage_unavailable}
-      end
+  def put_blob(relative_path, body, opts)
+      when is_binary(relative_path) and is_binary(body) and is_list(opts) do
+    with true <- valid_blob_path?(relative_path) or {:error, :invalid_path},
+         :ok <- authorize_blob_key(relative_path, opts) do
+      put_validated_blob(relative_path, body)
     else
-      {:error, :invalid_path}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # The blob keyspace is FLAT and instance-wide: `Blobstore` resolves an object
+  # by the very string that `media_files.path` holds (serve/2 →
+  # `Blobstore.serve_strategy(file.path)`, `delete_file/2` →
+  # `Blobstore.delete(file.path)`). A key is therefore OWNED by whatever
+  # workspace owns the `media_files` row(s) at that path, and the tenant wall on
+  # THIS route — the one place a CALLER names the key — is ownership of it.
+  #
+  # CORRECTED (task-918106d49c62563e). This comment used to justify ownership over
+  # a prefix by claiming a prefix "would change the layout of every object already
+  # in the store, which the read side could not resolve without a data migration",
+  # and that was read as ruling out prefixing altogether. It does not. The claim
+  # holds only for REWRITING existing rows; `upload/3` now chooses a
+  # `d/<dataset_id>/` key at BIRTH (`blob_key/3`), which moves no object, rewrites
+  # no row and needs no migration — old flat rows keep flat keys and keep
+  # resolving, permanently, and mixed layouts are coherent.
+  #
+  # What the original fear DOES correctly rule out is a rewrite, and for a sharper
+  # reason than object layout: `media_files.path` is a PUBLISHED REFERENCE that
+  # documents persist as a literal `/media/files/<path>` string, so rewriting a
+  # row orphans every document pointing at it (pinned by
+  # `test/barkpark/media_path_is_a_published_reference_test.exs`).
+  #
+  # FAIL CLOSED on three shapes:
+  #   * no `:workspace_id` in opts → `:unscoped_blob_write`. There is exactly one
+  #     production caller (MediaController.put_blob/2) and it always supplies one;
+  #     an omission is a bug, never an "unscoped" licence.
+  #   * a row at this key owned by a DIFFERENT workspace → `:blob_key_not_owned`.
+  #     This is the cross-tenant overwrite.
+  #   * a row at this key owned by NO workspace (`workspace_id IS NULL`) → also
+  #     `:blob_key_not_owned`. `Content.Scope.scope_to_workspace_or_global/3`
+  #     serves an unscoped row to EVERY tenant, so letting one workspace rewrite
+  #     its bytes poisons an object every other tenant reads.
+  #
+  # A key NO row claims stays writable: that is the live contract of this route
+  # (a bundle import COPIes the rows first and pushes the bytes after — see
+  # `internal/cli/cloud_workspace_cmd.go` `importWorkspace` → `uploadWorkspaceBlobs`
+  # — and `scripts/pds-scratch-target.sh` probes a bare path). Squatting an
+  # unclaimed key is not a path to another tenant's data: both ways a workspace
+  # acquires a key (`upload/3`'s `Blobstore.put_file`, or its own blob push)
+  # write the bytes themselves, overwriting any squat.
+  defp authorize_blob_key(relative_path, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      workspace_id when is_binary(workspace_id) ->
+        foreign? =
+          MediaFile
+          |> where([m], m.path == ^relative_path)
+          |> where([m], is_nil(m.workspace_id) or m.workspace_id != ^workspace_id)
+          |> Repo.exists?()
+
+        if foreign?, do: {:error, :blob_key_not_owned}, else: :ok
+
+      _ ->
+        {:error, :unscoped_blob_write}
+    end
+  end
+
+  # Reached only after `valid_blob_path?/1` AND `authorize_blob_key/2` passed.
+  defp put_validated_blob(relative_path, body) do
+    # The read-back lives BELOW this line, inside the backend (Blobstore's
+    # stat_blob/1 callback) — deliberately not here. This module also owns
+    # `file_path/1`, and a File.stat against that path is exactly the check
+    # the S3 backend's write-through cache defeats: it returns the expected
+    # size for an object the bucket never took.
+    case Blobstore.put_bytes(relative_path, body, []) do
+      {:ok, %{stored: :unverified} = receipt} ->
+        {:ok, relative_path, receipt}
+
+      {:ok, %{stored: stored, received: received} = receipt} when stored == received ->
+        {:ok, relative_path, receipt}
+
+      {:ok, %{stored: stored, received: received}} ->
+        {:error, {:storage_mismatch, received, stored}}
+
+      {:error, :not_stored} ->
+        {:error, :not_stored}
+
+      {:error, _reason} ->
+        {:error, :storage_unavailable}
     end
   end
 

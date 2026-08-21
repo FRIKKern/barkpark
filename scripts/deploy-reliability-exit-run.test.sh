@@ -197,7 +197,7 @@ section "the reading publishes no fleet failure percentage"
 run_exit "STUB_COMMIT=$TIP" --
 expect_has "failure_rate is printed as a REFUSAL with its reason" "failure_rate  REFUSED"
 expect_has "…naming the boundary" "deferred settle status boundary"
-if printf '%s\n' "$OUT" | grep -Eq 'failure_rate[^R]*[0-9]+(\.[0-9]+)?%'; then
+if grep -Eq 'failure_rate[^R]*[0-9]+(\.[0-9]+)?%' <<<"$OUT"; then
   bad "a failure percentage was printed beside failure_rate"
 else
   ok "no failure percentage appears anywhere beside failure_rate"

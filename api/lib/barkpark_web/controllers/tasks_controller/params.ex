@@ -655,6 +655,104 @@ defmodule BarkparkWeb.TasksController.Params do
   # the sole offset in the codebase with a floor but no ceiling.
   def parse_offset(raw), do: raw |> parse_int(0) |> max(0) |> min(100_000)
 
+  # ─── `filter[...]` container (gr-bl-tasks-route-parent-filter-ignored) ────
+  #
+  # `GET /v1/tasks` reads its narrowing params FLAT (`?parent=`, `?kind=`, …).
+  # A caller who reached for the `/v1/data/query` spelling — `?filter[parent_id]=x`,
+  # the form the Cloud GUI Remake charter's GR126 remedy prescribes — used to get
+  # a 200 with the WHOLE task page: the `filter` key was never read, so the
+  # request was silently unfiltered. Not an error, not empty — a plausible page
+  # of foreign rows (measured: 200 rows spanning eleven parents). A driver
+  # sourcing a re-parent work-list from that response re-parents every foreign
+  # row it contains, and every response reads 200 OK.
+  #
+  # So the container is now PARSED and fail-CLOSED, the same doctrine
+  # `Content.Errors` already applies to `{:invalid_filter_op, …}` /
+  # `{:invalid_flat_filter, …}` on the data-query surface (D75): a filter this
+  # route cannot honour is a 400 that NAMES the offending key, never a silent
+  # pass-through. Honouring `parent_id` alone would have MOVED the defect —
+  # `filter[bogus]=1` would still have returned an unfiltered page.
+  #
+  # The whitelist is exactly the flat params `index/2` already implements
+  # (plus `parent_id`, the generic spelling of `parent`); each maps to the
+  # SAME `Barkpark.Tasks.Query` fragment as its flat twin, so there is no
+  # second filter semantic to drift.
+  @index_filter_keys ~w(kind label lifecycle_status parent parent_id phase_id type)
+
+  def index_filter_keys, do: @index_filter_keys
+
+  @doc """
+  Parse the optional `filter[...]` container on `GET /v1/tasks`.
+
+  `{:ok, %{"parent_id" => "…"}}` for a map of whitelisted string→string pairs
+  (absent container → `{:ok, %{}}`), or `{:error, reason}` — never a silently
+  dropped filter:
+
+    * `{:unknown_filter_key, key}` — `?filter[bogus]=1`
+    * `{:invalid_filter_value, key}` — a non-string value: the operator form
+      `?filter[parent_id][eq]=x` (Plug → a map) or the list form
+      `?filter[parent_id][]=x` (Plug → a list). Both would fall through the
+      `maybe_filter_*` non-binary catch-alls as a no-op, i.e. the original
+      defect wearing a different spelling.
+    * `{:invalid_filter_container, raw}` — a bare `?filter=x` / `?filter[]=x`.
+
+  Keys are checked in sorted order so a request with several bad keys names the
+  same one on every run.
+  """
+  def parse_index_filters(params) when is_map(params) do
+    case Map.get(params, "filter") do
+      nil -> {:ok, %{}}
+      %{} = filter -> validate_index_filters(filter)
+      raw -> {:error, {:invalid_filter_container, raw}}
+    end
+  end
+
+  defp validate_index_filters(filter) do
+    filter
+    |> Enum.sort_by(fn {k, _} -> to_string(k) end)
+    |> Enum.reduce_while({:ok, %{}}, fn {key, value}, {:ok, acc} ->
+      key = to_string(key)
+
+      cond do
+        key not in @index_filter_keys -> {:halt, {:error, {:unknown_filter_key, key}}}
+        not is_binary(value) -> {:halt, {:error, {:invalid_filter_value, key}}}
+        true -> {:cont, {:ok, Map.put(acc, key, value)}}
+      end
+    end)
+  end
+
+  @doc """
+  Human-readable message for a `parse_index_filters/1` error — it must TEACH
+  (name the offending key and list what this route accepts), because the caller
+  it refuses is one who believed the request was already filtered.
+  """
+  def index_filter_message({:unknown_filter_key, key}) do
+    "unknown filter key #{inspect(key)} on GET /v1/tasks; supported: " <>
+      supported_filter_list()
+  end
+
+  def index_filter_message({:invalid_filter_value, key}) do
+    "filter[#{key}] must be a single string value; the operator form " <>
+      "(filter[#{key}][eq]=…) and the list form (filter[#{key}][]=…) are not " <>
+      "supported on GET /v1/tasks"
+  end
+
+  def index_filter_message({:invalid_filter_container, _raw}) do
+    "filter must be given as filter[<key>]=<value>; supported: " <> supported_filter_list()
+  end
+
+  defp supported_filter_list,
+    do: @index_filter_keys |> Enum.map(&"filter[#{&1}]") |> Enum.join(", ")
+
+  def index_filter_details({:unknown_filter_key, key}),
+    do: %{key: key, supported: @index_filter_keys}
+
+  def index_filter_details({:invalid_filter_value, key}),
+    do: %{key: key, supported: @index_filter_keys}
+
+  def index_filter_details({:invalid_filter_container, _raw}),
+    do: %{supported: @index_filter_keys}
+
   def reason_to_string(reason) when is_atom(reason), do: Atom.to_string(reason)
   def reason_to_string({:invalid_lifecycle, s}), do: "invalid_lifecycle:#{s}"
   # Stamp (and any future holder-gated verb) on a task with no live claim —

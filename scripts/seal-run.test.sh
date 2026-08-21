@@ -376,17 +376,25 @@ else
   # Both names are asserted ON A TOKEN-EMITTING LINE, not merely somewhere in the
   # file: the prose above them explains the fields at length, so a bare file-wide
   # grep would survive the exact rename this probe exists to catch.
-  grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" | grep -q 'head=' \
+  # The token lines are materialised, never piped — honest-gates D37. `grep FILE
+  # | grep -q …` is a pipeline, not a file match: `grep -q` exits at its first
+  # match, the producing grep takes SIGPIPE, and `set -o pipefail` reports its
+  # 141 over the match. For the two arms below that would only cost a spurious
+  # red, but for the DISARM it is silent — the disarm reports "does NOT emit"
+  # for a name the predicate does emit, and the two oks stop being load-bearing.
+  pred_token_lines="$(grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL")"
+
+  grep -q 'head=' <<<"$pred_token_lines" \
     && ok "…and it still emits head= on that line (seal-run.sh's tok head)" \
     || bad "the predicate no longer emits head= — seal-run.sh's stale-tree refusal has silently stopped checking"
 
-  grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" | grep -q 'b-unavailable=' \
+  grep -q 'b-unavailable=' <<<"$pred_token_lines" \
     && ok "…and it still emits b-unavailable= on that line (seal-run.sh's tok b-unavailable)" \
     || bad "the predicate no longer emits b-unavailable= — seal-run.sh's history refusal has silently stopped checking"
 
   # Able to fail: the same two greps against a name the predicate does not use
   # must NOT match, so the two oks above are matching the field and not the prose.
-  grep 'VERDICT-TOKEN: SEAL-PREDICATE' "$PRED_REAL" | grep -q 'b-unreadable=' \
+  grep -q 'b-unreadable=' <<<"$pred_token_lines" \
     && bad "the disarm matched a field name the predicate does not emit — these greps are not load-bearing" \
     || ok "disarm: a field name the predicate does NOT emit fails the same grep"
 fi

@@ -1732,6 +1732,196 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  # ─── gr-bl-tasks-route-parent-filter-ignored: the `filter[...]` container ──
+  #
+  # `GET /v1/tasks?filter[parent_id]=<id>` used to return the UNFILTERED page
+  # with a 200 — the `filter` param was never read. That is a FALSE
+  # CONFIRMATION: a plausible-looking page of foreign rows an operator can act
+  # on (measured live: 200 rows spanning eleven distinct parents). Every test
+  # below asserts on the RETURNED ROWS, and every fixture carries at least one
+  # row that must NOT come back, so an unfiltered response cannot pass by
+  # accident.
+
+  describe "GET /v1/tasks?filter[parent_id]= (fail-closed filter container)" do
+    test "returns ONLY that parent's children — the unfiltered page is a superset",
+         %{conn: conn, scope: scope} do
+      mine = mk_task!(uniq("gr-filter-parent-mine"), scope)
+      other = mk_task!(uniq("gr-filter-parent-other"), scope)
+
+      child_a = mk_task!(uniq("gr-filter-child-a"), scope, %{"parent_id" => mine.doc_id})
+      child_b = mk_task!(uniq("gr-filter-child-b"), scope, %{"parent_id" => mine.doc_id})
+      # The anti-vacuity rows: a child of a DIFFERENT parent, and a root task
+      # with no parent at all. If the filter is ignored, these come back too.
+      foreign = mk_task!(uniq("gr-filter-child-foreign"), scope, %{"parent_id" => other.doc_id})
+      orphan = mk_task!(uniq("gr-filter-orphan"), scope)
+
+      # Control: the same request WITHOUT the filter sees all of them, so the
+      # corpus this test filters over provably contains non-matching rows.
+      all_ids =
+        conn
+        |> authed()
+        |> get("/v1/tasks")
+        |> json_response(200)
+        |> Map.fetch!("docs")
+        |> Enum.map(& &1["doc_id"])
+
+      assert foreign.doc_id in all_ids
+      assert orphan.doc_id in all_ids
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks?filter[parent_id]=#{mine.doc_id}")
+        |> json_response(200)
+
+      ids = Enum.map(payload["docs"], & &1["doc_id"])
+
+      # Rail ordering (inserted_at ASC), exactly as the flat `?parent=` spelling.
+      assert ids == [child_a.doc_id, child_b.doc_id]
+      refute foreign.doc_id in ids
+      refute orphan.doc_id in ids
+
+      # The set of parent_ids actually returned is the singleton the caller asked
+      # for — the shape the live reproduction reported as "eleven distinct parents".
+      distinct_parents = payload["docs"] |> Enum.map(& &1["parent_id"]) |> Enum.uniq()
+      assert distinct_parents == [mine.doc_id]
+    end
+
+    test "the percent-encoded spelling filter%5Bparent_id%5D behaves identically",
+         %{conn: conn, scope: scope} do
+      mine = mk_task!(uniq("gr-filter-pct-mine"), scope)
+      other = mk_task!(uniq("gr-filter-pct-other"), scope)
+      child = mk_task!(uniq("gr-filter-pct-child"), scope, %{"parent_id" => mine.doc_id})
+      foreign = mk_task!(uniq("gr-filter-pct-foreign"), scope, %{"parent_id" => other.doc_id})
+
+      ids =
+        conn
+        |> authed()
+        |> get("/v1/tasks?filter%5Bparent_id%5D=#{mine.doc_id}")
+        |> json_response(200)
+        |> Map.fetch!("docs")
+        |> Enum.map(& &1["doc_id"])
+
+      assert ids == [child.doc_id]
+      refute foreign.doc_id in ids
+    end
+
+    test "filter[parent] is the same edge as filter[parent_id]", %{conn: conn, scope: scope} do
+      mine = mk_task!(uniq("gr-filter-alias-mine"), scope)
+      other = mk_task!(uniq("gr-filter-alias-other"), scope)
+      child = mk_task!(uniq("gr-filter-alias-child"), scope, %{"parent_id" => mine.doc_id})
+      foreign = mk_task!(uniq("gr-filter-alias-foreign"), scope, %{"parent_id" => other.doc_id})
+
+      ids =
+        conn
+        |> authed()
+        |> get("/v1/tasks?filter[parent]=#{mine.doc_id}")
+        |> json_response(200)
+        |> Map.fetch!("docs")
+        |> Enum.map(& &1["doc_id"])
+
+      assert ids == [child.doc_id]
+      refute foreign.doc_id in ids
+    end
+
+    test "filter[lifecycle_status] narrows too — the whitelist is not parent-only",
+         %{conn: conn, scope: scope} do
+      parent = mk_task!(uniq("gr-filter-life-parent"), scope)
+      open_child = mk_task!(uniq("gr-filter-life-open"), scope, %{"parent_id" => parent.doc_id})
+
+      done_child =
+        mk_task!(uniq("gr-filter-life-done"), scope, %{
+          "parent_id" => parent.doc_id,
+          "lifecycle_status" => "done"
+        })
+
+      ids =
+        conn
+        |> authed()
+        |> get("/v1/tasks?filter[parent_id]=#{parent.doc_id}&filter[lifecycle_status]=open")
+        |> json_response(200)
+        |> Map.fetch!("docs")
+        |> Enum.map(& &1["doc_id"])
+
+      assert ids == [open_child.doc_id]
+      refute done_child.doc_id in ids
+    end
+
+    test "an UNKNOWN filter key is a 400 naming the key — not a silent unfiltered page",
+         %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("gr-filter-bogus-row"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks?filter[bogus]=1")
+      assert resp.status == 400
+
+      payload = json_response(resp, 400)
+      assert payload["ok"] == false
+      assert payload["reason"] == "invalid_filter"
+      assert payload["message"] =~ "bogus"
+      assert payload["message"] =~ "filter[parent_id]"
+      assert payload["details"]["key"] == "bogus"
+      assert "parent_id" in payload["details"]["supported"]
+      # The refusal carries NO rows: the caller cannot mistake it for data.
+      refute Map.has_key?(payload, "docs")
+    end
+
+    test "the operator form filter[parent_id][eq] is a 400, not a silent no-op",
+         %{conn: conn, scope: scope} do
+      parent = mk_task!(uniq("gr-filter-op-parent"), scope)
+      _child = mk_task!(uniq("gr-filter-op-child"), scope, %{"parent_id" => parent.doc_id})
+      _foreign = mk_task!(uniq("gr-filter-op-foreign"), scope)
+
+      # `filter[parent_id][eq]=x` reaches the controller as a MAP value. It would
+      # fall through maybe_filter_parent_id/2's non-binary catch-all as a no-op —
+      # the original defect wearing a different spelling.
+      resp = conn |> authed() |> get("/v1/tasks?filter[parent_id][eq]=#{parent.doc_id}")
+      assert resp.status == 400
+
+      payload = json_response(resp, 400)
+      assert payload["reason"] == "invalid_filter"
+      assert payload["message"] =~ "filter[parent_id]"
+      assert payload["details"]["key"] == "parent_id"
+    end
+
+    test "the list form filter[parent_id][] is a 400", %{conn: conn, scope: scope} do
+      parent = mk_task!(uniq("gr-filter-list-parent"), scope)
+      _child = mk_task!(uniq("gr-filter-list-child"), scope, %{"parent_id" => parent.doc_id})
+
+      resp = conn |> authed() |> get("/v1/tasks?filter[parent_id][]=#{parent.doc_id}")
+      assert resp.status == 400
+      assert json_response(resp, 400)["details"]["key"] == "parent_id"
+    end
+
+    test "a bare ?filter= value is a 400 naming the accepted spelling",
+         %{conn: conn, scope: scope} do
+      _t = mk_task!(uniq("gr-filter-bare-row"), scope)
+
+      resp = conn |> authed() |> get("/v1/tasks?filter=parent_id:x")
+      assert resp.status == 400
+
+      payload = json_response(resp, 400)
+      assert payload["reason"] == "invalid_filter"
+      assert payload["message"] =~ "filter[<key>]=<value>"
+    end
+
+    test "no filter container at all is unchanged — every task still lists",
+         %{conn: conn, scope: scope} do
+      a = mk_task!(uniq("gr-filter-none-a"), scope)
+      b = mk_task!(uniq("gr-filter-none-b"), scope, %{"parent_id" => a.doc_id})
+
+      ids =
+        conn
+        |> authed()
+        |> get("/v1/tasks")
+        |> json_response(200)
+        |> Map.fetch!("docs")
+        |> Enum.map(& &1["doc_id"])
+
+      assert a.doc_id in ids
+      assert b.doc_id in ids
+    end
+  end
+
   # ─── tt5: GET /v1/tasks?label= generic exact-string filter ─────────────
   # Backs the bd-shim's `bd list --label file-claim:<path>` (and any
   # arbitrary label) → find every task holding a given claim.

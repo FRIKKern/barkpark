@@ -69,7 +69,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/usage/summary    user      cross-instance usage-meter rollup for the team
       GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
       POST    /v1/barkparks/:id/retry admin  re-enqueue a FAILED provision
-      GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
+      GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin; a PAT must also hold `root`)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
@@ -2763,16 +2763,82 @@ defmodule BarkparkCloud.Web.Router do
   # token was reported on /succeed and stored ENCRYPTED, and this decrypts it for
   # the owner. Show-to-owner — treat the response as a secret.
   #
-  # ADMIN-gated + team-scoped, fail-closed: require_team_admin 401s an
-  # unauthenticated caller and 403s a member who is not owner/admin; a barkpark in
+  # ADMIN-gated + team-scoped, fail-closed: the gate 401s an unauthenticated
+  # caller and 403s a member who is not owner/admin; a barkpark in
   # ANOTHER team (or no such id) is the SAME 404 — NO existence leak for a
   # non-member. 409 "suspended" when the box is under a billing suspension (the
   # credential is not revealed while access is revoked — cch-w54-s2).
   # 404 "no_admin_token" when the row never got one (ip-only succeed /
   # pre-feature instance); 500 if the stored ciphertext fails to decrypt.
+  #
+  # THE ROOT-PAT PATH (cloud-agent onramp). This was `Auth.require_team_admin`
+  # alone, i.e. a SESSION-ONLY route — and the committed onramp config
+  # (`.mcp.json` / `scripts/ensure-bp.sh`, #12729) needs an agent in a fresh
+  # container to fetch its instance credentials with a Personal Access Token,
+  # which no session cookie can supply. `require_user_or_pat/2` opens that door;
+  # everything below it keeps the door the same width.
+  #
+  # NOT the `admin(d)` DISJUNCTION the two go-live rows use. There a PAT needs
+  # only the `deploy` ability and NO team role, because launching a box is a
+  # capability the mint sells outright. This route hands back the PLAINTEXT
+  # instance admin token — the strongest credential the control plane holds — so
+  # the role axis is enforced for BOTH credential kinds and a PAT must ALSO
+  # carry `root`. The tier column therefore stays a plain `admin`: every caller
+  # here is a team admin, which is exactly what the table has always said.
+  #
+  # `root` and not `read`: `Auth.ability_implies/0` widens `write` and `deploy`
+  # INTO `read`, so a read-gated route is reachable by every PAT tier. Only a
+  # `root` PAT satisfies `root` — the exclusive mint (`normalize_abilities/1`
+  # collapses `root` -> ["root"]) means a read/write/deploy PAT is refused here,
+  # and `pat_abilities_allowed?/2` already caps a non-admin's mint at `read`.
+  #
+  # THE ROLE ARM IS DEFENCE IN DEPTH, AND SAYING SO IS THE HONEST VERSION.
+  # It is NOT closing a live hole: measured on this tree, `do_update_role/4`
+  # calls `revoke_team_pats_exceeding_role/3` on any rank drop and `do_remove/3`
+  # calls `revoke_team_pats/2`, so a root PAT whose holder is demoted or removed
+  # is REVOKED and 401s here — it never reaches the role check at all
+  # (provisioning_test.exs pins that 401, because it is the property actually
+  # protecting this route). What the role arm buys is that `root` alone can
+  # never be sufficient: the ability and the grant are read on every request, so
+  # any future path that drops a grant WITHOUT revoking the credential lands on
+  # a 403 instead of on the plaintext admin token.
+  #
+  # THE ORDER OF THE TWO REFUSALS IS STILL THE POINT. The role check runs FIRST,
+  # so a caller who lacks the grant is told `required: "admin", scope: "team"`
+  # and a read/write/deploy PAT held by a real admin is told `required: "root",
+  # scope: "token"`. Each refusal names the axis that would have admitted it.
+  #
+  # The two SESSION refusal shapes are unchanged and are pinned in
+  # router_ability_matrix_test.exs ("gate_role names the label its opaque check
+  # cannot introspect" / "the no-team arm states a CAUSE and never an
+  # authority"): a member of a team still gets `required: "admin"`, and a user
+  # holding NO team grant still gets `reason: "no_team"` and never an authority
+  # it would be a lie to name.
   get "/v1/barkparks/:id/credentials" do
-    # RBAC (rbac-roles): reveals a live admin credential → team admin (owner/admin) only.
-    conn = Auth.require_team_admin(conn, [])
+    # RBAC (rbac-roles): reveals a live admin credential → team admin
+    # (owner/admin) on either credential kind, and a PAT must also hold `root`.
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted ->
+          conn
+
+        is_nil(conn.assigns[:current_team]) ->
+          Auth.forbidden(conn, reason: "no_team", scope: "team")
+
+        # `Authz.team_admin?/2` and not `Accounts.team_admin?/2`: this is the
+        # LITERAL predicate `Auth.gate_role/4` ran before this slice, so the
+        # session arm is the same decision on the same read, not a lookalike.
+        not Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+          Auth.forbidden(conn, required: "admin", scope: "team")
+
+        conn.assigns[:current_token] ->
+          Auth.require_ability(conn, "root")
+
+        true ->
+          conn
+      end
 
     cond do
       conn.halted ->
@@ -8219,17 +8285,62 @@ defmodule BarkparkCloud.Web.Router do
     site = if artifactless?, do: Registry.get_site(deployment.site_id)
 
     case site do
-      %{github_repo: repo} when is_binary(repo) ->
+      %{github_repo: repo} = s when is_binary(repo) ->
         %{
-          source: %{
-            kind: "git",
-            url: "https://github.com/#{repo}.git",
-            ref: deployment.git_ref
-          }
+          source:
+            put_clone_token(
+              %{
+                kind: "git",
+                url: "https://github.com/#{repo}.git",
+                ref: deployment.git_ref
+              },
+              s
+            )
         }
 
       _ ->
         %{}
+    end
+  end
+
+  # dwb-webhook-deploy-artifact-gap: the AUTHENTICATED half of the clone lane.
+  #
+  # The anonymous URL above can only ever clone a PUBLIC repo — which made
+  # push-to-deploy structurally impossible for exactly the repos the product
+  # creates (`POST /v1/github/repos {"private": true}`) and imports (the picker
+  # lists private repos). When the site's team has a connected GitHub App
+  # installation, mint a short-lived installation token and hand it to the
+  # builder as its OWN field.
+  #
+  # `token` is a separate field, NOT credentials spliced into `url`, on purpose:
+  # a credential inside a remote URL is written into the clone workdir's config
+  # by `git remote add`, echoed back by git's own error messages, and would ride
+  # every console line that narrates the URL. A separate field keeps exactly one
+  # consumer (the builder's git auth env) and keeps the URL loggable.
+  #
+  # Minting is BEST-EFFORT, and the catch-all arm is load-bearing: this runs
+  # inside the builder's claim, so ANY unhandled shape here would 500 the claim
+  # and stall the whole build queue for every tenant — strictly worse than the
+  # gap it is fixing. A failure (unwired App, no installation, GitHub down,
+  # tampered handle, an unexpected seam return) leaves the anonymous source
+  # untouched, so a public repo keeps deploying and a private one fails at the
+  # builder with the honest terminal repo-inaccessible reason.
+  defp put_clone_token(source, site) do
+    case GitHub.installation_token_for(site.team_id) do
+      {:ok, token} when is_binary(token) and token != "" ->
+        Map.put(source, :token, token)
+
+      {:error, reason} when reason in [:not_configured, :no_installation] ->
+        # The ordinary un-connected shapes — not worth a log line per claim.
+        source
+
+      other ->
+        Logger.warning(
+          "builder clone token mint failed for site #{site.id}: #{inspect(other)} — " <>
+            "falling back to an anonymous clone (a private repo will fail at fetch)"
+        )
+
+        source
     end
   end
 
