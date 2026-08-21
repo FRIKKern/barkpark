@@ -27,6 +27,51 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
     end
   end
 
+  # ── scope tenancy (arpss-w10-bl-shares-add-instance-wide-scope-hole) ──────
+  #
+  # `Caps.admin?/1` proves admin of the MOUNTED workspace. The submitted scope
+  # names a workspace of its own, and `Sharing.parse_scope/1` accepts ANY slug
+  # (it rejects only empty segments and glob metacharacters), so without this
+  # clause an account admin of workspace A could declare a public read share
+  # over workspace B.
+  #
+  # The token arm needs no clamp and MUST NOT get one: `Caps.admin?/1`'s token
+  # arm already requires `token_admin?/1` — the same `admin` permission that
+  # `/v1/shares`'s `:require_admin` pipeline requires — so a token principal
+  # holds instance-wide declare authority by design there, and clamping here
+  # would make the LiveView panel refuse what its own HTTP twin performs. The
+  # hole is the ACCOUNT arm, which `/v1/shares` refuses outright.
+  #
+  # Injection is NOT the mechanism and needs no guard: a `:` in the scope makes
+  # `parse_entry/1` see 4+ segments and fall to its catch-all, and a `;` makes
+  # `parse/1` return two shares where `add_share/1` matches only `[%Share{}]`.
+  # Both already fail closed with `{:error, :invalid}`.
+  defp declarable_scope?(socket, scope) do
+    mounted = Shared.scope_slug(socket.assigns[:current_workspace], "default")
+
+    scope
+    |> String.split("/")
+    |> List.first()
+    |> to_string()
+    |> String.trim()
+    |> case do
+      ^mounted -> true
+      _ -> instance_declare_authority?(socket)
+    end
+  end
+
+  # The authority `/v1/shares` demands: a token carrying the `admin`
+  # permission (`BarkparkWeb.Plugs.RequireAdmin`). Never the account arm.
+  # Fail-closed on the account arm: `Auth.has_permission?/2` reads
+  # `token.permissions` with no nil clause, so an account session (no
+  # `:api_token`) would raise rather than deny. Match the struct instead.
+  defp instance_declare_authority?(socket) do
+    case socket.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token -> Barkpark.Auth.has_permission?(token, "admin")
+      _ -> false
+    end
+  end
+
   def shares_close(socket) do
     {:noreply, assign(socket, show_shares: false, shares_error: nil)}
   end
@@ -42,6 +87,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
 
         surfaces == "" ->
           {:noreply, assign(socket, shares_error: "Pick at least one surface.")}
+
+        not declarable_scope?(socket, scope) ->
+          {:noreply,
+           assign(socket,
+             shares_error:
+               "That scope belongs to another workspace. You can only share the workspace you are in."
+           )}
 
         true ->
           case Barkpark.Sharing.add_share("#{scope}:#{surfaces}:read") do
@@ -84,14 +136,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
     if Caps.admin?(socket) do
       case Barkpark.Sharing.scope_triple(scope) do
         {:ok, {ws, proj, dataset}} ->
-          {:ok, count} = Barkpark.Sharing.remove_share(ws, proj, dataset)
+          # Same tenancy clamp as shares_add/2: `Caps.admin?/1` proves admin of
+          # the MOUNTED workspace, and the scope names a workspace of its own.
+          # Unclamped, an account admin of workspace A could REVOKE workspace
+          # B's share — the availability mirror of the disclosure hole.
+          # `declarable_scope?/2` splits on "/", so a bare slug passes through
+          # as its own first segment.
+          if declarable_scope?(socket, ws) do
+            {:ok, count} = Barkpark.Sharing.remove_share(ws, proj, dataset)
 
-          socket =
-            socket
-            |> assign(shares_rows: Shared.load_share_rows(), shares_error: nil)
-            |> put_share_removal_flash(ws, proj, dataset, count)
+            socket =
+              socket
+              |> assign(shares_rows: Shared.load_share_rows(), shares_error: nil)
+              |> put_share_removal_flash(ws, proj, dataset, count)
 
-          {:noreply, socket}
+            {:noreply, socket}
+          else
+            {:noreply,
+             assign(socket,
+               shares_error:
+                 "That scope belongs to another workspace. You can only manage the workspace you are in."
+             )}
+          end
 
         {:error, _} ->
           {:noreply, assign(socket, shares_error: "Could not parse that scope.")}
