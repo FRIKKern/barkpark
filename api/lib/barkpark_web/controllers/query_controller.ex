@@ -49,8 +49,16 @@ defmodule BarkparkWeb.QueryController do
         # every row — a typo'd op (?filter[status][bogus]=x) looked like it
         # filtered but didn't. Checked here so the reject beats the query.
         bad = invalid_filter_op(filter_map) ->
-          {field, op} = bad
-          {:error, {:invalid_filter_op, field, op}}
+          case bad do
+            # A documented operator whose value/shape can't be honoured carries
+            # its OWN message — the shared "unknown filter operator" wording
+            # contradicted itself for hasStrong/is/$or (see invalid_filter_op/1).
+            {:clause, message, details} ->
+              {:error, {:invalid_filter_clause, message, details}}
+
+            {field, op} ->
+              {:error, {:invalid_filter_op, field, op}}
+          end
 
         # WS-B MEDIUM-4: reject a filter/order that targets a field this caller may
         # not SEE — otherwise the WHERE/ORDER becomes an oracle to binary-search or
@@ -591,30 +599,54 @@ defmodule BarkparkWeb.QueryController do
   # it hits the catch-all and the filter is silently a no-op (returns every row).
   @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is)
 
-  # Range/comparison ops take a SCALAR bound param. Array-bracket syntax
-  # (`?filter[price][gt][]=1`) delivers a LIST, which `parse_number/1` can't read
-  # and Postgrex can't bind into a scalar SQL compare → a bare 500. Reject a
-  # non-scalar value here so it routes through the invalid_filter 422 envelope.
-  @scalar_value_ops ~w(gt gte lt lte)
+  # `in`/`nin` bind a LIST (normalize_filter_op/1 splits their comma form into
+  # one). EVERY OTHER op binds a SCALAR: array-bracket syntax
+  # (`?filter[price][gt][]=1`, `?filter[title][eq][]=a`) delivers a list, which
+  # `parse_number/1` can't read and Postgrex can't bind into a scalar SQL
+  # compare. `gt/gte/lt/lte` were guarded; `eq`/`neq`/`contains`/… were NOT, so
+  # `?filter[title][eq][]=a` raised an Ecto.Query.CastError and surfaced as a
+  # 400 `internal_error` reading "unknown error (Ecto.Query.CastError)" with a
+  # "Retry shortly" hint — a permanently malformed request dressed as a
+  # transient server fault. The rule is now stated once, from the list side.
+  @list_value_ops ~w(in nin)
 
-  # Returns {field, op} for the FIRST nested filter op that isn't a documented
-  # operator, or nil when every op is valid. A bare `filter[field]=value` scalar
-  # carries no op (it's `eq` sugar) and is always accepted.
+  # Returns nil when every clause is honourable, or the FIRST offence as either
+  #   * `{field, op}` — an operator outside @valid_filter_ops, rendered by
+  #     `{:invalid_filter_op, …}` ("unknown filter operator …"), or
+  #   * `{:clause, message, details}` — a documented operator whose VALUE or
+  #     SHAPE this route cannot honour, rendered verbatim by
+  #     `{:invalid_filter_clause, …}`.
   #
-  # `is` also needs its VALUE checked: apply_field_op/4 only has clauses for
-  # is+"null"/"notnull", so ?filter[status][is]=published (a plausible equality
-  # typo) hits the catch-all and SILENTLY returns every row — the same fail-open
-  # this guard exists to prevent, one level down. An out-of-range `is` value is
-  # reported as an offending {field, "is"}, routing through the invalid_filter 400.
+  # The split exists because one shared message was LYING. A malformed
+  # `hasStrong` value was reported as `unknown filter operator "hasStrong"` by
+  # a message that then listed hasStrong as valid, and `filter[$or][0][…]`
+  # reported `"0"` as the offending operator on field `"$or"` — the caller was
+  # told to fix the operator when the operator was fine (or when the whole
+  # boolean-group spelling is unsupported). Every value/shape refusal now says
+  # what is actually wrong and what to type instead.
+  #
+  # A bare `filter[field]=value` scalar carries no op (it's `eq` sugar) and is
+  # accepted; a bare LIST/MAP value is not (same CastError family).
   defp invalid_filter_op(filter_map) do
     Enum.find_value(filter_map, fn
+      # `$or`/`$and`: not fields, and this route has no boolean-group form. Checked
+      # BEFORE the operator scan so the group INDEX is never reported as an operator.
+      {"$" <> _ = field, _value} ->
+        {:clause,
+         "boolean filter groups are not supported on /v1/data/query: #{inspect(field)} " <>
+           "is read as a document field, not an operator. Repeat the filter param " <>
+           "(filter[]=a=1&filter[]=b=2) to AND conditions; there is no OR form.", %{field: field}}
+
       {field, %{} = ops} ->
         cond do
           op = Enum.find(Map.keys(ops), fn op -> op not in @valid_filter_ops end) ->
             {field, op}
 
           Map.has_key?(ops, "is") and Map.get(ops, "is") not in ["null", "notnull"] ->
-            {field, "is"}
+            {:clause,
+             "filter[#{field}][is] takes \"null\" or \"notnull\", got " <>
+               "#{inspect(Map.get(ops, "is"))}; for equality use filter[#{field}][eq]",
+             %{field: field, op: "is"}}
 
           # `hasStrong` needs its VALUE checked with the same grammar the SQL
           # arm parses (`<tag>:<min_strength>`, split at the LAST colon): a
@@ -623,25 +655,54 @@ defmodule BarkparkWeb.QueryController do
           # two callers (`Content.Query.parse_has_strong/1`).
           Map.has_key?(ops, "hasStrong") and
               Content.Query.parse_has_strong(Map.get(ops, "hasStrong")) == :error ->
-            {field, "hasStrong"}
+            {:clause,
+             "filter[#{field}][hasStrong] takes \"<tag>:<min_strength>\" " <>
+               "(e.g. \"epic:50\"), got #{inspect(Map.get(ops, "hasStrong"))}",
+             %{field: field, op: "hasStrong"}}
 
-          op = Enum.find(@scalar_value_ops, fn op -> non_scalar_op_value?(ops, op) end) ->
-            {field, op}
+          op = Enum.find(Map.keys(ops), &non_scalar_op_value?(ops, &1)) ->
+            {:clause,
+             "filter[#{field}][#{op}] takes a single value, not a list or object; " <>
+               "the list form filter[#{field}][#{op}][]=… is only valid for in/nin",
+             %{field: field, op: op}}
+
+          op = Enum.find(@list_value_ops, &non_list_op_value?(ops, &1)) ->
+            {:clause,
+             "filter[#{field}][#{op}] takes a comma list (a,b) or the repeated form " <>
+               "filter[#{field}][#{op}][]=a&filter[#{field}][#{op}][]=b, got " <>
+               "#{inspect(Map.get(ops, op))}", %{field: field, op: op}}
 
           true ->
             nil
         end
+
+      {field, value} when is_list(value) ->
+        {:clause,
+         "filter[#{field}] takes a single value; for membership use " <>
+           "filter[#{field}][in]=a,b", %{field: field}}
 
       {_field, _scalar} ->
         nil
     end)
   end
 
-  # True when `ops` carries `op` with a non-scalar value (a list from
-  # array-bracket syntax, or a nested map). A scalar string/number is fine.
+  # True when `ops` carries `op` with a value the op cannot bind: a list/map for
+  # a scalar op (array-bracket syntax or a nested container).
+  defp non_scalar_op_value?(_ops, op) when op in @list_value_ops, do: false
+
   defp non_scalar_op_value?(ops, op) do
     case Map.fetch(ops, op) do
       {:ok, v} -> is_list(v) or is_map(v)
+      :error -> false
+    end
+  end
+
+  # True when a list-binding op (`in`/`nin`) carries something that isn't a list
+  # — a nested object (`?filter[x][in][k]=v`), which `apply_field_op/4`'s
+  # is_list-guarded clause would skip straight past into a silent no-op.
+  defp non_list_op_value?(ops, op) do
+    case Map.fetch(ops, op) do
+      {:ok, v} -> not is_list(v)
       :error -> false
     end
   end
@@ -830,7 +891,82 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  defp normalize_filter_map(_), do: %{}
+  # A REPEATED filter param (`?filter[]=status=published&filter[]=title=Alpha`,
+  # what a repeated `bp doc query --filter` now emits) arrives from Plug as a
+  # LIST. It used to hit the `%{}` catch-all below and mean NO FILTER AT ALL —
+  # the one HTTP shape that still answered 200 with the UNFILTERED set, and
+  # structurally invisible to the invalid_filter_op guard because that guard
+  # inspects an empty map and finds nothing wrong with it (Gyldendal #16).
+  #
+  # Every element runs through the SAME parsers a lone filter param uses, and
+  # the results are AND-composed into one `field => ops` map — `apply_filter_map/2`
+  # already reduces map keys with AND, so composition needs no query-builder
+  # change. A single element that fails to parse fails the WHOLE request: half
+  # a filter is the silent over-return this clause exists to end.
+  #
+  # CONFLICT RULE (explicit, not last-wins): clauses on the SAME field merge
+  # when their operators differ (`price>10` + `price<20` → one field, two ops,
+  # ANDed). The same field with the SAME operator twice is REFUSED — under AND
+  # `title=a AND title=b` can never hold, so silently keeping either one would
+  # answer a question the caller did not ask. The refusal names `in` as the
+  # membership form they probably wanted. A bare scalar (eq sugar) is promoted
+  # to `%{"eq" => value}` only when it has to merge, so the common single-clause
+  # shape is byte-identical to before.
+  defp normalize_filter_map(list) when is_list(list) do
+    Enum.reduce_while(list, %{}, fn element, acc ->
+      with %{} = one <- normalize_filter_map(element),
+           %{} = merged <- merge_filter_clauses(acc, one) do
+        {:cont, merged}
+      else
+        {:error, _} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  # Sealed catch-all. It used to be `%{}` — an unrecognised filter param shape
+  # silently meant "no filter", so a request that asked to narrow got every row
+  # at 200 OK. Anything the clauses above don't recognise is now a 400 that
+  # names the three accepted spellings.
+  defp normalize_filter_map(other) do
+    {:error,
+     {:invalid_filter_clause,
+      "unsupported filter param shape #{inspect(other)}; use filter=field<op>value, " <>
+        "filter[field][op]=value, or a repeated filter[]=field<op>value (ANDed)",
+      %{filter: inspect(other)}}}
+  end
+
+  # Merge one element's clauses into the accumulated filter map. See the
+  # CONFLICT RULE above: differing ops on a field compose, a repeated op is a 400.
+  defp merge_filter_clauses(acc, one) do
+    Enum.reduce_while(one, acc, fn {field, clause}, acc ->
+      case Map.fetch(acc, field) do
+        :error ->
+          {:cont, Map.put(acc, field, clause)}
+
+        {:ok, existing} ->
+          existing_ops = as_filter_ops(existing)
+          new_ops = as_filter_ops(clause)
+
+          case Enum.find(Map.keys(new_ops), &Map.has_key?(existing_ops, &1)) do
+            nil ->
+              {:cont, Map.put(acc, field, Map.merge(existing_ops, new_ops))}
+
+            op ->
+              {:halt,
+               {:error,
+                {:invalid_filter_clause,
+                 "repeated filters are ANDed, so #{inspect(field)} cannot carry two " <>
+                   "#{inspect(op)} clauses — no row satisfies both; use " <>
+                   "filter=#{field} in a,b for membership", %{field: field, op: op}}}}
+          end
+      end
+    end)
+  end
+
+  # A bare scalar filter is `eq` sugar (apply_filter_map/2 applies it as eq);
+  # spell it out so two clauses on one field can be merged as ops.
+  defp as_filter_ops(%{} = ops), do: ops
+  defp as_filter_ops(scalar), do: %{"eq" => scalar}
 
   @doc false
   # Thin public wrapper exposing the pure flat-grammar parser for unit tests

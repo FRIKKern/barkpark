@@ -2888,3 +2888,58 @@ func TestSoleReadVerbRule(t *testing.T) {
 		t.Errorf("noVerbMsg must name the literal corrected command; got %q", msg)
 	}
 }
+
+// TestApplyQueryRepeatableFilterEmitsListForm pins the CLI half of Gyldendal
+// finding #16: two `--filter` clauses must reach the server as a LIST the API
+// AND-composes, not as a duplicate scalar key whose surviving value depends on
+// Plug's decode order (the same pair returned 3 rows or 17 depending purely on
+// argument order, at 200 OK, with no warning).
+//
+// MUTATION PROOF: drop the `f.Repeatable && len(vals) > 1` branch in applyQuery
+// and the two-value case reds with `filter=…&filter=…` (the ambiguous shape).
+func TestApplyQueryRepeatableFilterEmitsListForm(t *testing.T) {
+	cmd := manifest.Command{
+		Noun: "doc", Verb: "query", Paginated: true,
+		Flags: []manifest.Flag{
+			{Name: "filter", Type: "string", Repeatable: true},
+			{Name: "perspective", Type: "string"},
+		},
+	}
+	base := "https://api.barkpark.cloud/v1/data/query/production/post"
+
+	// Two clauses → the bracket list form, BOTH values preserved and ordered.
+	got := applyQuery(base, globals{}, cmd,
+		map[string][]string{"filter": {"status=published", "title=Alpha"}},
+		map[string]string{})
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("bad url: %v", err)
+	}
+	q := u.Query()
+	if q.Has("filter") {
+		t.Errorf("two --filter values must NOT ride as a duplicate scalar key; got %q", got)
+	}
+	list := q["filter[]"]
+	if len(list) != 2 || list[0] != "status=published" || list[1] != "title=Alpha" {
+		t.Errorf("both clauses must ride as filter[]; got %q (%v)", got, list)
+	}
+
+	// One clause → the plain scalar spelling, unchanged from before.
+	gotOne := applyQuery(base, globals{}, cmd,
+		map[string][]string{"filter": {"status=published"}}, map[string]string{})
+	u1, err := url.Parse(gotOne)
+	if err != nil {
+		t.Fatalf("bad url: %v", err)
+	}
+	if u1.Query().Get("filter") != "status=published" || u1.Query().Has("filter[]") {
+		t.Errorf("a single --filter must keep the plain scalar form; got %q", gotOne)
+	}
+
+	// A NON-repeatable flag is untouched by the list rule (no manifest flag
+	// declares repeatable today except set/filter, and only filter is a query param).
+	gotNonRep := applyQuery(base, globals{}, cmd,
+		map[string][]string{"perspective": {"drafts", "raw"}}, map[string]string{})
+	if un, _ := url.Parse(gotNonRep); un.Query().Has("perspective[]") {
+		t.Errorf("a non-repeatable flag must not switch to the list form; got %q", gotNonRep)
+	}
+}

@@ -799,8 +799,22 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 			continue
 		}
 		if vals, ok := flags[f.Name]; ok {
+			// A repeated flag given MORE THAN ONCE rides as the bracket list form
+			// (`filter[]=a&filter[]=b`) rather than a duplicate scalar key. Plug
+			// decodes a duplicate scalar key by keeping ONE value — which one
+			// depends on decode order, so `--filter a --filter b` silently
+			// answered a different question than it asked (Gyldendal #16: the
+			// same pair returned 3 rows or 17 depending purely on order, 200 OK,
+			// no warning). The list form reaches the server as a LIST, which
+			// QueryController.normalize_filter_map/1 AND-composes. A single
+			// value keeps the plain `name=v` spelling, so nothing that works
+			// today changes shape.
+			name := f.Name
+			if f.Repeatable && len(vals) > 1 {
+				name = f.Name + "[]"
+			}
 			for _, v := range vals {
-				q.Add(f.Name, v)
+				q.Add(name, v)
 			}
 		}
 	}

@@ -463,6 +463,21 @@ defmodule Barkpark.Content.Errors do
       details: %{filter: raw}
     }
 
+  # A filter clause that names a DOCUMENTED operator but whose value or shape
+  # this route cannot honour — a non-scalar `eq`, a malformed `hasStrong`
+  # value, an out-of-range `is`, a `$or` boolean group, two conflicting clauses
+  # on one field. Same "invalid_filter" code (so it inherits the registered
+  # @hints entry) as its siblings, but the MESSAGE is caller-supplied: the
+  # shared `invalid_filter_op` wording CONTRADICTED ITSELF here — a malformed
+  # `hasStrong` VALUE was reported as `unknown filter operator "hasStrong"` by
+  # a message that went on to list hasStrong among the valid operators, and a
+  # `filter[$or][0][…]` group reported `"0"` as the offending operator. Details
+  # keep `field`/`op` where they are meaningful, so a caller parsing the
+  # envelope reads the same keys `invalid_filter_op` emits.
+  defp build({:error, {:invalid_filter_clause, message, details}})
+       when is_binary(message) and is_map(details),
+       do: %{code: "invalid_filter", message: message, status: 400, details: details}
+
   # The legacy `/api/documents/:type?filter=...` surface's flat "field=value"
   # string parser (LegacyController.parse_legacy_filter/1). A non-empty string
   # that doesn't split into a field=value pair (e.g. "price>10") used to fall

@@ -907,8 +907,8 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "filter",
             "string",
-            "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'; or 'field hasStrong tag:min' (weighted-tag strength floor, e.g. tags hasStrong epic:50). An unparseable filter is a 400 invalid_filter, never silently ignored.",
-            repeatable: false
+            "field<op>value where op is = != > >= < <= ^= (starts) $= (ends) *= (contains) (e.g. status=published, slug^=2024-, title*=hello); or 'field in a,b,c' / 'field not in a,b,c'; or 'field is null' / 'field is not null'; or 'field hasStrong tag:min' (weighted-tag strength floor, e.g. tags hasStrong epic:50). Repeatable — every --filter is ANDed (two clauses on one field must use different operators). An unparseable filter is a 400 invalid_filter, never silently ignored.",
+            repeatable: true
           ),
           flag(
             "fields",
