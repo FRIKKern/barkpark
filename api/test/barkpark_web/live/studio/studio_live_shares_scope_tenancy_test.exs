@@ -85,6 +85,25 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
              "an admin of #{ws_a.slug} declared a public share over #{ws_b.slug}"
     end
 
+    test "cannot REVOKE a share over a DIFFERENT workspace (the availability mirror)", %{
+      conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b
+    } do
+      # Stand the victim share up directly, as an instance operator would.
+      {:ok, _} = Sharing.add_share("#{ws_b.slug}/default/#{@dataset}:papers:read")
+      assert Sharing.shared?(ws_b.slug, "default", @dataset, :papers)
+
+      {_user, conn} = account_admin_session!(conn, ws_a, "admin")
+      {:ok, view, _html} = mount_on(conn, ws_a, proj_a)
+
+      render_hook(view, "shares-remove", %{"scope" => "#{ws_b.slug}/default/#{@dataset}"})
+
+      assert Sharing.shared?(ws_b.slug, "default", @dataset, :papers),
+             "an admin of #{ws_a.slug} revoked #{ws_b.slug}'s share"
+    end
+
     test "CAN still declare a share over its OWN workspace (the guard is not a blanket deny)",
          %{conn: conn, ws_a: ws_a, proj_a: proj_a} do
       {_user, conn} = account_admin_session!(conn, ws_a, "admin")

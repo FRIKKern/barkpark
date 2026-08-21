@@ -136,14 +136,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
     if Caps.admin?(socket) do
       case Barkpark.Sharing.scope_triple(scope) do
         {:ok, {ws, proj, dataset}} ->
-          {:ok, count} = Barkpark.Sharing.remove_share(ws, proj, dataset)
+          # Same tenancy clamp as shares_add/2: `Caps.admin?/1` proves admin of
+          # the MOUNTED workspace, and the scope names a workspace of its own.
+          # Unclamped, an account admin of workspace A could REVOKE workspace
+          # B's share — the availability mirror of the disclosure hole.
+          # `declarable_scope?/2` splits on "/", so a bare slug passes through
+          # as its own first segment.
+          if declarable_scope?(socket, ws) do
+            {:ok, count} = Barkpark.Sharing.remove_share(ws, proj, dataset)
 
-          socket =
-            socket
-            |> assign(shares_rows: Shared.load_share_rows(), shares_error: nil)
-            |> put_share_removal_flash(ws, proj, dataset, count)
+            socket =
+              socket
+              |> assign(shares_rows: Shared.load_share_rows(), shares_error: nil)
+              |> put_share_removal_flash(ws, proj, dataset, count)
 
-          {:noreply, socket}
+            {:noreply, socket}
+          else
+            {:noreply,
+             assign(socket,
+               shares_error:
+                 "That scope belongs to another workspace. You can only manage the workspace you are in."
+             )}
+          end
 
         {:error, _} ->
           {:noreply, assign(socket, shares_error: "Could not parse that scope.")}
