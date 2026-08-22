@@ -374,8 +374,17 @@ cmd_preflight() {
   return "$rc"
 }
 
+# Print the header comment block. The end of the block is DERIVED — never a
+# hardcoded last line.
+#
+# It USED to be `sed -n '2,60p'`, and PDS-D717's retirement note broke it in
+# exactly the way a fixed window always eventually breaks: the header grew, the
+# USAGE block slid from :46 to :62, and `--help` silently stopped naming the
+# `watch` and `preflight` verbs. No error, no non-zero exit — it still printed
+# something, just not the part a reader came for. A re-anchored 60 -> 80 would
+# rot again on the next paragraph; deriving the boundary cannot.
 usage() {
-  sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
+  awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
 }
 
 main() {

@@ -73,7 +73,10 @@ defmodule Barkpark.PdsWindowSentinelTest do
   # false claim. Filed as task-2a8524af7df9eb4b.
   test "the sentinel's usage names all THREE verbs, and --help exits clean", ctx do
     {out, rc} =
-      System.cmd(ctx.bash, [ctx.sentinel, "--help"], cd: ctx.root, stderr_to_stdout: true)
+      System.cmd(ctx.bash, [Path.join(ctx.root, "scripts/pds-window-sentinel.sh"), "--help"],
+        cd: ctx.root,
+        stderr_to_stdout: true
+      )
 
     assert rc == 0,
            "expected `scripts/pds-window-sentinel.sh --help` to exit 0, got #{rc}.\n#{out}"
