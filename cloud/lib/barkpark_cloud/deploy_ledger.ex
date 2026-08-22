@@ -198,6 +198,23 @@ defmodule BarkparkCloud.DeployLedger do
     "UNCLASSIFIED"
   ]
 
+  # THE ABANDONMENT COHORT — a publish that was GIVEN UP ON, and the one
+  # deploy-reliability quantity no bucket swap can dilute, because it is an
+  # absolute COUNT and not a rate (charter D174). Every one of these rows is a
+  # publish that never happened and never will: the refusal chain hit its bound
+  # and the driver stopped retrying.
+  #
+  # DERIVED from `@classes` by the naming convention `abandoned_class/1` itself
+  # writes, never hand-listed beside it. A hand-list is a second place to forget,
+  # and the failure mode is the comforting direction: a fourth `ABANDONED_*`
+  # class added upstream would land OUTSIDE the cohort and the abandonment count
+  # would FALL while the fleet abandoned more — the same inversion
+  # `abandoned_class/1`'s own D8 arm was fixed to refuse. `deploy_ledger_test.exs`
+  # drives every shape through the public producer `Sites.Deploy.abandonment_reason/3`
+  # and asserts the derivation covers all of them, so the convention is a red at
+  # edit time rather than a comment.
+  @abandoned_classes Enum.filter(@classes, &String.starts_with?(&1, "ABANDONED_"))
+
   # Classes whose rows were never a real deploy ATTEMPT, and therefore never sit
   # in a rate denominator. Kept separate from `@classes` so a caller cannot fold
   # them in by iterating the taxonomy.
@@ -352,6 +369,45 @@ defmodule BarkparkCloud.DeployLedger do
   # percentage travels without saying what it is a percentage OF.
   @basis_attempted "attempted rows in the window: failed + deferred + live + in_flight + cancelled + residual (never-attempted tombstones excluded, D19)"
   @basis_failed "settled failed rows in the window — the failure numerator"
+
+  # THE TERMINAL BASIS — the denominator that names itself beside the attempted
+  # one (charter D170b/D172).
+  #
+  # `@basis_attempted` counts DEFERRALS, and a deferral has not decided anything
+  # yet: the box said "not now" and a rebuild was re-queued. It is a real
+  # attempt, so it belongs in `volume` (D9 — the mass must be RELOCATED, never
+  # deleted), and it never enters the failure numerator. The arithmetic
+  # consequence is that every deferral drives `failure_rate` toward zero, so a
+  # fleet that defers HARDER prints healthier while nothing about its outcomes
+  # improved. That is not a bug in the rate; it is the rate answering a different
+  # question than the one an operator reads it as.
+  #
+  # So the terminal rate rides BESIDE it rather than replacing it, over the rows
+  # that actually REACHED an outcome: failed + live. Both are published, both
+  # name their denominator, and the gap between them IS the deferral mass.
+  # Subtracting deferrals from `volume` instead is the forbidden repair: it reds
+  # the D9 relocation tripwire and the unnamed-deferral test, correctly, because
+  # it deletes a first-class counted outcome.
+  @basis_terminal "TERMINAL rows only: failed + live. Deferred, in-flight and cancelled rows are OUT of this denominator — they have not reached an outcome, so counting them (as `attempted` does) drives the published rate toward zero as the fleet defers more"
+
+  # WHAT THE ABANDONMENT COUNT IS, and — said out loud — what it is a LOWER
+  # BOUND on. The abandonment marker lives in the PROSE of `failure_reason`
+  # (`@abandoned`, anchored on `Sites.Deploy.abandonment_reason/3`), so a failed
+  # row that recorded NO reason at all cannot be tested for it: the predicate
+  # does not answer "no", it does not run. Those rows are counted BESIDE the
+  # number as `abandoned_unreadable`, never inside it and never silently dropped
+  # — an abandonment count of 0 with 37 unreadable rows and an abandonment count
+  # of 0 with none are different worlds, and a single integer cannot tell them
+  # apart.
+  # WHAT THE COUNT COUNTS, in the code rather than on the wire (a prose key
+  # nothing renders is dead weight; `abandoned_unreadable` IS the machine-
+  # readable form of the caveat below):
+  # publishes GIVEN UP ON: rows whose class is one of `ABANDONED_*` — the
+  # refusal chain hit its bound and the driver stopped retrying. An absolute
+  # COUNT, never a rate: no bucket swap can dilute it. It is a LOWER BOUND
+  # whenever `abandoned_unreadable` is non-zero, because the marker is prose in
+  # `failure_reason` and a failed row with no reason recorded cannot be tested
+  # for it at all
 
   ## ── The deferral WAIT (dr-w28-s4) ─────────────────────────────────────────
   #
@@ -1201,6 +1257,25 @@ defmodule BarkparkCloud.DeployLedger do
     # be absorbed by `live`.
     residual = volume - (failed + total(deferred) + live + in_flight + cancelled)
 
+    # THE TERMINAL DENOMINATOR, computed here and NAMED on the wire beside the
+    # attempted one. `deferred_total` is the gap between them, emitted as its own
+    # scalar rather than left for a reader to sum `deferred`'s class rows: the Go
+    # side already summed them client-side (`deployCensusDeferredTotal`), which
+    # is a second, drifting definition of the same number living on the far side
+    # of the wire.
+    deferred_total = total(deferred)
+    terminal = failed + live
+
+    # THE CROWN COUNT, and its own "I could not measure this" arm beside it.
+    # `abandoned` is the classifier's positive answer; `abandoned_unreadable`
+    # counts the failed rows the abandonment predicate could not RUN on, because
+    # its marker is prose in `failure_reason` and these rows recorded none
+    # (`classify/2`'s `classify(_stage, nil)` arm). Two keys, not one, because a
+    # zero that means "none happened" and a zero that means "nothing was legible"
+    # are different facts and the operator acts differently on each.
+    abandoned = total(Enum.filter(failed_rows, &(&1.class in @abandoned_classes)))
+    abandoned_unreadable = total(Enum.filter(failed_rows, &is_nil(&1.failure_reason)))
+
     not_attempted_rows = class_rows(not_attempted, total(not_attempted), @basis_attempted)
     sites = site_rows(attempted)
     straddled = straddled_boundary(from, to)
@@ -1218,9 +1293,29 @@ defmodule BarkparkCloud.DeployLedger do
       # blends two taxonomies. `live_rate` is deliberately NOT refused (D229).
       failure_rate:
         refuse_across_boundary(rate_basis(failed, volume, @basis_attempted), straddled),
+      # THE SAME NUMERATOR OVER THE TERMINAL DENOMINATOR (D170b/D172), ADDITIVE:
+      # `failure_rate` above is untouched and `volume` still counts every
+      # deferral, so nothing this key does can move the published number. It is
+      # refused across the vocabulary boundary for exactly the reason
+      # `failure_rate` is — `failed` is label-dependent (a box-busy 409 settled
+      # `failed` before the boundary and `deferred` after it), so a window that
+      # straddles blends two taxonomies in the numerator AND the denominator.
+      terminal_failure_rate:
+        refuse_across_boundary(rate_basis(failed, terminal, @basis_terminal), straddled),
       live_rate: rate_basis(live, volume, @basis_attempted),
       classes: refuse_class_rows(class_rows(failed_rows, failed, @basis_failed), straddled),
       deferred: class_rows(deferred, volume, @basis_attempted),
+      # The scalar the two rates differ by. NOT refused across the boundary: it
+      # is a COUNT of real rows, and D9's ruling is that counts stay while
+      # ratios go.
+      deferred_total: deferred_total,
+      # THE ABSOLUTE COUNT AND ITS COVERAGE, side by side. Neither is refused
+      # across the boundary for the same reason `deferred_total` is not: they
+      # are counts. `abandoned` is a LOWER BOUND whenever `abandoned_unreadable`
+      # is non-zero, and the wire says so by carrying both rather than by
+      # carrying a comment.
+      abandoned: abandoned,
+      abandoned_unreadable: abandoned_unreadable,
       not_attempted: not_attempted_rows,
       sites: Enum.take(sites, site_limit),
       # THE TRUNCATION MARKER. `site_limit` has always defaulted to 50 and has
@@ -1876,6 +1971,7 @@ defmodule BarkparkCloud.DeployLedger do
     {deferred, settled} = Enum.split_with(rows, &deferred?(&1.class))
     failed_rows = Enum.filter(settled, & &1.class)
     failed = total(failed_rows)
+    live = total(Enum.filter(settled, &(&1.status == "live")))
 
     %{
       site_id: site_id,
@@ -1886,8 +1982,15 @@ defmodule BarkparkCloud.DeployLedger do
       # uses (D257), never `volume - failed - deferred`. A subtraction would
       # fold in-flight and cancelled rows into `live` and report a site as
       # healthy on the strength of builds that never finished.
-      live: total(Enum.filter(settled, &(&1.status == "live"))),
+      live: live,
       failure_rate: rate_basis(failed, volume, @basis_attempted),
+      # THE PER-SITE TERMINAL RATE, beside the per-site published one and for the
+      # same reason the fleet carries both: the site whose 409s became deferrals
+      # is exactly the site whose `failure_rate` falls without one outcome
+      # changing, and the per-site row is where an operator goes to find WHICH
+      # site that was. A fleet-level pair with no per-site pair sends that reader
+      # back to the diluted number.
+      terminal_failure_rate: rate_basis(failed, failed + live, @basis_terminal),
       top_class: top_class(failed_rows)
     }
   end

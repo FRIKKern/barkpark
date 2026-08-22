@@ -379,6 +379,11 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("")
 	out.outf("%s", deployCensusHeadline(census))
 	out.outf("  basis: %s", deployCensusBasis(census))
+	// THE ONE QUANTITY NO BUCKET SWAP CAN DILUTE, printed beside the rates it
+	// cannot be reduced to. Every rate above is a ratio over a population the
+	// fleet's own labelling decides the size of; this is a count of publishes
+	// that are permanently gone.
+	out.outf("  %s", deployCensusAbandonment(census))
 	out.outf("")
 
 	boundaries := deployCensusBoundaries(census.Raw)
@@ -440,9 +445,9 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 			if s.TopClass != nil && strings.TrimSpace(*s.TopClass) != "" {
 				top = sanitizeCell(*s.TopClass)
 			}
-			out.outf("  %-38s %6d attempted  %9s live  %6d failed  %6d deferred  %-7s %s",
+			out.outf("  %-38s %6d attempted  %9s live  %6d failed  %6d deferred  %-7s %-9s %s",
 				sanitizeCell(s.SiteID), s.Volume, deployCensusSiteLive(s), s.Failed, s.Deferred,
-				deployCensusShare(s.FailureRate), top)
+				deployCensusShare(s.FailureRate), deployCensusSiteTerminal(s), top)
 		}
 		if n := len(census.Sites) - len(rows); n > 0 {
 			out.outf("  … and %d more (raise the display clamp with --sites 0)", n)
@@ -691,15 +696,71 @@ func deployCensusClassCount(rows []cloudclient.DeployCensusClass, class string) 
 	return 0
 }
 
-// deployCensusDeferredTotal sums the deferral class counts — the third cohort,
+// deployCensusDeferredTotal is the deferral cohort's size — the third cohort,
 // inside the volume and outside the failure numerator, which is why a reader
 // that prints only failed/attempted makes a relocated 409 mass look deleted.
+//
+// THE SERVER'S OWN COUNT WINS (dr-w12-s8). Summing Deferred's class rows here is
+// a SECOND definition of the number living on the far side of the wire, and it
+// is the definition that can be wrong without saying so: a control plane that
+// truncated, filtered or simply did not send the class rows makes this loop
+// answer a confident 0 for a fleet that deferred thousands. `deferred_total` is
+// the emitter's own arithmetic over the rows it actually folded, so it is
+// preferred whenever it is sent; the sum stays as the fallback for a control
+// plane that predates the key, because refusing to render anything there would
+// be a regression for every older CP.
 func deployCensusDeferredTotal(census cloudclient.DeployCensus) int {
+	if census.DeferredTotal != nil {
+		return *census.DeferredTotal
+	}
 	total := 0
 	for _, c := range census.Deferred {
 		total += c.Count
 	}
 	return total
+}
+
+// deployCensusSiteTerminal renders a site's TERMINAL failure rate — the same
+// numerator as the column beside it, over failed+live instead of over every
+// attempted row. The two columns differ by exactly this site's deferral mass,
+// which is the point: the site whose 409s became deferrals is the site whose
+// attempted-basis rate fell without one outcome changing, and reading only the
+// first column is how that site reads as a site that got healthy.
+//
+// A control plane that does not send it renders "t —", never a percentage and
+// never a blank: a blank column reads as 0% to a scanning eye.
+func deployCensusSiteTerminal(s cloudclient.DeployCensusSite) string {
+	if s.TerminalFailureRate == nil {
+		return "t —"
+	}
+	return "t " + deployCensusShare(*s.TerminalFailureRate)
+}
+
+// deployCensusAbandonment renders the ABSOLUTE COUNT of publishes given up on,
+// and — separately — how much of the population the count could not be taken
+// over. Three endings, and none of them is a bare zero:
+//
+//   - `abandoned` absent: this control plane does not count abandonments at all.
+//     Printing "0 abandoned" there would be a measurement nobody took;
+//   - present, with `abandoned_unreadable` non-zero: the number is a LOWER
+//     BOUND, and it says so with the size of the blind spot beside it. The
+//     abandonment marker is prose in `failure_reason` and those rows recorded
+//     none, so the predicate did not answer "no" — it did not run;
+//   - present and fully legible: the count, flat.
+//
+// It is a COUNT and never a rate on purpose (charter D174/D142): a rate over a
+// bucket the fleet can relabel is a number the fleet can improve without one
+// publish succeeding, and an abandoned publish is permanently lost either way.
+func deployCensusAbandonment(census cloudclient.DeployCensus) string {
+	if census.Abandoned == nil {
+		return "abandoned publishes: NOT COUNTED — this control plane does not measure them (absence, not zero)"
+	}
+	if census.AbandonedUnreadable != nil && *census.AbandonedUnreadable > 0 {
+		return fmt.Sprintf(
+			"abandoned publishes: %d or more — %d failed row(s) recorded no reason, so the abandonment marker could not be read on them (LOWER BOUND)",
+			*census.Abandoned, *census.AbandonedUnreadable)
+	}
+	return fmt.Sprintf("abandoned publishes: %d", *census.Abandoned)
 }
 
 // deployCensusPct renders a rate node as a percentage, or reports that it has

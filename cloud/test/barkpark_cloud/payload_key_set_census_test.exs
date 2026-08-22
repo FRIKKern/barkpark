@@ -1017,8 +1017,6 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — declared on the deployment decoder; `port` is emitted on site_json (router.ex:10657), never on a deployment row. Decodes to 0 forever."},
     {"site_deployment_json/3", :phantom, "runtime_target",
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
-    {"DeployLedger.census/3", :phantom, "terminal_failure_rate",
-     "dr-w16-bl-emit-terminal-failure-rate — THE EMITTER IS UNBUILT AND NOW OWNED. The row previously read \"PR #10014 carries the emitter\"; #10014 is CLOSED with mergedAt null, so that sentence pointed a reader at a dead branch and this hole had no owner at all. THE HEADLINE CASE: internal/cli/cloud_deploy_census_cmd.go:398 branches on nil here, so `bp cloud deployments` is permanently on its \"older control plane\" arm and cannot tell that from a genuinely older CP."},
     {"site_deployment_json/3", :unread, "refusal_phase",
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
     {"DeployLedger.census/3", :unread, "boundaries",
@@ -1303,7 +1301,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 151 -> 152: `runaway_procs` joined merge_pressure/2 — the box's long-running
   # ORPHANED processes, the one pressure key that answers WHO is spending the box
   # rather than HOW MUCH (the 2026-08-06 guerrilla runaway).
-  @emitted_pinned 152
+  #
+  # 152 -> 157 (dr-w12-s8): census/3 gains `terminal_failure_rate`,
+  # `deferred_total`, `abandoned` and `abandoned_unreadable`; site_row/2 gains
+  # `terminal_failure_rate`. FIVE, not four — the pin is a SUM OF PER-PAIR SET
+  # SIZES, so the same name emitted by two pairs counts twice here even though it
+  # is one name in the Go union below (which moves by three). MEASURED by the
+  # 999-technique on this branch, never summed: both pins set to 999 and the two
+  # refusals printed "157 emitted key(s) collected" and "289 json tag(s) found in
+  # internal/cloudclient".
+  @emitted_pinned 157
   # 275 -> 279: internal/cloudclient gained `runaway_procs` on Pressure plus the
   # RunawayProc row it decodes (`pid`, `elapsed_s`, `command`). FOUR, not five:
   # `cpu_percent` was already a name here (Pressure's host-CPU vital), so the new
@@ -1324,7 +1331,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # in the package and so ride free on the NAME union — they move the SITE
   # register below instead, four of them by crossing INTO it. 286 measured by
   # the 999-technique on this tree, never summed.
-  @go_tag_pinned 286
+  #
+  # 286 -> 289 (dr-w12-s8): DeployCensus gains `deferred_total`, `abandoned` and
+  # `abandoned_unreadable`. `terminal_failure_rate` also lands on
+  # DeployCensusSite in this slice and moves this pin by NOTHING — the name was
+  # already declared on DeployCensus, so it rides free on the NAME union and
+  # moves the SITE register below instead, crossing INTO it at 2. That is charter
+  # D260's shape and the exact reason the register exists. Measured by the
+  # 999-technique on this branch, never summed.
+  @go_tag_pinned 289
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1488,6 +1503,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
+    # dr-w12-s8: `terminal_failure_rate` crossed INTO this register. It was
+    # declared ONCE (DeployCensus, where it has been decoded and unemitted since
+    # dr-w8-s1) and is now declared on DeployCensusSite too, because the per-site
+    # rows emit it. `@go_tag_pinned` structurally CANNOT see that second site —
+    # the name was already in the union — so this row is the only guard that can
+    # notice it being deleted.
+    "terminal_failure_rate" => 2,
     "theme" => 2,
     "to" => 2,
     "token" => 2,

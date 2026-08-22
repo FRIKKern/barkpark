@@ -3272,6 +3272,364 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
   end
 
+  ## ── 4c. The terminal denominator, and abandonment as an absolute count ───
+
+  describe "census/3 — the rate names its TERMINAL denominator beside itself (dr-w12-s8)" do
+    setup do
+      {_user, team} = user_team()
+      %{site: site_fixture(team)}
+    end
+
+    # FIVE windows, one calendar day each, all of them a month clear of
+    # `@deferred_status_boundary` (2026-08-05) so nothing here is refused for
+    # straddling a vocabulary change. The CONTROL comes first and carries no
+    # deferrals at all; the four after it hold failures at 120 and live at 120
+    # and move NOTHING but the deferred cohort.
+    #
+    # That is the whole design: if the published rate falls across rows where
+    # the failure count, the success count and every outcome are byte-identical,
+    # the fall is not a fleet getting healthier. It is the denominator growing.
+    @dil_control {~U[2026-07-01 00:00:00Z], ~U[2026-07-02 00:00:00Z], 0}
+    @dil_rising [
+      {~U[2026-07-02 00:00:00Z], ~U[2026-07-03 00:00:00Z], 60},
+      {~U[2026-07-03 00:00:00Z], ~U[2026-07-04 00:00:00Z], 240},
+      {~U[2026-07-04 00:00:00Z], ~U[2026-07-05 00:00:00Z], 760},
+      {~U[2026-07-05 00:00:00Z], ~U[2026-07-06 00:00:00Z], 1560}
+    ]
+
+    @dil_failed 120
+    @dil_live 120
+
+    # HELD CONSTANT, and inserted through `Repo.insert_all` because the smallest
+    # window carries 240 rows and the largest 1,800 — 4,860 `Repo.insert!` round
+    # trips would be seconds of test time for no extra truth. The failures carry
+    # a REAL reason (`@doc_id`), never a nil one: a nil-reason failure is a row
+    # the abandonment predicate cannot be run on, and it would land in
+    # `abandoned_unreadable` and quietly contaminate the cohort this fixture is
+    # not about.
+    defp dilution_window!(site, from, deferred) do
+      rows =
+        Enum.map(1..@dil_failed, fn i ->
+          {"failed", "HEALTH", @doc_id, i}
+        end) ++
+          Enum.map(1..@dil_live, fn i ->
+            {"live", nil, nil, 2_000 + i}
+          end) ++
+          Enum.map(1..deferred//1, fn i ->
+            {"deferred", "PLAN", @r409_bare, 20_000 + i}
+          end)
+
+      entries =
+        Enum.map(rows, fn {status, stage, reason, offset} ->
+          at = usec(DateTime.add(from, offset, :second))
+
+          %{
+            id: Ecto.UUID.generate(),
+            site_id: site.id,
+            status: status,
+            stage: stage,
+            failure_reason: reason,
+            environment: "production",
+            inserted_at: at,
+            updated_at: at
+          }
+        end)
+
+      Repo.insert_all(Deployment, entries)
+    end
+
+    defp dilution_reading!(site, {from, to, deferred}) do
+      dilution_window!(site, from, deferred)
+      census = DeployLedger.census(from, to)
+
+      %{
+        deferred: deferred,
+        volume: census.volume,
+        failed: census.failed,
+        live: census.live,
+        deferred_total: census.deferred_total,
+        published: census.failure_rate.pct,
+        published_sample: census.failure_rate.sample,
+        terminal: census.terminal_failure_rate.pct,
+        terminal_sample: census.terminal_failure_rate.sample,
+        terminal_basis: census.terminal_failure_rate.basis
+      }
+    end
+
+    defp dilution_series(readings) do
+      Enum.map_join(readings, "\n", fn r ->
+        "  deferred=#{String.pad_leading(to_string(r.deferred), 5)}  " <>
+          "failed=#{r.failed}  live=#{r.live}  " <>
+          "published=#{r.published}% of #{r.published_sample} attempted  " <>
+          "terminal=#{r.terminal}% of #{r.terminal_sample} terminal"
+      end)
+    end
+
+    # THE HEADLINE. This is the defect the whole slice exists for, as a
+    # measurement rather than as an argument.
+    test "the published rate FALLS on rising deferrals while the terminal rate stays FLAT", %{
+      site: site
+    } do
+      control = dilution_reading!(site, @dil_control)
+      rising = Enum.map(@dil_rising, &dilution_reading!(site, &1))
+      all = [control | rising]
+
+      # THE EVIDENCE, PRINTED. A rate series argued in prose is a rate series
+      # nobody can check; this one is on stdout of every green run.
+      IO.puts(
+        "\n[dr-w12-s8 dilution series] failures and live HELD CONSTANT:\n" <> dilution_series(all)
+      )
+
+      # NOTHING MOVED BUT THE DEFERRALS. Asserted, not assumed — a fixture that
+      # let `failed` or `live` drift would make the falling rate honest and this
+      # whole test vacuous.
+      for r <- all do
+        assert r.failed == @dil_failed
+        assert r.live == @dil_live
+        assert r.deferred_total == r.deferred
+        assert r.volume == @dil_failed + @dil_live + r.deferred
+      end
+
+      # THE CONTROL: with no deferrals the two denominators ARE the same
+      # population, so the two rates converge exactly. Any divergence here would
+      # mean the terminal rate is measuring something other than what it says.
+      assert control.deferred_total == 0
+      assert control.published == control.terminal
+      assert control.published_sample == control.terminal_sample
+
+      # STRICTLY FALLING, published. Pairwise, so the message names the pair.
+      published = Enum.map(rising, & &1.published)
+
+      for {a, b} <- Enum.zip(published, tl(published)) do
+        assert b < a,
+               "the published rate did not fall from #{a}% to #{b}% — the dilution this " <>
+                 "slice measures has stopped happening, and the terminal rate beside it is " <>
+                 "answering a question nobody has\n" <> dilution_series(all)
+      end
+
+      # FLAT, terminal — the same number in every window, control included,
+      # because failures and live never moved.
+      assert Enum.uniq(Enum.map(all, & &1.terminal)) == [50.0]
+
+      # …and the two are the SAME arithmetic where the cohorts agree, so the
+      # terminal rate is not a second, drifting definition of failure.
+      assert control.terminal == 50.0
+
+      # THE GAP IS THE DEFERRAL MASS, said on the wire. `basis` is what stops a
+      # reader taking the smaller number for the better one.
+      assert List.last(rising).published < 10.0
+      assert List.last(rising).terminal == 50.0
+      assert List.last(rising).terminal_basis =~ "TERMINAL rows only: failed + live"
+
+      assert DeployLedger.census(@dil_control |> elem(0), @dil_control |> elem(1)).failure_rate.basis =~
+               "attempted rows in the window"
+    end
+
+    # THE PER-SITE TWIN. A fleet pair with no per-site pair sends the reader who
+    # asks "which site?" straight back to the diluted number.
+    test "the per-site row carries the same pair, and its two rates differ by that site's deferrals",
+         %{site: site} do
+      {from, to, deferred} = {~U[2026-07-08 00:00:00Z], ~U[2026-07-09 00:00:00Z], 760}
+      dilution_window!(site, from, deferred)
+
+      assert [row] = DeployLedger.census(from, to).sites
+
+      assert row.failed == @dil_failed
+      assert row.live == @dil_live
+      assert row.deferred == deferred
+      assert row.volume == @dil_failed + @dil_live + deferred
+
+      assert row.failure_rate.pct == 12.0
+      assert row.failure_rate.sample == @dil_failed + @dil_live + deferred
+      assert row.terminal_failure_rate.pct == 50.0
+      assert row.terminal_failure_rate.sample == @dil_failed + @dil_live
+      assert row.terminal_failure_rate.basis =~ "TERMINAL rows only: failed + live"
+
+      # The two denominators differ by EXACTLY the deferrals, which is the one
+      # relationship a reader has to be able to reconstruct.
+      assert row.failure_rate.sample - row.terminal_failure_rate.sample == row.deferred
+    end
+
+    # THE ADDITION IS ADDITIVE, asserted rather than trusted. D9's ruling is that
+    # a deferral is RELOCATED, never deleted — so `volume` must still count it
+    # and `failure_rate` must be byte-identical to what it was before this slice.
+    test "volume still counts deferrals and the published rate is untouched", %{site: site} do
+      {from, to, deferred} = {~U[2026-07-10 00:00:00Z], ~U[2026-07-11 00:00:00Z], 240}
+      dilution_window!(site, from, deferred)
+      census = DeployLedger.census(from, to)
+
+      assert census.volume == @dil_failed + @dil_live + deferred
+      assert census.failure_rate.sample == census.volume
+      assert census.failure_rate.basis =~ "failed + deferred + live"
+      assert census.deferred_total == deferred
+
+      # The deferrals are still on their own line, with their share over the
+      # ATTEMPTED population — untouched by the new key beside them.
+      assert [%{class: "BOX_BUSY_DEFERRED", count: ^deferred}] =
+               Enum.map(census.deferred, &Map.take(&1, [:class, :count]))
+    end
+
+    ## ── Abandonment: an absolute count, with its own blind spot beside it ──
+
+    @ab_from ~U[2026-07-15 00:00:00Z]
+    @ab_to ~U[2026-07-16 00:00:00Z]
+
+    # THE BOX'S OWN REFUSAL LINES, DERIVED from the deferred corpus above by
+    # stripping the shared re-queue clause — never re-typed. The abandonment
+    # sentence and the deferral sentence are the SAME box refusal with different
+    # tails, and typing the head twice is how the two corpora drift apart.
+    @fence_capacity String.replace_suffix(@d_capacity, @requeued, "")
+    @fence_busy @r409_coded
+    @fence_bare @r409_bare
+    @fence_unknown String.replace_suffix(@d_unknown_code, @requeued, "")
+
+    # THE FENCE FIRING, BUILT THROUGH THE PUBLIC PRODUCER. `abandonment_reason/3`
+    # is the only place in the tree that writes the terminal sentence, and the
+    # classifier's only handle on an abandoned row is that prose — so a fixture
+    # built from a literal would keep passing through a reword that silently
+    # degraded every abandoned row back to `BOX_BUSY_409`.
+    defp fence_firing!(site, cause_line, rounds, offset) do
+      cause =
+        DeployLedger.classify(%{status: "deferred", stage: "PLAN", failure_reason: cause_line})
+
+      deployment!(site, %{
+        stage: "PLAN",
+        failure_reason: Deploy.abandonment_reason(cause_line, rounds, cause),
+        inserted_at: DateTime.add(@ab_from, offset, :second)
+      })
+    end
+
+    test "a fence firing MOVES the abandonment count, and it is a COUNT and not a rate", %{
+      site: site
+    } do
+      # BEFORE: ordinary failures and deferrals, no chain terminal anywhere.
+      for i <- 1..6 do
+        deployment!(site, %{
+          stage: "HEALTH",
+          failure_reason: @doc_id,
+          inserted_at: DateTime.add(@ab_from, i, :second)
+        })
+      end
+
+      before = DeployLedger.census(@ab_from, @ab_to)
+
+      assert before.abandoned == 0
+      # A REAL ZERO, and it says so: nothing here was illegible.
+      assert before.abandoned_unreadable == 0
+
+      # THE FIRINGS — one per shape the box actually sends, each a publish given
+      # up on after its chain hit the bound.
+      fence_firing!(site, @fence_capacity, 12, 100)
+      fence_firing!(site, @fence_busy, 6, 200)
+      fence_firing!(site, @fence_bare, 6, 300)
+
+      after_firing = DeployLedger.census(@ab_from, @ab_to)
+
+      IO.puts(
+        "\n[dr-w12-s8 abandonment] count moved #{before.abandoned} -> #{after_firing.abandoned} " <>
+          "(unreadable #{before.abandoned_unreadable} -> #{after_firing.abandoned_unreadable}, " <>
+          "failed #{before.failed} -> #{after_firing.failed})"
+      )
+
+      # IT MOVED, and by the number of publishes that were abandoned.
+      assert after_firing.abandoned == 3
+      assert after_firing.abandoned > before.abandoned
+
+      # Each firing landed in the failure numerator too — a given-up publish IS a
+      # failure. The COUNT is the crown because it is the one quantity a bucket
+      # swap cannot touch: three publishes are gone whatever the fleet relabels.
+      assert after_firing.failed == before.failed + 3
+
+      # AND IT IS A COUNT. No abandonment RATE is emitted anywhere — D142's
+      # refusal, as a property of the payload rather than as a promise.
+      refute Map.has_key?(after_firing, :abandonment_rate)
+      refute Map.has_key?(after_firing, :abandoned_rate)
+      assert is_integer(after_firing.abandoned)
+    end
+
+    # THE ARM THE WHOLE EPIC KEEPS RE-LEARNING: absent and zero are different
+    # worlds. A failed row that recorded no reason at all cannot be TESTED for
+    # abandonment — the marker is prose in `failure_reason` — so the predicate
+    # does not answer "no", it does not run. If that row were counted as "not
+    # abandoned", the count would be a confident understatement with nothing
+    # anywhere saying so.
+    test "an illegible failed row raises `abandoned_unreadable`, never lowers `abandoned`", %{
+      site: site
+    } do
+      fence_firing!(site, @fence_capacity, 12, 10)
+
+      legible = DeployLedger.census(@ab_from, @ab_to)
+      assert legible.abandoned == 1
+      assert legible.abandoned_unreadable == 0
+
+      # Four failed rows with NOTHING recorded about why.
+      for i <- 1..4 do
+        deployment!(site, %{
+          stage: nil,
+          failure_reason: nil,
+          inserted_at: DateTime.add(@ab_from, 500 + i, :second)
+        })
+      end
+
+      blinded = DeployLedger.census(@ab_from, @ab_to)
+
+      # THE COUNT DOES NOT MOVE — those rows said nothing, so they are not
+      # evidence of an abandonment and they are not evidence against one.
+      assert blinded.abandoned == 1
+      # …and the size of the blind spot is on the wire beside it, so `1` reads as
+      # "at least 1" rather than as "exactly 1".
+      assert blinded.abandoned_unreadable == 4
+
+      # The distinction this pair exists for, stated as the three-way it is:
+      #   0 / 0  — none happened
+      #   0 / N  — nothing legible said so; 0 is a LOWER BOUND
+      # (the third, "the control plane does not count them at all", is the Go
+      # pointer's nil and is asserted in internal/cli's own suite.)
+      empty = DeployLedger.census(~U[2026-07-20 00:00:00Z], ~U[2026-07-21 00:00:00Z])
+      assert empty.abandoned == 0
+      assert empty.abandoned_unreadable == 0
+
+      refute {blinded.abandoned, blinded.abandoned_unreadable} ==
+               {empty.abandoned, empty.abandoned_unreadable}
+    end
+
+    # THE COHORT IS DERIVED, NOT HAND-LISTED — and this is what proves the
+    # derivation covers the producer. A fourth `ABANDONED_*` class minted by
+    # `abandoned_class/1` and forgotten in a hand-list would make the count FALL
+    # while the fleet abandoned more, which is the inversion `abandoned_class/1`
+    # was itself fixed to refuse.
+    test "every class the abandonment producer can mint is INSIDE the count", %{site: site} do
+      lines = [@fence_capacity, @fence_busy, @fence_bare, @fence_unknown]
+
+      minted =
+        for {line, i} <- Enum.with_index(lines) do
+          fence_firing!(site, line, 12, 1_000 + i * 10)
+
+          cause =
+            DeployLedger.classify(%{status: "deferred", stage: "PLAN", failure_reason: line})
+
+          DeployLedger.classify("PLAN", Deploy.abandonment_reason(line, 12, cause))
+        end
+
+      # The producer really does mint more than one class here, or this test
+      # would be a green that proves nothing.
+      assert length(Enum.uniq(minted)) >= 3
+
+      census = DeployLedger.census(@ab_from, @ab_to)
+
+      # EVERY minted class is in the count, and the count is exactly their sum —
+      # so a class that fell out of the cohort reds here rather than shrinking a
+      # number nobody is watching.
+      counted =
+        census.classes
+        |> Enum.filter(&(&1.class in minted))
+        |> Enum.reduce(0, fn c, acc -> acc + c.count end)
+
+      assert counted == length(lines)
+      assert census.abandoned == length(lines)
+    end
+  end
+
   ## ── 5. The delivery clock ────────────────────────────────────────────────
 
   describe "delivery/3 — a percentile that can refuse, and a cohort still waiting" do
