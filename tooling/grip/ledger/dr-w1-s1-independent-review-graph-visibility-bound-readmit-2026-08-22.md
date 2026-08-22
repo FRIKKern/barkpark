@@ -27,7 +27,7 @@ controller' hole." **I do not agree that that is where the hole is.**
 
 `:none` would be a hole if the clamp depended on the plug. It does not. The
 filter sits at the derivation chokepoint —
-`TasksController.derive_graph_corpus/2` (`tasks_controller.ex:1221`) calls
+`TasksController.derive_graph_corpus/2` (`tasks_controller.ex:1224`) calls
 `visible_schemas/2` on the schema list *before* `all_types` is derived — so it
 holds whether or not `Plugs.PublicRead` is mounted on the route. Putting the
 clamp behind the plug would have been the weaker arrangement. Placement is
