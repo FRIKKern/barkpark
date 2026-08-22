@@ -60,7 +60,9 @@ defmodule BarkparkCloud.Repo.Migrations.AddApplyArmingToBarkparks do
 
   ## Why this ALTER is safe on the live table
 
-  `barkparks` is a control-plane table of EIGHT rows. Both columns are NULLABLE
+  `barkparks` is a small control-plane table — the last census of prod counted
+  EIGHT rows (charter D789, 2026-08-09; not re-measured here, and this slice does
+  not depend on the number). Both columns are NULLABLE
   with NO default, so the `ALTER` is a catalog-only update — no table rewrite, no
   per-row work. No index: the only reader is a full roll-up over the whole table
   (`GET /v1/operator/fleet` maps `Registry.all_barkparks/0`), and an index with
