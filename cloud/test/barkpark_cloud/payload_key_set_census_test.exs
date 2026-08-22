@@ -652,7 +652,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # name on this row — `site_id`, `name`, `slug`, `environment`,
     # `never_covered` — ALREADY exists as a json tag somewhere in
     # internal/cloudclient. So the file-global UNREAD arm and the exact
-    # `@go_tag_floor` would BOTH stay green with `DeployCoverageSite` declared
+    # `@go_tag_pinned` would BOTH stay green with `DeployCoverageSite` declared
     # carrying no fields at all: the control plane would emit the full named
     # tail, `encoding/json` would drop every name on the floor, and nothing in
     # this file could say so. The pair is what makes the PHANTOM arm bite the
@@ -1025,13 +1025,21 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # — DELETE the allowlist row" arm reds. That arm is DESIGNED to force this
   # co-edit in the same commit, and a Go-only PR never runs the Cloud job, so
   # deferring it would have merged green and reddened main.
-  @emitted_floor 151
-  @go_tag_floor 275
+  # NAMED `_pinned`, NOT `_floor`, AND THE RENAME IS THE POINT. Both are asserted
+  # with `==` (:1274 and :1341 below), so neither is a lower bound and calling
+  # them floors invited exactly one wrong repair: convert to `>=` and call it a
+  # cleanup. THE `==` IS LOAD-BEARING IN BOTH DIRECTIONS — fewer means the
+  # SCANNER broke, more means a key landed unannounced — and `>=` has already
+  # been tried and already let a defect through: #10474 shipped one tag of
+  # slack under it, which the refusal at :1341 still records. `@corpus_floor`
+  # below keeps its name because it IS a `>=` ratchet.
+  @emitted_pinned 151
+  @go_tag_pinned 275
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
   #
-  # `@go_tag_floor` counts NAMES, so it is a census of VOCABULARY and not of
+  # `@go_tag_pinned` counts NAMES, so it is a census of VOCABULARY and not of
   # coverage: a name declared at twelve sites can lose eleven of them and the
   # count never moves. MUTATION-PROVED on this tree, not predicted — turning
   # `SiteDeleteResult.Status` (`internal/cloudclient/client.go`, `json:"status"`,
@@ -1046,20 +1054,20 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # sampling. Every tag site in internal/cloudclient falls in exactly one class:
   #
   #   * a site of a name declared ONCE (172 of them) — deleting it deletes the
-  #     NAME, so `@go_tag_floor`'s `==` already reds. Not registered here.
+  #     NAME, so `@go_tag_pinned`'s `==` already reds. Not registered here.
   #   * a site of a name declared MORE THAN ONCE (101 names, 348 sites) — this is
   #     the blind class, and each row pins the exact multiplicity, so losing ONE
   #     of twelve `status` sites reds BY NAME.
   #
   # 172 + 348 = 520, and the two classes are asserted to reconstruct exactly
-  # that total from `@go_tag_floor` and this register, so a register edited
+  # that total from `@go_tag_pinned` and this register, so a register edited
   # without the floor (or the reverse) reds rather than drifting. No tag site in
   # the package can be deleted without a red — that is the claim, and the
   # partition test is what makes it checkable rather than aspirational.
   #
   # MERGE HAZARD, the same one the floors already carry: these are `==`. A PR
   # that declares a tag whose NAME already exists in internal/cloudclient does
-  # NOT move `@go_tag_floor` (it rides free on the union) but DOES move a row
+  # NOT move `@go_tag_pinned` (it rides free on the union) but DOES move a row
   # here — `team` and `scope` rode free in W19 S1, `sha`/`count`/`limit` in
   # W26 S3. Re-measure by the 999-technique after the other PR lands; never sum.
   #
@@ -1069,7 +1077,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `artifact_url`, `image_tag` and `detail` on `SiteDeployment`. All four names
   # ALREADY existed package-wide — declared by `Deployment`, `SiteStage` and
   # `WebhookProxyError` — which is precisely the laundering #12763 exists to
-  # end, so `@go_tag_floor` correctly did NOT move (273, both before and after)
+  # end, so `@go_tag_pinned` correctly did NOT move (273, both before and after)
   # and both PRs were green on their own bases. The SITE total went 516 -> 520
   # and main went red on the second merge. Re-measured here, never summed:
   # `artifact_url` 1 -> 2, `git_ref` 1 -> 2, `image_tag` 1 -> 2 (three names
@@ -1077,7 +1085,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # register grows by three ROWS as well as by sites) and `detail` 7 -> 8.
   #
   # Read that as the arm working rather than as the arm being fragile: a
-  # four-site change that `@go_tag_floor` structurally cannot see is exactly the
+  # four-site change that `@go_tag_pinned` structurally cannot see is exactly the
   # population this register was built to measure, and the first real one it met
   # it caught. The cost is real too and is not hidden: a name-union floor can be
   # bumped by whichever PR lands first, and this register cannot — it must be
@@ -1198,9 +1206,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
-  # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
-  # still worth exactly the same 14 vitals — the three new keys are in the base
-  # literal, so they are visible to both walkers).
+  # measured. THE PROSE HERE USED TO RESTATE THE PAIR AS "59 keys with the :when
+  # unwrap, 45 without" and both had since moved to 62 and 46 — a sentence
+  # describing two attributes that sat four lines below it, wrong, with nothing
+  # able to notice. It states the INVARIANT instead now, which is what the pair
+  # is for and what does not go stale: the `:when` unwrap is worth exactly the
+  # 14 vitals, and the two counts must move INDEPENDENTLY — `blind` tracking
+  # `seeing` would destroy the blind-spot measurement silently and in the green
+  # direction. The numbers live below, once each, and the PIN CO-EDIT arm reads
+  # them from there.
   @barkpark_family_keys 62
   @barkpark_family_keys_blind 46
 
@@ -1271,8 +1285,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   end
 
   test "ANTI-VACUITY FLOOR: a neutered walker REFUSES rather than reporting a clean tree" do
-    assert total_emitted([]) == @emitted_floor,
-           "#{total_emitted([])} emitted key(s) collected, floor is EXACTLY #{@emitted_floor} — " <>
+    assert total_emitted([]) == @emitted_pinned,
+           "#{total_emitted([])} emitted key(s) collected, the PIN is EXACTLY #{@emitted_pinned} — " <>
              "the EXTRACTOR is broken, not the payload shrunk. Check Extract.clauses/4 " <>
              "(a new def syntax it does not match) before touching the floor."
 
@@ -1281,11 +1295,86 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     assert_raise ExUnit.AssertionError, fn ->
       broken = total_emitted(walker: :broken)
 
-      assert broken == @emitted_floor,
-             "#{broken} emitted key(s) collected, floor is EXACTLY #{@emitted_floor}"
+      assert broken == @emitted_pinned,
+             "#{broken} emitted key(s) collected, the PIN is EXACTLY #{@emitted_pinned}"
     end
 
     assert total_emitted(walker: :broken) == 0
+  end
+
+  # THE PINS ARE REPORTED TOGETHER, IN ONE RUN. Before this arm the four `==`
+  # pins arrived in ROUNDS: `@go_tag_pinned` moves the moment a Go field lands,
+  # while `@emitted_pinned` and the `@barkpark_family_keys` pair only move once
+  # the EMIT side is corrected — so a two-field change cost four passes of the
+  # 999-technique, and the last two ambushed a builder who believed they were
+  # done. This measures all four in ONE pass and names EVERY one that moved,
+  # with the value to write, so the co-edit is one edit and not a treasure hunt.
+  #
+  # IT MEASURES; IT DOES NOT DERIVE. Every pin stays a committed literal. A
+  # bound computed from the corpus it bounds can never red — which is why the
+  # sibling census's line ANCHOR could be resolved from source and these four
+  # cannot. This arm changes WHEN you learn, never WHETHER the gate can fail:
+  # delete it and all four per-pin arms still red exactly as before.
+  test "PIN CO-EDIT: every moved pin is named in ONE run, with the value to write" do
+    src = Go.source(@cloudclient)
+
+    seeing = MapSet.size(emitted(barkpark()).keys) + MapSet.size(emitted(pressure()).keys)
+
+    blind =
+      MapSet.size(emitted(barkpark(), unwrap_when: false).keys) +
+        MapSet.size(emitted(pressure(), unwrap_when: false).keys)
+
+    measured = [
+      {"@go_tag_pinned", @go_tag_pinned, MapSet.size(Go.all_tags(src)),
+       "json tag NAMES in internal/cloudclient"},
+      {"@emitted_pinned", @emitted_pinned, total_emitted([]), "emitted key(s) collected"},
+      {"@barkpark_family_keys", @barkpark_family_keys, seeing,
+       "barkpark_json family keys the :when-unwrapping walker sees"},
+      {"@barkpark_family_keys_blind", @barkpark_family_keys_blind, blind,
+       "the same family through the walker that puts the attribute — INDEPENDENT of the line above"}
+    ]
+
+    # THE REGISTER IS A MAP, SO IT IS REPORTED AS MOVED-OR-NOT AND NEVER AS A
+    # NUMBER. A multiplicity can change with `map_size` unmoved, and the SITE
+    # arm below already prints the exact four-way diff (lost / gained / newly
+    # duplicated / no longer duplicated) — this line exists so the co-edit list
+    # is HONEST about including it, rather than promising "every moved pin" and
+    # silently meaning "every moved SCALAR pin", which is the same over-promise
+    # this whole arm was written to stop.
+    register_moved? =
+      Go.tag_sites(src) |> Enum.filter(fn {_n, c} -> c > 1 end) |> Map.new() != @go_tag_sites
+
+    register_note =
+      if register_moved?,
+        do:
+          "\n               @go_tag_sites                MOVED   (a map — see " <>
+            "`SITE: every tag name declared more than once...` for the four-way diff)",
+        else: ""
+
+    moved = Enum.reject(measured, fn {_, pinned, actual, _} -> pinned == actual end)
+
+    assert moved == [] and not register_moved?,
+           """
+           #{length(moved)} of #{length(measured)} scalar pin(s) no longer match this tree#{if register_moved?, do: ", and the SITE register moved too", else: ""}.
+
+           #{Enum.map_join(moved, "\n", fn {name, pinned, actual, what} -> "               #{String.pad_trailing(name, 28)} #{pinned} -> #{actual}   (#{what})" end)}#{register_note}
+
+           EVERY moved pin is listed above — that is this arm's whole job. The
+           per-pin arms below red one at a time and in ROUNDS, because some of
+           these only move after the emit side is corrected; you should not have
+           to discover the second half after believing you were done.
+
+           The right-hand column is MEASURED on this tree by the same expression
+           the per-pin arm uses, so it is the 999-technique's answer without the
+           999 round trip. Write those values, in the SAME commit as the change
+           that moved them, and say in the comment WHY each moved.
+
+           DO NOT convert these to `>=` to make this go away. The `==` catches
+           FEWER (the scanner broke) and MORE (a key landed unannounced); `>=`
+           was tried and let #10474 ship a tag of slack. And do not compute any
+           of them from the corpus — a bound derived from what it bounds can
+           never red.
+           """
   end
 
   test "UNRESOLVABLE KEYS RED rather than drop — proven against merge_job_status/4 itself" do
@@ -1338,9 +1427,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       assert MapSet.size(tags) > 0, "#{name} carries no json tags"
     end
 
-    assert MapSet.size(Go.all_tags(src)) == @go_tag_floor,
+    assert MapSet.size(Go.all_tags(src)) == @go_tag_pinned,
            "#{MapSet.size(Go.all_tags(src))} json tag(s) found in internal/cloudclient, " <>
-             "floor is EXACTLY #{@go_tag_floor} — either the TAG SCANNER is broken (fewer) or " <>
+             "the PIN is EXACTLY #{@go_tag_pinned} — either the TAG SCANNER is broken (fewer) or " <>
              "a tag landed without the floor following it (more, which is how #10474 shipped " <>
              "one tag of slack under the old `>=`)."
   end
@@ -1509,7 +1598,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       on disk:  #{Enum.join(Go.sources(@cloudclient), ", ")}
 
     Every multiplicity in `@go_tag_sites` is exact only for the pinned set. Re-measure
-    the register and `@go_tag_floor` against the new corpus before pinning it here —
+    the register and `@go_tag_pinned` against the new corpus before pinning it here —
     a widened corpus that keeps the old numbers is an arm measuring something else.
     """
   end
@@ -1543,7 +1632,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
         #{fmt_sites(moved(@go_tag_sites, actual, &>/2))}
 
       sites GAINED (a new declaration of an existing name — it rides free on the
-      NAME union, so `@go_tag_floor` does not move; bump the row here):
+      NAME union, so `@go_tag_pinned` does not move; bump the row here):
         #{fmt_sites(moved(@go_tag_sites, actual, &</2))}
 
       newly duplicated (a name that was declared once and now is not):
@@ -1557,17 +1646,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
   test "SITE: the name floor and the multiplicity register PARTITION every tag site" do
     # The totality claim, made checkable. Sites of once-declared names are
-    # covered by `@go_tag_floor`; sites of repeatedly-declared names by
+    # covered by `@go_tag_pinned`; sites of repeatedly-declared names by
     # `@go_tag_sites`. If those two classes reconstruct the measured site total,
     # nothing in the package is outside both — so no tag site can be deleted
     # without one of the two arms reddening. If they do not, one of the two
     # numbers was edited without the other and the coverage claim is void.
-    singles = @go_tag_floor - map_size(@go_tag_sites)
+    singles = @go_tag_pinned - map_size(@go_tag_sites)
     expected = singles + Enum.sum(Map.values(@go_tag_sites))
     actual = Enum.sum(Map.values(Go.tag_sites(Go.source(@cloudclient))))
 
     assert actual == expected, """
-    #{actual} tag site(s) found in internal/cloudclient, but `@go_tag_floor` (#{@go_tag_floor} names)
+    #{actual} tag site(s) found in internal/cloudclient, but `@go_tag_pinned` (#{@go_tag_pinned} names)
     and `@go_tag_sites` (#{map_size(@go_tag_sites)} duplicated names, #{Enum.sum(Map.values(@go_tag_sites))} sites)
     together account for #{expected}.
 
@@ -1580,7 +1669,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # of 1 would be a site claimed by BOTH classes and counted twice above.
     assert Enum.filter(@go_tag_sites, fn {_name, count} -> count < 2 end) == [],
            "`@go_tag_sites` registers a name at fewer than 2 sites — that site belongs to " <>
-             "`@go_tag_floor`'s class, and registering it here double-counts the partition."
+             "`@go_tag_pinned`'s class, and registering it here double-counts the partition."
   end
 
   # ---------------------------------------------------------------------------
