@@ -29,16 +29,32 @@
 #   * It never invokes the export. Exit status 0 means "the draw is clear" —
 #     the fire is a separate, deliberate, human-owned act.
 #
-# THE FIRE PREDICATE (PDS-D193) — all FOUR legs must hold:
+# THE FIRE PREDICATE (PDS-D193, as amended by PDS-D717) — THREE legs must hold:
 #   (i)   MemAvailable_MiB >= 2300      [kB / 1024, NEVER / 1000]
-#   (ii)  beam VmSwap      <= 100000 kB
 #   (iii) the `bp-site-build-*` running-unit listing is EMPTY
 #   (iv)  exactly ONE of barkpark-slot@blue / @green reads active
 #
-# Leg (iii) is new in wave 10 and it is the one legs (i)/(ii) cannot see: a
-# running site build depressed MemAvailable by 379 MiB and 496 MiB in two
-# independent 90 s steps while VmSwap stayed FLAT and BEAM RSS actually FELL.
-# A predicate built only on the BEAM's own numbers is blind to it.
+# LEG (ii) — beam VmSwap <= 100000 kB — IS RETIRED, and the leg numbering keeps
+# its hole on purpose so every transcript that cites "leg (iii)" still means the
+# build leg. PDS-D717 (charter, on main) rules that VmSwap was never a sound
+# proxy for export-time OOM risk: the DEPLOYED streaming spill engine's export
+# demand is 98.16 MiB (the RSS peak-minus-baseline delta measured by the frozen
+# harness's own 1 Hz sampler during wave 16's real 1.4 GB export, PDS-D276),
+# while a VmSwap ceiling gates how much of the BEAM's OWN address space is paged
+# out — a residency fact about the resident process, which does not bound a
+# ~98 MiB allocation by a DIFFERENT consumer. Measured: leg (ii) cleared 1 of
+# 661 draws across two independent instruments (1/61 wave-10, 0/600 PDS-D229),
+# and the crown fired and PASSED with no swap leg at all (run 5abf6afd, 11 PASS
+# / 0 ABORT / 0 FAIL). VmSwap is still SAMPLED and still written to every TSV
+# row — recorded, never gated, the same posture PDS-D246 set for BEAM warmth.
+#
+# Leg (iii) is new in wave 10 and it is the one leg (i) cannot see: a running
+# site build depressed MemAvailable by 379 MiB and 496 MiB in two independent
+# 90 s steps while VmSwap stayed FLAT and BEAM RSS actually FELL. A predicate
+# built only on the BEAM's own numbers is blind to it — and PDS-D227 later
+# measured the build channel as the dominant term (floor cleared 99.19% of
+# build-idle draws against 9.3% build-busy), which is why leg (iii) survives
+# the retirement of leg (ii) rather than falling with it.
 #
 # EVERY sample is appended to the TSV log — fire or stand-down. A predicate
 # that has never refused is not a predicate; the refusals ARE the dataset.
@@ -62,13 +78,12 @@ LOG="${PDS_SENTINEL_LOG:-/private/tmp/pds-window-sentinel.tsv}"
 INTERVAL="${PDS_SENTINEL_INTERVAL:-30}"
 MAX_SAMPLES="${PDS_SENTINEL_MAX_SAMPLES:-1}"
 
-# The two numeric legs. Both may be TIGHTENED, never loosened — the script
-# refuses to run against a softened predicate rather than quietly measuring a
-# weaker claim than the one the transcript will make.
+# The one numeric leg. It may be TIGHTENED, never loosened — the script refuses
+# to run against a softened predicate rather than quietly measuring a weaker
+# claim than the one the transcript will make. PDS_SENTINEL_SWAP_CEIL_KB is GONE
+# with leg (ii) (PDS-D717); it is not read, and setting it does nothing.
 MEM_FLOOR_MIB="${PDS_SENTINEL_MEM_FLOOR_MIB:-2300}"
-SWAP_CEIL_KB="${PDS_SENTINEL_SWAP_CEIL_KB:-100000}"
 MEM_FLOOR_LAW=2300
-SWAP_CEIL_LAW=100000
 
 FREEZE_BLOB="${PDS_FREEZE_BLOB:-e219e97ccf7f33797c86a2b84d998d599b6bda31}"
 HARNESS_PATH="scripts/pds-pull-proof.sh"
@@ -81,9 +96,9 @@ die() { printf 'sentinel: %s\n' "$*" >&2; exit 2; }
 
 # ── the guard on the guard ───────────────────────────────────────────────────
 # A sentinel whose own floor can be dialled down is a rubber stamp with extra
-# steps. Loosening either leg is a hard stop, not a warning.
+# steps. Loosening the floor is a hard stop, not a warning.
 #
-# Both legs are validated as integers FIRST. `[ abc -lt 2300 ]` is a bash error
+# The floor is validated as an integer FIRST. `[ abc -lt 2300 ]` is a bash error
 # that evaluates FALSE, so a non-numeric floor would slip past the comparison
 # below and then silently disable leg (i) at the comparison in take_sample —
 # the exact bypass this function exists to prevent. Same for the cadence knobs:
@@ -91,15 +106,11 @@ die() { printf 'sentinel: %s\n' "$*" >&2; exit 2; }
 # executes, and the run reports a STAND-DOWN it never measured.
 check_predicate_integrity() {
   is_int "$MEM_FLOOR_MIB" || die "PDS_SENTINEL_MEM_FLOOR_MIB='$MEM_FLOOR_MIB' is not an integer. The predicate is not evaluable."
-  is_int "$SWAP_CEIL_KB"  || die "PDS_SENTINEL_SWAP_CEIL_KB='$SWAP_CEIL_KB' is not an integer. The predicate is not evaluable."
   is_int "$INTERVAL"      || die "--interval / PDS_SENTINEL_INTERVAL='$INTERVAL' is not an integer."
   is_int "$MAX_SAMPLES"   || die "--max-samples / PDS_SENTINEL_MAX_SAMPLES='$MAX_SAMPLES' is not an integer."
   [ "$MAX_SAMPLES" -ge 1 ] || die "--max-samples must be >= 1; '$MAX_SAMPLES' would report a stand-down with zero draws taken."
   if [ "$MEM_FLOOR_MIB" -lt "$MEM_FLOOR_LAW" ]; then
     die "refusing to run: PDS_SENTINEL_MEM_FLOOR_MIB=$MEM_FLOOR_MIB is BELOW the D193 floor of $MEM_FLOOR_LAW MiB. The predicate tightens only."
-  fi
-  if [ "$SWAP_CEIL_KB" -gt "$SWAP_CEIL_LAW" ]; then
-    die "refusing to run: PDS_SENTINEL_SWAP_CEIL_KB=$SWAP_CEIL_KB is ABOVE the D193 ceiling of $SWAP_CEIL_LAW kB. The predicate tightens only."
   fi
 }
 
@@ -213,13 +224,10 @@ take_sample() { # $1 = sample index (for display only)
     pass=0; legs="${legs}i:mem(${mem_mib}<${MEM_FLOOR_MIB}MiB) "
   fi
 
-  # (ii) BEAM swap pressure. UNKNOWN is a FAIL: an unreadable leg has not been
-  # shown to hold, and this predicate does not pass on absence of evidence.
-  if ! is_int "$vmswap_kb"; then
-    pass=0; legs="${legs}ii:vmswap(UNREADABLE) "
-  elif [ "$vmswap_kb" -gt "$SWAP_CEIL_KB" ]; then
-    pass=0; legs="${legs}ii:vmswap(${vmswap_kb}>${SWAP_CEIL_KB}kB) "
-  fi
+  # (ii) RETIRED by PDS-D717. beam VmSwap is still sampled and still written to
+  # the TSV — the refusals are the dataset — but it no longer gates. It was
+  # never a sound proxy for export-time OOM risk, and it cleared 1 of 661 draws.
+  # Do NOT re-add it here without overturning D717 in the charter first.
 
   # (iii) no site build running — the invisible depressor
   if [ -n "$builds" ]; then
@@ -263,7 +271,8 @@ cmd_watch() {
   check_predicate_integrity
   local i=1 rc probe_fails=0
   say "sentinel: polling $SSH_HOST every ${INTERVAL}s, up to ${MAX_SAMPLES} sample(s)"
-  say "sentinel: predicate — mem >= ${MEM_FLOOR_MIB} MiB · vmswap <= ${SWAP_CEIL_KB} kB · no bp-site-build-* running · exactly one active slot"
+  say "sentinel: predicate — mem >= ${MEM_FLOOR_MIB} MiB · no bp-site-build-* running · exactly one active slot"
+  say "sentinel: vmswap is RECORDED, never gated (PDS-D717 retired leg (ii))"
   say "sentinel: log -> $LOG"
   rule
   while [ "$i" -le "$MAX_SAMPLES" ]; do
