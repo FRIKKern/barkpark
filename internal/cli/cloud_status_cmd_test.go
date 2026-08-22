@@ -235,6 +235,39 @@ func TestFillingFence(t *testing.T) {
 	}
 }
 
+// TestTheBuildPlaneBoxDoesNotRankHealthy asserts the VERDICT, not a predicate,
+// for the box this whole axis is named after — measured twice, live:
+//
+//	2026-08-06  df -P -k /  →  38G total, 34G used, 1.8G free, 96%
+//	2026-08-22  df -P -k /  →  37G total, 36G used, 285M free, 100%
+//
+// "Does the box rank correctly" is exactly where a green about the wrong
+// subject gets believed, so this asserts the two things an operator actually
+// reads — the BUCKET and the LABEL — and fails if either says the machine is
+// fine. It deliberately duplicates coverage TestFillingFence already has at
+// 95%: this one is pinned to real readings off a real host, so a future rung
+// re-ordering that happens to spare 95% cannot quietly re-heal 96 or 100.
+func TestTheBuildPlaneBoxDoesNotRankHealthy(t *testing.T) {
+	for _, pct := range []float64{96, 100} {
+		box := pressed("build-plane", &cloudclient.Pressure{
+			CPUCores: f64(2), Load15: f64(0.4),
+			DiskUsedPercent: f64(pct), ReportedAt: strPtr(seen),
+		})
+		status := attentionStatus(box)
+		if bucket := attentionBucket(status); bucket == "healthy" {
+			t.Errorf("a box at %v%% disk ranked %q/%q — a verdict that says \"fine\" about a "+
+				"machine with under 2 GB of headroom is worse than no verdict, because the "+
+				"operator reads it and looks somewhere else", pct, status, bucket)
+		}
+		if status != "filling" {
+			t.Errorf("a box at %v%% disk ranked %q, want \"filling\"", pct, status)
+		}
+		if reason := fillingReason(box); !strings.Contains(reason, "fills at 90") {
+			t.Errorf("fillingReason = %q, want the fence NAMED so the number is not a bare assertion", reason)
+		}
+	}
+}
+
 // TestFillingThresholdMatchesUsageMeter is the cross-surface tripwire the rung
 // exists for: `bp cloud status` must call a box `filling` at exactly the disk
 // percentage `bp cloud usage` already calls over_limit. It reads the LIVE

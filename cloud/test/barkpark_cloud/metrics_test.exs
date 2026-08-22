@@ -676,6 +676,99 @@ defmodule BarkparkCloud.MetricsTest do
       end
     end
 
+    test "a root that is NOT ON THIS BOX lands as `absent` with no bytes — never a zero" do
+      # The build-plane box's real payload shape, 2026-08-22: it has no
+      # /opt/barkpark/sites at all, while 25 GB sits in two roots the sites axis
+      # structurally cannot see.
+      space =
+        Telemetry.normalize_space(%{
+          "sites_dir" => "/opt/barkpark/sites",
+          "sites_bytes" => -1,
+          "consumer_roots" => [
+            %{
+              "path" => "/var/lib/containerd",
+              "status" => "read",
+              "bytes" => 15_032_385_536,
+              "count" => 11,
+              "top" => [
+                %{"name" => "io.containerd.snapshotter.v1.overlayfs", "bytes" => 12_884_901_888}
+              ]
+            },
+            %{
+              "path" => "/var/lib/barkpark-builder",
+              "status" => "read",
+              "bytes" => 11_811_160_064,
+              "count" => 2,
+              "top" => [%{"name" => "images", "bytes" => 11_811_160_064}]
+            },
+            %{
+              "path" => "/opt/barkpark/sites",
+              "status" => "absent",
+              "bytes" => -1,
+              "count" => -1,
+              "top" => nil
+            }
+          ]
+        })
+
+      assert length(space.consumer_roots) == 3,
+             "the ABSENT root must SURVIVE normalization — a dropped row is indistinguishable " <>
+               "from a root that holds nothing, which is the same lie in a quieter form"
+
+      absent = Enum.find(space.consumer_roots, &(&1.path == "/opt/barkpark/sites"))
+      assert absent.status == "absent"
+
+      refute absent.bytes == 0,
+             "an absent root normalized to 0 bytes claims an empty tree about a directory " <>
+               "that is not on the box — the exact reading that let a 100%-full builder rank healthy"
+
+      # Verbatim, like every other number here: the view words the sentinel.
+      assert absent.bytes == -1
+      assert absent.count == -1
+      assert absent.top == nil
+
+      containerd = Enum.find(space.consumer_roots, &(&1.path == "/var/lib/containerd"))
+      assert containerd.status == "read"
+      assert containerd.bytes == 15_032_385_536
+
+      assert containerd.top == [
+               %{name: "io.containerd.snapshotter.v1.overlayfs", bytes: 12_884_901_888}
+             ]
+
+      builder = Enum.find(space.consumer_roots, &(&1.path == "/var/lib/barkpark-builder"))
+
+      assert containerd.bytes + builder.bytes == 26_843_545_600,
+             "the 25 GiB the sites axis could not see must arrive whole"
+    end
+
+    test "consumer_roots: absent list vs. empty list, unknown status, and a pathless row" do
+      # No field at all (an agent predating the axis) is NOT MEASURED...
+      assert Telemetry.normalize_space(%{}).consumer_roots == nil
+      assert Telemetry.normalize_space(%{"consumer_roots" => nil}).consumer_roots == nil
+      assert Telemetry.normalize_space(%{"consumer_roots" => "nope"}).consumer_roots == nil
+
+      # ...while an agent told to measure NO roots sends [] and keeps it. An
+      # operator resolves those two differently (upgrade the box vs. change the
+      # unit file), so they must not collapse.
+      assert Telemetry.normalize_space(%{"consumer_roots" => []}).consumer_roots == []
+
+      space =
+        Telemetry.normalize_space(%{
+          "consumer_roots" => [
+            # No path: cannot be rendered, cannot be acted on, dropped.
+            %{"status" => "read", "bytes" => 5},
+            "garbage",
+            # A word this control plane does not know degrades to `unmeasured` —
+            # the only safe direction. Coercing toward "read" or "absent" would
+            # assert a measurement nobody made.
+            %{"path" => "/var/lib/snapd", "status" => "brand-new-word", "bytes" => -1}
+          ]
+        })
+
+      assert Enum.map(space.consumer_roots, & &1.path) == ["/var/lib/snapd"]
+      assert hd(space.consumer_roots).status == "unmeasured"
+    end
+
     test "a malformed consumer row is dropped, never rendered nameless or sizeless" do
       space =
         Telemetry.normalize_space(%{

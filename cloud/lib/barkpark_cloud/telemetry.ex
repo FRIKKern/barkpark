@@ -172,6 +172,29 @@ defmodule BarkparkCloud.Telemetry do
           # the measured claim "this tree is empty".
           count: number | nil
         },
+        # The extra disk-consumer roots — the BUILD PLANE's trees, which the
+        # sites axis structurally cannot see (a builder box has no
+        # /opt/barkpark/sites at all). Each row carries its own `status`, and
+        # the three values are a closed set:
+        #
+        #   "read"       — the walk completed; bytes/count are real
+        #   "absent"     — the root is NOT ON THIS BOX. A measurement, not a
+        #                  failure, and the reason this field is shaped this
+        #                  way: an absent root rendered as 0 bytes claims an
+        #                  empty tree about a directory that is not there.
+        #   "unmeasured" — we tried and could not read it
+        #
+        # bytes/count keep the agent's -1 sentinel verbatim for the two
+        # non-read states, like every other number here.
+        consumer_roots: [
+          %{
+            path: String.t(),
+            status: String.t(),
+            bytes: number | nil,
+            top: [%{name: String.t(), bytes: number}] | nil,
+            count: number | nil
+          }
+        ] | nil,
         reported_at: String.t() | nil   # the event's inserted_at, RFC3339
       }
 
@@ -206,11 +229,54 @@ defmodule BarkparkCloud.Telemetry do
         # -1, and only a view is allowed to word either.
         count: num_or_nil(Map.get(payload, "sites_count"))
       },
+      consumer_roots: consumer_roots(Map.get(payload, "consumer_roots")),
       reported_at: nil
     }
   end
 
   def normalize_space(_), do: normalize_space(%{})
+
+  # The consumer-root list. A non-list (an agent predating the axis, a null, a
+  # corrupt payload) is nil — NOT MEASURED — while an agent that was told to
+  # measure no roots sends `[]` and keeps it, because "this box was configured
+  # to look nowhere" and "this box has not been upgraded" are different facts an
+  # operator resolves differently.
+  defp consumer_roots(rows) when is_list(rows), do: Enum.flat_map(rows, &consumer_root/1)
+  defp consumer_roots(_), do: nil
+
+  # One root. The PATH is required: a row that cannot say which root it is
+  # cannot be rendered and cannot be acted on, so it is dropped rather than
+  # emitted as an anonymous number.
+  #
+  # `status` is normalized against the closed set and anything unrecognised
+  # becomes "unmeasured" — the only safe direction. Passing an unknown word
+  # through would let a future agent word invent a state every surface renders
+  # by falling off the end of its branch table, and coercing toward "read" or
+  # "absent" would assert a measurement nobody made.
+  defp consumer_root(row) when is_map(row) do
+    case str_or_nil(Map.get(row, "path")) do
+      nil ->
+        []
+
+      path ->
+        [
+          %{
+            path: path,
+            status: consumer_root_status(str_or_nil(Map.get(row, "status"))),
+            # Verbatim, -1 sentinel included. The view words it; the normalizer
+            # never "helpfully" zeroes an unmeasured tree.
+            bytes: num_or_nil(Map.get(row, "bytes")),
+            top: relation_sizes(Map.get(row, "top")),
+            count: num_or_nil(Map.get(row, "count"))
+          }
+        ]
+    end
+  end
+
+  defp consumer_root(_), do: []
+
+  defp consumer_root_status(status) when status in ["read", "absent", "unmeasured"], do: status
+  defp consumer_root_status(_), do: "unmeasured"
 
   # Roll the health-gate array up to {pass, total, failing}. A non-list (absent
   # / malformed) yields the zero roll-up — never nil arithmetic downstream.

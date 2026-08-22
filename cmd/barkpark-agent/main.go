@@ -52,6 +52,7 @@ func run(args []string) int {
 		printCmds  = fs.Bool("print-allowed-commands", false, "print the approved command allowlist and exit")
 		sitesDir   = fs.String("sites-dir", "", "sites root measured per-slug (empty resolves BARKPARK_SITES_DIR, then "+defaultSitesDir+")")
 		spaceEvery = fs.Duration("space-interval", agent.DefaultSpaceInterval, "cadence of the space report (its own, slower than --interval)")
+		consumers  = fs.String("consumer-roots", "", "comma-separated extra disk-consumer roots (empty resolves BARKPARK_CONSUMER_ROOTS, then the built-in build-plane defaults; \"none\" measures none)")
 	)
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -82,6 +83,12 @@ func run(args []string) int {
 	// rather than silent (charter D59).
 	resolvedSitesDir := resolveSitesDir(*sitesDir, os.Getenv("BARKPARK_SITES_DIR"))
 
+	// The consumer roots are resolved here for the SAME reason the sites root
+	// is: they travel in the payload as configured, so a box measuring the
+	// wrong trees says which trees it measured instead of just reporting a
+	// small number confidently.
+	resolvedConsumerRoots := resolveConsumerRoots(*consumers, os.Getenv("BARKPARK_CONSUMER_ROOTS"))
+
 	a := &agent.Agent{
 		ControlURL: *controlURL,
 		Token:      token,
@@ -101,6 +108,14 @@ func run(args []string) int {
 			PGTopRelationsProbe: agent.NewPGTopRelationsProbe(*checkout),
 			SitesDir:            resolvedSitesDir,
 			SitesProbe:          agent.NewSitesSpaceProbe(resolvedSitesDir),
+			// The build plane's disk. SitesDir does not exist on a builder box
+			// at all, so without these roots the space payload names ~1 GiB of
+			// a 34 GiB problem on the one box whose job is filling a disk.
+			// Presence is a stat, not a du-error guess: a root that is not here
+			// reports `absent`, never 0 bytes.
+			ConsumerRoots:      resolvedConsumerRoots,
+			ConsumerRootExists: agent.NewConsumerRootExists(),
+			ConsumerRootProbe:  agent.NewConsumerRootProbe(),
 		},
 		ReportProbes: agent.ReportConfig{
 			Checkout:  *checkout,
@@ -202,6 +217,48 @@ func resolveSitesDir(flagValue, envValue string) string {
 		return d
 	}
 	return defaultSitesDir
+}
+
+// consumerRootsNone is the explicit opt-OUT. It exists because "" already
+// means "use the defaults", so without a spelled word there is no way for an
+// operator to say "measure no extra roots" — and silently overloading an empty
+// string to mean both would make the defaults unremovable.
+const consumerRootsNone = "none"
+
+// resolveConsumerRoots picks the extra consumer roots the space probe will
+// walk, in the same precedence order resolveSitesDir uses: the explicit
+// --consumer-roots flag, then BARKPARK_CONSUMER_ROOTS, then
+// agent.DefaultConsumerRoots.
+//
+// The value is a comma-separated path list. Blank entries are dropped (a
+// trailing comma in a unit file must not become a walk of ""), and the literal
+// "none" — at either source — returns nil, which the payload renders as "this
+// agent measured no consumer roots" rather than as an empty fleet of them.
+//
+// It deliberately does NOT validate that the paths exist: a root that is not
+// on this box is a REPORTABLE FACT (ConsumerRootAbsent), not a configuration
+// error to be silently dropped here. Dropping it here is precisely how a wrong
+// root becomes invisible.
+func resolveConsumerRoots(flagValue, envValue string) []string {
+	for _, raw := range []string{flagValue, envValue} {
+		v := strings.TrimSpace(raw)
+		if v == "" {
+			continue
+		}
+		if strings.EqualFold(v, consumerRootsNone) {
+			return nil
+		}
+		var roots []string
+		for _, part := range strings.Split(v, ",") {
+			if p := strings.TrimSpace(part); p != "" {
+				roots = append(roots, p)
+			}
+		}
+		// An all-blank value ("  ,  ,") states no roots and is not a fallback
+		// cue — falling back there would ignore an operator who spoke.
+		return roots
+	}
+	return agent.DefaultConsumerRoots
 }
 
 // readToken reads, trims, and validates the agent token from path. An empty

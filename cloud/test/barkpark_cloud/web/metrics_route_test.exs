@@ -422,6 +422,74 @@ defmodule BarkparkCloud.Web.MetricsRouteTest do
       assert payload["sites_top"] == [%{"slug" => "guerrilla", "bytes" => 3_000_000_000}]
     end
 
+    test "a BUILD-PLANE payload lands whole and the metrics envelope names its 25 GB" do
+      # END TO END on the box's real shape (91.98.139.58, 2026-08-22): no
+      # /opt/barkpark/sites at all, 14 GB in containerd and 11 GB in the
+      # builder. Before consumer roots existed this payload named ~1 GB of a
+      # 37 GB filesystem on the one box whose job is to fill a disk.
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      body =
+        space_body(%{
+          "sites_bytes" => -1,
+          "sites_top" => nil,
+          "sites_count" => -1,
+          "consumer_roots" => [
+            %{
+              "path" => "/var/lib/containerd",
+              "status" => "read",
+              "bytes" => 15_032_385_536,
+              "count" => 11,
+              "top" => [
+                %{"name" => "io.containerd.snapshotter.v1.overlayfs", "bytes" => 12_884_901_888}
+              ]
+            },
+            %{
+              "path" => "/var/lib/barkpark-builder",
+              "status" => "read",
+              "bytes" => 11_811_160_064,
+              "count" => 2,
+              "top" => [%{"name" => "images", "bytes" => 11_811_160_064}]
+            },
+            %{
+              "path" => "/opt/barkpark/sites",
+              "status" => "absent",
+              "bytes" => -1,
+              "count" => -1,
+              "top" => nil
+            }
+          ]
+        })
+
+      conn = call(:post, "/v1/agent/space", body: body, token: agent_token(bp))
+      assert conn.status == 200
+
+      roots =
+        metrics(call(:get, "/v1/barkparks/#{bp.id}/metrics", token: session_token(user)))
+        |> get_in(["space", "consumer_roots"])
+
+      assert length(roots) == 3,
+             "the ABSENT root must reach the surface — a row that vanishes on the way " <>
+               "is indistinguishable from a root that holds nothing"
+
+      by_path = Map.new(roots, &{&1["path"], &1})
+
+      assert by_path["/var/lib/containerd"]["bytes"] +
+               by_path["/var/lib/barkpark-builder"]["bytes"] == 26_843_545_600
+
+      assert by_path["/var/lib/containerd"]["top"] == [
+               %{"name" => "io.containerd.snapshotter.v1.overlayfs", "bytes" => 12_884_901_888}
+             ]
+
+      absent = by_path["/opt/barkpark/sites"]
+      assert absent["status"] == "absent"
+
+      refute absent["bytes"] == 0,
+             "the root the probe was originally pointed at is NOT on this box; rendering it " <>
+               "as 0 bytes is the claim that let a 100%-full builder rank healthy"
+    end
+
     test "the recorded type is HARDCODED — a lying `type` in the body cannot steer it" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
