@@ -1,0 +1,742 @@
+{
+  "_comment": "Generated from the live corpus by the PDS merge_gate audit, 2026-08-22. must_warn: the marker opens the criterion — the nag MUST fire when merge_gate is absent. must_stay_silent: EVERY non-leading marker-bearing criterion in the corpus, including genuine gates phrased with a label prefix. The nag must never fire on these: a census found position and prose misclassify in opposite directions, so the nag is deliberately narrow and a miss is free.",
+  "counts": {
+    "corpus_leading": 1742,
+    "corpus_non_leading": 106,
+    "sampled_leading": 40
+  },
+  "must_warn": [
+    {
+      "doc": "task-1f8bcab494ac0a3a",
+      "index": 6,
+      "criterion": "MERGE-GATED (LEAD CLOSES): the PR is merged to main with Console gate green and the merge SHA recorded."
+    },
+    {
+      "doc": "scc-w3-reopen-adopt",
+      "index": 5,
+      "criterion": "MERGE-GATED (lead closes): PR containing this slice merged to main"
+    },
+    {
+      "doc": "scc-w3-send-honesty",
+      "index": 7,
+      "criterion": "MERGE-GATED (lead closes): PR containing this slice merged to main"
+    },
+    {
+      "doc": "scc-w3-images",
+      "index": 6,
+      "criterion": "MERGE-GATED (lead closes): PR containing this slice merged to main"
+    },
+    {
+      "doc": "bp-login-ux-w2-live-e2e",
+      "index": 7,
+      "criterion": "MERGE-GATED (lead closes): evidence PR (screenshots only, body Task: bp-login-ux-w2-live-e2e) merged"
+    },
+    {
+      "doc": "bp-login-ux-w2-activate-spa-polish",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged (body Task: bp-login-ux-w2-activate-spa-polish) + post-deploy live smoke - a real browser on https://barkpark.cloud/activate/?code=TEST-1234 reaches the code/approve flow, not the dashboard"
+    },
+    {
+      "doc": "bp-login-ux-w2-front-door-plug",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged in a tight window + post-deploy live smoke - curl -sI https://www.barkpark.cloud/activate?code=TEST-1234 shows 308 to https://barkpark.cloud/activate?code=TEST-1234, curl https://barkpark.cloud/up healthy, blue/green deploy completed"
+    },
+    {
+      "doc": "bp-login-ux-w3-2fa-login-card",
+      "index": 5,
+      "criterion": "MERGE-GATED (lead closes): PR merged with body 'Task: bp-login-ux-w3-2fa-login-card'; merges BEFORE bp-login-ux-w3-activate-preview in the tight cloud train, re-smoke after"
+    },
+    {
+      "doc": "bp-login-ux-w3-activate-preview",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged with body 'Task: bp-login-ux-w3-activate-preview', rebased on and merged strictly AFTER bp-login-ux-w3-2fa-login-card; live re-smoke after the cloud train"
+    },
+    {
+      "doc": "bp-login-ux-w3-wizard-cloud-exit0",
+      "index": 5,
+      "criterion": "MERGE-GATED (lead closes): PR merged with body 'Task: bp-login-ux-w3-wizard-cloud-exit0'; on merge the lead flips parent bp-login-ux-w2-live-verify criterion 'wizard automatable half' citing this task's re-witness evidence"
+    },
+    {
+      "doc": "task-caf31bede8a4351d",
+      "index": 3,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "task-288c8fc886e7c1f6",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate; nightly cron installed on guerrilla"
+    },
+    {
+      "doc": "task-ac73705249e97aa6",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "task-80289b3b07b40fe1",
+      "index": 5,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "task-d76fa14f63626556",
+      "index": 3,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "task-ac3604e7bb1d8680",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "task-10e78ceef4f5c31e",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "task-cad4afb9bfb9985a",
+      "index": 3,
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "bp-doc-patch-file-flag-broken",
+      "index": 1,
+      "criterion": "MERGE-GATED (lead closes): PR merged with a Task: bp-doc-patch-file-flag-broken body line; Go CLI gate green (CC=/usr/bin/clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/...)."
+    },
+    {
+      "doc": "epic-cycle-docs-index",
+      "index": 2,
+      "criterion": "MERGE-GATED (LEAD closes): the docs/INDEX.md PR is merged to main and CI doc-gates green on the clean checkout"
+    },
+    {
+      "doc": "eci-w1-index-note",
+      "index": 4,
+      "criterion": "MERGE-GATED (LEAD closes): the docs/INDEX.md PR is merged to main and CI doc-gates are green on the clean checkout"
+    },
+    {
+      "doc": "ao-backlog-onramp-doc-budgets",
+      "index": 3,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged into main"
+    },
+    {
+      "doc": "ao-backlog-anchors-tripwire-claude-noise",
+      "index": 3,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged into main"
+    },
+    {
+      "doc": "era-w10-governed-idp-lane",
+      "index": 5,
+      "criterion": "MERGE-GATED (lead closes): PR carrying Task: era-w10-governed-idp-lane merged after Elixir Test green"
+    },
+    {
+      "doc": "era-w10-trust-panel",
+      "index": 3,
+      "criterion": "MERGE-GATED (lead closes): PR carrying Task: era-w10-trust-panel merged after Elixir Test green"
+    },
+    {
+      "doc": "ct-bl-toolrow-renderers",
+      "index": 4,
+      "criterion": "[merge-gated, LEAD closes] the Elixir half and Go half merge TOGETHER after the Elixir Test CI gate (wave-2 lesson: incompatible fixtures cannot co-merge); PR merged"
+    },
+    {
+      "doc": "ct-bl-manifest-commands",
+      "index": 4,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged after the Elixir Test CI gate passes"
+    },
+    {
+      "doc": "ct-bl-cards-interactive",
+      "index": 4,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged after go vet+test CI gate passes"
+    },
+    {
+      "doc": "ct-bl-tui-apiclient-dedup",
+      "index": 4,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged after go vet+test CI gate passes"
+    },
+    {
+      "doc": "bpb-step7-content-edge-cache",
+      "index": 3,
+      "criterion": "[merge-gated -- LEAD closes] The PR is merged to origin/main with the Elixir Test gate green; the merge SHA is recorded in this task's stamped evidence."
+    },
+    {
+      "doc": "ae-w5-finish-publish-wall",
+      "index": 4,
+      "criterion": "[MERGE-GATED — lead closes] PR #2881 merged to main with the full Elixir Test gate green"
+    },
+    {
+      "doc": "ae-preview-routes-pollution-guard",
+      "index": 4,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged to main after the doc-gates workflow runs green"
+    },
+    {
+      "doc": "github-bridge-w9-s1-conflict-source-dedup",
+      "index": 5,
+      "criterion": "[merge-gated — LEAD closes] PR merged to main with the Elixir Test gate green."
+    },
+    {
+      "doc": "github-bridge-w9-s2-health-dataset-scope",
+      "index": 5,
+      "criterion": "[merge-gated — LEAD closes] PR merged to main with the Elixir Test gate green."
+    },
+    {
+      "doc": "github-bridge-w9-health-workspace-isolation",
+      "index": 3,
+      "criterion": "[merge-gated — LEAD closes] PR merged with Elixir Test gate green."
+    },
+    {
+      "doc": "ct-blk-elixir-toolrows",
+      "index": 4,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged after the Elixir Test CI gate passes AND the paired ct-blk-tui-toolrows lands — the golden gate spans both surfaces so the two halves merge together"
+    },
+    {
+      "doc": "task-846ae5a9e4e236b0",
+      "index": 2,
+      "criterion": "[merge-gated, LEAD closes] PR merged after the Elixir Test CI gate passes"
+    },
+    {
+      "doc": "ct-blk-tui-toolrows",
+      "index": 4,
+      "criterion": "MERGE-GATED (LEAD closes): PR merged together with the paired ct-blk-elixir-toolrows so the cross-surface golden gate is green on both mirrors"
+    },
+    {
+      "doc": "task-6672a70bea19dc11",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main; harness lives in scripts/connectors/ and reruns green off current main."
+    },
+    {
+      "doc": "onb-w1-team-aware-cli-identity",
+      "index": 4,
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged; CC=clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/... green"
+    }
+  ],
+  "must_stay_silent": [
+    {
+      "doc": "scc-w6-ask-ui",
+      "index": 8,
+      "criterion": "PR merged to main by the lead (merge-gated — the LEAD closes this criterion, not the builder)"
+    },
+    {
+      "doc": "scc-w6-plan-card",
+      "index": 6,
+      "criterion": "PR merged to main by the lead (merge-gated — the LEAD closes this criterion, not the builder)"
+    },
+    {
+      "doc": "scc-w6-composer-power",
+      "index": 7,
+      "criterion": "PR merged to main by the lead (merge-gated — the LEAD closes this criterion, not the builder)"
+    },
+    {
+      "doc": "cb-ledger-close",
+      "index": 2,
+      "criterion": "cb-live-smoke and cb-docs-card closed with merge-gated criteria flipped by the lead on merge"
+    },
+    {
+      "doc": "github-bridge-spine-outbound-scoping",
+      "index": 3,
+      "criterion": "Gate green (cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/github/mirror_job_test.exs) and [merge-gated — LEAD closes] PR merged with Elixir Test green."
+    },
+    {
+      "doc": "bp-task-stamp-criterion-index-is-zero-based-footgun",
+      "index": 2,
+      "criterion": "--met on a criterion whose text contains MERGE-GATED is refused without an explicit override, so a builder cannot pre-flip the leads merge gate."
+    },
+    {
+      "doc": "pbw-w1-usefulness-review-paper",
+      "index": 2,
+      "criterion": "S-tier backlog filed: 8-15 S-tier candidates each exist as a PUBLISHED bp task pbw-stier-<name> parented under pd-block-wishlist-epic with wave_paper set and a merge-gated criterion (gate command output pasted)"
+    },
+    {
+      "doc": "spd-w8-default-georgia-ledger-close",
+      "index": 3,
+      "criterion": "The two merge-gated criteria stranded on done tasks are backfilled with their merge commits: spd-w7-instrument-occlusion-and-state-axis index 10 (#4736 = bb8d313f2) and spd-w5-measure-lever-moves index 9 (#4737 = df30ad4b2). Read-back pasted for each."
+    },
+    {
+      "doc": "gr-bl-close-convention-unmet-criteria",
+      "index": 0,
+      "criterion": "A convention is decided and written down: either the closing actor stamps the merge-gated criterion, or a superseded close rewrites the criteria to match its actual disposition. The choice is stated with its reasoning, not left implicit."
+    },
+    {
+      "doc": "pds-w14-detached-launcher",
+      "index": 10,
+      "criterion": "PR merged to main (LEAD closes this criterion on merge). MERGE-GATED — DO NOT STAMP AS A BUILDER."
+    },
+    {
+      "doc": "pds-w14-peak-ledger-honesty",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD closes this criterion on merge). MERGE-GATED — DO NOT STAMP AS A BUILDER."
+    },
+    {
+      "doc": "pds-w1-crown-proof",
+      "index": 10,
+      "criterion": "PR merged to main (LEAD closes this criterion on merge). MERGE-GATED — DO NOT STAMP EARLY (PDS-D163). Criteria 0-5 and 7-9 are already met from the wave-7 climb, so this criterion plus criterion 6 completes 11/11, and cmux_hook.go:193-237 then closes this task UNCONDITIONALLY on the next Stop event with nobody typing a close command — the PDS-D138 false close, which already fired once on this exact task, re-armed in a shape no human has to type. Therefore: this criterion is NOT to be stamped until rungs 3 and 4 are GREEN in the transcript of the wave that pays this criterion (rungs 3 and 4 read off the ONE full bundle, rungs 1/2/5/6 against a real booted target, every rung passing WITH its controls FIRING), and then only by the LEAD on an actual merge to main. A stamp taken before those two rungs are green in-transcript is a false close, not a completion; if any rung fails, name it in the transcript and leave this criterion unmet."
+    },
+    {
+      "doc": "spd-b39-seal-ledger-reconciliation",
+      "index": 0,
+      "criterion": "All 14 Family-A tasks: single MERGE-GATED criterion stamped with PR#+SHA and the task closed (lifecycle=closed). Show a before/after lifecycle count."
+    },
+    {
+      "doc": "task-e4eb12c95ddee588",
+      "index": 5,
+      "criterion": "PR opened referencing the task, merge-gated (task stays open, not closed)"
+    },
+    {
+      "doc": "ssw9-prebuilt-live-proof",
+      "index": 4,
+      "criterion": "LIVE WALK (lead-run, merge-gated): a real site deploys from an off-box build against guerrilla, the live URL serves the uploaded bytes with the bp-* markers by value, and `ps` on the box during that deploy shows NO npm — output pasted as evidence."
+    },
+    {
+      "doc": "pds-w26-stamp-readback",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-stamp-exit-taxonomy",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-publish-door-criteria-fence",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-hetzner-five-flag-verbs",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-census-anchor-4a",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-export-atomic-out",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-workspace-export-declared-size",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-close-pulse-readback",
+      "index": 3,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-mcp-stamp-bypasses-readback",
+      "index": 3,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+    },
+    {
+      "doc": "pds-w26-close-refusal-taxonomy-remainder",
+      "index": 4,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+    },
+    {
+      "doc": "pds-w27-round-bare-30",
+      "index": 6,
+      "criterion": "The four lead-gated rows are adjudicated `open` — NOT closed — each with a reason naming the specific outstanding [MERGE-GATED] lead act. pds-w25-round-bare's reason additionally records that its criterion 4's 'blocked, non-stageable' premise is now stale, citing transitions.ex:42 + legal?/2's from==to branch + stage.ex's `(to in @stageable or from == to)` guard."
+    },
+    {
+      "doc": "pds-w27-hetzner-gate-file-blindness",
+      "index": 9,
+      "criterion": "HIGH-FLIP-RISK: the eject repair changes behaviour on a DESTRUCTIVE verb. [MERGE-GATED — THE LEAD CLOSES THIS] The lead independently re-derives that the deprovision status assertion cannot red an honest detach against the real control plane, and merges."
+    },
+    {
+      "doc": "pds-w27-bl-stamp-guard-substring-false-positive",
+      "index": 0,
+      "criterion": "stampMergeGateBlocked no longer trips on a criterion that merely QUOTES the MERGE-GATED marker mid-sentence — the anchor chosen (leading bracket, or an explicit criterion subfield) is named and justified"
+    },
+    {
+      "doc": "pds-w27-bl-stamp-guard-substring-false-positive",
+      "index": 1,
+      "criterion": "MUTATION-PROVEN BOTH WAYS: a genuinely [MERGE-GATED]-prefixed criterion still refuses a builder --met (test reds when the guard is removed), AND pds-w27-round-bare-30 criterion 6's exact stored wording stamps clean"
+    },
+    {
+      "doc": "jarl-flagship-epic-wave-1-log",
+      "index": 1,
+      "criterion": "PR merged by the lead (merge-gated; lead closes)."
+    },
+    {
+      "doc": "jf-w1-width-tokens-gate-rig",
+      "index": 4,
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into jarl-website main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. jarl-website has had exactly ONE pull request ever (#1, merged 2026-07-31, unrelated); 62 of its 63 commits went straight to main; the stamped branch is absent from origin. IMPORTANT: this row's WORK ALREADY LANDED, by direct push - scripts/check-measure.mjs, scripts/shoot.mjs, the playwright dep and the blocking ci.yml step are all present on jarl-website main. What did NOT land is criterion 1 as literally worded: the token is --figure: calc(var(--site-width) - 2*var(--space-5)), not --measure-figure: 67rem, and .shell/.storyShell were DELETED rather than bound. Re-scope or close criterion 1 on the design that actually shipped. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on jarl-website main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-engine-narrow-dark-fixes",
+      "index": 4,
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into barkpark main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. No PR was ever opened for this work in barkpark (gh pr list --state all finds none matching) and the stamped branch is absent from all 1,341 loop-epic/* heads on origin. NOTE: criteria 1-4 on this row are stamped met, but the code they describe is NOT on origin/main (.bp-lineage__body carries no overflow-wrap; .bp-duel__table has no scroll containment). Those false stamps are tracked separately as task-0e7a1a8ed32b5de5 and are NOT adjudicated here. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on barkpark main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-og-four-routes",
+      "index": 3,
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into jarl-website main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. jarl-website has had exactly ONE pull request ever (#1, merged 2026-07-31, unrelated); 62 of its 63 commits went straight to main; the stamped branch is absent from origin. SCOPE HAS ALSO SHRUNK: /notater was DELETED from jarl-website on 2026-08-03, so the four-route scope is now THREE (/om, /kontakt, /prosjekter). The /notater quarter is impossible, not outstanding. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on jarl-website main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-fleet-visual-review",
+      "index": 4,
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into jarl-website main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. jarl-website has had exactly ONE pull request ever (#1, merged 2026-07-31, unrelated); 62 of its 63 commits went straight to main; the stamped branch is absent from origin. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on jarl-website main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-revendor-honest-media",
+      "index": 4,
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into jarl-website main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. jarl-website has had exactly ONE pull request ever (#1, merged 2026-07-31, unrelated); 62 of its 63 commits went straight to main; the stamped branch is absent from origin. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on jarl-website main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-media-cors-upstream",
+      "index": 3,
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into barkpark main AFTER an independent second security review of the ACAO:* decision (merge-gated; the lead closes this criterion and records the reviewer).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. No PR was ever opened for this work in barkpark (gh pr list --state all finds none matching) and the stamped branch is absent from all 1,341 loop-epic/* heads on origin. THE SECURITY GATE SURVIVES THIS CORRECTION: the independent second review of the ACAO:* decision is still REQUIRED before this lands, and the lead still records the reviewer. Only the merge mechanism was wrong, never the review. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on barkpark main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-media-doctrine-paper",
+      "index": 3,
+      "criterion": "Lead review: doctrine accepted as epic law (merge-gated equivalent for a content slice; the lead closes this criterion)."
+    },
+    {
+      "doc": "pds-bl-record-update-basis-overclaims",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+    },
+    {
+      "doc": "pds-w33-ledger-postread-core",
+      "index": 8,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion). HIGH-FLIP-RISK on the cascade-broadcast blast radius: an INDEPENDENT second reviewer is warranted before merge"
+    },
+    {
+      "doc": "pds-w33-elixir-receipt-census",
+      "index": 9,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+    },
+    {
+      "doc": "pds-w33-cli-renders-error-details",
+      "index": 9,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+    },
+    {
+      "doc": "pds-w33-bulldocs-batch-id-honesty",
+      "index": 7,
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+    },
+    {
+      "doc": "pds-bl-stale-open-rows-with-merged-prs",
+      "index": 0,
+      "criterion": "Each of the six merge-gated rows is closed against its merged PR, with the merge sha quoted and verified an ancestor of origin/main."
+    },
+    {
+      "doc": "pds-bl-stale-open-rows-with-merged-prs",
+      "index": 2,
+      "criterion": "The full-field audit is re-run and shows zero pds rows in the stale-open shape (merged PR, all non-merge-gated criteria met, lifecycle_status open), with the query quoted and NOT using --fields."
+    },
+    {
+      "doc": "cch-w19-s5-ledger-truth-and-w18-s3-close",
+      "index": 4,
+      "criterion": "cch-w14-bl-status-pill-label-overflows-rail and cch-w15-bl-fleet-support-detail-truncated-stacked-band are stamped on their merge-gated criteria with #8818 = 17ec78adc3b9c2abd6441c5fc0a4692914430888, and the evidence NAMES the single advisory red (`Required-check spec drift (advisory)`, red on main itself) rather than writing 'merges green' unqualified. Both then close at N/N, and cch-w16-s3 closes at 10/10."
+    },
+    {
+      "doc": "cch-w19-bl-stamp-merge-gated-flag-undocumented",
+      "index": 0,
+      "criterion": "`bp capabilities -o json` lists --merge-gated under task stamp's flags, and `bp task stamp --help` prints it with a one-line description naming who may use it. Both outputs quoted."
+    },
+    {
+      "doc": "cch-w19-bl-stamp-merge-gated-flag-undocumented",
+      "index": 1,
+      "criterion": "The merge-gated marker check is shown to be textual and its false-positive rate is stated: a criterion that merely mentions 'merge-gated' in prose is either exempted, or the refusal message says out loud that the match is on the TEXT and may be a mention. Whichever is chosen, it is proven by stamping a mention-only criterion and quoting the result."
+    },
+    {
+      "doc": "jarl-innleggene-wave-1-log",
+      "index": 1,
+      "criterion": "PR merged by lead (merge-gated — lead closes)"
+    },
+    {
+      "doc": "ji-w1-rig-pipeline-gates",
+      "index": 5,
+      "criterion": "PR merget til main (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-rubrikk-paper",
+      "index": 3,
+      "criterion": "Lead-dom: rubrikken akseptert som epic-lov (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-judge-a",
+      "index": 3,
+      "criterion": "Lead-dom over doemmekvaliteten (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-corpus-hygiene",
+      "index": 4,
+      "criterion": "Lead-dom (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-kaaring-reconcile",
+      "index": 3,
+      "criterion": "Lead-dom (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-lift-media-naked",
+      "index": 4,
+      "criterion": "Lead-dom (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-lift-bottom-rest",
+      "index": 3,
+      "criterion": "Lead-dom (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-judge-b",
+      "index": 3,
+      "criterion": "Lead-dom over doemmekvaliteten (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "pds-w38-ledger-hygiene-derived",
+      "index": 0,
+      "criterion": "The merged-but-open set is RE-DERIVED in-process from the live ledger with the stated predicate (every unmet criterion matches /MERGE-GATED|LEAD CLOSES/i, OR the unmet set is empty), not transcribed from this brief. Evidence: paste the command and its output list with met/total per row."
+    },
+    {
+      "doc": "pds-w38-ledger-hygiene-derived",
+      "index": 3,
+      "criterion": "The three NON-qualifying rows are explicitly NOT closed and the reason is recorded: pds-w29-pay-lb (unmet criterion 13 is real unshipped work) and pds-w25-round-parked / pds-w25-round-open (their MERGE-GATED marker is a lead re-derivation of a pinned shard; their own text says the slice has no PR). Evidence: paste the reasoning per row."
+    },
+    {
+      "doc": "cch-w22-s6-law0-executes-the-23-row-repayment",
+      "index": 1,
+      "criterion": "THE ELEVEN MERGE-GATED ROWS ARE CLOSED, each against a SHA verified an ancestor of `origin/main`. Evidence: the `git merge-base --is-ancestor <sha> origin/main` loop output for all eleven, plus the eleven close receipts. Each needed `bp task claim` first (all read `claim.worker = null` with a lapsed `expired_at`) — record that you claimed before closing."
+    },
+    {
+      "doc": "pds-w40-bl-ledger-n1-free-closes",
+      "index": 0,
+      "criterion": "Every one of the six merged-PR N-1 rows is either CLOSED with its merge-gated criterion stamped under a live claim with `--merge-gated`, or carries a written reason why it is not. Evidence lists the row, the epoch it closed on, and the discharge."
+    },
+    {
+      "doc": "cch-w24-law0-repayment-as-a-claimed-slice",
+      "index": 3,
+      "criterion": "Any merge-gated criterion closed with --merge-gated carries evidence naming who adjudicated it and on what proof, so the override is auditable rather than a silent bypass."
+    },
+    {
+      "doc": "pds-w45-criterion-venue",
+      "index": 4,
+      "criterion": "The lead-owned merge-gated row at line 141 is EXPLICITLY EXEMPTED and is left byte-identical. Evidence quotes the exemption clause and a git diff confirming line 141 is unchanged."
+    },
+    {
+      "doc": "pds-w47-ledger-denominator-and-blind-spots",
+      "index": 2,
+      "criterion": "A BLIND-SPOT block prints a COUNT AND THE NAMES — `pds-bl-merge-gated-criteria-carry-the-flag` plus the two never-published drafts — derived from the corpus, never transcribed. Evidence quotes the block."
+    },
+    {
+      "doc": "pds-w47-n1-adjudication",
+      "index": 5,
+      "criterion": "THE FOUR MISFILED ROWS ARE RE-SCOPED IN PROSE with the measurement that shows why they are not merge-gated — including the `grep -n OPAQUE_CALLERS` run over origin/main's charter returning 8 hits of which 7 do not mark themselves pre-rename."
+    },
+    {
+      "doc": "pds-bl-w47-stamp-tripwire-false-positive",
+      "index": 1,
+      "criterion": "The predicate is narrowed to the marker's ANCHORED position and the change is mutation-proven BOTH ways: a genuine 'MERGE-GATED (the LEAD closes this):' row is STILL refused without --merge-gated, and the merely-mentioning row is now accepted without it. Both runs pasted."
+    },
+    {
+      "doc": "cch-w32-bl-roster-false-open-sweep",
+      "index": 4,
+      "criterion": "A standing instrument resolves every open MERGE-GATED criterion's PR number against GitHub, so this class stops accumulating."
+    },
+    {
+      "doc": "cch-w38-s3-spec-gate-packet-and-roster-disposition",
+      "index": 5,
+      "criterion": "The four false-open rows (cch-w23-bl-pat-deploy-grant-survives-demotion, cch-cloud-app-has-no-plug-errorhandler, cch-w11-s1-flip-behind-a-generator-that-cannot-lose, cch-w28-s1-empty-roster-control-asserts-clause-a) are closed with their receipts, each recording which criteria closed as merge-gated vs re-derived. Evidence: the four rows read back plus the re-derivation command for each receipt."
+    },
+    {
+      "doc": "cch-w41-bl-a-standing-instrument-resolves-open-merge-gated-criteria",
+      "index": 0,
+      "criterion": "A script resolves every open child's unmet MERGE-GATED criteria against GitHub and reports the payable ones, using per-check-run conclusions rather than a rollup. Evidence: the script and a run over the live epic."
+    },
+    {
+      "doc": "dr-w10-bl-epic-ledger-stamp-repair",
+      "index": 4,
+      "criterion": "dr-bl-w8-stamp-sixteen-merged-and-unstamped-tasks and dr-bl-w5-merge-gated-paperwork-is-unsatisfiable are closed or explicitly folded into this row"
+    },
+    {
+      "doc": "dr-w12-bl-close-satisfied-merge-gated-children",
+      "index": 0,
+      "criterion": "The 31 outright-closable rows are closed, each re-CLAIMED first and closed on the NEW epoch, with the merge commit sha as the evidence on the merge-gated criterion"
+    },
+    {
+      "doc": "dr-w12-bl-close-satisfied-merge-gated-children",
+      "index": 4,
+      "criterion": "A sample of the closed rows non-merge-gated criteria is spot-checked against the merged diff, since a previously-stamped met:true that overstated would survive a bulk close undetected"
+    },
+    {
+      "doc": "dr-w14-bl-ledger-sweep-fifty-four",
+      "index": 3,
+      "criterion": "The one-short count is re-derived after the sweep and recorded, and the three prior sweep orders (dr-bl-w8-stamp-sixteen, dr-w10-bl-epic-ledger-stamp-repair, dr-w12-bl-close-satisfied-merge-gated-children) are closed or explicitly superseded rather than left at 0/5 a fourth time"
+    },
+    {
+      "doc": "cch-w48-bl-the-remaining-lapsed-claim-arrears-epic-wide",
+      "index": 0,
+      "criterion": "The epic-wide arrears population is re-derived by reading every open child and counting those whose only unmet criterion is MERGE-GATED — the number is stated, not quoted from a prior wave."
+    },
+    {
+      "doc": "cch-w49-s5-the-epics-own-ledger-stops-reading-open-on-25-merged-rows",
+      "index": 4,
+      "criterion": "cch-w40-s4's merge-gated criterion is RE-WORDED to the real check names ('go vet + test', 'gofmt drift ceiling (blocking)') because no check named 'Go gate' exists in any rollup — shown by a query returning the actual Go-related check names."
+    },
+    {
+      "doc": "cch-w49-bl-merge-gated-stamp-guard-fires-on-any-mention",
+      "index": 0,
+      "criterion": "A criterion whose text merely MENTIONS a merge-gated row stamps met WITHOUT --merge-gated. Evidence: the stamp command and its rc."
+    },
+    {
+      "doc": "cch-w49-bl-merge-gated-stamp-guard-fires-on-any-mention",
+      "index": 1,
+      "criterion": "A genuine MERGE-GATED criterion is STILL refused without --merge-gated — the guard is shown to lose in the fix direction, not just widened. Evidence: the refusal output."
+    },
+    {
+      "doc": "dr-w19-bl-merge-gated-paperwork-is-unsatisfiable",
+      "index": 2,
+      "criterion": "The enumerated rows are resolved under that rule (stamped, reworded, or closed with the note), and dr-bl-w5-merge-gated-paperwork-is-unsatisfiable is closed or explicitly superseded by this row."
+    },
+    {
+      "doc": "dr-w23-s8-ledger-closes-the-closable",
+      "index": 1,
+      "criterion": "`dr-w2-s4-scrub-knows-our-own-token` and `dr-w2-s6-engine-one-extractor-health-slow-vs-broken` are closed on the live non-expiring claim they already hold (`dr-w6-s3-ledger-repair`, epoch 7), with #9731/#9733 merge evidence pasted, and `dr-w2-s6`'s unsatisfiable PR-body criterion is dispositioned by name under `dr-w19-bl-merge-gated-paperwork-is-unsatisfiable`'s rule."
+    },
+    {
+      "doc": "dr-w24-s6-roster-buys-back-seal-headroom",
+      "index": 1,
+      "criterion": "The never-started selection is stated as a rule and its count derived, not guessed; paste the selection criteria and the resulting row count, and paste the count of rows you deliberately EXCLUDED because they are merge-gated at N/N+1."
+    },
+    {
+      "doc": "dr-w24-bl-merge-gate-marker-false-positives",
+      "index": 2,
+      "criterion": "The guard still REFUSES a builder stamping a genuinely merge-gated criterion; proven by mutation, not by reading."
+    },
+    {
+      "doc": "cch-bl-merge-gated-override-cannot-tell-a-lead-from-a-builder",
+      "index": 0,
+      "criterion": "A run demonstrates the CURRENT hole: a stamp is refused with merge_gated_criterion, then the identical command plus --merge-gated succeeds against a criterion whose carrier PR is NOT merged. Evidence: both commands and their outputs."
+    },
+    {
+      "doc": "cch-bl-merge-gated-override-cannot-tell-a-lead-from-a-builder",
+      "index": 1,
+      "criterion": "--merge-gated no longer succeeds on an unmerged or unverifiable carrier: the override requires evidence the server can check, or the server checks the carrier itself. Evidence: the guard code and the refusal output."
+    },
+    {
+      "doc": "cch-w56-bl-merge-gated-override-has-no-authority-check-and-no-record",
+      "index": 0,
+      "criterion": "An override is RECORDED: a stamp or close that used --merge-gated is distinguishable from one that did not, by reading the stored task alone. Evidence: two stored rows, one overridden one not, showing the difference."
+    },
+    {
+      "doc": "cch-w56-bl-merge-gated-override-has-no-authority-check-and-no-record",
+      "index": 2,
+      "criterion": "The over-firing tripwire is narrowed so a criterion that merely MENTIONS merge-gating is not blocked. Evidence: a criterion containing the phrase in prose stamping successfully, plus a real MERGE-GATED row still refused."
+    },
+    {
+      "doc": "cch-w56-bl-merge-gated-override-has-no-authority-check-and-no-record",
+      "index": 5,
+      "criterion": "The four wave-55 claim notes prescribing `close with --merge-gated` (cch-w55-s2/s3/s4/s5) are corrected IN THE CLAIM NOTE, never by rewording the criterion — rewording a criterion DISARMS the text-keyed tripwire. Evidence: the corrected note text plus `bp task close <id> <worker> <epoch> --merge-gated` still exiting 2 with `unknown flag`."
+    },
+    {
+      "doc": "cch-w58-bl-charter-and-cli-carry-three-unsupportable-sentences-about-the-merge-gate",
+      "index": 2,
+      "criterion": "The four wave-55 claim notes prescribing `close --merge-gated` are corrected to the working recipe (claim -> stamp --merge-gated -> plain close). Evidence: the task ids and their patched notes."
+    },
+    {
+      "doc": "cch-w61-bl-the-merge-gate-attestation-names-the-wrong-required-set",
+      "index": 0,
+      "criterion": "The stock merge-gated criterion clause is rewritten to `gh api .../compare/<merge-sha>...main --jq .status` everywhere it appears in OPEN rows, and the local `merge-base --is-ancestor` form is removed from criteria text — list every row edited."
+    },
+    {
+      "doc": "cchi-w46-bl-lapsed-claim-arrears-close-path",
+      "index": 1,
+      "criterion": "The twelve confirmed shipped-but-unstamped rows are closed ONE AT A TIME through the established path — claim (a lapsed claim is directly re-claimable; no release is needed), stamp --merge-gated with the criterion text verbatim, then close — with the handle being doc.doc_id (the SLUG); `bp task get <uuid>` returns not_found, which is how sweeps lose rows. Their PRs: #10295 #10296 #10297 #10298 #10252 #10251 #10250 #10201 #10199 #10156 #10153 #10200."
+    },
+    {
+      "doc": "cchi-w46-bl-lapsed-claim-arrears-close-path",
+      "index": 2,
+      "criterion": "NO BATCH CLOSE: each merge-gated criterion carries its own four-part verification — PR merged, the merge commit an ancestor of origin/main, the gate green on the PR head, and the artifact actually present on main — quoted per row. Record that both server refusals (`criteria_unmet:N` inside close, `merge_gated_criterion` without --merge-gated) are CORRECT and not breakage."
+    },
+    {
+      "doc": "cch-w62-bl-the-law-0-repayment-pass-nineteen-located-rows",
+      "index": 0,
+      "criterion": "The 5 paid merge-gated rows are re-claimed (their claims are lapsed with claim.worker null, so a close on a stale worker fails the CAS silently) and CLOSED with the merge sha and its `ahead` status quoted per row."
+    },
+    {
+      "doc": "cch-w64-bl-merge-gated-criteria-are-unpayable-without-override",
+      "index": 0,
+      "criterion": "The failure is reproduced on a fresh open row: bp task stamp on a merge-gated criterion of an lifecycle_status=open row returns not_in_progress:open, and bp task close --set criteria:= without criteria_override returns the not-met refusal. Paste both."
+    },
+    {
+      "doc": "cch-w64-bl-merge-gated-criteria-are-unpayable-without-override",
+      "index": 1,
+      "criterion": "One of the three options (stamp-on-open under --merge-gated, a distinct foreign-evidence key, or auto-return to in_progress) is chosen with the reason stated, and the OTHER two are named as rejected rather than omitted."
+    },
+    {
+      "doc": "cch-w66-s2-the-autostamp-records-what-it-actually-observed",
+      "index": 0,
+      "criterion": "THE FABRICATION IS REPRODUCED BEFORE IT IS FIXED: a test proves that today a close carrying an arbitrary `landed` map, from a worker that is not the lead and citing a PR unrelated to the task, stamps the merge-gated criterion met:true with evidence claiming 'lead-closed on merge' and mints NO close_override. Paste the fail-before."
+    },
+    {
+      "doc": "dr-w35-s7-ledger-partition-execution",
+      "index": 4,
+      "criterion": "No row was closed on a MERGE-GATED label without its criterion's actual question being read — the record file states this and names the >=3 mislabelled human-judgement rows and the 7 open-PR-blocked rows left open. Evidence: the file's per-row table."
+    },
+    {
+      "doc": "onb-w5-close-by-evidence-dossier",
+      "index": 3,
+      "criterion": "All ten merge-gated child criteria closed via the close primitive with their merge shas (five D44 + five W6), each child read back done; backfill closes to 4/5 with its human gate met:false; relativeage-clock-injection closed wont-do; release-cache-unify stays open enumerated"
+    },
+    {
+      "doc": "stw12-ledger-honesty-pay",
+      "index": 3,
+      "criterion": "stw9-backlog-bpgraph-identity-tripwire idx 7 is LEFT untouched as a merge-gated lead close (its stored text says 'MERGE-GATED (lead closes)'), and this decision is recorded verbatim in this slice's stamped evidence."
+    },
+    {
+      "doc": "stw12-reconcile-close-batch",
+      "index": 5,
+      "criterion": "No row was closed on a lapsed claim or an honest-miss: for every close the CURRENT claim.worker+epoch was read immediately before close and re-claimed, and each unmet criterion was independently confirmed merge-gated/delivered per the console-w76 lesson; evidence names the per-row check."
+    },
+    {
+      "doc": "stw12-lead-live-seal",
+      "index": 1,
+      "criterion": "The live/merge-gated criteria (graph-server-honesty idx6, doctype-readback idx5, bpgraph idx7, provision-indx crit4) are closed on live token reads; evidence names each."
+    },
+    {
+      "doc": "ccpca-w1-pricing-spawn-latch",
+      "index": 3,
+      "criterion": "LEAD-OWNED, MERGE-GATED: the PR carrying this slice is merged to main with required gates green (the lead closes this criterion on merge)"
+    },
+    {
+      "doc": "cloud-control-plane-correctness-audit-wave-1-log",
+      "index": 1,
+      "criterion": "LEAD-OWNED, MERGE-GATED: the charter PR is merged to main (the lead closes this on merge)"
+    },
+    {
+      "doc": "wtc-w1-s1-byid-notfound-swallow",
+      "index": 4,
+      "criterion": "LEAD-OWNED (merge-gated): PR merged to main; the lead confirms a genuinely independent second reviewer signed off on the HIGH-FLIP 404-vs-500 boundary judgment before merge."
+    },
+    {
+      "doc": "wtc-w1-s2-webhook-lazy-init",
+      "index": 4,
+      "criterion": "LEAD-OWNED (merge-gated): PR merged; lead confirms an independent second reviewer signed off on the HIGH-FLIP fail-closed-vs-build-break judgment before merge."
+    },
+    {
+      "doc": "wtc-w1-s4-render-date-page-hydrate",
+      "index": 5,
+      "criterion": "LEAD-OWNED (merge-gated): PR merged to main."
+    },
+    {
+      "doc": "wtc-w1-s3-sitemap-degrade-nan",
+      "index": 4,
+      "criterion": "LEAD-OWNED (merge-gated): PR merged to main."
+    },
+    {
+      "doc": "task-e25b94b9db28392a",
+      "index": 6,
+      "criterion": "SCOPE FENCE AND MERGE-GATED -- THE LEAD CLOSES THIS. This row is a SIBLING of, not a duplicate of, task-ed7ae8110c7c8b41 (imported workspaces have zero administrators, because workspace_memberships is @dev_deny in the bundle catalog so profile=dev carries no membership rows). That row fixes the IMPORT PATH; this row is the standing PER-INSTANCE operator check and must not absorb it. Then all four required contexts green, read LIVE from .github/required-checks.json."
+    },
+    {
+      "doc": "pds-bl-merge-gated-override-carries-no-reason",
+      "index": 0,
+      "criterion": "A bare `--merge-gated` with no reason is REFUSED with a usage-grade message naming what to supply; the flag now takes a non-empty reason string. Demonstrated with the before/after invocation and both exit codes."
+    }
+  ]
+}
