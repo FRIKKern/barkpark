@@ -177,4 +177,39 @@ defmodule BarkparkCloud.Push.CredentialGateTest do
       refute_enqueued(worker: PushDeliveryWorker)
     end
   end
+
+  describe "the operator-facing packet names the file the deploy actually sources" do
+    # WHY THIS IS A TEST AND NOT A COMMENT. `NotConfigured`'s moduledoc is headed
+    # "THE CREDENTIAL GATE — exactly what a human must supply", and it is the text
+    # a human reads BEFORE handing over APNs/FCM secrets. It named
+    # `/opt/barkpark-cloud/.env`, which does not exist on the control plane; the
+    # file the deploy sources is `/opt/barkpark/cloud/.env` (named as such at
+    # `web/router.ex` — "the file the deploy already sources" — and in
+    # `notifications_platform_admin_env_test.exs`). A human executing the packet
+    # verbatim would land six CORRECT secrets in a nonexistent file, read
+    # `credential_status` still false, and debug it as a credential problem
+    # rather than a path problem — a wasted step only they can perform.
+    #
+    # There is no code constant to derive the path from (it is a deploy-host
+    # fact), so this pins the literal both ways: the right path present, the
+    # wrong one absent. Revert the moduledoc and this reds.
+    #
+    # It reads the SOURCE rather than `Code.fetch_docs/1` deliberately: the doc
+    # chunk is a compiler option, so a docs-stripped build would make a
+    # fetch_docs assertion pass vacuously on an empty string. The source file is
+    # the thing a human actually reads.
+
+    test "the NotConfigured packet points at /opt/barkpark/cloud/.env, never /opt/barkpark-cloud/.env" do
+      source = Path.join(__DIR__, "../../../lib/barkpark_cloud/push/adapters/not_configured.ex")
+      assert File.exists?(source), "the adapter source moved — re-point this guard: #{source}"
+      doc = File.read!(source)
+
+      assert String.contains?(doc, "/opt/barkpark/cloud/.env"),
+             "the credential packet must name /opt/barkpark/cloud/.env, the file the deploy sources"
+
+      refute String.contains?(doc, "/opt/barkpark-cloud/.env"),
+             "the credential packet still names /opt/barkpark-cloud/.env, which does not exist " <>
+               "on the control plane — six correct secrets would land in a nonexistent file"
+    end
+  end
 end
