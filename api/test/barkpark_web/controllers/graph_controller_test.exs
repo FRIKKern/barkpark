@@ -838,7 +838,26 @@ defmodule BarkparkWeb.GraphControllerTest do
       body = Jason.decode!(shed.resp_body)
       assert body["ok"] == false
       assert body["reason"] == "graph_corpus_busy"
-      assert Plug.Conn.get_resp_header(shed, "retry-after") == ["1"]
+
+      # THE SHED MUST NOT INVITE THE CLIENT BACK MID-DERIVATION. A slot is held
+      # for a whole derivation — measured live at 10.18-10.76s each for four
+      # concurrent reads on guerrilla — so the `retry-after: 1` this header used
+      # to carry told every retrying client to come back while all four slots
+      # were still held. search-starter's SSR obeyed it, burned all three
+      # attempts inside the first 3.7s, rendered an empty `bp-doc-id` and failed
+      # the deploy HEALTH gate. The assertion is a FLOOR, not an equality: the
+      # value may be tuned upward, but it may never sink back under a saturated
+      # derivation. See `stw10-backlog-flagship-health-pool`.
+      [retry_after] = Plug.Conn.get_resp_header(shed, "retry-after")
+      assert {seconds, ""} = Integer.parse(retry_after)
+
+      assert seconds >= 11,
+             "retry-after is #{seconds}s, which lands inside the ~10.8s a saturated derivation holds its slot"
+
+      # The same number rides the JSON body, so a client that never reads
+      # headers (or a proxy that strips them) still gets the truth.
+      assert body["retry_after"] == seconds
+      assert body["message"] =~ "retry in #{seconds}s"
 
       # Releasing the slot restores service on the very next request — the cap
       # sheds load, it does not latch the route off.
