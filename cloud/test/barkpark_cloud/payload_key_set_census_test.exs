@@ -1042,7 +1042,22 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `cpu_percent` was already a name here (Pressure's host-CPU vital), so the new
   # per-process declaration rides free on the NAME union and moves the SITE
   # register below instead.
-  @go_tag_pinned 279
+  #
+  # 279 -> 286: the HOST-SPACE report reached an eye. `bp cloud instance top`
+  # now renders per-box disk, so internal/cloudclient decodes it: `MetricsSpace`
+  # (`root`, `journal_bytes`, `db_size`, `top_relations`, `sites`,
+  # `reported_at`), `MetricsSpaceRoot` (`used_bytes`, `total_bytes`),
+  # `MetricsSpaceSites` (`dir`, `bytes`, `top`, `count`), plus
+  # `MetricsResult.Space` (`space`) and `MetricsLatest.Cores` (`cores`) — the
+  # core count being decoded as the has-it/hasn't-sent-it discriminator for an
+  # absent report. FOURTEEN new SITES, SEVEN new NAMES: `root`,
+  # `journal_bytes`, `used_bytes`, `dir`, `top`, `cores` and `space` are new
+  # vocabulary here, while `db_size`, `reported_at`, `top_relations`,
+  # `total_bytes`, `bytes`, `count` and `sites` were already declared elsewhere
+  # in the package and so ride free on the NAME union — they move the SITE
+  # register below instead, four of them by crossing INTO it. 286 measured by
+  # the 999-technique on this tree, never summed.
+  @go_tag_pinned 286
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1107,12 +1122,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "basis" => 6,
     "became_live_at" => 2,
     "build_log_url" => 2,
-    "bytes" => 2,
+    # MetricsSpaceSites.Bytes joined the two existing `bytes` declarations
+    # with the deployed-sites directory total (host-space report, W6 S4).
+    "bytes" => 3,
     "censored" => 3,
     "clock" => 3,
     "code" => 3,
     "content_rev" => 2,
-    "count" => 5,
+    # MetricsSpaceSites.Count joined the five existing `count` declarations
+    # — the deployed-sites walk (host-space report, W6 S4).
+    "count" => 6,
     # Pressure's HOST cpu busy-percent and RunawayProc's PER-PROCESS lifetime
     # average share one name and are different measurements — exactly the
     # collision this register exists to keep visible.
@@ -1120,6 +1139,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "covered" => 2,
     "current_deployment_id" => 2,
     "dataset" => 2,
+    # Crossed INTO this register in W6 S4 (declared ONCE before the host-space
+    # report landed, twice now): MetricsSpace.DBSize joined the existing
+    # `db_size` declaration. Same crossing for `reported_at`, `top_relations`
+    # and `total_bytes` below — four names leaving the once-declared class, so
+    # this register grows by four ROWS as well as by eight sites.
+    "db_size" => 2,
     "deferred" => 3,
     "delivered" => 2,
     "deployment" => 3,
@@ -1171,6 +1196,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "reachable" => 3,
     "reason" => 8,
     "refused" => 4,
+    # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
+    # which is why it is not the health beat's `as_of`.
+    "reported_at" => 2,
     "required" => 2,
     "role" => 4,
     "runtime_target" => 3,
@@ -1182,7 +1210,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "sha" => 2,
     "site" => 7,
     "site_id" => 5,
-    "sites" => 3,
+    # MetricsSpace.Sites joined the three existing `sites` declarations —
+    # the deployed-sites section of the host-space report (W6 S4).
+    "sites" => 4,
     "slug" => 7,
     "source" => 2,
     "stage" => 3,
@@ -1194,6 +1224,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "theme" => 2,
     "to" => 2,
     "token" => 2,
+    # W6 S4: MetricsSpace.TopRelations joined MetricsLatest.TopRelations.
+    "top_relations" => 2,
+    # W6 S4: MetricsSpaceRoot.TotalBytes joined MetricsSwap.TotalBytes.
+    "total_bytes" => 2,
     "trigger" => 3,
     "unmetered" => 2,
     "unreadable" => 2,
