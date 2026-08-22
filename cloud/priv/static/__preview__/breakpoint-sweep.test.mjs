@@ -533,44 +533,41 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // 1 on 100/75, which is exactly the "come here and say so" the literal exists
 // to compel. Four numbers moved and every one of them is derived from
 // `scenarioReport`, never typed from memory.
-// cch-w25-s3 moved it a third time, and both halves refused again:
+// cch-w25-s3 moved it, and both halves refused again:
 // `site-deploy-rail-failed` — the first fixture in this harness to carry a
 // deploy-rail STAGE entry — is the 102nd scenario and the 77th residue entry,
 // and the sweep exited 2 while this test exited 1 on 101/76. The numbers below
 // are `scenarioReport`'s, re-read after the entry landed.
-// cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` — the
+// cch-w34-s6 REVIEW moved it: `overview-never-reported` — the
 // first fixture for the never-reported state the slice made reachable — is the
 // 103rd scenario and the 78th residue entry. It refused exactly as designed:
 // this test exited 1 on 102/77 before these four numbers were re-read from
 // `scenarioReport`, which is the literal doing its job on a REVIEW edit rather
 // than a builder one.
-// cch-w38-s1 moved it a fifth time: `panel-overview-member` — the first
-// plain-member fixture outside GR33's settings scope, and the BEFORE/AFTER pin
-// for the instance rail's authority answer — is the 104th scenario and the 79th
-// residue entry. All three guards refused first, by name: the sweep exited 2 on
-// `UNLISTED scenario "panel-overview-member"`, smoke on `CENSUS: 1 committed
-// scenario(s) have NO expectation`, and this file failed FOUR tests (17, 21,
-// 44, 47) on 103/78. The numbers below — AND THIS TEST'S OWN TITLE, which is
-// where the census is really written — are `scenarioReport`'s, re-read after
-// the entry landed.
-//
-// cch-w37-s6 moved it a fifth time: `operator-me-unreadable` — the first
-// fixture that can fail the /v1/me READ while keeping the account present, and
-// therefore the first one to reach meState()=="failed" at all — is the 104th
-// scenario and the 79th residue entry. It refused exactly as designed: the bare
-// sweep exited 2 with `UNLISTED scenario "operator-me-unreadable" (family
+// cch-w37-s6 moved it: `operator-me-unreadable` — the first fixture that can
+// fail the /v1/me READ while keeping the account present, and therefore the
+// first one to reach meState()=="failed" at all — is the 104th scenario and
+// the 79th residue entry. It refused exactly as designed: the bare sweep
+// exited 2 with `UNLISTED scenario "operator-me-unreadable" (family
 // hash:#operator)` and this test exited 1 on 103/78 before the four numbers
 // below were RE-READ from `scenarioReport` (charter D413 — cch-w35-s4's brief
 // carried target numbers that were wrong; these are derived, never copied).
-// cch-w39-s1 moved it a SIXTH time: `billing-me-unreadable` — the first fixture
-// that fails the /v1/me read on a screen that makes a ROLE CLAIM (an owner told
-// "Only the team owner can manage billing.") — is the 105th scenario and the
-// 80th residue entry. It refused exactly as designed: the bare sweep exited 2
-// with `UNLISTED scenario "billing-me-unreadable" (family hash:#billing)` and
-// this test exited 1 on 104/79 before the four numbers below were RE-READ from
-// `scenarioReport` on THIS merge base (origin/main 9e39c60), never carried from
-// the brief.
-// cch-w45-s1 moved it a SEVENTH time, and by TWO: `members-admin-actor` and
+// cch-w38-s1 moved it: `panel-overview-member` — the first plain-member
+// fixture outside GR33's settings scope, and the BEFORE/AFTER pin for the
+// instance rail's authority answer — is the 105th scenario and the 80th
+// residue entry. All three guards refused first, by name: the sweep exited 2
+// on `UNLISTED scenario "panel-overview-member"`, smoke on `CENSUS: 1
+// committed scenario(s) have NO expectation`, and this file failed FOUR tests
+// (17, 21, 44, 47) on 104/79. The numbers below are `scenarioReport`'s,
+// re-read after the entry landed.
+// cch-w39-s1 moved it: `billing-me-unreadable` — the first fixture that fails
+// the /v1/me read on a screen that makes a ROLE CLAIM (an owner told "Only
+// the team owner can manage billing.") — is the 106th scenario and the 81st
+// residue entry. It refused exactly as designed: the bare sweep exited 2 with
+// `UNLISTED scenario "billing-me-unreadable" (family hash:#billing)` and this
+// test exited 1 on 105/80 before the four numbers below were RE-READ from
+// `scenarioReport` on the merged tree, never carried from the brief.
+// cch-w45-s1 moved it by TWO: `members-admin-actor` and
 // `members-peer-owner` — the first fixtures whose acting principal is not the
 // roster's row 0, and so the first that can ask a rank-relative predicate about
 // a row the actor does NOT outrank — are the 107th and 108th scenarios and the
@@ -589,6 +586,16 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // parse, no parser to maintain, and the harness prints the identical line. The
 // five asserts below stay — they are what makes the derived title mean
 // something rather than merely echo itself.
+//
+// task-9b96d39e0fa3d9e5 DELETED the "moved it a Nth time" counters from every
+// block above and from the bare sweep's twins: the counter was a second copy
+// of a fact the block ORDER already carries, and it rotted twice — two blocks
+// both claiming "a fifth time", then an eighth with no sixth — which is D527's
+// argument for deleting the title's integer copy, applied to prose. The
+// ordinals that remain ("the Nth scenario and the Mth residue entry") are no
+// longer unguarded: the chronicle arm below the residue parsers reads these
+// bytes and reds on a duplicate landing slot, an out-of-order block, or an
+// ordinal past the measured census.
 const census = scenarioReport({ scenarios: SCENARIOS });
 test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
@@ -732,6 +739,56 @@ test("the two ZERO-residue families are named, and 15 families over all scenario
     "the families every one of whose scenarios is rendered by a cell");
   // the relation, derived rather than typed: 15 - 13 IS the two above
   assert.equal(allFamilies.size - residueFamilies.size, zeroResidue.length);
+});
+
+// ── the CHRONICLE arm: the census history's ordinals can actually lose ───────
+// For fifteen days the chronicle above the census test — and its twin in
+// breakpoint-sweep.mjs — carried TWO blocks claiming the SAME landing slot
+// (104/79: one true, one an ort-resolution artifact), and every harness stayed
+// green: no assertion read the prose, and D527 had deleted the title's integer
+// copy on purpose. A comment cannot be derived — but it CAN be read. This arm
+// cannot recount history (no run can learn which fixture landed in which
+// slot), so it asserts the three properties every true chronicle has and the
+// rotted one lacked: per file, scenario ordinals strictly increase, residue
+// ordinals strictly increase, and no ordinal exceeds the measured census.
+// Strict increase is also the prose half of the 104->105 precedent: two green
+// PRs each chronicling the same next slot now red the union instead of merging
+// silently. THE MATCH-COUNT FLOOR IS LOAD-BEARING: a wording drift that slid
+// out from under these regexes would otherwise leave the arm vacuous-green,
+// which is the exact failure mode it exists to end. If the floor reds,
+// re-point the regex at the new wording — never lower the floor below the
+// blocks already on disk.
+const TEST_SRC = fs.readFileSync(fileURLToPath(import.meta.url), "utf8");
+function chronicleOrdinals(src) {
+  // the chronicle is hard-wrapped comment prose; join continuation lines so an
+  // ordinal split across a line break ("the 104th\n// scenario") still matches
+  const flat = src.replace(/\n\s*\/\/ ?/g, " ");
+  const out = { scenario: [], residue: [] };
+  for (const m of flat.matchAll(/\b(?:is|was|are) the (\d+)(?:st|nd|rd|th)(?: and (\d+)(?:st|nd|rd|th))? scenarios?\b/g)) {
+    out.scenario.push(Number(m[1]));
+    if (m[2]) out.scenario.push(Number(m[2]));
+  }
+  for (const m of flat.matchAll(/\bthe (\d+)(?:st|nd|rd|th)(?: and (\d+)(?:st|nd|rd|th))? residue entr(?:y|ies)\b/g)) {
+    out.residue.push(Number(m[1]));
+    if (m[2]) out.residue.push(Number(m[2]));
+  }
+  return out;
+}
+test("the chronicle's ordinals strictly increase and stay inside the census — in this file and the bare sweep", () => {
+  const r = scenarioReport({ scenarios: SCENARIOS });
+  for (const [file, src] of [["breakpoint-sweep.test.mjs", TEST_SRC], ["breakpoint-sweep.mjs", SWEEP_SRC]]) {
+    const ordinals = chronicleOrdinals(src);
+    for (const [axis, ords, ceiling] of [["scenario", ordinals.scenario, r.total], ["residue", ordinals.residue, r.residue]]) {
+      assert.ok(ords.length >= 9,
+        `${file}: only ${ords.length} ${axis} ordinals matched (floor 9) — the chronicle wording drifted out from under this arm; re-point the regex, never lower the floor`);
+      for (let i = 1; i < ords.length; i += 1) {
+        assert.ok(ords[i] > ords[i - 1],
+          `${file}: ${axis} ordinal ${ords[i]} does not follow ${ords[i - 1]} — either two blocks claim the same landing slot (the 104/79 rot) or a block sits out of landing order`);
+      }
+      assert.ok(ords[ords.length - 1] <= ceiling,
+        `${file}: the chronicle claims ${axis} ordinal ${ords[ords.length - 1]} but the measured census ceiling is ${ceiling}`);
+    }
+  }
 });
 
 test("A 101st SCENARIO IS REFUSED BY NAME — and a self-derived allowlist would not have", () => {
