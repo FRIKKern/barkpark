@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: task-system-guide | budget: 4000tok -->
 # The Task System
 
-Barkpark as your AI's task board: agents claim work over HTTP, you steer the queue in Studio, every change broadcasts live. Tasks are plain `type:task` documents — no second store. A root task is a **goal**; children nest; dependencies form a graph; claims are atomic and fenced.
+Barkpark as your AI's task board: agents claim work over HTTP, you steer the queue in Studio, every change broadcasts live. Tasks are plain `type:task` docs — no second store. A root task is a **goal**; children nest; dependencies form a graph; claims are atomic and fenced.
 
 ## What you get
 
@@ -9,8 +9,8 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the que
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system); `dependencies`/`claim` read-only. |
 | **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / close / move` — manifest-driven (`GET /v1/capabilities`). |
-| **Terminal TUI** | `bp tasks` (= `bp task tui`) opens the criteria-first reader; `c`/`x` claim/close the highlighted task (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Wide mode: click/wheel focuses a column, drag `↔` to resize. Desk keys: `/` search, `n` new, `y` duplicate, `D`×2 delete. |
-| **HTTP API** | Sixteen bearer-token endpoints under `/v1/tasks/*` (read tier): the verbs plus fetch, edges, labels, papers. |
+| **Terminal TUI** | `bp tasks` (= `bp task tui`) opens the criteria-first reader; `c`/`x` claim/close (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Keys: [tui cheatsheet](../cheatsheets/tui.md). |
+| **HTTP API** | Sixteen bearer endpoints under `/v1/tasks/*` (read tier): the verbs plus fetch, edges, labels, papers. |
 | **Events** | Each op emits a `mutation_events` row — `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
 
 Lifecycle: `open · in_progress · blocked · done · cancelled`.
@@ -84,6 +84,7 @@ The contract, precisely:
 - **Claim** flips to `in_progress`, stamps `{worker, ts_iso, epoch}`, and bumps the epoch.
 - **Release** — `POST /v1/tasks/:id/release`, holder `worker_id` + `observed_epoch`: `in_progress`→`open`, clears `claim.worker`+`assignee`, bumps the epoch, stamps `released_by`/`released_at`, emits `task.released`.
 - **Stamp** — holder + epoch fenced. `--met` needs evidence **and** `--criterion-text` (exact row wording; index-only met-flip → 409 `criterion_text_required`). `--miss` needs neither — records one of the last 5 attempts, no `met` flip. Emits `task.criterion`; never trips the work-digest fence.
+- **Merge gates are the lead's**; PR-body proof dies at merge — close over, never flip ([ADR 0005](../decisions/0005-pr-body-criteria.md)).
 - **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat: renews the lease, emits `task.pulse`. No epoch arg.
 - **Close** needs holder + epoch (`fenced_off` on mismatch). Status defaults `done`; reason + criterion updates (`met:true` needs its `criterion` text) commit in the same rev-CAS. Brief drift → `doc_changed_since_claim`; pass `observed_rev` for strict full-rev CAS.
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **2700**, env-tunable), emitting `task.lease_expired` (reap keeps `assignee`). Finish, pulse or re-claim.
@@ -137,7 +138,7 @@ Leave a field absent when unknown; never fabricate a ref.
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its Barkpark task. `bp cmux install --print` shows the four hooks (SessionStart · PreToolUse · Stop · SessionEnd → `bp cmux hook <event>`) + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>` set, **SessionStart** claims (re-claim = renewal), **PreToolUse** renews ≤1/60s, **Stop**/**SessionEnd** close IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
+A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks (SessionStart · PreToolUse · Stop · SessionEnd → `bp cmux hook <event>`) + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims (re-claim = renewal), **PreToolUse** renews ≤1/60s, **Stop**/**SessionEnd** close IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
 
 ## Working with your AI in Studio
 
