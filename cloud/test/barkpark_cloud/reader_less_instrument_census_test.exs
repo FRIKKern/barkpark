@@ -800,9 +800,9 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   test "the scanner CAN find a reader: the control at internal/agent/report.go", ctx do
     control = ReaderScan.hits(["request_stats"])["request_stats"]
 
-    assert Enum.any?(control, &(&1.file == "internal/agent/report.go" and &1.line == 639)),
+    assert Enum.any?(control, &(&1.file == "internal/agent/report.go" and &1.line == 659)),
            """
-           the control is missing. internal/agent/report.go:639 reads
+           the control is missing. internal/agent/report.go:659 reads
 
                const requestStatsPath = "/v1/instance/request-stats"
 

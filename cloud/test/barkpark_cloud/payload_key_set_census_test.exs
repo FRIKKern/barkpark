@@ -1025,8 +1025,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # — DELETE the allowlist row" arm reds. That arm is DESIGNED to force this
   # co-edit in the same commit, and a Go-only PR never runs the Cloud job, so
   # deferring it would have merged green and reddened main.
-  @emitted_floor 149
-  @go_tag_floor 273
+  @emitted_floor 151
+  @go_tag_floor 275
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1201,7 +1201,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
   # still worth exactly the same 14 vitals — the three new keys are in the base
   # literal, so they are visible to both walkers).
-  @barkpark_family_keys 60
+  @barkpark_family_keys 62
   @barkpark_family_keys_blind 46
 
   # ---------------------------------------------------------------------------
