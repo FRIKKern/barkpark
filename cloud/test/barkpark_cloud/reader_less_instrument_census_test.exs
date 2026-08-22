@@ -22,8 +22,8 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   `@roots` is a positive declaration. A SUBTRACTIVE corpus ("everything except
   …") is how D441's went vacuous, and D442's went dark for a different reason:
   IT OMITTED `api/`. The instance half of every control-plane instrument lives
-  there — `internal/agent/report.go:639` holds the probe and
-  `api/lib/barkpark_web/router.ex:1633` MOUNTS the route it probes — so a corpus
+  there — `internal/agent/report.go` holds the probe (`const requestStatsPath`)
+  and `api/lib/barkpark_web/router.ex` MOUNTS the route it probes — so a corpus
   without `api/` cannot see the reader half of a cross-tree instrument and
   scores it dark by construction. `test "the api/ half of the corpus is
   LOAD-BEARING"` measures exactly that: dropping `api/` loses real reader files
@@ -60,7 +60,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   ## SUBSTRING, not identifier-boundary — and why, measured
 
   A boundary-anchored match (`(?<![A-Za-z0-9_])name(?![A-Za-z0-9_])`) was the
-  first cut and it LOST THE CENSUS'S OWN CONTROL: `internal/agent/report.go:639`
+  first cut and it LOST THE CENSUS'S OWN CONTROL: `internal/agent/report.go`
   reads `const requestStatsPath = "/v1/instance/request-stats"`, and the trailing
   `Path` makes `requestStats` fail the right-hand boundary. A compound identifier
   built out of the key's name is still a code path that names the key — that is
@@ -656,7 +656,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       audience:
         "the fleet agent (a machine) on the read side, and the instance operator through the vitals it feeds — held here for a second reason: it is the row that proves the corpus needs api/",
       reason:
-        "its two halves live in DIFFERENT trees: internal/agent/report.go:639 names the route it probes, api/lib/barkpark_web/router.ex:1633 mounts it, and five more api/ files name the identifier. D442's corpus omitted api/ entirely, so a key whose readership lives there scored dark by construction. This row makes that concrete and testable.",
+        "its two halves live in DIFFERENT trees: internal/agent/report.go names the route it probes (`const requestStatsPath`), api/lib/barkpark_web/router.ex mounts it, and five more api/ files name the identifier. D442's corpus omitted api/ entirely, so a key whose readership lives there scored dark by construction. This row makes that concrete and testable.",
       disposition: :has_reader,
       stay: nil
     },
@@ -797,18 +797,98 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
     end
   end
 
+  # THE CONTROL IS ANCHORED ON THE CONST'S TEXT, NEVER ON ITS LINE NUMBER.
+  # This arm used to assert `&1.line == 639`. Lines inserted ABOVE the const
+  # moved it to :659 and the arm redded over an edit that touched nothing it
+  # measures — while its own `found instead:` list carried the correct line the
+  # whole time. THE SCANNER WAS NEVER BLIND; ONLY THE PIN WAS STALE.
+  #
+  # A pin that cannot tell "I am reading the wrong window" from "the thing is
+  # gone" will eventually read the wrong window (task-29644998e128dd9f). So the
+  # line is RESOLVED by reading report.go, and the two failures the single
+  # number used to conflate now print different sentences:
+  #
+  #   the control TEXT is gone from report.go  -> a finding about internal/
+  #   the SCANNER missed a line that IS there  -> a finding about this census
+  #
+  # THIS DERIVATION WEAKENS NOTHING, and the distinction matters because the
+  # floors in the sibling payload census must NOT be derived: those bound a
+  # count they measure, so deriving them can never red. This resolves an
+  # ANCHOR — the const's own source text, which is what the arm was always
+  # about — and the assertion still requires the scanner to have reached that
+  # exact line independently.
+  @control_file "internal/agent/report.go"
+  @control_text ~S(const requestStatsPath = "/v1/instance/request-stats")
+
+  # {:ok, line} | {:error, why} — never raises, so the arm says WHICH half broke
+  # instead of dying inside a helper.
+  defp control_line do
+    case File.read(Path.join(ReaderScan.repo_root(), @control_file)) do
+      {:ok, src} ->
+        src
+        |> String.split("\n")
+        |> Enum.with_index(1)
+        |> Enum.filter(fn {l, _} -> String.contains?(l, @control_text) end)
+        |> case do
+          [{_, line}] ->
+            {:ok, line}
+
+          [] ->
+            {:error, "the control text does not occur in #{@control_file} at all"}
+
+          many ->
+            {:error,
+             "the control text occurs #{length(many)}x in #{@control_file} (lines " <>
+               "#{Enum.map_join(many, ", ", fn {_, l} -> l end)}) — an ambiguous anchor " <>
+               "proves nothing about WHICH site the scanner reached"}
+        end
+
+      {:error, reason} ->
+        {:error, "#{@control_file} could not be read: #{inspect(reason)}"}
+    end
+  end
+
   test "the scanner CAN find a reader: the control at internal/agent/report.go", ctx do
     control = ReaderScan.hits(["request_stats"])["request_stats"]
 
-    assert Enum.any?(control, &(&1.file == "internal/agent/report.go" and &1.line == 659)),
-           """
-           the control is missing. internal/agent/report.go:659 reads
+    # HALF ONE — the control itself. A red here says `internal/` moved and this
+    # census is uninstrumented. It is NOT a statement about the scanner.
+    line =
+      case control_line() do
+        {:ok, line} ->
+          line
 
-               const requestStatsPath = "/v1/instance/request-stats"
+        {:error, why} ->
+          flunk("""
+          THE CONTROL TEXT IS GONE, so this census has no positive control at all.
+
+          expected, in #{@control_file}:
+
+              #{@control_text}
+
+          #{why}
+
+          Re-point @control_text at whatever code path in `internal/` now NAMES
+          the sibling route. Do NOT delete this arm and do NOT pin a line number
+          back into it — without a control, every zero this census reports is
+          indistinguishable from a grep artefact.
+          """)
+      end
+
+    # HALF TWO — the scanner. The text exists at a known line; the scanner must
+    # have reached it independently.
+    assert Enum.any?(control, &(&1.file == @control_file and &1.line == line)),
+           """
+           THE SCANNER MISSED A LINE THAT IS THERE. #{@control_file}:#{line} reads
+
+               #{@control_text}
 
            — a code path in `internal/` that NAMES the sibling route. It is the
            control for every zero this census reports out of that same tree: if
            this line cannot be found, a zero is a grep artefact, not an absence.
+
+           The line was RESOLVED by reading #{@control_file}, never transcribed,
+           so this failure is about the SCANNER and can never be a stale pin.
 
            found instead: #{inspect(Enum.take(control, 5))}
            """
