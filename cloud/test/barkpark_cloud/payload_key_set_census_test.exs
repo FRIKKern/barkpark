@@ -2179,7 +2179,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #     first run against today's tree: `apply_arming` and `apply_arming_checked_at`
   #     (#13003, landed the same day as this reland) are columns `barkpark_json/4`
   #     does not carry. That is the arm doing its job on a hole it was not built
-  #     for, three months after it was written. See their rows above.
+  #     for, FOURTEEN DAYS after it was written (2026-08-08 -> 2026-08-22). See their rows above.
   #   * @schema_field_floor went 95 -> 103: eight columns joined the three
   #     censused schemas in the interval. It is measured, never derived — a bound
   #     computed from what it bounds can never red.
