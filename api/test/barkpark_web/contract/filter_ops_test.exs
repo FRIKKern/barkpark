@@ -781,4 +781,55 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
       assert error["message"] =~ ~s(unknown filter operator "bogus")
     end
   end
+
+  # ── the door is DELIBERATELY narrower than the builder ────────────────────
+  #
+  # gfr-w1-filter-door-validator-drift asked for the door to DELEGATE to
+  # `Content.Query.validate_filter_map/1`. Measured, that would be a REGRESSION:
+  # the builder is field-aware and accepts the `@doc_id_only_ops` prefix
+  # spellings on `doc_id`/`_id`, which `query.ex` records as having "no public
+  # wire form". These two tests pin the divergence as a SPECIFICATION, so a
+  # later delegation reds here instead of quietly widening the public API.
+  describe "the door stays narrower than the builder" do
+    test "the BUILDER accepts doc_id/starts_with — it has a clause for that pair" do
+      assert :ok = Content.Query.validate_filter_map(%{"doc_id" => %{"starts_with" => "d"}})
+    end
+
+    test "the DOOR refuses the same filter — builder-only spellings have no wire form",
+         %{conn: conn} do
+      body =
+        conn
+        |> get("/v1/data/query/fops_http/post?filter[doc_id][starts_with]=f")
+        |> json_response(400)
+
+      assert body["error"]["code"] == "invalid_filter"
+      assert body["error"]["message"] =~ "unknown filter operator \"starts_with\""
+    end
+
+    test "the door's operator list is DERIVED from the builder's, never re-spelled" do
+      assert Content.Query.valid_filter_ops() ==
+               ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is)
+
+      body =
+        conn_for_ops()
+        |> get("/v1/data/query/fops_http/post?filter[title][bogus]=x")
+        |> json_response(400)
+
+      # The rendered list IS the builder's set, compared as a SET — a substring
+      # check per op is vacuous for short spellings like "is", which match
+      # accidentally inside other words (measured: dropping `is` from the door
+      # left a per-op `=~` assertion green while three behaviour tests red).
+      rendered =
+        body["error"]["message"]
+        |> String.split("valid operators:")
+        |> List.last()
+        |> String.split(",")
+        |> Enum.map(&String.trim/1)
+        |> MapSet.new()
+
+      assert rendered == MapSet.new(Content.Query.valid_filter_ops())
+    end
+
+    defp conn_for_ops, do: Phoenix.ConnTest.build_conn()
+  end
 end

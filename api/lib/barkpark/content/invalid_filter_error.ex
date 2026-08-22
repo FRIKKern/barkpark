@@ -52,8 +52,7 @@ defmodule Barkpark.Content.InvalidFilterError do
       op: op,
       message:
         "unsupported filter operator #{inspect(op)}; valid operators: " <>
-          "eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, " <>
-          "gt, gte, lt, lte, is"
+          Enum.join(Barkpark.Content.Query.valid_filter_ops(), ", ")
     }
   end
 end
