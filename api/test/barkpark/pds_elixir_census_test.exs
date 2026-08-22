@@ -108,8 +108,17 @@ defmodule Barkpark.PdsElixirCensusTest do
   # an enforcement nothing executes is the shape this case exists to refuse.
   # ONE TOKEN, ON THE RECORDED SIDE: the mutation moves the committed BASELINE,
   # never the tree, so it cannot be confused with an honest lens correction.
-  @baseline_from "unrouted: " <> "23"
-  @baseline_to "unrouted: 24"
+  #
+  # AND THE TOKEN IS DERIVED FROM THE SOURCE, NEVER TRANSCRIBED. This arm shipped
+  # `@baseline_from "unrouted: 23"` with a matching `derived 23` assertion below --
+  # a bucket count, in the file whose own "Why the assertions are on prose, never
+  # on numbers" section forbids exactly that, ON THE REQUIRED ELIXIR GATE. The
+  # census's `textual` row moved 104 -> 106 -> 108 in three waves, every move an
+  # honest re-derivation; the day `unrouted` does the same, a pinned literal here
+  # reds MAIN and accuses a PR whose bytes never touched the census. See
+  # `baseline_perturbation/1` below: it reads today's figure out of @rederived and
+  # perturbs it by one, so the arm is always exactly one off whatever the tree
+  # currently says and can only ever red for the reason it was written for.
 
   setup_all do
     census = Path.expand(@census_rel, __DIR__)
@@ -186,7 +195,8 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   test "the population baseline REFUSES: a perturbed literal exits 1 with FAIL  D448-DRIFT-REFUSES",
        ctx do
-    {out, rc} = mutate_and_run(ctx, @baseline_from, @baseline_to)
+    {from, to, derived, mutated} = baseline_perturbation(File.read!(ctx.census))
+    {out, rc} = mutate_and_run(ctx, from, to)
 
     assert rc == 1,
            "a census whose committed population baseline no longer matches the tree exited #{rc}. " <>
@@ -197,9 +207,11 @@ defmodule Barkpark.PdsElixirCensusTest do
            "the mutant exited 1 without naming the arm — the exit code did not descend from the " <>
              "baseline check. Output:\n#{out}"
 
-    assert out =~ "unrouted baseline 24 derived 23",
+    assert out =~ "unrouted baseline #{mutated} derived #{derived}",
            "the refusal named no row and no pair of numbers. A verdict that does not say WHICH " <>
-             "population moved cannot be repaired by re-derivation. Output:\n#{out}"
+             "population moved cannot be repaired by re-derivation. Expected the pair " <>
+             "#{mutated}/#{derived}, both READ OUT OF the census source rather than typed here. " <>
+             "Output:\n#{out}"
 
     assert out =~ "RE-DERIVE, never re-type",
            "the refusal shipped without the repair instruction, so the cheapest fix a reader can " <>
@@ -229,6 +241,27 @@ defmodule Barkpark.PdsElixirCensusTest do
   # corpus glob is CWD-relative, and a mutant run from its own tmp dir censuses an
   # empty tree and exits 2 (REFUSED: TRUNCATED CORPUS), which is not the rc under
   # test. Kept as a helper so a second arm cannot drift from the first one's setup.
+  # WHAT THE BASELINE ARM PERTURBS, READ OUT OF THE CENSUS RATHER THAN TYPED HERE.
+  # Returns the anchor pair for `mutate_and_run/3` plus both sides of the comparison
+  # the census must then print, so the assertion above names a row and a pair of
+  # numbers without this file ever transcribing one. An honest re-derivation of
+  # @rederived.unrouted moves all four together and this arm does not notice.
+  defp baseline_perturbation(source) do
+    case Regex.run(~r/@rederived\s+%\{.*?unrouted:\s*(\d+)/s, source) do
+      [_, n] ->
+        derived = String.to_integer(n)
+        {"unrouted: #{derived}", "unrouted: #{derived + 1}", derived, derived + 1}
+
+      nil ->
+        flunk(
+          "could not read @rederived.unrouted out of the census source. This arm perturbs that " <>
+            "literal; if the attribute was renamed or the key removed, RE-POINT the derivation " <>
+            "rather than pinning a number back into this file -- a pinned number is what this " <>
+            "arm was repaired to stop carrying."
+        )
+    end
+  end
+
   defp mutate_and_run(ctx, from, to) do
     source = File.read!(ctx.census)
     occurrences = length(String.split(source, from)) - 1

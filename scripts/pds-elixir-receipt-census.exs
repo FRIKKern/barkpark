@@ -281,6 +281,16 @@ defmodule PDS.Census do
     unrouted: 23
   }
 
+  # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
+  # its column padding — from @rederived and NOTHING TYPED. Both cases perturb
+  # `unrouted` by exactly one, so `baseline` is @rederived.unrouted + 1 (this file's own
+  # injected number, safe to assert) and `derived` is whatever the tree says (NEVER
+  # asserted). Pinning that second half is what left D448-REFUSAL-IS-THE-ARM dead-red for
+  # two waves while `textual` moved 104 -> 106 -> 107 -> 108, every move an honest
+  # re-derivation and not one of them a defect.
+  @drift_row_injected "unrouted       baseline " <>
+                        String.pad_leading(to_string(@rederived.unrouted + 1), 4) <> "  derived"
+
   # Route-bearing sentinels. A carriers-only corpus (the files that literally hold an
   # `ok: true`) parses fine and reports write=0 with no error — PDS-D449a. These files
   # carry no `ok: true` themselves, so their absence PROVES the corpus is truncated.
@@ -6747,22 +6757,30 @@ defmodule PDS.Census do
     # and a mutant there would run a check that returned [] before and [] after — the
     # unmutatability PDS-D541 named, wearing a new arm's name.
     #
-    # IT ASSERTS NO POPULATION COUNT IT DOES NOT HAVE TO. The mutation moves the BASELINE
-    # (a literal in this file), never the tree, and the expected prose names the row and
-    # both sides of the comparison it broke. An honest lens correction moves `derived`, and
-    # then this arm is SUPPOSED to red — that is the whole point of the wave-47 ending, and
-    # the FAIL sentence carries the re-derivation command so the repair is one run.
+    # IT ASSERTS ONLY THE COUNT IT INJECTED ITSELF. The mutation moves the BASELINE (a
+    # literal in this file), never the tree, so `24` is THIS CASE'S OWN number and pinning
+    # it is safe. THE DERIVED SIDE IS THE TREE'S AND IS DELIBERATELY LEFT UNPINNED — the
+    # expectation stops at the word `derived` — because pinning what follows it is the one
+    # thing the banner forbids, and pinning it is what left the sibling arm below dead-red
+    # for two waves. An honest lens correction moves `derived` and this case does not
+    # notice, which is the point. THE ANCHOR IS DERIVED TOO (@drift_row_injected, beside
+    # @rederived): a pinned anchor would not lie, but it would refuse with MUTATION ANCHOR
+    # GONE the first time `unrouted` moved — loud rather than wrong, and still a red this
+    # arm has no business printing.
+    # The FAIL sentence carries the re-derivation command so the repair is one run.
     %{
       name: "D448-BASELINE-REFUSES",
       corpus: :repo,
       argv: [],
-      mut: {"unrouted: " <> "23", "unrouted: 24"},
+      mut: {"unrouted: " <> Integer.to_string(@rederived.unrouted),
+            "unrouted: " <> Integer.to_string(@rederived.unrouted + 1)},
       exit: 1,
       expect: [
         "FAIL  D448-DRIFT-REFUSES",
-        "unrouted baseline 24 derived 23",
+        "1 population row(s) DRIFTED off the wave-47 baseline: unrouted baseline " <>
+          "#{@rederived.unrouted + 1} derived #{@rederived.unrouted}",
         "RE-DERIVE, never re-type",
-        "unrouted       baseline   24  derived   23  DRIFT"
+        @drift_row_injected
       ],
       proves: "a population row that no longer descends from the tree EXITS 1 by name instead of printing DRIFT at exit 0 forever — the four-wave-old advisory block, armed. The mutation perturbs the RECORDED side, which is the only side a selftest can move without touching api/lib"
     },
@@ -6770,15 +6788,29 @@ defmodule PDS.Census do
       name: "D448-REFUSAL-IS-THE-ARM",
       corpus: :repo,
       argv: [],
-      # THE SAME PERTURBATION, WITH THE ENFORCEMENT REMOVED. Without this case the case
-      # above proves only that SOMETHING reds; this one shows the exit code descends from
-      # baseline_checks/2 and nothing else — drop the arm from the checks list and the
-      # identical drift prints at exit 0, which is exactly what this file did until wave 47.
-      mut: {"++ baseline_checks(drift_rows, " <> "classified)", "++ []"},
+      # THE SAME PERTURBATION, WITH THE ENFORCEMENT REMOVED — and it takes BOTH mutations
+      # to say that. Moving the baseline is what PRODUCES a DRIFT row; removing the arm is
+      # what lets that row print at exit 0. DISARMING ALONE PERTURBS NOTHING: every row
+      # reads `==`, no DRIFT is printed, and the run differs from an unmutated one only by
+      # the missing PASS line — which is how this case spent two waves asserting a state it
+      # never produced. The pair below is applied left to right by apply_mutation/2, each
+      # half under the same exactly-once anchor refusal.
+      #
+      # NO NUMBER IS TYPED HERE AT ALL. Both the anchor and the asserted `baseline` come
+      # from @rederived.unrouted + 1 — this case's OWN injected value — and the `derived`
+      # side is left unasserted, so an honest re-derivation of any population moves all of
+      # them together and can never red this case. That is the banner's rule, obeyed. The
+      # row cannot read `==` with a baseline one off the derived value, so the prefix alone
+      # witnesses the DRIFT without naming the tree's figure.
+      mut: [
+        {"unrouted: " <> Integer.to_string(@rederived.unrouted),
+         "unrouted: " <> Integer.to_string(@rederived.unrouted + 1)},
+        {"++ baseline_checks(drift_rows, " <> "classified)", "++ []"}
+      ],
       exit: 0,
-      expect: ["CENSUS OK", "baseline  104  derived  104  =="],
+      expect: ["CENSUS OK", @drift_row_injected],
       refute: ["D448-DRIFT-REFUSES"],
-      proves: "with the arm removed the census returns to its pre-wave-47 behaviour — green, with the block still printing — so the red above is produced by this arm and not by a neighbouring check the mutation happened to disturb"
+      proves: "with the arm removed the census returns to its pre-wave-47 behaviour — a row whose baseline no longer descends from the tree PRINTS ITS DRIFT AND EXITS 0 ANYWAY — so the red the case above produces is produced by baseline_checks/2 and not by a neighbouring check the mutation happened to disturb. The two cases differ by exactly one mutation: the sibling moves the baseline and exits 1, this moves the same baseline AND drops the arm and exits 0"
     }
   ]
 
@@ -6997,6 +7029,21 @@ defmodule PDS.Census do
   # moves the mutated line must break the selftest loudly rather than leave it running the
   # unmutated script and reporting green.
   defp apply_mutation(src, nil), do: {:ok, src}
+
+  # A LIST APPLIES EVERY PAIR, EACH UNDER THE SAME EXACTLY-ONCE REFUSAL BELOW. One case
+  # needs a TWO-PART perturbation — move a baseline AND disarm the check that reads it —
+  # and a single pair can only ever do half of that, which is precisely how
+  # D448-REFUSAL-IS-THE-ARM came to assert a state it never produced. Applied left to
+  # right; the first anchor that is gone or ambiguous fails the WHOLE mutation, so a
+  # half-applied mutant is never run and never reported.
+  defp apply_mutation(src, muts) when is_list(muts) do
+    Enum.reduce_while(muts, {:ok, src}, fn m, {:ok, acc} ->
+      case apply_mutation(acc, m) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
 
   defp apply_mutation(src, {from, to}) do
     case length(:binary.matches(src, from)) do
