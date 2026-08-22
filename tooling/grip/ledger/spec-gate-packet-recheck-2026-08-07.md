@@ -11,7 +11,7 @@ smaller suite (54 passed / 1 failed vs 119 passed / 0 failed, same command, same
 | hermetic suite: `119 passed, 0 failed`, rc 0 | `bash scripts/required-checks.test.sh --hermetic; echo RC=$?` |
 | live suite (token exercises §10/§11): `123 passed, 0 failed`, rc 0 | `bash scripts/required-checks.test.sh; echo RC=$?` |
 | primary checkout is behind, and its suite is smaller | `git rev-list --count HEAD..origin/main` in the primary checkout, then the hermetic run there |
-| identity sweep short-circuits (no candidate = no evidence) | `bash scripts/registration-deadlock-sweep.sh --ref-rev origin/main --limit 100` |
+| identity sweep REFUSES: rc 2, "evaluated 0 of them ... exit 2 and not a pass" — a green here would be indistinguishable from a real authorization (edited 2026-08-23 per cch-w39-fu-flip-packet-passes-require-new-context; WAS the bare command without the flag, whose short-circuit exited 0) | `bash scripts/registration-deadlock-sweep.sh --require-new-context --ref-rev origin/main --limit 100; echo RC=$?` |
 | build the 5-context candidate | `jq '.protection.required_status_checks.checks += [{"context":"Required-check spec gate","app_id":15368}]' .github/required-checks.json > /tmp/_cand5.json` |
 | sweep with the fifth context: rc 0, **2 ok / 20 skip of 22**, denominator NOT printed | `bash scripts/registration-deadlock-sweep.sh --spec /tmp/_cand5.json --ref-rev origin/main --limit 100; echo RC=$?` |
 | floor refuses growth (rc 2), names the added context | `bash scripts/required-checks-floor.sh --ref-rev origin/main /tmp/_cand5.json; echo RC=$?` |
@@ -27,3 +27,20 @@ VERDICT: the packet is NOT authorized today. Not because a command failed — ev
 but because the sweep that authorizes the flip evaluated 2 of 22 open PRs and its own footer does
 not say so. #9921 must land first; it turns that footer into `evaluated 2, skipped 20 (…)` plus a
 `PARTIAL COVERAGE` line, which is the sentence a human must paste into the authorization.
+
+
+## Addendum 2026-08-23 — the step-2 invocation carries `--require-new-context`
+
+cch-w39-s4 shipped the flag; this packet was outside its fence and kept the bare command.
+Run verbatim from a worktree at origin/main `51a823b10d` (rc read by redirect, never a pipe):
+
+    $ bash scripts/registration-deadlock-sweep.sh --require-new-context --ref-rev origin/main --limit 100
+    ...
+    FAIL: the candidate proposes no context that origin/main:.github/required-checks.json does not
+    already require, so this sweep listed no PR, read no head's check runs, and evaluated 0 of them —
+    side (B), does this head render the newly proposed context, was never asked. Under
+    --require-new-context that is exit 2 and not a pass ...
+    RC=2
+
+The authorizing sentence must quote the evaluated/skipped coverage line, never the exit code.
+Hermetic suite after this prose edit: 177 passed, 0 failed, rc 0 (same worktree; re-run after the edit).
