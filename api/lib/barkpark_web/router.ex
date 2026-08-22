@@ -993,6 +993,18 @@ defmodule BarkparkWeb.Router do
     # rows in its WHERE clause, so a revoked token fails closed on its next
     # use with zero read-path changes.
     delete("/app-tokens/current", AppTokenController, :delete_current)
+
+    # jf-backlog-apptoken-revoke-upstream — enumerate + revoke BY ID. The mint's
+    # optional `label` REPLACES the `app:<email>` default, so
+    # `revoke_app_tokens_for_email/1`'s exact-label match could not reach a
+    # custom-labelled token: with no list and no by-id route it was unrevocable
+    # unless the operator still held the raw string.
+    #
+    # ORDER IS LOAD-BEARING: `/app-tokens/current` MUST stay above
+    # `/app-tokens/:id` or the literal segment is swallowed by the param and
+    # self-revoke starts trying to revoke a row with id "current".
+    get("/app-tokens", AppTokenController, :index)
+    delete("/app-tokens/:id", AppTokenController, :delete_by_id)
     delete("/app-tokens", AppTokenController, :delete)
   end
 

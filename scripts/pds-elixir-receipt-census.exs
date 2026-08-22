@@ -259,14 +259,25 @@ defmodule PDS.Census do
   # aarch64-apple-darwin24.6.0, printed live by report_engine/0. command
   # `elixir scripts/pds-elixir-receipt-census.exs` from the repo root, 2026-08-20,
   # in the SAME commit as the correction receipt that moved the rows.
+  # RE-DERIVED BY RUN, never re-typed (PDS-D448a): the four moved rows below are the
+  # output of `elixir scripts/pds-elixir-receipt-census.exs` from the repo root on the
+  # tree this commit ships, amended in the SAME commit as the change that moved them.
+  #
+  # WHAT MOVED IT: jf-backlog-apptoken-revoke-upstream added ONE routed-write receipt —
+  # AppTokenController.delete_by_id/2's `ok: true` success arm, the emission that makes
+  # the new admin revoke-by-id auditable instead of an UNDISPOSED ARRIVAL. One emission
+  # moves four rows: textual and ast-literal count the occurrence, `emitted` counts the
+  # site, and `read` counts the route's sibling GET /v1/auth/app-tokens arriving in the
+  # read-routed population. `phantom` is unchanged at 9 BY CONSTRUCTION — the receipt's
+  # own comment deliberately does not spell the needle, so it names no emitter.
   @rederived %{
-    textual: 107,
-    ast: 98,
+    textual: 108,
+    ast: 99,
     phantom: 9,
     consumer: 4,
-    emitted: 94,
+    emitted: 95,
     write: 57,
-    read: 14,
+    read: 15,
     unrouted: 23
   }
 
@@ -1002,6 +1013,16 @@ defmodule PDS.Census do
     %{key: {"api/lib/barkpark/plugins/sheets/web/ops_controller.ex",
             "Barkpark.Plugins.Sheets.Web.OpsController.apply_ops/2", "36006285", "87176703"},
       verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/app_token_controller.ex:215 — the admin revoke-by-id
+    # receipt (jf-backlog-apptoken-revoke-upstream). PROVEN/end_to_end is earned, not
+    # asserted: app_token_admin_revoke_test.exs drives DELETE /v1/auth/app-tokens/:id
+    # AND reads the store back through Auth.verify_token/1, which enforces revocation in
+    # its WHERE clause. Mutation-exercised — making revoke_app_token_by_id/1 a no-op reds
+    # "revoking by id actually stops the token authenticating".
+    %{key: {"api/lib/barkpark_web/controllers/app_token_controller.ex",
+            "BarkparkWeb.AppTokenController.delete_by_id/2", "15384850", "117712781"},
+      verdict: "PROVEN", basis: :end_to_end,
+      evidence: "api/test/barkpark_web/controllers/app_token_admin_revoke_test.exs:162"},
     # barkpark_web/controllers/auth_controller.ex:177
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.erase/2", "14672314", "70062513"},
