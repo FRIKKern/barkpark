@@ -203,14 +203,21 @@ defmodule BarkparkWeb.AppTokenController do
 
       true ->
         case Auth.revoke_app_token_by_id(id) do
-          # RECEIPT LAW (pds w40), same as delete_current/2 below:
-          # `Auth.revoke_app_token_by_id/1` ends in `revoke_token/1`, which returns
-          # the UPDATED row, so `revoked` descends from the persisted `revoked_at`
-          # rather than being a literal `true` that stays true even if the stamp
-          # never landed. Without this the routed-write census cannot see a receipt
-          # here at all and the arrival lands UNDISPOSED.
+          # THE RECEIPT, and it describes the STORE rather than the request
+          # (jf-backlog-apptoken-revoke-upstream). `revoke_token/1` returns the
+          # UPDATED row, so `revoked_at` is the timestamp the write actually
+          # produced — not a literal echoed back from the caller's own params.
+          # The success marker is the house one (auth_controller.ex:179/:218,
+          # bulldocs_intents_controller.ex:50) and is what makes this routed
+          # write JUDGED by the receipt census instead of an undisposed arrival.
+          # Spelled only in the code below, never in this comment: the census
+          # counts textual occurrences, and a mention here would register as a
+          # PHANTOM site that names no emitter.
+          # A revoke route that could not be audited would be the one thing this
+          # endpoint exists to prevent.
           {:ok, token} ->
             json(conn, %{
+              ok: true,
               revoked: not is_nil(token.revoked_at),
               id: token.id,
               revoked_at: token.revoked_at

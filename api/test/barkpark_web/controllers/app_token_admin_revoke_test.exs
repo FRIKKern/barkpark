@@ -151,7 +151,19 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
       body = json_conn(admin) |> get("/v1/auth/app-tokens") |> json_response(200)
       id = hd(body["tokens"])["id"]
 
-      assert json_conn(admin) |> delete("/v1/auth/app-tokens/#{id}") |> json_response(200)
+      receipt = json_conn(admin) |> delete("/v1/auth/app-tokens/#{id}") |> json_response(200)
+
+      # THE RECEIPT IS READ BACK AGAINST THE STORE, not merely parsed. The route
+      # renders `revoked_at` from the row `revoke_token/1` returned; this asserts
+      # the STORED row carries that same timestamp, so the receipt describes what
+      # the store holds rather than echoing the request. The census's own
+      # BASIS-FALSIFIERS refuses a PROVEN/end_to_end citation whose block does not
+      # read Repo back — and it refused this row until this line existed.
+      stored = Barkpark.Repo.get(Barkpark.Auth.ApiToken, id)
+      assert stored.revoked_at != nil, "the store shows the token still live"
+      assert receipt["ok"] == true
+      assert receipt["id"] == id
+      assert receipt["revoked_at"] == DateTime.to_iso8601(stored.revoked_at)
 
       # THE ASSERTION THAT MATTERS: not "the route answered 200", but that the
       # credential is dead at the auth chokepoint. `verify_token/1` enforces
@@ -160,34 +172,6 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
       # comment, never a distinct "revoked" code that would leak existence.
       assert Auth.verify_token(raw) == {:error, :unauthorized},
              "the revoked token still authenticates"
-    end
-
-    test "the 200 body's `revoked` DESCENDS from the persisted stamp, not a literal",
-         %{admin: admin} do
-      # RECEIPT LAW (pds w40). The sibling `delete_current/2` already derives this
-      # field; `delete_by_id/2` shipped it as a literal `true`, which stays true
-      # even if the stamp never lands — a revoke endpoint reporting success it did
-      # not verify. This test fails against the literal for a structural reason and
-      # not a cosmetic one: the literal body carries NO `revoked_at` key at all.
-      raw = mint_custom_labelled!(admin, email())
-      list = json_conn(admin) |> get("/v1/auth/app-tokens") |> json_response(200)
-      id = hd(list["tokens"])["id"]
-
-      body = json_conn(admin) |> delete("/v1/auth/app-tokens/#{id}") |> json_response(200)
-
-      persisted = Barkpark.Repo.get(Barkpark.Auth.ApiToken, id).revoked_at
-      refute is_nil(persisted), "the row was never stamped revoked_at"
-
-      assert body["revoked"] == true
-
-      refute is_nil(body["revoked_at"]),
-             "the body omits revoked_at — `revoked` cannot be descending from the stamp"
-
-      assert NaiveDateTime.compare(
-               NaiveDateTime.from_iso8601!(body["revoked_at"]),
-               NaiveDateTime.truncate(persisted, :second)
-             ) == :eq,
-             "the reported revoked_at does not match the persisted stamp"
     end
 
     test "an ADMIN-permissioned app token is revocable by id — the worst case of the gap",
