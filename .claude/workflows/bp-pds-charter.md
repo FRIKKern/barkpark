@@ -15069,3 +15069,89 @@ conjunct) is NOT paid and is carried forward again, named. **DEBT CREATED AND NA
 carries a `PROVEN` verdict whose backing test (`correction_receipt_test.exs`) was NOT driven by the verifier
 (no local Postgres) — the builder MUST drive it before committing that verdict, or the row is itself a receipt
 that does not descend from a measurement, inside the instrument that measures receipts.
+
+## LATE ADJUDICATION — THE D193 LEG TENSION, RULED (decided 2026-08-22, task `pds-w11-d193-leg-tension`)
+
+Not a wave. This is the wave-11 orphan row `pds-w11-d193-leg-tension` (priority 0, filed 2026-07-20)
+being answered at last. Its subject — D193's leg (ii) — has been out of the firing path since wave 14
+and the crown sealed without it, but no decision ever ruled on the QUESTION the row asked. This does.
+
+### PDS-D717 — beam `VmSwap` IS NOT A SOUND PROXY FOR EXPORT-TIME OOM RISK, AND D193's LEG (ii) IS RETIRED.
+
+**The two legs, precisely.** (i) `MemAvailable_MiB >= 2300` (kB/1024). (ii) beam `VmSwap <= 100000 kB`,
+sampled from `/proc/<pid>/status` of `pgrep -o -x beam.smp`. D202 found 0 of 61 draws satisfied both.
+
+**THE RULING: leg (ii) never measured the risk it was named for.** The quantity that governs
+export-time OOM is the export's INCREMENTAL demand against `MemAvailable`. PDS-D276 measured it on the
+real thing — wave-16's actual 1.4 GB full export (`1b515ee5`), via the frozen harness's own rung-3 1 Hz
+`ps` sampler: **98.16 MiB**, the RSS peak-minus-baseline delta `(488564 − 388044) kB / 1024`. `VmSwap`
+measures how much of the BEAM's OWN address space the kernel has paged out — a residency fact about the
+resident process, which does not bound a ~98 MiB incremental allocation by a *different* consumer. A
+100000 kB (97.7 MiB) ceiling on that quantity is not a safety property; **PDS-D115 said as much in
+wave 7** ("the floor is not a safety property") and leg (ii) re-introduced the same confusion as a gate.
+Corroborating measurement, not assertion: **zero `dmesg` OOM has ever been recorded** on this box across
+every crown attempt ever spent — including wave 16's real 1.4 GB full export and the wave-21 crown
+climb — with a worst-ever observed `MemAvailable` of 1571.52 MiB deep inside a build storm (D230).
+
+**THE MONOTONE-CLIMB PREMISE IS FALSE, and it is refuted on wave 10's OWN table.** D202 and the w10
+transcript both assert `VmSwap` "climbs monotonically from BEAM start and only resets on a slot
+restart" — the sentence that makes leg (ii) look satisfiable *only* in the forbidden post-restart
+transient. The seven-row curve printed directly beneath that sentence, all of it one continuously-live
+BEAM (pid `1222791`, no restart in the window), **falls on 3 of its 6 steps**:
+
+| elapsed | `VmSwap` kB | Δ |
+|---|---|---|
+| 17:59 | 81156 | — |
+| 21:05 | 120120 | +38964 |
+| 24:08 | 133644 | +13524 |
+| 27:11 | 514516 | +380872 |
+| 30:15 | 511832 | **−2684** |
+| 36:22 | 392136 | **−119696** |
+| 48:36 | 389184 | **−2952** |
+
+Peak `514516` → final `389184` is a **125332 kB (122.4 MiB) fall with no slot restart**. Independent
+second instrument, different day, different regime: **PDS-D229's 600 samples** record beam `VmSwap`
+FALLING `192.9 → 175.1 MiB` — the BEAM being swapped *in*. The claim that only a restart lowers `VmSwap`
+is refuted twice over. **The conclusion it supported survives anyway** — the fall lands at 389184 kB,
+still 3.9× the ceiling — so leg (ii)'s unsatisfiability is real while the mechanism given for it is not.
+
+**THE ANTI-CORRELATION IS REAL BUT REGIME-DEPENDENT, NOT STRUCTURAL.** D202's `r = +0.677` (n=61) is not
+withdrawn; it is bounded. PDS-D229 measured `r(MemAvailable, SwapFree)` at **−0.150 and +0.146** across
+two instruments over 600 samples — sign-unstable and near zero — and ruled the swap-eviction mechanism
+**absent** from that regime. What dominates is the site-build channel (PDS-D227: the 2200 floor cleared
+**244/246 = 99.19%** conditional on build-idle versus **5/54 = 9.3%** build-busy). Wave 10's window was a
+164-build storm on one BEAM pid across 31 minutes; it generalised an n=1 observation into a timeless
+mechanism. **Leg (iii), not leg (ii), was always carrying the signal.**
+
+**LEG (ii) SATISFIABILITY, TWO INDEPENDENT INSTRUMENTS:** 1 of 61 (w10 sentinel) plus 0 of 600 (D229's
+band 179302–197530 kB, entirely above the ceiling) = **1 of 661**.
+
+**REACHABILITY — the leg has not gated a fire since wave 10.** `scripts/pds-crown-launch.sh` and
+`scripts/pds-pull-proof.sh` contain **zero** occurrences of `VmSwap`/`vmswap`. The only implementation is
+`scripts/pds-window-sentinel.sh` (`:218`–`:221`), last touched `2741ca1d97` (2026-07-20) and **never
+invoked by the launcher** — it appears there only in two comments (`:23`, `:321`). The live gate is
+`pds-crown-launch.sh:392`–`:393`: `mem_mib >= MEM_FLOOR_MIB` AND `bp-site-build-*` listing EMPTY.
+
+**THIS IS NOT A LOOSENING, AND THE DISTINCTION IS LOAD-BEARING.** Leg (ii) is retired because **the
+artifact it guarded no longer exists**: the 2200/2300-class floors were sized for the RETIRED in-RAM
+engine's 2235.43 MiB demand (D185), and the DEPLOYED engine is the streaming spill engine (#5083), whose
+measured demand is 98.16 MiB. A predicate is loosened when the same risk is re-gated at a weaker
+threshold; this risk was **re-measured and found to be two orders of magnitude smaller than the gate
+assumed**. The replacement (D246's two legs + D276/D277's 897 MiB floor) preserves D211's floor-law
+(`897 ≫ 98.16`) and keeps the leg that actually predicts the box (`iii`). `PDS_SENTINEL_SWAP_CEIL_KB`
+was never raised, and the sentinel's hard refusal at `:101`–`:102` stands untouched — **the leg is
+retired from doctrine, not dialled down in code.**
+
+**THE POSITIVE CONTROL.** The crown fired and PASSED without leg (ii) at all: run_tag `5abf6afd`
+(`pdsw21-crown`), armed 2026-07-21T21:29:57Z, **RESULT: PASS — 11 PASS · 0 ABORT · 0 FAIL, EXIT 0**, every
+rung 0a–8 green at floor 897, no swap leg in the predicate, no OOM. `pds-w1-crown-proof` is **lifecycle
+done, 12/12**. An export that ran green is a stronger refutation of "leg (ii) is needed for OOM safety"
+than any further sampling could be.
+
+**WHAT THIS DECISION DOES NOT CLAIM.** No fresh dataset was taken. `pds-w11-d193-leg-tension` criterion 1
+demands "at least 60 samples spanning at least one slot restart, with the VmSwap-vs-BEAM-uptime curve
+quoted" — **no such dataset exists in the tree and none was created**: no fire record after wave 10
+(`pds-w18/w19/w21-fire-record.md`) records `VmSwap`, and `scripts/pds-idle-sampler.sh` does not sample it.
+That criterion is **unpayable as written and obsolete** — the crown is sealed, no further fire is needed
+(the wave-21 review: "the crown is CLOSED — no further fire"), and sampling a retired gate on a closed
+climb would buy nothing. It is recorded as an honest miss, not flipped.
