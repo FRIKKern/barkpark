@@ -1107,6 +1107,51 @@ type MetricsSwap struct {
 	TotalBytes *float64 `json:"total_bytes"`
 }
 
+// MetricsSpace is the newest HOST-SPACE report: what is on the disk, broken
+// down by named consumer. It rides its own 15-minute cadence on its own route
+// (/v1/agent/space), NOT the health beat, so its absence is a fact about the
+// agent binary rather than about this window.
+//
+// EVERY numeric field is a pointer, and that is load-bearing rather than
+// stylistic: the agent stamps -1 for a probe it ran and could not complete,
+// absent for a probe its build does not have, and a real number otherwise. A
+// value type would collapse all three onto 0 — the exact "absence rendered as a
+// good reading" this envelope exists to refuse. Only a view is allowed to word
+// the difference.
+type MetricsSpace struct {
+	Root         MetricsSpaceRoot  `json:"root"`
+	JournalBytes *float64          `json:"journal_bytes"`
+	DBSize       *float64          `json:"db_size"`
+	TopRelations []RelationSize    `json:"top_relations"`
+	Sites        MetricsSpaceSites `json:"sites"`
+	ReportedAt   *string           `json:"reported_at"`
+}
+
+// MetricsSpaceRoot is the root filesystem's used/total pair. Both nil is "we
+// could not read the filesystem", never "an empty disk".
+type MetricsSpaceRoot struct {
+	UsedBytes  *float64 `json:"used_bytes"`
+	TotalBytes *float64 `json:"total_bytes"`
+}
+
+// MetricsSpaceSites is the deployed-sites directory and its biggest named
+// consumers.
+//
+// Top follows the same nil/empty split as MetricsLatest.TopRelations: nil is
+// "not measured", an empty slice is "measured, and there is nothing there".
+//
+// Count carries THREE states, which is why it is a pointer to a signed value
+// and why the renderer must word all three: nil is an agent too old to send
+// `sites_count`, -1 is a walk that ran and FAILED, and >= 0 is a real count. A
+// -1 that reaches a reader as "0 sites" would claim a measured empty disk on
+// the strength of a failed probe.
+type MetricsSpaceSites struct {
+	Dir   *string        `json:"dir"`
+	Bytes *float64       `json:"bytes"`
+	Top   []RelationSize `json:"top"`
+	Count *float64       `json:"count"`
+}
+
 // MetricsBeam is the BEAM's OWN footprint from the newest beat: resident (Pss)
 // and paged-out (Swap) bytes for the one process the kernel OOM-kills.
 type MetricsBeam struct {
@@ -1123,6 +1168,18 @@ type MetricsLatest struct {
 	TopRelations []RelationSize `json:"top_relations"`
 	Swap         MetricsSwap    `json:"swap"`
 	Beam         MetricsBeam    `json:"beam"`
+
+	// Cores is the box's core count, and it is decoded here for a SECOND
+	// reason beyond display: it is the only signal on this envelope that can
+	// tell a box which has not YET sent a space report from one that never
+	// CAN. `cpu_cores` and the whole space probe entered the agent in ONE
+	// commit (fc6a74ca23, #9824) — `git log -S` over internal/agent/report.go
+	// returns exactly that commit for each, and its parent carries neither —
+	// so for a main-line binary, a readable core count implies a binary that
+	// also contains the space loop. cloud_status_cmd.go's `unmeteredMarker`
+	// already keys the same inference off the same field under charter D69/D88;
+	// this is that ruled inference reused, not a new one invented here.
+	Cores *float64 `json:"cores"`
 }
 
 // MetricsResult is a COMPLETED metrics roll-up: the control plane rolled the
@@ -1149,6 +1206,14 @@ type MetricsResult struct {
 	Series        map[string][]MetricPoint `json:"series"`
 	Latest        MetricsLatest            `json:"latest"`
 	ServiceHealth ServiceHealth            `json:"service_health"`
+
+	// Space is the newest HOST-SPACE report, or nil when the box has never sent
+	// one. A POINTER, never a value struct: the control plane sends `null` here
+	// (Metrics.space/1 answers nil, not an all-nil envelope) precisely so a
+	// renderer can tell "no space report" from "we measured and found nothing",
+	// and a value struct would erase that distinction at the decode boundary by
+	// turning absence into a zeroed section.
+	Space *MetricsSpace `json:"space"`
 }
 
 // Metrics fetches the on-box agent vitals roll-up for a managed instance via GET

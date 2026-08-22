@@ -201,6 +201,20 @@ func renderInstanceTop(out *writer, ref string, res cloudclient.MetricsResult) {
 		}
 	}
 
+	// What is on the DISK, from the box's own space report. Unlike the storage
+	// section above this ALWAYS prints: not having a space report is the common
+	// case today, and which absence it is decides what an operator should do
+	// about it (upgrade the agent, or simply wait a cadence).
+	if space, siteBars := spaceLines(res); len(space) > 0 {
+		out.outf("")
+		for _, line := range space {
+			out.outf("%s", line)
+		}
+		if len(siteBars) > 0 {
+			out.outf("%s", renderMetricsBlocks(out, siteBars))
+		}
+	}
+
 	if line := metricsHealthLine(res.ServiceHealth); line != "" {
 		out.outf("")
 		out.outf("%s", line)
@@ -416,6 +430,126 @@ func storageLines(l cloudclient.MetricsLatest) (string, []pdrender.Block) {
 	return head, []pdrender.Block{
 		{Type: "bar-chart", Attrs: map[string]any{"bars": bars, "max": max}},
 	}
+}
+
+// spaceLines answers "what is on this box's disk" for the drill-in view,
+// following storageLines' three-honest-states discipline one level up: a fact
+// that was not measured never renders as a fact that measured zero.
+//
+// THE ABSENT STATE IS THE COMMON ONE, so unlike storageLines it SPEAKS rather
+// than printing nothing — and it says WHICH absence, because the two have
+// different remedies and sending an operator to the wrong one is worse than
+// saying nothing:
+//
+//   - no space report AND no readable core count → the agent binary predates
+//     the space probe. Upgrading the agent is the fix; waiting will never help.
+//     `cpu_cores` and the space probe entered the agent in ONE commit (see
+//     cloudclient.MetricsLatest.Cores), so a box that cannot report its cores
+//     cannot report its space either. This is the same inference, on the same
+//     field, that cloud_status_cmd.go's `unmeteredMarker` already ships.
+//   - no space report but a readable core count → the agent CAN report space
+//     and simply has not yet. Waiting one cadence is the fix; upgrading is not.
+//
+// A note on why the beat status is not consulted here: the caller returns early
+// on an absent beat, so a box reaching this function is one we have heard from.
+func spaceLines(res cloudclient.MetricsResult) ([]string, []pdrender.Block) {
+	if res.Space == nil {
+		if res.Latest.Cores == nil {
+			return []string{"host space: not reported — this agent predates the space probe (it cannot report a core count either; both landed in the same agent build, so upgrading the agent is what fixes this)"}, nil
+		}
+		return []string{"host space: no report yet — this agent CAN report it (its core count reads), and space rides its own 15-minute cadence separate from the beat"}, nil
+	}
+
+	sp := res.Space
+	lines := []string{spaceRootLine(sp)}
+
+	if sp.JournalBytes != nil {
+		lines = append(lines, "  journal: "+humanBytes(*sp.JournalBytes))
+	}
+	if sp.DBSize != nil {
+		lines = append(lines, "  database: "+humanBytes(*sp.DBSize))
+	}
+
+	lines = append(lines, spaceSitesLine(sp))
+
+	// The bar chart is the sites breakdown, and it is drawn ONLY when there is a
+	// measured list with rows in it. nil and empty are both worded on the sites
+	// line above instead, because a chart with no bars reads as "nothing is using
+	// space" rather than "we did not look".
+	if len(sp.Sites.Top) == 0 {
+		return lines, nil
+	}
+	max := 0.0
+	if sp.Sites.Bytes != nil {
+		max = *sp.Sites.Bytes
+	}
+	bars := make([]any, 0, len(sp.Sites.Top))
+	for _, site := range sp.Sites.Top {
+		if site.Bytes > max {
+			max = site.Bytes
+		}
+		bars = append(bars, map[string]any{
+			"label": sanitizeCell(site.Name) + " " + humanBytes(site.Bytes),
+			"value": site.Bytes,
+		})
+	}
+	return lines, []pdrender.Block{
+		{Type: "bar-chart", Attrs: map[string]any{"bars": bars, "max": max}},
+	}
+}
+
+// spaceRootLine renders the root filesystem pair. A used figure without a total
+// is reported as the bare number it is — a percentage needs both, and inventing
+// the denominator is how a 30%-full box and a 97%-full box come to read alike.
+func spaceRootLine(sp *cloudclient.MetricsSpace) string {
+	head := "host space:"
+	if sp.ReportedAt != nil && strings.TrimSpace(*sp.ReportedAt) != "" {
+		head = "host space (reported " + sanitizeCell(strings.TrimSpace(*sp.ReportedAt)) + "):"
+	}
+	switch {
+	case sp.Root.UsedBytes == nil && sp.Root.TotalBytes == nil:
+		return head + " root filesystem not reported by this agent"
+	case sp.Root.TotalBytes == nil:
+		return head + " root " + humanBytes(*sp.Root.UsedBytes) + " used, capacity not reported (no share can be computed)"
+	case sp.Root.UsedBytes == nil:
+		return head + " root capacity " + humanBytes(*sp.Root.TotalBytes) + ", used not reported"
+	}
+	return head + " root " + humanBytes(*sp.Root.UsedBytes) + " of " + humanBytes(*sp.Root.TotalBytes) +
+		" used (" + pctOf(*sp.Root.UsedBytes, *sp.Root.TotalBytes) + ")"
+}
+
+// spaceSitesLine words the deployed-sites directory. Count carries three states
+// and all three are said out loud: a -1 is a walk that RAN AND FAILED, and
+// letting it render as "0 sites" would turn a failed probe into the measured
+// claim that this box serves nothing.
+func spaceSitesLine(sp *cloudclient.MetricsSpace) string {
+	line := "  sites"
+	if sp.Sites.Dir != nil && strings.TrimSpace(*sp.Sites.Dir) != "" {
+		line += " (" + sanitizeCell(strings.TrimSpace(*sp.Sites.Dir)) + ")"
+	}
+	line += ": "
+	if sp.Sites.Bytes != nil {
+		line += humanBytes(*sp.Sites.Bytes)
+	} else {
+		line += "size not reported"
+	}
+
+	switch {
+	case sp.Sites.Count == nil:
+		line += "  ·  site count not reported by this agent"
+	case *sp.Sites.Count < 0:
+		line += "  ·  site count UNKNOWN: the walk failed (this is not a count of zero)"
+	default:
+		line += fmt.Sprintf("  ·  %d sites", int(*sp.Sites.Count))
+	}
+
+	switch {
+	case sp.Sites.Top == nil:
+		line += "  ·  biggest consumers not reported"
+	case len(sp.Sites.Top) == 0:
+		line += "  ·  no sites reported"
+	}
+	return line
 }
 
 // pctOf renders a share as a one-decimal percent. A non-positive denominator
