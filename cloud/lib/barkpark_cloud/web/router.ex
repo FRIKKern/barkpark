@@ -3927,7 +3927,9 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/operator/fleet → 200 {barkparks: [...], staging_gate_open: bool} —
   # the cross-team fleet roll-up the console renders. Per-instance projection:
   # id/name/channel/update_state + the in-flight marker autoupdate_triggered_at
-  # (nil until a self-update is triggered). Top-level staging_gate_open mirrors
+  # (nil until a self-update is triggered) + the three-valued arming pair
+  # apply_arming/apply_arming_checked_at (null = NOT MEASURED, never false).
+  # Top-level staging_gate_open mirrors
   # the canary gate the kill switch respects (Registry.staging_gate_open?/0).
   get "/v1/operator/fleet" do
     conn = Auth.require_platform_operator(conn, [])
@@ -10361,13 +10363,26 @@ defmodule BarkparkCloud.Web.Router do
   # A thin projection of the Barkpark row: identity + rollout channel + update
   # state + the in-flight marker (nil until a self-update is triggered). No
   # secrets — every field is an observable operational label.
+  #
+  # `apply_arming` is the ARMING ROSTER this route exists to carry: `"unarmed"`
+  # names a box whose one-click apply is off, so the rollout's next advance onto
+  # it 503s and pauses it permanently (only an admin PATCH clears that pause).
+  # It is emitted RAW and three-valued — `null` means NOT MEASURED, never
+  # "armed" and never "unarmed" — and the console's arming derivations whitelist
+  # the two words rather than testing truthiness, so an unmeasured box can never
+  # be rendered onto the worklist. `apply_arming_checked_at` rides with it
+  # because a measurement with no age is a measurement an operator cannot grade;
+  # it is stamped only when a body was actually decoded, so it is NOT a copy of
+  # `update_checked_at`.
   defp operator_fleet_json(bp) do
     %{
       id: bp.id,
       name: bp.name,
       channel: bp.channel,
       update_state: bp.update_state,
-      autoupdate_triggered_at: bp.autoupdate_triggered_at
+      autoupdate_triggered_at: bp.autoupdate_triggered_at,
+      apply_arming: bp.apply_arming,
+      apply_arming_checked_at: bp.apply_arming_checked_at
     }
   end
 

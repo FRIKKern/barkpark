@@ -2405,6 +2405,7 @@ test("gr-p5: the operator console's pure helpers ride the ONE test hook", () => 
     "operatorRouteAllowed", "operatorRowState", "operatorFleetSort",
     "operatorStagingGateCopy", "operatorBrakeCardHtml", "operatorCanaryCardHtml",
     "operatorWarmPoolCardHtml", "operatorDigestCardHtml", "operatorPageHtml",
+    "operatorArmingState", "operatorArmingNote", "operatorArmingSummary",
   ]) assert.equal(typeof hooks[name], "function", name + " is exported");
   assert.equal(hooks.OPERATOR_SETTLE_MIN, 20, "the settle grace is 20 minutes, never 30 (GR40)");
 });
@@ -2520,6 +2521,91 @@ test("gr-p5: operatorStagingGateCopy renders THREE states — open is not automa
   assert.equal(hooks.operatorStagingGateCopy(true, prodOnly).role, "neutral", "fail-open is not a green vouch");
   assert.equal(hooks.operatorStagingGateCopy(true, staging).role, "ok");
   assert.equal(hooks.operatorStagingGateCopy(false, []).role, "warn");
+});
+
+test("the arming roster keeps THREE worlds — an unmeasured box is not an OFF box", () => {
+  // `apply_arming` is null on every box that predates the arming probe, and such
+  // a box may be perfectly armed. One truthiness test (`!bp.apply_arming`) would
+  // merge it with a MEASURED off box and put it on the retro-arm worklist, which
+  // is the one outcome that makes this roster worse than no roster. Both arms
+  // live in ONE test on purpose: the claim is a DISCRIMINATION, so a fixture
+  // without its opposite proves nothing.
+  const off = { apply_arming: "unarmed" };
+  const unmeasured = { apply_arming: null };
+
+  assert.equal(hooks.operatorArmingState({ apply_arming: "armed" }), "armed");
+  assert.equal(hooks.operatorArmingState(off), "unarmed");
+  assert.equal(hooks.operatorArmingState(unmeasured), "unknown");
+  assert.notEqual(hooks.operatorArmingState(unmeasured), hooks.operatorArmingState(off),
+    "a null arming reads as a measured OFF — every legacy box lands on the worklist");
+
+  // Absence in all its wire shapes is UNKNOWN, and so is any word we did not
+  // whitelist — fail-closed, the same posture the server takes on check.state.
+  for (const bp of [{}, { apply_arming: undefined }, { apply_arming: "" }, { apply_arming: false },
+                    { apply_arming: true }, { apply_arming: "ARMED" }, { apply_arming: "off" }, null, undefined])
+    assert.equal(hooks.operatorArmingState(bp), "unknown", JSON.stringify(bp) + " is not a measurement");
+
+  // The two notes must not read as each other, and an armed box says nothing.
+  assert.equal(hooks.operatorArmingNote({ apply_arming: "armed" }), "");
+  assert.match(hooks.operatorArmingNote(off), /One-click apply is OFF on this box/);
+  assert.match(hooks.operatorArmingNote(off), /pauses its autoupdate until an admin turns it back on by hand/);
+  assert.match(hooks.operatorArmingNote(unmeasured), /never told us/);
+  assert.match(hooks.operatorArmingNote(unmeasured), /not the same as OFF/);
+  assert.notEqual(hooks.operatorArmingNote(unmeasured), hooks.operatorArmingNote(off));
+});
+
+test("the arming summary counts THREE buckets and never folds 'not reported' into either", () => {
+  const rows = [
+    { name: "a", apply_arming: "unarmed" },
+    { name: "b", apply_arming: "unarmed" },
+    { name: "c", apply_arming: "armed" },
+    { name: "d", apply_arming: null },
+  ];
+  const s = hooks.operatorArmingSummary(rows);
+  assert.equal(s.role, "warn", "a measured OFF box is actionable");
+  assert.match(s.text, /2 with one-click apply OFF/);
+  assert.match(s.text, /1 armed, 1 not reported/,
+    "the unmeasured box is its own count — folded into either bucket it becomes a lie");
+
+  // No measured OFF box, but unmeasured ones: NOT a green vouch, and the copy
+  // says why in the same breath.
+  const q = hooks.operatorArmingSummary([{ apply_arming: "armed" }, { apply_arming: null }]);
+  assert.equal(q.role, "neutral", "unmeasured is not a vouch");
+  assert.match(q.text, /none measured OFF/);
+  assert.match(q.text, /1 armed, 1 not reported/);
+  assert.match(q.text, /never reported its arming is not a box that reported it off/);
+
+  // Fully measured and fully armed is the only green.
+  const green = hooks.operatorArmingSummary([{ apply_arming: "armed" }, { apply_arming: "armed" }]);
+  assert.equal(green.role, "ok");
+  assert.match(green.text, /every instance reports one-click apply on/);
+
+  // Total on junk input — a card that throws renders nothing at all.
+  assert.equal(hooks.operatorArmingSummary(null).role, "ok");
+  assert.equal(hooks.operatorArmingSummary([]).role, "ok");
+});
+
+test("the canary card RENDERS the arming roster, with unmeasured distinct from OFF", () => {
+  const data = {
+    barkparks: [
+      { id: "5b2c1e00-0000-4000-8000-0000000000b1", name: "old-box", channel: "prod", update_state: "current", apply_arming: null },
+      { id: "5b2c1e00-0000-4000-8000-0000000000b2", name: "off-box", channel: "prod", update_state: "current", apply_arming: "unarmed" },
+    ],
+    staging_gate_open: true,
+  };
+  const html = hooks.operatorCanaryCardHtml(data, Date.parse("2026-08-20T18:00:00.000000Z"));
+  assert.match(html, /1 with one-click apply OFF/, "the head line answers the roster question");
+  assert.match(html, /0 armed, 1 not reported/);
+  assert.match(html, /One-click apply is OFF on this box/, "the OFF box names itself");
+  assert.match(html, /never told us/, "the unmeasured box says something DIFFERENT");
+  // A fleet with no measured OFF box must not render the worklist sentence at all.
+  const clean = hooks.operatorCanaryCardHtml({
+    barkparks: [{ id: "x", name: "n", channel: "prod", update_state: "current", apply_arming: "armed" }],
+    staging_gate_open: true,
+  });
+  assert.doesNotMatch(clean, /with one-click apply OFF/);
+  assert.doesNotMatch(clean, /One-click apply is OFF on this box/);
+  assert.match(clean, /every instance reports one-click apply on/);
 });
 
 test("gr-p5: operatorFleetSort walks the rollout's own order — in-flight, staging, behind, rest", () => {

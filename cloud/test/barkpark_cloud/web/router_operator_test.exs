@@ -218,6 +218,59 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     assert length(body["barkparks"]) >= 2
   end
 
+  test "GET /v1/operator/fleet carries the ARMING roster, and UNMEASURED is not UNARMED" do
+    # The read the retro-arm gate needs: WHICH boxes will 503 the moment the
+    # rollout reaches them. It only works if the three worlds survive the wire —
+    # a pre-#12995 box (no `apply_enabled` key, so NULL on the row) must NOT
+    # arrive looking like a measured unarmed box, or every old box lands on the
+    # worklist and the roster is worthless.
+    {operator, op_team} = operator_fixture()
+    token = session_token(operator)
+
+    measured_at = ~U[2026-08-20 09:15:00.000000Z]
+
+    unarmed =
+      barkpark_fixture(op_team)
+      |> Ecto.Changeset.change(apply_arming: "unarmed", apply_arming_checked_at: measured_at)
+      |> Repo.update!()
+
+    armed =
+      barkpark_fixture(op_team)
+      |> Ecto.Changeset.change(apply_arming: "armed", apply_arming_checked_at: measured_at)
+      |> Repo.update!()
+
+    # Never measured: both columns NULL, exactly as a pre-#12995 row sits today.
+    unmeasured = barkpark_fixture(op_team)
+
+    body = json_body(call(:get, "/v1/operator/fleet", token))
+    row = fn bp -> Enum.find(body["barkparks"], &(&1["id"] == bp.id)) end
+
+    assert row.(unarmed)["apply_arming"] == "unarmed"
+    assert row.(unarmed)["apply_arming_checked_at"] == "2026-08-20T09:15:00.000000Z"
+    assert row.(armed)["apply_arming"] == "armed"
+
+    # THE DISCRIMINATION, asserted as a difference and not as two independent
+    # equalities: a serializer that defaulted the absent measurement to "unarmed"
+    # (or to false) would satisfy an `== "unarmed"` on the unarmed row just as
+    # happily.
+    assert is_nil(row.(unmeasured)["apply_arming"])
+    assert is_nil(row.(unmeasured)["apply_arming_checked_at"])
+
+    refute row.(unmeasured)["apply_arming"] == row.(unarmed)["apply_arming"],
+           "an unmeasured box and a measured-unarmed box read the same on the wire — " <>
+             "the retro-arm roster cannot tell an old box from a broken one"
+
+    # And the operator can actually ANSWER the question off this payload.
+    worklist =
+      body["barkparks"]
+      |> Enum.filter(&(&1["apply_arming"] == "unarmed"))
+      |> Enum.map(& &1["id"])
+
+    assert unarmed.id in worklist
+    refute armed.id in worklist
+    refute unmeasured.id in worklist
+  end
+
   ## 4. Deliveries — the receipts a REAL digest run writes; no leak
   ##
   ## These tests DRIVE `Notifications.deliver_fleet_digest/1` — real team, real

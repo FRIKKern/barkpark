@@ -92,6 +92,27 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # in this vocabulary that nothing can persist would be a small lie of its own.
   @update_unavailable_reasons ~w(identity_refused forbidden no_self_update_route unreachable bad_shape instance_error no_admin_token decrypt_failed not_live)
 
+  # The box's ONE-CLICK-APPLY ARMING, mirrored from the top-level `apply_enabled`
+  # key of `GET /v1/admin/self-update` (#12995). TWO words, because the THIRD
+  # world is NULL and must stay NULL:
+  #
+  #     "armed"    the body said apply_enabled: true
+  #     "unarmed"  the body said apply_enabled: false   <- the retro-arm worklist
+  #     NULL       the body carried no such key (a PRE-#12995 box), or we have
+  #                never read a body for this row at all
+  #
+  # A pre-#12995 box that is genuinely armed sends no such key, so mapping the
+  # ABSENT key to "unarmed" would make it indistinguishable from a MEASURED
+  # unarmed box and put correctly-armed boxes on the worklist. That collapse is
+  # the one thing this column exists to prevent, so absence is never a value —
+  # it is the absence of one. Same posture as the 404 rung above: a box that has
+  # never heard of the question has refused nothing.
+  #
+  # Deliberately NOT a value of `update_unavailable_reason`: on this path the box
+  # ANSWERED, nothing is unavailable, and overloading that column would re-merge
+  # two worlds cch-w58 spent a wave separating.
+  @apply_armings ~w(armed unarmed)
+
   # The rollout channels (isu-w5.2): "staging" boxes are the canary the rollout
   # worker advances first; "prod" is the fleet default and only advances once the
   # staging gate is green.
@@ -223,6 +244,34 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # a later slice needs, not the guard.
     field :update_unavailable_reason, :string
 
+    # THE ARMING MIRROR — whether ONE-CLICK APPLY is armed on the box, read from
+    # the `apply_enabled` sibling of `"check"` in the same hourly 200
+    # (`Registry.refresh_update_status/1`, written through
+    # `update_status_changeset/2`). Whitelisted against `apply_armings/0`; NULL
+    # is the THIRD state and means "not measured" — a pre-#12995 box that sends
+    # no such key, or a row no body has been read for yet. NEVER read NULL as
+    # false: an unmeasured box is not an unarmed box, and conflating them is
+    # what would put armed boxes on the retro-arm worklist.
+    #
+    # WHY IT MATTERS OPERATIONALLY: `false` here is precisely the input the
+    # box's one-click-apply POST decides its 503 `feature_not_configured` from,
+    # and that 503 is what `AutoupdateRolloutWorker` answers with
+    # `Registry.pause_autoupdate/1` — a pause no code path clears. So an
+    # `"unarmed"` row is a box the rollout will pause the moment it reaches it.
+    #
+    # A FAILED check does NOT clear this: `persist_update_unknown/2` never
+    # writes these two columns, so a measurement stands until a newer body
+    # replaces it. `apply_arming_checked_at` is how stale it is, and — unlike
+    # `update_checked_at`, which is stamped on six rungs that read no body at
+    # all — it is stamped ONLY when a body was actually decoded, so
+    # (checked_at set, arming NULL) reads "asked, and the box reported no
+    # arming" while (both NULL) reads "never asked".
+    #
+    # READ-ONLY ROSTER: nothing refuses on these columns. This is the evidence
+    # the human-gated retro-arm movement needs, not the guard.
+    field :apply_arming, :string
+    field :apply_arming_checked_at, :utc_datetime_usec
+
     # deploy-reliability W21 (S2) — the DERIVED freshness verdict, deliberately
     # NOT a fifth `update_state` rung (a fifth rung excludes the row from the
     # rollout that would fix it and can freeze the staging gate fail-CLOSED).
@@ -314,6 +363,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def agent_statuses, do: @agent_statuses
   def update_states, do: @update_states
   def update_unavailable_reasons, do: @update_unavailable_reasons
+  def apply_armings, do: @apply_armings
   def channels, do: @channels
   def providers, do: @providers
   def fleet_roles, do: @fleet_roles
@@ -640,7 +690,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
   end
 
   @doc """
-  Narrow changeset for a self-update status refresh (isu-6) — only the five
+  Narrow changeset for a self-update status refresh (isu-6) — only the seven
   update-status cache columns are castable, so mirroring the instance's verdict
   can never rename a Barkpark or reassign its Team (the same containment posture
   as `health_changeset/2` / `suspend_changeset/2`). `update_state` is whitelisted
@@ -651,7 +701,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
   `update_unavailable_reasons/0` and is the WHY behind an "unknown" state. `nil`
   is a legal value and means "no refusal on file" — `validate_inclusion` skips a
   nil change, which is exactly how `persist_update_check/2` CLEARS a stale
-  refusal on a recovered box. This changeset stays narrow: five columns, no more.
+  refusal on a recovered box.
+
+  Columns six and seven are the ARMING MIRROR (`apply_arming`,
+  `apply_arming_checked_at`). This @doc used to end "five columns, no more", and
+  the widening is deliberate and narrow in the sense that clause actually meant:
+  the boundary it guards is the WRITER, not the arity. Both new columns are read
+  out of the SAME hourly 200 body by the SAME caller, in the SAME single write —
+  splitting them into a second changeset would buy nothing but a second
+  `Repo.update` that can half-land, leaving a fresh state beside a stale arming.
+  The containment property is unchanged and still pinned: nothing outside these
+  seven is castable here, so a status refresh still cannot touch a name, a team,
+  or a freshness verdict. `apply_arming` is whitelisted against `apply_armings/0`
+  and `nil` is a legal value meaning UNMEASURED — never "false".
   """
   def update_status_changeset(barkpark, attrs) do
     barkpark
@@ -660,10 +722,13 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :update_running_release,
       :update_latest_release,
       :update_checked_at,
-      :update_unavailable_reason
+      :update_unavailable_reason,
+      :apply_arming,
+      :apply_arming_checked_at
     ])
     |> validate_inclusion(:update_state, @update_states)
     |> validate_inclusion(:update_unavailable_reason, @update_unavailable_reasons)
+    |> validate_inclusion(:apply_arming, @apply_armings)
     |> validate_length(:update_running_release, max: 255)
     |> validate_length(:update_latest_release, max: 255)
   end
