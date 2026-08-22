@@ -112,10 +112,13 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   # map pattern requires the `:permissions` key and a list value: a token struct
   # without it is NOT clamped (absence of the key is not evidence of the tier).
   #
-  # PUBLIC on purpose: `TasksController.graph_corpus/2` asks the same question to
-  # decide whether to restrict its schema list, and the tier test must have ONE
-  # definition. A second copy in the controller is exactly how a clamp and its
-  # downstream filter drift apart.
+  # NOTE this predicate is a TIER test, not a visibility clamp, and it must
+  # never again be the KEY of one: "is this the one restricted tier?" with an
+  # open else-arm fails OPEN for every principal it does not recognise —
+  # including a caller with no token at all, which is how the anonymous
+  # /finder graph leak shipped (task-336d22b7722ea71e). The corpus
+  # schema-visibility clamp now lives in `Content.Schema.visible_schemas/2`,
+  # keyed default-narrow on `CallerContext`.
   def public_read_token?(conn) do
     case conn.assigns[:api_token] do
       %{permissions: perms} when is_list(perms) -> "public-read" in perms

@@ -61,9 +61,18 @@ defmodule BarkparkWeb.FinderLive do
         graph_truncation_reason: nil
       )
 
+    # Who is asking — resolved BEFORE the async closure so the derivation runs
+    # as the mounting principal, not as an ambient "server-side, therefore
+    # privileged" reader. On this public route (`:browser` pipeline, no
+    # on_mount auth) it resolves to `CallerContext.anonymous/0`, which the
+    # shared clamp treats as the NARROWEST tier; if this LV ever mounts behind
+    # auth, the assigned `:caller_context`/`:api_token` flows through here
+    # unchanged — same threading as the search event below (D62).
+    caller_context = CallerContext.from_conn(socket)
+
     socket =
       if connected?(socket) do
-        start_async(socket, :graph_corpus, fn -> graph_payload(dataset) end)
+        start_async(socket, :graph_corpus, fn -> graph_payload(dataset, caller_context) end)
       else
         socket
       end
@@ -226,7 +235,7 @@ defmodule BarkparkWeb.FinderLive do
   # confirming COUNT — and node_budget), edges are re-filtered to the surviving
   # node set, and the {truncated, reason} pair rides the payload so /finder
   # never claims a complete corpus it didn't derive.
-  defp graph_payload(dataset) do
+  defp graph_payload(dataset, caller_context) do
     per_type_limit =
       Application.get_env(:barkpark, :graph_corpus_per_type_limit, @graph_node_per_type_limit)
 
@@ -235,7 +244,19 @@ defmodule BarkparkWeb.FinderLive do
     opts = [dataset: dataset, limit: per_type_limit]
     list_opts = Keyword.put(opts, :perspective, :published)
 
-    types = dataset |> Content.list_schemas(opts) |> Enum.map(& &1.name)
+    # Schema visibility, keyed on the PRINCIPAL — `Content.Schema.
+    # visible_schemas/2` is the ONE owner of this clamp, shared with the flat
+    # `/v1/graph` twin (`TasksController.derive_graph_corpus/2`). This site
+    # used to run the unclamped `list_schemas |> Enum.map(& &1.name)` line the
+    # controller's clamp had replaced — a second hand-copied derivation, which
+    # is exactly how an anonymous /finder visitor got every private type's
+    # name and titles in the graph payload while the search clamp on the SAME
+    # page held (task-336d22b7722ea71e). Never derive `types` here without it.
+    types =
+      dataset
+      |> Content.list_schemas(opts)
+      |> Barkpark.Content.Schema.visible_schemas(caller_context)
+      |> Enum.map(& &1.name)
 
     {doc_lists, per_type_capped} =
       Enum.map_reduce(types, false, fn type, capped ->

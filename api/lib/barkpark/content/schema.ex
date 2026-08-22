@@ -303,6 +303,56 @@ defmodule Barkpark.Content.Schema do
   end
 
   @doc """
+  The corpus-graph schema-visibility clamp, keyed on the PRINCIPAL — the ONE
+  owner of the "which schemas may this caller see in a whole-corpus read"
+  decision. Both corpus derivations (`TasksController.derive_graph_corpus/2`,
+  the flat `/v1/graph` twin, and `FinderLive.graph_payload/2`, the public
+  finder's inline payload) MUST read through this function; a hand-copied
+  derivation at a call site is exactly how the anonymous /finder leak
+  (task-336d22b7722ea71e) shipped.
+
+  DEFAULT-NARROW, WIDEN ONLY WHEN EARNED. The predecessor keyed on "is this
+  the one restricted tier?" (`PublicRead.public_read_token?/1`) with an
+  else-arm of "show everything" — an allow-list of one tier that FAILED OPEN
+  for every principal it did not recognise, including a visitor with no token
+  at all. This clamp inverts the key: the widening arm matches ONLY a
+  `CallerContext` that has earned the full view — an authenticated principal
+  (`:api_token` or `:user`) outside the public-read tier — and the catch-all
+  clamps. Anonymous, `nil`, a public-read token, a bare map, and any future
+  principal shape all land in the narrow arm by construction.
+
+  The tier test is `"public-read" in roles` — MEMBERSHIP, never list equality
+  (`CallerContext.from_token/1` stores the token's permission list verbatim,
+  and `TokenController` mints `["public-read", "read"]` as a real shape), the
+  same predicate as `PublicRead.public_read_token?/1` and
+  `DocumentsRetriever.public_read_principal?/1`.
+
+  The narrow view is `public_schema?/1` over the already-read rows — derived
+  at READ TIME, so a schema flipped to private drops out on the very next
+  corpus read, and an empty allowlist means the caller sees NOTHING, not
+  everything.
+  """
+  # @canonical capability:corpus-visible-schemas aka:visible_schemas,graph_payload,finder leak,private type titles,schema visibility clamp doc:docs/cards/search-media.md
+  def visible_schemas(schemas, caller_context)
+
+  def visible_schemas(schemas, %Barkpark.Content.CallerContext{principal_type: p, roles: roles})
+      when is_list(schemas) and p in [:api_token, :user] and is_list(roles) do
+    if "public-read" in roles do
+      Enum.filter(schemas, &public_schema?/1)
+    else
+      schemas
+    end
+  end
+
+  # The narrow arm is the DEFAULT: anything that has not affirmatively earned
+  # the wider view — anonymous, nil, a non-struct, an unknown future principal
+  # — sees public-visibility schemas only. "Unrecognised" must never fall
+  # through to "show everything" again.
+  def visible_schemas(schemas, _unearned) when is_list(schemas) do
+    Enum.filter(schemas, &public_schema?/1)
+  end
+
+  @doc """
   Returns the union of CORS origin allow-lists across all schemas in the dataset.
 
   An empty list means "no dataset-level policy" (default-allow).
