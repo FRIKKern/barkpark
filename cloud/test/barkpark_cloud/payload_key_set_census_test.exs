@@ -1206,9 +1206,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
-  # measured: 59 keys with the :when unwrap, 45 without (the :when unwrap is
-  # still worth exactly the same 14 vitals — the three new keys are in the base
-  # literal, so they are visible to both walkers).
+  # measured. THE PROSE HERE USED TO RESTATE THE PAIR AS "59 keys with the :when
+  # unwrap, 45 without" and both had since moved to 62 and 46 — a sentence
+  # describing two attributes that sat four lines below it, wrong, with nothing
+  # able to notice. It states the INVARIANT instead now, which is what the pair
+  # is for and what does not go stale: the `:when` unwrap is worth exactly the
+  # 14 vitals, and the two counts must move INDEPENDENTLY — `blind` tracking
+  # `seeing` would destroy the blind-spot measurement silently and in the green
+  # direction. The numbers live below, once each, and the PIN CO-EDIT arm reads
+  # them from there.
   @barkpark_family_keys 62
   @barkpark_family_keys_blind 46
 
