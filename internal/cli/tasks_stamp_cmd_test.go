@@ -21,48 +21,68 @@ import (
 // --- pure-function mutation-proofs -------------------------------------------
 
 // parseStampArgs must NEVER re-index --criterion (the index a builder types is
-// the index the server receives) and must strip ONLY the CLI-only
-// --merge-gated, forwarding every other token in order. A mutation that
-// shifted the index, or that leaked --merge-gated into the forwarded tail
-// (which the server does not declare → splitArgs "unknown flag"), reds here.
-func TestParseStampArgs_StripsMergeGatedForwardsRestVerbatim(t *testing.T) {
+// the index the server receives), and must route --merge-gated by whether the
+// SERVER declares it: forwarded when it does (the server owns the refusal and
+// needs to see the override), stripped when it does not (an undeclared token
+// fails splitArgs as "unknown flag"). Every OTHER token passes in order. A
+// mutation that shifted the index, or that got the routing backwards, reds here.
+func TestParseStampArgs_MergeGatedRoutedByDeclaration(t *testing.T) {
 	tail := []string{
 		"bp-task-x", "worker-1", "2",
 		"--criterion", "3", "--met", "--evidence", "gate green",
 		"--criterion-text", "some row", "--merge-gated",
 	}
-	sa, forward := parseStampArgs(tail)
-
-	if sa.criterion == nil || *sa.criterion != 3 {
-		t.Fatalf("criterion = %v, want 3 (no re-index)", sa.criterion)
-	}
-	if !sa.met || sa.miss {
-		t.Errorf("met/miss = %v/%v, want met", sa.met, sa.miss)
-	}
-	if sa.criterionText != "some row" {
-		t.Errorf("criterionText = %q, want %q", sa.criterionText, "some row")
-	}
-	if !sa.mergeGated {
-		t.Errorf("mergeGated not parsed")
-	}
-	want := []string{
+	base := []string{
 		"bp-task-x", "worker-1", "2",
 		"--criterion", "3", "--met", "--evidence", "gate green",
 		"--criterion-text", "some row",
 	}
-	if !reflect.DeepEqual(forward, want) {
-		t.Errorf("forward = %v\n want %v (only --merge-gated stripped, order kept)", forward, want)
-	}
-	for _, tok := range forward {
-		if tok == "--merge-gated" {
-			t.Fatalf("--merge-gated leaked into the forwarded tail")
+
+	for _, c := range []struct {
+		name     string
+		declared bool
+		want     []string
+	}{
+		{"server declares it → forwarded", true, append(append([]string{}, base...), "--merge-gated")},
+		{"legacy server → stripped", false, base},
+	} {
+		sa, forward := parseStampArgs(tail, c.declared)
+
+		if sa.criterion == nil || *sa.criterion != 3 {
+			t.Fatalf("%s: criterion = %v, want 3 (no re-index)", c.name, sa.criterion)
 		}
+		if !sa.met || sa.miss {
+			t.Errorf("%s: met/miss = %v/%v, want met", c.name, sa.met, sa.miss)
+		}
+		if sa.criterionText != "some row" {
+			t.Errorf("%s: criterionText = %q, want %q", c.name, sa.criterionText, "some row")
+		}
+		if !sa.mergeGated {
+			t.Errorf("%s: mergeGated not parsed", c.name)
+		}
+		if !reflect.DeepEqual(forward, c.want) {
+			t.Errorf("%s: forward = %v\n want %v", c.name, forward, c.want)
+		}
+	}
+}
+
+// commandDeclaresFlag is the capability probe the routing above turns on.
+func TestCommandDeclaresFlag(t *testing.T) {
+	cmd := manifest.Command{Flags: []manifest.Flag{{Name: "met"}, {Name: "merge-gated"}}}
+	if !commandDeclaresFlag(cmd, "merge-gated") {
+		t.Error("declared flag reported missing")
+	}
+	if commandDeclaresFlag(cmd, "nope") {
+		t.Error("undeclared flag reported present")
+	}
+	if commandDeclaresFlag(manifest.Command{}, "merge-gated") {
+		t.Error("empty command must declare nothing")
 	}
 }
 
 // The `--flag=value` inline spelling must parse identically to the space form.
 func TestParseStampArgs_InlineForms(t *testing.T) {
-	sa, forward := parseStampArgs([]string{"--criterion=5", "--criterion-text=inline row", "--met=true"})
+	sa, forward := parseStampArgs([]string{"--criterion=5", "--criterion-text=inline row", "--met=true"}, true)
 	if sa.criterion == nil || *sa.criterion != 5 {
 		t.Fatalf("criterion = %v, want 5", sa.criterion)
 	}
@@ -112,10 +132,12 @@ func TestStampEchoLine_NoCriterionEmpty(t *testing.T) {
 	}
 }
 
-// The MERGE-GATED tripwire: a --met on a lead-owned row without --merge-gated
-// is blocked; the override releases it; a --miss never blocks; a plain row is
-// untouched. Tolerant of case and of a hyphen or space between the words.
-func TestStampMergeGateBlocked(t *testing.T) {
+// The LEGACY client-side tripwire (reached only against a server that does not
+// declare --merge-gated): a --met on a lead-owned row without the override is
+// blocked; the override releases it; a --miss never blocks; a plain row is
+// untouched. Frozen on purpose — it must keep matching what old servers
+// assumed. The live predicate is Barkpark.Tasks.Criteria.merge_gated?/1.
+func TestStampMergeGateFallback(t *testing.T) {
 	cases := []struct {
 		name string
 		sa   stampArgs
@@ -129,7 +151,7 @@ func TestStampMergeGateBlocked(t *testing.T) {
 		{"space variant still blocks", stampArgs{met: true, criterionText: "this is MERGE GATED"}, true},
 	}
 	for _, c := range cases {
-		if got := stampMergeGateBlocked(c.sa); got != c.want {
+		if got := stampMergeGateFallback(c.sa); got != c.want {
 			t.Errorf("%s: blocked = %v, want %v", c.name, got, c.want)
 		}
 	}
@@ -162,13 +184,26 @@ const minimalStampManifest = `{
         {"name": "met", "type": "bool", "summary": "m"},
         {"name": "evidence", "type": "string", "summary": "ev"},
         {"name": "miss", "type": "bool", "summary": "x"},
-        {"name": "note", "type": "string", "summary": "n"}
+        {"name": "note", "type": "string", "summary": "n"},
+        {"name": "merge-gated", "type": "bool", "summary": "lead only"}
       ],
       "writes": true, "batch": false, "paginated": false, "dry_run": false,
       "default_output": "minimal"
     }
   ]
 }`
+
+// legacyStampManifest is minimalStampManifest WITHOUT the --merge-gated flag —
+// a server that predates the server-side merge-gate guard. Against it the CLI
+// must fall back to its historical client-side tripwire and strip the flag,
+// because forwarding an undeclared token fails splitArgs as "unknown flag".
+var legacyStampManifest = strings.Replace(
+	minimalStampManifest,
+	`,
+        {"name": "merge-gated", "type": "bool", "summary": "lead only"}`,
+	"",
+	1,
+)
 
 // stampStoreMode decides what the fake Barkpark's STORE does with a stamp it
 // answers 200 to. The three modes are the three worlds the read-back has to
@@ -197,7 +232,26 @@ func stampTestServer(t *testing.T) *int32 {
 	return stampTestServerMode(t, stampStoreHonest)
 }
 
+// stampTestServerLegacy is stampTestServer against a manifest that does NOT
+// declare --merge-gated — the pre-guard server the CLI must still protect.
+func stampTestServerLegacy(t *testing.T) *int32 {
+	t.Helper()
+	return stampTestServerWith(t, stampStoreHonest, legacyStampManifest, nil)
+}
+
 func stampTestServerMode(t *testing.T, mode stampStoreMode) *int32 {
+	t.Helper()
+	return stampTestServerWith(t, mode, minimalStampManifest, nil)
+}
+
+// stampTestServerQuery is stampTestServer that also records the raw query
+// string of the stamp POST, so a test can assert WHICH flags reached the wire.
+func stampTestServerQuery(t *testing.T, sink *string) *int32 {
+	t.Helper()
+	return stampTestServerWith(t, stampStoreHonest, minimalStampManifest, sink)
+}
+
+func stampTestServerWith(t *testing.T, mode stampStoreMode, manifestJSON string, querySink *string) *int32 {
 	t.Helper()
 	var hits int32
 	var mu sync.Mutex
@@ -209,6 +263,11 @@ func stampTestServerMode(t *testing.T, mode stampStoreMode) *int32 {
 		switch {
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/stamp"):
 			atomic.AddInt32(&hits, 1)
+			if querySink != nil {
+				mu.Lock()
+				*querySink = r.URL.RawQuery
+				mu.Unlock()
+			}
 			if mode == stampStoreHonest {
 				q := r.URL.Query()
 				idx, err := strconv.Atoi(q.Get("criterion"))
@@ -260,7 +319,7 @@ func stampTestServerMode(t *testing.T, mode stampStoreMode) *int32 {
 	t.Cleanup(backend.Close)
 
 	mf := filepath.Join(t.TempDir(), "manifest.json")
-	if err := os.WriteFile(mf, []byte(minimalStampManifest), 0o600); err != nil {
+	if err := os.WriteFile(mf, []byte(manifestJSON), 0o600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	t.Setenv("BARKPARK_MANIFEST", mf)
@@ -269,11 +328,13 @@ func stampTestServerMode(t *testing.T, mode stampStoreMode) *int32 {
 	return &hits
 }
 
-// The tripwire must fire in the REAL dispatch, refusing BEFORE any POST — a
-// mutation that forgot to call the guard from Execute would let the stamp reach
-// the server (hits == 1, exit 0), reddening this test.
-func TestTaskStampExecute_MergeGatedRefusedBeforeSend(t *testing.T) {
-	hits := stampTestServer(t)
+// LEGACY SERVER (no --merge-gated in the manifest): the client-side tripwire
+// must still fire in the REAL dispatch, refusing BEFORE any POST — a mutation
+// that forgot to call the fallback from Execute would let the stamp reach the
+// server (hits == 1, exit 0), reddening this test. This is the arm that keeps
+// the rollout from ever leaving the gate unguarded.
+func TestTaskStampExecute_LegacyServerRefusesBeforeSend(t *testing.T) {
+	hits := stampTestServerLegacy(t)
 	out, code := captureExecuteCode(t, []string{
 		"task", "stamp", "bp-task-x", "w", "1",
 		"--criterion", "6", "--met", "--evidence", "e",
@@ -283,18 +344,18 @@ func TestTaskStampExecute_MergeGatedRefusedBeforeSend(t *testing.T) {
 		t.Fatalf("exit = %d, want exitValidation (%d); out:\n%s", code, exitValidation, out)
 	}
 	if n := atomic.LoadInt32(hits); n != 0 {
-		t.Fatalf("stamp POST fired %d times; the guard must refuse BEFORE sending", n)
+		t.Fatalf("stamp POST fired %d times; the fallback must refuse BEFORE sending", n)
 	}
 	if !strings.Contains(out, "MERGE-GATED") || !strings.Contains(strings.ToLower(out), "refus") {
 		t.Errorf("refusal message missing; got:\n%s", out)
 	}
 }
 
-// --merge-gated releases the tripwire AND must be stripped before dispatch: if
-// it leaked to splitArgs the manifest would reject it as an unknown flag (no
-// POST, usage exit), so a reaching POST proves both the override and the strip.
-func TestTaskStampExecute_OverrideReleasesAndStripsFlag(t *testing.T) {
-	hits := stampTestServer(t)
+// LEGACY SERVER: --merge-gated releases the fallback AND must be stripped
+// before dispatch — if it leaked to splitArgs the old manifest would reject it
+// as an unknown flag (no POST, usage exit), so a reaching POST proves both.
+func TestTaskStampExecute_LegacyServerOverrideReleasesAndStrips(t *testing.T) {
+	hits := stampTestServerLegacy(t)
 	out, code := captureExecuteCode(t, []string{
 		"task", "stamp", "bp-task-x", "w", "1",
 		"--criterion", "6", "--met", "--evidence", "e",
@@ -309,6 +370,48 @@ func TestTaskStampExecute_OverrideReleasesAndStripsFlag(t *testing.T) {
 	}
 	if !strings.Contains(out, "criterion #7") {
 		t.Errorf("echo should still translate index 6 → criterion #7; got:\n%s", out)
+	}
+}
+
+// MODERN SERVER: the CLI must NOT adjudicate the gate itself. The marker in
+// --criterion-text is no longer grounds for a client-side refusal, because the
+// text is only what the CALLER typed while the verdict depends on the STORED
+// criterion's merge_gate field — so the stamp must REACH the server, which
+// refuses (or allows) on the authoritative row. A mutation that kept the old
+// unconditional client-side tripwire reds here with hits == 0.
+func TestTaskStampExecute_ModernServerDefersVerdictToServer(t *testing.T) {
+	hits := stampTestServer(t)
+	_, code := captureExecuteCode(t, []string{
+		"task", "stamp", "bp-task-x", "w", "1",
+		"--criterion", "6", "--met", "--evidence", "e",
+		"--criterion-text", "final row [MERGE-GATED — the lead closes this]",
+	})
+	if n := atomic.LoadInt32(hits); n != 1 {
+		t.Fatalf("stamp POST fired %d times, want 1 — the server owns the merge-gate verdict (exit %d)", n, code)
+	}
+}
+
+// MODERN SERVER: --merge-gated must ride the POST, not be swallowed. The server
+// cannot honour an override it never receives, so a mutation that kept
+// stripping the flag would silently turn every lead close into a refusal —
+// caught here by its absence from the query the fake server saw.
+func TestTaskStampExecute_ModernServerForwardsOverride(t *testing.T) {
+	var gotQuery string
+	hits := stampTestServerQuery(t, &gotQuery)
+	_, code := captureExecuteCode(t, []string{
+		"task", "stamp", "bp-task-x", "w", "1",
+		"--criterion", "6", "--met", "--evidence", "e",
+		"--criterion-text", "final row [MERGE-GATED — the lead closes this]",
+		"--merge-gated",
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK", code)
+	}
+	if n := atomic.LoadInt32(hits); n != 1 {
+		t.Fatalf("stamp POST fired %d times, want 1", n)
+	}
+	if !strings.Contains(gotQuery, "merge-gated=true") {
+		t.Errorf("--merge-gated did not reach the server; query was %q", gotQuery)
 	}
 }
 

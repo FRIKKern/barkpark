@@ -833,6 +833,7 @@ defmodule BarkparkWeb.TasksController do
       opts =
         [observed_epoch: observed_epoch, criterion: index, outcome: outcome]
         |> Params.put_opt(:criterion_text, criterion_text)
+        |> Params.put_opt(:merge_gated, Params.stamp_merge_gated(params))
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stamp(task.id, worker_id, opts) do

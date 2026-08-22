@@ -792,6 +792,29 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|--set 'criteria:=[{"index":0,"met":true,"evidence":"…","criterion":"<acceptance_criteria[0].criterion, verbatim>"}]'. | <>
         ~s|The 0-BASED index alone is unverifiable and can flip a neighbouring criterion. An entry with met=false needs no text.|
 
+  # The MERGE-GATE refusal (cch-w49 / cch-w19). This message is load-bearing in
+  # BOTH directions and each clause was asked for by a task row: it must name
+  # who may use the override (cch-w19 c0), it must say OUT LOUD that the match
+  # can be on the criterion's PROSE and may therefore be a mere mention, and it
+  # must state that mention rate as a MEASURED number rather than a hedge
+  # (cch-w19 c1) — 65 of 1853 marker-bearing criteria over the live corpus on
+  # 2026-08-22. It must also name the STRUCTURAL exit (`merge_gate: false`), so
+  # a caller who hits a false positive can retire it permanently for that row
+  # instead of reaching for the override every time — reflexive overriding is
+  # the failure mode the guard exists to prevent.
+  def criteria_hint(:merge_gated_criterion, :stamp),
+    do:
+      ~s|this criterion is a MERGE GATE — the LEAD closes it when the PR merges, and a builder flipping it | <>
+        ~s|fabricates a done before the PR exists. Nothing was written. If you ARE the lead closing the gate, | <>
+        ~s|re-run with --merge-gated. | <>
+        ~s|IF THIS ROW IS NOT A GATE, THE MATCH WAS ON ITS PROSE AND IS A FALSE POSITIVE: with no explicit | <>
+        ~s|"merge_gate" key on the criterion the guard falls back to matching the MERGE-GATED / MERGE GATE | <>
+        ~s|wording anywhere in the text, which over the live corpus (2026-08-22) is a mention rather than a | <>
+        ~s|gate for 65 of 1853 marker-bearing criteria (3.5%). The fix for those is structural, not the | <>
+        ~s|override: set "merge_gate": false on that criterion and the guard will never ask again. The prose | <>
+        ~s|fallback stays deliberately WIDE because a false refusal is loud and recoverable while a false | <>
+        ~s|permit is silent — see Barkpark.Tasks.Criteria.merge_gated?/1.|
+
   def criteria_hint(:criteria_mismatch, _surface),
     do:
       ~s|the criterion text you passed is NOT the wording stored at that index. Either the index is off by one | <>
@@ -984,6 +1007,18 @@ defmodule BarkparkWeb.TasksController.Params do
           {:error, :invalid_stamp, "pass one of --met (with --evidence) or --miss (with --note)"}
       end
     end
+  end
+
+  @doc """
+  Reads the LEAD-ONLY `--merge-gated` override off a stamp request, from the
+  kebab manifest flag (query key `merge-gated`) or the snake JSON body key.
+  Absent / anything but a truthy scalar → `false`: the override must be ASKED
+  FOR, never inferred, because it is the one flag that lets a caller flip a
+  row the lead owns.
+  """
+  @spec stamp_merge_gated(map()) :: boolean()
+  def stamp_merge_gated(params) do
+    stamp_flag?(Map.get(params, "merge_gated") || Map.get(params, "merge-gated"))
   end
 
   defp stamp_flag?(v), do: v in [true, "true", "1"]

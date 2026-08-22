@@ -228,4 +228,113 @@ defmodule Barkpark.Tasks.CriteriaTest do
       end
     end
   end
+
+  # ─── merge_gated?/1 — the stamp guard's predicate ──────────────────────────
+  #
+  # Written to fail in BOTH directions on purpose. The bug this replaced was a
+  # false POSITIVE (prose that merely MENTIONS merge-gating was refused), and
+  # the obvious fix — anchoring/narrowing the pattern — produces a false
+  # NEGATIVE instead, which is strictly worse because it is silent. Every
+  # `refute` below is a false-positive guard and every `assert` is a
+  # false-negative guard; deleting either half leaves a green suite and a
+  # broken gate.
+
+  describe "merge_gated?/1 — the STRUCTURAL flag decides alone" do
+    test "merge_gate: true is a gate even when the prose never says so" do
+      # 14 criteria on the live corpus (2026-08-22) are in exactly this shape.
+      # A text-only predicate silently PERMITS every one of them.
+      assert Criteria.merge_gated?(%{
+               "criterion" => "PR merged to main with the Elixir gate green",
+               "merge_gate" => true
+             })
+    end
+
+    test "merge_gate: false exempts a row whose prose DOES carry the marker" do
+      # The author's explicit declaration that this row merely talks about
+      # merge-gating. This is the door that retires a false positive per-row.
+      refute Criteria.merge_gated?(%{
+               "criterion" =>
+                 "A criterion whose text merely MENTIONS a merge-gated row stamps met WITHOUT --merge-gated.",
+               "merge_gate" => false
+             })
+    end
+
+    test "the flag outranks the prose in BOTH directions on one pair of rows" do
+      worded = "MERGE-GATED — the lead closes this"
+      refute Criteria.merge_gated?(%{"criterion" => worded, "merge_gate" => false})
+      assert Criteria.merge_gated?(%{"criterion" => "a plain row", "merge_gate" => true})
+    end
+
+    test "atom keys are honoured (in-memory callers)" do
+      assert Criteria.merge_gated?(%{criterion: "plain", merge_gate: true})
+      refute Criteria.merge_gated?(%{criterion: "MERGE-GATED row", merge_gate: false})
+    end
+  end
+
+  describe "merge_gated?/1 — the prose fallback, when no flag is set" do
+    test "matches every spelling the live corpus actually uses" do
+      for text <- [
+            "[MERGE-GATED — the lead closes this]",
+            "MERGE GATED: the lead closes this",
+            "MERGE GATE (LEAD closes): PR merged to main",
+            "LEAD merge gate: the PR is merged to origin/main",
+            "PR merged to main (lead-owned merge gate)",
+            "row merge-gated by the lead",
+            "LEAD-OWNED (merge-gated): PR merged to main"
+          ] do
+        assert Criteria.merge_gated?(%{"criterion" => text}),
+               "prose fallback missed a real gate: #{text}"
+      end
+    end
+
+    test "the 'MERGE GATE' spelling (no D) is caught — 120 real gates depended on it" do
+      # This spelling was absent from the predicate this replaced, so every one
+      # of these rows was silently stampable by a builder. Narrowing the
+      # pattern is what RE-OPENS this hole.
+      assert Criteria.merge_gated?(%{
+               "criterion" => "MERGE GATE (LEAD closes): PR merged to main"
+             })
+
+      assert Criteria.merge_gated?(%{"criterion" => "the PR is merged (LEAD merge-gate)"})
+    end
+
+    test "a plain criterion is never a gate" do
+      refute Criteria.merge_gated?(%{"criterion" => "the Elixir gate is green on the PR head"})
+      refute Criteria.merge_gated?(%{"criterion" => "docs updated"})
+      refute Criteria.merge_gated?(%{"criterion" => "the merge conflict is resolved"})
+    end
+
+    test "position does NOT decide — a mid-sentence marker is still a gate" do
+      # 43 genuine gates on the live corpus carry the marker mid-sentence. An
+      # anchored/leading-only predicate would miss every one of them, which is
+      # precisely the narrowing this test exists to red.
+      assert Criteria.merge_gated?(%{
+               "criterion" => "LEAD-OWNED (merge-gated): PR merged to main."
+             })
+
+      assert Criteria.merge_gated?(%{
+               "criterion" =>
+                 "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+             })
+    end
+
+    test "garbage entries are never gates and never crash" do
+      refute Criteria.merge_gated?(%{"criterion" => nil})
+      refute Criteria.merge_gated?(%{})
+      refute Criteria.merge_gated?("MERGE-GATED")
+      refute Criteria.merge_gated?(nil)
+    end
+  end
+
+  describe "at/2 — index resolution for the guard" do
+    test "returns the map at the index, or nil for anything unusable" do
+      list = [%{"criterion" => "a"}, %{"criterion" => "b"}]
+      assert Criteria.at(list, 1) == %{"criterion" => "b"}
+      assert Criteria.at(list, 5) == nil
+      assert Criteria.at(list, -1) == nil
+      assert Criteria.at(nil, 0) == nil
+      assert Criteria.at(["not a map"], 0) == nil
+      assert Criteria.at(list, "0") == nil
+    end
+  end
 end

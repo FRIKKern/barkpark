@@ -21,6 +21,7 @@ github-projects-sync	sync
 heat-quantile-bin	HeatQuantileBins
 instance-content-bootstrap	Run
 mcp-task-tools	registerTaskTools
+merge-gate-criterion-predicate	merge_gated?
 platform-delivery-record	record_all
 preview-manifest	project
 pull-provenance-schema-guard	pulled_schema_row

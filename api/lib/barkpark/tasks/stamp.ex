@@ -54,6 +54,7 @@ defmodule Barkpark.Tasks.Stamp do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Criteria
 
   @event_task_criterion "task.criterion"
 
@@ -77,12 +78,26 @@ defmodule Barkpark.Tasks.Stamp do
         fabricated a done in Wave 4). With it, a mis-based index whose text does
         not match the row is REJECTED (`:criteria_mismatch`) instead of flipping
         the neighbour. OPTIONAL for `{:miss, _}` — a miss flips nothing.
+      * `:merge_gated` (optional boolean, default `false`) — the LEAD-ONLY
+        override that releases the MERGE-GATE refusal below. Without it a
+        `{:met, _}` on a merge-gated row fails with `:merge_gated_criterion`.
       * `:caller_token_id` (optional) — audit stamp on the event row.
+
+  THE MERGE-GATE REFUSAL. A criterion the LEAD closes on merge is not the
+  builder's to flip — flipping it fabricates a done before the PR exists (the
+  live footgun that fabricated a done in wave 4). `Criteria.merge_gated?/1`
+  decides, reading the STORED row inside the close-family lock: the structural
+  `merge_gate` flag when the author set one, the wide prose convention
+  otherwise. The check lives HERE, not in the CLI, for two reasons that the
+  CLI-side version could not satisfy: only the server can see the stored
+  `merge_gate` flag (the CLI has nothing but the `--criterion-text` the caller
+  typed), and a CLI-only guard is bypassed entirely by a direct POST to this
+  endpoint.
 
   Errors: `:not_found`, `{:not_in_progress, status}`, `:not_holder`,
   `:fenced_off`, `:stale_claim`, `:criteria_index_out_of_range`,
   `:criteria_mismatch`, `:criterion_text_required`, `:evidence_required`,
-  `:note_required`, `:invalid_criteria`.
+  `:note_required`, `:invalid_criteria`, `:merge_gated_criterion`.
   """
   def stamp(task_id, worker_id, opts \\ []) when is_binary(worker_id) do
     observed_epoch = Keyword.fetch!(opts, :observed_epoch)
@@ -90,9 +105,18 @@ defmodule Barkpark.Tasks.Stamp do
     outcome = Keyword.fetch!(opts, :outcome)
     criterion_text = Keyword.get(opts, :criterion_text)
     caller_token_id = Keyword.get(opts, :caller_token_id)
+    merge_gated = Keyword.get(opts, :merge_gated, false) == true
 
     with {:ok, update, result_tag} <- build_update(index, outcome, worker_id, criterion_text) do
-      do_stamp_txn(task_id, worker_id, observed_epoch, update, result_tag, caller_token_id)
+      do_stamp_txn(
+        task_id,
+        worker_id,
+        observed_epoch,
+        update,
+        result_tag,
+        caller_token_id,
+        merge_gated
+      )
     end
   end
 
@@ -141,7 +165,15 @@ defmodule Barkpark.Tasks.Stamp do
 
   defp put_guard(update, _text), do: update
 
-  defp do_stamp_txn(task_id, worker_id, observed_epoch, update, result_tag, caller_token_id) do
+  defp do_stamp_txn(
+         task_id,
+         worker_id,
+         observed_epoch,
+         update,
+         result_tag,
+         caller_token_id,
+         merge_gated
+       ) do
     result =
       Repo.transaction(fn ->
         # Close-family advisory lock (D6): serialize with close/release/move
@@ -160,6 +192,7 @@ defmodule Barkpark.Tasks.Stamp do
             with :ok <- check_in_progress(doc),
                  :ok <- check_holder(doc, worker_id),
                  :ok <- check_fencing(doc, observed_epoch),
+                 :ok <- check_merge_gate(doc, update, result_tag, merge_gated),
                  {:ok, updated} <- apply_stamp_update(doc, update) do
               ev =
                 insert_mutation_event!(
@@ -215,6 +248,33 @@ defmodule Barkpark.Tasks.Stamp do
       %{"claim" => %{"epoch" => row_epoch}} when row_epoch == observed_epoch -> :ok
       %{"claim" => %{"epoch" => _}} -> {:error, :fenced_off}
       _ -> :ok
+    end
+  end
+
+  # THE MERGE-GATE REFUSAL (cch-w49). Refuse a builder's met-flip on a row the
+  # LEAD closes on merge, unless the caller passed the explicit `--merge-gated`
+  # override. Read the STORED criterion at the index — never the caller's
+  # `--criterion-text` — so the verdict comes from what the ledger holds rather
+  # than from what the caller chose to type; the criterion-text CAS in
+  # `merge_criteria` already refuses a text that disagrees with the row, but
+  # this guard must not DEPEND on that ordering to be sound.
+  #
+  # A miss flips no lock and is never refused. An index that does not resolve
+  # to a stored map falls through to `merge_criteria`, which owns the
+  # out-of-range / mismatch taxonomy — this guard never invents those errors.
+  defp check_merge_gate(_doc, _update, "miss", _merge_gated), do: :ok
+  defp check_merge_gate(_doc, _update, _tag, true), do: :ok
+
+  defp check_merge_gate(%Document{content: content}, update, _tag, false) do
+    entry =
+      (content || %{})
+      |> Map.get("acceptance_criteria")
+      |> Criteria.at(Map.get(update, "index"))
+
+    if Criteria.merge_gated?(entry) do
+      {:error, :merge_gated_criterion}
+    else
+      :ok
     end
   end
 

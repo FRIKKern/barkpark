@@ -594,4 +594,182 @@ defmodule Barkpark.Tasks.StampTest do
       assert miss_ev.previous_rev == met_doc.rev
     end
   end
+
+  # ─── (7) THE MERGE-GATE REFUSAL (cch-w49) ──────────────────────────────────
+  #
+  # THE POINT OF THIS BLOCK IS THAT THE GUARD CAN LOSE IN BOTH DIRECTIONS.
+  # It is easy to "fix" the reported false positive by weakening the guard
+  # until nothing trips it, and a suite that only asserted the mention stamps
+  # clean would go green on exactly that. So every permit test below is paired
+  # with a refusal test over the SAME machinery, and the refusal arm asserts
+  # that NOTHING was written — a guard that refuses but writes anyway is not a
+  # guard.
+
+  defp merge_gate_criteria do
+    [
+      %{
+        "criterion" => "the mobile gate is green on the PR head",
+        "met" => false,
+        "evidence" => ""
+      },
+      # A GENUINE gate, wired by the prose convention (the shape ~1839 live
+      # rows use — no flag, marker in the text).
+      %{
+        "criterion" => "[MERGE-GATED — the lead closes this] PR merged to main",
+        "met" => false,
+        "evidence" => ""
+      },
+      # A MENTION: prose ABOUT merge-gating, exempted structurally. This is
+      # cch-w49's own criterion 0, verbatim.
+      %{
+        "criterion" =>
+          "A criterion whose text merely MENTIONS a merge-gated row stamps met WITHOUT --merge-gated. Evidence: the stamp command and its rc.",
+        "met" => false,
+        "evidence" => "",
+        "merge_gate" => false
+      },
+      # A gate carrying the FLAG but no marker wording — invisible to any
+      # text-only guard (14 such rows live on the corpus).
+      %{
+        "criterion" => "PR merged to main with the required gates green",
+        "met" => false,
+        "evidence" => "",
+        "merge_gate" => true
+      }
+    ]
+  end
+
+  defp mg_task!(scope) do
+    doc_id = uniq("stamp-mg")
+    task = mk_task!(doc_id, scope, %{"acceptance_criteria" => merge_gate_criteria()})
+    {_claimed, epoch} = claim!(doc_id, "builder", scope)
+    {task, epoch}
+  end
+
+  defp criteria_of(task_id) do
+    Repo.get!(Document, task_id).content["acceptance_criteria"]
+  end
+
+  describe "stamp/3 — MERGE-GATE refusal: the guard REFUSES (cch-w49 c1)" do
+    test "a genuine prose-marked gate is refused a builder --met, and NOTHING is written",
+         %{scope: scope} do
+      {task, epoch} = mg_task!(scope)
+      text = "[MERGE-GATED — the lead closes this] PR merged to main"
+
+      assert {:error, :merge_gated_criterion} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 criterion_text: text,
+                 outcome: {:met, "PR #123 merged"}
+               )
+
+      row = Enum.at(criteria_of(task.id), 1)
+      assert row["met"] == false, "a refused stamp must not flip the lock"
+      assert row["evidence"] == "", "a refused stamp must not write evidence"
+    end
+
+    test "a FLAGGED gate whose prose never says 'merge-gated' is refused too", %{scope: scope} do
+      # The arm a text-only guard silently permits. If merge_gated?/1 stopped
+      # reading the flag, this reds — and only this.
+      {task, epoch} = mg_task!(scope)
+
+      assert {:error, :merge_gated_criterion} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 3,
+                 criterion_text: "PR merged to main with the required gates green",
+                 outcome: {:met, "merged"}
+               )
+
+      assert Enum.at(criteria_of(task.id), 3)["met"] == false
+    end
+
+    test "the LEAD override releases it and the stamp lands", %{scope: scope} do
+      {task, epoch} = mg_task!(scope)
+      text = "[MERGE-GATED — the lead closes this] PR merged to main"
+
+      assert {:ok, stamped} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 criterion_text: text,
+                 outcome: {:met, "PR #123 merged, sha an ancestor of origin/main"},
+                 merge_gated: true
+               )
+
+      row = Enum.at(stamped.content["acceptance_criteria"], 1)
+      assert row["met"] == true
+      assert row["evidence"] =~ "#123"
+    end
+
+    test "a --miss on a gate is never refused — it flips no lock", %{scope: scope} do
+      {task, epoch} = mg_task!(scope)
+
+      assert {:ok, stamped} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 1,
+                 outcome: {:miss, "PR not open yet"}
+               )
+
+      assert Enum.at(stamped.content["acceptance_criteria"], 1)["met"] == false
+    end
+  end
+
+  describe "stamp/3 — MERGE-GATE refusal: a MENTION stamps clean (cch-w49 c0)" do
+    test "a criterion that merely MENTIONS merge-gating stamps met WITHOUT --merge-gated",
+         %{scope: scope} do
+      {task, epoch} = mg_task!(scope)
+
+      text =
+        "A criterion whose text merely MENTIONS a merge-gated row stamps met WITHOUT --merge-gated. Evidence: the stamp command and its rc."
+
+      assert {:ok, stamped} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 2,
+                 criterion_text: text,
+                 outcome: {:met, "this very test"}
+               )
+
+      row = Enum.at(stamped.content["acceptance_criteria"], 2)
+      assert row["met"] == true
+      assert row["evidence"] == "this very test"
+    end
+
+    test "an ordinary criterion is untouched by the guard", %{scope: scope} do
+      {task, epoch} = mg_task!(scope)
+
+      assert {:ok, _} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 criterion_text: "the mobile gate is green on the PR head",
+                 outcome: {:met, "gate output"}
+               )
+    end
+
+    test "the guard does not pre-empt the out-of-range / mismatch taxonomy", %{scope: scope} do
+      # The merge-gate check must never invent an error that belongs to
+      # merge_criteria — a wrong index still reports what it always reported.
+      {task, epoch} = mg_task!(scope)
+
+      assert {:error, :criteria_index_out_of_range} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 99,
+                 criterion_text: "whatever",
+                 outcome: {:met, "e"}
+               )
+
+      assert {:error, :criteria_mismatch} =
+               Stamp.stamp(task.id, "builder",
+                 observed_epoch: epoch,
+                 criterion: 0,
+                 criterion_text: "not the stored wording",
+                 outcome: {:met, "e"}
+               )
+    end
+  end
 end

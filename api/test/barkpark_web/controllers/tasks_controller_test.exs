@@ -960,6 +960,109 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert Enum.all?(criteria, &(&1["met"] == false)), "a refused stamp writes nothing"
     end
 
+    # cch-w49 / cch-w19 — THE MERGE-GATE GUARD ON THE WIRE, both directions.
+    #
+    # A CLI-only guard was neither of these things: it could not see the stored
+    # `merge_gate` field, and a direct POST walked straight past it. These two
+    # tests are the pair — remove the guard and the first goes green-that-should-
+    # be-red; weaken it to "never fires" and the first reds while the second
+    # stays green. Neither alone is a proof.
+    test "a MERGE-GATED criterion is 409 merge_gated_criterion without --merge-gated, no write",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [
+          %{"criterion" => "the gate is green", "met" => false},
+          %{
+            "criterion" => "[MERGE-GATED — the lead closes this] PR merged to main",
+            "met" => false
+          }
+        ])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=1&criterion-text=%5BMERGE-GATED+%E2%80%94+the+lead+closes+this%5D+PR+merged+to+main&met=true&evidence=merged",
+          body
+        )
+
+      assert resp.status == 409
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["ok"] == false
+      assert payload["reason"] == "merge_gated_criterion"
+      # The message must name WHO may override (cch-w19 c0) ...
+      assert payload["message"] =~ "--merge-gated"
+      assert payload["message"] =~ "LEAD"
+      # ... say OUT LOUD that the fallback match is on the PROSE, and state the
+      # measured mention rate as a number rather than a hedge (cch-w19 c1) ...
+      assert payload["message"] =~ "prose"
+      assert payload["message"] =~ "65 of 1853"
+      # ... and name the STRUCTURAL exit, so a false positive is retired on the
+      # row instead of by reaching for the override every time.
+      assert payload["message"] =~ ~s("merge_gate": false)
+
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      criteria = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert Enum.all?(criteria, &(&1["met"] == false)), "a refused stamp writes nothing"
+    end
+
+    test "--merge-gated=true releases the gate on the wire and the stamp lands",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [
+          %{
+            "criterion" => "[MERGE-GATED — the lead closes this] PR merged to main",
+            "met" => false
+          }
+        ])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=%5BMERGE-GATED+%E2%80%94+the+lead+closes+this%5D+PR+merged+to+main&met=true&evidence=PR+%23123+merged&merge-gated=true",
+          body
+        )
+
+      assert resp.status == 200
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      [row] = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert row["met"] == true
+    end
+
+    # cch-w49 c0 on the wire: a criterion that merely MENTIONS merge-gating,
+    # marked `merge_gate: false` by its author, stamps met with NO override.
+    test "a mention-only criterion marked merge_gate:false stamps met WITHOUT --merge-gated",
+         %{conn: conn, scope: scope} do
+      text =
+        "A criterion whose text merely MENTIONS a merge-gated row stamps met WITHOUT --merge-gated."
+
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [
+          %{"criterion" => text, "met" => false, "merge_gate" => false}
+        ])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: epoch})
+
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=#{URI.encode_www_form(text)}&met=true&evidence=this+test",
+          body
+        )
+
+      assert resp.status == 200, "a mention must not need the lead-only override"
+      show = conn |> authed() |> get("/v1/tasks/#{doc_id}")
+      [row] = Jason.decode!(show.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert row["met"] == true
+      assert row["merge_gate"] == false, "the author's declaration survives the stamp"
+    end
+
     test "a --criterion-text that does not match the row is 409 criteria_mismatch, no write",
          %{conn: conn, scope: scope} do
       {doc_id, epoch} =

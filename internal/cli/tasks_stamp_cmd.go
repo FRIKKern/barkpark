@@ -29,10 +29,20 @@ import (
 //     #4 as boards/rubric number them") alongside the criterion text. A 0-vs-1
 //     slip is then visible at the moment of the stamp, not only when the server
 //     409s a text mismatch.
-//  2. MERGE-GATE TRIPWIRE — refuse a `--met` whose `--criterion-text` carries
-//     the MERGE-GATED marker unless the caller passes the CLI-only
-//     `--merge-gated` override. That one flip is the only mis-index that
-//     corrupts a lead's merge decision, so it earns an explicit door.
+//  2. MERGE-GATE OVERRIDE PASS-THROUGH — `--merge-gated` is now a
+//     SERVER-DECLARED flag, so the wrapper forwards it and the SERVER owns the
+//     refusal (`Barkpark.Tasks.Criteria.merge_gated?/1`, 409
+//     merge_gated_criterion). It used to be a CLI-only flag guarding a
+//     CLI-only textual tripwire, and that could not be made correct here: the
+//     authoritative signal is the STORED criterion's `merge_gate` field, which
+//     this process cannot see — it has only the `--criterion-text` the caller
+//     typed. Keeping the verdict client-side therefore mis-fired on rows whose
+//     prose merely DISCUSSES merge-gating (65 of 1853 marker-bearing criteria
+//     on the live corpus), missed rows flagged `merge_gate: true` whose prose
+//     never says so (14), and was bypassed outright by a direct POST. Against
+//     a server too old to declare the flag the OLD client-side tripwire still
+//     runs — see `stampMergeGateFallback` — so a rollout never leaves the gate
+//     unguarded in either direction.
 //  3. READ-BACK (PDS-D359/D361, wave 26) — after a 2xx, RE-READ the criterion
 //     from the store and render the receipt from what the store holds, never
 //     from what was asked. The epic has watched this verb return exit 0 with a
@@ -50,13 +60,18 @@ import (
 // impossible anyway. Documented-0-based + a translating echo is the
 // least-surprise, fully-backward-compatible fix.
 func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
-	sa, forward := parseStampArgs(tail)
+	declared := commandDeclaresFlag(cmd, "merge-gated")
+	sa, forward := parseStampArgs(tail, declared)
 
-	// MERGE-GATED tripwire: a met-flip on a lead-owned row without the explicit
-	// override is refused, and NOTHING is sent to the server.
-	if stampMergeGateBlocked(sa) {
+	// LEGACY-SERVER FALLBACK ONLY. When the server declares --merge-gated it
+	// owns the verdict (it can read the stored `merge_gate` field; we cannot),
+	// and the flag rides the POST. Against an older manifest the flag is not
+	// declared — forwarding it would fail splitArgs as an unknown flag — so we
+	// strip it and run the historical text-only tripwire, which is wrong at the
+	// edges but strictly better than shipping the met-flip unguarded.
+	if !declared && stampMergeGateFallback(sa) {
 		return useError(out, "merge_gated_criterion",
-			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated to override only if you are the lead closing the gate.",
+			"refusing to stamp a MERGE-GATED criterion met: --criterion-text carries the MERGE-GATED marker, and that row is the lead's to close (a builder flipping it fabricates a done before the PR exists). Pass --merge-gated to override only if you are the lead closing the gate. (This server is too old to declare --merge-gated, so the match is on the TEXT you passed and may be a false positive on a criterion that merely MENTIONS merge-gating.)",
 			exitValidation)
 	}
 
@@ -276,13 +291,18 @@ type stampArgs struct {
 }
 
 // parseStampArgs pulls the criterion index, criterion-text, the met/miss
-// outcome and the CLI-only --merge-gated override out of the stamp tail. It
-// returns the parsed view AND a forward slice with --merge-gated removed —
-// every OTHER token, order preserved, passes to the manifest dispatch verbatim,
-// so the CLI never re-indexes --criterion (the index the builder types is the
-// index the server receives). Both `--flag value` and `--flag=value` spellings
-// are recognized. Parsing here is advisory only.
-func parseStampArgs(tail []string) (stampArgs, []string) {
+// outcome and the --merge-gated override out of the stamp tail. It returns the
+// parsed view AND the forward slice for the manifest dispatch: every token,
+// order preserved, so the CLI never re-indexes --criterion (the index the
+// builder types is the index the server receives).
+//
+// `mergeGatedDeclared` says whether the SERVER declares --merge-gated. When it
+// does the flag is forwarded like any other (the server enforces the gate and
+// needs to see the override); when it does not, the flag is stripped, because
+// an undeclared token fails splitArgs with "unknown flag" — that is the
+// pre-existing behaviour, kept only for older servers. Both `--flag value` and
+// `--flag=value` spellings are recognized. Parsing here is advisory only.
+func parseStampArgs(tail []string, mergeGatedDeclared bool) (stampArgs, []string) {
 	var sa stampArgs
 	forward := make([]string, 0, len(tail))
 	for i := 0; i < len(tail); i++ {
@@ -297,7 +317,9 @@ func parseStampArgs(tail []string) (stampArgs, []string) {
 		switch name {
 		case "--merge-gated":
 			sa.mergeGated = true
-			continue // CLI-only: never forwarded to the server.
+			if !mergeGatedDeclared {
+				continue // legacy server: undeclared flag, never forwarded.
+			}
 		case "--met":
 			sa.met = true
 		case "--miss":
@@ -314,21 +336,40 @@ func parseStampArgs(tail []string) (stampArgs, []string) {
 	return sa, forward
 }
 
-// stampMergeGateBlocked is the MERGE-GATED tripwire predicate: a --met whose
-// --criterion-text carries the MERGE-GATED marker, with no --merge-gated
-// override. --criterion-text is REQUIRED on every --met (D56), so this guard
-// always has the text to inspect and needs no network round-trip. A --miss
-// flips nothing and is never blocked.
-func stampMergeGateBlocked(sa stampArgs) bool {
+// stampMergeGateFallback is the LEGACY client-side tripwire, reached ONLY when
+// the server's manifest does not declare --merge-gated (see runTaskStamp). The
+// live guard is `Barkpark.Tasks.Criteria.merge_gated?/1` on the server, which
+// reads the STORED criterion's `merge_gate` field and falls back to prose only
+// when the author set no field. Do NOT re-promote this to the primary check:
+// it sees only the `--criterion-text` the caller typed, so it cannot honour the
+// structural flag in EITHER direction. Delete it once no supported server
+// predates the declared flag.
+func stampMergeGateFallback(sa stampArgs) bool {
 	return sa.met && !sa.mergeGated && isMergeGatedText(sa.criterionText)
 }
 
 // isMergeGatedText reports whether a criterion's wording carries the
 // MERGE-GATED marker (the standard "[MERGE-GATED — the lead closes this]"
 // row), case-insensitively and tolerant of a hyphen or space between the words.
+// Frozen deliberately: it is the LEGACY-server predicate and must keep matching
+// exactly what old servers assumed. The authoritative, wider predicate is
+// Barkpark.Tasks.Criteria.merge_gated?/1 — find it by grepping the canonical
+// capability slug "merge-gate-criterion-predicate".
 func isMergeGatedText(s string) bool {
 	u := strings.ToUpper(s)
 	return strings.Contains(u, "MERGE-GATED") || strings.Contains(u, "MERGE GATED")
+}
+
+// commandDeclaresFlag reports whether the manifest command declares a flag by
+// name — the capability probe that decides whether --merge-gated can ride the
+// POST or must be stripped for an older server.
+func commandDeclaresFlag(cmd manifest.Command, name string) bool {
+	for _, f := range cmd.Flags {
+		if f.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // stampEchoLine renders the one-line, human-facing confirmation of WHICH
