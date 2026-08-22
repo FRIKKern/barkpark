@@ -499,6 +499,67 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
       scoped_resp = conn |> authed(token) |> get(scoped(ws, project, "export/#{@dataset}"))
       assert scoped_resp.status == 200
     end
+
+    # ── POST reindex — the route whose OWN comment named this token ─────────
+    #
+    # `POST /v1/data/search/:dataset/reindex` rides `[:api, :require_token]`
+    # (the `/v1/data` private scope), so mounting PublicRead on that pipeline
+    # denies it to the public tier. It is called out separately from
+    # `@leak_routes` above for three reasons:
+    #
+    #   * It is the only POST on this pipeline the clamp governs. Every leak
+    #     route above is a GET, so a regression that re-admitted only non-GET
+    #     methods would leave all ten of those cases green.
+    #   * `allowed_route?/1` matches `%{method: "GET", path_info: path}`, so the
+    #     denial here comes from the `defp allowed_route?(_), do: false` FALLBACK
+    #     clause. Nothing else in this file exercises that clause, and it is the
+    #     clause that makes the clamp deny-by-default across METHODS rather than
+    #     only across paths.
+    #   * Until this commit the route's router comment named "the public-read
+    #     token the web demo holds" as an INTENDED caller — a claim the clamp
+    #     falsified on 2026-07-30 and which then stood, uncorrected and
+    #     untested, for three weeks. The comment is fixed alongside this test.
+    #     The test is what stops the next reader from resolving the
+    #     contradiction the other way: by adding a route-level allowance to
+    #     make the stale comment true again, which would punch a POST-shaped
+    #     hole through a clamp governing 44 routes.
+    #
+    # There is no scoped mirror to certify: `/v1/data/search/:dataset/reindex`
+    # is declared only in the flat scope, so the FLAT arm is the whole surface.
+    test "reindex: POST is 403 forbidden for a public-read token (the non-GET arm)", %{
+      conn: conn,
+      public_read: token
+    } do
+      body =
+        conn
+        |> authed(token)
+        |> post("/v1/data/search/#{@dataset}/reindex")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "forbidden"
+
+      assert body["error"]["message"] ==
+               "public-read tokens may only read published public documents"
+    end
+
+    # The twin that makes the case above mean something. Without it, deleting
+    # the route entirely (404) or breaking it for everyone would still read as
+    # "public-read is denied". The clamp must be TIER-scoped, so a `read` token
+    # must not receive PublicRead's denial on the same request.
+    #
+    # The downstream outcome is deliberately NOT asserted: `reindex` enqueues an
+    # Indx rebuild, so a 200-with-jobId and a canonical `internal_error` are both
+    # legitimate depending on whether the worker is reachable in this env. What
+    # is never legitimate is a read token meeting the clamp.
+    test "reindex: a read token is NOT clamped — the 403 is tier-scoped, not route breakage", %{
+      conn: conn,
+      read: token
+    } do
+      resp = conn |> authed(token) |> post("/v1/data/search/#{@dataset}/reindex")
+
+      refute resp.status == 403
+      refute resp.resp_body =~ "public-read tokens may only read"
+    end
   end
 
   # ── Legacy /api/documents — the drafts-by-id clamp ────────────────────────
