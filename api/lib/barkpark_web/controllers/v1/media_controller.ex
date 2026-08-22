@@ -469,6 +469,29 @@ defmodule BarkparkWeb.V1.MediaController do
           {:error, :forbidden}
         end
 
+      # ACCOUNT ARM (gfr-w1-account-session-bearer-gap). A `user_session`
+      # principal carries no api_token, so the arm above cannot answer for it.
+      # Authority is the MEMBERSHIP ROLE on the workspace `ResolveWorkspace`
+      # already derived from the URL, through the same `Tenancy.Auth.authorize/3`
+      # the RequireWritePermission plug uses — the floor lives there
+      # ("member"/"admin"/"owner" satisfy :write) and is NOT restated here.
+      #
+      # SCOPED ONLY, structurally: a flat request has no :current_workspace at
+      # this point, so this clause cannot fire for one.
+      #
+      # NOT extended to checkout/undo_checkout. Those call `actor_label/1` and
+      # `admin?/1`, which read a token's LABEL to stamp `checkedOutBy` — what a
+      # human principal should be stamped as is a product decision nobody has
+      # made, and guessing it writes user-visible data. An account session can
+      # upload; it still cannot check out. Bounded on purpose.
+      match?(%Barkpark.Accounts.User{}, conn.assigns[:current_user]) ->
+        with %{id: ws_id} when is_binary(ws_id) <- conn.assigns[:current_workspace],
+             :ok <- Barkpark.Tenancy.Auth.authorize(conn.assigns[:current_user], ws_id, :write) do
+          :ok
+        else
+          _ -> {:error, :forbidden}
+        end
+
       true ->
         {:error, :unauthorized}
     end

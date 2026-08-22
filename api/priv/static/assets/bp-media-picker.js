@@ -113,6 +113,10 @@ class BpMediaPicker extends HTMLElement {
     const headers = { Accept: "application/json" };
     const tok = this._token();
     if (tok) headers["Authorization"] = "Bearer " + tok;
+    // ACCOUNT-SESSION FALLBACK (gfr-w1-account-session-bearer-gap): with no
+    // bearer we take RequireBearerOrSessionToken's cookie branch, which
+    // requires this header. Sent ONLY when the token is genuinely empty.
+    else headers["x-requested-with"] = "bp-media-picker";
     try {
       const url =
         this._scopePrefix() +
@@ -610,6 +614,10 @@ class BpMediaPicker extends HTMLElement {
     const headers = { Accept: "application/json" };
     const tok = this._token();
     if (tok) headers["Authorization"] = "Bearer " + tok;
+    // ACCOUNT-SESSION FALLBACK (gfr-w1-account-session-bearer-gap): with no
+    // bearer we take RequireBearerOrSessionToken's cookie branch, which
+    // requires this header. Sent ONLY when the token is genuinely empty.
+    else headers["x-requested-with"] = "bp-media-picker";
     this._setError("");
     this._setBusy(true);
     try {

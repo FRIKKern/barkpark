@@ -30,8 +30,7 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
            true <- TenancyAuth.permits?(token, :write) do
         conn
       else
-        _ ->
-          forbidden(conn)
+        _ -> account_write?(conn)
       end
     end
   end
@@ -43,5 +42,29 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
     |> put_status(env.status)
     |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
     |> halt()
+  end
+
+  # The ACCOUNT arm (gfr-w1-account-session-bearer-gap). A `user_session`
+  # principal carries no api_token, so the token branch above cannot answer for
+  # it — and its `with` FAILS CLOSED, which is why the gate arm alone would
+  # still have 403'd a legitimate member.
+  #
+  # Authority comes from the MEMBERSHIP ROLE on the workspace already resolved
+  # from the URL, through the same `Tenancy.Auth.authorize/3` every other
+  # account-principal check uses. No new role vocabulary: `@builtin_role_actions`
+  # already answers this — "admin" => read/write/admin, "member" => read/write —
+  # so a plain member writes, a custom role answers from its own rows, and
+  # anything else falls through to the 403 below.
+  #
+  # Fail-closed by construction: a missing user, a missing workspace, or a role
+  # without `write` all land on `forbidden/1`.
+  defp account_write?(conn) do
+    with %Barkpark.Accounts.User{} = user <- conn.assigns[:current_user],
+         %{id: ws_id} when is_binary(ws_id) <- conn.assigns[:current_workspace],
+         :ok <- TenancyAuth.authorize(user, ws_id, :write) do
+      conn
+    else
+      _ -> forbidden(conn)
+    end
   end
 end

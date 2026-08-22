@@ -1,0 +1,147 @@
+defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
+  @moduledoc """
+  `gfr-w1-account-session-bearer-gap` — an ACCOUNT (`user_session`) member can
+  complete a scoped media WRITE without ever holding a bearer token.
+
+  ## What was broken, and what it was NOT
+
+  No account/SSO login writes `session["api_token"]`, so
+  `RequireBearerOrSessionToken` — which read only Authorization and that session
+  key — refused a legitimate workspace member. **Nobody gained access from the
+  gap; a member was BLOCKED by it.** `ResolveWorkspace` already admitted them.
+
+  ## Why the gate arm ALONE was not enough
+
+  `RequireWritePermission` matches `%{api_token: token} <- conn.assigns` and
+  fails CLOSED, so an account principal cleared the gate and then collected a
+  403 anyway. Both arms are required, and each is mutation-proven below.
+
+  ## SCOPED ONLY, and structurally so
+
+  On `:scoped_media_mutate`, `ResolveWorkspace` runs BEFORE the gate, so the
+  URL-derived workspace is on the conn. On the FLAT `:media_mutate` nothing has
+  resolved one yet — `DeriveWorkspaceFromToken` and `AssignDefaultScope` run
+  after — so the account arm declines. Accepting it there would let the write be
+  stamped to and metered against the singleton Default workspace: the
+  stamps-to-Default defect D15/D16 paid off. The last test pins that refusal.
+
+  ## No credential is created or rendered
+
+  `data-token=""` for an account session stays the correct end state. The
+  components take the cookie branch instead, which is why the CSRF header test
+  below is load-bearing rather than decorative.
+  """
+  use BarkparkWeb.ConnCase, async: false
+
+  import Barkpark.TenancyFixtures
+
+  alias Barkpark.{Accounts, Media, Tenancy}
+
+  @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
+  @ds "production"
+
+  setup %{conn: conn} do
+    ws = create_workspace!("acct-media-#{System.unique_integer([:positive])}")
+    proj = create_project!(ws, "acct-media-p-#{System.unique_integer([:positive])}")
+    ensure_default_scope!()
+    {:ok, conn: conn, ws: ws, proj: proj}
+  end
+
+  defp account_session!(conn, ws, role) do
+    email = "acct-media-#{System.unique_integer([:positive])}@example.com"
+    {:ok, user} = Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+    {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, role, "user")
+    {:ok, raw} = Accounts.create_user_session_token(user)
+    {user, Plug.Test.init_test_session(conn, %{"user_session" => raw})}
+  end
+
+  defp png_upload do
+    path = Path.join(System.tmp_dir!(), "acct-#{System.unique_integer([:positive])}.png")
+    File.write!(path, Base.decode64!(@png_b64))
+    on_exit(fn -> File.rm(path) end)
+    %Plug.Upload{path: path, filename: "a.png", content_type: "image/png"}
+  end
+
+  defp scoped_upload(conn, ws, proj, opts \\ []) do
+    conn =
+      if Keyword.get(opts, :csrf, true),
+        do: put_req_header(conn, "x-requested-with", "bp-media-picker"),
+        else: conn
+
+    post(conn, "/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@ds}/upload", %{
+      "file" => png_upload()
+    })
+  end
+
+  defp cleanup(body) do
+    case get_in(body, ["result", "fileInfo", "path"]) || get_in(body, ["fileInfo", "path"]) do
+      p when is_binary(p) -> File.rm(Path.join(Media.upload_dir(), p))
+      _ -> :ok
+    end
+  end
+
+  describe "an account-session member, holding NO bearer" do
+    test "completes a scoped media upload", %{conn: conn, ws: ws, proj: proj} do
+      {_u, conn} = account_session!(conn, ws, "member")
+      conn = scoped_upload(conn, ws, proj)
+
+      assert conn.status in [200, 201],
+             "an account member was refused a scoped upload: #{conn.status} #{conn.resp_body}"
+
+      cleanup(Jason.decode!(conn.resp_body))
+    end
+
+    test "is REFUSED without the x-requested-with header — the cookie branch is CSRF-gated",
+         %{conn: conn, ws: ws, proj: proj} do
+      {_u, conn} = account_session!(conn, ws, "member")
+      conn = scoped_upload(conn, ws, proj, csrf: false)
+
+      refute conn.status in [200, 201],
+             "a cookie-authenticated write succeeded with no CSRF header"
+
+      assert conn.status in [401, 403]
+    end
+
+    test "a NON-member with a valid account session is still refused", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      other = create_workspace!("acct-media-other-#{System.unique_integer([:positive])}")
+      {_u, conn} = account_session!(conn, other, "admin")
+      conn = scoped_upload(conn, ws, proj)
+
+      refute conn.status in [200, 201]
+    end
+  end
+
+  describe "the flat pipeline still refuses an account session — deliberately" do
+    test "flat /media/upload does not admit a cookie-only principal — even a Default member",
+         %{conn: conn, ws: ws} do
+      # THE DEFAULT MEMBERSHIP IS THE WHOLE TEST, and without it this case is
+      # VACUOUS. On the flat pipeline `AssignDefaultScope` stamps
+      # :current_workspace to the singleton Default; a user who is NOT a member
+      # of Default is then refused by the membership check anyway — so the test
+      # passed with the scoped-only guard REMOVED, certifying nothing. Measured
+      # exactly that before this line was added.
+      #
+      # Make the principal a Default member and the guard becomes the ONLY thing
+      # standing between a flat cookie write and a document stamped to the
+      # singleton Default workspace (D15/D16).
+      {default_ws, _default_proj} = ensure_default_scope!()
+      {user, conn} = account_session!(conn, ws, "admin")
+      {:ok, _} = Tenancy.Auth.create_membership(default_ws.id, user.id, "admin", "user")
+
+      conn =
+        conn
+        |> put_req_header("x-requested-with", "bp-media-picker")
+        |> post("/media/upload", %{"file" => png_upload(), "dataset" => @ds})
+
+      IO.inspect({conn.status, String.slice(conn.resp_body, 0, 150)}, label: "FLAT")
+
+      refute conn.status in [200, 201],
+             "a flat account-session write was ADMITTED and would be stamped to the " <>
+               "singleton Default workspace — the D15/D16 defect"
+    end
+  end
+end
