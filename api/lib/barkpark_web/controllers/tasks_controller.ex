@@ -1154,6 +1154,31 @@ defmodule BarkparkWeb.TasksController do
   @graph_corpus_max_concurrency 4
   @graph_corpus_slot_ttl_ms 60_000
 
+  # WHEN a shed client should come back. This header used to say `1`, which was
+  # not derived from anything: a slot is held for a whole derivation, and at
+  # SATURATION a derivation is an order of magnitude longer than one second.
+  #
+  # MEASURED on guerrilla (live, token-carrying, 2026-08-22): one derivation is
+  # 2.45 / 2.80 / 3.36s serial-warm; FOUR concurrent — the cap — hold their
+  # slots 10.18 / 10.38 / 10.57 / 10.76s. So every shed inside a saturated
+  # window is answered ~10s before capacity actually exists.
+  #
+  # THAT NUMBER IS LOAD-BEARING, not cosmetic: `retry-after: 1` is what a
+  # retrying client obeys. search-starter's SSR landing retries a 503 twice
+  # (`templates/search-starter/lib/bp-fetch.ts`), so under a saturated cap all
+  # three of its attempts landed at t+0.31s / t+1.44s / t+3.58s — every one of
+  # them inside the 10.2s hold, every one shed — it then rendered an EMPTY
+  # `bp-doc-id`, and the deploy HEALTH gate correctly refused to switch
+  # (`deploy/site-deploy-node.sh` health_gate_node, which does NOT retry an
+  # empty marker). The cap protected the box by failing every concurrent
+  # deploy's health probe. See `stw10-backlog-flagship-health-pool`.
+  #
+  # The value must therefore OUTLAST a saturated derivation, with headroom over
+  # the 10.8s worst case measured above. Clients clamp it (the SDK's
+  # MAX_RATE_LIMIT_BACKOFF_MS, bp-fetch's MAX_RETRY_AFTER_MS), so it is advice a
+  # caller is free to bound — it is not a promise to block for this long.
+  @graph_corpus_retry_after_seconds 12
+
   def graph_corpus(conn, params) do
     case acquire_graph_corpus_slot() do
       {:ok, slot} ->
@@ -1164,14 +1189,17 @@ defmodule BarkparkWeb.TasksController do
         end
 
       :busy ->
+        retry_after = graph_corpus_retry_after_seconds()
+
         conn
-        |> put_resp_header("retry-after", "1")
+        |> put_resp_header("retry-after", Integer.to_string(retry_after))
         |> put_status(:service_unavailable)
         |> json(%{
           ok: false,
           reason: "graph_corpus_busy",
+          retry_after: retry_after,
           message:
-            "too many concurrent /v1/graph derivations (limit #{graph_corpus_max_concurrency()}); retry shortly"
+            "too many concurrent /v1/graph derivations (limit #{graph_corpus_max_concurrency()}); retry in #{retry_after}s — a slot is held for a whole derivation, not for a moment"
         })
     end
   end
@@ -1458,6 +1486,14 @@ defmodule BarkparkWeb.TasksController do
         :barkpark,
         :graph_corpus_max_concurrency,
         @graph_corpus_max_concurrency
+      )
+
+  defp graph_corpus_retry_after_seconds,
+    do:
+      Application.get_env(
+        :barkpark,
+        :graph_corpus_retry_after_seconds,
+        @graph_corpus_retry_after_seconds
       )
 
   @doc false

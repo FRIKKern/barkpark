@@ -1,6 +1,7 @@
 import "server-only";
 import { Agent, fetch as keepAliveFetch } from "undici";
 import { PUBLIC_API_URL, READ_TOKEN } from "./bp-env";
+import { parseRetryAfterMs, retryDelayMs } from "./retry-after";
 
 /**
  * Persistent connection pool to the Barkpark API. Without it, every upstream
@@ -25,6 +26,10 @@ const bpDispatcher = new Agent({
  *   - a short retry-with-backoff over the API-restart window (a `make deploy`
  *     bounces the BEAM for ~30s, during which the LB/socket layer may accept the
  *     connection but Phoenix answers an empty body or an Nginx 502 HTML page),
+ *     EXTENDED by the upstream's own `Retry-After` when it sends one — the
+ *     fixed ladder is a guess about a restart, and a server that sheds
+ *     deliberately (`/v1/graph`'s concurrency cap) knows better than we do,
+ *   - a ceiling on that header so it stays advice and not a hostage,
  *   - an `res.ok` guard BEFORE the body is ever consumed, and
  *   - defensive `text()` → `JSON.parse` (never bare `res.json()` on a body that
  *     might be empty/HTML — that is what throws the cryptic
@@ -62,17 +67,29 @@ export function authHeaders(): HeadersInit {
  * e.g. reindex_failed or a 401) as opposed to an infra blip (bodyless/HTML 5xx,
  * restart, timeout): definitive errors are NOT retried and carry their real
  * message instead of the generic "restarting" one.
+ *
+ * `retryAfterMs` carries the upstream's own `Retry-After`, when it sent one, so
+ * the retry loop can wait as long as the server said instead of guessing.
  */
 export class BpUpstreamError extends Error {
   readonly status: number;
   readonly detail: string;
   readonly definitive: boolean;
-  constructor(status: number, message: string, detail = "", definitive = false) {
+  /** Upstream `Retry-After`, in ms — `undefined` when the server sent none. */
+  readonly retryAfterMs?: number;
+  constructor(
+    status: number,
+    message: string,
+    detail = "",
+    definitive = false,
+    retryAfterMs?: number,
+  ) {
     super(message);
     this.name = "BpUpstreamError";
     this.status = status;
     this.detail = detail;
     this.definitive = definitive;
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -131,18 +148,30 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "(unreadable body)");
+    // Read the server's own backoff instruction BEFORE classifying: a shed that
+    // says "come back in 12s" is the only party that knows how long its
+    // capacity is committed for (/v1/graph holds a slot for a whole derivation).
+    const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
     // A non-OK response carrying a parseable JSON {error:…} envelope is a
     // DELIBERATE upstream answer (reindex_failed, 401 unauthorized) — surface its
     // real message and mark it definitive so it is NOT retried. A bodyless/HTML
     // 5xx (LB 502, restart) has no envelope → stays a retryable transient.
     const enveloped = errorEnvelopeMessage(detail);
     if (enveloped) {
-      throw new BpUpstreamError(res.status, enveloped, detail.slice(0, 200), true);
+      throw new BpUpstreamError(
+        res.status,
+        enveloped,
+        detail.slice(0, 200),
+        true,
+        retryAfterMs,
+      );
     }
     throw new BpUpstreamError(
       res.status,
       `upstream ${res.status}`,
       detail.slice(0, 200),
+      false,
+      retryAfterMs,
     );
   }
 
@@ -186,7 +215,10 @@ export async function bpFetchJson(
     } catch (err) {
       lastErr = err;
       if (i < RETRIES && isTransient(err)) {
-        await sleep(BACKOFF_MS[i] ?? 2_000);
+        const scheduled = BACKOFF_MS[i] ?? 2_000;
+        const advised =
+          err instanceof BpUpstreamError ? err.retryAfterMs : undefined;
+        await sleep(retryDelayMs(scheduled, advised));
         continue;
       }
       throw err;
