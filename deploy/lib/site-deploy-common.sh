@@ -127,7 +127,67 @@ build_failure_reason() { # <build-log>
   [ -n "$r" ] || r="$(grep -aE 'npm ERR!|[Ee]rror:' "$f" 2>/dev/null | grep -av 'complete log of this run' | tail -1)"
   [ -n "$r" ] || r="$(grep -av '^[[:space:]]*$' "$f" 2>/dev/null | tail -1)"
   [ -n "$r" ] || r="npm ci / npm run build failed with no output"
+  # A COUNT IS NOT A CAUSE. Every tier above selects ONE line; when that line is a
+  # producer's SUMMARY HEADER the selection is correct and the answer is still
+  # useless, so the header gets the first concrete error appended to it.
+  r="$(build_reason_name_a_cause "$f" "$r")"
   printf '%s' "$r"
+}
+
+# MEASURED 2026-08-06, `search-capstone` failed 25 times, and the whole durable
+# record of every one of them was:
+#
+#     BUILD failed (exit 12): Error: Turbopack build failed with 29 errors:
+#
+# Twenty-nine errors were printed and the deployment row named NONE of them. The
+# tier-2 grep was not broken and did not truncate: Turbopack prints a summary
+# line and THEN the errors, and the individual errors do not themselves contain
+# the token `Error:`, so `grep 'Error:' | tail -1` matched the header and nothing
+# else could be selected. In the recorded 30,993-byte producer that grep matches
+# EXACTLY ONE line — the extractor was structurally incapable of reaching the
+# body. It reported a count and read like a complete answer.
+#
+# The raw log is NOT lost (DeployRunner has named it via BARKPARK_SITE_LOG_FILE
+# since #3857, so `BUILD_LOG_KEEP=1` and it survives under `run_state_dir()`),
+# but nothing points a reader at it and the reason line implies there is nothing
+# more to say. So the fix is in the LINE: name the first real cause in it.
+#
+# WHY A LINE AND NOT A BLOCK: `emit` flattens detail to one line and `cut -c1-240`
+# (see fmt_detail above). A multi-line block cannot ride this field, so appending
+# the first concrete error is the honest maximum the channel can carry — for the
+# recorded producer that is ~157 chars, well inside the budget.
+build_reason_name_a_cause() { # <build-log> <reason> -> <reason>[ <first cause>]
+  local f="$1" r="$2" cause
+
+  # Only a summary header earns the append: a line whose subject is a COUNT of
+  # errors rather than an error. Anything else is already a cause and is left
+  # exactly as it was.
+  case "$r" in
+    *[0-9]' error:'|*[0-9]' errors:') ;;
+    *) printf '%s' "$r"; return 0 ;;
+  esac
+
+  # The two lines under the header are the location and the message. Code-frame
+  # gutters (`> 1 | import …`) are skipped by their `|` column marker — that is a
+  # Next/Turbopack frame shape, named as such rather than passed off as general.
+  cause="$(awk -v hdr="$r" '
+    !found && index($0, hdr) { found = 1; next }
+    found {
+      line = $0
+      gsub(/\033\[[0-9;]*[a-zA-Z]/, "", line)   # strip ANSI SGR
+      sub(/^[[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line == "") next
+      if (index(line, "|")) next
+      print line
+      if (++n == 2) exit
+    }' "$f" 2>/dev/null | tr '\n' ' ' | tr -s ' ')"
+  cause="${cause% }"
+
+  # Header with no body below it (truncated capture, or the header WAS the last
+  # line) degrades to the header alone — never to an empty reason.
+  [ -n "$cause" ] || { printf '%s' "$r"; return 0; }
+  printf '%s %s' "$r" "$cause"
 }
 
 # ---------------------------------------------------------------------------
