@@ -411,21 +411,21 @@ export const RESIDUE_FAMILY_REASONS = {
 // failed` is the 102nd scenario and the 77th residue entry, and this sweep
 // exited 2 with `UNLISTED scenario "site-deploy-rail-failed" (family
 // hash:#site)` until the entry below was written.
-// cch-w38-s1 moved it a fifth time: `panel-overview-member` is the 104th
-// scenario and the 79th residue entry — residue for the same reason its owner
-// twin `panel-overview` is a CELL: it varies the CONTENT of a panel the four
-// instance cells already walk at all 15 widths, not its geometry.
-// cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` is the
-// 103rd scenario and the 78th residue entry — residue, not a cell, the same
-// home its sibling `overview-attention` has, so it is rendered and asserted by
-// smoke.mjs without claiming a width walk it does not get.
-// cch-w37-s6 moved it a fifth time: `operator-me-unreadable` — the first
-// fixture able to fail the /v1/me READ while keeping the account present, and
-// so the first to reach meState()=="failed" at all — is the 104th scenario and
-// the 79th residue entry, in the family its three siblings already occupy. The
-// sweep exited 2 with `UNLISTED scenario "operator-me-unreadable" (family
+// cch-w34-s6 REVIEW moved it: `overview-never-reported` is the 103rd scenario
+// and the 78th residue entry — residue, not a cell, the same home its sibling
+// `overview-attention` has, so it is rendered and asserted by smoke.mjs
+// without claiming a width walk it does not get.
+// cch-w37-s6 moved it: `operator-me-unreadable` — the first fixture able to
+// fail the /v1/me READ while keeping the account present, and so the first to
+// reach meState()=="failed" at all — is the 104th scenario and the 79th
+// residue entry, in the family its three siblings already occupy. The sweep
+// exited 2 with `UNLISTED scenario "operator-me-unreadable" (family
 // hash:#operator)` until the entry above was written.
-// cch-w45-s1 moved it a seventh time, by TWO: `members-admin-actor` and
+// cch-w38-s1 moved it: `panel-overview-member` is the 105th scenario and the
+// 80th residue entry — residue for the same reason its owner twin
+// `panel-overview` is a CELL: it varies the CONTENT of a panel the four
+// instance cells already walk at all 15 widths, not its geometry.
+// cch-w45-s1 moved it by TWO: `members-admin-actor` and
 // `members-peer-owner` — the first fixtures in which the acting principal is
 // not the roster's row 0, so the first able to ask a rank-relative predicate
 // about a row the actor does NOT outrank — are the 107th and 108th scenarios
@@ -433,7 +433,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // scenario "members-admin-actor" (family hash:#settings)` (and the twin) until
 // the entries below were written; the four numbers here were then RE-READ from
 // `scenarioReport`, never carried from the brief.
-// cch-w48-s6 moved it an EIGHTH time, by TWO, and deliberately in ONE commit:
+// cch-w48-s6 moved it by TWO, and deliberately in ONE commit:
 // `overview-member-empty-fleet` (the first fixture combining a member actor with
 // a zero-instance fleet — the exact frame launchFlow's pre-hoc refusal exists
 // for) and `site-member` (the first member to enter the site layer at all) are
@@ -467,6 +467,12 @@ export const RESIDUE_FAMILY_REASONS = {
 //     in RESIDUE_FAMILY_REASONS is recounted from the literal". Five reasons
 //     spell no count and are honestly SKIPPED by that arm; their membership is
 //     covered by the header arm, which spans all 13.
+//   * the chronicle ordinals above ("the Nth scenario / Mth residue entry") —
+//     "the chronicle's ordinals strictly increase and stay inside the census —
+//     in this file and the bare sweep", which reads THESE bytes and reds on a
+//     duplicate landing slot, an out-of-order block, or an ordinal past the
+//     measured census. It cannot recount which fixture landed where — that
+//     stays prose — but a repeat of the 104/79 double-claim now fails by name.
 // THE PRECEDENT THIS EXISTS FOR: the prose here once said 99/74 while the
 // literal below already held 75 — #8849's `sites-on-instance` moved the census
 // and only the TEST literals were updated. A census that two files spell
