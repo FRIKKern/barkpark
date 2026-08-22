@@ -245,9 +245,14 @@ defmodule Barkpark.PdsDoorCensusTest do
              "(with harnesses) and 16 (peers only) are defensible, so an unprinted choice " <>
              "makes the denominator underivable by a reader (PDS-D650).\n#{out}"
 
-    assert out =~ ~r/harnesses\s+: 3 /,
-           "the derived harness count moved off 3. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a fourth harness landed, say so on purpose.\n#{out}"
+    # SAID ON PURPOSE: the fourth harness is scripts/pds-window-sentinel_test.sh,
+    # landed with PDS-D717's retirement of D193 leg (ii). It is a real harness by
+    # the derived rule (*_test.sh) and it rides a required gate through
+    # api/test/barkpark/pds_window_sentinel_test.exs, so it belongs in the
+    # WITH-HARNESSES denominator rather than being excluded to keep this 3.
+    assert out =~ ~r/harnesses\s+: 4 /,
+           "the derived harness count moved off 4. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a fifth harness landed, say so on purpose.\n#{out}"
   end
 
   test "it RIDES ITS OWN DOOR: its own row is THROUGH in its own output", ctx do
@@ -306,11 +311,13 @@ defmodule Barkpark.PdsDoorCensusTest do
     # THROUGH, 2 PRICE rows, population 20. A set that agrees with itself agrees
     # with itself just as well after a door is lost.
     #
-    # 4 is where main stands: pds-door-census.sh, pds-elixir-receipt-census.exs,
-    # pds-record-parity.test.sh, pds-status-only-residue.exs. RAISE this number
-    # when a slice wires another door; a slice that has to LOWER it is removing a
-    # door from a required gate, which is a decision, not a diff.
-    assert String.to_integer(through) >= 4,
+    # 5 is where main stands: pds-door-census.sh, pds-elixir-receipt-census.exs,
+    # pds-record-parity.test.sh, pds-status-only-residue.exs, and — RAISED ON
+    # PURPOSE by PDS-D717's leg-(ii) retirement — pds-window-sentinel_test.sh,
+    # wired through api/test/barkpark/pds_window_sentinel_test.exs. RAISE this
+    # number when a slice wires another door; a slice that has to LOWER it is
+    # removing a door from a required gate, which is a decision, not a diff.
+    assert String.to_integer(through) >= 5,
            "the THROUGH door count fell to #{through}. Nothing else here can see that: every " <>
              "other assertion in this case is self-consistency, and a smaller set is still " <>
              "consistent with itself. Either a door stopped being gated, or a shape check " <>

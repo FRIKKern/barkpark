@@ -108,6 +108,7 @@ scripts/pds-door-census.sh
 scripts/pds-elixir-receipt-census.exs
 scripts/pds-record-parity.test.sh
 scripts/pds-status-only-residue.exs
+scripts/pds-window-sentinel_test.sh
 web/__tests__/**'
 
 # EXEMPT — escapes that resolve to a real file but are NOT reachable from the
