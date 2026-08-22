@@ -206,17 +206,32 @@ defmodule BarkparkWeb.SiteDeployController do
   def status(conn, params) do
     case DeployRequest.validate_slug(Map.get(params, "slug")) do
       {:ok, slug} ->
-        status = DeployRunner.status(slug)
         requested_build_id = Map.get(params, "build_id")
 
-        case resolve_status_match(status, requested_build_id) do
-          :serve -> json(conn, render_status(status))
-          :not_found -> build_id_mismatch(conn, slug, requested_build_id)
+        if record_requested?(params) do
+          json(conn, render_build_record(DeployRunner.build_record(slug, requested_build_id)))
+        else
+          status = DeployRunner.status(slug)
+
+          case resolve_status_match(status, requested_build_id) do
+            :serve -> json(conn, render_status(status))
+            :not_found -> build_id_mismatch(conn, slug, requested_build_id)
+          end
         end
 
       {:error, code, message} ->
         bad_request(conn, code, message)
     end
+  end
+
+  # OPT-IN ONLY, and the opt-in is the design. BoxRelay polls this same route and
+  # its 404-means-keep-waiting contract is load-bearing (charter D34), so the
+  # durable record must never arrive by changing what an existing caller already
+  # receives. A caller that does not ask for it sees byte-identical behaviour,
+  # and a typo (`record=yes-please`, `record=0`) degrades to the live status
+  # rather than silently switching response shapes.
+  defp record_requested?(params) do
+    Map.get(params, "record") in ["1", "true", "yes", "on"]
   end
 
   @doc """
@@ -318,6 +333,95 @@ defmodule BarkparkWeb.SiteDeployController do
 
   # Whitelist-render: the runner's status map, JSON-shaped (atoms → strings,
   # DateTime → ISO8601). Never the command.
+  # The DURABLE per-build record, for a run the Runner has long forgotten.
+  #
+  # WHY THIS EXISTS: `render_status/1` above answers about the run the Runner is
+  # holding IN MEMORY. Once a build finishes and the slug goes idle, the only
+  # thing that still knows what happened is `<slug>-<tag>.terminal.json` on the
+  # box — and nothing called `build_record/2`, so the answer to "why did build X
+  # fail" was an SSH session. This is that answer over the existing admin door.
+  #
+  # RAW LOG BYTES ARE DELIBERATELY NOT SERVED, AND THIS IS NOT A SIZE DECISION.
+  # The build env file carries `BARKPARK_TOKEN=` in plaintext, and the measured
+  # leak rate of the shared scrubber against this box's own `bppat_` token shape
+  # is 95.1% (DeployRunner :1153-1155). DeployRunner :404-406 refuses the bytes
+  # for exactly that reason. So this ships the STRUCTURED record — which is
+  # strictly more diagnostic than the one-line failure_reason and carries no
+  # credential surface — and `log_path` + `log_bytes` + `journal_command` tell an
+  # operator where the bytes are without moving them.
+  #
+  # THE FIELD LIST IS EXPLICIT, NEVER A PASS-THROUGH. `build_record/2` is free to
+  # grow a field; if this rendered its map wholesale, the day someone adds a
+  # `log_tail` for an internal caller is the day this endpoint starts serving
+  # credentials. Naming each key means a new upstream field is invisible here
+  # until a human adds it on purpose.
+  # THE CAPS ARE ENFORCED HERE, not inherited. Upstream already bounds both —
+  # `failure_reason` carries @reason_lines (3) trailing lines and the BPSTAGE
+  # fold has six members by construction — but an invariant held somewhere else
+  # is exactly what this endpoint must not rely on. If a future change lets a
+  # 4 MB reason through, the door truncates it instead of serving it, and the
+  # test pins that with input an order of magnitude over the cap.
+  @max_reason_bytes 4_000
+  @max_stages 32
+
+  defp render_build_record(record) do
+    %{
+      slug: record.slug,
+      build_id: record.build_id,
+      record: Atom.to_string(record.record),
+      # FOUR states, not three: `available`, `evicted`, `never_recorded`, and
+      # `missing` — a log gone from disk but never tombstoned. Collapsing
+      # `missing` into `evicted` would claim retention did something it did not,
+      # and collapsing either into `never_recorded` is the exact lie this record
+      # was built to stop: a pruned deployment and a slug that never deployed
+      # used to return byte-identical maps.
+      log_state: Atom.to_string(record.log_state),
+      log_path: record.log_path,
+      log_bytes: record.log_bytes,
+      exit_code: record.exit_code,
+      failure_reason: cap_reason(record.failure_reason),
+      # The BPSTAGE fold. Retained separately from the 500-line log ring and
+      # IMMUNE to it, so these survive after the log itself is evicted — which
+      # is what makes this record useful at the end of a retention window
+      # rather than only while the bytes are still there.
+      stages: Enum.take(record.stages || [], @max_stages),
+      unit_name: record.unit_name,
+      journal_command: record.journal_command,
+      mode: atom_or_nil(record.mode),
+      runtime_target: atom_or_nil(record.runtime_target),
+      started_at: record_iso(record.started_at),
+      finished_at: record_iso(record.finished_at),
+      evicted_at: record_iso(record.evicted_at)
+    }
+  end
+
+  # Truncation is VISIBLE, never silent: a caller that sees the marker knows the
+  # reason was longer, and one that does not is looking at the whole thing. A
+  # quiet slice would make a truncated diagnosis indistinguishable from a
+  # complete one, which is the same class of lie as an evicted log answering
+  # like one that never existed.
+  # The terminal record is READ BACK FROM JSON, so its timestamps arrive as ISO
+  # STRINGS — not the %DateTime{} structs `iso/1` renders for the live status.
+  # Kept as its own function rather than widening `iso/1`: that one serves the
+  # live path, where a binary timestamp would mean something upstream had
+  # already gone wrong and should still crash rather than pass through.
+  defp record_iso(nil), do: nil
+  defp record_iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp record_iso(value) when is_binary(value), do: value
+  defp record_iso(_other), do: nil
+
+  defp cap_reason(nil), do: nil
+
+  defp cap_reason(reason) when is_binary(reason) do
+    if byte_size(reason) > @max_reason_bytes do
+      binary_part(reason, 0, @max_reason_bytes) <> "… [truncated at #{@max_reason_bytes} bytes]"
+    else
+      reason
+    end
+  end
+
+  defp cap_reason(other), do: other
+
   defp render_status(status) do
     %{
       state: Atom.to_string(status.state),
