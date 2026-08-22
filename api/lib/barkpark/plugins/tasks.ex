@@ -104,6 +104,14 @@ defmodule Barkpark.Plugins.Tasks do
       over `Barkpark.Tasks.Validation` (which rejects the same shapes earlier
       with a 422) — the gate owns the structural contract at the `before_save`
       boundary for any path that reaches it directly.
+    * **MERGE-GATED wording without `merge_gate: true` → SOFT WARN.** A
+      criterion that OPENS with the `MERGE-GATED` marker but carries no flag
+      saves normally and emits a `Logger.warning`. The close-time autostamp
+      keys on the FLAG, never on the wording, so the two vocabularies drift
+      silently — measured 2026-08-22: 2870 worded criteria, 35 flagged.
+      Deliberately narrow (leading position only) and deliberately advisory;
+      see `warn_unflagged_merge_gates/1` for why widening it or promoting it
+      to a halt is unsafe.
 
   Non-task documents pass untouched.
   """
@@ -239,6 +247,7 @@ defmodule Barkpark.Plugins.Tasks do
 
   defp eval_criteria(list, _prev) when is_list(list) do
     if Enum.all?(list, &is_map/1) do
+      warn_unflagged_merge_gates(list)
       :ok
     else
       {:halt,
@@ -262,6 +271,59 @@ defmodule Barkpark.Plugins.Tasks do
   end
 
   defp warn_if_create_zero(_prev), do: :ok
+
+  # THE MERGE-GATE WORDING NAG. The `MERGE-GATED` text convention and the
+  # `merge_gate` criterion flag are two vocabularies, and ONLY THE FLAG IS
+  # MACHINE-READABLE: `Tasks.Close.autostamp_merge_gate/6` fires on
+  # `merge_gate: true` and cannot see the wording. Measured 2026-08-22 over the
+  # published corpus: 2870 criteria are worded as merge-gated and 35 carry the
+  # flag — so ~2811 rows are wired to a convention the automation cannot see,
+  # and a lead who merges expecting an auto-stamp waits forever. This warns the
+  # AUTHOR of a new criterion so the gap stops widening; the existing rows are a
+  # separate MIGRATION (`pds-w25-backlog-merge-gate-split`).
+  #
+  # DELIBERATELY NARROW, AND A MISS IS FREE — read this before "improving" it.
+  # It matches ONLY the marker in LEADING position. A census of 1845
+  # marker-bearing criteria found 1740 leading, 51 NON-leading that are
+  # nonetheless genuine gates ("LEAD-OWNED (merge-gated):", "PR merged to main
+  # (LEAD CLOSES THIS …)"), and 54 that merely mention merge-gating — position
+  # and prose misclassify in OPPOSITE directions, so no text rule separates them
+  # cleanly. That refuted a proposed narrowing of the `bp task stamp` REFUSAL,
+  # where a false negative lets a builder fabricate a merge close. Here the
+  # asymmetry is reversed and benign: a false negative is one un-nagged author.
+  #
+  # THEREFORE THIS MUST NEVER BECOME A HALT, and it must never be widened to
+  # catch the 105 non-leading cases — widening it would nag ~54 authors whose
+  # criterion was never a gate. The flag stays the ONLY machine signal:
+  # `autostamp_merge_gate` must NOT be taught to read this wording.
+  @merge_gate_lead ~r/^\s*[\[\(]?\s*\*{0,2}\s*MERGE[-\s]GATED\b/i
+
+  defp warn_unflagged_merge_gates(list) do
+    unflagged =
+      list
+      |> Enum.with_index()
+      |> Enum.filter(fn {entry, _i} -> merge_gate_worded?(entry) and not merge_gate_flagged?(entry) end)
+      |> Enum.map(fn {_entry, i} -> i end)
+
+    if unflagged != [] do
+      Logger.warning(
+        "task quality gate: acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
+          "marker but carry no `merge_gate: true` — the close-time autostamp keys on the FLAG, not " <>
+          "the wording, so a lead merge will not flip them (soft warning, save proceeds)"
+      )
+    end
+
+    :ok
+  end
+
+  defp merge_gate_worded?(entry) do
+    case Map.get(entry, "criterion") do
+      text when is_binary(text) -> Regex.match?(@merge_gate_lead, text)
+      _ -> false
+    end
+  end
+
+  defp merge_gate_flagged?(entry), do: Map.get(entry, "merge_gate") == true
 
   # String-or-atom key fetch that distinguishes an ABSENT key from a present
   # nil/false value (write paths string-key their attrs; the atom fallback is
