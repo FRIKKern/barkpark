@@ -101,9 +101,10 @@ async function verifyPublicReadToken(t, origin) {
       `every visitor.\n\n` +
       `Only a public-read token (auth_tier "read") may be used here. Mint one with:\n` +
       `  POST <api>/v1/tokens  {"label":"<site> live search","permissions":["public-read"]}\n\n` +
-      `Or leave BARKPARK_TOKEN empty — the site still builds and both search ` +
-      `engines still work over the flat anonymous route; only the live WebSocket ` +
-      `upgrade stays dark.`,
+      `Or leave BARKPARK_TOKEN empty — both search engines still work over the ` +
+      `flat anonymous route and only the live WebSocket goes dark, but the build ` +
+      `then needs a graph route that is readable anonymously (\`/v1/graph\` answers ` +
+      `401 without a token, which fails the corpus bake).`,
   )
 }
 

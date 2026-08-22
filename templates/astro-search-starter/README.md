@@ -14,7 +14,9 @@ What a deploy produces:
 - `/d/<type>/<slug>/` — one static page per published document, full
   PortableDoc block rendering, `paper-surface.css` design system
 - `graph.json` — the whole corpus baked at build: the landing draws instantly,
-  no token ever reaches a visitor
+  with no token needed to READ it. (A `BARKPARK_TOKEN` set for live search IS
+  inlined into the browser bundle — see `.env.example`; the build refuses any
+  tier above `public-read` for exactly that reason.)
 - HEALTH markers (`bp-build-id` / `bp-content-rev` / `bp-doc-id`) in every
   page — the deploy engine gates on them before any traffic switches
 

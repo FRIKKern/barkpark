@@ -10,9 +10,8 @@ Pick this template and you get a running site that feels expensive:
 - **A zero-dependency Canvas2D force graph** — a hand-written physics engine
   (`bp-graph.js`, no D3, no network) that breathes between densely interlinked
   documents. On first load the corpus is a constellation.
-- **A Leaflet-free OpenStreetMap map** — raw OSM tiles, no map library.
 - **PortableDoc detail pages** — every document renders pixel-perfect through
-  the canonical `@barkpark/react` `PortableDoc` (all block types), never a fork.
+  the canonical `@barkpark/react` `PortableDoc`, never a fork.
 - **Four themes** — evergreen / ember / fjord / charple (theme matrix lands in a
   later wave; the graph re-skins live on `bp:themechange`).
 

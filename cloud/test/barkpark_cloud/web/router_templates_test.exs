@@ -68,7 +68,7 @@ defmodule BarkparkCloud.Web.RouterTemplatesTest do
   # regressing into it (a fabricated block COUNT, a `listings map` that is dead
   # on managed deploys, or an unqualified `typo-tolerant` promise implying a
   # fuzzy engine) must RED the suite, not ship silently. Proven failable: put
-  # `(all 42 block types)` back on the served search-starter row and this REDs.
+  # a parenthetical block COUNT back on the served search-starter row and this REDs.
   test "LOCK: the served catalog is exactly the five known slugs (literal pin)" do
     conn = Router.call(conn(:get, "/v1/templates"), @opts)
     %{"templates" => templates} = json_body(conn)
