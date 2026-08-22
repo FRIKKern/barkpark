@@ -418,8 +418,8 @@ defmodule Barkpark.Tasks.Dedup do
   # that happened to be valid chardata (`["a"]`) used to flatten to `"a"` through
   # `String.Chars.List`; it now encodes to the string `["a"]`. That is deliberate
   # — a nested list is not a label — and it is unreachable in practice: a census
-  # of all 7,508 published `type:task` rows on guerrilla (2026-08-22) found 9
-  # carrying `content.labels`, every one of them a flat list of strings.
+  # of all 7,508 published `type:task` rows on guerrilla (2026-08-22) found 1,690
+  # carrying `labels`, every one of them a flat list of strings.
   defp stringify(value) do
     case Jason.encode(value) do
       {:ok, json} -> {:coerced, json}
