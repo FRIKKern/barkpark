@@ -51,8 +51,24 @@ defmodule BarkparkCloud.Metrics do
           db_size: number | nil,
           top_relations: [%{name: String.t(), bytes: number}] | nil,
           swap: %{used_pct: number | nil, total_bytes: number | nil},
-          beam: %{pss_bytes: number | nil, swap_bytes: number | nil}
+          beam: %{pss_bytes: number | nil, swap_bytes: number | nil},
+          load15: number | nil,
+          cores: number | nil
         },
+        pressure: %{                               # the VERDICT — see `pressure/1`
+          state: "struggling" | "watch" | "calm" | "unknown",
+          measured: non_neg_integer,
+          of: pos_integer,
+          signals: [%{key: ..., state: ..., value: ..., unit: ..., watch_at: ..., struggling_at: ...}]
+        },
+        space: %{                                  # newest SPACE row — see `space/1`
+          root: %{used_bytes: ..., total_bytes: ...},
+          journal_bytes: number | nil,
+          db_size: number | nil,
+          top_relations: [...] | nil,
+          sites: %{dir: ..., bytes: ..., top: [...] | nil, count: number | nil},
+          reported_at: String.t() | nil
+        } | nil,
         service_health: %{pass: non_neg_integer, total: non_neg_integer, failing: [String.t()]}
       }
 
@@ -68,6 +84,14 @@ defmodule BarkparkCloud.Metrics do
   degraded threshold (180s) the staleness worker uses, never a new constant.
   `service_health` is the newest beat's health-check roll-up, taken through
   `Telemetry.normalize/1` (public reuse — `Telemetry` stays untouched).
+
+  `pressure` and `space` are the two blocks that answer "is this box in
+  trouble, and what is eating it" WITHOUT an SSH session. Both are computed
+  HERE, once, so the console and `bp cloud instance top` render one verdict
+  rather than each inventing its own threshold and drifting apart. `space` is
+  the newest `"space"` AgentEvent through `Telemetry.normalize_space/1` — that
+  row rides its OWN 15-minute cadence on its own route, so it is passed in
+  separately (`:space_event`) and is `nil` on a box that has never sent one.
   """
 
   alias BarkparkCloud.Registry
@@ -104,8 +128,62 @@ defmodule BarkparkCloud.Metrics do
     db_size: nil,
     top_relations: nil,
     swap: %{used_pct: nil, total_bytes: nil},
-    beam: %{pss_bytes: nil, swap_bytes: nil}
+    beam: %{pss_bytes: nil, swap_bytes: nil},
+    load15: nil,
+    cores: nil,
+    mem: nil,
+    disk: nil
   }
+
+  # The pressure signals, their thresholds, and WHOSE JUDGEMENT THEY ARE.
+  #
+  # These four numbers decide whether a box reads "struggling", so they are
+  # written down with their evidence rather than left as constants nobody
+  # re-measures. The calibration case is guerrilla (157.180.90.121, 2 vCPU /
+  # 3.8 GB) as measured 2026-08-06..08, which is the case that motivated this
+  # whole surface:
+  #
+  #     swap 1904/2047 MB (93%) · free mem 293 MB of 3819 · load15 1.89-2.02
+  #     per core on 2 cores · disk 75% · four concurrent site builds
+  #
+  # In that state the box answered 6,472 HTTP 500s in eight hours (76 of them
+  # the DBConnection-timeout-under-swap-thrash class) while `bp cloud status`
+  # reported it `ok / healthy`. So the ONE hard requirement these thresholds
+  # have to meet is: that state must not read as calm. That requirement is a
+  # test — metrics_test.exs "THE CALIBRATION CASE", against the recorded state
+  # in RealAgentBeats.guerrilla_under_pressure/0, with the console's twin in
+  # __app.test.mjs under the same name.
+  #
+  # What is measured and what is judged, stated separately so a later reader can
+  # tell them apart:
+  #
+  #   * MEASURED — swap at 93% coincided with the 500s; swap at rest did not.
+  #     Swap is also the signal `mem_used_percent` actively HIDES (MemAvailable
+  #     clears the floor precisely BECAUSE the BEAM was paged out, so a box at
+  #     99% swap can report a comfortable 58% memory). It is the causal one.
+  #   * JUDGED — the exact boundaries. One calibrated sick point (93%) and one
+  #     calibrated well point (0%) cannot locate a threshold between them; 50/80
+  #     is a judgement, made here, on the reasoning that ANY sustained swap on a
+  #     box whose working set is a BEAM means paging the thing that serves
+  #     requests. Move it with evidence, not with taste.
+  #   * DELIBERATELY NOT ALARMING — disk 75% is `watch`, not `struggling`.
+  #     Guerrilla was at 75% and disk was not what was hurting it. A threshold
+  #     tuned so every signal fires on the calibration case is a threshold tuned
+  #     to say "struggling" always.
+  #
+  # `load` is judged PER CORE (load15 / cores), never raw: 2.0 is idle on 16
+  # cores and a queue two deep on 2. Its divisor travels in the same beat.
+  @pressure_signals [
+    %{key: "swap", unit: "pct", watch_at: 50, struggling_at: 80},
+    %{key: "mem", unit: "pct", watch_at: 85, struggling_at: 92},
+    %{key: "load", unit: "per_core", watch_at: 1.0, struggling_at: 1.5},
+    %{key: "disk", unit: "pct", watch_at: 75, struggling_at: 90}
+  ]
+
+  # Severity order, worst LAST. "unknown" is not on this ladder on purpose: an
+  # unmeasured signal must never be able to win the verdict in either
+  # direction — it can neither raise an alarm nor talk one down.
+  @pressure_ladder ["calm", "watch", "struggling"]
 
   @doc """
   Fold a window of `barkpark`'s agent events into the metrics envelope.
@@ -118,6 +196,11 @@ defmodule BarkparkCloud.Metrics do
       envelope. Defaults to `30`.
     * `:now` — the current time for the beat's `age_seconds`/`status`. Defaults
       to `DateTime.utc_now/0`; tests inject a fixed clock.
+    * `:space_event` — the newest `"space"` `%AgentEvent{}`, or nil. It is NOT
+      taken from `events`: the space row rides its own 15-minute cadence on its
+      own route, and `events` is the health window (type-filtered at the fetch,
+      D58). Absent → `space: nil`, which is the honest "this box has not sent a
+      space report", never an all-zero breakdown.
   """
   @spec build(map(), [AgentEvent.t()], keyword()) :: map()
   def build(barkpark, events, opts \\ []) do
@@ -130,6 +213,12 @@ defmodule BarkparkCloud.Metrics do
     oldest_first = Enum.reverse(health_newest_first)
     newest = List.first(health_newest_first)
 
+    # Folded ONCE and shared: `pressure` is computed from exactly the scalars
+    # the envelope publishes as `latest`, so an operator who disputes the
+    # verdict can check it against the same numbers in the same response.
+    # Two calls could not drift today, but they are two places to edit.
+    latest = latest(newest)
+
     %{
       ok: true,
       collected_at: to_rfc3339(now),
@@ -137,10 +226,146 @@ defmodule BarkparkCloud.Metrics do
       beat: beat(newest, now),
       points: points,
       series: series(oldest_first),
-      latest: latest(newest),
+      latest: latest,
+      pressure: pressure(latest),
+      space: space(Keyword.get(opts, :space_event)),
       service_health: service_health(newest)
     }
   end
+
+  @doc """
+  The newest SPACE row as a stable envelope, or `nil` when the box has never
+  sent one.
+
+  This is `Telemetry.normalize_space/1`'s production caller. The agent has
+  measured root/journal/postgres/per-slug space and POSTed it to
+  `/v1/agent/space` since #9889; until this call existed the row landed in
+  `agent_events` and no read surface ever served it, so "what is eating the
+  disk" was still an SSH question with the answer already in the database.
+
+  `nil` (not an all-nil envelope) is deliberate: a renderer must be able to say
+  "no space report yet" differently from "we measured and found nothing",
+  which is the same nil-not-zero doctrine one level up.
+  """
+  @spec space(AgentEvent.t() | nil) :: map() | nil
+  def space(nil), do: nil
+  def space(%AgentEvent{} = event), do: Telemetry.normalize_space(event)
+  def space(_), do: nil
+
+  @doc """
+  The pressure VERDICT for one box, from its newest beat's scalars.
+
+  Answers the question the four sparklines never did: *is this box in trouble
+  right now?* — in a word an operator can scan a fleet by, with the numbers that
+  produced the word travelling beside it so the word is checkable.
+
+  Computed in the control plane, once, because it has two consumers (the
+  console's Metrics tab and `bp cloud instance top`) and a threshold duplicated
+  per surface is a threshold that drifts per surface.
+
+  ## The shape
+
+      %{
+        state: "struggling" | "watch" | "calm" | "unknown",
+        measured: 3,          # signals that produced a reading
+        of: 4,                # signals considered
+        signals: [%{
+          key: "swap", state: "struggling", value: 93.0, unit: "pct",
+          watch_at: 50, struggling_at: 80
+        }, ...]
+      }
+
+  ## Rules that keep it from lying
+
+    * **The verdict is the WORST measured signal.** Not an average — averaging
+      four signals is how a box at 93% swap comes out "moderate" and reads calm.
+    * **EVERY signal is listed, always**, including the calm ones and the ones
+      that could not be measured (`state: "unknown"`, `value: nil`). A verdict
+      that silently drops the signals it could not read is a verdict whose
+      confidence you cannot judge.
+    * **An unmeasured signal never decides anything.** It cannot raise the
+      state and it cannot talk it down.
+    * **Nothing measured → `"unknown"`, never `"calm"`.** This is the whole
+      failure mode this block exists to end: guerrilla read `ok / healthy` while
+      it was 500ing, because absence of a reading was rendered as a good
+      reading. Silence is not health.
+    * **`measured`/`of` always travel**, so `"calm"` computed from one of four
+      signals is legible as the weak claim it is rather than a clean bill.
+
+  Thresholds and their evidence: see `@pressure_signals`.
+  """
+  @spec pressure(map()) :: map()
+  def pressure(latest) when is_map(latest) do
+    signals = Enum.map(@pressure_signals, &signal(&1, latest))
+    measured = Enum.reject(signals, &(&1.state == "unknown"))
+
+    # The verdict is the worst MEASURED signal — never an average, which is how
+    # a box at 93% swap comes out "moderate". Nothing measured is "unknown", the
+    # one state that must never collapse into "calm".
+    state =
+      case measured do
+        [] -> "unknown"
+        rows -> rows |> Enum.map(& &1.state) |> Enum.max_by(&severity/1)
+      end
+
+    %{
+      state: state,
+      measured: length(measured),
+      of: length(@pressure_signals),
+      signals: signals
+    }
+  end
+
+  def pressure(_), do: pressure(@empty_latest)
+
+  # One signal: its reading, and where that reading falls against its two
+  # thresholds. An absent reading is "unknown" with a nil value — never a 0 that
+  # would read as a healthy floor.
+  defp signal(%{key: key} = spec, latest) do
+    value = pressure_value(key, latest)
+
+    base = %{
+      key: key,
+      unit: spec.unit,
+      watch_at: spec.watch_at,
+      struggling_at: spec.struggling_at,
+      value: value
+    }
+
+    Map.put(base, :state, band(value, spec))
+  end
+
+  # Rank on the ladder. An unlisted state sorts to the floor rather than raising
+  # (a nil index would crash the comparison); "unknown" never reaches here — it
+  # is filtered out before the max.
+  defp severity(state), do: Enum.find_index(@pressure_ladder, &(&1 == state)) || -1
+
+  defp band(nil, _spec), do: "unknown"
+  defp band(v, %{struggling_at: at}) when is_number(v) and v >= at, do: "struggling"
+  defp band(v, %{watch_at: at}) when is_number(v) and v >= at, do: "watch"
+  defp band(v, _spec) when is_number(v), do: "calm"
+  defp band(_, _), do: "unknown"
+
+  # Each signal's reading, pulled from the SAME normalized scalars the envelope
+  # already publishes — so a value the operator disputes can be read straight off
+  # `latest` and checked against the verdict.
+  defp pressure_value("swap", %{swap: %{used_pct: pct}}), do: measured(pct)
+  defp pressure_value("mem", latest), do: measured(Map.get(latest, :mem))
+  defp pressure_value("disk", latest), do: measured(Map.get(latest, :disk))
+
+  # Load is per core, and it is nil unless BOTH halves are real: a load average
+  # divided by an unknown core count is not a smaller number, it is not a number.
+  # `cores <= 0` is refused for the same reason (and never divided by).
+  defp pressure_value("load", latest) do
+    with l when is_number(l) <- measured(Map.get(latest, :load15)),
+         c when is_number(c) and c > 0 <- measured(Map.get(latest, :cores)) do
+      l / c
+    else
+      _ -> nil
+    end
+  end
+
+  defp pressure_value(_, _), do: nil
 
   defp instance_info(barkpark) when is_map(barkpark) do
     %{
@@ -211,7 +436,15 @@ defmodule BarkparkCloud.Metrics do
       beam: %{
         pss_bytes: measured(t.beam.pss_bytes),
         swap_bytes: measured(t.beam.swap_bytes)
-      }
+      },
+      # load15 + its divisor, and the two percents the verdict reads. `cores` is
+      # not a vital anyone charts — it is the number without which `load15` is
+      # uninterpretable, so it rides here beside it rather than being looked up
+      # elsewhere by each consumer.
+      load15: measured(t.load15),
+      cores: measured(t.cores),
+      mem: measured(t.mem),
+      disk: measured(t.disk.used_pct)
     }
   end
 

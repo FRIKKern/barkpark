@@ -8798,7 +8798,7 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # GET /v1/barkparks/:id/metrics?points=N → 200 {ok, collected_at, instance,
-  # beat, points, series, service_health} | 404. The time-series companion to
+  # beat, points, series, latest, pressure, space, service_health} | 404. The time-series companion to
   # /telemetry (which serves the single latest beat): it folds a WINDOW of the
   # instance's health beats — the vitals the agent now rides on its 60s beat
   # (cpu/mem/disk/load) — into oldest-to-newest series the console's Metrics tab
@@ -8844,7 +8844,26 @@ defmodule BarkparkCloud.Web.Router do
             # the envelope still says 200 (D58's separation was enforced at
             # WRITE and at FOLD, never at FETCH).
             events = Registry.recent_events_of_type(bp, "health", points)
-            json(conn, 200, Metrics.build(bp, events, points: points))
+
+            # The SPACE row is fetched SEPARATELY and deliberately: it rides its
+            # own 15-minute cadence on its own route (D58), so it is not in the
+            # health window at all — a type-blind read is exactly what D58
+            # separated. ONE row is enough: space is a scalar snapshot ("what is
+            # on the disk right now"), not a series, and asking for one row of a
+            # type-filtered, already-indexed scan is a bounded cost added to a
+            # route that was already doing the same scan for health.
+            #
+            # `nil` when the box has never sent one (an agent older than #9889,
+            # or one whose probes are all unwired) → `space: nil` in the
+            # envelope, which every surface renders as "no space report yet"
+            # rather than as an empty disk.
+            space_event = List.first(Registry.recent_events_of_type(bp, "space", 1))
+
+            json(
+              conn,
+              200,
+              Metrics.build(bp, events, points: points, space_event: space_event)
+            )
         end
     end
   end

@@ -270,6 +270,115 @@ defmodule BarkparkCloud.Web.MetricsRouteTest do
     end
   end
 
+  # ── The round trip: what the agent measured comes back out of the API ──────
+  #
+  # Every half of this existed and none of it connected. The agent has measured
+  # root/journal/postgres/per-slug space and POSTed it since #9889;
+  # `Telemetry.normalize_space/1` has been written and unit-tested since the
+  # same PR; and no read route ever called it. The answer to "what is eating the
+  # disk" sat in `agent_events` while the question still needed an SSH session.
+  #
+  # This is the DB-backed proof that it does not any more, and it belongs here
+  # rather than in metrics_test.exs for the reason that file's own docstring
+  # gives: metrics_test.exs hands `build/3` a list it constructed itself, so it
+  # is structurally incapable of seeing a defect that lives in the QUERY.
+  describe "the space row comes back OUT — diagnosis without an SSH session" do
+    test "what the agent POSTs to /v1/agent/space is served by GET /metrics" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # The agent's own route, with the agent's own body — not a hand-seeded row.
+      post = call(:post, "/v1/agent/space", body: space_body(), token: agent_token(bp))
+      assert post.status == 200
+
+      m = metrics(call(:get, "/v1/barkparks/#{bp.id}/metrics", token: session_token(user)))
+      space = m["space"]
+
+      assert space, "the space row landed but no read surface serves it"
+      # The three consumers that used to need an SSH session, by name and size.
+      assert space["sites"]["dir"] == "/opt/barkpark/sites"
+      assert space["sites"]["bytes"] == 4_400_000_000
+      assert [%{"name" => "guerrilla", "bytes" => 3_000_000_000}] = space["sites"]["top"]
+      assert space["db_size"] == 3_500_000_000
+      assert [%{"name" => "documents"}] = space["top_relations"]
+      assert space["journal_bytes"] == 900_000_000
+      # The root travels as a PAIR, never a bare percent.
+      assert space["root"]["used_bytes"] == 12_000_000_000
+      assert space["root"]["total_bytes"] == 40_000_000_000
+      # And it is dated: a 15-minute cadence read as live would be its own lie.
+      assert is_binary(space["reported_at"])
+    end
+
+    test "the NEWEST space row wins — a stale breakdown never outranks a fresh one" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      seed_space(bp, %{"sites_bytes" => 1_000, "sites_count" => 2}, 3600)
+      seed_space(bp, %{"sites_bytes" => 9_999, "sites_count" => 8}, 60)
+
+      m = metrics(call(:get, "/v1/barkparks/#{bp.id}/metrics", token: session_token(user)))
+      assert m["space"]["sites"]["bytes"] == 9_999
+      assert m["space"]["sites"]["count"] == 8
+    end
+
+    test "the sites COUNT survives the whole trip, so the cap can say when it binds" do
+      # Ten rows and a total read identically whether the tree holds ten or
+      # forty. The count is the only thing that separates them, and it has to
+      # survive the agent's cap, the jsonb round trip AND the read route.
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      top = for i <- 1..10, do: %{"slug" => "site-#{i}", "bytes" => 1_000 - i}
+
+      assert call(:post, "/v1/agent/space",
+               body: space_body(%{"sites_top" => top, "sites_count" => 37}),
+               token: agent_token(bp)
+             ).status == 200
+
+      m = metrics(call(:get, "/v1/barkparks/#{bp.id}/metrics", token: session_token(user)))
+      assert length(m["space"]["sites"]["top"]) == 10
+      assert m["space"]["sites"]["count"] == 37
+    end
+
+    test "a box with no space row serves space: null, never a zeroed disk" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      seed_health(bp, %{"cpu_percent" => 5}, 10)
+
+      m = metrics(call(:get, "/v1/barkparks/#{bp.id}/metrics", token: session_token(user)))
+      assert m["space"] == nil
+    end
+
+    test "the verdict rides the same response, and an unread box is not called calm" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # A box in guerrilla's recorded state: 93% swap, 2.02 load per core.
+      seed_health(
+        bp,
+        %{
+          "swap_used_percent" => 93,
+          "mem_used_percent" => 92,
+          "disk_used_percent" => 75,
+          "load15" => 4.04,
+          "cpu_cores" => 2
+        },
+        10
+      )
+
+      m = metrics(call(:get, "/v1/barkparks/#{bp.id}/metrics", token: session_token(user)))
+      assert m["pressure"]["state"] == "struggling"
+      assert m["pressure"]["measured"] == 4
+
+      # And a box that has never reported a vital is UNKNOWN over the wire too —
+      # the shape that let a 500ing box read `ok / healthy`.
+      quiet = barkpark_fixture(team)
+      q = metrics(call(:get, "/v1/barkparks/#{quiet.id}/metrics", token: session_token(user)))
+      assert q["pressure"]["state"] == "unknown"
+      refute q["pressure"]["state"] == "calm"
+    end
+  end
+
   describe "POST /v1/agent/space" do
     # The SpaceReport body (internal/agent/report.go) — the agent carries its
     # own `type` inline; the route hardcodes "space" and never reads it.

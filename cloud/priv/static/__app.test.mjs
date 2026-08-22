@@ -10025,6 +10025,214 @@ test("D-07: the absent panel owns its empty state — no vitals grid, no stubs, 
   assert.ok(absent.indexOf("metrics-stubs") === -1, "no request-level stubs in the absent state");
 });
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The diagnosis half: the pressure verdict + the disk breakdown.
+//
+// The bug these pin is a rendered one. For eight hours the console showed four
+// calm sparklines for guerrilla while it was 93% into swap, running four builds
+// on two cores, and answering 6,472 HTTP 500s — because "struggling" was
+// something a human had to INFER from four charts, and because the swap series
+// the control plane had been publishing since #9784 was rendered by nothing.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Guerrilla as measured and recorded in task-aa775c3d30287a4b: swap 93%, free
+// mem 293 MB of 3819 (92% used), four builds on two cores (load15 4.04 = 2.02
+// per core), disk 75%. The `pressure`/`space` blocks are exactly the shape
+// BarkparkCloud.Metrics emits for that beat — the Elixir side pins the same
+// case in metrics_test.exs, so the two ends cannot drift apart silently.
+const METRICS_STRUGGLING = {
+  ok: true,
+  collected_at: "2026-08-06T12:00:00Z",
+  instance: { id: "bp_g", host: "guerrilla.barkpark.cloud", provider: "hetzner" },
+  beat: { last_seen_at: "2026-08-06T11:59:30Z", age_seconds: 30, status: "live" },
+  points: 4,
+  series: {
+    cpu: [{ at: "t0", value: 100 }],
+    mem: [{ at: "t0", value: 92 }],
+    disk: [{ at: "t0", value: 75 }],
+    load: [{ at: "t0", value: 4.11 }],
+    swap: [{ at: "t0", value: 93 }],
+  },
+  pressure: {
+    state: "struggling",
+    measured: 4,
+    of: 4,
+    signals: [
+      { key: "swap", state: "struggling", value: 93, unit: "pct", watch_at: 50, struggling_at: 80 },
+      { key: "mem", state: "struggling", value: 92, unit: "pct", watch_at: 85, struggling_at: 92 },
+      { key: "load", state: "struggling", value: 2.02, unit: "per_core", watch_at: 1, struggling_at: 1.5 },
+      { key: "disk", state: "watch", value: 75, unit: "pct", watch_at: 75, struggling_at: 90 },
+    ],
+  },
+  space: {
+    root: { used_bytes: 30000000000, total_bytes: 40000000000 },
+    journal_bytes: 3972844748,
+    db_size: 3650722201,
+    top_relations: [{ name: "mutation_events", bytes: 1534328832 }],
+    sites: {
+      dir: "/opt/barkpark/sites",
+      bytes: 4402341478,
+      top: [
+        { name: "search-ember", bytes: 699400192 },
+        { name: "search", bytes: 658505728 },
+      ],
+      count: 8,
+    },
+    reported_at: "2026-08-06T11:48:00Z",
+  },
+  service_health: { pass: 3, total: 3, failing: [] },
+};
+
+test("diagnosis: the pressure + space helpers are exported", () => {
+  for (const name of ["pressureModel", "pressureBannerHtml", "pressureSignalText",
+                      "spaceModel", "spacePanelHtml", "spaceAgeSeconds", "metricsBytesText"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("THE CALIBRATION CASE: guerrilla's measured state renders as STRUGGLING, with the numbers", () => {
+  const html = hooks.metricsPanelHtml(hooks.metricsSeries(METRICS_STRUGGLING));
+
+  // The word, unmissable and above the charts.
+  assert.match(html, /This box is struggling/);
+  assert.match(html, /pressure--danger/);
+
+  // And every number that produced it, on the surface — a verdict an operator
+  // cannot check is a verdict they learn to ignore.
+  assert.match(html, /swap 93%/);
+  assert.match(html, /memory 92%/);
+  assert.match(html, /load 2\.02 per core/);
+
+  // The banner is ABOVE the sparkline grid: the whole complaint was that
+  // "struggling" had to be inferred from the charts.
+  assert.ok(html.indexOf("pressure-banner") < html.indexOf("metrics-grid"),
+    "the verdict must render above the charts it replaces the need to read");
+
+  // Swap is now CHARTED too — it was published and rendered by nothing.
+  assert.match(html, />Swap</);
+  assert.ok(hooks.metricsKeys.indexOf("swap") !== -1, "swap must be a charted vital");
+
+  // Disk at 75% is watch, not struggling — it is listed, but it is not the alarm.
+  assert.match(html, /disk 75%/);
+
+  // A complete reading claims no caveat.
+  assert.doesNotMatch(html, /Judged on/);
+});
+
+test("THE CALIBRATION CASE: what is eating the disk is on the surface, no SSH", () => {
+  const html = hooks.metricsPanelHtml(hooks.metricsSeries(METRICS_STRUGGLING));
+
+  // The three consumers the row said needed an SSH session to see.
+  assert.match(html, /\/opt\/barkpark\/sites/);  // the sites tree, by its RESOLVED path
+  assert.match(html, /4\.1 GB/);                  // 4402341478 bytes
+  assert.match(html, /search-ember/);            // named, so the operator knows what to delete
+  assert.match(html, /Database/);
+  assert.match(html, /3\.4 GB/);                  // 3650722201 bytes
+  assert.match(html, /Journal/);
+  assert.match(html, /3\.7 GB/);                  // 3972844748 bytes — itself the finding
+
+  // The space row rides a 15-minute cadence, so it says how old it is rather
+  // than letting a stale breakdown read as live. 12 minutes, from two SERVER
+  // timestamps — never the browser clock.
+  assert.equal(hooks.spaceAgeSeconds(METRICS_STRUGGLING.collected_at, METRICS_STRUGGLING.space.reported_at), 720);
+  assert.match(html, /measured 12m ago/);
+});
+
+test("diagnosis: nothing measured reads UNKNOWN, never calm — silence is not health", () => {
+  // The exact failure. A box reporting no vitals must not be dressed as healthy.
+  const html = hooks.pressureBannerHtml(hooks.pressureModel({
+    state: "unknown", measured: 0, of: 4,
+    signals: [
+      { key: "swap", state: "unknown", value: null },
+      { key: "mem", state: "unknown", value: null },
+      { key: "load", state: "unknown", value: null },
+      { key: "disk", state: "unknown", value: null },
+    ],
+  }));
+  assert.match(html, /No vitals to judge/);
+  assert.match(html, /pressure--unknown/);
+  assert.doesNotMatch(html, /pressure--ok/);
+  assert.doesNotMatch(html, /No resource pressure/);
+
+  // An envelope from a control plane too old to send `pressure` at all takes
+  // the same path — it must not fold to a fabricated calm.
+  const legacy = hooks.metricsSeries({ ok: true, beat: { status: "live" }, series: {} });
+  assert.equal(legacy.pressure.state, "unknown");
+  assert.doesNotMatch(hooks.pressureBannerHtml(legacy.pressure), /No resource pressure/);
+});
+
+test("diagnosis: a PARTIAL verdict says so — even a calm one", () => {
+  // A clean bill drawn from one of four signals is the shape that let a sick
+  // box read healthy, so the caveat rides the calm state too.
+  const m = hooks.pressureModel({
+    state: "calm", measured: 1, of: 4,
+    signals: [
+      { key: "swap", state: "calm", value: 4, unit: "pct" },
+      { key: "mem", state: "unknown", value: null },
+      { key: "load", state: "unknown", value: null },
+      { key: "disk", state: "unknown", value: null },
+    ],
+  });
+  assert.equal(m.partial, true);
+  const html = hooks.pressureBannerHtml(m);
+  assert.match(html, /No resource pressure/);
+  assert.match(html, /Judged on 1 of 4 signals/);
+  assert.match(html, /no reading for memory, load, disk/);
+
+  // A COMPLETE calm reading carries no caveat — the note means something.
+  const full = hooks.pressureModel({
+    state: "calm", measured: 4, of: 4,
+    signals: [{ key: "swap", state: "calm", value: 4, unit: "pct" }],
+  });
+  assert.equal(full.partial, false);
+  assert.doesNotMatch(hooks.pressureBannerHtml(full), /Judged on/);
+});
+
+test("diagnosis: the sites cap SAYS when it binds — top 10 of 37, never a silent ten", () => {
+  // Ten rows and a total read IDENTICALLY whether the tree holds ten or forty.
+  const top = Array.from({ length: 10 }, (_, i) => ({ name: "site-" + i, bytes: 1000 - i }));
+
+  const truncated = hooks.spaceModel({ sites: { dir: "/s", bytes: 99999, top: top, count: 37 } }, null);
+  assert.equal(truncated.sites.truncated, true);
+  assert.match(hooks.spacePanelHtml(truncated), /top 10 of 37 sites/);
+
+  const complete = hooks.spaceModel({ sites: { dir: "/s", bytes: 99999, top: top, count: 10 } }, null);
+  assert.equal(complete.sites.truncated, false);
+  assert.match(hooks.spacePanelHtml(complete), /all 10 sites/);
+
+  // With NO count we do not know whether the cap bound — and "we do not know"
+  // must not render as "it did not".
+  const unknown = hooks.spaceModel({ sites: { dir: "/s", bytes: 99999, top: top } }, null);
+  assert.equal(unknown.sites.truncated, false);
+  const html = hooks.spacePanelHtml(unknown);
+  assert.doesNotMatch(html, /all 10 sites/, "an absent count must not be claimed as a complete list");
+  assert.doesNotMatch(html, /top 10 of/);
+});
+
+test("diagnosis: no space row is an honest empty state, never a zeroed disk", () => {
+  const html = hooks.spacePanelHtml(hooks.spaceModel(null, null));
+  assert.match(html, /No space report yet/);
+  // Never a fabricated breakdown at zero bytes.
+  assert.doesNotMatch(html, /0 B/);
+  assert.equal(hooks.metricsBytesText(null), "\u2014");
+  assert.equal(hooks.metricsBytesText(-1), "\u2014", "the agent's unwired sentinel is not a size");
+});
+
+test("diagnosis: the models are TOTAL — garbage never throws, and never fabricates calm", () => {
+  for (const bad of [null, undefined, 0, "x", [], { signals: "nope" }, { state: "made-up" }]) {
+    const m = hooks.pressureModel(bad);
+    assert.equal(m.state, "unknown");
+    assert.equal(typeof hooks.pressureBannerHtml(m), "string");
+  }
+  for (const bad of [null, undefined, 0, "x", 7]) {
+    assert.equal(hooks.spaceModel(bad, null), null);
+  }
+  // A malformed consumer row is dropped, never rendered nameless or sizeless.
+  const m = hooks.spaceModel({ sites: { top: [{ name: "ok", bytes: 10 }, { name: "no-bytes" }, { bytes: 5 }, "junk"] } }, null);
+  assert.deepEqual([...m.sites.top.map((r) => r.name)], ["ok"]);
+});
+
 // ── S14 portable archives: the console archives panel (pure projection) ──────
 test("S14: the archives helpers are exported", () => {
   for (const name of ["archivesModel", "archiveRowHtml", "archivesPanelHtml"]) {

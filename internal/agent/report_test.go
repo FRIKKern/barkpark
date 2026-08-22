@@ -1029,10 +1029,15 @@ func TestSitesProbeNonZeroExitDiscardsPartialOutput(t *testing.T) {
 	}
 }
 
-// TestSitesTopCappedAtTen proves the per-slug list is capped at the top 10 by
-// bytes. Uncapped, the compressed jsonb crosses Postgres's 2032-byte
-// TOAST_TUPLE_THRESHOLD between 20 and 25 realistic slugs, after which a
-// 14-day window per box goes 34MB→58MB (D58).
+// TestSitesTopCappedAtTen proves the per-slug list REACHING THE PAYLOAD is
+// capped at the top 10 by bytes. Uncapped, the compressed jsonb crosses
+// Postgres's 2032-byte TOAST_TUPLE_THRESHOLD between 20 and 25 realistic slugs,
+// after which a 14-day window per box goes 34MB→58MB (D58).
+//
+// The cap lives in gatherSpace, not parseDuTree, so this asserts it there — and
+// asserts the half that makes a cap safe to consume: SitesCount reports the 25
+// slugs the walk FOUND, not the 10 that survived.
+// TestSitesCountSaysWhenTheCapBinds is the honesty twin; this one is the bound.
 func TestSitesTopCappedAtTen(t *testing.T) {
 	var b strings.Builder
 	for i := 1; i <= 25; i++ {
@@ -1040,22 +1045,100 @@ func TestSitesTopCappedAtTen(t *testing.T) {
 	}
 	b.WriteString("40G\t/opt/barkpark/sites\n")
 
-	total, top, err := parseDuTree(b.String(), "/opt/barkpark/sites")
+	total, all, err := parseDuTree(b.String(), "/opt/barkpark/sites")
 	if err != nil {
 		t.Fatalf("parseDuTree: %v", err)
 	}
 	if total != 40*(1<<30) {
 		t.Errorf("total = %d, want the root row's bytes", total)
 	}
+	// The probe hands over everything it found — the denominator has to survive
+	// the walk to be reportable at all.
+	if len(all) != 25 {
+		t.Fatalf("parseDuTree returned %d slugs, want all 25 — the cap belongs at the payload", len(all))
+	}
+
+	s := gatherSpace(SpaceConfig{
+		SitesDir:   "/opt/barkpark/sites",
+		SitesProbe: func() (int64, []SiteSize, error) { return total, all, nil },
+	})
+	top := s.SitesTop
 	if len(top) != sitesTopLimit {
-		t.Fatalf("len(top) = %d, want %d", len(top), sitesTopLimit)
+		t.Fatalf("len(SitesTop) = %d, want %d", len(top), sitesTopLimit)
 	}
 	if top[0].Slug != "site-25" || top[len(top)-1].Slug != "site-16" {
-		t.Errorf("top = %+v, want the ten BIGGEST slugs, descending", top)
+		t.Errorf("SitesTop = %+v, want the ten BIGGEST slugs, descending", top)
 	}
 	if top[0].Bytes != 25*(1<<20) {
-		t.Errorf("top[0].Bytes = %d, want 25 MiB", top[0].Bytes)
+		t.Errorf("SitesTop[0].Bytes = %d, want 25 MiB", top[0].Bytes)
 	}
+	if s.SitesCount != 25 {
+		t.Errorf("SitesCount = %d, want 25 — a cap that eats its own denominator can never say when it binds", s.SitesCount)
+	}
+}
+
+// TestSitesCountSaysWhenTheCapBinds is the tripwire for the failure the count
+// exists to remove: a truncated list that reads as a complete one.
+//
+// Ten slugs and a total look IDENTICAL whether the tree holds ten or forty. The
+// only thing that separates them is a denominator the cap did not eat, so this
+// pins all three states a reader has to be able to tell apart:
+//
+//	under the cap  → SitesCount == len(SitesTop): the list IS the whole tree
+//	over the cap   → SitesCount >  len(SitesTop): the list is a stated tip
+//	unmeasured     → SitesCount == -1, never 0 (which claims an empty tree)
+func TestSitesCountSaysWhenTheCapBinds(t *testing.T) {
+	slugs := func(n int) []SiteSize {
+		out := make([]SiteSize, 0, n)
+		for i := 0; i < n; i++ {
+			out = append(out, SiteSize{Slug: fmt.Sprintf("site-%02d", i), Bytes: int64(n - i)})
+		}
+		return out
+	}
+
+	t.Run("under the cap, the count equals the list", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			SitesDir:   "/opt/barkpark/sites",
+			SitesProbe: func() (int64, []SiteSize, error) { return 4096, slugs(3), nil },
+		})
+		if s.SitesCount != 3 || len(s.SitesTop) != 3 {
+			t.Fatalf("count=%d len(top)=%d, want 3/3 — an uncapped list must read as complete",
+				s.SitesCount, len(s.SitesTop))
+		}
+	})
+
+	t.Run("over the cap, the count exceeds the list and says so", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			SitesDir:   "/opt/barkpark/sites",
+			SitesProbe: func() (int64, []SiteSize, error) { return 4096, slugs(37), nil },
+		})
+		if len(s.SitesTop) != sitesTopLimit {
+			t.Fatalf("len(top) = %d, want the payload bound %d", len(s.SitesTop), sitesTopLimit)
+		}
+		if s.SitesCount != 37 {
+			t.Fatalf("SitesCount = %d, want 37 — the cap bound and did not announce it", s.SitesCount)
+		}
+		if s.SitesCount <= len(s.SitesTop) {
+			t.Errorf("count %d <= len(top) %d: a reader cannot tell this list was truncated",
+				s.SitesCount, len(s.SitesTop))
+		}
+	})
+
+	t.Run("unmeasured is -1, never a measured zero", func(t *testing.T) {
+		// No probe at all, and a probe that fails: both are "we did not measure",
+		// and 0 would be the measured claim "this tree is empty".
+		for name, cfg := range map[string]SpaceConfig{
+			"unwired": {SitesDir: "/opt/barkpark/sites"},
+			"failed": {SitesDir: "/opt/barkpark/sites", SitesProbe: func() (int64, []SiteSize, error) {
+				return -1, nil, errors.New("du: timed out")
+			}},
+		} {
+			s := gatherSpace(cfg)
+			if s.SitesCount != -1 {
+				t.Errorf("%s: SitesCount = %d, want -1 (0 would claim an empty tree)", name, s.SitesCount)
+			}
+		}
+	})
 }
 
 // TestParseDuTreeRequiresTotalRow proves output without du's own root row —

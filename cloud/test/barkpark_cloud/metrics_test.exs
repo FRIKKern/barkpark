@@ -79,13 +79,30 @@ defmodule BarkparkCloud.MetricsTest do
       assert env.service_health == %{pass: 0, total: 0, failing: []}
 
       # A never-phoned-home box still destructures `latest` — all-absent, never
-      # a zeroed database or a swap reading nobody took.
+      # a zeroed database or a swap reading nobody took. `load15`/`cores`/`mem`/
+      # `disk` joined it as the scalars the pressure verdict is computed from:
+      # they live here so a verdict an operator disputes can be checked against
+      # the same envelope that produced it.
       assert env.latest == %{
                db_size: nil,
                top_relations: nil,
                swap: %{used_pct: nil, total_bytes: nil},
-               beam: %{pss_bytes: nil, swap_bytes: nil}
+               beam: %{pss_bytes: nil, swap_bytes: nil},
+               load15: nil,
+               cores: nil,
+               mem: nil,
+               disk: nil
              }
+
+      # And the two blocks that make the envelope answer "is this box in
+      # trouble, and what is eating it". A box with no beat is UNKNOWN, never
+      # calm — a verdict computed from nothing must not read as a clean bill.
+      assert env.pressure.state == "unknown"
+      assert env.pressure.measured == 0
+      assert env.pressure.of == 4
+
+      # No space row → nil, distinct from "we measured and the disk is empty".
+      assert env.space == nil
     end
 
     test "points echoes the requested (clamped) window size" do
@@ -255,7 +272,11 @@ defmodule BarkparkCloud.MetricsTest do
                db_size: nil,
                top_relations: nil,
                swap: %{used_pct: nil, total_bytes: nil},
-               beam: %{pss_bytes: nil, swap_bytes: nil}
+               beam: %{pss_bytes: nil, swap_bytes: nil},
+               load15: nil,
+               cores: nil,
+               mem: nil,
+               disk: nil
              }
     end
   end
@@ -343,6 +364,242 @@ defmodule BarkparkCloud.MetricsTest do
   # for the whole BOX rather than just Postgres). It lives beside these tests
   # because it is the same pure, hand-built-payload discipline; the route that
   # LANDS the payload is proven over HTTP in web/metrics_route_test.exs.
+  # ── The pressure verdict ───────────────────────────────────────────────────
+  #
+  # The failure these tests exist to prevent is ONE failure, and it already
+  # happened: guerrilla read `ok / rank 8 / healthy` while it was 93% into swap
+  # and answering 6,472 HTTP 500s in eight hours. Every case below is a way of
+  # making sure the word this block prints cannot come apart from the numbers
+  # that produced it.
+
+  describe "pressure/1 — the verdict, and what it is allowed to say" do
+    defp pressure_for(payload) do
+      Metrics.build(%{id: "i", host: "h", provider: "hetzner"}, [health(10, payload)], now: @now).pressure
+    end
+
+    defp signal(pressure, key), do: Enum.find(pressure.signals, &(&1.key == key))
+
+    test "THE CALIBRATION CASE: guerrilla's recorded 93%-swap state reads struggling" do
+      p = pressure_for(RealAgentBeats.guerrilla_under_pressure())
+
+      assert p.state == "struggling",
+             "the box that 500'd 6,472 times in eight hours came out #{p.state}"
+
+      # And the numbers that produced the word travel WITH it — a verdict an
+      # operator cannot check is a verdict they learn to ignore.
+      assert signal(p, "swap").state == "struggling"
+      assert signal(p, "swap").value == 93
+
+      # Load is judged PER CORE: 4.04 over 2 cores is 2.02, not "4.04, which is
+      # fine". The divisor is what makes the number mean anything.
+      load = signal(p, "load")
+      assert load.state == "struggling"
+      assert_in_delta load.value, 2.02, 0.001
+      assert load.unit == "per_core"
+    end
+
+    test "disk at 75% is watch, NOT struggling — the deliberate non-alarm" do
+      # Guerrilla was at 75% disk and disk was not what was hurting it. A
+      # threshold set so every signal fires on the calibration case is a
+      # threshold that only knows how to say "struggling".
+      p = pressure_for(RealAgentBeats.guerrilla_under_pressure())
+      assert signal(p, "disk").state == "watch"
+      assert signal(p, "disk").value == 75
+    end
+
+    test "SELF-TEST ON REAL BYTES: the verbatim guerrilla capture is not calm" do
+      # `guerrilla/0` is a real stored beat, not a shape invented to pass this.
+      # 55% swap and 76% disk are both over their watch lines, so a verdict that
+      # returns "calm" here is broken no matter what it does on hand-built input.
+      p = pressure_for(RealAgentBeats.guerrilla())
+
+      assert p.state == "watch"
+      assert signal(p, "swap").state == "watch"
+      assert signal(p, "disk").state == "watch"
+      assert signal(p, "mem").state == "calm"
+
+      # That capture predates #9888, so it carries neither load15 nor cpu_cores.
+      # The honest reading is "unknown" — and the verdict still stands on the
+      # three it COULD read, and says it read three.
+      assert signal(p, "load").state == "unknown"
+      assert signal(p, "load").value == nil
+      assert p.measured == 3
+      assert p.of == 4
+    end
+
+    test "nothing measured is UNKNOWN, never calm — silence is not health" do
+      # This is the whole bug in one assertion. A box that reports no vitals at
+      # all must not be rendered as a healthy box.
+      p = pressure_for(%{"agent_status" => "online"})
+
+      assert p.state == "unknown"
+      assert p.measured == 0
+      assert p.of == 4
+      refute p.state == "calm"
+
+      # A box that has never beaten at all takes the same path.
+      no_beat = Metrics.build(%{id: "i", host: "h", provider: "p"}, [], now: @now).pressure
+      assert no_beat.state == "unknown"
+      assert no_beat.measured == 0
+    end
+
+    test "TOTAL: pressure/1 is public — a bare map, nil or garbage never raises" do
+      # `pressure/1` is documented and callable on its own, so it must survive
+      # inputs that never came through `latest/1`. Every one of them is
+      # "unknown" with the full signal list — never a raise, and never a calm.
+      for input <- [%{}, nil, "x", 7, [], %{swap: nil}, %{swap: %{}}] do
+        p = Metrics.pressure(input)
+        assert p.state == "unknown", "#{inspect(input)} produced #{p.state}"
+        assert p.measured == 0
+        assert p.of == 4
+        assert length(p.signals) == 4
+      end
+    end
+
+    test "every signal is listed always — including the calm and the unreadable" do
+      # A verdict that silently drops the signals it could not read is a verdict
+      # whose confidence cannot be judged.
+      p = pressure_for(%{"swap_used_percent" => 5})
+
+      assert Enum.map(p.signals, & &1.key) == ["swap", "mem", "load", "disk"]
+      assert signal(p, "swap").state == "calm"
+
+      for key <- ["mem", "load", "disk"] do
+        assert signal(p, key).state == "unknown", "#{key} vanished instead of reading unknown"
+        assert signal(p, key).value == nil
+      end
+
+      # Each signal carries the two lines it was judged against, so the verdict
+      # is auditable off the payload alone.
+      assert signal(p, "swap").watch_at == 50
+      assert signal(p, "swap").struggling_at == 80
+    end
+
+    test "an unmeasured signal cannot raise the verdict OR talk it down" do
+      struggling = %{"swap_used_percent" => 95}
+
+      # Alone, swap decides.
+      assert pressure_for(struggling).state == "struggling"
+
+      # Adding three unmeasured signals must not soften it toward their absence,
+      # and adding a CALM one must not average it away either.
+      assert pressure_for(Map.put(struggling, "disk_used_percent", 3)).state == "struggling"
+      assert pressure_for(Map.put(struggling, "mem_used_percent", 1)).state == "struggling"
+
+      # The verdict is the WORST measured signal, not the mean of four.
+      p =
+        pressure_for(%{
+          "swap_used_percent" => 95,
+          "mem_used_percent" => 1,
+          "disk_used_percent" => 1
+        })
+
+      assert p.state == "struggling"
+      assert p.measured == 3
+    end
+
+    test "the -1 unwired sentinel is unmeasured, never a healthy zero" do
+      # The agent stamps -1 for a probe it could not run. Read as a number, -1 is
+      # below every threshold and would print as the calmest box in the fleet.
+      p =
+        pressure_for(%{
+          "swap_used_percent" => -1,
+          "disk_used_percent" => -1,
+          "mem_used_percent" => -1
+        })
+
+      assert p.state == "unknown"
+      assert p.measured == 0
+      assert signal(p, "swap").value == nil
+    end
+
+    test "load without its divisor is unknown, not a raw comparison" do
+      # 4.04 is two-deep on 2 cores and idle on 16. Without cores it is not a
+      # smaller number — it is not a number, and must not be judged as one.
+      p = pressure_for(%{"load15" => 4.04})
+      assert signal(p, "load").state == "unknown"
+
+      # Same load, different divisors, opposite verdicts — which is exactly why
+      # the divisor has to travel in the beat.
+      two = pressure_for(%{"load15" => 4.04, "cpu_cores" => 2})
+      sixteen = pressure_for(%{"load15" => 4.04, "cpu_cores" => 16})
+      assert signal(two, "load").state == "struggling"
+      assert signal(sixteen, "load").state == "calm"
+
+      # A zero/absent core count is refused, never divided by.
+      assert signal(pressure_for(%{"load15" => 4.04, "cpu_cores" => 0}), "load").state ==
+               "unknown"
+    end
+  end
+
+  # ── The space block: what is eating the disk, without an SSH session ────────
+
+  describe "space/1 — the read half that had no caller" do
+    defp space_row(payload) do
+      %AgentEvent{type: "space", payload: payload, inserted_at: DateTime.add(@now, -300, :second)}
+    end
+
+    defp built_space(event) do
+      Metrics.build(%{id: "i", host: "h", provider: "p"}, [], now: @now, space_event: event).space
+    end
+
+    test "no space row is nil — distinct from a measured-and-empty disk" do
+      assert built_space(nil) == nil
+      assert Metrics.build(%{id: "i", host: "h", provider: "p"}, [], now: @now).space == nil
+    end
+
+    test "the envelope carries the sites tree, postgres AND the journal" do
+      # The three consumers the row named as needing an SSH session to see:
+      # sites 4.1G across its slugs, postgres 3.4G, journal 3.7G.
+      space =
+        built_space(
+          space_row(%{
+            "type" => "space",
+            "root_used_bytes" => 30_000_000_000,
+            "root_total_bytes" => 40_000_000_000,
+            "journal_bytes" => 3_972_844_748,
+            "pg_size_bytes" => 3_650_722_201,
+            "pg_top_relations" => [%{"name" => "mutation_events", "bytes" => 1_534_328_832}],
+            "sites_dir" => "/opt/barkpark/sites",
+            "sites_bytes" => 4_402_341_478,
+            "sites_top" => [
+              %{"slug" => "search-ember", "bytes" => 699_400_192},
+              %{"slug" => "search", "bytes" => 658_505_728}
+            ],
+            "sites_count" => 8
+          })
+        )
+
+      assert space.journal_bytes == 3_972_844_748
+      assert space.db_size == 3_650_722_201
+      assert [%{name: "mutation_events"}] = space.top_relations
+      assert space.sites.dir == "/opt/barkpark/sites"
+      assert space.sites.bytes == 4_402_341_478
+      assert [%{name: "search-ember", bytes: 699_400_192} | _] = space.sites.top
+      assert space.root.used_bytes == 30_000_000_000
+      assert space.reported_at != nil
+    end
+
+    test "the sites count survives so a reader can tell truncated from complete" do
+      # Ten slugs and a total read IDENTICALLY whether the tree holds ten or
+      # forty. The count is the only thing that separates them, so it has to
+      # reach the surface — not just the payload.
+      top = for i <- 1..10, do: %{"slug" => "site-#{i}", "bytes" => 1000 - i}
+
+      truncated = built_space(space_row(%{"sites_top" => top, "sites_count" => 37}))
+      assert length(truncated.sites.top) == 10
+      assert truncated.sites.count == 37
+
+      complete = built_space(space_row(%{"sites_top" => top, "sites_count" => 10}))
+      assert complete.sites.count == length(complete.sites.top)
+
+      # An agent too old to send the count, and one whose walk failed, are both
+      # "we do not know" — never 0, which claims an empty tree.
+      assert built_space(space_row(%{"sites_top" => top})).sites.count == nil
+      assert built_space(space_row(%{"sites_count" => -1})).sites.count == -1
+    end
+  end
+
   describe "Telemetry.normalize_space/1 — honest absence, and the root PAIR" do
     test "a measured payload names every consumer, and sites_top's `slug` reads as a name" do
       space =
@@ -414,7 +671,7 @@ defmodule BarkparkCloud.MetricsTest do
         assert space.journal_bytes == nil
         assert space.db_size == nil
         assert space.top_relations == nil
-        assert space.sites == %{dir: nil, bytes: nil, top: nil}
+        assert space.sites == %{dir: nil, bytes: nil, top: nil, count: nil}
         assert space.reported_at == nil
       end
     end
