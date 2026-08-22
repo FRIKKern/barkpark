@@ -144,4 +144,43 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
                "singleton Default workspace — the D15/D16 defect"
     end
   end
+
+  describe "the token-less principals reach admin?/1 without raising" do
+    # REGRESSION. `require_write/1` gained an ACCOUNT ARM, so a principal with no
+    # `:api_token` now reaches `undo_checkout`'s `admin?(conn)`. That helper called
+    # `Auth.has_permission?(token, ...)`, which is `permission in (token.permissions
+    # || [])` — a nil token RAISES BadMapError rather than answering false, turning
+    # an authorization question into a 500. Shipped briefly on main in #12932 and
+    # closed here.
+    #
+    # The raise is OLDER than the account arm: `share_writer` also short-circuits
+    # `require_write/1` with no token, so this path could already 500 for a
+    # share-token holder before any account session existed.
+    test "an account-session member hitting undo_checkout is answered, never 500ed",
+         %{conn: conn, ws: ws, proj: proj} do
+      {_u, conn} = account_session!(conn, ws, "member")
+
+      # A REAL file id, not a random UUID. With a random id `Media.get_file/2`
+      # fails and the `with` short-circuits BEFORE `actor_label/1` and
+      # `admin?/1` are reached — the test would pass without exercising the
+      # raise at all. Upload first, then act on that id.
+      upload = scoped_upload(conn, ws, proj)
+      assert upload.status in [200, 201], "fixture upload failed: #{upload.resp_body}"
+      file_id = Jason.decode!(upload.resp_body)["result"]["id"]
+      assert is_binary(file_id), "no file id in #{upload.resp_body}"
+
+      conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> then(fn c -> elem(account_session!(c, ws, "member"), 1) end)
+        |> put_req_header("x-requested-with", "bp-media-picker")
+        |> post("/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@ds}/#{file_id}/undo-checkout")
+
+      refute conn.status == 500,
+             "a token-less principal raised instead of being answered: #{conn.status} #{conn.resp_body}"
+
+      assert conn.status in [401, 403, 404],
+             "expected an honest refusal or not-found, got #{conn.status} #{conn.resp_body}"
+    end
+  end
 end

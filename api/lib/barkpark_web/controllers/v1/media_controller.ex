@@ -505,16 +505,34 @@ defmodule BarkparkWeb.V1.MediaController do
   # the current, intended posture; whether it SHOULD tighten to true-admin is
   # tracked separately (felix-w28-bl-checkout-tighten-adjudication) — do not
   # change behavior here.
+  # A token-less principal reaches here since the account arm on `require_write/1`
+  # (and, before it, `share_writer`). `Auth.has_permission?/2` is
+  # `permission in (token.permissions || [])`, so a nil token RAISES BadMapError
+  # rather than denying — a 500 where a boolean belongs. Match the token first.
   defp admin?(conn) do
-    token = conn.assigns[:api_token]
+    case conn.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token ->
+        Auth.has_permission?(token, "admin") or Auth.has_permission?(token, "write")
 
-    Auth.has_permission?(token, "admin") or Auth.has_permission?(token, "write")
+      _ ->
+        false
+    end
   end
 
+  # Attribution, not authorization. For a token this is its human-chosen LABEL;
+  # for an account session the equivalent human identity is the email, matching
+  # `auth_controller.ex`'s existing `created_by: user.email`. "member" would name
+  # nobody, which is strictly worse than the token path.
   defp actor_label(conn) do
     case conn.assigns[:api_token] do
-      %{label: label} when is_binary(label) and label != "" -> label
-      _ -> "api"
+      %{label: label} when is_binary(label) and label != "" ->
+        label
+
+      _ ->
+        case conn.assigns[:current_user] do
+          %Barkpark.Accounts.User{email: email} when is_binary(email) and email != "" -> email
+          _ -> "api"
+        end
     end
   end
 
