@@ -144,6 +144,7 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
                "singleton Default workspace — the D15/D16 defect"
     end
   end
+
   describe "the token-less principals reach admin?/1 without raising" do
     # REGRESSION. `require_write/1` gained an ACCOUNT ARM, so a principal with no
     # `:api_token` now reaches `undo_checkout`'s `admin?(conn)`. That helper called
