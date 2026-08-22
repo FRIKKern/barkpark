@@ -142,7 +142,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.ReaderScan do
   # `scripts/cloud-path-escape-check.sh` resolves every parent-relative string
   # literal in `cloud/**` against `CLOUD_PATHS`; `internal`, `web`, `js` and
   # `api` are not declared there, and the declaration lives in a file this slice
-  # does not own (dr-w26-s4). A parent-relative literal naming those trees fails
+  # does not own (dr-w26-s4-census-scores-a-caller-less-producer). A parent-relative literal naming those trees fails
   # that gate on arrival — measured, not assumed: writing one here reds it with
   # `UNCOVERED repo-root read: internal`, which is exactly the honest complaint
   # the moduledoc records and files rather than silences.
@@ -390,9 +390,11 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensus.Stay do
   green be confused for one another, which is precisely the confusion that let
   three dead PRs hold instruments alive for a wave.
 
-  NOT THE MERGE PREDICATE. #11009 is UNSTABLE and must still land. This function
-  answers one question only: may a reader-less instrument keep its life on the
-  strength of this PR.
+  NOT THE MERGE PREDICATE, and this moduledoc no longer tries to be one. The
+  sentence that stood here ruled on a PR in prose, and went stale: prose has no
+  way to be re-checked. A PR's disposition belongs in a register row or in a
+  live query, never in a paragraph. This function answers one question only: may
+  a reader-less instrument keep its life on the strength of this PR.
   """
 
   @type facts :: %{
@@ -499,14 +501,17 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       `internal/`, `web/`, `js/` and `api/` are NOT declared there, so a commit
       that adds a reader ONLY in those trees does not re-run this census; the
       ROT is caught on the next cloud-touching commit, not on the commit that
-      caused it. That declaration lives in a file dr-w26-s4 owns, so it is filed
+      caused it. That declaration lives in a file dr-w26-s4-census-scores-a-caller-less-producer owns, so it is filed
       (`dr-w26-followup-reader-corpus-dispatch`), not smuggled into this slice.
     * FAILING OPEN. An instrument nobody registered is invisible here, exactly
       as `deploy_signal_audience_census_test.exs` admits of its own registry.
-      Nothing syntactic closes that hole. `queued_seconds` is the honest
-      example: it is emitted by `platform_delivery.ex:356`, has zero readers in
-      all five trees, and is NOT in the register below because its disposition
-      is a later slice's call, not this one's — filed as
+      Nothing syntactic closes that hole. `queued_seconds` WAS the honest
+      example, and it stopped being one: it is emitted by
+      `platform_delivery.ex:356`, and the claim that stood here — zero readers in
+      all five trees — is false today. `internal/cli/cloud_deliveries_cmd.go:398`
+      and `:401` read it and `internal/cloudclient/deliveries.go` decodes it, so
+      it is registered below as `:has_reader`. The hole this bullet names is
+      real; the example it used had been overtaken. Filed as
       `dr-w26-followup-queued-seconds-disposition`.
   """
 
@@ -535,7 +540,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       audience:
         "a SESSION-authenticated member of the site's own team, and nobody else: the route is session-only (D219), so no PAT, no CI credential and no platform seat could ever read it — and no client, page or script in five trees ever decoded the node",
       reason:
-        "ruled the epic's vital in W11, written in W12, given a production caller in W14, and read by zero code paths in thirteen waves. Zero readers across all five corpus trees, no open PR names it, and its stay under any rider is empty. THE FIRST DELETION (dr-w26-s6).",
+        "ruled the epic's vital in W11, written in W12, given a production caller in W14, and read by zero code paths in thirteen waves. Zero readers across all five corpus trees, no open PR names it, and its stay under any rider is empty. THE FIRST DELETION (dr-w26-s6-reader-less-instrument-guard-and-the-first-deletion).",
       disposition: :deleted,
       stay: nil
     },
@@ -546,9 +551,9 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "GET /v1/deploy-ledger/census — emitted inside DeployLedger.census/3 (deploy_ledger.ex:893)",
       audience:
-        "the terminal, as of dr-w23-s4: internal/cloudclient/client.go decodes the node into `DeployCensus.CoalescedAttempts *DeployCoalescedAttempts` and internal/cli/cloud_deploy_census_cmd.go renders it on the basis line of every `-o table` deploy census. A WHOLE reader, unlike the queued_* legs below: this key has a real writer too (auto_deploy_worker.ex:412, ~31,697 rows), so the rendered number means something.",
+        "the terminal, as of dr-w23-s4-census-table-stops-hiding: internal/cloudclient/client.go decodes the node into `DeployCensus.CoalescedAttempts *DeployCoalescedAttempts` and internal/cli/cloud_deploy_census_cmd.go renders it on the basis line of every `-o table` deploy census. A WHOLE reader, unlike the queued_* legs below: this key has a real writer too (auto_deploy_worker.ex:412, ~31,697 rows), so the rendered number means something.",
       reason:
-        "RE-DECLARED (was `:stay`). THE CLOSER LANDED, which is the good direction this register exists to detect: dr-w23-s4 added the typed decode and the render, so the row derives 13 readers and correctly redded as :rot under `:stay`. The old reason is preserved as the record because it is the more interesting half — D442 scored this key \'1 reader hit\', and that hit was the COMMENT at cloud_deploy_census_cmd.go:538 asserting `coalesced_attempts` \'is not in this envelope\', which was FALSE on main (deploy_ledger.ex:893 emits it inside census/3). The true reader count was 0, a comment was being counted as readership, and the comment was wrong about the very fact it was being counted for. dr-w23-s4 deletes that comment and replaces the window-independent frozen sentence beside it with this window\'s own measured count — or, before @coalesced_counter_since, with the producer\'s own refusal rendered as a named absence and never as a 0.",
+        "RE-DECLARED (was `:stay`). THE CLOSER LANDED, which is the good direction this register exists to detect: dr-w23-s4-census-table-stops-hiding added the typed decode and the render, so the row derives 13 readers and correctly redded as :rot under `:stay`. The old reason is preserved as the record because it is the more interesting half — D442 scored this key \'1 reader hit\', and that hit was the COMMENT at cloud_deploy_census_cmd.go:538 asserting `coalesced_attempts` \'is not in this envelope\', which was FALSE on main (deploy_ledger.ex:893 emits it inside census/3). The true reader count was 0, a comment was being counted as readership, and the comment was wrong about the very fact it was being counted for. dr-w23-s4-census-table-stops-hiding deletes that comment and replaces the window-independent frozen sentence beside it with this window\'s own measured count — or, before @coalesced_counter_since, with the producer\'s own refusal rendered as a named absence and never as a 0.",
       disposition: :has_reader,
       stay:
         {:data,
@@ -561,13 +566,37 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:357), on the deliveries envelope",
       audience:
-        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:89 decodes the leg and internal/cli/cloud_deliveries_cmd.go:450 renders it. HALF a reader, and the register says which half — see `reason`.",
+        "the terminal, as of dr-w26-s3-deliveries-reader-stops-lying-about-carried: internal/cloudclient/deliveries.go:89 decodes the leg and internal/cli/cloud_deliveries_cmd.go:450 renders it. HALF a reader, and the register says which half — see `reason`.",
       reason:
-        "RE-DECLARED 2026-08-09 (was `:stay`). The READER landed — internal/cloudclient/deliveries.go:89-91 decodes all three legs as *int and cloud_deliveries_cmd.go:450 renders them — so this row derives 5 readers and correctly redded as :rot under `:stay`. THE WRITER NEVER DID: cloud/lib/barkpark_cloud/platform_delivery.ex carries cast (:144), schema field (:173), validate (:249) and to_json emit (:452) and NO producer anywhere in cloud/lib computes a value (`grep -rn queued_self_seconds cloud/lib | grep -v platform_delivery.ex` is EMPTY), so the column is emitted ALWAYS-NULL and the terminal renders a hole. This census measures READERSHIP only, which is why `:has_reader` is true here while the number is still meaningless — the honest fact a plain green would hide. dr-w26-s5, the slice the old stay named as the writer's closer, DOES NOT EXIST (`bp task get dr-w26-s5` -> not_found), so nothing is queued to fill it. Deleting the row instead would have taken the guard with it (@register_floor 7 trips and the :780 pin fails); re-declaring keeps it and ADDS the :lost_reader direction.",
+        "RE-DECLARED 2026-08-09 (was `:stay`). The READER landed — internal/cloudclient/deliveries.go:89-91 decodes all three legs as *int and cloud_deliveries_cmd.go:450 renders them — so this row derives 5 readers and correctly redded as :rot under `:stay`. THE WRITER NEVER DID: cloud/lib/barkpark_cloud/platform_delivery.ex carries cast (:144), schema field (:173), validate (:249) and to_json emit (:452) and NO producer anywhere in cloud/lib computes a value (`grep -rn queued_self_seconds cloud/lib | grep -v platform_delivery.ex` is EMPTY), so the column is emitted ALWAYS-NULL and the terminal renders a hole. This census measures READERSHIP only, which is why `:has_reader` is true here while the number is still meaningless — the honest fact a plain green would hide. The slice the old stay named as the writer's closer is dr-w26-s5-crown-gets-its-writer; its disposition is a live fact this file does not restate. Deleting the row instead would have taken the guard with it (@register_floor 7 trips and the :780 pin fails); re-declaring keeps it and ADDS the :lost_reader direction.",
       disposition: :has_reader,
       stay:
-        {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "KEPT AS THE RECORD, not as a live stay (this row is now `:has_reader`, so the stay-validity test no longer reads it, but the :780 pin does). dr-w26-s3 built the reader and LANDED. dr-w26-s5 was named as the writer and was never filed as a task at all — `bp task get dr-w26-s5` returns not_found and FTS finds only s6, the w26 charter and the w26 paper. A stay naming a closer that does not exist is exactly the failure this register exists to catch, and the register could not catch it: nothing here derives task existence."}
+        {:slice,
+         [
+           "dr-w26-s3-deliveries-reader-stops-lying-about-carried",
+           "dr-w26-s5-crown-gets-its-writer"
+         ],
+         "KEPT AS THE RECORD, not as a live stay (this row is now `:has_reader`, so the stay-validity test no longer reads it, but the :780 pin does). dr-w26-s3-deliveries-reader-stops-lying-about-carried built the reader and LANDED. dr-w26-s5-crown-gets-its-writer was named as the writer. The sentence that stood here ruled it unfiled, on the strength of a lookup by the slug's STEM — the family-wave-slice part with the descriptive tail cut off. That stem resolves to nothing, because every id on this board carries the tail. The row exists under its full slug. That is why the TIER 1 guard below refuses a truncated id: the census drew a verdict from an instrument that could not see the thing it was ruling on, which is the exact failure this register exists to catch."}
+    },
+    %{
+      key: "queued_seconds",
+      what: "the whole queue wait: run created until a runner picked the job up",
+      surface:
+        "PlatformDelivery.to_json/1 (platform_delivery.ex:356), on the deliveries envelope",
+      audience:
+        "the terminal: internal/cloudclient/deliveries.go decodes the leg and " <>
+          "internal/cli/cloud_deliveries_cmd.go:398/:401 renders it, naming the gap " <>
+          "between the run being created and a runner picking the job up",
+      reason:
+        "REGISTERED BY dr-w27-s3-census-arms-survive-their-own-success, and the point is WHY it was not registered before. " <>
+          "The FAILING-OPEN bullet in this module's moduledoc used this key as its honest example of the hole — " <>
+          "an instrument nobody registered is invisible to this census — on the strength of `zero readers in all five trees`. " <>
+          "That was true when written and false by the time it was read: the readers above are on origin/main today. " <>
+          "The example outlived its own measurement, which is the same decay the TIER 2 guard now refuses in prose. " <>
+          "Registering it does NOT close the failing-open hole — nothing syntactic derives the emitted set, so the hole is real — " <>
+          "it removes the one stale illustration that made the hole look smaller than it is.",
+      disposition: :has_reader,
+      stay: nil
     },
     %{
       key: "queued_pickup_seconds",
@@ -575,13 +604,17 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:358), on the deliveries envelope",
       audience:
-        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:90 decodes the leg, cloud_deliveries_cmd.go:450 renders it — same half-a-reader state as its sibling",
+        "the terminal, as of dr-w26-s3-deliveries-reader-stops-lying-about-carried: internal/cloudclient/deliveries.go:90 decodes the leg, cloud_deliveries_cmd.go:450 renders it — same half-a-reader state as its sibling",
       reason:
-        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as queued_self_seconds: the READER landed (internal/cloudclient/deliveries.go:90) and the WRITER never did — platform_delivery.ex casts, stores, validates and emits the column and no producer in cloud/lib computes it, so it is emitted always-null. `:has_reader` is a readership claim, not a claim that the number means anything. dr-w26-s5, the writer's named closer, is not a filed task.",
+        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as queued_self_seconds: the READER landed (internal/cloudclient/deliveries.go:90) and the WRITER never did — platform_delivery.ex casts, stores, validates and emits the column and no producer in cloud/lib computes it, so it is emitted always-null. `:has_reader` is a readership claim, not a claim that the number means anything. dr-w26-s5-crown-gets-its-writer is the writer's named closer; its disposition is a live fact, not a claim carried here.",
       disposition: :has_reader,
       stay:
-        {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3 built the reader and landed; dr-w26-s5 was never filed — `bp task get dr-w26-s5` returns not_found."}
+        {:slice,
+         [
+           "dr-w26-s3-deliveries-reader-stops-lying-about-carried",
+           "dr-w26-s5-crown-gets-its-writer"
+         ],
+         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3-deliveries-reader-stops-lying-about-carried built the reader; dr-w26-s5-crown-gets-its-writer is the writer's named closer. Neither disposition is restated here — a slug is a pointer, and this file stopped ruling on pointers."}
     },
     %{
       key: "queued_stall_seconds",
@@ -590,13 +623,17 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       surface:
         "PlatformDelivery.to_json/1 (platform_delivery.ex:359), on the deliveries envelope",
       audience:
-        "the terminal, as of dr-w26-s3: internal/cloudclient/deliveries.go:91 decodes the leg, cloud_deliveries_cmd.go:450 renders it — and this is the leg whose absence a platform operator would most need, which is why an always-null render is worse here than anywhere else",
+        "the terminal, as of dr-w26-s3-deliveries-reader-stops-lying-about-carried: internal/cloudclient/deliveries.go:91 decodes the leg, cloud_deliveries_cmd.go:450 renders it — and this is the leg whose absence a platform operator would most need, which is why an always-null render is worse here than anywhere else",
       reason:
-        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as its two siblings: reader landed (internal/cloudclient/deliveries.go:91), writer never did (no producer in cloud/lib writes the column; platform_delivery.ex only casts/stores/validates/emits it), so the operator is shown a blank where the unowned stall should be. dr-w26-s5, named as the writer's closer, is not a filed task.",
+        "RE-DECLARED 2026-08-09 (was `:stay`), same measured state as its two siblings: reader landed (internal/cloudclient/deliveries.go:91), writer never did (no producer in cloud/lib writes the column; platform_delivery.ex only casts/stores/validates/emits it), so the operator is shown a blank where the unowned stall should be. dr-w26-s5-crown-gets-its-writer is named as the writer's closer; its disposition is a live fact, not a claim carried here.",
       disposition: :has_reader,
       stay:
-        {:slice, ["dr-w26-s3", "dr-w26-s5"],
-         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3 built the reader and landed; dr-w26-s5 was never filed — `bp task get dr-w26-s5` returns not_found."}
+        {:slice,
+         [
+           "dr-w26-s3-deliveries-reader-stops-lying-about-carried",
+           "dr-w26-s5-crown-gets-its-writer"
+         ],
+         "KEPT AS THE RECORD (the :780 pin still reads it). dr-w26-s3-deliveries-reader-stops-lying-about-carried built the reader; dr-w26-s5-crown-gets-its-writer is the writer's named closer. Neither disposition is restated here — a slug is a pointer, and this file stopped ruling on pointers."}
     },
     %{
       key: "failure_class",
@@ -632,7 +669,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       audience:
         "a human, every morning, WITHOUT being asked to go and look: DailyDigestWorker runs at 06:00 UTC and digest_email.ex renders the sentence. Second surface: the operator's terminal — internal/cloudclient/client.go decodes CoverageCohorts and internal/cli/cloud_deploy_census_cmd.go renders it.",
       reason:
-        "REGISTERED AT BIRTH, in the same commit as the key (dr-w32-s3). This census FAILS OPEN — the register is hand-typed and nothing derives the emitted set — so a key that ships without its row is a key this guard silently does not cover. The row is here because the gauge the epic's wind-down rests on must not be the next instrument nobody reads: its reader ships in the same PR rather than being promised to a later slice.",
+        "REGISTERED AT BIRTH, in the same commit as the key (dr-w32-s3-coverage-gauge-and-the-failed-tail). This census FAILS OPEN — the register is hand-typed and nothing derives the emitted set — so a key that ships without its row is a key this guard silently does not cover. The row is here because the gauge the epic's wind-down rests on must not be the next instrument nobody reads: its reader ships in the same PR rather than being promised to a later slice.",
       disposition: :has_reader,
       stay: nil
     },
@@ -645,7 +682,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       audience:
         "the operator with a never-covered count in front of them and no idea which site to look at: internal/cloudclient/client.go decodes DeployCoverageSite and internal/cli/cloud_deploy_census_cmd.go's renderDeployCoverageSites prints slug, environment and row count, plus the cut marker when the tail is longer than the list.",
       reason:
-        "REGISTERED AT BIRTH, in the same commit as the key (dr-w34-s1) — the doctrine `coverage_cohorts` established one wave earlier. The count it names shipped ANONYMOUS for two waves: `coverage_cohorts/2` already SELECTED site_id and discarded it in the merge, so the never-covered split could be built by environment and never by site. A naming that shipped without a reader would be the same defect one level down — a list nobody can see is not an improvement on a number nobody can act on.",
+        "REGISTERED AT BIRTH, in the same commit as the key (dr-w34-s1-coverage-envelope-window-and-sites) — the doctrine `coverage_cohorts` established one wave earlier. The count it names shipped ANONYMOUS for two waves: `coverage_cohorts/2` already SELECTED site_id and discarded it in the merge, so the never-covered split could be built by environment and never by site. A naming that shipped without a reader would be the same defect one level down — a list nobody can see is not an improvement on a number nobody can act on.",
       disposition: :has_reader,
       stay: nil
     }
@@ -654,7 +691,7 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
   # THE ANTI-VACUITY FLOOR. A deleted register row would otherwise be a silent
   # green — zero instruments examined is zero reader-less instruments found.
   # Lowered only in the same commit as the instrument that went away.
-  @register_floor 8
+  @register_floor 9
 
   # The corpus floor, per root. A `find` that silently returns nothing (a moved
   # tree, a refused-dirs change that eats a whole root) reports every instrument
@@ -1025,7 +1062,9 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       """
 
       assert {:slice, slices, _why} = row.stay
-      assert "dr-w26-s3" in slices and "dr-w26-s5" in slices
+
+      assert "dr-w26-s3-deliveries-reader-stops-lying-about-carried" in slices and
+               "dr-w26-s5-crown-gets-its-writer" in slices
     end
   end
 
@@ -1109,5 +1148,109 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
         true -> []
       end
     end)
+  end
+
+  # ── THE TWO OFFLINE GUARDS (dr-w27-s3-census-arms-survive-their-own-success) ──────────────────────────────────────
+  #
+  # This census kept going stale in its own PROSE. Three separate paragraphs
+  # adjudicated a PR or a task in a sentence — "#11009 is UNSTABLE and must
+  # still land", "dr-w26-s5-crown-gets-its-writer was never filed as a task at all", "queued_seconds
+  # has zero readers in all five trees" — and every one of them was FALSE by the
+  # time anyone read it. A sentence has no way to be re-checked; a register row
+  # does. These two guards make the file refuse the shape of that mistake.
+  #
+  # They are OFFLINE by construction: they read this file's own bytes and ask
+  # nothing of the network, so they cannot answer differently on a runner than
+  # on a laptop.
+  describe "the file cannot adjudicate in prose" do
+    @source_path Path.join(
+                   ReaderScan.repo_root(),
+                   "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs"
+                 )
+
+    # A task id as this board spells one: family, wave, slice, then a DESCRIPTIVE
+    # TAIL. The tail is the part that was being dropped.
+    @task_id ~r/\b(?:dr|cch)-w\d+-(?:s\d+[a-z]?|bl|hg|r\d+)(?:-[a-z][a-z0-9-]*)?\b/
+    @full_slug ~r/\b(?:dr|cch)-w\d+-(?:s\d+[a-z]?|bl|hg|r\d+)-[a-z][a-z0-9-]*\b/
+
+    # A citation is a thing whose disposition lives elsewhere: a task id, or a PR.
+    @citation ~r/(?:\b(?:dr|cch)-w\d+-(?:s\d+[a-z]?|bl|hg|r\d+)(?:-[a-z][a-z0-9-]*)?\b|#\d{3,6})/
+
+    # Words that RULE on a citation. Prose may CITE freely; it may not ADJUDICATE.
+    @verdicts [
+      "does not exist",
+      "doesn't exist",
+      "not_found",
+      "never filed",
+      "was never filed",
+      "is not a filed task",
+      "is open",
+      "is closed",
+      "is merged",
+      "must still land",
+      "is unstable"
+    ]
+
+    # THE GUARD DOES NOT SCAN ITSELF, and that is not a loophole — it is the only
+    # way it can exist. This block NAMES the stale sentences as examples and
+    # LISTS the verdict words in `@verdicts`; scanning itself would red forever
+    # on its own definition. Everything above the marker is scanned, which is
+    # the whole census: register, moduledocs, comments and assertions.
+    defp scannable_source do
+      @source_path
+      |> File.read!()
+      |> String.split(~s(# ── THE TWO OFFLINE GUARDS), parts: 2)
+      |> hd()
+    end
+
+    test "TIER 1: every task id is a FULL slug — a truncated id names nothing" do
+      source = scannable_source()
+
+      truncated =
+        @task_id
+        |> Regex.scan(source)
+        |> Enum.map(&hd/1)
+        |> Enum.uniq()
+        |> Enum.reject(&Regex.match?(@full_slug, &1))
+
+      assert truncated == [],
+             "truncated task ids found — a bare id resolves to not_found and invites a " <>
+               "false 'never filed' verdict: #{inspect(truncated)}"
+    end
+
+    test "TIER 2: a citation is never followed by a verdict word" do
+      source = scannable_source()
+
+      offences =
+        @citation
+        |> Regex.scan(source, return: :index)
+        |> Enum.map(fn [{start, len}] ->
+          {binary_part(source, start, len), window_after(source, start + len, 80)}
+        end)
+        |> Enum.filter(fn {_cite, window} ->
+          down = String.downcase(window)
+          Enum.any?(@verdicts, &String.contains?(down, &1))
+        end)
+        |> Enum.map(fn {cite, window} -> "#{cite} -> #{String.trim(window)}" end)
+
+      assert offences == [],
+             "prose adjudicates a citation within 80 bytes. Carry the disposition as a " <>
+               "REGISTER ROW, which can be re-checked, not as a sentence, which cannot:\n" <>
+               Enum.join(offences, "\n")
+    end
+
+    # An 80-BYTE window, trimmed back to a valid UTF-8 boundary — this file is
+    # full of em dashes, and a naive binary_part/3 would split one and raise.
+    defp window_after(source, offset, size) do
+      max = byte_size(source) - offset
+      take = min(size, max)
+      shrink(binary_part(source, offset, take))
+    end
+
+    defp shrink(bin) do
+      if String.valid?(bin) or bin == "",
+        do: bin,
+        else: shrink(binary_part(bin, 0, byte_size(bin) - 1))
+    end
   end
 end
