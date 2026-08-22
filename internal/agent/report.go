@@ -1759,6 +1759,18 @@ func duDiagnosticPath(line string) (string, bool) {
 // 1024, so it can print "512" but can never print "26214400"; a bare value at
 // or above 1024 is therefore PROOF that -k output reached the -h path, and it
 // is REFUSED rather than returned 1024x short.
+//
+// THE TRIPWIRE HAS A FLOOR, AND IT IS NOT THE DEFENCE. Below 1024 the two units
+// are genuinely indistinguishable from the output alone: measured on a real
+// tree, `du -kx -d1` prints "300/100/400" where `du -hx -d1` prints
+// "300K/100K/400K", and nothing in those bytes says which flag produced them.
+// A parser cannot close that gap; only knowing the flag can. So the UNIT
+// PARAMETER is the defence — duTreeArgs hands the flag and the unit out
+// together precisely so the parser is never guessing — and this check is a
+// secondary tripwire for output that arrived from somewhere else. It catches
+// every case where the error exceeds ~1 MB, which is the magnitude the axis
+// exists to see (25 GiB rendering as 26 MB); it does not, and cannot, make the
+// coupling optional.
 func parseDuSize(s string, unit duUnit) (int64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

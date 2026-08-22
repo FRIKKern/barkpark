@@ -2104,6 +2104,33 @@ func TestParseDuTreeRejectsTheWrongUnit(t *testing.T) {
 		}
 	})
 
+	t.Run("the tripwire has a floor, and the floor is why the unit is a PARAMETER", func(t *testing.T) {
+		// Measured on a real tree: `du -kx -d1` prints "300/100/400" where
+		// `du -hx -d1` prints "300K/100K/400K". Below 1024 the two units are
+		// indistinguishable from the output alone, so the -k rows for a small
+		// tree DO parse on the -h path — as 400 bytes for a 400 KiB tree.
+		//
+		// This test exists so that limit is a STATED FACT rather than an
+		// assumption a later reader makes on the tripwire's behalf and then
+		// uses to justify dropping the duTreeArgs coupling. The parameter is
+		// the defence; the >= 1024 check is a backstop for the magnitudes that
+		// matter.
+		small := "300\t/opt/barkpark/sites/a\n100\t/opt/barkpark/sites/b\n400\t/opt/barkpark/sites\n"
+		total, _, _, err := parseDuTree(small, "/opt/barkpark/sites", duUnitHuman)
+		if err != nil {
+			t.Fatalf("parseDuTree: %v — sub-1024 bare values are legal `du -h` output", err)
+		}
+		if total != 400 {
+			t.Fatalf("total = %d, want 400", total)
+		}
+		// Named for what it is: the same bytes read in the unit du was actually
+		// asked for are 1024x larger, and only the caller knows which is right.
+		if k, _, _, err := parseDuTree(small, "/opt/barkpark/sites", duUnitKiB); err != nil || k != 400*1024 {
+			t.Fatalf("same bytes on the -k path = (%d, %v), want (%d, nil) — the ambiguity is real "+
+				"and the unit parameter is the only thing that resolves it", k, err, 400*1024)
+		}
+	})
+
 	t.Run("a bare sub-kilobyte size is still legal on the human path", func(t *testing.T) {
 		// `du -h` humanizes at 1024, so it CAN print "0" or "512" and can never
 		// print "14680064". The threshold is what makes the rejection exact
