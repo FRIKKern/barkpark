@@ -3376,7 +3376,9 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       # THE EVIDENCE, PRINTED. A rate series argued in prose is a rate series
       # nobody can check; this one is on stdout of every green run.
-      IO.puts("\n[dr-w12-s8 dilution series] failures and live HELD CONSTANT:\n" <> dilution_series(all))
+      IO.puts(
+        "\n[dr-w12-s8 dilution series] failures and live HELD CONSTANT:\n" <> dilution_series(all)
+      )
 
       # NOTHING MOVED BUT THE DEFERRALS. Asserted, not assumed — a fixture that
       # let `failed` or `live` drift would make the falling rate honest and this
@@ -3418,6 +3420,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert List.last(rising).published < 10.0
       assert List.last(rising).terminal == 50.0
       assert List.last(rising).terminal_basis =~ "TERMINAL rows only: failed + live"
+
       assert DeployLedger.census(@dil_control |> elem(0), @dil_control |> elem(1)).failure_rate.basis =~
                "attempted rows in the window"
     end
@@ -3585,6 +3588,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       empty = DeployLedger.census(~U[2026-07-20 00:00:00Z], ~U[2026-07-21 00:00:00Z])
       assert empty.abandoned == 0
       assert empty.abandoned_unreadable == 0
+
       refute {blinded.abandoned, blinded.abandoned_unreadable} ==
                {empty.abandoned, empty.abandoned_unreadable}
     end
