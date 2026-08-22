@@ -430,6 +430,23 @@ type SpaceReport struct {
 	// the tree.
 	SitesBytes int64      `json:"sites_bytes"`
 	SitesTop   []SiteSize `json:"sites_top"`
+
+	// SitesCount is how many slugs the walk actually FOUND, which is the only
+	// thing that can tell a reader whether SitesTop is the whole answer or the
+	// visible tip of one.
+	//
+	// A top-N list without its denominator is a cap that never says when it
+	// binds: ten slugs and a total read as "these ten ARE the tree" whether the
+	// walk found ten or forty, and the operator's next action differs (delete
+	// search-ember vs. the tree has grown a shape nobody is watching). The cap
+	// itself is not the hazard — reporting a truncated list as a complete one
+	// is. With SitesCount a surface renders "top 10 of 37" and the truncation is
+	// a stated fact instead of an invisible one.
+	//
+	// -1 when the probe was not wired or failed, matching every other unmeasured
+	// field here — and NEVER 0, which is the measured claim "this tree is
+	// empty".
+	SitesCount int `json:"sites_count"`
 }
 
 // CommandRunner runs a single resolved argv and returns combined output. It is
@@ -1024,11 +1041,17 @@ type SpaceConfig struct {
 	// SitesDir is the RESOLVED sites root, echoed into the payload whether or
 	// not the measurement succeeds.
 	SitesDir string
-	// SitesProbe returns (total bytes, per-slug sizes) for SitesDir. nil or an
-	// error → SitesBytes=-1 and SitesTop=nil, as ONE unit: a total without its
-	// breakdown is the uninformative number this payload replaces, and a
-	// breakdown without its total cannot be sanity-checked.
-	SitesProbe func() (totalBytes int64, top []SiteSize, err error)
+	// SitesProbe returns (total bytes, EVERY slug it found, sorted biggest
+	// first) for SitesDir. nil or an error → SitesBytes=-1, SitesTop=nil and
+	// SitesCount=-1, as ONE unit: a total without its breakdown is the
+	// uninformative number this payload replaces, and a breakdown without its
+	// total cannot be sanity-checked.
+	//
+	// The probe deliberately does NOT cap. gatherSpace applies sitesTopLimit at
+	// the payload boundary — the one place the bound is actually needed — so the
+	// count it reports is the count the walk FOUND, not the count that survived
+	// the cap. A cap that eats its own denominator can never say when it binds.
+	SitesProbe func() (totalBytes int64, all []SiteSize, err error)
 }
 
 // gatherSpace assembles a SpaceReport from the wired probes. Like gatherReport
@@ -1043,6 +1066,7 @@ func gatherSpace(cfg SpaceConfig) SpaceReport {
 		PGSizeBytes:    -1,
 		SitesDir:       cfg.SitesDir,
 		SitesBytes:     -1,
+		SitesCount:     -1,
 	}
 
 	// Root filesystem: used AND total, one measurement, never half-landed.
@@ -1069,10 +1093,19 @@ func gatherSpace(cfg SpaceConfig) SpaceReport {
 		}
 	}
 
-	// Sites: total + per-slug, one unit.
+	// Sites: total + per-slug + the COUNT, one unit. The cap lands here, at the
+	// payload boundary, and only after the count has been taken off the full
+	// list — so SitesTop can be short of SitesCount and a reader can SEE that it
+	// is. Capping upstream would leave len(SitesTop) as the only available
+	// denominator, which is the same number under both "ten slugs exist" and
+	// "forty do", i.e. a bound that never announces itself.
 	if cfg.SitesProbe != nil {
-		if total, top, err := cfg.SitesProbe(); err == nil {
-			s.SitesBytes, s.SitesTop = total, top
+		if total, all, err := cfg.SitesProbe(); err == nil {
+			s.SitesBytes, s.SitesCount = total, len(all)
+			if len(all) > sitesTopLimit {
+				all = all[:sitesTopLimit]
+			}
+			s.SitesTop = all
 		}
 	}
 
@@ -1090,7 +1123,8 @@ var (
 	duProbeTimeout      = 60 * time.Second
 )
 
-// sitesTopLimit caps the per-slug list. Ten slugs compress to ~1685 B, safely
+// sitesTopLimit caps the per-slug list, enforced in gatherSpace (NOT in the
+// probe) so SpaceReport.SitesCount still carries how many slugs the cap hid. Ten slugs compress to ~1685 B, safely
 // inside Postgres's 2032-byte TOAST_TUPLE_THRESHOLD; an uncapped list crosses
 // it between 20 and 25 realistic high-entropy slugs (D58). The cap is also the
 // useful shape: an operator acts on the biggest site, not on the 40th.
@@ -1231,9 +1265,12 @@ func newSitesSpaceProbeWith(run probeRunner, dir string) func() (int64, []SiteSi
 	}
 }
 
-// parseDuTree turns `du -hx -d1 <dir>` output into (total bytes, per-slug sizes
-// capped at sitesTopLimit by bytes). The row whose path IS dir is the total;
-// every other row is one slug, named by its base name.
+// parseDuTree turns `du -hx -d1 <dir>` output into (total bytes, EVERY per-slug
+// size, sorted biggest first). The row whose path IS dir is the total; every
+// other row is one slug, named by its base name.
+//
+// It does NOT truncate. gatherSpace owns sitesTopLimit, because the count of
+// slugs the walk found has to survive to the payload — see SpaceReport.SitesCount.
 //
 // The total row is REQUIRED: du prints its root last, so output without it is
 // output that was cut short, and a truncated walk must not land as a
@@ -1271,9 +1308,6 @@ func parseDuTree(out string, dir string) (int64, []SiteSize, error) {
 		return -1, nil, fmt.Errorf("du: no total row for %s", want)
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Bytes > rows[j].Bytes })
-	if len(rows) > sitesTopLimit {
-		rows = rows[:sitesTopLimit]
-	}
 	return total, rows, nil
 }
 

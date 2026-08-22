@@ -112,6 +112,16 @@ defmodule BarkparkCloud.Telemetry do
       cpu: num_or_nil(Map.get(payload, "cpu_percent")),
       mem: num_or_nil(Map.get(payload, "mem_used_percent")),
       load1: num_or_nil(Map.get(payload, "load1")),
+      # `load15` and `cores` travel together and exist for one reason: a bare
+      # load average is UNINTERPRETABLE. 2.0 is idle on 16 cores and a queue two
+      # deep on 2. Only load-per-core is comparable across a fleet of mixed
+      # boxes, and it cannot be computed without the divisor — so the divisor is
+      # part of the reading, not a lookup the consumer is trusted to do.
+      # load15 (not load1) is the one to judge on: a 60s beat sampling load1
+      # catches spikes a build storm produces and drops, and an alarm that
+      # flickers is an alarm an operator learns to ignore.
+      load15: num_or_nil(Map.get(payload, "load15")),
+      cores: num_or_nil(Map.get(payload, "cpu_cores")),
       req_per_s: num_or_nil(Map.get(payload, "req_per_s")),
       p95_ms: num_or_nil(Map.get(payload, "p95_ms")),
       backup: %{
@@ -153,7 +163,14 @@ defmodule BarkparkCloud.Telemetry do
         sites: %{
           dir: String.t() | nil,
           bytes: number | nil,
-          top: [%{name: String.t(), bytes: number}] | nil
+          top: [%{name: String.t(), bytes: number}] | nil,
+          # How many slugs the walk FOUND, which is the only thing that can tell
+          # a reader whether `top` is the whole tree or the visible tip of one.
+          # The agent caps `top` at ten (a payload bound, `sites_count` in
+          # report.go); without the count, ten slugs read identically whether
+          # the tree holds ten or forty. nil when unmeasured — never 0, which is
+          # the measured claim "this tree is empty".
+          count: number | nil
         },
         reported_at: String.t() | nil   # the event's inserted_at, RFC3339
       }
@@ -183,7 +200,11 @@ defmodule BarkparkCloud.Telemetry do
         # `SiteSize` names its key `slug` where `RelationSize` names it `name`;
         # both are "a named consumer and its bytes", so one row shaper serves
         # both and every surface renders one shape.
-        top: relation_sizes(Map.get(payload, "sites_top"))
+        top: relation_sizes(Map.get(payload, "sites_top")),
+        # Verbatim like every other number here, `-1` sentinel included: an
+        # agent too old to send `sites_count` is absent (nil), a failed walk is
+        # -1, and only a view is allowed to word either.
+        count: num_or_nil(Map.get(payload, "sites_count"))
       },
       reported_at: nil
     }

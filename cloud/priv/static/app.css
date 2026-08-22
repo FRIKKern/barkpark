@@ -4019,6 +4019,79 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .metrics-stub-value { font-size: 12px; }
 .metrics-health { margin-top: 12px; }
 
+/* ---------- Pressure verdict + disk breakdown (the diagnosis half) ---------- */
+/* Colours READ the S4 role vars (--danger/--warn/--ok/--muted-text) exactly as
+   .metrics-stale above does — no new hex. The banner deliberately borrows
+   .metrics-stale's shape so an operator reads "the box has something to say" in
+   one visual language whether the beat went quiet or the box is thrashing. */
+.pressure-banner {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+}
+.pressure-head { font-weight: 650; color: var(--text); }
+.pressure-detail { margin-top: 2px; color: var(--text); font-variant-numeric: tabular-nums; }
+/* The confidence line is dim by design: it qualifies the verdict, it is not the
+   verdict. It still has to be PRESENT — a clean bill drawn from one of four
+   signals is the shape that let a 500ing box read healthy. */
+.pressure-conf { display: block; margin-top: 4px; font-size: 12px; }
+.pressure--danger { border-color: var(--danger); background: var(--danger-soft); }
+.pressure--danger .pressure-head { color: var(--danger); }
+.pressure--warn { border-color: var(--warn); background: var(--warn-soft); }
+.pressure--warn .pressure-head { color: var(--warn-strong); }
+.pressure--ok { border-color: var(--ok); background: var(--ok-soft); }
+.pressure--ok .pressure-head { color: var(--ok-strong); }
+/* "unknown" gets the NEUTRAL treatment, never the calm one: absence of a
+   reading must not be dressed as a good reading. */
+.pressure--unknown { border-color: var(--border); background: var(--surface); }
+.pressure--unknown .pressure-head { color: var(--muted-text); }
+
+.space-panel {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.space-title {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text);
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+.space-group + .space-group { margin-top: 12px; }
+.space-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+.space-group-name { font-weight: 600; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.space-group-bytes { font-variant-numeric: tabular-nums; color: var(--text); }
+/* The truncation notice. Small, but it is the difference between "these ARE the
+   sites" and "these are ten of thirty-seven". */
+.space-note { display: block; margin-top: 2px; font-size: 12px; }
+.space-consumers { list-style: none; margin: 6px 0 0; padding: 0; }
+.space-consumer {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: 12px;
+  color: var(--muted-text);
+}
+.space-consumer-name { min-width: 0; overflow-wrap: anywhere; }
+.space-consumer-bytes { font-variant-numeric: tabular-nums; }
+
 /* ---------- Webhooks tab ---------- */
 .wh-toolbar {
   display: flex;

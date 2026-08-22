@@ -20975,6 +20975,13 @@
     { key: "mem", label: "Memory", unit: "%", role: "ok" },
     { key: "disk", label: "Disk", unit: "%", role: "warn" },
     { key: "load", label: "Load", unit: "", role: "info" },
+    // Swap is the vital Memory HIDES, and the reason this tab could show four
+    // green sparklines for a box that was 93% into swap and answering 6,472
+    // HTTP 500s in eight hours: MemAvailable clears the floor precisely BECAUSE
+    // the BEAM was paged out, so Memory reads comfortable at the moment things
+    // are worst. The control plane has published the series since #9784; nothing
+    // rendered it until now.
+    { key: "swap", label: "Swap", unit: "%", role: "warn" },
   ];
 
   // GR27/D-07: the request-level signals the on-box agent does NOT yet report.
@@ -21051,6 +21058,14 @@
       lastSeenAt: typeof beat.last_seen_at === "string" ? beat.last_seen_at : null,
       lastSeenText: metricsAgeText(beat.age_seconds),
       metrics: metrics,
+      // The verdict and the disk breakdown, both rendered from the control
+      // plane's own blocks. `pressureModel` is TOTAL, so an envelope from an
+      // older control plane that carries no `pressure` key folds to the honest
+      // unknown state rather than to a fabricated calm one.
+      pressure: pressureModel(payload.pressure),
+      // `collected_at` is threaded in so the space row's age is computed from
+      // two server timestamps, never from the browser clock.
+      space: spaceModel(payload.space, typeof payload.collected_at === "string" ? payload.collected_at : null),
       health: {
         pass: typeof health.pass === "number" ? health.pass : null,
         total: typeof health.total === "number" ? health.total : null,
@@ -21136,6 +21151,247 @@
     return String(r) + (m.unit ? " " + m.unit : "");
   }
 
+  // ── The pressure verdict + the space breakdown (the diagnosis half) ───────
+  //
+  // Both are rendered, never COMPUTED, here. The control plane publishes
+  // `pressure` and `space` on the same /metrics envelope (BarkparkCloud.Metrics),
+  // so this surface and `bp cloud instance top` cannot drift into two different
+  // opinions about what "struggling" means. If a threshold looks wrong, it is
+  // wrong in metrics.ex, where its evidence is written down.
+
+  // How each pressure signal is worded. `key` matches the control plane's;
+  // anything it sends that is NOT in this table still renders (see
+  // pressureSignalLabel) — an unknown signal must appear as itself rather than
+  // vanish, which is the same silent-drop trap metricTopSpecs carries in Go.
+  var PRESSURE_LABELS = { swap: "swap", mem: "memory", load: "load", disk: "disk" };
+
+  // Pure: the headline sentence per state. "unknown" is deliberately NOT worded
+  // as reassurance — reading absence as health is the exact failure this block
+  // exists to end.
+  var PRESSURE_HEADLINES = {
+    struggling: "This box is struggling",
+    watch: "This box is under pressure",
+    calm: "No resource pressure",
+    unknown: "No vitals to judge",
+  };
+
+  // Pure: a human byte size. null/absent → the honest em-dash, never "0 B".
+  function metricsBytesText(n) {
+    if (typeof n !== "number" || !isFinite(n) || n < 0) return "—";
+    var units = ["B", "KB", "MB", "GB", "TB"];
+    var i = 0;
+    var v = n;
+    while (v >= 1024 && i < units.length - 1) { v = v / 1024; i++; }
+    return (i === 0 ? String(Math.round(v)) : (Math.round(v * 10) / 10).toFixed(1)) + " " + units[i];
+  }
+
+  function pressureSignalLabel(key) {
+    return PRESSURE_LABELS[key] || String(key || "");
+  }
+
+  // Pure: one signal as a phrase carrying its NUMBER. A verdict an operator
+  // cannot check against the numbers is a verdict they learn to ignore, so the
+  // word and the reading always travel together.
+  function pressureSignalText(sig) {
+    if (!sig) return "";
+    var label = pressureSignalLabel(sig.key);
+    if (sig.value === null || typeof sig.value !== "number" || !isFinite(sig.value)) {
+      return label + " not measured";
+    }
+    if (sig.unit === "per_core") return label + " " + (Math.round(sig.value * 100) / 100) + " per core";
+    return label + " " + Math.round(sig.value) + "%";
+  }
+
+  // Pure: the render-ready pressure model. TOTAL over any payload — a missing
+  // or garbage `pressure` block yields the honest unknown state, never a
+  // fabricated calm.
+  function pressureModel(payload) {
+    var p = (payload && typeof payload === "object") ? payload : {};
+    var state = (p.state === "struggling" || p.state === "watch" || p.state === "calm")
+      ? p.state : "unknown";
+    var signals = Array.isArray(p.signals) ? p.signals : [];
+    signals = signals.map(function (sig) {
+      sig = sig || {};
+      var v = (typeof sig.value === "number" && isFinite(sig.value)) ? sig.value : null;
+      var st = (sig.state === "struggling" || sig.state === "watch" || sig.state === "calm")
+        ? sig.state : "unknown";
+      return {
+        key: typeof sig.key === "string" ? sig.key : "",
+        state: st, value: v,
+        unit: typeof sig.unit === "string" ? sig.unit : "",
+        text: pressureSignalText({ key: sig.key, value: v, unit: sig.unit }),
+      };
+    });
+    var measured = typeof p.measured === "number" ? p.measured : signals.filter(function (x) {
+      return x.state !== "unknown";
+    }).length;
+    var of = typeof p.of === "number" ? p.of : signals.length;
+    return {
+      state: state,
+      measured: measured,
+      of: of,
+      // A verdict computed from some of its signals must SAY so — the same
+      // honesty a capped top-N list owes its reader. "calm, 1 of 4" is a much
+      // weaker claim than "calm", and the difference has to be visible.
+      partial: typeof of === "number" && of > 0 && measured < of,
+      signals: signals,
+      // What actually fired, worst first — the reasons behind the word.
+      firing: signals.filter(function (x) { return x.state === "struggling" || x.state === "watch"; })
+        .sort(function (a, b) {
+          if (a.state === b.state) return 0;
+          return a.state === "struggling" ? -1 : 1;
+        }),
+      unreadable: signals.filter(function (x) { return x.state === "unknown"; }),
+    };
+  }
+
+  // State → the banner's COMPLETE opening tag, written out literally rather
+  // than composed as "pressure--" + tone.
+  //
+  // Composition would need an ALLOW_PREFIXES entry in __css_check.mjs, and an
+  // allowlisted prefix is a class the checker STOPS verifying: delete
+  // `.pressure--danger` from app.css and nothing would complain. Spelled out,
+  // all four are static literals the E1/E2 scan proves exist — so the rule that
+  // paints the alarm red is itself covered by a check that can fail. (Verified
+  // by deleting a pressure rule and watching __css_check go red; an allowlisted
+  // prefix would have stayed green.) Same reasoning as the sites cap carrying
+  // its own count: a check that cannot fail is not a check.
+  //
+  // The whole TAG is the literal, not just the class value: a class ATTRIBUTE
+  // finished by concatenation is itself the dynamic-composition shape E3
+  // refuses, so the opening tag has to be complete before it leaves this map.
+  var PRESSURE_BANNER_OPEN = {
+    struggling: '<div class="pressure-banner pressure--danger" role="status">',
+    watch: '<div class="pressure-banner pressure--warn" role="status">',
+    calm: '<div class="pressure-banner pressure--ok" role="status">',
+    unknown: '<div class="pressure-banner pressure--unknown" role="status">',
+  };
+
+  // Pure: the banner. Rendered ABOVE the sparkline grid on purpose — the whole
+  // complaint was that a struggling box had to be inferred from four charts.
+  function pressureBannerHtml(model) {
+    if (!model) return "";
+    var open = PRESSURE_BANNER_OPEN[model.state] || PRESSURE_BANNER_OPEN.unknown;
+    var head = PRESSURE_HEADLINES[model.state] || PRESSURE_HEADLINES.unknown;
+
+    var detail = "";
+    if (model.state === "struggling" || model.state === "watch") {
+      detail = model.firing.map(function (x) { return x.text; }).join(" · ");
+    } else if (model.state === "unknown") {
+      detail = "This box has not reported the numbers this verdict is made of.";
+    }
+
+    // The confidence line. It appears whenever the verdict was made on an
+    // incomplete reading, INCLUDING a calm one — a clean bill drawn from one of
+    // four signals is the shape that let a sick box read healthy.
+    var conf = "";
+    if (model.partial) {
+      var missing = model.unreadable.map(function (x) { return pressureSignalLabel(x.key); }).join(", ");
+      conf = '<span class="pressure-conf dim">Judged on ' + esc(String(model.measured)) + " of " +
+        esc(String(model.of)) + " signals" + (missing ? " — no reading for " + esc(missing) : "") + "</span>";
+    }
+
+    return open +
+      '<div class="pressure-head">' + esc(head) + "</div>" +
+      (detail ? '<div class="pressure-detail">' + esc(detail) + "</div>" : "") +
+      conf + "</div>";
+  }
+
+  // Pure: seconds between the fold's own timestamp and the space row's — NOT
+  // Date.now. The server stamps both, so the age is deterministic and this
+  // stays node-pinnable. A space row rides a 15-minute cadence, so rendering it
+  // without its age would let a stale breakdown read as live.
+  function spaceAgeSeconds(collectedAt, reportedAt) {
+    var a = Date.parse(collectedAt), b = Date.parse(reportedAt);
+    if (!isFinite(a) || !isFinite(b)) return null;
+    var age = Math.floor((a - b) / 1000);
+    return age >= 0 ? age : null;
+  }
+
+  // Pure: one named consumer row — "search-ember  667 MB".
+  function spaceConsumerHtml(row) {
+    return '<li class="space-consumer"><span class="space-consumer-name">' + esc(String(row.name)) +
+      '</span><span class="space-consumer-bytes">' + esc(metricsBytesText(row.bytes)) + "</span></li>";
+  }
+
+  // Pure: the render-ready space model, TOTAL over any payload.
+  //
+  // `truncated` is the load-bearing field. The agent caps the per-slug list at
+  // ten and reports how many slugs it FOUND (sites_count); without surfacing
+  // both, ten rows read as the whole tree whether the tree holds ten or forty,
+  // and the operator's next action differs. A cap that does not say when it
+  // binds is worse than no cap, because a partial answer gets read as a
+  // complete one.
+  function spaceModel(payload, collectedAt) {
+    if (!payload || typeof payload !== "object") return null;
+    function rows(list) {
+      if (!Array.isArray(list)) return null; // null = unmeasured, [] = measured and empty
+      return list.filter(function (r) {
+        return r && typeof r.name === "string" && typeof r.bytes === "number" && r.bytes >= 0;
+      }).map(function (r) { return { name: r.name, bytes: r.bytes }; });
+    }
+    function num(v) { return (typeof v === "number" && isFinite(v) && v >= 0) ? v : null; }
+    var sites = (payload.sites && typeof payload.sites === "object") ? payload.sites : {};
+    var top = rows(sites.top);
+    var count = num(sites.count);
+    return {
+      journalBytes: num(payload.journal_bytes),
+      dbSize: num(payload.db_size),
+      topRelations: rows(payload.top_relations),
+      sites: {
+        dir: typeof sites.dir === "string" ? sites.dir : "",
+        bytes: num(sites.bytes),
+        top: top,
+        count: count,
+        // Only claimable when BOTH numbers are real. With no count we do not
+        // know whether the cap bound, and "we do not know" must not render as
+        // "it did not".
+        truncated: count !== null && top !== null && count > top.length,
+      },
+      reportedAt: typeof payload.reported_at === "string" ? payload.reported_at : null,
+      ageSeconds: spaceAgeSeconds(collectedAt, payload.reported_at),
+    };
+  }
+
+  // Pure: the "what is eating the disk" panel — the answer that used to need an
+  // SSH session. Absent row → an honest empty state, never a zeroed breakdown.
+  function spacePanelHtml(model) {
+    if (!model) {
+      return '<div class="space-panel"><h3 class="space-title">What\u2019s using the disk</h3>' +
+        '<p class="dim">No space report yet. The agent measures this every 15 minutes; ' +
+        "it appears here as soon as the first report lands.</p></div>";
+    }
+
+    var age = model.ageSeconds === null ? "" : " · measured " + metricsAgeText(model.ageSeconds);
+
+    var sitesNote = "";
+    if (model.sites.truncated) {
+      // The cap, stated. This is the sentence that separates "these ten ARE the
+      // tree" from "these ten are ten of thirty-seven".
+      sitesNote = '<span class="space-note dim">top ' + esc(String(model.sites.top.length)) +
+        " of " + esc(String(model.sites.count)) + " sites</span>";
+    } else if (model.sites.count !== null && model.sites.top !== null) {
+      sitesNote = '<span class="space-note dim">all ' + esc(String(model.sites.count)) + " sites</span>";
+    }
+
+    function group(title, total, list, note) {
+      if (total === null && (list === null || !list.length)) return "";
+      return '<div class="space-group">' +
+        '<div class="space-group-head"><span class="space-group-name">' + esc(title) + "</span>" +
+        '<span class="space-group-bytes">' + esc(metricsBytesText(total)) + "</span></div>" +
+        (note || "") +
+        (list && list.length ? '<ul class="space-consumers">' + list.map(spaceConsumerHtml).join("") + "</ul>" : "") +
+        "</div>";
+    }
+
+    return '<div class="space-panel">' +
+      '<h3 class="space-title">What\u2019s using the disk<span class="dim">' + esc(age) + "</span></h3>" +
+      group(model.sites.dir || "Sites", model.sites.bytes, model.sites.top, sitesNote) +
+      group("Database", model.dbSize, model.topRelations, "") +
+      group("Journal", model.journalBytes, null, "") +
+      "</div>";
+  }
+
   // Pure: one metric card — headline value + label + the role-tinted sparkline.
   function metricsCardHtml(m) {
     var spark = sparklineSvg(m.values, { width: 180, height: 40, area: true });
@@ -21193,9 +21449,16 @@
         "minute — metrics appear here as soon as the first beat lands.</p></div>";
     }
     var grid = model.metrics.map(metricsCardHtml).join("");
+    // ORDER IS THE POINT. The verdict sits ABOVE the sparklines because the
+    // whole complaint was that a struggling box had to be INFERRED from four
+    // charts — and was not, for eight hours. The disk breakdown sits below
+    // them, where an operator who has read "struggling" goes looking for what
+    // to delete.
     return metricsHeadHtml(model) +
+      pressureBannerHtml(model.pressure) +
       '<div class="metrics-grid">' + grid + "</div>" +
       metricsStubsHtml() +
+      spacePanelHtml(model.space) +
       metricsHealthHtml(model.health);
   }
 
@@ -24286,6 +24549,12 @@
       metricsPanelHtml: metricsPanelHtml, metricsCardHtml: metricsCardHtml,
       metricsHealthHtml: metricsHealthHtml, metricsKeys: METRIC_SPECS.map(function (s) { return s.key; }),
       metricsStubsHtml: metricsStubsHtml, metricsStubKeys: METRIC_STUBS.map(function (s) { return s.key; }),
+      // The diagnosis half: the pressure verdict and the disk breakdown. Pure
+      // folds + string renders, all node-pinned.
+      pressureModel: pressureModel, pressureBannerHtml: pressureBannerHtml,
+      pressureSignalText: pressureSignalText,
+      spaceModel: spaceModel, spacePanelHtml: spacePanelHtml,
+      spaceAgeSeconds: spaceAgeSeconds, metricsBytesText: metricsBytesText,
       // S14 (azure-hetzner hosting): the archives panel. Only the pure projection
       // (archivesModel) + its render helpers are node-pinned; the DOM mount
       // (loadArchives) is browser-verified.
