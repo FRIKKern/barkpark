@@ -33,6 +33,8 @@ import {
   buildLenses,
   refusesAsCharterGrep,
   adjudicateCriterion,
+  reconcilePool,
+  PAGE,
 } from "../seal.mjs";
 import { deriveLevel } from "../level.mjs";
 import { screenCommand } from "../screen.mjs";
@@ -300,4 +302,63 @@ test("the word SEALED never appears in any output path", () => {
 test("an unreadable --ledger path is an INFRA FAULT path, never a NOT YET", () => {
   const r = seal(["--ledger", resolve(REPO, "tooling/grip/fixtures/NO-SUCH-FIXTURE.json")]);
   assert.notEqual(r.status, 1, "exit 1 must mean NOT YET and nothing else");
+});
+
+// ── THE POOL RECONCILIATION ─────────────────────────────────────────────────
+// The merged gate asserted `allUnique === allCount` and so faulted on a
+// duplicate doc_id in the SERVER's own listing. That is a real live condition —
+// `akbr-feedback-2026-08-epic` is served twice by `bp task ready --all`, filed
+// as the still-open `tgw12-bl-seal-infra-fault-ready-pool-ghost` — and it made
+// every live run exit 2 with a=UNKNOWN, so no clause was ever evaluated. These
+// controls pin BOTH halves: the live shape must reconcile, and a genuinely
+// partial read must still fault.
+
+const poolReport = (walk, all) => ({
+  ids: new Set(walk), walked: walk.length, duplicates: walk.length - new Set(walk).size,
+  allIds: new Set(all), allCount: all.length, allUnique: new Set(all).size,
+  allDuplicates: all.length - new Set(all).size, pages: [walk.length],
+});
+
+test("a duplicate doc_id in the server's listing is DEDUPED and reported, never an INFRA FAULT", () => {
+  // The live shape, reproduced: one doc_id served twice by both reads.
+  const r = reconcilePool(poolReport(["a", "b", "b", "c"], ["a", "b", "b", "c"]));
+  assert.equal(r.ok, true, "the merged gate faulted here and made the command permanently inert");
+  assert.match(r.detail, /DEDUPED/);
+  assert.match(r.detail, /1 duplicate doc_id\(s\) in --all and 1 in the walk/);
+});
+
+test("EQUAL TOTALS ARE NOT AN EQUAL SET — a skip and a duplicate cancel, and the sets still catch it", () => {
+  // The walk skipped "c" and served "b" twice. Both totals read 4. A size-only
+  // reconciliation passes this; the set difference does not.
+  const rep = poolReport(["a", "b", "b", "d"], ["a", "b", "c", "d"]);
+  assert.equal(rep.walked, rep.allCount, "the premise of this test is that the TOTALS agree");
+  const r = reconcilePool(rep);
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /agree on the TOTAL \(4\) but not on the SET/);
+  assert.match(r.detail, /the walk misses 1 \(c\)/);
+});
+
+test("a walk that carries a row --all does not list is a fault, and the row is NAMED", () => {
+  const r = reconcilePool(poolReport(["a", "b", "ghost"], ["a", "b", "c"]));
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /carries 1 that --all does not list \(ghost\)/);
+});
+
+test("a raw total mismatch faults before the sets are even differenced", () => {
+  const r = reconcilePool(poolReport(["a", "b"], ["a", "b", "c"]));
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /offset walk returned 2 row\(s\), --all returned 3/);
+  assert.doesNotMatch(r.detail, /SET/, "a size mismatch is its own finding, not a set report");
+});
+
+test("the clamp guard sits on PAGE, not on the pool size — a healthy 3010-row pool must reconcile", () => {
+  assert.ok(PAGE < 1000, "PAGE must stay under the server's silent 1000 clamp");
+  const big = Array.from({ length: 3010 }, (_, i) => `t${i}`);
+  assert.equal(reconcilePool(poolReport(big, big)).ok, true,
+    "the merged gate faulted on any pool >= 1000, which is every live pool today");
+});
+
+test("a missing pool report is a fault, never a silent pass", () => {
+  assert.equal(reconcilePool(null).ok, false);
+  assert.equal(reconcilePool(undefined).ok, false);
 });
