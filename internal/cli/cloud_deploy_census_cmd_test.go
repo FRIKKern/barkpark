@@ -2200,3 +2200,203 @@ func TestCloudDeploymentsForbiddenGetsNoWindowSuggestion(t *testing.T) {
 		}
 	}
 }
+
+// ─── THE SITE ROWS: WHAT SHIPPED, AND WHY THERE IS NO RATE ───────────────────
+
+// censusSiteRealEnvelope carries the site row MEASURED on a real 200 against a
+// team credential and quoted on cloudclient.DeployCensusSite —
+// {"volume":435,"failed":1,"deferred":325,"live":109}, which sums exactly — next
+// to a second, LOW-VOLUME site whose own rate the producer refuses.
+//
+// Both halves come off the real producer, not off an assumed shape: site_row/2
+// denominates each site's `failure_rate` on that SITE's own volume via
+// rate_basis/3, and rate/2 refuses below @min_sample 200 with the reason
+// verbatim below. Every site fixture that existed before this one had a volume
+// of 1016 or more, so the refusing branch had never once been rendered.
+const censusSiteRealEnvelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 470,
+  "failed": 4,
+  "live": 118,
+  "failure_rate": {"sample": 470, "pct": 0.85, "numerator": 4, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [
+    {"site_id": "site-real", "volume": 435, "failed": 1, "deferred": 325, "live": 109,
+     "failure_rate": {"sample": 435, "pct": 0.23, "numerator": 1, "min_sample": 200, "refused": false, "reason": null},
+     "top_class": "BOX_BUSY_409"},
+    {"site_id": "site-quiet", "volume": 35, "failed": 3, "deferred": 23, "live": 9,
+     "failure_rate": {"sample": 35, "pct": null, "numerator": 3, "min_sample": 200, "refused": true,
+                      "reason": "sample 35 below min_sample 200"},
+     "top_class": "DOC_ID_EMPTY"}
+  ],
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsSiteRowNamesWhatShipped: the site row says how many of its
+// attempts went LIVE. On the real row above, 109 of 435 shipped while the render
+// showed "1 failed" and a 0.2% rate — a site a reader would call healthy. The
+// reader cannot recover 109 by subtraction (that is site_row/2's forbidden
+// arithmetic), so the wire's own `live` has to reach the screen.
+func TestCloudDeploymentsSiteRowNamesWhatShipped(t *testing.T) {
+	newCensusServer(t, 200, censusSiteRealEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	row := censusLineContaining(t, stdout, "site-real")
+	for _, want := range []string{"435 attempted", "109 live", "1 failed", "325 deferred"} {
+		if !strings.Contains(row, want) {
+			t.Fatalf("site row %q missing %q — the row must name what SHIPPED beside what failed", row, want)
+		}
+	}
+	// A payload that names per-site live owes no UNMETERED note.
+	if strings.Contains(stdout, "PER-SITE LIVE UNMETERED") {
+		t.Fatalf("every row carried `live`, so no unmetered note may print:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsSiteLiveCellTracksTheWire is the MUTATION PROOF for the
+// live cell: the same render over a payload whose only difference is the site's
+// `live` must print a different number. A cell that renders identically under a
+// changed fact is decoration, not a reading.
+func TestCloudDeploymentsSiteLiveCellTracksTheWire(t *testing.T) {
+	render := func(t *testing.T, body string) string {
+		t.Helper()
+		newCensusServer(t, 200, body)
+		pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+		stdout, stderr, code := runDeployments(t, "table")
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+		}
+		return censusLineContaining(t, stdout, "site-real")
+	}
+
+	truth := render(t, censusSiteRealEnvelope)
+	mutated := render(t, strings.Replace(censusSiteRealEnvelope,
+		`"deferred": 325, "live": 109`, `"deferred": 325, "live": 7`, 1))
+
+	if truth == mutated {
+		t.Fatalf("the site row did not move when `live` moved 109 → 7 — the cell is not reading the wire:\n%s", truth)
+	}
+	if !strings.Contains(truth, "109 live") || !strings.Contains(mutated, "7 live") {
+		t.Fatalf("live cell did not track the payload:\ntruth:   %s\nmutated: %s", truth, mutated)
+	}
+	// AND THE ABSENCE IS ITS OWN THIRD STATE, never a zero: a control plane
+	// predating #10519 sends no per-site `live` key at all.
+	absent := render(t, strings.Replace(censusSiteRealEnvelope, `"deferred": 325, "live": 109`, `"deferred": 325`, 1))
+	if !strings.Contains(absent, "UNMETERED") {
+		t.Fatalf("a missing per-site `live` must render UNMETERED, never a count: %s", absent)
+	}
+	if strings.Contains(absent, "0 live") {
+		t.Fatalf("a missing per-site `live` rendered as zero-live — the most alarming reading of an absence: %s", absent)
+	}
+}
+
+// TestCloudDeploymentsSiteRefusalIsNamed: the em-dash in a site's share cell is
+// a REFUSAL, and the section says so with the denominator it was refused on and
+// the remedy that actually applies. Before this, the class and deferral sections
+// each carried deployCensusShareNotes and the site section carried nothing.
+func TestCloudDeploymentsSiteRefusalIsNamed(t *testing.T) {
+	newCensusServer(t, 200, censusSiteRealEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	note := censusLineContaining(t, stdout, "NO PER-SITE RATE")
+	// ONE of the two rows refused, on ITS OWN volume of 35, against the floor of
+	// 200 — never the fleet's 470.
+	for _, want := range []string{"1 of 2 rows", "n=35", "min_sample 200", "REFUSAL"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("site refusal note %q missing %q", note, want)
+		}
+	}
+	remedy := censusLineContaining(t, stdout, "NO --from CAN UN-REFUSE THESE")
+	if !strings.Contains(remedy, "SHRINK") {
+		t.Fatalf("a per-site sample refusal must say the sample has to GROW: %q", remedy)
+	}
+	// A sample floor is not a vocabulary straddle: offering a narrower window
+	// would send the operator to a smaller sample.
+	if strings.Contains(stdout, "A WINDOW THAT COULD ANSWER") {
+		t.Fatalf("a per-site sample refusal was offered a narrower window:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsSiteNoteCanBeAbsent is the guard that keeps the note
+// FALSIFIABLE. A note that renders on every payload proves nothing about the one
+// on screen — so a section where every site rate answered must carry no note at
+// all. censusTodayEnvelope's two sites are 1200 and 1016, both above the floor.
+func TestCloudDeploymentsSiteNoteCanBeAbsent(t *testing.T) {
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	sites := stdout[strings.Index(stdout, "sites (by volume)"):]
+	if strings.Contains(sites, "NO PER-SITE RATE") {
+		t.Fatalf("both site rates answered, so no refusal note may print:\n%s", sites)
+	}
+	if !strings.Contains(sites, "41.7%") || !strings.Contains(sites, "32.7%") {
+		t.Fatalf("the answered per-site rates must still render their percentages:\n%s", sites)
+	}
+	// TODAY'S payload carries no per-site `live` — which is a fact the reader
+	// owes its operator, together with the subtraction it must not perform.
+	note := censusLineContaining(t, stdout, "PER-SITE LIVE UNMETERED")
+	for _, want := range []string{"2 of 2 rows", "NOT the answer"} {
+		if !strings.Contains(note, want) {
+			t.Fatalf("unmetered note %q missing %q", note, want)
+		}
+	}
+}
+
+// TestCloudDeploymentsSiteNotesDescribeTheRenderedRows: --sites clamps the rows
+// on screen, and the notes must count the rows a human can actually see. A note
+// denominated on the full list would accuse rows the clamp hid.
+//
+// BOTH HALVES ARE ASSERTED, and the positive one is why this test is not
+// vacuous. Checked against the pre-fix renderer, an absence-only assertion
+// passes for the wrong reason — no note printed under ANY clamp — which is the
+// exact shape of a test that cannot fail on the change it exists to guard.
+func TestCloudDeploymentsSiteNotesDescribeTheRenderedRows(t *testing.T) {
+	render := func(t *testing.T, args ...string) string {
+		t.Helper()
+		newCensusServer(t, 200, censusSiteRealEnvelope)
+		pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+		stdout, stderr, code := runDeployments(t, "table", args...)
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+		}
+		return stdout
+	}
+
+	// UNCLAMPED: the refusing row is on screen, so its refusal is named and
+	// counted against the two rows that are.
+	both := render(t, "--sites", "2")
+	if !strings.Contains(both, "site-quiet") {
+		t.Fatalf("--sites 2 must render both rows:\n%s", both)
+	}
+	note := censusLineContaining(t, both, "NO PER-SITE RATE")
+	if !strings.Contains(note, "1 of 2 rows") {
+		t.Fatalf("the note must count the rows on screen: %q", note)
+	}
+
+	// CLAMPED: the refusing row is gone, so the note that accused it must go
+	// with it — while the clamp still discloses what it hid.
+	one := render(t, "--sites", "1")
+	if strings.Contains(one, "site-quiet") {
+		t.Fatalf("--sites 1 must clamp the second row away:\n%s", one)
+	}
+	if strings.Contains(one, "NO PER-SITE RATE") {
+		t.Fatalf("a refusal note survived the clamp that hid the refusing row:\n%s", one)
+	}
+	if !strings.Contains(one, "… and 1 more") {
+		t.Fatalf("the clamp must still disclose what it hid:\n%s", one)
+	}
+}
