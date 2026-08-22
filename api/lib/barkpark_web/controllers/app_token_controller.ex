@@ -119,6 +119,98 @@ defmodule BarkparkWeb.AppTokenController do
   end
 
   @doc """
+  GET /v1/auth/app-tokens — admin-bearer-gated enumerate
+  (jf-backlog-apptoken-revoke-upstream).
+
+  Never returns a raw secret: only `token_hash` is stored, and it is not
+  returned either. Mirrors `ShareController.list_tokens/2`'s posture rather than
+  inventing a second shape.
+
+  ## THE LABEL IS WITHHELD FROM AN UNFILTERED LIST, ON PURPOSE
+
+  `GET /app-tokens` returns every app token on the instance with `label: null`
+  and `label_redacted: true` on the envelope. `GET /app-tokens?email=<addr>`
+  returns that email's tokens WITH their real labels.
+
+  The admin gate here is `Auth.has_permission?/2` — PERMISSION-only, with no
+  tenancy predicate (the same property `Plugs.RequireAdmin` has). So any
+  admin-permissioned token, in any workspace, reaches this route.
+
+  Labels follow the mint's `app:<email>` convention. An unfiltered list that
+  returned them would hand one workspace's admin EVERY USER'S EMAIL ADDRESS on
+  the instance — a DIRECTORY, not a lifecycle verb. Revoke-by-email costs the
+  caller an address they already had; unfiltered enumeration would convert that
+  into discovery of everyone.
+
+  What survives redaction is everything this row's purpose needs: `id` (revoke
+  by it), `workspace_id`, `permissions`, `dataset` and the dates. An operator
+  can still find and retire a custom-labelled token — including one the
+  `?email=` filter can never match, which is the whole defect — while the
+  instance's user list stays unenumerable.
+
+  ## INTERIM, pending a ruling
+
+  This is a POSTURE, not a design claim. `task-ea8cae3258ea4bd3` is open on
+  exactly this surface: whether an admin token in one workspace should reach
+  another workspace's app tokens at all. Cross-workspace REVOCATION already
+  crosses today (`revoke_app_tokens_for_email/1` has no workspace predicate);
+  cross-workspace ENUMERATION arrived with this route, and shipping it
+  unredacted while that row is unsettled would answer the question by merge.
+
+  If the owner rules the admin gate is legitimately instance-wide, unredacting
+  is a one-line change in `app_token_json/2` with a recorded justification.
+
+  Non-admin bearers get the same generic unauthorized as an invalid token, the
+  mint's oracle discipline.
+  """
+  def index(conn, params) do
+    if Auth.has_permission?(conn.assigns.api_token, "admin") do
+      case list_email_filter(params) do
+        {:ok, opts} ->
+          # `filtered?` is the whole posture: a caller who already supplied the
+          # address gets the label back; an unfiltered sweep does not.
+          filtered? = Keyword.has_key?(opts, :email)
+          rows = Enum.map(Auth.list_app_tokens(opts), &app_token_json(&1, filtered?))
+
+          json(conn, %{tokens: rows, label_redacted: not filtered?})
+
+        {:error, message} ->
+          unprocessable(conn, message)
+      end
+    else
+      ErrorResponse.emit(conn, {:error, :unauthorized})
+    end
+  end
+
+  @doc """
+  DELETE /v1/auth/app-tokens/:id — admin-bearer-gated revoke by row id, the
+  escape hatch for a token whose label no longer matches the email convention.
+
+  A malformed or unknown id is a clean 404 (no existence oracle). Idempotent:
+  re-revoking an already-revoked row is another 200, matching the by-raw arm.
+
+  Unlike the by-raw and by-email arms this does NOT 422 an `admin`-permissioned
+  token — see `Auth.revoke_app_token_by_id/1` for why an explicit row id is not
+  the collision this rule was written against.
+  """
+  def delete_by_id(conn, %{"id" => id}) do
+    cond do
+      revoke_rate_limited?(conn) ->
+        ErrorResponse.emit(conn, {:error, :rate_limited})
+
+      not Auth.has_permission?(conn.assigns.api_token, "admin") ->
+        ErrorResponse.emit(conn, {:error, :unauthorized})
+
+      true ->
+        case Auth.revoke_app_token_by_id(id) do
+          {:ok, token} -> json(conn, %{revoked: true, id: token.id})
+          {:error, :not_found} -> ErrorResponse.emit(conn, {:error, :not_found})
+          {:error, _} -> ErrorResponse.emit(conn, {:error, :not_found})
+        end
+    end
+  end
+
+  @doc """
   DELETE /v1/auth/app-tokens/current — self-revoke: the bearer kills ITSELF
   (possession is the authorization; no admin required). The phone's
   cloud-independent logout. Admin bearers are refused (422) so the stored
@@ -341,5 +433,41 @@ defmodule BarkparkWeb.AppTokenController do
     conn
     |> put_status(:unprocessable_entity)
     |> json(%{error: %{code: "unprocessable", message: message}})
+  end
+
+  # The list filter reuses the mint's OWN email discipline (trim, non-empty,
+  # must contain "@") so a caller cannot narrow by a shape the mint would never
+  # have produced — one convention, not two.
+  defp list_email_filter(%{"email" => email}) when is_binary(email) do
+    case String.trim(email) do
+      "" ->
+        {:error, "email must be a non-empty string"}
+
+      trimmed ->
+        if trimmed =~ "@",
+          do: {:ok, [email: trimmed]},
+          else: {:error, ~s(email must look like an address)}
+    end
+  end
+
+  defp list_email_filter(%{"email" => _}), do: {:error, ~s("email" must be a string)}
+  defp list_email_filter(_), do: {:ok, []}
+
+  # Redacted row. The raw secret is never stored (only `token_hash`) and the
+  # hash is not returned either — an enumerate route must not hand out anything
+  # replayable.
+  # `label` is nil-ed rather than dropped: a MISSING key reads as "this token has
+  # no label", a different and false statement. The envelope's `label_redacted`
+  # flag says withheld, out loud.
+  defp app_token_json(token, filtered?) do
+    %{
+      id: token.id,
+      label: if(filtered?, do: token.label),
+      permissions: token.permissions || [],
+      dataset: token.dataset,
+      workspace_id: token.workspace_id,
+      revoked_at: token.revoked_at,
+      inserted_at: token.inserted_at
+    }
   end
 end

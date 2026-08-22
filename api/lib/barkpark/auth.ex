@@ -288,6 +288,77 @@ defmodule Barkpark.Auth do
   end
 
   @doc """
+  Every app token (`kind == "api"`), newest first, for the admin enumerate
+  route. Optionally narrowed to one `email` by the SAME label convention the
+  mint uses.
+
+  ## Why enumeration had to exist (jf-backlog-apptoken-revoke-upstream)
+
+  `revoke_app_tokens_for_email/1` matches `label == "app:" <> email` EXACTLY,
+  and the mint's optional `label` REPLACES that default
+  (`AppTokenController.fetch_label/2`). So a custom-labelled app token was
+  unreachable by email — and with no list route and no revoke-by-id ROUTE, it
+  could not be revoked at all unless the operator still held the raw string.
+  A credential nobody can enumerate is a credential nobody can retire.
+
+  Returns rows, never raw secrets: `token_hash` is the only stored form and the
+  caller renders a redacted view.
+  """
+  @spec list_app_tokens(keyword()) :: [ApiToken.t()]
+  def list_app_tokens(opts \\ []) do
+    query =
+      ApiToken
+      |> where([t], t.kind == "api")
+
+    query =
+      case Keyword.get(opts, :email) do
+        email when is_binary(email) and email != "" ->
+          where(query, [t], t.label == ^("app:" <> email))
+
+        _ ->
+          query
+      end
+
+    query
+    |> order_by([t], desc: t.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Revoke ONE app token by its row id — the escape hatch for a token whose label
+  no longer matches the email convention.
+
+  Scoped to `kind == "api"`, the same boundary `get_api_token_by_raw/1` keeps: a
+  non-app row answers `{:error, :not_found}` rather than being revoked through
+  this door, so the app-token surface cannot reach a share/ticket credential.
+
+  ## Admin-permissioned tokens ARE revocable here, unlike the email path
+
+  `revoke_app_tokens_for_email/1` rejects `admin` rows, and the controller's
+  by-raw arm 422s them. That rule exists for a stated reason — a custody
+  credential "cannot be killed by a label collision or a smuggled body". An
+  explicit row id is neither: it names one row, chosen by an admin bearer, with
+  no collision surface. Carrying the rejection over would leave the WORST case
+  of this gap — a custom-labelled admin app token — permanently unrevocable,
+  which is the defect, not a protection against it.
+  """
+  @spec revoke_app_token_by_id(binary()) :: {:ok, ApiToken.t()} | {:error, atom()}
+  def revoke_app_token_by_id(token_id) when is_binary(token_id) do
+    # Same UUID cast guard as revoke_token/1: the id column is :binary_id, so a
+    # non-UUID would raise Ecto.CastError -> 500 instead of a clean not_found.
+    case Repo.uuid_or_nil(token_id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
+        case Repo.get(ApiToken, uuid) do
+          %ApiToken{kind: "api"} = token -> revoke_token(token)
+          _ -> {:error, :not_found}
+        end
+    end
+  end
+
+  @doc """
   Mint an API token. When `workspace_id` is given (the tenancy-aware path),
   the token is bound to that workspace AND a `Barkpark.Tenancy.Membership`
   row is created in the same transaction — role derived from permissions
