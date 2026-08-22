@@ -508,6 +508,7 @@ defmodule BarkparkCloud.Web.Router do
     beam_swap_bytes: nil,
     beam_pid: nil,
     beam_slot: nil,
+    runaway_procs: nil,
     reported_at: nil
   }
 
@@ -9962,6 +9963,19 @@ defmodule BarkparkCloud.Web.Router do
       # process nobody identified.
       beam_pid: named_or_nil(Map.get(payload, "beam_pid")),
       beam_slot: named_or_nil(Map.get(payload, "beam_slot")),
+      # WHO is spending the box. Every vital above is an AGGREGATE and none of
+      # them can answer that: on 2026-08-06 guerrilla read load 6.3 on 2 cores
+      # with /api/schemas flapping 200/500/500, and the cause was ONE orphaned
+      # `journalctl -u bp-site-build-* --since -14d` left by a dead SSH session,
+      # 2h46m old at 66.3% of a core. A human found it because a `bp` write
+      # failed. Nothing on this row could have named it.
+      #
+      # This is the one pressure key that is a LIST, and it keeps a distinction
+      # the scalars express with nil alone: `nil` is UNMEASURED (an agent that
+      # predates the probe, or a box without `ps`), while `[]` is MEASURED AND
+      # QUIET. Collapsing those would re-enact the incident exactly — "we did not
+      # look" rendered as "nothing to see".
+      runaway_procs: runaway_procs(Map.get(payload, "runaway_procs")),
       reported_at: at
     })
   end
@@ -9979,6 +9993,31 @@ defmodule BarkparkCloud.Web.Router do
 
   defp measured_or_nil(n) when is_number(n) and n >= 0, do: n
   defp measured_or_nil(_), do: nil
+
+  # The agent's `runaway_procs` rows, kept in the agent's own order (worst
+  # first — by CPU-seconds actually spent) and reduced to the four fields a
+  # surface renders. A row survives only when ALL FOUR are readable: a runaway
+  # with no command is a number an operator cannot act on, and one with no
+  # elapsed or cpu is an accusation with no evidence, so a malformed row is
+  # DROPPED rather than rendered half-blank.
+  #
+  # A non-list — absent key, JSON null, garbage — is nil: NOT measured, which is
+  # not the same as measured and empty. An honestly empty list stays [].
+  defp runaway_procs(rows) when is_list(rows), do: Enum.flat_map(rows, &runaway_proc/1)
+  defp runaway_procs(_), do: nil
+
+  defp runaway_proc(row) when is_map(row) do
+    with pid when is_number(pid) <- measured_or_nil(Map.get(row, "pid")),
+         elapsed when is_number(elapsed) <- measured_or_nil(Map.get(row, "elapsed_s")),
+         cpu when is_number(cpu) <- measured_or_nil(Map.get(row, "cpu_percent")),
+         command when is_binary(command) <- named_or_nil(Map.get(row, "command")) do
+      [%{pid: pid, elapsed_s: elapsed, cpu_percent: cpu, command: command}]
+    else
+      _ -> []
+    end
+  end
+
+  defp runaway_proc(_), do: []
 
   # The fleet-ops row shape (GET/POST /v1/internal/barkparks): the identity +
   # placement fields the `bp cloud hetzner instance` verbs cross-check, plus

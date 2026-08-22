@@ -126,7 +126,15 @@ func run(args []string) int {
 			// Request stats ride the SAME base+token seam as the health gate: the
 			// probe GETs the instance RequestStats route at *healthURL. Empty
 			// health-url → nil probe → req/s + p95 report their -1 sentinels.
-			ReqStatsProbe:  agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
+			ReqStatsProbe: agent.NewReqStatsProbe(*healthURL, *healthTok, nil),
+			// WHO is spending the box, beside the aggregates that can only
+			// say THAT it is being spent. One bounded `ps` per beat, no state.
+			// This is the detection half of the 2026-08-06 guerrilla runaway;
+			// the lifetime half is runBounded, which every probe above already
+			// goes through. On a box without `ps` it ERRORS, so runaway_procs
+			// stays null (UNMEASURED) rather than landing an empty list that
+			// would read "nothing running here".
+			RunawayProbe:   agent.NewRunawayProbe(),
 			HealthBaseURL:  *healthURL,
 			HealthToken:    *healthTok,
 			HealthGateOpts: agentHealthGateOpts(*healthURL, *healthTok),

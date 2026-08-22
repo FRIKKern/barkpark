@@ -244,6 +244,76 @@ func unmeteredMarker(b cloudclient.Barkpark) string {
 	return "vitals unreadable — agent predates the vitals beat"
 }
 
+// --- the runaway marker (the 2026-08-06 guerrilla incident) -------------------
+//
+// WHAT HAPPENED, because the shape of this function is dictated by it: an SSH
+// session died and left `journalctl -u bp-site-build-* --since -14d --no-pager`
+// reparented to PID 1, scanning fourteen days of journal for a unit glob that
+// matched nothing, at 66.3% of a core, for 2h46m, on a box with two cores. Load
+// hit 6.3, https://guerrilla.barkpark.cloud/api/schemas flapped 200/500/500, and
+// the ONLY thing that noticed was a human's `bp task claim` failing with a
+// transient error. Every vital this screen already renders was an AGGREGATE —
+// load, cpu, mem — and an aggregate can say a box is being spent but never by
+// WHOM, which is the only thing an operator can act on.
+//
+// It is a DETAIL LINE and deliberately NOT a rung, exactly like unmeteredMarker
+// above. The decision-15 vocabulary is pinned across three surfaces by the
+// decision-32 fixture (attention_order.json) and the SPA mirrors it; a twelfth
+// status invented here alone would be the drift D32 exists to prevent. It rides
+// on top of whatever the status said, on ANY row — including a row that reads
+// `ok`, which is precisely the row the incident was sitting on for its first
+// two hours, before the load average caught up and made it `strained`.
+//
+// It never fabricates: an unmeasured box (nil list — an agent predating the
+// probe, or a box with no `ps`) and a measured-quiet box (an empty list) both
+// render "", because neither has a runaway to name. Those two ARE distinguished
+// on the wire and in `-o json`; what they are not is a sentence on a table row
+// claiming something happened.
+func runawayMarker(b cloudclient.Barkpark) string {
+	p := b.Pressure
+	if p == nil || len(p.RunawayProcs) == 0 {
+		return ""
+	}
+	worst := p.RunawayProcs[0]
+	// The three facts the incident report needed and did not have: how long, how
+	// much, and — the one that ends the investigation — what.
+	s := fmt.Sprintf("runaway: pid %d orphaned %s at %s%% CPU — %s",
+		int(worst.PID), humanElapsed(worst.ElapsedS),
+		trimFloat(round1(worst.CPUPercent)), truncateCell(worst.Command, runawayCommandCell))
+	if n := len(p.RunawayProcs) - 1; n > 0 {
+		// The count is carried even though the commands are not: a box with FOUR
+		// abandoned journalctls is a different story from a box with one, and
+		// `-o json` has all of them.
+		s += fmt.Sprintf(" (+%d more)", n)
+	}
+	return s
+}
+
+// runawayCommandCell caps the argv INSIDE the table cell. The agent already caps
+// what it sends (120 runes); this is the narrower cap the DETAIL column can
+// carry without pushing the URL off an 80-column terminal. The full command the
+// agent sent is always in `-o json`, so the table never becomes the only copy.
+const runawayCommandCell = 48
+
+// humanElapsed renders a process age the way an operator says it out loud —
+// "2h46m", not "10001". Seconds below a minute keep their unit rather than
+// rounding to "0m", because a detector that reports a young process at all is
+// reporting something surprising and the number should not be flattened.
+func humanElapsed(seconds float64) string {
+	if seconds < 0 {
+		return "?"
+	}
+	total := int(seconds)
+	switch {
+	case total < 60:
+		return fmt.Sprintf("%ds", total)
+	case total < 3600:
+		return fmt.Sprintf("%dm", total/60)
+	default:
+		return fmt.Sprintf("%dh%02dm", total/3600, (total%3600)/60)
+	}
+}
+
 // --- commit distance (dr-w24-s2) ---------------------------------------------
 //
 // `update_state` is the box's RELEASE-TAG self-grade; `commit_ancestry` /
@@ -488,15 +558,18 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		// commit-distance sentence for a box whose tag grade disagrees.
 		reason = behindDetail(b)
 	}
-	marker := unmeteredMarker(b)
-	switch {
-	case reason == "":
-		return marker
-	case marker == "":
-		return reason
-	default:
-		return reason + " · " + marker
+	// Two markers ride on top of the status's own reason, on ANY row: what we
+	// could not read (unmeteredMarker) and what is eating the box right now
+	// (runawayMarker). Joined with the same separator the strained reason uses
+	// for its swap clause, and every empty one drops out rather than leaving a
+	// dangling dot.
+	parts := make([]string, 0, 3)
+	for _, s := range []string{reason, runawayMarker(b), unmeteredMarker(b)} {
+		if s != "" {
+			parts = append(parts, s)
+		}
 	}
+	return strings.Join(parts, " · ")
 }
 
 // rankedBarkpark is one fleet row with its computed decision-15 triage fields.
@@ -623,6 +696,27 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	// carries the reason the number is missing.
 	if r.BP.CommitDistance != nil {
 		row["commit_distance"] = *r.BP.CommitDistance
+	}
+	// The runaway list, tri-state like every honest field above and by the SAME
+	// rule: emit the key only when the box was actually MEASURED. A nil list is
+	// an agent that predates the probe (or a box with no `ps`) and the key is
+	// absent, forcing a script to branch; a measured-quiet box emits `[]`, which
+	// is a real answer and reads as one. `"runaway_procs": []` for a box nobody
+	// looked at would be the single most reassuring lie this payload could tell.
+	//
+	// Unlike the table's DETAIL cell, this carries EVERY row and the FULL command
+	// the agent sent — the table is a glance, this is the evidence.
+	if r.BP.Pressure != nil && r.BP.Pressure.RunawayProcs != nil {
+		procs := make([]any, 0, len(r.BP.Pressure.RunawayProcs))
+		for _, p := range r.BP.Pressure.RunawayProcs {
+			procs = append(procs, map[string]any{
+				"pid":         int(p.PID),
+				"elapsed_s":   int(p.ElapsedS),
+				"cpu_percent": p.CPUPercent,
+				"command":     p.Command,
+			})
+		}
+		row["runaway_procs"] = procs
 	}
 	return row
 }

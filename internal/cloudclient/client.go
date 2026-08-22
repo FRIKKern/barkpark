@@ -236,10 +236,42 @@ type Pressure struct {
 	BeamPID    *string  `json:"beam_pid"`
 	BeamSlot   *string  `json:"beam_slot"`
 	Err5xxPerS *float64 `json:"err_5xx_per_s"`
+	// RunawayProcs names the box's long-running ORPHANED processes — the only
+	// field in this block that answers WHO rather than HOW MUCH. Every scalar
+	// above is an aggregate: they can say a box is at load 6.3 and can never say
+	// that 66.3% of a core has gone to one abandoned `journalctl` for 2h46m,
+	// which is the fact that ended the 2026-08-06 guerrilla outage once a human
+	// finally looked.
+	//
+	// Being a LIST, it carries the same three-state honesty the pointers do, by
+	// a different mechanism: nil (the CP sent `null`) is UNMEASURED — an agent
+	// predating the probe, or a box without `ps`; a NON-NIL EMPTY slice (`[]`) is
+	// MEASURED AND QUIET. `len() == 0` is true of both, so a consumer that means
+	// "we looked and it is clean" must test for non-nil, not for empty.
+	RunawayProcs []RunawayProc `json:"runaway_procs"`
 	// ReportedAt is the BEAT's own timestamp (RFC3339), a pointer for the same
 	// reason: null means the box has never phoned home at all, which is not the
 	// same as "beat, but told us nothing readable".
 	ReportedAt *string `json:"reported_at"`
+}
+
+// RunawayProc is one long-running orphaned process off a fleet row's pressure
+// block: the pid, how long it has been alive, the CPU share it has averaged over
+// that whole life, and the argv that identifies it.
+//
+// The command is the field that turns this from a statistic into an action — an
+// operator kills `journalctl -u bp-site-build-*`, never "pid 3369344" — and it
+// arrives already capped by the agent so the beat payload stays bounded.
+//
+// The numerics are float64 for the same reason every number in Pressure is: the
+// control plane emits JSON off agent-shaped jsonb, and an int-typed field would
+// hard-fail decoding on a `3369344.0`. The control plane drops any row missing
+// one of the four, so a row that decodes is complete.
+type RunawayProc struct {
+	PID        float64 `json:"pid"`
+	ElapsedS   float64 `json:"elapsed_s"`
+	CPUPercent float64 `json:"cpu_percent"`
+	Command    string  `json:"command"`
 }
 
 // Provider is a connected cloud account (e.g. a Hetzner token) the control plane

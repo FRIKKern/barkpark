@@ -2799,6 +2799,93 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert is_binary(pressure["reported_at"])
     end
 
+    # THE 2026-08-06 GUERRILLA RUNAWAY. Every vital above is an AGGREGATE: they
+    # said the box was at load 6.3 on 2 cores with /api/schemas flapping
+    # 200/500/500, and not one of them could say that 66.3% of a core had gone to
+    # ONE orphaned `journalctl -u bp-site-build-* --since -14d --no-pager` for
+    # 2h46m. A human found it because a `bp` write failed. These two tests are the
+    # detector's two arms, and the second is the one that makes the first mean
+    # something.
+    test "the runaway rides the row — pid, elapsed, CPU share and the argv to kill" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.put(pre_vitals_report(), "runaway_procs", [
+            %{
+              "pid" => 3_369_344,
+              "elapsed_s" => 10_001,
+              "cpu_percent" => 66.3,
+              "command" => "journalctl -u bp-site-build-* --since -14d --no-pager"
+            }
+          ])
+        )
+
+      assert [row] = pressure_for(user, bp)["runaway_procs"]
+      assert row["pid"] == 3_369_344
+      # 02:46:41, as SECONDS: a number needs no format parser.
+      assert row["elapsed_s"] == 10_001
+      assert row["cpu_percent"] == 66.3
+      # The field that turns a statistic into an action. An operator kills
+      # `journalctl -u bp-site-build-*`; nobody kills "pid 3369344".
+      assert row["command"] == "journalctl -u bp-site-build-* --since -14d --no-pager"
+    end
+
+    test "a QUIET box reports [] and an UNMEASURED box reports nil — never the same" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # The box after the kill: the probe RAN and found nothing.
+      :ok = beat(bp, Map.put(pre_vitals_report(), "runaway_procs", []))
+      assert pressure_for(user, bp)["runaway_procs"] == []
+
+      # An agent that predates the probe, or a box with no `ps`: nobody looked.
+      # Rendering this as [] would say "nothing to see" about a box nobody
+      # examined — which is precisely the silence of 2026-08-06.
+      :ok = beat(bp, pre_vitals_report())
+      pressure = pressure_for(user, bp)
+      assert Map.has_key?(pressure, "runaway_procs")
+      assert pressure["runaway_procs"] == nil
+
+      # And garbage is unmeasured too, never a half-rendered accusation.
+      :ok = beat(bp, Map.put(pre_vitals_report(), "runaway_procs", "lots"))
+      assert pressure_for(user, bp)["runaway_procs"] == nil
+    end
+
+    test "a runaway row missing any of its four fields is DROPPED, not half-rendered" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      good = %{
+        "pid" => 3_369_344,
+        "elapsed_s" => 10_001,
+        "cpu_percent" => 66.3,
+        "command" => "journalctl -u bp-site-build-*"
+      }
+
+      :ok =
+        beat(
+          bp,
+          Map.put(pre_vitals_report(), "runaway_procs", [
+            # No command: a number an operator cannot act on.
+            Map.delete(good, "command"),
+            # No elapsed: an accusation with no evidence.
+            Map.delete(good, "elapsed_s"),
+            # Empty command: the agent's "not attributable", never a guess.
+            Map.put(good, "command", ""),
+            good
+          ])
+        )
+
+      # Exactly ONE survivor — and it is the complete row, so the three zeros
+      # above are the shaper refusing and not the whole key failing to land.
+      assert [survivor] = pressure_for(user, bp)["runaway_procs"]
+      assert survivor["pid"] == 3_369_344
+      assert survivor["command"] == "journalctl -u bp-site-build-*"
+    end
+
     test "the LATEST beat wins — a newer report replaces an older one on the row" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
