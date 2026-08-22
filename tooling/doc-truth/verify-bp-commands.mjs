@@ -54,8 +54,12 @@ const HEADER = [
 
 // ── the run ─────────────────────────────────────────────────────────────────
 
-export function verifyDocs(docs, { root = REPO_ROOT, offline = false, use = "ABCDE" } = {}) {
-  const sources = loadBpSources({ root, offline });
+export function verifyDocs(docs, { root = REPO_ROOT, offline = false, use = "ABCDE", manifestPath } = {}) {
+  // manifestPath is threaded through so the "an unavailable source FAILS the
+  // RUN" law can be proved at RUN level, not merely at loader level. Without
+  // it the run always loaded the real manifest, so the law was untested where
+  // it actually matters.
+  const sources = loadBpSources(manifestPath ? { root, offline, manifestPath } : { root, offline });
   const report = {
     header: HEADER,
     sources: {
@@ -291,15 +295,84 @@ function selftest() {
     return text === "bp cloud site deploy <slug>" || `got ${text}`;
   });
 
+  // ── FIXTURES ─────────────────────────────────────────────────────────────
+  //
+  // Every mutation below runs over a corpus this selftest OWNS, never over the
+  // live templates/** READMEs. That is deliberate: those files are edited by
+  // other rows (#6941 repaired the `--barkpark` defects; stw11-claim-ledger
+  // edits them again), so a mutation anchored to them proves nothing the moment
+  // someone repairs a README — and keeps reporting green while it proves
+  // nothing. Fixtures test the LOGIC; the live run at the end tests the WIRING.
+  const FIX = "tooling/doc-truth/fixtures/bp-commands";
+  const fix = (name) => `${FIX}/${name}.md`;
+  const runFix = (name, opts) => verifyDocs([fix(name)], opts);
+
+  check("FIXTURES: the corpus exists (a missing corpus must not pass vacuously)", () => {
+    const missing = ["clean", "unknown-flag", "unknown-subnoun", "unresolvable-head"]
+      .filter((f) => !existsSync(join(REPO_ROOT, fix(f))));
+    return missing.length === 0 || `missing fixture(s): ${missing.join(", ")}`;
+  });
+
+  // POSITIVE HALF — a clean fixture GREENs, and is not green by being empty.
+  check("FIXTURE: the clean fixture GREENs every command it prints", () => {
+    const r = runFix("clean");
+    if (r.totals.commands < 6) return `only ${r.totals.commands} command(s) extracted — corpus too small to prove anything`;
+    return (r.totals.unresolved === 0 && r.totals.unproven === 0) ||
+      `${r.totals.unresolved} UNRESOLVED / ${r.totals.unproven} UNPROVEN: ` +
+      [...r.unresolved, ...r.unproven].map((x) => `${x.doc}:${x.line}`).join(", ");
+  });
+
+  // The clean fixture must exercise every markup shape a command appears in. A
+  // pattern written for one shape silently UNDER-counts the rest and returns a
+  // clean-looking green, so the shapes are asserted, not assumed.
+  check("EXTRACTOR: the clean fixture covers all four markup shapes", () => {
+    const rows = runFix("clean").docs[0].rows;
+    const shapes = {
+      fenced: rows.some((r) => r.fenced && !/^bp cloud site (create|status)/.test(r.raw)),
+      prompted: rows.some((r) => r.raw === "bp cloud site status <slug>"),
+      continued: rows.some((r) => r.fenced && /--template search-starter$/.test(r.raw) && /--name/.test(r.raw)),
+      inline: rows.some((r) => !r.fenced),
+    };
+    const missing = Object.entries(shapes).filter(([, ok]) => !ok).map(([k]) => k);
+    return missing.length === 0 || `shape(s) not covered by the fixture: ${missing.join(", ")}`;
+  });
+
+  // NEGATIVE HALF — each defect fixture REDs, and is named in the report.
+  const redsByName = (name, needle) => {
+    const r = runFix(name);
+    if (r.totals.unresolved !== 1) return `expected exactly 1 UNRESOLVED, got ${r.totals.unresolved}`;
+    const row = r.unresolved[0];
+    if (!row.raw.includes(needle)) return `RED row does not name ${needle}: ${row.raw}`;
+    if (!row.reasons.length) return "RED row carries no reason";
+    return true;
+  };
+  check("MUTATION: an unknown FLAG REDs (fixture), named with its reason", () =>
+    redsByName("unknown-flag", "--barkpark"));
+  check("MUTATION: an unknown SUB-NOUN REDs (fixture) — only D can adjudicate it", () =>
+    redsByName("unknown-subnoun", "bp cloud barkpark"));
+  check("MUTATION: an unresolvable HEAD REDs (fixture), never skipped", () =>
+    redsByName("unresolvable-head", "totally-not-a-noun"));
+
+  // A source made unavailable must FAIL THE RUN — not degrade it to a skip that
+  // reports green over a corpus nothing adjudicated.
+  check("MUTATION: a source made unavailable FAILS the RUN, not just the load", () => {
+    const r = verifyDocs([fix("clean")], { manifestPath: "docs/cli/fixtures/does-not-exist.json" });
+    return (r.sources.ok === false && /SOURCE A UNAVAILABLE/.test(r.sources.errors.join(" "))) ||
+      `run did not fail: ok=${r.sources.ok} errors=${JSON.stringify(r.sources.errors)}`;
+  });
+
   // the templates/** corpus, on the real files: E is what closes the UNPROVEN
   // set, and an UNPROVEN row is reported by NAME and by COUNT — never as a pass.
+  // This is the WIRING half — fixtures cannot prove the gate reads real docs.
   const TEMPLATES = [
     "templates/DEPLOYING.md", "templates/MANIFEST.md",
     "templates/astro-search-starter/README.md", "templates/search-starter/DEPLOYING.md",
     "templates/search-starter/README.md",
   ].filter((d) => existsSync(join(REPO_ROOT, d)));
   check("templates/**: 0 UNPROVEN with all five sources", () => {
+    if (TEMPLATES.length === 0) return "the live corpus filtered to EMPTY — this check would pass vacuously";
     const r = verifyDocs(TEMPLATES);
+    if (r.totals.commands === 0) return "the live corpus yielded 0 commands — nothing was adjudicated";
     return r.totals.unproven === 0 || `${r.totals.unproven} UNPROVEN: ` +
       r.unproven.map((x) => `${x.doc}:${x.line}`).join(", ");
   });
@@ -342,7 +415,10 @@ function selftest() {
     }
     return bad;
   };
-  const CITED = verifyDocs(TEMPLATES).docs.flatMap((d) => d.rows).filter((r) => r.verdict === PROVEN);
+  // Cited rows come from the FIXTURE corpus, not the live READMEs: a citation
+  // check anchored to files other rows edit stops proving anything the moment
+  // one is edited, and stays green while it does.
+  const CITED = runFix("clean").docs.flatMap((d) => d.rows).filter((r) => r.verdict === PROVEN);
 
   check("every GREEN row cites a SPECIFIC authority (letter alone is not enough)", () => {
     const naked = CITED.filter((r) => !r.authority || r.authority.length === 0);

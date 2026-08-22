@@ -456,7 +456,7 @@ is neither required by a synopsis nor supplied by a doc line; an inline prose
 fragment naming one flag is an illustration, not an invocation).
 
 ```bash
-node tooling/doc-truth/verify-bp-commands.mjs --selftest        # 29 cases, every law proved BY MUTATION
+node tooling/doc-truth/verify-bp-commands.mjs --selftest        # 36 cases, every law proved BY MUTATION
 node tooling/doc-truth/verify-bp-commands.mjs templates/**/*.md # exit 1 on any UNRESOLVED, 2 on a dead source
 node tooling/doc-truth/verify-bp-commands.mjs --brief <doc>...  # source letters only, no citations
 node tooling/doc-truth/verify-bp-commands.mjs --json <doc>...
@@ -465,6 +465,24 @@ node tooling/doc-truth/verify-bp-commands.mjs --json <doc>...
 The selftest is mutation-shaped on purpose: each law's negative half (drop D,
 drop A, drop E, drop the continuation join, drop the depth rule) must FAIL, or
 its positive half proves nothing.
+
+### The mutations run over FIXTURES, not the live READMEs
+
+`fixtures/bp-commands/` holds a corpus the selftest OWNS: `clean.md` (must
+GREEN) plus one file per defect class — `unknown-flag.md`, `unknown-subnoun.md`,
+`unresolvable-head.md` (each must RED, by name, with a reason).
+
+Anchoring a mutation to `templates/**` looks equivalent and is not. Those files
+are edited by other rows — #6941 repaired the `--barkpark` defects the gate was
+built to catch — so a mutation pointed at them stops proving anything the moment
+someone repairs a README, **and keeps reporting green while it proves nothing**.
+Fixtures test the LOGIC; the live `templates/**` case at the end tests the
+WIRING, which fixtures cannot. Both are needed, and the live one now refuses to
+pass when its corpus filters to empty or yields zero commands.
+
+`clean.md` also pins all four markup shapes a command appears in — fenced,
+`$ `-prompted, backslash-continued, and inline in prose — and a selftest case
+asserts each shape is present, so the corpus cannot quietly stop exercising one.
 
 ### Every green cites the line that made it green
 
