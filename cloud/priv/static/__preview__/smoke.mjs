@@ -2610,6 +2610,15 @@ const EXPECTATIONS = {
       assert.ok(log.includes("wh-del-status--danger"), "a failed delivery reads danger-toned");
       assert.ok(log.includes("Failed"), "a failure with no http_status reads 'Failed'");
       assert.ok(log.includes("204 OK"), "a chat delivery with an http_status reads its code");
+      // THE WITHHOLD, REACHED. A `suppressed` fixture row alone reds nothing —
+      // proved by adding it with these three lines absent (smoke exit 0, 111
+      // scenarios, __app.test.mjs 1135/0). So the assertion, not the fixture, is
+      // the guard: it pins the two things the old code got exactly backwards.
+      assert.ok(log.includes("wh-del-status--muted"), "a withheld delivery reads muted-toned — never info, which paints a thrown-away alert as in flight");
+      assert.ok(log.includes("Withheld"), "the withheld pill reads 'Withheld' — never 'Pending', the inverse of what happened");
+      assert.ok(!/wh-del-status--info[^"]*">\s*Pending\s*<\/span>[\s\S]{0,400}?too many deployment alerts/.test(log),
+        "no suppressed row renders through the pending pill");
+      assert.ok(log.includes("too many deployment alerts in one sweep"), "the withhold REASON is on the row, so the admin reads the decision and not just its name");
     },
   },
   "notif-empty": {

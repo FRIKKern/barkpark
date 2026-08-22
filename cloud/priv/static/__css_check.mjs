@@ -100,6 +100,14 @@
 //       `cancelled` shipped ruleless — falling through to the .dep-pill base,
 //       which is byte-identical to .dep-queued, so an aborted deploy painted as
 //       one still waiting. Full boundary on DEPLOY_STATUSES below.
+//   E15 an unpainted DELIVERY TONE, and a stale consent for one. Same family as
+//       E13 one surface over: `wh-del-status wh-del-status--` is an E3 allowlist
+//       entry too, so the tone half was unmeasured. The value space is DERIVED
+//       from `notifDeliveryTone()`'s returns in app.js and diffed against
+//       WH_DEL_TONES, so a fifth tone reds here without anyone editing this file.
+//       WH_DEL_BASE_TONES names the tones the neutral base pill really does paint
+//       (`muted`, the withheld alert) — and a STALE entry there reds too, because
+//       a consent that absolves nothing is the blind spot rebuilt inside the fix.
 //   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
 //
 //         A rule whose selector is WRAPPER-SCOPED onto the pill
@@ -273,7 +281,7 @@ const ALLOW_PREFIXES = [
   "bp-tl-step bp-tl-step--",    // timelineHtml(): + role (ok | active | failed | pending)
   "bp-console",                 // timelineConsoleHtml(): + (collapsed ? " is-collapsed" : "")
   "inst-tab",                   // instanceTabStripHtml(): + (on ? " is-active" : "")
-  "wh-del-status wh-del-status--", // deliveryRowHtml(): + tone (ok | danger | info)
+  "wh-del-status wh-del-status--", // delivery status pill: + tone — the value space is NOT this comment's; it is WH_DEL_TONES below, and E15 checks it
   "tlv-badge tlv-badge--",      // tlvRowHtml(): + variant (event | verify | verify-fail | audit)
   "vf-chip vf-chip--",          // verifyChipHtml(): + role (pass | fail | unknown)
   "usage-card usage-card--",    // usageMeterHtml(): + rowTone (warn | over)
@@ -354,6 +362,50 @@ const ALLOW_PREFIXES = [
 // `.dep-deferred`), so it co-merges with the rule in the same commit — a
 // deliberate guard+fix co-merge, not a guard weakened to fit.
 const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled", "deferred"];
+
+// The `wh-del-status--` VALUE SPACE, mirroring DEPLOY_STATUSES above and checked
+// by E15. `"wh-del-status wh-del-status--"` is an ALLOW_PREFIXES entry, which
+// waives the whole dynamic head — so before E15 the tone half of that class was
+// unmeasured, exactly the hole that let `.dep-cancelled` ship ruleless and paint
+// a terminal abort as "still waiting". The delivery log repeats the shape: a
+// WITHHELD alert that falls through to an unintended tone tells a team admin the
+// opposite of what happened.
+//
+// This list is not hand-trusted: E15 also DERIVES the tones `notifDeliveryTone()`
+// actually returns out of app.js and asserts the two sets are equal, so adding a
+// fifth tone in app.js reds here even if the author never reads this file.
+const WH_DEL_TONES = ["ok", "danger", "info", "muted"];
+
+// The tones deliberately painted by the BASE `.wh-del-status` pill, with no rule
+// of their own. `muted` is the shipped example: a withheld alert is neither in
+// flight nor a transport failure, and the neutral base pill IS its treatment, so
+// a `--muted` rule would only be a copy that can drift from the base.
+//
+// This is a CONSENT list and it is held to the consent doctrine: E15 reds on a
+// STALE entry too — a tone named here that has grown a rule, or that
+// `notifDeliveryTone()` no longer emits, is a consent absolving nothing, which is
+// how a consent list quietly becomes the new blind spot.
+const WH_DEL_BASE_TONES = ["muted"];
+
+// The tones `notifDeliveryTone()` in app.js actually returns. Derived, never
+// enumerated: an enumerated list is the tones somebody REMEMBERED.
+function emittedDeliveryTones(js) {
+  const start = js.indexOf("function notifDeliveryTone(");
+  if (start === -1) return null;
+  let depth = 0;
+  let i = js.indexOf("{", start);
+  if (i === -1) return null;
+  const open = i;
+  for (; i < js.length; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}" && --depth === 0) break;
+  }
+  if (depth !== 0) return null;
+  const body = js.slice(open, i);
+  const tones = new Set();
+  for (const m of body.matchAll(/return\s+"([a-z][a-z0-9-]*)"/g)) tones.add(m[1]);
+  return tones;
+}
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
@@ -1473,6 +1525,74 @@ for (const st of DEPLOY_STATUSES) {
       `and paints as an untouched/queued deployment. Add a rule next to the ` +
       `other .dep-* rules in the DEPLOYMENTS section.`,
   );
+}
+
+// E15 — every delivery-log TONE is painted, or is a NAMED base-pill consent.
+// Same family as E13 one surface over: the ALLOW_PREFIXES entry for
+// `"wh-del-status wh-del-status--"` waives the dynamic head, so nothing measured
+// the value space until here. Three ways to fail, because a value-space check
+// with only the obvious arm is half a check.
+{
+  const emitted = emittedDeliveryTones(jsRaw);
+  const declared = new Set(WH_DEL_TONES);
+  const consented = new Set(WH_DEL_BASE_TONES);
+
+  if (emitted === null) {
+    errors.push(
+      "E15 app.js  notifDeliveryTone() could not be located or parsed — the " +
+        "wh-del-status tone value space is DERIVED from its returns, so a rename " +
+        "or a rewrite must come with an update here, never a silently skipped check.",
+    );
+  } else {
+    // (a) DRIFT: app.js and WH_DEL_TONES must name the same set.
+    for (const t of emitted) {
+      if (declared.has(t)) continue;
+      errors.push(
+        `E15 __css_check.mjs  notifDeliveryTone() returns tone "${t}", which is not in ` +
+          `WH_DEL_TONES — add it there, then paint .wh-del-status--${t} or consent to ` +
+          `the base pill in WH_DEL_BASE_TONES.`,
+      );
+    }
+    for (const t of declared) {
+      if (emitted.has(t)) continue;
+      errors.push(
+        `E15 __css_check.mjs  WH_DEL_TONES names "${t}", which notifDeliveryTone() no ` +
+          `longer returns — a value space wider than reality trains the reader to ` +
+          `ignore this list. Remove it.`,
+      );
+    }
+  }
+
+  // (b) UNPAINTED: a tone with neither a rule nor a consent falls through to the
+  //     base pill by ACCIDENT, and a withheld alert reads as some other outcome.
+  for (const t of WH_DEL_TONES) {
+    if (cssClasses.has(`wh-del-status--${t}`)) continue;
+    if (consented.has(t)) continue;
+    errors.push(
+      `E15 app.css  delivery tone "${t}" has no .wh-del-status--${t} rule — the ` +
+        `wh-del-status-- head emits it, so it falls through to the .wh-del-status ` +
+        `base pill and reads as an unrelated outcome. Add a rule beside the other ` +
+        `.wh-del-status--* rules, or name it in WH_DEL_BASE_TONES if the neutral ` +
+        `base pill really is its treatment.`,
+    );
+  }
+
+  // (c) STALE CONSENT: a consent that absolves nothing is the new silent slack.
+  for (const t of WH_DEL_BASE_TONES) {
+    if (cssClasses.has(`wh-del-status--${t}`)) {
+      errors.push(
+        `E15 __css_check.mjs  WH_DEL_BASE_TONES consents "${t}" to the base pill, but ` +
+          `.wh-del-status--${t} now HAS a rule — the consent is stale. Drop the entry ` +
+          `so the rule is the thing being checked.`,
+      );
+    }
+    if (!WH_DEL_TONES.includes(t)) {
+      errors.push(
+        `E15 __css_check.mjs  WH_DEL_BASE_TONES consents "${t}", which is not a tone in ` +
+          `WH_DEL_TONES — a consent row that matches no branch consents to nothing.`,
+      );
+    }
+  }
 }
 
 // E5 — the contrast manifest, both themes.
