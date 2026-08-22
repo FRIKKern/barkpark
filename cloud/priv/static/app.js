@@ -21334,10 +21334,36 @@
     var sites = (payload.sites && typeof payload.sites === "object") ? payload.sites : {};
     var top = rows(sites.top);
     var count = num(sites.count);
+    // The extra consumer roots — the build plane's trees. Each keeps its own
+    // `status`, and `absent` is the load-bearing one: on the builder box
+    // /opt/barkpark/sites does not exist while 25 GB sits in
+    // /var/lib/containerd and /var/lib/barkpark-builder, so a root that is not
+    // there has to SAY SO. Rendering it as 0 bytes would claim an empty tree
+    // about a directory nobody has.
+    function consumerRoots(list) {
+      if (!Array.isArray(list)) return null; // null = unmeasured, [] = configured to look nowhere
+      return list.filter(function (r) {
+        return r && typeof r.path === "string" && r.path !== "";
+      }).map(function (r) {
+        var status = (r.status === "read" || r.status === "absent") ? r.status : "unmeasured";
+        return {
+          path: r.path,
+          status: status,
+          // Only a READ root is allowed to carry numbers. A -1 sentinel that
+          // slipped through with status "read" still fails num() and lands as
+          // null, so no arm can paint a negative size.
+          bytes: status === "read" ? num(r.bytes) : null,
+          top: status === "read" ? rows(r.top) : null,
+          count: status === "read" ? num(r.count) : null,
+        };
+      });
+    }
+
     return {
       journalBytes: num(payload.journal_bytes),
       dbSize: num(payload.db_size),
       topRelations: rows(payload.top_relations),
+      consumerRoots: consumerRoots(payload.consumer_roots),
       sites: {
         dir: typeof sites.dir === "string" ? sites.dir : "",
         bytes: num(sites.bytes),
@@ -21384,9 +21410,42 @@
         "</div>";
     }
 
+    // One consumer root. An ABSENT root still renders — as a stated absence,
+    // never as a zero and never by vanishing. A row that disappears is
+    // indistinguishable from a tree that holds nothing, which is the same lie
+    // in a quieter form.
+    function rootGroup(r) {
+      // Both non-read arms reuse the EXISTING .space-group / .dim rules rather
+      // than minting a modifier class. The words carry the distinction, and a
+      // new rule head would have to move the CSS ratchet for styling nobody
+      // asked for.
+      if (r.status === "absent") {
+        return '<div class="space-group">' +
+          '<div class="space-group-head"><span class="space-group-name">' + esc(r.path) + "</span>" +
+          '<span class="space-group-bytes dim">not on this box</span></div></div>';
+      }
+      if (r.status !== "read") {
+        return '<div class="space-group">' +
+          '<div class="space-group-head"><span class="space-group-name">' + esc(r.path) + "</span>" +
+          '<span class="space-group-bytes dim">not measured</span></div></div>';
+      }
+      var note = "";
+      if (r.count !== null && r.top !== null && r.count > r.top.length) {
+        note = '<span class="space-note dim">top ' + esc(String(r.top.length)) +
+          " of " + esc(String(r.count)) + "</span>";
+      }
+      return group(r.path, r.bytes, r.top, note);
+    }
+
+    var rootsHtml = "";
+    if (model.consumerRoots && model.consumerRoots.length) {
+      rootsHtml = model.consumerRoots.map(rootGroup).join("");
+    }
+
     return '<div class="space-panel">' +
       '<h3 class="space-title">What\u2019s using the disk<span class="dim">' + esc(age) + "</span></h3>" +
       group(model.sites.dir || "Sites", model.sites.bytes, model.sites.top, sitesNote) +
+      rootsHtml +
       group("Database", model.dbSize, model.topRelations, "") +
       group("Journal", model.journalBytes, null, "") +
       "</div>";

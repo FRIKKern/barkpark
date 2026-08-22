@@ -1314,13 +1314,36 @@ func TestSpaceJSONFieldNames(t *testing.T) {
 		`"root_used_bytes":`, `"root_total_bytes":`,
 		`"journal_bytes":`, `"pg_size_bytes":`, `"pg_top_relations":`,
 		`"sites_dir":`, `"sites_bytes":`, `"sites_top":`,
+		`"consumer_roots":`,
 	} {
 		if !strings.Contains(s, key) {
 			t.Errorf("space JSON missing %s; payload=%s", key, s)
 		}
 	}
-	if !strings.Contains(s, `"pg_top_relations":null`) || !strings.Contains(s, `"sites_top":null`) {
+	if !strings.Contains(s, `"pg_top_relations":null`) || !strings.Contains(s, `"sites_top":null`) ||
+		!strings.Contains(s, `"consumer_roots":null`) {
 		t.Errorf("unmeasured lists must marshal as null, never []; payload=%s", s)
+	}
+
+	// The consumer rows ride RelationSize's keys, not SiteSize's, so the
+	// control plane's existing row shaper lands them with no second code path.
+	rows, err := json.Marshal(gatherSpace(SpaceConfig{
+		ConsumerRoots:      []string{"/var/lib/containerd"},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe: func(string) (int64, []DirSize, error) {
+			return 15032385536, []DirSize{{Name: "io.containerd.snapshotter.v1.overlayfs", Bytes: 12884901888}}, nil
+		},
+	}).ConsumerRoots)
+	if err != nil {
+		t.Fatalf("marshal consumer roots: %v", err)
+	}
+	for _, key := range []string{`"path":`, `"status":"read"`, `"bytes":`, `"top":`, `"count":`, `"name":`} {
+		if !strings.Contains(string(rows), key) {
+			t.Errorf("consumer-root JSON missing %s; rows=%s", key, rows)
+		}
+	}
+	if strings.Contains(string(rows), `"slug":`) {
+		t.Errorf("consumer rows must not use SiteSize's `slug` key — a containerd directory is a name; rows=%s", rows)
 	}
 }
 
@@ -1601,4 +1624,347 @@ type errRunner struct{}
 
 func (errRunner) Run(string, ...string) (string, error) {
 	return "", errors.New("probe unreadable")
+}
+
+// --- the consumer roots (the build plane's disk) ------------------------------
+//
+// realBuildPlaneDu is VERBATIM `nice -n 19 ionice -c3 du -hx -d1 <dir>` output,
+// captured 2026-08-22 over ssh from the build-plane box at 91.98.139.58 — the
+// box that motivated this axis, whose root filesystem read 100% full with
+// 285 MB free at capture time.
+//
+// It is a REAL fixture on purpose. A synthesised one is written in the shape
+// the parser is already assumed to handle, which makes a green here mean
+// nothing; these strings carry the actual coreutils spacing, the actual
+// containerd directory names, and the "4.0K" rows a hand-written fixture would
+// have tidied away.
+var realBuildPlaneDu = map[string]string{
+	"/var/lib/containerd": "4.0K\t/var/lib/containerd/tmpmounts\n" +
+		"3.1M\t/var/lib/containerd/io.containerd.metadata.v1.bolt\n" +
+		"2.0G\t/var/lib/containerd/io.containerd.content.v1.content\n" +
+		"8.0K\t/var/lib/containerd/io.containerd.grpc.v1.introspection\n" +
+		"12K\t/var/lib/containerd/io.containerd.runtime.v2.task\n" +
+		"4.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.btrfs\n" +
+		"4.0K\t/var/lib/containerd/io.containerd.sandbox.controller.v1.shim\n" +
+		"12G\t/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs\n" +
+		"4.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.blockfile\n" +
+		"8.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.native\n" +
+		"4.0K\t/var/lib/containerd/io.containerd.snapshotter.v1.erofs\n" +
+		"14G\t/var/lib/containerd\n",
+	"/var/lib/barkpark-builder": "11G\t/var/lib/barkpark-builder/images\n" +
+		"1.8M\t/var/lib/barkpark-builder/uploads\n" +
+		"11G\t/var/lib/barkpark-builder\n",
+	"/var/log/journal": "8.1M\t/var/log/journal/f8537ed2a6984286b86d626a60059275\n" +
+		"881M\t/var/log/journal/e82ca0d33eb64f0f84e134be7b72c656\n" +
+		"889M\t/var/log/journal\n",
+}
+
+// buildPlaneRunner is a probeRunner that replays realBuildPlaneDu for the roots
+// that box has and reproduces coreutils' actual failure for the one it does
+// not. `/opt/barkpark/sites` genuinely does not exist there — the ssh capture
+// returned exactly this text with rc=1.
+func buildPlaneRunner(t *testing.T) probeRunner {
+	t.Helper()
+	return func(name string, args ...string) (string, error) {
+		dir := args[len(args)-1]
+		if out, ok := realBuildPlaneDu[dir]; ok {
+			return out, nil
+		}
+		return "du: cannot access '" + dir + "': No such file or directory\n",
+			errors.New("exit status 1")
+	}
+}
+
+// TestConsumerRootAbsentIsNeverZero is the whole point of the axis, and its
+// failure message is the bug it exists to catch:
+//
+//	a root that is not on this box must report ABSENT with the -1 sentinel.
+//	Reporting 0 bytes claims "we walked this tree and it is empty" about a
+//	directory that does not exist — which is how a probe pointed at the wrong
+//	root came to read as good news on a box that was 100% full.
+//
+// It also pins that the absent root STAYS IN THE LIST. Dropping it would be the
+// same bug by omission: a payload with no row for a root nobody can tell from a
+// box where that root holds nothing.
+func TestConsumerRootAbsentIsNeverZero(t *testing.T) {
+	// The build-plane box's real shape: two roots present, one absent.
+	present := map[string]bool{
+		"/var/lib/containerd":       true,
+		"/var/lib/barkpark-builder": true,
+	}
+	s := gatherSpace(SpaceConfig{
+		ConsumerRoots:      []string{"/var/lib/containerd", "/opt/barkpark/sites", "/var/lib/barkpark-builder"},
+		ConsumerRootExists: func(p string) bool { return present[p] },
+		ConsumerRootProbe:  newConsumerRootProbeWith(buildPlaneRunner(t)),
+	})
+
+	if len(s.ConsumerRoots) != 3 {
+		t.Fatalf("ConsumerRoots has %d entries, want 3 — the ABSENT root must stay in the list; "+
+			"a missing row is indistinguishable from a root that holds nothing", len(s.ConsumerRoots))
+	}
+
+	var absent *ConsumerRoot
+	for i := range s.ConsumerRoots {
+		if s.ConsumerRoots[i].Path == "/opt/barkpark/sites" {
+			absent = &s.ConsumerRoots[i]
+		}
+	}
+	if absent == nil {
+		t.Fatal("no entry for /opt/barkpark/sites — the root that does not exist is the one that must be reported")
+	}
+	if absent.Bytes == 0 {
+		t.Fatalf("absent root %s reported 0 bytes — that is the measured claim "+
+			"\"this tree is empty\" about a directory that is not on the box, and it is "+
+			"exactly the reading that let a 100%%-full builder rank healthy", absent.Path)
+	}
+	if absent.Status != ConsumerRootAbsent {
+		t.Errorf("absent root Status = %q, want %q — %q and %q are different operator actions "+
+			"(point the probe somewhere real vs. fix the probe)",
+			absent.Status, ConsumerRootAbsent, ConsumerRootAbsent, ConsumerRootUnmeasured)
+	}
+	if absent.Bytes != -1 || absent.Count != -1 {
+		t.Errorf("absent root = (bytes %d, count %d), want both at the -1 sentinel", absent.Bytes, absent.Count)
+	}
+	if absent.Top != nil {
+		t.Errorf("absent root Top = %v, want nil — an unmeasured list is null, never []", absent.Top)
+	}
+
+	// And the two roots that ARE there were still read: one missing tree must
+	// never erase the ones that were measured.
+	for _, r := range s.ConsumerRoots {
+		if r.Path == "/opt/barkpark/sites" {
+			continue
+		}
+		if r.Status != ConsumerRootRead || r.Bytes <= 0 {
+			t.Errorf("root %s = %+v, want a completed read — an absent sibling must not poison it", r.Path, r)
+		}
+	}
+}
+
+// TestConsumerRootsNameTheBuildPlanesTwentyFiveGigabytes replays the REAL du
+// output from the box and asserts the payload names the 25 GiB that the sites
+// axis structurally could not see.
+//
+// The number is the finding: containerd 14 GiB + barkpark-builder 11 GiB on a
+// 37 GiB root filesystem. If this test ever goes quiet about them, the space
+// payload is back to naming ~1 GiB of a 34 GiB problem.
+func TestConsumerRootsNameTheBuildPlanesTwentyFiveGigabytes(t *testing.T) {
+	s := gatherSpace(SpaceConfig{
+		ConsumerRoots:      DefaultConsumerRoots,
+		ConsumerRootExists: func(p string) bool { _, ok := realBuildPlaneDu[p]; return ok },
+		ConsumerRootProbe:  newConsumerRootProbeWith(buildPlaneRunner(t)),
+	})
+
+	byPath := map[string]ConsumerRoot{}
+	for _, r := range s.ConsumerRoots {
+		byPath[r.Path] = r
+	}
+
+	containerd, builder := byPath["/var/lib/containerd"], byPath["/var/lib/barkpark-builder"]
+	if containerd.Status != ConsumerRootRead || builder.Status != ConsumerRootRead {
+		t.Fatalf("build-plane roots = (%+v, %+v), want both read", containerd, builder)
+	}
+
+	const gib = int64(1) << 30
+	if containerd.Bytes != 14*gib {
+		t.Errorf("/var/lib/containerd = %d bytes, want %d (14G, the box's biggest single consumer)", containerd.Bytes, 14*gib)
+	}
+	if builder.Bytes != 11*gib {
+		t.Errorf("/var/lib/barkpark-builder = %d bytes, want %d (11G)", builder.Bytes, 11*gib)
+	}
+	if sum := containerd.Bytes + builder.Bytes; sum != 25*gib {
+		t.Errorf("build plane names %d bytes, want %d — the 25 GiB measured on the box", sum, 25*gib)
+	}
+
+	// The biggest child is named, not just the total: an operator acts on
+	// io.containerd.snapshotter.v1.overlayfs, never on "/var/lib/containerd".
+	if len(containerd.Top) == 0 || containerd.Top[0].Name != "io.containerd.snapshotter.v1.overlayfs" {
+		t.Errorf("containerd Top = %+v, want the overlayfs snapshotter (12G) named first", containerd.Top)
+	}
+	if containerd.Top[0].Bytes != 12*gib {
+		t.Errorf("containerd biggest child = %d bytes, want %d (12G)", containerd.Top[0].Bytes, 12*gib)
+	}
+	if len(builder.Top) == 0 || builder.Top[0].Name != "images" || builder.Top[0].Bytes != 11*gib {
+		t.Errorf("builder Top = %+v, want images at 11G named first", builder.Top)
+	}
+	if journal := byPath["/var/log/journal"]; journal.Status != ConsumerRootRead || journal.Bytes != 932184064 {
+		t.Errorf("/var/log/journal = %+v, want a read of 889M — measured as a tree, so a box "+
+			"without journald still gets an answer", journal)
+	}
+}
+
+// TestConsumerRootsHonestUnknowns pins the other two honest states: no roots
+// configured is nil (not []), and a root whose walk FAILS is `unmeasured` —
+// never `absent`, because "we could not read it" is not "it is not there".
+func TestConsumerRootsHonestUnknowns(t *testing.T) {
+	t.Run("no roots configured", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{SitesDir: "/opt/barkpark/sites"})
+		if s.ConsumerRoots != nil {
+			t.Errorf("ConsumerRoots = %v, want nil — an agent never told where to look has not "+
+				"measured an empty fleet of roots, it has not measured", s.ConsumerRoots)
+		}
+	})
+
+	t.Run("probe fails on a root that IS there", func(t *testing.T) {
+		s := gatherSpace(SpaceConfig{
+			ConsumerRoots:      []string{"/var/lib/containerd"},
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe: func(string) (int64, []DirSize, error) {
+				// A du killed at its deadline: rows already printed, non-zero exit.
+				return 0, []DirSize{{Name: "half", Bytes: 1}}, errors.New("signal: killed")
+			},
+		})
+		got := s.ConsumerRoots[0]
+		if got.Status != ConsumerRootUnmeasured {
+			t.Errorf("failed walk Status = %q, want %q — a timeout is not evidence the tree is missing",
+				got.Status, ConsumerRootUnmeasured)
+		}
+		if got.Bytes != -1 || got.Count != -1 || got.Top != nil {
+			t.Errorf("failed walk = %+v, want the sentinels — a partial du must be DISCARDED, "+
+				"not landed as a measurement", got)
+		}
+	})
+
+	t.Run("no exists-check wired", func(t *testing.T) {
+		// Without a presence check we genuinely do not know why the walk
+		// failed, so the honest answer is `unmeasured`, never `absent`.
+		s := gatherSpace(SpaceConfig{
+			ConsumerRoots:     []string{"/nope"},
+			ConsumerRootProbe: newConsumerRootProbeWith(buildPlaneRunner(t)),
+		})
+		if got := s.ConsumerRoots[0]; got.Status != ConsumerRootUnmeasured || got.Bytes != -1 {
+			t.Errorf("unchecked failing root = %+v, want unmeasured/-1 — claiming ABSENT here "+
+				"would be a guess dressed as a measurement", got)
+		}
+	})
+}
+
+// TestConsumerRootsAreBounded pins both caps, and pins that the CHILD cap does
+// not eat its own denominator: Count is what the walk FOUND, so a short Top can
+// say it is short. That is the sites axis's SitesCount lesson applied here.
+func TestConsumerRootsAreBounded(t *testing.T) {
+	t.Run("root list", func(t *testing.T) {
+		many := make([]string, consumerRootsLimit+4)
+		for i := range many {
+			many[i] = fmt.Sprintf("/root%d", i)
+		}
+		s := gatherSpace(SpaceConfig{
+			ConsumerRoots:      many,
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe:  func(string) (int64, []DirSize, error) { return 1, nil, nil },
+		})
+		if len(s.ConsumerRoots) != consumerRootsLimit {
+			t.Errorf("configured %d roots, payload carried %d, want the %d cap — every root is one "+
+				"bounded du, so the cap bounds wall time as well as bytes",
+				len(many), len(s.ConsumerRoots), consumerRootsLimit)
+		}
+	})
+
+	t.Run("children, with the count surviving the cap", func(t *testing.T) {
+		children := make([]DirSize, consumerTopLimit+7)
+		for i := range children {
+			children[i] = DirSize{Name: fmt.Sprintf("d%d", i), Bytes: int64(1000 - i)}
+		}
+		s := gatherSpace(SpaceConfig{
+			ConsumerRoots:      []string{"/var/lib/containerd"},
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe:  func(string) (int64, []DirSize, error) { return 99, children, nil },
+		})
+		got := s.ConsumerRoots[0]
+		if len(got.Top) != consumerTopLimit {
+			t.Errorf("Top has %d rows, want the %d cap", len(got.Top), consumerTopLimit)
+		}
+		if got.Count != len(children) {
+			t.Errorf("Count = %d, want %d — the count must be what the walk FOUND, not what "+
+				"survived the cap; a cap that eats its denominator can never announce itself",
+				got.Count, len(children))
+		}
+	})
+}
+
+// TestSpacePayloadStaysBounded measures rather than hopes: it marshals a
+// build-plane-shaped report with the root list at its cap and every root at its
+// child cap, and pins the wire size. The caps exist to bound this number; if it
+// grows past the ceiling, LOWER A CAP — do not raise the ceiling.
+func TestSpacePayloadStaysBounded(t *testing.T) {
+	roots := make([]string, consumerRootsLimit)
+	children := make([]DirSize, consumerTopLimit)
+	for i := range children {
+		// Realistic worst case: containerd's longest actual directory name.
+		children[i] = DirSize{Name: "io.containerd.sandbox.controller.v1.shim", Bytes: 12884901888}
+	}
+	for i := range roots {
+		roots[i] = fmt.Sprintf("/var/lib/some-fairly-long-consumer-root-%d", i)
+	}
+	sites := make([]SiteSize, sitesTopLimit)
+	for i := range sites {
+		sites[i] = SiteSize{Slug: fmt.Sprintf("a-realistic-site-slug-%d", i), Bytes: 658505728}
+	}
+
+	s := gatherSpace(SpaceConfig{
+		RootProbe:          func() (int64, int64, error) { return 37937041408, 39964635136, nil },
+		JournalProbe:       func() (int64, error) { return 932184064, nil },
+		PGSizeProbe:        func() (int64, error) { return 3477617687, nil },
+		SitesDir:           "/opt/barkpark/sites",
+		SitesProbe:         func() (int64, []SiteSize, error) { return 4294967296, sites, nil },
+		ConsumerRoots:      roots,
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe:  func(string) (int64, []DirSize, error) { return 15032385536, children, nil },
+	})
+
+	body, err := json.Marshal(s)
+	if err != nil {
+		t.Fatalf("marshal SpaceReport: %v", err)
+	}
+	const ceiling = 4096
+	if len(body) > ceiling {
+		t.Errorf("space payload is %d bytes at full caps, over the %d-byte ceiling. "+
+			"LOWER consumerRootsLimit (%d) or consumerTopLimit (%d) — the caps exist to bound "+
+			"this number, and raising the ceiling instead is how a payload grows without anyone deciding to.",
+			len(body), ceiling, consumerRootsLimit, consumerTopLimit)
+	}
+	t.Logf("space payload at full caps: %d bytes (ceiling %d)", len(body), ceiling)
+}
+
+// TestConsumerRootExistsIsAStatNotADuGuess pins the presence check against the
+// real filesystem: a directory that is there is PRESENT, one that is not is
+// ABSENT, and — the arm that matters — a path we are not allowed to read is
+// PRESENT, so its du failure lands as `unmeasured`. Calling an unreadable root
+// "absent" would be the original bug wearing a different hat.
+func TestConsumerRootExistsIsAStatNotADuGuess(t *testing.T) {
+	exists := NewConsumerRootExists()
+	dir := t.TempDir()
+
+	// Subtests, so the permission arm's skip cannot swallow these two: a whole
+	// test reported SKIP is a test whose passing arms nobody can see.
+	t.Run("a directory that is there", func(t *testing.T) {
+		if !exists(dir) {
+			t.Errorf("exists(%q) = false for a directory that is right there", dir)
+		}
+	})
+
+	t.Run("a path that is not", func(t *testing.T) {
+		if exists(filepath.Join(dir, "definitely-not-here")) {
+			t.Error("exists() = true for a path that does not exist")
+		}
+	})
+
+	t.Run("a directory we may not read into", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root: a 0000 directory is still readable, so this arm cannot be exercised")
+		}
+		locked := filepath.Join(dir, "locked")
+		if err := os.Mkdir(locked, 0o000); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(locked, 0o700) })
+		if _, err := os.Stat(filepath.Join(locked, "child")); err == nil {
+			t.Skip("this sandbox stats through a 0000 directory; the permission arm is unreachable here")
+		}
+		if !exists(locked) {
+			t.Error("exists() = false for a directory we merely lack permission to READ INTO — " +
+				"a permission denial is not evidence the root is missing, and reporting ABSENT " +
+				"there recreates the very bug this axis fixes")
+		}
+	})
 }

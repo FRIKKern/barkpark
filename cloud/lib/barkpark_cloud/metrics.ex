@@ -67,6 +67,10 @@ defmodule BarkparkCloud.Metrics do
           db_size: number | nil,
           top_relations: [...] | nil,
           sites: %{dir: ..., bytes: ..., top: [...] | nil, count: number | nil},
+          # The build plane's roots. Each carries a status of "read" | "absent"
+          # | "unmeasured" — a root that is not on this box says ABSENT and
+          # keeps the -1 sentinel, never 0 bytes.
+          consumer_roots: [%{path: ..., status: ..., bytes: ..., top: [...] | nil, count: ...}] | nil,
           reported_at: String.t() | nil
         } | nil,
         service_health: %{pass: non_neg_integer, total: non_neg_integer, failing: [String.t()]}

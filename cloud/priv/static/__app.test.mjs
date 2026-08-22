@@ -10219,6 +10219,65 @@ test("diagnosis: no space row is an honest empty state, never a zeroed disk", ()
   assert.equal(hooks.metricsBytesText(-1), "\u2014", "the agent's unwired sentinel is not a size");
 });
 
+test("diagnosis: a consumer root that is NOT ON THIS BOX says so — never 0 B, never a missing row", () => {
+  // The build-plane box's real shape, 2026-08-22: /opt/barkpark/sites does not
+  // exist there while 25 GB sits in two roots the sites axis cannot see.
+  const model = hooks.spaceModel({
+    sites: { dir: "/opt/barkpark/sites", bytes: null, top: null, count: null },
+    consumer_roots: [
+      {
+        path: "/var/lib/containerd", status: "read", bytes: 15032385536, count: 11,
+        top: [{ name: "io.containerd.snapshotter.v1.overlayfs", bytes: 12884901888 }],
+      },
+      { path: "/var/lib/barkpark-builder", status: "read", bytes: 11811160064, count: 2, top: [] },
+      { path: "/opt/barkpark/sites", status: "absent", bytes: -1, count: -1, top: null },
+      { path: "/var/lib/snapd", status: "unmeasured", bytes: -1, count: -1, top: null },
+    ],
+  }, null);
+
+  assert.equal(model.consumerRoots.length, 4, "the absent root must survive into the model");
+
+  const absent = model.consumerRoots.find((r) => r.path === "/opt/barkpark/sites");
+  assert.equal(absent.status, "absent");
+  assert.equal(absent.bytes, null, "an absent root has no size — not -1, and above all not 0");
+  assert.notEqual(absent.bytes, 0);
+
+  const html = hooks.spacePanelHtml(model);
+  // The 25 GB the sites axis could not see, named.
+  assert.match(html, /var\/lib\/containerd/);
+  assert.match(html, /var\/lib\/barkpark-builder/);
+  assert.match(html, /io\.containerd\.snapshotter\.v1\.overlayfs/);
+  // The absent root is STATED, not dropped and not zeroed.
+  assert.match(html, /not on this box/);
+  assert.match(html, /not measured/, "a root we failed to read is a different fact from one that is not there");
+  assert.doesNotMatch(html, /0 B/, "a root with no reading must never render as an empty tree");
+  assert.doesNotMatch(html, /-1/, "the agent's sentinel is not a size a human should ever see");
+});
+
+test("diagnosis: consumer roots are TOTAL — absent list vs. empty list, and garbage is dropped", () => {
+  // No field at all (an agent predating the axis) = UNMEASURED, not "none".
+  assert.equal(hooks.spaceModel({ sites: {} }, null).consumerRoots, null);
+  for (const bad of [null, "x", 7, {}]) {
+    assert.equal(hooks.spaceModel({ consumer_roots: bad }, null).consumerRoots, null);
+  }
+  // An agent configured to measure NO roots sends [] and keeps it — a different
+  // fact from an agent that was never upgraded.
+  assert.deepEqual(hooks.spaceModel({ consumer_roots: [] }, null).consumerRoots, []);
+
+  // A row with no path cannot be rendered or acted on; an unrecognised status
+  // degrades to "unmeasured", never to a claim.
+  const m = hooks.spaceModel({
+    consumer_roots: [
+      { status: "read", bytes: 5 },
+      "junk",
+      { path: "/ok", status: "brand-new-word", bytes: 99 },
+    ],
+  }, null);
+  assert.deepEqual(m.consumerRoots.map((r) => r.path), ["/ok"]);
+  assert.equal(m.consumerRoots[0].status, "unmeasured");
+  assert.equal(m.consumerRoots[0].bytes, null, "an unknown status must not carry a number through");
+});
+
 test("diagnosis: the models are TOTAL — garbage never throws, and never fabricates calm", () => {
   for (const bad of [null, undefined, 0, "x", [], { signals: "nope" }, { state: "made-up" }]) {
     const m = hooks.pressureModel(bad);

@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -447,6 +448,80 @@ type SpaceReport struct {
 	// field here — and NEVER 0, which is the measured claim "this tree is
 	// empty".
 	SitesCount int `json:"sites_count"`
+
+	// ConsumerRoots is the BUILD PLANE's disk, and every other tree the sites
+	// axis structurally cannot see.
+	//
+	// WHY IT EXISTS, measured: on the build-plane box at 91.98.139.58 the root
+	// filesystem read 100% full with 285 MB free, and 25 GiB of it sat in
+	// /var/lib/containerd (14 GiB) and /var/lib/barkpark-builder (11 GiB).
+	// SitesDir there is /opt/barkpark/sites, which DOES NOT EXIST on that box —
+	// it runs barkpark-builder.service and barkpark-runtime.service, not the
+	// site tree this payload was first written against. So every field above
+	// named ~1 GiB of a 34 GiB problem, and the box that most needed the
+	// diagnosis was the box the diagnosis could not see.
+	//
+	// Each entry says WHICH root it is and WHETHER IT WAS READ, because the
+	// failure being repaired is a probe pointed at a root that is not there
+	// reporting "nothing to see" for "I did not look" — see ConsumerRoot.Status.
+	//
+	// nil (a JSON null) when no roots were configured at all: an agent that was
+	// never told where to look has not measured an empty fleet of roots, it has
+	// not measured.
+	ConsumerRoots []ConsumerRoot `json:"consumer_roots"`
+}
+
+// The three ConsumerRoot.Status values. They are a CLOSED set and they are
+// deliberately three, not two: "we read it", "it is not on this box", and "we
+// tried and failed" are three different operator actions (act on the bytes /
+// point the probe somewhere real / fix the probe), and collapsing the last two
+// into one is how a wrong root became invisible in the first place.
+const (
+	// ConsumerRootRead — the walk completed. Bytes and Count are real.
+	ConsumerRootRead = "read"
+	// ConsumerRootAbsent — the path does not exist on this box. This is a
+	// MEASUREMENT ("we looked; there is no such directory"), not a failure, and
+	// it is the whole point of the field: it is the state that must never
+	// render as 0 bytes.
+	ConsumerRootAbsent = "absent"
+	// ConsumerRootUnmeasured — no probe wired, or the walk errored/timed out.
+	// Bytes and Count keep their -1 sentinel.
+	ConsumerRootUnmeasured = "unmeasured"
+)
+
+// ConsumerRoot is one measured (or honestly unmeasured) disk-consumer root.
+//
+// Bytes and Count carry the SAME -1 sentinel every other number in this payload
+// uses, and they carry it for `absent` too. An absent root reporting 0 bytes
+// would be the claim "this directory is empty", which is a fact about a
+// directory that is not there — the exact confusion Status exists to end.
+type ConsumerRoot struct {
+	// Path is the root as CONFIGURED, echoed back whether or not it was read,
+	// for the same reason SitesDir is: a wrong root has to be visible.
+	Path string `json:"path"`
+	// Status is one of the three constants above. A reader branches on THIS,
+	// never on Bytes >= 0.
+	Status string `json:"status"`
+	// Bytes is the whole tree's size; Top names its biggest direct children,
+	// capped at consumerTopLimit; Count is how many children the walk FOUND, so
+	// a capped list can say it is capped (the sites axis's own SitesCount
+	// lesson: a cap that eats its denominator can never announce itself).
+	// -1 / nil / -1 unless Status is ConsumerRootRead.
+	Bytes int64     `json:"bytes"`
+	Top   []DirSize `json:"top"`
+	Count int       `json:"count"`
+}
+
+// DirSize is one named child of a consumer root and the bytes it occupies.
+//
+// Its JSON keys are `name`/`bytes` — RelationSize's keys, NOT SiteSize's
+// `slug` — deliberately: the control plane's row shaper
+// (telemetry.ex relation_sizes/1) already accepts both and emits `name`, so
+// this rides the landing path that exists instead of minting a second one. A
+// containerd snapshotter directory is a name, never a slug.
+type DirSize struct {
+	Name  string `json:"name"`
+	Bytes int64  `json:"bytes"`
 }
 
 // CommandRunner runs a single resolved argv and returns combined output. It is
@@ -1052,6 +1127,32 @@ type SpaceConfig struct {
 	// count it reports is the count the walk FOUND, not the count that survived
 	// the cap. A cap that eats its own denominator can never say when it binds.
 	SitesProbe func() (totalBytes int64, all []SiteSize, err error)
+
+	// ConsumerRoots is the ORDERED list of extra disk-consumer roots to measure
+	// — the build plane's trees and anything else the sites axis cannot see.
+	// Empty → SpaceReport.ConsumerRoots stays nil (not measured), never [].
+	//
+	// It is a LIST and it is configurable because the fleet is not one shape:
+	// the box that motivated this runs the build plane and has no sites tree at
+	// all, while a content box has a sites tree and no containerd. A single
+	// hardcoded root is how one of those two became unmeasurable.
+	ConsumerRoots []string
+
+	// ConsumerRootExists reports whether a root is present on this box. It is a
+	// SEPARATE seam from the probe on purpose: "not there" is a measurement
+	// this agent can make with a stat, in microseconds, without shelling out —
+	// and it is the one answer a du error can never give reliably, because a
+	// du that fails on a missing directory and a du killed at its deadline both
+	// come back as "non-zero exit, some text". nil → every configured root that
+	// the probe cannot read reports `unmeasured` (we genuinely do not know).
+	ConsumerRootExists func(path string) bool
+
+	// ConsumerRootProbe measures ONE root: (total bytes, EVERY direct child,
+	// sorted biggest first). Like SitesProbe it does NOT cap — gatherSpace caps
+	// at the payload boundary so Count survives the cap. An error → that root
+	// reports `unmeasured`; the other roots are unaffected, because one
+	// unreadable tree must not erase the ones that were read.
+	ConsumerRootProbe func(path string) (totalBytes int64, all []DirSize, err error)
 }
 
 // gatherSpace assembles a SpaceReport from the wired probes. Like gatherReport
@@ -1109,7 +1210,60 @@ func gatherSpace(cfg SpaceConfig) SpaceReport {
 		}
 	}
 
+	s.ConsumerRoots = gatherConsumerRoots(cfg)
+
 	return s
+}
+
+// gatherConsumerRoots measures every configured consumer root, in order, and
+// returns one entry per root — INCLUDING the roots that are not on this box.
+//
+// The absent entry is the whole reason this function exists. Dropping a missing
+// root from the list would restore exactly the bug being fixed: a payload with
+// no /var/lib/containerd row is indistinguishable from a payload from a box
+// where containerd holds nothing, and a reader that sees no row for a root it
+// asked about learns nothing about which of those two is true.
+//
+// It returns nil (never an empty slice) when no roots are configured: an agent
+// that was never told where to look has not measured "no roots".
+func gatherConsumerRoots(cfg SpaceConfig) []ConsumerRoot {
+	roots := cfg.ConsumerRoots
+	if len(roots) == 0 {
+		return nil
+	}
+	if len(roots) > consumerRootsLimit {
+		roots = roots[:consumerRootsLimit]
+	}
+
+	out := make([]ConsumerRoot, 0, len(roots))
+	for _, path := range roots {
+		// Every root starts UNMEASURED with both sentinels set, so any arm that
+		// falls through — nil probe, error, timeout — lands honestly by default
+		// rather than by remembering to.
+		r := ConsumerRoot{
+			Path:   path,
+			Status: ConsumerRootUnmeasured,
+			Bytes:  -1,
+			Count:  -1,
+		}
+		switch {
+		case cfg.ConsumerRootExists != nil && !cfg.ConsumerRootExists(path):
+			// Measured, and the measurement is "there is no such directory".
+			// Bytes and Count stay -1: a tree that does not exist is not empty.
+			r.Status = ConsumerRootAbsent
+		case cfg.ConsumerRootProbe != nil:
+			if total, all, err := cfg.ConsumerRootProbe(path); err == nil {
+				r.Status = ConsumerRootRead
+				r.Bytes, r.Count = total, len(all)
+				if len(all) > consumerTopLimit {
+					all = all[:consumerTopLimit]
+				}
+				r.Top = all
+			}
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // The space probes' deadlines. Each is probe-SPECIFIC, and each is a LIFETIME
@@ -1129,6 +1283,46 @@ var (
 // it between 20 and 25 realistic high-entropy slugs (D58). The cap is also the
 // useful shape: an operator acts on the biggest site, not on the 40th.
 const sitesTopLimit = 10
+
+// consumerRootsLimit and consumerTopLimit are the consumer axis's two bounds,
+// and they are bounds on a CONFIGURED list, which is the point: the roots are
+// operator-supplied, so a fat-fingered unit file must not be able to turn the
+// space beat into a rootfs walk or the payload into a kilobyte of directory
+// names.
+//
+// consumerRootsLimit also bounds WALL TIME, not just bytes: every root is one
+// bounded `du` under duProbeTimeout, so six roots is a 6-minute worst case on a
+// box that is already struggling. That is the number to lower if the beat is
+// ever seen crowding a cutover — never the honesty.
+//
+// consumerTopLimit is 5 rather than the sites axis's 10 because it multiplies:
+// six roots at ten children each is sixty rows on a payload the sites axis
+// already budgets ten for. TestSpacePayloadStaysBounded marshals a real
+// jarl-shaped report and pins the resulting size, so this arithmetic is a
+// measurement rather than a hope.
+const (
+	consumerRootsLimit = 6
+	consumerTopLimit   = 5
+)
+
+// DefaultConsumerRoots is what the agent measures when nothing overrides it.
+//
+// It is three paths and each earned its place on a real box:
+//
+//   - /var/lib/containerd — 14 GiB on the build-plane box, its single biggest
+//     consumer, 12 GiB of that in one overlayfs snapshotter directory.
+//   - /var/lib/barkpark-builder — 11 GiB, effectively all of it in `images`.
+//   - /var/log/journal — 889 MiB, and measured HERE as a tree as well as via
+//     `journalctl --disk-usage` above, because the header read needs journald
+//     on the box and the tree walk does not.
+//
+// Two of the three do not exist on a content box, and one does not exist on the
+// build box. That asymmetry is why they report `absent` instead of vanishing.
+var DefaultConsumerRoots = []string{
+	"/var/lib/containerd",
+	"/var/lib/barkpark-builder",
+	"/var/log/journal",
+}
 
 // boundedSpaceRunner returns a probeRunner bound to timeout. Every space probe
 // goes through one — a probe that can run forever is the runaway-diagnostic
@@ -1262,6 +1456,59 @@ func newSitesSpaceProbeWith(run probeRunner, dir string) func() (int64, []SiteSi
 			return -1, nil, fmt.Errorf("du %s: %w: %s", dir, err, truncate(strings.TrimSpace(out), 120))
 		}
 		return parseDuTree(out, dir)
+	}
+}
+
+// NewConsumerRootExists builds the production presence check: a plain
+// os.Stat.
+//
+// It is a stat and NOT a du-error inspection on purpose. `du` on a missing
+// directory exits non-zero with "cannot access", and `du` killed at its
+// deadline also exits non-zero — string-matching the first out of the second is
+// locale-dependent, coreutils-version-dependent, and wrong the first time a
+// timeout message happens to contain the word "No". A stat answers the
+// question the payload is actually asking, in microseconds, with no shell.
+//
+// Anything that is NOT a "does not exist" error — a permission denial, an I/O
+// error on a failing disk — reports PRESENT, so the du probe runs and its
+// failure lands as `unmeasured`. Claiming a root is absent because we were not
+// allowed to look at it would be the original bug wearing a different hat.
+func NewConsumerRootExists() func(string) bool {
+	return func(path string) bool {
+		_, err := os.Stat(path)
+		return !errors.Is(err, fs.ErrNotExist)
+	}
+}
+
+// NewConsumerRootProbe builds the production per-root probe: the SAME bounded,
+// shell-free `nice -n 19 ionice -c3 du -hx -d1 <dir>` argv the sites probe
+// uses, under the same duProbeTimeout, with the same discard-on-error rule (a
+// partially-printed walk is not a measurement).
+func NewConsumerRootProbe() func(string) (int64, []DirSize, error) {
+	return newConsumerRootProbeWith(boundedSpaceRunner(duProbeTimeout))
+}
+
+func newConsumerRootProbeWith(run probeRunner) func(string) (int64, []DirSize, error) {
+	return func(dir string) (int64, []DirSize, error) {
+		if dir == "" {
+			return -1, nil, errors.New("du: empty root")
+		}
+		out, err := run("nice", duSitesArgs(dir)...)
+		if err != nil {
+			return -1, nil, fmt.Errorf("du %s: %w: %s", dir, err, truncate(strings.TrimSpace(out), 120))
+		}
+		total, rows, err := parseDuTree(out, dir)
+		if err != nil {
+			return -1, nil, err
+		}
+		// One parser, two payload shapes. parseDuTree already returns the rows
+		// biggest-first and already refuses output with no total row; all that
+		// differs is the JSON key the wire wants (see DirSize).
+		children := make([]DirSize, 0, len(rows))
+		for _, r := range rows {
+			children = append(children, DirSize{Name: r.Slug, Bytes: r.Bytes})
+		}
+		return total, children, nil
 	}
 }
 
