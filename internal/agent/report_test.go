@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"runtime/debug"
 	"strings"
@@ -1045,9 +1046,12 @@ func TestSitesTopCappedAtTen(t *testing.T) {
 	}
 	b.WriteString("40G\t/opt/barkpark/sites\n")
 
-	total, all, err := parseDuTree(b.String(), "/opt/barkpark/sites")
+	total, all, degraded, err := parseDuTree(b.String(), "/opt/barkpark/sites", duUnitHuman)
 	if err != nil {
 		t.Fatalf("parseDuTree: %v", err)
+	}
+	if degraded != nil {
+		t.Errorf("degraded = %v, want nil — this fixture carries no du diagnostics", degraded)
 	}
 	if total != 40*(1<<30) {
 		t.Errorf("total = %d, want the root row's bytes", total)
@@ -1146,8 +1150,8 @@ func TestSitesCountSaysWhenTheCapBinds(t *testing.T) {
 // into a confident-looking partial list.
 func TestParseDuTreeRequiresTotalRow(t *testing.T) {
 	out := "628M\t/opt/barkpark/sites/search-ember\n577M\t/opt/barkpark/sites/next-proof\n"
-	if total, top, err := parseDuTree(out, "/opt/barkpark/sites"); err == nil || total != -1 || top != nil {
-		t.Errorf("got (%d, %+v, %v), want (-1, nil, an error)", total, top, err)
+	if total, top, degraded, err := parseDuTree(out, "/opt/barkpark/sites", duUnitHuman); err == nil || total != -1 || top != nil || degraded != nil {
+		t.Errorf("got (%d, %+v, %v, %v), want (-1, nil, nil, an error)", total, top, degraded, err)
 	}
 }
 
@@ -1330,8 +1334,8 @@ func TestSpaceJSONFieldNames(t *testing.T) {
 	rows, err := json.Marshal(gatherSpace(SpaceConfig{
 		ConsumerRoots:      []string{"/var/lib/containerd"},
 		ConsumerRootExists: func(string) bool { return true },
-		ConsumerRootProbe: func(string) (int64, []DirSize, error) {
-			return 15032385536, []DirSize{{Name: "io.containerd.snapshotter.v1.overlayfs", Bytes: 12884901888}}, nil
+		ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+			return 15032385536, []DirSize{{Name: "io.containerd.snapshotter.v1.overlayfs", Bytes: 12884901888}}, nil, nil
 		},
 	}).ConsumerRoots)
 	if err != nil {
@@ -1809,9 +1813,9 @@ func TestConsumerRootsHonestUnknowns(t *testing.T) {
 		s := gatherSpace(SpaceConfig{
 			ConsumerRoots:      []string{"/var/lib/containerd"},
 			ConsumerRootExists: func(string) bool { return true },
-			ConsumerRootProbe: func(string) (int64, []DirSize, error) {
+			ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
 				// A du killed at its deadline: rows already printed, non-zero exit.
-				return 0, []DirSize{{Name: "half", Bytes: 1}}, errors.New("signal: killed")
+				return 0, []DirSize{{Name: "half", Bytes: 1}}, nil, errors.New("signal: killed")
 			},
 		})
 		got := s.ConsumerRoots[0]
@@ -1851,7 +1855,7 @@ func TestConsumerRootsAreBounded(t *testing.T) {
 		s := gatherSpace(SpaceConfig{
 			ConsumerRoots:      many,
 			ConsumerRootExists: func(string) bool { return true },
-			ConsumerRootProbe:  func(string) (int64, []DirSize, error) { return 1, nil, nil },
+			ConsumerRootProbe:  func(string) (int64, []DirSize, []string, error) { return 1, nil, nil, nil },
 		})
 		if len(s.ConsumerRoots) != consumerRootsLimit {
 			t.Errorf("configured %d roots, payload carried %d, want the %d cap — every root is one "+
@@ -1868,7 +1872,7 @@ func TestConsumerRootsAreBounded(t *testing.T) {
 		s := gatherSpace(SpaceConfig{
 			ConsumerRoots:      []string{"/var/lib/containerd"},
 			ConsumerRootExists: func(string) bool { return true },
-			ConsumerRootProbe:  func(string) (int64, []DirSize, error) { return 99, children, nil },
+			ConsumerRootProbe:  func(string) (int64, []DirSize, []string, error) { return 99, children, nil, nil },
 		})
 		got := s.ConsumerRoots[0]
 		if len(got.Top) != consumerTopLimit {
@@ -1900,6 +1904,10 @@ func TestSpacePayloadStaysBounded(t *testing.T) {
 	for i := range sites {
 		sites[i] = SiteSize{Slug: fmt.Sprintf("a-realistic-site-slug-%d", i), Bytes: 658505728}
 	}
+	degradedNames := make([]string, consumerDegradedLimit)
+	for i := range degradedNames {
+		degradedNames[i] = fmt.Sprintf("/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/%d", i)
+	}
 
 	s := gatherSpace(SpaceConfig{
 		RootProbe:          func() (int64, int64, error) { return 37937041408, 39964635136, nil },
@@ -1909,7 +1917,12 @@ func TestSpacePayloadStaysBounded(t *testing.T) {
 		SitesProbe:         func() (int64, []SiteSize, error) { return 4294967296, sites, nil },
 		ConsumerRoots:      roots,
 		ConsumerRootExists: func(string) bool { return true },
-		ConsumerRootProbe:  func(string) (int64, []DirSize, error) { return 15032385536, children, nil },
+		// Worst case includes the DEGRADED names: every root short, every name
+		// list at its cap, and realistically long paths. A ceiling measured on
+		// the happy shape is a ceiling that has never met the payload.
+		ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+			return 15032385536, children, degradedNames, nil
+		},
 	})
 
 	body, err := json.Marshal(s)
@@ -1966,5 +1979,518 @@ func TestConsumerRootExistsIsAStatNotADuGuess(t *testing.T) {
 				"a permission denial is not evidence the root is missing, and reporting ABSENT " +
 				"there recreates the very bug this axis fixes")
 		}
+	})
+}
+
+// --- the exact-units axis ----------------------------------------------------
+//
+// duHumanTree and duKiBTree are THE SAME TREE in the two units du can print it
+// in, byte-for-byte equivalent by construction (every human row is an exact
+// power-of-1024 multiple, so the -k row is the same number of 1024-blocks).
+// They exist as a PAIR because the failure being pinned is a unit confusion,
+// and a single-unit fixture cannot see one.
+const (
+	duHumanTree = "12G\t/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs\n" +
+		"2.0G\t/var/lib/containerd/io.containerd.content.v1.content\n" +
+		"14G\t/var/lib/containerd\n"
+
+	duKiBTree = "12582912\t/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs\n" +
+		"2097152\t/var/lib/containerd/io.containerd.content.v1.content\n" +
+		"14680064\t/var/lib/containerd\n"
+)
+
+// TestDuArgvAndParseUnitCannotDrift pins the COUPLING, which is the actual
+// repair: duTreeArgs hands back the argv and the unit its output will be in
+// from one place, so the flag that picks the unit and the parser that reads it
+// cannot be edited apart.
+//
+// Before the unit parameter existed this drift was one character wide and
+// entirely invisible: flipping `-hx` to `-kx` (plus the two argv literals that
+// pinned the string) left the whole package green while the payload reported
+// 26 MB for 25 GiB. This test reads the flag out of the argv and maps it back
+// to a unit INDEPENDENTLY, so a flag-only edit fails here rather than in
+// production six weeks later.
+func TestDuArgvAndParseUnitCannotDrift(t *testing.T) {
+	argv, unit := duTreeArgs("/var/lib/containerd")
+
+	// An independent flag->unit table. It is deliberately NOT built from
+	// duUnit's own values: a test that derives its expectation from the code
+	// under test can never disagree with it.
+	byFlag := map[string]duUnit{"-hx": duUnitHuman, "-kx": duUnitKiB}
+
+	var flags []string
+	for _, a := range argv {
+		if _, ok := byFlag[a]; ok {
+			flags = append(flags, a)
+		}
+	}
+	if len(flags) != 1 {
+		t.Fatalf("argv %v carries %d recognised du unit flags, want exactly 1 — the unit must be a "+
+			"single stated decision, not something a reader infers", argv, len(flags))
+	}
+	if want := byFlag[flags[0]]; want != unit {
+		t.Errorf("argv asks du for %q (unit %q) but duTreeArgs returns unit %q. These are ONE decision: "+
+			"reading `du -k`'s bare 1024-blocks on the -h path reports 26 MB for 25 GiB, and reading "+
+			"`du -h`'s \"14G\" on the -k path is the same error 1024x the other way.",
+			flags[0], want, unit)
+	}
+}
+
+// TestParseDuTreeRejectsTheWrongUnit is the 1024x test, and it is the reason
+// parseDuTree takes a unit at all.
+//
+// The measured hazard: `du -k` prints "14680064" for the same tree `du -h`
+// prints "14G". A parser that falls through to strconv.ParseInt and calls the
+// result BYTES turns 14 GiB into 14 MB — under-reporting, which is the single
+// direction that makes a full box look healthy and is exactly what this payload
+// exists to prevent. So -k rows on the -h path must be REFUSED, not returned
+// 1024x short.
+func TestParseDuTreeRejectsTheWrongUnit(t *testing.T) {
+	const dir = "/var/lib/containerd"
+	const wantTotal = int64(14) << 30
+
+	t.Run("each unit read on its own path agrees, byte for byte", func(t *testing.T) {
+		for _, c := range []struct {
+			name string
+			out  string
+			unit duUnit
+		}{
+			{"human rows, human unit", duHumanTree, duUnitHuman},
+			{"kib rows, kib unit", duKiBTree, duUnitKiB},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				total, rows, degraded, err := parseDuTree(c.out, dir, c.unit)
+				if err != nil {
+					t.Fatalf("parseDuTree: %v", err)
+				}
+				if total != wantTotal {
+					t.Errorf("total = %d, want %d — the two fixtures are the SAME TREE and must "+
+						"produce the same bytes", total, wantTotal)
+				}
+				if len(rows) != 2 || rows[0].Bytes != int64(12)<<30 {
+					t.Errorf("rows = %+v, want the overlayfs snapshotter at 12 GiB first", rows)
+				}
+				if degraded != nil {
+					t.Errorf("degraded = %v, want nil — a clean walk names nothing", degraded)
+				}
+			})
+		}
+	})
+
+	t.Run("kib rows on the HUMAN path are refused, not silently 1024x short", func(t *testing.T) {
+		total, rows, degraded, err := parseDuTree(duKiBTree, dir, duUnitHuman)
+		if err == nil {
+			t.Fatalf("parseDuTree accepted `du -k` output on the -h path and returned total=%d "+
+				"(%.1f MB) where the tree is %.1f GB. Silently under-reporting by 1024x is the "+
+				"failure this axis exists to remove.",
+				total, float64(total)/(1<<20), float64(wantTotal)/(1<<30))
+		}
+		if total != -1 || rows != nil || degraded != nil {
+			t.Errorf("got (%d, %+v, %v), want (-1, nil, nil) — a rejected parse must land nothing",
+				total, rows, degraded)
+		}
+		// The specific number the bug would have produced, named so a future
+		// reader can see what "silently returned" would have meant.
+		if total == 14680064 {
+			t.Error("total is the raw 1024-block count read as bytes: 14 MB for a 14 GiB tree")
+		}
+	})
+
+	t.Run("human rows on the KIB path are refused too", func(t *testing.T) {
+		// The mirror image, and it over-reports by 1024x rather than under —
+		// still a lie, and still caught by the same parameter.
+		if total, _, _, err := parseDuTree(duHumanTree, dir, duUnitKiB); err == nil {
+			t.Errorf("parseDuTree accepted `du -h` output on the -k path, total=%d", total)
+		}
+	})
+
+	t.Run("the tripwire has a floor, and the floor is why the unit is a PARAMETER", func(t *testing.T) {
+		// Measured on a real tree: `du -kx -d1` prints "300/100/400" where
+		// `du -hx -d1` prints "300K/100K/400K". Below 1024 the two units are
+		// indistinguishable from the output alone, so the -k rows for a small
+		// tree DO parse on the -h path — as 400 bytes for a 400 KiB tree.
+		//
+		// This test exists so that limit is a STATED FACT rather than an
+		// assumption a later reader makes on the tripwire's behalf and then
+		// uses to justify dropping the duTreeArgs coupling. The parameter is
+		// the defence; the >= 1024 check is a backstop for the magnitudes that
+		// matter.
+		small := "300\t/opt/barkpark/sites/a\n100\t/opt/barkpark/sites/b\n400\t/opt/barkpark/sites\n"
+		total, _, _, err := parseDuTree(small, "/opt/barkpark/sites", duUnitHuman)
+		if err != nil {
+			t.Fatalf("parseDuTree: %v — sub-1024 bare values are legal `du -h` output", err)
+		}
+		if total != 400 {
+			t.Fatalf("total = %d, want 400", total)
+		}
+		// Named for what it is: the same bytes read in the unit du was actually
+		// asked for are 1024x larger, and only the caller knows which is right.
+		if k, _, _, err := parseDuTree(small, "/opt/barkpark/sites", duUnitKiB); err != nil || k != 400*1024 {
+			t.Fatalf("same bytes on the -k path = (%d, %v), want (%d, nil) — the ambiguity is real "+
+				"and the unit parameter is the only thing that resolves it", k, err, 400*1024)
+		}
+	})
+
+	t.Run("a bare sub-kilobyte size is still legal on the human path", func(t *testing.T) {
+		// `du -h` humanizes at 1024, so it CAN print "0" or "512" and can never
+		// print "14680064". The threshold is what makes the rejection exact
+		// instead of a heuristic that discards real small rows.
+		out := "512\t/var/lib/containerd/tiny\n0\t/var/lib/containerd/empty\n4.0K\t/var/lib/containerd\n"
+		total, rows, _, err := parseDuTree(out, dir, duUnitHuman)
+		if err != nil {
+			t.Fatalf("parseDuTree rejected legal `du -h` output: %v", err)
+		}
+		if total != 4096 || len(rows) != 2 {
+			t.Errorf("got total=%d rows=%+v, want 4096 and two rows", total, rows)
+		}
+	})
+}
+
+// --- the degraded axis -------------------------------------------------------
+
+// duDegradedGNU and duDegradedBSD are the REAL CombinedOutput shape: runBounded
+// uses CombinedOutput(), so du's stderr complaint arrives interleaved with its
+// sizes. GNU coreutils 9.4 emits the diagnostic LAST (after the total row) and
+// quotes the path; macOS/BSD emits it FIRST and does not quote. Any parser that
+// assumes a position is a flake on one of the two, so both are pinned.
+const (
+	duDegradedGNU = "200K\t/opt/barkpark/sites/ok\n" +
+		"100K\t/opt/barkpark/sites/ok2\n" +
+		"300K\t/opt/barkpark/sites\n" +
+		"du: cannot read directory '/opt/barkpark/sites/locked': Permission denied\n"
+
+	duDegradedBSD = "du: /opt/barkpark/sites/locked: Permission denied\n" +
+		"200K\t/opt/barkpark/sites/ok\n" +
+		"100K\t/opt/barkpark/sites/ok2\n" +
+		"300K\t/opt/barkpark/sites\n"
+)
+
+// TestParseDuTreeRoutesDuDiagnosticsToDegraded is the contained fix for the
+// blocker: before it, one "du: ... Permission denied" line HARD-FAILED the
+// whole parse — measured, `total=-1 rows=[]` against a stdout-only parse of
+// `total=307200 rows=[{ok 204800} {ok2 102400}]`. A real measurement was thrown
+// away along with the only bytes that could name the shortfall.
+func TestParseDuTreeRoutesDuDiagnosticsToDegraded(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		out  string
+	}{
+		{"GNU: quoted path, diagnostic LAST", duDegradedGNU},
+		{"BSD: bare path, diagnostic FIRST", duDegradedBSD},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			total, rows, degraded, err := parseDuTree(c.out, "/opt/barkpark/sites", duUnitHuman)
+			if err != nil {
+				t.Fatalf("parseDuTree hard-failed on a du diagnostic: %v — the total was right "+
+					"there in the same bytes", err)
+			}
+			if want := int64(300) * 1024; total != want {
+				t.Errorf("total = %d, want %d", total, want)
+			}
+			if len(rows) != 2 {
+				t.Errorf("rows = %+v, want the two readable children", rows)
+			}
+			want := []string{"/opt/barkpark/sites/locked"}
+			if !reflect.DeepEqual(degraded, want) {
+				t.Errorf("degraded = %v, want %v — the unreadable subtree must be named BY PATH, "+
+					"which is what an operator can ls/chmod", degraded, want)
+			}
+		})
+	}
+
+	t.Run("GNU's curly quotes outside the C locale", func(t *testing.T) {
+		out := "307200\t/opt/barkpark/sites\n" +
+			"du: cannot read directory ‘/opt/barkpark/sites/locked’: Permission denied\n"
+		_, _, degraded, err := parseDuTree(out, "/opt/barkpark/sites", duUnitKiB)
+		if err != nil {
+			t.Fatalf("parseDuTree: %v", err)
+		}
+		if len(degraded) != 1 || degraded[0] != "/opt/barkpark/sites/locked" {
+			t.Errorf("degraded = %v, want the path out of U+2018/U+2019 quotes", degraded)
+		}
+	})
+
+	t.Run("a directory whose NAME starts with du: is a row, not a diagnostic", func(t *testing.T) {
+		// The discriminator has to be exact: a du OUTPUT row is size<TAB>path,
+		// so a directory literally named "du: notes" arrives WITH a tab and
+		// must be counted, not silently reclassified as a failure.
+		out := "1024\t/opt/barkpark/sites/du: notes\n307200\t/opt/barkpark/sites\n"
+		_, rows, degraded, err := parseDuTree(out, "/opt/barkpark/sites", duUnitKiB)
+		if err != nil {
+			t.Fatalf("parseDuTree: %v", err)
+		}
+		if len(rows) != 1 || degraded != nil {
+			t.Errorf("rows=%+v degraded=%v, want one row and nothing degraded", rows, degraded)
+		}
+	})
+}
+
+// TestConsumerRootDegradedLandsTheFloorAndNamesTheShortfall is the end-to-end
+// arm: a real permission-denied walk (rc=1, every row printed INCLUDING the
+// total, one stderr line) reaches the payload as `degraded` with real bytes and
+// the unreadable path named — never as `read` (the number is a floor, not a
+// size) and never as `unmeasured` (we have a floor and can say what is missing
+// from it).
+func TestConsumerRootDegradedLandsTheFloorAndNamesTheShortfall(t *testing.T) {
+	probe := newConsumerRootProbeWith(func(string, ...string) (string, error) {
+		// Exactly what runBounded hands back: full combined output AND rc=1.
+		return duDegradedGNU, errors.New("exit status 1")
+	})
+	s := gatherSpace(SpaceConfig{
+		ConsumerRoots:      []string{"/opt/barkpark/sites"},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe: func(p string) (int64, []DirSize, []string, error) {
+			return probe(p)
+		},
+	})
+
+	got := s.ConsumerRoots[0]
+	if got.Status != ConsumerRootDegraded {
+		t.Fatalf("Status = %q, want %q — a walk that finished, printed its total and named what it "+
+			"could not read is neither a clean read nor an unmeasured one", got.Status, ConsumerRootDegraded)
+	}
+	if want := int64(300) * 1024; got.Bytes != want {
+		t.Errorf("Bytes = %d, want %d — the floor is real and must land", got.Bytes, want)
+	}
+	if got.Count != 2 {
+		t.Errorf("Count = %d, want 2", got.Count)
+	}
+	if want := []string{"/opt/barkpark/sites/locked"}; !reflect.DeepEqual(got.Degraded, want) {
+		t.Errorf("Degraded = %v, want %v — BY PATH, never by the daemon or unit that owns the tree",
+			got.Degraded, want)
+	}
+	if got.DegradedCount != 1 {
+		t.Errorf("DegradedCount = %d, want 1", got.DegradedCount)
+	}
+
+	// And it survives the wire under its own name.
+	body, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"status":"degraded"`, `"degraded":["/opt/barkpark/sites/locked"]`, `"degraded_count":1`} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("payload missing %s; got %s", want, body)
+		}
+	}
+}
+
+// TestConsumerRootDegradedNamesAreCappedButCounted: the cap has to announce
+// itself, the same lesson SitesCount paid for — a cap that eats its own
+// denominator can never say when it binds.
+func TestConsumerRootDegradedNamesAreCappedButCounted(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("300K\t/opt/barkpark/sites\n")
+	const found = consumerDegradedLimit + 4
+	for i := 0; i < found; i++ {
+		fmt.Fprintf(&b, "du: cannot read directory '/opt/barkpark/sites/locked-%02d': Permission denied\n", i)
+	}
+	probe := newConsumerRootProbeWith(func(string, ...string) (string, error) {
+		return b.String(), errors.New("exit status 1")
+	})
+	s := gatherSpace(SpaceConfig{
+		ConsumerRoots:      []string{"/opt/barkpark/sites"},
+		ConsumerRootExists: func(string) bool { return true },
+		ConsumerRootProbe:  func(p string) (int64, []DirSize, []string, error) { return probe(p) },
+	})
+	got := s.ConsumerRoots[0]
+	if len(got.Degraded) != consumerDegradedLimit {
+		t.Errorf("Degraded carries %d names, want the %d cap", len(got.Degraded), consumerDegradedLimit)
+	}
+	if got.DegradedCount != found {
+		t.Errorf("DegradedCount = %d, want %d — the count must be what the walk HIT, not what "+
+			"survived the cap", got.DegradedCount, found)
+	}
+}
+
+// TestConsumerRootDiscardsWhatWasCutShort is criterion 3's half of the rule,
+// and it is the one that keeps land-on-degraded from becoming land-on-anything.
+// D59 stands: a walk that was CUT SHORT is not a measurement, however parseable
+// its prefix happens to be.
+func TestConsumerRootDiscardsWhatWasCutShort(t *testing.T) {
+	const dir = "/opt/barkpark/sites"
+	partial := "200K\t/opt/barkpark/sites/ok\n100K\t/opt/barkpark/sites/ok2\n"
+
+	for _, c := range []struct {
+		name string
+		out  string
+		err  error
+		why  string
+	}{
+		{
+			name: "deadline kill, even with a total row AND a named diagnostic",
+			out:  duDegradedGNU,
+			err:  fmt.Errorf("%w after 60s: nice du", errProbeTimedOut),
+			why:  "a killed du can print anything at all; the deadline is the fact, not the output shape",
+		},
+		{
+			name: "non-zero exit, no total row",
+			out:  partial,
+			err:  errors.New("signal: killed"),
+			why:  "du prints its root LAST, so output without it was cut short",
+		},
+		{
+			name: "non-zero exit, total row, but nothing named",
+			out:  partial + "300K\t/opt/barkpark/sites\n",
+			err:  errors.New("signal: killed"),
+			why:  "an unexplained rc!=0 is not a permission shortfall; without a named path there is nothing to land",
+		},
+		{
+			// BSD order deliberately: du has ALREADY named an unreadable subtree
+			// by the time the unparseable row arrives, so the "was anything
+			// named?" veto is satisfied and only the "did the parse succeed?"
+			// veto can refuse this. Each veto has to be able to refuse ALONE, or
+			// one of them is decoration.
+			name: "non-zero exit, a named diagnostic ALREADY seen, but an unparseable row",
+			out:  "du: /opt/barkpark/sites/locked: Permission denied\nnot-a-size\t/opt/barkpark/sites/x\n300K\t/opt/barkpark/sites\n",
+			err:  errors.New("exit status 1"),
+			why:  "a row we could not read is a hole of unknown size, which is not a floor",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			probe := newConsumerRootProbeWith(func(string, ...string) (string, error) { return c.out, c.err })
+			total, children, degraded, err := probe(dir)
+			if err == nil {
+				t.Fatalf("probe returned nil error — %s", c.why)
+			}
+			if total != -1 || children != nil || degraded != nil {
+				t.Fatalf("got (%d, %+v, %v), want (-1, nil, nil) — %s", total, children, degraded, c.why)
+			}
+
+			s := gatherSpace(SpaceConfig{
+				ConsumerRoots:      []string{dir},
+				ConsumerRootExists: func(string) bool { return true },
+				ConsumerRootProbe:  func(p string) (int64, []DirSize, []string, error) { return probe(p) },
+			})
+			got := s.ConsumerRoots[0]
+			if got.Status != ConsumerRootUnmeasured || got.Bytes != -1 || got.Degraded != nil || got.DegradedCount != -1 {
+				t.Errorf("through gatherSpace: %+v, want unmeasured with every sentinel intact", got)
+			}
+		})
+	}
+}
+
+// TestConsumerRootsReportEveryConfiguredRootByPath is criterion 1's shape, all
+// four arms in one ordered payload: what was ATTEMPTED (every configured root
+// has a row, in order), what was READ, what DEGRADED, and what was neither.
+//
+// Naming is BY PATH throughout. "containerd" is not a place; /var/lib/containerd
+// is, and it is the string the operator's next command takes.
+func TestConsumerRootsReportEveryConfiguredRootByPath(t *testing.T) {
+	const (
+		readRoot     = "/var/lib/containerd"
+		degradedRoot = "/var/lib/barkpark-builder"
+		absentRoot   = "/opt/barkpark/sites"
+		failedRoot   = "/var/log/journal"
+	)
+	configured := []string{readRoot, degradedRoot, absentRoot, failedRoot}
+
+	var attempted []string
+	s := gatherSpace(SpaceConfig{
+		ConsumerRoots:      configured,
+		ConsumerRootExists: func(p string) bool { return p != absentRoot },
+		ConsumerRootProbe: func(p string) (int64, []DirSize, []string, error) {
+			attempted = append(attempted, p)
+			switch p {
+			case readRoot:
+				return 14 << 30, []DirSize{{Name: "overlayfs", Bytes: 12 << 30}}, nil, nil
+			case degradedRoot:
+				return 11 << 30, []DirSize{{Name: "images", Bytes: 10 << 30}}, []string{degradedRoot + "/locked"}, nil
+			}
+			return -1, nil, nil, errors.New("du: boom")
+		},
+	})
+
+	// ATTEMPTED, in the configured order: one row per root, absent included.
+	var gotPaths []string
+	for _, r := range s.ConsumerRoots {
+		gotPaths = append(gotPaths, r.Path)
+	}
+	if !reflect.DeepEqual(gotPaths, configured) {
+		t.Fatalf("payload paths = %v, want %v in configured order", gotPaths, configured)
+	}
+	// The absent root is answered by a stat, so it is deliberately NOT walked —
+	// "attempted" is the row, and the row is there.
+	if want := []string{readRoot, degradedRoot, failedRoot}; !reflect.DeepEqual(attempted, want) {
+		t.Errorf("walked %v, want %v — the absent root is answered by a stat, not a du", attempted, want)
+	}
+
+	byPath := map[string]ConsumerRoot{}
+	for _, r := range s.ConsumerRoots {
+		byPath[r.Path] = r
+	}
+	for path, want := range map[string]string{
+		readRoot:     ConsumerRootRead,
+		degradedRoot: ConsumerRootDegraded,
+		absentRoot:   ConsumerRootAbsent,
+		failedRoot:   ConsumerRootUnmeasured,
+	} {
+		if got := byPath[path].Status; got != want {
+			t.Errorf("%s Status = %q, want %q — the four states are four different operator actions",
+				path, got, want)
+		}
+	}
+	if d := byPath[degradedRoot]; d.Bytes != 11<<30 || len(d.Degraded) != 1 || d.Degraded[0] != degradedRoot+"/locked" {
+		t.Errorf("degraded root = %+v, want a real floor and the unreadable path named", d)
+	}
+	if r := byPath[readRoot]; r.Degraded != nil || r.DegradedCount != -1 {
+		t.Errorf("clean root = %+v, want nil/-1 — a root that read everything names nothing", r)
+	}
+}
+
+// TestConsumerRootsBoundTOTALProbeTime is the bound criterion 4 asks for, and
+// the distinction it draws is the whole point: duProbeTimeout is PER SHELL-OUT,
+// so N roots buy N x 60s of worst case in ONE cycle. Nothing about the per-root
+// bound stops six roots from becoming sixty.
+//
+// The SLICE is what bounds the total, so this measures the slice two ways —
+// the number of walks actually performed, and the wall clock — and then pins
+// the arithmetic against the cadence the beat has to fit inside.
+func TestConsumerRootsBoundTOTALProbeTime(t *testing.T) {
+	t.Run("the arithmetic worst case fits inside the space cadence", func(t *testing.T) {
+		worst := time.Duration(consumerRootsLimit) * duProbeTimeout
+		if worst >= DefaultSpaceInterval {
+			t.Errorf("consumerRootsLimit(%d) x duProbeTimeout(%s) = %s, which is not shorter than the "+
+				"%s space cadence: one slow cycle would still be walking when the next beat is due, and "+
+				"beats would pile up. LOWER a bound — the per-root timeout is not the one that grows.",
+				consumerRootsLimit, duProbeTimeout, worst, DefaultSpaceInterval)
+		}
+		t.Logf("worst case per cycle: %d roots x %s = %s (cadence %s)", consumerRootsLimit, duProbeTimeout, worst, DefaultSpaceInterval)
+	})
+
+	t.Run("a fat-fingered root list cannot buy more walls than the cap", func(t *testing.T) {
+		const perRoot = 20 * time.Millisecond
+		many := make([]string, consumerRootsLimit*5)
+		for i := range many {
+			many[i] = fmt.Sprintf("/root%d", i)
+		}
+		var calls int
+		start := time.Now()
+		s := gatherSpace(SpaceConfig{
+			ConsumerRoots:      many,
+			ConsumerRootExists: func(string) bool { return true },
+			ConsumerRootProbe: func(string) (int64, []DirSize, []string, error) {
+				calls++
+				time.Sleep(perRoot)
+				return 1, nil, nil, nil
+			},
+		})
+		elapsed := time.Since(start)
+
+		if calls != consumerRootsLimit {
+			t.Errorf("configured %d roots and the beat performed %d walks, want %d — the cap is the "+
+				"only thing bounding TOTAL probe time, because the 60s deadline is per shell-out",
+				len(many), calls, consumerRootsLimit)
+		}
+		if len(s.ConsumerRoots) != consumerRootsLimit {
+			t.Errorf("payload carried %d roots, want %d", len(s.ConsumerRoots), consumerRootsLimit)
+		}
+		// Generous slack: this asserts the ORDER of magnitude the cap buys, not
+		// the scheduler's precision.
+		if ceiling := time.Duration(consumerRootsLimit)*perRoot + 2*time.Second; elapsed > ceiling {
+			t.Errorf("the consumer axis took %s for %d configured roots, over the %s the %d-root cap "+
+				"should have bought", elapsed, len(many), ceiling, consumerRootsLimit)
+		}
+		t.Logf("%d configured roots -> %d walks in %s", len(many), calls, elapsed)
 	})
 }
