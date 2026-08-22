@@ -74,4 +74,106 @@ defmodule BarkparkWeb.FinderLiveTest do
 
     assert html =~ "type to search"
   end
+
+  # ── the graph visibility clamp (task-336d22b7722ea71e) ────────────────────
+  #
+  # /finder is public by construction (`:browser` pipeline, no on_mount, no
+  # token) — its principal is the public internet. `graph_payload/2` used to
+  # be a second, hand-copied corpus derivation with NO schema-visibility
+  # clamp, so while the search side of the SAME LiveView correctly returned 0
+  # hits to an anonymous visitor, the graph payload in the same response
+  # carried every private type's name and titles (observed live: anonymous
+  # corpus = 1 node, type "vault", visibility private, title present). The
+  # derivation now reads through `Content.Schema.visible_schemas/2` — the ONE
+  # owner, shared with the flat /v1/graph twin — which defaults to the
+  # narrowest view and widens only for a principal that earned it.
+  describe "graph visibility clamp" do
+    setup do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+
+      for {name, vis} <- [{"finderopen", "public"}, {"findervault", "private"}] do
+        {:ok, _} =
+          Content.upsert_schema(
+            %{"name" => name, "title" => name, "visibility" => vis, "fields" => []},
+            "production",
+            scope
+          )
+      end
+
+      %{scope: scope}
+    end
+
+    defp publish_doc!(type, doc_id, title, scope) do
+      {:ok, _} =
+        Content.create_document(
+          type,
+          %{"doc_id" => doc_id, "title" => title, "content" => %{}},
+          "production",
+          scope
+        )
+
+      {:ok, doc} = Content.publish_document(doc_id, type, "production", scope)
+      doc
+    end
+
+    test "SECURITY: the anonymous graph payload carries ZERO private-visibility nodes — not the type name, not the title, not the id",
+         %{conn: conn, scope: scope} do
+      uid = System.unique_integer([:positive])
+      secret_id = "vault-doc-#{uid}"
+      secret_title = "SECRET-FINDER-#{uid}"
+      open_id = "open-doc-#{uid}"
+      open_title = "OPEN-FINDER-#{uid}"
+
+      publish_doc!("findervault", secret_id, secret_title, scope)
+      publish_doc!("finderopen", open_id, open_title, scope)
+
+      # No token, no session — the same anonymous mount the probe used.
+      {:ok, view, _html} = live(conn, "/finder")
+      html = render_async(view, 5_000)
+
+      # PERMIT DIRECTION FIRST: the corpus landed and carries the public doc,
+      # so the refutes below cannot pass vacuously on an empty payload — and
+      # the fix demonstrably narrows, it does not blank the graph.
+      assert html =~ open_title
+      assert html =~ open_id
+
+      # The leak, re-probed: the private-visibility node must be absent from
+      # the payload in EVERY attribute — type name, title, AND id.
+      refute html =~ secret_title,
+             "private-visibility TITLE leaked to an anonymous /finder visitor"
+
+      refute html =~ secret_id,
+             "private-visibility doc ID leaked to an anonymous /finder visitor"
+
+      refute html =~ "findervault",
+             "private-visibility TYPE NAME leaked to an anonymous /finder visitor"
+    end
+
+    test "read-time, not cached: a schema flipped to public appears on the NEXT anonymous mount",
+         %{conn: conn, scope: scope} do
+      uid = System.unique_integer([:positive])
+      doc_id = "flip-doc-#{uid}"
+      title = "FLIP-FINDER-#{uid}"
+      publish_doc!("findervault", doc_id, title, scope)
+
+      {:ok, view, _html} = live(conn, "/finder")
+      refute render_async(view, 5_000) =~ title
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "findervault",
+            "title" => "findervault",
+            "visibility" => "public",
+            "fields" => []
+          },
+          "production",
+          scope
+        )
+
+      {:ok, view2, _html} = live(conn, "/finder")
+      assert render_async(view2, 5_000) =~ title
+    end
+  end
 end

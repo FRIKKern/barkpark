@@ -1355,33 +1355,34 @@ defmodule BarkparkWeb.TasksController do
 
   # ─── corpus visibility, keyed on the CALLER ──────────────────────────────
   #
-  # The corpus read already pins `perspective: :published` (drafts never leak);
-  # what it did NOT do was honour schema VISIBILITY, so a public-read token got
-  # the titles of every private type in the dataset — 33 of 39 on the live
-  # instance, and a freshly published private-type document showed up within
-  # seconds. Site-spawner D6 clamps that tier to "published perspective + public
-  # -visibility schemas"; this is the second half.
+  # The clamp itself lives in `Barkpark.Content.Schema.visible_schemas/2` —
+  # the ONE owner, shared with `FinderLive.graph_payload/2` (the public
+  # finder's inline twin of this derivation). It used to be defined HERE,
+  # keyed `if PublicRead.public_read_token?(conn)` with an else-arm of "show
+  # everything": an allow-list of one restricted tier that failed OPEN for
+  # every principal it did not recognise — and FinderLive carried a second,
+  # hand-copied derivation with no clamp at all, so an anonymous visitor read
+  # every private type's titles through /finder (task-336d22b7722ea71e). The
+  # shared function inverts the key — default-narrow, widen only for an
+  # authenticated principal outside the public-read tier — and keying it on
+  # `CallerContext.from_conn/1` means a tokenless caller lands in the narrow
+  # arm by construction instead of falling through the tier test.
   #
-  # KEYED, not unconditional: every other principal (Studio session, read/write/
-  # admin token, and `FinderLive`, which derives its own payload off this same
-  # shape) keeps seeing every type. The tier test is
-  # `PublicRead.public_read_token?/1` — the plug's own definition, not a copy.
-  #
-  # Derived at READ TIME from `Content.Schema.public_type_names/1` over the
-  # schema rows this request already loaded (no extra query, no hardcoded type
-  # list): flip a schema to private and the very next corpus read drops it.
+  # The corpus read already pins `perspective: :published` (drafts never
+  # leak); this is the schema-VISIBILITY half. Derived at READ TIME over the
+  # schema rows this request already loaded (no extra query, no hardcoded
+  # type list): flip a schema to private and the very next corpus read drops
+  # it.
   #
   # Phantom nodes are deliberately NOT filtered. A phantom is a referenced-but-
   # absent id with `title == id`, and a public document's reference field already
   # exposes that same id through the allowed `GET /v1/data/doc` route — so
   # dropping them would cost the dangling-edge signal without closing anything.
   defp visible_schemas(schemas, conn) do
-    if BarkparkWeb.Plugs.PublicRead.public_read_token?(conn) do
-      allowed = MapSet.new(Barkpark.Content.Schema.public_type_names(schemas))
-      Enum.filter(schemas, &MapSet.member?(allowed, &1.name))
-    else
-      schemas
-    end
+    Barkpark.Content.Schema.visible_schemas(
+      schemas,
+      Barkpark.Content.CallerContext.from_conn(conn)
+    )
   end
 
   # ─── corpus admission cap (see the @graph_corpus_max_concurrency comment) ──
