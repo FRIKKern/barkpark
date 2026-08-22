@@ -279,8 +279,16 @@ defmodule Barkpark.Tasks.Close do
 
   # Repo.get/2 with the binary_id cast taken FIRST: a non-UUID task_id is a miss,
   # never a raise. See the cast-guard note in do_close_txn.
+  #
+  # THE JUSTIFICATION TRAVELS WITH THE READ, not with its old address. Extracting
+  # this helper moved the `Repo.get` out from under the `# global-read:` comment
+  # that licensed it and left the comment behind on the call site — the read did
+  # not change, but its licence stopped covering it, and tenant-scope-check named
+  # exactly that. A justification anchored to a LOCATION rather than to the
+  # statement it justifies is one refactor away from being false.
   defp fetch_task(task_id) when is_binary(task_id) do
     case Ecto.UUID.cast(task_id) do
+      # global-read: task-close by-PK — task_id IS the Document PK; tenancy is resolved by the caller's CAS claim (worker+epoch) inside the per-task advisory-locked txn in do_close_txn, not a workspace_id thread (internal-worker posture).
       {:ok, uuid} -> Repo.get(Document, uuid)
       :error -> nil
     end
