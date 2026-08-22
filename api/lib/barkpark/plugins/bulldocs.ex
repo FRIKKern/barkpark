@@ -367,7 +367,14 @@ defmodule Barkpark.Plugins.Bulldocs do
           %{
             name: "file",
             type: "file",
-            summary: "Ops payload {\"ops\":[…]} from a file or - for stdin."
+            summary:
+              "Ops payload {\"ops\":[…]} from a file or - for stdin. Each op is " <>
+                "{\"op\": <verb>, …}; the accepted verbs are append-block, insert-after, " <>
+                "patch-block, replace-block, remove-block and move-block. append-block " <>
+                "takes \"block\"; insert-after takes \"afterId\" + \"block\"; patch-block " <>
+                "and replace-block take \"id\" (+ \"patch\" / \"block\"); remove-block and " <>
+                "move-block take \"id\". An unrecognised verb refuses the WHOLE batch — " <>
+                "the apply is atomic, so nothing is written."
           },
           %{
             name: "if-rev",
