@@ -893,7 +893,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stamp",
         summary:
-          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
+          "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated; a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
         auth_tier: "read",
         args: [
@@ -950,6 +950,12 @@ defmodule Barkpark.Plugins.Tasks do
             name: "note",
             type: "string",
             summary: "What was tried and why it missed — required with --miss, non-empty."
+          },
+          %{
+            name: "merge-gated",
+            type: "bool",
+            summary:
+              "LEAD ONLY — the override that lets a --met flip a MERGE GATE (a criterion the lead closes when the PR merges). Builders must NOT pass it: without it such a stamp is refused (409 merge_gated_criterion), which is the point — flipping a gate before the PR exists fabricates a done. A criterion counts as a gate if it carries \"merge_gate\": true, or (when it carries no explicit \"merge_gate\" key) if its wording mentions MERGE-GATED / MERGE GATE. That prose fallback is deliberately wide and mis-fires on ~3.5% of marker-bearing rows that merely DISCUSS merge-gating; the fix for those is to set \"merge_gate\": false on the criterion, not to reach for this flag."
           }
         ],
         writes: true,
