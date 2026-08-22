@@ -24,6 +24,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -434,39 +436,83 @@ func parseSwapPercent(data []byte) (pct int, totalBytes int64, err error) {
 // frequent victim on a Barkpark box, which is why its footprint is a vital.
 const beamComm = "beam.smp"
 
-// beamSmapsProbe reports the BEAM's (PSS, swap) bytes from
-// /proc/<pid>/smaps_rollup. Both -1 when no beam.smp is running or the rollup
-// cannot be read — an un-run BEAM is not a zero-footprint BEAM.
-func beamSmapsProbe() (int64, int64, error) {
+// beamSmapsProbe reports the winning BEAM's (PSS, swap) bytes plus the pid and
+// slot it was measured from, read out of /proc/<pid>/smaps_rollup. The byte
+// values are -1, and pid/slot empty, when no beam.smp is running or no rollup
+// could be read — an un-run BEAM is not a zero-footprint BEAM.
+func beamSmapsProbe() (int64, int64, string, string, error) {
 	return beamSmapsProbeIn("/proc")
 }
 
-// beamSmapsProbeIn is beamSmapsProbe with an injectable /proc root so both the
-// found and the not-found paths are testable on any host.
-func beamSmapsProbeIn(procRoot string) (int64, int64, error) {
-	pid, err := findBeamPID(procRoot)
+// beamSmapsProbeIn is beamSmapsProbe with an injectable /proc root so the
+// found, not-found and MULTI-BEAM paths are all testable on any host.
+//
+// THE BOX RUNS BLUE/GREEN, so this samples EVERY comm-anchored beam.smp and
+// reports the MAX across the set — the rule pds-w11-paired-control-measure
+// already states ("sample ALL comm-anchored beam.smp slots and report peak =
+// MAX across the set"). The predecessor returned the FIRST match in
+// os.ReadDir order, which sorts LEXICALLY: on a 4-entry /proc that is
+// 1000, 4179607, 4185178, 999. That rule is neither "oldest" (pgrep -o) nor
+// "the slot Caddy proxies" — it is a string sort over pid digits, so across a
+// cutover's two-BEAM overlap it selected by a coin flip and the series
+// silently changed subject.
+//
+// The winner is chosen by PSS+SWAP, the total committed footprint, because
+// that is the quantity the OOM killer acts on (PDS-D114: RSS and VmSwap trade
+// against each other, so either alone is a swap-residency meter rather than a
+// consumption meter). Choosing by the SUM keeps the reported triple coherent:
+// pss, swap and pid all describe ONE real process. Taking max(pss) and
+// max(swap) independently could describe two different processes and make
+// beam_pid a lie about at least one of them.
+func beamSmapsProbeIn(procRoot string) (int64, int64, string, string, error) {
+	pids, err := findBeamPIDs(procRoot)
 	if err != nil {
-		return -1, -1, err
+		return -1, -1, "", "", err
 	}
-	data, err := os.ReadFile(filepath.Join(procRoot, pid, "smaps_rollup"))
-	if err != nil {
-		return -1, -1, err
+	var (
+		bestPSS, bestSwap int64 = -1, -1
+		bestPID           string
+		readErr           error
+	)
+	for _, pid := range pids {
+		data, err := os.ReadFile(filepath.Join(procRoot, pid, "smaps_rollup"))
+		if err != nil {
+			readErr = err
+			continue // it exited mid-scan; another slot may still be readable
+		}
+		pss, swap, err := parseSmapsRollup(data)
+		if err != nil {
+			readErr = err
+			continue
+		}
+		if bestPID == "" || pss+swap > bestPSS+bestSwap {
+			bestPSS, bestSwap, bestPID = pss, swap, pid
+		}
 	}
-	return parseSmapsRollup(data)
+	if bestPID == "" {
+		if readErr != nil {
+			return -1, -1, "", "", readErr
+		}
+		return -1, -1, "", "", fmt.Errorf("no readable %s rollup under %s", beamComm, procRoot)
+	}
+	return bestPSS, bestSwap, bestPID, beamSlotOf(procRoot, bestPID), nil
 }
 
-// findBeamPID scans procRoot for a process whose comm is beam.smp. An
+// findBeamPIDs scans procRoot for EVERY process whose comm is beam.smp, in
+// ascending numeric pid order so the scan itself is deterministic. An
 // unreadable /proc, or no such process, is an error — never a guessed pid.
-func findBeamPID(procRoot string) (string, error) {
+func findBeamPIDs(procRoot string) ([]string, error) {
 	entries, err := os.ReadDir(procRoot)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	var pids []int
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := strconv.Atoi(e.Name()); err != nil {
+		n, err := strconv.Atoi(e.Name())
+		if err != nil {
 			continue // not a pid directory
 		}
 		comm, err := os.ReadFile(filepath.Join(procRoot, e.Name(), "comm"))
@@ -474,10 +520,38 @@ func findBeamPID(procRoot string) (string, error) {
 			continue // the process exited between the scan and the read
 		}
 		if strings.TrimSpace(string(comm)) == beamComm {
-			return e.Name(), nil
+			pids = append(pids, n)
 		}
 	}
-	return "", fmt.Errorf("no %s process found under %s", beamComm, procRoot)
+	if len(pids) == 0 {
+		return nil, fmt.Errorf("no %s process found under %s", beamComm, procRoot)
+	}
+	sort.Ints(pids)
+	out := make([]string, 0, len(pids))
+	for _, n := range pids {
+		out = append(out, strconv.Itoa(n))
+	}
+	return out, nil
+}
+
+// beamSlotRE matches the blue/green slot in a cgroup line, e.g.
+// "0::/system.slice/system-barkpark\x2dslot.slice/barkpark-slot@green.service".
+var beamSlotRE = regexp.MustCompile(`barkpark-slot@(blue|green)`)
+
+// beamSlotOf derives which blue/green slot a pid belongs to by reading its
+// cgroup. An empty string means "not attributable" — the box may not be
+// slotted, or the cgroup may be unreadable — and an empty slot is reported as
+// such rather than guessed. beam_pid alone already lets a consumer detect that
+// the measured process changed; the slot only names WHICH one it moved to.
+func beamSlotOf(procRoot, pid string) string {
+	data, err := os.ReadFile(filepath.Join(procRoot, pid, "cgroup"))
+	if err != nil {
+		return ""
+	}
+	if m := beamSlotRE.FindSubmatch(data); m != nil {
+		return string(m[1])
+	}
+	return ""
 }
 
 // parseSmapsRollup sums the Pss: and Swap: lines of a smaps_rollup file (kB)

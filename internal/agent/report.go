@@ -236,6 +236,18 @@ type Report struct {
 	BeamPSSBytes  int64 `json:"beam_pss_bytes"`
 	BeamSwapBytes int64 `json:"beam_swap_bytes"`
 
+	// BeamPID and BeamSlot ATTRIBUTE the two numbers above to the process they
+	// were actually read from. The box runs blue/green, so during a cutover two
+	// beam.smp processes coexist — 8m30s of overlap was observed on 2026-08-22 —
+	// and without attribution a consumer cannot tell a real footprint change
+	// from the probe silently switching subject. A beam_swap series stepping
+	// 0 → ~190 MB across a flip is TWO PROCESSES, not a leak. Empty when the
+	// probe was not wired or no beam.smp was found; BeamSlot is additionally
+	// empty on a box whose cgroups carry no barkpark-slot@ unit, which is
+	// "not attributable", never a guess.
+	BeamPID  string `json:"beam_pid"`
+	BeamSlot string `json:"beam_slot"`
+
 	// ReqPerS is the instance's recent requests-per-second, read from the
 	// instance RequestStats route over the SAME base+token seam as the health
 	// gate. -1 when the probe was not wired, failed, or the instance is old and
@@ -464,10 +476,14 @@ type ReportConfig struct {
 	// ReqStatsProbe, not independently like CPU/Mem: a percent landed against an
 	// unknown total is meaningless, so an error leaves both sentinels.
 	SwapProbe func() (pct int, totalBytes int64, err error)
-	// BeamProbe returns the BEAM's (PSS, swap) bytes. nil or an error → BOTH
-	// BeamPSSBytes and BeamSwapBytes keep -1; the two are one measurement of one
-	// process and never half-land.
-	BeamProbe func() (pssBytes int64, swapBytes int64, err error)
+	// BeamProbe returns the winning BEAM's (PSS, swap) bytes plus the pid and
+	// blue/green slot they were read from. nil or an error → BeamPSSBytes and
+	// BeamSwapBytes keep -1 and BeamPID/BeamSlot stay empty; the four are ONE
+	// measurement of ONE process and never half-land. On a blue/green box the
+	// implementation must sample every comm-anchored beam.smp and report the
+	// MAX across the set (pds-w11-paired-control-measure), never the first
+	// match in directory order.
+	BeamProbe func() (pssBytes int64, swapBytes int64, pid string, slot string, err error)
 	// PGSizeProbe returns the Postgres DB size in bytes. nil → PGSizeBytes=-1.
 	// Wire the production implementation with NewPGSizeProbe(checkout).
 	PGSizeProbe func() (int64, error)
@@ -573,11 +589,15 @@ func gatherReport(cfg ReportConfig) Report {
 		}
 	}
 
-	// The BEAM's own footprint (PSS + swap), one process, one measurement.
+	// The BEAM's own footprint (PSS + swap) — the MAX across every blue/green
+	// slot, carrying the pid and slot it was measured from so a consumer can
+	// detect that the measured process changed.
 	if cfg.BeamProbe != nil {
-		if pss, sw, err := cfg.BeamProbe(); err == nil {
+		if pss, sw, pid, slot, err := cfg.BeamProbe(); err == nil {
 			r.BeamPSSBytes = pss
 			r.BeamSwapBytes = sw
+			r.BeamPID = pid
+			r.BeamSlot = slot
 		}
 	}
 

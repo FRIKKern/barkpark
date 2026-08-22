@@ -506,6 +506,8 @@ defmodule BarkparkCloud.Web.Router do
     swap_total_bytes: nil,
     beam_pss_bytes: nil,
     beam_swap_bytes: nil,
+    beam_pid: nil,
+    beam_slot: nil,
     reported_at: nil
   }
 
@@ -9949,6 +9951,17 @@ defmodule BarkparkCloud.Web.Router do
       swap_total_bytes: measured_or_nil(Map.get(payload, "swap_total_bytes")),
       beam_pss_bytes: measured_or_nil(Map.get(payload, "beam_pss_bytes")),
       beam_swap_bytes: measured_or_nil(Map.get(payload, "beam_swap_bytes")),
+      # The two beam figures above are useless without knowing WHICH process
+      # they came from. The box runs blue/green and two beam.smp processes
+      # coexist through a cutover, so a beam_swap series stepping 0 -> ~190 MB
+      # across a flip is TWO PROCESSES, not a leak. These are STRINGS, so they
+      # take named_or_nil rather than measured_or_nil: an agent predating the
+      # attribution omits the key, and a box with no barkpark-slot@ cgroup
+      # sends "" for the slot — both are "not attributable" and render nil.
+      # Never a fabricated pid, which would attribute a measurement to a
+      # process nobody identified.
+      beam_pid: named_or_nil(Map.get(payload, "beam_pid")),
+      beam_slot: named_or_nil(Map.get(payload, "beam_slot")),
       reported_at: at
     })
   end
@@ -9957,6 +9970,13 @@ defmodule BarkparkCloud.Web.Router do
 
   # A vital counts as MEASURED only when it is a non-negative number. Anything
   # else — absent, non-numeric, or the agent's `-1` unwired sentinel — is nil.
+  # The string counterpart of measured_or_nil: a non-empty binary is an
+  # attribution, and anything else — absent, non-binary, or the empty string the
+  # agent sends when a pid has no barkpark-slot@ cgroup — is nil. "Not
+  # attributable" must never render as a guess.
+  defp named_or_nil(s) when is_binary(s) and s != "", do: s
+  defp named_or_nil(_), do: nil
+
   defp measured_or_nil(n) when is_number(n) and n >= 0, do: n
   defp measured_or_nil(_), do: nil
 
