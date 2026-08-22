@@ -538,7 +538,71 @@ const fetchRoster = (parentId) => {
       'ROSTER-INCOMPLETE');
   return rows;
 };
-const fetchById = (id) => q([['filter[_id]', id]]).result.documents[0] || null;
+// THE OTHER HALF OF THE SAME DISEASE, and the one wave 64 left standing. The roster read
+// was taught to page-or-refuse; this by-id read still could not tell the row it ASKED FOR
+// from a row it merely RECEIVED:
+//
+//     const fetchById = (id) => q([['filter[_id]', id]]).result.documents[0] || null;
+//
+// No `limit`, no `count`, and no check that `documents[0]._id === id`. Three lines above,
+// this file already records that this endpoint DROPS a filter it does not recognise
+// SILENTLY and answers unfiltered ("NEVER bare ?parent_id= — proven at Decide to silently
+// return 500 unfiltered rows"). RE-MEASURED against the live ledger on 2026-08-22, and the
+// precedent is not history — it is current behaviour:
+//
+//   …/v1/data/query/production/task?filter[_id]=<a real id>&count=true -> {count:1, total:1}
+//   …?filter[_id]=<a garbage id>&count=true                            -> {count:0, total:0}
+//   …?_id=<a real id>&limit=3&count=true   (the filter[] wrapper LOST) -> {count:3, total:6994}
+//   …?count=true            (no filter, no limit — the DEFAULT window) -> {count:100, total:6994}
+//
+// So one dropped `filter[]` wrapper — a rename, a typo, an API revision — turns
+// `fetchById(anything)` into "the most recently updated task in the ledger", HTTP 200, no
+// error, no signal. What reads off it:
+//
+//   BUCKET (c) — `resolved: !!doc` over PERMANENT_HUMAN_GATES. The clause exists to catch
+//     a gate that silently VANISHED. Under a dropped filter EVERY gate resolves ✓, over a
+//     stranger's row, and the clause becomes structurally unable to lose — the exact shape
+//     of the roster defect this task was filed for, one call site over.
+//   resolveTask — R5 (dead letterbox) and R6 (successor inside the epic) read
+//     `lifecycle_status` and `parent_id`. Off the wrong row, both fences read a stranger.
+//
+// SO: ASK FOR A WINDOW, AND VERIFY THE ROW. `limit=2` is the whole trick — one row is the
+// answer, a SECOND row is proof the filter did not hold — and `count=true` makes the
+// server state how many rows actually matched, so the refusal can report its own sample
+// size instead of implying one. Zero rows stays a real answer (`null`): "no such task" is
+// a fact about the ledger, not a truncation.
+//
+// TWO ARMS, AND NEITHER SUBSUMES THE OTHER. Cardinality catches a dropped filter over a
+// populated ledger (many rows come back). Identity catches the same drop where only one
+// row could come back at all — a one-row page, or a server that pins `limit` to 1. A
+// checkout that kept only one of them would still have a shape it answers blind on.
+const LOOKUP_LIMIT = 2;
+const fetchById = (id) => {
+  const result = q([['filter[_id]', id], ['limit', String(LOOKUP_LIMIT)], ['count', 'true']]).result || {};
+  const docs = result.documents;
+  if (!Array.isArray(docs))
+    throw new Infra(`the lookup of ${id} is not an array of documents`, 'LOOKUP-NOT-AN-ARRAY');
+  const total = typeof result.total === 'number' ? result.total : null;
+
+  // ARM 1 — CARDINALITY. `_id` is unique, so more than one row for one id means the
+  // response is not an answer to the question that was asked.
+  if (docs.length > 1)
+    throw new Infra(
+      `the lookup of ${id} came back with ${docs.length} rows for ONE _id${total === null ? '' : ` (the server's own count says ${total} matched)`} — [${docs.slice(0, 4).map((d) => (d && d._id) || 'id absent').join(', ')}${docs.length > 4 ? ', …' : ''}]. \`_id\` is unique, so a multi-row answer is a \`filter[_id]\` this endpoint DROPPED and answered unfiltered — measured live on 2026-08-22, a lost \`filter[]\` wrapper returns the whole task table. Read blind, bucket (c) would resolve every permanent human gate ✓ against whichever stranger sorted first and could never lose. Nothing is asserted about bucket (c) or the successor fences.`,
+      'LOOKUP-UNFILTERED');
+
+  const doc = docs[0];
+  if (!doc) return null;
+
+  // ARM 2 — IDENTITY. One row is not evidence it is THE row. Read the id off the document
+  // rather than off the parameter that was sent, exactly as the roster walk reads the
+  // order off the rows rather than off the `order=` it asked for.
+  if (doc._id !== id)
+    throw new Infra(
+      `the lookup of ${id} came back with ${(doc && doc._id) || 'a row carrying no _id'} instead${total === null ? '' : ` (the server's own count says ${total} matched)`}. One row is not evidence it is THE row: a \`filter[_id]\` the endpoint dropped answers HTTP 200 with a stranger, and every fence downstream — bucket (c)'s \`resolved\`, R5's \`lifecycle_status\`, R6's \`parent_id\` — would then be read off that stranger. Nothing is asserted about bucket (c) or the successor fences.`,
+      'LOOKUP-WRONG-ROW');
+  return doc;
+};
 
 // A successor must be a row someone can still WORK. `done` and `cancelled` are
 // containers nobody opens again, so forwarding residue into one is filing it into a

@@ -1342,8 +1342,8 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
     (src) => mustReplace(
       mustReplace(emptyLiveRoster(src),
         'if (!fixture && children.length === 0)', 'if (false && children.length === 0)'),
-      'const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
-      'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
+      'const fetchById = (id) => {',
+      'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
 
   // THIS CONTROL ASSERTS CLAUSE (a) ONLY — NEVER THE OVERALL EXIT CODE. The exit code
@@ -1420,8 +1420,8 @@ test('wave 27: the verdict token names the roster it counted and the tree it rea
   const live = mutatedRun(
     (src) => emptyLiveRoster(src)
       .replace('if (!fixture && children.length === 0)', 'if (false && children.length === 0)')
-      .replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
-        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
+      .replace('const fetchById = (id) => {',
+        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
   assert.match(token(live.out), /roster=0 repo=\S+ head=[0-9a-f]{7,}/,
     'a live verdict states its population AND the tree it was taken from');
@@ -1597,8 +1597,8 @@ test('wave 29 THE VERDICT PATH: HISTORY-UNAVAILABLE is a LETTER at exit 1, never
   const mut = (src) => must(
     must(src, 'const children = fixture ? fixture.children : fetchRoster(EPIC);',
       'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];'),
-    'const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
-    'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });');
+    'const fetchById = (id) => {',
+    'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {');
   const { status, out } = mutatedRun(mut, ['--repo', root, '--successor', 'TERMINAL']);
   assert.equal(status, NO_SEAL, `a per-defect unreadable history costs exit 1, not exit 2: ${token(out)}`);
   assert.match(token(out), /SEAL-PREDICATE NO-SEAL a=PASS b=HISTORY-UNAVAILABLE c=PASS /,
@@ -1621,8 +1621,8 @@ test('wave 29: a checkout with WHOLE history is BYTE-IDENTICAL to the undiscrimi
   // unmatchable for a condition that did not occur.
   const roster = (src) => src.replace('const children = fixture ? fixture.children : fetchRoster(EPIC);',
     'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];');
-  const stubGate = (src) => src.replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
-    'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });');
+  const stubGate = (src) => src.replace('const fetchById = (id) => {',
+    'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });\nconst _unused_real_fetchById = (id) => {');
   const now = mutatedRun((s) => stubGate(roster(s)), ['--repo', REPO, '--successor', 'TERMINAL']);
   // The undiscriminated ancestry leg, restored verbatim on top of everything else.
   const before = mutatedRun((s) => {
@@ -1658,11 +1658,32 @@ test('wave 29: a checkout with WHOLE history is BYTE-IDENTICAL to the undiscrimi
 // time and watch which arm fires. `rows: Infinity` is a ledger that never runs out —
 // the shape a walk must be able to give up on rather than loop over forever.
 //
-// `fetchById` reaches the same `q` with no `limit`, so it comes back empty here; these
-// tests run `--successor TERMINAL` (which consults no successor) and read clause (a)'s
-// OWN letters, never the exit code, exactly as the wave-29 control did.
+// `fetchById` reaches the same `q`, so the stub answers `filter[_id]` on its OWN branch
+// rather than letting a by-id lookup fall through the roster generator and come back with
+// `row-0` — a stub that answers a question it was not asked is the very defect these
+// tests exist to pin. `byId` picks HOW it answers, and the default is `absent` (no such
+// row), which is what the roster arms below want: these tests run `--successor TERMINAL`
+// (which consults no successor) and read clause (a)'s OWN letters, never the exit code,
+// exactly as the wave-29 control did.
+//   absent      the id is not in the ledger — a real answer, and `null`
+//   honest      one row, and it IS the row asked for
+//   wrong-row   ONE row, and it is a stranger — the shape only the identity arm can catch
+//   unfiltered  a FULL page of strangers, `total` the whole task table — a dropped
+//               `filter[]` wrapper, measured live on 2026-08-22
 const cannedLedger = (o) => 'function q(params) {\n'
   + '  const p = new Map(params);\n'
+  + '  const BY_ID = ' + JSON.stringify(o.byId || 'absent') + ';\n'
+  + '  if (p.has("filter[_id]")) {\n'
+  + '    const want = p.get("filter[_id]"), n = Number(p.get("limit") || 0);\n'
+  + '    const row = (i) => ({ _id: i, _type: "task", status: "published", lifecycle_status: "open", parent_id: null, _createdAt: "2026-01-01T00:00:00.000000000Z" });\n'
+  + '    if (BY_ID === "honest") return { result: { documents: [row(want)], count: 1, offset: 0, limit: n, total: 1 } };\n'
+  + '    if (BY_ID === "wrong-row") return { result: { documents: [row("cch-w39-s4-a-stranger")], count: 1, offset: 0, limit: n, total: 1 } };\n'
+  + '    if (BY_ID === "unfiltered") {\n'
+  + '      const d = []; for (let i = 0; i < Math.max(n, 1); i += 1) d.push(row("cch-w39-s4-a-stranger-" + i));\n'
+  + '      return { result: { documents: d, count: d.length, offset: 0, limit: n, total: 6994 } };\n'
+  + '    }\n'
+  + '    return { result: { documents: [], count: 0, offset: 0, limit: n, total: 0 } };\n'
+  + '  }\n'
   + '  const ROWS = ' + (o.rows === Infinity ? 'Infinity' : String(o.rows))
   + ', TOTAL = ' + (o.total === undefined || o.total === null ? 'null' : String(o.total))
   + ', DESC = ' + Boolean(o.descending)
@@ -1913,4 +1934,123 @@ test('wave 30: a ledger this program could not REACH is an INFRA FAULT that says
   assert.doesNotMatch(out, /VERDICT: SEAL/, 'nothing may be sealed off a roster that was never fetched');
   assert.doesNotMatch(token(out), /\ba=(PASS|FAIL)\b/,
     'no clause letter may be asserted off a read that did not happen');
+});
+
+// ── THE OTHER HALF OF WAVE 64 — THE BY-ID READ ─────────────────────────────────────────
+// Wave 64 taught the ROSTER read to page-or-refuse. The BY-ID read next to it kept the
+// original disease in miniature: `q([['filter[_id]', id]]).result.documents[0] || null` —
+// no `limit`, no `count`, and no check that the row that came back is the row that was
+// asked for. Re-measured on the live ledger 2026-08-22: a lost `filter[]` wrapper
+// (`?_id=<real id>&limit=3`) answers HTTP 200 with 3 UNFILTERED rows out of 6,994, and a
+// filterless read with no `limit` answers a default window of 100. So one dropped wrapper
+// makes `fetchById(anything)` return whatever sorted first, silently — and bucket (c),
+// whose whole job is to catch a permanent human gate that VANISHED, resolves every gate ✓
+// off that stranger and can no longer lose. Truncation and blindness are indistinguishable
+// at the call site: that is the thing these four arms fix.
+
+test('wave 65 THE BY-ID READ CAN LOSE (cardinality): a dropped `filter[_id]` REFUSES instead of resolving a stranger', () => {
+  // A roster that pages cleanly and carries no residue, so the run reaches BUCKET (c) —
+  // the clause that reads `fetchById` — instead of stopping at the TERMINAL refusal.
+  const dropped = chain(withLedger({ rows: 4, total: 4, byId: 'unfiltered' }), withPageLimit(3));
+
+  const refused = rosterRun(dropped);
+  assert.equal(refused.status, INFRA, 'a lookup this program could not trust is an infra fault, never a verdict');
+  assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=LOOKUP-UNFILTERED/);
+  // THE INSTRUMENT REPORTS ITS OWN SAMPLE SIZE — how many rows it got AND how many the
+  // server said matched. A refusal that only says "something was wrong" is the same
+  // silence one layer up.
+  assert.match(refused.out, /came back with 2 rows for ONE _id \(the server's own count says 6994 matched\)/);
+  assert.doesNotMatch(refused.out, /VERDICT: SEAL/);
+
+  // CONTROL 1 — the arms are INDEPENDENT and STACKED. Remove cardinality and the identity
+  // arm still refuses, by its own name: two different facts about the same broken read.
+  const noCardinality = chain(dropped, (s) => must(s, 'if (docs.length > 1)', 'if (false)'));
+  const stillCaught = rosterRun(noCardinality);
+  assert.equal(stillCaught.status, INFRA, 'with cardinality gone, identity still refuses');
+  assert.match(token(stillCaught.out), /code=LOOKUP-WRONG-ROW/);
+  assert.doesNotMatch(token(stillCaught.out), /code=LOOKUP-UNFILTERED/,
+    'the cardinality mutation must actually apply — otherwise the arm under test never left');
+
+  // CONTROL 2 — WITH BOTH ARMS GONE, THE PRE-FIX DISEASE RETURNS INTACT. Bucket (c)
+  // resolves all three permanent human gates ✓ against rows nobody asked for, prints a
+  // stranger's `parent=` as if it were the gate's, and reports c=PASS. That is a clause
+  // that cannot fail on the one condition it exists to catch.
+  const blind = rosterRun(chain(noCardinality, (s) => must(s, 'if (doc._id !== id)', 'if (false)')));
+  assert.notEqual(blind.status, INFRA, 'disarmed, the lookup stops refusing');
+  assert.doesNotMatch(token(blind.out), /code=LOOKUP-/, 'the mutations must actually remove both refusals');
+  assert.match(token(blind.out), /\bc=PASS\b/, 'and bucket (c) certifies gates it never read');
+  assert.match(blind.out, /✓ gr-ops-platform-admin-emails {2}status=open parent=null/,
+    'the gate line is printed off the stranger row, ✓ and all');
+});
+
+test('wave 65 THE BY-ID READ CAN LOSE (identity): ONE row that is the WRONG row is refused by name', () => {
+  // The shape cardinality is structurally BLIND to, and the reason both arms exist: a
+  // single row comes back, so counting rows proves nothing. Only reading the `_id` off
+  // the document — never off the parameter that was sent — can see it.
+  const stranger = chain(withLedger({ rows: 4, total: 4, byId: 'wrong-row' }), withPageLimit(3));
+
+  const refused = rosterRun(stranger);
+  assert.equal(refused.status, INFRA);
+  assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=LOOKUP-WRONG-ROW/);
+  assert.match(refused.out, /came back with cch-w39-s4-a-stranger instead \(the server's own count says 1 matched\)/);
+  assert.doesNotMatch(token(refused.out), /code=LOOKUP-UNFILTERED/,
+    'one row is one row: the cardinality arm CANNOT see this, which is why identity is not redundant');
+
+  // THE CONTROL — remove identity alone and the run goes green over the stranger, with
+  // cardinality still armed and unable to help.
+  const trusted = rosterRun(chain(stranger, (s) => must(s, 'if (doc._id !== id)', 'if (false)')));
+  assert.notEqual(trusted.status, INFRA);
+  assert.doesNotMatch(token(trusted.out), /code=LOOKUP-/, 'the mutation must actually remove the refusal');
+  assert.match(token(trusted.out), /\bc=PASS\b/);
+  assert.match(trusted.out, /✓ cch-hg-compose-network-recreation {2}status=open parent=null/);
+});
+
+test('wave 65 THE PERMIT: an honest by-id read stays green, and the permit is BOUND to the guard', () => {
+  // Direction two. A lookup that answers the question it was asked must cost nothing:
+  // every gate resolves, no `LOOKUP-` code appears, bucket (c) passes.
+  const honest = chain(withLedger({ rows: 4, total: 4, byId: 'honest' }), withPageLimit(3));
+  const permitted = rosterRun(honest);
+  assert.notEqual(permitted.status, INFRA, `an honest lookup is not an infra fault: ${token(permitted.out)}`);
+  assert.doesNotMatch(token(permitted.out), /code=LOOKUP-/);
+  assert.match(token(permitted.out), /\bc=PASS\b/);
+  assert.match(permitted.out, /✓ gr-ops-platform-admin-emails {2}status=open/,
+    'and the gate row printed is the gate row, not a stranger');
+
+  // NON-VACUOUS, PROVED BY MUTATION. A permit assertion that no mutation can red is not
+  // evidence — it is a sentence about a code path it never touched. Over-tighten the
+  // cardinality arm by ONE character (`> 1` becomes `> 0`) and this exact run REDS: the
+  // permit is reading the guard, not reading past it.
+  const overEager = rosterRun(chain(honest, (s) => must(s, 'if (docs.length > 1)', 'if (docs.length > 0)')));
+  assert.equal(overEager.status, INFRA, 'the permit is bound to the guard: over-tighten it and the healthy read reds');
+  assert.match(token(overEager.out), /code=LOOKUP-UNFILTERED/);
+
+  // AND THE GUARD COSTS NOTHING WHERE THERE IS NOTHING TO GUARD. With BOTH arms removed
+  // the honest run's verdict token is BYTE-IDENTICAL — so disarming the guard reds only
+  // the refusal tests above and moves not one byte of a healthy verdict.
+  const disarmed = rosterRun(chain(honest,
+    (s) => must(s, 'if (docs.length > 1)', 'if (false)'),
+    (s) => must(s, 'if (doc._id !== id)', 'if (false)')));
+  assert.equal(token(disarmed.out), token(permitted.out),
+    'both arms gone, and an honest read produces the same verdict token byte for byte');
+  assert.equal(disarmed.status, permitted.status, 'same exit code');
+});
+
+test('wave 65: the by-id request actually CARRIES limit and count — read off curl\'s own argv', () => {
+  // NAMING THE AFFORDANCE IS NOT ENOUGH IF THE REQUEST DOES NOT USE IT — the wave-64
+  // argv test's rule, pointed at the lookup. `limit=2` IS the cardinality arm: without a
+  // window there is no second row to count, and the arm can never fire however well it is
+  // written. Asserted from the wire, not from the source that claims to send it.
+  const shimDir = tmp('seal-pred-curl-byid-');
+  const argsFile = join(shimDir, 'argv.txt');
+  writeFileSync(join(shimDir, 'curl'),
+    `#!/bin/sh\nprintf '%s\\n' "$@" >> ${argsFile}\nprintf '{"result":{"documents":[],"count":0,"offset":0,"limit":500,"total":0}}\\n200\\n'\n`);
+  spawnSync('chmod', ['+x', join(shimDir, 'curl')]);
+  // `--successor` names an id, so the lookup runs before any roster floor can end the run.
+  const r = spawnSync('node', [PREDICATE, '--repo', REPO, '--successor', 'some-successor-id'],
+    { encoding: 'utf8', timeout: 120000, env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}` } });
+  assert.notEqual(r.status, null, 'the predicate produced no exit status');
+  const argv = readFileSync(argsFile, 'utf8');
+  assert.match(argv, /^filter\[_id\]=some-successor-id$/m, 'never a bare _id — measured live, the wrapper-less form returns the whole table');
+  assert.match(argv, /^limit=2$/m, 'one row is the answer; the SECOND row is the proof the filter did not hold');
+  assert.match(argv, /^count=true$/m, 'so the refusal can state how many rows actually matched');
 });
