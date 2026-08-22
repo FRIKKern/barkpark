@@ -440,11 +440,18 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 			if s.TopClass != nil && strings.TrimSpace(*s.TopClass) != "" {
 				top = sanitizeCell(*s.TopClass)
 			}
-			out.outf("  %-38s %6d attempted  %6d failed  %6d deferred  %-7s %s",
-				sanitizeCell(s.SiteID), s.Volume, s.Failed, s.Deferred, deployCensusShare(s.FailureRate), top)
+			out.outf("  %-38s %6d attempted  %9s live  %6d failed  %6d deferred  %-7s %s",
+				sanitizeCell(s.SiteID), s.Volume, deployCensusSiteLive(s), s.Failed, s.Deferred,
+				deployCensusShare(s.FailureRate), top)
 		}
 		if n := len(census.Sites) - len(rows); n > 0 {
 			out.outf("  … and %d more (raise the display clamp with --sites 0)", n)
+		}
+		if line := deployCensusSiteLiveNote(rows); line != "" {
+			out.outf("%s", line)
+		}
+		for _, line := range deployCensusSiteNotes(rows, boundaries, from, to, census.MinSample) {
+			out.outf("%s", line)
 		}
 	} else {
 		out.outf("no site had a deploy row in this window — widen it with --days.")
@@ -729,6 +736,151 @@ func deployCensusShare(r cloudclient.DeployRate) string {
 		return pct
 	}
 	return "—"
+}
+
+// ─── THE SITE ROWS OWE THE SAME THREE ANSWERS THE HEADLINE OWES ──────────────
+//
+// The headline was cured of this exact disease and the site rows were not. A
+// line that leads with a failure rate answers "how bad is it" and never answers
+// "did anything ship", which is why deployCensusLiveTerm exists. Under it, every
+// site row rendered attempted/failed/deferred and a share cell, and success was
+// the unnamed remainder — per site.
+//
+// MEASURED, NOT SUPPOSED. The real 200 quoted on cloudclient.DeployCensusSite —
+// {"volume":435,"failed":1,"deferred":325,"live":109} — rendered as "435
+// attempted, 1 failed, 325 deferred, 0.2%". A reader takes that for a healthy
+// site. 109 of the 435 shipped, and the wire SAID SO: `live` has been on the
+// payload since #10519 and on this struct since dr-w19-s7, and this renderer
+// decoded it and dropped it. The reader could not recover it either, because
+// `attempted − failed − deferred` is the FORBIDDEN subtraction (site_row/2's own
+// comment): it folds in-flight, cancelled and residual rows into live.
+//
+// AND THE SHARE CELL'S EM-DASH IS A REFUSAL NOBODY NAMED. Class shares and
+// deferral shares each get deployCensusShareNotes beneath their rows; the site
+// section got nothing, so `—` conflated "refused below min_sample" with "no
+// failures" with "this control plane sent no rate". Per-site rates are the ones
+// that refuse most: site_row/2 denominates each one on that SITE's own volume,
+// so the floor is min_sample per site, not across the fleet.
+
+// deployCensusSiteLive renders one site's shipped count — the same three endings
+// as the fleet's live term, and none of them is a zero. A control plane older
+// than #10519 sends no per-site `live` at all, and that must render UNMETERED:
+// a zero-live site is the most alarming reading of an absence there is.
+func deployCensusSiteLive(s cloudclient.DeployCensusSite) string {
+	if s.Live == nil {
+		return "UNMETERED"
+	}
+	return strconv.Itoa(*s.Live)
+}
+
+// deployCensusSiteLiveNote explains the UNMETERED cells once, beneath the rows,
+// and forecloses the subtraction a reader would otherwise reach for. It prints
+// only when a row actually went unmetered — this is a note about an absence, not
+// a caption.
+func deployCensusSiteLiveNote(rows []cloudclient.DeployCensusSite) string {
+	unmetered := 0
+	for _, s := range rows {
+		if s.Live == nil {
+			unmetered++
+		}
+	}
+	if unmetered == 0 {
+		return ""
+	}
+	return fmt.Sprintf("  PER-SITE LIVE UNMETERED on %d of %d rows above — this control plane sends no per-site `live`, "+
+		"so nothing here says how many of those attempts SHIPPED. `attempted − failed − deferred` is NOT the answer: "+
+		"it folds in-flight, cancelled and residual rows into live.", unmetered, len(rows))
+}
+
+// deployCensusSiteNotes is deployCensusShareNotes' counterpart for the site
+// section: the refusal behind every em-dash, named, with the remedy that fits.
+//
+// GROUPED BY REMEDY, AND THE DENOMINATOR TRAVELS AS A RANGE. Every site rate is
+// denominated on that site's OWN volume, so grouping by reason (which carries
+// the sample) would emit one note pair per row and grouping by reason alone
+// would print one row's n over a count that includes rows never taken over it —
+// the precise error deployCensusShareNotes splits its groups to avoid. Reporting
+// the observed span of samples states only what the rows themselves state.
+func deployCensusSiteNotes(rows []cloudclient.DeployCensusSite, boundaries []deployCensusBoundary, from, to time.Time, minSample int) []string {
+	type group struct {
+		remedy string
+		floor  int
+		rows   int
+		lo, hi int
+	}
+	var groups []group
+	for _, s := range rows {
+		r := s.FailureRate
+		if !r.Refused && r.Pct != nil {
+			continue
+		}
+		reason := deployCensusRefusal(r, minSample)
+		remedy := deployCensusSiteRemedy(reason, boundaries, from, to, minSample)
+		floor := r.MinSample
+		if floor <= 0 {
+			floor = minSample
+		}
+		found := false
+		for i := range groups {
+			if groups[i].remedy != remedy || groups[i].floor != floor {
+				continue
+			}
+			groups[i].rows++
+			if r.Sample < groups[i].lo {
+				groups[i].lo = r.Sample
+			}
+			if r.Sample > groups[i].hi {
+				groups[i].hi = r.Sample
+			}
+			found = true
+			break
+		}
+		if !found {
+			groups = append(groups, group{remedy: remedy, floor: floor, rows: 1, lo: r.Sample, hi: r.Sample})
+		}
+	}
+	if len(groups) == 0 {
+		return nil
+	}
+
+	lines := make([]string, 0, 2*len(groups))
+	for _, g := range groups {
+		span := fmt.Sprintf("n=%d", g.lo)
+		if g.hi != g.lo {
+			span = fmt.Sprintf("n=%d–%d", g.lo, g.hi)
+		}
+		floor := ""
+		if g.floor > 0 {
+			floor = fmt.Sprintf(", min_sample %d", g.floor)
+		}
+		lines = append(lines,
+			fmt.Sprintf("  NO PER-SITE RATE for %d of %d rows above — that em-dash is a REFUSAL, never a zero "+
+				"(each row denominated on its OWN volume: %s%s).", g.rows, len(rows), span, floor))
+		lines = append(lines, "  "+g.remedy)
+	}
+	return lines
+}
+
+// deployCensusSiteRemedy is the actionable half for a site refusal.
+//
+// A per-site refusal is a SAMPLE floor, not a vocabulary straddle — site_row/2
+// builds the node with rate_basis(failed, volume) and nothing else — so the
+// honest remedy is that the sample has to grow, and no window can be trimmed to
+// produce one. That truth does NOT depend on the envelope naming a boundary,
+// which is why it is not routed through deployCensusShareRemedy's third arm
+// ("this control plane named no vocabulary boundary") — a sentence about
+// vocabulary would answer a question nobody asked here.
+//
+// Where the control plane DOES name a boundary inside its own reason, the
+// shared remedy still owns the render: that instant is read, never invented, and
+// forking a second copy of the boundary logic is how the two drift.
+func deployCensusSiteRemedy(reason string, boundaries []deployCensusBoundary, from, to time.Time, minSample int) string {
+	if _, ok := deployCensusReasonBoundary(reason); ok {
+		return deployCensusShareRemedy(reason, boundaries, from, to, minSample)
+	}
+	return "NO --from CAN UN-REFUSE THESE: a narrower window can only SHRINK each site's own sample. " +
+		"A per-site rate needs MORE deploys per site — a wider --from, or more time. The fleet headline above is " +
+		"the rate this population CAN support; it is not a per-site claim."
 }
 
 // ─── A REFUSED SHARE SAYS WHICH WINDOW WOULD UN-REFUSE IT ────────────────────
