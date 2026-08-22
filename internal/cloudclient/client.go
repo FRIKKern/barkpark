@@ -2437,12 +2437,12 @@ type DeployCensus struct {
 	// nil = this control plane does not count abandonments; 0 with 0 unreadable =
 	// none happened; 0 with N unreadable = nothing legible said so, and 0 is a
 	// LOWER BOUND. That is the whole reason these are pointers.
-	DeferredTotal       *int `json:"deferred_total"`
-	Abandoned           *int `json:"abandoned"`
-	AbandonedUnreadable *int `json:"abandoned_unreadable"`
-	NotAttempted   []DeployCensusClass `json:"not_attempted"`
-	Sites          []DeployCensusSite  `json:"sites"`
-	MinSample      int                 `json:"min_sample"`
+	DeferredTotal       *int                `json:"deferred_total"`
+	Abandoned           *int                `json:"abandoned"`
+	AbandonedUnreadable *int                `json:"abandoned_unreadable"`
+	NotAttempted        []DeployCensusClass `json:"not_attempted"`
+	Sites               []DeployCensusSite  `json:"sites"`
+	MinSample           int                 `json:"min_sample"`
 	// Delivery is the dr-w11-s4 addition: the time-to-web census. A POINTER
 	// because today's control plane sends no `delivery` key at all, and "the
 	// control plane does not measure delivery yet" must not decode to "delivery
