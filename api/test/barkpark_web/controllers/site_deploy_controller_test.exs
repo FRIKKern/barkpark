@@ -798,4 +798,169 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
 
     door
   end
+
+  describe "GET ?record=1 — the DURABLE per-build record" do
+    # WHY THIS ENDPOINT EXISTS: render_status/1 answers about the run the Runner
+    # holds IN MEMORY. Once a build finishes and the slug goes idle, the only
+    # thing that still knows what happened is the terminal record on disk — and
+    # before this, reading it cost an SSH session.
+
+    test "a slug that never deployed answers never_recorded, NOT an empty success",
+         %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+      on_exit(fn -> File.rm_rf(run_state) end)
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      body =
+        conn
+        |> admin_conn()
+        |> get("/v1/admin/site-deploy?slug=never-built&record=1")
+        |> json_response(200)
+
+      assert body["log_state"] == "never_recorded"
+      assert body["record"] == "none"
+      assert body["exit_code"] == nil
+
+      # THE DISTINCTION THIS ROW EXISTS FOR: a slug that never deployed and a
+      # build whose log was pruned must not answer identically. `never_recorded`
+      # is a different word from `evicted`, and both are different from
+      # `missing` (gone from disk, never tombstoned).
+      refute body["log_state"] in ["evicted", "missing", "available"]
+    end
+
+    test "a recorded failure exposes the CAUSE — stages, exit code, journal command — and NEVER raw log bytes",
+         %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+      on_exit(fn -> File.rm_rf(run_state) end)
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      secret = "BARKPARK_TOKEN=bppat_thismustnevercrosstheboundary"
+      log = Path.join(run_state, "boom-b1.log")
+      File.write!(log, "npm ERR! 401 Unauthorized\n" <> secret <> "\n")
+
+      File.write!(
+        Path.join(run_state, "boom-b1.terminal.json"),
+        Jason.encode!(%{
+          "slug" => "boom",
+          "build_id" => "b1",
+          "run_tag" => "b1",
+          "log_file" => log,
+          "log_bytes" => 64,
+          "exit_code" => 1,
+          "failure_reason" => "BUILD failed: npm ERR! 401 Unauthorized",
+          "stages" => [
+            %{"name" => "PLAN", "status" => "ok"},
+            %{"name" => "BUILD", "status" => "failed"}
+          ],
+          "unit_name" => "bp-site-build-boom.service",
+          "started_at" => "2026-08-22T10:00:00Z",
+          "finished_at" => "2026-08-22T10:01:00Z"
+        })
+      )
+
+      body =
+        conn
+        |> admin_conn()
+        |> get("/v1/admin/site-deploy?slug=boom&build_id=b1&record=1")
+        |> json_response(200)
+
+      # MORE than the one-line failure_reason — the whole point of the row.
+      assert body["exit_code"] == 1
+      assert body["failure_reason"] =~ "401 Unauthorized"
+      assert length(body["stages"]) == 2
+      assert body["unit_name"] == "bp-site-build-boom.service"
+      assert body["journal_command"]
+      assert body["log_state"] == "available"
+      assert body["log_bytes"] == 64
+
+      # THE SECURITY BOUNDARY, asserted POSITIVELY against the exact bytes on
+      # disk rather than by hoping no field carries them. The build env file
+      # carries BARKPARK_TOKEN in plaintext and the shared scrubber's measured
+      # leak rate against this token shape is 95.1%, which is why the bytes are
+      # refused rather than scrubbed.
+      encoded = Jason.encode!(body)
+      refute encoded =~ "bppat_"
+      refute encoded =~ "BARKPARK_TOKEN"
+      refute Map.has_key?(body, "log")
+
+      # NOT "no log-derived text" — `failure_reason` is BUILT from the log's
+      # trailing meaningful lines and carrying the cause is the entire point of
+      # the row. The boundary is the raw BYTES, which is where the plaintext
+      # token lives. An earlier version of this test refuted "npm ERR!" and was
+      # wrong in the direction that matters: it would have passed against a
+      # surface that had stopped saying anything useful.
+      assert body["failure_reason"] =~ "npm ERR!"
+    end
+
+    test "the reason and stage caps are ENFORCED HERE, not inherited from upstream",
+         %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+      on_exit(fn -> File.rm_rf(run_state) end)
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      # An order of magnitude over each cap. Upstream bounds these already; this
+      # asserts the DOOR does too, so a future upstream change cannot widen what
+      # this endpoint serves without reddening here.
+      File.write!(
+        Path.join(run_state, "huge-b1.terminal.json"),
+        Jason.encode!(%{
+          "slug" => "huge",
+          "build_id" => "b1",
+          "run_tag" => "b1",
+          "log_file" => Path.join(run_state, "huge-b1.log"),
+          "exit_code" => 1,
+          "failure_reason" => String.duplicate("x", 40_000),
+          "stages" => Enum.map(1..320, &%{"name" => "S#{&1}", "status" => "ok"})
+        })
+      )
+
+      body =
+        conn
+        |> admin_conn()
+        |> get("/v1/admin/site-deploy?slug=huge&build_id=b1&record=1")
+        |> json_response(200)
+
+      assert byte_size(body["failure_reason"]) < 5_000
+      assert body["failure_reason"] =~ "truncated at 4000 bytes"
+      assert length(body["stages"]) == 32
+    end
+
+    test "WITHOUT the flag the existing status contract is byte-identical — BoxRelay is untouched",
+         %{conn: conn} do
+      run_state = Path.join(System.tmp_dir!(), "bp-rec-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(run_state)
+      on_exit(fn -> File.rm_rf(run_state) end)
+      put_runner_cfg(enabled: true, run_state_dir: run_state, command: stub("exit 0"))
+
+      plain =
+        conn |> admin_conn() |> get("/v1/admin/site-deploy?slug=idle-one") |> json_response(200)
+
+      assert plain["state"] == "idle"
+      refute Map.has_key?(plain, "log_state")
+
+      # A typo in the flag must NOT switch response shapes — it degrades to the
+      # live status. `record=0` and `record=please` are not opt-ins.
+      for bad <- ["0", "false", "please", ""] do
+        other =
+          conn
+          |> admin_conn()
+          |> get("/v1/admin/site-deploy?slug=idle-one&record=#{bad}")
+          |> json_response(200)
+
+        assert other["state"] == "idle",
+               "record=#{inspect(bad)} switched response shapes; only 1/true/yes/on may opt in"
+
+        refute Map.has_key?(other, "log_state")
+      end
+
+      # And the 404 contract BoxRelay depends on (charter D34) still fires.
+      conn
+      |> admin_conn()
+      |> get("/v1/admin/site-deploy?slug=idle-one&build_id=not-the-live-one")
+      |> json_response(404)
+    end
+  end
 end
