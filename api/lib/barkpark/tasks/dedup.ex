@@ -252,7 +252,7 @@ defmodule Barkpark.Tasks.Dedup do
       |> maybe_filter_dataset(dataset)
       |> Scope.scope_to_workspace(workspace_id, project_id)
 
-    {:ok, query |> Repo.all(timeout: timeout) |> Enum.map(&row_to_task/1)}
+    {:ok, query |> Repo.all(timeout: timeout) |> to_tasks()}
   rescue
     e ->
       Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
@@ -290,19 +290,6 @@ defmodule Barkpark.Tasks.Dedup do
     }
   end
 
-  # The projected row IS the scored shape — no JSONB decoding left to do beyond
-  # the `labels` array.
-  defp row_to_task(row) do
-    %{
-      id: row.doc_id,
-      title: row.title || "",
-      description: row.description,
-      labels: candidate_labels(row),
-      parent: row.parent,
-      lifecycle: row.lifecycle
-    }
-  end
-
   # ── the scan is TOTAL over its input (a poisoned row cannot take the gate down)
   #
   # `labels` is the ONE projected field read as RAW JSONB (`->`). Every other one
@@ -324,23 +311,53 @@ defmodule Barkpark.Tasks.Dedup do
   #
   # TOTAL IS NOT SILENT. An unusable label keeps its slot as a stable encoding —
   # so the row keeps its label CARDINALITY and stays scorable instead of quietly
-  # shedding signal — and the row is NAMED in a warning, so the poison gets fixed
-  # at source rather than becoming a permanent blind spot in the scan.
-  defp candidate_labels(row) do
-    case stringify_list(row.labels) do
-      {labels, []} ->
-        labels
+  # shedding signal — and the rows are NAMED in a warning, so the poison gets
+  # fixed at source rather than becoming a permanent blind spot in the scan.
+  defp to_tasks(rows) do
+    {tasks, malformed} = Enum.map_reduce(rows, [], &row_to_task/2)
+    report_malformed(Enum.reverse(malformed))
+    tasks
+  end
 
-      {labels, unusable} ->
-        Logger.warning(
-          "Tasks.Dedup: task #{row.doc_id} carries #{length(unusable)} unusable " <>
-            "content.labels value(s) — a label set is a list of strings, and these " <>
-            "are not: #{inspect(unusable, limit: 3, printable_limit: 200)}. The scan " <>
-            "completed and scored the row with encoded stand-ins; fix the row at source."
-        )
+  # The projected row IS the scored shape — no JSONB decoding left to do beyond
+  # the `labels` array. Accumulates the rows whose labels had to be coerced.
+  defp row_to_task(row, malformed) do
+    {labels, unusable} = stringify_list(row.labels)
 
-        labels
+    task = %{
+      id: row.doc_id,
+      title: row.title || "",
+      description: row.description,
+      labels: labels,
+      parent: row.parent,
+      lifecycle: row.lifecycle
+    }
+
+    case unusable do
+      [] -> {task, malformed}
+      _ -> {task, [{row.doc_id, unusable} | malformed]}
     end
+  end
+
+  # ONE line per SCAN, not one per row. The scan reads up to `@candidate_limit`
+  # rows on every single create, so a per-row warning would turn one bad
+  # migration into thousands of log lines per create — a flood in exactly the
+  # scenario this fix exists for. The count is the alarm; the named ids are the
+  # thread to pull.
+  defp report_malformed([]), do: :ok
+
+  defp report_malformed(rows) do
+    named = Enum.take(rows, 5)
+
+    Logger.warning(
+      "Tasks.Dedup: #{length(rows)} backlog row(s) carry unusable content.labels " <>
+        "value(s) — a label set is a list of strings, and these are not. The scan " <>
+        "COMPLETED and scored them with encoded stand-ins; fix them at source. " <>
+        "First #{length(named)}: " <>
+        Enum.map_join(named, "; ", fn {doc_id, unusable} ->
+          "#{doc_id} #{inspect(unusable, limit: 3, printable_limit: 120)}"
+        end)
+    )
   end
 
   defp present(%{id: id, sim: sim, structural: rel, lifecycle: lc}) do
