@@ -2337,7 +2337,19 @@ type DeployCensusSite struct {
 	Deferred    int        `json:"deferred"`
 	Live        *int       `json:"live"`
 	FailureRate DeployRate `json:"failure_rate"`
-	TopClass    *string    `json:"top_class"`
+	// TerminalFailureRate is the dr-w12-s8 addition, the per-site twin of the
+	// fleet key of the same name: the same numerator over failed+live instead of
+	// over every attempted row. A POINTER for the reason all its neighbours are —
+	// a control plane predating this slice sends no per-site terminal rate, and
+	// that must not decode into a site whose terminal rate is 0% of 0 rows, which
+	// is the most flattering possible reading of an absence.
+	//
+	// It is declared HERE and not left to ride the file-global tag union on
+	// DeployCensus's identically-named field: that is charter D260 exactly, and
+	// json.Unmarshal would drop the per-site key on the floor while every
+	// name-based guard stayed green.
+	TerminalFailureRate *DeployRate `json:"terminal_failure_rate"`
+	TopClass            *string     `json:"top_class"`
 }
 
 // DeployCensusWindow is the PINNED window the census was taken over, echoed back
@@ -2408,6 +2420,26 @@ type DeployCensus struct {
 	Residual       *int                `json:"residual"`
 	Classes        []DeployCensusClass `json:"classes"`
 	Deferred       []DeployCensusClass `json:"deferred"`
+	// DeferredTotal, Abandoned and AbandonedUnreadable are the
+	// dr-w12-s8 additions.
+	//
+	// DeferredTotal is the scalar the two failure rates differ by. The CLI has
+	// always summed Deferred's class counts itself; that client-side sum is a
+	// SECOND definition of the number living on the far side of the wire, and it
+	// silently answers 0 for a control plane that sent no class rows at all. The
+	// server's own count wins where it is sent.
+	//
+	// Abandoned is the crown count: publishes GIVEN UP ON after the refusal chain
+	// hit its bound. AbandonedUnreadable is what makes it honest — failed rows
+	// whose failure_reason recorded nothing, so the abandonment predicate (prose,
+	// anchored on Sites.Deploy.abandonment_reason) could not RUN on them. With
+	// both, three states are distinguishable that one integer collapses into one:
+	// nil = this control plane does not count abandonments; 0 with 0 unreadable =
+	// none happened; 0 with N unreadable = nothing legible said so, and 0 is a
+	// LOWER BOUND. That is the whole reason these are pointers.
+	DeferredTotal       *int `json:"deferred_total"`
+	Abandoned           *int `json:"abandoned"`
+	AbandonedUnreadable *int `json:"abandoned_unreadable"`
 	NotAttempted   []DeployCensusClass `json:"not_attempted"`
 	Sites          []DeployCensusSite  `json:"sites"`
 	MinSample      int                 `json:"min_sample"`

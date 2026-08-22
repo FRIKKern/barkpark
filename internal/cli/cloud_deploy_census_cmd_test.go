@@ -78,6 +78,175 @@ const censusS1Envelope = `{
   "min_sample": 200
 }`
 
+// censusW12S8Envelope is what the control plane sends AFTER dr-w12-s8: the
+// terminal rate at BOTH levels, the server's own `deferred_total`, and the
+// abandonment COUNT with the size of its own blind spot beside it.
+//
+// The numbers are internally consistent on purpose — 832 failed + 591 live =
+// 1423 terminal, and 2216 attempted - 1423 terminal = 793 deferred — so a render
+// that mixes the two denominators up produces a number this fixture can catch.
+const censusW12S8Envelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2216,
+  "failed": 832,
+  "live": 591,
+  "deferred_total": 793,
+  "abandoned": 6,
+  "abandoned_unreadable": 0,
+  "failure_rate": {"sample": 2216, "pct": 37.55, "numerator": 832, "min_sample": 200, "refused": false, "reason": null, "basis": "attempted rows (deferrals included)"},
+  "terminal_failure_rate": {"sample": 1423, "pct": 58.47, "numerator": 832, "min_sample": 200, "refused": false, "reason": null, "basis": "TERMINAL rows only: failed + live"},
+  "classes": [],
+  "deferred": [],
+  "not_attempted": [],
+  "sites": [
+    {"site_id": "site-alpha", "volume": 1200, "failed": 500, "deferred": 400, "live": 300,
+     "failure_rate": {"sample": 1200, "pct": 41.67, "numerator": 500, "min_sample": 200, "refused": false, "reason": null},
+     "terminal_failure_rate": {"sample": 800, "pct": 62.5, "numerator": 500, "min_sample": 200, "refused": false, "reason": null, "basis": "TERMINAL rows only: failed + live"},
+     "top_class": "BOX_BUSY_409"}
+  ],
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsW12S8Payload: the control plane now sends what the reader
+// has been declaring since dr-w8-s1, and the headline LEAVES its
+// "older control plane" arm — the case the payload census's allowlist row named
+// as the headline consequence of the emitter being unbuilt.
+func TestCloudDeploymentsW12S8Payload(t *testing.T) {
+	newCensusServer(t, 200, censusW12S8Envelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+
+	// THE ARM IT MUST HAVE LEFT. This sentence is correct against today's
+	// deployed CP and a LIE against a CP that sends the key, and nothing else in
+	// the tree can tell the two apart.
+	if strings.Contains(stdout, "this control plane sends no terminal-row rate") {
+		t.Fatalf("the headline is still on its older-control-plane arm against a payload that carries the rate:\n%s", stdout)
+	}
+	headline := censusLineContaining(t, stdout, "of 2216 attempted")
+	for _, want := range []string{"37.5%", "58.5% of 1423 terminal"} {
+		if !strings.Contains(headline, want) {
+			t.Fatalf("headline %q missing %q — both denominators ride the SAME line or a reader compares two screens", headline, want)
+		}
+	}
+
+	// THE ABSOLUTE COUNT, beside the rates it cannot be reduced to.
+	if !strings.Contains(stdout, "abandoned publishes: 6") {
+		t.Fatalf("the abandonment COUNT is not on the census screen:\n%s", stdout)
+	}
+
+	// THE PER-SITE TWIN — the reader who asks "which site" must not be sent back
+	// to the diluted column.
+	site := censusLineContaining(t, stdout, "site-alpha")
+	for _, want := range []string{"41.7%", "t 62.5%"} {
+		if !strings.Contains(site, want) {
+			t.Fatalf("site row %q missing %q — the per-site terminal rate did not render", site, want)
+		}
+	}
+}
+
+// TestDeployCensusAbandonmentThreeStates: absent, lower-bounded and exact are
+// three DIFFERENT renders. Collapsing any two of them is the defect this pair of
+// keys exists to make impossible, so it is asserted directly on the renderer
+// rather than only through a whole-screen fixture.
+func TestDeployCensusAbandonmentThreeStates(t *testing.T) {
+	six, zero, four := 6, 0, 4
+
+	cases := []struct {
+		name    string
+		census  cloudclient.DeployCensus
+		want    string
+		notWant string
+	}{
+		{
+			name:    "not sent at all",
+			census:  cloudclient.DeployCensus{},
+			want:    "NOT COUNTED",
+			notWant: "abandoned publishes: 0",
+		},
+		{
+			name:    "a real zero",
+			census:  cloudclient.DeployCensus{Abandoned: &zero, AbandonedUnreadable: &zero},
+			want:    "abandoned publishes: 0",
+			notWant: "LOWER BOUND",
+		},
+		{
+			name:    "counted, and fully legible",
+			census:  cloudclient.DeployCensus{Abandoned: &six, AbandonedUnreadable: &zero},
+			want:    "abandoned publishes: 6",
+			notWant: "LOWER BOUND",
+		},
+		{
+			name:    "counted, with a blind spot beside it",
+			census:  cloudclient.DeployCensus{Abandoned: &zero, AbandonedUnreadable: &four},
+			want:    "LOWER BOUND",
+			notWant: "NOT COUNTED",
+		},
+	}
+
+	for _, tc := range cases {
+		got := deployCensusAbandonment(tc.census)
+		if !strings.Contains(got, tc.want) {
+			t.Fatalf("%s: %q does not contain %q", tc.name, got, tc.want)
+		}
+		if strings.Contains(got, tc.notWant) {
+			t.Fatalf("%s: %q must not contain %q — two of the three states have collapsed", tc.name, got, tc.notWant)
+		}
+	}
+
+	// AND THE ZERO THAT IS A LOWER BOUND SAYS THE SIZE OF WHAT IT COULD NOT SEE.
+	got := deployCensusAbandonment(cloudclient.DeployCensus{Abandoned: &zero, AbandonedUnreadable: &four})
+	if !strings.Contains(got, "4 failed row(s) recorded no reason") {
+		t.Fatalf("the blind spot's SIZE is missing: %q", got)
+	}
+}
+
+// TestDeployCensusDeferredTotalPrefersTheServer: the client-side sum over the
+// class rows is a SECOND definition of the number, and it is the one that can be
+// confidently wrong — a control plane that sent no class rows makes it answer 0
+// for a fleet that deferred hundreds.
+func TestDeployCensusDeferredTotalPrefersTheServer(t *testing.T) {
+	server := 793
+
+	// The class rows and the server's own count DISAGREE on purpose: only a
+	// reader that actually prefers the sent key can pass this.
+	census := cloudclient.DeployCensus{
+		DeferredTotal: &server,
+		Deferred:      []cloudclient.DeployCensusClass{{Class: "BOX_BUSY_DEFERRED", Count: 11}},
+	}
+	if got := deployCensusDeferredTotal(census); got != server {
+		t.Fatalf("deferred total = %d, want the server's own %d — the client-side sum won", got, server)
+	}
+
+	// …and a control plane that predates the key still gets the sum rather than a
+	// silent zero.
+	older := cloudclient.DeployCensus{
+		Deferred: []cloudclient.DeployCensusClass{{Class: "BOX_BUSY_DEFERRED", Count: 11}, {Class: "DEFERRED_UNCLASSIFIED", Count: 4}},
+	}
+	if got := deployCensusDeferredTotal(older); got != 15 {
+		t.Fatalf("deferred total = %d on a pre-key control plane, want the class sum 15", got)
+	}
+}
+
+// TestDeployCensusSiteTerminalAbsence: a site whose control plane does not send
+// the per-site terminal rate must render a MARK, never a blank column — a blank
+// reads as 0% to a scanning eye, which is the flattering direction.
+func TestDeployCensusSiteTerminalAbsence(t *testing.T) {
+	if got := deployCensusSiteTerminal(cloudclient.DeployCensusSite{}); !strings.Contains(got, "—") {
+		t.Fatalf("absent per-site terminal rate rendered %q, want a dash", got)
+	}
+	pct := 62.5
+	sent := cloudclient.DeployCensusSite{
+		TerminalFailureRate: &cloudclient.DeployRate{Sample: 800, Pct: &pct, Numerator: 500, MinSample: 200},
+	}
+	if got := deployCensusSiteTerminal(sent); !strings.Contains(got, "62.5%") {
+		t.Fatalf("per-site terminal rate rendered %q, want the percentage", got)
+	}
+}
+
 // censusTeamScopedEnvelope is what the TEAM route sends (dr-w16-s6): the same
 // census body PLUS a `scope` node naming the population. registered_sites (13)
 // deliberately exceeds the two rows in `sites` — a registered site that has
