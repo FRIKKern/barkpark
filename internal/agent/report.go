@@ -471,14 +471,25 @@ type SpaceReport struct {
 	ConsumerRoots []ConsumerRoot `json:"consumer_roots"`
 }
 
-// The three ConsumerRoot.Status values. They are a CLOSED set and they are
-// deliberately three, not two: "we read it", "it is not on this box", and "we
-// tried and failed" are three different operator actions (act on the bytes /
-// point the probe somewhere real / fix the probe), and collapsing the last two
-// into one is how a wrong root became invisible in the first place.
+// The four ConsumerRoot.Status values. They are a CLOSED set and they are
+// deliberately four, not two: "we read it", "we read PART of it and can say
+// which part we could not", "it is not on this box", and "we tried and failed"
+// are four different operator actions (act on the bytes / chmod the named
+// subtree or run the agent with the rights to see it / point the probe
+// somewhere real / fix the probe), and collapsing any of them is how a wrong
+// root became invisible in the first place.
 const (
 	// ConsumerRootRead — the walk completed. Bytes and Count are real.
 	ConsumerRootRead = "read"
+	// ConsumerRootDegraded — the walk finished and printed its total, but du
+	// could not descend into one or more subtrees and said so. Bytes and Count
+	// are REAL AND SHORT, and Degraded names by how much less we saw.
+	//
+	// It is its own word rather than `read` because the number is a floor, not
+	// a size (measured on guerrilla: 212K reported against a true 712K, a 70%
+	// shortfall), and rather than `unmeasured` because throwing away a floor we
+	// CAN name — and can act on — is the same information loss one layer down.
+	ConsumerRootDegraded = "degraded"
 	// ConsumerRootAbsent — the path does not exist on this box. This is a
 	// MEASUREMENT ("we looked; there is no such directory"), not a failure, and
 	// it is the whole point of the field: it is the state that must never
@@ -510,6 +521,19 @@ type ConsumerRoot struct {
 	Bytes int64     `json:"bytes"`
 	Top   []DirSize `json:"top"`
 	Count int       `json:"count"`
+
+	// Degraded NAMES the subtrees du could not descend into, BY PATH — the
+	// thing an operator can `ls`, `chmod` or `sudo du`. Never by the daemon or
+	// unit that happens to own the tree: "containerd" is not a place, and the
+	// path is the only string that is both what we asked for and what the
+	// operator's next command takes.
+	//
+	// Capped at consumerDegradedLimit, with DegradedCount carrying how many the
+	// walk actually hit, so a capped list can say it is capped — the same
+	// lesson as SitesCount, where a cap that eats its own denominator can never
+	// announce itself. nil / -1 unless Status is ConsumerRootDegraded.
+	Degraded      []string `json:"degraded"`
+	DegradedCount int      `json:"degraded_count"`
 }
 
 // DirSize is one named child of a consumer root and the bytes it occupies.
@@ -554,12 +578,20 @@ func (ExecRunner) Run(name string, args ...string) (string, error) {
 // per-beat probes get a short one (pgProbeTimeout). A probe that can run for
 // five minutes is the three-hour runaway again one layer down — the lesson of
 // that incident was an unbounded LIFETIME, not an expensive command.
+// errProbeTimedOut is the sentinel a caller matches with errors.Is to tell "we
+// blew the deadline" from "the command exited non-zero on its own". They are
+// different worlds: a killed walk printed a prefix of the tree and is not a
+// measurement, while `du` exiting rc=1 because one subdirectory was unreadable
+// printed the WHOLE tree and named what it missed. Inferring that difference
+// from the output shape alone is how a timeout gets partially landed.
+var errProbeTimedOut = errors.New("timed out")
+
 func runBounded(timeout time.Duration, name string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return string(out), fmt.Errorf("timed out after %s: %s %s", timeout, name, strings.Join(args, " "))
+		return string(out), fmt.Errorf("%w after %s: %s %s", errProbeTimedOut, timeout, name, strings.Join(args, " "))
 	}
 	return string(out), err
 }
@@ -1152,7 +1184,11 @@ type SpaceConfig struct {
 	// at the payload boundary so Count survives the cap. An error → that root
 	// reports `unmeasured`; the other roots are unaffected, because one
 	// unreadable tree must not erase the ones that were read.
-	ConsumerRootProbe func(path string) (totalBytes int64, all []DirSize, err error)
+	// degraded names the subtrees the walk could not descend into, by PATH. A
+	// non-empty degraded with a nil err is a REAL, SHORT total: du finished and
+	// printed its root but could not read everything under it, and that is a
+	// floor worth landing precisely because we can say what is missing from it.
+	ConsumerRootProbe func(path string) (totalBytes int64, all []DirSize, degraded []string, err error)
 }
 
 // gatherSpace assembles a SpaceReport from the wired probes. Like gatherReport
@@ -1241,10 +1277,11 @@ func gatherConsumerRoots(cfg SpaceConfig) []ConsumerRoot {
 		// falls through — nil probe, error, timeout — lands honestly by default
 		// rather than by remembering to.
 		r := ConsumerRoot{
-			Path:   path,
-			Status: ConsumerRootUnmeasured,
-			Bytes:  -1,
-			Count:  -1,
+			Path:          path,
+			Status:        ConsumerRootUnmeasured,
+			Bytes:         -1,
+			Count:         -1,
+			DegradedCount: -1,
 		}
 		switch {
 		case cfg.ConsumerRootExists != nil && !cfg.ConsumerRootExists(path):
@@ -1252,13 +1289,24 @@ func gatherConsumerRoots(cfg SpaceConfig) []ConsumerRoot {
 			// Bytes and Count stay -1: a tree that does not exist is not empty.
 			r.Status = ConsumerRootAbsent
 		case cfg.ConsumerRootProbe != nil:
-			if total, all, err := cfg.ConsumerRootProbe(path); err == nil {
+			if total, all, degraded, err := cfg.ConsumerRootProbe(path); err == nil {
 				r.Status = ConsumerRootRead
 				r.Bytes, r.Count = total, len(all)
 				if len(all) > consumerTopLimit {
 					all = all[:consumerTopLimit]
 				}
 				r.Top = all
+				if len(degraded) > 0 {
+					// The total is real and SHORT. Say both, and cap the names
+					// after taking the count — never before, or the payload can
+					// no longer say how much it hid.
+					r.Status = ConsumerRootDegraded
+					r.DegradedCount = len(degraded)
+					if len(degraded) > consumerDegradedLimit {
+						degraded = degraded[:consumerDegradedLimit]
+					}
+					r.Degraded = degraded
+				}
 			}
 		}
 		out = append(out, r)
@@ -1295,14 +1343,27 @@ const sitesTopLimit = 10
 // box that is already struggling. That is the number to lower if the beat is
 // ever seen crowding a cutover — never the honesty.
 //
-// consumerTopLimit is 5 rather than the sites axis's 10 because it multiplies:
+// consumerTopLimit is 3 rather than the sites axis's 10 because it multiplies:
 // six roots at ten children each is sixty rows on a payload the sites axis
 // already budgets ten for. TestSpacePayloadStaysBounded marshals a real
 // jarl-shaped report and pins the resulting size, so this arithmetic is a
 // measurement rather than a hope.
+//
+// It came DOWN from 5 when the degraded names were added, and that direction is
+// the rule: at full caps the payload measured 5125 bytes against a 4096-byte
+// ceiling, and the ceiling is the thing that must not move. The bytes were
+// bought from the fifth and fourth child rather than from a root slot because a
+// root nobody measures is invisible while a fourth-biggest child is a detail —
+// and Count still reports how many children the walk found, so the shorter list
+// says it is short.
+// consumerDegradedLimit caps the NAMES a degraded root carries. Two is enough
+// to act on — an operator fixes a permission class, not 40 individual
+// directories — and DegradedCount still reports how many the walk hit, so the
+// cap announces itself instead of quietly deciding the shortfall was small.
 const (
-	consumerRootsLimit = 6
-	consumerTopLimit   = 5
+	consumerRootsLimit    = 6
+	consumerTopLimit      = 3
+	consumerDegradedLimit = 2
 )
 
 // DefaultConsumerRoots is what the agent measures when nothing overrides it.
@@ -1431,7 +1492,43 @@ func parseJournalDiskUsage(out string) (int64, error) {
 // TestSitesProbeArgvIsDirect pins this shape so no future edit can quietly
 // reintroduce a shell.
 func duSitesArgs(dir string) []string {
-	return []string{"-n", "19", "ionice", "-c3", "du", "-hx", "-d1", dir}
+	args, _ := duTreeArgs(dir)
+	return args
+}
+
+// duUnit names the unit `du` was ASKED for, and it travels with the output to
+// the parser. It exists because the flag and the parse are ONE decision that
+// lives in TWO places, and separating them is a 1024x under-report one
+// character wide:
+//
+//	du -h  ->  "25G\t/var/lib/containerd"        (suffixed, humanized at 1024)
+//	du -k  ->  "26214400\t/var/lib/containerd"   (a bare count of 1024-blocks)
+//
+// A parser that reads an UNSUFFIXED number as BYTES turns that same 25 GiB into
+// 26 MB, and the whole point of this axis is that a box which is full says so.
+// Measured on this repo before the parameter existed: flipping the flag AND the
+// two argv literals that pin it — the realistic "generalize the argv" edit —
+// left the ENTIRE package suite green, because no test encoded the unit.
+type duUnit string
+
+const (
+	// duUnitHuman is `du -h`: every size carries a K/M/G/T/P/E suffix, and a
+	// bare number is only legal BELOW 1024 (du humanizes at 1024, so a bare
+	// number >= 1024 could not have come from -h at all).
+	duUnitHuman duUnit = "h"
+	// duUnitKiB is `du -k`: every size is a bare count of 1024-byte blocks and
+	// a suffix is impossible.
+	duUnitKiB duUnit = "k"
+)
+
+// duTreeArgs returns the du argv AND the unit its output will be in, from ONE
+// place, so the two cannot drift: the unit constant below is interpolated into
+// the flag, so flipping it to duUnitKiB flips the argv and the parser together
+// in a single edit. That mechanical coupling is the fix — TestDuArgvAndParseUnitCannotDrift
+// pins it, so a future edit that changes only one side does not compile past a test.
+func duTreeArgs(dir string) ([]string, duUnit) {
+	const unit = duUnitHuman
+	return []string{"-n", "19", "ionice", "-c3", "du", "-" + string(unit) + "x", "-d1", dir}, unit
 }
 
 // NewSitesSpaceProbe builds the production per-slug sites probe for dir, under
@@ -1445,7 +1542,8 @@ func newSitesSpaceProbeWith(run probeRunner, dir string) func() (int64, []SiteSi
 		return nil
 	}
 	return func() (int64, []SiteSize, error) {
-		out, err := run("nice", duSitesArgs(dir)...)
+		args, unit := duTreeArgs(dir)
+		out, err := run("nice", args...)
 		if err != nil {
 			// DISCARD, never partially land. A du killed at its deadline prints
 			// the rows it had already finished — 5 site rows, then rc=137 — and
@@ -1455,7 +1553,21 @@ func newSitesSpaceProbeWith(run probeRunner, dir string) func() (int64, []SiteSi
 			// unmeasured.
 			return -1, nil, fmt.Errorf("du %s: %w: %s", dir, err, truncate(strings.TrimSpace(out), 120))
 		}
-		return parseDuTree(out, dir)
+		total, rows, degraded, perr := parseDuTree(out, dir, unit)
+		if perr != nil {
+			return -1, nil, perr
+		}
+		if len(degraded) > 0 {
+			// The sites axis has NOWHERE to put the names: SpaceReport carries
+			// sites_bytes / sites_top / sites_count and no field that can say
+			// "this total is short by these subtrees". A silently-short number
+			// is the exact failure this payload exists to remove, so the sites
+			// axis DISCARDS where the consumer axis — which has
+			// ConsumerRoot.Degraded to name them in — lands. Widening the sites
+			// payload to carry names is its own row, not a side effect of this one.
+			return -1, nil, fmt.Errorf("du %s: unreadable subtrees %v", dir, degraded)
+		}
+		return total, rows, nil
 	}
 }
 
@@ -1484,23 +1596,43 @@ func NewConsumerRootExists() func(string) bool {
 // shell-free `nice -n 19 ionice -c3 du -hx -d1 <dir>` argv the sites probe
 // uses, under the same duProbeTimeout, with the same discard-on-error rule (a
 // partially-printed walk is not a measurement).
-func NewConsumerRootProbe() func(string) (int64, []DirSize, error) {
+func NewConsumerRootProbe() func(string) (int64, []DirSize, []string, error) {
 	return newConsumerRootProbeWith(boundedSpaceRunner(duProbeTimeout))
 }
 
-func newConsumerRootProbeWith(run probeRunner) func(string) (int64, []DirSize, error) {
-	return func(dir string) (int64, []DirSize, error) {
+func newConsumerRootProbeWith(run probeRunner) func(string) (int64, []DirSize, []string, error) {
+	return func(dir string) (int64, []DirSize, []string, error) {
 		if dir == "" {
-			return -1, nil, errors.New("du: empty root")
+			return -1, nil, nil, errors.New("du: empty root")
 		}
-		out, err := run("nice", duSitesArgs(dir)...)
-		if err != nil {
-			return -1, nil, fmt.Errorf("du %s: %w: %s", dir, err, truncate(strings.TrimSpace(out), 120))
+		args, unit := duTreeArgs(dir)
+		out, runErr := run("nice", args...)
+		total, rows, degraded, parseErr := parseDuTree(out, dir, unit)
+
+		if runErr != nil {
+			// A non-zero exit is TWO different worlds and only ONE of them is a
+			// measurement. Measured on guerrilla (GNU coreutils 9.4,
+			// unprivileged, one 0700 subdir): `du -hx -d1` printed EVERY row
+			// INCLUDING the total, named the unreadable path on stderr, and
+			// exited rc=1 — a real 712K tree landing as 212K, a 70% shortfall
+			// that we can NAME. A killed du printed a prefix and no total row.
+			//
+			// So the landing rule is three ANDs, and each one can veto:
+			//   - not a deadline kill (errProbeTimedOut), which is never a
+			//     measurement however parseable its prefix happens to be;
+			//   - the parse SUCCEEDED, which means the total row is present —
+			//     du prints its root last, so output without it was cut short;
+			//   - at least one `du:` diagnostic named a path, which is the
+			//     positive evidence that this rc!=0 is a permission shortfall
+			//     and not an unexplained failure.
+			// Anything else DISCARDS to the unmeasured sentinel (D59).
+			if errors.Is(runErr, errProbeTimedOut) || parseErr != nil || len(degraded) == 0 {
+				return -1, nil, nil, fmt.Errorf("du %s: %w: %s", dir, runErr, truncate(strings.TrimSpace(out), 120))
+			}
+		} else if parseErr != nil {
+			return -1, nil, nil, parseErr
 		}
-		total, rows, err := parseDuTree(out, dir)
-		if err != nil {
-			return -1, nil, err
-		}
+
 		// One parser, two payload shapes. parseDuTree already returns the rows
 		// biggest-first and already refuses output with no total row; all that
 		// differs is the JSON key the wire wants (see DirSize).
@@ -1508,7 +1640,7 @@ func newConsumerRootProbeWith(run probeRunner) func(string) (int64, []DirSize, e
 		for _, r := range rows {
 			children = append(children, DirSize{Name: r.Slug, Bytes: r.Bytes})
 		}
-		return total, children, nil
+		return total, children, degraded, nil
 	}
 }
 
@@ -1522,13 +1654,33 @@ func newConsumerRootProbeWith(run probeRunner) func(string) (int64, []DirSize, e
 // The total row is REQUIRED: du prints its root last, so output without it is
 // output that was cut short, and a truncated walk must not land as a
 // measurement.
-func parseDuTree(out string, dir string) (int64, []SiteSize, error) {
+//
+// On an ERROR the total and the rows are discarded (-1, nil) but the degraded
+// list is still returned: what du complained about is a fact whether or not the
+// rest of the output parsed, and handing it back keeps the caller's "was this a
+// permission shortfall?" veto separate from its "did the parse succeed?" veto.
+// Callers must still branch on err — a returned degraded list is never on its
+// own a licence to land a number.
+func parseDuTree(out string, dir string, unit duUnit) (int64, []SiteSize, []string, error) {
 	want := filepath.Clean(dir)
 	var total int64 = -1
 	var rows []SiteSize
+	var degraded []string
+	seen := map[string]bool{}
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		// A du DIAGNOSTIC, not a row. runBounded uses CombinedOutput, so du's
+		// complaints about subtrees it could not read arrive interleaved with
+		// its sizes; hard-failing the parse on them threw away a measurement we
+		// had, along with the only bytes that could name the shortfall.
+		if path, ok := duDiagnosticPath(line); ok {
+			if !seen[path] {
+				seen[path] = true
+				degraded = append(degraded, path)
+			}
 			continue
 		}
 		sizeStr, path, ok := strings.Cut(line, "\t")
@@ -1536,13 +1688,13 @@ func parseDuTree(out string, dir string) (int64, []SiteSize, error) {
 			// du separates with a tab; fall back to whitespace for robustness.
 			fields := strings.Fields(line)
 			if len(fields) < 2 {
-				return -1, nil, fmt.Errorf("du: unparseable %q", line)
+				return -1, nil, degraded, fmt.Errorf("du: unparseable %q", line)
 			}
 			sizeStr, path = fields[0], strings.Join(fields[1:], " ")
 		}
-		n, err := parseHumanBytes(strings.TrimSpace(sizeStr))
+		n, err := parseDuSize(strings.TrimSpace(sizeStr), unit)
 		if err != nil {
-			return -1, nil, fmt.Errorf("du: unparseable size in %q", line)
+			return -1, nil, degraded, fmt.Errorf("du: unparseable size in %q: %w", line, err)
 		}
 		path = filepath.Clean(strings.TrimSpace(path))
 		if path == want {
@@ -1552,10 +1704,91 @@ func parseDuTree(out string, dir string) (int64, []SiteSize, error) {
 		rows = append(rows, SiteSize{Slug: filepath.Base(path), Bytes: n})
 	}
 	if total < 0 {
-		return -1, nil, fmt.Errorf("du: no total row for %s", want)
+		return -1, nil, degraded, fmt.Errorf("du: no total row for %s", want)
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Bytes > rows[j].Bytes })
-	return total, rows, nil
+	return total, rows, degraded, nil
+}
+
+// duDiagnosticPath recognises one of du's stderr lines and names the PATH it is
+// about — by path, never by the daemon or unit that happens to own the tree,
+// because the operator's next action is `ls`/`chmod`/`du` on a directory.
+//
+// Two shapes, both measured:
+//
+//	GNU  du: cannot read directory '/opt/barkpark/sites/locked': Permission denied
+//	BSD  du: /opt/barkpark/sites/locked: Permission denied
+//
+// GNU emits its diagnostics LAST (after the total row) and BSD emits them
+// FIRST, so POSITION is never the test — the shape is. A du OUTPUT row is
+// `size<TAB>path`, so the discriminator is exact: a diagnostic starts with
+// "du: " and carries no tab, and a directory literally named "du: x" still
+// arrives as "4.0K\tdu: x" and is read as the row it is.
+func duDiagnosticPath(line string) (string, bool) {
+	if !strings.HasPrefix(line, "du: ") || strings.Contains(line, "\t") {
+		return "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(line, "du: "))
+	// GNU quotes the path. Outside the C locale it uses U+2018/U+2019, which is
+	// why this looks for three opener/closer pairs rather than one.
+	for _, q := range [][2]string{{"'", "'"}, {"\u2018", "\u2019"}, {"\"", "\""}} {
+		if i := strings.Index(rest, q[0]); i >= 0 {
+			if j := strings.Index(rest[i+len(q[0]):], q[1]); j > 0 {
+				return rest[i+len(q[0]) : i+len(q[0])+j], true
+			}
+		}
+	}
+	// Unquoted (BSD): the reason is the tail after the LAST ": ", so what
+	// precedes it is the path — including paths that themselves contain ": ".
+	if i := strings.LastIndex(rest, ": "); i > 0 {
+		return strings.TrimSpace(rest[:i]), true
+	}
+	// A diagnostic we cannot pick a path out of is still a diagnostic: report
+	// the whole message rather than silently dropping the fact that the walk
+	// was short. Naming something is the requirement; naming nothing is the bug.
+	return rest, true
+}
+
+// parseDuSize reads one du size IN THE UNIT DU WAS ASKED FOR. The unit is a
+// parameter and not an inference because inferring it is exactly the bug: `du
+// -k`'s "26214400" is a perfectly valid bare integer, and reading it as bytes
+// silently reports 26 MB for 25 GiB — the direction that makes a full box look
+// healthy.
+//
+// In duUnitHuman a bare number is legal ONLY below 1024. `du -h` humanizes at
+// 1024, so it can print "512" but can never print "26214400"; a bare value at
+// or above 1024 is therefore PROOF that -k output reached the -h path, and it
+// is REFUSED rather than returned 1024x short.
+func parseDuSize(s string, unit duUnit) (int64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, errors.New("empty size")
+	}
+	switch unit {
+	case duUnitKiB:
+		// -k: a bare count of 1024-byte blocks. A suffix here means du was NOT
+		// run with -k, and multiplying a humanized number by 1024 over-reports
+		// by as much as the other direction under-reports.
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil || v < 0 {
+			return 0, fmt.Errorf("du -k: want a bare 1024-block count, got %q", s)
+		}
+		return v * 1024, nil
+	case duUnitHuman:
+		if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+			if v < 0 {
+				return 0, fmt.Errorf("negative size %q", s)
+			}
+			if v >= 1024 {
+				return 0, fmt.Errorf("du -h: %q is an unsuffixed value >= 1024, which `du -h` "+
+					"never prints — this is `du -k` output on the -h parse path, and reading it "+
+					"as bytes under-reports by 1024x", s)
+			}
+			return v, nil
+		}
+		return parseHumanBytes(s)
+	}
+	return 0, fmt.Errorf("du: unknown unit %q", unit)
 }
 
 // humanUnits maps du/journalctl's single-letter suffixes to powers of 1024.
