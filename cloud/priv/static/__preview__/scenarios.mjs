@@ -1864,6 +1864,13 @@ const notifEmpty = notifSettings({});
 // http_status/inserted_at. Chat rows record the channel TYPE as recipient (never
 // a webhook URL); email rows carry the address. status ∈ pending|sent|failed.
 const notifDeliveries = [
+  // A WITHHELD alert (wave 32 S2 `suppressed`). The reaper's per-sweep cap
+  // decided this one was not sent; `last_error` carries `Withhold.label/1`'s
+  // constant sentence verbatim, and the row exists so a team admin can read the
+  // decision instead of reading nothing. It renders `--muted` / "Withheld" — the
+  // one status whose pill must NOT read "Pending"/info, which is what it did
+  // before the tone branch existed.
+  { id: "del_6", recipient: "alerts@acme.com", event: "deployment_failed", channel: "email", kind: "alert", status: "suppressed", attempts: 0, last_error: "Withheld: too many deployment alerts in one sweep, so this one was not sent. The deployment itself is failed in the console.", http_status: null, inserted_at: tMinus(60) },
   { id: "del_5", recipient: "alerts@acme.com", event: "provision_failed", channel: "email", kind: "alert", status: "failed", attempts: 3, last_error: "smtp 550 mailbox unavailable", http_status: null, inserted_at: tMinus(120) },
   { id: "del_4", recipient: "discord", event: "deployment_failed", channel: "discord", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: 204, inserted_at: tMinus(600) },
   { id: "del_3", recipient: "alerts@acme.com", event: "provision_succeeded", channel: "email", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: null, inserted_at: tMinus(4000) },
