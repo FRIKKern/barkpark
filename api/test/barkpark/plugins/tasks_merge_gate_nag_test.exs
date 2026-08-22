@@ -79,7 +79,11 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
     test "a leading criterion that DOES carry the flag is not nagged" do
       log =
         log_for([
-          %{"criterion" => "[MERGE-GATED] PR merged to main.", "met" => false, "merge_gate" => true}
+          %{
+            "criterion" => "[MERGE-GATED] PR merged to main.",
+            "met" => false,
+            "merge_gate" => true
+          }
         ])
 
       refute log =~ "merge_gate: true`"
@@ -87,7 +91,9 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
 
     test "EVERY non-leading corpus case stays silent — genuine gates and mentions alike" do
       cases = fixture()["must_stay_silent"]
-      assert length(cases) > 100, "the silence fixture should carry the whole non-leading population"
+
+      assert length(cases) > 100,
+             "the silence fixture should carry the whole non-leading population"
 
       for %{"criterion" => text, "doc" => doc} <- cases do
         log = log_for([%{"criterion" => text, "met" => false}])

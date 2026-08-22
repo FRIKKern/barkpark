@@ -302,7 +302,9 @@ defmodule Barkpark.Plugins.Tasks do
     unflagged =
       list
       |> Enum.with_index()
-      |> Enum.filter(fn {entry, _i} -> merge_gate_worded?(entry) and not merge_gate_flagged?(entry) end)
+      |> Enum.filter(fn {entry, _i} ->
+        merge_gate_worded?(entry) and not merge_gate_flagged?(entry)
+      end)
       |> Enum.map(fn {_entry, i} -> i end)
 
     if unflagged != [] do
