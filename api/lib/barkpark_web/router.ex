@@ -1907,9 +1907,25 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     get("/listen/:dataset", ListenController, :listen)
-    # Trigger an Indx blue/green rebuild for the scope (token-gated; any member
-    # token, e.g. the public-read token the web demo holds). Oban-unique per
-    # scope, so concurrent triggers collapse into one rebuild.
+    # Trigger an Indx blue/green rebuild for the scope. Oban-unique per scope,
+    # so concurrent triggers collapse into one rebuild.
+    #
+    # NOT reachable by a `public-read` token, and this comment used to say
+    # otherwise — it named "the public-read token the web demo holds" as an
+    # intended caller. Mounting `Plugs.PublicRead` on `:require_token`
+    # (2026-07-30) falsified that: the clamp allows only GET query/doc/graph, so
+    # every other method AND path on this pipeline is denied to the public tier.
+    # The claim then stood uncorrected for three weeks, which is the whole
+    # hazard — a reader who trusts it "repairs" the 403 by adding a route-level
+    # allowance and punches a POST-shaped hole through a clamp governing 44
+    # routes. Unclamped, this route is not merely a disclosure: a
+    # browser-shipped credential ENQUEUES an index rebuild across every type
+    # (proven at 200 `{"ok":true,...,"jobId":...}` by deleting the clamp line).
+    # Any non-public tier (`read`, `write`, `admin`) still calls it.
+    #
+    # Pinned by public_read_enforcement_test.exs, "reindex: POST is 403 forbidden
+    # for a public-read token (the non-GET arm)" — the decision you would be
+    # reversing.
     post("/search/:dataset/reindex", SearchController, :reindex)
     get("/export/:dataset", ExportController, :export)
 
