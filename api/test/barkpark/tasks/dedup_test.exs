@@ -394,4 +394,152 @@ defmodule Barkpark.Tasks.DedupTest do
       assert {:ok, _} = create_task("adv-b4", @adv_title_b, scope, %{"parent_id" => "epic-b"})
     end
   end
+
+  # ── a malformed backlog row must not take down creation for everyone ───────
+  #
+  # MEASURED LIVE 2026-08-01 (PDS wave 33): EVERY `type:task` create against
+  # guerrilla was refused 409 `halted` with "the backlog scan failed
+  # (Protocol.UndefinedError)", until callers learned to pass `dedup_bypass` —
+  # which disables duplicate detection fleet-wide. The gate itself behaved
+  # correctly: it failed CLOSED and named its own bypass. The defect was that a
+  # single poisoned row could put the gate into that state for every caller.
+  #
+  # THE POISON: `fetch_candidates/2` projects `content->'labels'` as RAW JSONB
+  # (every other projected field uses `->>`, which is always text-or-NULL). That
+  # raw term is fed to `to_string/1`, which has no `String.Chars` implementation
+  # for a map — so ONE task row whose `content.labels` holds objects instead of
+  # strings raises `Protocol.UndefinedError` inside the scan.
+  #
+  # The row is planted with a direct `Repo.insert!` ON PURPOSE: the write path
+  # would coerce it, and the whole point is a row that arrived through a
+  # non-`bp` path (a migration, a restore, a hand-written INSERT).
+  defp plant_poisoned_row!(doc_id, labels, scope) do
+    Barkpark.Repo.insert!(%Barkpark.Content.Document{
+      doc_id: doc_id,
+      type: "task",
+      dataset: @dataset,
+      status: "published",
+      rev: Ecto.UUID.generate(),
+      title: "poisoned backlog row",
+      workspace_id: Keyword.fetch!(scope, :workspace_id),
+      project_id: Keyword.fetch!(scope, :project_id),
+      content: %{
+        "kind" => "task",
+        "lifecycle_status" => "open",
+        "description" => "a row written through a non-bp path",
+        "labels" => labels
+      }
+    })
+  end
+
+  describe "a malformed candidate row" do
+    # The exact live shape: `labels` holding weighted-tag OBJECTS (the same
+    # shape `content.tags` legitimately carries) instead of bare strings.
+    @poison_shapes %{
+      "a list of objects" => [%{"tag" => "pds", "strength" => 86}],
+      "a bare object" => %{"tag" => "pds"},
+      "a list mixing strings and objects" => ["pds", %{"tag" => "elixir"}]
+    }
+
+    for {label, shape} <- @poison_shapes do
+      @shape shape
+      @label label
+
+      test "#{label} in content.labels does NOT take the gate down", %{scope: scope} do
+        plant_poisoned_row!("poison-#{:erlang.phash2(@label)}", @shape, scope)
+
+        # THE REGRESSION. Before the fix this was
+        # {:error, {:dedup_unavailable, "... the backlog scan failed
+        # (Protocol.UndefinedError) ..."}} — for EVERY caller, on every create,
+        # regardless of what the caller sent.
+        assert {:ok, _} =
+                 create_task("clean-#{:erlang.phash2(@label)}", "an unrelated new task", scope, %{
+                   "description" => "nothing like the poisoned row"
+                 })
+      end
+    end
+
+    test "the malformed row is REPORTED by doc_id, not silently swallowed", %{scope: scope} do
+      import ExUnit.CaptureLog
+
+      log =
+        capture_log(fn ->
+          plant_poisoned_row!("poison-reported", [%{"tag" => "pds"}], scope)
+
+          assert {:ok, _} =
+                   create_task("clean-reported", "an unrelated new task", scope, %{
+                     "description" => "nothing like the poisoned row"
+                   })
+        end)
+
+      # Resilience must not become a blind spot: the scan survives the row AND
+      # says which row it was, so the poison can be found and fixed at source.
+      assert log =~ "poison-reported"
+      assert log =~ "labels"
+    end
+
+    test "the poisoned row still PARTICIPATES in detection — it is not dropped", %{scope: scope} do
+      # A row with unusable labels keeps its title/description signal, which is
+      # 0.7 of the score. Degrading `labels` must not amount to deleting the row
+      # from the backlog: that would silently punch a hole in dedup coverage.
+      Barkpark.Repo.insert!(%Barkpark.Content.Document{
+        doc_id: "poison-dup",
+        type: "task",
+        dataset: @dataset,
+        status: "published",
+        rev: Ecto.UUID.generate(),
+        title: @rate_limit,
+        workspace_id: Keyword.fetch!(scope, :workspace_id),
+        project_id: Keyword.fetch!(scope, :project_id),
+        content: %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "description" => @rate_limit_desc,
+          "parent_id" => "epic-a",
+          "labels" => [%{"tag" => "pds"}]
+        }
+      })
+
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("poison-dup-new", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc,
+                 "parent_id" => "epic-b"
+               })
+
+      assert Enum.any?(payload.similar, &(&1.id == "poison-dup"))
+    end
+
+    # The SECOND hole, same root cause, different blast radius. `string_list/1`
+    # also runs over the NEW task's own content in `to_task/2` — which is
+    # OUTSIDE `fetch_candidates/2`'s rescue. There the same `to_string/1` on a
+    # map was an UNHANDLED raise, i.e. a 500, not a named refusal. MEASURED on
+    # the pre-fix tree, verbatim:
+    #
+    #   ** (Protocol.UndefinedError) protocol String.Chars not implemented for Map
+    #       (barkpark) lib/barkpark/tasks/dedup.ex:287: Barkpark.Tasks.Dedup.to_task/2
+    #
+    # It is driven through `check_new_task/5` DIRECTLY on purpose:
+    # `Content.create_document/4` normalises content against the schema first,
+    # so the write path never delivered this shape and the hole was invisible
+    # from there. Anything calling the gate without that normalisation — another
+    # plugin, an internal caller, a future write path — got the 500.
+    test "a CALLER's own object-shaped labels do not raise out of the gate", %{scope: scope} do
+      assert :ok =
+               Barkpark.Tasks.Dedup.check_new_task(
+                 "task",
+                 %{
+                   "doc_id" => "caller-poison",
+                   "title" => "a task with object labels",
+                   "content" => %{
+                     "kind" => "task",
+                     "description" => "labels arrived as weighted-tag objects",
+                     "labels" => [%{"tag" => "pds", "strength" => 86}]
+                   }
+                 },
+                 @dataset,
+                 nil,
+                 scope
+               )
+    end
+  end
 end

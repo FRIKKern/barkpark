@@ -297,10 +297,50 @@ defmodule Barkpark.Tasks.Dedup do
       id: row.doc_id,
       title: row.title || "",
       description: row.description,
-      labels: string_list(row.labels),
+      labels: candidate_labels(row),
       parent: row.parent,
       lifecycle: row.lifecycle
     }
+  end
+
+  # ── the scan is TOTAL over its input (a poisoned row cannot take the gate down)
+  #
+  # `labels` is the ONE projected field read as RAW JSONB (`->`). Every other one
+  # uses `->>`, which Postgres guarantees is text-or-NULL. So this is the only
+  # place a stored row can hand the scan a term with no `String.Chars`
+  # implementation — a map, or a list containing one.
+  #
+  # MEASURED LIVE 2026-08-01 (PDS wave 33): exactly that raised
+  # `Protocol.UndefinedError` inside `fetch_candidates/2`. Because the rescue
+  # there is FUNCTION-wide, one malformed row degraded the gate for EVERY caller
+  # — and the documented way out, `content.dedup_bypass: true`, switches
+  # duplicate detection off fleet-wide. A single bad row was therefore able to
+  # disable the ledger's dedup property for everyone.
+  #
+  # The fix is totality, NOT a rescue. Wrapping the crash would turn a loud
+  # failure into a silent blind spot; instead every branch of `stringify/1`
+  # terminates for any term Postgrex can decode out of JSONB (null, boolean,
+  # number, string, list, map) and, via the catch-all, for anything else.
+  #
+  # TOTAL IS NOT SILENT. An unusable label keeps its slot as a stable encoding —
+  # so the row keeps its label CARDINALITY and stays scorable instead of quietly
+  # shedding signal — and the row is NAMED in a warning, so the poison gets fixed
+  # at source rather than becoming a permanent blind spot in the scan.
+  defp candidate_labels(row) do
+    case stringify_list(row.labels) do
+      {labels, []} ->
+        labels
+
+      {labels, unusable} ->
+        Logger.warning(
+          "Tasks.Dedup: task #{row.doc_id} carries #{length(unusable)} unusable " <>
+            "content.labels value(s) — a label set is a list of strings, and these " <>
+            "are not: #{inspect(unusable, limit: 3, printable_limit: 200)}. The scan " <>
+            "completed and scored the row with encoded stand-ins; fix the row at source."
+        )
+
+        labels
+    end
   end
 
   defp present(%{id: id, sim: sim, structural: rel, lifecycle: lc}) do
@@ -318,7 +358,55 @@ defmodule Barkpark.Tasks.Dedup do
     ArgumentError -> :__missing__
   end
 
-  defp string_list(nil), do: []
-  defp string_list(list) when is_list(list), do: Enum.map(list, &to_string/1)
-  defp string_list(other), do: [to_string(other)]
+  # Total. Shared by the candidate rows above AND by `to_task/2` /
+  # `distinct_from` on the caller's own content — where the same `to_string/1`
+  # ran OUTSIDE any rescue, so a caller sending object-shaped labels crashed the
+  # write with an unhandled 500 rather than a named refusal.
+  defp string_list(value) do
+    {strings, _unusable} = stringify_list(value)
+    strings
+  end
+
+  # `{strings, unusable_originals}` — never raises, whatever `value` holds.
+  defp stringify_list(value) do
+    {strings, unusable} =
+      value
+      |> wrap_list()
+      |> Enum.map_reduce([], fn element, acc ->
+        case stringify(element) do
+          {:ok, string} -> {string, acc}
+          {:coerced, string} -> {string, [element | acc]}
+        end
+      end)
+
+    {strings, Enum.reverse(unusable)}
+  end
+
+  defp wrap_list(nil), do: []
+  defp wrap_list(list) when is_list(list), do: list
+  defp wrap_list(other), do: [other]
+
+  # `nil` is an atom, so `to_string(nil) == ""` — the pre-existing behaviour for
+  # a null label entry is preserved exactly.
+  defp stringify(value) when is_binary(value), do: {:ok, value}
+
+  defp stringify(value) when is_atom(value) or is_integer(value) or is_float(value),
+    do: {:ok, to_string(value)}
+
+  # Maps, nested lists, tuples, pids, anything: encoded rather than converted.
+  # `Jason.encode/1` RETURNS an error tuple (it does not raise) for a term it
+  # cannot encode, and `inspect/1` is total, so this clause cannot fail.
+  #
+  # ONE BEHAVIOUR CHANGE, NAMED RATHER THAN LEFT TO BE DISCOVERED: a nested list
+  # that happened to be valid chardata (`["a"]`) used to flatten to `"a"` through
+  # `String.Chars.List`; it now encodes to the string `["a"]`. That is deliberate
+  # — a nested list is not a label — and it is unreachable in practice: a census
+  # of all 7,508 published `type:task` rows on guerrilla (2026-08-22) found 9
+  # carrying `content.labels`, every one of them a flat list of strings.
+  defp stringify(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> {:coerced, json}
+      _ -> {:coerced, inspect(value)}
+    end
+  end
 end
