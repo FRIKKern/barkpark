@@ -131,10 +131,27 @@ defmodule BarkparkWeb.SelfUpdateController do
     # `check` is the CHECKER's view (is an update available?) riding along
     # with the runner state — one admin GET gives a control plane everything:
     # Barkpark Cloud polls this to light up its per-instance update badge.
+    #
+    # `apply_enabled` is the NON-DESTRUCTIVE ARMING PROBE. `state` describes the
+    # RUN and reads "idle" identically whether or not one-click apply is armed,
+    # so before this key the only way to learn a box was unarmed was to POST —
+    # and that POST's 503 `feature_not_configured` is what the control plane's
+    # AutoupdateRolloutWorker answers with `Registry.pause_autoupdate/1`, a pause
+    # NO code path clears (the sole writer of `autoupdate_paused: false` is the
+    # admin-and-audited PATCH /v1/barkparks/:id/autoupdate). The only probe was
+    # the one that breaks the thing it measures.
+    #
+    # It reports `Runner.enabled?/0` — the RUNNING BEAM's boot-frozen
+    # `Application.get_env` value, which is the exact input the 503 is decided
+    # from. A box whose env file gained BARKPARK_SELF_UPDATE_APPLY=1 but was
+    # never restarted still reads false here, and that is correct: the env file
+    # is not the running truth, and confusing the two is what makes a box look
+    # armed while it 503s.
     conn
     |> json(
       Runner.status()
       |> render_status()
+      |> Map.put(:apply_enabled, Runner.enabled?())
       |> Map.put(:check, render_check(Barkpark.SelfUpdate.status()))
     )
   end

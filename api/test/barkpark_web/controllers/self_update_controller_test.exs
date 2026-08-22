@@ -101,9 +101,58 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
       body = conn |> admin_conn() |> get("/v1/admin/self-update") |> json_response(200)
       assert body["state"] in ["idle", "done"]
     end
+
+    # THE NON-DESTRUCTIVE ARMING PROBE (dr-bl-w7). `state` is the RUN's state and
+    # reads "idle" identically on an armed box and an unarmed one — so before
+    # this key the control plane could learn a box was unarmed ONLY by POSTing,
+    # and that POST's 503 is what `AutoupdateRolloutWorker` (:178) answers with
+    # `Registry.pause_autoupdate/1` — a pause no code path anywhere clears (the
+    # only writer of `autoupdate_paused: false` is the admin-and-audited
+    # PATCH /v1/barkparks/:id/autoupdate). The only probe was the destructive one.
+    #
+    # `apply_enabled` reports `Runner.enabled?/0`, i.e. the RUNNING BEAM's
+    # boot-frozen `Application.get_env` value — NOT what the env file says. A box
+    # whose env file gained BARKPARK_SELF_UPDATE_APPLY=1 but was never restarted
+    # still reports false here, which is the whole point: it is the state the
+    # 503 is decided from.
+    test "GET reports apply_enabled=false, and that PREDICTS the POST 503", %{conn: conn} do
+      body = conn |> admin_conn() |> get("/v1/admin/self-update") |> json_response(200)
+
+      assert body["apply_enabled"] == false,
+             "GET must report apply_enabled=false on an unarmed box — it is the control " <>
+               "plane's only NON-DESTRUCTIVE arming probe. Without it the rollout worker " <>
+               "can discover 'unarmed' only by triggering, and that trigger's 503 pauses " <>
+               "the box permanently (worker :178 → Registry.pause_autoupdate/1, cleared " <>
+               "only by a human PATCH). Got: #{inspect(body["apply_enabled"])}"
+
+      # Same box, same tick: the prediction must match the destructive outcome.
+      resp = conn |> admin_conn() |> post("/v1/admin/self-update")
+
+      assert resp.status == 503,
+             "apply_enabled=false must mean the POST 503s — a probe that disagrees with " <>
+               "the trigger is worse than no probe."
+
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "feature_not_configured"
+    end
   end
 
   describe "enabled runner" do
+    # The other polarity of the probe: an ARMED box says so without being
+    # triggered. Both polarities are required — a key hardcoded to either value
+    # would pass one test and fail the other.
+    test "GET reports apply_enabled=true on an armed box, with no trigger", %{conn: conn} do
+      put_runner_cfg(enabled: true, command: {"bash", ["-c", "true"]})
+
+      body = conn |> admin_conn() |> get("/v1/admin/self-update") |> json_response(200)
+
+      assert body["apply_enabled"] == true,
+             "an armed box must be readable as armed WITHOUT a trigger. Got: " <>
+               inspect(body["apply_enabled"])
+
+      # The probe is read-only: it must not have started anything.
+      assert body["state"] in ["idle", "done"]
+    end
+
     test "POST 202 runs the command and GET captures its log", %{conn: conn} do
       put_runner_cfg(enabled: true, command: {"bash", ["-c", "echo line-one; echo line-two"]})
 
