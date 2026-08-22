@@ -859,6 +859,19 @@ defmodule PDS.Census do
   # DECLARED-BASIS-INTACT correctly REDS, and that is not a residual line dependency worth
   # engineering away: a basis span NAMES PROSE IN A FILE, so it is line-anchored by
   # nature, and the FAIL line carries the row and its recorded span so the fix is one edit.
+  # SO THE MUTATION ABOVE ENDS AT RC 1 AND A FAILED CENSUS, AND THAT IS THE PASS.
+  # Expected result of a clean re-run, in full, because a reader who sees only the two
+  # green arms named above will read the red as a regression this migration caused:
+  #   RC 1 · REGISTER-COMPLETE PASS · DECLARED-ROWS-RESOLVE PASS · DECLARED-BASIS-INTACT FAIL
+  #     1 declared basis has DRIFTED off its recorded span: github_webhook_controller.ex
+  #      BarkparkWeb.GithubWebhookController.receive/2 [CATCH-ALL-TO-SUCCESS] recorded span
+  #      :74-78,:87-87 no longer carries the token `ignored:`
+  # MEASURED, not predicted — that block is the observed FAIL line, and the baseline it is
+  # measured against is this file green at RC 0 with all three arms PASS.
+  # Seeing exactly that is a REPRODUCTION of the migration proof, never a refutation of it.
+  # The arm was introduced by the same PR as the migration, so the red is this wave's own
+  # new instrument firing on the mutation this wave prescribes. Restore the span and it
+  # greens; there is nothing to fix in the key.
   #
   # -- NO SCRIPT EVER WRITES A VERDICT. Arms check; they never assign. The one apparent
   # exception is `basis_stale`, and it is not one: a row whose recorded head_hash/expr_fp
