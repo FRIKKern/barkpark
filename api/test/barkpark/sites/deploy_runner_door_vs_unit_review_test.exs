@@ -130,9 +130,8 @@ defmodule Barkpark.Sites.DeployRunnerDoorVsUnitReviewTest do
 
       assert DeployRunner.trigger(req("dvu-cost-alpha")) == {:ok, :started}
 
-      assert DeployRunner.trigger(
-               req("dvu-cost-beta", artifact_b64: b64, artifact_sha256: sha)
-             ) == {:ok, :started}
+      assert DeployRunner.trigger(req("dvu-cost-beta", artifact_b64: b64, artifact_sha256: sha)) ==
+               {:ok, :started}
 
       # Criterion 1 pins that a REFUSED deploy never extracts. This one was not
       # refused, so it extracted — the box paid for the deploy the door was
@@ -172,7 +171,10 @@ defmodule Barkpark.Sites.DeployRunnerDoorVsUnitReviewTest do
   defp prebuilt_artifact do
     tar = Path.join(System.tmp_dir!(), "bp-dvu-pb-#{System.unique_integer([:positive])}.tar.gz")
     on_exit(fn -> File.rm(tar) end)
-    :ok = :erl_tar.create(String.to_charlist(tar), [{~c"index.html", "<h1>x</h1>"}], [:compressed])
+
+    :ok =
+      :erl_tar.create(String.to_charlist(tar), [{~c"index.html", "<h1>x</h1>"}], [:compressed])
+
     raw = File.read!(tar)
     {Base.encode64(raw), :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower)}
   end
