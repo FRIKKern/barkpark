@@ -1033,8 +1033,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # been tried and already let a defect through: #10474 shipped one tag of
   # slack under it, which the refusal at :1341 still records. `@corpus_floor`
   # below keeps its name because it IS a `>=` ratchet.
-  @emitted_pinned 151
-  @go_tag_pinned 275
+  # 151 -> 152: `runaway_procs` joined merge_pressure/2 — the box's long-running
+  # ORPHANED processes, the one pressure key that answers WHO is spending the box
+  # rather than HOW MUCH (the 2026-08-06 guerrilla runaway).
+  @emitted_pinned 152
+  # 275 -> 279: internal/cloudclient gained `runaway_procs` on Pressure plus the
+  # RunawayProc row it decodes (`pid`, `elapsed_s`, `command`). FOUR, not five:
+  # `cpu_percent` was already a name here (Pressure's host-CPU vital), so the new
+  # per-process declaration rides free on the NAME union and moves the SITE
+  # register below instead.
+  @go_tag_pinned 279
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1105,6 +1113,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "code" => 3,
     "content_rev" => 2,
     "count" => 5,
+    # Pressure's HOST cpu busy-percent and RunawayProc's PER-PROCESS lifetime
+    # average share one name and are different measurements — exactly the
+    # collision this register exists to keep visible.
+    "cpu_percent" => 2,
     "covered" => 2,
     "current_deployment_id" => 2,
     "dataset" => 2,
@@ -1215,7 +1227,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `seeing` would destroy the blind-spot measurement silently and in the green
   # direction. The numbers live below, once each, and the PIN CO-EDIT arm reads
   # them from there.
-  @barkpark_family_keys 62
+  # 62 -> 63: the `runaway_procs` key merge_pressure/2 now emits (see
+  # @emitted_pinned above) is inside the barkpark_json family.
+  @barkpark_family_keys 63
   @barkpark_family_keys_blind 46
 
   # ---------------------------------------------------------------------------

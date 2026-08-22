@@ -273,6 +273,26 @@ type Report struct {
 	// answering.
 	Err5xxPerS float64 `json:"err_5xx_per_s"`
 
+	// Runaways names the box's LONG-RUNNING ORPHANED PROCESSES — the vital the
+	// 2026-08-06 guerrilla incident proved nothing was watching. A `journalctl -u
+	// bp-site-build-* --since -14d --no-pager` left behind by a dead SSH session
+	// ran 2h46m at 66.3% of a core on a 2-core box; load sat at 6.3 and
+	// /api/schemas flapped 200/500/500. It was found by a bp WRITE failing, not by
+	// any alert, because every vital above is an AGGREGATE: cpu_percent and load15
+	// say a box is busy and can never say WHO, and the operator's next action
+	// depends entirely on the who.
+	//
+	// It rides the EXISTING 60s beat, not a second cadence: the whole complaint is
+	// that a human learned about this three hours late, and a slower channel would
+	// reproduce that. See RunawayProc for the predicate and its honest limits.
+	//
+	// nil — a JSON null, never an empty list — when the probe was not wired or
+	// failed; a NON-NIL EMPTY list when the box was measured and is quiet. Those
+	// are opposite facts and this is the one field where collapsing them would
+	// re-enact the incident: "we did not look" rendered as "nothing to see" is
+	// precisely the silence of 2026-08-06.
+	Runaways []RunawayProc `json:"runaway_procs"`
+
 	// BackupOK / BackupDetail come from the injected backup-status probe — is a
 	// recent backup present and scheduled?
 	BackupOK     bool   `json:"backup_ok"`
@@ -291,6 +311,55 @@ type RelationSize struct {
 	Name  string `json:"name"`
 	Bytes int64  `json:"bytes"`
 }
+
+// RunawayProc is one long-running orphaned process: the pid, how long it has
+// been alive, the CPU share it has averaged over that whole life, and the argv
+// that identifies it. The command is what turns a number into an action — an
+// operator kills `journalctl -u bp-site-build-*`, never "pid 3369344".
+//
+// ElapsedS is SECONDS, from `ps -o etimes=`, not the D-HH:MM:SS `etime` column:
+// a number needs no format parser and cannot be misread across locales. The
+// incident's 02:46:41 is 10001 here.
+//
+// CPUPercent is `ps -o pcpu=`, which is the process's LIFETIME AVERAGE CPU
+// (cputime ÷ elapsed), not an instantaneous sample — and that is why this
+// predicate works at all. An idle daemon that has been up for a week averages
+// near zero however long it has lived, so elapsed alone cannot separate it from
+// a runaway, while a lifetime average over half a core sustained for half an
+// hour is a process that has actually spent the machine.
+type RunawayProc struct {
+	PID        int     `json:"pid"`
+	ElapsedS   int     `json:"elapsed_s"`
+	CPUPercent float64 `json:"cpu_percent"`
+	Command    string  `json:"command"`
+}
+
+// The runaway predicate, and its honest bounds.
+//
+//   - runawayMinElapsedS (30 min): the incident ran 2h46m. Half an hour is far
+//     past any legitimate per-beat probe (the longest bound in this file is the
+//     60s du) and past a normal `next build`, so a burst cannot trip it.
+//   - runawayMinCPUPercent (50): half a core, AVERAGED OVER THE WHOLE LIFE. The
+//     incident read 66.3.
+//   - runawayTopLimit (3) and runawayCommandLimit (120): this list rides the
+//     health beat, which the metrics chart reads back up to 200 payloads at a
+//     time, and an unbounded list of full argv strings crosses Postgres's
+//     2032-byte TOAST_TUPLE_THRESHOLD the same way the per-slug space payload
+//     did (D58). Three rows of a 120-rune command is ~500 B. An operator acts on
+//     the worst offender, never on the tenth.
+//
+// WHAT THIS CANNOT DO, stated here because a detector whose blind spot is not
+// written down is trusted past its evidence: PPID 1 is ALSO every systemd
+// service's main process, so a genuinely CPU-hungry managed service clears this
+// predicate. That is not a bug being tolerated — the payload carries the argv,
+// so a human reads `beam.smp` and closes the tab — but it does mean a row here
+// is a REPORT, never a verdict, and nothing downstream may treat it as one.
+const (
+	runawayMinElapsedS   = 1800
+	runawayMinCPUPercent = 50.0
+	runawayTopLimit      = 3
+	runawayCommandLimit  = 120
+)
 
 // SpaceEventType is the agent-event type the space payload is posted under. It
 // is deliberately NOT "health": the 60s health beat is the series the metrics
@@ -471,6 +540,12 @@ type ReportConfig struct {
 	// (see NewReqStatsProbe). Wire the production implementation with
 	// NewReqStatsProbe(base, token, rootCAs).
 	ReqStatsProbe func() (reqPerS float64, p95Ms int, err5xxPerS float64, err error)
+	// RunawayProbe returns the box's long-running orphaned processes, worst first.
+	// nil → Runaways stays nil (UNMEASURED). A successful probe that found none
+	// must return a NON-NIL EMPTY slice, and gatherReport normalizes a nil-with-no-
+	// error to one, so "measured and quiet" can never arrive as "we did not look".
+	// Wire the production implementation with NewRunawayProbe().
+	RunawayProbe func() ([]RunawayProc, error)
 	// SwapProbe returns (used percent 0..100, total swap bytes). nil → BOTH swap
 	// fields keep the -1 sentinel. Gathered fail-soft as ONE unit like
 	// ReqStatsProbe, not independently like CPU/Mem: a percent landed against an
@@ -576,6 +651,20 @@ func gatherReport(cfg ReportConfig) Report {
 			r.ReqPerS = rps
 			r.P95Ms = p95
 			r.Err5xxPerS = err5xx
+		}
+	}
+
+	// Long-running orphans — WHO is spending the box, beside the aggregates that
+	// can only say THAT it is being spent. The nil-vs-empty normalization is the
+	// whole honesty of the field: a probe that ran and found nothing lands `[]`
+	// (measured, quiet); an unwired or failing probe leaves nil (unmeasured), and
+	// the control plane renders those two differently on purpose.
+	if cfg.RunawayProbe != nil {
+		if procs, err := cfg.RunawayProbe(); err == nil {
+			if procs == nil {
+				procs = []RunawayProc{}
+			}
+			r.Runaways = procs
 		}
 	}
 
@@ -1231,4 +1320,151 @@ func parseHumanBytes(s string) (int64, error) {
 		return 0, fmt.Errorf("unparseable size %q", s)
 	}
 	return v, nil
+}
+
+// --- the runaway-orphan probe ------------------------------------------------
+//
+// The 2026-08-06 guerrilla incident, in one line: an SSH session died and left
+// `journalctl -u bp-site-build-* --since -14d --no-pager` reparented to PID 1,
+// scanning fourteen days of journal for a unit glob that matched nothing, at
+// 66.3% of a core, for 2h46m, on a box with two cores. The API flapped and the
+// only thing that noticed was a human's `bp` write failing.
+//
+// The LIFETIME half of that lesson is already paid (runBounded above). This is
+// the DETECTION half, and it is deliberately the cheapest possible instrument:
+// one `ps` per beat, no state, no second cadence.
+
+// runawayProbeTimeout bounds the `ps` shell-out. `ps -e` is a /proc walk of a
+// few hundred entries — milliseconds — and a probe that hangs must degrade to
+// the unmeasured sentinel rather than stall the beat behind it.
+var runawayProbeTimeout = 5 * time.Second
+
+// psRunawayArgs is the process-list argv, and it is a contract, not a taste:
+//
+//   - `-e` every process, so an orphan nobody owns is in scope.
+//   - `-o ppid=,pid=,etimes=,pcpu=,args=` — the four fields the predicate needs
+//     and nothing else. The trailing `=` on each suppresses the header, so the
+//     parser never has to recognise and skip one.
+//   - `args=` is LAST because it is the only field that can contain spaces; the
+//     parser splits four times and keeps the remainder verbatim. Any other
+//     order would make an argv with a space corrupt the numbers beside it.
+//   - `etimes` (seconds) not `etime` (D-HH:MM:SS): a number, not a format.
+//   - DIRECT argv, never `sh -c` and never a pipe to `grep`/`sort`. Under an
+//     identical deadline a shell wrapper returns 44x late, because
+//     exec.CommandContext kills only the direct child and CombinedOutput then
+//     blocks in Wait on the orphaned grandchild's inherited stdout — and BOTH
+//     paths report the same `signal: killed`, so the caller cannot tell the
+//     bound was blown (D59, measured for duSitesArgs above). A probe for
+//     runaway orphans that leaks a runaway orphan is not a joke worth risking.
+func psRunawayArgs() []string {
+	return []string{"-e", "-o", "ppid=,pid=,etimes=,pcpu=,args="}
+}
+
+// NewRunawayProbe builds the production RunawayProbe: one bounded `ps` per beat.
+// Every failure path — no `ps`, a `ps` without `etimes`, a timeout, an
+// unparseable table — returns an error, so Runaways stays nil (UNMEASURED)
+// rather than landing an empty list that would read "this box is quiet".
+func NewRunawayProbe() func() ([]RunawayProc, error) {
+	return newRunawayProbeWith(boundedSpaceRunner(runawayProbeTimeout))
+}
+
+func newRunawayProbeWith(run probeRunner) func() ([]RunawayProc, error) {
+	return func() ([]RunawayProc, error) {
+		out, err := run("ps", psRunawayArgs()...)
+		if err != nil {
+			return nil, fmt.Errorf("ps: %w: %s", err, truncate(strings.TrimSpace(out), 120))
+		}
+		return parseRunaways(out)
+	}
+}
+
+// parseRunaways turns `ps -e -o ppid=,pid=,etimes=,pcpu=,args=` output into the
+// orphans that clear the predicate, worst first, capped at runawayTopLimit.
+//
+// It returns a NON-NIL EMPTY slice for a quiet box and an ERROR for output it
+// could not read. Those must not be confused: a `ps` build that does not know
+// `etimes` prints usage to stderr, and silently reading that as "no runaways"
+// would make this instrument permanently, invisibly blind — the exact failure
+// mode the field exists to remove. Empty output is an error too: `ps -e` always
+// lists at least itself, so nothing at all means the command did not run.
+//
+// "Worst first" is by CPU-SECONDS ACTUALLY SPENT (elapsed x pcpu), not by
+// either factor alone: a 90%-of-a-core process 31 minutes old has cost the box
+// less than the incident's 66.3% over 2h46m, and the cap must keep the one an
+// operator would kill first.
+func parseRunaways(out string) ([]RunawayProc, error) {
+	rows := []RunawayProc{}
+	seen := 0
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		seen++
+		// Four splits: ppid, pid, etimes, pcpu, then args VERBATIM (it may
+		// contain any number of spaces, and it is the field we most need intact).
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			return nil, fmt.Errorf("ps: unparseable %q", truncate(line, 120))
+		}
+		ppid, errPP := strconv.Atoi(fields[0])
+		pid, errP := strconv.Atoi(fields[1])
+		elapsed, errE := strconv.Atoi(fields[2])
+		cpu, errC := strconv.ParseFloat(fields[3], 64)
+		if errPP != nil || errP != nil || errE != nil || errC != nil {
+			return nil, fmt.Errorf("ps: unparseable %q", truncate(line, 120))
+		}
+		args := restAfterFields(line, 4)
+		if args == "" {
+			return nil, fmt.Errorf("ps: no command in %q", truncate(line, 120))
+		}
+		// THE PREDICATE, all three arms required. PPID 1 alone is every daemon
+		// on the box; elapsed alone is every daemon that has been up a while;
+		// a high lifetime average alone is a legitimate short burst.
+		if ppid != 1 || elapsed < runawayMinElapsedS || cpu < runawayMinCPUPercent {
+			continue
+		}
+		rows = append(rows, RunawayProc{
+			PID:        pid,
+			ElapsedS:   elapsed,
+			CPUPercent: cpu,
+			Command:    truncate(args, runawayCommandLimit),
+		})
+	}
+	if seen == 0 {
+		return nil, errors.New("ps: empty process list")
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return float64(rows[i].ElapsedS)*rows[i].CPUPercent >
+			float64(rows[j].ElapsedS)*rows[j].CPUPercent
+	})
+	if len(rows) > runawayTopLimit {
+		rows = rows[:runawayTopLimit]
+	}
+	return rows, nil
+}
+
+// restAfterFields returns everything in line after the first n whitespace-
+// separated fields, with the separating whitespace stripped and the remainder
+// otherwise VERBATIM.
+//
+// It exists because the command is the only field that may contain spaces, so
+// it cannot be recovered by rejoining strings.Fields output — `sh -c 'a  b'`
+// would come back with its double space collapsed, and an operator comparing
+// this string to what they see in `ps` would be looking at a different command.
+// Splitting on the pcpu TOKEN instead (its first occurrence in the line) is the
+// obvious shortcut and is wrong for the same reason a grep is: it assumes no
+// earlier field can contain that byte sequence, which is a property of today's
+// `ps` output, not of the format.
+func restAfterFields(line string, n int) string {
+	rest := line
+	for i := 0; i < n; i++ {
+		rest = strings.TrimLeft(rest, " \t")
+		j := strings.IndexAny(rest, " \t")
+		if j < 0 {
+			return ""
+		}
+		rest = rest[j:]
+	}
+	return strings.TrimLeft(rest, " \t")
 }
