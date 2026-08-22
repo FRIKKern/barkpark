@@ -37,6 +37,15 @@ defmodule Barkpark.Content.Writer do
 
   require Logger
 
+  # The terminal lifecycle states, for the tombstone fence below. DUPLICATED
+  # from `Barkpark.Tasks.Close`'s private `@closed_lifecycle_statuses` because
+  # a module attribute cannot be read across modules — and pinned against it by
+  # `TombstoneFenceTest`'s "the terminal set matches Close's", which reads
+  # close.ex's own bytes and reds if either list moves without the other. A
+  # fence keyed on a stale copy of "what closed means" would let a mint through
+  # on whichever status the two disagree about.
+  @terminal_lifecycle_statuses ~w(done cancelled blocked)
+
   # W7a step 1 — task documents carry a tight `content` field contract
   # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
   # schema-field validation. Enforced here at the write boundary so neither
@@ -159,6 +168,8 @@ defmodule Barkpark.Content.Writer do
     # task unchecked. content.dedup_bypass: true is the deliberate escape.
     # See Barkpark.Tasks.Dedup.
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
+         :ok <-
+           ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
@@ -607,6 +618,8 @@ defmodule Barkpark.Content.Writer do
     # structurally untouched — they no-op on a live row exactly as they do on
     # the create path.
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
+         :ok <-
+           ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts) do
       upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts)
@@ -726,6 +739,102 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp ensure_task_transition_legal(_type, _attrs, _dataset, _doc_id, _prev_doc, _opts), do: :ok
+
+  # ── THE TOMBSTONE FENCE (cch-w39-bl) ──────────────────────────────────────
+  #
+  # A DISPOSAL REASON IS A CLAIM, NOT A MEASUREMENT. `close_reason` is written
+  # once and re-read by nobody, so nothing can ever contradict it — the exact
+  # property this codebase refuses in a guard ("a guard that can only stay green
+  # while the disease stays untreated is not a guard"). Two live specimens, from
+  # ONE disposal loop, failing in OPPOSITE directions:
+  #
+  #   * cch-w36-bl-mecache-unknown-arms-remaining — a cancel aimed at a
+  #     `drafts.` twin that HAS NEVER EXISTED (none of the store's 403 `drafts.`
+  #     rows carries that slug) landed its reason on the PUBLISHED ROW OF RECORD
+  #     and killed it. The tombstone's own words were "The published row is the
+  #     one of record and is NOT touched here" — written onto the row it killed.
+  #   * cch-w36-s6-invalid-precedence-details-win — the reason landed and the
+  #     CLOSE DID NOT: `lifecycle_status` stayed `in_progress` with
+  #     `claim.closed_at` nil. A row wearing an epitaph while still alive.
+  #
+  # THE FENCE: a close_reason may be MINTED only by a write that also lands a
+  # terminal `lifecycle_status`. The reason and the close become ONE atomic
+  # fact, so a two-step loop (patch the reason, then attempt the close) can no
+  # longer leave the first half standing when the second half loses its CAS —
+  # and a reason aimed at a row nobody is closing is refused AT THE MOMENT IT IS
+  # WRITTEN, rather than discovered by a reader months later.
+  #
+  # WHAT IT DELIBERATELY DOES NOT DO, and this is the placement lesson the birth
+  # fence below already paid for: it is `prev_doc`-AWARE, never a content-only
+  # rule. `/v1/data/mutate` merges patches BEFORE validation, so a content-only
+  # "close_reason implies terminal" would be RETROACTIVE and 422 every future
+  # patch to a row that already carries one. So CORRECTING an existing tombstone
+  # stays legal at any status — not a loophole but a REQUIREMENT: cch-w36-bl was
+  # reopened and its false tombstone corrected in place, and a fence that
+  # forbade that would forbid the repair it exists to enable.
+  defp ensure_close_reason_lands_with_a_close("task", attrs, dataset, doc_id, prev_doc, opts) do
+    content = Map.get(attrs, "content") || %{}
+    now = present_string(Map.get(content, "close_reason") || Map.get(content, :close_reason))
+    was = present_string(resolve_close_reason_was(prev_doc, doc_id, dataset, opts))
+    status = Map.get(content, "lifecycle_status") || Map.get(content, :lifecycle_status)
+
+    cond do
+      # No tombstone in this write, or an unchanged one carried through a patch.
+      is_nil(now) -> :ok
+      now == was -> :ok
+      # CORRECTING an existing reason — the audit action, always legal.
+      not is_nil(was) -> :ok
+      # Replication mirrors upstream verbatim (the same exemption its siblings take).
+      Keyword.get(opts, :source, :api) == :sync -> :ok
+      # MINTING one: the close must land in this same write.
+      status in @terminal_lifecycle_statuses -> :ok
+      true -> {:error, {:invalid_task_content, orphan_close_reason_error(status)}}
+    end
+  end
+
+  defp ensure_close_reason_lands_with_a_close(_t, _a, _d, _i, _p, _o), do: :ok
+
+  # The row's CURRENT close_reason, resolved published-fallback — the same two
+  # steps `resolve_lifecycle_was/4` takes, for the same reason: the drafts-exact
+  # prev_doc the writer already loaded, then the bare (published) id.
+  defp resolve_close_reason_was(%Document{content: content}, _doc_id, _dataset, _opts),
+    do: (content || %{})["close_reason"]
+
+  defp resolve_close_reason_was(_prev_doc, doc_id, dataset, opts) do
+    with id when is_binary(id) <- doc_id,
+         pid when pid != "" and pid != id <- DraftId.published_id(id),
+         {:ok, %Document{content: content}} <-
+           Content.get_document(pid, "task", dataset, opts) do
+      (content || %{})["close_reason"]
+    else
+      _ -> nil
+    end
+  end
+
+  # Blank is not a value. `nil`, `""`, whitespace and non-strings are all "no
+  # tombstone" — an empty reason must not license a mint, and must not read as a
+  # PREVIOUS reason that would make the next write a mere "correction".
+  defp present_string(v) when is_binary(v) do
+    case String.trim(v) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp present_string(_), do: nil
+
+  defp orphan_close_reason_error(status) do
+    %{
+      "close_reason" => [
+        "a close_reason may not be minted on a row this write does not close " <>
+          "(lifecycle_status #{inspect(status)}): the reason and the close are ONE fact. " <>
+          "Close through the close primitive (`bp task close <id> <worker> <epoch> " <>
+          "<status> <reason>`, POST /v1/tasks/:id/close), which writes both together and " <>
+          "rolls BOTH back when its CAS loses. A reason written beside a close that never " <>
+          "landed is an epitaph on a living row."
+      ]
+    }
+  end
 
   # ── THE BIRTH FENCE (PDS wave 28) ─────────────────────────────────────────
   #
