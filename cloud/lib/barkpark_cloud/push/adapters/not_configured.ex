@@ -16,7 +16,7 @@ defmodule BarkparkCloud.Push.Adapters.NotConfigured do
   ═══════════════════════════════════════════════════════════════════════════
   ## THE CREDENTIAL GATE — exactly what a human must supply
 
-  Five environment variables on the CONTROL PLANE (`cloud/`, `/opt/barkpark-cloud/.env`,
+  Five environment variables on the CONTROL PLANE (`cloud/`, `/opt/barkpark/cloud/.env`,
   read by `cloud/config/runtime.exs`) turn on iOS; one turns on Android. Each
   platform is independent — shipping Android alone is valid, and iOS devices
   simply keep cancelling.
