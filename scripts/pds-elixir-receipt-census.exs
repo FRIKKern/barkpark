@@ -438,6 +438,8 @@ defmodule PDS.Census do
     {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke, :status_only_receipt},
     {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete, :status_only_receipt},
     {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current, :status_only_receipt},
+    {:delete, "/v1/auth/app-tokens/:id", "BarkparkWeb.AppTokenController", :delete_by_id,
+     :status_only_receipt},
     {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete, :status_only_receipt},
     {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete, :status_only_receipt},
     {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member, :status_only_receipt},

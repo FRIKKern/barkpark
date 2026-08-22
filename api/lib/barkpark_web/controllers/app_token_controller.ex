@@ -203,9 +203,24 @@ defmodule BarkparkWeb.AppTokenController do
 
       true ->
         case Auth.revoke_app_token_by_id(id) do
-          {:ok, token} -> json(conn, %{revoked: true, id: token.id})
-          {:error, :not_found} -> ErrorResponse.emit(conn, {:error, :not_found})
-          {:error, _} -> ErrorResponse.emit(conn, {:error, :not_found})
+          # RECEIPT LAW (pds w40), same as delete_current/2 below:
+          # `Auth.revoke_app_token_by_id/1` ends in `revoke_token/1`, which returns
+          # the UPDATED row, so `revoked` descends from the persisted `revoked_at`
+          # rather than being a literal `true` that stays true even if the stamp
+          # never landed. Without this the routed-write census cannot see a receipt
+          # here at all and the arrival lands UNDISPOSED.
+          {:ok, token} ->
+            json(conn, %{
+              revoked: not is_nil(token.revoked_at),
+              id: token.id,
+              revoked_at: token.revoked_at
+            })
+
+          {:error, :not_found} ->
+            ErrorResponse.emit(conn, {:error, :not_found})
+
+          {:error, _} ->
+            ErrorResponse.emit(conn, {:error, :not_found})
         end
     end
   end

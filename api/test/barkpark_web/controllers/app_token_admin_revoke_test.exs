@@ -162,6 +162,34 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
              "the revoked token still authenticates"
     end
 
+    test "the 200 body's `revoked` DESCENDS from the persisted stamp, not a literal",
+         %{admin: admin} do
+      # RECEIPT LAW (pds w40). The sibling `delete_current/2` already derives this
+      # field; `delete_by_id/2` shipped it as a literal `true`, which stays true
+      # even if the stamp never lands — a revoke endpoint reporting success it did
+      # not verify. This test fails against the literal for a structural reason and
+      # not a cosmetic one: the literal body carries NO `revoked_at` key at all.
+      raw = mint_custom_labelled!(admin, email())
+      list = json_conn(admin) |> get("/v1/auth/app-tokens") |> json_response(200)
+      id = hd(list["tokens"])["id"]
+
+      body = json_conn(admin) |> delete("/v1/auth/app-tokens/#{id}") |> json_response(200)
+
+      persisted = Barkpark.Repo.get(Barkpark.Auth.ApiToken, id).revoked_at
+      refute is_nil(persisted), "the row was never stamped revoked_at"
+
+      assert body["revoked"] == true
+
+      refute is_nil(body["revoked_at"]),
+             "the body omits revoked_at — `revoked` cannot be descending from the stamp"
+
+      assert NaiveDateTime.compare(
+               NaiveDateTime.from_iso8601!(body["revoked_at"]),
+               NaiveDateTime.truncate(persisted, :second)
+             ) == :eq,
+             "the reported revoked_at does not match the persisted stamp"
+    end
+
     test "an ADMIN-permissioned app token is revocable by id — the worst case of the gap",
          %{admin: admin} do
       mail = email()
