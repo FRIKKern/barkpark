@@ -337,7 +337,7 @@ defmodule Barkpark.Content.Errors do
       status: 403,
       reason: "not_a_member",
       hint:
-        "This is a MEMBERSHIP check, not a permission tier: sign in as — or send a token belonging to — a member of this workspace. A browser session authenticates only on routes that read the session cookie; a Web Component needs a real data-token."
+        "This is a MEMBERSHIP check, not a permission tier: sign in as — or send a token belonging to — a member of this workspace. A browser session authenticates on any route that reads the session cookie, including the scoped media writes — no data-token is required for those."
     }
 
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard

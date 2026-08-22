@@ -448,6 +448,16 @@
         source: "explorer",
         record: opts.record
       });
+      // ACCOUNT-SESSION FALLBACK (gfr-w1-account-session-bearer-gap).
+      // An account/SSO principal holds no api_token, so LiveAuth renders
+      // data-token="" — deliberately, because putting a raw bearer in the
+      // markup would ship a live credential in every SSO user's HTML. With no
+      // bearer we take RequireBearerOrSessionToken's COOKIE branch instead,
+      // which requires this header: it cannot be set by a cross-site form or
+      // image, and a cross-origin fetch that sets it trips a preflight the
+      // allowlist blocks. Sent ONLY when the token is genuinely empty, so a
+      // bearer caller is byte-unchanged.
+      if (!tok) intel["x-requested-with"] = "bp-asset-explorer";
       return intel;
     }
 
