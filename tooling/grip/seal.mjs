@@ -62,7 +62,9 @@
 // because open rows sort onto the first page: green for the wrong reason. So the
 // row count, not the claimable count, is what is asserted. Both walks page
 // explicitly, assert every full page came back at exactly the requested size,
-// dedupe by id, and assert the ready pool is under the clamp.
+// dedupe by id, and — for the pool — reconcile the walk against `--all` ON THE
+// SET, not on the totals (see `reconcilePool`: equal totals are not an equal
+// set, and the clamp guard belongs on PAGE, not on the pool size).
 //
 // `GET /v1/data/query/production/task` is PINNED BY NAME. `/v1/tasks` silently
 // ignores `parent_id` — a real parent, an absent one and a nonexistent one all
@@ -202,8 +204,69 @@ export function walkPool() {
     offset += PAGE;
   }
   const all = (runJson("bp", ["task", "ready", "--all", "-o", "json"], "ready --all").docs || []).map((d) => d.doc_id);
+  const allIds = new Set(all);
   const walked = pages.reduce((a, b) => a + b, 0);
-  return { ids, pages, walked, duplicates, allCount: all.length, allUnique: new Set(all).size };
+  return {
+    ids, pages, walked, duplicates,
+    allIds, allCount: all.length, allUnique: allIds.size,
+    allDuplicates: all.length - allIds.size,
+  };
+}
+
+/**
+ * Reconcile the offset walk against `--all` — ON THE SET, never on the totals.
+ *
+ * The merged version of this file asserted `allUnique === allCount` and faulted
+ * on any repeated doc_id. That made the command PERMANENTLY INERT against the
+ * live ledger: `bp task ready --all` serves `akbr-feedback-2026-08-epic` twice
+ * (one doc_id under two row UUIDs) — the exact condition this slice's own brief
+ * told the walk to DEDUPE ("dedupe on doc_id — `ls --all` carries a duplicate id
+ * under two UUIDs"). Every live run exited 2 with a=UNKNOWN, so no clause was
+ * ever evaluated. A probe that refuses a true claim is not strictness; it is a
+ * broken instrument that FEELS like strictness because refusing looks careful.
+ *
+ * A repeated doc_id in the SERVER's listing is a property of the listing, not of
+ * this measurement, so it is deduped, counted and PRINTED — loudly, on every
+ * run, pass included. What is still fatal is a disagreement about WHICH rows the
+ * two reads saw, which is the only thing that could make clause (b) read a
+ * partial pool. Sizes are compared too, but sizes alone cannot catch a walk that
+ * skips one row and duplicates another: two opposite errors cancel and both
+ * totals AGREE. That is not hypothetical — the mutation proof for this change
+ * dropped one id from the walk and both reads still totalled the same number,
+ * so only the set difference reported it. So the sets are differenced, and the
+ * missing/extra ids are NAMED.
+ *
+ * The `allCount >= 1000` guard is REPLACED, not dropped. Its purpose was "clause
+ * (b) must never silently read a truncated pool", and it expressed that as a cap
+ * on the POOL — which fires on every live pool today (~3010 rows on 2026-08-22)
+ * even when that pool was walked correctly in 7 pages. The truncation risk lives
+ * in the PAGE SIZE instead (the server clamps a
+ * single request at 1000 with no flag, no total and no has_more), so the guard
+ * now sits on PAGE, where a future edit raising it is what actually reintroduces
+ * the hazard.
+ */
+export function reconcilePool(r) {
+  if (!r) return { ok: false, detail: "no pool report at all" };
+  if (PAGE >= 1000)
+    return { ok: false, detail: `PAGE=${PAGE} is at or above the server's silent 1000 clamp — a page could come back truncated with no flag, no total and no has_more` };
+  if (r.walked !== r.allCount)
+    return { ok: false, detail: `offset walk returned ${r.walked} row(s), --all returned ${r.allCount} — the pool moved under the read, or one of them truncated` };
+  const missing = [...r.allIds].filter((id) => !r.ids.has(id));
+  const extra = [...r.ids].filter((id) => !r.allIds.has(id));
+  if (missing.length || extra.length)
+    return {
+      ok: false,
+      detail: `the two reads agree on the TOTAL (${r.walked}) but not on the SET: ` +
+        `the walk misses ${missing.length} (${missing.slice(0, 5).join(", ") || "-"}), ` +
+        `and carries ${extra.length} that --all does not list (${extra.slice(0, 5).join(", ") || "-"})`,
+    };
+  return {
+    ok: true,
+    detail: `${r.walked} row(s) both ways, ${r.ids.size} unique — the offset walk and --all agree on the SET, not merely the count` +
+      (r.allDuplicates || r.duplicates
+        ? `; ${r.allDuplicates} duplicate doc_id(s) in --all and ${r.duplicates} in the walk, DEDUPED (a repeated doc_id is the server's listing, not a partial read)`
+        : "; no duplicate doc_id in either read"),
+  };
 }
 
 /** The pinned direct-children query — kept ONLY to show what it would have missed. */
@@ -360,7 +423,7 @@ export function main(argv = process.argv.slice(2), out = console.log) {
       rows = new Map((fx.namespace || []).map((r) => [r._id, r]));
       pages = ["(fixture)"]; duplicates = 0;
       pool = new Set(fx.pool || []);
-      poolReport = { pages: ["(fixture)"], walked: pool.size, allCount: pool.size, allUnique: pool.size, duplicates: 0 };
+      poolReport = { pages: ["(fixture)"], walked: pool.size, ids: pool, allIds: pool, allCount: pool.size, allUnique: pool.size, duplicates: 0, allDuplicates: 0 };
       direct = new Set(fx.direct_children || []);
       rootDoc = fx.root_doc || null;
       criteria = fx.criteria || [];
@@ -374,10 +437,8 @@ export function main(argv = process.argv.slice(2), out = console.log) {
       criteria = FROZEN_CRITERIA;
     }
     if (!rootDoc) fail("root document", { klass: RUN_CLASS.INFRA, detail: `${ROOT_ID} is not in the walked corpus` });
-    if (poolReport.walked !== poolReport.allCount || poolReport.allUnique !== poolReport.allCount)
-      fail("ready pool", { klass: RUN_CLASS.INFRA, detail: `offset walk ${poolReport.walked} != --all ${poolReport.allCount} (unique ${poolReport.allUnique})` });
-    if (poolReport.allCount >= 1000)
-      fail("ready pool", { klass: RUN_CLASS.INFRA, detail: `pool ${poolReport.allCount} has reached the silent 1000 clamp — clause (b) would read a partial pool` });
+    const recon = reconcilePool(poolReport);
+    if (!recon.ok) fail("ready pool", { klass: RUN_CLASS.INFRA, detail: recon.detail });
 
     const lens = buildLenses(rows, ROOT_ID, direct.size ? direct : null);
     if (!fx && direct.size !== lens.corpusDepth1.size)
@@ -397,7 +458,8 @@ export function main(argv = process.argv.slice(2), out = console.log) {
     say("=== SEAL PREDICATE — truth-grip-epic (D94 as amended by D108) ===");
     say(`walked at ${stamp}  repo ${top} @ ${sha}${fx ? `  [LEDGER FIXTURE ${fixturePath} — NOT LIVE]` : "  [live ledger]"}`);
     say(`corpus walk pages: ${pages.join("+")} = ${rows.size} published task rows, ${duplicates} duplicate id(s) deduped`);
-    say(`ready pool walk  : ${poolReport.pages.join("+")} = ${poolReport.walked}, reconciles with --all ${poolReport.allCount}, under the 1000 clamp`);
+    say(`ready pool walk  : ${poolReport.pages.join("+")} = ${poolReport.walked} (PAGE=${PAGE}, under the silent 1000 clamp)`);
+    say(`      reconciliation : ${recon.detail}`);
     say(`lens: closure ${lens.closure.size} / prefix(_type==task) ${lens.prefix.size} / filter[parent_id] ${lens.direct.size} / UNION ${lens.union.size}`);
     say(`      claimable per lens: closure ${claimableIn(lens.closure, rows, pool).length}` +
         ` / prefix ${claimableIn(lens.prefix, rows, pool).length}` +
