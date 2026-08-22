@@ -25,7 +25,13 @@
 //   4. UNPROVEN is not a pass. A flag set no source enumerates is reported by
 //      NAME and by COUNT, and never counted as verified.
 //
-//   node tooling/doc-truth/verify-bp-commands.mjs [--json] [--offline] <doc>...
+//   node tooling/doc-truth/verify-bp-commands.mjs [--json] [--offline] [--brief] <doc>...
+//
+// Every GREEN row cites the SPECIFIC authority that adjudicated it — the
+// file:line of the switch case, the completionNouns literal, the parseHzArgs
+// allowlist or the "--flag" literal (and, for [A], the manifest ROW id: that
+// manifest is one line of JSON, so a ":<line>" would be a fiction). --brief
+// suppresses the citations and prints the source letters alone.
 //   node tooling/doc-truth/verify-bp-commands.mjs --selftest
 //
 // Exit 0 only when every printed command was adjudicated and none is
@@ -77,7 +83,7 @@ export function verifyDocs(docs, { root = REPO_ROOT, offline = false, use = "ABC
       const row = {
         doc: rel, line: claim.line, fenced: !!claim.fenced, raw: r.text,
         verdict: r.verdict, path: r.path, via: [...new Set(r.via.filter(Boolean))],
-        reasons: r.reasons, unproven: r.unproven,
+        authority: r.authority, reasons: r.reasons, unproven: r.unproven,
       };
       rows.push(row);
       report.totals.commands++;
@@ -90,7 +96,7 @@ export function verifyDocs(docs, { root = REPO_ROOT, offline = false, use = "ABC
   return report;
 }
 
-function printReport(report) {
+function printReport(report, { authority = true } = {}) {
   const w = (s) => process.stdout.write(s + "\n");
   const bar = "─".repeat(78);
   w("");
@@ -119,6 +125,7 @@ function printReport(report) {
       const mark = r.verdict === PROVEN ? "✓" : r.verdict === UNPROVEN ? "?" : "✗";
       const via = r.via.length ? ` [${r.via.join("+")}]` : "";
       w(`  ${mark} L${r.line}${r.fenced ? "" : " (inline)"} \`${trunc(r.raw, 66)}\`${r.verdict === PROVEN ? via : ""}`);
+      if (authority) for (const a of r.authority) w(`        ↳ ${a}`);
       for (const reason of r.reasons) w(`      ${reason}`);
       for (const u of r.unproven) w(`      UNPROVEN: ${u}`);
     }
@@ -307,6 +314,57 @@ function selftest() {
       `unproven=${r.totals.unproven} named=${JSON.stringify(named)}`;
   });
 
+  // ── the citation is the claim: read every cited line BACK ────────────────
+  //
+  // A source letter is not checkable by a reader; `hetzner_cmd.go:118` is — but
+  // only if it is TRUE. A citation that points at a plausible-looking wrong line
+  // is worse than none, so the gate re-opens each file it cited and demands the
+  // token actually be declared there. `readBack` returns the failures, so the
+  // positive check demands zero and the mutation below demands some.
+  const CITE_RE = /^([A-Z+]+) (\S+) → (.+):(\d+)$/;
+  const readBack = (rows, shift = 0) => {
+    const bad = [];
+    for (const r of rows) {
+      for (const a of r.authority || []) {
+        const m = a.match(CITE_RE);
+        if (!m) continue;                       // [A] cites a row id, not a line
+        const [, , tok, file, lineNo] = m;
+        const abs = join(REPO_ROOT, file);
+        if (!existsSync(abs)) { bad.push(`${a} — no such file`); continue; }
+        const lines = readFileSync(abs, "utf8").split("\n");
+        const text = lines[Number(lineNo) - 1 + shift];
+        // the cited line must literally declare the token it was cited for
+        const bare = tok.replace(/^--/, "");
+        if (text === undefined || !(text.includes(`"${tok}"`) || text.includes(`"${bare}"`))) {
+          bad.push(`${a} — line ${Number(lineNo) + shift} does not declare ${tok}: ${String(text).trim().slice(0, 60)}`);
+        }
+      }
+    }
+    return bad;
+  };
+  const CITED = verifyDocs(TEMPLATES).docs.flatMap((d) => d.rows).filter((r) => r.verdict === PROVEN);
+
+  check("every GREEN row cites a SPECIFIC authority (letter alone is not enough)", () => {
+    const naked = CITED.filter((r) => !r.authority || r.authority.length === 0);
+    return naked.length === 0 || `${naked.length} row(s) cite no authority: ` +
+      naked.map((r) => `${r.doc}:${r.line}`).join(", ");
+  });
+  check("every cited file:line REALLY declares the token it was cited for", () => {
+    const bad = readBack(CITED);
+    return bad.length === 0 || `${bad.length} false citation(s): ${bad.slice(0, 3).join(" | ")}`;
+  });
+  check("MUTATION: shift every citation by one line and the read-back FAILS", () => {
+    // Proves the check above is not vacuous — it is reading the file, not the
+    // string it printed. If an off-by-one still passed, the check proves nothing.
+    const bad = readBack(CITED, 1);
+    return bad.length > 0 || "an off-by-one citation still passed — the read-back is VACUOUS";
+  });
+  check("citations name real dispatch, not the doc: [D] cites internal/cli/**.go", () => {
+    const d = CITED.flatMap((r) => r.authority).filter((a) => a.startsWith("D "));
+    return (d.length > 0 && d.every((a) => /→ internal\/cli\/\S+\.go:\d+$/.test(a))) ||
+      `${d.length} D-citations, offenders: ${d.filter((a) => !/internal\/cli/.test(a)).slice(0, 3).join(" | ")}`;
+  });
+
   // the header never claims success
   check("the header says PARSES and denies SUCCEEDS", () => {
     const h = HEADER.join(" ");
@@ -346,7 +404,7 @@ function main() {
   const docs = argv.filter((a) => !a.startsWith("--"));
 
   if (docs.length === 0) {
-    process.stderr.write("usage: verify-bp-commands.mjs [--json] [--offline] <doc.md>...\n");
+    process.stderr.write("usage: verify-bp-commands.mjs [--json] [--offline] [--brief] <doc.md>...\n");
     process.exit(2);
   }
   if (offline && !offlineAllowed(docs)) {
@@ -358,7 +416,7 @@ function main() {
 
   const report = verifyDocs(docs, { offline });
   if (wantJson) process.stdout.write(JSON.stringify(report, null, 2) + "\n");
-  else printReport(report);
+  else printReport(report, { authority: !argv.includes("--brief") });
 
   if (!report.sources.ok) process.exit(2);
   process.exit(report.totals.unresolved === 0 ? 0 : 1);

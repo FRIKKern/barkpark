@@ -72,6 +72,10 @@ function loadManifest(root, relPath) {
   const nouns = new Set((raw.nouns || []).map((n) => n.name));
   const verbs = new Map(); // noun -> Set(verb)
   const flags = new Map(); // "noun.verb" -> Set("--flag")
+  // The manifest ships as ONE line of JSON, so a ":<line>" would be a fiction.
+  // The honest authority for [A] is the ROW: `<path>#<row id>`.
+  const at = new Map();    // "noun" | "noun.verb" -> "<relPath>#<row>"
+  for (const nd of raw.nouns || []) if (nd.name) at.set(nd.name, `${relPath}#nouns[${nd.name}]`);
   for (const c of raw.commands || []) {
     if (!c.noun || !c.verb) continue;
     nouns.add(c.noun);
@@ -80,9 +84,11 @@ function loadManifest(root, relPath) {
     const f = new Set();
     for (const fl of c.flags || []) if (fl.name) f.add("--" + fl.name);
     flags.set(`${c.noun}.${c.verb}`, f);
+    at.set(`${c.noun}.${c.verb}`, `${relPath}#${c.id || `${c.noun}.${c.verb}`}`);
+    if (!at.has(c.noun)) at.set(c.noun, `${relPath}#nouns[${c.noun}]`);
   }
   if (nouns.size === 0) return { ok: false, why: `manifest at ${relPath} declares no nouns` };
-  return { ok: true, origin: relPath, nouns, verbs, flags, rows: (raw.commands || []).length };
+  return { ok: true, origin: relPath, nouns, verbs, flags, at, rows: (raw.commands || []).length };
 }
 
 // ── the Go scan (sources B, C, D, E + usage synopses) ───────────────────────
@@ -116,7 +122,7 @@ const STRING_RE = /"((?:[^"\\]|\\.)*)"/g;
 // is exactly that shape, and attributing those to the whole function would make
 // `bp <anything> create` resolvable).
 function newNode(id, file) {
-  return { id, file, cases: new Set(), edges: new Map(), fn: null };
+  return { id, file, cases: new Set(), edges: new Map(), caseAt: new Map(), fn: null };
 }
 
 function scanGo(root) {
@@ -126,7 +132,10 @@ function scanGo(root) {
   const nodes = new Map();          // node id -> node
   const funcFile = new Map();       // func name -> repo-relative file
   const hz = new Map();             // func name -> Set("--flag")   [C]
+  const hzAt = new Map();           // func name -> "file:line" of its parseHzArgs
   const fileFlags = new Map();      // repo-relative file -> Set("--flag")  [E]
+  const flagAt = new Map();         // file -> Map("--flag" -> "file:line")  [E]
+  let nounsAt = BUILTINS;           // "file:line" of `var completionNouns`
   const synopses = [];              // {path:[tok], required:Set, all:Set}
   let completionNouns = null;       // [B]
   let completionGlobals = new Set();
@@ -146,13 +155,24 @@ function scanGo(root) {
     // parsers spell their flags as `case "--site":` or `flagDevice = "--device"`;
     // both are the same declaration of vocabulary.
     const eSet = fileFlags.get(rel) || new Set();
-    for (const m of text.matchAll(FLAG_LITERAL_RE)) eSet.add(m[1]);
+    const eAt = flagAt.get(rel) || new Map();
+    for (const m of text.matchAll(FLAG_LITERAL_RE)) {
+      eSet.add(m[1]);
+      // first spelling wins — the line where this file DECLARES the flag
+      if (!eAt.has(m[1])) {
+        eAt.set(m[1], `${rel}:${text.slice(0, m.index).split("\n").length}`);
+      }
+    }
     fileFlags.set(rel, eSet);
+    flagAt.set(rel, eAt);
 
     // [B] the completion noun/global lists (builtins.go).
     if (rel === BUILTINS) {
       const nb = text.match(/var\s+completionNouns\s*=\s*\[\]string\{([\s\S]*?)\}/);
-      if (nb) completionNouns = [...nb[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+      if (nb) {
+        completionNouns = [...nb[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+        nounsAt = `${rel}:${text.slice(0, nb.index).split("\n").length}`;
+      }
       const gb = text.match(/var\s+completionGlobals\s*=\s*\[\]string\{([\s\S]*?)\}/);
       if (gb) for (const m of gb[1].matchAll(/"([^"]+)"/g)) completionGlobals.add(m[1]);
     }
@@ -190,6 +210,7 @@ function scanGo(root) {
         continue;
       }
       fnBody.push(line);
+      if (!hzAt.has(fn) && line.includes("parseHzArgs(")) hzAt.set(fn, `${rel}:${i + 1}`);
       collectSynopses(line, synopses);
 
       const cm = line.match(CASE_RE);
@@ -198,7 +219,7 @@ function scanGo(root) {
         const isFlagCase = toks.every((t) => t.startsWith("-"));
         if (!isFlagCase) {
           const node = nodeFor(fn, rel);
-          for (const t of toks) node.cases.add(t);
+          for (const t of toks) { node.cases.add(t); node.caseAt.set(t, `${rel}:${i + 1}`); }
           // an edge is a `return runX(` within the case body
           let callee = null;
           for (let j = i + 1; j < Math.min(lines.length, i + 9); j++) {
@@ -221,6 +242,7 @@ function scanGo(root) {
         const tok = m[1];
         const node = nodeFor(caseNodeId || fn, rel);
         node.cases.add(tok);
+        node.caseAt.set(tok, `${rel}:${i + 1}`);
         for (let j = i; j < Math.min(lines.length, i + 5); j++) {
           const rm = lines[j].match(RETURN_RUN_RE);
           if (rm) { node.edges.set(tok, rm[1]); break; }
@@ -235,7 +257,7 @@ function scanGo(root) {
   }
   if (!rootFn) return { ok: false, why: "top-level `switch noun` dispatch not found in internal/cli" };
   return {
-    ok: true, nodes, funcFile, hz, fileFlags, synopses,
+    ok: true, nodes, funcFile, hz, hzAt, fileFlags, flagAt, nounsAt, synopses,
     completionNouns: new Set(completionNouns), completionGlobals, rootFn,
   };
 }
@@ -330,8 +352,11 @@ export function loadBpSources({ root = REPO_ROOT, offline = false, manifestPath 
     A,
     B: go.ok ? go.completionNouns : null,
     C: go.ok ? go.hz : null,
+    Cat: go.ok ? go.hzAt : new Map(),
     D: go.ok ? { nodes: go.nodes, funcFile: go.funcFile, rootFn: go.rootFn } : null,
     E: go.ok ? go.fileFlags : null,
+    Eat: go.ok ? go.flagAt : new Map(),
+    Bat: go.ok ? go.nounsAt : BUILTINS,
     globals: go.ok ? go.completionGlobals : new Set(),
     synopses: go.ok ? go.synopses : [],
     counts: {
@@ -403,7 +428,10 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
   const useE = use.includes("E") && sources.E;
 
   const { text, tokens } = splitCommandLine(line);
-  const res = { verdict: PROVEN, path: [], via: [], reasons: [], unproven: [], text };
+  const res = { verdict: PROVEN, path: [], via: [], authority: [], reasons: [], unproven: [], text };
+  // `cite` records WHICH line of WHICH file adjudicated this token. A source
+  // letter alone ("[D]") is not checkable by a reader; `hetzner_cmd.go:88` is.
+  const cite = (src, tok, at) => { if (at) res.authority.push(`${src} ${tok} → ${at}`); };
   if (tokens.length === 0 || !/^(bp|barkpark)$/.test(tokens[0])) {
     res.verdict = UNRESOLVED;
     res.reasons.push(`not a bp command: ${text}`);
@@ -448,6 +476,7 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
     if (node && node.cases.has(tok)) {
       res.path.push(tok);
       res.via.push("D");
+      cite("D", tok, node.caseAt.get(tok));
       const callee = node.edges.get(tok);
       const sub = sources.D.nodes.get(`${node.id}::${tok}`) || null;
       if (callee) {
@@ -465,6 +494,7 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
       if (inA || inB) {
         res.path.push(tok);
         res.via.push(inA ? "A" : "B");
+        cite(inA ? "A" : "B", tok, inA ? sources.A.at.get(tok) : sources.Bat);
         node = null;
         continue;
       }
@@ -482,6 +512,7 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
       if ((sources.A.verbs.get(noun) || new Set()).has(tok)) {
         res.path.push(tok);
         res.via.push("A");
+        cite("A", tok, sources.A.at.get(`${noun}.${tok}`));
         leaf = true;
         continue;
       }
@@ -520,18 +551,22 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
   if (nonGlobal.length) {
     const vocab = new Set();
     let vocabSource = null;
+    const flagAuth = new Map();   // "--flag" -> "file:line" that declares it
     if (useC && leafFn && sources.C.has(leafFn)) {
-      for (const f of sources.C.get(leafFn)) vocab.add(f);
+      const at = sources.Cat.get(leafFn);
+      for (const f of sources.C.get(leafFn)) { vocab.add(f); if (at) flagAuth.set(f, at); }
       vocabSource = "C";
     }
     const key = res.path.join(".");
     if (useA && sources.A.flags.has(key)) {
-      for (const f of sources.A.flags.get(key)) vocab.add(f);
+      const at = sources.A.at.get(key);
+      for (const f of sources.A.flags.get(key)) { vocab.add(f); if (!flagAuth.has(f) && at) flagAuth.set(f, at); }
       vocabSource = vocabSource ? `${vocabSource}+A` : "A";
     }
     if (useE && leafFn && sources.D && sources.D.funcFile.has(leafFn)) {
       const file = sources.D.funcFile.get(leafFn);
-      for (const f of sources.E.get(file) || []) vocab.add(f);
+      const eAt = sources.Eat.get(file) || new Map();
+      for (const f of sources.E.get(file) || []) { vocab.add(f); if (!flagAuth.has(f)) flagAuth.set(f, eAt.get(f)); }
       vocabSource = vocabSource ? `${vocabSource}+E` : "E";
     }
     if (vocab.size === 0) {
@@ -541,6 +576,7 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
         `leaf's flags (C allowlist absent, A carries no row, E found none)`);
     } else {
       res.via.push(vocabSource);
+      for (const f of nonGlobal) if (vocab.has(f)) cite(vocabSource, f, flagAuth.get(f));
       const unknown = nonGlobal.filter((f) => !vocab.has(f));
       if (unknown.length) {
         res.verdict = UNRESOLVED;

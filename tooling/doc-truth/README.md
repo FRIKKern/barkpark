@@ -456,14 +456,39 @@ is neither required by a synopsis nor supplied by a doc line; an inline prose
 fragment naming one flag is an illustration, not an invocation).
 
 ```bash
-node tooling/doc-truth/verify-bp-commands.mjs --selftest        # 25 cases, every law proved BY MUTATION
+node tooling/doc-truth/verify-bp-commands.mjs --selftest        # 29 cases, every law proved BY MUTATION
 node tooling/doc-truth/verify-bp-commands.mjs templates/**/*.md # exit 1 on any UNRESOLVED, 2 on a dead source
+node tooling/doc-truth/verify-bp-commands.mjs --brief <doc>...  # source letters only, no citations
 node tooling/doc-truth/verify-bp-commands.mjs --json <doc>...
 ```
 
 The selftest is mutation-shaped on purpose: each law's negative half (drop D,
 drop A, drop E, drop the continuation join, drop the depth rule) must FAIL, or
 its positive half proves nothing.
+
+### Every green cites the line that made it green
+
+A source letter (`[D]`) is a claim the reader cannot check. Each GREEN row
+therefore names the **specific authority** that adjudicated each token:
+
+```
+  ✓ L42 `bp cloud site create --name my-search …` [D+C+E]
+        ↳ D cloud    → internal/cli/cli.go:391            case "cloud":
+        ↳ D site     → internal/cli/hetzner_cmd.go:118    case "site", "sites":
+        ↳ D create   → internal/cli/cloud_site_cmd.go:88  case "create":
+        ↳ C+E --name → internal/cli/cloud_site_cmd.go:159 parseHzArgs allowlist
+```
+
+Source **[A] cites a row, not a line** (`full-manifest.json#cloud.site.create`)
+— that manifest ships as a single line of JSON, so a `:<line>` would be a
+fiction, and printing one would be exactly the kind of plausible-looking
+falsehood this gate exists to catch.
+
+A citation is only worth more than nothing if it is TRUE, so the selftest
+re-opens every file the run cited and demands the token actually be declared on
+that line — and then **shifts every citation by one line and demands the
+read-back FAIL**. Without that mutation, a citation check that never opened the
+file would pass just as happily.
 
 ## Meta-lesson
 
