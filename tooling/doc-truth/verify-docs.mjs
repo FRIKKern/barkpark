@@ -489,11 +489,19 @@ function claimsFromSpan(doc, span) {
   }
 
   // ── command (shell)
-  const cmdHead = raw.split(/\s+/)[0];
-  if (KNOWN_CMD_HEADS.has(cmdHead) && /\s/.test(raw)) {
+  // A FENCED line may carry a shell prompt (`$ ` / `# `). Strip it before
+  // deriving the head, or every prompted command is silently DROPPED: the head
+  // reads as "$", which is in no KNOWN_CMD_HEADS, so the claim is never emitted
+  // and the doc looks clean because nothing was examined. splitCommandLine()
+  // already strips the same prompt downstream — that strip was unreachable
+  // until now, because extraction never handed it a prompted line.
+  // Inline spans are NOT prompt-stripped: a bare `$` in prose is not a prompt.
+  const cmdText = span.fenced ? raw.replace(/^[$#]\s+/, "") : raw;
+  const cmdHead = cmdText.split(/\s+/)[0];
+  if (KNOWN_CMD_HEADS.has(cmdHead) && /\s/.test(cmdText)) {
     out.push({
-      doc, line: span.line, type: "command", raw, fenced: !!span.fenced,
-      target: { head: cmdHead, sub: raw.split(/\s+/)[1] || null, full: raw },
+      doc, line: span.line, type: "command", raw: cmdText, fenced: !!span.fenced,
+      target: { head: cmdHead, sub: cmdText.split(/\s+/)[1] || null, full: cmdText },
     });
     return out;
   }
