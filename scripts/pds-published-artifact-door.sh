@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+#
+# pds-published-artifact-door.sh — refuse an export subpath that the frozen
+# published artifact under main's own version literal cannot serve.
+#
+# WHY THIS EXISTS
+# ---------------
+# `npm i @barkpark/react` gets the SHIPPED JavaScript of the frozen
+# 1.0.0-preview.1 tarball, not main. When main adds an export subpath without
+# bumping the version literal, the registry advertises a surface the published
+# bytes cannot serve, and an installer gets a resolution error for a subpath the
+# repository swears exists. Nothing else in this repo can refuse that.
+#
+# THE REQUIRED LEG — the SURFACE clause, and ONLY this one:
+#
+#   exports(HEAD) MUST BE A SUBSET OF exports(R)
+#   where R = the commit that last CHANGED that package's version literal.
+#
+# R is DERIVED, never pinned: walk the package.json history from the ref and
+# take the first commit whose `version` differs from its parent's. A genuine
+# release bumps the literal, which moves R onto the release commit itself, so
+# the door is structurally SILENT on releases rather than silent by exception.
+#
+# WHAT THIS DOOR STRUCTURALLY CANNOT SEE
+# --------------------------------------
+# THE REQUIRED LEG READS THE exports MAP ONLY. A package that changes BEHAVIOUR
+# under an unchanged version literal — a repaired function body, a reversed
+# error contract, a deleted stub — adds no export key and PASSES this door.
+# That is exactly #9601: main's repaired Reference.tsx says the opposite of the
+# shipped preview.1 JavaScript, the surfaces are identical, and this leg is
+# silent on it. That sentence is PRINTED on every run, because prose that lives
+# only in a comment is what a copy-paste drops.
+#
+# THREE ESCAPE HATCHES, ALL MANDATORY:
+#   * `"private": true`               — never published, nothing to contradict
+#   * the literal `0.0.0-placeholder` — keyed on the LITERAL, never on registry
+#                                       absence: BOTH placeholder packages ARE
+#                                       published at that literal, so "not on
+#                                       npm" would be the wrong test
+#   * js/.changeset/config.json `ignore` — read at the REF, never hardcoded
+#
+# UNSCOPED PACKAGES: a package is named by its package.json `name`, never by
+# building @barkpark/$dir — create-barkpark-app is unscoped and any name-builder
+# that assumes the scope silently stops checking it.
+#
+# RELEASE DEBT IS REPORTED, NEVER REFUSED. Hundreds of changesets sit on main; a
+# required leg that refused on debt would block every js PR until someone ran
+# release.yml, and it would be the leg that gets weakened. It is a column, not a
+# verdict.
+#
+# OFFLINE BY CONSTRUCTION. Every read is `git show <ref>:<path>`. No network
+# command appears anywhere in this file. The sourcemap byte oracle is an
+# ENHANCEMENT arm that prints SKIP-WITH-REASON and cannot move the exit code.
+#
+# USAGE
+#   scripts/pds-published-artifact-door.sh [<ref>]   # default origin/main
+#   scripts/pds-published-artifact-door.sh --selftest
+#
+# EXIT STATUS
+#   0  every checked package advertises only what its frozen artifact can serve
+#   1  at least one REFUSAL — a subpath added since R
+#   2  the door itself failed (bad ref, unreadable tree) — measured nothing
+#   3  bad usage
+#
+set -uo pipefail
+
+SELF="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+PKG_ROOT="js/packages"
+CHANGESET_CONFIG="js/.changeset/config.json"
+PLACEHOLDER_LITERAL="0.0.0-placeholder"
+
+die() { printf 'door: %s\n' "$*" >&2; exit 2; }
+
+# Print the header comment block. The boundary is DERIVED — a hardcoded last
+# line silently truncates the moment the header grows.
+usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$SELF"; }
+
+# ── readers: every one of them is `git show`, and that is the offline property ──
+blob_at() { git show "$1:$2" 2>/dev/null; }
+
+json_field() { # <json on stdin> <dotted field>
+  python3 -c '
+import json,sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+v = d.get(sys.argv[1])
+if v is None: sys.exit(0)
+print(v if not isinstance(v, bool) else ("true" if v else "false"))
+' "$1"
+}
+
+exports_keys() { # <json on stdin> -> one key per line, sorted
+  python3 -c '
+import json,sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+e = d.get("exports")
+if isinstance(e, dict):
+    for k in sorted(e): print(k)
+'
+}
+
+ignore_list() { # <ref>
+  blob_at "$1" "$CHANGESET_CONFIG" | python3 -c '
+import json,sys
+try: d = json.load(sys.stdin)
+except Exception: sys.exit(0)
+for n in d.get("ignore", []) or []: print(n)
+'
+}
+
+# R = the commit that last CHANGED this package.json version literal, at or
+# before <ref>. Derived by walking the file history and comparing each commit to
+# its parent. The FIRST such commit is R.
+resolve_r() { # <ref> <path>
+  local ref="$1" path="$2" c v p pv
+  for c in $(git log --format=%H "$ref" -- "$path" 2>/dev/null); do
+    v="$(blob_at "$c" "$path" | json_field version)"
+    if ! p="$(git rev-parse --verify -q "$c^" 2>/dev/null)"; then printf '%s\n' "$c"; return 0; fi
+    pv="$(blob_at "$p" "$path" | json_field version)"
+    [ "$v" != "$pv" ] && { printf '%s\n' "$c"; return 0; }
+  done
+  printf '\n'
+}
+
+run_door() { # <ref>
+  local ref="$1"
+  local sha; sha="$(git rev-parse --verify -q "$ref^{commit}")" || die "not a commit: $ref"
+
+  local ignores; ignores="$(ignore_list "$ref")"
+
+  printf 'pds-published-artifact-door — REF=%s (%s)\n\n' "$ref" "${sha:0:9}"
+  printf 'IGNORE LIST (%s @ REF): %s\n\n' "$CHANGESET_CONFIG" "$(printf '%s' "$ignores" | tr '\n' ' ')"
+
+  local enumerated=0 skipped=0 checked=0 refusals=0 errors=0
+  local dirs d path pjson name ver priv r new_keys line
+  local -a refuse_lines=() debt_lines=()
+
+  dirs="$(git ls-tree --name-only "$ref" "$PKG_ROOT/" 2>/dev/null | sed 's#.*/##')"
+  [ -n "$dirs" ] || die "no packages enumerated under $PKG_ROOT at $ref — the enumerator is broken, not the tree empty"
+
+  printf '%-26s %-20s %-11s %s\n' "PACKAGE" "VERSION" "R" "VERDICT"
+  for d in $dirs; do
+    path="$PKG_ROOT/$d/package.json"
+    pjson="$(blob_at "$ref" "$path")"
+    [ -n "$pjson" ] && continue_marker=1 || continue
+    enumerated=$((enumerated + 1))
+
+    # NAMED BY ITS package.json, never by @barkpark/$dir — create-barkpark-app
+    # is unscoped and a scope-builder stops checking it silently.
+    name="$(printf '%s' "$pjson" | json_field name)"
+    ver="$(printf '%s' "$pjson" | json_field version)"
+    priv="$(printf '%s' "$pjson" | json_field private)"
+    [ -n "$name" ] || { errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR no name field\n' "$d" "-" "-"; continue; }
+
+    if [ "$priv" = "true" ]; then
+      skipped=$((skipped + 1)); printf '%-26s %-20s %-11s SKIP private:true\n' "$name" "$ver" "-"; continue
+    fi
+    if [ "$ver" = "$PLACEHOLDER_LITERAL" ]; then
+      skipped=$((skipped + 1)); printf '%-26s %-20s %-11s SKIP version literal is %s\n' "$name" "$ver" "-" "$PLACEHOLDER_LITERAL"; continue
+    fi
+    if printf '%s\n' "$ignores" | grep -qxF "$name"; then
+      skipped=$((skipped + 1)); printf '%-26s %-20s %-11s SKIP .changeset ignore\n' "$name" "$ver" "-"; continue
+    fi
+
+    r="$(resolve_r "$ref" "$path")"
+    if [ -z "$r" ]; then
+      errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR no R (version literal never changed)\n' "$name" "$ver" "-"; continue
+    fi
+    checked=$((checked + 1))
+
+    new_keys="$(comm -23 \
+      <(printf '%s' "$pjson" | exports_keys) \
+      <(blob_at "$r" "$path" | exports_keys))"
+
+    if [ -n "$new_keys" ]; then
+      refusals=$((refusals + 1))
+      printf '%-26s %-20s %-11s REFUSE\n' "$name" "$ver" "${r:0:9}"
+      refuse_lines+=("REFUSE: $name advertises export subpath(s) the frozen $ver artifact cannot serve: $(printf '%s' "$new_keys" | tr '\n' ' ' | sed 's/ $//')")
+    else
+      printf '%-26s %-20s %-11s PASS\n' "$name" "$ver" "${r:0:9}"
+    fi
+
+    # REPORTED, NEVER REFUSED.
+    debt_lines+=("$name $(git rev-list --count "$r..$ref" -- "$PKG_ROOT/$d" 2>/dev/null) commit(s) touch $PKG_ROOT/$d since ${r:0:9}")
+  done
+
+  printf '\n'
+  for line in "${refuse_lines[@]:-}"; do [ -n "$line" ] && printf '%s\n' "$line"; done
+  [ ${#refuse_lines[@]} -gt 0 ] && printf '\n'
+
+  printf 'RELEASE DEBT (reported, never refused — a debt leg would block every js PR):\n'
+  for line in "${debt_lines[@]:-}"; do [ -n "$line" ] && printf '  %s\n' "$line"; done
+
+  printf '\nENHANCEMENT ARM — published sourcemap byte oracle: SKIP-WITH-REASON\n'
+  printf '  needs the registry tarballs; this door is offline by construction and the\n'
+  printf '  arm can never move the exit code. react server.cjs.map/server.mjs.map carry\n'
+  printf '  no sourcesContent, so they would SKIP even with a network.\n'
+
+  printf '\nWHAT THIS DOOR STRUCTURALLY CANNOT SEE\n'
+  printf '  The required leg reads the exports MAP only. A package that changes BEHAVIOUR\n'
+  printf '  under an unchanged version literal — a repaired function body, a reversed\n'
+  printf '  error contract, a deleted stub — adds no export key and PASSES this door.\n'
+
+  printf '\nCOUNTS: enumerated %d, skipped %d, checked %d, REFUSALS %d, ERRORS %d\n' \
+    "$enumerated" "$skipped" "$checked" "$refusals" "$errors"
+
+  [ "$errors" -gt 0 ] && { printf 'VERDICT: ERROR\n'; return 2; }
+  [ "$refusals" -gt 0 ] && { printf 'VERDICT: REFUSE\n'; return 1; }
+  printf 'VERDICT: PASS\n'; return 0
+}
+
+main() {
+  case "${1:---default}" in
+    -h|--help|help) usage; exit 0 ;;
+    --selftest)     exec bash "$(dirname "$SELF")/pds-published-artifact-door_test.sh" ;;
+    --default)      run_door "origin/main" ;;
+    -*)             printf 'door: unknown option: %s\n' "$1" >&2; exit 3 ;;
+    *)              run_door "$1" ;;
+  esac
+}
+
+main "$@"
