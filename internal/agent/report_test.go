@@ -68,7 +68,7 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 		LoadProbe:   func() (float64, float64, error) { return 1.25, 1.89, nil },
 		PGSizeProbe: func() (int64, error) { return 1234567, nil },
 		SwapProbe:   func() (int, int64, error) { return 99, 2147479552, nil },
-		BeamProbe:   func() (int64, int64, error) { return 1602224128, 1233125376, nil },
+		BeamProbe:   func() (int64, int64, string, string, error) { return 1602224128, 1233125376, "4185178", "green", nil },
 		PGTopRelationsProbe: func() ([]RelationSize, error) {
 			return []RelationSize{{Name: "mutation_events", Bytes: 1510000000}}, nil
 		},
@@ -562,7 +562,9 @@ func TestGatherReportSwapAndBeamFailSoftAsPairs(t *testing.T) {
 	t.Run("erroring probes leave both sentinels", func(t *testing.T) {
 		r := gatherReport(ReportConfig{
 			SwapProbe: func() (int, int64, error) { return 55, 999, errors.New("no /proc/meminfo") },
-			BeamProbe: func() (int64, int64, error) { return 5, 6, errors.New("no beam.smp") },
+			BeamProbe: func() (int64, int64, string, string, error) {
+				return 5, 6, "4185178", "green", errors.New("no beam.smp")
+			},
 		})
 		if r.SwapUsedPercent != -1 || r.SwapTotalBytes != -1 {
 			t.Errorf("swap = (%d, %d), want both -1 — a percent must never land without its total",
@@ -570,6 +572,12 @@ func TestGatherReportSwapAndBeamFailSoftAsPairs(t *testing.T) {
 		}
 		if r.BeamPSSBytes != -1 || r.BeamSwapBytes != -1 {
 			t.Errorf("beam = (%d, %d), want both -1 on probe error", r.BeamPSSBytes, r.BeamSwapBytes)
+		}
+		// The attribution folds into the SAME unit: an erroring probe must not
+		// leave a pid/slot naming a process whose numbers never landed.
+		if r.BeamPID != "" || r.BeamSlot != "" {
+			t.Errorf("beam attribution = (%q, %q), want both empty on probe error — a pid without its measurement attributes nothing",
+				r.BeamPID, r.BeamSlot)
 		}
 	})
 

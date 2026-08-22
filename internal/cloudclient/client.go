@@ -226,7 +226,16 @@ type Pressure struct {
 	SwapTotalBytes  *float64 `json:"swap_total_bytes"`
 	BeamPSSBytes    *float64 `json:"beam_pss_bytes"`
 	BeamSwapBytes   *float64 `json:"beam_swap_bytes"`
-	Err5xxPerS      *float64 `json:"err_5xx_per_s"`
+	// BeamPID and BeamSlot attribute the two beam figures above to the process
+	// they were read from. The box runs blue/green and two beam.smp processes
+	// coexist during a cutover, so without these a consumer cannot tell a real
+	// footprint change from the probe switching subject: a beam_swap series
+	// stepping 0 → ~190 MB across a flip is TWO PROCESSES, not a leak. Nil on a
+	// box whose agent predates the attribution, empty-string when the box is
+	// not slotted — both mean "not attributable", never a guess.
+	BeamPID    *string  `json:"beam_pid"`
+	BeamSlot   *string  `json:"beam_slot"`
+	Err5xxPerS *float64 `json:"err_5xx_per_s"`
 	// ReportedAt is the BEAT's own timestamp (RFC3339), a pointer for the same
 	// reason: null means the box has never phoned home at all, which is not the
 	// same as "beat, but told us nothing readable".

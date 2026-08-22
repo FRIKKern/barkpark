@@ -170,16 +170,19 @@ func TestBeamProbeNotFound(t *testing.T) {
 	writeFakeProc(t, procRoot, "1", "systemd", "")
 	writeFakeProc(t, procRoot, "42", "postgres", "")
 
-	pss, swap, err := beamSmapsProbeIn(procRoot)
+	pss, swap, pid, slot, err := beamSmapsProbeIn(procRoot)
 	if err == nil {
 		t.Fatal("err = nil, want an error when no beam.smp process exists")
 	}
 	if pss != -1 || swap != -1 {
 		t.Errorf("got (%d, %d), want both -1 sentinels when the BEAM is not found", pss, swap)
 	}
+	if pid != "" || slot != "" {
+		t.Errorf("got pid=%q slot=%q, want both empty when the BEAM is not found", pid, slot)
+	}
 
 	// An unreadable /proc is likewise an error, not zeros.
-	if _, _, err := beamSmapsProbeIn(filepath.Join(procRoot, "does-not-exist")); err == nil {
+	if _, _, _, _, err := beamSmapsProbeIn(filepath.Join(procRoot, "does-not-exist")); err == nil {
 		t.Error("an unreadable proc root must error")
 	}
 }
@@ -195,12 +198,15 @@ func TestBeamProbeFindsBeamAmongProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pss, swap, err := beamSmapsProbeIn(procRoot)
+	pss, swap, pid, _, err := beamSmapsProbeIn(procRoot)
 	if err != nil {
 		t.Fatalf("err = %v, want nil", err)
 	}
 	if pss != 1024*1024 || swap != 512*1024 {
 		t.Errorf("got (%d, %d), want (%d, %d)", pss, swap, 1024*1024, 512*1024)
+	}
+	if pid != "7" {
+		t.Errorf("pid = %q, want \"7\" — the measurement must name the process it came from", pid)
 	}
 }
 
@@ -219,5 +225,109 @@ func writeFakeProc(t *testing.T, procRoot, pid, comm, rollup string) {
 		if err := os.WriteFile(filepath.Join(dir, "smaps_rollup"), []byte(rollup), 0o644); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+// TestBeamProbePicksMaxAcrossBlueGreenOverlap is the regression this whole
+// change exists for, and the pid digits are chosen to make the old rule FAIL.
+//
+// os.ReadDir sorts LEXICALLY, so over {1, 4179607, 4185178, 999} the first
+// beam.smp in directory order is 4179607 — the DRAINING blue slot with the
+// small footprint — while the live green slot 4185178 sorts AFTER it and 999
+// sorts after both. The predecessor returned that first match, so it reported
+// blue's 0 MB swap and a consumer watching beam_swap step to green's ~190 MB
+// across the cutover would read TWO PROCESSES as one impossible leap.
+//
+// The fixture reproduces the real 2026-08-22 overlap: blue's cgroup epitaph
+// read 0B swap peak while green's read 788.3M.
+func TestBeamProbePicksMaxAcrossBlueGreenOverlap(t *testing.T) {
+	procRoot := t.TempDir()
+	writeFakeProc(t, procRoot, "1", "systemd", "")
+	// Draining blue: sorts FIRST lexically, smallest footprint.
+	writeFakeProc(t, procRoot, "4179607", beamComm, "Pss:   102400 kB\nSwap:      0 kB\n")
+	// Live green: sorts SECOND, and is the one that matters.
+	writeFakeProc(t, procRoot, "4185178", beamComm, "Pss:   409600 kB\nSwap: 194560 kB\n")
+	// A low-numbered non-BEAM that sorts LAST lexically, proving the scan is
+	// not accidentally rescued by numeric ordering.
+	writeFakeProc(t, procRoot, "999", "postgres", "")
+
+	pss, swap, pid, _, err := beamSmapsProbeIn(procRoot)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if pid != "4185178" {
+		t.Errorf("pid = %q, want \"4185178\" — the MAX across the set, not the lexically first match (that would be 4179607)", pid)
+	}
+	if pss != 409600*1024 {
+		t.Errorf("pss = %d, want %d — blue's 102400 kB means the lexical rule won", pss, int64(409600)*1024)
+	}
+	if swap != 194560*1024 {
+		t.Errorf("swap = %d, want %d — a 0 here is blue's epitaph, the exact misread this fixes", swap, int64(194560)*1024)
+	}
+}
+
+// TestFindBeamPIDsReturnsEveryBeamNumericallySorted proves the scan reports the
+// whole set, not one member, and that its order is numeric rather than the
+// lexical order os.ReadDir hands it.
+func TestFindBeamPIDsReturnsEveryBeamNumericallySorted(t *testing.T) {
+	procRoot := t.TempDir()
+	writeFakeProc(t, procRoot, "1", "systemd", "")
+	writeFakeProc(t, procRoot, "999", beamComm, "Pss: 1 kB\nSwap: 1 kB\n")
+	writeFakeProc(t, procRoot, "4179607", beamComm, "Pss: 1 kB\nSwap: 1 kB\n")
+	writeFakeProc(t, procRoot, "4185178", beamComm, "Pss: 1 kB\nSwap: 1 kB\n")
+
+	pids, err := findBeamPIDs(procRoot)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	want := []string{"999", "4179607", "4185178"}
+	if len(pids) != len(want) {
+		t.Fatalf("got %v (%d beams), want %v (%d) — every slot must be sampled", pids, len(pids), want, len(want))
+	}
+	for i := range want {
+		if pids[i] != want[i] {
+			t.Errorf("pids[%d] = %q, want %q — numeric order, not os.ReadDir's lexical order", i, pids[i], want[i])
+		}
+	}
+}
+
+// TestBeamSlotAttribution proves beam_slot names the blue/green unit from the
+// pid's cgroup, and that an unslotted or unreadable cgroup reports "not
+// attributable" rather than a guess.
+func TestBeamSlotAttribution(t *testing.T) {
+	procRoot := t.TempDir()
+	writeFakeProc(t, procRoot, "4185178", beamComm, "Pss: 4096 kB\nSwap: 0 kB\n")
+	writeFakeCgroup(t, procRoot, "4185178",
+		"0::/system.slice/system-barkpark\\x2dslot.slice/barkpark-slot@green.service\n")
+
+	_, _, pid, slot, err := beamSmapsProbeIn(procRoot)
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	if pid != "4185178" || slot != "green" {
+		t.Errorf("got pid=%q slot=%q, want pid=\"4185178\" slot=\"green\"", pid, slot)
+	}
+
+	// No cgroup file at all: not attributable, never guessed.
+	bare := t.TempDir()
+	writeFakeProc(t, bare, "7", beamComm, "Pss: 4096 kB\nSwap: 0 kB\n")
+	if _, _, _, slot, err := beamSmapsProbeIn(bare); err != nil || slot != "" {
+		t.Errorf("got slot=%q err=%v, want empty slot and nil err on an unslotted box", slot, err)
+	}
+
+	// A cgroup naming no barkpark slot is likewise empty, not a partial match.
+	other := t.TempDir()
+	writeFakeProc(t, other, "8", beamComm, "Pss: 4096 kB\nSwap: 0 kB\n")
+	writeFakeCgroup(t, other, "8", "0::/system.slice/postgresql.service\n")
+	if _, _, _, slot, err := beamSmapsProbeIn(other); err != nil || slot != "" {
+		t.Errorf("got slot=%q err=%v, want empty slot on a non-slot cgroup", slot, err)
+	}
+}
+
+// writeFakeCgroup lays down procRoot/<pid>/cgroup.
+func writeFakeCgroup(t *testing.T, procRoot, pid, body string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(procRoot, pid, "cgroup"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
