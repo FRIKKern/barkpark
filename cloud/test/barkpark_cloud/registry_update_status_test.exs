@@ -365,4 +365,216 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       assert reloaded.update_checked_at == honest_clock
     end
   end
+
+  describe "the ARMING probe rides the same 200 (apply_enabled, #12995)" do
+    # `apply_enabled` is a SIBLING of `"check"` at the top level of the body, and
+    # the old match named only `"check"`, so the bytes arrived every hour and
+    # were discarded AT THE MATCH.
+    #
+    # THE WHOLE POINT IS THAT ABSENT IS NOT FALSE. A pre-#12995 box sends no such
+    # key and may well be armed; mapping absence to "unarmed" would render it
+    # identical to a MEASURED unarmed box and put correctly-armed boxes on the
+    # retro-arm worklist — which is worse than having no worklist. Every test
+    # below is written so that collapse REDS it.
+
+    # The same envelope `check_body/1` builds, plus the sibling key. Passing
+    # `:absent` returns a body WITHOUT it — a pre-#12995 box, byte for byte.
+    defp arming_body(:absent), do: check_body("current")
+
+    defp arming_body(apply_enabled) do
+      check_body("current")
+      |> Jason.decode!()
+      |> Map.put("apply_enabled", apply_enabled)
+      |> Jason.encode!()
+    end
+
+    # Drive ONE programmed 200 through the real transport seam and return what
+    # the ROW ends up saying — the persisted column, never the returned struct,
+    # because the roster is read back out of the table hours later.
+    defp persisted_arming(body) do
+      bp =
+        live_barkpark(team_fixture())
+        |> Ecto.Changeset.change(url: "#{@instance_url}/#{System.unique_integer([:positive])}")
+        |> Repo.update!()
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: body}}])
+      _ = Registry.refresh_update_status(bp)
+      Repo.get!(Barkpark, bp.id).apply_arming
+    end
+
+    test "a body WITHOUT the key and a body with `false` are TWO DIFFERENT stored values" do
+      # Both arms in ONE test on purpose. Two assertions that both pass on the
+      # same fixture prove nothing; the claim is a DISCRIMINATION, so both
+      # fixtures have to be present for either assertion to mean anything.
+      armed = persisted_arming(arming_body(true))
+      unarmed = persisted_arming(arming_body(false))
+      unmeasured = persisted_arming(arming_body(:absent))
+
+      assert armed == "armed"
+
+      assert unarmed == "unarmed",
+             "a MEASURED false is the retro-arm worklist — the box will 503 the " <>
+               "moment the rollout reaches it. Got: #{inspect(unarmed)}"
+
+      assert is_nil(unmeasured),
+             "a pre-#12995 box sends no apply_enabled key and may be perfectly " <>
+               "armed; NULL is the third state. Got: #{inspect(unmeasured)}"
+
+      refute unmeasured == unarmed,
+             "THE COLLAPSE THIS COLUMN EXISTS TO PREVENT: an unmeasured box and a " <>
+               "measured-unarmed box now read the same, so every pre-#12995 box " <>
+               "lands on the retro-arm worklist and the roster is worthless."
+
+      # Three upstream worlds, three persisted values — a property, not three
+      # equalities copied out of the implementation.
+      assert length(Enum.uniq([armed, unarmed, unmeasured])) == 3
+    end
+
+    test "a non-boolean apply_enabled fails CLOSED to unmeasured, never into a verdict" do
+      # Same posture as `check["state"]`, which is whitelisted down to "unknown"
+      # rather than trusting a weird instance into a rendering state. An operator
+      # acts on this column, so a shape we cannot read must not become a word.
+      for junk <- [nil, "true", "false", 1, 0, %{"enabled" => true}, []] do
+        assert is_nil(persisted_arming(arming_body(junk))),
+               "apply_enabled=#{inspect(junk)} is not a boolean and must land unmeasured"
+      end
+    end
+
+    test "every word the refresh can persist is inside the changeset whitelist" do
+      # The mirror of the reason-vocabulary pins above: a value outside
+      # `apply_armings/0` would be rejected by validate_inclusion and the
+      # best-effort write would silently drop it, leaving the row's OLD arming on
+      # file — a stale roster, which is worse than an empty one.
+      for word <- ~w(armed unarmed), do: assert(word in Barkpark.apply_armings())
+      assert Enum.sort(Barkpark.apply_armings()) == Enum.sort(~w(armed unarmed))
+
+      # And "unknown" is NOT a word here. It is the ABSENCE of one — a
+      # `validate_inclusion` that admitted it would invite a writer to store it,
+      # and a column with three words has no NULL left to mean "never asked".
+      refute "unknown" in Barkpark.apply_armings()
+    end
+
+    test "the arming clock is stamped ONLY when a body was actually decoded" do
+      # `update_checked_at` is stamped on six rungs that never read a body, so it
+      # cannot say when the ARMING question was last answered. This column can,
+      # and only because nothing but the 200 path writes it.
+      bp = live_barkpark(team_fixture())
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 401, body: ~s({"error":"unauthorized"})}}
+      ])
+
+      assert {:error, :identity_refused} = Registry.refresh_update_status(bp)
+      refused = Repo.get!(Barkpark, bp.id)
+      assert %DateTime{} = refused.update_checked_at, "the 401 asked a real question"
+
+      assert is_nil(refused.apply_arming_checked_at),
+             "a 401 carries no body to read an arming out of — stamping it would " <>
+               "be the plane inventing evidence about a question it never got an answer to"
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(false)}}])
+      assert {:ok, _} = Registry.refresh_update_status(bp)
+
+      measured = Repo.get!(Barkpark, bp.id)
+      assert measured.apply_arming == "unarmed"
+      assert %DateTime{} = measured.apply_arming_checked_at
+    end
+
+    test "a box that goes dark KEEPS its measured arming — an outage must not empty the roster" do
+      bp = live_barkpark(team_fixture())
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(false)}}])
+      assert {:ok, _} = Registry.refresh_update_status(bp)
+      measured_at = Repo.get!(Barkpark, bp.id).apply_arming_checked_at
+
+      # Now every failure rung in turn — none of them may touch the two columns.
+      for response <- [
+            {:ok, %{status: 401, body: ~s({"e":1})}},
+            {:ok, %{status: 403, body: ~s({"e":1})}},
+            {:ok, %{status: 404, body: ""}},
+            {:ok, %{status: 500, body: "boom"}},
+            {:ok, %{status: 200, body: ~s({"nope":true})}},
+            {:error, :econnrefused}
+          ] do
+        StudioLinkFakeHttpClient.program([response])
+        _ = Registry.refresh_update_status(Repo.get!(Barkpark, bp.id))
+
+        reloaded = Repo.get!(Barkpark, bp.id)
+
+        assert reloaded.apply_arming == "unarmed",
+               "#{inspect(response)} erased a real measurement — a box that stops " <>
+                 "answering has not become unmeasured, and an operator reaching for " <>
+                 "the roster mid-outage would find it empty"
+
+        assert reloaded.apply_arming_checked_at == measured_at
+      end
+    end
+
+    test "a box ROLLED BACK below the feature loses its stale arming, not the other way round" do
+      # The direction the `force_change` exists for: the box stops sending the
+      # key, so the honest write is "unarmed" -> NULL (unmeasured). A cast that
+      # skipped the no-op would leave the stale word standing on the roster, and
+      # this is the only test that discriminates the two shapes.
+      bp = live_barkpark(team_fixture())
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(false)}}])
+      assert {:ok, measured} = Registry.refresh_update_status(bp)
+      assert measured.apply_arming == "unarmed"
+
+      # Same struct, now handed back to the refresh (the router's fire-and-forget
+      # kick and the workers both re-read, but a carried struct is the shape this
+      # guards).
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(:absent)}}])
+      assert {:ok, _} = Registry.refresh_update_status(measured)
+
+      assert is_nil(Repo.get!(Barkpark, bp.id).apply_arming),
+             "the box no longer reports arming, so the row must stop claiming to know it"
+    end
+
+    test "a STALE carried struct cannot strand a word on the roster (the force_change insurance)" do
+      # HONEST SCOPE, stated the way charter D717 stated it for the sibling
+      # column: no production caller produces this shape today — the router's
+      # kick re-reads via `get_barkpark/1` and both workers hand over a freshly
+      # read row — so this pins the INSURANCE, not a live path. It is the only
+      # test that discriminates `force_change` from a plain `cast`, and without
+      # it that line would be unfalsifiable decoration.
+      bp = live_barkpark(team_fixture())
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(false)}}])
+      assert {:ok, measured} = Registry.refresh_update_status(bp)
+      assert Repo.get!(Barkpark, bp.id).apply_arming == "unarmed"
+
+      # A struct read BEFORE that write landed: in-memory nil, row "unarmed".
+      # `cast(nil)` emits no change against it, so only a forced change can
+      # reach the column.
+      stale = %{measured | apply_arming: nil}
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(:absent)}}])
+      assert {:ok, _} = Registry.refresh_update_status(stale)
+
+      assert is_nil(Repo.get!(Barkpark, bp.id).apply_arming),
+             "the row still claims an arming the box has stopped reporting — a stale " <>
+               "word on the retro-arm roster is worse than an empty one"
+    end
+
+    test "the arming write stays inside the narrow changeset — it cannot rename a box" do
+      cs =
+        Barkpark.update_status_changeset(%Barkpark{}, %{
+          apply_arming: "unarmed",
+          apply_arming_checked_at: DateTime.utc_now(),
+          name: "renamed",
+          team_id: Ecto.UUID.generate(),
+          commit_distance: 0
+        })
+
+      assert cs.changes.apply_arming == "unarmed"
+      refute Map.has_key?(cs.changes, :name)
+      refute Map.has_key?(cs.changes, :team_id)
+      refute Map.has_key?(cs.changes, :commit_distance)
+
+      # And a word outside the vocabulary is a changeset ERROR, not a silent
+      # write — the roster never carries an invented state.
+      refute Barkpark.update_status_changeset(%Barkpark{}, %{apply_arming: "maybe"}).valid?
+    end
+  end
 end

@@ -9553,6 +9553,66 @@
     return { role: "ok", text: "Staging gate: open — a staging instance is current on the newest release." };
   }
 
+  // ---- the ARMING roster (apply_arming) ------------------------------------
+  //
+  // The wire carries `apply_arming` as THREE values and the third one is null.
+  // A box reports `apply_enabled` on its own admin route (#12995); the control
+  // plane mirrors true -> "armed", false -> "unarmed", and ANY absence -> null,
+  // because a box that predates the probe sends no such key and may be
+  // perfectly armed. Rendering null as "unarmed" would put correctly-armed
+  // boxes on the retro-arm worklist, which is the one outcome that would make
+  // this roster worse than no roster — so these helpers WHITELIST the two words
+  // and never test truthiness. `!bp.apply_arming` would fold the two worlds back
+  // together in one character.
+  function operatorArmingState(bp) {
+    var v = bp && bp.apply_arming;
+    if (v === "armed") return "armed";
+    if (v === "unarmed") return "unarmed";
+    return "unknown";
+  }
+
+  // The per-row sentence. An armed box says nothing — the roster's job is to
+  // name the boxes that need a human, and a note on every row is a note on none.
+  // The two other arms say DIFFERENT things, deliberately: one is a measurement
+  // to act on, the other is the absence of a measurement, and the copy must
+  // never let an operator read the second as the first.
+  function operatorArmingNote(bp) {
+    var st = operatorArmingState(bp);
+    if (st === "unarmed") {
+      return "One-click apply is OFF on this box. The rollout's next advance onto it fails, " +
+        "and that failure pauses its autoupdate until an admin turns it back on by hand.";
+    }
+    if (st === "unknown") {
+      return "Arming not reported — this box has never told us whether one-click apply is on. " +
+        "That is not the same as OFF, and it is not a reason to touch it.";
+    }
+    return "";
+  }
+
+  // The head-line answer to "which boxes are unarmed", counted. Three counts,
+  // never two: folding "not reported" into either of the other buckets is the
+  // same collapse the null guards against, one level up.
+  function operatorArmingSummary(rows) {
+    var list = rows || [];
+    var n = { armed: 0, unarmed: 0, unknown: 0 };
+    for (var i = 0; i < list.length; i++) n[operatorArmingState(list[i])]++;
+    var tail = n.armed + " armed, " + n.unknown + " not reported.";
+    if (n.unarmed > 0) {
+      return {
+        role: "warn",
+        text: "Arming: " + n.unarmed + " with one-click apply OFF — the rollout pauses each one it reaches. " + tail,
+      };
+    }
+    if (n.unknown > 0) {
+      return {
+        role: "neutral",
+        text: "Arming: none measured OFF. " + tail +
+          " A box that has never reported its arming is not a box that reported it off.",
+      };
+    }
+    return { role: "ok", text: "Arming: every instance reports one-click apply on." };
+  }
+
   // The console's state pill. Reuses the shared .status-pill grammar (the same
   // dynamic head the fleet pill uses, already allowlisted in __css_check).
   function operatorPillHtml(role, label) {
@@ -9640,19 +9700,28 @@
       return head + '<p class="set-empty">No instances are registered yet, so there is nothing to roll out.</p>' +
         operatorCanaryFootHtml();
     }
+    // The ARMING roll-up, its own line under the gate: the retro-arm worklist is
+    // a different question from "is anything advancing", and it must never be
+    // read off the state pill (a box reads "Current" whether or not one-click
+    // apply is armed — that is exactly why the probe had to exist).
+    var arming = operatorArmingSummary(data.barkparks);
+    var armingHead = '<p class="op-gate">' + operatorPillHtml(arming.role, "Arming") +
+      "<span>" + arming.text + "</span></p>";   // static author copy + counts, not server strings
     var rows = operatorFleetSort(data.barkparks).map(function (bp) {
       var st = operatorRowState(bp, nowMs);
+      var armNote = operatorArmingNote(bp);
       var idTail = bp.id ? String(bp.id).slice(0, 8) : "—";
       return '<div class="set-row">' +
         '<div class="set-row-main">' +
           '<div class="set-row-name">' + esc(bp.name || "Unnamed instance") + "</div>" +
           '<div class="set-row-meta">' + esc(bp.channel || "prod") + " &middot; " + esc(idTail) + "</div>" +
           (st.note ? '<div class="set-row-note">' + esc(st.note) + "</div>" : "") +
+          (armNote ? '<div class="set-row-note">' + esc(armNote) + "</div>" : "") +
         "</div>" +
         '<div class="set-row-side">' + operatorPillHtml(st.role, st.label) + "</div>" +
       "</div>";
     }).join("");
-    return head + '<div class="set-list">' + rows + "</div>" + operatorCanaryFootHtml();
+    return head + armingHead + '<div class="set-list">' + rows + "</div>" + operatorCanaryFootHtml();
   }
 
   // The rollout's own vocabulary, verbatim from the worker (GR40/GR50): serial
@@ -24883,6 +24952,11 @@
       operatorRowState: operatorRowState,
       operatorFleetSort: operatorFleetSort,
       operatorStagingGateCopy: operatorStagingGateCopy,
+      // The ARMING roster (#12995 -> apply_arming). Three-valued and whitelisted:
+      // null means NOT MEASURED and must never render as "off".
+      operatorArmingState: operatorArmingState,
+      operatorArmingNote: operatorArmingNote,
+      operatorArmingSummary: operatorArmingSummary,
       operatorBrakeCardHtml: operatorBrakeCardHtml,
       operatorCanaryCardHtml: operatorCanaryCardHtml,
       operatorWarmPoolCardHtml: operatorWarmPoolCardHtml,

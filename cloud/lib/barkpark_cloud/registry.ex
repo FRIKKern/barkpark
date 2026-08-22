@@ -3873,6 +3873,28 @@ defmodule BarkparkCloud.Registry do
   A clean 200 CLEARS the column, so a stale refusal can never outlive a
   recovery. Nothing REFUSES on this column yet — it is evidence, not a guard.
 
+  THE ARMING IS PERSISTED TOO, off the SIBLING of `"check"`. The same 200 also
+  carries `apply_enabled` (#12995) — the box's `Runner.enabled?/0`, the exact
+  input its one-click-apply POST decides its 503 from — and it lands in
+  `apply_arming` as a THREE-valued fact:
+
+    * `"armed"` — the body said `true`.
+    * `"unarmed"` — the body said `false`. This box will 503 the moment the
+      rollout reaches it, and that 503 is what `AutoupdateRolloutWorker` answers
+      with a `pause_autoupdate/1` no code path clears. It is the retro-arm
+      worklist.
+    * `nil` — NOT MEASURED: the body carried no such key (a pre-#12995 box, which
+      may well be armed), or no body has ever been read for this row. Reading
+      this as `false` would put correctly-armed boxes on the worklist, so the
+      absent key is never coerced into a word.
+
+  Only a decoded 200 writes those columns (with their own clock,
+  `apply_arming_checked_at`); every failure rung leaves them exactly as it found
+  them, because a box that stops answering has not become unmeasured — and
+  wiping the roster on an outage is the opposite of what an operator needs. This
+  is a READ: nothing here POSTs to a box, arms anything, or clears an
+  `autoupdate_paused`.
+
   Transport is the same swappable seam `mint_studio_link/1` uses
   (`:studio_link_http_client`; tests wire `StudioLinkFakeHttpClient`).
   """
@@ -3911,8 +3933,11 @@ defmodule BarkparkCloud.Registry do
               # errored: the box answered and believes it succeeded, and the
               # shape is what failed. Same word `Usage` already uses for it,
               # and it is the only writer of this rung (cch-w58 review).
-              {:ok, %{"check" => %{} = check}} -> persist_update_check(bp, check)
-              _ -> persist_update_unknown(bp, :bad_shape)
+              {:ok, %{"check" => %{} = check} = body} ->
+                persist_update_check(bp, check, arming_of(body))
+
+              _ ->
+                persist_update_unknown(bp, :bad_shape)
             end
 
           # The box's OWN admin route answered, and its answer DISCRIMINATES —
@@ -3939,10 +3964,31 @@ defmodule BarkparkCloud.Registry do
 
   def refresh_update_status(%Barkpark{} = bp), do: persist_update_unknown(bp, :not_live)
 
+  # THE ARMING PROBE, read off the SIBLING of `"check"` (#12995). `apply_enabled`
+  # reports the box's `Runner.enabled?/0` — the running BEAM's boot-frozen value,
+  # which is the exact input its one-click-apply POST decides its 503
+  # `feature_not_configured` from. Those bytes already arrived on every refresh;
+  # the old match named only `"check"` and dropped them on the floor.
+  #
+  # THREE WORLDS, AND THE ABSENT KEY IS NOT `false`. A pre-#12995 box that is
+  # genuinely armed sends no such key, so mapping absence to "unarmed" would make
+  # it indistinguishable from a MEASURED unarmed box and put correctly-armed
+  # boxes on the retro-arm worklist — the one outcome that would make this roster
+  # worse than no roster. `nil` is the third state and the ONLY thing the last
+  # clause can produce.
+  #
+  # FAIL-CLOSED ON SHAPE, like `check["state"]` above it: only the two literal
+  # booleans are trusted into a word. A string "true", a 1, a null — anything a
+  # weird instance might render — falls to `nil`/unmeasured rather than being
+  # coerced into a verdict an operator would act on.
+  defp arming_of(%{"apply_enabled" => true}), do: "armed"
+  defp arming_of(%{"apply_enabled" => false}), do: "unarmed"
+  defp arming_of(_body), do: nil
+
   # Mirror the instance's "check" verdict onto the row. A state outside the
   # whitelist is downgraded to "unknown" (fail-closed — never trust a weird
   # instance into a rendering state the SPA doesn't know).
-  defp persist_update_check(bp, check) do
+  defp persist_update_check(bp, check, arming) do
     state =
       case check["state"] do
         s when is_binary(s) -> if s in Barkpark.update_states(), do: s, else: "unknown"
@@ -3957,7 +4003,17 @@ defmodule BarkparkCloud.Registry do
       update_checked_at: DateTime.utc_now(),
       # The box answered us on its own admin route: whatever it refused an hour
       # ago, it does not refuse now. A stale refusal must not survive a recovery.
-      update_unavailable_reason: nil
+      update_unavailable_reason: nil,
+      # THE ARMING MEASUREMENT, and its OWN clock. `update_checked_at` above is
+      # stamped on six unknown rungs that never read a body at all, so it cannot
+      # say when the arming question was last actually ANSWERED. This one is
+      # written on exactly one path — a decoded 200 — which is the only place an
+      # answer exists (cch-w65: the clock records a check that was actually
+      # made). Stamped even when `arming` is nil, because "we read a body and it
+      # carried no arming" is itself a measurement (a pre-#12995 box) and is a
+      # different fact from "we have never read one".
+      apply_arming: arming,
+      apply_arming_checked_at: DateTime.utc_now()
     })
     # FORCED, not cast: `cast` emits no change when the value already matches the
     # IN-MEMORY struct, and the caller may hold a struct read BEFORE the refusal
@@ -3965,6 +4021,16 @@ defmodule BarkparkCloud.Registry do
     # carried across calls). That would leave the accusation in the row while the
     # box is demonstrably answering. The clear is unconditional.
     |> Ecto.Changeset.force_change(:update_unavailable_reason, nil)
+    # FORCED for the same reason, and honestly the same status: INSURANCE, not a
+    # live path (charter D717 measured that all three callers hand this function
+    # a freshly-read struct). The shape it covers is a struct whose in-memory
+    # arming is already `nil` while the ROW still says "unarmed" — `cast` emits
+    # no change there, so the UPDATE would omit the column and leave the stale
+    # word standing on the roster while the box has stopped reporting arming at
+    # all. Deleting this line reds exactly one test, and that test says in its
+    # own body that it pins the insurance rather than a shape production
+    # produces today.
+    |> Ecto.Changeset.force_change(:apply_arming, arming)
     |> Repo.update()
   end
 
