@@ -4974,12 +4974,19 @@ test("mountInstanceTimeline: mounts the timeline and a re-render does NOT blank 
   assert.ok(root.innerHTML.length > 0);
 });
 
-test("mountInstanceTimeline: a failed instance keeps the timeline + shows the verbatim detail + Retry", () => {
+// cch-w38-s1: this test now NAMES ITS ACTOR. mountInstanceTimeline reads
+// instanceAdminAuthority() (POST /v1/barkparks/:id/retry is `admin`), so the
+// mount's answer depends on who is looking — and a test that does not say who
+// it is testing cannot tell "offered to an admin" from "offered to everyone".
+// It was passing on the COLD-BOOT authority ("unknown", no /v1/me at all),
+// which is now the CHECKING arm, so the owner is driven in first.
+test("mountInstanceTimeline: a failed instance keeps the timeline + shows the verbatim detail + Retry", async () => {
   const bp = {
     id: "def", provision_status: "failed", provision_error: "SECRET_KEY_BASE too short (32 bytes)",
     provision_steps: [{ step: "configure", status: "failed", at: T(2), detail: "writing secrets" }],
     provision_console: [],
   };
+  await driveMe(200, ME_OWNER);
   const root = fakeNode();
   hooks.mountInstanceTimeline(root, bp, NOW);
   assert.match(root.innerHTML, /Setup failed/);
@@ -4988,6 +4995,7 @@ test("mountInstanceTimeline: a failed instance keeps the timeline + shows the ve
   // Re-render (post-mortem stays visible — the timeline is the product).
   hooks.mountInstanceTimeline(root, bp, NOW + 1000);
   assert.match(root.innerHTML, /Setup failed/);
+  hooks.clearMe();
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -18214,6 +18222,247 @@ test("cch-w38-s1: the loading and unavailable frames carry the authority too —
   // The model carries the decision so the DOM mount cannot fork it.
   assert.equal(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, "refuse").authority, "refuse");
   assert.equal(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP).authority, "grant");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w38-s1, CRITERION 3 — ALL SEVEN ELEVATED VERBS, NOT ONE.
+//
+// The first pass at this criterion paid exactly ONE verb (runDecommission, the
+// rail model the slice was cut around) and recorded on the row that the other
+// six lived in instanceHeaderHtml / updatePanelHtml / instanceTimelineHtml and
+// were untouched. Waves 45 and 47 then routed three more through
+// adminWriteControlHtml (rollbackInstance, attachDomain, patchAutoupdate). This
+// test closes the remaining three — retryInstance, removeInstance,
+// updateInstance — and, more importantly, pins ALL SEVEN IN ONE PLACE: a
+// per-slice assertion can be green in six files while the SCREEN still offers a
+// plain member a live write the server answers 403.
+//
+// THREE PROPERTIES OF THIS TEST ARE LOAD-BEARING:
+//
+//  1. THE ACTOR IS DERIVED, NOT TYPED. The authority strings come out of
+//     instanceAdminAuthority() after a real /v1/me is driven, so "refuse" here
+//     IS the member's answer rather than a hand-picked argument that would keep
+//     passing if the predicate stopped answering it.
+//
+//  2. EVERY VERB IS ASSERTED IN BOTH DIRECTIONS, and the admin arm is checked
+//     FIRST. A member-only test cannot tell "correctly disabled" from "broken
+//     for everyone" — deleting the control outright would satisfy it.
+//
+//  3. THE BUTTON IS MATCHED WHOLE, LABEL INCLUDED. `/hook[^>]*>/` is the shape
+//     that swallowed a `disabled` attribute at :11858 and let a permanently
+//     dead Decommission pass the entire suite; nothing here uses it. And the
+//     DISABLED bytes are asserted separately from the absence of the live hook,
+//     because a vanished control also satisfies "no live hook" — and a hidden
+//     verb is indistinguishable from a verb you never had.
+test("cch-w38-s1: a MEMBER is offered NONE of the seven elevated verbs live — every one is disabled and explained", async () => {
+  await driveMe(200, ME_MEMBER);
+  const member = hooks.instanceAdminAuthority();
+  assert.equal(member, "refuse",
+    "sanity: the member arm below must be the answer the PREDICATE gives a member, not a string this test chose");
+  await driveMe(200, ME_OWNER);
+  const admin = hooks.instanceAdminAuthority();
+  assert.equal(admin, "grant", "sanity: and the privileged arm must be the predicate's grant");
+  hooks.clearMe();
+
+  const S = W38_ADMIN_SENTENCE;
+  // NO NEW COPY IS MINTED: the sentence asserted below is the one app.js
+  // authors ONCE, in FORBIDDEN_ROLE_COPY.admin — the same bytes the server's
+  // own 403 renders through friendly(). If this reds, someone wrote a second,
+  // kinder wording, which is how two surfaces start disagreeing.
+  const appSrc = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.ok(appSrc.includes("admin: " + JSON.stringify(S) + ","),
+    "the sentence must be FORBIDDEN_ROLE_COPY.admin verbatim, authored once in app.js");
+
+  const LIVE_BP = {
+    id: "bp-1", name: "web", provider: "hetzner", host: "h", url: "https://web.example",
+    update_state: "behind", update_latest_release: "v0.5.0",
+    autoupdate_paused: false, channel: "stable",
+  };
+  const PAUSED_PINNED_BP = Object.assign({}, LIVE_BP, { autoupdate_paused: true, pinned_release: "v0.4.1" });
+  const REMOVE_FAILED_BP = {
+    id: "bp-1", name: "web", provider: "hetzner", deprovision_status: "failed", deprovision_error: "the node would not drain",
+  };
+  const PROVISION_FAILED_BP = {
+    id: "bp-1", name: "web", provider: "hetzner", provision_status: "failed",
+    provision_error: "SECRET_KEY_BASE too short (32 bytes)", provision_steps: [], provision_console: [],
+  };
+  const ghostDead = (label) => '<button class="btn btn-ghost btn-sm" type="button" disabled title="' + S + '">' + label + "</button>";
+
+  // ELEVEN OFFER SITES over SEVEN verbs — the count differs because two verbs
+  // are offered from more than one surface, and gating one site of a verb while
+  // leaving the other live is precisely how the last pass at this row stopped.
+  // `route` is the router's own table (cloud/lib/barkpark_cloud/web/router.ex);
+  // every one of them reads `admin`.
+  const OFFERS = [
+    { verb: "runDecommission", route: "POST /v1/instances/:id/lifecycle", where: "the CLI rail",
+      render: (a) => hooks.lifecycleActionRowHtml(hooks.lifecycleActionsModel(CAP_PAYLOAD, W38_BP, a)),
+      live: 'data-life-verb="decommission"',
+      dead: '<button class="btn btn-sm" type="button" disabled title="' + S + '">Decommission</button>' },
+
+    { verb: "rollbackInstance", route: "POST /v1/barkparks/:id/rollback", where: "the Updates panel",
+      render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
+      live: '<button class="btn btn-ghost btn-sm" type="button" data-rollback="1">Roll back&hellip;</button>',
+      dead: ghostDead("Roll back&hellip;") },
+
+    { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (pause)",
+      render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
+      live: '<button class="btn btn-ghost btn-sm" type="button" data-au="pause">Pause autoupdate</button>',
+      dead: ghostDead("Pause autoupdate") },
+    { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (pin)",
+      render: (a) => hooks.updatePanelHtml(LIVE_BP, a),
+      live: '<button class="btn btn-ghost btn-sm" type="button" data-au="pin">Pin version</button>',
+      dead: ghostDead("Pin version") },
+    { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (resume)",
+      render: (a) => hooks.updatePanelHtml(PAUSED_PINNED_BP, a),
+      live: '<button class="btn btn-ghost btn-sm" type="button" data-au="resume">Resume autoupdate</button>',
+      dead: ghostDead("Resume autoupdate") },
+    { verb: "patchAutoupdate", route: "PATCH /v1/barkparks/:id/autoupdate", where: "the Updates panel (unpin)",
+      render: (a) => hooks.updatePanelHtml(PAUSED_PINNED_BP, a),
+      live: '<button class="btn btn-ghost btn-sm" type="button" data-au="unpin">Unpin</button>',
+      dead: ghostDead("Unpin") },
+
+    { verb: "attachDomain", route: "POST /v1/barkparks/:id/domain", where: "the instance header",
+      render: (a) => hooks.instanceHeaderHtml(LIVE_BP, a),
+      live: '<button class="btn btn-ghost btn-sm" type="button" id="inst-domain">Attach domain</button>',
+      dead: ghostDead("Attach domain") },
+
+    // ── the three this commit closes ────────────────────────────────────────
+    { verb: "updateInstance", route: "POST /v1/barkparks/:id/self-update", where: "the instance header CTA",
+      render: (a) => hooks.instanceHeaderHtml(LIVE_BP, a),
+      live: '<button class="btn btn-primary btn-sm" type="button" id="inst-update">Update to v0.5.0</button>',
+      dead: ghostDead("Update to v0.5.0") },
+
+    { verb: "removeInstance", route: "DELETE /v1/barkparks/:id", where: "the removal-failed header",
+      render: (a) => hooks.instanceHeaderHtml(REMOVE_FAILED_BP, a),
+      live: '<button class="btn btn-primary btn-sm" type="button" id="inst-remove-retry">Retry removal</button>',
+      dead: ghostDead("Retry removal") },
+
+    { verb: "retryInstance", route: "POST /v1/barkparks/:id/retry", where: "the provisioning timeline",
+      render: (a) => hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, a),
+      live: '<button class="btn btn-primary btn-sm bp-tl-retry" type="button" data-tl-retry>Retry setup</button>',
+      dead: ghostDead("Retry setup") },
+    { verb: "retryInstance", route: "POST /v1/barkparks/:id/retry", where: "the verify card's no_admin_token note",
+      render: (a) => hooks.verifyNoteHtml("no_admin_token", PROVISION_FAILED_BP, a),
+      live: '<button class="btn btn-sm" type="button" data-vf-reprovision>Re-provision</button>',
+      dead: ghostDead("Re-provision") },
+  ];
+
+  const covered = new Set();
+  for (const o of OFFERS) {
+    const at = o.verb + " @ " + o.where + " (" + o.route + ")";
+    const refused = o.render(member);
+    const granted = o.render(admin);
+    covered.add(o.verb);
+
+    // ADMIN FIRST. If this reds, the verb is broken for EVERYONE and the member
+    // assertions below would still pass — the exact confusion a one-sided test
+    // cannot report.
+    assert.ok(granted.includes(o.live),
+      at + ": the ADMIN arm no longer paints its live control. Expected:\n  " + o.live +
+      "\nThis is not a member fix — an admin lost the verb too, and a member-only assertion would have called that success.");
+
+    // THE MEMBER STILL SEES A CONTROL. Asserted before the negative below,
+    // because "the control vanished" also satisfies "no live hook" — and a
+    // control a member cannot see is indistinguishable from one that was never
+    // built. DISABLED, never HIDDEN (D428).
+    assert.ok(refused.includes(o.dead),
+      at + ": a member's control is not the disabled-and-explained one. Expected these exact bytes:\n  " + o.dead +
+      "\nGot:\n  " + refused +
+      "\nIf the control is simply ABSENT from that markup, that is the defect and not the fix.");
+
+    // VISIBLE, not hover-only: a `title` is unreachable on touch and to a
+    // screen reader browsing the page, so the sentence rides the shipped span.
+    assert.ok(refused.includes('<span class="inst-life-reason">' + S + "</span>"),
+      at + ": the refusal is title-only. The sentence must also ride the VISIBLE .inst-life-reason span — a tooltip is not an explanation on a phone.");
+
+    // NO NEW COPY: every reason this markup carries is the server's own.
+    const reasons = refused.match(/<span class="inst-life-reason">[^<]*<\/span>/g) || [];
+    assert.ok(reasons.length > 0, at + ": no reason span at all in the member's markup");
+    for (const r of reasons) {
+      assert.equal(r, '<span class="inst-life-reason">' + S + "</span>",
+        at + ": a reason span carries copy that is NOT FORBIDDEN_ROLE_COPY.admin — " + r);
+    }
+
+    // …and no live mount hook survives, so the wiring has nothing to re-arm.
+    assert.ok(!refused.includes(o.live),
+      at + ": the member's markup still carries the live mount hook —\n  " + o.live +
+      "\nthe add-listener-if-present wiring binds on exactly that, so the dead click is re-armed.");
+
+    // The three states stay three: a member's bytes are not an admin's.
+    assert.notEqual(refused, granted, at + ": the member and admin renders are byte-identical — nothing was gated");
+  }
+
+  assert.equal(covered.size, 7,
+    "all SEVEN verbs must be represented; got " + covered.size + ": " + [...covered].sort().join(", "));
+  assert.deepEqual([...covered].sort(),
+    ["attachDomain", "patchAutoupdate", "removeInstance", "retryInstance", "rollbackInstance", "runDecommission", "updateInstance"],
+    "the seven the brief enumerated, by name");
+});
+
+// The UNKNOWN arm of the three verbs this commit moved. It is asserted apart
+// from the member sweep above because it is the arm that has never rendered for
+// them, and because "unknown" must NOT borrow the refusal's sentence: a /v1/me
+// that has not answered is not evidence that anyone is a member.
+test("cch-w38-s1: while /v1/me is outstanding the three newly-gated verbs say CHECKING, and accuse nobody", () => {
+  const LIVE_BP = {
+    id: "bp-1", name: "web", provider: "hetzner", host: "h", url: "https://web.example",
+    update_state: "behind", update_latest_release: "v0.5.0",
+  };
+  const REMOVE_FAILED_BP = { id: "bp-1", name: "web", provider: "hetzner", deprovision_status: "failed" };
+  const PROVISION_FAILED_BP = {
+    id: "bp-1", name: "web", provider: "hetzner", provision_status: "failed",
+    provision_error: "boom", provision_steps: [], provision_console: [],
+  };
+
+  const frames = [
+    ["updateInstance", hooks.instanceHeaderHtml(LIVE_BP, "unknown"), "Update to v0.5.0"],
+    ["removeInstance", hooks.instanceHeaderHtml(REMOVE_FAILED_BP, "unknown"), "Retry removal"],
+    ["retryInstance", hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "unknown"), "Retry setup"],
+    ["retryInstance", hooks.verifyNoteHtml("no_admin_token", PROVISION_FAILED_BP, "unknown"), "Re-provision"],
+  ];
+  for (const [verb, html, label] of frames) {
+    assert.ok(html.includes('<button class="btn btn-ghost btn-sm" type="button" disabled>' + label + "</button>"),
+      verb + ": the still-checking arm must draw the control disabled and UNTITLED — got:\n" + html);
+    assert.match(html, /inst-life-note">Checking capabilities&hellip;</,
+      verb + ": an unanswered /v1/me must say we are still checking, in the rail's shipped words");
+    assert.ok(html.indexOf(W38_ADMIN_SENTENCE) === -1,
+      verb + ": a role we have not read is NOT the role of member — an unanswered read must accuse nobody");
+  }
+
+  // The docked Retry is the one control that must LOSE its dock when it is not
+  // pressable: `.bp-tl-retry` is `position: fixed`, so a disabled copy would
+  // float over every screen of the page forever while its own reason stayed
+  // behind in the timeline.
+  const memberTl = hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "refuse");
+  assert.ok(memberTl.indexOf("bp-tl-retry") === -1,
+    "a refused Retry setup must not keep the viewport dock — a fixed-position control nobody may press is a permanent obstruction, and its reason span would be stranded mid-page");
+  assert.ok(hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "grant").includes("bp-tl-retry"),
+    "…while an admin's Retry setup keeps it (this is the control the dock was measured for)");
+});
+
+// The default arm: every call site that predates this commit passes no
+// authority, and must be byte-identical to what shipped. Proven, not asserted
+// in prose — this is what keeps the change an ADD.
+test("cch-w38-s1: omitting the authority is byte-identical to grant at all three newly-threaded seams", () => {
+  const LIVE_BP = {
+    id: "bp-1", name: "web", provider: "hetzner", host: "h", url: "https://web.example",
+    update_state: "behind", update_latest_release: "v0.5.0",
+  };
+  const PROVISION_FAILED_BP = {
+    id: "bp-1", name: "web", provider: "hetzner", provision_status: "failed",
+    provision_error: "boom", provision_steps: [], provision_console: [],
+  };
+  assert.equal(hooks.instanceHeaderHtml(LIVE_BP), hooks.instanceHeaderHtml(LIVE_BP, "grant"));
+  assert.equal(hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}),
+    hooks.instanceTimelineHtml(PROVISION_FAILED_BP, NOW, {}, "grant"));
+  assert.equal(hooks.verifyNoteHtml("no_admin_token", LIVE_BP),
+    hooks.verifyNoteHtml("no_admin_token", LIVE_BP, "grant"));
+  // …and the helper's own default emphasis, read through one of the eight call
+  // sites that predate this commit: no `emphasis` argument is still the ghost
+  // weight they already emit, so widening the signature moved none of them.
+  assert.ok(hooks.instanceHeaderHtml(LIVE_BP, "grant")
+      .includes('<button class="btn btn-ghost btn-sm" type="button" id="inst-domain">Attach domain</button>'),
+    "an omitted `emphasis` must still be the ghost weight the pre-existing call sites ship");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -361,9 +361,9 @@ const PIN = [
 
   // ── instance detail — the console's densest unpredicated cluster
   { fn: "runDecommission", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["wireLifecycleActions", "repaintLifecycleAuthority"], "decommissionAction"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: decommissionAction answers mode:\"disabled\" for refuse and for unknown, and the rail emits data-life-verb only on the live arm — the same disabled-ghost shape rows rollbackInstance/attachDomain are already pinned on (D428). Read twice, on purpose: the rail is mounted by wireLifecycleActions and re-offered by repaintLifecycleAuthority when /v1/me answers late" },
-  { fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: null, auth_fn: A_TADMIN, context_fn: null, note: "UNPREDICATED" },
-  { fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED; second call site on the same route as :6750" },
-  { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: null, auth_fn: A_PTADMIN, context_fn: null, note: "UNPREDICATED" },
+  { fn: "retryInstance", verb: "POST", route: "/v1/barkparks/:*/retry", elevated: true, predicate: INSTANCE_BAND, fence: F_INST(["loadInstance", "mountInstanceTimeline", "runVerifyNow"], "adminWriteControlHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): TWO offer sites, both now drawn by adminWriteControlHtml — the timeline's docked [data-tl-retry] and the verify note's [data-vf-reprovision] — so the mount hook is withheld on refuse and on unknown. Read THREE times because the two sites have three entries: instanceOverviewHtml threads loadInstance's answer, the SSE repaint lands in mountInstanceTimeline, and the no_admin_token note is painted from runVerifyNow" },
+  { fn: "removeInstance", verb: "DELETE", route: "/v1/barkparks/:*", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml's removal-failed arm offers #inst-remove-retry only on a grant; refuse/unknown render the disabled control with no mount hook. Second call site on the same route as runDecommission's, and now fenced on the same band" },
+  { fn: "updateInstance", verb: "POST", route: "/v1/barkparks/:*/self-update", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w38-s1 (criterion 3): instanceHeaderHtml offers the behind-box CTA #inst-update only on a grant. The modal buttons behind it (#update-go, #update-force) are POST-offer and stay unfenced by design — the same shape as rollbackInstance's confirm" },
   { fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook. cch-w48-s4 names the DECIDING function rather than the panel that hosts it: updatePanelHtml threads the answer through unchanged, and adminWriteControlHtml is where the data-rollback hook is withheld" },
   { fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook — again by way of adminWriteControlHtml, which is the function that actually decides" },
   { fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "fleetSupportCardHtml"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: fleetSupportCardHtml OMITS #fleet-add-support unless authority === \"grant\" (D514 rules this add OMITTED rather than disabled-and-explained). Found BY HAND, not by (2i-4): its read is loadInstance, which sibling rows already claim — see LIMIT 1b. POST /v1/fleet/supports still refuses non-admin sessions inside a cond, so the overlay stays" },
@@ -920,10 +920,12 @@ console.log("                   (require_ability is NOT elevated for the console
 console.log("                    counting it would give 46, not " + pinnedElevated.length + ". See ruling (a) at the top of this file.)");
 console.log("");
 console.log(`THE ${pinnedUnpredicated.length} UNPREDICATED ELEVATED WRITES — an affordance a plain member can see, click, and be refused for.`);
-console.log("This census does NOT fix them. Fixing them is cch-w38-bl-three-elevated-verbs-still-unpredicated,");
-console.log("which is still open and still the owner. The population it owns SHRINKS by re-pinning as well as by");
-console.log("fixing: cch-w48-s4 moved five rows out of this list because the console had already fenced them and");
-console.log("only the pin still said otherwise. A row leaves this list on a FENCE, never on a tidier note.");
+console.log("This census does NOT fix them. cch-w38-s1 (criterion 3) took the THREE this list was named for —");
+console.log("retryInstance, removeInstance and updateInstance — so cch-w38-bl-three-elevated-verbs-still-unpredicated");
+console.log("is FIXED and no longer the owner of what is left; the four below are unowned and need a row of their own.");
+console.log("The population SHRINKS by re-pinning as well as by fixing: cch-w48-s4 moved five rows out of this list");
+console.log("because the console had already fenced them and only the pin still said otherwise. A row leaves this");
+console.log("list on a FENCE, never on a tidier note.");
 for (const r of pinnedUnpredicated) {
   const live = liveByKey(r);
   console.log(`  ${pad(`${LABEL}:${live ? live.line : "gone"}`, 34)}${pad(r.verb, 7)}${pad(r.route, 58)}${r.auth_fn || r.context_fn}`);
@@ -1003,7 +1005,7 @@ if (unresolved.length) {
 // DELETE /v1/sites/:id caller. `elevated` DELIBERATELY UNMOVED at 40: that route
 // is plain team membership (see the row's own note), so bumping it would be a
 // false statement about the router AND would red arm (2b) at rc=2.
-const EXPECT = { total: 80, elevated: 40, predicated: 33, unpredicated: 7 };
+const EXPECT = { total: 80, elevated: 40, predicated: 36, unpredicated: 4 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

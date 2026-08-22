@@ -7572,8 +7572,40 @@
   // label carries a literal &hellip;); liveAttrs is the mount hook the wiring
   // binds on and is dropped on both non-grant arms. exitHtml rides the unknown
   // arm only (see wireMeRetry at the render site).
-  function adminWriteControlHtml(authority, labelHtml, liveAttrs, exitHtml) {
+  //
+  // cch-w38-s1 (the crown's last unpaid criterion): `emphasis` names the GRANT
+  // arm's shipped button weight so the remaining three of the seven elevated
+  // verbs — retryInstance, removeInstance, updateInstance — can come through
+  // this ONE helper while an admin keeps the exact control that shipped (the
+  // primary CTA stays primary, the docked Retry stays docked; the attribute
+  // ORDER inside the tag normalises to this helper's, as it did for the five
+  // verbs that moved here in waves 45 and 47). It is a CLOSED four-way switch
+  // over FULL STATIC class literals, never a composed head:
+  // __css_check's E3 hard-fails a dynamically built class attribute and its
+  // KNOWN_GAPS list is deliberately empty, so concatenating the dock suffix onto
+  // a base string is not available to us — the same reason the cliToggle two
+  // lines of instanceHeaderHtml below are two whole literals rather than one
+  // composed pair. Absent (every call site that shipped before this) it is
+  // the ghost weight, byte-identical to what those eight sites emit today.
+  //   "primary" → the header's Update / Retry-removal CTAs
+  //   "dock"    → the timeline's viewport-docked Retry setup (.bp-tl-retry)
+  //   "plain"   → the verify note's Re-provision
+  // THE REFUSAL ARM DELIBERATELY HAS NO VARIANTS. D428's disable-and-explain is
+  // ONE grammar, and a refusal is not a call to action — the dock in particular
+  // is DROPPED, because `position: fixed` on a control nobody may press would
+  // float a dead button over every screen of the page forever and strand its
+  // own reason span back at the timeline. Emphasis belongs to the offer.
+  function adminWriteControlHtml(authority, labelHtml, liveAttrs, exitHtml, emphasis) {
     if (authority !== "refuse" && authority !== "unknown") {
+      if (emphasis === "primary") {
+        return '<button class="btn btn-primary btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
+      }
+      if (emphasis === "dock") {
+        return '<button class="btn btn-primary btn-sm bp-tl-retry" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
+      }
+      if (emphasis === "plain") {
+        return '<button class="btn btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
+      }
       return '<button class="btn btn-ghost btn-sm" type="button" ' + liveAttrs + ">" + labelHtml + "</button>";
     }
     var reason = authority === "refuse" ? FORBIDDEN_ROLE_COPY.admin : "";
@@ -7615,9 +7647,19 @@
     var pill = statusPill(bp);
 
     // isu-6: live + behind → offer the one-click update alongside Open Studio.
+    // cch-w38-s1: POST /v1/barkparks/:id/self-update is `admin` in the router's
+    // own table, and this CTA was appended with no authority read at all — so a
+    // plain member on a behind box was offered the update, confirmed it, and
+    // collected the 403 that updateConflictCopy's forbidden arm exists to
+    // render. Same seam, same grammar as the four verbs beside it (D428): the
+    // `id` mount hook wireInstanceActions binds on lives on the grant arm only.
+    // No exit here: this CTA needs `lc.live`, and so does connectBtn below —
+    // the page's ONE shipped [data-me-retry] is already on screen beside it,
+    // and wireMeRetry takes the FIRST match, so a second would be dead bytes.
     var updateBtn = lc.live && bp.update_state === "behind"
-      ? '<button class="btn btn-primary btn-sm" id="inst-update" type="button">' +
-          esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update") + "</button>"
+      ? adminWriteControlHtml(authority,
+          esc(bp.update_latest_release ? "Update to " + vRel(bp.update_latest_release) : "Update"),
+          'id="inst-update"', "", "primary")
       : "";
 
     // custom-domain: live + no custom host yet → offer the attach flow.
@@ -7668,7 +7710,11 @@
       lc.removing
         ? ""
         : lc.removeFailed
-          ? '<button class="btn btn-primary btn-sm" id="inst-remove-retry" type="button">Retry removal</button>'
+          // cch-w38-s1: DELETE /v1/barkparks/:id is `admin`, and this is the
+          // whole actions strip in the removeFailed state — nothing else on it
+          // carries the exit, so the still-checking arm gets meRetryHtml() here
+          // (unlike the live-box CTAs above, which sit beside connectBtn's).
+          ? adminWriteControlHtml(authority, "Retry removal", 'id="inst-remove-retry"', meRetryHtml(), "primary")
           : lc.failed
             ? cliToggle
             : lc.suspended
@@ -7726,7 +7772,7 @@
     var timeline = opts.ready
       ? readyHeroHtml(bp, { studioBtnId: "inst-ready-studio", viewBtnId: "inst-ready-dismiss", viewLabel: "View details", demoteHeading: true })
       : (lc.provisioning || lc.failed)
-        ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed })
+        ? instanceTimelineHtml(bp, Date.now(), { consoleCollapsed: instanceConsoleCollapsed }, authority)
         : "";
 
     // C8: the golden-path verify card mounts here for a host-set box (a box
@@ -11997,7 +12043,12 @@
   // /verify refusals (D25). 409 not_live → watch the Timeline (the check works
   // once the box is live); 404 no_admin_token → the server's own hint is a
   // re-provision, and POST /retry is that primitive.
-  function verifyNoteHtml(code, bp) {
+  // cch-w38-s1: `authority` is instanceAdminAuthority()'s three-valued answer,
+  // threaded from the render site (runVerifyNow) — the no_admin_token arm's
+  // ONE recovery action is POST /v1/barkparks/:id/retry, which is `admin`.
+  // Absent it defaults to "grant": byte-identical to the shipped note.
+  function verifyNoteHtml(code, bp, authority) {
+    authority = authority || "grant";
     if (code === "not_live") {
       return '<div class="vf-note"><b>Not live yet.</b> Verification probes the running box &mdash; ' +
         "it works once provisioning finishes. " +
@@ -12006,7 +12057,7 @@
     if (code === "no_admin_token") {
       return '<div class="vf-note"><b>No stored credentials.</b> This instance predates verification ' +
         "&mdash; re-provisioning captures the credentials the check needs. " +
-        '<button class="btn btn-sm" type="button" data-vf-reprovision>Re-provision</button></div>';
+        adminWriteControlHtml(authority, "Re-provision", "data-vf-reprovision", meRetryHtml(), "plain") + "</div>";
     }
     return "";
   }
@@ -12090,7 +12141,10 @@
         return;
       }
       if (r.status === 404 && r.data && r.data.error === "no_admin_token") {
-        renderVerifyCard(box, bp, model, verifyNoteHtml("no_admin_token", bp));
+        // cch-w38-s1: a DOM render site, so the authority is read here (the
+        // loadInstance / mountInstanceTimeline precedent). not_live's note
+        // offers only a hash link, so it needs no authority.
+        renderVerifyCard(box, bp, model, verifyNoteHtml("no_admin_token", bp, instanceAdminAuthority()));
         return;
       }
       btn.disabled = false;
@@ -19119,8 +19173,14 @@
   // liveness on top. opts.consoleCollapsed persists the user's toggle.
   // data-tl-bp + data-tl-lc stamp WHAT is mounted so loadInstance's SSE fast
   // path can prove "same instance, same phase" and patch instead of remounting.
-  function instanceTimelineHtml(bp, now, opts) {
+  // cch-w38-s1: `authority` is instanceAdminAuthority()'s three-valued answer,
+  // threaded from the two render sites (instanceOverviewHtml and
+  // mountInstanceTimeline) rather than read here — the instanceHeaderHtml /
+  // updatePanelHtml convention. Absent (every pure-helper call site) it
+  // defaults to "grant", which is byte-identical to the shipped timeline.
+  function instanceTimelineHtml(bp, now, opts, authority) {
     opts = opts || {};
+    authority = authority || "grant";
     now = (typeof now === "number") ? now : Date.now();
     var failed = isProvisionFailed(bp);
     var rows = instanceDisplayRows(bp);
@@ -19129,8 +19189,16 @@
         '<h2 class="bp-tl-title">' + (failed ? "Setup failed" : "Provisioning") + "</h2>" +
         '<span class="bp-tl-total" data-tl-total>' + (total != null ? fmtDur(total) : "") + "</span>" +
       "</div>";
+    // cch-w38-s1: POST /v1/barkparks/:id/retry is `admin` in the router's own
+    // table. This is the SECOND offer site of the same verb (the other is the
+    // verify note's Re-provision) — gating one and not the other would leave
+    // retryInstance half-fenced, which is how the last pass at this criterion
+    // stopped. The dock (.bp-tl-retry) rides the GRANT arm only; see
+    // adminWriteControlHtml on why a refusal is never a floating control. This
+    // strip is the whole failed-state recovery surface, so the still-checking
+    // arm carries the exit.
     var retry = failed
-      ? '<button class="btn btn-primary btn-sm bp-tl-retry" type="button" data-tl-retry>Retry setup</button>'
+      ? adminWriteControlHtml(authority, "Retry setup", "data-tl-retry", meRetryHtml(), "dock")
       : "";
     return '<section class="bp-timeline" data-tl data-tl-bp="' + esc((bp && bp.id) || "") +
         '" data-tl-lc="' + (failed ? "failed" : "provisioning") + '">' +
@@ -19319,7 +19387,10 @@
   // loadInstance and by the committed fake-DOM wiring smoke.
   function mountInstanceTimeline(root, bp, now) {
     if (!root) return;
-    root.innerHTML = instanceTimelineHtml(bp, now, { consoleCollapsed: instanceConsoleCollapsed });
+    // cch-w38-s1: a DOM render site, so it reads the authority itself — the
+    // loadInstance precedent. The SSE repaint path lands here, so a member's
+    // Retry setup must not come back live on the next provisioning tick.
+    root.innerHTML = instanceTimelineHtml(bp, now, { consoleCollapsed: instanceConsoleCollapsed }, instanceAdminAuthority());
     wireInstanceTimeline(root, bp);
     startInstanceTicker(bp);
   }
