@@ -1217,7 +1217,10 @@ FAKENPM
   check "the node engine can call the shared extractor" has_fn build_failure_reason
   if [ -f "$N_FIXLOG" ]; then
     check "it yields the SAME line the static engine yields (no per-engine drift)" \
-      [ "$(build_failure_reason "$N_FIXLOG")" = "Error: Turbopack build failed with 29 errors:" ]
+      [ "$(build_failure_reason "$N_FIXLOG")" = "Error: Turbopack build failed with 29 errors: ./sites/search-capstone/src/app/(finder)/page.tsx:1:1 Module not found: Can't resolve '@/components/desktop-only'" ]
+    build_failure_reason "$N_FIXLOG" > "$TD/n-fix-reason.txt"
+    check "the CAUSE — not merely the count — crosses the engine boundary too" \
+      grep -q "Can't resolve" "$TD/n-fix-reason.txt"
   fi
 
   echo "[selftest] rollback preflight is read-only + typed"

@@ -671,8 +671,28 @@ if [ "$MODE" = selftest ]; then
       [ "$(grep -ac 'FATAL' "$FIXLOG" 2>/dev/null || true)" = 0 ]
     check "tier 2 matches EXACTLY ONE line in 30,993 bytes (not a tail -1 accident)" \
       [ "$(grep -aE 'npm ERR!|[Ee]rror:' "$FIXLOG" | grep -av 'complete log of this run' | wc -l | tr -d ' ')" = 1 ]
-    check "the extractor yields that line — the Turbopack header, which names the count" \
-      [ "$(build_failure_reason "$FIXLOG")" = "Error: Turbopack build failed with 29 errors:" ]
+    # THE REGRESSION THIS FILE EXISTS FOR. The header alone names a COUNT and no
+    # CAUSE: `search-capstone` failed 25 times and every durable record was
+    # "Turbopack build failed with 29 errors:" — 29 errors printed, none named.
+    # The reason must now carry the FIRST REAL ERROR out of the block below it.
+    check "the extractor names a CAUSE, not just the count" \
+      [ "$(build_failure_reason "$FIXLOG")" = "Error: Turbopack build failed with 29 errors: ./sites/search-capstone/src/app/(finder)/page.tsx:1:1 Module not found: Can't resolve '@/components/desktop-only'" ]
+    # Stated as their own arms so a future change that keeps the header but drops
+    # the body reds HERE, naming what was lost, instead of only failing the
+    # whole-string compare above. (Via a file, not `sh -c` — build_failure_reason
+    # is a shell FUNCTION and a subshell cannot see it.)
+    FIXREASON="$TD/fix-reason.txt"
+    build_failure_reason "$FIXLOG" > "$FIXREASON"
+    check "an individual error — the file:line — survives into the reason" \
+      grep -q 'page.tsx:1:1' "$FIXREASON"
+    check "an individual error — the MESSAGE — survives into the reason" \
+      grep -q "Can't resolve" "$FIXREASON"
+    # The channel is `emit`, which flattens to one line and cut -c1-240, so a
+    # reason that overflows is silently beheaded. This is the budget check.
+    check "the reason fits the 240-char detail budget the emitter enforces" \
+      [ "$(wc -c < "$FIXREASON" | tr -d ' ')" -le 240 ]
+    check "and it stays ONE line — the emitter cannot carry a block" \
+      [ "$(wc -l < "$FIXREASON" | tr -d ' ')" = 0 ]
     # The tier BELOW it would have been strictly worse: a stack frame with no
     # subject. This is the check that says the ORDER is load-bearing.
     check "tier 3 (last non-blank) would have been strictly worse" \
@@ -683,6 +703,17 @@ if [ "$MODE" = selftest ]; then
     [ "$(build_failure_reason "$EMPTYLOG")" = "npm ci / npm run build failed with no output" ]
   check "a missing log file is the same honest fallback, not a shell error" \
     [ "$(build_failure_reason "$TD/no-such-build.log")" = "npm ci / npm run build failed with no output" ]
+  # TOTALITY OF THE APPEND. A summary header is only ever ENRICHED, never
+  # replaced, and a header with nothing under it degrades to the header — never
+  # to an empty reason, and never to a shell error.
+  HDRONLY="$TD/hdr-only-build.log"
+  printf 'noise\nError: Turbopack build failed with 3 errors:\n' > "$HDRONLY"
+  check "a header with NO body below it degrades to the header, not to empty" \
+    [ "$(build_failure_reason "$HDRONLY")" = "Error: Turbopack build failed with 3 errors:" ]
+  NOTHDR="$TD/npm-err-build.log"
+  printf 'npm ERR! code ELIFECYCLE\nnpm ERR! errno 1\n' > "$NOTHDR"
+  check "a reason that is ALREADY a cause is left exactly as it was" \
+    [ "$(build_failure_reason "$NOTHDR")" = "npm ERR! errno 1" ]
 
   # -------------------------------------------------------------------------
   # TEARDOWN — --teardown excises ONLY this slug's marker-guarded Caddy block
