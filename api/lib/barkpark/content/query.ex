@@ -189,6 +189,66 @@ defmodule Barkpark.Content.Query do
   # The columns the prefix ops above are spelled against.
   @id_fields ~w(doc_id _id)
 
+  # ── THE PER-FIELD CAPABILITY TABLE (gfr-w1-per-field-op-table) ────────────
+  #
+  # A PROMOTED COLUMN only supports the ops `apply_field_op/4` has a clause for.
+  # Every other op used to fall through to the generic JSONB arm and read
+  # `content->>'<name>'` — a key that does not exist on a column-backed field —
+  # so the query ran happily and returned 0 rows at 200 OK. Strictness could
+  # never catch it: the op IS in @valid_filter_ops and a legitimate generic
+  # clause DOES exist. Only a per-field table can.
+  #
+  # THE BOUNDARY, STATED HERE BECAUSE GETTING IT WRONG BREAKS ONE SIDE OR THE
+  # OTHER: this table is consulted ONLY for the names below. `content` is
+  # schemaless JSONB, so "unknown field" can never be an error in general —
+  # an arbitrary content field keeps running through the generic arm untouched.
+  # Widen this table only alongside a real clause; the table and the clauses are
+  # pinned to each other by `per_field_op_table_test.exs`, which drives EVERY
+  # pair through a live query and reds if a declared pair reads the wrong
+  # column.
+  #
+  # WIDENED vs REFUSED, per field:
+  #   * `title`   — already carried the full string+comparison set; unchanged.
+  #   * `status`  — WIDENED with contains/startsWith/endsWith (meaningful on a
+  #     text column, and the customer-visible half of this defect). Comparison
+  #     ops are REFUSED: lexicographic `status > "d"` is not a question anyone
+  #     asked, and a refusal is honest where a silent 0 was not.
+  #   * `doc_id`/`_id` — WIDENED with neq/contains/startsWith/endsWith. This is
+  #     the worst case in the class: prefix filtering was unreachable by ANY
+  #     spelling. Comparison ops and `is` are REFUSED (doc_id is NOT NULL by
+  #     construction, so `is null` could only ever mean "no rows").
+  #   * `_createdAt`/`_updatedAt` — comparison ops only. String ops on a
+  #     timestamp column are REFUSED rather than widened: `contains` on a
+  #     timestamp is a category error, not a missing feature.
+  @column_field_ops %{
+    "title" => ~w(eq neq in nin contains startsWith endsWith gt gte lt lte is has hasStrong),
+    "status" => ~w(eq neq in nin contains startsWith endsWith is),
+    "doc_id" => ~w(eq neq in nin contains startsWith endsWith),
+    "_id" => ~w(eq neq in nin contains startsWith endsWith),
+    "_createdAt" => ~w(eq neq gt gte lt lte),
+    "_updatedAt" => ~w(eq neq gt gte lt lte)
+  }
+
+  @doc """
+  The ops a COLUMN-BACKED field supports, or `nil` for a schemaless content
+  field (which supports the whole documented set through the generic arm).
+
+  One owner for the per-field answer: the refusal message, the door and any
+  future reader all read it here rather than re-spelling it.
+  """
+  @spec supported_ops_for(String.t()) :: [String.t()] | nil
+  def supported_ops_for(field), do: Map.get(@column_field_ops, field)
+
+  # THE ENUMERATION QUESTION, DELIBERATELY LEFT SHUT. The row asked the refusal
+  # message to name the supported ops FOR THAT FIELD. It must not: naming the
+  # field (or printing a narrower, field-shaped list) tells an unauthorised
+  # caller the field EXISTS. `query_test.exs` pins it — "The MESSAGE names the
+  # op and the vocabulary, and NEVER the field ... at internal doors that gate
+  # never ran at all" — and charter D13 Tier B lists this surface as
+  # existence-hiding. So the TABLE decides accept-vs-refuse; the MESSAGE keeps
+  # printing the documented global set. Settling D13 is a lead ruling, not a
+  # builder's call.
+
   @doc """
   The documented public filter operators (docs/api-v1.md §4). An op outside this
   set has no `apply_field_op/4` clause.
@@ -286,9 +346,20 @@ defmodule Barkpark.Content.Query do
   # field-generic.
   defp unsupported_op?(field, op) when is_binary(op) do
     cond do
-      op in @valid_filter_ops -> false
-      op in @doc_id_only_ops -> field not in @id_fields
-      true -> true
+      # The builder-only prefix spellings, on the id columns only. Checked FIRST
+      # so the capability table below never has to carry a non-public spelling.
+      op in @doc_id_only_ops ->
+        field not in @id_fields
+
+      # A promoted column answers from its own table, NOT from the global set:
+      # an op with no clause for THIS column would otherwise read a JSONB key
+      # that does not exist and return 0 rows at 200 OK.
+      ops = Map.get(@column_field_ops, field) ->
+        op not in ops
+
+      # Schemaless content field — the generic arm handles the whole set.
+      true ->
+        op not in @valid_filter_ops
     end
   end
 
@@ -368,6 +439,21 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "status", "is", "notnull"),
     do: where(query, [d], not is_nil(d.status))
 
+  # WIDENED (gfr-w1-per-field-op-table). `status` is a PROMOTED COLUMN, so these
+  # three fell through to the generic JSONB arm and read `content->>'status'` —
+  # a key that does not exist on a column-backed field — returning 0 rows at
+  # 200 OK. Same `ilike` idiom as `title`, which has carried the full set all
+  # along; widening beats refusing here because the op is meaningful on the
+  # column and a working filter is what the caller asked for.
+  defp apply_field_op(query, "status", "contains", v),
+    do: where(query, [d], ilike(d.status, ^like_contains(v)))
+
+  defp apply_field_op(query, "status", "startsWith", v),
+    do: where(query, [d], ilike(d.status, ^like_starts_with(v)))
+
+  defp apply_field_op(query, "status", "endsWith", v),
+    do: where(query, [d], ilike(d.status, ^like_ends_with(v)))
+
   # doc_id operators — desk-group filters (e.g. drafts. prefix) need this.
   defp apply_field_op(query, "doc_id", "eq", v), do: where(query, [d], d.doc_id == ^v)
 
@@ -382,6 +468,27 @@ defmodule Barkpark.Content.Query do
 
   defp apply_field_op(query, "doc_id", "not_starts_with", v),
     do: where(query, [d], not like(d.doc_id, ^like_starts_with(v)))
+
+  # WIDENED (gfr-w1-per-field-op-table). The worst case of the class: doc_id
+  # PREFIX filtering was unreachable by ANY spelling. The column clause is
+  # `starts_with` (snake, builder-only, no public wire form), while the public
+  # allowlist carries only `startsWith` (camel) — which fell through to JSONB
+  # and matched nothing. `startsWith` now hits the column.
+  #
+  # This does NOT put `starts_with` on the wire. The snake spellings stay
+  # builder-only exactly as `@doc_id_only_ops` documents, and
+  # `filter_ops_test.exs` "the door stays narrower than the builder" reds if
+  # that ever changes. What is fixed here is a DOCUMENTED op that silently lied.
+  defp apply_field_op(query, "doc_id", "neq", v), do: where(query, [d], d.doc_id != ^v)
+
+  defp apply_field_op(query, "doc_id", "contains", v),
+    do: where(query, [d], ilike(d.doc_id, ^like_contains(v)))
+
+  defp apply_field_op(query, "doc_id", "startsWith", v),
+    do: where(query, [d], ilike(d.doc_id, ^like_starts_with(v)))
+
+  defp apply_field_op(query, "doc_id", "endsWith", v),
+    do: where(query, [d], ilike(d.doc_id, ^like_ends_with(v)))
 
   # `_id` is the id field clients SEE in responses (it carries the physical doc_id,
   # drafts. prefix and all). Filtering should use that same name, so alias every
