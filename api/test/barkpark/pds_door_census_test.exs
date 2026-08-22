@@ -253,9 +253,9 @@ defmodule Barkpark.PdsDoorCensusTest do
     # keep an older number. The count below is RE-DERIVED by running the census on
     # the merged tree — never by adding this slice's delta to main's figure.
     # WITH-HARNESSES denominator rather than being excluded to keep this 3.
-    assert out =~ ~r/harnesses\s+: 4 /,
-           "the derived harness count moved off 4. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a fifth harness landed, say so on purpose.\n#{out}"
+    assert out =~ ~r/harnesses\s+: 5 /,
+           "the derived harness count moved off 5. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a sixth harness landed, say so on purpose.\n#{out}"
   end
 
   test "it RIDES ITS OWN DOOR: its own row is THROUGH in its own output", ctx do
