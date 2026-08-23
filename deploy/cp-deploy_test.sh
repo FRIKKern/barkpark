@@ -27,21 +27,44 @@ check "pins control-url to the stable front https://barkpark.cloud" \
   "grep -q 'PROVISIONER_CONTROL_URL:-https://barkpark.cloud' '$SCRIPT'"
 check "rewrites the --control-url flag via sed" \
   "grep -q -- '--control-url\\[= \\]' '$SCRIPT'"
-check "runs systemctl daemon-reload after the rewrite" \
-  "grep -q 'systemctl daemon-reload' '$SCRIPT'"
+# ANCHORED to the pin block, not the whole file: `systemctl daemon-reload`
+# occurs twice in cp-deploy.sh (the pin, and the image-bake timer install near
+# the end), so a bare file-wide grep stays green when the pin's own reload is
+# deleted — the unit file is rewritten and systemd never re-reads it. Proven:
+# blanking only the pin's reload left this harness at ALL PASS.
+PIN_BLOCK="$(mktemp)"
+awk '/if grep -qE -- .--control-url\[= \]./,/^  else$/' "$SCRIPT" > "$PIN_BLOCK"
+check "found the control-url pin block in the script" "[ -s '$PIN_BLOCK' ]"
+check "runs systemctl daemon-reload INSIDE the pin block (not merely somewhere in the file)" \
+  "grep -q 'systemctl daemon-reload' '$PIN_BLOCK'"
 
-# 2) Functional: the exact rewrite the script applies. Mirror the script's sed so
-# a drift in the rewrite expression fails here too.
+# 2) Functional: the exact rewrite the script applies — EXTRACTED from the
+# script, never mirrored. A hand-copied expression tests the copy: with the real
+# sed re-pointed at `http://localhost:4100` (the precise regression dwb-16
+# exists to prevent — the port-flip lockout that froze /new at "Starting") this
+# harness still reported ALL PASS, because it was replaying its own good copy of
+# a line the script no longer had. Now the script's own expression is pulled out
+# and run, so any drift in it reds here.
 PROV_CONTROL_URL="https://barkpark.cloud"
-# Mirrors cp-deploy.sh's sed expression EXACTLY, but writes via a temp instead of
-# `-i` so the test is portable to BSD sed (macOS) as well as GNU sed (the box).
+PIN_SED_EXPR="$(grep -- 'sed -i -E "s#--control-url' "$SCRIPT" | head -1)"
+PIN_SED_EXPR="${PIN_SED_EXPR#*sed -i -E \"}"      # drop everything up to the opening quote
+PIN_SED_EXPR="${PIN_SED_EXPR%%\" \"\$PROV_UNIT\"*}"  # drop the closing quote and the file arg
+PIN_SED_EXPR="${PIN_SED_EXPR//\\\"/\"}"            # the line's \" is shell escaping, not sed syntax
+PIN_SED_EXPR="${PIN_SED_EXPR//\$\{PROV_CONTROL_URL\}/$PROV_CONTROL_URL}"
+# Kept OUT of check's eval string: the extracted expression contains a literal
+# single quote (the character class excludes ' ), which no amount of quoting
+# survives being re-evaluated. Same idiom as code_is_healthy below.
+pin_expr_ok() { [ -n "$PIN_SED_EXPR" ] && case "$PIN_SED_EXPR" in 's#--control-url'*) return 0 ;; *) return 1 ;; esac; }
+check "extracted the script's own control-url sed expression" "pin_expr_ok"
+# Runs the SCRIPT's expression, but writes via a temp instead of `-i` so the test
+# is portable to BSD sed (macOS) as well as GNU sed (the box).
 rewrite() {
-  sed -E "s#--control-url[= ][^[:space:]\"']+#--control-url ${PROV_CONTROL_URL}#g" "$1" > "$1.out"
+  sed -E "$PIN_SED_EXPR" "$1" > "$1.out"
   mv "$1.out" "$1"
 }
 
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+trap 'rm -f "$tmp" "$PIN_BLOCK"' EXIT
 
 # a) space-separated localhost:4100 (the exact bug) -> stable front
 printf 'ExecStart=/usr/local/bin/barkpark-provisioner --control-url http://localhost:4100 --token-file /etc/barkpark/worker.token\n' > "$tmp"
@@ -105,7 +128,7 @@ command -v caddy >/dev/null 2>&1 || { echo "  FAIL: caddy binary required for th
 
 FTMP=""
 cleanup_flip() { [ -n "$FTMP" ] && rm -rf "$FTMP"; }
-trap 'cleanup_flip; rm -f "$tmp"' EXIT
+trap 'cleanup_flip; rm -f "$tmp" "$PIN_BLOCK"' EXIT
 
 make_flip_fakes() {
   local dir="$1"; mkdir -p "$dir"
