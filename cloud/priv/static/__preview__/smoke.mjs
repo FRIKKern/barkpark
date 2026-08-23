@@ -87,9 +87,40 @@ const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
 //     `data-prov-disconnect` and `data-wh-delete` are authored bare, and an
 //     attribute the parse never recorded can never satisfy a selector.
 // NOT widened, deliberately: PARSED_TAGS (the mountUsageTab detached-stub
-// hazard above stands) and the DOCUMENT-level querySelectorAll (it hard-returns
-// [] and six document-level attribute loops stay dead — a separate, unmeasured
-// decision, filed as backlog rather than smuggled in here).
+// hazard above stands).
+//
+// cch-bl-smoke-document-attr-selectors-still-dead — the DOCUMENT-level
+// querySelectorAll is now a registry sweep, and the decision was MEASURED, not
+// assumed: with an instrumented sweep in place the full suite ran GREEN (111
+// scenarios, exit 0, status lines byte-identical to the hard-return-[] run),
+// so widening reds nothing. The census over that run, per selector as
+// calls/hits:
+//   [data-notif-chan-test]   6/12  ← COMES ALIVE — per-channel Send test wired
+//   [data-offload-support]   5/5   ← COMES ALIVE — the Offload row button wired
+//   [data-notif-cell]        6/0      routing checkboxes are <input>: PARSED_TAGS
+//   [data-support-presence]  5/0      presence slots are <span>: PARSED_TAGS
+//   .nav-link[data-view]   105/0      shell chrome lives in index.html, which
+//   .nav-sub[data-view]    105/0      this shim never parses — structurally 0
+//   #modal [data-close]      2/0      DESCENDANT selector — see below
+// Both live loops only ATTACH handlers (wireNotifSettings :4281 and
+// wireOffloadActions :24229 in app.js — grep, don't trust the line), so coming
+// alive cannot change pre-existing rendered markup; that is the same
+// safe-by-construction argument as the two element-level widenings above, and
+// the measured green confirms it. The sweep is ONE code path — dedupe over
+// [body, ...registry] delegating to the element-level grammar — so no arm of
+// it is decoration: every grammar arm is the same arm the element-level
+// oracles already exercise, and the document level itself is pinned by the
+// notif-configured chan-test click (revert the sweep to `return []` and that
+// check reds — mutation-verified, this row's evidence).
+// STILL DEAD, by name, so nobody re-discovers them: `#modal [data-close]`
+// (applyModalClose — a DESCENDANT selector no shim grammar parses; it answers
+// [] exactly as every richer selector does), `.nav-link[data-view]` /
+// `.nav-sub[data-view]` (applyRoute/applyShellNav — the static shell is not
+// modelled, so a sweep finds no such nodes to return), and credQ (:2816) —
+// never called in this corpus (census shows no credQ selector), but NOTE: if a
+// future scenario reaches it with #modal-root visible, its `root.contains(b)`
+// will THROW here (shim elements model no `contains`) — a loud red, never a
+// false green, which is the correct failure mode for an unmodelled path.
 const PARSED_TAGS = "button|a";
 const TAG_RE = new RegExp("<(" + PARSED_TAGS + ")\\b([^>]*?)/?>", "gi");
 const ATTR_RE = /([\w:.-]+)(?:="([^"]*)")?/g;
@@ -317,7 +348,20 @@ function makeDom() {
     addEventListener() {},
     removeEventListener() {},
     querySelector: query,
-    querySelectorAll() { return []; },
+    // The document-level sweep (cch-bl-smoke-document-attr-selectors-still-dead):
+    // every registry mount + body, deduped, through the SAME per-element grammar
+    // above — one code path, no document-only selector arm to rot unexercised.
+    querySelectorAll(sel) {
+      if (typeof sel !== "string") return [];
+      const seen = new Set();
+      const out = [];
+      for (const root of [document.body, ...registry.values()]) {
+        for (const hit of root.querySelectorAll(sel)) {
+          if (!seen.has(hit)) { seen.add(hit); out.push(hit); }
+        }
+      }
+      return out;
+    },
     getElementById: byId,
     // Created (non-registry) elements are freshly-authored wiring surfaces. Now
     // that innerHTML really parses, their querySelector finds the real control
@@ -2569,8 +2613,8 @@ const EXPECTATIONS = {
   },
   // ── G-04 notifications (the crown): the settings-anatomy page ───────────────
   "notif-configured": {
-    what: "the full notifications page — email + chat channels + routing matrix + delivery log, all backend-true",
-    check(reg) {
+    what: "the full notifications page — email + chat channels + routing matrix + delivery log, all backend-true; the per-channel Send test is WIRED through the document-level sweep",
+    async check(reg, hooks, ctx) {
       const html = reg.get("notif-body").innerHTML || "";
       // GR33 anatomy: .set-section cards, each buffered section its own save-row;
       // the loose #notif-status span is GONE, and the superseded .notif-card too.
@@ -2619,6 +2663,32 @@ const EXPECTATIONS = {
       assert.ok(!/wh-del-status--info[^"]*">\s*Pending\s*<\/span>[\s\S]{0,400}?too many deployment alerts/.test(log),
         "no suppressed row renders through the pending pill");
       assert.ok(log.includes("too many deployment alerts in one sweep"), "the withhold REASON is on the row, so the admin reads the decision and not just its name");
+
+      // ── cch-bl-smoke-document-attr-selectors-still-dead: THE DOCUMENT LOOP,
+      // CLICKED. wireNotifSettings attaches the per-channel Send-test handler
+      // through document.querySelectorAll("[data-notif-chan-test]") — a loop
+      // that ran over [] for the whole life of this harness, so every one of
+      // these buttons was rendered DEAD. This is the assertion that makes the
+      // document-level sweep falsifiable: the button is FOUND element-level
+      // (notif-body's kids — a path that works either way), but it was WIRED
+      // document-level, so reverting the sweep to `return []` reds exactly
+      // here (mutation-verified). Amended in place, never forked (the
+      // cch-w2-revoke-ux-honesty precedent).
+      const chanTests = reg.get("notif-body").querySelectorAll("[data-notif-chan-test]");
+      assert.equal(chanTests.length, 3,
+        "one Send test per ENABLED+CONFIGURED channel (discord, slack, webhook; telegram is disabled, pushover " +
+        "unconfigured); got " + chanTests.length +
+        " — if 0, the element-level attribute selector regressed and nothing below proves anything");
+      const chanType = chanTests[0].getAttribute("data-notif-chan-test");
+      assert.equal(chanType, "discord", "the first configured channel is discord");
+      assert.equal(chanTests[0].click(), 1,
+        "the Send-test button dispatched no click handler — the document-level wiring loop is DEAD again");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("POST", "/v1/notifications/test"), 1,
+        "the wired handler must put exactly one test POST on the wire");
+      const chanToast = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(chanToast.includes("Test queued") && chanToast.includes("Sent to " + chanType),
+        "the 202 renders the honest per-channel toast; toast stack: " + chanToast.slice(0, 200));
     },
   },
   "notif-empty": {
