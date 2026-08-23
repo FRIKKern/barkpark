@@ -3,7 +3,7 @@
 //
 // WAVE-3 CAPSTONE (charter D25-D32): Next STATIC-EXPORT DOM-shape parity.
 //
-// W1 proved `@barkpark/react`'s `PortableDoc` renders 42 non-plugin block types to
+// W1 proved `@barkpark/react`'s `PortableDoc` renders every frozen non-plugin block type to
 // HTML that DOM-shape-equals the Elixir `:article` golden. W2 re-proved it from an
 // Astro static build. W3 re-runs the SAME proof from a THIRD surface: a real Next
 // `output:'export'` build (`basePath:'/blog'`) in which the REAL, RSC-safe
@@ -13,7 +13,7 @@
 //   1. PARITY — every `[data-pd-type]` wrapper extracted from `out/index.html` holds
 //      an inner `.bp-paper-surface` whose DOM shape equals its Elixir golden, using
 //      the UNCHANGED comparator from `@barkpark/react`'s W1 harness
-//      (tests/support/dom-shape.ts, imported VERBATIM). Coverage >= 42.
+//      (tests/support/dom-shape.ts, imported VERBATIM). Coverage ≡ the golden set.
 //
 //   2. basePath INVERSION (D29) — on `out/index.html`, >=1 asset ref carries the
 //      `/blog/` prefix AND ZERO bare `/_next` refs exist at root (prefixed-PRESENT
@@ -103,7 +103,7 @@ beforeAll(() => {
   }
 })
 
-describe('Next static export → HTML DOM-shape parity (42 non-plugin types)', () => {
+describe('Next static export → HTML DOM-shape parity (full frozen golden set)', () => {
   it('extracts one inner .bp-paper-surface per [data-pd-type] wrapper from the BUILT HTML', () => {
     expect(containers.length).toBe(goldens.size)
     for (const c of containers) {
@@ -113,11 +113,13 @@ describe('Next static export → HTML DOM-shape parity (42 non-plugin types)', (
     }
   })
 
-  it('covers every frozen golden fixture (coverage >= 42, no silent gaps)', () => {
+  it('covers every frozen golden fixture (coverage >= the golden-dir census, no silent gaps)', () => {
     const built = new Set(containers.map((c) => c.type))
     const missing = [...goldens.keys()].filter((t) => !built.has(t))
     expect(missing, `goldens absent from the Next build: ${missing.join(', ')}`).toHaveLength(0)
-    expect(containers.length).toBeGreaterThanOrEqual(42)
+    // Derived from the canonical golden directory, never a hand-counted literal
+    // (stale-count prose sweep): the floor moves WITH the frozen set.
+    expect(containers.length).toBeGreaterThanOrEqual(goldens.size)
   })
 
   // One assertion per built container: its DOM shape must equal the Elixir golden.

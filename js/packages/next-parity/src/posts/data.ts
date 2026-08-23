@@ -69,7 +69,7 @@ export const POSTS: Post[] = [
         style: 'bullet',
         items: [
           { content: [{ type: 'text', value: 'Elixir compose.ex is the read-only source of truth.' }] },
-          { content: [{ type: 'text', value: 'The 42 pd-golden fixtures are canonical.' }] },
+          { content: [{ type: 'text', value: 'The frozen pd-golden fixtures are canonical.' }] },
           { content: [{ type: 'text', value: 'The JS must match 1:1.' }] },
         ],
       },
