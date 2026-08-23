@@ -165,9 +165,19 @@ function childrenText(list: unknown): string {
 
 /** One note/notes row: `label`, then the bold run-in `lead` + `text` body —
  * mirroring the renderer's `noteItemHtml` reading order. */
+/** One annotation row: `label`, then `lead` + body.
+ *
+ * The body reads `content` OR the legacy flat `text` — the extractor twin of
+ * the renderer's `noteItemHtml`, which was itself swept for the `content[]`
+ * shape ("the note body read `text` alone, blanking the live note persisted as
+ * `{content:[…]}`", blocks/core.ts). Reading `text` alone here left the SAME
+ * defect standing one surface over: a content-shape note rendered its prose but
+ * extracted as label-only. */
 function noteText(m: unknown): string {
   const rec = isMap(m) ? m : {}
-  const body = [str(rec.lead).trim(), str(rec.text)].filter((s) => s !== '').join(' ')
+  const body = [str(rec.lead).trim(), proseContent(rec as Block)]
+    .filter((s) => s !== '')
+    .join(' ')
   return [str(rec.label), body].filter((s) => s !== '').join(' ')
 }
 

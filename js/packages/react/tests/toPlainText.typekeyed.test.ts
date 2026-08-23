@@ -45,7 +45,20 @@ const cases: GoldenFixture[] = existsSync(FIXTURE_DIR)
   : []
 
 describe('toPlainText — type-keyed grammar coverage', () => {
-  it('the pd-golden fixture corpus is the expected 49 types', () => {
+  // The NAME reports what was actually loaded; the ASSERTION carries the pin.
+  // They used to be two hand-written numbers and they drifted: the name said
+  // "49 types" while the assertion said 63, so for months the suite announced a
+  // corpus size it had not checked since the fixture set grew. An observed
+  // count in the name can never go stale.
+  //
+  // The pin itself STAYS a bare literal, deliberately, against this row's own
+  // suggestion to derive it from the readdir. Two reasons: `cases` is ALREADY
+  // that readdir, so `cases.length === readdirSync(...).length` is a tautology
+  // and no tripwire at all; and this exact line is a live scaffy REPLACE anchor
+  // (scaffy/commands/add-block-type.scaffy, "typekeyed corpus anchor") that
+  // bumps the pin when a new block type lands. Rewriting it would break block
+  // scaffolding to remove a guard.
+  it(`the pd-golden fixture corpus is the pinned size (${cases.length} loaded)`, () => {
     // scaffy:add-block-type Toc MARK:typekeyed-corpus-toc
     // scaffy:add-block-type Steps MARK:typekeyed-corpus-steps
     // scaffy:add-block-type Footnote MARK:typekeyed-corpus-footnote
@@ -128,6 +141,73 @@ describe('toPlainText — type-keyed grammar coverage', () => {
       }
     })
   }
+})
+
+// ── the `{content:[…]}` twin of every prose golden ────────────────────────────
+//
+// The type-keyed goldens above pin each type in ONE authored shape — whichever
+// the fixture happens to use. That is exactly how the heading/eyebrow drop hid
+// for as long as it did: the renderer was swept for `{content:[…]}` (#6009) and
+// the extractor was not, but no golden held a content-shape heading, so the
+// suite stayed green over the gap.
+//
+// These cases re-author the fixture body into the OTHER shape and assert both
+// yield the same plaintext. Deliberately NOT applied corpus-wide: for `code`,
+// `diff` and `filetree` the `text`/`value` field is DATA, not a prose run, and
+// rewriting it into inlines is a different law (task-e4833f198e293ed1).
+describe('toPlainText — prose reads BOTH the content[] and the flat shape', () => {
+  const inlineOf = (s: string) => [{ type: 'text', value: s }]
+
+  const dualCases: Array<{ type: string; flat: unknown; content: unknown; expected: string }> = [
+    {
+      type: 'heading',
+      flat: { type: 'heading', level: 2, text: 'Capstone' },
+      content: { type: 'heading', level: 2, content: inlineOf('Capstone') },
+      expected: 'Capstone',
+    },
+    {
+      type: 'eyebrow',
+      flat: { type: 'eyebrow', text: 'Field report' },
+      content: { type: 'eyebrow', content: inlineOf('Field report') },
+      expected: 'Field report',
+    },
+    {
+      type: 'note',
+      flat: { type: 'note', label: 'Note', lead: 'Run-in', text: 'A single annotated row.' },
+      content: {
+        type: 'note',
+        label: 'Note',
+        lead: 'Run-in',
+        content: inlineOf('A single annotated row.'),
+      },
+      expected: 'Note Run-in A single annotated row.',
+    },
+    {
+      type: 'notes',
+      flat: { type: 'notes', items: [{ label: 'Upgrade', lead: 'Instant', text: 'The board updates live.' }] },
+      content: {
+        type: 'notes',
+        items: [
+          { label: 'Upgrade', lead: 'Instant', content: inlineOf('The board updates live.') },
+        ],
+      },
+      expected: 'Upgrade Instant The board updates live.',
+    },
+  ]
+
+  for (const c of dualCases) {
+    it(`${c.type}: the content[] shape extracts the same prose as the flat shape`, () => {
+      expect(toPlainText([c.flat] as never)).toBe(c.expected)
+      expect(toPlainText([c.content] as never)).toBe(c.expected)
+    })
+  }
+
+  it('a note with BOTH content[] and a legacy text prefers content[] (renderer order)', () => {
+    const out = toPlainText([
+      { type: 'note', label: 'N', content: inlineOf('from content'), text: 'from text' },
+    ] as never)
+    expect(out).toBe('N from content')
+  })
 })
 
 describe('toPlainText — type-keyed document walking', () => {
