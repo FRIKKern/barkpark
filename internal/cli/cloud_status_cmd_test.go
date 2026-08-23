@@ -1237,6 +1237,9 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		"update_checked_at": true, "commit_ancestry": true,
 		"commit_distance_checked_at": true, "autoupdate_paused": true,
 		"pinned_release": true, "channel": true,
+		// dr-w5-followup: the 5xx tri-state node — ALWAYS present, and its
+		// state key is what keeps nil-as-unmeasured from collapsing into 0.
+		"err_5xx": true,
 	}
 	// The two deliberate tri-states: emitted ONLY when the plane reported them,
 	// so their absence here is the contract, not a gap.
@@ -1368,5 +1371,76 @@ func TestStatusCommitColumnDarkForOlderCP(t *testing.T) {
 	got := sout.String()
 	if strings.Contains(got, "COMMIT") || strings.Contains(got, "UNMETERED") {
 		t.Fatalf("an older control plane must render exactly as before — no column, no sentinel:\n%s", got)
+	}
+}
+
+// TestErr5xxThreeStatesStayThree (dr-w5-followup-5xx-reaches-no-eyes): the
+// beat's 5xx reading renders in three distinguishable states and none of them
+// is another — nil (or the agent's -1 sentinel) is UNMEASURED with per_s null,
+// a measured 0.0 is a real zero, a positive rate is itself. The table marker
+// prints only the positive sentence (runawayMarker's policy: a table sentence
+// claims something happened); the json node carries the full tri-state.
+func TestErr5xxThreeStatesStayThree(t *testing.T) {
+	mk := func(v *float64) cloudclient.Barkpark {
+		cores := 4.0
+		return cloudclient.Barkpark{Pressure: &cloudclient.Pressure{CPUCores: &cores, Err5xxPerS: v}}
+	}
+	pos, zero, sentinel := 0.22, 0.0, -1.0
+
+	cases := []struct {
+		name      string
+		bp        cloudclient.Barkpark
+		wantState string
+		wantPerS  any
+		wantMark  string // "" = no table sentence
+	}{
+		{"nil is unmeasured", mk(nil), "unmeasured", nil, ""},
+		{"the -1 sentinel is unmeasured", mk(&sentinel), "unmeasured", nil, ""},
+		{"a measured 0.0 is a real zero", mk(&zero), "zero", 0.0, ""},
+		{"a positive rate is itself", mk(&pos), "answering", 0.22, "answering 0.22 5xx/s"},
+		{"no pressure block at all is unmeasured", cloudclient.Barkpark{}, "unmeasured", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := err5xxRow(tc.bp)
+			if row["state"] != tc.wantState {
+				t.Fatalf("state = %v, want %v", row["state"], tc.wantState)
+			}
+			if row["per_s"] != tc.wantPerS {
+				t.Fatalf("per_s = %v, want %v — collapsing these states invents a measurement", row["per_s"], tc.wantPerS)
+			}
+			mark := err5xxMarker(tc.bp)
+			if tc.wantMark == "" && mark != "" {
+				t.Fatalf("table marker = %q, want none — only a happening earns a sentence", mark)
+			}
+			if tc.wantMark != "" && !strings.Contains(mark, tc.wantMark) {
+				t.Fatalf("table marker = %q, want it to carry %q — the beat's own number, never recomputed", mark, tc.wantMark)
+			}
+		})
+	}
+}
+
+// TestErr5xxAnsweringReachesTheDetailColumn: the D75 sentence reaches the
+// table — a box the ladder calls ok, answering 0.22 5xx/s, says so on its row.
+func TestErr5xxAnsweringReachesTheDetailColumn(t *testing.T) {
+	cores, rate := 4.0, 0.22
+	reported := "2026-08-06T12:00:00Z"
+	b := cloudclient.Barkpark{
+		Name: "ok-but-erroring", HealthStatus: "up", AgentStatus: "online", Host: "h",
+		LastSeenAt: reported,
+		Pressure: &cloudclient.Pressure{
+			CPUCores: &cores, Err5xxPerS: &rate, ReportedAt: &reported,
+		},
+	}
+	ranked := rankBarkparks([]cloudclient.Barkpark{b})
+	if len(ranked) != 1 {
+		t.Fatalf("rows = %d", len(ranked))
+	}
+	if !strings.Contains(ranked[0].Detail, "answering 0.22 5xx/s") {
+		t.Fatalf("detail = %q — the 5xx reading reaches no eyes", ranked[0].Detail)
+	}
+	// The reading changed NO rank and NO bucket — the ruling is a detail line.
+	if ranked[0].Status != "ok" || ranked[0].Bucket != "healthy" {
+		t.Fatalf("status/bucket = %s/%s — the 5xx detail line must not move the ladder", ranked[0].Status, ranked[0].Bucket)
 	}
 }
