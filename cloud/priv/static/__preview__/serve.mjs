@@ -87,6 +87,17 @@ function serveIndex(res) {
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || "/").split("?")[0];
 
+  // TREE IDENTITY (cchi-w22-bl-guard-port-contention-silently-measures-a-
+  // foreign-tree). Port 4199 is shared across concurrent worktrees, and a
+  // byte-compare cannot tell two IDENTICAL trees apart — a guard that only
+  // compares bytes can silently measure a FOREIGN worktree's server and quote
+  // it as its own baseline. This endpoint answers the only question bytes
+  // cannot: WHICH tree is this server rooted in.
+  if (urlPath === "/__tree") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ root: ROOT, pid: process.pid }));
+  }
+
   // Root and the SPA entry paths get the injected shell.
   if (urlPath === "/" || urlPath === "/index.html" || urlPath === "/new") {
     return serveIndex(res);

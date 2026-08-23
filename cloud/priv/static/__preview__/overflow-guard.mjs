@@ -598,6 +598,41 @@ async function main() {
   // AUDITED (exit 2): the local static server never came up. Environment, not CSS.
   if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
 
+  // 1b. THE SERVER IS THIS TREE'S SERVER (cchi-w22-bl-guard-port-contention-
+  //     silently-measures-a-foreign-tree). The byte-compare below cannot tell
+  //     two IDENTICAL trees apart — measured: with a concurrent worktree's
+  //     serve.mjs squatting :4199, an unmodified run here passed every byte
+  //     compare and printed OVERFLOW GUARD PASS while never once touching its
+  //     own tree's server. Identity is asserted FIRST, from serve.mjs's
+  //     /__tree endpoint; bytes are asserted after (a squatter can also be a
+  //     stale same-tree server, which identity alone cannot catch).
+  //     AUDITED (exit 2): both arms are ENVIRONMENT refusals, never defects.
+  {
+    let identity = null;
+    try {
+      const r = await fetch(`${BASE}/__tree`, { cache: "no-store" });
+      if (r.ok) identity = await r.json();
+    } catch { /* fall through to the refusal below */ }
+    if (!identity || typeof identity.root !== "string") {
+      return die(
+        `UNIDENTIFIABLE SQUATTER on :${PORT} — the server answered /app.css but not /__tree, ` +
+        `so it is an older serve.mjs or a foreign process. This guard only measures a server that ` +
+        `IDENTIFIES ITSELF as this tree (${ROOT}). Kill the squatter (lsof -nP -iTCP:${PORT} -sTCP:LISTEN) or ` +
+        `set OVERFLOW_GUARD_PORT to a free port.`,
+      );
+    }
+    if (path.resolve(identity.root) !== path.resolve(ROOT)) {
+      return die(
+        `FOREIGN TREE on :${PORT} — the server identifies as\n` +
+        `     ${identity.root} (pid ${identity.pid})\n` +
+        `   while this run measures\n` +
+        `     ${ROOT}\n` +
+        `   Identical bytes would pass the byte-compare below, so a run against that server would ` +
+        `quote ANOTHER WORKTREE's pixels as this tree's baseline. Refusing to measure.`,
+      );
+    }
+  }
+
   // 2. SERVED BYTES == DISK BYTES (GR125a). Compared for every file the
   //    measurement depends on, plus the injected shell "/" against the same
   //    injection serve.mjs performs — so a squatter serving a different
