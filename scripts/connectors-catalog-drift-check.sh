@@ -42,9 +42,11 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-CATALOG_EX="api/lib/barkpark/connectors/catalog.ex"
-CONNECTORS_DIR="connectors/src/connectors"
-OAUTH_DIR="connectors/src/oauth"
+# Env-overridable scan paths (the seam --selftest re-invokes "$0" through, as
+# studio-link-lint's STUDIO_LINK_LINT_ROOT does): absolute paths welcome.
+CATALOG_EX="${CONNECTORS_CATALOG_EX:-api/lib/barkpark/connectors/catalog.ex}"
+CONNECTORS_DIR="${CONNECTORS_CATALOG_CONNECTORS_DIR:-connectors/src/connectors}"
+OAUTH_DIR="${CONNECTORS_CATALOG_OAUTH_DIR:-connectors/src/oauth}"
 
 # Extract the sorted "<provider> <mode>" set from the Elixir catalog. Scans ONLY
 # the `@providers [ … ]` list body (so the @type/@typedoc doc lines that also
@@ -402,7 +404,113 @@ EOF
     echo "SELFTEST FAIL: a dropped TOOL entry went undetected"; return 1
   fi
 
-  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded (paste + oauth); tool set: agree→green, @tool_providers channel-neutral, dropped tool entry→red"
+  # ── END-TO-END ARMS: re-invoke "$0" so BOTH verdict comparisons and all
+  # four empty-set fail-closed arms live inside the tripwire, not a fork of
+  # it. Everything above exercises only the extractors; the real
+  # CATALOG_SET/BRIDGE_SET and TOOL comparisons plus the empty-set exits
+  # could be disarmed while every arm above stayed green (the
+  # selftest-reimplements-the-scan defect this gate copied from its model,
+  # cgsi-s3 class). Every arm asserts the EXIT CODE and its own message.
+  run_gate() { # catalog-ex connectors-dir oauth-dir
+    CONNECTORS_CATALOG_EX="$1" CONNECTORS_CATALOG_CONNECTORS_DIR="$2" \
+      CONNECTORS_CATALOG_OAUTH_DIR="$3" bash "$0"
+  }
+  local out rc
+  set +e
+  out="$(run_gate "$tmp/catalog.ex" "$tmp/agree/connectors" "$tmp/agree/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: an agreeing catalog+bridge exited $rc end-to-end, expected 0 — $out"; return 1
+  fi
+  case "$out" in *"PASS"*) ;; *) echo "SELFTEST FAIL: the agreeing pair did not print PASS end-to-end"; return 1 ;; esac
+
+  set +e
+  out="$(run_gate "$tmp/catalog.ex" "$tmp/drift/connectors" "$tmp/drift/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: a dropped connect member exited $rc end-to-end, expected 1 — the CHANNEL verdict comparison is disarmed"; return 1
+  fi
+  case "$out" in *"connectable-provider DRIFT"*) ;; *) echo "SELFTEST FAIL: the channel-drift red did not come from the DRIFT verdict"; return 1 ;; esac
+
+  # A catalog whose @tool_providers dropped linear while the bridge still ships
+  # linear-oauth.ts: the CHANNEL sets agree, so only the TOOL verdict can red.
+  sed '/id: "linear"/,/^    }$/d' "$tmp/catalog.ex" | sed 's/^    },$/    }/' > "$tmp/catalog_tooldrift.ex"
+  grep -q 'id: "linear"' "$tmp/catalog_tooldrift.ex" \
+    && { echo "SELFTEST FAIL: the tool-drift fixture still carries linear — this arm would prove nothing"; return 1; }
+  set +e
+  out="$(run_gate "$tmp/catalog_tooldrift.ex" "$tmp/agree/connectors" "$tmp/agree/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: a dropped TOOL entry exited $rc end-to-end, expected 1 — the TOOL verdict comparison is disarmed"; return 1
+  fi
+  case "$out" in *"TOOL-connector DRIFT"*) ;; *) echo "SELFTEST FAIL: the tool-drift red did not come from the TOOL DRIFT verdict — $out"; return 1 ;; esac
+
+  # The four fail-closed empties, one at a time so each red is attributable.
+  : > "$tmp/catalog_empty.ex"
+  set +e
+  out="$(run_gate "$tmp/catalog_empty.ex" "$tmp/agree/connectors" "$tmp/agree/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: an EMPTY channel catalog exited $rc end-to-end, expected 1 — the catalog empty-set arm is disarmed"; return 1
+  fi
+  case "$out" in *"no connectable providers parsed from"*) ;; *) echo "SELFTEST FAIL: the empty-catalog red did not come from its own arm"; return 1 ;; esac
+
+  mkdir -p "$tmp/emptydirs/connectors" "$tmp/emptydirs/oauth"
+  set +e
+  out="$(run_gate "$tmp/catalog.ex" "$tmp/emptydirs/connectors" "$tmp/emptydirs/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: an EMPTY bridge tree exited $rc end-to-end, expected 1 — the bridge empty-set arm is disarmed"; return 1
+  fi
+  case "$out" in *"no connectable providers parsed from"*) ;; *) echo "SELFTEST FAIL: the empty-bridge red did not come from its own arm"; return 1 ;; esac
+
+  # BOTH sides empty — the composite the single-side arms cannot see. A
+  # neutered empty-exit on ONE side degrades to the drift verdict (empty vs
+  # non-empty still reds, misattributed); neuter them on BOTH sides and
+  # empty == empty sails through BOTH comparisons as a vacuous PASS over a
+  # completely unparsed world. Measured before this arm existed: all four
+  # exits stripped -> rc 0 PASS.
+  set +e
+  out="$(run_gate "$tmp/catalog_empty.ex" "$tmp/emptydirs/connectors" "$tmp/emptydirs/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: an ENTIRELY empty world exited $rc end-to-end, expected 1 — empty==empty scans vacuously green (the empty-set arms are disarmed)"; return 1
+  fi
+
+  # Channel agreement with NO tool block: the catalog-tool empty arm must red.
+  awk '/@tool_providers/{exit} {print}' "$tmp/catalog.ex" > "$tmp/catalog_notools.ex"
+  set +e
+  out="$(run_gate "$tmp/catalog_notools.ex" "$tmp/agree/connectors" "$tmp/agree/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: a MISSING @tool_providers block exited $rc end-to-end, expected 1 — the catalog tool empty-set arm is disarmed"; return 1
+  fi
+  case "$out" in *"no tool providers parsed from"*) ;; *) echo "SELFTEST FAIL: the missing-tool-block red did not come from its own arm"; return 1 ;; esac
+
+  # Channel agreement with NO tool files on the bridge: the bridge-tool empty
+  # arm must red. Copy the agree tree minus github/linear.
+  mkdir -p "$tmp/nootool/connectors" "$tmp/nootool/oauth"
+  for src in "$tmp/agree/connectors/telegram.ts" "$tmp/agree/connectors/discord.ts" "$tmp/agree/connectors/gateway.ts"; do
+    cp "$src" "$tmp/nootool/connectors/"
+  done
+  cp "$tmp/agree/oauth/slack-oauth.ts" "$tmp/nootool/oauth/"
+  set +e
+  out="$(run_gate "$tmp/catalog.ex" "$tmp/nootool/connectors" "$tmp/nootool/oauth" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: a bridge with NO tool connectors exited $rc end-to-end, expected 1 — the bridge tool empty-set arm is disarmed"; return 1
+  fi
+  case "$out" in *"no tool providers parsed from"*) ;; *) echo "SELFTEST FAIL: the no-tool-bridge red did not come from its own arm"; return 1 ;; esac
+
+  echo "selftest OK: agree→green, dropped connect member→red, nil mode excluded, tool direction excluded (paste + oauth); tool set: agree→green, @tool_providers channel-neutral, dropped tool entry→red; END-TO-END re-invocation: both verdicts and all four empty-set fail-closed arms assert exit codes"
 }
 
 # Refuse an argument this gate does not understand. A swallowed flag — a
