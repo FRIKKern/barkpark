@@ -2114,12 +2114,22 @@ defmodule BarkparkCloud.Web.Router do
       # query for the whole page, never a per-row lookup (that is the N+1 this
       # domain already paid for once).
       hmap = Registry.latest_health_payload_map(ids)
+      # jpf-w1-queue-age-alarm: the queued-deployment age rides the SAME
+      # prefetch shape — one GROUP BY query for the whole page, never a per-row
+      # lookup (the N+1 this domain already paid for once).
+      qmap = Registry.queued_deploy_age_map(ids)
 
       json(conn, 200, %{
         barkparks:
           Enum.map(scoped_barkparks, fn {barkpark, role} ->
             row =
-              barkpark_json(barkpark, pmap[barkpark.id], dmap[barkpark.id], hmap[barkpark.id])
+              barkpark_json(
+                barkpark,
+                pmap[barkpark.id],
+                dmap[barkpark.id],
+                hmap[barkpark.id],
+                qmap[barkpark.id]
+              )
 
             if all_teams? do
               Map.put(row, :team, %{
@@ -9828,7 +9838,14 @@ defmodule BarkparkCloud.Web.Router do
   # has never beaten (a just-created / just-enqueued instance), and an internal
   # lookup would put a per-row query on those four WRITE paths. nil → the
   # `pressure` key renders all-unmetered, never zeros.
-  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil, pressure \\ nil) do
+  # `queued_age` is the PREFETCHED queued-deployment age for this box
+  # (`Registry.queued_deploy_age_map/1`), same parameter-not-lookup rule as
+  # `pressure` above: only the fleet list computes it (one GROUP BY for the
+  # page); the four write-path call sites serialize a box that by construction
+  # has no queued container deployment and pass nothing. nil means NONE QUEUED
+  # — clients own the stalled threshold (charter D6), the payload only carries
+  # the raw number.
+  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil, pressure \\ nil, queued_age \\ nil) do
     base = %{
       id: bp.id,
       name: bp.name,
@@ -9919,6 +9936,14 @@ defmodule BarkparkCloud.Web.Router do
       fleet_role: bp.fleet_role,
       fleet_parent_id: bp.fleet_parent_id,
       fleet_token_id: bp.fleet_token_id,
+      # jpf-w1-queue-age-alarm (charter D6): age in SECONDS of the oldest
+      # `queued` container-site deployment on this box, nil when none. A NUMBER
+      # rather than a verdict on purpose — the Go CLI and the SPA own the
+      # 5-minute `deploy_stalled` threshold and can render "queued 7m" honestly;
+      # the CP stays read-only here (the 15-min reaper is a different, MUTATING
+      # mechanism and never sees a never-claimed row). Always present, so a
+      # consumer branches on the VALUE, not the key.
+      queued_deploy_age_seconds: queued_age,
       inserted_at: bp.inserted_at
     }
 

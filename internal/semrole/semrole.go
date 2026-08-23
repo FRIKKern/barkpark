@@ -112,8 +112,14 @@ func For(status string) string {
 	// a quiet one. It must be distinguishable in TONE from the deliberate
 	// "unmetered" (which stays neutral): a failed reading is attention-worthy,
 	// same grammar as degraded — look at it, it has not itself failed the plan.
+	// "deploy_stalled" (jpf-w1 D7) is warn for the ladder-monotony reason the
+	// D69 rungs give above — it sits at rank 8, between "unreported" (7, warn)
+	// and "behind" (9, info): a queued deploy nobody is building is a box to
+	// LOOK AT, not one that has failed. NAMING TRAP the state dodges: "queued"
+	// is already an info/blue token in this very switch, so the stalled state
+	// needed its own word to get its own tone.
 	case "degraded", "unknown", "suspended", "inactive", "near_limit",
-		"strained", "filling", "unreported", "unavailable":
+		"strained", "filling", "unreported", "deploy_stalled", "unavailable":
 		return "warn"
 	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling
 	// the operator must act on, so it paints the same danger tone as a failure.

@@ -5520,7 +5520,11 @@
     var h = String(hash == null ? "" : hash).replace(/^#/, "");
     var m = h.match(/^fleet\/([a-z]+)$/);
     if (!m) return null;
-    return m[1] === "attention" || m[1] === "inflight" || m[1] === "healthy" ? m[1] : null;
+    // The deep-link SEGMENT stays "inflight" (bookmarked URLs; the hash
+    // grammar is [a-z]+), but the returned FILTER is the decision-32 bucket
+    // string, hyphenated, so it compares equal to bucketOf everywhere.
+    if (m[1] === "inflight") return "in-flight";
+    return m[1] === "attention" || m[1] === "healthy" ? m[1] : null;
   }
 
   // Pure: the raw accept token from an invitation hash, or null. Tolerates the
@@ -6042,7 +6046,9 @@
   // ------------------------------------------------ status + attention (pure)
   // classifyBp collapses the fleet fields GET /v1/barkparks already returns
   // (provision/deprovision status, suspended, health_status, agent_status,
-  // update_state, last_seen_at) into exactly ONE of the nine ranked states of charter
+  // update_state, last_seen_at, queued_deploy_age_seconds) into exactly ONE of
+  // the TEN ranked states this console classifies (of the decision-32
+  // fixture's twelve — see the ATTENTION_RANK gap note) of charter
   // decision 15 — the single attention-order spec. Both statusOf (the pill) and
   // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
   // colour and the queue's order can never disagree. This is the JS twin of
@@ -6070,25 +6076,39 @@
     // last_seen_at null they were never measured, so they cannot rank this box.
     // This arm is checked BEFORE degraded because unknown is a different state,
     // not a lesser one; the ladder below is where its urgency is expressed.
-    if (live && bp.last_seen_at == null) return "unreported";      // 5
+    if (live && bp.last_seen_at == null) return "unreported";      // 7
     if (live && !healthy) return "degraded";                       // 4
-    if (live && bp.update_state === "behind") return "behind";     // 6
-    if (removing) return "removing";                              // 7
-    if (!host) return "provisioning";                            // 8 (rank-2 already excluded)
-    return "ok";                                                // 9
+    // jpf-w1 D7: a queued deployment no builder has claimed for 5 minutes.
+    // AFTER degraded/unreported — a sick box's stuck queue is a SYMPTOM, so
+    // the box's own condition outranks it — and BEFORE behind. The threshold
+    // is the CLIENT's by design (charter D6): the payload carries only the
+    // raw age, nil when nothing is queued, and nil NEVER alarms (an absent
+    // field on an older CP must not read as stalled).
+    if (live && typeof bp.queued_deploy_age_seconds === "number" &&
+        bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 8
+    if (live && bp.update_state === "behind") return "behind";     // 9
+    if (removing) return "removing";                              // 10
+    if (!host) return "provisioning";                            // 11 (rank-2 already excluded)
+    return "ok";                                                // 12
   }
 
-  // The rank number per decision 15 (1 = most urgent … 9 = ok). cch-w34-s6 adds
-  // `unreported` and the EXPLICIT ordering clause charter D332(b) requires:
-  // failed > unknown > pending > ok. A measured failure (removal_failed, failed,
-  // suspended, degraded) outranks the UNKNOWN state, which in turn outranks
-  // every pending/in-flight state (behind, removing, provisioning) and ok.
-  // The eight pre-existing kinds keep their RELATIVE order, so this ladder still
-  // agrees with the Go twin (cloud_status_cmd.go statusOf) on every shared kind.
+  // The rank number per decision 15 (1 = most urgent … 12 = ok), BYTE-EQUAL to
+  // the decision-32 fixture (__fixtures__/attention_order.json) — the node
+  // harness asserts every entry here against that file, which is how the SPA
+  // stops drifting silently (until jpf-w1-queue-age-alarm, Go was the
+  // fixture's only asserter and this ladder had wandered to its own 1–9
+  // numbering). KNOWN GAP, named where it lives: ranks 5 (strained) and
+  // 6 (filling) are fixture states this console does not classify yet — the
+  // holes keep every shared state on its fixture rank, and the harness pins
+  // the gap to exactly those two so a third missing state reds the suite.
+  // jpf-w1 D7 adds deploy_stalled at 8: after the box-condition rungs
+  // (degraded/unreported — a sick box's stuck queue is a symptom), before
+  // behind (a deploy nobody builds beats passive update drift).
   var ATTENTION_RANK = {
     removal_failed: 1, failed: 2, suspended: 3, degraded: 4,
-    unreported: 5,
-    behind: 6, removing: 7, provisioning: 8, ok: 9,
+    unreported: 7,
+    deploy_stalled: 8,
+    behind: 9, removing: 10, provisioning: 11, ok: 12,
   };
   function attentionRank(bp) { return ATTENTION_RANK[classifyBp(bp)]; }
 
@@ -6102,17 +6122,24 @@
     return an < bn ? -1 : an > bn ? 1 : 0;
   }
 
-  // Buckets (decision 15): attention = ranks 1–6, in-flight = 7–8, healthy = 9.
-  // `unreported` (5) sits in ATTENTION: a box we have never heard from is a box
-  // to look at, and it was already counted there when it read "degraded".
+  // Buckets (decision 15 / decision 32): attention = ranks 1–9
+  // (removal_failed…behind), in-flight = 10–11 (removing/provisioning),
+  // healthy = 12 (ok) — the SAME boundaries as the Go twin's attentionBucket.
+  // The bucket STRING is the fixture's, hyphenated: "in-flight", not the
+  // "inflight" this file used to emit while nothing held it to the fixture
+  // (the #fleet/inflight deep-link segment keeps its old spelling — that is a
+  // URL, not vocabulary — and parseFleetFilter maps it to the canonical
+  // bucket).
+  function bucketOfRank(r) {
+    return r <= 9 ? "attention" : r <= 11 ? "in-flight" : "healthy";
+  }
   function bucketOf(bp) {
-    var r = attentionRank(bp);
-    return r <= 6 ? "attention" : r <= 8 ? "inflight" : "healthy";
+    return bucketOfRank(attentionRank(bp));
   }
 
   // Pure rollup of a fleet list into the three bucket counts + total.
   function fleetSummary(list) {
-    var out = { attention: 0, inflight: 0, healthy: 0, total: 0 };
+    var out = { attention: 0, "in-flight": 0, healthy: 0, total: 0 };
     (list || []).forEach(function (bp) { out[bucketOf(bp)] += 1; out.total += 1; });
     return out;
   }
@@ -6205,11 +6232,16 @@
       if (missed) parts.push(missed);
       return { role: "warn", label: "Degraded", detail: parts.join(" · ") || "Needs attention" };
     }
+    // jpf-w1 D7: warn, never the info/blue tone "queued" would get — waiting
+    // is news, waiting five minutes with no builder is an alarm. The detail
+    // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
+    // and says the fact that makes the wait a problem.
+    if (kind === "deploy_stalled") return { role: "warn", label: "Deploy stalled", detail: "Deploy queued " + Math.floor(bp.queued_deploy_age_seconds / 60) + "m — no builder claimed it" };
     if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
     if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
     if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
-    // Unreachable while classifyBp stays total over the nine kinds of
+    // Unreachable while classifyBp stays total over the kinds of
     // ATTENTION_RANK — and the CLOSED-ENUM test pins exactly that (charter D33).
     // It is deliberately NOT the calm "Unknown" it used to be: a tail that
     // announces the calmest word over an unhandled — and therefore possibly the
@@ -6576,7 +6608,7 @@
     });
   }
 
-  var BUCKET_LABEL = { attention: "needs attention", inflight: "in flight", healthy: "healthy" };
+  var BUCKET_LABEL = { attention: "needs attention", "in-flight": "in flight", healthy: "healthy" };
   function fleetFilterBar(bucket, n) {
     return '<div class="fleet-filter-bar">' +
       "<span>Showing " + n + " " + esc(BUCKET_LABEL[bucket] || bucket) + "</span>" +
@@ -6711,9 +6743,9 @@
     var chips =
       '<span class="ov-chip ov-chip--attention"><span class="ov-chip-glyph" aria-hidden="true">&#9650;</span>' +
         (sum.attention || 0) + " needs attention</span>" +
-      ((sum.inflight || 0) > 0
+      ((sum["in-flight"] || 0) > 0
         ? '<span class="ov-chip ov-chip--inflight"><span class="ov-chip-glyph ov-chip-pulse" aria-hidden="true">&#9680;</span>' +
-            sum.inflight + " in flight</span>"
+            sum["in-flight"] + " in flight</span>"
         : "") +
       '<span class="ov-chip ov-chip--healthy"><span class="ov-chip-glyph" aria-hidden="true">&#9679;</span>' +
         (sum.healthy || 0) + " healthy</span>";
@@ -7164,14 +7196,14 @@
       } else {
         // Nothing needs action. Stay honest when boxes are still in flight —
         // "all healthy" would be a lie while something is provisioning.
-        var settled = sum.inflight === 0;
+        var settled = sum["in-flight"] === 0;
         queueHtml = '<div class="overview-ok"><span class="status-pill status-pill--ok">' +
             '<span class="status-pill-dot" aria-hidden="true"></span>' +
             '<span class="status-pill-label">' + (settled ? "All healthy" : "All clear") + "</span></span>" +
           "<p>" + (settled
             ? "Every instance is up, current, and reporting in."
-            : "Nothing needs your attention right now — " + sum.inflight +
-              (sum.inflight === 1 ? " instance in flight." : " instances in flight.")) +
+            : "Nothing needs your attention right now — " + sum["in-flight"] +
+              (sum["in-flight"] === 1 ? " instance in flight." : " instances in flight.")) +
           "</p></div>";
       }
       // Rebuilding the body blanks the activity digest. It is AUDIT-derived and
@@ -24666,7 +24698,8 @@
       neverReportedEvidence: neverReportedEvidence,
       attentionKinds: Object.keys(ATTENTION_RANK),
       attentionRank: attentionRank, attentionCompare: attentionCompare,
-      bucketOf: bucketOf, fleetSummary: fleetSummary, filterFleet: filterFleet,
+      bucketOf: bucketOf, bucketOfRank: bucketOfRank, ATTENTION_RANK: ATTENTION_RANK,
+      fleetSummary: fleetSummary, filterFleet: filterFleet,
       // gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview pure helpers — greeting,
       // triage subline, header chips, the REAL slots meter, the attention row +
       // reason, instance cards + stats, the self-healing runway model/markup, the

@@ -110,6 +110,8 @@ func TestAttentionBucket(t *testing.T) {
 		"degraded": "attention",
 		// the D69 additions
 		"strained": "attention", "filling": "attention", "unreported": "attention",
+		// the jpf-w1 D7 addition — a stalled queue is a thing to LOOK AT
+		"deploy_stalled": "attention",
 		// unchanged from the shipped ladder — the drift tripwire
 		"behind":   "attention",
 		"removing": "in-flight", "provisioning": "in-flight",
@@ -130,13 +132,13 @@ func TestAttentionBucket(t *testing.T) {
 	}
 }
 
-// TestAttentionLadderIsElevenRungs pins the ladder itself — order and length —
+// TestAttentionLadderIsTwelveRungs pins the ladder itself — order and length —
 // so a rung inserted at the wrong height (which silently re-buckets its
 // neighbours) fails here rather than in an operator's terminal.
-func TestAttentionLadderIsElevenRungs(t *testing.T) {
+func TestAttentionLadderIsTwelveRungs(t *testing.T) {
 	want := []string{
 		"removal_failed", "failed", "suspended", "degraded",
-		"strained", "filling", "unreported", "behind",
+		"strained", "filling", "unreported", "deploy_stalled", "behind",
 		"removing", "provisioning", "ok",
 	}
 	if len(attentionRankOrder) != len(want) {
@@ -154,10 +156,11 @@ func TestAttentionLadderIsElevenRungs(t *testing.T) {
 		bucket string
 	}{
 		{"removal_failed", 1, "attention"},
-		{"behind", 8, "attention"}, // the LAST attention rung
-		{"removing", 9, "in-flight"},
-		{"provisioning", 10, "in-flight"},
-		{"ok", 11, "healthy"}, // the ONLY healthy rung
+		{"deploy_stalled", 8, "attention"}, // jpf-w1 D7: after unreported, before behind
+		{"behind", 9, "attention"},         // the LAST attention rung
+		{"removing", 10, "in-flight"},
+		{"provisioning", 11, "in-flight"},
+		{"ok", 12, "healthy"}, // the ONLY healthy rung
 	} {
 		if got := attentionRank(c.state); got != c.rank {
 			t.Errorf("attentionRank(%q) = %d, want %d", c.state, got, c.rank)
@@ -165,6 +168,77 @@ func TestAttentionLadderIsElevenRungs(t *testing.T) {
 		if got := attentionBucket(c.state); got != c.bucket {
 			t.Errorf("attentionBucket(%q) = %q, want %q", c.state, got, c.bucket)
 		}
+	}
+}
+
+// TestDeployStalledFence is the jpf-w1 D6/D7 fence table. The three honest-
+// silence shapes can NEVER stall — nil is both "nothing queued" and "a CP that
+// predates the field" — and the boundary is >= 300, not > 300. The nil arm is
+// the alarm's fail-closed contract stated positively: with no queued-age input
+// the alarm says NOTHING, it does not scan an empty corpus and report calm.
+func TestDeployStalledFence(t *testing.T) {
+	age := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name string
+		bp   cloudclient.Barkpark
+		want bool
+	}{
+		{"no field (older CP / nothing queued)", cloudclient.Barkpark{}, false},
+		{"fresh queue, under the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(299)}, false},
+		{"exactly the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(300)}, true},
+		{"the incident shape: 7.5h unclaimed", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(27000)}, true},
+	}
+	for _, c := range cases {
+		if got := deployStalled(c.bp); got != c.want {
+			t.Errorf("%s: deployStalled = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestDeployStalledStatusAndDetail drives the full classification: a live,
+// healthy, current box whose only fault is a 7-minute unclaimed queued deploy
+// must read deploy_stalled, land in ATTENTION, and NAME THE AGE in its detail
+// — and the same box with a fresh queue (or none) must read ok with an empty
+// detail, so the assertion has a side that can fail.
+func TestDeployStalledStatusAndDetail(t *testing.T) {
+	age := func(v float64) *float64 { return &v }
+	base := cloudclient.Barkpark{
+		Host: "10.0.0.9", LastSeenAt: "2026-08-06T12:00:00Z",
+		HealthStatus: "up", AgentStatus: "online", UpdateState: "current",
+	}
+
+	stalled := base
+	stalled.QueuedDeployAgeSeconds = age(420)
+	if st := attentionStatus(stalled); st != "deploy_stalled" {
+		t.Fatalf("status = %q, want deploy_stalled", st)
+	}
+	if b := attentionBucket("deploy_stalled"); b != "attention" {
+		t.Fatalf("bucket = %q, want attention", b)
+	}
+	d := attentionDetail(stalled, "deploy_stalled")
+	if want := "deploy queued 7m — no builder claimed it"; d != want {
+		t.Fatalf("detail = %q, want %q", d, want)
+	}
+
+	// A DEGRADED box with the same stalled queue stays degraded: the stuck
+	// queue is a symptom and the box's own condition outranks it (D7).
+	degraded := stalled
+	degraded.AgentStatus = "offline"
+	if st := attentionStatus(degraded); st != "degraded" {
+		t.Fatalf("degraded+stalled = %q, want degraded (the box outranks its queue)", st)
+	}
+
+	// Fresh queue → ok, and the detail stays honestly empty.
+	fresh := base
+	fresh.QueuedDeployAgeSeconds = age(60)
+	if st := attentionStatus(fresh); st != "ok" {
+		t.Fatalf("fresh-queue status = %q, want ok", st)
+	}
+	if d := attentionDetail(fresh, "ok"); d != "" {
+		t.Fatalf("fresh-queue detail = %q, want empty", d)
+	}
+	if r := deployStalledReason(fresh); r != "" {
+		t.Fatalf("deployStalledReason under the fence = %q — it may never assert a stall it did not measure", r)
 	}
 }
 
@@ -595,10 +669,10 @@ func TestRunCloudStatusJSON(t *testing.T) {
 		t.Fatalf("buckets = %+v", resp.Buckets)
 	}
 	// Ranked most-urgent-first, ranks 1-based per the decision-32 fixture:
-	// failed (2) < degraded (4) < strained (5) < filling (6) < ok (11).
+	// failed (2) < degraded (4) < strained (5) < filling (6) < ok (12).
 	wantOrder := []string{"dead-box", "slow-box", "hot-box", "full-box", "ok-box"}
 	wantStatus := []string{"failed", "degraded", "strained", "filling", "ok"}
-	wantRank := []int{2, 4, 5, 6, 11}
+	wantRank := []int{2, 4, 5, 6, 12}
 	for i := range wantOrder {
 		if resp.Barkparks[i].Name != wantOrder[i] || resp.Barkparks[i].Status != wantStatus[i] || resp.Barkparks[i].Rank != wantRank[i] {
 			t.Fatalf("row %d = %s/%s/rank %d, want %s/%s/rank %d", i,
@@ -893,13 +967,15 @@ func TestStatusDeployCensusRefusalNamesItself(t *testing.T) {
 	}
 }
 
-// TestStatusDeployIsAGaugeNotAFence: the diff adds no twelfth rung, no verdict
-// arm and no hardcoded floor. The ladder is still eleven, the buckets still
+// TestStatusDeployIsAGaugeNotAFence: the deploy-census diff added no rung, no
+// verdict arm and no hardcoded floor. The ladder is exactly the charter's
+// twelve (eleven D69 rungs + jpf-w1 D7's deploy_stalled — the ONE deliberate
+// addition, pinned by TestAttentionLadderIsTwelveRungs), the buckets still
 // three, and the ONLY threshold the deploy line consults is the census's own
 // min_sample off the wire.
 func TestStatusDeployIsAGaugeNotAFence(t *testing.T) {
-	if len(attentionRankOrder) != 11 {
-		t.Fatalf("the ladder grew a rung: %v", attentionRankOrder)
+	if len(attentionRankOrder) != 12 {
+		t.Fatalf("the ladder grew a rung beyond the charter's twelve: %v", attentionRankOrder)
 	}
 	// The floor is read, never carried: a census that sends min_sample 999 moves
 	// the refusal, which a hardcoded fence could not do.
@@ -1283,7 +1359,12 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 	}
 	// The two deliberate tri-states: emitted ONLY when the plane reported them,
 	// so their absence here is the contract, not a gap.
-	optional := map[string]bool{"autoupdate_enabled": true, "commit_distance": true}
+	optional := map[string]bool{
+		"autoupdate_enabled": true, "commit_distance": true,
+		// jpf-w1-queue-age-alarm: emitted only when the plane reported a queued
+		// row — absent is "nothing queued / older CP", never a fabricated 0.
+		"queued_deploy_age_seconds": true,
+	}
 
 	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{commitFleet()[0]})[0])
 	for k := range want {

@@ -1,7 +1,8 @@
 {
-  "_comment": "Concrete input→order cases for the charter decision-15 / D69 ranking. The canonical cross-surface vocabulary (state/rank/bucket/tone/glyph/label) is cloud/priv/static/__fixtures__/attention_order.json (charter decision 32) — this file is its test companion: a synthetic fleet covering EVERY one of the ELEVEN ranks plus the case-insensitive name tiebreak. 'barkparks' is the INPUT (deliberately shuffled); 'expected_order' is the exact name order rankBarkparks must produce. Any surface implementing the decision-15 rank should reproduce this order. NOTE: every LIVE box that is not meant to read 'unreported' carries a last_seen_at — a live box the control plane has never heard from ranks 7 (unreported), matching the shipped console's classifyBp precedence, so omitting it is not a neutral default.",
+  "_comment": "Concrete input→order cases for the charter decision-15 / D69 / jpf-w1-D7 ranking. The canonical cross-surface vocabulary (state/rank/bucket/tone/glyph/label) is cloud/priv/static/__fixtures__/attention_order.json (charter decision 32) — this file is its test companion: a synthetic fleet covering EVERY one of the TWELVE ranks plus the case-insensitive name tiebreak. stall-1 carries queued_deploy_age_seconds 420 (past the 300s fence → deploy_stalled, rank 8); Zeta carries 90 ON PURPOSE — a freshly queued deploy must NOT alarm, so Zeta staying ok is the fence-s negative arm inside the order case. 'barkparks' is the INPUT (deliberately shuffled); 'expected_order' is the exact name order rankBarkparks must produce. Any surface implementing the decision-15 rank should reproduce this order. NOTE: every LIVE box that is not meant to read 'unreported' carries a last_seen_at — a live box the control plane has never heard from ranks 7 (unreported), matching the shipped console's classifyBp precedence, so omitting it is not a neutral default.",
   "barkparks": [
-    { "id": "id-zeta", "name": "Zeta", "host": "10.0.0.12", "last_seen_at": "2026-08-06T12:00:00Z", "health_status": "up", "agent_status": "online", "update_state": "current" },
+    { "id": "id-zeta", "name": "Zeta", "host": "10.0.0.12", "last_seen_at": "2026-08-06T12:00:00Z", "health_status": "up", "agent_status": "online", "update_state": "current", "queued_deploy_age_seconds": 90 },
+    { "id": "id-stall-1", "name": "stall-1", "host": "10.0.0.17", "last_seen_at": "2026-08-06T12:00:00Z", "health_status": "up", "agent_status": "online", "update_state": "current", "queued_deploy_age_seconds": 420 },
     { "id": "id-rem-2", "name": "rem-2", "host": "10.0.0.2", "deprovision_status": "claimed" },
     { "id": "id-deg-1", "name": "deg-1", "host": "10.0.0.3", "last_seen_at": "2026-08-06T12:00:00Z", "health_status": "unknown", "agent_status": "online" },
     { "id": "id-fail-1", "name": "fail-1", "host": "", "provision_status": "failed", "provision_error": "cloud-init timed out" },
@@ -29,6 +30,7 @@
     "strain-1",
     "fill-1",
     "unrep-1",
+    "stall-1",
     "beh-1",
     "rem-1",
     "rem-2",

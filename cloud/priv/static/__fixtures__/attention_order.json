@@ -6,8 +6,9 @@
  {"state":"strained","rank":5,"bucket":"attention","tone":"warn","glyph":"!","label":"under load"},
  {"state":"filling","rank":6,"bucket":"attention","tone":"warn","glyph":"!","label":"disk filling"},
  {"state":"unreported","rank":7,"bucket":"attention","tone":"warn","glyph":"?","label":"never reported"},
- {"state":"behind","rank":8,"bucket":"attention","tone":"info","glyph":"^","label":"update available"},
- {"state":"removing","rank":9,"bucket":"in-flight","tone":"info","glyph":"~","label":"removing"},
- {"state":"provisioning","rank":10,"bucket":"in-flight","tone":"info","glyph":"~","label":"provisioning"},
- {"state":"ok","rank":11,"bucket":"healthy","tone":"ok","glyph":"*","label":"live"}
+ {"state":"deploy_stalled","rank":8,"bucket":"attention","tone":"warn","glyph":"!","label":"deploy stalled"},
+ {"state":"behind","rank":9,"bucket":"attention","tone":"info","glyph":"^","label":"update available"},
+ {"state":"removing","rank":10,"bucket":"in-flight","tone":"info","glyph":"~","label":"removing"},
+ {"state":"provisioning","rank":11,"bucket":"in-flight","tone":"info","glyph":"~","label":"provisioning"},
+ {"state":"ok","rank":12,"bucket":"healthy","tone":"ok","glyph":"*","label":"live"}
 ]}

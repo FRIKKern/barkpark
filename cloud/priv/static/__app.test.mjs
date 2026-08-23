@@ -3404,7 +3404,9 @@ test("parseHash resolves both the old flat and the new canonical Settings hashes
 
 test("parseFleetFilter extracts a known bucket, else null (whole fleet)", () => {
   assert.equal(hooks.parseFleetFilter("#fleet/attention"), "attention");
-  assert.equal(hooks.parseFleetFilter("fleet/inflight"), "inflight");
+  // The URL SEGMENT stays "inflight" (bookmarks; the hash grammar is [a-z]+)
+  // but the returned filter is the decision-32 bucket string, hyphenated.
+  assert.equal(hooks.parseFleetFilter("fleet/inflight"), "in-flight");
   assert.equal(hooks.parseFleetFilter("#fleet/healthy"), "healthy");
   assert.equal(hooks.parseFleetFilter("#fleet"), null);
   assert.equal(hooks.parseFleetFilter("#fleet/bogus"), null);
@@ -3484,17 +3486,20 @@ const MIXED = [
   { name: "healthy-a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },       // ok (9), tiebreak before healthy-b
 ];
 
-test("attentionRank matches the D15 ladder for each state", () => {
+test("attentionRank matches the decision-32 fixture rank for each state", () => {
+  // jpf-w1-queue-age-alarm: these are the FIXTURE ranks (attention_order.json),
+  // no longer a private 1–9 numbering — 5 and 6 are strained/filling, which
+  // this console does not classify yet (the named gap in ATTENTION_RANK).
   const rankByName = Object.fromEntries(MIXED.map((b) => [b.name, hooks.attentionRank(b)]));
   assert.equal(rankByName["gone-fail"], 1);
   assert.equal(rankByName["prov-fail"], 2);
   assert.equal(rankByName["susp"], 3);
   assert.equal(rankByName["Alpha-degraded"], 4);
-  assert.equal(rankByName["never-said"], 5);
-  assert.equal(rankByName["behind-1"], 6);
-  assert.equal(rankByName["removing-x"], 7);
-  assert.equal(rankByName["prov"], 8);
-  assert.equal(rankByName["healthy-a"], 9);
+  assert.equal(rankByName["never-said"], 7);
+  assert.equal(rankByName["behind-1"], 9);
+  assert.equal(rankByName["removing-x"], 10);
+  assert.equal(rankByName["prov"], 11);
+  assert.equal(rankByName["healthy-a"], 12);
 });
 
 // cch-w34-s6 (charter D332(b)), stated as an ORDERING, not just as numbers:
@@ -3535,44 +3540,152 @@ test("attentionCompare sorts most-urgent-first, tiebreak name ascending case-ins
 
 // ── bucketOf / fleetSummary / filterFleet ───────────────────────────────────
 
-test("bucketOf maps ranks 1–6 → attention, 7–8 → inflight, 9 → healthy", () => {
+test("bucketOf maps ranks 1–9 → attention, 10–11 → in-flight, 12 → healthy", () => {
   assert.equal(hooks.bucketOf({ deprovision_status: "failed" }), "attention"); // 1
   assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "down" }), "attention"); // 4
-  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: null }), "attention"); // 5 unreported
-  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "inflight"); // 7
-  assert.equal(hooks.bucketOf({}), "inflight"); // 8 provisioning
-  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }), "healthy"); // 9
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: null }), "attention"); // 7 unreported
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", queued_deploy_age_seconds: 420 }), "attention"); // 8 deploy_stalled
+  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "in-flight"); // 10
+  assert.equal(hooks.bucketOf({}), "in-flight"); // 11 provisioning
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }), "healthy"); // 12
 });
 
 test("fleetSummary counts buckets — mixed, empty, and all-healthy", () => {
   const s = hooks.fleetSummary(MIXED);
   assert.equal(s.total, 10);
-  assert.equal(s.attention, 6); // removal_failed, failed, suspended, degraded, unreported, behind (ranks 1–6)
-  assert.equal(s.inflight, 2);  // removing, provisioning (ranks 7–8)
-  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 9)
-  assert.equal(s.attention + s.inflight + s.healthy, s.total);
+  assert.equal(s.attention, 6); // removal_failed, failed, suspended, degraded, unreported, behind (attention ranks)
+  assert.equal(s["in-flight"], 2); // removing, provisioning (ranks 10–11) — the fixture's hyphenated bucket key
+  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 12)
+  assert.equal(s.attention + s["in-flight"] + s.healthy, s.total);
 
   // Spread sandbox-realm returns into the test realm before deepEqual (the
   // node:vm objects carry a different Object.prototype — same trick as parseHash).
-  assert.deepEqual({ ...hooks.fleetSummary([]) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
-  assert.deepEqual({ ...hooks.fleetSummary(null) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
+  assert.deepEqual({ ...hooks.fleetSummary([]) }, { attention: 0, "in-flight": 0, healthy: 0, total: 0 });
+  assert.deepEqual({ ...hooks.fleetSummary(null) }, { attention: 0, "in-flight": 0, healthy: 0, total: 0 });
 
   const allHealthy = [
     { name: "a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
     { name: "b", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
   ];
-  assert.deepEqual({ ...hooks.fleetSummary(allHealthy) }, { attention: 0, inflight: 0, healthy: 2, total: 2 });
+  assert.deepEqual({ ...hooks.fleetSummary(allHealthy) }, { attention: 0, "in-flight": 0, healthy: 2, total: 2 });
 });
 
 test("filterFleet returns exactly one bucket; null bucket → the whole list (copied)", () => {
   const attention = hooks.filterFleet(MIXED, "attention").map((b) => b.name).sort();
   assert.deepEqual(attention, ["Alpha-degraded", "behind-1", "gone-fail", "never-said", "prov-fail", "susp"].sort());
-  assert.equal(hooks.filterFleet(MIXED, "inflight").length, 2);
+  assert.equal(hooks.filterFleet(MIXED, "in-flight").length, 2);
   assert.equal(hooks.filterFleet(MIXED, "healthy").length, 2);
   const all = hooks.filterFleet(MIXED, null);
   assert.equal(all.length, MIXED.length);
   assert.notEqual(all, MIXED); // a copy, not the same reference
   assert.deepEqual([...hooks.filterFleet(null, "attention")], []);
+});
+
+// ── the decision-32 fixture is now the SPA's asserter too (jpf-w1) ──────────
+//
+// Until this test, Go was attention_order.json's ONLY asserter and this file
+// drifted silently: the SPA ran a private 1–9 rank ladder and emitted the
+// bucket string "inflight" where the fixture (and Go, and -o json) say
+// "in-flight". This is the verify_probes.json pattern (C8 below): read the
+// committed fixture, hold the SPA's vocabulary to it byte-for-byte.
+
+test("D32: the SPA attention vocabulary matches attention_order.json", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
+  );
+  const states = fixture.states;
+
+  // FAIL CLOSED ON AN EMPTY CORPUS: a fixture that parses to zero states must
+  // red here, never green a loop that asserted nothing. The floor states the
+  // sample size the rest of the test runs over.
+  assert.ok(Array.isArray(states) && states.length >= 12,
+    "attention_order.json carries " + (Array.isArray(states) ? states.length : 0) +
+    " states — the decision-32 vocabulary is at least twelve; an empty fixture would green every loop below vacuously");
+
+  // The BUCKET STRINGS, from the fixture side — including the hyphenated
+  // "in-flight" this file used to misspell as "inflight". Compared against a
+  // literal, not against the SPA, so both-empty can never scan green.
+  assert.deepEqual([...new Set(states.map((st) => st.bucket))],
+    ["attention", "in-flight", "healthy"]);
+
+  // …and from the SPA side: the three strings bucketOfRank can produce are the
+  // fixture's three, verbatim.
+  assert.equal(hooks.bucketOfRank(1), "attention");
+  assert.equal(hooks.bucketOfRank(10), "in-flight");
+  assert.equal(hooks.bucketOfRank(12), "healthy");
+
+  // KNOWN GAP, pinned to exactly two names: fixture states the SPA does not
+  // classify yet (their inputs — load/disk vitals — have no classifyBp arm).
+  // A THIRD state missing from ATTENTION_RANK reds this test; so does closing
+  // the gap without deleting its entry here.
+  const SPA_GAP = ["strained", "filling"];
+  const ranks = { ...hooks.ATTENTION_RANK };
+  assert.deepEqual(states.map((st) => st.state).filter((k) => !(k in ranks)), SPA_GAP,
+    "fixture states missing from the SPA ladder must be exactly the named gap");
+
+  // Every state the SPA ranks: fixture-listed, on the FIXTURE's rank, in the
+  // FIXTURE's bucket. This is the assertion that reds if either side renumbers
+  // alone — the drift this slice found (1–9 vs 1–11) could never have shipped
+  // through it.
+  for (const st of states) {
+    if (SPA_GAP.includes(st.state)) continue;
+    assert.equal(ranks[st.state], st.rank,
+      st.state + ": SPA rank " + ranks[st.state] + " != fixture rank " + st.rank);
+    assert.equal(hooks.bucketOfRank(st.rank), st.bucket,
+      st.state + ": SPA bucket for rank " + st.rank + " != fixture bucket " + st.bucket);
+  }
+
+  // No SPA state outside the fixture: a rung minted here alone is the same
+  // drift in the other direction.
+  for (const k of Object.keys(ranks)) {
+    assert.ok(states.some((st) => st.state === k),
+      "SPA state " + k + " is not in attention_order.json");
+  }
+
+  // The row this slice adds, by name: present in the fixture AND in the SPA,
+  // warn-toned, attention-bucketed, between unreported and behind.
+  const stalled = states.find((st) => st.state === "deploy_stalled");
+  assert.ok(stalled, "deploy_stalled missing from the fixture");
+  assert.equal(stalled.tone, "warn");
+  assert.equal(stalled.bucket, "attention");
+  assert.ok(ranks.unreported < ranks.deploy_stalled && ranks.deploy_stalled < ranks.behind,
+    "deploy_stalled must sit after unreported and before behind");
+});
+
+// ── deploy_stalled (jpf-w1 D6/D7): the queued-age alarm, client side ────────
+
+test("jpf-w1: a 5-minute unclaimed queued deploy is deploy_stalled — warn, attention, age named", () => {
+  const live = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  const stalled = { ...live, queued_deploy_age_seconds: 420 };
+  assert.equal(hooks.classifyBp(stalled), "deploy_stalled");
+  assert.equal(hooks.bucketOf(stalled), "attention");
+  const s = hooks.statusOf(stalled);
+  assert.equal(s.role, "warn"); // NOT the info/blue tone "queued" would get
+  assert.equal(s.label, "Deploy stalled");
+  assert.match(s.detail, /queued 7m/i);       // the criterion: the age, named
+  assert.match(s.detail, /no builder/i);      // and the fact that makes it a problem
+});
+
+test("jpf-w1: the fence never fires on a fresh queue, a nil field, or a non-number", () => {
+  const live = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // Fresh queue (under 300s) → ok: a just-enqueued deploy is news, not an alarm.
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: 299 }), "ok");
+  // nil / absent — an older CP or nothing queued — must NEVER read as stalled.
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: null }), "ok");
+  assert.equal(hooks.classifyBp(live), "ok");
+  // A stringly-typed age is a wire bug, not a stall.
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: "420" }), "ok");
+  // Exactly the fence (>= 300, not > 300).
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: 300 }), "deploy_stalled");
+});
+
+test("jpf-w1: a sick box's stuck queue is a symptom — degraded/unreported outrank deploy_stalled", () => {
+  const stalledAge = { queued_deploy_age_seconds: 9000 };
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "offline", ...stalledAge }), "degraded");
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: null, ...stalledAge }), "unreported");
+  // …and a stalled box that is ALSO behind reads stalled: someone asked for
+  // this deploy and nobody is building it, which beats passive update drift.
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind", ...stalledAge }), "deploy_stalled");
 });
 
 // ── esc: the HTML-injection shield used by every renderer ───────────────────
@@ -3670,7 +3783,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
   // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
   // most severe state. The enum is pinned, and every member has an explicit arm.
   const KINDS = ["removal_failed", "failed", "suspended", "degraded", "unreported",
-    "behind", "removing", "provisioning", "ok"];
+    "deploy_stalled", "behind", "removing", "provisioning", "ok"];
   assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
     "a new fleet state was added without a statusOf arm (or one was removed)");
   const REP = {
@@ -3679,6 +3792,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
     unreported: { host: "h", last_seen_at: null },
+    deploy_stalled: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", queued_deploy_age_seconds: 420 },
     behind: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
     removing: { deprovision_status: "pending" },
     provisioning: {},
@@ -13784,7 +13898,7 @@ test("overviewSubline: the triage sentence reads the truth (0 / 1 / N attention)
 });
 
 test("overviewHeadChipsHtml: attention always, in-flight only when >0 (pulsing), healthy, + slots slot", () => {
-  const withFlight = hooks.overviewHeadChipsHtml({ attention: 2, inflight: 1, healthy: 4 });
+  const withFlight = hooks.overviewHeadChipsHtml({ attention: 2, "in-flight": 1, healthy: 4 });
   assert.match(withFlight, /ov-chip--attention/);
   assert.match(withFlight, /2 needs attention/);
   assert.match(withFlight, /ov-chip--inflight/);
@@ -13793,7 +13907,7 @@ test("overviewHeadChipsHtml: attention always, in-flight only when >0 (pulsing),
   assert.match(withFlight, /ov-chip--healthy/);
   assert.match(withFlight, /4 healthy/);
   assert.match(withFlight, /id="overview-slots"/);
-  const noFlight = hooks.overviewHeadChipsHtml({ attention: 0, inflight: 0, healthy: 2 });
+  const noFlight = hooks.overviewHeadChipsHtml({ attention: 0, "in-flight": 0, healthy: 2 });
   assert.doesNotMatch(noFlight, /ov-chip--inflight/); // conditional
   assert.match(noFlight, /0 needs attention/); // amber chip always present
 });
