@@ -1508,10 +1508,40 @@ section "14b. EXCLUSION LOSS — the DECISION LEDGER gets the same pair: the mer
 # strongest form of "cannot render": no sampling window anywhere can restore it.
 SEEDX="$TMP/seeded-base.json"
 SEEDNAME="Ghost ceiling (blocking) — no workflow publishes this name"
-jq --arg c "$SEEDNAME" \
-   '.exclusions += [{context: $c, reason: "SEEDED BY THE TEST SUITE: a hand-added decision row whose name no workflow publishes, so no sample can ever re-derive it"}]' \
+# THE SECOND SEED IS SYNTHETIC FOR THE SAME REASON (hg: §14b was half-synthetic).
+# The PULL_REQUEST-ONLY half of the distinction used to be keyed to a REAL
+# workflow trigger shape (go-format.yml was the repo's only pull_request-only
+# specimen carrying an excluded context), so the CORRECT act of adding a push
+# arm to that workflow would red this section with a message naming neither the
+# workflow nor the reason. The seed row below pairs with a synthetic
+# pull_request-only WORKFLOW in a copied workflows dir, so the proof survives
+# any trigger edit to any real workflow — exactly the principle already stated
+# for the ghost seed.
+PRSEEDNAME="Seeded PR-only ceiling (blocking) — published against merge refs only"
+jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" \
+   '.exclusions += [
+      {context: $c,  reason: "SEEDED BY THE TEST SUITE: a hand-added decision row whose name no workflow publishes, so no sample can ever re-derive it"},
+      {context: $pr, reason: "SEEDED BY THE TEST SUITE: a decision row whose job exists only in a synthetic pull_request-only workflow, so it can never render on a branch head"}
+    ]' \
    "$SPEC" > "$SEEDX"
-SEEDARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
+# The synthetic workflows dir: every real workflow, plus ONE pull_request-only
+# workflow publishing the PR-only seed name. Used by §14b alone.
+mkdir -p "$TMP/workflows-14b"
+cp "$REPO_ROOT/.github/workflows"/*.yml "$TMP/workflows-14b/" 2>/dev/null || true
+cat >"$TMP/workflows-14b/zz-seeded-pr-only.yml" <<EOF
+name: zz-seeded-pr-only
+on:
+  pull_request:
+    paths:
+      - "zz-seeded-nonexistent-path/**"
+jobs:
+  seeded:
+    name: "$PRSEEDNAME"
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+EOF
+SEEDARGS=(--workflows "$TMP/workflows-14b" --fixture-dir "$FIXP"
           --merge-base "$SEEDX" --sha e34031104 --sha f69cfb1f6)
 
 X14_OUT="$(bash "$GEN" "${SEEDARGS[@]}" --expect-unrendered "Elixir gate" \
@@ -1524,13 +1554,21 @@ if [ "$X14_RC" -eq 1 ] \
 else
   bad "the exclusion loss was not refused (exit $X14_RC): $(grep -E 'EXCLUSION LOSS|LOST' <<<"$X14_OUT" | head -3)"
 fi
-if grep -qF "no job in" <<<"$X14_OUT" && grep -qF "PULL_REQUEST-ONLY" <<<"$X14_OUT"; then
-  ok "…and it says WHICH kind of absence each row is, so the operator's next move is not a guess"
+# The DISTINCTION, each half keyed to ITS OWN synthetic seed row's line — never
+# to a real workflow's trigger shape, which a correct edit is allowed to change.
+if grep -F "LOST  $SEEDNAME" <<<"$X14_OUT" | grep -qF "no job in"; then
+  ok "…the deleted-job absence is named ON the ghost row itself (no job in …)"
 else
-  bad "the exclusion refusal did not distinguish a deleted job from a pull_request-only one"
+  bad "the ghost row did not carry the deleted-job hint: $(grep -F "LOST  $SEEDNAME" <<<"$X14_OUT")"
+fi
+if grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT" | grep -qF "PULL_REQUEST-ONLY"; then
+  ok "…and the pull_request-only absence is named ON the seeded PR-only row — keyed to the synthetic workflow, so adding a push arm to any REAL workflow cannot red this"
+else
+  bad "the seeded PR-only row did not carry the PULL_REQUEST-ONLY hint: $(grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT")"
 fi
 
 bash "$GEN" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
+  --expect-unrendered "$PRSEEDNAME" \
   --out "$TMP/seeded-spec.json" >/dev/null 2>&1 || true
 if jq -e --arg c "$SEEDNAME" '[.exclusions[].context] | index($c)' "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and once acknowledged the seeded row SURVIVES the regeneration (the merge carries what the sample cannot see)"
@@ -1542,7 +1580,7 @@ if jq -e --slurpfile base "$SEEDX" \
      '[.exclusions[].context] as $out
       | ($base[0].exclusions | map(.context) | map(. as $c | $out | index($c) != null) | all)' \
      "$TMP/seeded-spec.json" >/dev/null 2>&1; then
-  ok "…and EVERY committed exclusion context survives, 'gofmt drift ceiling (blocking)' included (26 in, 26 out)"
+  ok "…and EVERY committed exclusion context survives, 'gofmt drift ceiling (blocking)' included (set inclusion over the whole seeded base)"
 else
   bad "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)"
 fi
@@ -1569,6 +1607,7 @@ else
   bad "the exclusion-union mutation did not apply — the expression moved, so the proof below is vacuous"
 fi
 bash "$NOUNION" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
+  --expect-unrendered "$PRSEEDNAME" \
   --out "$TMP/nounion-spec.json" >/dev/null 2>&1 || true
 if jq -e --arg c "$SEEDNAME" \
      '([.exclusions[].context] | index($c) | not) and (.exclusions | length < 20)' \
