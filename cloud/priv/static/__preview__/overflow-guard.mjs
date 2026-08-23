@@ -376,13 +376,23 @@ const BAND_WIDTHS = [721, 768, 769, 790, 830, 860, 899, 900, 1024];
 // the single #view-instance section.
 const INST = "5b2c1e00-0000-4000-8000-0000000000a1";
 const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
+// `rail` is the MEASURED per-route expectation for `.detail-rail .status-pill`
+// (cchi-w23-bl-plural-layer-second-order-refusals): driven at 900/light, the two
+// site routes render exactly one railed pill each — 2 routes x 9 widths x 2
+// themes = the 36 the count line used to print unexplained — and the other FOUR
+// are ZERO for structural reasons named here, not skipped: instance-detail's
+// rail hosts the domain checklist and health rows, no status pill; the timeline
+// and metrics TABS render #instance-tabpanel with no rail at all; #fleet is a
+// table, railless by design. A named-zero route that STARTS rendering pills
+// reds below (the exemption must be re-derived), and an expected-pill route
+// that renders zero reds too — in both directions, per cell.
 const BAND_ROUTES = [
-  { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", tab: "Overview", ready: ".detail-grid--instance" },
-  { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", tab: "Timeline", ready: "#instance-tabpanel" },
-  { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", tab: "Metrics", ready: "#instance-tabpanel" },
-  { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid" },
-  { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid" },
-  { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", tab: null, ready: ".fleet-row" },
+  { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", tab: "Overview", ready: ".detail-grid--instance", rail: false },
+  { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", tab: "Timeline", ready: "#instance-tabpanel", rail: false },
+  { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", tab: "Metrics", ready: "#instance-tabpanel", rail: false },
+  { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid", rail: true },
+  { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid", rail: true },
+  { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", tab: null, ready: ".fleet-row", rail: false },
 ];
 
 // W14-S3 RETIRED THE ONE PIN THIS LEG USED TO CARRY. #fleet's 21px overhang at
@@ -1408,7 +1418,7 @@ async function main() {
               // horizontal one and can invent the vertical one.
               `var rp=[].slice.call(document.querySelectorAll('.detail-rail .status-pill')).map(function(p){` +
               `  var pr=p.getBoundingClientRect(); var l=p.querySelector('.status-pill-label');` +
-              `  return {sw:p.scrollWidth,cw:p.clientWidth,sh:p.scrollHeight,ch:p.clientHeight,` +
+              `  return {hasL:!!l,sw:p.scrollWidth,cw:p.clientWidth,sh:p.scrollHeight,ch:p.clientHeight,` +
               `    lh:l?+l.getBoundingClientRect().height.toFixed(2):0,ph:+pr.height.toFixed(2),` +
               `    lsw:l?l.scrollWidth:0,lcw:l?l.clientWidth:0,t:(p.textContent||'').slice(0,40)};});` +
               `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none', rp:rp,` +
@@ -1430,10 +1440,25 @@ async function main() {
               offenders++;
               fail(D, `${r.name}/${theme}@${width}: scrollWidth ${m.sw} > viewport ${m.cw} — ${over}px of the page is off-screen at rest, with no cue`);
             }
+            // (3a) THE RAIL EXPECTATION, both directions per cell (cchi-w23).
+            // A sub-read that silently skips is the second-order vacuity D264
+            // measured: renaming the label template left this leg green with
+            // byte-identical output.
+            if (r.rail && m.rp.length === 0) {
+              fail(D, `${r.name}/${theme}@${width}: zero .detail-rail .status-pill on a route measured to render one — the railed pill is gone (renamed?), so every pill metric below measured nothing here`);
+            }
+            if (!r.rail && m.rp.length > 0) {
+              fail(D, `${r.name}/${theme}@${width}: ${m.rp.length} .detail-rail .status-pill on a route named ZERO-RAIL in BAND_ROUTES — the exemption is stale; re-derive the per-route expectations instead of letting a new pill ride an old zero`);
+            }
             // (3) THE RAIL'S PILLS — element geometry, both axes. Counted
             // separately from `cells` so this leg's 108/108 stays 108/108.
             for (const p of m.rp) {
               railPills++;
+              if (!p.hasL) {
+                railBad++;
+                fail(D, `${r.name}/${theme}@${width} .detail-rail .status-pill: renders NO .status-pill-label — the label sub-host is gone (renamed?), and every label metric on this pill measured nothing. This is not a pass.`);
+                continue;
+              }
               if (p.sw > p.cw) {
                 railBad++;
                 fail(D, `${r.name}/${theme}@${width} .detail-rail .status-pill: scrollWidth ${p.sw} > clientWidth ${p.cw} — ${Math.round((1 - p.cw / p.sw) * 100)}% of "${p.t}" renders OUTSIDE its own chip (the label declares no overflow, so it is painted, not clipped) and the page never scrolls, which is why every page-level leg above walks past it`);
@@ -1463,7 +1488,10 @@ async function main() {
       }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
-          `${railPills} .detail-rail .status-pill(s) measured on both axes, ${railBad} outside their own chip`,
+          `${railPills} .detail-rail .status-pill(s) measured on both axes (every one carrying its ` +
+          `.status-pill-label — a labelless pill reds), ${railBad} outside their own chip; ` +
+          `rail expectation asserted BOTH directions per cell: ${BAND_ROUTES.filter((r) => r.rail).map((r) => r.name).join("+")} ` +
+          `must render pills, ${BAND_ROUTES.filter((r) => !r.rail).map((r) => r.name).join("/")} are named ZERO-RAIL with reasons at BAND_ROUTES`,
         );
         okLine(
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
@@ -2448,6 +2476,7 @@ async function main() {
         ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT)\n`,
       );
       let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0, foreignRows = 0;
+      const subTotals = { name: 0, url: 0, meta: 0, pills: 0, details: 0, badges: 0 };
       const knownSeen = new Set();
       for (const scen of FLEET_SCENS) {
         for (const theme of ["light", "dark"]) {
@@ -2466,7 +2495,8 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var sels=${JSON.stringify(FLEET_TEXT_SELS)};` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,docRows:document.querySelectorAll('.fleet-row').length,clips:[],ell:[],sq:[],tall:[]};` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,docRows:document.querySelectorAll('.fleet-row').length,clips:[],ell:[],sq:[],tall:[],sc:{},pills:0,details:0,badges:0};` +
+              `sels.forEach(function(s){out.sc[s]=0;});` +
               // cch-w24-s5 — THE WALK IS SCOPED TO THE VIEW IT JUST COMPUTED.
               // It used to compute `v` and then iterate `document.querySelectorAll`,
               // using the scope only to LABEL the output. `.fleet-row` is a
@@ -2483,9 +2513,11 @@ async function main() {
               // harness, not of the leg.
               `[].slice.call(v?v.querySelectorAll('.fleet-row'):[]).forEach(function(r,i){out.rows++;` +
               `  sels.forEach(function(s){var e=r.querySelector(s); if(!e) return;` +
+              `    out.sc[s]++;` +
               `    if(e.scrollWidth>e.clientWidth) out.clips.push({i:i,s:s,sw:e.scrollWidth,cw:e.clientWidth,t:(e.textContent||'').slice(0,32)});});` +
               `  var p=r.querySelector('.status-pill-detail');` +
-              `  if(p&&p.scrollWidth>p.clientWidth) out.ell.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').slice(0,40)});` +
+              `  if(p){out.details++;` +
+              `  if(p.scrollWidth>p.clientWidth) out.ell.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').slice(0,40)});}` +
               // W16-S3 (d): IS THE CHIP TALL ENOUGH FOR ITS OWN TEXT. The first
       // VERTICAL question any instrument in __preview__ has ever asked. The
       // remedy for (b) is a WRAP, and a wrap without `height: auto` scores
@@ -2493,13 +2525,14 @@ async function main() {
       // a 24px chip and the second line paints BELOW the capsule — invisible
       // to a scrollWidth-only scorer, which is what every leg in this file was.
       `  var pl=r.querySelector('.status-pill');` +
-      `  if(pl){var plr=pl.getBoundingClientRect();` +
+      `  if(pl){out.pills++;var plr=pl.getBoundingClientRect();` +
       `    if(pl.scrollHeight>pl.clientHeight) out.tall.push({i:i,k:'chip',sh:pl.scrollHeight,ch:pl.clientHeight,t:(pl.textContent||'').slice(0,40)});` +
       `    [].slice.call(pl.children).forEach(function(c){var cr=c.getBoundingClientRect();` +
       `      if(cr.height>plr.height+0.5) out.tall.push({i:i,k:c.className,sh:+cr.height.toFixed(2),ch:+plr.height.toFixed(2),t:(c.textContent||'').slice(0,40)});});}` +
       `  var b=r.querySelector('.fleet-badges');` +
-              `  if(b&&b.scrollWidth>0&&b.getBoundingClientRect().width+0.5<b.scrollWidth)` +
-              `    out.sq.push({i:i,w:+b.getBoundingClientRect().width.toFixed(2),sw:b.scrollWidth});});` +
+              `  if(b){out.badges++;` +
+              `  if(b.scrollWidth>0&&b.getBoundingClientRect().width+0.5<b.scrollWidth)` +
+              `    out.sq.push({i:i,w:+b.getBoundingClientRect().width.toFixed(2),sw:b.scrollWidth});}});` +
               `return out;})()`,
             );
             cells++;
@@ -2513,6 +2546,29 @@ async function main() {
             // renders zero rows would score 0 clips and read as a pass.
             if (m.rows === 0) fail(D, `${scen}/${theme}@${width}: zero .fleet-row rendered IN THE VISIBLE VIEW — nothing was measured, this is not a pass`);
             rowsSeen += m.rows;
+            // PER-CELL SUB-HOST FLOORS (cchi-w23-bl-plural-layer-second-order-
+            // refusals / D264): the sub-reads above silently skip a missing
+            // host, so renaming ONE emitting template left this leg rc 0 with
+            // byte-identical output. MEASURED on the committed corpus: every
+            // fleet row carries every sub-host (mixed-fleet 5/5, cruel 3/3 for
+            // name/url/meta/pill/detail/badges), so a zero in any of these
+            // columns while rows render is a vanished population, never a
+            // legitimate emptiness. `.fleet-meta` is the one that CAN go empty
+            // legitimately — fleetMetaHtml (app.js) returns "" for a bp with
+            // no region/server_type/version/channel/autoupdate/verify text —
+            // so its floor is a ZERO-TOTAL per cell, and the per-sel counts
+            // are printed on the ok-line so a partial drop reads as a number,
+            // not silence.
+            if (m.rows > 0) {
+              for (const sel of FLEET_TEXT_SELS) {
+                if (m.sc[sel] === 0) fail(D, `${scen}/${theme}@${width}: ${m.rows} fleet rows and ZERO carry ${sel} — the sub-host is gone (renamed?), and every ${sel} clip metric measured nothing. This is not a pass.`);
+              }
+              if (m.pills === 0) fail(D, `${scen}/${theme}@${width}: ${m.rows} fleet rows and ZERO carry .status-pill — the chip sub-host is gone, its height metrics measured nothing`);
+              if (m.details === 0) fail(D, `${scen}/${theme}@${width}: ${m.rows} fleet rows and ZERO carry .status-pill-detail — the money-message sub-host is gone, the GR116 metric measured nothing`);
+              if (m.badges === 0) fail(D, `${scen}/${theme}@${width}: ${m.rows} fleet rows and ZERO carry .fleet-badges — the badge-column sub-host is gone, the squeeze metric measured nothing`);
+            }
+            subTotals.name += m.sc[".fleet-name"]; subTotals.url += m.sc[".fleet-url"]; subTotals.meta += m.sc[".fleet-meta"];
+            subTotals.pills += m.pills; subTotals.details += m.details; subTotals.badges += m.badges;
             // cch-w24-s5 — the rows the walk REFUSED, counted and named rather
             // than silently dropped: a scope that cannot report what it excluded
             // is indistinguishable from a scope that excluded nothing.
@@ -2566,7 +2622,8 @@ async function main() {
       }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
-          `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured IN THE VISIBLE VIEW, ` +
+          `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured IN THE VISIBLE VIEW — sub-hosts COUNTED, zero refused per cell: ` +
+          `${subTotals.name} name / ${subTotals.url} url / ${subTotals.meta} meta / ${subTotals.pills} pill / ${subTotals.details} detail / ${subTotals.badges} badges, ` +
           `${foreignRows} .fleet-row(s) elsewhere in the document refused, ${knownSeen.size} known-row cells itemised: ${FLEET_KNOWN.map((k) => k.row).join(", ") || "none"}) across ` +
           `${FLEET_WIDTHS.join("/")}; ${clipped} clipped text cells, ${ellipsed} ellipsed money ` +
           `messages, ${squeezed} squeezed badge columns, ${overflowed} chips shorter than their own text, ` +
@@ -4008,7 +4065,7 @@ async function main() {
         `\n${D} — ${HEAD_SCENS.length} scenarios x ${HEAD_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells; #instance/<id> page overflow + EVERY .copy-btn's right edge)\n`,
       );
-      let cells = 0, copiesSeen = 0, offscreen = 0, pageOver = 0;
+      let cells = 0, copiesSeen = 0, offscreen = 0, pageOver = 0, tabsSeen = 0;
       for (const scen of HEAD_SCENS) {
         for (const theme of ["light", "dark"]) {
           // Enter at 900 — ABOVE the band — and pin the hash: `?scen=` alone
@@ -4037,7 +4094,8 @@ async function main() {
               `});` +
               // The containment claim, measured rather than assumed: any strip
               // wider than its own box must own a non-visible overflow-x.
-              `[].slice.call(document.querySelectorAll('.inst-tabs')).forEach(function(s){` +
+              `out.tabs=0;` +
+              `[].slice.call(document.querySelectorAll('.inst-tabs')).forEach(function(s){out.tabs++;` +
               `  if(s.scrollWidth>s.clientWidth) out.strips.push({ox:getComputedStyle(s).overflowX,sw:s.scrollWidth,cw:s.clientWidth});` +
               `});` +
               `return out;})()`,
@@ -4058,6 +4116,17 @@ async function main() {
               continue;
             }
             copiesSeen += m.copies;
+            // THE STRIP MUST EXIST (cchi-w23 / D264): the containment claim
+            // below is a forEach over .inst-tabs — renaming the sole emitting
+            // template (<nav class="inst-tabs">, app.js renderInstance nav)
+            // left this leg rc 0 with byte-identical output, its own ok-line
+            // still claiming per-cell containment for a selector matching
+            // NOTHING. Zero strips on the instance workspace is a vanished
+            // population, refused per cell.
+            if (m.tabs === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero .inst-tabs in the DOM — the tab strip is gone (renamed?), so the containment claim below has no subject. This is not a pass.`);
+            }
+            tabsSeen += m.tabs;
             // (1) THE PAGE. Strict equality: a viewport-sized page is the whole
             // claim, and `>=` would tolerate the 22px this leg exists for.
             if (m.psw !== m.pcw) {
@@ -4088,7 +4157,8 @@ async function main() {
           `it replaced. The band is 320-ONLY: 360-620 are the no-regression control, not padding`,
         );
         okLine(
-          `\`a.inst-tab\` at 360-390 is NOT suppressed here — .inst-tabs computes overflow-x:auto, so the strip ` +
+          `${tabsSeen} .inst-tabs strip(s) COUNTED across the cells (zero per cell refused — the containment ` +
+          `claim has a measured subject): \`a.inst-tab\` at 360-390 is NOT suppressed here — .inst-tabs computes overflow-x:auto, so the strip ` +
           `scrolls itself and never moves documentElement.scrollWidth; that containment is asserted per cell ` +
           `(a strip that ever computed overflow-x:visible reds) instead of being allowlisted away`,
         );
