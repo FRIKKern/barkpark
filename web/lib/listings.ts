@@ -6,6 +6,7 @@ import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { SAMPLE_LISTINGS, type Listing } from "@/lib/listings-data";
 import { paperTags, type PaperTag } from "@/lib/paper-tags";
+import { collectAllPages } from "@/lib/paginate";
 
 /**
  * The data layer for the listing-directory landing — the map's source of pins.
@@ -35,8 +36,16 @@ const API_URL = PUBLIC_API_URL;
 const LISTINGS_TYPE = process.env.LISTINGS_TYPE || "";
 
 /** Cap on rows pulled from the source — a directory map wants every pin, but a
- * sane ceiling keeps one runaway dataset from blowing the payload. */
+ * sane ceiling keeps one runaway dataset from blowing the payload. Used as the
+ * PER-PAGE size for the offset walk below (task-269eefbe4864d8a5): this used
+ * to be the only page fetched, so a corpus over `LISTINGS_LIMIT` silently lost
+ * pins with no error signal — latent while `LISTINGS_TYPE` is unset, but real
+ * the moment a deployment turns this source on against a corpus that size. */
 const LISTINGS_LIMIT = Number(process.env.LISTINGS_LIMIT) || 500;
+/** Bounds the walk so a misbehaving upstream that never serves a short page
+ * can't spin it forever — mirrors PAPERS_MAX_PAGES / POSTS_MAX_PAGES
+ * (lib/papers.ts, lib/posts.ts) and apps/hundesteder/lib/paginate.ts. */
+const LISTINGS_MAX_PAGES = 20;
 
 export type { Listing };
 
@@ -132,12 +141,17 @@ function normalizeListing(raw: unknown): Listing | null {
 
 /* ── upstream fetch ─────────────────────────────────────────────────────── */
 
-/** Raw, uncached query for published listings of `LISTINGS_TYPE`. Caching is
- * layered above by `cachedListings`. Only called when `LISTINGS_TYPE` is set. */
-async function rawListings(): Promise<Listing[]> {
+/** Fetch one page of published listings of `LISTINGS_TYPE`. Returns null on a
+ * failed fetch (the `collectAllPages` "page failed" signal) rather than
+ * throwing, EXCEPT the first page — see `rawListings` for why. */
+async function fetchListingsPage(
+  limit: number,
+  offset: number,
+): Promise<unknown[]> {
   const qs = new URLSearchParams({
     "filter[status]": "published",
-    limit: String(LISTINGS_LIMIT),
+    limit: String(limit),
+    offset: String(offset),
   });
   const url = `${API_URL}/v1/data/query/${encodeURIComponent(DATASET)}/${encodeURIComponent(
     LISTINGS_TYPE,
@@ -155,13 +169,42 @@ async function rawListings(): Promise<Listing[]> {
 
   // Accept both the query envelope (`{ result: { documents } }`) and a bare
   // array, so the seam survives a minor API shape drift.
-  const docs = Array.isArray(json)
+  return Array.isArray(json)
     ? json
     : (((json as { result?: { documents?: unknown[] } })?.result?.documents ??
         (json as { documents?: unknown[] })?.documents) ||
       []);
+}
 
-  return docs
+/** Raw, uncached query for published listings of `LISTINGS_TYPE`, walked page
+ * by page until a short page terminates (task-269eefbe4864d8a5 — this used to
+ * be a single `limit=LISTINGS_LIMIT` query that silently truncated past that
+ * many rows). Caching is layered above by `cachedListings`. Only called when
+ * `LISTINGS_TYPE` is set. */
+async function rawListings(): Promise<Listing[]> {
+  const { rows, truncated } = await collectAllPages(
+    async (limit, offset) => {
+      try {
+        return await fetchListingsPage(limit, offset);
+      } catch (err) {
+        // A first-page failure keeps the PRE-EXISTING behaviour: this used to
+        // be the only query issued, so its rejection propagated to
+        // `fetchListings`'s try/catch (degrade to SAMPLE_LISTINGS). A later
+        // page failing mid-walk is new territory the walk now recovers from.
+        if (offset === 0) throw err;
+        return null;
+      }
+    },
+    { limit: LISTINGS_LIMIT, maxPages: LISTINGS_MAX_PAGES },
+  );
+  if (truncated !== undefined) {
+    console.warn(
+      `[listings] PAGINATION COULD NOT TERMINATE CLEANLY (${truncated}) — ` +
+        `returning the ${rows.length} listings collected so far`,
+    );
+  }
+
+  return rows
     .map(normalizeListing)
     .filter((l): l is Listing => l !== null);
 }

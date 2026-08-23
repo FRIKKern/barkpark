@@ -6,6 +6,7 @@ import {
 import type { Paper, BarkparkTypeMap } from "./barkpark.types";
 import { inlineText } from "./find.ts";
 import type { PaperTag } from "./paper-tags.ts";
+import { collectAllPages } from "./paginate.ts";
 
 /**
  * Inline content node (PortableDoc). Mirrors `Barkpark.PortableDoc.Render`'s
@@ -114,17 +115,57 @@ export function paperExcerpt(paper: PaperDocument): string | null {
   return text.length > 0 ? text : null;
 }
 
-/** Listing query — papers, newest first. Scope rides on the client. */
+// Pagination bounds (task-269eefbe4864d8a5): a bare `.limit(50).find()` used
+// to ride the server's default page and silently truncate at 50 papers — the
+// `docs` dataset carries 118 in prod today, so 68 were dropped from every
+// consumer (the /papers listing, sitemap.xml, feed.xml). 1000/page (the
+// server's own clamp — js/packages/core's `DocsBuilder.limit` docs) x 20
+// pages = 20k papers, far beyond any plausible corpus; the cap exists so an
+// upstream that never serves a short page can't spin the walk forever, and
+// hitting it is reported out loud, never absorbed. Mirrors
+// apps/hundesteder/lib/paginate.ts (PR #13316), the second instance of this
+// fix — this is the third, same shape.
+const PAPERS_PAGE_LIMIT = 1000;
+const PAPERS_MAX_PAGES = 20;
+
+/** Listing query — papers, newest first, walked page by page until a short
+ * page terminates. Scope rides on the client. */
 export async function fetchPapers(
   client: BarkparkClient,
 ): Promise<PaperDocument[]> {
   // `typedClient<BarkparkTypeMap>` narrows `docs("paper")` to the generated
   // `Paper`; cast to the demo's wider `PaperDocument` view at the boundary.
-  return typedClient<BarkparkTypeMap>(client)
-    .docs("paper")
-    .order("_updatedAt:desc")
-    .limit(50)
-    .find() as Promise<PaperDocument[]>;
+  const bp = typedClient<BarkparkTypeMap>(client);
+  const { rows, truncated } = await collectAllPages(
+    async (limit, offset) => {
+      try {
+        return (await bp
+          .docs("paper")
+          .order("_updatedAt:desc")
+          .limit(limit)
+          .offset(offset)
+          .find()) as unknown[];
+      } catch (err) {
+        // A first-page failure keeps the PRE-EXISTING behaviour: this used to
+        // be the only query issued, so its rejection propagated to the
+        // caller (papers/page.tsx, sitemap.ts, feed.xml/route.ts all already
+        // wrap fetchPapers in try/catch). A later page failing mid-walk is
+        // new territory the walk now recovers from — degrade to null so
+        // collectAllPages returns the rows already collected, flagged.
+        if (offset === 0) throw err;
+        return null;
+      }
+    },
+    { limit: PAPERS_PAGE_LIMIT, maxPages: PAPERS_MAX_PAGES },
+  );
+  if (truncated !== undefined) {
+    // Partial truth, said out loud — never a silent shrink of the corpus.
+    console.warn(
+      `[papers] PAGINATION COULD NOT TERMINATE CLEANLY (${truncated}) — ` +
+        `returning the ${rows.length} papers collected so far`,
+    );
+  }
+  return rows as PaperDocument[];
 }
 
 /** Single paper by slug (or id) — same fallback shape as posts. */
