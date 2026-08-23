@@ -73,7 +73,8 @@ async function MapFinderLanding() {
 
 /** The default Barkpark docs demo: an interactive graph of the docs corpus. */
 async function GraphFinderLanding() {
-  const { nodes, edges, rootId } = await fetchCorpusGraph();
+  const { nodes, edges, rootId, truncated, truncationReason } =
+    await fetchCorpusGraph();
 
   return (
     <>
@@ -85,7 +86,13 @@ async function GraphFinderLanding() {
           execute it on phones where nothing is shown. */}
       <div className="hidden h-full w-full md:block">
         <DesktopOnly>
-          <GraphLanding nodes={nodes} edges={edges} rootId={rootId} />
+          <GraphLanding
+            nodes={nodes}
+            edges={edges}
+            rootId={rootId}
+            truncated={truncated}
+            truncationReason={truncationReason}
+          />
         </DesktopOnly>
       </div>
 

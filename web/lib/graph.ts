@@ -4,6 +4,7 @@ import { DATASET } from "@/lib/config";
 import { bpAll } from "@/lib/bp-tags";
 import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
+import { readTruncation } from "@/lib/graph-truncation";
 
 /**
  * The corpus graph for the landing — the one place that talks to Barkpark's
@@ -66,6 +67,16 @@ export interface CorpusGraph {
   edges: GraphEdge[];
   /** Highest-degree node id (PREFERRED_ROOT wins when present), or null. */
   rootId: string | null;
+  /** The server cut the corpus at one of its ceilings, so `nodes` is a SUBSET
+   * of the real corpus. Carried out of the upstream payload (which has emitted
+   * it all along) instead of discarded — the landing has to be able to say the
+   * graph is partial. `false` here really does mean "complete". */
+  truncated: boolean;
+  /** Which ceiling fired — "per_type_cap" | "node_budget" |
+   * "per_type_cap+node_budget", per `TasksController.graph_truncation_reason/2`.
+   * Null when `truncated` is false, or when the server declared a truncation
+   * without naming its cause. */
+  truncationReason: string | null;
 }
 
 /* ── upstream parsing ───────────────────────────────────────────────────── */
@@ -73,6 +84,11 @@ export interface CorpusGraph {
 interface UpstreamGraph {
   nodes?: unknown[];
   edges?: unknown[];
+  /** `GET /v1/graph` has emitted this pair since the server-honesty fix; this
+   * module used to declare neither and drop both. See `lib/graph-truncation.ts`
+   * for the reading law (a reason without the flag is discarded). */
+  truncated?: unknown;
+  truncation_reason?: unknown;
 }
 
 function str(v: unknown): string | undefined {
@@ -175,7 +191,11 @@ async function rawCorpusGraph(): Promise<CorpusGraph> {
     .map(normalizeEdge)
     .filter((e): e is GraphEdge => e !== null && ids.has(e.from_id) && ids.has(e.to_id));
 
-  return { nodes, edges, rootId: computeRootId(nodes, edges) };
+  // The truncation pair the endpoint has been emitting all along. Read under
+  // `graph-truncation.ts`'s law rather than trusted verbatim.
+  const { truncated, truncationReason } = readTruncation(json);
+
+  return { nodes, edges, rootId: computeRootId(nodes, edges), truncated, truncationReason };
 }
 
 /** Cached variant — 5-min revalidate, tagged GRAPH_TAG + the dataset `_all`
@@ -201,6 +221,12 @@ export async function fetchCorpusGraph(): Promise<CorpusGraph> {
     // revalidation re-populates from the live API once it's healthy.
     return await rawCorpusGraph();
   } catch {
-    return { nodes: [], edges: [], rootId: null };
+    // An UNREADABLE corpus is not a TRUNCATED one: we learned nothing about
+    // ceilings, so claiming a partial graph here would be a fabricated
+    // diagnosis. `truncated: false` is the honest value for "no information".
+    // (Naming WHICH upstream condition emptied the graph is a separate,
+    // separately-filed concern — see the search-starter fork's
+    // `CorpusUnavailableError`; this module still degrades silently by design.)
+    return { nodes: [], edges: [], rootId: null, truncated: false, truncationReason: null };
   }
 }

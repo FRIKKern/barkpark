@@ -5,11 +5,20 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { GraphView } from "@/components/graph-view";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
+import { truncationNotice } from "@/lib/graph-truncation";
 
 export interface GraphLandingProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
   rootId?: string | null;
+  /** The server cut the corpus at one of its ceilings (`truncated` on the
+   * `/v1/graph` payload — see `lib/graph.ts`). Drives the visible partial-graph
+   * notice below; absent/false claims nothing, so a complete corpus stays
+   * quiet. */
+  truncated?: boolean;
+  /** Upstream `truncation_reason`. Rendered as VISIBLE copy, not a tooltip:
+   * see `lib/graph-truncation.ts`. */
+  truncationReason?: string | null;
 }
 
 /**
@@ -23,13 +32,23 @@ export interface GraphLandingProps {
  * The renderer owns its own search box + hover hop-cascade; we only translate a
  * node click into a route push and skip phantom (document-less) nodes.
  */
-export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps) {
+export function GraphLanding({
+  nodes,
+  edges,
+  rootId = null,
+  truncated = false,
+  truncationReason = null,
+}: GraphLandingProps) {
   const router = useRouter();
   const sp = useSearchParams();
   const { hoveredId, setHoveredId } = useHoveredDoc();
   // The finder's visible result set drives which nodes the graph keeps lit, and
   // how strongly (by search rank).
   const { matches } = useGraphMatches();
+
+  // Null on a complete corpus — the notice below renders only when the server
+  // actually said it cut something, so there is no false-partial noise.
+  const notice = truncationNotice(truncated, truncationReason);
 
   const onNodeClick = useCallback(
     (node: GraphNode) => {
@@ -65,6 +84,14 @@ export function GraphLanding({ nodes, edges, rootId = null }: GraphLandingProps)
             ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} from your search · brightest = best · click to read`
             : "Search on the left to filter · click a node to read it"}
         </p>
+        {notice ? (
+          <p
+            data-testid="graph-truncation-notice"
+            className="mt-1 text-[0.7rem] leading-relaxed text-amber-400/90"
+          >
+            {notice}
+          </p>
+        ) : null}
       </div>
 
       <GraphView
