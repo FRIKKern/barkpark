@@ -4208,6 +4208,33 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w37-bl-operator-retry-click-undriven — THE RECOVERY TWIN. The sibling
+  // above proves the failed BODY renders and carries #operator-me-retry; nothing
+  // in the repo ever CLICKED it. A regression that wires the listener to the
+  // wrong node, drops the .then, or re-enters the loader on a SUCCESSFUL read
+  // (painting twice and issuing the four operator reads twice) passed every gate.
+  //
+  // ONE-SHOT, NOT STICKY: `times: 1` fails the boot read and then heals, so the
+  // retry's re-read LANDS and the operator shell must paint. The row filed this
+  // exhaustible form as "does not exist yet and is the actual work" — it exists,
+  // built by cchi-w39-bl-mefault-must-be-exhaustible (route()'s per-boot state
+  // bag, two waves after this row was written), and `billing-me-recovers` has
+  // consumed it since. This fixture mints no mechanism; it points the existing
+  // one at the operator surface, whose recovery arm is the one with the double-
+  // read hazard the billing twin does not have.
+  "operator-me-recovers": {
+    label: "Operator console — /v1/me 500s ONCE: the retry re-reads, the shell paints, and the four operator routes are read exactly once",
+    authed: true,
+    deepLink: "#operator",
+    data: {
+      me: operatorMe("Acme Inc"),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
 
   // ── gr-p5-account-2fa: the account modal (GR54/GR58) ──────────────────────
   // The modal is opened by a CLICK, so it is unreachable by deepLink — smoke
