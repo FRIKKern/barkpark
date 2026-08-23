@@ -817,7 +817,12 @@ async function main() {
         `(flat okLine(A, B)) or printing two legs reversed (nested okLine(A, okLine(B))). ` +
         `Re-resolve the merge at this call site by hand. First argument begins: "${String(args[0]).slice(0, 120)}"\n`,
       );
-      process.exit(2);
+      // THROW, never process.exit: a bare exit here LEAKS the static-server
+      // child (measured — a squatter on :4199 survived the first draft of this
+      // refusal and made the NEXT run refuse as a foreign tree). The tail
+      // catch routes this through die(), which tears down server + browser
+      // before exiting 2.
+      throw new Error("okLine arity refusal (keep-both merge defect) — the named call is above");
     }
     return process.stdout.write(`   ✓ ${args[0]}\n`);
   };
