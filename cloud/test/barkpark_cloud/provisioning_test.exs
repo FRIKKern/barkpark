@@ -2682,13 +2682,17 @@ defmodule BarkparkCloud.ProvisioningTest do
       {user, team} = user_with_team()
       {site, d} = wire_deployment(team)
 
-      # As the BUILDER does it: the real route, the real worker token.
+      # As the BUILDER does it: the real route, with the real credential — which
+      # since jpf-w1-builder-identity is the hosting box's own agent token, not
+      # the shared fleet worker token.
+      {:ok, builder_token, _} = Registry.mint_agent_token(site.barkpark_id, "report")
+
       conn =
         call(
           :post,
           "/v1/builder/deployments/#{d.id}/console",
           %{line: String.duplicate("x", 5_000)},
-          @worker_token
+          builder_token
         )
 
       assert conn.status == 200
