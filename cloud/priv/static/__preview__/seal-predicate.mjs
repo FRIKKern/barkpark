@@ -3,12 +3,18 @@
 // The epic is `--epic`, defaulting to the Cloud Console hardening epic. FROZEN AT
 // DECIDE (wave 7, charter D88/D89/D90) — before any builder of this wave flew.
 //
-//   exit 0 = SEAL.   exit 1 = NO SEAL.   exit 2 = INFRA FAULT.
+//   exit 0 = SEAL.   exit 1 = NO SEAL (measured).   exit 2 = INFRA FAULT.   exit 3 = REFUSED (nothing measured).
 //
-// Three exit codes, not two. The two-code shape let exit 1 mean BOTH "no seal" and
-// "a non-JSON HTTP response threw at the curl site", which is a red nobody can read;
-// `tooling/grip/seal.mjs` names this file as that prior art and ports the triad plus
-// a machine-readable `VERDICT-TOKEN:` line.
+// Four exit codes, not two — and not three. The two-code shape let exit 1 mean BOTH
+// "no seal" and "a non-JSON HTTP response threw at the curl site", which is a red
+// nobody can read; `tooling/grip/seal.mjs` names this file as that prior art and ports
+// the triad plus a machine-readable `VERDICT-TOKEN:` line. The three-code shape then
+// let exit 1 mean BOTH "no seal, measured over a real roster" and "REFUSED — an empty
+// or malformed roster, nothing measured at all" (a `Refusal`, e.g. EMPTY-ROSTER,
+// NO-SUCCESSOR, SELF-SUCCESSOR): the same ambiguity the third code was carved out to
+// remove for infra faults, left standing one split over. Exit 3 removes it: a `Refusal`
+// is not a verdict and must never share a code with one. Any consumer reading the exit
+// code alone (`scripts/seal-run.sh` is the live one) needs the update too.
 //
 // Five rounds of the PREDECESSOR epic ended in a PROSE verdict whose bar moved with
 // the reader. This file is that verdict made mechanical. Its inputs are frozen BEFORE
@@ -1594,17 +1600,28 @@ try {
   const stamp = new Date().toISOString();
   console.log(`=== SEAL PREDICATE — epic ${EPIC} ===`);
   if (e instanceof Refusal) {
-    // A refusal IS a verdict — NO SEAL — but no clause may be reported PASS: either
-    // none ran, or the one that would have passed was structurally unfailable.
+    // A refusal is NOT a verdict — nothing was measured, so nothing about SEAL or
+    // NO-SEAL is claimed. It used to exit 1, the SAME code `main()` returns for a real
+    // measured NO-SEAL, which made "checked and found wanting" and "declined to check
+    // anything (e.g. an empty roster)" indistinguishable to any caller reading the exit
+    // code alone — precisely the ambiguity this module's own `Infra` branch below exists
+    // to avoid for infra faults, and the ambiguity this module's own doctrine two lines
+    // up rejects: "a predicate that prints an honest sentence and still exits 0 is the
+    // same defect as one that lies" applies just as much to a refusal borrowing the
+    // finding's exit code. Exit 3 is its own lane — distinct from 0 (SEAL), 1 (measured
+    // NO-SEAL) and 2 (INFRA FAULT, an unexpected failure) — so `scripts/seal-run.sh` (and
+    // any other consumer reading the exit code) can tell "REFUSED — nothing measured"
+    // from a genuine measured NO-SEAL without parsing prose.
     console.log(`REFUSED at ${stamp}, ${e.stage}: ${e.message}`);
     console.log('VERDICT: NO SEAL — REFUSED');
     console.log('  Nothing was certified. This is a pre-committed outcome: a predicate that prints an');
-    console.log('  honest sentence and still exits 0 is the same defect as one that lies.');
+    console.log('  honest sentence and still exits 0 is the same defect as one that lies — and exiting');
+    console.log('  the SAME code as a genuine measured NO-SEAL is the same defect one code over.');
     // `repo=` is APPENDED AFTER `epic=` on both tokens below, never inserted before the
     // clause letters: readers (and this file's own tests) anchor on the
     // `a=… b=… c=… epic=…` run, and widening it in the middle breaks them for no gain.
     console.log(`VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=${e.code} a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=${EPIC} repo=${REPO}`);
-    code = 1;
+    code = 3;
   } else {
     console.log(`INFRA FAULT at ${stamp}: ${e instanceof Infra ? e.message : `unexpected ${e.name}: ${e.message}`}`);
     console.log('  This is NOT a verdict. Nothing was measured, so nothing is claimed — the whole point');
