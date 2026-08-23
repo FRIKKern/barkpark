@@ -6,23 +6,26 @@ defmodule BarkparkCloud.CloudflareTest do
   error branches), and the Real client's PURE request builders + fail-closed
   guards. NO DB, NO boot — mirrors `vercel_test.exs`'s pure + Fake sections.
   """
-  # async: false — this module swaps node-global env (`:barkpark_cloud,
-  # Cloudflare`, incl. `:client`). The second proven live race: while the swap
-  # is held, site_cf_deploy_test.exs drives do_bind_cloudflare/5 through
-  # `Cloudflare.client()` with no process scoping and reads
-  # `{:error, :http_client_not_configured}`. Ratchet: scripts/async_env_seam_scan.exs.
-  use ExUnit.Case, async: false
+  # async: true (hg-w1-async-seam-process-scope-followup) — this module used to
+  # swap node-global env (`:barkpark_cloud, Cloudflare`, incl. `:client`), which
+  # was a proven live race against site_cf_deploy_test.exs (drives
+  # do_bind_cloudflare/5 through `Cloudflare.client()` concurrently). Fixed at
+  # the seam, not by serialization: `put_cf_config/1` now installs the override
+  # in THIS TEST'S process dictionary via `Cloudflare.put_process_config/1`
+  # (see Cloudflare's moduledoc "Process-scoped config override"), which
+  # `Cloudflare.client()`/`configured?()` (and `Cloudflare.Real`'s own config
+  # read) check before the node-global default — invisible to every other
+  # concurrently-running test. Ratchet: scripts/async_env_seam_scan.exs.
+  use ExUnit.Case, async: true
 
   alias BarkparkCloud.Cloudflare
   alias BarkparkCloud.Cloudflare.{Fake, Real}
 
-  # Merge Cloudflare config for one test, restoring the original on exit. Config
-  # is resolved at call time, so this is all the setup a config-sensitive test
-  # needs (no DB, no boot).
+  # Merge Cloudflare config for one test, scoped to THIS test's process only —
+  # no on_exit needed, the override dies with the test process.
   defp put_cf_config(kw) do
-    base = Application.get_env(:barkpark_cloud, Cloudflare, [])
-    on_exit(fn -> Application.put_env(:barkpark_cloud, Cloudflare, base) end)
-    Application.put_env(:barkpark_cloud, Cloudflare, Keyword.merge(base, kw))
+    base = Cloudflare.resolved_config()
+    Cloudflare.put_process_config(Keyword.merge(base, kw))
   end
 
   ## Context — client selection, configured?, capabilities

@@ -16,10 +16,14 @@ defmodule BarkparkCloud.Web.RouterCloudflareRedactionTest do
   response body carries a `cf_zone_SENSITIVE_SENTINEL`, and asserts that sentinel
   NEVER appears in the client response while it DOES appear in the server log. It
   REDS on the unfixed tree (where `inspect(reason)` echoes the whole tuple,
-  sentinel and all) and GREENS with the redaction fix. `async: false` because it
-  mutates application env (the Cloudflare client + http_client) for the test.
+  sentinel and all) and GREENS with the redaction fix. `async: true`
+  (hg-w1-async-seam-process-scope-followup): the Cloudflare client + http_client
+  swap is installed in THIS TEST'S process dictionary via
+  `Cloudflare.put_process_config/1` rather than mutating node-global
+  Application env, so it is invisible to every other concurrently-running
+  test — see Cloudflare's moduledoc "Process-scoped config override".
   """
-  use BarkparkCloud.DataCase, async: false
+  use BarkparkCloud.DataCase, async: true
   import Plug.Test
   import Plug.Conn
   import ExUnit.CaptureLog
@@ -105,23 +109,14 @@ defmodule BarkparkCloud.Web.RouterCloudflareRedactionTest do
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
   # Swap the Cloudflare client to the REAL builder + an injected http_client
-  # `stub` so the first DNS write fails with a sentinel-bearing error. Restore the
-  # prior env on exit. The three stubs below drive the three distinct shapes that
-  # reach the router else arm, so both the positive arm AND the bare `_` catch-all
-  # are mutation-proven fail-closed.
+  # `stub` so the first DNS write fails with a sentinel-bearing error, scoped
+  # to THIS test's process only (no on_exit needed — see Cloudflare's
+  # moduledoc "Process-scoped config override"). The three stubs below drive
+  # the three distinct shapes that reach the router else arm, so both the
+  # positive arm AND the bare `_` catch-all are mutation-proven fail-closed.
   defp put_leaky_cloudflare(stub) do
-    prev = Application.get_env(:barkpark_cloud, Cloudflare)
-
-    on_exit(fn ->
-      if prev,
-        do: Application.put_env(:barkpark_cloud, Cloudflare, prev),
-        else: Application.delete_env(:barkpark_cloud, Cloudflare)
-    end)
-
-    Application.put_env(
-      :barkpark_cloud,
-      Cloudflare,
-      Keyword.merge(prev || [],
+    Cloudflare.put_process_config(
+      Keyword.merge(Cloudflare.resolved_config(),
         client: BarkparkCloud.Cloudflare.Real,
         http_client: stub
       )
