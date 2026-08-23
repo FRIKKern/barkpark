@@ -29,6 +29,7 @@ import (
 //     #4 as boards/rubric number them") alongside the criterion text. A 0-vs-1
 //     slip is then visible at the moment of the stamp, not only when the server
 //     409s a text mismatch.
+//
 //  2. MERGE-GATE OVERRIDE PASS-THROUGH — `--merge-gated` is now a
 //     SERVER-DECLARED flag, so the wrapper forwards it and the SERVER owns the
 //     refusal (`Barkpark.Tasks.Criteria.merge_gated?/1`, 409
@@ -43,6 +44,7 @@ import (
 //     a server too old to declare the flag the OLD client-side tripwire still
 //     runs — see `stampMergeGateFallback` — so a rollout never leaves the gate
 //     unguarded in either direction.
+//
 //  3. READ-BACK (PDS-D359/D361, wave 26) — after a 2xx, RE-READ the criterion
 //     from the store and render the receipt from what the store holds, never
 //     from what was asked. The epic has watched this verb return exit 0 with a
@@ -53,6 +55,14 @@ import (
 //     exits non-zero as UNCONFIRMED, because "we could not ask" is not "it
 //     landed". The correct fix regardless of WHY a write is lost — a transport
 //     ceiling, a holder gate, or a bad minute on the box.
+//
+//     The read-back also fires on a server-side 5xx (exitServer), not only a
+//     2xx: the epic's own doctrine ("a 500 can hide a write that landed") means
+//     an 8 is NOT proof the write is absent — the transaction can commit and the
+//     response still fail after. Every OTHER non-2xx (auth/validation/not_found/
+//     conflict/rate-limit) is the server refusing BEFORE any commit, so a
+//     read-back there would just be noise on a row nothing touched — those still
+//     return immediately, untouched, exactly as before.
 //
 // The base is deliberately NOT flipped to 1-based: that is a breaking change
 // for every existing script AND for the MCP tools (mcp_tasks.go) that already
@@ -89,11 +99,14 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 
 	// THE READ-BACK (PDS-D359/D361). A 2xx is not a landed write: the epic has
 	// now watched this exact verb return exit 0 with a normal envelope on a
-	// stamp the store did not hold. So after a successful POST, ASK THE STORE
-	// what the row holds and render the verdict from THAT. --dry-run sent
-	// nothing, and a non-zero POST already reported its own failure, so both
-	// skip straight through.
-	if rc != exitOK || g.dryRun {
+	// stamp the store did not hold. So after the POST, ASK THE STORE what the
+	// row holds and render the verdict from THAT — for a clean 2xx (rc==exitOK)
+	// AND for a server-side 5xx (rc==exitServer), because a 5xx is not proof the
+	// write is absent either (the transaction can commit and the response still
+	// fail — see the doc comment above). --dry-run sent nothing, and every OTHER
+	// non-2xx (auth/validation/not_found/conflict/rate-limit) is the server
+	// refusing BEFORE any commit, so both skip straight through untouched.
+	if g.dryRun || (rc != exitOK && rc != exitServer) {
 		return rc
 	}
 	req, ok := stampRequestOf(cmd, forward)
@@ -103,7 +116,10 @@ func runTaskStamp(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 		// specific row to re-read, so claim nothing extra about one.
 		return rc
 	}
-	return confirmStampLanded(out, ctx, req)
+	if rc == exitServer {
+		out.errf("the stamp POST answered a server error (exit %d) — checking the store before trusting that as \"nothing landed\" (a 5xx can hide a write that already committed)", rc)
+	}
+	return confirmStampLanded(out, ctx, req, rc)
 }
 
 // stampRequest is what the caller ASKED the ledger to write. It is the request
@@ -164,7 +180,15 @@ func stampRequestOf(cmd manifest.Command, forward []string) (stampRequest, bool)
 // read-back that cannot reach the store is reported as UNCONFIRMED and exits
 // non-zero: "we could not ask" is not "it landed", and this verb's whole job
 // this wave is to stop claiming the difference away.
-func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest) int {
+//
+// origRC is the exit code the POST itself produced (exitOK on a clean 2xx,
+// exitServer on a 5xx the caller decided to double-check). When the read-back
+// CANNOT reach the store either, origRC is what survives: a 5xx that already
+// named a specific server failure carries more information than the generic
+// exitGeneric bucket, so it is kept rather than downgraded. Only a genuinely
+// unclassified starting point (origRC == exitOK, meaning the POST itself gave
+// no hint of trouble) falls back to exitGeneric.
+func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest, origRC int) int {
 	client := apiclient.New(apiclient.Config{
 		BaseURL:   ctx.Server,
 		Token:     ctx.Token,
@@ -183,9 +207,12 @@ func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest) int
 		out.userErr("stamp sent but NOT confirmed — the read-back of %s criterion index %d failed: %v",
 			req.docID, req.index, err)
 		out.errf("  the write may or may not have landed; re-read with `bp task get %s` before trusting it", req.docID)
+		if origRC != exitOK {
+			return origRC
+		}
 		return exitGeneric
 	}
-	return renderStampVerdict(out, req, stored)
+	return renderStampVerdict(out, req, stored, origRC)
 }
 
 // renderStampVerdict is the stamp's receipt, and it is PURE: given the request
@@ -194,12 +221,24 @@ func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest) int
 // only as the "expected" half of a contradiction, never as the answer. Hand it a
 // row that disagrees and the receipt says so and exits non-zero.
 //
+// origRC is the exit code the POST itself reported (exitOK or exitServer — see
+// confirmStampLanded). The read-back is the SINGLE source of truth once it
+// answers: a landed row is exitOK even if the POST answered a 5xx (the write is
+// real regardless of what the response said), and a confirmed-absent row is
+// exitConflict regardless of what the POST answered, because the store — not
+// the transport — is what "landed" means. origRC only changes what gets PRINTED
+// (a landed-despite-5xx row gets one extra explanatory line so the surprising
+// resurrection is never silent).
+//
 // The receipt rides progressf: stdout in the human view, stderr under -o
 // json/yaml so the dispatch's envelope stays the single parseable document on
 // stdout. The exit code carries the verdict in both.
-func renderStampVerdict(out *writer, req stampRequest, stored taskboard.CriterionItem) int {
+func renderStampVerdict(out *writer, req stampRequest, stored taskboard.CriterionItem, origRC int) int {
 	mismatches := stampMismatches(req, stored)
 	if len(mismatches) == 0 {
+		if origRC == exitServer {
+			out.progressf("✓ the store holds it despite the POST answering a server error (exit %d) — a 5xx can commit the write before the response fails; the read-back is the truth here, not the transport error", origRC)
+		}
 		out.progressf("✓ the store holds it — criterion index %d (#%d as boards number them): %s",
 			req.index, req.index+1, storedCriterionSummary(stored))
 		return exitOK
