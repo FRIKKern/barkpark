@@ -8,7 +8,7 @@ defmodule BarkparkCloud.BillingLifecycleTest do
   use BarkparkCloud.DataCase, async: true
   import Ecto.Query, only: [from: 2]
 
-  alias BarkparkCloud.{Accounts, Billing, Registry, Repo}
+  alias BarkparkCloud.{Accounts, Billing, Events, Registry, Repo}
   alias BarkparkCloud.Billing.{StripeGateway, StubGateway, Subscription}
   alias BarkparkCloud.Registry.Barkpark
 
@@ -692,6 +692,127 @@ defmodule BarkparkCloud.BillingLifecycleTest do
       refute reload_bp(lapsed).suspended
       assert reload_bp(quota).suspended
       assert reload_bp(foreign).suspended
+    end
+  end
+
+  ## ── cch-w50-bl: the feed must not report a change that never happened ──
+
+  # THE LIE THIS PINS. `Registry.resume_billing_suspended/1` is a bulk
+  # `update_all` that broadcasts NOTHING, while `reconcile_plan_limit/1` suspends
+  # row-by-row through `suspend_one/2`, which DOES broadcast. Before the
+  # narrowing the resume was reason-blind: a resubscribe silently lifted a box
+  # that was already `quota_exceeded`, the reconcile behind it re-suspended that
+  # same box against the smaller ceiling, and the team's dashboard received a
+  # `barkpark.suspended` for a box that was suspended before the webhook arrived
+  # and suspended after it — a transition that never happened, with no
+  # `barkpark.restored` in front of it to pair against.
+  #
+  # The narrowing removes the CAUSE (a quota row is never resumed, so it is never
+  # in the reconcile's live set); this pins the CONSEQUENCE on the feed itself.
+  # MUTATION: revert `do_activate_from_session`'s call to the reason-blind
+  # `Registry.resume_team_barkparks/1` and this reds with the unpaired suspend.
+  describe "the resubscribe event feed pairs every suspend (cch-w50-bl)" do
+    # Give the reconciler's `sort_by(inserted_at, {:desc, DateTime})` an
+    # unambiguous order, so which rows land in the overflow is a fact and not a
+    # tie-break: the quota box is stamped NEWEST, squarely inside the slice an
+    # over-wide resume hands back to the reconcile.
+    defp age_rows(bps) do
+      bps
+      |> Enum.with_index()
+      |> Enum.each(fn {bp, i} ->
+        at = DateTime.add(DateTime.utc_now(), -3600 + i * 60, :second)
+        Repo.update_all(from(b in Barkpark, where: b.id == ^bp.id), set: [inserted_at: at])
+      end)
+    end
+
+    # Every `{:bpcloud_event, _}` sitting in this process's mailbox, in arrival
+    # order. The webhook runs synchronously in the test process, so by the time
+    # `handle_webhook/2` returns the whole trace is already delivered.
+    defp drain_events(acc \\ []) do
+      receive do
+        {:bpcloud_event, ev} -> drain_events([ev | acc])
+      after
+        50 -> Enum.reverse(acc)
+      end
+    end
+
+    # THE PAIRING LAW, folded over the trace. `known` seeds each WATCHED box's
+    # availability as a feed reader understands it at t0. A `barkpark.suspended`
+    # for a box the reader already believes suspended is UNPAIRED — the feed
+    # asserting a transition that did not occur. A suspend that FOLLOWS a
+    # restore is paired and fine, which is why this is a fold and not a
+    # "contains no suspend" grep.
+    defp unpaired_suspends(trace, known) do
+      {unpaired, _} =
+        Enum.reduce(trace, {[], known}, fn ev, {bad, state} ->
+          id = Map.get(ev.payload || %{}, :barkpark_id)
+
+          case {ev.type, Map.fetch(state, id)} do
+            {"barkpark.restored", {:ok, _}} -> {bad, Map.put(state, id, :live)}
+            {"barkpark.suspended", {:ok, :live}} -> {bad, Map.put(state, id, :suspended)}
+            {"barkpark.suspended", {:ok, :suspended}} -> {[id | bad], state}
+            _ -> {bad, state}
+          end
+        end)
+
+      Enum.reverse(unpaired)
+    end
+
+    test "a resubscribe onto a SMALLER plan emits no unpaired suspend for an untouched box" do
+      {team, sub} = subscribed_team("support_plus")
+      lapsing = for _ <- 1..4, do: barkpark_fixture(team)
+      quota_bp = barkpark_fixture(team)
+      age_rows(lapsing ++ [quota_bp])
+
+      # The box whose availability NEVER changes across this whole test: over
+      # quota before the cancel, still over quota after the resubscribe.
+      {:ok, _} = Registry.suspend_barkpark(quota_bp, Billing.quota_suspended_reason())
+      suspended_at_before = reload_bp(quota_bp).suspended_at
+
+      cancel_via_webhook(sub)
+
+      # The bulk suspend skips rows that are already suspended, so the quota box
+      # keeps its own reason — this mixed fleet is the production shape.
+      assert reload_bp(quota_bp).suspended_reason == "quota_exceeded"
+      assert Enum.all?(lapsing, &(reload_bp(&1).suspended_reason == "billing_lapsed"))
+
+      :ok = Events.subscribe(team.id)
+      _ = drain_events()
+
+      assert {:ok, %Subscription{status: "active", plan: "supporter"}} =
+               Billing.handle_webhook(checkout_completed(team.id, "supporter"), sig())
+
+      trace = drain_events()
+
+      # THE LAW.
+      assert unpaired_suspends(trace, %{quota_bp.id => :suspended}) == [],
+             "the feed carries a barkpark.suspended for a box that was ALREADY suspended when " <>
+               "the webhook arrived, with no barkpark.restored to pair it against — the silent " <>
+               "bulk resume lifted it and the reconcile broadcast taking it back. Trace: " <>
+               inspect(trace)
+
+      refute Enum.any?(trace, &(Map.get(&1.payload || %{}, :barkpark_id) == quota_bp.id)),
+             "a box whose availability never changed must produce NO feed traffic at all"
+
+      # ANTI-VACUITY: the subscription is live and the reconcile really ran.
+      # supporter's ceiling is 3 against the 4 boxes the billing axis legitimately
+      # resumed, so exactly ONE suspend belongs on this feed — for a box that was
+      # genuinely live a moment earlier.
+      suspends = Enum.filter(trace, &(&1.type == "barkpark.suspended"))
+
+      assert length(suspends) == 1,
+             "expected exactly one LEGITIMATE suspend on the feed; got #{length(suspends)} — " <>
+               inspect(trace)
+
+      # A second, independent witness that the row never moved: a blind resume
+      # nulls `suspended_at`, and the re-suspend behind it stamps a fresh one.
+      after_row = reload_bp(quota_bp)
+      assert after_row.suspended and after_row.suspended_reason == "quota_exceeded"
+
+      assert after_row.suspended_at == suspended_at_before,
+             "suspended_at moved on a box nothing was supposed to touch"
+
+      assert length(live_barkparks(team)) == 3
     end
   end
 
