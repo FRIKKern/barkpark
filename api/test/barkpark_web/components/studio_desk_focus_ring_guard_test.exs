@@ -57,7 +57,10 @@ defmodule BarkparkWeb.StudioDeskFocusRingGuardTest do
     {".bp-doc-row-body:focus-visible", "every document row body"},
     # spd-bl-doc-checkbox-is-an-unfocusable-span — the bulk-select control is a
     # real <button role="checkbox"> now; its ring rides the same pinned list.
-    {".bp-doc-checkbox:focus-visible", "the bulk-select checkbox on every doc row"}
+    {".bp-doc-checkbox:focus-visible", "the bulk-select checkbox on every doc row"},
+    # spd-w18-desk-chips-answer — the chips are Tab-reachable anchors and now
+    # show it; the ring graduated out of the absent-list below.
+    {".bp-desk-chip:focus-visible", "the desk filter chips"}
   ]
 
   defp sheet, do: File.read!(@root)
@@ -150,24 +153,8 @@ defmodule BarkparkWeb.StudioDeskFocusRingGuardTest do
     end
   end
 
-  describe "the rings this wave must NOT pretend to have" do
-    test ".bp-desk-chip ring does not exist yet (spd-w18 round 2)" do
-      # Pinned as ABSENT on purpose: it dates this guard honestly, and when
-      # the chips slice lands, THIS is the test that tells its author to add
-      # it to @desk_focus_rings instead of leaving it unguarded. (The
-      # .bp-doc-checkbox ring GRADUATED into @desk_focus_rings above —
-      # spd-bl-doc-checkbox-is-an-unfocusable-span.)
-      css = sheet()
-
-      for selector <- [".bp-desk-chip:focus-visible"] do
-        refute rule_open(css, selector),
-               """
-               `#{selector}` now EXISTS. Good — move it into
-               @desk_focus_rings above (and delete it from this list) so it is
-               guarded like the other three, instead of shipping a new ring
-               with no tripwire.
-               """
-      end
-    end
-  end
+  # The absent-list is retired: every ring it once dated honestly
+  # (.bp-doc-checkbox — spd-bl-doc-checkbox-is-an-unfocusable-span, and
+  # .bp-desk-chip — spd-w18-desk-chips-answer) has GRADUATED into
+  # @desk_focus_rings above, exactly as its assertion message instructed.
 end

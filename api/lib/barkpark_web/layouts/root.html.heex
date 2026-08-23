@@ -1536,6 +1536,9 @@
       white-space: nowrap;
     }
     .bp-desk-chip:hover { color: var(--fg); border-color: var(--fg-dim); }
+    /* spd-w18-desk-chips-answer — the chips are Tab-reachable anchors; a
+       landing keyboard user must SEE it (D224 sub-ruling 8 spelling). */
+    .bp-desk-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .bp-desk-chip.is-active {
       background: var(--primary); color: var(--primary-fg);
       border-color: var(--primary);
