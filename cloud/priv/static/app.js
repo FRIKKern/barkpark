@@ -25272,6 +25272,11 @@
       accountTwoFactorPhase: accountTwoFactorPhase, a2fBadgeState: a2fBadgeState,
       accountTwoFactorQrHtml: accountTwoFactorQrHtml,
       accountTwoFactorErrorCopy: accountTwoFactorErrorCopy,
+      // gr-blk-a2fwire-coverage: the 2FA DOM mount + repaint seam. IMPURE and
+      // exported by the same explicit permission as openModal/closeModal below
+      // — the click -> api -> repaint chain had zero coverage, and driving the
+      // real wiring against a harness DOM is the only honest way to gate it.
+      a2fPaint: a2fPaint, a2fWire: a2fWire,
       secretGroups: secretGroups, recoveryCodesText: recoveryCodesText,
       // GR56: the pin predicate + the two DOM primitives it guards. openModal /
       // closeModal are IMPURE and exported here by explicit charter permission —
