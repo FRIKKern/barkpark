@@ -339,7 +339,12 @@ const KNOWN = [
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
 const PIN_MEMBER_SCENARIOS = 10;
-const PIN_TOTAL_SCENARIOS = 114;
+// 114 -> 115: cch-w37-bl-operator-retry-click-undriven added `operator-me-recovers`
+// (the one-shot /v1/me fault whose retry smoke.mjs clicks). RE-DERIVED by running
+// this sweep, not by adding one: its actor is an OPERATOR, so the member slice
+// above is unmoved and PIN_MEMBER_SCENARIOS stays at 10 — bumping it to match
+// would red this sweep on actor-set instead.
+const PIN_TOTAL_SCENARIOS = 115;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;
