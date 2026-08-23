@@ -1019,6 +1019,24 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
+    # ── RULING: route ENVELOPES stay OUT of this census (dr-w14-s6 followup,
+    # criterion 3, 2026-08-23). The question on the record was whether envelope
+    # keys added at the ROUTE (e.g. GET /v1/sites/:id/deployments'
+    # `next_cursor`, or the deleted `publish_clock`) should become a censused
+    # class here. They do not, for three reasons. (1) Side A's walker reads
+    # NAMED serializer entry functions (@pairs); route envelopes are composed
+    # inline in router.ex `json/3` calls, and a scanner over macro-generated
+    # route bodies is a DIFFERENT instrument with its own false-positive class
+    # — bolting it onto this file would blur what a red here means. (2) The
+    # class-level blindness already has one owner:
+    # dr-w18-bl-route-added-keys-escape-the-census (KNOWN OPEN, the `scope` row
+    # below is its second instance) — a walker fix belongs there, not as a
+    # side-effect of one envelope's reader. (3) The compensating control is
+    # typed Go readers with their own tests: the deployments envelope now has a
+    # NAMED decoder (internal/cloudclient deploymentsEnvelope) and a walked
+    # cursor (ListDeploymentsAll + TestListDeploymentsAllWalksPastTheCap), so
+    # the key this ruling was filed about is no longer silent. A divergence
+    # found later still lands here as an :unread/:phantom row, case by case. ──
     {"DeployLedger.census/3", :phantom, "scope",
      "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/4`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
   ]
