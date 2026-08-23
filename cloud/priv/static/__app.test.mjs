@@ -23395,3 +23395,107 @@ test("agentKeyStatusCopy: terminal sentences are honest; a failed job's own erro
     assert.equal(hooks.agentKeyStatusCopy({ status: inflight }).kind, "pending");
   }
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// cch-w61-bl-the-console-asserts-current-while-holding-the-refutation:
+// the plane MEASURES commit_distance / commit_ancestry hourly and the console
+// read them ZERO times while rendering update_state's reassuring grade twelve
+// times. These arms pin the ported Go reader (cloud_status_cmd.go behindCell /
+// behindDetail) — the phrasing is the CLI's shipped copy, not a minted one —
+// and, above all, that the TWO DEGENERATE ARMS STAY DISTINCT. Appended at the
+// tail (OC9 append-only law). Pure helpers only; both render seams are string
+// builders (fleetMetaHtml / updatePanelHtml) already driven by this harness.
+// ════════════════════════════════════════════════════════════════════════════
+
+test("cch-w61: commitBehindCell speaks the Go BEHIND-column vocabulary, arm for arm", () => {
+  const cell = hooks.commitBehindCell;
+  assert.equal(cell({ commit_ancestry: "current", commit_distance: 0 }), "even");
+  assert.equal(cell({ commit_ancestry: "behind", commit_distance: 2493 }), "2493");
+  assert.equal(cell({ commit_ancestry: "ahead_of_main", commit_distance: 3 }), "ahead 3");
+  assert.equal(cell({ commit_ancestry: "diverged", commit_distance: 7 }), "diverged 7");
+  // Unrecognised plane vocabulary renders as itself — never invented, never dropped.
+  assert.equal(cell({ commit_ancestry: "sideways", commit_distance: 1 }), "sideways");
+});
+
+test("cch-w61: the two degenerate arms are DISTINCT — a naive port collapsing them into 0/'even' reds here", () => {
+  const cell = hooks.commitBehindCell;
+  // Arm 1 — the plane ASKED and could not grade: ancestry present, distance
+  // null. Loud UNMETERED, never a number. (Three prod rows sit here today —
+  // empty git_commit — and a rate-limit 403 lands here too.)
+  const unmetered = cell({ commit_ancestry: "unknown", commit_distance: null });
+  assert.equal(unmetered, "UNMETERED");
+  // Arm 2 — the plane SAID NOTHING (older CP, or a row it never graded):
+  // the cell is empty and the segment collapses out entirely.
+  const silent = cell({});
+  assert.equal(silent, "");
+  assert.equal(cell({ commit_ancestry: null, commit_distance: null }), "");
+  assert.equal(cell({ commit_ancestry: "   " }), "");
+  // THE GUARD: the two arms must never converge, and neither may read as a
+  // measured number. `bp.commit_distance == null` (not truthiness) is what
+  // keeps a MEASURED ZERO out of the unmetered arm — a `!distance` port sends
+  // {current, 0} to UNMETERED and a `|| 0` port sends {unknown, null} to
+  // "even"; both directions red on these four assertions.
+  assert.notEqual(unmetered, silent);
+  assert.notEqual(unmetered, "even");
+  assert.notEqual(unmetered, "0");
+  assert.equal(cell({ commit_ancestry: "current", commit_distance: 0 }), "even");
+  // A behind row with no number says so in words — never "0 commits behind".
+  const d = hooks.commitBehindDetail({ commit_ancestry: "behind", commit_distance: null });
+  assert.match(d, /behind main by an unmeasured number of commits/);
+  assert.equal(d.indexOf("0 commits"), -1);
+});
+
+test("cch-w61: commitBehindDetail names the disagreement in the CLI's shipped phrasing", () => {
+  // The production row that motivated the slice, verbatim through the Go copy.
+  const prod = { commit_ancestry: "behind", commit_distance: 2493, update_state: "current" };
+  assert.equal(hooks.commitBehindDetail(prod),
+    "2493 commits behind main · release-tag grade still reads current");
+  // A grade that already says behind is not a disagreement — no suffix.
+  assert.equal(hooks.commitBehindDetail({ commit_ancestry: "behind", commit_distance: 12, update_state: "behind" }),
+    "12 commits behind main");
+  // No grade at all: the fact stands alone.
+  assert.equal(hooks.commitBehindDetail({ commit_ancestry: "behind", commit_distance: 12 }),
+    "12 commits behind main");
+  // Not behind by commits → "" (the release-tag grade owns its own story).
+  assert.equal(hooks.commitBehindDetail({ commit_ancestry: "current", commit_distance: 0, update_state: "current" }), "");
+  assert.equal(hooks.commitBehindDetail({}), "");
+});
+
+test("cch-w61: the fleet mono line carries the compare — and collapses on a silent plane, byte-identical", () => {
+  // The refuted row: the meta line now says what the plane measured.
+  const behind = hooks.fleetMetaHtml({
+    region: "nbg1", commit_ancestry: "behind", commit_distance: 2493, update_state: "current",
+  });
+  assert.match(behind, /2493 commits behind main · release-tag grade still reads current/);
+  // Unmetered rides the labelled cell form.
+  assert.match(hooks.fleetMetaHtml({ region: "nbg1", commit_ancestry: "unknown", commit_distance: null }),
+    /vs main: UNMETERED/);
+  assert.match(hooks.fleetMetaHtml({ region: "nbg1", commit_ancestry: "current", commit_distance: 0 }),
+    /vs main: even/);
+  // A plane that sent nothing renders the EXACT pre-slice line — the column
+  // collapses out, no dangling separator, no invented segment.
+  const before = hooks.fleetMetaHtml({ region: "nbg1" });
+  assert.equal(hooks.fleetMetaHtml({ region: "nbg1", commit_ancestry: null, commit_distance: null }), before);
+  assert.equal(before.indexOf("vs main"), -1);
+});
+
+test("cch-w61: updatePanelHtml states the compare beside the release-tag badge — and escapes hostile ancestry", () => {
+  const html = hooks.updatePanelHtml({
+    id: "b1", host: "h", update_state: "current",
+    commit_ancestry: "behind", commit_distance: 2493,
+  });
+  // The badge still says what the tag grade says — the row BESIDE it carries
+  // the refutation, so the panel now holds both truths at once.
+  assert.match(html, /Up to date/);
+  assert.match(html, /Vs main/);
+  assert.match(html, /2493 commits behind main · release-tag grade still reads current/);
+  // Presence-conditional: an older CP renders no row at all.
+  const legacy = hooks.updatePanelHtml({ id: "b2", host: "h", update_state: "current" });
+  assert.equal(legacy.indexOf("Vs main"), -1);
+  // The ancestry value is server data on an HTML seam — hostile bytes stay inert.
+  const hostile = hooks.updatePanelHtml({
+    id: "b3", host: "h", commit_ancestry: '<img src=x onerror=alert(1)>', commit_distance: 5,
+  });
+  assert.equal(hostile.indexOf("<img"), -1);
+  assert.match(hostile, /&lt;img/);
+});
