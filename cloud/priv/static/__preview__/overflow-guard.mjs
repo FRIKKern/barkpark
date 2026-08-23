@@ -190,6 +190,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 
 const DEFECTS = [
   "GR108-tablet-topbar-overflow",
+  "W20-phone-band-billing-chip",
   "GR109-attention-row-dead-rule",
   "GR115-bpconsole-dead-rule",
   "W27-deploy-ref-branch-bounded",
@@ -851,6 +852,64 @@ async function main() {
         // chip was only ever read at 768. The chip now answers for itself above.
         okLine(`0/${checks} PAGE-overflow cells across ${WIDTHS[0]}-${WIDTHS[WIDTHS.length - 1]} (sweep includes 769/775/780/785 — ABOVE the breakpoint). The chip's own question is answered per-width above, not by this line.`);
       }
+    }
+
+    // ── W20: THE PHONE BAND'S MONEY MESSAGE — the question PHONE_WIDTHS never
+    //    asked (cchi-w20-bl-phone-band-billing-chip-unguarded). GR108 above
+    //    asserts #billing-chip across CHIP_WIDTHS, which FLOORS at 721; below
+    //    that the chip is kept whole by ONE css block — app.css's
+    //    `@media (max-width: 620px)` topbar wrap (`.topbar { flex-wrap: wrap }`
+    //    + `.billing-chip { flex: 0 0 auto }`, the W19-S2 block) — and until
+    //    this leg by NOTHING ELSE: reverting that block takes the past-due
+    //    money message back to 168/85 at 320 while every committed instrument
+    //    stays green. The app.css banner states the hole in PROSE ("PHONE_WIDTHS
+    //    never asserts #billing-chip"); a comment is not a guard. Anchored to the
+    //    SELECTORS of that block, never its line numbers — the filing row's own
+    //    :3963 cite had drifted ~850 lines by build time.
+    //
+    //    STRICT sw <= cw, no epsilon: at every one of the ten PHONE_WIDTHS the
+    //    wrap block applies (620 sits ON the max-width: 620px boundary), the
+    //    chip holds its full intrinsic width on its own wrapped line, so a
+    //    pixel of tolerance could only hide a regression. And the chip must
+    //    PAINT: a display:none'd chip reads 0/0 and would sail through the
+    //    scroll assertion — hidden is not whole, so a 0px rect is a finding,
+    //    not a skip.
+    if (requested.includes("W20-phone-band-billing-chip")) {
+      const D = "W20-phone-band-billing-chip";
+      process.stdout.write(`\n${D} — ${PHONE_WIDTHS.length} phone widths x 2 themes x 2 past-due scenarios\n`);
+      let measured = 0;
+      for (const scen of ["billing-past-due", "overview-past-due"]) {
+        for (const theme of ["light", "dark"]) {
+          await setViewport(390);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}`,
+            `document.querySelector('.topbar') && (function(){var c=document.getElementById('billing-chip');return c && !c.hidden;})()`,
+          );
+          const row = [];
+          let cut = 0;
+          for (const width of PHONE_WIDTHS) {
+            await setViewport(width);
+            const chip = await evalJs(
+              `(function(){var c=document.getElementById('billing-chip');if(!c)return null;` +
+              `var r=c.getBoundingClientRect();` +
+              `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
+            );
+            if (!chip) { fail(D, `${scen}/${theme}@${width}: #billing-chip MISSING — the readiness gate saw it and this read did not`); row.push(`${width}:missing`); continue; }
+            if (chip.w <= 0) { fail(D, `${scen}/${theme}@${width}: #billing-chip paints a ${chip.w}px rect — hidden is not whole ("${chip.text}")`); row.push(`${width}:0px`); continue; }
+            measured++;
+            const over = chip.sw > chip.cw;
+            if (over) { cut++; fail(D, `${scen}/${theme}@${width}: #billing-chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} ("${chip.text}")`); }
+            row.push(`${width}:${chip.sw}/${chip.cw}${over ? "!" : ""}`);
+          }
+          process.stdout.write(`   chip ${scen}/${theme}  ${row.join(" ")}\n`);
+          if (!cut) okLine(`${scen}/${theme}: chip whole at all ${PHONE_WIDTHS.length} phone widths ${PHONE_WIDTHS[0]}-${PHONE_WIDTHS[PHONE_WIDTHS.length - 1]}`);
+        }
+      }
+      // A leg that measured nothing certifies nothing — zero cells is a RED,
+      // never a tick (the filing criterion's own wording: "FAILS on a zero
+      // measured count"). The MISSING/0px arms above fail per-cell; this arm
+      // is the backstop that cannot be satisfied by an empty loop.
+      if (measured === 0) fail(D, `#billing-chip measured in ZERO cells across 2 scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the leg no longer reaches the population it certifies`);
     }
 
     // ── GR109: the stacked attention row is left-aligned, not centred ───────
