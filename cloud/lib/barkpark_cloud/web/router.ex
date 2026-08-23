@@ -2153,7 +2153,7 @@ defmodule BarkparkCloud.Web.Router do
   # NEVER be served. Newest-first. Each row is {fqdn, slug, source_provider,
   # created_at, bundle_ref, spec:{region, server_type}} — enough for the console
   # to render the row + a `bp cloud instance resurrect <slug> --provider <kind>`
-  # affordance (the console does not execute resurrect this wave).
+  # affordance.
   #
   # Honest degrade (D39): an unconfigured or unreachable store returns
   # {ok:false, error} at 502 — NEVER a fabricated empty-success, which would
