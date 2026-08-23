@@ -144,6 +144,7 @@ defmodule Barkpark.RateLimiterAsyncIsolationTest do
     |> Path.wildcard()
     |> Enum.filter(fn path ->
       source = File.read!(path)
+
       String.contains?(source, "RateLimiter") or
         String.contains?(source, "barkpark_rate_limiter")
     end)
