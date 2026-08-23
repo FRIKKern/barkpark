@@ -180,7 +180,7 @@ export type Row =
    * `s-<turn>-<from>` — the segment's wire identity — so the row survives every
    * later delta by identity and React never re-renders a paragraph the reader
    * has already finished reading. */
-  | { key: string; kind: 'segment'; blocks: Block[] }
+  | { key: string; kind: 'segment'; blocks: Block[]; opensTurn: boolean }
   /** The forming block at the head of the remainder (charter D67): the prose
    * above it keeps streaming as live text, the block itself is an honest labelled
    * placeholder until it is whole. Never fabricated content. */
@@ -261,15 +261,27 @@ export function stableSegmentRows(
 ): Row[] {
   const live = new Set<string>()
   const out: Row[] = []
+  const seenTurns = new Set<number>()
   for (const seg of segments) {
     const key = `s-${seg.turn}-${seg.from}`
     live.add(key)
+    // Whether this segment OPENS its turn is a fact about the ordering — the
+    // first segment of a turn is the one rowLead gives the 18px turn-boundary
+    // lead, every later one continues at zero — and it is stamped HERE because
+    // this loop is the one place that can see it while getItemType only ever
+    // receives (item, index) (mob-lm-s5f-segment-size-bucket). Stable under the
+    // memo table: segments are append-only per turn and dropped wholesale, so a
+    // turn's first segment stays its first and a cache hit can never carry a
+    // stale answer. NOT derived from `from === 0` — a resumed stream's first
+    // held segment does not start at byte 0 (see rowLead's own note).
+    const opensTurn = !seenTurns.has(seg.turn)
+    seenTurns.add(seg.turn)
     const hit = table.get(key)
     if (hit !== undefined) {
       out.push(hit)
       continue
     }
-    const row: Row = { key, kind: 'segment', blocks: seg.blocks }
+    const row: Row = { key, kind: 'segment', blocks: seg.blocks, opensTurn }
     table.set(key, row)
     out.push(row)
   }
@@ -488,7 +500,18 @@ export function transcriptItemType(row: Row): string {
   // together is the same dishonesty the message rows split to avoid. An empty
   // blocks array cannot reach here (the reducer refuses a blockless frame), but
   // the fallback names itself rather than emitting a bare `segment:`.
-  if (row.kind === 'segment') return `segment:${row.blocks[0]?.type ?? 'unknown'}`
+  //
+  // AND on whether the row opens its turn (mob-lm-s5f-segment-size-bucket): the
+  // measured height of a turn-OPENING segment includes rowLead's 18px
+  // turn-boundary wrapper while a continuing segment's does not, so one bucket
+  // blended both and every estimate in it was wrong by a predictable 18·p. The
+  // ordering fact rides on the row (stableSegmentRows stamps `opensTurn`)
+  // because this function receives (item, index) and can never see the
+  // predecessor. CHOSEN ANSWER for that row: split the bucket — the fix is two
+  // tokens on an existing seam, cheaper than proving 18px unobservable.
+  if (row.kind === 'segment') {
+    return `segment:${row.opensTurn ? 'lead:' : ''}${row.blocks[0]?.type ?? 'unknown'}`
+  }
   return row.kind
 }
 
