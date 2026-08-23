@@ -411,6 +411,17 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
     }
   }
 
+  // 304 Not Modified is a SUCCESS, not an error: it is `ok === false` with an
+  // empty body (query_controller.ex emits send_resp(304, "")), so it used to
+  // fall into decodeAndThrow and surface as a generic BarkparkAPIError — thrown
+  // at the one caller who explicitly opted into conditional semantics. The SDK
+  // never sends If-None-Match/If-Modified-Since itself and Next's data cache
+  // revalidates by refetching, so a 304 is reachable ONLY when the consumer
+  // injects a conditional header via cfg.fetchOptions.headers — and that caller
+  // holds the copy the 304 says is still current. It joins the no-body success
+  // family below (204 / empty body → undefined): undefined means "not modified,
+  // keep your copy" to the only caller who can receive it.
+  if (resp.status === 304) return undefined as T
   if (!resp.ok) await decodeAndThrow(resp, input.url)
 
   // Ok-path body decode — mirror core transport (js/packages/core/src/transport.ts
