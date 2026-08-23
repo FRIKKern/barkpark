@@ -11376,6 +11376,102 @@ test("isu-w5: forceUpdateBody is the explicit {force:true} override payload", ()
   assert.deepEqual(plain(hooks.forceUpdateBody()), { force: true });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w62-bl — THE UPDATE SEAM'S TERMINAL/TRANSIENT SPLIT, minted AND wired.
+// cch-w61-s2 shipped copy only and deliberately minted no predicate, because a
+// predicate no shipped path consults is a guard that structurally cannot lose
+// (D738). This slice is the other half: updateInstance CONSULTS
+// updateRefusalTerminal at its transport seam — the recovery control here is
+// the Update button the refusal arm re-enables (the toast has no buttons), and
+// re-enabling it after a permanent refusal offered a re-POST that cannot work.
+//
+// THE BUTTON-REACHABLE PERMANENT REFUSAL (the predicate's live subject):
+// `not_enabled`. An UNARMED box still answers the hourly CHECK 200 with
+// apply_enabled:false and check.state intact (registry.ex arming_of/1 +
+// persist_update_check/3), so update_state stays "behind", the admin's Update
+// button renders — and the apply POST 503s feature_not_configured until the
+// box's env changes. identity_refused / suspended are classified terminal for
+// API callers but are NOT button-reachable (their probe rungs write
+// update_state "unknown"; lc.live is false when suspended) — recorded here so
+// nobody mistakes them for the predicate's reachability story.
+
+test("cch-w62-bl: updateRefusalTerminal is hookable, boolean, and split over the seam's own vocabulary", () => {
+  assert.equal(typeof hooks.updateRefusalTerminal, "function",
+    "the predicate must be drivable at all (RED on origin/main: grep -c updateRefusalTerminal app.js is 0)");
+  assert.equal(typeof hooks.updateInstance, "function",
+    "…and so must the arm that consults it (RED on origin/main: zero harness references)");
+
+  for (const kind of ["not_enabled", "not_supported", "suspended", "no_admin_token",
+                      "decrypt_failed", "not_found", "identity_refused"]) {
+    const v = hooks.updateRefusalTerminal({ kind });
+    assert.equal(v, true, kind + " is terminal — no click changes the box's answer");
+    assert.equal(typeof v, "boolean", "predicates stay boolean, never truthy");
+  }
+  // The gate refusals ride the `other` arm with a code.
+  assert.equal(hooks.updateRefusalTerminal({ kind: "other", code: "forbidden" }), true);
+  assert.equal(hooks.updateRefusalTerminal({ kind: "other", code: "no_team" }), true);
+  for (const c of [{ kind: "already_running" }, { kind: "runner_start_failed" },
+                   { kind: "not_live" }, { kind: "pinned", pin: "v1" },
+                   { kind: "other", code: "wat" }, { kind: "other", code: null }, {}, null]) {
+    const v = hooks.updateRefusalTerminal(c);
+    assert.equal(v, false, JSON.stringify(c) + " stays retryable — unknown fails safe toward the user");
+    assert.equal(typeof v, "boolean");
+  }
+});
+
+test("cch-w62-bl: updateConflict's return shape stays FROZEN — the predicate is a separate reader, not a new key", () => {
+  // The isu-w5 classifier test round-trips the whole object; this names the
+  // exact contract so a drive-by "add terminal:true to the return" reds twice.
+  assert.deepEqual(Object.keys(hooks.updateConflict({ error: { code: "not_enabled" } })).sort(),
+    ["kind", "pin"]);
+  assert.deepEqual(Object.keys(hooks.updateConflict({ error: { code: "wat" } })).sort(),
+    ["code", "kind", "pin"]);
+});
+
+// Swap fetch into the realm, run updateInstance to completion against a fake
+// button, so the OFFERING (disabled/label) and the POST count are both visible.
+async function driveUpdate(status, payload) {
+  const fetch = fetchStub(status, payload);
+  const btn = { disabled: false, textContent: "Update" };
+  const inRealm = async (fn) => {
+    const saved = { fetch: sandbox.fetch };
+    sandbox.fetch = fetch;
+    try {
+      fn();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+  };
+  await inRealm(() => hooks.updateInstance({ id: "bp-1", name: "web" }, btn));
+  return {
+    btn, fetch,
+    posts: () => fetch.calls.filter((c) => c.opts && c.opts.method === "POST").length,
+    clickAgain: () => inRealm(() => hooks.updateInstance({ id: "bp-1", name: "web" }, btn)),
+  };
+}
+
+test("cch-w62-bl: a not_enabled 503 changes what is OFFERED — the button stays disabled, one POST total", async () => {
+  const d = await driveUpdate(503, { error: { code: "not_enabled" } });
+  assert.equal(d.posts(), 1, "the click that collected this refusal issued exactly one POST");
+  assert.equal(d.btn.disabled, true,
+    "BEFORE this slice the refusal arm re-enabled the button unconditionally — a live re-POST into a 503 the box answers until its env changes");
+  assert.equal(d.btn.textContent, "Update unavailable",
+    "…and the label says the offering changed, not merely the toast");
+});
+
+test("cch-w62-bl: the transient positive control — already_running keeps the button live and really re-POSTs", async () => {
+  const d = await driveUpdate(409, { error: { code: "already_running" } });
+  assert.equal(d.posts(), 1);
+  assert.equal(d.btn.disabled, false, "a box-side transient keeps the retry that works");
+  assert.equal(d.btn.textContent, "Update");
+  await d.clickAgain();
+  assert.equal(d.posts(), 2, "…and clicking again genuinely re-POSTs");
+});
+
+test("cch-w62-bl: an UNKNOWN refusal fails safe toward retry — the button stays live", async () => {
+  const d = await driveUpdate(500, { error: { code: "wat" } });
+  assert.equal(d.btn.disabled, false, "an invented permanent no is the same lie pointed the other way");
+});
+
 test("isu-w5: updatePanelHtml renders truth cells and degrades (no policy chip/buttons) on older CP", () => {
   const legacy = hooks.updatePanelHtml({
     update_state: "behind", update_running_release: "0.4.0", update_latest_release: "v0.4.1", version: "0.4.0",

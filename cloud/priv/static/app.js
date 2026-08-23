@@ -8165,9 +8165,26 @@
         loadInstance(bp.id);
         return;
       }
-      if (btn) { btn.disabled = false; btn.textContent = opts.force ? "Update anyway" : "Update"; }
       // Errors arrive as {error: {code}} — NOT the flat string friendly() reads.
       var c = updateConflict(r.data);
+      // cch-w62-bl (D738's other half) — the predicate is minted AND consulted
+      // at this transport seam: a PERMANENT refusal changes what the operator
+      // is OFFERED, not only what they are told. The re-enabled Update button
+      // WAS the recovery control here (the toast has no buttons), and
+      // re-enabling it after e.g. `not_enabled` offered a re-POST into a 503
+      // the box will answer until someone changes its env. A terminal refusal
+      // now leaves the button disabled until the next data render — the hourly
+      // check / loadInstance repaint is what can honestly re-offer it, because
+      // only fresh server state can change the answer. Transient refusals
+      // (already_running, runner_start_failed, a pin's own force modal, any
+      // UNKNOWN code — fail-safe toward retry) keep the button live.
+      var terminal = updateRefusalTerminal(c);
+      if (btn) {
+        btn.disabled = terminal;
+        btn.textContent = terminal
+          ? "Update unavailable"
+          : (opts.force ? "Update anyway" : "Update");
+      }
       // cch-w38-s1: the raw envelope rides along so a gate refusal renders the
       // SERVER's authority sentence instead of "Please try again in a moment."
       var copy = updateConflictCopy(c, r.data);
@@ -9035,6 +9052,35 @@
       };
     }
     return { title: "Couldn't start the update", body: "Please try again in a moment.", forceLabel: null };
+  }
+
+  // cch-w62-bl — WHICH self-update refusals are TERMINAL for the seam's one
+  // recovery control (the Update button updateInstance re-enables). Keyed on
+  // updateConflict's normalized kind (+ code on the `other` arm), NEVER on an
+  // HTTP status, and NEVER a new key on updateConflict's frozen return shape.
+  //
+  // THE BUTTON-REACHABLE PERMANENT REFUSAL that makes this predicate a guard
+  // pointed at somebody: `not_enabled`. An UNARMED box (no
+  // BARKPARK_SELF_UPDATE_APPLY) still answers the hourly CHECK 200 with
+  // `apply_enabled: false` and `check.state` intact (registry.ex arming_of/1 +
+  // persist_update_check/3), so `update_state` stays "behind", the admin's
+  // Update button renders — and the apply POST 503s feature_not_configured
+  // until someone changes the box's env. `identity_refused` stays in the set
+  // but is API-reachable only (its probe rung co-writes update_state
+  // "unknown"); `suspended` likewise (lc.live is false for a suspended box, so
+  // the button never renders) — both are classified for the API-driven caller,
+  // not because a click can reach them. TRANSIENT: already_running and
+  // runner_start_failed (box-side, self-clearing), not_live (provisioning
+  // finishes), pinned (its OWN force modal is the designed affordance), and
+  // every unknown code — an invented permanent no is the same lie pointed the
+  // other way. Boolean, pure.
+  function updateRefusalTerminal(c) {
+    c = c || {};
+    if (c.kind === "other") return c.code === "forbidden" || c.code === "no_team";
+    return c.kind === "not_enabled" || c.kind === "not_supported" ||
+      c.kind === "suspended" || c.kind === "no_admin_token" ||
+      c.kind === "decrypt_failed" || c.kind === "not_found" ||
+      c.kind === "identity_refused";
   }
 
   // The request body for a forced (pin-overriding) self-update re-trigger.
@@ -24561,6 +24607,10 @@
       updateRefusalReason: updateRefusalReason,
       lastCheckedText: lastCheckedText, autoupdatePolicyLabel: autoupdatePolicyLabel,
       autoupdateActions: autoupdateActions, updateConflict: updateConflict,
+      // cch-w62-bl: the terminality predicate + the transport arm that consults
+      // it, hooked so the harness can drive the recovery control (the
+      // runDecommission precedent).
+      updateRefusalTerminal: updateRefusalTerminal, updateInstance: updateInstance,
       updateConflictCopy: updateConflictCopy, forceUpdateBody: forceUpdateBody,
       updatePanelHtml: updatePanelHtml, fleetRolloutBanner: fleetRolloutBanner,
       fleetRolloutBannerHtml: fleetRolloutBannerHtml,
