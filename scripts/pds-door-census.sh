@@ -497,8 +497,26 @@ classify_one_file() {
     # `)` or a `#` inside a literal can neither close a span nor start a comment.
     # Only for the COUNTING/scanning pass — membership is tested against the raw
     # text, because blanking would erase a literal that IS the argument.
-    function blank_strings(s,   out, i, c, inq, esc, n) {
-      out = ""; inq = 0; esc = 0
+    # SIGIL-AWARE (pds-w45-argspan-sigil-and-silent-bound). A paren inside a
+    # sigil (~s|a ( b|, ~r/(/ …) used to count as STRUCTURE, so the span closed
+    # early or overran to the 40-line bound — MORE permissive, i.e. it could
+    # admit a fraudulent THROUGH. Sigil CONTENTS are now blanked one-for-one
+    # (length preserved — the span-column arithmetic depends on it), with the
+    # delimiters kept: a paired-delimiter sigil keeps its own ( ) which balance
+    # each other, and nested paired delimiters inside track depth exactly as
+    # the Elixir lexer does. Single-quoted charlists are DELIBERATELY not
+    # tracked: an apostrophe in a comment (dont, isnt…) would swallow the rest
+    # of the line including its # and defeat cut_comment — a worse, more
+    # permissive failure than the rare charlist paren.
+    function sigil_close(d) {
+      if (d == "(") return ")"
+      if (d == "[") return "]"
+      if (d == "{") return "}"
+      if (d == "<") return ">"
+      return d
+    }
+    function blank_strings(s,   out, i, c, inq, esc, n, insig, sopen, sclose, sdepth, nxt, dlm) {
+      out = ""; inq = 0; esc = 0; insig = 0
       n = length(s)
       for (i = 1; i <= n; i++) {
         c = substr(s, i, 1)
@@ -507,7 +525,27 @@ classify_one_file() {
           if (c == "\\") { esc = 1; out = out " "; continue }
           if (c == "\"") { inq = 0; out = out "\""; continue }
           out = out " "
+        } else if (insig) {
+          if (esc) { esc = 0; out = out " "; continue }
+          if (c == "\\") { esc = 1; out = out " "; continue }
+          if (c == sopen && sopen != sclose) { sdepth++; out = out " "; continue }
+          if (c == sclose) {
+            sdepth--
+            if (sdepth <= 0) { insig = 0; out = out c; continue }
+            out = out " "; continue
+          }
+          out = out " "
         } else {
+          if (c == "~" && i + 2 <= n) {
+            nxt = substr(s, i + 1, 1)
+            dlm = substr(s, i + 2, 1)
+            if (nxt ~ /[A-Za-z]/ && index("([{<|/\"", dlm) > 0) {
+              insig = 1; sopen = dlm; sclose = sigil_close(dlm); sdepth = 1
+              out = out c nxt dlm
+              i += 2
+              continue
+            }
+          }
           if (c == "\"") { inq = 1; out = out "\""; continue }
           out = out c
         }
@@ -542,6 +580,7 @@ classify_one_file() {
     # word, so one of them ends it and the census dies at parse time.)
     function arg_span(start, pos,   span, depth, k, cut, blk, ch, m, n) {
       span = ""; depth = 0
+      SPAN_TRUNC = 0
       for (k = start; k <= NR && k < start + 40; k++) {
         if (k > start && is_comment(L[k])) continue
         cut = cut_comment(L[k])
@@ -564,6 +603,12 @@ classify_one_file() {
           }
         }
       }
+      # Fell out of the loop: the 40-line bound was hit (or the file ended)
+      # with parens still open. The span is INCOMPLETE — say so, out of band,
+      # so the caller can emit an attributable row instead of a silent decline
+      # (the census law turned on itself: a verdict that does not descend from
+      # a complete read must say so).
+      SPAN_TRUNC = 1
       return span
     }
 
@@ -682,6 +727,7 @@ classify_one_file() {
         # just the first — a line carrying two calls would otherwise hide the
         # second one behind the first.
         exec_at = 0
+        trunc_at = 0
         for (i = 1; i <= NR && exec_at == 0; i++) {
           if (is_comment(L[i])) continue
           probe = cut_comment(L[i])
@@ -693,12 +739,19 @@ classify_one_file() {
             rest2 = substr(rest2, RSTART + RLENGTH)
             off = popen
             span = arg_span(i, popen)
+            if (SPAN_TRUNC && trunc_at == 0) trunc_at = i
             if (span == "") continue
             if (attr != "" && mentions_attr(span, attr)) exec_at = i
             if (exec_at == 0) for (v in TV) if (mentions(span, v)) { exec_at = i; break }
             if (exec_at != 0) break
           }
         }
+
+        # A truncated span means NO verdict about this binding descends from a
+        # complete read — the honest-decline law applied to the census itself.
+        # The row is emitted BESIDE the verdict so the table can outrank it.
+        if (trunc_at > 0)
+          printf "%s\t%d\tSPAN-TRUNCATED\t%s\t%s\n", FNAME, trunc_at, bbase[b], blit[b]
 
         if (bkind[b] == "ATTR") {
           if (exec_at > 0)
@@ -1066,7 +1119,10 @@ run_census() {
 
     # unclassifiable test-side references are ERRORS, never a silent "not gated"
     row=''
-    if has_line "$kinds" 'BOUND-UNEXEC'; then
+    if has_line "$kinds" 'SPAN-TRUNCATED'; then
+      class='ERROR'
+      evidence='a System.cmd/Port.open argument-list span hit the arg_span 40-line bound (or the file ended with parens open) — the read is INCOMPLETE, so no verdict about this binding descends from a complete read. Split the call under 40 lines or fix the unbalanced paren; never let a truncated read decline (or admit) a door quietly.'
+    elif has_line "$kinds" 'BOUND-UNEXEC'; then
       class='ERROR'
       evidence='attribute-bound but executed by nothing — a door pointed at nothing. Wire it into System.cmd/Port.open or delete the binding, never both quietly.'
     elif has_line "$kinds" 'INLINE-EXEC'; then
@@ -1609,7 +1665,7 @@ selftest() {
 
   for s in pds-fx-three.sh pds-fx-four.sh pds-fx-inline.sh pds-fx-fraud.sh pds-fx-orphan.sh \
     pds-fx-nearcomment.sh pds-fx-nearread.sh pds-fx-trailing.sh pds-fx-port.sh \
-    pds-fx-tail.sh; do
+    pds-fx-tail.sh pds-fx-sigil.sh pds-fx-long.sh; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/scripts/$s"
   done
   printf '# fixture\n' >"$tmp/scripts/pds-fx-inbeam.exs"
@@ -1783,6 +1839,41 @@ defmodule TailTest do
 end
 EOF
 
+  # SIGIL (pds-w45-argspan-sigil-and-silent-bound, hole 1) — a System.cmd whose
+  # argument list carries a pipe-delimited sigil holding an UNBALANCED open
+  # paren (legal Elixir: no escaping needed outside paired delimiters). The
+  # bound instrument is only File.regular?-checked AFTER that call. A
+  # sigil-blind scanner counts the paren as structure, never balances, and the
+  # overrun span swallows the File.regular? line — admitting a fraudulent
+  # LEGA-BOUND-EXEC. Correct classification: BOUND-UNEXEC.
+  cat >"$tmp/api/test/barkpark/sigil_test.exs" <<'EOF'
+defmodule SigilTest do
+  use ExUnit.Case, async: false
+  @sigil_rel "../../../scripts/pds-fx-sigil.sh"
+  test "sigil paren must not open a structural span" do
+    {_o, 0} = System.cmd("echo", [~s|an ( unbalanced paren|])
+    assert File.regular?(Path.expand(@sigil_rel, __DIR__))
+  end
+end
+EOF
+
+  # LONG SPAN (hole 2) — an argument list whose closing paren sits past the
+  # 40-line bound, with the bound token BEYOND the bound. The old behaviour was
+  # a silent BOUND-UNEXEC (an honest door declined quietly); now the truncation
+  # is NAMED beside the verdict, and the table turns it into an ERROR row.
+  {
+    printf 'defmodule LongTest do\n'
+    printf '  use ExUnit.Case, async: false\n'
+    printf '  @long_rel "../../../scripts/pds-fx-long.sh"\n'
+    printf '  test "an argument list longer than the span bound" do\n'
+    printf '    {_o, 0} = System.cmd("echo", [\n'
+    for i in $(seq 1 42); do printf '      "filler-%d",\n' "$i"; done
+    printf '      Path.expand(@long_rel, __DIR__)\n'
+    printf '    ])\n'
+    printf '  end\n'
+    printf 'end\n'
+  } >"$tmp/api/test/barkpark/long_test.exs"
+
   INSTRUMENT_LIST="$(cd "$tmp/scripts" && ls -1 pds-*.sh pds-*.exs | LC_ALL=C sort)"
 
   local saved_root="$SCAN_ROOT"
@@ -1821,6 +1912,10 @@ EOF
     BOUND-UNEXEC pds-fx-tail.sh
   check "SECOND DIRECTION: an HONEST Port.open door spanning FIVE lines" \
     LEGA-BOUND-EXEC pds-fx-port.sh
+  check "SIGIL: an unbalanced paren inside ~s|...| is CONTENT, not structure" \
+    BOUND-UNEXEC pds-fx-sigil.sh
+  check "LONG SPAN: a 40-line-plus argument list is NAMED truncated, never a silent decline" \
+    "BOUND-UNEXEC,SPAN-TRUNCATED" pds-fx-long.sh
 
   # The fraud arm, said the other way round: the file DOES contain System.cmd,
   # so the weaker predicate would have admitted it.
