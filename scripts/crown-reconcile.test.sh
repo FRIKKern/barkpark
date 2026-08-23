@@ -419,7 +419,7 @@ section "(u) QUIET WINDOW: an empty window on a VERIFIED crown is a NAMED deferr
 # The live streak, in fixture form. A quiet repo empties the 24h window BY
 # CONSTRUCTION, and the empty-population rc 2 paged SIX consecutive scheduled
 # runs 2026-08-15T18:28Z..08-17 (#11217 at 41 comments) — all saying only that
-# nothing happened. Quiescence may read green ONLY when all three conditions
+# nothing happened. Quiescence may read green ONLY when all four conditions
 # hold, and each condition is pinned below by the ONE fixture that fails it
 # alone — so removing any single condition from the guard reds this section.
 #
@@ -493,6 +493,77 @@ run_cr 2 "a run whose job list could not be read is a SILENCE, and silence outra
   --runs-fixture "$RUNS_QUIET_UNREAD" --jobs-fixture "$JOBS_ELSEWHERE" --crown-fixture "$CROWN_QUIET" --health-fixture "$HEALTH_BASE"
 saw "its job list could not be read" "the unreadable run is named"
 not_saw "QUIET WINDOW:" "an unreadable window is never a quiet one"
+
+# (u6) CONDITION 4 — THE TRIGGER IS ALIVE (dr-w35). BEHIND is RUN-derived, so a
+# dead push trigger empties the window of delivering runs while merges continue:
+# the stale serving sha keeps its cp row, the list stays PRESENT-EMPTY, zero
+# rows sit in-window — the first three conditions all HOLD and quiescence read
+# green while production fell behind main. The fixture below is that exact
+# shape: a main commit inside the window touching deploy.yml's own on.push path
+# filters, with zero deploy.yml runs of any status in-window. First the defect
+# is the fixture; the guard makes it a named rc-2 refusal.
+commits_json() { # <name> <sha=file,file,...>...
+  local out="$TMP/$1.json"; shift
+  {
+    printf '['
+    local first=1 spec sha files f f2
+    for spec in "$@"; do
+      [ "$first" = 1 ] || printf ','
+      first=0
+      sha="${spec%%=*}"; files="${spec#*=}"
+      printf '{"sha":"%s","files":[' "$sha"
+      f2=1
+      while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        [ "$f2" = 1 ] || printf ','
+        f2=0
+        printf '"%s"' "$f"
+      done <<<"$(tr ',' '\n' <<<"$files")"
+      printf ']}'
+    done
+    printf ']'
+  } > "$out"
+  fixture_ok "$out"
+  echo "$out"
+}
+
+COMMITS_RELEVANT="$(commits_json commits-relevant "$SHA_C=cloud/lib/runtime.ex,docs/readme.md")"
+run_cr 2 "a deploy-path commit in the window with ZERO deploy.yml runs is a DEAD TRIGGER, not quiescence" \
+  --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_QUIET" --health-fixture "$HEALTH_BASE" \
+  --commits-fixture "$COMMITS_RELEVANT"
+saw "DEAD-TRIGGER SUSPECT: 1 file change(s)" "the refusal is its own named sentence, counting the deploy-path changes"
+saw "the push trigger never fired for them" "and it says what died — the trigger, not the repo"
+not_saw "QUIET WINDOW:" "a window production is falling behind is never quiet"
+
+# (u6b) NON-VACUITY, docs side: the same window with only docs-file commits is
+# still quiescence — the guard keys on deploy.yml's OWN path filters, so a
+# guard hardened into always-refusing reds HERE.
+COMMITS_DOCS="$(commits_json commits-docs "$SHA_C=docs/readme.md,MEMORY.md")"
+run_cr 0 "docs-only commits in the window are still a quiet green" \
+  --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_QUIET" --health-fixture "$HEALTH_BASE" \
+  --commits-fixture "$COMMITS_DOCS"
+saw "QUIET WINDOW:" "docs-only quiescence still reads green"
+not_saw "DEAD-TRIGGER" "and no dead trigger is invented out of a docs merge deploy.yml never fires on"
+
+# (u6c) NON-VACUITY, runs side: the same deploy-path commit WITH a deploy.yml
+# run in the window (skipped legs — a run that delivered nothing) means the
+# TRIGGER IS ALIVE, which is all condition 4 asserts. A guard that ignores the
+# run count and keys only on commits reds HERE.
+RUNS_ALIVE="$(runs_json runs-quiet-alive "$SHA_C:$IN2")"
+JOBS_ALIVE="$(jobs_json jobs-quiet-alive "1:skipped")"
+run_cr 0 "the same commit with a (non-delivering) deploy.yml run in-window: the trigger is alive" \
+  --runs-fixture "$RUNS_ALIVE" --jobs-fixture "$JOBS_ALIVE" --crown-fixture "$CROWN_QUIET" --health-fixture "$HEALTH_BASE" \
+  --commits-fixture "$COMMITS_RELEVANT"
+saw "QUIET WINDOW:" "a live trigger that delivered nothing is still quiescence"
+not_saw "DEAD-TRIGGER" "condition 4 accuses the TRIGGER, never a run that fired and delivered nothing"
+
+# (u6d) FAIL CLOSED: a commit list that cannot be read refuses quiescence with
+# its own named reason — an unreadable dead-trigger check must never green.
+run_cr 2 "an unreadable commit list refuses quiescence, fail-closed and named" \
+  --runs-fixture "$RUNS_OLD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_QUIET" --health-fixture "$HEALTH_BASE" \
+  --commits-fixture "$TMP/no-such-commits.json"
+saw "the main commit list for the window could not be read" "the unreadable check is named"
+not_saw "QUIET WINDOW:" "and nothing greens off a check that did not run"
 
 # The doctrine is STATED in the script, not only implemented — same contract as
 # section (q): a rule that lives only in a guard expression is a rule the next

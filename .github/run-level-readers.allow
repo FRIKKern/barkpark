@@ -27,7 +27,7 @@
 # behaviour is separate work with its own row.
 
 .github/workflows/deploy.yml 5 RUN-LEVEL anchors its path-diff base to `gh run list --status=success` (line 68); a run whose deploy job was continue-on-error red still advances the base, silently dropping that push's paths
-scripts/crown-reconcile.sh 4 RUN-LEVEL filters the deploy population with `select(.conclusion == "success")` over .workflow_runs[] (line 833); a partially-failed deploy run counts as a success to reconcile against
+scripts/crown-reconcile.sh 5 RUN-LEVEL filters the deploy population with `select(.conclusion == "success")` over .workflow_runs[]; a partially-failed deploy run counts as a success to reconcile against. The fifth reference is the dead-trigger check (dr-w35): an ANY-STATUS in-window run count over .workflow_runs[] that deliberately reads NO conclusion - the presence of a run, not its verdict, is what proves the push trigger alive
 scripts/registration-sample.sh 1 RUN-LEVEL reads `.workflow_runs[] | [.path, .status, .conclusion]` (line 217) and answers per-workflow status from the run rollup, not from check-runs
 scripts/pds-pull-proof.sh 2 RUN-LEVEL reports the last deploy from `gh run list --json headSha,conclusion` (line 569); advisory output, but it is the run conclusion being shown as the deploy verdict
 scripts/main-gate-watch.sh 2 KNOWS-THE-CLASS reads repos/<r>/actions/runs only to ENUMERATE, then asserts at check-run level; its header states the class verbatim - "`gh run list` itself launders the red (a run whose Sobelow job concluded `failure` reads `success` at the RUN level)"

@@ -311,6 +311,7 @@
 #   scripts/crown-reconcile.sh --state-file /var/lib/crown/graced.txt
 #   scripts/crown-reconcile.sh --runs-fixture r.json --jobs-fixture j.json \
 #       --crown-fixture c.json --health-fixture h.json --now 2026-08-09T12:00:00Z
+#   … --commits-fixture m.json   # [{sha, files:[…]}] — the DEAD-TRIGGER check
 #
 # The fixture flags make every classification hermetically provable; see
 # scripts/crown-reconcile.test.sh, which breaks the comparison five ways and
@@ -392,6 +393,7 @@ RUNS_FIXTURE=""
 JOBS_FIXTURE=""
 CROWN_FIXTURE=""
 HEALTH_FIXTURE=""
+COMMITS_FIXTURE=""
 NOW_OVERRIDE=""
 
 WORK="$(mktemp -d 2>/dev/null || mktemp -d -t crown-reconcile)"
@@ -413,6 +415,7 @@ while [ $# -gt 0 ]; do
     --jobs-fixture) JOBS_FIXTURE="${2:-}"; shift 2 ;;
     --crown-fixture) CROWN_FIXTURE="${2:-}"; shift 2 ;;
     --health-fixture) HEALTH_FIXTURE="${2:-}"; shift 2 ;;
+    --commits-fixture) COMMITS_FIXTURE="${2:-}"; shift 2 ;;
     --now) NOW_OVERRIDE="${2:-}"; shift 2 ;;
     --state-file) STATE_FILE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -1219,22 +1222,127 @@ if [ "$DELIVERING" -eq 0 ]; then
   # ── QUIET WINDOW (charter D597): an empty window on a VERIFIED crown ───────
   # A repo that stops merging empties this window BY CONSTRUCTION, and rc 2
   # here filed every 6 hours forever (6-run streak 2026-08-15..17, #11217 at 41
-  # comments). Quiescence reads green ONLY when all three hold: (1) the serving
+  # comments). Quiescence reads green ONLY when all four hold: (1) the serving
   # check verified the served sha has its cp row, (2) the re-ask list was
-  # PRESENT-EMPTY, (3) zero ledger rows sit inside the window. Any OTHER
+  # PRESENT-EMPTY, (3) zero ledger rows sit inside the window, (4) the push
+  # trigger is not suspect — no deploy-path file change on main sits in the
+  # window with zero deploy.yml runs (the dead-trigger block below). Any OTHER
   # reason() than the reverse direction's structural no-alibi refusal is a real
   # silence and still outranks quiescence — the refusal itself is unavoidable
   # on an empty window and is repeated inside the deferral text below, because
   # a green here must not imply the reverse direction was checked.
+  # ── THE FOURTH QUIESCENCE CONDITION: THE TRIGGER IS ALIVE (dr-w35) ────────
+  #
+  # BEHIND is RUN-derived — a delivering run whose sha has no row — never
+  # repo-head-derived. So if push-triggered deploy.yml stops firing entirely
+  # while merges continue, the window is empty of delivering runs, the (stale)
+  # serving sha keeps its cp row, the re-ask list is PRESENT-EMPTY, and the
+  # three conditions above all hold: quiescence read GREEN while production
+  # silently fell behind main. The 60-day auto-disable residual covers the
+  # SCHEDULE going dark, not the push trigger.
+  #
+  # The check, measured not felt: list main commits inside the window and
+  # classify each against deploy.yml's OWN on.push path filters (parsed from
+  # the checked-out file — one source of truth, no re-typed list). A commit
+  # touching those filters MUST have produced a deploy.yml run; docs-only
+  # commits legitimately produce none. Refusal fires ONLY when filter-touching
+  # commits exist AND the window holds ZERO deploy.yml runs of ANY status —
+  # runs present but non-delivering (a deploy.yml-only merge, a failed deploy)
+  # mean the TRIGGER is alive, which is all this condition asserts. STATED
+  # RESIDUAL: a window whose every relevant run FAILED still quiesces green
+  # here; that is a different defect (nothing-delivered, not dead-trigger).
+  # A commit list that cannot be read is a reason() — quiescence then refuses
+  # through QUIET_OTHER_REASONS, fail-closed and named. The GitHub commit-files
+  # payload caps at 300 files per commit; a >300-file commit whose deploy-path
+  # file sits past the cap can be misread as irrelevant — stated, not hidden.
+  QUIET_RELEVANT_COMMITS=0
+  QUIET_WINDOW_RUNS=0
+  if [ -n "$RUNS_FIXTURE" ] || [ -f "$WORK/runs-raw.json" ]; then
+    QUIET_WINDOW_RUNS="$(jq --argjson cut "$CUTOFF_EPOCH" \
+      '[.workflow_runs[]? | select((.created_at | sub("\\.[0-9]+"; "") | sub("Z?$"; "Z") | fromdateiso8601) >= $cut)] | length' \
+      "$WORK/runs-raw.json" 2>/dev/null || echo 0)"
+    case "${QUIET_WINDOW_RUNS:-}" in ''|*[!0-9]*) QUIET_WINDOW_RUNS=0 ;; esac
+  fi
+  deploy_path_filters() { # the on.push paths block of deploy.yml, first block only
+    awk '
+      done { next }
+      inp && /^[[:space:]]*-[[:space:]]*"/ { line=$0; sub(/^[^"]*"/, "", line); sub(/".*$/, "", line); print line; next }
+      inp && !/^[[:space:]]*#/ && !/^[[:space:]]*$/ { done=1; next }
+      /^[[:space:]]*paths:[[:space:]]*$/ { inp=1 }
+    ' "$REPO_ROOT/.github/workflows/deploy.yml"
+  }
+  if [ -n "$COMMITS_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
+    if [ -n "$COMMITS_FIXTURE" ]; then
+      if [ -f "$COMMITS_FIXTURE" ] && jq -e 'type == "array"' "$COMMITS_FIXTURE" >/dev/null 2>&1; then
+        cp "$COMMITS_FIXTURE" "$WORK/commits-files.json"
+      else
+        reason "the main commit list for the window could not be read — the dead-trigger check did NOT run"
+      fi
+    else
+      # LIVE: only reached on a live empty window, so the spend is bounded and
+      # rare. List shas since the window start, then each commit's files —
+      # capped at 50 commits; a busier window than that with zero runs is a
+      # dead trigger many times over and the refusal below fires regardless.
+      if gh api "repos/$REPO/commits?sha=main&since=$CUTOFF_ISO&per_page=50" \
+           --jq '[.[].sha]' > "$WORK/commit-shas.json" 2>/dev/null; then
+        : > "$WORK/commits-files.ndjson"
+        commits_files_ok=1
+        while IFS= read -r csha; do
+          [ -n "$csha" ] || continue
+          if ! gh api "repos/$REPO/commits/$csha" \
+               --jq '{sha: .sha, files: [.files[]?.filename]}' >> "$WORK/commits-files.ndjson" 2>/dev/null; then
+            commits_files_ok=0; break
+          fi
+        done < <(jq -r '.[]' "$WORK/commit-shas.json" 2>/dev/null)
+        if [ "$commits_files_ok" = "1" ]; then
+          jq -s '.' "$WORK/commits-files.ndjson" > "$WORK/commits-files.json" 2>/dev/null \
+            || reason "the main commit list for the window could not be read — the dead-trigger check did NOT run"
+        else
+          reason "the main commit list for the window could not be read — the dead-trigger check did NOT run"
+        fi
+      else
+        reason "the main commit list for the window could not be read — the dead-trigger check did NOT run"
+      fi
+    fi
+    if [ -f "$WORK/commits-files.json" ]; then
+      # The filter list travels by FILE, never by `awk -v` — BSD awk refuses a
+      # -v value containing newlines ("newline in string"), and an empty filter
+      # set must be a named refusal rather than a matcher that matches nothing.
+      deploy_path_filters > "$WORK/deploy-filters.txt"
+      if [ ! -s "$WORK/deploy-filters.txt" ]; then
+        reason "deploy.yml's on.push paths block could not be parsed — the dead-trigger check did NOT run"
+      else
+        jq -r '[.[] | .files[]?] | .[]' "$WORK/commits-files.json" 2>/dev/null > "$WORK/commit-files.txt"
+        QUIET_RELEVANT_COMMITS="$(awk '
+          NR == FNR { F[++n] = $0; next }
+          {
+            for (i = 1; i <= n; i++) {
+              f = F[i]
+              if (f ~ /\/\*\*$/) { pre = substr(f, 1, length(f) - 2); if (index($0, pre) == 1) { hits++; next } }
+              else if ($0 == f) { hits++; next }
+            }
+          }
+          END { print hits + 0 }' "$WORK/deploy-filters.txt" "$WORK/commit-files.txt")"
+        case "${QUIET_RELEVANT_COMMITS:-}" in ''|*[!0-9]*) QUIET_RELEVANT_COMMITS=0 ;; esac
+      fi
+    fi
+  fi
+  QUIET_TRIGGER_DEAD=0
+  if [ "$QUIET_RELEVANT_COMMITS" -gt 0 ] && [ "$QUIET_WINDOW_RUNS" -eq 0 ]; then # MUT:G-DEADTRIGGER
+    QUIET_TRIGGER_DEAD=1
+  fi
   QUIET_OTHER_REASONS="$(grep -vxF "$NOALIBI_REASON" "$REASONS_FILE" 2>/dev/null | awk 'NF' | wc -l | tr -d ' ')"
-  if [ "$SERVING_VERIFIED" = "1" ] && [ "$STATE_STATE" = "PRESENT-EMPTY" ] && [ "$QUIET_ROWS_READ" = "1" ] && [ "$QUIET_ROWS" -eq 0 ] && [ "${QUIET_OTHER_REASONS:-1}" -eq 0 ]; then
+  if [ "$SERVING_VERIFIED" = "1" ] && [ "$STATE_STATE" = "PRESENT-EMPTY" ] && [ "$QUIET_ROWS_READ" = "1" ] && [ "$QUIET_ROWS" -eq 0 ] && [ "${QUIET_OTHER_REASONS:-1}" -eq 0 ] && [ "$QUIET_TRIGGER_DEAD" -eq 0 ]; then
     say ""
-    say "QUIET WINDOW: ${SUCCESS_COUNT}${FLOOR} successful run(s) in the window and none of them delivered — and the crown is VERIFIED as far as an empty window allows: the serving sha ${SERVING_SHA} has its cp row, the re-ask list was PRESENT-EMPTY (nothing graced is still owed a row), and ZERO crown row(s) sit inside the window (nothing was delivered and nothing claims to have been). This is a NAMED DEFERRAL, not a reconciliation: the verdict over a real population is deferred to the next run whose window holds one."
+    say "QUIET WINDOW: ${SUCCESS_COUNT}${FLOOR} successful run(s) in the window and none of them delivered — and the crown is VERIFIED as far as an empty window allows: the serving sha ${SERVING_SHA} has its cp row, the re-ask list was PRESENT-EMPTY (nothing graced is still owed a row), ZERO crown row(s) sit inside the window (nothing was delivered and nothing claims to have been), and the push trigger is NOT suspect (no deploy-path file change on main sits in the window without a deploy.yml run). This is a NAMED DEFERRAL, not a reconciliation: the verdict over a real population is deferred to the next run whose window holds one."
     say "  the reverse direction has no alibi source on an empty window and was NOT checked — quiescence-green does not imply the reverse direction was checked."
-    say "::warning::QUIET WINDOW — zero delivering deploy.yml runs in the last ${WINDOW_HOURS}h on a verified crown (serving sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows). A deferral, not a silence: paging here is what mutes the alarm for the one case that is not."
+    say "::warning::QUIET WINDOW — zero delivering deploy.yml runs in the last ${WINDOW_HOURS}h on a verified crown (serving sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows, push trigger not suspect). A deferral, not a silence: paging here is what mutes the alarm for the one case that is not."
     exit 0
   fi
   say ""
+  if [ "$QUIET_TRIGGER_DEAD" -eq 1 ]; then
+    say "DEAD-TRIGGER SUSPECT: ${QUIET_RELEVANT_COMMITS} file change(s) on main inside the window touch deploy.yml's own on.push path filters, yet the window holds ZERO deploy.yml runs of any status — the push trigger never fired for them, so production is falling behind main. This is exactly the shape quiescence-green could not see (dr-w35): it stays a warning that pages, never a quiet green."
+  fi
   if [ "$QUIET_ROWS_READ" = "1" ] && [ "$QUIET_ROWS" -gt 0 ]; then
     # Rows-exist-but-no-runs is NOT quiescence and STAYS rc 2: a row claiming a
     # delivery no run made is an accusation source, unjudgeable without an
