@@ -615,6 +615,17 @@ func Execute(args []string) int {
 		return runTaskStamp(out, g, ctx, m, *cmd, tail)
 	}
 
+	// `bp task claim` — client-side ergonomic wrapper: on a refused claim
+	// (exit 6 — not_ready and its task-claim/close-contention siblings), read
+	// the task doc back and print a diagnosis of WHICH of the several causes a
+	// bare "not_ready" can mean (genuinely not ready / held live by someone
+	// else / a stale-but-present claim.worker refusing every id but the
+	// original holder — task-eb2b6170e19f1611). The POST itself is unchanged;
+	// this only adds a stderr diagnosis after a conflict.
+	if noun == "task" && verb == "claim" {
+		return runTaskClaim(out, g, ctx, m, *cmd, tail)
+	}
+
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 
