@@ -4467,7 +4467,11 @@ async function main() {
       const D = "W21-members-roster-identity-and-remove";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone and must never
       // read as shared file constants.
-      const MEM_SCENS = ["members-populated"];
+      // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts: the roster is now
+      // ALSO driven at the server's own email cap (one 160-char unbroken
+      // address, members-cruel-content) — before this the leg measured
+      // .set-row-name at 12-14 fixture-kind characters only.
+      const MEM_SCENS = ["members-populated", "members-cruel-content"];
       // The phone band where the row is broken, the fold, and 900 as a measured
       // upper edge on pre-fix bytes so the band's top is pinned rather than
       // assumed.

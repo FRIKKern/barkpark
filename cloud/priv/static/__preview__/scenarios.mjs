@@ -2238,6 +2238,30 @@ const cruelAccountMe = (function () {
   return Object.assign({}, m, { user: Object.assign({}, m.user, { email: cruelAccountEmail }) });
 })();
 
+// ── cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — THE CRUEL MEMBER ──
+// The roster's committed emails ship 12-14 characters against
+// `validate_length(:email, max: 160)` (cloud/lib/barkpark_cloud/accounts/
+// user.ex, validate_email/1) — so the members leg has only ever measured
+// fixture kindness on `.set-row-name`, never the cap. Same derivation as the
+// account identity above (160 − "@" − the 1-char domain @email_format admits =
+// 158 unbroken local characters; lowercase because validate_email/1 downcases
+// on the way in), with its OWN stem so two users never share an address.
+const cruelMemberLocal = dnsLabel("solveigmargretheeriksdatterholmenkollveien", AM_NAME_MAX);
+const cruelMemberEmail = `${cruelMemberLocal}@x`;
+if (cruelMemberEmail.length !== ACCOUNT_EMAIL_MAX || !ACCOUNT_EMAIL_FORMAT.test(cruelMemberEmail)) {
+  throw new Error(`cruel member: ${cruelMemberEmail.length} chars against the ${ACCOUNT_EMAIL_MAX} cap (user.ex validate_email/1), or not admissible by @email_format — an address the server would REJECT proves nothing`);
+}
+if (/[^a-z0-9]/.test(cruelMemberLocal)) {
+  throw new Error("cruel member: the local part carries a break opportunity — BREAKABLE, it would wrap on its own and certify a bound that never held it");
+}
+// CONCAT, never an edit: `teamMembers` and every count assertion, residue line
+// and wire leg standing on its three rows stays byte-for-byte unmoved (the
+// cch-w45-s1 fence). usr_sol is never an ACTOR, so corpusActorEmail's fatal
+// unknown-id arm is untouched.
+const teamMembersCruel = teamMembers.concat([
+  { user_id: "usr_sol", email: cruelMemberEmail, role: "member", joined_at: tMinus(3 * 86400) },
+]);
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -2576,6 +2600,24 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       members: teamMembers,
+      invitations: teamInvites,
+    },
+  },
+  // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — the members roster
+  // at the server's own email cap. Identical frame to members-populated (owner
+  // actor, buttons rendered) with ONE appended 160-char member, so the members
+  // leg finally measures `.set-row-name` under content the server would store.
+  "members-cruel-content": {
+    label: "Members — cruel content: one roster email at the 160-char server cap, unbroken",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersCruel,
       invitations: teamInvites,
     },
   },
@@ -3508,6 +3550,27 @@ export const SCENARIOS = {
     label: "Cruel content — a 253-char custom domain, a 255-char name and a 512-char single-token provision error, all server-legal",
     authed: true,
     deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts (absorbing
+  // cch-w15-bl-detail-url-fixture-never-overflows): the CRUEL instance's OWN
+  // detail screen. fleet-cruel-content already carries cruelInstance and its
+  // 253-char custom_host (registry/barkpark.ex custom_host cap under
+  // @external_host_format), but no committed scenario ever deep-linked
+  // #instance/<cruel id> — so `.detail-url-text`, which renders
+  // publicUrl(bp) = "https://" + custom_host, had never rendered a string that
+  // overflows anywhere in the corpus (the w15 measurement: sw == cw == 240 in
+  // EVERY cell). Same data, the cruel box's route.
+  "instance-cruel-detail": {
+    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, with the copy-btn carrying the full value",
+    authed: true,
+    deepLink: "#instance/5b2c1e00-0000-4000-8000-0000000000c1",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
