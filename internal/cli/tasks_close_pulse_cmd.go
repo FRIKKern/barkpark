@@ -20,6 +20,30 @@ package cli
 // verdict from what it holds. Both also inherit the draft check — the read-back
 // route falls back to the `drafts.` twin, so a close or a pulse can land on a row
 // no board will ever show.
+//
+// THE STATUS CODE CARRIES NO INFORMATION ABOUT WHETHER THE WRITE LANDED. Three
+// outcomes are real and this system has produced all three:
+//
+//	200 + LOST    a normal envelope over a write the store never took
+//	500 + LANDED  the transaction commits, then the RESPONSE fails
+//	500 + LOST    the ordinary genuine failure
+//
+// Only the read-back separates them, so both verbs re-read on a 2xx AND on a
+// 5xx, and each of the three has an Execute-level test
+// (tasks_close_pulse_execute_test.go). A suite that exercised only the happy
+// path would re-certify the bug rather than catch it.
+//
+// THE ONE INFERENCE THAT REMAINS, STATED PLAINLY. Every OTHER non-2xx — auth,
+// validation, not_found, conflict, rate-limit — returns WITHOUT a second read,
+// on the assumption that the server refused BEFORE any commit. That assumption
+// holds for those paths as they are implemented today (they are guard-clause
+// rejections ahead of the transaction), but it IS an inference from a status
+// code, and it is the one place these verbs still make one. If a refusal path
+// ever grows a partial write ahead of its rejection, this skip becomes the same
+// defect in miniature and the fix is to re-read there too. Re-reading on every
+// refusal today would add a round trip and noise on a row nothing touched,
+// which is why it is not done — a deliberate trade, recorded rather than
+// hidden.
 
 import (
 	"fmt"
