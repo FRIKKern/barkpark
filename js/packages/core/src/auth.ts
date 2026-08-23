@@ -69,7 +69,11 @@ export async function loginUser(
 
 /**
  * The current authenticated user (`GET /v1/auth/me`), using the client's session
- * token. Returns `null` when not authenticated (401). Prefer `client.auth.me()`.
+ * token. Returns `null` only for a genuine 401 (not authenticated). A 403 —
+ * including the server's `cors_forbidden` and `csrf_required` rejections, both
+ * emitted with status 403 — propagates as `BarkparkAuthError`: a token that
+ * lacks permission, or a CORS/CSRF refusal, is a refusal-to-answer, not an
+ * absent user. Prefer `client.auth.me()`.
  */
 export async function getCurrentUser(
   config: BarkparkClientConfig,
@@ -81,7 +85,11 @@ export async function getCurrentUser(
     const { data } = await request<{ user?: AuthUser }>(config, `/v1/auth/me`, reqOpts)
     return data.user ?? null
   } catch (err) {
-    if (err instanceof BarkparkAuthError) return null
+    // Only the genuine "who are you? — nobody" answer collapses to null.
+    // transport.ts throws BarkparkAuthError for 401 AND 403/cors_forbidden/
+    // csrf_required (all 403 server-side); discriminating on status keeps a
+    // refusal from being reported as "no current user".
+    if (err instanceof BarkparkAuthError && err.status === 401) return null
     throw err
   }
 }
