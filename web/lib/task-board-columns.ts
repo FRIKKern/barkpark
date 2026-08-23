@@ -8,8 +8,9 @@
  * (an `open` task with no unmet blocker is surfaced as `"ready"` by
  * `row_from_task/status_of` — readiness is derived ONCE, server-side, exactly
  * like the live board's D3 overlay). So this helper NEVER re-derives readiness
- * and NEVER re-queries; it only BUCKETS the resolved rows into the five ordered
- * columns for display. No React / DOM — unit-testable under `node --test`.
+ * and NEVER re-queries; it only BUCKETS the resolved rows into the seven
+ * ordered columns (five white-ladder + the two adopted thought states) for
+ * display. No React / DOM — unit-testable under `node --test`.
  *
  * The organizer (`Barkpark.Tasks.Board`, D2) stays Elixir core; this is the far
  * simpler web twin because readiness is already decided on the wire.
@@ -125,8 +126,9 @@ function columnForStatus(status: string): TaskBoardColumnKey | "cancelled" {
 }
 
 /**
- * Bucket a flat, already-resolved task-board snapshot into the five ordered
- * white-ladder columns + a cancelled tally + the momentum read.
+ * Bucket a flat, already-resolved task-board snapshot into the seven ordered
+ * columns (five white-ladder + considering/researching) + a cancelled tally +
+ * the momentum read.
  *
  * Readiness is PRE-COMPUTED server-side (D16) — this only buckets by the row's
  * `status` string. `pct = round(done / max(non_cancelled_total, 1) * 100)` so it

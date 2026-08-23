@@ -6,11 +6,15 @@
  * Each function maps an authored component block to the SAME structural
  * projection the Elixir generator emits into `<type>.golden.json` (a manifest-
  * derived element-tree of container_role / column·row roles / labels / glyph-
- * roles / nesting). `portable-doc.tsx` renders EACH of these types FROM the
- * matching projection here, and `__tests__/component-golden-parity.test.ts`
- * asserts the projection equals the committed golden fixture — so a web
+ * roles / nesting). CONSUMERS (measured): `__tests__/component-golden-parity.test.ts`
+ * asserts each projection equals the committed golden fixture — so a web
  * divergence from the shared truth trips the freshness lock, never a hand-tuned
- * web-only assertion.
+ * web-only assertion — and `task-board-columns.ts` imports the board label +
+ * glyph helpers. The old web render fork (`portable-doc.tsx`) that once
+ * rendered FROM these projections was deliberately deleted — the render path
+ * is the single canonical `renderPortableDocument` from `@barkpark/react`
+ * (see `components/paper-editor-doc.tsx`), so these projections have no
+ * render-side consumer in web/ anymore; the parity spine is what they serve.
  *
  * DECISION-1: structure is the shared truth; each surface asserts its native
  * realization of THIS projection. Pure TS (no React / DOM) so it runs under
@@ -267,8 +271,9 @@ function noteRow(item: Block): NoteRow {
 
 export function statusLegendProjection(): LegendProjection {
   // Manifest-scoped (see MANIFEST_LADDER): the legend key stays byte-frozen to
-  // the Elixir golden; the appended thought states power resolution but are not
-  // legend rows until the manifest adopts them.
+  // the Elixir golden. The manifest has ADOPTED the two thought states
+  // (considering/researching), so they ARE legend rows here — the filter and
+  // the golden gained them in lockstep (see the MANIFEST_LADDER note above).
   return {
     container_role: "legend",
     rows: STATUS_LADDER.filter((r) => MANIFEST_LADDER.has(r.role)),
@@ -296,8 +301,10 @@ export function cardsProjection(block: Block): CardsProjection {
   };
 }
 
-/** The card's FIXED render order (mirrors `Components.card_html/2` +
- * `portable-doc.tsx` case "card" order). The projection filters this to the PRESENT
+/** The card's FIXED render order (mirrors `Components.card_html/2`; the
+ * deleted `portable-doc.tsx` web fork used to realize the same order — the
+ * canonical `@barkpark/react` renderer now owns the render leg). The
+ * projection filters this to the PRESENT
  * slots — the structural render contract (a reorder reds the render legs). */
 const CARD_SLOT_ORDER = ["media", "title", "body", "action"] as const;
 

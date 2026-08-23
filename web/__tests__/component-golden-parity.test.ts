@@ -6,15 +6,14 @@
  * into the api + internal/pdrender trees. Each fixture carries the authored
  * `input` block plus an `expected` STRUCTURAL PROJECTION (node roles / column
  * labels / row titles / glyph-role / nesting). This suite proves the web reader's
- * task-board model (`taskBoardColumns` + the exported label/glyph constants that
- * `portable-doc.tsx` renders from) REALIZES that projection — the web half of the
- * shared contract.
+ * task-board model (`taskBoardColumns` + the exported label/glyph constants)
+ * REALIZES that projection — the web half of the shared contract. (The old web
+ * render fork `portable-doc.tsx` that consumed these constants was deleted;
+ * the canonical `@barkpark/react` renderer owns the render leg, so this MODEL
+ * parity is what keeps the web surface honest.)
  *
  * The web reader has no RTL/testing-library; like the sheet golden-parity web leg
- * it asserts the pure MODEL the component consumes, not the DOM. `portable-doc.tsx`
- * maps `taskBoardColumns(...).columns[key]` -> a labelled column with
- * `TASK_BOARD_GLYPHS[key]` and one card per row, so realizing the model realizes
- * the render.
+ * it asserts the pure MODEL the component consumes, not the DOM.
  *
  * SCOPE (S1): task-board only. status-legend has NO web reader case yet — it is
  * the FIRST S2 item (see the skipped placeholder below); the harness is proven on
@@ -166,7 +165,7 @@ test("web glyph chars match the shared manifest for non-spinner roles (legend fi
 /* ══ S2: the task-tracking / composition component family ══════════════════════
  *
  * Each type's web PROJECTOR (`web/lib/component-projections.ts`, which
- * portable-doc.tsx renders FROM) must produce the SAME structural projection the
+ * the deleted portable-doc.tsx fork once rendered FROM) must produce the SAME structural projection the
  * Elixir generator committed. deepEqual against the golden `expected` — EXACT,
  * never substring — so a web divergence from the shared truth reds here (matching
  * the task-board leg's exactness). status-legend leads (the S1 skip, now green);
@@ -226,8 +225,9 @@ const S2_CASES: Array<{
   { type: "terminal", project: terminalProjection },
   // section (cd-12): the projector leg C1 ONLY — the deepEqual proof that the web
   // projector realizes the golden layout projection (mode · tracks · gap ·
-  // authored-echo cells). The web RENDER leg (portable-doc.tsx renders the grid) is
-  // cd-12b — filed, not built here; NO section render-assert is added below.
+  // authored-echo cells). The web RENDER leg (now the canonical @barkpark/react
+  // renderer — the portable-doc.tsx fork is deleted) is cd-12b — filed, not
+  // built here; NO section render-assert is added below.
   { type: "section", project: sectionProjection },
 ];
 
@@ -368,7 +368,7 @@ test("web card RENDER realizes the MODEL-B projection (ordered slots · tone tin
   const exp = loadFixture("card").expected as CardProjection;
 
   // The projection's PRESENT slots realize IN ORDER in the rendered DOM — a
-  // dropped or reordered slot in portable-doc.tsx's `case "card"` render (projector
+  // dropped or reordered slot in the @barkpark/react card emitter (projector
   // untouched) reds this ordered-spine check (the load-bearing non-vacuous proof).
   assert.deepEqual(
     exp.slots,
