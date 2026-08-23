@@ -45,7 +45,7 @@ describe('generateTypes — field-type mappings', () => {
       required: true,
       options: ['published', 'draft'],
     })
-    expect(out).toContain("status: 'draft' | 'published'")
+    expect(out).toContain('status: "draft" | "published"')
     expect(await genField({ name: 'e', type: 'select', required: true })).toContain('e: string')
   })
 
@@ -57,7 +57,7 @@ describe('generateTypes — field-type mappings', () => {
       options: ['a\nb'],
     })
     // The newline must be escaped so the string-literal type stays on one line.
-    expect(out).toContain("'a\\nb'")
+    expect(out).toContain('"a\\nb"')
     // The raw, unescaped value must NOT appear — a raw newline inside the quotes
     // is invalid TS and prettier (run inside generateTypes) would have thrown
     // before returning, so merely reaching this assertion already proves parseability.
@@ -121,7 +121,7 @@ describe('generateTypes — field-type mappings', () => {
       required: true,
       languages: ['nob', 'eng'],
     })
-    expect(out).toContain("t: Partial<Record<'eng' | 'nob', string>>")
+    expect(out).toContain('t: Partial<Record<"eng" | "nob", string>>')
   })
 
   it('an unrecognized type → unknown (surfaced, never silently dropped)', async () => {
@@ -196,5 +196,61 @@ describe('generateTypes — JSDoc from descriptions', () => {
     })
     expect(out).toContain('/** A blog post. */')
     expect(out).toContain('export interface Post extends BarkparkSystemFields')
+  })
+})
+
+// ── CWD independence (cca-backlog-prettier-cwd) ──────────────────────────────
+// The old code passed process.cwd() to prettier.resolveConfig, which treats
+// its argument as a FILE path — the config search started in the cwd's PARENT.
+// So cwd=js/ found nothing (prettier defaults) while cwd=js/packages/codegen
+// found js/.prettierrc (semi:false), and the whole byte diff was semicolons.
+// Formatting is now a function of the OUTPUT location alone: with no
+// outputPath there is deliberately no config search at all.
+describe('generateTypes — formatting is CWD-independent', () => {
+  const envelope = {
+    _schemaVersion: 1,
+    datasetSchemaHash: 'h',
+    schemas: [{ name: 'thing', fields: [{ name: 'f', type: 'string', required: true }] }],
+  }
+
+  it('emits byte-identical output from the two CWDs that used to disagree', async () => {
+    const { resolve } = await import('node:path')
+    const before = process.cwd()
+    // __dirname twins: tests/ → package root (js/packages/codegen) and js/.
+    const pkgRoot = resolve(import.meta.dirname, '..')
+    const jsRoot = resolve(import.meta.dirname, '../../..')
+    const outs: string[] = []
+    try {
+      for (const dir of [pkgRoot, jsRoot]) {
+        process.chdir(dir)
+        outs.push(await generateTypes(envelope))
+      }
+    } finally {
+      process.chdir(before)
+    }
+    expect(outs[0]!.length).toBeGreaterThan(100)
+    // Byte-identical — the old resolveConfig(process.cwd()) reds here (the
+    // pkgRoot run picks up js/.prettierrc semi:false, the jsRoot run does not).
+    expect(outs[1]).toBe(outs[0])
+    // And both are prettier DEFAULTS (semi:true): js/.prettierrc was consulted
+    // from NEITHER cwd. The committed web/lib/barkpark.types.ts is these bytes.
+    expect(outs[0]).toContain('f: string;')
+  })
+
+  it('resolves the prettier config against outputPath, never the CWD', async () => {
+    const { mkdtemp, writeFile: wf, rm } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const { tmpdir } = await import('node:os')
+    const dir = await mkdtemp(join(tmpdir(), 'bp-codegen-'))
+    try {
+      await wf(join(dir, '.prettierrc'), '{ "semi": false }', 'utf8')
+      const styled = await generateTypes(envelope, { outputPath: join(dir, 'out.types.ts') })
+      // The output file's directory carries semi:false — and it is honored
+      // even though the process CWD is nowhere near it.
+      expect(styled).toContain('f: string\n')
+      expect(styled).not.toContain('f: string;')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

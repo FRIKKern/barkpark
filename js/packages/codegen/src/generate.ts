@@ -282,13 +282,22 @@ export interface GenerateOptions {
    * `"unknown"`.
    */
   dataset?: string
+  /**
+   * Absolute path of the file the caller will write the result to. When set,
+   * the prettier config is resolved against THIS path (the generated file is
+   * formatted like its committed siblings), so formatting is a function of the
+   * output location — never of the invoking CWD. When absent, no config search
+   * happens at all and prettier defaults apply (deterministic by construction).
+   */
+  outputPath?: string
 }
 
 /**
  * Generate the full TypeScript module from a schema envelope. Deterministic:
- * schemas and fields are sorted by name, union members are sorted, so the same
- * input always produces byte-identical output. The result is formatted with the
- * repo's prettier config.
+ * schemas and fields are sorted by name, union members are sorted, and the
+ * prettier config is resolved against `outputPath` (or skipped entirely when
+ * none is given), so the same input + output location always produces
+ * byte-identical output regardless of the directory the generator runs from.
  */
 export async function generateTypes(
   envelope: BarkparkSchemaJson,
@@ -362,7 +371,17 @@ export async function generateTypes(
 
   const source = [banner, '', PRELUDE, '', interfaces, '', typeMap, '', union, ''].join('\n')
 
-  const config = await prettier.resolveConfig(process.cwd()).catch(() => null)
+  // Config resolution is anchored to the OUTPUT file, never process.cwd():
+  // prettier treats the argument as a FILE path (the search starts in its
+  // parent), so the old resolveConfig(process.cwd()) made the emitted bytes a
+  // function of where the generator happened to run — cwd=js/ found nothing
+  // (defaults) while cwd=js/packages/codegen found js/.prettierrc, and the
+  // whole diff was semicolons. Without an outputPath there is deliberately NO
+  // filesystem search: prettier defaults, byte-stable anywhere.
+  const config =
+    options.outputPath !== undefined
+      ? await prettier.resolveConfig(options.outputPath).catch(() => null)
+      : null
   return prettier.format(source, {
     ...(config ?? {}),
     parser: 'typescript',
