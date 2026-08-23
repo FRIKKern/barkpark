@@ -1274,15 +1274,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </:header_actions>
 
           <%= if Map.get(pane, :desk_groups, []) != [] do %>
-            <div class="bp-desk-filter" role="tablist" aria-label="Desk filters">
+            <%!-- spd-w18-desk-chips-answer / charter D244 — the chips are LINKS,
+                  and they say so. The old markup claimed role="tablist"/"tab"
+                  with aria-selected={active}: no aria-controls, no tabpanel
+                  anywhere in the tree, no roving tabindex — and HEEx rendered
+                  the boolean as a BARE VALUELESS aria-selected when true and
+                  omitted it when false, neither a valid ARIA boolean. Worse,
+                  role="tab" on an <a href> overwrites the link role, so AT
+                  stopped announcing a control that navigates (D79: an ARIA
+                  state that never changes truthfully is worse than absence).
+                  Resolution per D244: DROP the fake tab semantics — a plain
+                  group of links, every chip Tab-reachable (N tab stops is the
+                  correct link grammar; a one-tab-stop roving pattern belongs
+                  to the tablist D244 rejected), selection spoken as
+                  aria-current="true" exactly like the sibling pane rows (the
+                  vocabulary is written down once, in StudioComponents.Panes'
+                  moduledoc). --%>
+            <div class="bp-desk-filter" role="group" aria-label="Desk filters">
               <%= for grp <- pane.desk_groups do %>
                 <% gname = Map.get(grp, "name") || Map.get(grp, :name) %>
                 <% gtitle = Map.get(grp, "title") || Map.get(grp, :title) || gname %>
                 <% active = to_string(gname) == to_string(pane[:active_desk] || "") %>
                 <a
                   class={"bp-desk-chip " <> if(active, do: "is-active", else: "")}
-                  role="tab"
-                  aria-selected={active}
+                  aria-current={active && "true"}
                   href={Paths.desk_chip_href(@scope_prefix, @nav_path, @dataset, gname)}
                   phx-click="select-desk"
                   phx-value-desk={gname}

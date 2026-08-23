@@ -507,8 +507,20 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       }
     >
       <%= if @selectable do %>
-        <span
+        <%!-- A REAL control (spd-bl-doc-checkbox-is-an-unfocusable-span): this
+              was a bare <span phx-click> — unreachable by keyboard, silent to
+              AT, its checked state a bare glyph. Now a <button role="checkbox">
+              (legal here: the row body is a SIBLING button inside the outer
+              div, so no button-in-button) — Tab-reachable, Enter/Space
+              activatable, with aria-checked carrying the state and an
+              aria-label naming WHAT gets selected. The ✓ glyph stays visual
+              only; AT reads aria-checked. --%>
+        <button
+          type="button"
+          role="checkbox"
           class="bp-doc-checkbox"
+          aria-checked={to_string(@checked)}
+          aria-label={"Select #{@title}"}
           phx-click="toggle-doc-checkbox"
           phx-value-id={@phx_value_id}
           data-test-id={"doc-checkbox-#{@phx_value_id}"}
@@ -516,7 +528,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           <span class={"bp-doc-checkbox-box " <> if(@checked, do: "is-checked", else: "")}>
             <%= if @checked, do: "✓" %>
           </span>
-        </span>
+        </button>
       <% end %>
       <button
         type="button"
