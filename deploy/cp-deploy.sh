@@ -127,7 +127,13 @@ fi
 ok=0
 for _ in $(seq 1 36); do
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://localhost:${TARGET_PORT}/" || true)"
-  if echo "$code" | grep -qE '^(200|301|302|404)$'; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
+  # 404 is NOT accepted: it used to be, on the theory that "some route
+  # answered" proves a live app — but a container that serves nothing but
+  # 404s (image booted, app crashed, wrong port, static server up with the
+  # SPA missing) is exactly the broken-deploy shape this gate exists to
+  # catch, and 404 waved it through as "healthy". Only redirect/success on
+  # '/' counts now.
+  if echo "$code" | grep -qE '^(200|301|302)$'; then ok=1; log "slot $TARGET healthy ($code)"; break; fi
   sleep 5
 done
 if [ "$ok" != "1" ]; then
