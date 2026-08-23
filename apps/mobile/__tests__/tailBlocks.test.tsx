@@ -242,12 +242,36 @@ function escapeHtml(s: string): string {
 
 /** The MathML this leg's atom tree STANDS FOR — the same tags at the same
  * grammar positions the web emitter uses, so the two can be compared directly.
- * Grouping <mrow>s are omitted here and stripped from the twin's side: mrow
- * carries no meaning, and the two legs wrap groups at different depths (the web
- * wraps a `{…}` group and then wraps it again per mfrac/script slot).
- * Everything that DOES carry meaning — which element, which symbol, which slot,
- * in what order — is compared exactly. */
-function atomsToMathMl(a: MathAtom): string {
+ *
+ * SLOT <mrow>s ARE EMITTED, and that is the whole point (task-ce0b4827a6bff147).
+ * This projection used to omit every <mrow>, and a `stripRows` helper deleted
+ * them from the twin's side too, on the stated grounds that "mrow carries no
+ * meaning". That was FACTUALLY WRONG: <mrow> is the ONLY thing encoding the
+ * mfrac numerator/denominator boundary in MathML, because the two slots sit
+ * adjacent with no delimiter between them. `<mfrac>` + `a+b` + `c` + `</mfrac>`
+ * serialises identically whether the split is (a+b)/(c) or (a+b·c)/(), so the
+ * corpus below could not see a slot-boundary drift at all.
+ *
+ * MEASURED, not argued. With the old helper in place, a parser mutation making
+ * a NESTED-frac numerator swallow its denominator — `\frac{\frac{a}{b}}{c}`
+ * parsed as `(a/b · c) / ()`, mathematically wrong — passed the ENTIRE mobile
+ * suite: 51 suites, 892 tests, all green. The sibling assertion below pins the
+ * flagship `\frac{a+b}{c}` tree directly and does catch a mis-split THERE, but
+ * it is one hand-written tree for one input; every other frac and script slot
+ * in the 21-row corpus was blind.
+ *
+ * WHERE THE ROWS GO, read off the twin's actual output rather than assumed:
+ *   • a TOP-LEVEL row emits no wrapper — the twin renders `x + y = z` flat;
+ *   • a nested row (an explicit `{…}` group) emits <mrow>, as the twin does;
+ *   • EVERY mfrac and script slot is wrapped, as the twin does — including an
+ *     absent denominator, which the twin emits as an empty <mrow>.
+ *
+ * The twin wraps a `{…}` group AND wraps it again per slot, so it emits
+ * <mrow><mrow>…</mrow></mrow> where this leg emits one level fewer. That is the
+ * ONE real difference, and `collapse` normalises it on BOTH sides rather than
+ * deleting the information. A collapse cannot merge two sibling slots — only a
+ * row that is its parent row's sole child — so the boundary survives. */
+function atomsToMathMl(a: MathAtom, top = false): string {
   switch (a.kind) {
     case 'sym':
       return `<${a.mathml}>${escapeHtml(a.text)}</${a.mathml}>`
@@ -255,14 +279,16 @@ function atomsToMathMl(a: MathAtom): string {
       return `<mtext>${escapeHtml(a.text)}</mtext>`
     case 'none':
       return ''
-    case 'row':
-      return a.items.map(atomsToMathMl).join('')
+    case 'row': {
+      const inner = a.items.map((i) => atomsToMathMl(i)).join('')
+      return top ? inner : `<mrow>${inner}</mrow>`
+    }
     case 'frac':
-      return `<mfrac>${atomsToMathMl(a.numer)}${atomsToMathMl(a.denom)}</mfrac>`
+      return `<mfrac>${slot(a.numer)}${slot(a.denom)}</mfrac>`
     case 'script': {
-      const base = atomsToMathMl(a.base)
-      const sup = a.sup === undefined ? '' : atomsToMathMl(a.sup)
-      const sub = a.sub === undefined ? '' : atomsToMathMl(a.sub)
+      const base = slot(a.base)
+      const sup = a.sup === undefined ? '' : slot(a.sup)
+      const sub = a.sub === undefined ? '' : slot(a.sub)
       if (a.sup !== undefined && a.sub !== undefined) return `<msubsup>${base}${sub}${sup}</msubsup>`
       if (a.sup !== undefined) return `<msup>${base}${sup}</msup>`
       return `<msub>${base}${sub}</msub>`
@@ -270,7 +296,72 @@ function atomsToMathMl(a: MathAtom): string {
   }
 }
 
-const stripRows = (s: string): string => s.replace(/<\/?mrow>/g, '')
+/** One mfrac/script SLOT. ALWAYS wrapped, exactly as the twin wraps it — an
+ * unwrapped slot is the boundary erasure this change exists to end. */
+function slot(a: MathAtom): string {
+  return `<mrow>${atomsToMathMl(a)}</mrow>`
+}
+
+/* ── mrow normalisation ─────────────────────────────────────────────────────
+ * The twin double-wraps (group mrow + slot mrow); this leg wraps once. Collapse
+ * an <mrow> whose SOLE child is an <mrow> down one level, to a fixpoint, on
+ * BOTH sides. Structural, not a regex: a regex over nested identical tags
+ * cannot tell an inner close tag from an outer one, and getting that wrong is
+ * how a normaliser quietly starts erasing the boundary again.
+ *
+ * This is deliberately the WEAKEST normalisation that reconciles the two legs.
+ * It never merges siblings, so `<mfrac><mrow>A</mrow><mrow>B</mrow></mfrac>` is
+ * already a fixpoint and A/B stay distinguishable. */
+type MNode = { tag: string; kids: MNode[] } | { text: string }
+
+function parseMathMl(s: string): MNode[] {
+  const out: MNode[] = []
+  const stack: MNode[][] = [out]
+  const re = /<(\/?)([a-zA-Z]+)>|([^<]+)/g
+  let m: RegExpExecArray | null
+  while ((m = re.exec(s)) !== null) {
+    const here = stack[stack.length - 1] as MNode[]
+    if (m[3] !== undefined) {
+      here.push({ text: m[3] })
+    } else if (m[1] === '/') {
+      if (stack.length > 1) stack.pop()
+    } else {
+      const node: MNode = { tag: m[2] as string, kids: [] }
+      here.push(node)
+      stack.push(node.kids)
+    }
+  }
+  return out
+}
+
+function collapse(nodes: MNode[]): MNode[] {
+  return nodes.map((n) => {
+    if (!('tag' in n)) return n
+    let kids = collapse(n.kids)
+    while (
+      n.tag === 'mrow' &&
+      kids.length === 1 &&
+      'tag' in (kids[0] as MNode) &&
+      (kids[0] as { tag: string }).tag === 'mrow'
+    ) {
+      kids = (kids[0] as { kids: MNode[] }).kids
+    }
+    return { tag: n.tag, kids }
+  })
+}
+
+function serialize(nodes: MNode[]): string {
+  return nodes
+    .map((n) => ('tag' in n ? `<${n.tag}>${serialize(n.kids)}</${n.tag}>` : n.text))
+    .join('')
+}
+
+/** Normalise one MathML string for cross-leg comparison. Applied to BOTH sides
+ * — never to one, which would make the comparison a statement about the
+ * normaliser rather than about the two parsers. */
+function normMathMl(s: string): string {
+  return serialize(collapse(parseMathMl(s)))
+}
 
 describe('equation — the transliterated parser agrees with the web twin', () => {
   const CORPUS = [
@@ -301,24 +392,23 @@ describe('equation — the transliterated parser agrees with the web twin', () =
   ]
 
   it.each(CORPUS.map((t) => [t] as const))('emits the twin’s MathML for %s', (tex) => {
-    expect(stripRows(atomsToMathMl(texToMathAtoms(tex)))).toBe(stripRows(twinMathMl(tex)))
+    expect(normMathMl(atomsToMathMl(texToMathAtoms(tex), true))).toBe(normMathMl(twinMathMl(tex)))
   })
 
   it('the MULTI-ATOM numerator is a real slot boundary, not a flattened run', () => {
-    // THE case equation.go gets wrong, pinned on the TREE and not only through
-    // the corpus comparison above — because `stripRows` deletes every <mrow>,
-    // and <mrow> is the ONLY thing encoding the mfrac numerator/denominator
-    // boundary in MathML. After stripping, a numerator that swallowed the
-    // denominator serialises to exactly the same string as a correct split
+    // THE case equation.go gets wrong, pinned on the TREE as well as through
+    // the corpus comparison above. It was written when the corpus could NOT see
+    // this — every <mrow> was deleted from both sides, and <mrow> is the only
+    // thing encoding the mfrac slot boundary, so a numerator that swallowed the
+    // denominator serialised to exactly the same string as a correct split
     // (`<mfrac><mi>a</mi><mo>+</mo><mi>b</mi><mi>c</mi></mfrac>` either way).
     //
-    // Measured, rather than asserted: of four deliberately mis-split trees, the
-    // three that keep the mfrac in the same POSITION — numerator swallows all,
-    // split one atom early, numerator empty — are indistinguishable to the
-    // corpus row, while the regex reading `a + (b/c)` IS caught there, because
-    // its mfrac moves. So the corpus does cover equation.go's actual bug; what
-    // it cannot see is a slot-boundary drift, and that is what this assertion
-    // buys.
+    // The corpus CAN see it now (task-ce0b4827a6bff147: slot mrows are emitted
+    // and both sides are collapsed to a fixpoint instead of stripped). This
+    // assertion is kept anyway, and deliberately: it names the specific tree for
+    // the specific input equation.go gets wrong, so a reader learns WHAT the
+    // right split is, not merely that two legs agree. The corpus proves
+    // agreement; this proves correctness.
     const items = (texToMathAtoms('\\frac{a+b}{c}') as { items: MathAtom[] }).items
     expect(items).toHaveLength(1)
     const frac = items[0] as MathAtom
@@ -344,7 +434,7 @@ describe('equation — the transliterated parser agrees with the web twin', () =
     for (const [name, symbol] of Object.entries(MACROS)) {
       expect(name.startsWith('\\')).toBe(true)
       // The twin resolves the same macro to the same glyph…
-      expect(stripRows(twinMathMl(name))).toBe(`<mi>${symbol}</mi>`)
+      expect(normMathMl(twinMathMl(name))).toBe(`<mi>${symbol}</mi>`)
       // …and so does this leg, through the real render.
       expect(text({ type: 'equation', tex: name })).toBe(symbol)
     }
