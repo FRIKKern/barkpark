@@ -575,6 +575,71 @@ grep -q "^#             2 = no red, but SOME rows stayed UNKNOWN after re-pollin
   && ok "…and 2's wording is TIGHTENED to partial coverage, which is all it still means" \
   || bad "the EXIT CODES header still describes 2 loosely enough to re-absorb the silences"
 
+# ═══ (m) the TREND: the red carries its movement, and an unread run is UNREAD ═
+section "(m) trend — the count's movement since the last READ run (dr-w29)"
+
+# THE DEFECT THIS OWNS. The watch's red printed the same sentence at 3 reported
+# rows and at 30, with no way to tell a growing backlog from a stuck one — and
+# any notion of "unchanged since last run" would silently have compared against
+# runs that never read (cancelled mid-poll, or BLIND). The trend's baseline is
+# the last READ line of a state file; a run that did not read leaves a dangling
+# START, which is COUNTED and SAID as UNREAD, never treated as a baseline.
+# Everything below runs under run_watch's gh-stripped PATH: the trend makes no
+# network call, ever.
+
+# (m1) no state file: the trend states its own absence, and no baseline is invented.
+out="$(run_watch "$TMP/a.json")"; rc=$?
+grep -q "TREND: no state file configured" <<<"$out" \
+  && ok "(m1) with no state file the trend says so — movement is UNKNOWN, not zero" \
+  || bad "(m1) no absence sentence without a state file: $out"
+
+# (m2) a red run carries count + movement against the last READ baseline.
+ST="$TMP/m-state-baseline.txt"
+printf 'READ 2026-08-10T00:00:00Z reported=3 classified=5 open=5\n' > "$ST"
+out="$(run_watch "$TMP/a.json" --state-file "$ST")"; rc=$?
+[ "$rc" = "1" ] && ok "(m2) the trend does not change the verdict (still exit 1)" \
+  || bad "(m2) expected exit 1, got $rc"
+grep -q "TREND: reported 1 — was 3 at 2026-08-10T00:00:00Z (moved -2 since the last READ run)" <<<"$out" \
+  && ok "(m2) the red carries the count AND its movement — a shrinking backlog reads as -2" \
+  || bad "(m2) no movement line against the READ baseline: $out"
+grep -q "^READ .* reported=1 " <<<"$(cat "$ST")" \
+  && ok "(m2) …and this run, which READ, appended its own READ line for the next baseline" \
+  || bad "(m2) the reading run left no READ line: $(cat "$ST")"
+
+# (m3) a CANCELLED predecessor is a dangling START: counted UNREAD, never a baseline.
+ST="$TMP/m-state-cancelled.txt"
+printf 'READ 2026-08-10T00:00:00Z reported=1 classified=5 open=5\nSTART 2026-08-10T06:00:00Z\n' > "$ST"
+out="$(run_watch "$TMP/a.json" --state-file "$ST")"; rc=$?
+grep -q "1 intervening run(s) went UNREAD (cancelled, blind, or unreachable) and are counted UNREAD, never as unchanged" <<<"$out" \
+  && ok "(m3) the cancelled run's dangling START is counted UNREAD, in those words" \
+  || bad "(m3) the dangling START was not counted UNREAD: $out"
+grep -q "was 1 at 2026-08-10T00:00:00Z (moved +0" <<<"$out" \
+  && ok "(m3) …and the baseline is the READ run behind it, so +0 is measured against a real read" \
+  || bad "(m3) the baseline is not the last READ run: $out"
+
+# (m4) a BLIND run (exit 5) writes START and NO READ — end to end, not seeded:
+# the next run counts it UNREAD instead of comparing against it.
+ST="$TMP/m-state-blind.txt"
+printf 'READ 2026-08-10T00:00:00Z reported=1 classified=5 open=5\n' > "$ST"
+out="$(run_watch "$TMP/d-blind.json" --state-file "$ST")"; rc=$?
+[ "$rc" = "5" ] && ok "(m4) the blind run still exits 5 with the state file in play" \
+  || bad "(m4) expected exit 5, got $rc"
+grep -q '^START ' "$ST" && ! grep -q 'reported=0' "$ST" \
+  && ok "(m4) the blind run left a START and no READ — zero coverage never becomes a baseline" \
+  || bad "(m4) the blind run's state write is wrong: $(cat "$ST")"
+out="$(run_watch "$TMP/a.json" --state-file "$ST")"; rc=$?
+grep -q "1 intervening run(s) went UNREAD" <<<"$out" \
+  && ok "(m4) …and the next run counts the blind run UNREAD, baselined on the READ before it" \
+  || bad "(m4) the blind run was not counted UNREAD by its successor: $out"
+
+# (m5) no READ line at all: the trend refuses to compare rather than inventing 0.
+ST="$TMP/m-state-noread.txt"
+printf 'START 2026-08-10T06:00:00Z\n' > "$ST"
+out="$(run_watch "$TMP/a.json" --state-file "$ST")"; rc=$?
+grep -q "TREND: no READ baseline yet — 1 earlier run(s) left a START with no READ" <<<"$out" \
+  && ok "(m5) with only dangling STARTs the trend refuses a baseline and counts them UNREAD" \
+  || bad "(m5) no honest no-baseline arm: $out"
+
 # ═══ (i) the harness's own assertions can fail ═══════════════════════════════
 section "(i) disarm: prove these probes are able to fail"
 
