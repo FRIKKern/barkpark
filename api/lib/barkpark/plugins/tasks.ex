@@ -308,11 +308,21 @@ defmodule Barkpark.Plugins.Tasks do
       |> Enum.map(fn {_entry, i} -> i end)
 
     if unflagged != [] do
-      Logger.warning(
-        "task quality gate: acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
+      message =
+        "acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
           "marker but carry no `merge_gate: true` — the close-time autostamp keys on the FLAG, not " <>
-          "the wording, so a lead merge will not flip them (soft warning, save proceeds)"
-      )
+          "the wording, so a lead merge will not flip them. Add \"merge_gate\": true to each " <>
+          "gate entry (soft warning, save proceeds)"
+
+      # Journal copy (grep-able in prod logs) AND the advisory channel: the
+      # Logger line alone let 669 unflagged rows accumulate in silence — its
+      # only reader was the server journal, which no task author ever sees.
+      # Warnings.put rides the mutate SUCCESS envelope (`warnings: [...]`),
+      # which the bp CLI prints to stderr (emitWarnings) and Studio folds into
+      # its save flash — so the author is told at the moment of authoring.
+      # Collect-only-when-listening: a caller with no open collector drops it.
+      Logger.warning("task quality gate: " <> message)
+      Barkpark.Content.Warnings.put("merge_gate_unflagged", message, "warning")
     end
 
     :ok
