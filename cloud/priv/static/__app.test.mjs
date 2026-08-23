@@ -23499,3 +23499,192 @@ test("cch-w61: updatePanelHtml states the compare beside the release-tag badge �
   assert.equal(hostile.indexOf("<img"), -1);
   assert.match(hostile, /&lt;img/);
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// gr-blk-a2fwire-coverage: the 2FA click -> api -> repaint chain, driven by
+// SIMULATED CLICKS against the interaction harness — before this block,
+// `grep -c a2fWire` on this file returned 0 and the seven handlers were
+// exercised by nothing but a human in a real browser. smoke.mjs's account-modal
+// expectations call the pure renders directly and never dispatch a click.
+//
+// GR52b: the CONFIRM surface has NO 429 state — the arms below cover 422
+// invalid_otp and 422 not_enrolled and deliberately do not invent a
+// rate-limited one.
+//
+// The vacuous-open-predicate trap (this row's criterion 3): a bare
+// `querySelector('.modal-card')` is NOT a modal-open predicate — the card is
+// index.html's STATIC wrapper and persists while #modal-root is hidden, so
+// that selector is green in both directions. Grepped at build time: every
+// `.modal-card` open-read in the tree (modal-oracle.mjs, overflow-guard.mjs
+// ×3) already composes `!root.hidden &&` beside it, and zero bare occurrences
+// exist. The asserts below read `modalRoot.hidden` directly, never card
+// presence. Appended at the tail (OC9 append-only law).
+// ════════════════════════════════════════════════════════════════════════════
+
+// The a2f surface's own fixture: the interaction harness plus a standalone
+// #a2f-panel mount (in the browser it lives inside the account modal; the
+// mount seam a2fPaint/a2fWire read is just `$("#a2f-panel")`). The overrides
+// layer ON TOP of installInteractionHarness's own document, and its cleanup
+// restores the pre-install methods, so nothing leaks past the finally.
+function a2fHarness() {
+  const h = installInteractionHarness();
+  const panel = interactionElement("div", { id: "a2f-panel" });
+  const priorQS = sandbox.document.querySelector;
+  const priorGEB = sandbox.document.getElementById;
+  sandbox.document.querySelector = (sel) =>
+    sel === "#a2f-panel" ? panel : (priorQS(sel) || panel.querySelector(sel));
+  sandbox.document.getElementById = (id) =>
+    id === "a2f-panel" ? panel : (priorGEB(id) || panel.querySelector("#" + id));
+  return { ...h, panel };
+}
+
+test("gr-blk-a2fwire: enroll -> QR -> confirm -> codes runs on simulated clicks, with the right bodies on the right endpoints", async () => {
+  const h = a2fHarness();
+  try {
+    hooks.a2fPaint({ phase: "off" });
+    assert.ok(h.panel.querySelector("#a2f-start"), "the off phase offers Set up");
+
+    h.queue.push({ json: { secret: "JBSWY3DPEHPK3PXP", otpauth_uri: "otpauth://totp/bp?secret=JBSWY3DPEHPK3PXP" } });
+    h.panel.querySelector("#a2f-start").dispatch("click");
+    // The busy interim paints synchronously, before the response lands.
+    assert.match(h.panel.innerHTML, /Starting/);
+    await settleInteraction();
+
+    const enroll = plainRequest(h.requests[0]);
+    assert.deepEqual({ path: enroll.path, method: enroll.method, body: enroll.body },
+      { path: "/v1/account/two-factor/enroll", method: "POST", body: {} });
+    assert.ok(h.panel.querySelector("#a2f-otp"), "the enroll form mounted");
+    assert.ok(h.panel.querySelector("#a2f-confirm"), "with its Confirm control");
+    // secretGroups renders the secret in 4-char groups — the manual-entry seam.
+    assert.match(h.panel.innerHTML, /JBSW/);
+
+    // Confirm with WHITESPACE in the code — the handler strips it before POSTing.
+    h.panel.querySelector("#a2f-otp").value = "123 456";
+    h.queue.push({ json: { recovery_codes: ["aaaa-bbbb", "cccc-dddd"] } });
+    h.panel.querySelector("#a2f-confirm").dispatch("click");
+    await settleInteraction();
+
+    const confirm = plainRequest(h.requests[1]);
+    assert.deepEqual({ path: confirm.path, method: confirm.method, body: confirm.body },
+      { path: "/v1/account/two-factor/confirm", method: "POST", body: { code: "123456" } });
+    assert.ok(h.panel.querySelector("#a2f-codes"), "the one-shot sheet painted");
+    assert.match(h.panel.innerHTML, /aaaa-bbbb/);
+    assert.ok(h.panel.querySelector("#a2f-saved"), "with its explicit exit");
+
+    // The explicit exit is a PURE phase change — no request rides it.
+    h.panel.querySelector("#a2f-saved").dispatch("click");
+    assert.ok(h.panel.querySelector("#a2f-regen"), "the on phase offers regen");
+    assert.ok(h.panel.querySelector("#a2f-disable"), "and turn-off");
+    assert.equal(h.requests.length, 2, "exactly two requests: enroll and confirm");
+  } finally { h.cleanup(); }
+});
+
+test("gr-blk-a2fwire: a 422 invalid_otp repaints the SAME enroll form with the honest copy, the secret retained and the code refilled", async () => {
+  const h = a2fHarness();
+  try {
+    hooks.a2fPaint({ phase: "enroll", uri: "otpauth://totp/bp?secret=SECRETSECRET", secret: "SECRETSECRET" });
+    h.panel.querySelector("#a2f-otp").value = "000000";
+    h.queue.push({ ok: false, status: 422, json: { error: "invalid_otp" } });
+    h.panel.querySelector("#a2f-confirm").dispatch("click");
+    await settleInteraction();
+
+    const err = h.panel.querySelector("#a2f-error");
+    assert.ok(err, "the inline error mounted (never a toast)");
+    // The mini-DOM keeps esc()'s entities in textContent, so compare through
+    // the same escape the render applied — the sentence is still asserted
+    // whole, against the pinned copy map, not a substring of convenience.
+    const pinned = hooks.accountTwoFactorErrorCopy(422, { error: "invalid_otp" })
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+    assert.equal(err.textContent, pinned,
+      "the copy is the pinned honest sentence, not friendly()'s generic");
+    assert.ok(h.panel.querySelector("#a2f-confirm"), "still the enroll form — no phase change");
+    assert.match(h.panel.innerHTML, /SECR/, "the pending secret survives the repaint");
+    assert.equal(h.panel.querySelector("#a2f-otp").value, "000000",
+      "the mistyped code is refilled for correction");
+  } finally { h.cleanup(); }
+});
+
+test("gr-blk-a2fwire: a 422 not_enrolled recovers to the OFF phase with a fresh Set up — never a dead form", async () => {
+  const h = a2fHarness();
+  try {
+    hooks.a2fPaint({ phase: "enroll", uri: "otpauth://totp/bp?secret=SECRETSECRET", secret: "SECRETSECRET" });
+    h.panel.querySelector("#a2f-otp").value = "123456";
+    h.queue.push({ ok: false, status: 422, json: { error: "not_enrolled" } });
+    h.panel.querySelector("#a2f-confirm").dispatch("click");
+    await settleInteraction();
+
+    assert.ok(h.panel.querySelector("#a2f-start"), "back to off with a fresh Set up button");
+    assert.equal(h.panel.querySelector("#a2f-confirm"), null, "the dead confirm form is gone");
+    const err = h.panel.querySelector("#a2f-error");
+    assert.ok(err && /no longer pending/.test(err.textContent), "the honest not_enrolled copy renders");
+  } finally { h.cleanup(); }
+});
+
+test("gr-blk-a2fwire: regen POSTs recovery-codes and paints the sheet; a failure stays ON with the error", async () => {
+  for (const succeeds of [true, false]) {
+    const h = a2fHarness();
+    try {
+      hooks.a2fPaint({ phase: "on" });
+      h.queue.push(succeeds
+        ? { json: { recovery_codes: ["eeee-ffff"] } }
+        : { ok: false, status: 503, json: { error: "instance_unavailable" } });
+      h.panel.querySelector("#a2f-regen").dispatch("click");
+      await settleInteraction();
+
+      const req = plainRequest(h.requests[0]);
+      assert.deepEqual({ path: req.path, method: req.method, body: req.body },
+        { path: "/v1/account/two-factor/recovery-codes", method: "POST", body: {} });
+      if (succeeds) {
+        assert.ok(h.panel.querySelector("#a2f-codes"), "the fresh sheet painted");
+        assert.match(h.panel.innerHTML, /eeee-ffff/);
+      } else {
+        assert.ok(h.panel.querySelector("#a2f-regen"), "still ON — the phase did not lie forward");
+        assert.ok(h.panel.querySelector("#a2f-error"), "with the failure stated inline");
+      }
+    } finally { h.cleanup(); }
+  }
+});
+
+test("gr-blk-a2fwire: disable rides the danger confirm modal — DELETE fires only on the modal's confirm, and failure morphs to Try again", async () => {
+  // Success arm: the confirm click DELETEs, the account modal reopens on OFF.
+  let h = a2fHarness();
+  try {
+    hooks.a2fPaint({ phase: "on" });
+    assert.equal(h.modalRoot.hidden, true, "no modal before the click");
+    h.panel.querySelector("#a2f-disable").dispatch("click");
+    // The OPEN predicate is #modal-root's hidden flag — NEVER a bare
+    // .modal-card read, which is green in both directions (see header).
+    assert.equal(h.modalRoot.hidden, false, "the confirm modal opened");
+    assert.match(h.modalBody.innerHTML, /Turn off two-factor authentication\?/);
+    assert.equal(h.requests.length, 0, "opening the confirm sends NOTHING");
+
+    h.queue.push({ status: 204 });
+    h.modalBody.querySelector("#cm-confirm").dispatch("click");
+    await settleInteraction();
+
+    const del = plainRequest(h.requests[0]);
+    assert.deepEqual({ path: del.path, method: del.method, body: del.body },
+      { path: "/v1/account/two-factor", method: "DELETE", body: null });
+    // succeed() closes the confirm and reopens the ACCOUNT modal, whose model
+    // now folds the server-confirmed OFF — the fresh panel offers Set up.
+    assert.equal(h.modalRoot.hidden, false, "the account modal is open in its place");
+    assert.match(h.modalBody.innerHTML, /Set up two-factor authentication/);
+  } finally { h.cleanup(); }
+
+  // Failure arm: the button morphs to the recovery, and the dialog stays up.
+  h = a2fHarness();
+  try {
+    hooks.a2fPaint({ phase: "on" });
+    h.panel.querySelector("#a2f-disable").dispatch("click");
+    h.queue.push({ ok: false, status: 503, json: { error: "instance_unavailable" } });
+    const go = h.modalBody.querySelector("#cm-confirm");
+    go.dispatch("click");
+    await settleInteraction();
+
+    assert.equal(h.modalRoot.hidden, false, "the dialog holds — no silent close on failure");
+    assert.equal(go.disabled, false, "the recovery is clickable");
+    assert.equal(go.textContent, "Try again");
+    assert.equal(plainRequest(h.requests[0]).method, "DELETE");
+  } finally { h.cleanup(); }
+});
