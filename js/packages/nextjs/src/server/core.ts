@@ -86,10 +86,14 @@ function buildUrl(
     // `bp.doc(id, { expand, fields })` — the /doc endpoint honors both.
     const idParts: string[] = []
     if (perspective !== undefined) idParts.push(`perspective=${encodeURIComponent(perspective)}`)
-    const idExpand = Array.isArray(opts.expand) ? opts.expand.join(',') : opts.expand
-    if (idExpand) idParts.push(`expand=${encodeURIComponent(idExpand)}`)
-    const idFields = Array.isArray(opts.fields) ? opts.fields.join(',') : opts.fields
-    if (idFields) idParts.push(`fields=${encodeURIComponent(idFields)}`)
+    // Fail closed exactly like core getDoc (normalizeFieldList): comma-in-name
+    // and empty-list are caller bugs, not params to silently mangle or omit.
+    if (opts.expand !== undefined) {
+      idParts.push(`expand=${encodeURIComponent(normalizeFieldList(opts.expand, 'expand'))}`)
+    }
+    if (opts.fields !== undefined) {
+      idParts.push(`fields=${encodeURIComponent(normalizeFieldList(opts.fields, 'fields'))}`)
+    }
     const qs = idParts.length > 0 ? `?${idParts.join('&')}` : ''
     return `${baseUrl}${scope}${path}${qs}`
   }
@@ -122,6 +126,32 @@ function defaultHeaders(
 
 function strOrUndefined(v: unknown): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
+}
+
+/**
+ * Normalize an expand/fields list into the comma-joined query-param value the
+ * server expects — a local mirror of core's `normalizeFieldList`
+ * (js/packages/core/src/filter-builder.ts), which is not on core's public
+ * export surface (the @barkpark/core bundle sits bytes under its size cap, so
+ * widening its index for this helper was not worth the risk). Same contract:
+ * trim, drop empties, throw on an empty result or a comma inside a name (a
+ * comma would silently split into extra projected/expanded fields — an
+ * over-broad read). If core ever exports it, delete this mirror and import.
+ */
+function normalizeFieldList(input: string | readonly string[], label: string): string {
+  const list = Array.isArray(input) ? input : [input]
+  const cleaned = list.map((f) => String(f).trim()).filter((f) => f.length > 0)
+  if (cleaned.length === 0) {
+    throw new BarkparkValidationError(`${label} requires at least one field name`, { field: label })
+  }
+  const bad = cleaned.find((f) => f.includes(','))
+  if (bad !== undefined) {
+    throw new BarkparkValidationError(
+      `${label} field name cannot contain a comma: ${JSON.stringify(bad)} (pass separate fields as an array)`,
+      { field: label },
+    )
+  }
+  return cleaned.join(',')
 }
 
 function pickRequestId(body: unknown): string | undefined {
@@ -336,6 +366,17 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
     try {
       return await fetch(input.url, init)
     } catch (e) {
+      // A caller-initiated abort is a CANCELLATION, not a timeout: re-throw the
+      // AbortError untouched so callers detect it via `err.name === 'AbortError'`
+      // exactly as with a bare fetch — mirroring core transport's contract
+      // (js/packages/core/src/transport.ts). Before this guard, an unmount or
+      // route change cancelling a read was reported as "barkparkFetch: timeout",
+      // indistinguishable from a genuinely slow origin. A TimeoutError (e.g.
+      // from an AbortSignal.timeout the caller passed) IS a deadline and still
+      // maps to BarkparkTimeoutError below.
+      if (input.signal?.aborted === true && e instanceof Error && e.name === 'AbortError') {
+        throw e
+      }
       if (e instanceof Error && (e.name === 'AbortError' || e.name === 'TimeoutError')) {
         throw new BarkparkTimeoutError(`barkparkFetch: timeout ${input.url}`, {
           url: input.url,

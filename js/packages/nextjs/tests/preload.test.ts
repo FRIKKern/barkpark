@@ -81,3 +81,65 @@ describe('preloadDocument (top-level convenience)', () => {
     expect(fetchSpy).toHaveBeenCalledWith({ type: 'post', id: 'p1' })
   })
 })
+
+describe('preload rejection safety', () => {
+  // preloadDocument is fire-and-forget: nothing awaits its promise. A rejecting
+  // barkparkFetch (server down at preload time) must NOT surface as an
+  // unhandledrejection — in Node's default configuration that CRASHES the
+  // process, turning a warm-up optimization into an outage. The rejection must
+  // still reach a caller who awaits loadDocument for the same key.
+  it('a rejecting preloadDocument does not raise an unhandled rejection', async () => {
+    const boom = new Error('preload-boom')
+    // Plain functions, NOT vi.fn(): vitest mock instrumentation attaches its own
+    // handlers to every returned promise (settled-result tracking), which
+    // silently defuses the unhandledRejection detector this test exists to arm.
+    let calls = 0
+    const server: PreloadableServer = {
+      barkparkFetch: (async () => {
+        calls += 1
+        throw boom
+      }) as unknown as PreloadableServer['barkparkFetch'],
+    }
+    const p = createPreloader(server)
+
+    const seen: unknown[] = []
+    const onUR = (reason: unknown): void => {
+      seen.push(reason)
+    }
+    process.on('unhandledRejection', onUR)
+    try {
+      p.preloadDocument('p1', { type: 'post' })
+      // unhandledRejection fires on a later macrotask tick — give it two.
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setImmediate(r))
+      expect(seen).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUR)
+    }
+    // The stored promise still carries the rejection for an awaiting caller.
+    await expect(p.loadDocument('p1', { type: 'post' })).rejects.toBe(boom)
+    expect(calls).toBe(1)
+  })
+
+  it('the one-shot preloadDocument export is also rejection-safe', async () => {
+    // Plain function, not vi.fn() — see the detector note above.
+    const server: PreloadableServer = {
+      barkparkFetch: (async () => {
+        throw new Error('one-shot-boom')
+      }) as unknown as PreloadableServer['barkparkFetch'],
+    }
+    const seen: unknown[] = []
+    const onUR = (reason: unknown): void => {
+      seen.push(reason)
+    }
+    process.on('unhandledRejection', onUR)
+    try {
+      preloadDocument(server, 'p1', { type: 'post' })
+      await new Promise((r) => setImmediate(r))
+      await new Promise((r) => setImmediate(r))
+      expect(seen).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUR)
+    }
+  })
+})
