@@ -7,7 +7,11 @@ export const postSchema = {
     { name: 'title', type: 'string', required: true },
     { name: 'slug', type: 'slug', source: 'title' },
     { name: 'excerpt', type: 'text', rows: 3 },
-    { name: 'content', type: 'richText' },
+    // The post body: the canonical, type-keyed PortableDocument block array
+    // (Barkpark's own block grammar). `surface: 'body'` marks it as the trailing
+    // body region; the frontend renders it with `@barkpark/react`'s PortableDoc,
+    // NOT Sanity PortableText.
+    { name: 'content', type: 'richText', surface: 'body' },
     { name: 'author', type: 'reference', refType: 'author' },
     { name: 'coverImage', type: 'image' },
     { name: 'publishedAt', type: 'datetime' },

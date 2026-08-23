@@ -1,11 +1,13 @@
 // Pure Content-Security-Policy helper for the website-starter marketing scaffold.
 //
-// This scaffold has ZERO raw-HTML injection: every document renders through a
-// PortableText React component tree, which auto-escapes. So this CSP is pure
-// defense-in-depth — it clamps the object/base/frame/form vectors and blocks
-// any inline `<script>` an attacker might inject, mirroring the Phoenix-side
-// posture in api/lib/barkpark_web/csp.ex (a script-blocking policy that never
-// allows 'unsafe-inline' for scripts). See the wave Paper
+// The only HTML this app injects is the trusted SDK-emitter output of
+// `renderPortableDocument` (the canonical, type-keyed PortableDoc renderer —
+// escaped upstream, the same emitter that skins Phoenix's `/papers` reader),
+// mounted via `PortableDocSurface`. This CSP is defense-in-depth on top of
+// that: it clamps the object/base/frame/form vectors and blocks any inline
+// `<script>` an attacker might inject, mirroring the Phoenix-side posture in
+// api/lib/barkpark_web/csp.ex (a script-blocking policy that never allows
+// 'unsafe-inline' for scripts). See the wave Paper
 // api-read-path-security-sweep-consumer-csp-wave-2026-08-18.
 //
 // The policy is nonce-based: `script-src` allows only per-request-nonced inline
