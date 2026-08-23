@@ -35,12 +35,12 @@ async function mutate(mutations: Mutation[]): Promise<void> {
   }
 }
 
-function portableTextParagraph(text: string): Record<string, unknown> {
+// A single canonical PortableDocument paragraph block — the type-keyed grammar
+// `@barkpark/react`'s PortableDoc renders (NOT a Sanity `_type: 'block'`).
+function block(text: string): Record<string, unknown> {
   return {
-    _type: 'block',
-    _key: Math.random().toString(36).slice(2, 10),
-    style: 'normal',
-    children: [{ _type: 'span', _key: 'c1', text, marks: [] }],
+    type: 'paragraph',
+    content: [{ type: 'text', value: text }],
   }
 }
 
@@ -77,7 +77,7 @@ async function main(): Promise<void> {
         slug: { current: 'home' },
         subtitle: 'A headless CMS that fits in your backpack.',
         body: [
-          portableTextParagraph(
+          block(
             'Barkpark gives you a real-time content backend with a Studio UI, built on Phoenix and PostgreSQL.',
           ),
         ],
@@ -91,7 +91,7 @@ async function main(): Promise<void> {
         slug: { current: 'about' },
         subtitle: 'Why we built Barkpark.',
         body: [
-          portableTextParagraph(
+          block(
             'We missed the ergonomics of Sanity but wanted an open-source, self-hostable alternative.',
           ),
         ],
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
         slug: { current: 'pricing' },
         subtitle: 'Free forever on your own infrastructure.',
         body: [
-          portableTextParagraph(
+          block(
             'Self-host Barkpark for free. Hosted plans coming soon with SLAs and automated backups.',
           ),
         ],
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
         author: { _ref: 'author-ada', _type: 'reference' },
         tags: ['meta', 'launch'],
         content: [
-          portableTextParagraph('Hello world. This post was seeded via the mutate API.'),
+          block('Hello world. This post was seeded via the mutate API.'),
         ],
       },
     },
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
         author: { _ref: 'author-grace', _type: 'reference' },
         tags: ['nextjs', 'architecture'],
         content: [
-          portableTextParagraph(
+          block(
             'React Server Components let you fetch from Barkpark without shipping the client to the browser.',
           ),
         ],
@@ -157,7 +157,7 @@ async function main(): Promise<void> {
         author: { _ref: 'author-ada', _type: 'reference' },
         tags: ['roadmap'],
         content: [
-          portableTextParagraph('API stability, migration tools, and a documented upgrade path.'),
+          block('API stability, migration tools, and a documented upgrade path.'),
         ],
       },
     },
