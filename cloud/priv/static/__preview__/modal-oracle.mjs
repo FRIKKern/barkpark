@@ -117,6 +117,11 @@ const DEFAULT_SCEN = [
 //   $ grep -rn 'modal-oracle' .github/workflows/ scripts/
 //   (no output)
 //
+// MODAL GEOMETRY IS OWNED BY overflow-guard.mjs (cchi-w22-bl-modal-oracle-
+// never-visits-a-phone-width): its W22-2fa-enroll-phone-band leg drives the
+// REAL enroll phase at 320-480 in both themes under the CI-blocking gate,
+// because a phone-band assertion in a file nothing runs enforces nothing.
+// This oracle stays the 1440 behavioural instrument.
 // ZERO CI jobs and ZERO scripts invoke this oracle, so its exit 2 is read by
 // nobody today. The pin below buys EVIDENCE — a human running this by hand
 // learns which face resolved — and NOT enforcement. Saying so here is the
