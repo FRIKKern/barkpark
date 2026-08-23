@@ -34,6 +34,29 @@
 # Anything landing inside api/ is not an escape. Anything landing outside api/
 # AND existing on disk is a repo-root read that the dispatcher must cover.
 #
+# A THIRD shape is resolved separately, because no `"../…"` literal reveals it:
+# the ROOT ANCHOR — `@repo_root Path.expand("../../../..", __DIR__)` bound once
+# and then `Path.join(@repo_root, "deploy/site-deploy.sh")` at each read site.
+# The anchor literal alone resolves to the empty string and used to be dropped,
+# so the joined filename was never seen. See the `-root` door in list_escapes.
+#
+# MUTATION PROOF that the `-root` door is real, recorded because a guard nobody
+# has watched fail is not enforcement. Probe (removed after measuring):
+#
+#   mkdir -p api/test/probe
+#   printf 'defmodule P do\n  use ExUnit.Case\n  @root Path.expand("../../..", __DIR__)\n  test "x" do\n    assert is_binary(File.read!(Path.join(@root, "CLAUDE.md")))\n  end\nend\n' > api/test/probe/p_test.exs
+#   bash scripts/elixir-path-escape-check.sh; echo rc=$?
+#
+# BEFORE (origin/main @ 2b8605d082, probe on disk): "29 distinct repo-root
+# read(s)", "OK: every repo-root read from api/lib + api/test is dispatched
+# on.", rc=0 — a FALSE OK inside the REQUIRED Elixir gate, with an undeclared
+# read sitting right there.
+# AFTER (this file): "34 distinct", "idiom test-root: 5 read(s) (floor 2)",
+# "::error:: UNCOVERED repo-root read: CLAUDE.md / read from:
+# api/test/probe/p_test.exs", rc=1.
+# The harness carries the same mutation as a permanent case (case 3b), and
+# disarming the door's `printf` takes the harness from 137/0 to 125/12.
+#
 # The existence filter is what keeps the traversal-attack fixtures
 # (`"../etc/passwd"`, `"../up"`, `"../x"`) out of the census: they are asserted
 # on, never read. It is also why the enumeration walks the WORKING TREE.
@@ -94,8 +117,26 @@ scripts/gate-announces-skips.test.sh'
 #
 # NOTE the two docs/ entries are EXACT FILES, never docs/**: docs-only PRs
 # skipping the Elixir suite is half the point of this shim.
+#
+# THE FOUR `deploy/` + workflow ENTRIES BELOW ARE THE ROOT-ANCHOR DOOR'S FIRST
+# HARVEST. They were read by the default `mix test` lane for weeks while this
+# ratchet printed OK, because the `-root` idiom did not exist yet (see the
+# comment on that door in list_escapes). Declaring them is what makes the OK
+# line TRUE rather than lucky — and it is NOT free: every `deploy/**` PR now
+# runs the full Elixir suite, which the workflow's own note prices at
+# 9m31s-16m29s. That is what the honesty costs. Do not optimise it back out
+# without deleting the reads: the two tests below are the ONLY guards on the
+# `@stage_names` doctrine and on `deploy.yml`'s `scripts/connectors/**` filter
+# that can block a merge at all.
+#   deploy/site-deploy.sh, deploy/site-deploy-node.sh
+#       <- api/test/barkpark/sites/deploy_runner_stage_names_test.exs
+#   .github/workflows/deploy.yml, scripts/check-deployyml-filters.sh
+#       <- api/test/barkpark/sites/deployyml_connectors_pathfilter_test.exs
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
+.github/workflows/deploy.yml
 cmd/barkpark/testdata/**
+deploy/site-deploy-node.sh
+deploy/site-deploy.sh
 docs/api-v1.md
 docs/openapi.json
 internal/chat/testdata/**
@@ -104,6 +145,7 @@ internal/provisioner/catalog/templates/**
 internal/taskboard/**
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
+scripts/check-deployyml-filters.sh
 scripts/pds-door-census.sh
 scripts/pds-elixir-receipt-census.exs
 scripts/pds-published-artifact-door.sh
@@ -134,16 +176,28 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # `cch-w30-s3-escape-ratchet-transitive-and-per-idiom-floor` next door in
 # scripts/console-path-escape-check.sh; the shape here is ported from it.
 #
-# THE FOUR DOORS are the two axes the scanner actually has, and each is exactly
-# one line away from being deleted:
+# THE DOORS are the axes the scanner actually has, and each is exactly one line
+# away from being deleted:
 #   * the SOURCE TREE — `find api/lib api/test` in list_escapes. Tagged `lib-`
 #     / `test-`. Dropping either argument blinds that half.
 #   * the RESOLUTION BASE — `for base in "$d" "api"` in list_escapes, the two
 #     bases documented under HOW AN ESCAPE IS RESOLVED above. Tagged `-dir`
 #     (the `Path.expand("../x", __DIR__)` idiom) / `-cwd` (the `mix test` cwd
 #     idiom, `File.read!("../x")`). Dropping either base blinds that half.
+#   * the ROOT ANCHOR — the anchor+`Path.join` scan in list_escapes. Tagged
+#     `-root`. THIS COMMENT SAID "THE FOUR DOORS" AND WAS WRONG: for weeks the
+#     root-anchor idiom was a FIFTH door nobody counted, and it hid four live
+#     undeclared reads while `--check` exited 0. The floor table below is the
+#     inventory that now makes a sixth door impossible to add silently.
 # So one door going to zero reds ON ITS OWN, which is the property an aggregate
 # count structurally cannot have.
+#
+# RESIDUE — the census is a LOWER BOUND, and saying so is the point. Shapes the
+# scanner still cannot see, and which therefore may hide further undeclared
+# reads: an INTERPOLATED anchor (`Path.expand("../#{x}", __DIR__)`), the LIST
+# form `Path.join([root, a, b])`, and execution-cwd reads via
+# `System.cmd(…, cd: root)` (api/test/barkpark/pds_door_census_test.exs uses
+# that last one — a separate class this door does not close). Filed, not fixed.
 #
 # Bounds are LOWER BOUNDS, never equalities. An exact pin taxes every slice that
 # ADDS a read (the lesson filed as `pds-bl-census-exact-pins-tax-growth`, and
@@ -153,8 +207,12 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # equality — or a whole-population pin — would red on ordinary green work.
 #
 # Live population when these bounds were set (`--list-escapes | cut -f1,3 |
-# sort -u`, 29 distinct paths): test-cwd 27, test-dir 24, lib-cwd 11,
-# lib-dir 10. Each bound sits near 40-50% of its live population: retiring
+# sort -u`, 33 distinct paths): test-cwd 27, test-dir 24, lib-cwd 11,
+# lib-dir 10, test-root 4 — all five DERIVED BY RUNNING the scanner on a clean
+# checkout, never guessed. `lib-root` gets no row because the scanner emits no
+# such tag today: a floor on an unpopulated idiom would red on a clean tree, and
+# the inventory check below is what catches the day api/lib starts using it.
+# Each bound sits near 40-50% of its live population: retiring
 # several cross-tree reads must never require touching this table, while a
 # blinded door — which takes its idiom to ZERO, not to 60% — reds immediately.
 # Cross-tree reads are deliberate and rare, so they do not churn the way
@@ -170,7 +228,8 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 ELIXIR_ESCAPE_IDIOM_MIN='test-cwd	8
 test-dir	8
 lib-cwd	5
-lib-dir	5'
+lib-dir	5
+test-root	2'
 
 # ELIXIR_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
@@ -269,11 +328,86 @@ EOF
 # pass green here.
 list_escapes() {
   local f lit base resolved d lits sources tree idiom
+  local anchors a name alit adir joins j jlit
   # WORKING TREE enumeration (D31) — `find`, never `git ls-files`. An untracked
   # .exs on disk is code the suite will run, so it is code this ratchet must see.
   sources="$(cd -- "$REPO_ROOT" && find api/lib api/test -type f \( -name '*.ex' -o -name '*.exs' \) 2>/dev/null | LC_ALL=C sort)"
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    d="$(dirname -- "$f")"
+    # The SOURCE-TREE half of the tag. `other` is deliberately absent from
+    # ELIXIR_ESCAPE_IDIOM_MIN: the `find` above walks exactly api/lib and
+    # api/test, so a row tagged `other-*` means somebody widened the find
+    # without declaring a floor for the new door — the inventory check in
+    # --check reds on it rather than letting it ship unguarded.
+    case "$f" in
+      api/lib/*) tree="lib" ;;
+      api/test/*) tree="test" ;;
+      *) tree="other" ;;
+    esac
+
+    # ---- THE ROOT-ANCHOR DOOR (tagged `-root`) ----------------------------
+    # `@repo_root Path.expand("../../../..", __DIR__)` bound once, then
+    # `Path.join(@repo_root, "deploy/site-deploy.sh")` at each read site.
+    #
+    # The LITERAL doors below are STRUCTURALLY BLIND to this shape: they grep
+    # `"../…"` literals, so the only thing they ever see is the anchor
+    # `"../../../.."` — which norm_path reduces to the EMPTY STRING, and the
+    # `[ -n "$resolved" ] || continue` guard then discards. The joined filename
+    # is never looked at. That made this a FIFTH door the "THE FOUR DOORS"
+    # comment above never counted, and it hid four live undeclared reads
+    # (deploy/site-deploy.sh, deploy/site-deploy-node.sh,
+    # .github/workflows/deploy.yml, scripts/check-deployyml-filters.sh) while
+    # this script printed `OK: every repo-root read … is dispatched on.` at
+    # rc=0 on a byte-clean tree, INSIDE THE REQUIRED Elixir gate. A false OK in
+    # a required gate is worse than no gate: every reader downstream acts on it.
+    #
+    # Resolution has exactly ONE base by construction — `Path.expand(…,
+    # __DIR__)` names its own base — so this door is `<tree>-root`, not a
+    # `-dir`/`-cwd` pair.
+    anchors="$(grep -Eoh '(@[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]+|[a-zA-Z_][a-zA-Z0-9_]*[[:space:]]*=[[:space:]]*)Path\.expand\("[./]+",[[:space:]]*__DIR__\)' "$REPO_ROOT/$f" || true)"
+    while IFS= read -r a; do
+      [ -n "$a" ] || continue
+      name="${a%%Path.expand*}"
+      name="${name%%=*}"
+      name="${name//[[:space:]]/}"
+      name="${name#@}"
+      [ -n "$name" ] || continue
+      alit="${a#*\"}"
+      alit="${alit%%\"*}"
+      adir="$(norm_path "$d/$alit")"
+      # `Path.join(<anchor>, "literal")` only. The LIST form
+      # `Path.join([root, a, b])`, an interpolated anchor, and
+      # `System.cmd(…, cd: root)` are NOT matched — see the RESIDUE note at
+      # ELIXIR_ESCAPE_IDIOM_MIN. This census is a LOWER BOUND.
+      joins="$(grep -Eoh 'Path\.join\(@?'"$name"',[[:space:]]*"[^"]*"\)' "$REPO_ROOT/$f" || true)"
+      while IFS= read -r j; do
+        [ -n "$j" ] || continue
+        jlit="${j#*\"}"
+        jlit="${jlit%%\"*}"
+        jlit="${jlit%%\#\{*}"
+        case "$jlit" in
+          *'*'*)
+            jlit="${jlit%%\**}"
+            jlit="${jlit%/}"
+            ;;
+        esac
+        [ -n "$jlit" ] || continue
+        resolved="$(norm_path "$adir/$jlit")"
+        [ -n "$resolved" ] || continue
+        # inside api/ is not an escape
+        case "$resolved" in api | api/*) continue ;; esac
+        # Only reads that can actually happen.
+        [ -e "$REPO_ROOT/$resolved" ] || continue
+        printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$tree-root"
+      done <<EOF
+$joins
+EOF
+    done <<EOF
+$anchors
+EOF
+
+    # ---- THE LITERAL DOORS (`-dir` / `-cwd`) ------------------------------
     lits="$(grep -Eoh '"\.\./[^"]*"' "$REPO_ROOT/$f" || true)"
     [ -n "$lits" ] || continue
     while IFS= read -r lit; do
@@ -289,17 +423,6 @@ list_escapes() {
           ;;
       esac
       [ -n "$lit" ] || continue
-      d="$(dirname -- "$f")"
-      # The SOURCE-TREE half of the tag. `other` is deliberately absent from
-      # ELIXIR_ESCAPE_IDIOM_MIN: the `find` above walks exactly api/lib and
-      # api/test, so a row tagged `other-*` means somebody widened the find
-      # without declaring a floor for the new door — the inventory check in
-      # --check reds on it rather than letting it ship unguarded.
-      case "$f" in
-        api/lib/*) tree="lib" ;;
-        api/test/*) tree="test" ;;
-        *) tree="other" ;;
-      esac
       # THE RESOLUTION-BASE half. Both bases are real idioms in this codebase
       # (see HOW AN ESCAPE IS RESOLVED above), so both are separately floored.
       for base in "$d" "api"; do
