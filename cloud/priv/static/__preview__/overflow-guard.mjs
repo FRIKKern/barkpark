@@ -880,18 +880,59 @@ async function main() {
   };
 
   // Navigate and poll until `readyExpr` is truthy (the SPA mounts async).
+  //
+  // HONESTLY BOUNDED, WITH ONE STATED RETRY (cchi-w21-bl-guard-readiness-poll-
+  // nondeterministic). Three verifiers watched the old loop refuse on IDENTICAL
+  // bytes ("page never became ready") while an independent Chrome found the
+  // page ready, and the immediately following run passed. The old loop (a) was
+  // ITERATION-counted — `w += 100` per lap — so its printed 12000ms budget was
+  // nominal, not wall-clock; (b) swallowed EVERY eval error identically, so a
+  // slow asset, a dead session and a genuinely unready page all wore the same
+  // sentence; and (c) gave a one-off environment stall the same terminal
+  // verdict as a permanent fault. Now: the budget is ELAPSED time; a first
+  // timeout re-navigates ONCE and says so in the output (a flaked load is
+  // retried where a human would retry it — never more than once, so a real
+  // never-ready page still refuses within 2×RENDER_CAP); and the terminal
+  // refusal is headlined READINESS TIMEOUT — textually disjoint from the
+  // STALE SERVER refusals above, which fire before any navigation — carrying
+  // the poll's own diagnosis (expr-false vs eval-threw counts, the last eval
+  // error, and a final forced probe of what the page says it is).
   const nav = async (url, readyExpr) => {
-    await cdp.send("Page.navigate", { url }, sessionId);
-    for (let w = 0; w < RENDER_CAP; w += 100) {
-      let ready = false;
-      // The pin is called OUTSIDE this catch on purpose: swallowing its refusal
-      // as "still navigating" would spend the whole RENDER_CAP and then report
-      // a never-ready page — a font fault wearing a timeout's clothes.
-      try { ready = !!(await evalJs(`!!(${readyExpr})`)); } catch { /* navigating */ }
-      if (ready) { await pinFonts(url); await assertReadyHostsPaint(url, readyExpr); return; }
-      await sleep(100);
+    let exprFalse = 0, evalThrew = 0, lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await cdp.send("Page.navigate", { url }, sessionId);
+      const t0 = Date.now();
+      while (Date.now() - t0 < RENDER_CAP) {
+        let ready = false;
+        // The pin is called OUTSIDE this catch on purpose: swallowing its refusal
+        // as "still navigating" would spend the whole RENDER_CAP and then report
+        // a never-ready page — a font fault wearing a timeout's clothes.
+        try { ready = !!(await evalJs(`!!(${readyExpr})`)); if (!ready) exprFalse++; }
+        catch (e) { evalThrew++; lastErr = e && e.message ? e.message : String(e); }
+        if (ready) { await pinFonts(url); await assertReadyHostsPaint(url, readyExpr); return; }
+        await sleep(100);
+      }
+      if (attempt === 1) {
+        process.stdout.write(
+          `   · readiness timeout after ${Date.now() - t0}ms on ${url} — re-navigating once ` +
+          `(stated retry 1/1; a second timeout REFUSES at exit 2)\n`,
+        );
+      }
     }
-    throw new Error(`page never became ready: ${url} (waited on: ${readyExpr})`);
+    // Terminal: diagnose OUTSIDE the swallowing catch, then refuse.
+    let pageSays;
+    try {
+      pageSays = String(await evalJs(
+        `(function(){return location.href+' readyState='+document.readyState+` +
+        `' bodyLen='+((document.body&&document.body.innerHTML)||'').length;})()`,
+      ));
+    } catch (e) { pageSays = `the final probe itself threw: ${e && e.message ? e.message : e}`; }
+    throw new Error(
+      `READINESS TIMEOUT — the page never became ready within ${RENDER_CAP}ms elapsed, twice (1 stated retry): ${url} (waited on: ${readyExpr})\n` +
+      `   poll saw: expr-false ${exprFalse} · eval-threw ${evalThrew}${lastErr ? ` (last: ${lastErr})` : ""}\n` +
+      `   page says: ${pageSays}\n` +
+      `   NOT the STALE SERVER family — identity and bytes on :${PORT} matched this tree before any navigation.`,
+    );
   };
 
   const failures = [];
