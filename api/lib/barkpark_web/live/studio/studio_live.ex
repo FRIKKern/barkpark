@@ -474,6 +474,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("sidebar-slug-change", params, socket),
     do: Paper.sidebar_slug_change(params, socket)
 
+  # spd-bl-publish-affordance-triple — the hand path's publish affordances:
+  # the sidebar description input, the label-add form, and the pane header's
+  # Publish control. All three ride the Shared.Paper meta-write guard ladder.
+  def handle_event("sidebar-description-change", params, socket),
+    do: Paper.sidebar_description_change(params, socket)
+
+  def handle_event("sidebar-label-add", params, socket),
+    do: Paper.sidebar_label_add(params, socket)
+
+  def handle_event("paper-publish", _params, socket), do: Paper.paper_publish(socket)
+
   def handle_event("backlinks-refresh", _params, socket), do: Paper.backlinks_refresh(socket)
   def handle_event("open-backlink", params, socket), do: Paper.open_backlink(params, socket)
 

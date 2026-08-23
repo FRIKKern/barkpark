@@ -189,6 +189,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def sidebar_slug_change(_params, socket), do: {:noreply, socket}
 
   @doc """
+  spd-bl-publish-affordance-triple — the sidebar's description field. Persists
+  `content["description"]` on the DRAFT row through the shared meta-write guard
+  ladder in `Shared.Paper.paper_meta_write/2` (draft-only, rev-fenced).
+  """
+  def sidebar_description_change(%{"value" => value}, socket) when is_binary(value),
+    do: {:noreply, Shared.sidebar_description_change(socket, value)}
+
+  def sidebar_description_change(_params, socket), do: {:noreply, socket}
+
+  @doc """
+  spd-bl-publish-affordance-triple — the Labels section's add form. Appends one
+  complete weighted-tag entry (tag, strength 1–100, rationale) to
+  `content["tags"]`; field floors mirror the publish wall's own entry rules.
+  """
+  def sidebar_label_add(params, socket), do: {:noreply, Shared.sidebar_label_add(socket, params)}
+
+  @doc """
+  spd-bl-publish-affordance-triple — the paper pane's Publish control. Drives
+  the untouched publish wall (`Content.publish_document/4`) and surfaces each
+  refusal in plain language.
+  """
+  def paper_publish(socket), do: {:noreply, Shared.paper_publish(socket)}
+
+  @doc """
   Re-run the inbound-reference load for the currently-open paper. Read-only;
   no-ops (preserving the existing lists) when no paper is open.
   """
