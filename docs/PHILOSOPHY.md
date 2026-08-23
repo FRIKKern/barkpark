@@ -53,36 +53,3 @@ Default-deny API, existence-hiding, tiered tokens, public reads only where you s
 deepest security is structural: your data sits in your Postgres, on your machine, behind your
 firewall, exportable at any moment, running code you can read and fork. There is no third party
 to breach, subpoena, or sunset you.
-
-## No black boxes
-
-An agent you can't see is an agent you have to wait for. In Barkpark, work is never a spinner:
-every change — a page rewritten, a sheet cell updated, a task claimed — lands visibly, in real
-time, in the same Studio you're standing in. Humans and agents act on the same live documents,
-so you watch the effect directly instead of trusting a report afterwards — and you always hold
-the information you need to make good calls fast. We build toward a system that feels alive:
-people and agents visibly moving, editing, and reacting together — collaboration that is
-faster, more social, and more fun than either working alone.
-
-## What's open source (and always will be)
-
-```
-Barkpark Studio · the HTTP API · schemas · documents · datasets · plugins · export/import ·
-the task system · Papers · Sheets · Media · the bp CLI + TUI · the cloud control plane ·
-local development · deploy scripts · self-host docs · editable source · custom code
-```
-
-## Not really a CMS
-
-Barkpark began as the operating system for one AI agent system — Doey — and outgrew that job
-fast: one content model, an API that teaches itself to an agent in a single call, and human and
-machine surfaces over the same live documents. Less a CMS than a **small operating system for
-everything you and your AI make** — installed in minutes, secured almost anywhere.
-
-And it is as much for people as for agents: work fast, share fast. Invite someone into your
-Barkpark, meet in a Studio on the web, or hand them an export they can run anywhere — papers,
-sheets, or a whole CMS, edits landing in real time, drafts publishing when you say so.
-
-**Private. Collaborative. Incremental. Secure. Realtime. Yours.**
-
-Host it with us, with anyone, or yourself — and never ask permission.
