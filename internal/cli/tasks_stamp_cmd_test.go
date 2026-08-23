@@ -220,6 +220,19 @@ const (
 	// stampStoreUnreadable answers the POST 200 but fails the read-back, so the
 	// verb must report UNCONFIRMED rather than either verdict.
 	stampStoreUnreadable
+	// stampStore500Landed answers the POST with a 500 (exitServer) but — the
+	// doctrine this mode exists to prove — the write STILL COMMITS, so the
+	// read-back must find it and report the truth over the transport error.
+	stampStore500Landed
+	// stampStore500Absent answers the POST with a 500 AND writes nothing: the
+	// ordinary "the server genuinely failed" case, which must still read exitServer
+	// after the read-back confirms the row is empty.
+	stampStore500Absent
+	// stampStore500Unreadable answers the POST with a 500 AND fails the
+	// read-back too: neither call can confirm anything, so the more specific
+	// exitServer the POST already reported must survive rather than downgrading
+	// to the generic unconfirmed bucket.
+	stampStore500Unreadable
 )
 
 // stampTestServer wires a fake Barkpark that counts POSTs to the stamp route,
@@ -268,7 +281,7 @@ func stampTestServerWith(t *testing.T, mode stampStoreMode, manifestJSON string,
 				*querySink = r.URL.RawQuery
 				mu.Unlock()
 			}
-			if mode == stampStoreHonest {
+			if mode == stampStoreHonest || mode == stampStore500Landed {
 				q := r.URL.Query()
 				idx, err := strconv.Atoi(q.Get("criterion"))
 				if err == nil {
@@ -287,9 +300,17 @@ func stampTestServerWith(t *testing.T, mode stampStoreMode, manifestJSON string,
 					mu.Unlock()
 				}
 			}
+			if mode == stampStore500Landed || mode == stampStore500Absent || mode == stampStore500Unreadable {
+				// The write (if this mode commits one) already happened above —
+				// exactly the "a 500 can hide a write that landed" doctrine: the
+				// transaction commits, then the RESPONSE fails.
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"error":{"code":"internal_error","message":"boom"}}`))
+				return
+			}
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/tasks/"):
-			if mode == stampStoreUnreadable {
+			if mode == stampStoreUnreadable || mode == stampStore500Unreadable {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"ok":false,"reason":"store_unreachable"}`))
 				return
@@ -473,7 +494,7 @@ func stampStoredContradicted() taskboard.CriterionItem {
 // which row failed and why.
 func TestRenderStampVerdict_ContradictionNamesIndexExpectedAndFound(t *testing.T) {
 	out, buf := stampVerdictWriter()
-	code := renderStampVerdict(out, stampVerdictReq, stampStoredContradicted())
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredContradicted(), exitOK)
 	if code != exitConflict {
 		t.Fatalf("exit = %d, want exitConflict (%d) — an unlanded stamp must not report success", code, exitConflict)
 	}
@@ -496,13 +517,46 @@ func TestRenderStampVerdict_ContradictionNamesIndexExpectedAndFound(t *testing.T
 // must exit zero.
 func TestRenderStampVerdict_ConfirmedReportsTheStoredRow(t *testing.T) {
 	out, buf := stampVerdictWriter()
-	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked())
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), exitOK)
 	if code != exitOK {
 		t.Fatalf("exit = %d, want exitOK on a landed stamp; out:\n%s", code, buf())
 	}
 	got := buf()
 	if !strings.Contains(got, "met=true") || !strings.Contains(got, "the store holds it") {
 		t.Errorf("confirmed verdict should report the stored row; got:\n%s", got)
+	}
+}
+
+// A landed row overrides a 5xx from the POST: the read-back is the truth, not
+// the transport error. This is the "a 500 can hide a write that landed"
+// doctrine — a mutation that kept exitServer here (ignored origRC on the
+// landed branch) would report a real write as a failure.
+func TestRenderStampVerdict_LandedOverridesA5xx(t *testing.T) {
+	out, buf := stampVerdictWriter()
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), exitServer)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK — a confirmed-landed row is a success regardless of what the POST answered; out:\n%s", code, buf())
+	}
+	got := buf()
+	if !strings.Contains(got, "despite the POST answering a server error") {
+		t.Errorf("landed-despite-5xx verdict should explain the surprising resurrection; got:\n%s", got)
+	}
+	if !strings.Contains(got, "the store holds it") || !strings.Contains(got, "met=true") {
+		t.Errorf("verdict should still report the stored row; got:\n%s", got)
+	}
+}
+
+// A confirmed-absent row after a 5xx still exits exitConflict (the store, not
+// the transport, decides "landed" — see the read-back's own doctrine), and
+// carries no false "despite a 5xx" claim since nothing landed.
+func TestRenderStampVerdict_ConfirmedAbsentAfter5xxStillConflict(t *testing.T) {
+	out, buf := stampVerdictWriter()
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredContradicted(), exitServer)
+	if code != exitConflict {
+		t.Fatalf("exit = %d, want exitConflict; out:\n%s", code, buf())
+	}
+	if strings.Contains(buf(), "despite the POST answering a server error") {
+		t.Errorf("a genuinely-absent row must not claim it landed despite the 5xx; got:\n%s", buf())
 	}
 }
 
@@ -605,6 +659,60 @@ func TestTaskStampExecute_UnreadableStoreIsUnconfirmedNotSuccess(t *testing.T) {
 	}
 	if !strings.Contains(out, "NOT confirmed") {
 		t.Errorf("output should say the stamp is unconfirmed; got:\n%s", out)
+	}
+}
+
+// THE 5xx DOCTRINE, proven through the real dispatch: a server that answers
+// the stamp POST with a 500 but ALREADY COMMITTED the write must not report
+// failure — the read-back finds it and the verb exits 0. Delete the
+// rc==exitServer arm in runTaskStamp and this goes red (rc stops at 8, no
+// read-back ever fires, "the store holds it" never appears).
+func TestTaskStampExecute_ServerErrorThatLandedIsConfirmedSuccess(t *testing.T) {
+	stampTestServerMode(t, stampStore500Landed)
+	out, code := captureExecuteCode(t, []string{
+		"task", "stamp", "bp-task-x", "w", "1",
+		"--criterion", "2", "--met", "--evidence", "gate green",
+		"--criterion-text", "a normal row",
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want exitOK — the read-back confirmed the write landed despite the 5xx; out:\n%s", code, out)
+	}
+	if !strings.Contains(out, "the store holds it") || !strings.Contains(out, "despite the POST answering a server error") {
+		t.Errorf("receipt should name both the landed row AND the surprising 5xx it survived; got:\n%s", out)
+	}
+}
+
+// The honest counterpart: a 500 whose write genuinely never landed must still
+// report failure — and now as a STORE-CONFIRMED absence (exitConflict), not a
+// bare unconfirmed transport error.
+func TestTaskStampExecute_ServerErrorThatDidNotLandStaysAFailure(t *testing.T) {
+	stampTestServerMode(t, stampStore500Absent)
+	out, code := captureExecuteCode(t, []string{
+		"task", "stamp", "bp-task-x", "w", "1",
+		"--criterion", "2", "--met", "--evidence", "gate green",
+		"--criterion-text", "a normal row",
+	})
+	if code == exitOK {
+		t.Fatalf("exit = 0 on a stamp the store confirms never landed; out:\n%s", out)
+	}
+	if !strings.Contains(out, "NOT confirmed") {
+		t.Errorf("output should say the stamp was not confirmed by the store; got:\n%s", out)
+	}
+}
+
+// A 5xx WHOSE read-back also fails must keep the more specific exitServer
+// code, not collapse to the generic exitGeneric bucket the plain-2xx path
+// uses — the POST already named a real server failure, and the failed
+// read-back adds no new information to override that.
+func TestTaskStampExecute_ServerErrorAndUnreadableStoreKeepsExitServer(t *testing.T) {
+	stampTestServerMode(t, stampStore500Unreadable)
+	out, code := captureExecuteCode(t, []string{
+		"task", "stamp", "bp-task-x", "w", "1",
+		"--criterion", "2", "--met", "--evidence", "gate green",
+		"--criterion-text", "a normal row",
+	})
+	if code != exitServer {
+		t.Fatalf("exit = %d, want exitServer (%d) preserved from the POST; out:\n%s", code, exitServer, out)
 	}
 }
 
