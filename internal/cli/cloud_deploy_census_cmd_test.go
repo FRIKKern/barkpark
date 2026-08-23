@@ -706,14 +706,29 @@ func TestCloudDeploymentsNotLoggedIn(t *testing.T) {
 // censusLineContaining returns the single rendered line carrying needle, failing
 // the test when there is none — so "the rate and its denominator are on the SAME
 // line" is asserted as one line, not as two lucky substrings of the whole page.
+//
+// It also fails when MORE THAN ONE line carries the needle. Returning the first
+// of several is a needle-hijack: a term that leaks onto its own line produces a
+// second match, the helper hands back whichever renders first, and the caller's
+// failure reads as a want-list problem on the wrong line — the exact misdirection
+// dr-w16-s5 measured. One needle, one line, or the helper says why not.
 func censusLineContaining(t *testing.T, out, needle string) string {
 	t.Helper()
+	var matches []string
 	for _, line := range strings.Split(out, "\n") {
 		if strings.Contains(line, needle) {
-			return line
+			matches = append(matches, line)
 		}
 	}
-	t.Fatalf("no line contains %q:\n%s", needle, out)
+	switch len(matches) {
+	case 1:
+		return matches[0]
+	case 0:
+		t.Fatalf("no line contains %q:\n%s", needle, out)
+	default:
+		t.Fatalf("needle hijack: %d lines contain %q — the needle no longer names ONE line, and asserting against the first would misread the render:\n%s\nfull output:\n%s",
+			len(matches), needle, strings.Join(matches, "\n"), out)
+	}
 	return ""
 }
 
@@ -774,18 +789,9 @@ func TestCloudDeploymentsLivePerAttemptLeadsTheHeadline(t *testing.T) {
 	if strings.Index(headline, "live 26.7%") > strings.Index(headline, "failure 37.5%") {
 		t.Fatalf("the live rate must LEAD, not trail the failure rate: %q", headline)
 	}
-	// ONE line carries the denominator phrase. A live rate on a line of its own
-	// would be a second "of N attempted" line, and every reader that reaches for
-	// the headline by that phrase — this test included — takes the first one.
-	n := 0
-	for _, line := range strings.Split(stdout, "\n") {
-		if strings.Contains(line, "of 2216 attempted") {
-			n++
-		}
-	}
-	if n != 1 {
-		t.Fatalf("%d lines carry \"of 2216 attempted\", want exactly 1:\n%s", n, stdout)
-	}
+	// ONE line carries the denominator phrase — enforced by censusLineContaining
+	// itself, which fails on more than one match, so the bespoke count that used
+	// to live here is retired.
 }
 
 // TestDeployCensusHeadlineRendersLiveInBOTHBranches is the anti-vacuity pin.
@@ -1293,7 +1299,9 @@ func TestCloudDeploymentsDeliveryRefusesAndNamesWhoIsWaiting(t *testing.T) {
 		}
 	}
 
-	waiting := censusLineContaining(t, stdout, "STILL WAITING >=")
+	// The per-site rows (dr-w23-s2) also carry "STILL WAITING >=", so the fleet
+	// line is named by its own phrase — the hardened helper reds a bare needle.
+	waiting := censusLineContaining(t, stdout, "row(s) not delivered")
 	for _, want := range []string{"STILL WAITING >= 21h13m19s", "400 row(s)", "(as of 2026-08-02T00:00:00Z)"} {
 		if !strings.Contains(waiting, want) {
 			t.Fatalf("still-waiting line %q missing %q — a bare count reports the measurement's own latency as fact", waiting, want)
@@ -1377,8 +1385,9 @@ func TestCloudDeploymentsWithoutDeliverySaysNotMeasured(t *testing.T) {
 	// which renders first and is also absent from this payload, has a NOT
 	// MEASURED sentence of its own.
 	// dr-w23-s4 added a second, real one: the coalesced-attempt gauge's refusal
-	// on the basis line. censusLineContaining returns the FIRST match, so a bare
-	// "NOT MEASURED" would silently start asserting against another section.
+	// on the basis line. censusLineContaining now FAILS on a multi-match, so a
+	// bare "NOT MEASURED" needle would red as a hijack instead of silently
+	// asserting against another section — the specific sentence keeps it to one.
 	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no delivery census")
 	if !strings.Contains(line, "NOT a fleet that delivers instantly") {
 		t.Fatalf("a missing delivery census must refuse out loud, not print nothing:\n%s", stdout)
