@@ -226,7 +226,14 @@ defmodule Barkpark.Search.Synonyms do
           transitions: row.transition_count,
           reason: "zero_to_hit",
           evidence:
-            candidate_evidence(surface, scope, from_q, to_q, row.transition_count, {period, period_start})
+            candidate_evidence(
+              surface,
+              scope,
+              from_q,
+              to_q,
+              row.transition_count,
+              {period, period_start}
+            )
         }
       end)
       |> Enum.reject(fn c -> c.from in [nil, ""] or c.to in [nil, ""] end)
