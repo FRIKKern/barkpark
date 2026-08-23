@@ -1486,6 +1486,20 @@ async function withBrowser(fn) {
   // why load() precedes ready (a ready-only pin reports two SHIPPED mono
   // weights false on a perfectly healthy page).
   //
+  // THE CORRECTED CI MECHANISM (cchi-w20-bl-breakpoint-sweep-fonts-blind):
+  // D218's original story said Inter may not RESOLVE on ubuntu-latest. Wrong
+  // half: Inter is SELF-HOSTED (app.css @font-face, src url(fonts/
+  // Inter-var.woff2)) and serve.mjs serves the .woff2 off disk on the same
+  // origin, so it resolves everywhere. What is not guaranteed is IN TIME —
+  // font-display: swap paints fallback metrics first, and under
+  // setCacheDisabled/no-store a slow disk or loaded runner re-runs that race
+  // on every navigation. The pin does not wait out the race; it forces the
+  // load (face.load() before fonts.ready, check() after), which is why it
+  // belongs in navSettle and not in a sleep. Mutation-measured on this tree:
+  // pin bypassed + Inter-var.woff2 hidden -> rc 0 'clean across 2 cells' (a
+  // fiction, measured silently); pin active + same hidden face -> exit 2
+  // naming 'Inter=false IBM Plex Mono=true'.
+  //
   // It needs its OWN Runtime.evaluate because evalJs below passes
   // `awaitPromise: false` — through that helper the pin would come back as an
   // unresolved Promise handle, i.e. truthy garbage, and the guard would be
