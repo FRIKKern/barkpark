@@ -15,6 +15,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
+  alias BarkparkWeb.Plugs.RequireWritePermission
   alias BarkparkWeb.SearchIntel
 
   import BarkparkWeb.ParamCoercion, only: [bin: 1]
@@ -458,51 +459,17 @@ defmodule BarkparkWeb.V1.MediaController do
     if Access.allowed?(conn, file, doc, :edit_metadata), do: :ok, else: {:error, :forbidden}
   end
 
+  # ONE JUDGMENT, ONE OWNER (task-6e22b3922dc42e8c). This used to re-derive the
+  # write judgment from `conn.assigns[:api_token]` — a second implementation of
+  # what `BarkparkWeb.Plugs.RequireWritePermission` already decided on this same
+  # request, which had drifted from it in two ways (a member the gate ADMITS was
+  # 403'd here; a missing credential answered 401 here and 403 there). It now
+  # reads the gate's own verdict. Still a REAL check, not a no-op: an ungated
+  # route carries no grant assign and is refused, so the collapse fails CLOSED
+  # rather than trusting the pipeline. `share_writer` is honoured by the gate
+  # itself, so a P5 share-token upload still passes.
   defp require_write(conn) do
-    # P5: a scoped-share media-edit token proved its right to write THIS scope in
-    # RequireShareEditToken (opaque `share-edit-media` perm + live :edit-share +
-    # byte-exact scope) and carries no global :write perm — honor `share_writer`
-    # here, mirroring BarkparkWeb.Plugs.RequireWritePermission, or a media upload
-    # via a share token would 403 despite the plug grant.
-    cond do
-      conn.assigns[:share_writer] == true ->
-        :ok
-
-      not is_nil(conn.assigns[:api_token]) ->
-        token = conn.assigns[:api_token]
-
-        if Auth.has_permission?(token, "write") or Auth.has_permission?(token, "admin") do
-          :ok
-        else
-          {:error, :forbidden}
-        end
-
-      # ACCOUNT ARM (gfr-w1-account-session-bearer-gap). A `user_session`
-      # principal carries no api_token, so the arm above cannot answer for it.
-      # Authority is the MEMBERSHIP ROLE on the workspace `ResolveWorkspace`
-      # already derived from the URL, through the same `Tenancy.Auth.authorize/3`
-      # the RequireWritePermission plug uses — the floor lives there
-      # ("member"/"admin"/"owner" satisfy :write) and is NOT restated here.
-      #
-      # SCOPED ONLY, structurally: a flat request has no :current_workspace at
-      # this point, so this clause cannot fire for one.
-      #
-      # NOT extended to checkout/undo_checkout. Those call `actor_label/1` and
-      # `admin?/1`, which read a token's LABEL to stamp `checkedOutBy` — what a
-      # human principal should be stamped as is a product decision nobody has
-      # made, and guessing it writes user-visible data. An account session can
-      # upload; it still cannot check out. Bounded on purpose.
-      match?(%Barkpark.Accounts.User{}, conn.assigns[:current_user]) ->
-        with %{id: ws_id} when is_binary(ws_id) <- conn.assigns[:current_workspace],
-             :ok <- Barkpark.Tenancy.Auth.authorize(conn.assigns[:current_user], ws_id, :write) do
-          :ok
-        else
-          _ -> {:error, :forbidden}
-        end
-
-      true ->
-        {:error, :unauthorized}
-    end
+    if RequireWritePermission.granted?(conn), do: :ok, else: {:error, :forbidden}
   end
 
   # Force-release privilege for `undo_checkout`. NOTE: write==force-release is

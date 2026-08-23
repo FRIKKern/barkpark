@@ -7,11 +7,11 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
-  alias Barkpark.Auth
   alias Barkpark.Media
   alias Barkpark.Media.Storage.{Collections, Share}
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
+  alias BarkparkWeb.Plugs.RequireWritePermission
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -187,18 +187,16 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     end
   end
 
+  # ONE JUDGMENT, ONE OWNER (task-6e22b3922dc42e8c) — the SECOND instance of the
+  # class, collapsed with its media_controller.ex twin. This arm re-derived the
+  # write judgment `BarkparkWeb.Plugs.RequireWritePermission` had already made on
+  # the same request, and diverged from it harder than the twin did: it carried
+  # NEITHER a `share_writer` arm NOR an account arm, so a principal the gate
+  # admits on either of those grounds collected a 401 here. It now reads the
+  # gate's verdict. Still fails CLOSED on a route that ever loses the plug: no
+  # grant assign, no write.
   defp require_write(conn) do
-    case conn.assigns[:api_token] do
-      token when not is_nil(token) ->
-        if Auth.has_permission?(token, "write") or Auth.has_permission?(token, "admin") do
-          :ok
-        else
-          {:error, :forbidden}
-        end
-
-      _ ->
-        {:error, :unauthorized}
-    end
+    if RequireWritePermission.granted?(conn), do: :ok, else: {:error, :forbidden}
   end
 
   defp ensure_dataset(%{dataset: ds}, ds), do: :ok
