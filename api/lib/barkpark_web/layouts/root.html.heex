@@ -3499,7 +3499,12 @@
     .bp-doc-checkbox {
       display: inline-flex; align-items: center; justify-content: center;
       width: 28px; padding: 12px 0 0 10px; flex-shrink: 0; cursor: pointer;
+      /* spd-bl-doc-checkbox-is-an-unfocusable-span: now a real <button
+         role="checkbox">, so strip the UA button chrome — the box span below
+         stays the whole visual. */
+      background: none; border: 0; font: inherit; color: inherit;
     }
+    .bp-doc-checkbox:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .bp-doc-checkbox-box {
       width: 14px; height: 14px; border: 1px solid var(--border);
       border-radius: 3px; background: var(--bg);

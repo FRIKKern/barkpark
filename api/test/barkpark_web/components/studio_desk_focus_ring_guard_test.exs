@@ -54,7 +54,10 @@ defmodule BarkparkWeb.StudioDeskFocusRingGuardTest do
   @desk_focus_rings [
     {".pane-add-btn:focus-visible", ~s(the "+" / share / access pane-header buttons)},
     {".pane-item:focus-visible", "every structure + plugin-link desk row"},
-    {".bp-doc-row-body:focus-visible", "every document row body"}
+    {".bp-doc-row-body:focus-visible", "every document row body"},
+    # spd-bl-doc-checkbox-is-an-unfocusable-span — the bulk-select control is a
+    # real <button role="checkbox"> now; its ring rides the same pinned list.
+    {".bp-doc-checkbox:focus-visible", "the bulk-select checkbox on every doc row"}
   ]
 
   defp sheet, do: File.read!(@root)
@@ -148,13 +151,15 @@ defmodule BarkparkWeb.StudioDeskFocusRingGuardTest do
   end
 
   describe "the rings this wave must NOT pretend to have" do
-    test ".bp-desk-chip / .bp-doc-checkbox rings do not exist yet (spd-w18 round 2)" do
+    test ".bp-desk-chip ring does not exist yet (spd-w18 round 2)" do
       # Pinned as ABSENT on purpose: it dates this guard honestly, and when
-      # the chips/checkbox slice lands, THIS is the test that tells its author
-      # to add them to @desk_focus_rings instead of leaving them unguarded.
+      # the chips slice lands, THIS is the test that tells its author to add
+      # it to @desk_focus_rings instead of leaving it unguarded. (The
+      # .bp-doc-checkbox ring GRADUATED into @desk_focus_rings above —
+      # spd-bl-doc-checkbox-is-an-unfocusable-span.)
       css = sheet()
 
-      for selector <- [".bp-desk-chip:focus-visible", ".bp-doc-checkbox:focus-visible"] do
+      for selector <- [".bp-desk-chip:focus-visible"] do
         refute rule_open(css, selector),
                """
                `#{selector}` now EXISTS. Good — move it into

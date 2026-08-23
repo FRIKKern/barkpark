@@ -133,7 +133,7 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
       refute html =~ "toggle-doc-checkbox"
     end
 
-    test "selectable=true renders a checkbox span with a phx-click handler" do
+    test "selectable=true renders a REAL checkbox control with a phx-click handler" do
       html =
         render_component(&Panes.pane_doc_item/1, Map.merge(base_assigns(), %{selectable: true}))
 
@@ -141,6 +141,40 @@ defmodule BarkparkWeb.StudioComponents.PanesTest do
       assert html =~ ~s(phx-click="toggle-doc-checkbox")
       assert html =~ ~s(phx-value-id="doc-abc")
       assert html =~ ~s(data-test-id="doc-checkbox-doc-abc")
+
+      # spd-bl-doc-checkbox-is-an-unfocusable-span: a <span phx-click> was
+      # unreachable by keyboard and silent to AT. The control must be a real
+      # <button role="checkbox"> with its state on aria-checked and a name
+      # saying WHAT gets selected.
+      [checkbox] =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([data-test-id="doc-checkbox-doc-abc"]))
+        |> Enum.to_list()
+
+      assert LazyHTML.tag(checkbox) == ["button"],
+             "the bulk-select control must be a real <button>, not a span"
+
+      assert LazyHTML.attribute(checkbox, "role") == ["checkbox"]
+      assert LazyHTML.attribute(checkbox, "aria-checked") == ["false"]
+      assert LazyHTML.attribute(checkbox, "aria-label") == ["Select My Post"]
+    end
+
+    test "checked=true announces aria-checked=true on the checkbox control" do
+      html =
+        render_component(
+          &Panes.pane_doc_item/1,
+          Map.merge(base_assigns(), %{selectable: true, checked: true})
+        )
+
+      [checkbox] =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([data-test-id="doc-checkbox-doc-abc"]))
+        |> Enum.to_list()
+
+      assert LazyHTML.attribute(checkbox, "aria-checked") == ["true"],
+             "AT must hear the checked state from aria-checked, not a bare glyph"
     end
 
     test "checked=true adds is-bulk-checked class and renders ✓ inside the checkbox" do
