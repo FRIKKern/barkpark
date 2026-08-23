@@ -93,7 +93,7 @@ defmodule BarkparkCloud.RegistryTest do
       assert {:error, changeset} =
                Registry.register_barkpark(team_a, %{name: "Prod 2", slug: "prod"})
 
-      assert "a Barkpark with this slug already exists in this team" in errors_on(changeset).team_id
+      assert "already has a Barkpark with this slug" in errors_on(changeset).team_id
 
       # Same slug, DIFFERENT team → fine.
       assert {:ok, _} = Registry.register_barkpark(team_b, %{name: "Prod", slug: "prod"})

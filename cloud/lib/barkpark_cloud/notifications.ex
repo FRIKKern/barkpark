@@ -1088,7 +1088,7 @@ defmodule BarkparkCloud.Notifications do
   defp channel_url_error(reason) do
     %EmailSettings{}
     |> Ecto.Changeset.change()
-    |> Ecto.Changeset.add_error(:channels, "unsafe webhook url", reason: reason)
+    |> Ecto.Changeset.add_error(:channels, "include an unsafe webhook url", reason: reason)
   end
 
   @doc """

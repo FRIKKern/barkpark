@@ -185,7 +185,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     # failure still enqueues.
     |> unique_constraint([:barkpark_id, :kind],
       name: :provision_jobs_one_active_per_barkpark_kind_idx,
-      message: "an active job of this kind already exists for this barkpark"
+      message: "already has an active job of this kind"
     )
   end
 

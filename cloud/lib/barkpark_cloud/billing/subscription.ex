@@ -121,7 +121,7 @@ defmodule BarkparkCloud.Billing.Subscription do
     # colliding. Backed by `subscriptions_one_live_per_team_idx`.
     |> unique_constraint(:team_id,
       name: :subscriptions_one_live_per_team_idx,
-      message: "this team already has a live subscription"
+      message: "already has a live subscription"
     )
   end
 end
