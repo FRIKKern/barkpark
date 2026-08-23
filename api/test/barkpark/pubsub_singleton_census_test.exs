@@ -200,7 +200,8 @@ defmodule Barkpark.PubSubSingletonCensusTest do
         defmodule_of(File.read!(path)) == module
       end)
 
-    found || flunk("could not find the source file defining #{inspect(module)} under #{@lib_root}")
+    found ||
+      flunk("could not find the source file defining #{inspect(module)} under #{@lib_root}")
   end
 
   defp index_of!(source, needle, what) do
