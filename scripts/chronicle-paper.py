@@ -206,11 +206,17 @@ def navigation_blocks(periods: dict[str, Period], active: str) -> list[dict[str,
 def period_payload(period: Period, selected: list[Event], periods: dict[str, Period], repo: str) -> dict[str, Any]:
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in selected)
+    public_titles = {
+        "day": f"Daily shiplog report · {period.start.strftime('%A')}, {period.title}",
+        "week": f"Week {period.key.split('-W')[-1]} dispatch · {period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}",
+        "month": f"Monthly product change ledger · {period.title}",
+        "year": f"Annual product record · {period.title}",
+    }
     blocks: list[dict[str, Any]] = navigation_blocks(periods, period.kind)
     blocks.extend(
         [
             {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
-            heading("auto:title", 1, period.title),
+            heading("auto:title", 1, public_titles[period.kind]),
             {"id": "auto:ingress", "type": "ingress", "content": [text(signal(period, selected))]},
             {
                 "id": "auto:release-pulse",
@@ -256,7 +262,7 @@ def period_payload(period: Period, selected: list[Event], periods: dict[str, Per
     return {
         "_id": period.slug,
         "slug": period.slug,
-        "title": f"Barkpark Chronicle · {period.title}",
+        "title": public_titles[period.kind],
         "description": f"The verified Barkpark {period.kind} record for {period.key}, projected from first-parent mainline history.",
         "style": "article",
         "event_type": f"changelog.{period.kind}",
