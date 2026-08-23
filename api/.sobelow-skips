@@ -25,7 +25,6 @@ Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:326,55E81A1
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:245,2428CAE
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/media/probe.ex:27,2C782D6
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:295,3CA05A1
-CI.System: Command Injection via `System` function,lib/barkpark/studio_chat/runtime/codex/readiness.ex:42,6CC3DE8
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit/schemas/text_content.ex:40,1DCA539
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/epic_fleet/benchmark.ex:233,7E9FD64
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:650,11C327D
