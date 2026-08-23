@@ -236,5 +236,10 @@ defmodule BarkparkCloud.Cloudflare.Real do
   defp decode_body(body), do: Jason.decode(body)
 
   defp http_client, do: config()[:http_client]
-  defp config, do: Application.get_env(:barkpark_cloud, BarkparkCloud.Cloudflare, [])
+
+  # hg-w1-async-seam-process-scope-followup: reads through
+  # Cloudflare.resolved_config/0 rather than Application.get_env directly, so
+  # this module sees the SAME process-scoped override a test installs via
+  # Cloudflare.put_process_config/1 — one config choke point for both readers.
+  defp config, do: BarkparkCloud.Cloudflare.resolved_config()
 end

@@ -58,11 +58,14 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
       cd cloud && CC=clang mix test test/barkpark_cloud/cloudflare_standalone_degrade_test.exs
   """
 
-  # async: false — the config-sensitive cases mutate the GLOBAL
-  # `:barkpark_cloud, BarkparkCloud.Cloudflare` env (installing a raising stub,
-  # clearing/setting the token). Serialising keeps those mutations from bleeding
-  # into concurrent CF cases when the whole suite runs (the merge gate).
-  use ExUnit.Case, async: false
+  # async: true (hg-w1-async-seam-process-scope-followup) — the config-sensitive
+  # cases (installing a raising stub, clearing/setting the token) now install
+  # their override in THIS TEST'S process dictionary via
+  # `Cloudflare.put_process_config/1` rather than mutating the node-global
+  # `:barkpark_cloud, BarkparkCloud.Cloudflare` env, so a concurrent CF case
+  # never sees another test's override. See Cloudflare's moduledoc
+  # "Process-scoped config override".
+  use ExUnit.Case, async: true
 
   alias BarkparkCloud.Billing.HttpClient
   alias BarkparkCloud.Cloudflare
@@ -131,12 +134,11 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
     {"BarkparkCloud.Cloudflare", "lib/barkpark_cloud/web/router.ex"}
   ]
 
-  # Merge Cloudflare config for one test, restoring the original on exit. Config
-  # is resolved at call time, so this is all a config-sensitive test needs.
+  # Merge Cloudflare config for one test, scoped to THIS test's process only —
+  # no on_exit needed, the override dies with the test process.
   defp put_cf_config(kw) do
-    base = Application.get_env(:barkpark_cloud, Cloudflare, [])
-    on_exit(fn -> Application.put_env(:barkpark_cloud, Cloudflare, base) end)
-    Application.put_env(:barkpark_cloud, Cloudflare, Keyword.merge(base, kw))
+    base = Cloudflare.resolved_config()
+    Cloudflare.put_process_config(Keyword.merge(base, kw))
   end
 
   # ── Obligation 1: configured?/0 fail-closes on an absent/blank token ─────────
