@@ -20,6 +20,8 @@ defmodule BarkparkCloud.Web.RouterOAuthTwoFactorTest do
   router_two_factor_test.exs is serial).
   """
   use BarkparkCloud.DataCase, async: false
+
+  import BarkparkCloud.TotpTestHelper
   import Plug.Test
   import Plug.Conn
 
@@ -78,7 +80,7 @@ defmodule BarkparkCloud.Web.RouterOAuthTwoFactorTest do
       call(
         :post,
         "/v1/account/two-factor/confirm",
-        %{code: NimbleTOTP.verification_code(secret)},
+        %{code: totp_code_stable!(secret)},
         token
       )
 
@@ -104,7 +106,7 @@ defmodule BarkparkCloud.Web.RouterOAuthTwoFactorTest do
   # test must therefore come from the NEXT step — the same +30 router_two_factor_test
   # uses for exactly this reason.
   defp next_code(secret),
-    do: NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
+    do: code_for_period_offset!(secret, +1)
 
   defp session_origins(user) do
     user |> Accounts.list_user_sessions() |> Enum.map(& &1.origin)

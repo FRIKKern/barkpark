@@ -46,6 +46,8 @@ defmodule BarkparkCloud.Web.AuthOnboardingErrorTest do
   onboarding action's happy path is unchanged.
   """
   use BarkparkCloud.DataCase, async: false
+
+  import BarkparkCloud.TotpTestHelper
   import Plug.Test
   import Plug.Conn
 
@@ -120,7 +122,7 @@ defmodule BarkparkCloud.Web.AuthOnboardingErrorTest do
       call(
         :post,
         "/v1/account/two-factor/confirm",
-        %{code: NimbleTOTP.verification_code(secret)},
+        %{code: totp_code_stable!(secret)},
         token
       )
 
@@ -196,7 +198,7 @@ defmodule BarkparkCloud.Web.AuthOnboardingErrorTest do
       conn =
         call(:post, "/v1/auth/two-factor-challenge", %{
           challenge_token: challenge,
-          code: NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
+          code: code_for_period_offset!(secret, +1)
         })
 
       assert conn.status == 422

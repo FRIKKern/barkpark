@@ -6,6 +6,8 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
   exactly like router_test.exs.
   """
   use BarkparkCloud.DataCase, async: false
+
+  import BarkparkCloud.TotpTestHelper
   import Plug.Test
   import Plug.Conn
 
@@ -80,7 +82,7 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
       call(
         :post,
         "/v1/account/two-factor/confirm",
-        %{code: NimbleTOTP.verification_code(secret)},
+        %{code: totp_code_stable!(secret)},
         token
       )
 
@@ -131,7 +133,7 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
         call(:post, "/v1/auth/two-factor-challenge", %{
           challenge_token: challenge,
           # Next window past the spent enrollment step (confirm consumed it).
-          code: NimbleTOTP.verification_code(secret, time: System.os_time(:second) + 30)
+          code: code_for_period_offset!(secret, +1)
         })
 
       body = json_body(conn)
@@ -254,7 +256,7 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
         call(
           :post,
           "/v1/account/two-factor/confirm",
-          %{code: NimbleTOTP.verification_code(secret)},
+          %{code: totp_code_stable!(secret)},
           token
         )
 
