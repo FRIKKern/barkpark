@@ -399,9 +399,11 @@
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
-    // cch-w62 (D740) — UNWRAP THE NESTED ENVELOPE before keying anything. Five
-    // route families (self-update 13, rollback 10, the webhook proxy 6, PATCH
-    // /autoupdate 1, PATCH /admin channel 1 — 31 emitters in router.ex) send
+    // cch-w62 (D740) — UNWRAP THE NESTED ENVELOPE before keying anything. Four
+    // route families (self-update, rollback, the webhook proxy, PATCH /admin
+    // channel — 29 emitters in router.ex, MEASURED and pinned by
+    // router_error_envelope_census_test.exs; PATCH /autoupdate left the set
+    // when cch-w62-bl flattened its 422 into the details-ladder shape) send
     // `{error: {code}}`, not the flat shape. Without this line `key` is a
     // truthy OBJECT and the humanized-slug return below calls `key.replace`
     // — a TypeError, in copy code whose whole job is to never crash. A nested

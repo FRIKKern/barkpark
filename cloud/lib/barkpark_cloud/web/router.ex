@@ -3823,8 +3823,20 @@ defmodule BarkparkCloud.Web.Router do
                   }
                 })
 
-              {:error, %Ecto.Changeset{}} ->
-                json(conn, 422, %{error: %{code: "invalid"}})
+              {:error, %Ecto.Changeset{} = cs} ->
+                # cch-w62-bl — ONE envelope shape for the whole route. The 404
+                # arms are flat, and this arm used to be the route's lone nested
+                # `%{error: %{code: "invalid"}}` — one route, two shapes, and a
+                # validation refusal that reached the console details-blind: the
+                # wave-37 per-field ladder reads `details` off the TOP level, so
+                # the changeset's own answer (which field, what rule) was thrown
+                # away and a permanent refusal rendered as a generic. Flat
+                # `error` + `details` is the shape ~100 sibling 422 emitters
+                # already use, and both consumers of this route read it today:
+                # `friendly()` (app.js) keys flat strings natively, and the Go
+                # CLI's `decodeRouteErrorCode` tries object-then-string. The
+                # envelope-shape census pins this route all-flat.
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
             end
 
           _ ->
