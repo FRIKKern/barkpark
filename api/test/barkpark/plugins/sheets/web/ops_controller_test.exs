@@ -263,4 +263,112 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsControllerTest do
     assert Map.has_key?(cells, "A5")
     refute Map.has_key?(cells, "A7")
   end
+
+  # ── the authorization wall (pds-w44-bl-ops-controller-apply-ops-ungated) ──
+  #
+  # This HTTP door is the SECOND Session.apply_ops surface — the LiveView
+  # write wall (sheet_grid/ops.ex `write_capable: false`) does not and cannot
+  # cover it. The chain, derived from source: route `auth: :ingest`
+  # (sheets.ex register_routes) → `pipe_through :ingest` (router/plugins.ex)
+  # → pipeline :ingest → RequireIngestToken (router.ex), which authorizes
+  # ONLY a constant-time ingest-secret match OR an api_token satisfying
+  # `Tenancy.Auth.permits?(token, :admin)` — every other principal 401s
+  # before the controller. These tests settle that BY RUN with the STORED
+  # cell value as the oracle, against a LIVE session (so the proof can never
+  # be satisfied by a vacuous "no session started" predicate).
+
+  test "a write-denied principal cannot reach Session.apply_ops — settled by the STORED " <>
+         "cell value against a LIVE session",
+       %{conn: conn} do
+    create_sheet("authz-probe")
+
+    # Positive control FIRST: the authed door writes for real and the oracle
+    # can see a landed write — and the session is now LIVE, so the denials
+    # below are proven against a running target.
+    body =
+      conn
+      |> authed()
+      |> post(
+        ops_url("authz-probe", @dataset),
+        Jason.encode!(%{
+          "ops" => [%{"op" => "set_cell", "tab" => 0, "ref" => "B1", "raw" => "legit"}]
+        })
+      )
+      |> json_response(200)
+
+    assert body["applied"] == 1
+    assert is_pid(Session.whereis("authz-probe", @dataset))
+
+    probe =
+      Jason.encode!(%{
+        "ops" => [%{"op" => "set_cell", "tab" => 0, "ref" => "A1", "raw" => "hacked"}]
+      })
+
+    # (a) anonymous — no bearer at all.
+    resp_anon =
+      build_conn()
+      |> put_req_header("content-type", "application/json")
+      |> post(ops_url("authz-probe", @dataset), probe)
+
+    assert resp_anon.status == 401
+
+    # (b) the SHARPEST write-denied principal: a VALID, live api_token
+    # carrying read+write permissions — but not admin. Generic write
+    # permission does NOT open this door.
+    raw = "sheets-nonadmin-#{System.unique_integer([:positive])}"
+    {:ok, _} = Barkpark.Auth.create_token(raw, "sheets non-admin", "test", ["read", "write"])
+
+    resp_writer =
+      build_conn()
+      |> put_req_header("authorization", "Bearer " <> raw)
+      |> put_req_header("content-type", "application/json")
+      |> post(ops_url("authz-probe", @dataset), probe)
+
+    assert resp_writer.status == 401
+    assert Jason.decode!(resp_writer.resp_body)["error"]["code"] == "unauthorized"
+
+    # THE ORACLE — the stored cell value, both layers. The session's
+    # authoritative in-memory content:
+    {:ok, content} = Session.peek("authz-probe", @dataset)
+    cells = get_in(content, ["tabs", Access.at(0), "cells"])
+    assert cells["A1"]["v"] == "hello"
+    refute inspect(content) =~ "hacked"
+    # …the positive control's write IS visible to the same oracle:
+    assert inspect(cells["B1"]) =~ "legit"
+
+    # And the PERSISTED document, behind the read-your-writes flush barrier:
+    assert :ok = Session.flush("authz-probe", @dataset)
+    {:ok, doc} = Content.get_document("drafts.authz-probe", "sheet", @dataset)
+    stored_cells = get_in(doc.content, ["tabs", Access.at(0), "cells"])
+    assert stored_cells["A1"]["v"] == "hello"
+    refute inspect(doc.content) =~ "hacked"
+  end
+
+  test "an ADMIN api_token opens the door without the shared secret (the second " <>
+         "RequireIngestToken arm is live, not decorative)",
+       %{conn: conn} do
+    create_sheet("authz-admin")
+
+    raw = "sheets-admin-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Barkpark.Auth.create_token(raw, "sheets admin", "test", ["read", "write", "admin"])
+
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer " <> raw)
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        ops_url("authz-admin", @dataset),
+        Jason.encode!(%{
+          "ops" => [%{"op" => "set_cell", "tab" => 0, "ref" => "C1", "raw" => "by-admin"}]
+        })
+      )
+      |> json_response(200)
+
+    assert body["applied"] == 1
+
+    {:ok, content} = Session.peek("authz-admin", @dataset)
+    assert inspect(get_in(content, ["tabs", Access.at(0), "cells"])["C1"]) =~ "by-admin"
+  end
 end
