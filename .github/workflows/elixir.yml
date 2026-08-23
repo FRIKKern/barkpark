@@ -306,6 +306,32 @@ jobs:
       - name: The four gates announce their skips (the ratchet must be able to fail)
         run: bash scripts/gate-announces-skips.test.sh
 
+      # ── the merge-authority claim guard, riding this job for one reason ───
+      # The repo's existing merge-authority guard, `blocking_authority_check`
+      # in scripts/required-checks-verify.sh, is invoked in the real tree from
+      # exactly one workflow: required-checks-drift.yml, inside the job
+      # `Required-check spec drift (advisory)`, which carries
+      # continue-on-error: true. .github/required-checks.json holds that context
+      # out under S2 ADVISORY. So the cure for a merge-authority phantom sat on
+      # a context that cannot stop a merge — the same disease, one level up.
+      #
+      # This job is the strongest venue available for it, and every part of that
+      # is checked rather than asserted (scripts/merge-authority-claim-check.test.sh
+      # §B): `path-escape` carries no `if:` and no continue-on-error, it is in
+      # `elixir-gate`'s `needs` with the gate value NEVER — so it can never be
+      # skipped into a green — and `Elixir gate` is one of the four required
+      # contexts. A red in these steps reds a REQUIRED context.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name, so required-checks-verify.sh's roster is unchanged.
+      - name: The merge-authority claim guard must be able to fail
+        run: bash scripts/merge-authority-claim-check.test.sh
+
+      - name: No workflow or card claims merge authority the spec denies
+        run: bash scripts/merge-authority-claim-check.sh
+
   format:
     # ADVISORY format signal — NOT a merge gate. The project pins formatting
     # to the PROD Elixir version (server runs 1.18.x; local dev runs 1.19.x,
