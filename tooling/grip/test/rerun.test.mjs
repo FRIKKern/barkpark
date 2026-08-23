@@ -762,6 +762,35 @@ test("separated-value globals in front of a READ stay admitted — the permit ar
   }
 });
 
+test("opts.root IS the execution cwd — a rerun's verdict must not depend on where the caller was invoked", () => {
+  // Measured live during the tgw11 build: the full grip suite red/greened purely
+  // by invocation directory — seal.test.mjs's polarity specimen
+  // `diff tooling/grip/record.mjs tooling/grip/provenance.mjs` ruled NULL-READ
+  // from a tooling/grip cwd and FAILED from the repo root, because runRerun
+  // spawned /bin/sh -c with NO cwd and only used opts.root for scope/warmth.
+  // Every caller already passes root believing it scopes execution
+  // (adjudicateCriterion, adjudicate.mjs, seal.mjs — which papers over the gap
+  // by chdir-ing in main(), a fix the LIBRARY path never got). A verdict that
+  // depends on invocation cwd eventually produces a confident wrong answer.
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const scratch = mkdtempSync(join(tmpdir(), "grip-cwd-"));
+  const prev = process.cwd();
+  process.chdir(scratch);
+  try {
+    // A repo-relative read that EXISTS under root and not under the scratch cwd.
+    const r = runRerun("grep -c classifySafety tooling/grip/rerun.mjs", { root: repoRoot });
+    assert.equal(r.ran, true);
+    assert.equal(r.exit, 0, `repo-relative rerun must execute under opts.root, not the caller's cwd — exited ${r.exit}: ${r.stderr}`);
+    // And the same command WITHOUT root still runs in the caller's cwd (the
+    // default is unchanged): from the scratch dir the file does not exist.
+    const local = runRerun("grep -c classifySafety tooling/grip/rerun.mjs");
+    assert.notEqual(local.exit, 0, "without opts.root the caller's cwd must still govern — the default contract is unchanged");
+  } finally {
+    process.chdir(prev);
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 // ── 7. the module boundary ───────────────────────────────────────────────────
 
 test("rerun.mjs does not import level.mjs", async () => {

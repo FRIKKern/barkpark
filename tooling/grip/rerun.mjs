@@ -368,11 +368,18 @@ export function classifyHttp(code, exit) {
 const HTTP_URL = /\bhttps?:\/\/[^\s'"|<>]+/;
 const SSH_DENIED = /permission denied|no such identity|could not resolve hostname|host key verification failed/i;
 
-function shell(cmd, timeoutMs) {
+// `cwd` makes opts.root the EXECUTION directory, not just a scope/warmth probe
+// path. Before this parameter existed, /bin/sh -c ran wherever the CALLER
+// happened to be invoked, so a repo-relative rerun's verdict depended on
+// invocation cwd — seal.test.mjs's polarity specimen ruled NULL-READ from a
+// tooling/grip cwd and FAILED from the repo root, and seal.mjs's CLI had to
+// paper over it by chdir-ing in main() (a fix its library path never got).
+function shell(cmd, timeoutMs, cwd) {
   return finishSpawn(Date.now(), spawnSync("/bin/sh", ["-c", cmd], {
     encoding: "utf8",
     timeout: timeoutMs,
     maxBuffer: 8 * 1024 * 1024,
+    ...(cwd ? { cwd } : {}),
   }));
 }
 
@@ -716,7 +723,7 @@ export function runRerun(command, opts = {}) {
     };
     // Only bother running the literal command when the host actually answered.
     if (reachable) {
-      const lit = shell(cmd, timeoutMs);
+      const lit = shell(cmd, timeoutMs, root);
       httpOut.stdout = lit.stdout;
       httpOut.stderr = lit.stderr;
       httpOut.stdoutBytes = Buffer.byteLength(lit.stdout ?? "", "utf8");
@@ -765,7 +772,7 @@ export function runRerun(command, opts = {}) {
   }
 
   // 4. EXECUTE. Actually. This is the whole point.
-  const run = shell(cmd, timeoutMs);
+  const run = shell(cmd, timeoutMs, root);
   const out = {
     ...base,
     scope: SCOPE.SYNC,
