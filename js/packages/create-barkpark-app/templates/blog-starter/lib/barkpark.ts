@@ -2,6 +2,7 @@ import 'server-only'
 import { BarkparkNotFoundError, makeFilterExpression, type Perspective } from '@barkpark/core'
 import { createBarkparkServer } from '@barkpark/nextjs/server'
 import { barkparkClient } from '../barkpark.config'
+import { resolveServerToken } from './resolve-server-token'
 
 // Envelope shapes returned by the /v1/data endpoints. `result.count` is the
 // TOTAL number of matching documents (not just the page you fetched).
@@ -39,7 +40,7 @@ export interface QueryEnvelope<T> {
 // no-ops (permanent stale content).
 const { barkparkFetch } = createBarkparkServer({
   client: barkparkClient,
-  serverToken: process.env.BARKPARK_SERVER_TOKEN ?? 'barkpark-dev-token',
+  serverToken: resolveServerToken(process.env),
 })
 
 export async function getDocs<T>(
