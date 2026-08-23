@@ -217,6 +217,7 @@ const DEFECTS = [
   "W26-deploy-fail-clip",
   "W26-cred-sheet-exits",
   "W26-new-ready-and-launch-bounded",
+  "W14-site-detail-phone-band",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -402,6 +403,38 @@ const WIDTHS = [721, 750, 768, 769, 775, 780, 785, 800, 900, 1024, 1440];
 // measured threshold (overflowed at <=495, clean at >=496 pre-fix), so a run
 // that goes green here has crossed the bisection point rather than missed it.
 const PHONE_WIDTHS = [320, 360, 375, 390, 412, 430, 480, 495, 496, 620];
+
+// cch-w14-bl-site-open-phone-overflow, criterion 4: THE SCENARIO AXIS, NOT THE
+// WIDTH AXIS, IS WHAT HID THIS DEFECT. PHONE_WIDTHS above ALREADY held 320, 360,
+// 375 and 390 while `a.site-open` pinned the site detail page floor at 388px on
+// every iPhone in portrait, both themes, all three site fixtures. The W12 leg
+// drives `#overview` and `#notifications`; W13 drives the site routes but its
+// axis starts at 721. So no leg in this file had ever rendered a DETAIL route at
+// a PHONE width, and the row was found by hand. This leg closes the product of
+// the two axes, which is the thing that was missing.
+//
+// 340 IS IN THIS SET AND IS NOT IN PHONE_WIDTHS, and THE FILED BAND IS STALE.
+// The row filed 320:+68 340:+48 360:+28 375:+13 388:ok. Re-derived in this
+// browser by deleting the W15-S5 rule on today's bytes, the band is WIDER and
+// the overhang is roughly double: 320:+126 340:+106 360:+86 375:+71 390:+56
+// 412:+34 430:+16, clean from 480 up, identical in both themes. The head's live
+// line now renders host AND path ("…barkpark.cloud/sites/a…"), so the floor
+// moved from 388 to 446. The filed numbers were FLOORS, as the row itself said;
+// they are quoted here as history, never as the pin. 340 earns its place by
+// making that band readable as a ladder rather than as one failing corner.
+const SITE_PHONE_WIDTHS = [320, 340, 360, 375, 390, 412, 430, 480, 495, 496, 620];
+// THREE FIXTURES, AND THE THIRD IS THE CONTROL — NOT, as this leg first
+// asserted, the worst case. The row named `site-binding-bound` as the fixture
+// still overhanging at 390 (+5); on today's bytes it does not overhang at ANY
+// width, in either theme, WITH THE FIX DELETED. It has never deployed
+// (`current_deployment_id` absent -> `siteHasEverDeployed` false, app.js:10441),
+// so its detail head emits NO live-URL line at all and there is nothing to
+// overhang. That makes it the leg's attribution control: 84 findings land on the
+// two fixtures that carry `.site-open` and ZERO on the one that does not, which
+// is what shows the mutation measures the LINK and not phone width in general.
+// Its 22 cells are still asserted — a page that starts scrolling sideways on a
+// never-deployed site is a defect too, and this is the only leg that would see it.
+const SITE_PHONE_SCENS = ["rollback", "site-states", "site-binding-bound"];
 
 // W17-S6: THE CHIP'S OWN WIDTH SET, BECAUSE THIS FILE USED TO ASK ITS QUESTION
 // AT ONE WIDTH. The money-message read below sat behind `await setViewport(768)`
@@ -1663,6 +1696,154 @@ async function main() {
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
           ` no exemptions — #fleet's W13 residual was paid by W14-S3 and its pin is gone`,
+        );
+      }
+    }
+
+    // ── cch-w14-bl-site-open-phone-overflow (criterion 4): SITE DETAIL x PHONE ─
+    //    The CSS half of this row shipped in W15-S5 (`.fleet-url .site-open`
+    //    drops nowrap and wraps on `overflow-wrap: break-word`). This is the
+    //    half that keeps it: an instrument that renders a site DETAIL route at a
+    //    PHONE width, which no leg in this file has ever done.
+    //
+    //    IT ASSERTS TWO THINGS THAT A SINGLE REMEDY CANNOT BUY BOTH OF. A page
+    //    that does not scroll sideways is trivially purchasable by clipping the
+    //    URL — and the row's own criterion 2 already ruled that out ("the remedy
+    //    wraps or truncates with a CUE rather than clipping silently", and WRAP
+    //    is the branch that was taken, because a person reads that line to learn
+    //    WHERE the site lives). So the page geometry and the link's own
+    //    box-vs-content are asserted independently, and the second one is
+    //    honestly VACUOUS TODAY: `.site-open` is an inline `<a>`, so its
+    //    scrollWidth/clientWidth both read 0 and the comparison cannot fire.
+    //    That is the point — it becomes live at exactly the moment someone gives
+    //    it `display:block` + `overflow:hidden` to buy the page-level green, and
+    //    the measured pair is PRINTED per fixture so no reader mistakes 0/0 for
+    //    a measurement of something.
+    if (requested.includes("W14-site-detail-phone-band")) {
+      const D = "W14-site-detail-phone-band";
+      // ROUTES DERIVED, NEVER TRANSCRIBED (charter D228): `?scen=` alone does
+      // NOT route, and a transcribed uuid that drifts renders #overview three
+      // times and prints an entirely phantom table.
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      const routes = [];
+      for (const key of SITE_PHONE_SCENS) {
+        const sc = SCENARIOS[key];
+        if (!sc || typeof sc.deepLink !== "string" || !sc.deepLink.startsWith("#site/")) {
+          return die(`${D}: SCENARIOS["${key}"] no longer carries a #site/ deepLink — the detail route this leg certifies cannot be reached, so every cell below it would measure #overview`);
+        }
+        // THE POPULATION IS DERIVED TOO, not counted after the fact. `.site-open`
+        // appears in the detail head's `.fleet-url` sub-line only when
+        // `siteHasEverDeployed(site)` (app.js:10441 — `!!s.current_deployment_id`),
+        // so whether this fixture owes a link is a property of the FIXTURE. A
+        // leg that merely tallied what it found would print a happy total while
+        // a fixture quietly stopped rendering the element the row is named for.
+        const id = sc.deepLink.slice("#site/".length);
+        const sites = sc.data && Array.isArray(sc.data.sites) ? sc.data.sites : [];
+        const site = sites.find((x) => x && x.id === id);
+        if (!site) {
+          return die(`${D}: SCENARIOS["${key}"].deepLink points at site ${id}, which is not in its own \`data.sites\` — the fixture and its deep link have drifted apart`);
+        }
+        routes.push({ name: key, hash: sc.deepLink, owesLink: !!site.current_deployment_id });
+      }
+      process.stdout.write(
+        `\n${D} — ${routes.length} site fixtures x ${SITE_PHONE_WIDTHS.length} phone widths x 2 themes` +
+        ` (${routes.length * SITE_PHONE_WIDTHS.length * 2} cells)\n`,
+      );
+      let cells = 0, misrouted = 0, links = 0, linkBoxed = 0, wrapped = 0;
+      for (const r of routes) {
+        for (const theme of ["light", "dark"]) {
+          // Enter ABOVE the band, like W13: a route that only renders at one
+          // width must not read as a route that renders everywhere.
+          await setViewport(900);
+          await nav(
+            `${BASE}/?scen=${r.name}&theme=${theme}${r.hash}`,
+            `document.querySelector('.detail-head .fleet-url') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+          );
+          const row = [];
+          for (const width of SITE_PHONE_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){var d=document.documentElement;var R=function(v){return Math.round(v*100)/100;};` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var u=document.querySelector('.detail-head .fleet-url');` +
+              `var as=[].slice.call(document.querySelectorAll('.detail-head .fleet-url .site-open')).map(function(a){` +
+              `  var rr=a.getBoundingClientRect();var cs=getComputedStyle(a);` +
+              `  return {right:R(rr.right),w:R(rr.width),lines:a.getClientRects().length,` +
+              `    sw:a.scrollWidth,cw:a.clientWidth,ws:cs.whiteSpace,ov:cs.textOverflow,` +
+              `    ow:cs.overflowWrap,t:(a.textContent||'').trim().slice(0,48)};});` +
+              `return {sw:d.scrollWidth,cw:d.clientWidth,view:v?v.id:'none',` +
+              ` theme:d.getAttribute('data-theme'),` +
+              ` urect:u?R(u.getBoundingClientRect().right):null,` +
+              ` usw:u?u.scrollWidth:null,ucw:u?u.clientWidth:null,as:as};})()`,
+            );
+            cells++;
+            // (1) THE ROUTE. Without this every number below is phantom.
+            if (m.view !== "view-site") {
+              misrouted++;
+              fail(D, `${r.name}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-site" — the hash did not route, so nothing below this line measures a site detail page`);
+            }
+            if (m.theme !== theme) fail(D, `${r.name}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // (2) THE PAGE. This is the row's own defect: 320:+68 340:+48
+            //     360:+28 375:+13, and 390:+5 on site-binding-bound.
+            const overhang = m.sw - m.cw;
+            if (overhang > 0) {
+              fail(D, `${r.name}/${theme}@${width}#site: documentElement scrollWidth ${m.sw} > clientWidth ${m.cw} — ${overhang}px of the site detail page is off-screen at rest, with no cue, on a phone in portrait`);
+            }
+            // (3) THE HOST LINE'S OWN BOX. A sub-line that overhangs its own
+            //     container while the PAGE stays put is the same defect one
+            //     `overflow:hidden` later.
+            if (m.usw !== null && m.usw > m.ucw + 1) {
+              fail(D, `${r.name}/${theme}@${width}#site: .detail-head .fleet-url scrollWidth ${m.usw} > clientWidth ${m.ucw} — the head's sub-line hides ${m.usw - m.ucw}px of itself`);
+            }
+            // (4) THE LINK IS THERE, OR IS DERIVABLY ABSENT. Asserted per cell
+            //     against the fixture's own `current_deployment_id`, so an
+            //     element that stops rendering reds instead of shrinking this
+            //     leg's population in silence.
+            const wantLinks = r.owesLink ? 1 : 0;
+            if (m.as.length !== wantLinks) {
+              fail(D, `${r.name}/${theme}@${width}#site: ${m.as.length} .detail-head .fleet-url .site-open, expected ${wantLinks} — the fixture's site ${r.owesLink ? "HAS" : "has NO"} current_deployment_id, so siteHasEverDeployed says the head ${r.owesLink ? "must" : "must not"} carry a live-URL line`);
+            }
+            // (5) THE LINK'S GEOMETRY. Bounded by the viewport, and NOT bought
+            //     by clipping.
+            for (const a of m.as) {
+              links++;
+              if (a.lines > 1) wrapped++;
+              if (a.cw > 0) linkBoxed++;
+              if (a.right > m.cw + 1) {
+                fail(D, `${r.name}/${theme}@${width}#site: .fleet-url .site-open right edge ${a.right} is past the ${m.cw}px viewport — "${a.t}" paints off-screen (white-space:${a.ws}, overflow-wrap:${a.ow}, ${a.lines} line box(es))`);
+              }
+              if (a.sw > a.cw + 1) {
+                fail(D, `${r.name}/${theme}@${width}#site: .fleet-url .site-open scrollWidth ${a.sw} > clientWidth ${a.cw} — the live URL is CLIPPED, not wrapped. This row's criterion 2 took the wrap branch on purpose: a person reads this line to learn where the site lives, so a silent clip trades a scrollbar for a lie`);
+              }
+            }
+            row.push(`${width}:${m.sw}${overhang > 0 ? "!" : ""}`);
+          }
+          const n = row.length;
+          process.stdout.write(`   ${r.name}/${theme}  ${row.join(" ")}\n`);
+          if (n !== SITE_PHONE_WIDTHS.length) fail(D, `${r.name}/${theme}: ${n} of ${SITE_PHONE_WIDTHS.length} widths measured`);
+        }
+      }
+      // AN EMPTY POPULATION IS NOT A CLEAN ONE. If the head stops emitting the
+      // live URL, every assertion in (4) measures nothing and this leg would
+      // print a tick over the element the row is named after.
+      if (links === 0) {
+        fail(D, `zero .detail-head .fleet-url .site-open measured across ${cells} cells — the live-URL line stopped rendering, so the element this row is named after was never measured. This is not a pass.`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${SITE_PHONE_WIDTHS[0]}-${SITE_PHONE_WIDTHS[SITE_PHONE_WIDTHS.length - 1]}` +
+          ` on ${routes.length} site fixtures x 2 themes; ${misrouted} misrouted`,
+        );
+        const bearers = routes.filter((x) => x.owesLink).map((x) => x.name);
+        const controls = routes.filter((x) => !x.owesLink).map((x) => x.name);
+        okLine(
+          `${links} .fleet-url .site-open link(s) measured on ${bearers.length} fixture(s) (${bearers.join(", ") || "none"});` +
+          ` ${controls.length} never-deployed control(s) (${controls.join(", ") || "none"}) assert ZERO links and are page-asserted anyway`,
+        );
+        okLine(
+          `${wrapped} of ${links} link(s) render on more than one line box (the wrap remedy doing its job);` +
+          ` ${linkBoxed} with a non-zero clientWidth — the CLIP assertion is inert while that count is 0` +
+          ` and goes live the moment the link stops being an inline box, which is exactly how a page-level green would be bought`,
         );
       }
     }
