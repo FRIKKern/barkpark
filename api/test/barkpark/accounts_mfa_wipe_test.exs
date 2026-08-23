@@ -22,6 +22,14 @@ defmodule Barkpark.AccountsMfaWipeTest do
 
   @password "correct-horse-battery"
 
+  # Generate through the helper, but never let it sleep out a period boundary:
+  # the caller below buys one wide window up front and everything must land in
+  # it. (`wait_ms/2` returns 0 whenever headroom >= this, so 1ms never waits.)
+  @no_wait [min_headroom_ms: 1]
+
+  # Which 30s TOTP step we are in — the unit `NimbleTOTP.reused?/3` compares.
+  defp step, do: div(System.os_time(:second), period_seconds())
+
   defp user_with_totp do
     email = "mfa-wipe-#{System.unique_integer([:positive])}@example.com"
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
@@ -49,25 +57,38 @@ defmodule Barkpark.AccountsMfaWipeTest do
 
     test "a re-enrolled NEW secret verifies on its first code, in the same period" do
       # The whole flow — verify, disable, re-enrol, verify — has to land inside
-      # ONE 30s period for the stale stamp to bite, so buy the headroom once and
-      # mint plain codes after it. This is the narrow window in which the defect
-      # is genuinely reachable; outside it the stale stamp is simply old enough
-      # to be harmless, which is why it survived so long.
+      # ONE 30s period for the stale stamp to bite. This is the narrow window in
+      # which the defect is genuinely reachable; outside it the stale stamp is
+      # simply old enough to be harmless, which is why it survived so long.
+      #
+      # So the headroom is bought ONCE, generously, and every code after that is
+      # minted with `min_headroom_ms: 1` — the helper still owns generation (the
+      # raw generator is ratcheted out of api/test/ for good reason), but it can
+      # no longer sleep out a boundary mid-flow. That matters more here than
+      # anywhere else: a roll between the stamp and the final verify would make
+      # `reused?/3` say "different step", and the test would go GREEN ON BROKEN
+      # CODE. `step/0` below turns exactly that into a red instead.
       {user, old_secret} = user_with_totp()
-      await_period_headroom!(min_headroom_ms: 5_000)
+      await_period_headroom!(min_headroom_ms: 10_000)
+      step_at_start = step()
 
-      {:ok, user} = Accounts.verify_totp(user, NimbleTOTP.verification_code(old_secret))
+      {:ok, user} = Accounts.verify_totp(user, totp_code_stable!(old_secret, @no_wait))
       {:ok, user} = Accounts.disable_totp(user)
 
       new_secret = Accounts.totp_secret()
       refute new_secret == old_secret
 
       {:ok, user, _codes} =
-        Accounts.enable_totp(user, new_secret, NimbleTOTP.verification_code(new_secret))
+        Accounts.enable_totp(user, new_secret, totp_code_stable!(new_secret, @no_wait))
 
       # Split rather than `assert pat = expr, "msg"`, which raises a bare
       # MatchError and throws the message away.
-      result = Accounts.verify_totp(user, NimbleTOTP.verification_code(new_secret))
+      result = Accounts.verify_totp(user, totp_code_stable!(new_secret, @no_wait))
+
+      assert step() == step_at_start,
+             "the 30s TOTP period rolled mid-test, so the stale stamp would have been " <>
+               "a DIFFERENT step from the final verify and the assertion below would " <>
+               "have passed on broken code — this is a vacuous-green guard, not the fix"
 
       assert result != :error,
              "the first code of a freshly enrolled secret was rejected as a REPLAY — " <>
