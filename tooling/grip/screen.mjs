@@ -368,6 +368,51 @@ const hasFlag = (argv, ...flags) => argv.some((t) => flags.includes(t));
 // leaves a bare value that needs eating. The head at argv[0] is preserved so the
 // `<head> <verb> <sub-verb>` positions the sub-verb guards read are unchanged.
 
+// SHORT GLOBALS CLUSTER, AND EXACT-TOKEN COMPARISON CANNOT SEE IT.
+//
+// `valueGlobals.has(t)` is an EXACT token match, so it catches `-c` and misses
+// `-Dc` — and every one of these tools clusters. Proven live on this host:
+//
+//     docker -Dc ps version   → ate `ps` as the CONTEXT, then ran `docker version`
+//     docker -Dl ps version   → ate `ps` as the LOG LEVEL
+//     pnpm  -rC ls root       → ate `ls` as the DIRECTORY, then ran `pnpm root`
+//
+// Substitute the harmless tail for `exec -it foo bash` / `add lodash` and the
+// screen admits arbitrary code execution: the eaten value is read as the
+// sub-verb, and the real verb one token further right is never examined. This is
+// the SAME defect #13346 fixed for the unclustered spelling, one cluster
+// character along — exactly how `curl -o` → `curl -so` went (see
+// `normaliseArgv`, whose comment names that history).
+//
+// getopt/pflag both bind a cluster the same way: the FIRST value-taking letter
+// in `-abc` consumes the REST OF THE CLUSTER as its value, and only consumes the
+// NEXT TOKEN when it is the cluster's last letter. So `-Dc ps` eats `ps`;
+// `-Dcps` does not (its value is the attached `ps`), and neither does a cluster
+// with no value-taking letter in it at all.
+//
+// The letters come from `valueGlobals` itself — every `-x` member contributes
+// `x` — so a head that declares a short global gets its clustered spelling for
+// free and the two can never drift apart.
+
+/** @param {Set<string>} valueGlobals @returns {Set<string>} the short letters in it */
+const shortValueLetters = (valueGlobals) =>
+  new Set([...valueGlobals].filter((g) => /^-[A-Za-z]$/.test(g)).map((g) => g[1]));
+
+/**
+ * Does this pre-verb token eat the NEXT token as its value?
+ *
+ * @param {string} t
+ * @param {Set<string>} valueGlobals
+ * @param {Set<string>} letters
+ */
+function eatsNextToken(t, valueGlobals, letters) {
+  if (valueGlobals.has(t)) return true;
+  if (!/^-[A-Za-z]{2,}$/.test(t)) return false; // long flag, `--flag=value`, or an attached-value cluster
+  const cluster = [...t.slice(1)];
+  const at = cluster.findIndex((ch) => letters.has(ch));
+  return at === cluster.length - 1; // value-taking letter LAST → the value is the next token
+}
+
 /**
  * @param {string[]} argv
  * @param {Set<string>} valueGlobals global option tokens that eat their next token
@@ -375,11 +420,12 @@ const hasFlag = (argv, ...flags) => argv.some((t) => flags.includes(t));
  */
 function dropValueGlobals(argv, valueGlobals) {
   if (!argv.length) return argv;
+  const letters = shortValueLetters(valueGlobals);
   const out = [argv[0]];
   let i = 1;
   for (; i < argv.length; i++) {
     const t = argv[i];
-    if (valueGlobals.has(t)) {
+    if (eatsNextToken(t, valueGlobals, letters)) {
       i++; // eat this global AND the separate value token it consumes
       continue;
     }
@@ -395,6 +441,44 @@ function dropValueGlobals(argv, valueGlobals) {
 
 const EMPTY_VALUE_GLOBALS = new Set();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE WRITE-VERB BACKSTOP — because a value-global set can never be COMPLETE
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Every fix above is an ENUMERATION: "these tokens eat their neighbour." Three
+// separate waves have now enumerated that set for docker/pnpm/npm/systemctl and
+// three times the enumeration was SHORT — #13346 shipped docker with four of its
+// seven value-taking globals, and this wave found `-c`, `-l`/`--log-level`,
+// `--tlscacert`, `--tlscert` and `--tlskey` still admitting `docker exec`
+// (`docker --tlscacert ps version` RAN `docker version` on this host — the value
+// was eaten and the real verb executed). An enumeration whose every past revision
+// was incomplete is not a thing to complete once more and trust; it is a thing to
+// put a SECOND LAYER under.
+//
+// So each of these heads also carries the set of its own verbs that WRITE or
+// EXECUTE, and any of them appearing ANYWHERE in argv refuses — the sub-verb
+// allowlist stays the gate, this is the catch. It is deliberately the same
+// belt-and-braces shape `ghRule` (GH_WRITE_VERBS) and `bpRule` (BP_WRITE_VERBS)
+// already use, and for the identical stated reason. Its value is that a
+// value-global this wave ALSO missed can no longer hide `restart`, `exec` or
+// `add` — the dangerous verb is still a bare token in the command, wherever the
+// parser thinks the sub-verb is.
+//
+// The cost is a false refusal on a read whose ARGUMENT happens to be spelled
+// like a write verb (`systemctl status restart`, a unit literally named
+// `restart`). That is the direction this module is allowed to be wrong in, and
+// NEVER_CRY_WOLF_SET bounds how far.
+
+/** @param {string[]} argv @param {Set<string>} writeVerbs @param {string} head */
+function writeVerbBackstop(argv, writeVerbs, head) {
+  for (let i = 1; i < argv.length; i++) {
+    if (writeVerbs.has(argv[i])) {
+      return `${head} names the write/exec verb "${argv[i]}" — refused wherever it sits, because a value-taking global can hide it in the sub-verb position`;
+    }
+  }
+  return null;
+}
+
 /**
  * A head whose sub-verb must appear in `verbs`.
  *
@@ -408,14 +492,16 @@ const EMPTY_VALUE_GLOBALS = new Set();
  * happens to be an allowed docker verb, and the real verb `exec` was never
  * looked at.
  */
-const verbRule = (verbs, label, valueGlobals = EMPTY_VALUE_GLOBALS) => ({
+const verbRule = (verbs, label, valueGlobals = EMPTY_VALUE_GLOBALS, writeVerbs = EMPTY_VALUE_GLOBALS) => ({
   verbs: new Set(verbs),
   check(rawArgv) {
     const argv = valueGlobals.size ? dropValueGlobals(rawArgv, valueGlobals) : rawArgv;
     const verb = firstNonFlag(argv);
     if (verb === null) return `${argv[0]} without a sub-verb — ${label} requires one of: ${[...verbs].sort().join(", ")}`;
     if (!this.verbs.has(verb)) return `${argv[0]} sub-verb "${verb}" is not on the read-only allowlist (${[...verbs].sort().join(", ")})`;
-    return null;
+    // SECOND LAYER — see writeVerbBackstop. Runs over the RAW argv, because the
+    // whole point is to see a verb the pre-verb normaliser mis-sited.
+    return writeVerbs.size ? writeVerbBackstop(rawArgv, writeVerbs, label) : null;
   },
 });
 
@@ -776,8 +862,42 @@ const NPM_READ_VERBS = new Map([
 // own alias for `--prefix`; the rest are the config paths/names that also eat a
 // value. Booleans (`-g`, `--json`, `--long`) are NOT here — eating their neighbour
 // would falsely refuse an honest read.
+//
+// npm's grammar makes this set UNCLOSEABLE by enumeration, and that is the
+// finding rather than a caveat: npm accepts `--<any-config-key> <value>` before
+// the command for EVERY non-boolean key in its config schema — roughly a hundred
+// of them — so the seven above are a sample, not a set. Proven live on this
+// host, each printing `ls` (the eaten value) from the command that then RAN:
+//
+//     npm --tag          ls config get tag           → ls
+//     npm --otp          ls config get otp           → ls
+//     npm --script-shell ls config get script-shell  → ls
+//
+// so `npm --tag ls publish` publishes, and `npm --script-shell ls run build`
+// executes a package script — both ADMITTED before this change, and neither
+// caught by the layer-(c) write-shape backstop (its regex names `install`, not
+// `publish`/`run`). The named keys below are the proven ones; NPM_WRITE_VERBS is
+// what actually holds the line for the ninety-odd unnamed.
 const NPM_VALUE_GLOBALS = new Set([
   "--prefix", "-C", "-w", "--workspace", "--userconfig", "--globalconfig", "--cache",
+  "--registry", "--loglevel", "--tag", "--otp", "--script-shell", "--node-options",
+  "--omit", "--include", "--depth", "--cache-min", "--before", "--user-agent",
+]);
+
+/**
+ * npm verbs that write, publish, or execute. Deliberately EXCLUDES the nine
+ * NPM_READ_VERBS keys — `config` and `version` are admitted at the top level and
+ * bounded by their own second-level guards (`npm config set`, `npm version
+ * patch`), so denying them here would break those rules rather than reinforce
+ * them, and `set`/`patch` are denied instead.
+ */
+const NPM_WRITE_VERBS = new Set([
+  "install", "i", "add", "ci", "install-test", "install-ci-test", "publish", "unpublish",
+  "run", "run-script", "exec", "x", "link", "unlink", "uninstall", "remove", "rm", "r", "un",
+  "update", "up", "upgrade", "dedupe", "ddp", "find-dupes", "prune", "pack", "init", "create",
+  "set", "adduser", "login", "logout", "token", "star", "unstar", "deprecate", "dist-tag",
+  "owner", "access", "audit", "rebuild", "rb", "restart", "start", "stop", "test", "edit",
+  "explore", "hook", "org", "profile", "team", "diff", "pkg", "sbom", "doctor",
 ]);
 
 const npmRule = {
@@ -795,7 +915,9 @@ const npmRule = {
     if (verb === "version" && after !== null) {
       return `npm version ${after} WRITES package.json and, by npm's own default, commits and tags it — only bare \`npm version\` reads`;
     }
-    return null;
+    // SECOND LAYER over the RAW argv — see writeVerbBackstop. npm needs it more
+    // than any other head: its value-taking pre-verb set is unenumerable.
+    return writeVerbBackstop(rawArgv, NPM_WRITE_VERBS, "npm");
   },
 };
 
@@ -1099,14 +1221,70 @@ const sedRule = {
 // with an allowlisted verb, so the real verb `exec` two tokens later was never
 // examined. `-H` is docker's short alias for `--host`; `--context` and
 // `--config` also take a separate-token value ahead of the verb.
-const DOCKER_VALUE_GLOBALS = new Set(["-H", "--host", "--context", "--config"]);
+// That set was FOUR of docker's SEVEN. `docker --help` on this host lists every
+// root option and which of them take a `string`: `--config`, `-c`/`--context`,
+// `-H`/`--host`, `-l`/`--log-level`, `--tlscacert`, `--tlscert`, `--tlskey`
+// (the booleans `-D`/`--debug`, `--tls`, `--tlsverify`, `-v` eat nothing and are
+// correctly absent). `-c` is the SHORT SPELLING OF `--context`, which the set
+// already carried in its long form — so the identical bypass rode the two-letter
+// alias of a flag the fix had already named. Proven live, executing:
+//
+//     docker --tlscacert ps version   → printed `docker version` output
+//     docker --tlscert   ps version   → printed `docker version` output
+//     docker -Dc         ps version   → resolved context `ps`, ran `version`
+//
+// with `version` standing in for `exec -it foo bash`.
+const DOCKER_VALUE_GLOBALS = new Set([
+  "-H", "--host", "-c", "--context", "--config",
+  "-l", "--log-level", "--tlscacert", "--tlscert", "--tlskey",
+]);
+
+// docker's verbs that write, execute, or reach the daemon to change state — the
+// backstop set, not the gate. `exec`/`run`/`build`/`cp` are arbitrary code or
+// file writes; the object nouns (`container`, `image`, `volume`, `network`,
+// `compose`, `swarm`, `system`, `buildx`, `context`, `plugin`, `stack`,
+// `secret`, `config`, `node`, `service`, `trust`, `checkpoint`, `manifest`) each
+// carry writing sub-verbs of their own and none is on the read allowlist.
+const DOCKER_WRITE_VERBS = new Set([
+  "exec", "run", "build", "cp", "create", "start", "stop", "restart", "kill", "rm", "rmi",
+  "pull", "push", "commit", "save", "load", "export", "import", "tag", "login", "logout",
+  "attach", "update", "rename", "pause", "unpause", "prune", "wait", "init", "rollback",
+  "compose", "system", "volume", "network", "container", "image", "swarm", "service",
+  "secret", "config", "context", "buildx", "plugin", "trust", "checkpoint", "stack", "node",
+  "manifest",
+]);
 
 // pnpm's value-taking pre-verb globals. `pnpm -C ls add lodash` and
 // `pnpm --prefix ls install` both ADMITTED (confirmed live on origin/main):
 // `add`/`install` are writes/code-exec, judged instead as the eaten value `ls`
 // read as the sub-verb. `-C` is pnpm's short alias for `--prefix` (mirrors
 // npm's own `-C`/`--prefix`).
-const PNPM_VALUE_GLOBALS = new Set(["-C", "--prefix"]);
+// That set was TWO, and it named the ALIAS while missing the flag's own primary
+// spelling: pnpm's option is `-C, --dir <dir>` — `--prefix` is the npm-compatible
+// alias — so `pnpm --dir ls add lodash` walked straight past a fix whose whole
+// subject was `-C`. Proven live on this host, each eating its next token and then
+// running the REAL verb:
+//
+//     pnpm --dir      ls root  → ENOENT lstat '/private/tmp/ls'  (ate `ls` as the dir)
+//     pnpm --loglevel ls root  → printed /private/tmp/node_modules  (RAN `pnpm root`)
+//     pnpm --reporter ls root  → printed /private/tmp/node_modules  (RAN `pnpm root`)
+//     pnpm --filter   ls root  → parsed as a filter, ate `ls`
+//     pnpm -rC        ls root  → the CLUSTERED spelling, ate `ls` as the dir
+//
+// This set is what was PROVEN, not what is complete — pnpm forwards a long tail
+// of npm config keys (`--registry`, `--store-dir`, …) that take values on
+// `add`/`install` too. Completeness is what PNPM_WRITE_VERBS is for.
+const PNPM_VALUE_GLOBALS = new Set([
+  "-C", "--dir", "--prefix", "--filter", "-F", "--filter-prod", "--loglevel", "--reporter",
+]);
+
+/** pnpm verbs that write the tree, the lockfile, or execute a script. */
+const PNPM_WRITE_VERBS = new Set([
+  "add", "install", "i", "update", "up", "remove", "rm", "uninstall", "un", "link", "unlink",
+  "import", "prune", "dedupe", "rebuild", "publish", "pack", "run", "exec", "dlx", "create",
+  "init", "patch", "patch-commit", "patch-remove", "deploy", "fetch", "setup", "store",
+  "config", "env", "server", "start", "test", "licenses", "self-update",
+]);
 
 // systemctl's value-taking pre-verb globals — the SECOND head of the same bug
 // #13346 fixed for docker/pnpm ("systemctl and launchctl are untouched", per
@@ -1119,13 +1297,65 @@ const PNPM_VALUE_GLOBALS = new Set(["-C", "--prefix"]);
 // is the same shape, one container hop instead of one host hop; `--root=PATH`
 // takes a separate-token value ahead of the verb too (an offline root for
 // preset/enable-style operations).
-const SYSTEMCTL_VALUE_GLOBALS = new Set(["-H", "--host", "-M", "--machine", "--root"]);
+//
+// Those three were the REMOTE-hop globals. systemctl's option table has a dozen
+// more declared `required_argument` in the same getopt_long call, and every one
+// eats its next token identically — `systemctl -p status restart barkpark.service`
+// admits a RESTART, and unlike `-t`/`-o`/`-s` (whose values systemd validates
+// and rejects) `--property` is accepted unvalidated by every verb, so that one
+// reaches the daemon. The list below is systemctl(1)'s own set of options
+// documented as taking a mandatory argument. NOTE: systemd is Linux-only, so
+// unlike the docker/pnpm rows above these are DOCUMENTED, not live-executed on
+// this host — which is precisely why SYSTEMCTL_WRITE_VERBS exists underneath.
+//
+// getopt_long also CLUSTERS, so `systemctl -qH status restart barkpark.service`
+// hid the same restart behind two characters; `dropValueGlobals` now expands a
+// cluster whose last letter takes a value.
+const SYSTEMCTL_VALUE_GLOBALS = new Set([
+  "-H", "--host", "-M", "--machine", "--root", "--image",
+  "-t", "--type", "--state", "-p", "--property", "-P",
+  "-n", "--lines", "-o", "--output", "-s", "--signal", "--kill-whom",
+  "--what", "--job-mode", "--timestamp", "--when",
+  "--boot-loader-entry", "--esp-path", "--boot-path",
+]);
+
+/**
+ * systemctl verbs that change unit or machine state. `restart`/`stop` are
+ * DANGER_SET members by name; the rest are the same family. Read verbs
+ * (`status`, `show`, `cat`, `is-active`, `list-units`, …) are deliberately
+ * absent, and so is `list-jobs`-style introspection.
+ */
+const SYSTEMCTL_WRITE_VERBS = new Set([
+  "start", "stop", "restart", "reload", "try-restart", "reload-or-restart",
+  "try-reload-or-restart", "kill", "clean", "freeze", "thaw", "isolate",
+  "enable", "disable", "reenable", "preset", "preset-all", "mask", "unmask", "link",
+  "revert", "add-wants", "add-requires", "edit", "set-property", "set-default",
+  "set-environment", "unset-environment", "import-environment",
+  "daemon-reload", "daemon-reexec", "reset-failed", "log-level", "log-target",
+  "service-log-level", "service-log-target", "bind", "mount-image",
+  "reboot", "soft-reboot", "poweroff", "halt", "kexec", "exit", "switch-root",
+  "suspend", "hibernate", "hybrid-sleep", "suspend-then-hibernate",
+  "rescue", "emergency", "default",
+]);
 
 // launchctl was CHECKED for the same shape and CLEARED, not skipped. Its
 // SYNOPSIS is `launchctl subcommand [arguments ...]` — there is no pre-verb
 // global-option region at all, so there is no token for a value-taking global
 // to eat before the subcommand. `firstNonFlag` reads the subcommand directly.
 // Do not add a valueGlobals set here; there is nothing to normalise.
+//
+// It does still get the write-verb backstop, and that is not decoration: because
+// `firstNonFlag` SKIPS leading flag tokens for every head, `launchctl -w list
+// unload /L/foo.plist` resolved its sub-verb to `list` and was ADMITTED, with
+// `unload` sitting untouched two tokens on. Real launchctl rejects that spelling
+// (`-w` is not a subcommand), so it is a model gap rather than a live hole — but
+// it is the same gap shape, and the backstop closes it without pretending
+// launchctl has a global-option region it does not have.
+const LAUNCHCTL_WRITE_VERBS = new Set([
+  "load", "unload", "start", "stop", "kickstart", "bootstrap", "bootout", "enable", "disable",
+  "remove", "submit", "setenv", "unsetenv", "kill", "attach", "reboot", "config", "limit",
+  "asuser", "debug", "resolveport", "runstats", "uncache", "dumpstate",
+]);
 
 /**
  * THE ALLOWLIST. Every entry is a head this census may run. Anything absent is
@@ -1203,8 +1433,8 @@ export const ALLOWED_HEADS = new Map([
   ["go", goRule],
   ["mix", mixRule],
   ["curl", curlRule],
-  ["docker", verbRule(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"], "docker", DOCKER_VALUE_GLOBALS)],
-  ["systemctl", verbRule(["is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-unit-files", "get-default"], "systemctl", SYSTEMCTL_VALUE_GLOBALS)],
+  ["docker", verbRule(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"], "docker", DOCKER_VALUE_GLOBALS, DOCKER_WRITE_VERBS)],
+  ["systemctl", verbRule(["is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-unit-files", "get-default"], "systemctl", SYSTEMCTL_VALUE_GLOBALS, SYSTEMCTL_WRITE_VERBS)],
   // journalctl READS the journal — except for the handful of flags that vacuum,
   // rotate or flush it, which delete log history irreversibly.
   ["journalctl", {
@@ -1213,14 +1443,14 @@ export const ALLOWED_HEADS = new Map([
       return bad ? `journalctl ${bad} mutates or deletes the journal` : null;
     },
   }],
-  ["launchctl", verbRule(["list", "print"], "launchctl")],
+  ["launchctl", verbRule(["list", "print"], "launchctl", EMPTY_VALUE_GLOBALS, LAUNCHCTL_WRITE_VERBS)],
   // `pack` was on this list and is a WRITE: `npm pack` builds a tarball and
   // drops `<name>-<version>.tgz` into the working directory. Found alongside the
   // sort/uniq/tree hole, same root cause — a verb judged by "does it execute
   // something?" rather than "does it write?". Removing it costs the census
   // nothing: 0 of the 651 frozen corpus commands use it.
   ["npm", npmRule],
-  ["pnpm", verbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm", PNPM_VALUE_GLOBALS)],
+  ["pnpm", verbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm", PNPM_VALUE_GLOBALS, PNPM_WRITE_VERBS)],
 ]);
 
 /**
@@ -1677,6 +1907,32 @@ export const DANGER_SET = [
   "gh -R status repo clone owner/repo /tmp/evil",
   "gh --repo status repo clone owner/repo /tmp/evil",
   "gh -R status release download owner/repo",
+  // A FOURTH wave over the same enumeration. Each of these was ADMITTED after
+  // the three fixes above shipped — `-c` is the short spelling of a `--context`
+  // already named, `--dir` is the primary spelling of a `-C` already named, and
+  // clusters walked past exact-token comparison entirely. The docker and pnpm
+  // and npm rows were EXECUTED live with a harmless verb in the dangerous slot
+  // (`docker --tlscacert ps version` printed version output); the systemctl rows
+  // are documented required-argument globals, systemd being Linux-only.
+  "docker -c ps exec -it foo bash",
+  "docker -l ps exec -it foo bash",
+  "docker --log-level ps exec -it foo bash",
+  "docker --tlscacert ps exec -it foo bash",
+  "docker --tlscert ps run --privileged alpine sh",
+  "docker -Dc ps exec -it foo bash",
+  "pnpm --dir ls add lodash",
+  "pnpm --loglevel ls add lodash",
+  "pnpm --reporter ls install",
+  "pnpm -rC ls add lodash",
+  "npm --tag ls publish",
+  "npm --otp ls publish",
+  "npm --script-shell ls run build",
+  "systemctl -p status restart barkpark.service",
+  "systemctl -t status restart barkpark.service",
+  "systemctl --state status restart barkpark.service",
+  "systemctl --image status restart barkpark.service",
+  "systemctl -qH status restart barkpark.service",
+  "launchctl -w list unload /Library/LaunchDaemons/foo.plist",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -1736,6 +1992,21 @@ export const NEVER_CRY_WOLF_SET = [
   "systemctl -H example.com status barkpark.service",
   "gh -R owner/repo pr view 1",
   "gh --repo owner/repo issue list",
+  // …and the mirror for the fourth wave: the newly-normalised globals pointed at
+  // a REAL value, followed by a real read verb, must all stay admitted. The
+  // backstop must not fire on a read whose arguments merely LOOK flag-shaped.
+  "docker -D ps",
+  "docker -c myctx ps",
+  "docker --log-level debug images",
+  "docker --tlscacert /home/me/ca.pem version",
+  "pnpm --dir /some/dir ls",
+  "pnpm --filter @barkpark/core list",
+  "pnpm --loglevel silent outdated",
+  "npm --tag latest view express",
+  "npm --registry https://registry.npmjs.org ls",
+  "systemctl --no-pager status barkpark.service",
+  "systemctl -p ActiveState show barkpark.service",
+  "launchctl list",
 ];
 
 /**

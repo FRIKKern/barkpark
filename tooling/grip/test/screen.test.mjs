@@ -1161,17 +1161,47 @@ test("the size of the gap is RE-DERIVED, never remembered", async () => {
   // over a set every wave grows, about a module this suite does not own. Wave 5
   // added 24 shapes and the absolute went red on two of them.
   //
-  // The two are named rather than counted: rerun.mjs's own WRITE_SHAPES carries
-  // `sed -i` by name, so those two rows are the ONE place its denylist and this
-  // screen agree. Naming them is strictly more informative than "51 of 53" and
-  // cannot go stale when the set grows again.
-  const CS_CATCHES = DANGER_SET.filter((c) => /^sed -i/.test(c));
-  assert.ok(CS_CATCHES.length >= 2, "the sed -i rows are the ones rerun.mjs's denylist happens to carry");
-  assert.deepEqual(
-    DANGER_SET.filter((c) => !classifySafety(c).safe).sort(), CS_CATCHES.sort(),
-    `classifySafety must admit every DANGER SET shape EXCEPT the \`sed -i\` rows its own WRITE_SHAPES names. ` +
-      `If this fails, rerun.mjs has genuinely tightened and this comparison must be RE-STATED, not re-baselined.`,
+  // ...AND WAVE 9 CAUGHT ITS REPLACEMENT DOING IT AGAIN. The re-statement below
+  // was `deepEqual(rows rerun refuses, rows matching /^sed -i/)` — an ABSOLUTE
+  // once more, just spelled as a hand-written predicate instead of a count. It
+  // went red the moment this wave added `npm --tag ls publish`, which rerun.mjs
+  // happens to catch on its own `publish` shape. Nothing had tightened; the
+  // hand-written predicate had simply gone stale, which is the exact failure
+  // three paragraphs of this test's own preamble forbid.
+  //
+  // So the overlap is RE-DERIVED from rerun.mjs's own verdict, never from a
+  // pattern written here — and what is ASSERTED is a MARGIN plus a set of NAMED
+  // shapes, the two forms that cannot go stale as DANGER_SET grows:
+  //
+  //   * the overlap is refused for a reason rerun.mjs itself names, not by
+  //     accident of some other code path;
+  //   * the overlap stays a small MINORITY — the gap is the finding;
+  //   * and the named rows below, each an outage, are still ADMITTED by
+  //     rerun.mjs. Only a genuine tightening can red that, which is the one
+  //     failure this comparison is for.
+  const CS_CATCHES = DANGER_SET.filter((c) => !classifySafety(c).safe);
+  assert.ok(CS_CATCHES.length >= 2, "rerun.mjs's denylist must still catch SOMETHING, or this comparison is measuring nothing");
+  for (const c of CS_CATCHES) {
+    assert.match(classifySafety(c).reason, /^write-shaped verb: /, `the overlap must come from rerun.mjs's own named WRITE_SHAPES, not a side path: ${c}`);
+  }
+  assert.ok(
+    CS_CATCHES.length * 4 <= DANGER_SET.length,
+    `the GAP is the finding: rerun.mjs catches ${CS_CATCHES.length} of ${DANGER_SET.length} DANGER SET shapes. ` +
+      `If this ratio has genuinely improved, RE-STATE the margin — do not delete the assertion.`,
   );
+  for (const stillAdmitted of [
+    "systemctl restart barkpark.service",
+    "systemctl stop barkpark.service",
+    "bash /opt/barkpark/deploy/site-deploy.sh",
+    "git fetch origin",
+    "kill -9 4242",
+  ]) {
+    assert.ok(DANGER_SET.includes(stillAdmitted), `this comparison names a row DANGER_SET must carry: ${stillAdmitted}`);
+    assert.equal(classifySafety(stillAdmitted).safe, true,
+      `rerun.mjs is expected to ADMIT ${stillAdmitted} — that gap is why screen.mjs exists. ` +
+        `If rerun.mjs has genuinely tightened, RE-STATE this list rather than re-baselining it.`);
+    assert.equal(screenCommand(stillAdmitted).ok, false, `and the screen must refuse it: ${stillAdmitted}`);
+  }
 
   const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
   const commands = [...new Set(corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim()))];
@@ -1548,4 +1578,192 @@ test("the wave-5 shapes are carried by the SHIPPED named sets, not only by this 
   const { falsePermissions, falseRefusals } = runNamedSets();
   assert.deepEqual(falsePermissions, [], "a false PERMISSION is an execution");
   assert.deepEqual(falseRefusals, [], "a false REFUSAL is how the screen gets routed around");
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE VALUE-GLOBAL SET WAS SHORT ON FOUR HEADS, AND CLUSTERS WALKED PAST IT
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Three waves have now enumerated "the tokens that eat their neighbour" for
+// docker/pnpm/npm/systemctl, and all three enumerations were SHORT. What was
+// still admitted on origin/main after them, re-measured for this wave:
+//
+//   docker -c ps exec …           `-c` is the SHORT SPELLING of `--context`,
+//                                 which the previous fix had already named
+//   docker -l / --log-level ps …  three more `string` globals: --tlscacert,
+//   docker --tlscacert ps …       --tlscert, --tlskey
+//   docker -Dc ps exec …          the CLUSTERED spelling of any of the above
+//   pnpm  --dir ls add lodash     `--dir` is pnpm's PRIMARY name; `-C`/`--prefix`
+//                                 (both already fixed) are its aliases
+//   pnpm  --loglevel / --reporter / --filter ls add lodash
+//   pnpm  -rC ls add lodash       clustered
+//   npm   --tag / --otp ls publish
+//   npm   --script-shell ls run build
+//   systemctl -p status restart barkpark.service   (+ a dozen more required-arg
+//   systemctl -qH status restart barkpark.service   globals, and clusters)
+//   launchctl -w list unload /L/foo.plist
+//
+// EXECUTED LIVE on the authoring host, with a harmless verb standing in for the
+// dangerous one, to prove the parser really does eat the token rather than error:
+//
+//   docker --tlscacert ps version  → printed `docker version` output
+//   docker --tlscert   ps version  → printed `docker version` output
+//   docker -Dc         ps version  → resolved CONTEXT `ps`, then ran `version`
+//   docker -Dl         ps version  → parsed `ps` as the LOG LEVEL
+//   pnpm  --loglevel   ls root     → printed /private/tmp/node_modules (RAN `root`)
+//   pnpm  --reporter   ls root     → printed /private/tmp/node_modules (RAN `root`)
+//   pnpm  -rC          ls root     → ate `ls` as the DIRECTORY
+//   npm   --tag        ls config get tag  → printed `ls` (the eaten value)
+//   npm   --otp        ls config get otp  → printed `ls`
+//   npm   --script-shell ls config get script-shell → printed `ls`
+//
+// systemd is Linux-only, so its rows are DOCUMENTED (systemctl(1)'s own
+// required-argument options) rather than live-executed — stated, not implied.
+//
+// TWO layers went in, because the first three attempts at layer one were each
+// short: the enumeration is completed AND every head carries a write-verb
+// backstop scanned over the whole argv, the shape ghRule/bpRule already use.
+
+test("the value-global set was SHORT — the missing globals no longer hide a write", () => {
+  const refused = [
+    // docker — the short alias of an already-fixed long flag, plus four more.
+    "docker -c ps exec -it foo bash",
+    "docker -l ps exec -it foo bash",
+    "docker --log-level ps exec -it foo bash",
+    "docker --tlscacert ps exec -it foo bash",
+    "docker --tlscert ps run --privileged alpine sh",
+    "docker --tlskey ps run --rm -v /:/host alpine sh",
+    // pnpm — `--dir` is the PRIMARY spelling of the `-C` the last fix named.
+    "pnpm --dir ls add lodash",
+    "pnpm --loglevel ls add lodash",
+    "pnpm --reporter ls install",
+    "pnpm --filter ls add lodash",
+    // npm — `publish` and `run` are writes the layer-(c) backstop's regex
+    // (which names `install`) never covered.
+    "npm --tag ls publish",
+    "npm --otp ls publish",
+    "npm --script-shell ls run build",
+    // systemctl — a dozen required-argument globals beyond the remote-hop three.
+    "systemctl -p status restart barkpark.service",
+    "systemctl -t status restart barkpark.service",
+    "systemctl --state status restart barkpark.service",
+    "systemctl -o status restart barkpark.service",
+    "systemctl --image status restart barkpark.service",
+    "systemctl --job-mode status restart barkpark.service",
+    "systemctl -s status kill barkpark.service",
+    "systemctl --what status clean barkpark.service",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the collision: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("SHORT GLOBALS CLUSTER — `-Dc ps exec` is the same bypass two characters along", () => {
+  // getopt and pflag agree: in `-abc` the first value-taking letter consumes the
+  // REST of the cluster, and only consumes the NEXT TOKEN when it is last.
+  const refused = [
+    "docker -Dc ps exec -it foo bash",       // -D boolean, -c last → eats `ps`
+    "docker -Dl ps exec -it foo bash",
+    "pnpm -rC ls add lodash",                 // -r recursive, -C last → eats `ls`
+    "systemctl -qH status restart barkpark.service",
+    "systemctl -aM status restart barkpark.service",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the clustered collision: ${cmd} → ${r.reason}`);
+  }
+  // A cluster with the value ATTACHED eats nothing more — `-Dcps` is `-D -c ps`,
+  // so the token after it really IS the sub-verb and an honest read must survive.
+  assert.equal(screenCommand("docker -Dcmyctx ps").ok, true, "attached-value cluster must not eat the sub-verb");
+  // A cluster with no value-taking letter at all eats nothing.
+  assert.equal(screenCommand("docker -Dv ps").ok, true, "boolean-only cluster must not eat the sub-verb");
+});
+
+test("the write-verb backstop refuses a dangerous verb WHEREVER it sits", () => {
+  // The point of the second layer: a value-global that THIS wave also missed
+  // still cannot hide the verb, because the verb is a bare token regardless.
+  // `--utterly-unknown-flag` stands in for that unnamed global.
+  const refused = [
+    "docker --utterly-unknown-flag ps exec -it foo bash",
+    "pnpm --utterly-unknown-flag ls add lodash",
+    "npm --utterly-unknown-flag ls publish",
+    "systemctl --utterly-unknown-flag status restart barkpark.service",
+    // launchctl has NO pre-verb global region, so nothing eats — but
+    // `firstNonFlag` SKIPS leading flags for every head, so the sub-verb
+    // resolved to `list` and `unload` sat untouched two tokens on.
+    "launchctl -w list unload /Library/LaunchDaemons/foo.plist",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `backstop MUST REFUSE: ${cmd} → ${r.reason}`);
+    assert.match(r.reason, /write\/exec verb|not on the read-only allowlist/, `and name why: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("neither layer over-refuses the honest reads on these five heads", () => {
+  const admitted = [
+    "docker ps",
+    "docker -D ps",
+    "docker -c myctx ps",
+    "docker --log-level debug images",
+    "docker --tlscacert /home/me/ca.pem version",
+    "pnpm --dir /some/dir ls",
+    "pnpm --filter @barkpark/core list",
+    "pnpm --loglevel silent outdated",
+    "npm --tag latest view express",
+    "npm --registry https://registry.npmjs.org ls",
+    "npm config get registry",
+    "npm config list",
+    "npm version",
+    "systemctl status barkpark.service",
+    "systemctl --no-pager status barkpark.service",
+    "systemctl -p ActiveState show barkpark.service",
+    "systemctl list-units --type=service",
+    "launchctl list",
+  ];
+  for (const cmd of admitted) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, true, `MUST ADMIT the honest read: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("MUTATION PROOF: removing the added globals AND the backstop re-admits every row", () => {
+  // Reproduces the pre-fix rule exactly — the previous wave's four-member docker
+  // set, exact-token comparison only, no backstop — and asserts the rows this
+  // wave found were ADMITTED by it. A fix nothing can re-break is a fix nothing
+  // was proven to close.
+  const stale = new Set(["-H", "--host", "--context", "--config"]);
+  const preFix = (raw) => {
+    const out = [raw[0]];
+    let i = 1;
+    for (; i < raw.length; i++) {
+      if (stale.has(raw[i])) { i++; continue; }
+      if (raw[i].startsWith("-")) { out.push(raw[i]); continue; }
+      break;
+    }
+    for (; i < raw.length; i++) out.push(raw[i]);
+    return out;
+  };
+  const READ = new Set(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"]);
+  for (const cmd of ["docker -c ps exec -it foo bash", "docker -l ps exec -it foo bash", "docker --tlscacert ps exec -it foo bash", "docker -Dc ps exec -it foo bash"]) {
+    const argv = preFix(cmd.split(/\s+/));
+    const verb = argv.slice(1).find((t) => !t.startsWith("-")) ?? null;
+    assert.ok(READ.has(verb), `the pre-fix rule ADMITTED ${cmd} (it read the sub-verb as "${verb}")`);
+    assert.equal(screenCommand(cmd).ok, false, `and the shipped rule refuses it: ${cmd}`);
+  }
+});
+
+test("the fourth-wave shapes are carried by the SHIPPED named sets, not only by this file", () => {
+  // Same standing lesson as the wave-5 block above: a named set measures only
+  // the spellings it contains, so every row this wave found lives where
+  // `node screen.mjs --selftest` exercises it, not merely here.
+  const danger = DANGER_SET.join("\n");
+  for (const needle of ["docker -c ps exec", "docker -l ps exec", "--tlscacert", "docker -Dc ps", "pnpm --dir ls add", "pnpm -rC ls add", "npm --tag ls publish", "npm --script-shell ls run", "systemctl -p status restart", "systemctl -qH status restart", "launchctl -w list unload"]) {
+    assert.ok(danger.includes(needle), `DANGER_SET must carry the ${needle} shape`);
+  }
+  const wolf = NEVER_CRY_WOLF_SET.join("\n");
+  for (const needle of ["docker -D ps", "docker -c myctx ps", "pnpm --dir /some/dir ls", "npm --tag latest view", "systemctl -p ActiveState show", "launchctl list"]) {
+    assert.ok(wolf.includes(needle), `NEVER_CRY_WOLF_SET must carry the honest mirror ${needle}`);
+  }
 });
