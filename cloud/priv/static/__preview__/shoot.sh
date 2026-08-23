@@ -213,7 +213,9 @@ echo $$ > "$LOCK"
 # The lock and the server both have to be released however we exit — including
 # the loud aborts below, which are new exit paths.
 cleanup() {
-  if [[ -n "${SERVER_PID:-}" ]]; then kill "$SERVER_PID" 2>/dev/null || true; fi
+  # kill + wait, so bash's "Terminated" job notice never lands in a consumer's
+  # captured output (the wait reaps the child inside cleanup, silently).
+  if [[ -n "${SERVER_PID:-}" ]]; then kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; fi
   if [[ "$(cat "$LOCK" 2>/dev/null || true)" == "$$" ]]; then rm -f "$LOCK"; fi
 }
 trap cleanup EXIT
@@ -227,7 +229,8 @@ if [[ "$existing_png" -gt 0 && "${OUT_REUSE:-}" != "1" ]]; then
 fi
 
 # ── start the preview server ─────────────────────────────────────────────────
-node "$HERE/serve.mjs" --port "$PORT" >/dev/null 2>&1 &
+SERVE_ERR="$OUT/.serve-stderr"
+node "$HERE/serve.mjs" --port "$PORT" >/dev/null 2>"$SERVE_ERR" &
 SERVER_PID=$!
 # (cleanup + EXIT trap are installed above, with the $OUT lock.)
 
@@ -241,9 +244,37 @@ for _ in $(seq 1 50); do
 done
 if [[ -z "$up" ]]; then
   echo "!! preview server never answered on :$PORT (port in use? node error?)" >&2
+  sed 's/^/   /' "$SERVE_ERR" >&2 2>/dev/null || true
   echo "   try: node $HERE/serve.mjs --port $PORT" >&2
   exit 1
 fi
+
+# ── the stale-server guard, CONSUMER SIDE (gr-blk-serve-stale-guard) ─────────
+# "The port answers" is not "OUR server answers". A preview server left running
+# by a FOREIGN worktree once squatted the port: our serve.mjs died EADDRINUSE
+# unheard (stderr went to /dev/null), curl above got its 200 from the squatter,
+# and every shot would have rendered ANOTHER TREE's bytes under this tree's
+# name — the before/after false green measured live at Decide. serve.mjs now
+# refuses and diagnoses on its own (exit 2, "STALE SERVER"), but this consumer
+# polls the PORT, so it must also assert the answering server serves THIS
+# tree's bytes. cmp, not wc: equal lengths with different bytes must fail too.
+for canary in app.css app.js; do
+  served_tmp="$OUT/.served-$canary"
+  if ! curl -sf "http://localhost:$PORT/$canary" -o "$served_tmp"; then
+    echo "!! shoot.sh: the server answered '/' but refused '/$canary' — not a usable preview server." >&2
+    sed 's/^/   /' "$SERVE_ERR" >&2 2>/dev/null || true
+    exit 1
+  fi
+  if ! cmp -s "$served_tmp" "$HERE/../$canary"; then
+    echo "!! STALE SERVER on :$PORT — /$canary served $(wc -c <"$served_tmp" | tr -d ' ') B but this tree's disk has $(wc -c <"$HERE/../$canary" | tr -d ' ') B." >&2
+    echo "   A server rooted at a DIFFERENT tree (a foreign worktree?) is squatting this port." >&2
+    echo "   Shooting it would file another tree's pixels under this tree's name — refusing." >&2
+    sed 's/^/   /' "$SERVE_ERR" >&2 2>/dev/null || true
+    echo "   Find it: lsof -nP -iTCP:$PORT -sTCP:LISTEN" >&2
+    exit 1
+  fi
+  rm -f "$served_tmp"
+done
 
 echo ">> Chrome: $CHROME_BIN"
 echo ">> Shooting into: $OUT"
