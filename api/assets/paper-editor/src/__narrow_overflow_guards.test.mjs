@@ -16,6 +16,44 @@
 // shape, so a future edit that reintroduces the bug is caught before a stamp
 // can outlive the code again.
 //
+// jf-narrow-viewport-sweep-remaining-blocks widened this to a systematic pass
+// over every `.bp-*` block family in paper-surface.css, hunting the same two
+// defect shapes: (a) a `white-space: nowrap` cell with no scroll container or
+// ellipsis clamp on its own rule, and (b) a container holding author-supplied
+// unbreakable tokens (task/paper slugs, dep ids, criterion prose that may
+// embed a URL) with no overflow-wrap/word-break guard. That pass found:
+//   - `.bp-task-chip` set bare `white-space: nowrap` with NO ellipsis/overflow
+//     clamp (unlike every other nowrap label in the sheet — `.bp-trow__t`,
+//     `.bp-rm__lbl`, `.bp-gauge__l/__n`, `.bp-bar-chart__l`,
+//     `.bp-criteria-progress__l` all pair nowrap with `overflow: hidden;
+//     text-overflow: ellipsis`). A long task title chip in prose had no
+//     escape hatch and forced the line to overflow sideways at 390px. Fixed
+//     by dropping nowrap in favor of `overflow-wrap: anywhere` — the same
+//     normal-wrapping behavior its sibling chips (`.bp-tag`, `.bp-wikilink`)
+//     already use, so a multi-word title now wraps instead of forcing a
+//     single unbreakable line.
+//   - `.bp-crit__t`, `.bp-bcard__t`, `.bp-tdetail__deps`, `.bp-tdetail__labels`
+//     and `.bp-rail__paper` render free-form author content (acceptance-
+//     criterion prose, board-card titles, dependency/task ids, paper slugs)
+//     with no overflow-wrap guard, unlike their siblings that already carry
+//     one for the identical risk (`.bp-field__v`, `.bp-lineage__body`,
+//     `.bp-kilde__ref`, `.bp-api-endpoint__path`, `.bp-pnode__f/__src`,
+//     `.bp-canvas-stage__f`). This codebase's own task/paper slugs (e.g. a
+//     40+ char loop-epic branch name) are a live example of the unbroken
+//     token these containers can receive. All five now carry
+//     `overflow-wrap: anywhere`.
+//   - `.bp-legend__n` is a fixed `width: 6.5rem; flex: none` mono label with
+//     no wrap guard; same fix.
+// Everything else in the sheet was audited and found ALREADY SAFE by one of:
+// nowrap paired with its own ellipsis clamp, nesting inside an established
+// `overflow-x: auto` scroll container (`.bp-table`, `.bp-duel__table`,
+// `.bp-heat__scroll`, `.bp-pipe-scroll`, `.bp-chart__scroll`, `.bp-diff`/
+// `.bp-filetree`), or an existing overflow-wrap/word-break guard already on
+// the rule. The rendered 390px no-horizontal-scroll assertion this task also
+// calls for (every PortableDoc golden fixture through headless Chromium)
+// needs `js/packages/react/tests/fixtures/pd-golden/` and a browser harness —
+// outside api/assets, left to that lane; this file is the source-level half.
+//
 // Run: node src/__narrow_overflow_guards.test.mjs   (or: npm test)
 
 import assert from "node:assert/strict";
@@ -83,6 +121,47 @@ check(".bp-duel__table self-contains horizontally, .bp-table's own escape hatch"
   // width:100% must survive — it is what keeps desktop (>=720px) unchanged.
   assert.ok(decls.includes("width: 100%"), ".bp-duel__table must keep width:100% so desktop layout is unchanged.");
 });
+
+// ── 3. .bp-task-chip wraps a long title instead of forcing a nowrap overflow ──
+
+check(".bp-task-chip does not force an unguarded single-line overflow", () => {
+  const decls = ruleFor(".bp-paper-surface .bp-task-chip", surface);
+  assert.ok(
+    !/white-space\s*:\s*nowrap/.test(decls),
+    ".bp-task-chip must not set bare white-space:nowrap — with no ellipsis " +
+      "or overflow-wrap paired to it (unlike every other nowrap label in " +
+      "this sheet), a long task title has no escape hatch and overflows " +
+      "the line sideways at 390px (jf-narrow-viewport-sweep-remaining-blocks).",
+  );
+  assert.ok(
+    /overflow-wrap\s*:\s*anywhere/.test(decls),
+    ".bp-task-chip should wrap normally like its sibling chips (.bp-tag, " +
+      ".bp-wikilink) rather than forcing a single unbreakable line.",
+  );
+});
+
+// ── 4. free-form author-content containers carry an overflow-wrap guard ──────
+
+for (const selector of [
+  ".bp-crit__t",
+  ".bp-bcard__t",
+  ".bp-tdetail__deps",
+  ".bp-tdetail__labels",
+  ".bp-rail__paper",
+  ".bp-legend__n",
+]) {
+  check(`${selector} carries an overflow-wrap guard`, () => {
+    const decls = ruleFor(`.bp-paper-surface ${selector}`, surface);
+    assert.ok(
+      /overflow-wrap\s*:\s*anywhere/.test(decls),
+      `${selector} renders free-form author content (a task/paper slug, ` +
+        "dependency id, or criterion prose) with no wrap guard — an " +
+        "unbroken token (this codebase's own task ids run 40+ chars) " +
+        "blows the container out sideways at 390px " +
+        "(jf-narrow-viewport-sweep-remaining-blocks).",
+    );
+  });
+}
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

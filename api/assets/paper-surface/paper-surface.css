@@ -588,7 +588,7 @@ html[data-theme="dark"] .bp-paper-body {
    wikilink is a real link and shares the prose link's at-rest border. */
 .bp-paper-surface .bp-wikilink { color: var(--paper-accent); text-decoration: none; }
 .bp-paper-surface .bp-wikilink--unresolved { text-decoration: underline dotted; }
-.bp-paper-surface .bp-task-chip { white-space: nowrap; }
+.bp-paper-surface .bp-task-chip { overflow-wrap: anywhere; }
 .bp-paper-surface .bp-task-chip__badge {
   border: 1px solid var(--paper-accent); border-radius: 10px; padding: 0 6px;
   color: var(--paper-accent); font-size: 0.85em;
@@ -1152,14 +1152,14 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-tdetail__lbl { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-faint); font-weight: 700; margin: 1rem 0 0.45rem; }
 .bp-paper-surface .bp-crit { display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.84rem; color: var(--paper-ink); }
 .bp-paper-surface .bp-crit--met .bp-crit__t { color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-crit__t { flex: 1; min-width: 0; }
+.bp-paper-surface .bp-crit__t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-crit__ev { padding-left: 1.85rem; color: var(--paper-ink-faint); font-size: 0.76rem; margin: 0.1rem 0 0.3rem; }
-.bp-paper-surface .bp-tdetail__deps { font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-tdetail__deps { font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); overflow-wrap: anywhere; }
 .bp-paper-surface .bp-tdetail__rail { display: flex; flex-direction: column; gap: 0.25rem; }
 .bp-paper-surface .bp-rail__r { display: flex; align-items: center; gap: 0.5rem; font-size: 0.82rem; color: var(--paper-ink); }
-.bp-paper-surface .bp-rail__paper { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-accent); }
+.bp-paper-surface .bp-rail__paper { font-family: var(--paper-font-mono); font-size: 0.76rem; color: var(--paper-accent); overflow-wrap: anywhere; }
 .bp-paper-surface .bp-rail__more { font-size: 0.72rem; color: var(--paper-ink-faint); padding-left: 0.3rem; }
-.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.9rem; }
+.bp-paper-surface .bp-tdetail__labels { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.9rem; overflow-wrap: anywhere; }
 
 /* ── task board (kanban) ── */
 .bp-paper-surface .bp-board {
@@ -1183,7 +1183,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-board__count { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); background: var(--paper-bg); border-radius: 999px; padding: 0 7px; }
 .bp-paper-surface .bp-board__cards { display: flex; flex-direction: column; gap: 7px; }
 .bp-paper-surface .bp-bcard { display: flex; align-items: flex-start; gap: 0.4rem; background: var(--paper-bg); border: 1px solid var(--paper-chrome-border); border-radius: 7px; padding: 8px 10px; }
-.bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; }
+.bp-paper-surface .bp-bcard__t { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--paper-ink); line-height: 1.35; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-bcard__m { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
 
 /* ── roadmap (author-dated phase/task bars) ── */
@@ -1215,7 +1215,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 }
 .bp-paper-surface .bp-legend__r { display: flex; align-items: center; gap: 0.7rem; padding: 0.5rem 0.9rem; border-top: 1px solid var(--paper-rule); font-size: 0.82rem; }
 .bp-paper-surface .bp-legend__r:first-child { border-top: none; }
-.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; }
+.bp-paper-surface .bp-legend__n { font-family: var(--paper-font-mono); font-size: 0.74rem; font-weight: 600; color: var(--paper-ink); width: 6.5rem; flex: none; overflow-wrap: anywhere; }
 .bp-paper-surface .bp-legend__d { color: var(--paper-ink-soft); }
 
 /* ── notes: annotated label-chip list (the "what upgraded" column) ── */
