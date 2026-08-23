@@ -731,6 +731,8 @@ gate "path-escape skipped" 1 \
 gate "a cancelled upstream" 1 \
   R_CHANGES=success R_TEST=cancelled R_PROD=skipped R_PERF=success R_ESCAPE=success \
   O_COMPILE=true O_TEST=true
+gate_says "CANCELLED — this job did not fail" "…and the step log names CANCELLATION (the D57 arm), not a generic failure"
+gate_names "mix-test (cancelled, not failed)" "validation-perf"
 
 # (h) anything unrecognised is red — "cannot tell" is a failure, not a pass
 gate "an unrecognised result value" 1 \
