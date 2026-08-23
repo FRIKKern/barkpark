@@ -146,8 +146,8 @@ async function runFromFile(options: GenerateCliOptions): Promise<string> {
     throw new Error(`Schema file ${fromAbs} failed validation: ${parsed.error.message}`)
   }
 
-  const code = await generateTypes(parsed.data, { dataset })
   const out = resolve(process.cwd(), output)
+  const code = await generateTypes(parsed.data, { dataset, outputPath: out })
   await writeFile(out, code, 'utf8')
   return out
 }
@@ -163,8 +163,8 @@ async function runOnce(config: BarkparkCodegenConfig): Promise<string> {
   if (config.project !== undefined) fetchArgs.project = config.project
 
   const envelope = await fetchSchema(fetchArgs)
-  const code = await generateTypes(envelope, { dataset: config.dataset })
   const out = resolve(process.cwd(), config.output)
+  const code = await generateTypes(envelope, { dataset: config.dataset, outputPath: out })
   await writeFile(out, code, 'utf8')
   return out
 }

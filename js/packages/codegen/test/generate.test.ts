@@ -65,9 +65,9 @@ describe('generateTypes — self-contained prelude', () => {
     expect(output).toContain('export interface BarkparkSlug {')
     expect(output).toContain('current: string')
     expect(output).toContain('export interface BarkparkImage {')
-    expect(output).toContain("_type: 'image'")
+    expect(output).toContain('_type: "image"')
     expect(output).toContain('export interface BarkparkReference {')
-    expect(output).toContain("_type: 'reference'")
+    expect(output).toContain('_type: "reference"')
   })
 
   it('every interface extends BarkparkSystemFields', () => {
@@ -80,7 +80,7 @@ describe('generateTypes — per-type mapping spot-checks', () => {
   it('select → sorted string-literal union (Ability.kind)', () => {
     // options: movement, combat, timeControl, utility → sorted union
     expect(output).toMatch(
-      /kind\?:\s*'combat'\s*\|\s*'movement'\s*\|\s*'timeControl'\s*\|\s*'utility'/,
+      /kind\?:\s*"combat"\s*\|\s*"movement"\s*\|\s*"timeControl"\s*\|\s*"utility"/,
     )
   })
 
@@ -114,7 +114,7 @@ describe('generateTypes — per-type mapping spot-checks', () => {
   })
 
   it('localizedText → Partial<Record<langs, string>> (MediaAsset.altText)', () => {
-    expect(output).toMatch(/altText\?:\s*Partial<Record<'eng'\s*\|\s*'nob',\s*string>>/)
+    expect(output).toMatch(/altText\?:\s*Partial<Record<"eng"\s*\|\s*"nob",\s*string>>/)
   })
 
   it('object → Record<string, unknown> (Event.payload)', () => {
@@ -149,7 +149,7 @@ describe('generateTypes — completeness', () => {
       expect(unionBlock).toContain(pascal)
       // … and its interface pins `_type` to the schema-name literal (so
       // `if (d._type === '<name>')` narrows the union to that interface).
-      expect(output).toContain(`_type: '${s.name}'`)
+      expect(output).toContain(`_type: "${s.name}"`)
     }
   })
 

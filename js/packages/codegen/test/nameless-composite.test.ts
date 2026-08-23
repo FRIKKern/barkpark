@@ -62,6 +62,6 @@ describe('malformed nested descriptors — fail loud, never opaque', () => {
     ])
     const out = await generateTypes(envelope, { dataset: 'x' })
     // the number is filtered out; the string keys survive
-    expect(out).toMatch(/body\?:\s*Partial<Record<'en'\s*\|\s*'nb',\s*string>>/)
+    expect(out).toMatch(/body\?:\s*Partial<Record<"en"\s*\|\s*"nb",\s*string>>/)
   })
 })
