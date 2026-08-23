@@ -2155,6 +2155,10 @@ test("curl's value LETTERS that write a file were eaten, never examined", () => 
     // clustered, the spelling that defeated `-o` before it defeated these
     "curl -sSD /tmp/hdr.txt https://example.com/",
     "curl -sSc /tmp/jar.txt https://example.com/",
+    // Same sweep, same shape as findRule's missing `-fprint0`: journalctl's
+    // mutation list carried six flags and not `--update-catalog`, which writes
+    // /var/lib/systemd/catalog/database.
+    "journalctl --update-catalog",
   ];
   for (const cmd of refused) {
     const r = screenCommand(cmd);

@@ -1700,7 +1700,10 @@ export const ALLOWED_HEADS = new Map([
   // rotate or flush it, which delete log history irreversibly.
   ["journalctl", {
     check: (argv) => {
-      const bad = argv.find((t) => /^--(vacuum-(size|time|files)|rotate|flush|sync|relinquish-var|setup-keys)\b/.test(t));
+      // `--update-catalog` was absent from this list and WRITES
+      // /var/lib/systemd/catalog/database — the same one-flag-short shape as
+      // findRule's missing `-fprint0` above, on the same sweep.
+      const bad = argv.find((t) => /^--(vacuum-(size|time|files)|rotate|flush|sync|relinquish-var|setup-keys|update-catalog)\b/.test(t));
       return bad ? `journalctl ${bad} mutates or deletes the journal` : null;
     },
   }],
@@ -2322,6 +2325,7 @@ export const DANGER_SET = [
   "curl --stderr /tmp/err.txt https://example.com/",
   "curl --etag-save /tmp/etag https://example.com/",
   "curl -sSD /tmp/hdr.txt https://example.com/",
+  "journalctl --update-catalog",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
