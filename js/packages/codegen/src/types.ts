@@ -28,6 +28,14 @@ export interface BarkparkCodegenConfig {
    * to select the scoped schema path.
    */
   project?: string
+  /**
+   * Schema-fetch deadline in milliseconds. `0` disables the deadline entirely
+   * (mirrors `@barkpark/core`'s convention); omitted means the fetch layer's
+   * 30s default. Settable three ways, strongest first: the `--timeout` CLI
+   * flag, this config key, the `BARKPARK_SCHEMA_TIMEOUT_MS` environment
+   * variable — the escape hatch for slow links or very large schemas.
+   */
+  timeoutMs?: number
 }
 
 /**
