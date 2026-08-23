@@ -1152,16 +1152,53 @@ function cellProbeJs(cell) {
     }
     var c=cueOf(el);
     // text-overflow: ellipsis IS an authored cue — the "…" is the affordance
-    // that tells a person the string continues. It counts ONLY for non-form
-    // elements: a UA-painted <select> computes an ellipsis it does not
-    // necessarily paint, which would silence correction (a) — measured on
+    // that tells a person the string continues — but ONLY when the element can
+    // actually PAINT one (ellipsisCanPaint below —
+    // cchi-w21-bl-clip-no-cue-exempts-inert-ellipsis). It counts ONLY for
+    // non-form elements: a UA-painted <select> computes an ellipsis it does
+    // not necessarily paint, which would silence correction (a) — measured on
     // select#site-theme-select.rail-select, the one selector this sweep is
     // supposed to catch.
-    if (!isForm && cs.textOverflow==='ellipsis') c.cue=Math.max(c.cue,1);
+    if (!isForm && cs.textOverflow==='ellipsis' && ellipsisCanPaint(cs)) c.cue=Math.max(c.cue,1);
     if (c.track<=0 && c.cue<=0) {
       q2.push({kind:'CLIP_NO_CUE', sel:sel(el), tag:el.tagName, sw:el.scrollWidth, cw:el.clientWidth,
-               overflowX:cs.overflowX, text:(el.tagName==='SELECT'&&el.selectedOptions&&el.selectedOptions[0]?el.selectedOptions[0].text:(el.textContent||'').trim().slice(0,40))});
+               overflowX:cs.overflowX,
+               inertEllipsis:(!isForm && cs.textOverflow==='ellipsis'),
+               text:(el.tagName==='SELECT'&&el.selectedOptions&&el.selectedOptions[0]?el.selectedOptions[0].text:(el.textContent||'').trim().slice(0,40))});
     }
+  }
+  // Can a computed text-overflow: ellipsis actually PAINT on this element?
+  // DRIVEN, not reasoned — headless-Chrome twin screenshots (te:ellipsis vs
+  // te:clip on otherwise-identical boxes; differing pixels = the "…" painted),
+  // charter D253's decoded-PNG probe independently agrees. The verdicts:
+  //   · a FLEX or GRID container lays out ITEMS, not line boxes, so it has
+  //     nothing to ellipsize: a squeezed display:flex chip measures sw 152 >
+  //     cw 60 and its twins are pixel-IDENTICAL — whatever white-space says.
+  //     app.css's own .billing-chip review comment states exactly this.
+  //   · a BLOCK container that measured a HORIZONTAL clip (the only way into
+  //     this arm — the clipped gate is sw > cw+1) has, by that measurement,
+  //     a line that could not break at the box edge, and Chrome paints the
+  //     "…" on an overflowing line REGARDLESS of white-space: nowrap paints,
+  //     pre paints, plain normal with an unbreakable token paints (D253's
+  //     refutation of the nowrap-only doctrine), and even overflow-wrap:
+  //     anywhere paints when the overflow comes from a nowrap child — with
+  //     anywhere live and only breakable text, the text wraps and sw never
+  //     exceeds cw, so that host never reaches this arm at all.
+  //   · display:-webkit-box paints ONLY its live -webkit-line-clamp ellipsis
+  //     (driven: clamp vs plain overflow:hidden twins differ); a clamp
+  //     declared on any other display does nothing.
+  // KNOWN LIMIT (owned by cchi-w23-bl-d253-inert-ellipsis-correction-five-
+  // sites, the break-opportunity upgrade): a block host whose overflowing
+  // line holds ONLY atomic inlines (an inline-block child, sw 202 > cw 60)
+  // paints no "…" yet is exempted here — a declaration-computed predicate
+  // cannot see it; the measured upgrade that row owns can.
+  function ellipsisCanPaint(cs){
+    if (cs.display==='-webkit-box')
+      return !!cs.webkitLineClamp && cs.webkitLineClamp!=='none';
+    if (cs.display==='flex'||cs.display==='inline-flex'||
+        cs.display==='grid'||cs.display==='inline-grid'||
+        cs.display==='table'||cs.display==='inline-table') return false;
+    return true;
   }
   // Does anything between el and <html> clip or scroll? If so el is CONTAINED:
   // its overhang is the container's business, not the page's.
