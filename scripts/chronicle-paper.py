@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-mvp-1"
+RENDERER_VERSION = "chronicle-mvp-2"
 LEDGER_PREVIEW_LIMIT = 24
 DEFAULT_REPO = "FRIKKern/barkpark"
 CONVENTIONAL = re.compile(
@@ -185,6 +185,59 @@ def sentence_case(value: str) -> str:
     return value[:1].upper() + value[1:] if value else value
 
 
+def percentage(part: int, whole: int) -> str:
+    return f"{round(part * 100 / whole):d}%" if whole else "0%"
+
+
+def change_profile(block_id: str, selected: list[Event], caption: str) -> dict[str, Any]:
+    counts = collections.Counter(event.kind for event in selected)
+    order = ("feat", "fix", "perf", "docs", "refactor", "test", "ci", "chore", "other")
+    bars = [
+        {"label": kind, "value": counts[kind]}
+        for kind in order
+        if counts[kind]
+    ][:7]
+    return {
+        "id": block_id,
+        "type": "bar-chart",
+        "title": caption,
+        "bars": bars or [{"label": "quiet", "value": 0}],
+        "values": True,
+    }
+
+
+def area_cards(block_id: str, selected: list[Event], repo: str, limit: int = 3) -> dict[str, Any]:
+    counts = collections.Counter(event.area for event in selected)
+    items = []
+    for area, count in counts.most_common(limit):
+        latest = next(event for event in reversed(selected) if event.area == area)
+        items.append(
+            {
+                "title": sentence_case(area),
+                "text": f"{count:,} changes · latest: {latest.title}",
+                "href": event_url(latest, repo),
+            }
+        )
+    if not items:
+        items.append({"title": "Quiet period", "text": "No mainline area recorded a change."})
+    return {"id": block_id, "type": "cards", "items": items}
+
+
+def event_lineage(block_id: str, selected: list[Event], repo: str, limit: int = 5) -> dict[str, Any]:
+    nodes = [
+        {
+            "overline": event.occurred_at.strftime("%d %b · %H:%M UTC"),
+            "title": event.title,
+            "body": f"{event.area} · {event.kind}",
+            "source": event_url(event, repo),
+        }
+        for event in reversed(selected[-limit:])
+    ]
+    if not nodes:
+        nodes.append({"overline": "No mainline activity", "title": "A quiet interval", "body": "The verified ledger contains no changes for this period."})
+    return {"id": block_id, "type": "lineage", "nodes": nodes}
+
+
 def ledger_url(period: Period, repo: str) -> str:
     return (
         f"https://github.com/{repo}/commits/main"
@@ -212,24 +265,37 @@ def period_payload(period: Period, selected: list[Event], periods: dict[str, Per
         "month": f"Monthly product change ledger · {period.title}",
         "year": f"Annual product record · {period.title}",
     }
+    date_range = f"{period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}"
+    profile = collections.Counter(event.kind for event in selected)
+    dominant_kind = profile.most_common(1)[0][0] if profile else "quiet"
     blocks: list[dict[str, Any]] = navigation_blocks(periods, period.kind)
     blocks.extend(
         [
             {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
             heading("auto:title", 1, public_titles[period.kind]),
             {"id": "auto:ingress", "type": "ingress", "content": [text(signal(period, selected))]},
+            {"id": "auto:byline", "type": "byline", "items": [date_range, "Verified mainline record", f"Edition {digest(selected)[:8]}" ]},
             {
                 "id": "auto:release-pulse",
                 "type": "stats",
                 "items": [
                     {"value": str(len(selected)), "label": "mainline changes"},
-                    {"value": str(len(product)), "label": "product-facing"},
+                    {"value": percentage(len(product), len(selected)), "label": "product-facing share"},
                     {"value": str(len(areas)), "label": "areas touched"},
-                    {"value": digest(selected)[:8], "label": "source digest"},
+                    {"value": dominant_kind, "label": "dominant change kind"},
                 ],
             },
+            {"id": "auto:divider-shape", "type": "divider"},
+            heading("auto:shape-title", 2, "The shape of the work"),
+            paragraph("auto:shape-dek", "A derived view of how the period moved: change kinds first, then the product areas carrying the most mainline activity."),
+            change_profile("auto:change-profile", selected, f"Change profile · {period.key}"),
+            area_cards("auto:areas", selected, repo),
+            {"id": "auto:divider-sequence", "type": "divider"},
+            heading("auto:sequence-title", 2, "The sequence"),
+            paragraph("auto:sequence-dek", "The five freshest mainline signals, read newest first."),
+            event_lineage("auto:sequence", selected, repo),
             {"id": "auto:divider-ledger", "type": "divider"},
-            heading("auto:ledger-title", 2, "Latest from the ledger"),
+            heading("auto:ledger-title", 2, "Source ledger"),
         ]
     )
     if selected:
@@ -277,50 +343,72 @@ def period_payload(period: Period, selected: list[Event], periods: dict[str, Per
 
 def index_payload(periods: dict[str, Period], events: list[Event], repo: str) -> dict[str, Any]:
     latest = events[-1] if events else None
+    current_year = events_in_period(events, periods["year"])
+    current_week = events_in_period(events, periods["week"])
+    product = [event for event in current_year if event.kind in PRODUCT_KINDS]
+    areas = collections.Counter(event.area for event in current_year)
     cards = []
+    edition_names = {
+        "day": "Today’s shiplog",
+        "week": "The weekly dispatch",
+        "month": "The August chapter",
+        "year": "The 2026 annual volume",
+    }
     for kind in ("day", "week", "month", "year"):
         period = periods[kind]
         count = len(events_in_period(events, period))
         cards.append(
             {
-                "title": period.title,
-                "text": f"{count:,} mainline changes · {period.key}",
-                "tone": "ok" if count else "info",
+                "title": edition_names[kind],
+                "text": f"{period.title} · {count:,} verified mainline changes",
                 "href": f"/papers/{period.slug}",
             }
         )
     all_digest = digest(events)
     lead = f"Latest: {sentence_case(latest.title)}." if latest else "The journal opens quietly."
-    period_links: list[dict[str, Any]] = []
-    for index, kind in enumerate(("day", "week", "month", "year")):
-        if index:
-            period_links.append(text(" · "))
-        period = periods[kind]
-        period_links.append(link(kind.capitalize(), f"/papers/{period.slug}"))
+    monthly = collections.Counter(event.occurred_at.month for event in current_year)
+    first_active_month = min(monthly) if monthly else periods["month"].start.month
+    month_bars = [
+        {"label": dt.date(periods["year"].start.year, month, 1).strftime("%b"), "value": monthly[month]}
+        for month in range(first_active_month, periods["month"].start.month + 1)
+    ]
     blocks = [
-        {"id": "auto:masthead", "type": "eyebrow", "text": "BARKPARK CHRONICLE · LIVING PRODUCT JOURNAL"},
+        {"id": "auto:masthead", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · VOLUME {periods['year'].key} · LIVING PRODUCT JOURNAL"},
         heading("auto:title", 1, "Barkpark Chronicle"),
         {"id": "auto:ingress", "type": "ingress", "content": [text(lead)]},
-        paragraph("auto:dek", "One verified history, read as a day, ISO week, calendar month, or annual volume. Every claim returns to first-parent mainline history."),
+        paragraph("auto:dek", "The evolving field journal of Barkpark: one verified history, edited into daily shiplogs, weekly dispatches, monthly chapters, and an annual volume."),
+        {"id": "auto:byline", "type": "byline", "items": [periods["day"].title, "Built from first-parent Git history", f"Edition {all_digest[:8]}"]},
         {
             "id": "auto:pulse",
             "type": "stats",
             "items": [
-                {"value": str(len(events)), "label": "recorded mainline changes"},
-                {"value": "4", "label": "calendar lenses"},
-                {"value": all_digest[:8], "label": "source digest"},
+                {"value": f"{len(current_year):,}", "label": "changes in 2026"},
+                {"value": percentage(len(product), len(current_year)), "label": "product-facing share"},
+                {"value": str(len(areas)), "label": "active product areas"},
+                {"value": f"{len(current_week):,}", "label": "changes this week"},
             ],
         },
+        {"id": "auto:divider-editions", "type": "divider"},
+        heading("auto:editions-title", 2, "Read the current editions"),
+        paragraph("auto:editions-dek", "Four lenses on the same source ledger. Start close to the work, then widen the frame."),
         {"id": "auto:periods", "type": "cards", "items": cards},
-        paragraph("auto:period-links", period_links),
+        {"id": "auto:divider-motion", "type": "divider"},
+        heading("auto:motion-title", 2, "The year in motion"),
+        paragraph("auto:motion-dek", f"Monthly mainline activity across {periods['year'].key}. The shape is evidence, not a release score: a busy month is not automatically a better month."),
+        {"id": "auto:motion", "type": "bar-chart", "title": "Mainline changes by month", "bars": month_bars, "values": True},
+        heading("auto:areas-title", 2, "Where the work gathered"),
+        area_cards("auto:areas", current_year, repo, limit=4),
         {"id": "auto:divider-latest", "type": "divider"},
-        heading("auto:latest-title", 2, "Latest on main"),
+        heading("auto:latest-title", 2, "Fresh signals"),
+        paragraph("auto:latest-dek", "The five most recent first-parent changes on main, linked back to their source."),
+        event_lineage("auto:latest", events, repo),
     ]
-    if latest:
-        blocks.append(paragraph("auto:latest", [link(latest.title, event_url(latest, repo)), text(f" · {latest.occurred_at.strftime('%d %b %Y, %H:%M UTC')}")]))
-    else:
-        blocks.append(paragraph("auto:latest", "No first-parent changes were found."))
-    blocks.append(paragraph("auto:provenance", f"Generated by {RENDERER_VERSION} · source digest {all_digest} · period links are stable Paper URLs."))
+    blocks.extend(
+        [
+            {"id": "auto:divider-provenance", "type": "divider"},
+            paragraph("auto:provenance", f"Verified from {len(events):,} first-parent mainline changes · renderer {RENDERER_VERSION} · source digest {all_digest} · all edition links are stable Paper URLs."),
+        ]
+    )
     return {
         "_id": "barkpark-chronicle",
         "slug": "barkpark-chronicle",

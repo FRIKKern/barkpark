@@ -71,8 +71,13 @@ class ChroniclePaperTest(unittest.TestCase):
         serialized = json.dumps(week)
         self.assertIn("https://github.com/acme/project/pull/12", serialized)
         self.assertIn("https://github.com/acme/project/pull/13", serialized)
+        self.assertIn('"type": "bar-chart"', serialized)
+        self.assertIn('"type": "lineage"', serialized)
         index = by_slug["barkpark-chronicle"]
-        self.assertIn("/papers/barkpark-changelog-2026-w34", json.dumps(index))
+        serialized_index = json.dumps(index)
+        self.assertIn("/papers/barkpark-changelog-2026-w34", serialized_index)
+        self.assertIn('"text": "The year in motion"', serialized_index)
+        self.assertIn("https://github.com/acme/project/pull/13", serialized_index)
 
     def test_utc_boundaries_and_iso_week_are_independent_of_month(self):
         periods = chronicle.periods_for(dt.date(2026, 1, 1))
