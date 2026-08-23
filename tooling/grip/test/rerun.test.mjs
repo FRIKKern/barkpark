@@ -712,6 +712,56 @@ test("a git GLOBAL OPTION no longer hides the write verb behind it", () => {
   }
 });
 
+test("a SEPARATED-VALUE git global no longer launders the write verb behind it", () => {
+  // Wave-11 verification measured this against origin/main's own module
+  // (re-verified at head 2260a0efb7 on 2026-08-23): the alternation consumed
+  // `-c`/`-C` <value> pairs and attached `--flag=value` forms, but a SEPARATED
+  // `--git-dir <value>` left its value token standing between the globals and
+  // the verb, so the verb never matched — classifySafety returned
+  // {safe:true, reason:"no write shape detected"} for all seven globals below
+  // across every write verb, and runRerun gates on classifySafety ALONE
+  // (rerun.mjs runRerun step 1), so it would have EXECUTED the write. 7×12=84
+  // of the 108 cells in the nine-globals × twelve-verbs matrix laundered.
+  // screenCommand refuses all 108 (dropValueGlobals, PR #12180) — but that is
+  // the OTHER module; the executing gate was blind. This is a TIGHTENING.
+  const SEPARATED_LAUNDER_GLOBALS = [
+    "--git-dir", "--work-tree", "--namespace", "--exec-path",
+    "--super-prefix", "--attr-source", "--config-env",
+  ];
+  const WRITE_VERBS = [
+    "push", "commit", "checkout", "switch", "reset", "rebase",
+    "mergetool", "merge", "clean", "apply", "am", "tag",
+  ];
+  for (const g of SEPARATED_LAUNDER_GLOBALS) {
+    for (const v of WRITE_VERBS) {
+      const cmd = `git ${g} VAL ${v} x`;
+      const s = classifySafety(cmd);
+      assert.equal(s.safe, false, `laundered shape MUST be refused: ${cmd} — got safe:true (${s.reason})`);
+    }
+  }
+  // The two the old alternation already consumed stay refused, and `stash`
+  // (13th denylist verb) is covered through a separated global too.
+  assert.equal(classifySafety("git -C /tmp/repo push origin main").safe, false);
+  assert.equal(classifySafety("git -c user.name=x commit -m y").safe, false);
+  assert.equal(classifySafety("git --git-dir /tmp/r/.git stash").safe, false);
+});
+
+test("separated-value globals in front of a READ stay admitted — the permit arm", () => {
+  // Tightening the gate must not cost the honest path (D3). Each of these
+  // rulings was ADMIT at head before the fix and must stay ADMIT after it.
+  for (const cmd of [
+    "git -C /tmp/repo log -1",
+    "git -C /Volumes/SATECHI/github/barkpark status",
+    "git --git-dir /tmp/repo/.git log -1",
+    "git --work-tree /tmp/repo status",
+    "git --config-env GIT_PAGER=P log --oneline",
+    "git --no-pager log -1",
+  ]) {
+    const s = classifySafety(cmd);
+    assert.equal(s.safe, true, `MUST ADMIT: ${cmd} — refused as ${s.reason}`);
+  }
+});
+
 // ── 7. the module boundary ───────────────────────────────────────────────────
 
 test("rerun.mjs does not import level.mjs", async () => {
