@@ -198,11 +198,19 @@ func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest, ori
 		// Perspective is inert for this call: GET /v1/tasks/:doc_id is the flat,
 		// token-scoped task route and carries no perspective query param. It is
 		// set only so this client is constructed identically to every other one
-		// in the CLI — the read-back always sees the row `bp task stamp` wrote,
-		// which is the PUBLISHED one (PDS-D360).
+		// in the CLI.
+		//
+		// It used to say here that "the read-back always sees the row `bp task
+		// stamp` wrote, which is the PUBLISHED one (PDS-D360)". That was FALSE,
+		// and a run refuted it. The route falls back to the `drafts.` twin when
+		// no published row exists (tasks_controller.ex find_task_by_doc_id), and
+		// `bp task create --yes` produces exactly such a draft-only row at rc=0
+		// — so on those rows there IS no published row to see. The read-back now
+		// carries the answering row's identity and the verdict refuses a green
+		// when a draft answered; see renderStampVerdict.
 		Perspective: "drafts",
 	})
-	stored, err := taskboard.FetchCriterion(client, req.docID, req.index)
+	stored, readback, err := taskboard.FetchCriterion(client, req.docID, req.index)
 	if err != nil {
 		out.userErr("stamp sent but NOT confirmed — the read-back of %s criterion index %d failed: %v",
 			req.docID, req.index, err)
@@ -212,7 +220,7 @@ func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest, ori
 		}
 		return exitGeneric
 	}
-	return renderStampVerdict(out, req, stored, origRC)
+	return renderStampVerdict(out, req, stored, readback, origRC)
 }
 
 // renderStampVerdict is the stamp's receipt, and it is PURE: given the request
@@ -233,7 +241,20 @@ func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest, ori
 // The receipt rides progressf: stdout in the human view, stderr under -o
 // json/yaml so the dispatch's envelope stays the single parseable document on
 // stdout. The exit code carries the verdict in both.
-func renderStampVerdict(out *writer, req stampRequest, stored taskboard.CriterionItem, origRC int) int {
+func renderStampVerdict(out *writer, req stampRequest, stored taskboard.CriterionItem, readback apiclient.TaskReadback, origRC int) int {
+	// WHICH ROW answered is checked BEFORE what it holds. A draft twin can hold
+	// the criterion, hold it exactly as asked, and still be invisible to every
+	// board — so comparing its fields would only decorate a green that means
+	// nothing. The value landed; it landed somewhere nobody reads.
+	if readback.IsDraft() {
+		out.userErr("stamp landed on a DRAFT, not the board — %s answered this read-back", readbackRowLabel(readback))
+		out.errf("  the value is really in the store, but `%s` has no published row, so no board will ever show it", req.docID)
+		out.errf("  criterion index %d (0-based) = criterion #%d as boards/rubric number them", req.index, req.index+1)
+		out.errf("  the draft holds: %s", storedCriterionSummary(stored))
+		out.errf("  publish the row, then stamp again — `bp doc get task %s` returns not_found until you do", req.docID)
+		return exitConflict
+	}
+
 	mismatches := stampMismatches(req, stored)
 	if len(mismatches) == 0 {
 		if origRC == exitServer {
@@ -270,6 +291,23 @@ func storedCriterionSummary(stored taskboard.CriterionItem) string {
 		s += fmt.Sprintf("  attempts=%d", n)
 	}
 	return s
+}
+
+// readbackRowLabel names the row that answered a read-back, using only what the
+// read-back actually carried. It never asserts more than it was told: a server
+// that sent no doc_id and no status is described as unnamed, not as a draft and
+// not as published.
+func readbackRowLabel(rb apiclient.TaskReadback) string {
+	switch {
+	case rb.DocID != "" && rb.Status != "":
+		return fmt.Sprintf("%s (status %q)", rb.DocID, rb.Status)
+	case rb.DocID != "":
+		return rb.DocID
+	case rb.Status != "":
+		return fmt.Sprintf("a row with status %q", rb.Status)
+	default:
+		return "a row the server did not name"
+	}
 }
 
 // stampMismatches is the pure comparison behind the verdict: every way the

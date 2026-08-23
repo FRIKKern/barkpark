@@ -477,7 +477,7 @@ func successClaimRegistry() []claimSite {
 			// that echoed the request would print the same bytes for both halves.
 			Name: "renderStampVerdict",
 			Render: func(out *writer, resp any) {
-				renderStampVerdict(out, stampVerdictReq, resp.(taskboard.CriterionItem), exitOK)
+				renderStampVerdict(out, stampVerdictReq, resp.(taskboard.CriterionItem), stampReadbackPublished(), exitOK)
 			},
 			Backed:       stampStoredBacked(),
 			Contradicted: stampStoredContradicted(),

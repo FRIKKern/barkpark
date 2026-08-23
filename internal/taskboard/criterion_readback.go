@@ -26,19 +26,26 @@ import (
 // error, an ok:false envelope, a task with no criteria and an out-of-range
 // index all return an error naming what went wrong. A caller must not read any
 // of them as "the write landed" — it means the store could not be asked.
-func FetchCriterion(c *apiclient.Client, docID string, idx int) (CriterionItem, error) {
+//
+// It also returns the IDENTITY of the row that answered. A read-back that
+// cannot say WHICH row it read cannot tell a caller whether the value it found
+// is on the board: GET /v1/tasks/:doc_id falls back to the `drafts.` twin when
+// no published row exists, so a criterion can be found, and be real, and still
+// live somewhere no board will ever render it. The verdict belongs to the
+// caller — this reports what answered and never judges it.
+func FetchCriterion(c *apiclient.Client, docID string, idx int) (CriterionItem, apiclient.TaskReadback, error) {
 	if idx < 0 {
-		return CriterionItem{}, fmt.Errorf("criterion index %d is negative — indices are zero-based", idx)
+		return CriterionItem{}, apiclient.TaskReadback{}, fmt.Errorf("criterion index %d is negative — indices are zero-based", idx)
 	}
-	content, err := c.TaskGetContent(docID)
+	rb, err := c.TaskGetContent(docID)
 	if err != nil {
-		return CriterionItem{}, err
+		return CriterionItem{}, apiclient.TaskReadback{}, err
 	}
-	items := decodeAcceptanceCriteria(content)
+	items := decodeAcceptanceCriteria(rb.Content)
 	if idx >= len(items) {
-		return CriterionItem{}, fmt.Errorf(
+		return CriterionItem{}, rb, fmt.Errorf(
 			"the store holds %d acceptance criteria on %s — index %d (0-based) does not exist",
 			len(items), docID, idx)
 	}
-	return items[idx], nil
+	return items[idx], rb, nil
 }
