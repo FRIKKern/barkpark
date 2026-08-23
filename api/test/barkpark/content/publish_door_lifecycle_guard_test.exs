@@ -280,4 +280,168 @@ defmodule Barkpark.Content.PublishDoorLifecycleGuardTest do
 
     assert pub.content["lifecycle_status"] == "open"
   end
+
+  # ── (g) the :sync exemption does NOT extend to the criteria fence ─────────
+  #
+  # pds-bl-sync-source-bypasses-publish-door: the `:sync` exemption used to be
+  # taken BEFORE any gate ran, so a PULL-applied mirror write could blank a
+  # `met: true` flag or a non-empty evidence string with no guard at all. The
+  # ruling (recorded at the exemption site in lifecycle.ex): transition + claim
+  # checks stay mirror-exempt, the CRITERIA FENCE is source-blind — no
+  # legitimate upstream can need to erase a stamped proof, because every write
+  # door upstream refuses that erasure too.
+
+  defp publish_proof_bearing!(doc_id, scope) do
+    mk_task!(doc_id, scope, %{
+      "acceptance_criteria" => [
+        %{"criterion" => "it works", "met" => true, "evidence" => "run output pasted"}
+      ]
+    })
+
+    {:ok, pub} = Content.publish_document(doc_id, "task", @dataset, scope)
+    assert [%{"met" => true}] = pub.content["acceptance_criteria"]
+    pub
+  end
+
+  # The erasing mirror payload: same doc, criteria regressed to unproven.
+  defp erasing_result(doc_id) do
+    %{
+      "_id" => "drafts.#{doc_id}",
+      "_publishedId" => doc_id,
+      "_draft" => false,
+      "_type" => "task",
+      "doc_id" => "drafts.#{doc_id}",
+      "type" => "task",
+      "title" => "Gate fixture #{doc_id}",
+      "content" =>
+        %{"kind" => "task", "lifecycle_status" => "open"}
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+        |> Map.put("acceptance_criteria", [
+          %{"criterion" => "it works", "met" => false, "evidence" => ""}
+        ])
+    }
+  end
+
+  test "a sync-sourced publish cannot blank a met:true flag or a non-empty evidence " <>
+         "string on a published task row",
+       %{scope: scope} do
+    publish_proof_bearing!("pdg-sync-erase", scope)
+
+    # The regressing draft arrives the way replication really writes it —
+    # through the Writer seam under `source: :sync` (exempt there by design).
+    assert {:ok, {_tx, _}} =
+             Content.apply_mutations(
+               [
+                 %{
+                   "patch" => %{
+                     "id" => "pdg-sync-erase",
+                     "type" => "task",
+                     "set" => %{
+                       "acceptance_criteria" => [
+                         %{"criterion" => "it works", "met" => false, "evidence" => ""}
+                       ]
+                     }
+                   }
+                 }
+               ],
+               @dataset,
+               scope ++ [source: :sync]
+             )
+
+    # The erasure is refused AT THE PUBLISH DOOR even from :sync…
+    assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+             Content.publish_document(
+               "pdg-sync-erase",
+               "task",
+               @dataset,
+               scope ++ [source: :sync]
+             )
+
+    assert message =~ "clear the `met: true` flag"
+
+    # …and the published proof survives, byte-for-byte.
+    pub = published!("pdg-sync-erase", scope)
+
+    assert [%{"met" => true, "evidence" => "run output pasted"}] =
+             pub.content["acceptance_criteria"]
+  end
+
+  test "APPLIER path: the exact createOrReplace+publish batch Sync.Applier synthesizes " <>
+         "is refused when it would erase a stamped proof — and the refusal is :terminal, " <>
+         "never a retry wedge",
+       %{scope: scope} do
+    publish_proof_bearing!("pdg-applier-erase", scope)
+
+    # Applier.apply_upsert/4 verbatim: `[%{"createOrReplace" => result}] ++
+    # maybe_publish(result, type)` under `source: :sync` (applier.ex:206-208).
+    result = erasing_result("pdg-applier-erase")
+
+    mutations = [
+      %{"createOrReplace" => result},
+      %{"publish" => %{"id" => "pdg-applier-erase", "type" => "task"}}
+    ]
+
+    # `{:invalid_task_content, _}` is exactly the shape the Applier classes
+    # :terminal (applier.ex error_class/1), so a refused erasure dead-letters
+    # instead of wedging the pull loop — the match below pins that shape.
+    assert {:error, {:invalid_task_content, _}} =
+             Content.apply_mutations(mutations, @dataset, scope ++ [source: :sync])
+
+    # Nothing about the published row moved.
+    pub = published!("pdg-applier-erase", scope)
+
+    assert [%{"met" => true, "evidence" => "run output pasted"}] =
+             pub.content["acceptance_criteria"]
+  end
+
+  test "PUSHER path: the synthesized publish Sync.Pusher ships is refused by the REMOTE " <>
+         "door (source: :api there) when it would erase a stamped proof",
+       %{scope: scope} do
+    publish_proof_bearing!("pdg-pusher-erase", scope)
+
+    # The real payload builder: primary mutation + conditional publish
+    # (pusher.ex payload_mutations/3). On the receiving box these run through
+    # MutateController, which stamps `source: :api` — the fence applies there.
+    result = erasing_result("pdg-pusher-erase")
+
+    mutations = Barkpark.Sync.Pusher.payload_mutations(result, "task", nil)
+    assert Enum.any?(mutations, &match?(%{"publish" => _}, &1))
+
+    assert {:error, {:invalid_task_content, _}} =
+             Content.apply_mutations(mutations, @dataset, scope ++ [source: :api])
+
+    pub = published!("pdg-pusher-erase", scope)
+
+    assert [%{"met" => true, "evidence" => "run output pasted"}] =
+             pub.content["acceptance_criteria"]
+  end
+
+  test "mirror-legit control: a :sync publish that PRESERVES the stamped proof still " <>
+         "passes (the fence refuses erasure, not replication)",
+       %{scope: scope} do
+    publish_proof_bearing!("pdg-sync-keep", scope)
+
+    # Upstream reopened the task but kept its proof — the mirror carries the
+    # done→open edge (transition-exempt for :sync) AND the intact criteria.
+    assert {:ok, {_tx, _}} =
+             Content.apply_mutations(
+               [
+                 %{
+                   "patch" => %{
+                     "id" => "pdg-sync-keep",
+                     "type" => "task",
+                     "set" => %{"lifecycle_status" => "open"}
+                   }
+                 }
+               ],
+               @dataset,
+               scope ++ [source: :sync]
+             )
+
+    assert {:ok, pub} =
+             Content.publish_document("pdg-sync-keep", "task", @dataset, scope ++ [source: :sync])
+
+    assert pub.content["lifecycle_status"] == "open"
+    assert [%{"met" => true}] = pub.content["acceptance_criteria"]
+  end
 end

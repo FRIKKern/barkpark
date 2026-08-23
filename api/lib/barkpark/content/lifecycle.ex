@@ -247,9 +247,10 @@ defmodule Barkpark.Content.Lifecycle do
   #
   #   * FIRST publish (no published row) is a birth — exempt, including the
   #     importer's legitimately-born-`done` draft.
-  #   * `source: :sync` mirrors upstream state verbatim — exempt. `:source` is
-  #     server-set (MutateController prepends `source: :api`), so a request
-  #     body can never reach the exemption.
+  #   * `source: :sync` mirrors upstream state verbatim — exempt from the
+  #     TRANSITION and CLAIM checks only; the CRITERIA FENCE applies to every
+  #     source (see below). `:source` is server-set (MutateController prepends
+  #     `source: :api`), so a request body can never reach the exemption.
   #   * a published row with no `lifecycle_status` (legacy / non-task-kind
   #     content) exempts the transition check; the claim check still runs.
   #   * an ILLEGAL implied transition (`Transitions.legal?/2`, the ONE D7
@@ -291,10 +292,23 @@ defmodule Barkpark.Content.Lifecycle do
   #
   # THE EXACT COVERAGE, re-derived at review rather than assumed (wave 26):
   #
-  #   * NOT COVERED — `source: :sync`. The exemption below is taken BEFORE any
-  #     gate runs, so a PULL-applied mirror write bypasses both the transition
-  #     check and the criteria fence. Filed as
-  #     `pds-bl-sync-source-bypasses-publish-door`.
+  #   * COVERED — `source: :sync`, for the CRITERIA FENCE only
+  #     (pds-bl-sync-source-bypasses-publish-door). The exemption used to be
+  #     taken BEFORE any gate ran, so a PULL-applied mirror write could blank a
+  #     `met: true` flag or a non-empty evidence string with no guard at all —
+  #     strictly worse than the `:api` hole PDS-D362 closed. RULED: the fence
+  #     is source-blind, the mirror exemptions are not. Transition + claim
+  #     checks stay exempt for `:sync` because a verbatim mirror legitimately
+  #     carries upstream's lifecycle (`done → open` reopens, foreign claim
+  #     state) — but no LEGITIMATE upstream can need to erase a stamped proof:
+  #     every write door upstream (api, github, and now sync itself) refuses
+  #     that erasure, so a sync payload that regresses criteria is evidence of
+  #     drift or forgery, never of replication. The refusal is safe on the
+  #     apply side: `Sync.Applier.error_class/1` classes
+  #     `{:invalid_task_content, _}` as :terminal (no retry wedge), and the
+  #     Pusher's synthesized publish executes on the REMOTE box through its
+  #     MutateController (`source: :api` there), where this same fence already
+  #     gates it.
   #   * COVERED, and this is wider than the slice brief assumed — the GitHub
   #     automatic publishers thread `source: :github`, NOT `:sync`
   #     (`plugins/github/link.ex:193` via `mirror_job.ex:560` /
@@ -307,18 +321,20 @@ defmodule Barkpark.Content.Lifecycle do
   #     deferred", never to a broken mirror. `pds-bl-github-linkput-auto-publish-erasure`
   #     stays open for the audit-trail half it does not answer.
   defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
-    if Keyword.get(opts, :source, :api) == :sync do
-      :ok
-    else
-      case Content.get_document(pid, "task", dataset, opts) do
-        {:ok, %Document{content: pub_content}} ->
+    case Content.get_document(pid, "task", dataset, opts) do
+      {:ok, %Document{content: pub_content}} ->
+        if Keyword.get(opts, :source, :api) == :sync do
+          # Mirror-verbatim: transition + claim exempt, criteria fence NOT —
+          # see the :sync coverage note above.
+          criteria_fence(pub_content || %{}, draft.content || %{})
+        else
           gate_task_publish(pub_content || %{}, draft.content || %{})
+        end
 
-        _ ->
-          # First publish — a birth. Never consult legal?/2 (legal?(nil, x)
-          # is false by design and would refuse every first publish).
-          :ok
-      end
+      _ ->
+        # First publish — a birth. Never consult legal?/2 (legal?(nil, x)
+        # is false by design and would refuse every first publish).
+        :ok
     end
   end
 
@@ -336,10 +352,17 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
 
       true ->
-        case criteria_regression(pub_content, draft_content) do
-          nil -> :ok
-          regression -> {:error, {:invalid_task_content, criteria_regression_error(regression)}}
-        end
+        criteria_fence(pub_content, draft_content)
+    end
+  end
+
+  # The criteria fence as a standalone gate: the ONE check that applies to
+  # every publish source, `:sync` included (a stamped proof is erasable by no
+  # replication payload).
+  defp criteria_fence(pub_content, draft_content) do
+    case criteria_regression(pub_content, draft_content) do
+      nil -> :ok
+      regression -> {:error, {:invalid_task_content, criteria_regression_error(regression)}}
     end
   end
 
