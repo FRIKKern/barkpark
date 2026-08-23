@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-mvp-10"
+RENDERER_VERSION = "chronicle-mvp-11"
 LEDGER_PREVIEW_LIMIT = 24
 DEFAULT_HISTORY_MONTHS = 18
 DEFAULT_REPO = "FRIKKern/barkpark"
@@ -219,6 +219,12 @@ def digest(events: Iterable[Event]) -> str:
     return hashlib.sha256(f"{RENDERER_VERSION}\n{material}".encode()).hexdigest()[:16]
 
 
+def edition_folio(period: Period, events: Iterable[Event]) -> str:
+    material = f"{period.kind}\n{period.key}\n{digest(events)}"
+    value = hashlib.sha256(material.encode()).hexdigest()[:16]
+    return "-".join(value[index:index + 4] for index in range(0, 16, 4))
+
+
 def signal(period: Period, selected: list[Event]) -> str:
     if not selected:
         return f"Quiet {period.kind}: no first-parent changes landed on main."
@@ -404,13 +410,13 @@ def period_payload(
     leading_areas = [sentence_case(area) for area, _count in areas.most_common(3)]
     public_titles = {
         "day": (
-            f"Daily shiplog · {period.start.strftime('%A')}, {period.title} · "
-            f"edition {digest(selected)[:8]} {digest(selected)[8:]}"
+            f"{period.key} shiplog · {period.start.strftime('%A')} · "
+            f"folio {edition_folio(period, selected)}"
         ),
         "week": (
-            f"Week {period.key.split('-W')[-1]} dispatch · {period.start.strftime('%d %b')}–"
+            f"{period.key} dispatch · {period.start.strftime('%d %b')}–"
             f"{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')} · "
-            f"edition {digest(selected)[:8]} {digest(selected)[8:]}"
+            f"folio {edition_folio(period, selected)}"
         ),
         "month": (
             f"{period.title} field journal · {len(selected):,} changes, "

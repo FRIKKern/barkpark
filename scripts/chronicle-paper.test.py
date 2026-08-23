@@ -197,6 +197,14 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("restore tasks", json.dumps(payload))
         self.assertNotIn("typed exports", json.dumps(payload))
 
+    def test_quiet_periods_receive_distinct_dedup_folios(self):
+        first = chronicle.periods_for(dt.date(2026, 8, 24))["week"]
+        second = chronicle.periods_for(dt.date(2026, 8, 31))["week"]
+        self.assertNotEqual(
+            chronicle.edition_folio(first, []),
+            chronicle.edition_folio(second, []),
+        )
+
     def test_output_is_deterministic_and_every_generated_block_is_owned(self):
         first = self.run_script("--date", "2026-08-23", "--ref", "main").stdout
         second = self.run_script("--date", "2026-08-23", "--ref", "main").stdout
