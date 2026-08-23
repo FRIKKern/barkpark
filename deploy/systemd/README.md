@@ -13,10 +13,18 @@ These two are **not** prod units. Their host is **the site's own box** — the m
 
 | Unit | Role | Identity |
 |---|---|---|
-| `barkpark-builder.service` | claims queued deployments, nixpacks-builds the site image (`--platform` = the box's own arch) | `__BUILDER_TOKEN__` — the shared worker token when the box has one, else the agent token |
+| `barkpark-builder.service` | claims queued deployments, nixpacks-builds the site image (`--platform` = the box's own arch) | the box's agent token (`/etc/barkpark/agent.token`, fixed) |
 | `barkpark-runtime.service` | executes the deployment on the box: loads the image, runs it, rewrites the Caddyfile | the box's agent token (fixed) |
 
-Installed by `deploy/site-runtime-install.sh`, which is streamed to the box as **exactly one file** by the cp-ops `site-runtime-install` operation — so it carries the units as inline heredocs rather than reading them from the repo. The files here are the canonical copies (placeholders `__PLATFORM__` / `__BUILDER_TOKEN__` intact); `deploy/site-runtime-install_test.sh` byte-diffs script against staged file offline, so the two cannot drift. **Edit both sides or the gate goes red.**
+Both units authenticate with the box's **own per-box agent token** — never the shared fleet `WORKER_TOKEN`, which was retired from boxes when the `/v1/builder/*` routes moved to `require_agent` (#13251; that shared secret also opens `/v1/internal/*` — list/deprovision any box). **Never place a `worker.token` on a box.**
+
+### `WORKER_TOKEN` rotation — the order is not optional
+
+1. **Control plane first**: the `require_agent` builder routes are merged (#13251).
+2. **Rerun `site-runtime-install` on every box** before rotating. A box still presenting the old worker token 401s and its container builds freeze **silently** — queued rows sit forever with no error — until its rerun repoints the builder unit at `agent.token`. The rerun does **not** delete `/etc/barkpark/worker.token`: the stale file stays on disk, still holding the live fleet secret, until rotation invalidates it (which is why rotation must follow, never lead).
+3. **Rotate `WORKER_TOKEN` last**, handing the provisioner host the new value in the same step — provisioning breaks otherwise. Rotating before a box's rerun freezes that box exactly as in step 2.
+
+Installed by `deploy/site-runtime-install.sh`, which is streamed to the box as **exactly one file** by the cp-ops `site-runtime-install` operation — so it carries the units as inline heredocs rather than reading them from the repo. The files here are the canonical copies (placeholder `__PLATFORM__` intact — there is no token placeholder); `deploy/site-runtime-install_test.sh` byte-diffs script against staged file offline, so the two cannot drift. **Edit both sides or the gate goes red.**
 
 ## What the units do
 
