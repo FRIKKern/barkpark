@@ -28,7 +28,11 @@
 #
 # WARN-only (never fails the gate):
 #   7. Duplication tripwires — prod IP literal, webhook signature literal,
-#      dev-token literal outside their canonical owners.
+#      dev-token literal outside their canonical owners. Vendored mirrors, the
+#      append-only grip ledger and .changeset/ are pruned structurally (see §7).
+#      Also warns when an ALLOWLIST entry has gone stale (path vanished, or the
+#      file no longer carries the literal) — the one check here with a known
+#      ground truth, so the section is not purely an absence proof.
 #
 # bash 3.2 compatible: no associative arrays, no mapfile.
 
@@ -494,10 +498,29 @@ tripwire() {
   # after `sed 's|^\./||'` a top-level hit reads '.claude/…' with NO leading
   # slash, so an unanchored '/\.claude/' would miss it and leave thousands of
   # worktree-copy WARNs (D26).
+  # Three trees are pruned STRUCTURALLY, not allowlisted file-by-file, because
+  # every file they will ever hold is exempt for the same reason — an allowlist
+  # would need a new entry per file forever and would still be behind:
+  #
+  #   cloud/priv/templates/  A byte-identical machine copy of the already-
+  #     allowlisted js/packages/create-barkpark-app/templates/<t>/, produced by
+  #     `make cloud-templates-sync` and held identical by
+  #     BarkparkCloud.Templates.AppFilesDriftTest. "Prefer a pointer" here would
+  #     turn that drift test RED — the advice is not merely noise, it is wrong.
+  #     `prune_find` (§2/§5) already prunes this tree; §7 walking it was the drift.
+  #   tooling/grip/ledger/   A documented "shared append-only commons" (see
+  #     tooling/grip/README.md) of dated, immutable evidence rows. A record must
+  #     quote what it observed; rewriting one to a pointer falsifies it. Same
+  #     class as docs/ops/studio-nav-bug-2026-04-19.md below ("path-frozen
+  #     history") — and it grows every wave, so file-by-file never converges.
+  #   .changeset/            Release-note fragments that `changeset version`
+  #     consumes and DELETES. Not docs; they cannot own or point at anything.
   hits=$(grep -rlF "$literal" --include='*.md' "${GREP_PRUNE[@]}" . 2>/dev/null |
     sed 's|^\./||' | grep -v '^_attic/' | grep -v node_modules | grep -v '^\.artifacts/' \
     | grep -v '/_build/' | grep -v '/deps/' \
-    | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)\.omx/' | grep -vE '(^|/)\.tmp-bp89/' || true)
+    | grep -vE '(^|/)\.claude/' | grep -vE '(^|/)\.omx/' | grep -vE '(^|/)\.tmp-bp89/' \
+    | grep -v '^cloud/priv/templates/' | grep -v '^tooling/grip/ledger/' \
+    | grep -vE '(^|/)\.changeset/' || true)
   for f in $hits; do
     allowed=0
     for a in $allow; do
@@ -507,18 +530,69 @@ tripwire() {
       warn "'$literal' appears in $f — canonical owner is elsewhere; prefer a pointer"
     fi
   done
+  # Positive control on the ALLOWLIST itself. Every check above is an absence
+  # proof: it prints nothing when it finds nothing, and a scan that has silently
+  # stopped finding anything prints exactly the same nothing (the hazard §8
+  # documents at length). The allowlist is the one thing here with a known
+  # ground truth — each entry was added BECAUSE that file carries the literal —
+  # so a stale entry is decidable: the file moved, was retired, or the literal
+  # was edited out, and the entry now exempts nothing while quietly shrinking
+  # what the tripwire covers. It also doubles as the rotation change-set: when
+  # the prod IP or dev token changes, the allowlist IS the list of files to edit,
+  # which is only true while every entry still resolves.
+  # Skipped under a custom DOCS_ANCHORS_ROOT, following §8b: the allowlist names
+  # REAL repo paths, so in a 4-file fixture every entry would read as stale and
+  # bury the arm's own output in noise. Announced once below, never silent.
+  if [ -z "${DOCS_ANCHORS_ROOT:-}" ]; then
+    for a in $allow; do
+      if [ ! -e "$a" ]; then
+        warn "allowlist for '$literal' names $a, which does not exist — entry is stale"
+      elif ! grep -qF "$literal" "$a" 2>/dev/null; then
+        warn "allowlist for '$literal' names $a, which no longer contains it — entry is stale"
+      fi
+    done
+  fi
 }
 
 # Allowlist rationale: copy-paste-ready examples beat pointers in user-facing
 # setup guides and starter templates — those files legitimately repeat the dev
-# token / signature shape. README carries the live-demo IP; studio-nav-bug is
-# path-frozen history. The tripwire still catches NEW files repeating these.
+# token / signature shape. studio-nav-bug is path-frozen history. The tripwire
+# still catches NEW files repeating these.
+#
+# Five entries were REMOVED when the stale-entry control above first ran: the
+# IP had left docs/ops/bokbasen-go-live.md, deploy/systemd/README.md and
+# README.md (whose exemption this comment used to justify), and the dev token
+# had left CLAUDE.md and js/CLAUDE.md. Each was exempting nothing while
+# silently narrowing what the tripwire covers; dropping them re-arms those
+# files, so the literal reappearing there warns again.
+#
+# Entries below the original set, each verified against the code before adding —
+# a WARN is only noise once you have checked that the claim behind it is true:
+#   deploy/README.md            names the box in a parenthetical that ALREADY
+#                               attributes it to CLAUDE.md ("the CLAUDE.md prod
+#                               box …") — a pointer that happens to quote.
+#   api/lib/barkpark/sync/HANDOFF.md   runnable `ssh root@<ip>` for an agent.
+#   templates/DEPLOYING.md      runnable `--token-ssh root@<ip>`; the flag is
+#                               real (scripts/bp-vercel-quick-setup.sh).
+#   templates/place-directory/README.md   the starter-README class already
+#                               exempted above; the dev token is real on the
+#                               `mix setup` path it documents (BARKPARK_SEED_
+#                               PROFILE defaults to demo, which mints it).
+#   tooling/doc-onboarding/TRUTH-AUDIT.md   the literal IS the subject of its
+#                               audit table — it cannot be replaced by a
+#                               pointer without deleting the finding.
 tripwire '89.167.28.206' \
-  "docs/ops/PROD_OPS.md CLAUDE.md docs/ops/bokbasen-go-live.md docs/ops/adding-a-domain.md docs/ops/vercel-dns-connect.md deploy/uptime-kuma/README.md deploy/systemd/README.md README.md docs/studio/user-guide.md docs/ops/studio-nav-bug-2026-04-19.md"
+  "docs/ops/PROD_OPS.md CLAUDE.md docs/ops/adding-a-domain.md docs/ops/vercel-dns-connect.md deploy/uptime-kuma/README.md docs/studio/user-guide.md docs/ops/studio-nav-bug-2026-04-19.md deploy/README.md api/lib/barkpark/sync/HANDOFF.md templates/DEPLOYING.md"
 tripwire 'v1=<hex>' \
   "docs/contracts/webhook-realtime.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 tripwire 'barkpark-dev-token' \
-  "docs/auth.md docs/api-v1.md CLAUDE.md api/CLAUDE.md js/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
+  "docs/auth.md docs/api-v1.md api/CLAUDE.md docs/setup/SETUP.md docs/setup/WINDOWS.md docs/setup/TASK-SYSTEM.md docs/ops/merge-gates.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md templates/place-directory/README.md tooling/doc-onboarding/TRUTH-AUDIT.md"
+
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
+  echo "ok:   allowlist staleness not applicable to a custom DOCS_ANCHORS_ROOT"
+else
+  echo "ok:   every tripwire allowlist entry still exists and still carries its literal"
+fi
 
 # --- 8. @canonical capability markers (code-side canonical pointers) ---------
 # In-code `@canonical capability:<slug>` markers name the ONE canonical impl of a
