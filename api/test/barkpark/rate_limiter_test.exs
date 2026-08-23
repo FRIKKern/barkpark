@@ -74,7 +74,8 @@ defmodule Barkpark.RateLimiterTest do
 
   test "prunes fully-refilled (stale) buckets once the table exceeds the bound" do
     now = System.monotonic_time(:millisecond)
-    stale = now - 600_000
+    # Tracks @stale_after_ms (1h): a 10-minute-old bucket is no longer stale.
+    stale = now - 4_000_000
     fresh = now
 
     # Fill past @max_entries (10_000) with stale buckets + one fresh bucket.
@@ -98,7 +99,8 @@ defmodule Barkpark.RateLimiterTest do
 
   test "does not prune while under the bound (a stale bucket survives)" do
     now = System.monotonic_time(:millisecond)
-    :ets.insert(:barkpark_rate_limiter, {{:token, "old-but-few"}, 5.0, now - 600_000})
+    # Tracks @stale_after_ms (1h): a 10-minute-old bucket is no longer stale.
+    :ets.insert(:barkpark_rate_limiter, {{:token, "old-but-few"}, 5.0, now - 4_000_000})
 
     # Under @max_entries → no prune, even though the entry is stale (the prune is
     # gated on table size so the hot path stays cheap).
