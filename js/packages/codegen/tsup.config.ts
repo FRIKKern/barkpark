@@ -13,7 +13,7 @@ export default defineConfig({
   treeshake: true,
   target: 'es2022',
   outDir: 'dist',
-  external: ['chokidar', 'cac', 'zod', 'prettier', '@barkpark/core'],
+  external: ['chokidar', 'cac', 'zod', 'prettier', 'jiti', '@barkpark/core'],
   outExtension({ format }) {
     return {
       js: format === 'cjs' ? '.cjs' : '.mjs',
