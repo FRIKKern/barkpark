@@ -426,7 +426,13 @@ const CHIP_WIDTHS = [721, 725, 730, 735, 740, 741, 750, 768, 769, 775, 780, 785,
 const HEIGHT = 800;
 const CLASSIC_SCROLLBARS = process.env.OVERFLOW_GUARD_CLASSIC_SCROLLBARS === "1";
 
-const SERVER_CAP = 8000;
+// cchi-w18-bl-overflow-guard-server-cap-and-leaked-child (charter D208): 8000
+// manufactured FALSE exit-2 refusals in a chained per-leg sweep on a loaded
+// host — three serve.mjs children bound AFTER the cap and were then left
+// listening, poisoning the next run through the STALE SERVER path (one bug
+// manufacturing the other). Raised, env-tunable, and the value in force is
+// printed in the run header so a refusal names the budget it missed.
+const SERVER_CAP = Number(process.env.OVERFLOW_GUARD_SERVER_CAP || 15000);
 const DEVTOOLS_CAP = 15000;
 const RENDER_CAP = 12000;
 const EVAL_CAP = 10000;
@@ -549,6 +555,21 @@ async function main() {
   const serveChild = spawn("node", [path.join(HERE, "serve.mjs"), "--port", String(PORT)], {
     stdio: "ignore",
   });
+  // LAST-DITCH REAPER, on EVERY exit path. The refusal path is supposed to
+  // reap through die() -> teardown(), but any path that reaches process.exit
+  // without it (a thrown-through exit, a future bare exit — one shipped in a
+  // draft of the okLine refusal and its leaked child squatted :4199 for the
+  // NEXT run) must still not leak the server. 'exit' handlers run on
+  // process.exit(); kill(0-args-sync) is all that is allowed here.
+  process.once("exit", () => {
+    try { serveChild.kill("SIGKILL"); } catch { /* gone */ }
+    try { if (chrome) chrome.kill("SIGKILL"); } catch { /* gone */ }
+  });
+  process.stdout.write(
+    `>> caps: server ${SERVER_CAP}ms` +
+    `${process.env.OVERFLOW_GUARD_SERVER_CAP ? " (OVERFLOW_GUARD_SERVER_CAP)" : " (default)"}` +
+    ` · render ${RENDER_CAP}ms · eval ${EVAL_CAP}ms · port ${PORT}\n`,
+  );
 
   let chrome = null;
   let cdp = null;
