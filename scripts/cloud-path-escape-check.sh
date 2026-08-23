@@ -232,6 +232,7 @@ internal/caddyfile/caddyfile.go
 internal/cli/cloud/providers_capabilities.json
 internal/cloudclient/**
 internal/provisioner/**
+api/test/support/totp_test_helper.ex
 js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
 scripts/cloud-path-escape-check.sh

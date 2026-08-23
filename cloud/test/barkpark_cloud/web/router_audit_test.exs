@@ -11,6 +11,8 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   # dedicated GitHub router tests run non-async), so this module must not race a
   # parallel test reading `GitHub.configured?/0`.
   use BarkparkCloud.DataCase, async: false
+
+  import BarkparkCloud.TotpTestHelper
   import Plug.Test
   import Plug.Conn
   import ExUnit.CaptureLog, only: [with_log: 1]
@@ -1388,7 +1390,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
         call(
           :post,
           "/v1/account/two-factor/confirm",
-          %{code: NimbleTOTP.verification_code(secret)},
+          %{code: totp_code_stable!(secret)},
           token
         )
 
@@ -1421,7 +1423,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
         call(
           :post,
           "/v1/account/two-factor/confirm",
-          %{code: NimbleTOTP.verification_code(secret)},
+          %{code: totp_code_stable!(secret)},
           member_token
         )
 
@@ -1437,7 +1439,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       {:ok, _codes} =
         Accounts.confirm_two_factor(
           Accounts.get_user(user.id),
-          NimbleTOTP.verification_code(secret)
+          totp_code_stable!(secret)
         )
 
       conn = call(:delete, "/v1/account/two-factor", nil, token)
@@ -1479,7 +1481,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
           call(
             :post,
             "/v1/account/two-factor/confirm",
-            %{code: NimbleTOTP.verification_code(secret)},
+            %{code: totp_code_stable!(secret)},
             token
           )
         end)
@@ -1501,7 +1503,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       {:ok, _} =
         Accounts.confirm_two_factor(
           Accounts.get_user(user.id),
-          NimbleTOTP.verification_code(secret)
+          totp_code_stable!(secret)
         )
 
       {conn, log} = with_log(fn -> call(:delete, "/v1/account/two-factor", nil, token) end)
