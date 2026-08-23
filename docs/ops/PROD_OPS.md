@@ -44,8 +44,7 @@ cd /opt/barkpark
 ```
 
 Exit code 0 = healthy. Non-zero = unhealthy; the script writes a tail of
-`systemctl status barkpark` to stderr before exiting so you have an
-immediate diagnostic without a second SSH round-trip.
+`systemctl status barkpark` to stderr before exiting.
 
 ## What it checks
 
@@ -106,9 +105,10 @@ applied one.
 Roll back by reverting source, never by resetting the server checkout:
 
 ```bash
-# On a workstation (ask before pushing, per repo rules):
-git revert <bad-sha>          # forward-moving revert commit on main
-git push
+# Workstation, on a BRANCH — main refuses a direct push (GH006 is
+# correct, not a retry cue):
+git revert <bad-sha>          # forward-moving revert commit
+git push -u origin <branch>   # open a PR; merge: scripts/bp-merge.sh
 
 # On the server:
 ssh root@89.167.28.206
@@ -123,7 +123,7 @@ rebuild must be the full `make rebuild` clean path (nuke `api/_build/prod`)
 — a partial clean serves stale BEAM/HEEx (Past Mistakes #1–3). If the bad
 commit included a migration, rolling back code does NOT undo the schema;
 write a compensating migration if the schema change itself must be undone.
-npm/SDK rollback is a separate runbook: `docs/ops/npm-rollback-playbook.md`.
+npm/SDK rollback: `docs/ops/npm-rollback-playbook.md`.
 
 ## Code anchors
 
