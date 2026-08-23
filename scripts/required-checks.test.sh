@@ -852,6 +852,76 @@ else
   ok "the rendered context is not reported — the difference is a set operation, not a message grep"
 fi
 
+# hgw5-bl-deadlock-pending-informational: a required context that RENDERED but
+# has not SETTLED (conclusion null) used to return exit 0 with output
+# byte-shaped like green. It must now print an INFORMATIONAL PENDING line —
+# naming the context, its status and its started_at — and STILL exit 0
+# (charter D76: never a fifth failing state; bp-merge pre-flights this once,
+# so a failing PENDING would refuse every freshly pushed PR).
+# (a) in_progress with a null conclusion key
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (.conclusion = null | .status = "in_progress")' \
+  "$TMP/runs.json" > "$TMP/runs-pending-ip.json"
+set +e
+OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-pending-ip.json" --sha probe --deadlock 2>&1)"
+RC=$?
+set -e
+if [ "$RC" -eq 0 ]; then
+  ok "an in_progress required context still exits 0 (informational, not a fifth failing state)"
+else
+  bad "an in_progress required context exited $RC, not 0 — PENDING must never refuse (D76)"
+fi
+if grep -q "PENDING: $KEPT_CTX has not settled (status=in_progress, started_at=2026-07-28T01:00:00Z)" <<<"$OUT"; then
+  ok "the PENDING line names the context, its status and its started_at (in_progress)"
+else
+  bad "no PENDING line for an in_progress required context — rendered-but-unsettled reads as green"
+fi
+
+# (b) queued with NO conclusion key at all (the API omits it before a run starts)
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (del(.conclusion) | .status = "queued")' \
+  "$TMP/runs.json" > "$TMP/runs-pending-q.json"
+set +e
+OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-pending-q.json" --sha probe --deadlock 2>&1)"
+RC=$?
+set -e
+if [ "$RC" -eq 0 ] && grep -q "PENDING: $KEPT_CTX has not settled (status=queued" <<<"$OUT"; then
+  ok "queued-with-no-conclusion also prints the PENDING line and exits 0"
+else
+  bad "queued-with-no-conclusion did not print PENDING/exit 0 (exit $RC)"
+fi
+
+# (c) pending + MISSING still exits 3 — the failing states keep winning
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (.conclusion = null | .status = "in_progress")' \
+  "$TMP/runs.json" > "$TMP/runs-pending-dead.json"
+set +e
+bash "$VERIFY" --spec "$TMP/dead2.json" --runs "$TMP/runs-pending-dead.json" --sha probe --deadlock >/dev/null 2>&1
+RC=$?
+set -e
+if [ "$RC" -eq 3 ]; then
+  ok "pending + missing still exits 3 — PENDING never outranks DEADLOCK"
+else
+  bad "pending + missing exited $RC, not 3"
+fi
+
+# (d) pending + CANCELLED still exits 4
+OTHER_CTX="$(SPEC_CONTEXTS | sed -n 2p)"
+if [ -n "$OTHER_CTX" ]; then
+  jq -c --arg keep "$KEPT_CTX" --arg oth "$OTHER_CTX" \
+    '(.check_runs[] | select(.name == $keep)) |= (.conclusion = null | .status = "in_progress")
+     | (.check_runs[] | select(.name == $oth)  | .conclusion) = "cancelled"' \
+    "$TMP/runs.json" > "$TMP/runs-pending-cancel.json"
+  set +e
+  bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-pending-cancel.json" --sha probe --deadlock >/dev/null 2>&1
+  RC=$?
+  set -e
+  if [ "$RC" -eq 4 ]; then
+    ok "pending + cancelled still exits 4 — PENDING never outranks RE-RUN"
+  else
+    bad "pending + cancelled exited $RC, not 4"
+  fi
+else
+  bad "spec has fewer than 2 contexts — the pending+cancelled probe has nothing to drive"
+fi
+
 # Every required context rendered, PLUS one name the spec never asked for.
 jq -c '.check_runs += [
   { "name": "Some brand new advisory gate", "conclusion": "failure", "started_at": "2026-07-28T01:00:00Z" } ]' \
