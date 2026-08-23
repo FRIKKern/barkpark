@@ -9,8 +9,18 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
   `Barkpark.Tenancy.Auth.permits?/2` (the `:write` action ← "write"/"admin").
 
   This is the enforcement-first slice of the tenancy retrofit. Workspace-scoped
-  authorization (`Barkpark.Tenancy.Auth.authorize/3`) is wired at the route
-  level by the sibling ROUTER task once `/w/:workspace` resolution lands.
+  authorization (`Barkpark.Tenancy.Auth.authorize/3`) landed and is supplied by
+  `Plugs.ResolveWorkspace` (`authorize(token_or_user, workspace.id, :read)`) —
+  but ONLY on the SCOPED `/w/:workspace_slug/p/:project_slug` pipelines that
+  plug runs on. An unscoped `[:api, :require_token, :require_write]` route
+  (e.g. `/v1/data/mutate`, `/v1/data/revision/:dataset/:id/restore`, legacy
+  `/api/documents`) carries no `ResolveWorkspace` and this plug alone does not
+  supply a workspace-membership check either — those routes answer tenancy
+  through dataset-scoped `scope_opts` in their controllers instead, a
+  different mechanism from workspace-slug membership (see
+  arpss-w10-bl-readonly-member-creates-projects, which found and fixed a
+  workspace-slug route with neither this plug nor ResolveWorkspace on its
+  pipeline: `WorkspaceController.create_project/2`).
   """
 
   import Plug.Conn

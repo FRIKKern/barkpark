@@ -363,6 +363,92 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert Tenancy.get_dataset(project, "production")
     end
 
+    # Regression for arpss-w10-bl-readonly-member-creates-projects. Drives the
+    # SAME chain that proved the hole: an admin mints a read-only token
+    # through the real HTTP mint endpoint (POST /w/:ws/p/:proj/v1/tokens,
+    # `TokenControllerTest`'s subject) — the endpoint whose own router comment
+    # says a read-only mint "can never be a privilege-mint" — then that token
+    # POSTs here. Before the fix (`member?/2` alone), `role_for_permissions/1`
+    # mapped ["read"] to the "member" ROLE, `role_permits?/3` grants that role
+    # :write, and this was 201 with a Project + production Dataset created.
+    test "403 for a READ-ONLY token minted via POST .../v1/tokens — no privilege escalation from read to write",
+         %{conn: conn, member_ws: member_ws, member_proj: member_proj} do
+      admin_raw = "ws-mint-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, admin} =
+        Auth.create_token(admin_raw, "mint admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} = TenancyAuth.create_membership(member_ws.id, admin.id, "admin")
+
+      mint_resp =
+        conn
+        |> authed(admin_raw)
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          "/w/#{member_ws.slug}/p/#{member_proj.slug}/v1/tokens",
+          Jason.encode!(%{"label" => "readonly-mint", "permissions" => ["read"]})
+        )
+
+      assert mint_resp.status == 201
+      minted_body = Jason.decode!(mint_resp.resp_body)
+      assert minted_body["permissions"] == ["read"]
+      readonly_raw = minted_body["token"]
+
+      # Sanity: the minted token really is a member (so this is testing the
+      # WRITE conjunct, not membership itself) and really is denied :write.
+      {:ok, readonly_token} = Auth.verify_token(readonly_raw)
+      assert TenancyAuth.member?(readonly_token, member_ws.id)
+      assert TenancyAuth.authorize(readonly_token, member_ws.id, :write) == {:error, :forbidden}
+
+      slug = "escalated-proj-#{System.unique_integer([:positive])}"
+
+      resp =
+        conn
+        |> authed(readonly_raw)
+        |> post("/api/workspaces/#{member_ws.slug}/projects", %{
+          "name" => "Should Not Exist",
+          "slug" => slug
+        })
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+      refute Tenancy.get_project(member_ws.slug, slug)
+    end
+
+    # Criterion 0's OTHER named shape: permissions: [] — no permissions at
+    # all, not even "read". role_for_permissions([]) also maps to "member"
+    # (role_for_permissions/1: "admin" in permissions -> "admin", else
+    # "member" — an empty list hits the else branch same as ["read"]), so
+    # this is the same member?-only hole from the opposite edge: a token that
+    # cannot even list is denied create too, via the same authorize(:write)
+    # conjunct (permits?/2's `Enum.any?(@write_perms, &(&1 in perms))` is
+    # trivially false over an empty perms list).
+    test "403 for a member token with NO permissions at all (permissions: [])", %{
+      conn: conn,
+      member_ws: member_ws
+    } do
+      raw = "ws-noperm-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "no perms", "test", [])
+      {:ok, _} = TenancyAuth.create_membership(member_ws.id, token.id, "member")
+
+      assert TenancyAuth.member?(token, member_ws.id)
+      assert TenancyAuth.authorize(token, member_ws.id, :write) == {:error, :forbidden}
+
+      slug = "noperm-proj-#{System.unique_integer([:positive])}"
+
+      resp =
+        conn
+        |> authed(raw)
+        |> post("/api/workspaces/#{member_ws.slug}/projects", %{
+          "name" => "Should Not Exist Either",
+          "slug" => slug
+        })
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+      refute Tenancy.get_project(member_ws.slug, slug)
+    end
+
     test "403 for a NON-member workspace — and still writes nothing", %{
       conn: conn,
       raw_token: raw,
