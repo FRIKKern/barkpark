@@ -205,6 +205,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   defdelegate paper_pane_op(socket, op), to: Paper
 
   @doc false
+  defdelegate paper_publish(socket), to: Paper
+
+  @doc false
+  defdelegate sidebar_description_change(socket, value), to: Paper
+
+  @doc false
+  defdelegate sidebar_label_add(socket, params), to: Paper
+
+  @doc false
   defdelegate document_op(socket, op), to: Paper
 
   @doc false
