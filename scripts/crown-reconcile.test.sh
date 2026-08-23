@@ -674,6 +674,50 @@ run_cr 4 "the in-flight run is not counted as a successful run" \
   --runs-fixture "$RUNS_INFLIGHT_D" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FUT54"
 saw "POPULATION: 2 successful deploy.yml run(s)" "the success population is unchanged by construction — the in-flight row is fetched, never counted"
 
+# (r6) THE CAP: an in-flight run is an alibi WITH AN EXPIRY. Unbounded, the arm
+# re-deferred for as long as GitHub reported the run in_progress, so a HUNG run
+# bought amnesty bounded only by GitHub's ~6h default job timeout — a bound the
+# script never stated (dr-w34-fu-inflight-deferral-is-unbounded). The pair (r1)
+# + (r6) is the mutation proof in both directions: strip the cap condition and
+# (r6) reds (rc 4, deferral, where 1 is pinned); zero the cap and (r1) reds.
+CAP="$(sed -n 's/^SERVING_INFLIGHT_CAP_SECONDS=\([0-9][0-9]*\).*/\1/p' "$CR" | head -1)"
+GRACE_S="$(sed -n 's/^SERVING_GRACE_SECONDS=\([0-9][0-9]*\).*/\1/p' "$CR" | head -1)"
+if [ -z "$CAP" ]; then
+  bad "SERVING_INFLIGHT_CAP_SECONDS is not derivable from $CR — an unbounded in-flight arm is the exact defect this section pins"
+else
+  # The BAND, both edges reasoned: at or below SERVING_GRACE_SECONDS the
+  # in-flight arm would be a STRICTER deferral than the plain grace beside it
+  # (an alibi worth less than no alibi); at or beyond 21600s it re-creates
+  # GitHub's own default job timeout and caps nothing.
+  if [ "$CAP" -gt "${GRACE_S:-1200}" ] && [ "$CAP" -lt 21600 ]; then
+    ok "the in-flight cap (${CAP}s) sits inside the reasoned band GRACE < CAP < 21600"
+  else
+    bad "the in-flight cap is ${CAP}s, outside the band ${GRACE_S:-1200} < CAP < 21600 — it either outranks the plain grace or re-states GitHub's own timeout"
+  fi
+  NOW_S="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$NOW" +%s 2>/dev/null || date -u -d "$NOW" +%s)"
+  CR_STATE="$TMP/state-inflight-expired.txt"
+  printf '%s %s\n' "$SHA_D" "$((NOW_S - CAP - 60))" > "$CR_STATE"
+  run_cr 1 "a run in_progress since beyond the cap no longer defers — the hung run is accused" \
+    --runs-fixture "$RUNS_INFLIGHT_D" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+  saw "SERVING-INFLIGHT-EXPIRED" "the expiry is its own named sentence, not a generic red"
+  saw "9001" "and it still NAMES the hung run, so the reader can go look at it"
+  saw "past the ${CAP}s cap" "and it states the cap it charged against"
+  saw "SERVING-UNRECORDED" "the missing row is accused, no longer excused"
+  not_saw "SERVING IN FLIGHT:" "the deferral sentence is gone — this is not a deferral"
+  not_saw "NOT YET DUE" "and rc 1 means accusation, never the rc-4 warning"
+  CR_STATE=""
+
+  # (r6b) ONE SECOND INSIDE the cap still defers: the boundary belongs to the
+  # alibi, so a cap tightened by accident reds HERE and not in production.
+  CR_STATE="$TMP/state-inflight-inside.txt"
+  printf '%s %s\n' "$SHA_D" "$((NOW_S - CAP + 60))" > "$CR_STATE"
+  run_cr 4 "the same run 60s inside the cap is still a named deferral" \
+    --runs-fixture "$RUNS_INFLIGHT_D" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_BASE" --health-fixture "$HEALTH_FRESH"
+  saw "SERVING IN FLIGHT" "inside the cap the alibi still holds"
+  not_saw "SERVING-INFLIGHT-EXPIRED" "and no expiry is invented before its time"
+  CR_STATE=""
+fi
+
 section "(h) a docs-only run delivered NOTHING and must not be counted BEHIND"
 RUNS_DOCS="$(runs_json runs-docs "$SHA_A:$IN1" "$SHA_C:$IN2")"
 JOBS_DOCS="$(jobs_json jobs-docs "1:success" "2:skipped")"

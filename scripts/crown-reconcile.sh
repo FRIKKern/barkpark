@@ -346,6 +346,19 @@ SERVING_GRACE_SECONDS=1200
 # it silently. scripts/crown-reconcile.test.sh reads this constant back out and
 # asserts the BAND 4 <= EPS < 54, so a later widening reds.
 SERVING_SKEW_EPSILON_SECONDS=15
+# How long an `in_progress` deploy.yml run for the served sha may keep DEFERRING
+# the missing-row accusation (charged against the sha's FIRST-SEEN instant, like
+# the grace above). Without a cap the in-flight arm re-defers for as long as
+# GitHub reports the run in_progress, so a HUNG run bought amnesty bounded only
+# by GitHub's own ~6h default job timeout — a bound this script never stated
+# (dr-w34-fu-inflight-deferral-is-unbounded). MEASURED, not felt: across the 50
+# most recent successful deploy.yml runs (runs API, read 2026-08-23), duration
+# was median 501s, p90 1175s, max 6495s. The cap must EXCEED that observed max —
+# a slow-but-real deploy is this arm's whole purpose — and fall far below the
+# ~21600s a hung job may sit in_progress by default. 10800s is ~1.66x the
+# observed maximum. Past it, the run stops being an alibi: the sha is accused
+# (SERVING-INFLIGHT-EXPIRED + SERVING-UNRECORDED, exit 1), naming the hung run.
+SERVING_INFLIGHT_CAP_SECONDS=10800
 # How long a graced sha stays on the RE-ASK LIST. It is accused on every run in
 # between, so this bounds the LIST, not the accusation. See the boundary above.
 REASK_MAX_SECONDS=86400
@@ -1011,6 +1024,8 @@ SERVING_SHA=""
 SERVING_SKEW=0
 SERVING_SKEW_AHEAD=0
 SERVING_INFLIGHT_RUN=""
+SERVING_INFLIGHT_EXPIRED=""
+SERVING_INFLIGHT_AGE=0
 SERVING_SINCE=""
 GRACED_THIS_RUN=""
 if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
@@ -1036,16 +1051,11 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
         # already on the re-ask list cannot buy a fresh grace by being restarted.
         #
         # `graced_age` bounds the EPSILON and GRACE arms below at
-        # SERVING_GRACE_SECONDS, so neither can defer forever. THE IN-FLIGHT ARM
-        # IS NOT BOUNDED BY IT and that is a real gap, stated here rather than
-        # left for a reader to discover: it re-defers for as long as GitHub
-        # reports the run `in_progress`, so a HUNG deploy run buys amnesty
-        # bounded only by GitHub's own run timeout — which is not a bound this
-        # script states or can see. Tracked as
-        # dr-w34-fu-inflight-deferral-is-unbounded; the cap is deliberately NOT
-        # invented here, because every other threshold in this block carries a
-        # measured derivation and a felt number would be the one unmeasured
-        # constant in the chain.
+        # SERVING_GRACE_SECONDS, and the IN-FLIGHT arm at its own, longer
+        # SERVING_INFLIGHT_CAP_SECONDS (measured derivation at the constant),
+        # so none of the three can defer forever. A run still `in_progress`
+        # past the cap stops being an alibi and the accusation fires below as
+        # SERVING-INFLIGHT-EXPIRED, naming the hung run.
         first_seen="$(state_first_seen "$SERVING_SHA")"
         [ -n "$first_seen" ] || first_seen="$NOW_EPOCH"
         graced_age=$((NOW_EPOCH - first_seen))
@@ -1057,13 +1067,23 @@ if [ -n "$HEALTH_FIXTURE" ] || [ "$FIXTURE_MODE" != "1" ]; then
         # clock has not reached. Asked in the other order, the skew arm wins
         # first and the crown pages on a deploy nobody has finished.
         inflight_run="$(serving_run_in_flight "$SERVING_SHA")"
-        if [ -n "$inflight_run" ]; then
+        if [ -n "$inflight_run" ] && [ "$graced_age" -lt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then # MUT:G-INFLIGHT-CAP
           SERVING_INFLIGHT_RUN="$inflight_run"
           # defer(), NOT reason(). Everything was read; the answer is "not yet".
           # The debt goes to the re-ask list with every other deferral, so a
           # deploy that runs and still never records is accused by a later run.
           GRACED_THIS_RUN="$SERVING_SHA"
           defer "SERVING IN FLIGHT: the serving sha $SERVING_SHA has no cp row, but deploy.yml run ${inflight_run} for that exact sha is STILL RUNNING — the recorder has not had its turn, so the accusation is DEFERRED to the next run rather than fired at a deploy in progress (first seen $(iso_of "$first_seen"))"
+        elif [ -n "$inflight_run" ]; then
+          # The alibi EXPIRED. The run has reported in_progress since beyond
+          # SERVING_INFLIGHT_CAP_SECONDS (charged against first-seen): that is
+          # a hung run, not a slow deploy, and a hung run must not hold the
+          # accusation off for the rest of GitHub's own timeout. Falls to RED
+          # with its own named sentence below, never to the skew arm — the
+          # disagreement here is explained, and its explanation is the fault.
+          SERVING_INFLIGHT_EXPIRED="$inflight_run"
+          SERVING_INFLIGHT_AGE="$graced_age"
+          SERVING_RED=1
         elif [ "${since_epoch:-0}" -gt 0 ] && [ "$age" -lt 0 ] && [ $((0 - age)) -le "$SERVING_SKEW_EPSILON_SECONDS" ] && [ "$graced_age" -lt "$SERVING_GRACE_SECONDS" ]; then
           # Ordinary inter-host jitter, measured at 3s on an NTP-healthy plane.
           # A few seconds of disagreement between two machines is not a fault,
@@ -1175,6 +1195,9 @@ if [ "$WRONG" -gt 0 ]; then
 fi
 if [ "$SERVING_SKEW" -gt 0 ]; then
   say "SERVING-CLOCK-SKEW: barkpark.cloud reports serving_since ${SERVING_SINCE:-<none>}, which is ${SERVING_SKEW_AHEAD}s in the FUTURE. A grace granted off a clock that disagrees is not leniency, it is a fault — so the missing row below is ACCUSED rather than excused."
+fi
+if [ -n "$SERVING_INFLIGHT_EXPIRED" ]; then
+  say "SERVING-INFLIGHT-EXPIRED: deploy.yml run ${SERVING_INFLIGHT_EXPIRED} for the serving sha has reported in_progress for ${SERVING_INFLIGHT_AGE}s (first-seen-charged), past the ${SERVING_INFLIGHT_CAP_SECONDS}s cap — a hung run is not an alibi, so the missing row below is ACCUSED rather than deferred again."
 fi
 if [ "$SERVING_RED" -gt 0 ]; then
   say "SERVING-UNRECORDED: barkpark.cloud reports it is SERVING ${SERVING_SHA} and the crown has no cp row for it — production is running a commit its own record has never heard of."
