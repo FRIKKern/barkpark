@@ -132,10 +132,18 @@ defmodule BarkparkWeb.SearchController do
         record_result =
           SearchIntelligence.record(dataset, params, count, ms, record_opts)
 
+        # `searchEventId: null` IS the honest wire answer for every no-write
+        # outcome here (pds-bl-w36-record6-conflation): the id's only use is
+        # interaction linking, and "nothing was recorded" needs no companion
+        # field — unlike the interaction receipt, no success claim is made. The
+        # CAUSE is no longer destroyed: `record/6` names it ({:skipped, reason})
+        # and telemetry carries it; a reader who wants it on the wire changes
+        # this case, not the recorder.
         search_event_id =
           case record_result do
             {:ok, id} -> id
-            _ -> nil
+            {:skipped, _reason} -> nil
+            {:rejected, _reason} -> nil
           end
 
         caller_context = CallerContext.from_conn(conn)
