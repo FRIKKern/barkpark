@@ -183,7 +183,7 @@ const HOST = ["", "box.barkpark.cloud"];
 const AUTHORITY = ["grant", "refuse", "unknown"];
 const AUTHORITY_STATE = [undefined, "loading", "failed", "loaded"];
 
-const painted = new Map();        // "verb mode" -> {verb, mode}
+const painted = new Map();        // "verb\u0000mode" -> {verb, mode}
 const paintedVerbs = new Set();
 const sequences = new Set();      // JSON of the painted verb order
 let paintedEqualsDeclaredAlways = true;
@@ -221,7 +221,7 @@ for (const [capName, capPayload] of CAP_PAYLOADS) {
             }
             order.push(action.verb);
             paintedVerbs.add(action.verb);
-            painted.set(`${action.verb} ${action.mode}`, { verb: action.verb, mode: action.mode });
+            painted.set(`${action.verb}\u0000${action.mode}`, { verb: action.verb, mode: action.mode });
           }
 
           sequences.add(JSON.stringify(order));
