@@ -2,6 +2,7 @@
 
 import datetime as dt
 import importlib.util
+import io
 import json
 import os
 import pathlib
@@ -240,6 +241,26 @@ class ChroniclePaperTest(unittest.TestCase):
 
         self.assertEqual("barkpark-chronicle", completed[-1])
         self.assertEqual({"day-a", "week-a"}, set(completed[:-1]))
+
+    def test_publish_error_names_the_failing_paper_and_response(self):
+        error = chronicle.urllib.error.HTTPError(
+            "https://example.test/ingest",
+            409,
+            "Conflict",
+            {},
+            io.BytesIO(b'{"error":"duplicate"}'),
+        )
+        with mock.patch.object(chronicle, "current_source_doc", return_value=None):
+            with mock.patch.object(chronicle.urllib.request, "urlopen", side_effect=error):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    r"/papers/day-a: HTTP 409: .*duplicate",
+                ):
+                    chronicle.publish_one(
+                        {"slug": "day-a", "source_doc": "a"},
+                        "https://example.test",
+                        "secret",
+                    )
 
 
 if __name__ == "__main__":

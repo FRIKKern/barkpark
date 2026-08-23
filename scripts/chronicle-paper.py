@@ -696,18 +696,24 @@ def current_source_doc(api_url: str, slug: str) -> str | None:
 
 
 def publish_one(payload: dict[str, Any], api_url: str, token: str) -> str:
-    endpoint = api_url.rstrip("/") + "/v1/plugins/bulldocs/papers"
-    if current_source_doc(api_url, payload["slug"]) == payload["source_doc"]:
-        return f"unchanged /papers/{payload['slug']}"
-    request = urllib.request.Request(
-        endpoint,
-        data=json.dumps(payload, separators=(",", ":")).encode(),
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        receipt = json.load(response)
-    return f"published {receipt['liveview_path']} rev {receipt['rev']}"
+    try:
+        endpoint = api_url.rstrip("/") + "/v1/plugins/bulldocs/papers"
+        if current_source_doc(api_url, payload["slug"]) == payload["source_doc"]:
+            return f"unchanged /papers/{payload['slug']}"
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload, separators=(",", ":")).encode(),
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            receipt = json.load(response)
+        return f"published {receipt['liveview_path']} rev {receipt['rev']}"
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(
+            f"/papers/{payload['slug']}: HTTP {exc.code}: {detail}"
+        ) from exc
 
 
 def publish(
