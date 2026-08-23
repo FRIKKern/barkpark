@@ -1665,13 +1665,22 @@
         title: "Sign out everywhere else?",
         confirmLabel: "Sign them out",
         busyLabel: "Signing out…",
-        // cch-w53-s1 — NO timing word. The old copy said "immediately", and it
-        // was measured false: an already-open SSE stream keeps delivering team
-        // events after revoke_all_user_sessions, unbounded (sse_loop/1 is a bare
-        // receive/after 25_000 park that re-reads no credential). A replacement
-        // timing ("within 25 seconds") would be false too until the mechanism
-        // slice lands, so this states the OUTCOME only — true before and after.
+        // cch-w53-s1 — no INVENTED timing word ("immediately" was measured
+        // false). cch-w53-s4 then landed the mechanism: sse_loop/3 re-checks the
+        // session per heartbeat, so an already-open stream now ENDS bounded by
+        // one ~25s tick (measured first-hand on the fixed lib with production
+        // timings: the chunked terminator arrived inside the first 25s window;
+        // a t+55s broadcast delivered nothing). cch-w53-bl DECIDES: state the
+        // bound, SOFTLY — "about a minute" is deliberately weaker than the
+        // measured ~25s (per-heartbeat, not instant; never stronger than
+        // measured), because a user watching another tab keep working for 20
+        // seconds with no explanation reads "it didn't work". THE SENTENCE
+        // BELONGS TO THIS SHEET ONLY: per-row revoke (DELETE
+        // /v1/account/sessions/:id) does NOT end that device's stream
+        // (cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream)
+        // and must not inherit this claim.
         bodyHtml: "Every other browser and device is signed out. " +
+          "Open screens elsewhere lose access within about a minute. " +
           "This device stays signed in, and anyone signed out can sign back in with their password.",
         // Named so the recovery arm can RE-ISSUE the request (a recovery
         // handler that only calls busy() spins the button forever).
