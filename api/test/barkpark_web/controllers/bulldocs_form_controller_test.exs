@@ -6,12 +6,21 @@ defmodule BarkparkWeb.BulldocsFormControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.RateLimiterSandbox
   import Barkpark.TenancyFixtures
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Repo
+
+  # Every submission is billed to an IP-keyed bucket (`{:bulldocs_form, ip}`,
+  # capacity 20, refill 1/min) in the WHOLE-NODE :barkpark_rate_limiter table.
+  # In tests every direct conn is 127.0.0.1, so without a per-test reset this
+  # file spends ONE shared loopback budget for the entire run — the same
+  # untreated shape PR #13284 fixed on token revoke — and the spam test's
+  # forwarded-IP buckets stay spent across repeated runs in one BEAM.
+  setup :reset_rate_limiter!
 
   defp path(slug), do: "/v1/plugins/bulldocs/papers/#{slug}/form-responses"
 
