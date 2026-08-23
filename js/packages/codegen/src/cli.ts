@@ -78,6 +78,23 @@ let configLoadSeq = 0
 async function loadConfig(configPath?: string): Promise<Partial<BarkparkCodegenConfig>> {
   if (!configPath) return {}
   const abs = resolve(process.cwd(), configPath)
+  // The advertised `barkpark.config.ts` cannot load through the native ESM
+  // loader on the Node 20 engines floor (ERR_UNKNOWN_FILE_EXTENSION), and
+  // Node 22's type-stripping covers only erasable syntax (an enum throws
+  // ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX) — so .ts/.mts/.cts configs go through
+  // jiti. moduleCache + fsCache are OFF so `--watch` re-reads an edited
+  // config: the same freshness guarantee the `?t=` cache-bust below gives
+  // native loads (see loadconfig-cache.test.ts). The discriminating proof
+  // lives in cli-ts-config.test.ts, which drives the BUILT CLI in a
+  // subprocess: an in-process vitest import of a .ts file is transpiled by
+  // Vite's module runner, so an in-process test passes with or without this
+  // branch and proves nothing about the shipped loader.
+  if (/\.[cm]?ts$/.test(abs)) {
+    const { createJiti } = await import('jiti')
+    const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false })
+    const mod = (await jiti.import(abs)) as { default?: BarkparkCodegenConfig }
+    return mod.default ?? {}
+  }
   const url = `${pathToFileURL(abs).href}?t=${++configLoadSeq}`
   const mod = (await import(url)) as {
     default?: BarkparkCodegenConfig

@@ -69,3 +69,34 @@ describe('loadConfig — a rewritten config is re-read, not served from the ESM 
     expect(second).toMatchObject({ dataset: 'beta', output: 'flag.types.ts' })
   })
 })
+
+/**
+ * The --watch freshness guarantee for jiti-loaded .ts configs
+ * (cca-backlog-ts-config-loader). NOTE what this does and does not prove:
+ * in-process, Vite's module runner would transpile even a native import of a
+ * .ts file, so an in-process test cannot distinguish the jiti branch from the
+ * native fallback — the loader-existence proof lives in cli-ts-config.test.ts
+ * (built CLI, subprocess). What CAN fail here: jiti's moduleCache/fsCache being
+ * turned back on would serve the FIRST config on the second resolve, exactly
+ * the stale-watch bug the ?t= cache-bust kills for native loads.
+ */
+describe('loadConfig — an edited .ts config is re-read (jiti caches off)', () => {
+  let dir: string | undefined
+
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true })
+    dir = undefined
+  })
+
+  it('returns the edited values on a second resolve of the same .ts path', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'bp-codegen-ts-'))
+    const configPath = join(dir, 'barkpark.config.ts')
+    const body = (dataset: string) =>
+      `const config: { dataset: string; output: string; apiUrl: string } = {\n  dataset: '${dataset}',\n  output: 'ts.types.ts',\n  apiUrl: 'http://localhost:4000',\n}\nexport default config\n`
+    await writeFile(configPath, body('alpha'), 'utf8')
+    expect(await resolveConfig({ config: configPath })).toMatchObject({ dataset: 'alpha' })
+
+    await writeFile(configPath, body('beta'), 'utf8')
+    expect(await resolveConfig({ config: configPath })).toMatchObject({ dataset: 'beta' })
+  })
+})
