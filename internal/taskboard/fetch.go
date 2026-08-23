@@ -15,6 +15,8 @@ import (
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
+const snapshotFetchAttempts = 3
+
 // FetchSnapshot composes the board's raw state from the two proven task
 // endpoints in a single Snapshot:
 //
@@ -183,29 +185,56 @@ func getJSON(c *apiclient.Client, path string) ([]byte, error) {
 // and why ("GET /v1/tasks/prime: status 401: …"). The cap is a refusal, never a
 // trim — a truncated JSON body would parse as garbage or a plausible prefix.
 func getJSONCtx(ctx context.Context, c *apiclient.Client, path string) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < snapshotFetchAttempts; attempt++ {
+		body, retry, err := getJSONAttempt(ctx, c, path)
+		if err == nil {
+			return body, nil
+		}
+		lastErr = err
+		if !retry || attempt == snapshotFetchAttempts-1 {
+			return nil, err
+		}
+
+		// Guerrilla can briefly refuse a DB checkout while a large task query is
+		// completing. Retry only server-side failures, inside the existing 30s
+		// snapshot deadline; auth, malformed requests, oversize bodies and local
+		// transport failures still fail immediately and truthfully.
+		delay := time.Duration(attempt+1) * 150 * time.Millisecond
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, fmt.Errorf("GET %s: %w", path, ctx.Err())
+		}
+	}
+	return nil, lastErr
+}
+
+func getJSONAttempt(ctx context.Context, c *apiclient.Client, path string) ([]byte, bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL()+path, nil)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+		return nil, false, fmt.Errorf("GET %s: %w", path, err)
 	}
 	if token := c.Token(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := snapshotHTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+		return nil, false, fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBoardFetchBytes+1))
 	if err != nil {
-		return nil, fmt.Errorf("GET %s: %w", path, err)
+		return nil, false, fmt.Errorf("GET %s: %w", path, err)
 	}
 	if int64(len(body)) > maxBoardFetchBytes {
-		return nil, fmt.Errorf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", path, maxBoardFetchBytes)
+		return nil, false, fmt.Errorf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", path, maxBoardFetchBytes)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: status %d%s", path, resp.StatusCode, bodyHint(body))
+		retry := resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode <= 599
+		return nil, retry, fmt.Errorf("GET %s: status %d%s", path, resp.StatusCode, bodyHint(body))
 	}
-	return body, nil
+	return body, false, nil
 }
 
 // bodyHint condenses an error body into a short single-line ": …" suffix so a

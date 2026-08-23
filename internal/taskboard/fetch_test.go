@@ -171,6 +171,47 @@ func TestFetchSnapshot_ListError(t *testing.T) {
 	}
 }
 
+func TestGetJSONRetriesTransientServerFailure(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts < snapshotFetchAttempts {
+			http.Error(w, `{"error":{"code":"internal_error"}}`, http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"docs":[]}`))
+	}))
+	defer srv.Close()
+
+	body, err := getJSON(newClient(srv.URL), "/v1/tasks?limit=1000")
+	if err != nil {
+		t.Fatalf("transient 500s did not recover: %v", err)
+	}
+	if attempts != snapshotFetchAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, snapshotFetchAttempts)
+	}
+	if !strings.Contains(string(body), `"docs":[]`) {
+		t.Fatalf("recovered body = %q", body)
+	}
+}
+
+func TestGetJSONDoesNotRetryClientFailure(t *testing.T) {
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	_, err := getJSON(newClient(srv.URL), "/v1/tasks?limit=1000")
+	if err == nil || !strings.Contains(err.Error(), "status 401") {
+		t.Fatalf("client failure = %v, want status 401", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("401 attempts = %d, want 1", attempts)
+	}
+}
+
 // TestFetchSnapshot_CorpusPastManifestCap — the 2026-07-24 incident: the
 // guerrilla corpus crossed apiclient's 8 MiB manifest cap and the board went
 // dark. The board's fetch now carries its own maxBoardFetchBytes bound, so a

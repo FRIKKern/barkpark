@@ -218,7 +218,9 @@ func spineRows(b Board, st UIState) []SpineRow {
 
 	if !emitted {
 		text := "All clear — no open tasks."
-		if isSyncing(st) {
+		if st.ConnProblem != "" {
+			text = "Unable to load tasks — " + st.ConnProblem + "."
+		} else if isSyncing(st) {
 			text = "syncing…"
 		}
 		rows = append(rows, SpineRow{Kind: spineEmpty, text: text})

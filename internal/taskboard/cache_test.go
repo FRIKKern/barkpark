@@ -183,6 +183,31 @@ func TestCacheKeyStableAndDistinct(t *testing.T) {
 	}
 }
 
+func TestLegacyCacheMigratesWithoutBlankFirstPaint(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		BaseURL:   "https://guerrilla.barkpark.cloud",
+		Workspace: "default",
+		Project:   "default",
+		Dataset:   "production",
+		CacheDir:  dir,
+	}
+	cached := Snapshot{
+		Tasks:     []Task{{DocID: "still-here", Title: "Cached task", Lifecycle: lifeOpen}},
+		Counts:    map[string]int{lifeOpen: 1},
+		FetchedAt: fixedNow,
+	}
+	SaveCachedSnapshot(dir, legacyCacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project), cached)
+
+	m := newModel(nil, "", cfg)
+	if _, ok := m.taskByID("still-here"); !ok {
+		t.Fatal("dataset-key upgrade discarded the legacy cached task")
+	}
+	if _, ok := LoadCachedSnapshot(dir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset)); !ok {
+		t.Fatal("legacy cache was not migrated to the dataset-scoped key")
+	}
+}
+
 // TestCachePrimedStartIsHonestAndDoesNotFlash is the model-level proof of the
 // two first-paint contracts (charter decisions #9 and #20):
 //

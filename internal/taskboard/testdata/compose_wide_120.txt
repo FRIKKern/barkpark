@@ -1,40 +1,40 @@
 
- barkpark · tasks      ⇄ guerrilla  ● live · 2m↔  ──────────────────────────────────────────────────────────────────
-   tasks ·································· 1/4│ │ Wire the SSE live bridge to the task board pane                  │
- └─▎⠋ Wire the SSE live bridge to the task boa…│ │ ⠋ in_progress · P1 · task · fable-3                              │
-      P1 · ✓✓○ 2/3 · fable-3 · 4m              │ │                                                                  │
-   ├─ ✓ Decode the change feed envelope        │ │ criteria 2/3                                                     │
-   ├─ ⠋ Debounce the refetch at 750ms          │ │   ✓ SSE dirty-bit triggers a debounced refetch                   │
-   │    fable-3 · 4m                           │ │     ↳ internal/taskboard/live.go:42                              │
-   └─ ○ Honest connection dot states           │ │   ✓ Connection dot renders honestly                              │
-                                               │ │   ○ A stuck reconnect never reads ConnLive                       │
-                                               │ │                                                                  │
-                                               │ │ purpose · derived                                                │
-                                               │ │   part of   standalone task                                      │
-                                               │ │   impact    blocks 0 · blocked by 0                              │
-                                               │ │   does      Wire the SSE live bridge to the task board pane      │
-                                               │ │   why       Why this task is worth doing is not recorded.        │
-                                               │ │   endgame   Complete this task and its 3 direct children.        │
-                                               │ │   important 90/100 — Derived from P1 queue priority.             │
-                                               │ │   relevant  90/100 — Derived from active in-progress status.     │
-                                               │ │   proof     Recorded task intent — Wire the SSE live bridge to   │
-                                               │ │             the task board pane — document.title                 │
-                                               │ │   proof     Acceptance contract — 3 recorded criteria —          │
-                                               │ │             content.acceptance_criteria                          │
-                                               │ │   derived from recorded task facts · add authored purpose to ov… │
-                                               │ │                                                                  │
-                                               │ │ created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)  │
-                                               │ │                                                                  │
-                                               │ │ ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)               │
-                                               │ │                                                                  │
-                                               │ │   The board must repaint the moment the queue moves.             │
-                                               │ │                                                                  │
-                                               │ │   • one dirty bit signals the refetch                            │
-                                               │ │   • one snapshot is the single source of truth                   │
-                                               │ │                                                                  │
-                                               │ │ labels  proj:task-tui · area:live                                │
-                                               │ │                                                                  │
-                                               │ │ claim  fable-3 · epoch 4 · claimed 4m ago (Jul 04, 17:26)        │
- ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ │                                                                  │
- ⠋ 2 in flight · ○ 1 ready · ✓ 1 done       33%│ │ children 1/3 done                                                │
- jk · enter open · esc back · c claim · x clos…│ │   ↓ more below                                                   │
+ barkpark · tasks      ⇄ guerrilla  ● live · 2m↔ Wire the SSE live bridge to the task board pane
+   tasks ·································· 1/4│ ⠋ in_progress · P1 · task · fable-3
+ └─▎⠋ Wire the SSE live bridge to the task boa…│
+      P1 · ✓✓○ 2/3 · fable-3 · 4m              │ criteria 2/3
+   ├─ ✓ Decode the change feed envelope        │   ✓ SSE dirty-bit triggers a debounced refetch
+   ├─ ⠋ Debounce the refetch at 750ms          │     ↳ internal/taskboard/live.go:42
+   │    fable-3 · 4m                           │   ✓ Connection dot renders honestly
+   └─ ○ Honest connection dot states           │   ○ A stuck reconnect never reads ConnLive
+                                               │
+                                               │ purpose · derived
+                                               │   part of   standalone task
+                                               │   impact    blocks 0 · blocked by 0
+                                               │   does      Wire the SSE live bridge to the task board pane
+                                               │   why       Why this task is worth doing is not recorded.
+                                               │   endgame   Complete this task and its 3 direct children.
+                                               │   important 90/100 — Derived from P1 queue priority.
+                                               │   relevant  90/100 — Derived from active in-progress status.
+                                               │   proof     Recorded task intent — Wire the SSE live bridge to the
+                                               │             task board pane — document.title
+                                               │   proof     Acceptance contract — 3 recorded criteria —
+                                               │             content.acceptance_criteria
+                                               │   derived from recorded task facts · add authored purpose to overri…
+                                               │
+                                               │ created 2d ago (Jul 02, 09:12) · updated 8m ago (Jul 04, 17:22)
+                                               │
+                                               │ ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)
+                                               │
+                                               │   The board must repaint the moment the queue moves.
+                                               │
+                                               │   • one dirty bit signals the refetch
+                                               │   • one snapshot is the single source of truth
+                                               │
+                                               │ labels  proj:task-tui · area:live
+                                               │
+                                               │ claim  fable-3 · epoch 4 · claimed 4m ago (Jul 04, 17:26)
+                                               │
+ ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁│ children 1/3 done
+ ⠋ 2 in flight · ○ 1 ready · ✓ 1 done       33%│   ✓ Decode the change feed envelope  1d
+ jk · enter open · esc back · c claim · x clos…│   ↓ more below
