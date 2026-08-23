@@ -88,14 +88,34 @@ defmodule Barkpark.PubSubSingletons do
   in-flight query.
 
   Never raises. A singleton that is not running (plugin disabled, app partly
-  started) is skipped; one that does not answer within `@drain_timeout_ms` is
-  logged and left, because a test's `on_exit` failing is strictly worse than the
-  disconnect it was trying to prevent.
+  started) is skipped. One still alive past `@drain_timeout_ms` is logged and
+  RETRIED, not abandoned — see `await_quiesced/3` for why a fixed wall-clock
+  ceiling is the wrong gate for "has this live process been scheduled yet."
+  Only a genuinely dead/hung singleton (caught by `@drain_deadlock_guard_ms`,
+  four times the warning threshold, but still comfortably under
+  ExUnit's own default per-test timeout) gives up, because a test's
+  `on_exit` hanging forever is strictly worse than the disconnect this barrier
+  exists to prevent — the ORIGINAL failure mode `@drain_timeout_ms` guarded
+  against, which a liveness check now catches directly instead.
   """
   @spec drain!(timeout()) :: :ok
   def drain!(timeout \\ @drain_timeout_ms) do
     Enum.each(@drained, &quiesce(&1, timeout))
   end
+
+  # A deadlock circuit-breaker for genuinely-stuck work (e.g. a Postgres
+  # statement that never returns), which this repo's own Postgrex config
+  # gives no smaller bound to catch first — NOT a "give the race more room"
+  # number (that was tried and rejected — see the moduledoc note above).
+  # Measured (2026-08-23, 8 concurrent `yes` stressors on an already
+  # oversubscribed box): a value here at ExUnit's own default 60_000ms test
+  # timeout collides with it when `drain!/1` runs inside a test body (as
+  # `bridge_sandbox_cascade_test.exs` does directly, to capture the barrier's
+  # log) — ExUnit kills the whole test before this guard gets to log its own,
+  # more specific warning. Kept comfortably under that ceiling so a genuine
+  # deadlock is caught by NAME rather than surfacing as an opaque
+  # `ExUnit.TimeoutError` with no indication which singleton stalled.
+  @drain_deadlock_guard_ms 20_000
 
   defp quiesce(module, timeout) do
     case Process.whereis(module) do
@@ -103,21 +123,80 @@ defmodule Barkpark.PubSubSingletons do
         :ok
 
       pid ->
-        # `:sys.get_state/2` is the barrier, NOT a state read — the return value
-        # is deliberately discarded. Any exit (dead between whereis and here,
-        # timeout, or a singleton that traps and refuses) is swallowed: this runs
-        # inside `on_exit`.
-        _ = :sys.get_state(pid, timeout)
-        :ok
+        deadline = System.monotonic_time(:millisecond) + timeout
+        guard_deadline = System.monotonic_time(:millisecond) + @drain_deadlock_guard_ms
+        await_quiesced(module, pid, deadline, guard_deadline, false)
     end
+  end
+
+  # `:sys.get_state/2` is the barrier, NOT a state read — the return value is
+  # deliberately discarded. A SINGLE long wait races the barrier against the
+  # scheduler: under enough concurrent load (measured: 8 concurrent `yes`
+  # busy-loops on top of an already-oversubscribed box) the singleton is
+  # ALIVE and WILL answer, but the scheduler had simply not reached it inside
+  # one arbitrary window — that is a scheduling delay, not evidence the
+  # singleton is stuck, and no fixed number is safe against unbounded
+  # contention (the same lesson the 20,001-entry cap test taught: the fix was
+  # removing the expensive work, not raising its budget — reproduced here as
+  # removing the wall-clock gate, not raising it).
+  #
+  # So retry on a SHORT per-attempt window, bounded by the singleton's own
+  # liveness rather than by a bigger clock: a process still alive keeps
+  # getting another short attempt (correctness holds as long as OTP's fair
+  # scheduler eventually runs it — it always does); a dead one stops on the
+  # next attempt via `Process.alive?/1`, immediately, not after the whole
+  # window elapses. `@drain_timeout_ms` still gates exactly one thing: the ONE
+  # warning log emitted the first time the deadline is crossed, so a loaded
+  # run is still observable without being abandoned for it.
+  @drain_poll_ms 200
+
+  defp await_quiesced(module, pid, deadline, guard_deadline, warned?) do
+    _ = :sys.get_state(pid, @drain_poll_ms)
+    :ok
   catch
+    :exit, {:timeout, _} ->
+      now = System.monotonic_time(:millisecond)
+
+      cond do
+        not Process.alive?(pid) ->
+          :ok
+
+        now > guard_deadline ->
+          Logger.warning(
+            "PubSubSingletons.drain!: #{inspect(module)} did not quiesce within " <>
+              "the #{@drain_deadlock_guard_ms}ms deadlock guard; the sandbox owner " <>
+              "is about to stop and an in-flight query on it may disconnect."
+          )
+
+          :ok
+
+        true ->
+          warned? = warned? or maybe_warn(module, pid, now, deadline)
+          await_quiesced(module, pid, deadline, guard_deadline, warned?)
+      end
+
     :exit, reason ->
       Logger.warning(
-        "PubSubSingletons.drain!: #{inspect(module)} did not quiesce within " <>
-          "#{timeout}ms (#{inspect(reason)}); the sandbox owner is about to stop " <>
-          "and an in-flight query on it may disconnect."
+        "PubSubSingletons.drain!: #{inspect(module)} exited while quiescing " <>
+          "(#{inspect(reason)}); the sandbox owner is about to stop and an " <>
+          "in-flight query on it may disconnect."
       )
 
       :ok
+  end
+
+  # Logs once, the moment the original deadline is crossed, so a loaded run
+  # is still observable in CI output — but returns `true` rather than giving
+  # up, so the caller keeps retrying instead of abandoning the wait.
+  defp maybe_warn(_module, _pid, now, deadline) when now <= deadline, do: false
+
+  defp maybe_warn(module, _pid, _now, _deadline) do
+    Logger.warning(
+      "PubSubSingletons.drain!: #{inspect(module)} still quiescing past " <>
+        "#{@drain_timeout_ms}ms under load; retrying (bounded by liveness, " <>
+        "not by a bigger clock) rather than stopping the owner underneath it."
+    )
+
+    true
   end
 end
