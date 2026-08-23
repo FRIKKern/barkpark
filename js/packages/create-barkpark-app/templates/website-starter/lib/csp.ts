@@ -33,7 +33,10 @@ export function buildCspPolicy(nonce: string): string {
     // Tailwind ships styles inline; allow 'unsafe-inline' for styles only
     // (styles cannot execute script, so this does not weaken the XSS backstop).
     `style-src 'self' 'unsafe-inline'`,
-    `img-src 'self' data: https:`,
+    // `blob:` added alongside the existing `data: https:` — mermaid/asciinema-player
+    // (the new PortableDoc media deps) can render through blob URLs; `https:` stays
+    // for the pre-existing `heroImage` field's hosted asset URLs.
+    `img-src 'self' data: blob: https:`,
     `font-src 'self'`,
     // Marketing pages fetch CMS content server-side, so the browser makes no
     // cross-origin WS/SSE/fetch — 'self' is sufficient.
