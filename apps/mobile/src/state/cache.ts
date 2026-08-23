@@ -25,6 +25,14 @@
 //     (pinned in paperRenderer.test.tsx "unresolvable src renders a labeled
 //     placeholder" and re-proven on the offline reader in
 //     paperReaderOffline.test.tsx).
+//   • DIAGRAMS ARE THE SECOND RECORDED EXCLUSION
+//     (mob-zb-bl-island-churn-offline): no mermaid bytes and no rendered SVG
+//     are cached — the MermaidIsland fetches mermaid from the CDN per mount,
+//     so an offline open of a CACHED paper renders every diagram as the
+//     honest "could not render" placeholder carrying the verbatim source
+//     (the ~4s watchdog turns a hung captive-portal fetch into that same
+//     arm). Pinned on the offline reader in paperReaderOffline.test.tsx with
+//     the WebView mocked as an ELEMENT, so the island path actually runs.
 //
 // ── SEAM LAW (jest-probe-proven this wave) ──────────────────────────────────
 // expo-sqlite's IMPORT is clean under jest but openDatabaseSync THROWS at

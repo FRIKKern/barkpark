@@ -283,6 +283,7 @@ const NAMED: Record<string, string> = {
   'chat/PickerSheet.tsx#degraded': '14/20',
   'chat/PickerSheet.tsx#note': '13/18',
   'chat/PickerSheet.tsx#rowLabel': '12/16',
+  'papers/portabledoc/MermaidIsland.tsx#loadingLabel': '11/15',
   'papers/portabledoc/MermaidIsland.tsx#placeholderLabel': '12/16',
   'papers/portabledoc/MermaidIsland.tsx#placeholderSource': '11/15 monospace',
   'papers/portabledoc/MermaidIsland.tsx#truncatedNote': '11/15',
