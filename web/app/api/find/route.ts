@@ -12,6 +12,20 @@ export const runtime = "nodejs";
 
 /* ── suggestions (popular / no-hit past queries) ───────────────────────── */
 
+/**
+ * What `?suggest=1` answers with. `error` is the field the two empty lists
+ * descend from: `null` when the upstream actually answered (the corpus really
+ * has no popular or no-hit queries yet), and the upstream's own reason when it
+ * did not. Without it, "nobody has searched yet" and "the suggestions endpoint
+ * is down" are the same bytes — which is exactly what the search path below
+ * already refuses to do at :56-60.
+ */
+interface SuggestionsResponse {
+  popular: PopularQuery[];
+  nohits: PopularQuery[];
+  error: string | null;
+}
+
 async function suggestions(): Promise<NextResponse> {
   try {
     // bpFetchJson bakes in auth + timeout and guards res.ok before parsing, so a
@@ -20,13 +34,26 @@ async function suggestions(): Promise<NextResponse> {
     const json = (await bpFetchJson(
       `${API_URL}/v1/data/search/${DATASET}/suggestions?q=&limit=8`,
     )) as { result?: { popular?: PopularQuery[]; nohits?: PopularQuery[] } };
-    return NextResponse.json({
+    const answered: SuggestionsResponse = {
       popular: json.result?.popular ?? [],
       nohits: json.result?.nohits ?? [],
-    });
-  } catch {
-    // Empty suggestions is a harmless degrade — keep the existing default.
-    return NextResponse.json({ popular: [], nohits: [] });
+      error: null,
+    };
+    return NextResponse.json(answered);
+  } catch (err) {
+    // An empty suggestion list is a harmless degrade for the UI — the finder
+    // simply shows no popular queries — but it must not be reported as one the
+    // upstream sent. The message descends from the failure, the same way the
+    // search path's does at :56-60; the status line deliberately stays 200 so a
+    // caller reading `res.ok` never sees this optional panel as a page failure.
+    console.error("find suggestions upstream error:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    const degraded: SuggestionsResponse = {
+      popular: [],
+      nohits: [],
+      error: message,
+    };
+    return NextResponse.json(degraded, { status: 200 });
   }
 }
 
