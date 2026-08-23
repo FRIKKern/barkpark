@@ -1,6 +1,12 @@
 import "server-only";
 import { Agent, fetch as keepAliveFetch } from "undici";
 import { PUBLIC_API_URL, READ_TOKEN } from "./bp-env.ts";
+import {
+  MAX_RETRY_SLEEP_TOTAL_MS,
+  parseRetryAfterMs,
+  retryDelayMs,
+  withinSleepBudget,
+} from "./retry-after.ts";
 
 /**
  * Persistent connection pool to the Barkpark API. Without it, every upstream
@@ -72,12 +78,18 @@ export class BpUpstreamError extends Error {
    * (bodyless/HTML 5xx) that never reached a structured envelope. Lets
    * callers branch on the specific failure instead of only the HTTP status. */
   readonly code?: string;
+  /** Upstream `Retry-After`, in ms — `undefined` when the server sent none, or
+   * sent one this build refuses to read (see `parseRetryAfterMs`). Lets the
+   * retry ladder wait as long as the server ASKED instead of guessing against
+   * a shed it was told the length of. */
+  readonly retryAfterMs?: number;
   constructor(
     status: number,
     message: string,
     detail = "",
     definitive = false,
     code?: string,
+    retryAfterMs?: number,
   ) {
     super(message);
     this.name = "BpUpstreamError";
@@ -85,6 +97,7 @@ export class BpUpstreamError extends Error {
     this.detail = detail;
     this.definitive = definitive;
     this.code = code;
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -146,6 +159,12 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
   }
 
   if (!res.ok) {
+    // Read the server's own backoff instruction BEFORE classifying: a shed that
+    // says "come back in 12s" is the only party that knows how long its
+    // capacity is committed for (`/v1/graph` holds a slot for a whole
+    // derivation). Read on BOTH arms — a definitive answer can carry one too
+    // (a 429), and dropping it there is how this class of bug spreads.
+    const retryAfterMs = parseRetryAfterMs(res.headers.get("retry-after"));
     const detail = await res.text().catch(() => "(unreadable body)");
     // A non-OK response carrying a parseable JSON {error:…} envelope is a
     // DELIBERATE upstream answer (reindex_failed, 401 unauthorized) — surface its
@@ -159,12 +178,16 @@ async function attempt(url: string, init: RequestInit): Promise<unknown> {
         detail.slice(0, 200),
         true,
         enveloped.code,
+        retryAfterMs,
       );
     }
     throw new BpUpstreamError(
       res.status,
       `upstream ${res.status}`,
       detail.slice(0, 200),
+      false,
+      undefined,
+      retryAfterMs,
     );
   }
 
@@ -199,16 +222,33 @@ export function isTransient(err: unknown): boolean {
 export async function bpFetchJson(
   url: string,
   init?: RequestInit,
+  /** Total time this call may spend ASLEEP between attempts. Exposed only so
+   * the budget is provable end to end in a test that finishes in seconds; every
+   * production caller takes the default. */
+  sleepBudgetMs: number = MAX_RETRY_SLEEP_TOTAL_MS,
 ): Promise<unknown> {
   const merged = withAuth(init);
   let lastErr: unknown;
+  // Total time spent asleep across this call. Bounded because a render with a
+  // deadline that sleeps past it returns a timeout instead of a degraded page
+  // — see MAX_RETRY_SLEEP_TOTAL_MS.
+  let sleptMs = 0;
   for (let i = 0; i <= RETRIES; i++) {
     try {
       return await attempt(url, merged);
     } catch (err) {
       lastErr = err;
       if (i < RETRIES && isTransient(err)) {
-        await sleep(BACKOFF_MS[i] ?? 2_000);
+        const scheduled = BACKOFF_MS[i] ?? 2_000;
+        const advised = err instanceof BpUpstreamError ? err.retryAfterMs : undefined;
+        const delay = retryDelayMs(scheduled, advised);
+        // A wait that does not fit the budget is NOT taken and NOT shortened:
+        // a truncated wait lands back inside the hold the server just named,
+        // which is the behaviour this fix exists to end. Stop and surface the
+        // error instead.
+        if (!withinSleepBudget(delay, sleptMs, sleepBudgetMs)) throw err;
+        await sleep(delay);
+        sleptMs += delay;
         continue;
       }
       throw err;
