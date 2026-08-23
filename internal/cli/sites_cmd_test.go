@@ -1417,3 +1417,52 @@ func TestSitesGithubConnectFlagParsing(t *testing.T) {
 		})
 	}
 }
+
+// TestCloudSiteLsAliasesTeamList (dr-w14-bl-owner-cannot-list-own-sites): the
+// wave-14 verifier, standing at the `bp cloud site` noun, got `unknown site
+// command "ls"` and had to curl /v1/sites to find their own 13 sites — while
+// `bp sites` answered the question all along. The ruling is ALIASING: `bp
+// cloud site ls` routes to the same team list, so an owner at either noun can
+// enumerate, and the output names each site's SLUG — the handle every other
+// verb takes.
+func TestCloudSiteLsAliasesTeamList(t *testing.T) {
+	withTempConfigHome(t)
+	s := newScriptedCloud(t).route("GET", "/v1/sites", http.StatusOK, sitesListFixture)
+
+	srv := httptest.NewServer(s.handler())
+	defer srv.Close()
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudSite(out, globals{}, []string{"ls"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	// The SLUG column and both slugs render — an owner can act on what they see.
+	for _, want := range []string{"SLUG", "blog", "shop"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("cloud site ls output missing %q:\n%s", want, stdout)
+		}
+	}
+	if len(s.requestsFor("GET", "/v1/sites")) != 1 {
+		t.Fatalf("expected exactly one /v1/sites read; requests = %+v", s.requests)
+	}
+}
+
+// TestCloudSiteUnknownVerbNamesTheListingPath: the refusal that used to strand
+// the owner now names both listing verbs.
+func TestCloudSiteUnknownVerbNamesTheListingPath(t *testing.T) {
+	withTempConfigHome(t)
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runCloudSite(out, globals{}, []string{"enumerate"})
+	})
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want usage", code)
+	}
+	if !strings.Contains(stderr, "bp sites") || !strings.Contains(stderr, "bp cloud site ls") {
+		t.Fatalf("the unknown-verb refusal must name the listing path:\n%s", stderr)
+	}
+}
