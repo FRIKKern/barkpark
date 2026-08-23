@@ -1881,6 +1881,77 @@ async function main() {
           process.stdout.write(`   ${r.name}/${theme}  ${row.join("  ")}\n`);
         }
       }
+
+      // ── THE PROBE CELL: the shipped `anywhere` gets a leg that can lose ────
+      //    (cchi-w26-bl-deploy-rail-fail-value-has-no-leg-that-can-lose /
+      //    charter D312-CCH.) On the shipped tree, flipping `.deploy-rail-fail`
+      //    from `overflow-wrap: anywhere` to `break-word` is BYTE-IDENTICAL in
+      //    all six cells above — #9255 hoisted `minmax(0, 1fr)` onto the base
+      //    `.detail-grid`, so the track absorbs either value. The difference
+      //    EXISTS and was measured under one named condition: a bare `1fr`
+      //    track (the pre-#9255 shape) with `.new-step-detail`'s min-content
+      //    neutralised — there `anywhere` holds the page at 900 and
+      //    `break-word` drags it (~1050 at filing). This cell reproduces that
+      //    condition INSIDE the run, so the shipped value decides a measured
+      //    outcome again. Injected-style caveat (D308): an injected <style>
+      //    outranks later same-specificity rules at EVERY width, so this probe
+      //    runs ONLY at 900 (the ≤899 collapse never competes), scopes to
+      //    #view-site, and REMOVES itself — arm (c) asserts the removal.
+      //    The mutation stays INSIDE the probe: `.new-step-detail` ships
+      //    unchanged (W24-theater-failed-hostname-whole still owns it).
+      {
+        const PROBE_BASE =
+          "#view-site .detail-grid { grid-template-columns: 1fr 260px !important; }" +
+          "#view-site .new-step-detail { overflow-wrap: anywhere !important; }";
+        const PROBE_FLIP =
+          "#view-site .deploy-rail-fail { overflow-wrap: break-word !important; }";
+        const probeRead =
+          `(function(){var d=document.documentElement;` +
+          `var f=document.querySelector('.deploy-rail-fail');` +
+          `return {sw:d.scrollWidth, cw:d.clientWidth,` +
+          ` ow:f?getComputedStyle(f).overflowWrap:'no-rail',` +
+          ` probe:!!document.getElementById('__rail_probe')};})()`;
+        for (const theme of ["light", "dark"]) {
+          await setViewport(900);
+          await nav(
+            `${BASE}/?scen=site-deploy-rail-failed&theme=${theme}${sc.deepLink}`,
+            `document.querySelector('.deploy-rail-fail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+          );
+          // (a) probe on, rail value SHIPPED: the cell the shipped value must carry.
+          await evalJs(
+            `(function(){var s=document.createElement('style');s.id='__rail_probe';` +
+            `s.textContent=${JSON.stringify("PROBE_BASE_LIT")};document.head.appendChild(s);return true;})()`
+              .replace('"PROBE_BASE_LIT"', JSON.stringify(PROBE_BASE)),
+          );
+          const a = await evalJs(probeRead);
+          if (a.sw > a.cw) {
+            fail(D, `probe/${theme}@900: under the probe grid (bare 1fr 260px, step detail neutralised) the page reads ${a.sw}/${a.cw} with the SHIPPED .deploy-rail-fail overflow-wrap "${a.ow}" — the shipped value no longer carries the one cell that can refuse break-word`);
+          }
+          // (b) positive control: the probe must be able to SEE the difference.
+          await evalJs(
+            `(function(){var s=document.getElementById('__rail_probe');` +
+            `s.textContent+=${JSON.stringify("PROBE_FLIP_LIT")};return true;})()`
+              .replace('"PROBE_FLIP_LIT"', JSON.stringify(PROBE_FLIP)),
+          );
+          const b = await evalJs(probeRead);
+          if (b.sw <= b.cw) {
+            fail(D, `probe/${theme}@900: POSITIVE CONTROL WENT VACUOUS — forcing overflow-wrap: break-word inside the probe still reads ${b.sw}/${b.cw} (rail computed "${b.ow}"), so this probe can no longer distinguish the values and arm (a) certifies nothing`);
+          }
+          // (c) hygiene: the probe removes itself and the page returns clean.
+          await evalJs(
+            `(function(){var s=document.getElementById('__rail_probe');` +
+            `if(s)s.parentNode.removeChild(s);return true;})()`,
+          );
+          const c = await evalJs(probeRead);
+          if (c.probe || c.sw > c.cw) {
+            fail(D, `probe/${theme}@900: PROBE RESIDUE — style present=${c.probe}, page ${c.sw}/${c.cw} after removal; later cells would measure a mutated tree`);
+          }
+          process.stdout.write(
+            `   probe/${theme}@900  shipped(${a.ow}):${a.sw}/${a.cw}  forced(break-word):${b.sw}/${b.cw}  removed:${c.sw}/${c.cw}\n`,
+          );
+        }
+      }
+
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${cells} / ${cells} cruel cells clean across ${RAIL_WIDTHS.join("/")} in both themes, plus ${kindCells} ` +
