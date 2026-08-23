@@ -85,6 +85,231 @@ check "404 (not found) NOT healthy — the fixed defect"   "! code_is_healthy 40
 check "500 (server error) NOT healthy"                    "! code_is_healthy 500"
 check "000 (curl failure / connection refused) NOT healthy" "! code_is_healthy 000"
 
+
+# ===========================================================================
+# FUNCTIONAL: the blue/green FLIP, driven end to end against fakes.
+#
+# Everything above this line is static grep + a sed replay. The flip itself —
+# which slot is derived as live, whether the rewrite lands, and whether a
+# broken flip stops the deploy — had NO coverage at all, and it is the step
+# that can take barkpark.cloud down: the old slot is retired seconds after it.
+#
+# Fakes for docker/git/systemctl/curl/sleep; REAL caddy validate, REAL flock,
+# REAL cp/grep/sed against a REAL Caddyfile in a tmpdir. No network, no
+# containers, no box.
+# ===========================================================================
+echo
+echo "cp-deploy blue/green flip (functional)"
+
+command -v caddy >/dev/null 2>&1 || { echo "  FAIL: caddy binary required for the flip cases (real validation)"; fails=$((fails + 1)); echo; if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi; exit "$fails"; }
+
+FTMP=""
+cleanup_flip() { [ -n "$FTMP" ] && rm -rf "$FTMP"; }
+trap 'cleanup_flip; rm -f "$tmp"' EXIT
+
+make_flip_fakes() {
+  local dir="$1"; mkdir -p "$dir"
+
+  # Fake docker. Container liveness is a file per published port in $DSTATE, so
+  # "was the OLD slot retired?" is an observable fact and not a log grep.
+  cat > "$dir/docker" <<'EOF'
+#!/usr/bin/env bash
+echo "docker $*" >> "$DOCKERLOG"
+slot_port() { case "$1" in
+  control_plane_blue) printf '%s' "${PORT_BLUE:-4100}" ;;
+  control_plane_green) printf '%s' "${PORT_GREEN:-4101}" ;;
+esac; }
+case "${1:-}" in
+  tag) exit 0 ;;
+  ps)
+    p=""
+    for a in "$@"; do case "$a" in publish=*) p="${a#publish=}" ;; esac; done
+    [ -n "$p" ] && [ -f "$DSTATE/running.$p" ] && echo "c$p"
+    exit 0 ;;
+  stop)
+    id=""; for a in "$@"; do id="$a"; done
+    rm -f "$DSTATE/running.${id#c}"
+    exit 0 ;;
+  compose)
+    shift
+    args=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -f|--profile) shift 2; continue ;;
+      esac
+      args="$args $1"; shift
+    done
+    set -- $args
+    sub="${1:-}"
+    case "$sub" in
+      build) [ "${COMPOSE_BUILD_FAIL:-0}" = 1 ] && exit 1; exit 0 ;;
+      up)
+        for a in "$@"; do
+          pp="$(slot_port "$a")"; [ -n "$pp" ] && touch "$DSTATE/running.$pp"
+        done
+        exit 0 ;;
+      rm)
+        for a in "$@"; do
+          pp="$(slot_port "$a")"; [ -n "$pp" ] && rm -f "$DSTATE/running.$pp"
+        done
+        exit 0 ;;
+    esac
+    exit 0 ;;
+esac
+exit 0
+EOF
+
+  # Fake curl, URL-aware — the three probes must be drivable INDEPENDENTLY:
+  #   --resolve …           the PUBLIC post-flip probe   -> PUBLIC_HEALTH_CODE
+  #   …/v1/auth/login       the pre-flip DB probe        -> DB_CODE
+  #   otherwise             the pre-flip '/' boot probe  -> HEALTH_CODE
+  # so a slot that boots perfectly on its own port can still be driven to fail
+  # the public probe, which is the whole point of the post-flip gate.
+  cat > "$dir/curl" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  case "$a" in --resolve) printf '%s' "${PUBLIC_HEALTH_CODE:-200}"; exit 0 ;; esac
+done
+for a in "$@"; do
+  case "$a" in */v1/auth/login) printf '%s' "${DB_CODE:-401}"; exit 0 ;; esac
+done
+printf '%s' "${HEALTH_CODE:-200}"
+EOF
+
+  cat > "$dir/git" <<'EOF'
+#!/usr/bin/env bash
+echo "git $*" >> "$GITLOG"
+args=("$@"); i=0; sub=""
+while [ "$i" -lt "${#args[@]}" ]; do
+  case "${args[$i]}" in
+    -c|-C) i=$((i + 2)); continue ;;
+    *) sub="${args[$i]}"; break ;;
+  esac
+done
+[ "$sub" = "rev-parse" ] && { echo "${FAKE_SHA:-deadbeefcafe}"; exit 0; }
+exit 0
+EOF
+
+  cat > "$dir/systemctl" <<'EOF'
+#!/usr/bin/env bash
+echo "systemctl $*" >> "$SYSCTLLOG"
+case "${1:-}" in
+  is-active) echo active ;;
+  is-enabled) echo enabled ;;
+esac
+exit 0
+EOF
+
+  # The flip's sleeps are real time in a harness that has no real containers.
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/sleep"
+  # GNU-style `sed -i "expr" file` shim for macOS (the script targets Linux).
+  cat > "$dir/sed" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "-i" ]; then shift; expr="$1"; shift; exec perl -pi -e "$expr" "$@"; fi
+exec /usr/bin/sed "$@"
+EOF
+  chmod +x "$dir"/*
+}
+
+# caddyfile <upstream>  — a REAL, caddy-valid control-plane front.
+caddyfile() { printf 'barkpark.cloud {\n\treverse_proxy %s\n}\n' "$1" > "$CADDY"; }
+
+# setup_flip <upstream> [blue_port] [green_port]
+setup_flip() {
+  cleanup_flip
+  FTMP="$(mktemp -d "${TMPDIR:-/tmp}/cp-deploy-flip.XXXXXX")"
+  APPDIR="$FTMP/opt/barkpark"; FAKEBIN="$FTMP/bin"; DSTATE="$FTMP/dstate"
+  CADDY="$FTMP/etc/caddy/Caddyfile"
+  DOCKERLOG="$FTMP/docker.log"; GITLOG="$FTMP/git.log"; SYSCTLLOG="$FTMP/systemctl.log"
+  mkdir -p "$APPDIR/cloud" "$FAKEBIN" "$DSTATE" "$FTMP/etc/caddy"
+  : > "$DOCKERLOG"; : > "$GITLOG"; : > "$SYSCTLLOG"
+  make_flip_fakes "$FAKEBIN"
+  : > "$APPDIR/cloud/docker-compose.yml"
+  {
+    printf 'PORT_BLUE=%s\n' "${2:-4100}"
+    printf 'PORT_GREEN=%s\n' "${3:-4101}"
+  } > "$APPDIR/cloud/.env"
+  caddyfile "$1"
+  # The live slot's container. Retiring it is the LAST thing a healthy deploy
+  # does, so "is it still there?" separates a clean abort from a real outage.
+  touch "$DSTATE/running.${2:-4100}"
+}
+
+# run_flip [VAR=VAL …] -> prints the exit code; stdout+stderr land in $FTMP/out.log
+run_flip() {
+  env PATH="$FAKEBIN:$PATH" \
+      BARKPARK_APP_DIR="$APPDIR" \
+      BARKPARK_CADDYFILE="$CADDY" \
+      BARKPARK_DEPLOY_LOCK="$FTMP/deploy.lock" \
+      BARKPARK_PROVISIONER_UNIT="$FTMP/nonexistent-provisioner.service" \
+      DOCKERLOG="$DOCKERLOG" GITLOG="$GITLOG" SYSCTLLOG="$SYSCTLLOG" DSTATE="$DSTATE" \
+      "$@" bash "$SCRIPT" > "$FTMP/out.log" 2>&1
+  echo "$?"
+}
+
+upstream() { grep -oE 'reverse_proxy [^ ]+' "$CADDY" | head -1 | awk '{print $2}'; }
+
+# ---- Case 1: a healthy deploy flips blue(:4100) -> green(:4101) and retires blue
+setup_flip localhost:4100
+rc="$(run_flip)"
+check "healthy: exit 0"                          "[ '$rc' = '0' ]"
+check "healthy: Caddy upstream moved to :4101"   "[ \"\$(upstream)\" = 'localhost:4101' ]"
+check "healthy: Caddyfile still caddy-valid"     "caddy validate --config '$CADDY' >/dev/null 2>&1"
+check "healthy: green slot booted"               "[ -f '$DSTATE/running.4101' ]"
+check "healthy: old blue slot retired AFTER the flip" "[ ! -f '$DSTATE/running.4100' ]"
+
+# ---- Case 2: the PUBLIC post-flip probe fails -> flip REVERTED, old slot kept
+# ROOT CAUSE this guards: this curl was captured into $code, logged, and never
+# tested. A flip that landed on a dead public front still exited 0 — and the
+# very next thing the script does is stop the slot that WAS serving, so the
+# control plane went dark while the deploy reported DONE. The pre-flip probes
+# both pass here (HEALTH_CODE=200, DB_CODE=401); only the PUBLIC one fails, so
+# this proves the gate AFTER the flip, not the boot gate before it.
+setup_flip localhost:4100
+rc="$(run_flip PUBLIC_HEALTH_CODE=502)"
+check "public probe fails: exit 14 (not 0 — a broken flip must not report success)" "[ '$rc' = '14' ]"
+check "public probe fails: named in the log"     "grep -q 'post-flip public health check FAILED' '$FTMP/out.log'"
+check "public probe fails: Caddy flipped BACK to :4100" "[ \"\$(upstream)\" = 'localhost:4100' ]"
+check "public probe fails: reverted Caddyfile still valid" "caddy validate --config '$CADDY' >/dev/null 2>&1"
+check "public probe fails: caddy reloaded on the way back" "[ \"\$(grep -c 'systemctl reload caddy' '$SYSCTLLOG')\" -ge 2 ]"
+check "public probe fails: the LIVE blue slot was NEVER stopped" "[ -f '$DSTATE/running.4100' ]"
+check "public probe fails: the unproven green slot was removed" "[ ! -f '$DSTATE/running.4101' ]"
+check "public probe fails: checkout reset back"  "grep -q 'reset --hard' '$GITLOG'"
+
+# ---- Case 3: the flip sed matches NOTHING -> refused before anything is retired
+# A Caddyfile whose upstream is spelled 127.0.0.1:<port> (or any form without
+# the literal 'localhost:<slot port>') is invisible to both the ACTIVE_PORT grep
+# and the flip sed. The file comes out BYTE-IDENTICAL, caddy validate passes on
+# it, the reload succeeds, and the public probe answers 200 — because the OLD
+# slot is still the one serving. Before the landed-check the deploy then retired
+# that old slot and exited 0: a total outage reported as success.
+setup_flip 127.0.0.1:4100
+rc="$(run_flip)"
+check "sed matched nothing: exit 14 (not 0)"     "[ '$rc' = '14' ]"
+check "sed matched nothing: named in the log"    "grep -q 'FLIP DID NOT LAND' '$FTMP/out.log'"
+check "sed matched nothing: Caddyfile byte-identical" "[ \"\$(upstream)\" = '127.0.0.1:4100' ]"
+check "sed matched nothing: the serving slot was NEVER stopped" "[ -f '$DSTATE/running.4100' ]"
+
+# ---- Case 4: PORT_BLUE/PORT_GREEN are honoured, not hardcoded 4100
+# `[ "$ACTIVE_PORT" = "4100" ]` compared a configurable port against a literal.
+# With the ports moved, the old code derived the WRONG slot and its sed matched
+# nothing — a deploy that built, booted and reported DONE while Caddy never
+# moved and the new code was never served.
+setup_flip localhost:4200 4200 4201
+rc="$(run_flip)"
+check "custom ports: exit 0"                     "[ '$rc' = '0' ]"
+check "custom ports: derived blue as live"       "grep -q 'active upstream :4200' '$FTMP/out.log'"
+check "custom ports: flipped to the green port"  "[ \"\$(upstream)\" = 'localhost:4201' ]"
+check "custom ports: green slot booted"          "[ -f '$DSTATE/running.4201' ]"
+
+# ---- Case 5: a derivation that names the LIVE port is refused before any work
+setup_flip localhost:4100 4100 4100
+rc="$(run_flip)"
+check "collided ports: exit 16"                  "[ '$rc' = '16' ]"
+check "collided ports: refusal names the reason" "grep -q 'the port Caddy already serves' '$FTMP/out.log'"
+check "collided ports: nothing was built"        "! grep -q 'compose.*build' '$DOCKERLOG'"
+check "collided ports: Caddy untouched"          "[ \"\$(upstream)\" = 'localhost:4100' ]"
+check "collided ports: the live container survives" "[ -f '$DSTATE/running.4100' ]"
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi
 exit "$fails"
