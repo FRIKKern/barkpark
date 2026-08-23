@@ -9,16 +9,16 @@
  * roles / nesting). CONSUMERS (measured): `__tests__/component-golden-parity.test.ts`
  * asserts each projection equals the committed golden fixture — so a web
  * divergence from the shared truth trips the freshness lock, never a hand-tuned
- * web-only assertion — and `task-board-columns.ts` imports the board label +
- * glyph helpers. The old web render fork (`portable-doc.tsx`) that once
- * rendered FROM these projections was deliberately deleted — the render path
- * is the single canonical `renderPortableDocument` from `@barkpark/react`
+ * web-only assertion. The old web render fork (`portable-doc.tsx`) that once
+ * rendered FROM these projections was deliberately deleted, and its orphaned
+ * board model (`task-board-columns.ts`) with it — the render path is the
+ * single canonical `renderPortableDocument` from `@barkpark/react`
  * (see `components/paper-editor-doc.tsx`), so these projections have no
  * render-side consumer in web/ anymore; the parity spine is what they serve.
  *
  * DECISION-1: structure is the shared truth; each surface asserts its native
  * realization of THIS projection. Pure TS (no React / DOM) so it runs under
- * `node --test`, exactly like `task-board-columns.ts`.
+ * `node --test`.
  *
  * COVERED — card (au-w5-card-slot-parity GRADUATED, all three surfaces render model
  * B: Elixir View + this web reader #1529, Go pdrender #1535): the projection is the
@@ -83,7 +83,7 @@ interface LadderRow {
  * `StatusVocab.roles/0` + glyph/spinner/label; a manifest edit re-derives the
  * Elixir fixture, so this hard-coded twin must move in lockstep or the web leg
  * reds. `label` is the canonical lowercase display noun (progress→"in progress",
- * cancel→"cancelled"); the board sentence-cases it via `boardLabel`. */
+ * cancel→"cancelled"). */
 export const STATUS_LADDER: LadderRow[] = [
   { role: "open", glyph_role: "open", glyph: "○", spinner: false, label: "open" },
   { role: "ready", glyph_role: "ready", glyph: "○", spinner: false, label: "ready" },
@@ -98,11 +98,6 @@ export const STATUS_LADDER: LadderRow[] = [
   { role: "considering", glyph_role: "considering", glyph: "◌", spinner: false, label: "considering" },
   { role: "researching", glyph_role: "researching", glyph: "◎", spinner: false, label: "researching" },
 ];
-
-/** role → canonical lowercase label (unknown role → the slug itself). */
-const LABEL_BY_ROLE: Record<string, string> = Object.fromEntries(
-  STATUS_LADDER.map((r) => [r.role, r.label]),
-);
 
 /** The EIGHT canonical manifest roles (design/status-manifest.json). The
  * status-legend projection is the cross-surface parity KEY and must stay byte-
@@ -120,17 +115,6 @@ const MANIFEST_LADDER = new Set([
   "considering",
   "researching",
 ]);
-
-export function labelForRole(role: string): string {
-  return LABEL_BY_ROLE[role] ?? role;
-}
-
-/** Sentence-case a role's canonical label for a board column header (the fold —
- * ONE manifest source, not a second hardcoded copy): "in progress" → "In progress". */
-export function boardLabel(role: string): string {
-  const l = labelForRole(role);
-  return l.length === 0 ? l : l[0].toUpperCase() + l.slice(1);
-}
 
 /** Stored lifecycle status → ladder role (mirrors the manifest `statuses` map).
  * ABSENT/empty → the `open` default; an unrecognized NON-EMPTY status fails OPEN

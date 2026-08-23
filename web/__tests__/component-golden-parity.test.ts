@@ -5,15 +5,16 @@
  * `mix barkpark.paper_components.gen_golden_parity` and mirrored byte-for-byte
  * into the api + internal/pdrender trees. Each fixture carries the authored
  * `input` block plus an `expected` STRUCTURAL PROJECTION (node roles / column
- * labels / row titles / glyph-role / nesting). This suite proves the web reader's
- * task-board model (`taskBoardColumns` + the exported label/glyph constants)
- * REALIZES that projection — the web half of the shared contract. (The old web
- * render fork `portable-doc.tsx` that consumed these constants was deleted;
- * the canonical `@barkpark/react` renderer owns the render leg, so this MODEL
- * parity is what keeps the web surface honest.)
+ * labels / row titles / glyph-role / nesting). This suite proves the web reader
+ * REALIZES that projection — the web half of the shared contract. The web render
+ * path is the canonical `@barkpark/react` `renderPortableDocument` (the old web
+ * fork `portable-doc.tsx` and its orphaned model `task-board-columns.ts` are
+ * both deleted), so the task-board leg asserts the CANONICAL RENDER — label,
+ * count, ordered card titles, glyph — directly against the golden projection.
  *
- * The web reader has no RTL/testing-library; like the sheet golden-parity web leg
- * it asserts the pure MODEL the component consumes, not the DOM.
+ * The web reader has no RTL/testing-library; the S2 projector legs assert the
+ * pure MODEL (`component-projections.ts`) and the render legs assert the
+ * canonical HTML string emitter — still no browser and no DOM library.
  *
  * SCOPE (S1): task-board only. status-legend has NO web reader case yet — it is
  * the FIRST S2 item (see the skipped placeholder below); the harness is proven on
@@ -21,7 +22,8 @@
  *
  * COVERAGE (honest scope — subset-parity, projection ⊆ native): for every column
  * PRESENT in the projection, all three surfaces agree on label + count + ordered
- * card titles + glyph-role (this leg asserts the web model at exact equality). NOT
+ * card titles + glyph-role (the task-board leg asserts the canonical RENDER at
+ * exact equality). NOT
  * COVERED, FILED not fixed: (a) task-board `open`-task DROP — the Elixir 4-column
  * omit-empty view drops `open` tasks this 5-column web view keeps; a ⊆-projection
  * cannot catch an omission, so the fixture input omits `open`; owned by
@@ -29,9 +31,10 @@
  * catches the real bug). COVERED since au-w5-status-prose-parity: the status LABEL
  * prose is ONE manifest source; the legend projection asserts the canonical label
  * TEXT ("in progress"/"cancelled") and the web RENDER realizes it (the
- * status-legend RENDER leg below asserts `>${label}</dt>`); board LABELS are the
- * fold — `TASK_BOARD_COLUMN_LABELS` is derived via `boardLabel`, not a hardcoded
- * copy. Legend MEANING is not rendered by the web reader (name-only web parity, a
+ * status-legend RENDER leg below asserts `>${label}</dt>`); board LABELS are
+ * asserted against the canonical render, which derives them from the ONE
+ * manifest ladder (`@barkpark/react` STATUS_ROLES) — web keeps no hand copy.
+ * Legend MEANING is not rendered by the web reader (name-only web parity, a
  * SUPERSET the Elixir/TUI legends carry). The harness never implies parity it does
  * not hold.
  *
@@ -41,13 +44,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import {
-  taskBoardColumns,
-  TASK_BOARD_COLUMN_LABELS,
-  TASK_BOARD_GLYPHS,
-  type TaskBoardColumnKey,
-  type TaskBoardRow,
-} from "../lib/task-board-columns.ts";
 
 interface BoardProjection {
   container_role: string;
@@ -62,7 +58,7 @@ interface BoardProjection {
 
 interface ComponentGolden {
   type: string;
-  input: { type: string; snapshot?: TaskBoardRow[] };
+  input: { type: string; snapshot?: Array<Record<string, unknown>> };
   expected: BoardProjection;
 }
 
@@ -72,17 +68,6 @@ const fixture: ComponentGolden = JSON.parse(
     "utf8",
   ),
 );
-
-/** The projection speaks the shared manifest role vocabulary (open/ready/progress/
- * blocked/done/cancel); the web column keys use `in_progress` for the progress
- * role. This maps a projection role to its web column key. */
-const ROLE_TO_WEB_KEY: Record<string, TaskBoardColumnKey> = {
-  open: "open",
-  ready: "ready",
-  progress: "in_progress",
-  blocked: "blocked",
-  done: "done",
-};
 
 /* ── floors — fail LOUD before any leg can go vacuous ── */
 
@@ -97,70 +82,6 @@ floor(
   `projection has ${fixture.expected.columns.length} columns, need >= 3`,
 );
 floor(Array.isArray(fixture.input.snapshot), "input.snapshot missing");
-
-const { columns } = taskBoardColumns(fixture.input.snapshot ?? []);
-
-test("web task-board model realizes every projection column (key · label · count · card titles)", () => {
-  for (const col of fixture.expected.columns) {
-    const key = ROLE_TO_WEB_KEY[col.role];
-    assert.ok(key, `projection role ${col.role} has no web column key`);
-
-    // Label parity — the shared column header the reader renders.
-    assert.equal(
-      TASK_BOARD_COLUMN_LABELS[key],
-      col.label,
-      `label for ${col.role}/${key}`,
-    );
-
-    // Bucketing + count + ordered card titles all realize the projection.
-    const rendered = columns[key];
-    assert.equal(rendered.length, col.count, `count for ${col.role}`);
-    assert.deepEqual(
-      rendered.map((r) => String(r.title ?? "")),
-      col.cards.map((c) => c.title),
-      `card titles for ${col.role}`,
-    );
-  }
-});
-
-test("web task-board renders a glyph for every projection glyph-role", () => {
-  for (const col of fixture.expected.columns) {
-    const key = ROLE_TO_WEB_KEY[col.glyph_role];
-    assert.ok(
-      typeof TASK_BOARD_GLYPHS[key] === "string" && TASK_BOARD_GLYPHS[key].length > 0,
-      `no web glyph for glyph-role ${col.glyph_role}`,
-    );
-  }
-});
-
-test("web glyph chars match the shared manifest for non-spinner roles (legend fixture)", () => {
-  // Cross-fixture glyph parity: the status-legend fixture carries the Elixir/
-  // manifest glyph char per role; the web board glyph for the same NON-spinner
-  // role must be that exact codepoint (○ ready · ! blocked · ✓ done). The
-  // spinner role (progress→in_progress) is surface-local and excluded.
-  interface LegendRow {
-    role: string;
-    glyph: string;
-    spinner: boolean;
-  }
-  const legend = JSON.parse(
-    readFileSync(
-      new URL("./fixtures/status-legend.golden.json", import.meta.url),
-      "utf8",
-    ),
-  ) as { expected: { rows: LegendRow[] } };
-
-  for (const row of legend.expected.rows) {
-    if (row.spinner) continue;
-    const key = ROLE_TO_WEB_KEY[row.role];
-    if (!key) continue; // cancel is folded to a tally, not a rendered column
-    assert.equal(
-      TASK_BOARD_GLYPHS[key],
-      row.glyph,
-      `web glyph for ${row.role} must equal the manifest glyph`,
-    );
-  }
-});
 
 /* ══ S2: the task-tracking / composition component family ══════════════════════
  *
@@ -555,12 +476,74 @@ test("web terminal RENDER realizes chrome (title · live · footer) + nests chil
   });
 });
 
-test("web task-board RENDER realizes every projection column (label · card titles)", () => {
+test("web task-board RENDER realizes every projection column (role order · label · count · ordered card titles · manifest glyph)", () => {
   const html = renderHtml(fixture.input as Record<string, unknown>);
-  for (const col of fixture.expected.columns) {
-    present(html, `${col.label}</span>`, `board label ${col.label}`);
+  // Cross-fixture glyph-char source: the status-legend golden carries the
+  // manifest glyph per role. The canonical render derives BOTH surfaces from
+  // one ladder — this asserts that derivation instead of a web hand copy
+  // (the deleted `task-board-columns.ts` model was that hand copy).
+  const legend = loadFixture("status-legend").expected as LegendProjection;
+  const legendByRole = new Map(legend.rows.map((r) => [r.role, r]));
+
+  // One rendered column per projection column, in projection order. The golden
+  // input populates EXACTLY the projected columns (empty columns collapse), so
+  // an extra, dropped, or reordered rendered column reds here.
+  const segments = html.split('<div class="bp-board__col ').slice(1);
+  assert.equal(
+    segments.length,
+    fixture.expected.columns.length,
+    "rendered board column count",
+  );
+
+  fixture.expected.columns.forEach((col, i) => {
+    const seg = segments[i] ?? "";
+    assert.ok(
+      seg.startsWith(`bp-board__col--${col.role}`),
+      `column ${i} must be ${col.role} (white-ladder order parity)`,
+    );
+    present(
+      seg,
+      `<span class="bp-board__label">${col.label}</span>`,
+      `board label ${col.role}`,
+    );
+    present(
+      seg,
+      `<span class="bp-board__count">${col.count}</span>`,
+      `board count ${col.role}`,
+    );
+
+    // Ordered card titles — presence AND order within the column segment.
+    let prev = -1;
     for (const card of col.cards) {
-      present(html, `>${card.title}</span>`, `board card ${card.title}`);
+      const marker = `<span class="bp-bcard__t">${card.title}</span>`;
+      const idx = seg.indexOf(marker);
+      assert.ok(
+        idx >= 0,
+        `board card ${JSON.stringify(card.title)} missing from ${col.role}`,
+      );
+      assert.ok(
+        idx > prev,
+        `board card ${JSON.stringify(card.title)} out of order in ${col.role}`,
+      );
+      prev = idx;
     }
-  }
+
+    // The glyph-role realizes at the MANIFEST glyph char. Spinner roles emit
+    // the empty CSS-animated span (aria-labelled), never a literal char.
+    const lrow = legendByRole.get(col.glyph_role);
+    assert.ok(lrow, `legend fixture has no row for glyph role ${col.glyph_role}`);
+    if (lrow!.spinner) {
+      present(
+        seg,
+        `<span class="bp-g bp-g--${col.glyph_role}" aria-label=`,
+        `board spinner glyph ${col.glyph_role}`,
+      );
+    } else {
+      present(
+        seg,
+        `<span class="bp-g bp-g--${col.glyph_role}">${lrow!.glyph}</span>`,
+        `board glyph ${col.glyph_role}`,
+      );
+    }
+  });
 });
