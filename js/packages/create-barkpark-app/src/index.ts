@@ -6,7 +6,7 @@ import { AVAILABLE_TEMPLATES, BARKPARK_VERSION, type TemplateName } from './cons
 import { runPrompts } from './prompts.js'
 import { scaffold } from './scaffold.js'
 import { detectPackageManager } from './pm.js'
-import { applyHostedDemo } from './hosted.js'
+import { applyHostedDemoSafely } from './hosted.js'
 import { runInstall } from './install.js'
 import { printNextSteps, runGitInit } from './post-install.js'
 import { cleanupPartialScaffold, ensureTargetEmpty } from './target-dir.js'
@@ -99,8 +99,17 @@ async function main(argv: string[]): Promise<number> {
   if (answers.hostedDemo) {
     const hs = p.spinner()
     hs.start('Applying --hosted-demo settings')
-    await applyHostedDemo({ targetDir })
-    hs.stop(`Pointed at hosted demo: ${pc.cyan('https://barkpark.dev')} (read-only)`)
+    // A throw here used to escape after the copy finished, aborting the run
+    // and leaving a COMPLETE tree that jammed ensureTargetEmpty on every
+    // retry. The remedy (recorded in applyHostedDemoSafely's doc) is relieve,
+    // not delete: warn with the manual steps and continue — the scaffold is
+    // usable and install/git/next-steps all still apply.
+    const applied = await applyHostedDemoSafely({ targetDir })
+    hs.stop(
+      applied
+        ? `Pointed at hosted demo: ${pc.cyan('https://barkpark.dev')} (read-only)`
+        : 'Hosted-demo settings failed — manual steps printed above.',
+    )
   }
 
   let didInstall = false
