@@ -83,6 +83,11 @@ export async function getDoc<T = BarkparkDocument>(
     if (etag !== undefined) result.etag = etag
     return result
   } catch (err) {
+    // The absence of ONE document of a valid type is a normal data state, so a
+    // 404 here collapses to { data: null }. The LIST executor (docs.ts) does
+    // NOT mirror this: its 404 means a missing/private TYPE — a config error
+    // the caller must see — and propagates typed. Recorded decision; see the
+    // createDocsOperation docstring (D72).
     if (err instanceof BarkparkNotFoundError) return { data: null }
     throw err
   }
