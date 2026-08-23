@@ -11,11 +11,17 @@ on:
         description: "ISO-week Monday (YYYY-MM-DD); blank means the previous week"
         required: false
         type: string
+      backfill_all:
+        description: "Publish or refresh every curated historical edition"
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - ".github/workflows/weekly-changelog.yml"
       - "scripts/weekly-changelog.py"
       - "scripts/weekly-changelog.test.py"
+      - "changelog/editorial.json"
       - "CHANGELOG.md"
 
 concurrency:
@@ -33,7 +39,9 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run hermetic generator tests
-        run: python3 scripts/weekly-changelog.test.py
+        run: |
+          python3 scripts/weekly-changelog.test.py
+          python3 scripts/weekly-changelog.py --validate-editorial --ref HEAD
 
   publish:
     name: Publish weekly changelog
@@ -64,27 +72,39 @@ jobs:
           )"
           fi
           echo "week=$week" >> "$GITHUB_OUTPUT"
-      - name: Render weekly notes
-        env:
-          WEEK: ${{ steps.week.outputs.week }}
-        run: |
-          python3 scripts/weekly-changelog.py --week "$WEEK" --ref main > "$RUNNER_TEMP/weekly-changelog.md"
-          cat "$RUNNER_TEMP/weekly-changelog.md" >> "$GITHUB_STEP_SUMMARY"
-      - name: Create or refresh the week's changelog issue
+      - name: Create or refresh Barkpark Weekly editions
         env:
           GH_TOKEN: ${{ github.token }}
           WEEK: ${{ steps.week.outputs.week }}
+          BACKFILL_ALL: ${{ github.event.inputs.backfill_all || 'false' }}
         run: |
-          title="Weekly changelog · $WEEK"
-          gh label create weekly-changelog --description "Automated project-wide weekly changelog" --color 0e8a16 --force
-          number="$(gh issue list --state all --search "$title in:title" --limit 100 --json number,title \
-            | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' \
-            | head -n 1)"
-          if [ -n "$number" ]; then
-            gh issue edit "$number" --body-file "$RUNNER_TEMP/weekly-changelog.md" --add-label weekly-changelog
+          if [ "$BACKFILL_ALL" = "true" ]; then
+            mapfile -t weeks < <(python3 scripts/weekly-changelog.py --list-editorial-weeks)
           else
-            url="$(gh issue create --title "$title" --body-file "$RUNNER_TEMP/weekly-changelog.md" --label weekly-changelog)"
-            number="${url##*/}"
+            weeks=("$WEEK")
           fi
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" \
-            -f state=closed -f state_reason=completed >/dev/null
+
+          gh label create weekly-changelog \
+            --description "Barkpark's curated weekly product journal" \
+            --color 5b4bdb --force
+
+          for week in "${weeks[@]}"; do
+            body="$RUNNER_TEMP/weekly-changelog-$week.md"
+            python3 scripts/weekly-changelog.py --week "$week" --ref main > "$body"
+            title="$(python3 scripts/weekly-changelog.py --week "$week" --ref main --title-only)"
+            number="$(gh issue list --state all --label weekly-changelog \
+              --search "$week in:title" --limit 100 --json number,title \
+              | jq -r --arg week "$week" \
+                '[.[] | select(.title | contains($week))][0].number // empty')"
+            if [ -n "$number" ]; then
+              gh issue edit "$number" --title "$title" --body-file "$body" \
+                --add-label weekly-changelog
+            else
+              url="$(gh issue create --title "$title" --body-file "$body" \
+                --label weekly-changelog)"
+              number="${url##*/}"
+            fi
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" \
+              -f state=closed -f state_reason=completed >/dev/null
+            cat "$body" >> "$GITHUB_STEP_SUMMARY"
+          done

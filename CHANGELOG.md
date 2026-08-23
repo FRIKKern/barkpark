@@ -1,17 +1,19 @@
 <!-- doc-tier: human | canonical-for: weekly-changelog | budget: 500tok -->
 # Changelog
 
-Barkpark publishes a project-wide changelog every Monday for the preceding ISO
-week. [Read the weekly changelog](https://github.com/FRIKKern/barkpark/issues?q=is%3Aissue+label%3Aweekly-changelog).
+Barkpark publishes a curated project journal every Monday for the preceding ISO
+week. [Read Barkpark Weekly](https://github.com/FRIKKern/barkpark/issues?q=is%3Aissue+label%3Aweekly-changelog+sort%3Acreated-asc).
 
-Each entry covers user-facing `feat`, `fix`, `perf`, and `revert` commits merged
-to `main` from Monday through Sunday, in UTC. Documentation, test, CI, refactor,
-build, and maintenance commits are counted separately so the useful changes do
-not disappear inside repository housekeeping.
+Each edition has an editorial headline, a short account of the week's direction,
+three narrative highlights, a concise release pulse, selected additions and
+repairs, and a link to the complete first-parent ledger. The first 19 editions
+cover every completed ISO week from Barkpark's beginning on 2026-04-11 through
+2026-08-16; future editions continue on the same Monday-through-Sunday UTC clock.
 
-The scheduled workflow is idempotent: rerunning a week edits the same closed,
-`weekly-changelog`-labelled entry instead of creating a duplicate or adding
-noise to the project's open work queue.
+The journal is deliberately selective without losing provenance: featured claims
+resolve to commits inside their stated week, counts come from `main`, and the
+full compare trail remains one click away. Rerunning an edition edits the same
+closed, `weekly-changelog`-labelled issue instead of creating a duplicate.
 
 Package-specific histories remain beside their packages under
 [`js/packages/`](js/packages/).

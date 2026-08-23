@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import os
 import pathlib
 import subprocess
@@ -59,14 +60,21 @@ class WeeklyChangelogTest(unittest.TestCase):
         output = self.run_script(
             "--week", "2026-08-17", "--ref", "main", "--repo", "acme/project"
         ).stdout
-        self.assertIn("# Week of 2026-08-17", output)
+        self.assertIn("# Barkpark Weekly 20", output)
         self.assertIn(f"compare/{self.base}...{self.week_head}", output)
-        self.assertIn("## Added", output)
-        self.assertIn("**api:** add typed exports ([#12](https://github.com/acme/project/pull/12))", output)
-        self.assertIn("## Fixed", output)
-        self.assertIn("recover stale sessions ([#13](https://github.com/acme/project/pull/13))", output)
-        self.assertIn("2 documentation, test, CI, refactor, build, or maintenance changes", output)
+        self.assertIn("## api moved forward", output)
+        self.assertIn("## Three things worth knowing", output)
+        self.assertIn("**Release pulse:** 4 mainline changes", output)
+        self.assertIn("[add typed exports](https://github.com/acme/project/pull/12)", output)
+        self.assertIn("[recover stale sessions](https://github.com/acme/project/pull/13)", output)
+        self.assertIn("## The week in perspective", output)
         self.assertNotIn("next week", output)
+
+    def test_renders_a_stable_editorial_issue_title(self):
+        output = self.run_script(
+            "--week", "2026-08-17", "--ref", "main", "--title-only"
+        ).stdout.strip()
+        self.assertEqual("Barkpark Weekly 20 · api moved forward · 2026-08-17", output)
 
     def test_rejects_a_non_monday(self):
         result = self.run_script("--week", "2026-08-18", "--ref", "main", check=False)
@@ -77,11 +85,62 @@ class WeeklyChangelogTest(unittest.TestCase):
         workflow = WORKFLOW.read_text()
         self.assertIn('cron: "17 6 * * 1"', workflow)
         self.assertIn("issues: write", workflow)
+        self.assertIn("backfill_all", workflow)
+        self.assertIn("--list-editorial-weeks", workflow)
         self.assertIn('gh issue list --state all', workflow)
         self.assertIn('gh issue edit "$number"', workflow)
         self.assertIn('gh issue create --title "$title"', workflow)
         self.assertIn("-f state=closed -f state_reason=completed", workflow)
         self.assertNotIn("gh release", workflow)
+
+
+class EditorialCatalogTest(unittest.TestCase):
+    def test_catalog_covers_every_completed_week_and_resolves_to_its_ledger(self):
+        catalog_path = ROOT / "changelog" / "editorial.json"
+        catalog = json.loads(catalog_path.read_text())
+        self.assertEqual(19, len(catalog))
+        self.assertEqual("2026-04-06", min(catalog))
+        self.assertEqual("2026-08-10", max(catalog))
+
+        validation = subprocess.run(
+            ["python3", str(SCRIPT), "--validate-editorial", "--ref", "HEAD"],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=True,
+        )
+        self.assertIn("Validated 19 editorial weeks.", validation.stdout)
+
+    def test_every_curated_edition_fits_the_github_issue_surface(self):
+        weeks = subprocess.check_output(
+            ["python3", str(SCRIPT), "--list-editorial-weeks"],
+            cwd=ROOT,
+            text=True,
+        ).splitlines()
+        for week in weeks:
+            body = subprocess.check_output(
+                ["python3", str(SCRIPT), "--week", week, "--ref", "HEAD"],
+                cwd=ROOT,
+                text=True,
+            )
+            title = subprocess.check_output(
+                [
+                    "python3",
+                    str(SCRIPT),
+                    "--week",
+                    week,
+                    "--ref",
+                    "HEAD",
+                    "--title-only",
+                ],
+                cwd=ROOT,
+                text=True,
+            ).strip()
+            self.assertLess(len(body), 65_536, week)
+            self.assertLessEqual(len(title), 256, week)
+            self.assertIn("## Three things worth knowing", body)
+            self.assertIn("## The week in perspective", body)
 
 
 if __name__ == "__main__":
