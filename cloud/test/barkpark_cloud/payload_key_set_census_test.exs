@@ -790,13 +790,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   assertion in Go (`TestCloudDeliveriesRollbackVerdictReachesTheHuman`), which
   is what actually holds what a human reads.
 
-  What it finds TODAY, declared and not repaired here: `PlatformDelivery.SHA`,
-  `DeliveriesPage.SHA` and `DeliveriesPage.Limit` are decoded and never printed.
-  The row's own `SHA` is the interesting one — the render prints the sha the
-  CALLER ASKED FOR in its header and never the sha each row carries, so it never
-  demonstrates that the rows it printed are the sha you asked for. Repairing
-  that is a reader change with its own render decisions and is filed, not
-  smuggled in here.
+  What it found at its first cut (dr-w27-s2), since repaired by
+  dr-w27-bl-decoded-but-never-rendered-sha: `PlatformDelivery.SHA`,
+  `DeliveriesPage.SHA` and `DeliveriesPage.Limit` were decoded and never
+  printed — the render printed the sha the CALLER ASKED FOR in its header and
+  never the sha each row carries, so it never demonstrated that the rows it
+  printed were the sha you asked for. The reader now opens every row with
+  `d.SHA` and renders the filter echo and page limit, so the declared set below
+  is empty; this arm stays to red the day any decoded field goes silent again.
 
   It reads `internal/cloudclient/` through a `"../../../internal/cloudclient"`
   literal, which `scripts/cloud-path-escape-check.sh` resolves as a repo-root
@@ -2076,9 +2077,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # The scan's bound is in the moduledoc and is not restated here: honest about
   # ABSENCE, optimistic about PRESENCE. The declared set below is a REPORT of
   # today's tree, not a blessing — each entry names what a reader cannot see.
+  # Both sets emptied by dr-w27-bl-decoded-but-never-rendered-sha: the reader
+  # now renders `d.SHA` (per-row identity), `page.SHA` (the filter echo) and
+  # `page.Limit` (the clamped window). An entry re-appears here only when a
+  # decoded field stops reaching the render — and it must arrive with a stated
+  # reason, not as a shrug.
   @never_rendered %{
-    "PlatformDelivery" => {"d", ["SHA"]},
-    "DeliveriesPage" => {"page", ["Limit", "SHA"]}
+    "PlatformDelivery" => {"d", []},
+    "DeliveriesPage" => {"page", []}
   }
 
   test "RENDER: every decoded delivery field reaches the human render, or is DECLARED unrendered" do
