@@ -789,7 +789,38 @@ async function main() {
 
   const failures = [];
   const fail = (defect, msg) => { failures.push({ defect, msg }); process.stdout.write(`   ✗ ${msg}\n`); };
-  const okLine = (msg) => process.stdout.write(`   ✓ ${msg}\n`);
+  // ── okLine ARITY REFUSAL (cchi-w27-bl-okline-arity-swallows-a-leg) ────────
+  // A keep-both git merge at this file's shared SUCCESS tail produces VALID
+  // JS: git treats the surrounding `okLine(` and `);` lines as common context,
+  // so the conflict lands INSIDE the argument list and marker-strip keep-both
+  // yields either a FLAT `okLine(A, B)` — the second argument, one whole leg's
+  // clean claim, is silently DISCARDED (rc 0 on node --check, on import, at
+  // runtime) — or a NESTED `okLine(A, okLine(B))`, which prints the two slices
+  // in REVERSED order and rides the inner call's return value in as a bogus
+  // second argument. Both shapes now REFUSE at the first corrupted call:
+  // exactly one argument is the contract, anything else is the merge defect by
+  // name, exit 2 (a refusal to measure — the instrument's own bytes are
+  // corrupt, so no clean claim it prints can be trusted).
+  //
+  // HONEST LIMIT: this is a RUNTIME check. It fires in CI because
+  // console-harness.yml runs the guard with no --defect flag (every leg's
+  // success tail executes on a green run) — but a swallow inside a
+  // FAILURE-gated okLine call is invisible on a green run, and a static
+  // scanner is refuted: ${} interpolation inside template literals defeats
+  // naive paren/comma depth tracking (34 false positives over 57 clean calls).
+  const okLine = (...args) => {
+    if (args.length !== 1) {
+      process.stderr.write(
+        `!! GUARD (exit 2): okLine called with ${args.length} argument(s) — it takes exactly ONE. ` +
+        `This is the keep-both MERGE DEFECT this refusal exists to catch: a conflict resolved inside ` +
+        `okLine's argument list parses as valid JS while silently discarding a leg's clean claim ` +
+        `(flat okLine(A, B)) or printing two legs reversed (nested okLine(A, okLine(B))). ` +
+        `Re-resolve the merge at this call site by hand. First argument begins: "${String(args[0]).slice(0, 120)}"\n`,
+      );
+      process.exit(2);
+    }
+    return process.stdout.write(`   ✓ ${args[0]}\n`);
+  };
   // The FONT PINNED sentence is EARNED, never narrated: it prints the number
   // of successful pinFonts() executions this run, and when that number is
   // zero it WITHHOLDS the claim — under a `!`, never a ✓ — instead of
