@@ -16,26 +16,19 @@ fleet, and a way to cheer the work on. [The full stance →](docs/PHILOSOPHY.md)
 
 **2.81M lines · 9,366 files · 16,900+ tests · 561 routes · 11 plugins · four runtimes.**
 
-## What it replaces
+## What this makes possible
 
-| What Barkpark does | What you'd otherwise buy |
-|---|---|
-| Content model, API, editing Studio | Sanity · Contentful · Strapi |
-| Rich documents (Papers) | Notion · Google Docs |
-| Spreadsheets, 142 real formulas | Airtable · Google Sheets |
-| Media library, renditions, signed URLs | Cloudinary · Bynder |
-| Search with click-learning | Algolia · Typesense |
-| Task board and work queues | Linear · Jira |
-| Site hosting, builds, previews | Vercel · Netlify |
-| Server provisioning and lifecycle | Render · Fly.io · Heroku |
-| SSO — SAML, OIDC, SCIM, passkeys | Auth0 · WorkOS · Okta |
-| Book metadata (ONIX 3.0) | Firebrand · Bokbasen |
-| Agents on the work ledger | *no standard product* |
-
-Every row has a better-funded competitor; for any single row, buy theirs. What has no
-equivalent is the **combination** — and it isn't a bundle. One content model, one permission
-model and one deploy path sit under every row, so a document, a sheet cell, an asset, a task
-and a book record are the same object with the same access rules.
+- **The internet goes out; your work doesn't.** A full Barkpark runs on your laptop — same
+  Studio, same API. Move content between servers with `bp migrate`; Cloud's auth tunnel
+  reaches your local box too.
+- **An AI builds a spreadsheet; you're both inside it a minute later.** Real formulas, a live
+  grid — sharing is a link, on your LAN or across the world.
+- **A paper written once reads everywhere.** The same blocks render on the web, in the
+  terminal, in the editor, even in email.
+- **A whole CMS for a side project, in minutes.** Schema one type and every surface exists —
+  a D&D campaign got its own Barkpark while the idea was still warm.
+- **Hand someone the whole thing.** `bp export` streams a dataset to a file; instances archive
+  and resurrect on a different cloud. Leaving is a feature — which is why staying is safe.
 
 ## Install & connect
 
@@ -52,9 +45,10 @@ Windows: `irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/i
 
 [Quickstart](docs/setup/QUICKSTART.md) · [Cursor](docs/setup/CURSOR.md) · [Learn & own](docs/learn/README.md) · [From source](docs/setup/SETUP.md)
 
-## Create fast
+## Your first schema
 
-Define a shape, get every surface — Studio pane, TUI desk, REST routes, CLI verbs — no client code:
+Describe the shape of your content once, and every surface — Studio pane, TUI desk, REST
+routes, CLI verbs — appears around it:
 
 ```bash
 bp make schema recipe --out recipe.json   # skeleton — fill the blanks
@@ -63,28 +57,30 @@ bp seed recipe --count 5 --publish        # schema-valid sample data, live
 bp tinker                                 # REPL: query it, poke it
 ```
 
-## Your AI agent, unreasonably powerful
+When you're ready to go further: `bp doctor` checks your setup, and the
+[handbook](docs/cli/HANDBOOK.md) walks the rest.
 
-Point any agent at a Barkpark and it gains structured memory with hands:
+## Working with agents
 
-- **The whole API in one call** — `bp capabilities -o json` teaches an agent every noun, verb
-  and route. No docs pasted into context.
-- **A real task board** — dependencies, priorities, and an atomic claim/close contract built
-  for concurrent workers:
-  ```bash
-  bp task next agent-1                      # atomically claim the next ready task
-  bp task claim t1 a1 --resources lib/x.ex  # fence files against parallel workers
-  bp task close t1 agent-1 1                # CAS on the claim epoch
-  ```
-  Because the board lives in Barkpark, not the session, **an agent can crash and still be on
-  track** — it reclaims its work, context intact.
-- **Papers** — agents write long-form docs over a token-gated ingest API; read at
-  `/papers/:slug`, edit live.
-- **No black boxes** — you watch every change land live in Studio. JSON when piped, atomic
-  batch writes via `-f`, stable exit codes.
+Barkpark treats an agent as a collaborator with a desk of its own. `bp capabilities -o json`
+describes every noun, verb and route in one call, so any harness can learn the system without
+docs pasted into context. Work lives on a shared task board with an atomic claim/close
+contract, so several agents (and you) can move at once without collisions:
 
-This repo runs on it: agents claim work from `bp task ready`, publish design papers, and score
-the codebase into a browsable graph ([Cody](tooling/README.md) — one paper per source file).
+```bash
+bp task next agent-1                      # atomically claim the next ready task
+bp task claim t1 a1 --resources lib/x.ex  # fence files against parallel workers
+bp task close t1 agent-1 1                # CAS on the claim epoch
+```
+
+Because the board lives in Barkpark rather than in a session, an agent that disconnects or
+crashes picks its work back up, context intact — and everything it does lands visibly in
+Studio, in real time. `bp onramp` emits ready-to-paste setup for nine harnesses (Claude Code,
+Cursor, Codex, Windsurf, Zed and more), and a built-in MCP server exposes the task board to
+any MCP client.
+
+This repository is built this way: agents claim work from `bp task ready`, publish design
+papers, and score the codebase into a browsable graph ([Cody](tooling/README.md)).
 
 ## Four ways in
 
@@ -96,18 +92,6 @@ the codebase into a browsable graph ([Cody](tooling/README.md) — one paper per
 | **REST API** | Public reads, token-authed writes, Sanity-compatible mutations, SSE stream. |
 
 ## How it works
-
-```mermaid
-flowchart TB
-  BP["bp — one binary<br/>zero hardcoded verbs"]
-  CP["Control plane<br/>accounts · billing · warm pool"]
-  I["Instance<br/>Phoenix · Postgres · plugins"]
-  S["Studio · TUI · SDK · agents"]
-  BP -->|"fleet verbs"| CP
-  BP -->|"content verbs"| I
-  CP -->|"provisions, health-gates, flips"| I
-  I --> S
-```
 
 - **One schema, many surfaces.** A single SchemaDefinition drives Studio, TUI, REST, and CLI.
 - **Manifest-driven contract.** The server projects nouns, verbs, and routes into
@@ -122,6 +106,14 @@ flowchart TB
 Stack: Elixir / Phoenix LiveView · PostgreSQL · Oban · Go (CLI + TUI, one binary) · Caddy.
 Plugins: **Tasks · Bulldocs · Media · OnixEdit · Sheets · Frt · GitHub · Pulse · Quiz · Scaffy ·
 Tickets**. It grades itself — [`tooling/`](tooling/README.md) recomputes 14 critics live.
+
+## Why we build it this way
+
+We know the temptation from the inside: the moment greed enters a design, dark patterns
+follow — so we took the choice away from ourselves. Open source dismantles the machinery that
+makes a "no" profitable. We are locked behind a purpose — greatness, and making software
+yours — and we will not hold back on user experience or freedom.
+[Conditioned for greatness →](docs/PHILOSOPHY.md)
 
 ## Be your own cloud
 
