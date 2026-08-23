@@ -198,6 +198,7 @@ const DEFECTS = [
   "W13-detail-route-band",
   "W25-deploy-rail-fail-wrap",
   "W23-account-modal-identity-bounded",
+  "W22-2fa-enroll-phone-band",
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
   "W23-cred-remediation-reachable",
@@ -2434,6 +2435,100 @@ async function main() {
         fontPinnedEvidence(
           `\`.am-name\` inherits the UI face, not the mono fallback D248 named, and what is ASSERTED here is ` +
           `face-independent anyway: glyphs inside their own box, and a modal that does not scroll sideways`,
+        );
+      }
+    }
+
+
+    // ── W22: THE 2FA ENROLL PHASE, AT PHONE WIDTHS, AT REST ────────────────
+    //    (cchi-w22-bl-modal-oracle-never-visits-a-phone-width.) THE OWNERSHIP
+    //    DECISION, in one sentence: overflow-guard owns modal GEOMETRY because
+    //    it is the instrument console-harness actually blocks merges on, while
+    //    modal-oracle (1440-only, invoked by ZERO CI jobs — it prints that
+    //    itself) stays the behavioural oracle; so the enroll phase is driven
+    //    HERE rather than widening an instrument nothing runs.
+    //
+    //    THE DEFECT CLASS THIS CAN LOSE ON (cch-w22-s4 / D254, measured
+    //    pre-fix): the account card carried a ~460.45px min-content floor, the
+    //    modal root became a horizontal scroller with no visible affordance,
+    //    and at rest the QR sat at x=-135..-17 (@320) with Copy at
+    //    416.33..448.45 (@360/390/430) — OFF-SCREEN, while
+    //    documentElement.scrollWidth == clientWidth at every width, so every
+    //    page-level scorer read clean. The assertions here are therefore
+    //    VIEWPORT-RELATIVE RECTS AT REST, per control, plus the root's own
+    //    scroll pair — never the page number. Px are font-conditional (D218);
+    //    the ORDINAL fact — a control past the viewport edge at rest — is what
+    //    is asserted.
+    //
+    //    THE DRIVE IS REAL: scenario account-modal-2fa-badcode auto-drives
+    //    #a2f-start → POST enroll → type 000000 → #a2f-confirm → 422, and
+    //    app.js paints #a2f-error. Readiness keys on #a2f-error (the drive's
+    //    arrival sentinel — NOT one of the measured hosts), so a drive that
+    //    never reached the enroll phase refuses as exit 2 instead of
+    //    photographing the wrong screen.
+    if (requested.includes("W22-2fa-enroll-phone-band")) {
+      const D = "W22-2fa-enroll-phone-band";
+      const A2F_WIDTHS = [320, 360, 390, 430, 480];
+      // #a2f-copy ("Copy all") deliberately NOT here: it belongs to the
+      // recovery-codes phase AFTER a successful confirm — the driven 422 path
+      // never renders it (measured: zero matches in this phase). The enroll
+      // phase's copy control is #a2f-copy-secret.
+      const A2F_HOSTS = [".a2f-qr", "#a2f-secret", "#a2f-copy-secret", "#a2f-confirm"];
+      process.stdout.write(
+        `\n${D} — the driven enroll phase x ${A2F_WIDTHS.length} phone widths x 2 themes` +
+        ` (${A2F_HOSTS.length} controls viewport-checked AT REST in every cell)\n`,
+      );
+      let a2fCells = 0, a2fChecked = 0;
+      for (const theme of ["light", "dark"]) {
+        await setViewport(900);
+        await nav(
+          `${BASE}/?scen=account-modal-2fa-badcode&theme=${theme}&modal=account`,
+          `(function(){var r=document.getElementById('modal-root');` +
+          `return !!(r && !r.hidden && r.querySelector('.modal-card') && document.getElementById('a2f-error'));})()`,
+        );
+        const row = [];
+        for (const width of A2F_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;var vw=d.clientWidth;` +
+            `var root=document.getElementById('modal-root');` +
+            `var hosts=${JSON.stringify(A2F_HOSTS)}.map(function(q){` +
+            `  var els=[].slice.call(document.querySelectorAll(q));` +
+            `  return {q:q, n:els.length, rects:els.map(function(el){var r=el.getBoundingClientRect();` +
+            `    return {l:+r.left.toFixed(2), r:+r.right.toFixed(2), w:+r.width.toFixed(2), h:+r.height.toFixed(2)};})};` +
+            `});` +
+            `return {vw:vw, psw:d.scrollWidth, pcw:d.clientWidth,` +
+            ` rsw:root?root.scrollWidth:0, rcw:root?root.clientWidth:0,` +
+            ` rleft:root?root.scrollLeft:0, hosts:hosts};})()`,
+          );
+          a2fCells++;
+          for (const h of m.hosts) {
+            // A control that stopped rendering is a finding, never a skip: the
+            // enroll phase without its QR (or its Copy) is the defect wearing
+            // an emptier costume.
+            if (h.n === 0) { fail(D, `${theme}@${width}: ${h.q} matched NOTHING in the driven enroll phase — the control is gone, so nothing below can certify it reachable`); continue; }
+            for (const r of h.rects) {
+              a2fChecked++;
+              if (r.w <= 0 || r.h <= 0) { fail(D, `${theme}@${width}: ${h.q} paints a ${r.w}x${r.h} rect — present but invisible`); continue; }
+              // THE ORDINAL ASSERTION: on screen AT REST. scrollLeft is read,
+              // not reset — "at rest" is what a person gets.
+              if (r.l < 0 || r.r > m.vw) {
+                fail(D, `${theme}@${width}: ${h.q} rests at ${r.l}..${r.r} against a ${m.vw}px viewport — OFF-SCREEN AT REST behind a scroll with no visible affordance (root scrollLeft ${m.rleft}, root ${m.rsw}/${m.rcw})`);
+              }
+            }
+          }
+          row.push(`${width}:root ${m.rsw}/${m.rcw}${m.rsw > m.rcw ? "!" : ""}`);
+        }
+        process.stdout.write(`   ${theme}  ${row.join("  ")}\n`);
+      }
+      if (a2fChecked === 0) {
+        fail(D, `ZERO control rects measured across ${a2fCells} cells — the enroll phase never rendered, so this leg certifies nothing`);
+      } else if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${a2fChecked} control rect(s) across ${a2fCells} cells: QR, secret, Copy, Confirm all ON SCREEN ` +
+          `AT REST at ${A2F_WIDTHS.join("/")} in both themes, in the REAL driven enroll phase (start → enroll → 422). ` +
+          `The page number is not consulted — pre-fix, documentElement read clean at every one of these widths ` +
+          `while the QR sat at x=-135; the viewport-relative rects are what a person gets`,
         );
       }
     }
