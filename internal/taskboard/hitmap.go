@@ -205,14 +205,13 @@ func (m Model) ComposeHitMap() []LineTarget {
 		body = HitMapFor(m.board, m.ui, bw, bh, now)
 	} else {
 		width, height := m.composeInner()
-		avail := height - 2 // footer + the sheet's ─ top edge, exactly as composeAt reserves
+		avail := height - 1 // reading footer, exactly as composeAt reserves
 		if avail < 1 {
 			avail = 1
 		}
 		docW, _ := docLayout(width)
 		content, stops := m.frameContent(top, docW, now)
-		body = make([]LineTarget, 0, avail+2)
-		body = append(body, chromeTarget) // the sheet's ─ top edge (renderDocPane)
+		body = make([]LineTarget, 0, avail+1)
 		body = append(body, frameHitTargets(content, stops, top.Cursor, top.Scroll, avail)...)
 		body = append(body, chromeTarget) // reading footer
 	}
