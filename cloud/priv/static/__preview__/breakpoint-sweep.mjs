@@ -25,7 +25,7 @@
 //             height-bearing @media, so the derived refusal refuses nothing
 //             today and legA's own output says so. The declared HEIGHTS set
 //             carries a written reason per value.
-//   SCENARIO  111 scenarios, 26 rendered, 85 in a COMMITTED residue literal.
+//   SCENARIO  112 scenarios, 26 rendered, 86 in a COMMITTED residue literal.
 //             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
 //             prints these on every bare run (the `>> scenarios` line), and
 //             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
@@ -387,7 +387,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "no-deeplink": "The account modal family: no route of its own, opened over whatever screen is live. Modal geometry has its own instrument (modal-oracle) — duplicating it here would double the cost and split the owner.",
   "path:/activate": "The device-activation page is not part of the console shell at all — a different document with its own layout, outside this sweep's screen axis.",
   "path:/new": "The launch/theater page is likewise its own document outside the shell.",
-  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 4 vary member-role, cancelling copy, the portal return and cch-w39-s1's `billing-me-unreadable` inside those same panels — the last swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
+  "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 5 vary member-role, cancelling copy, the portal return, cch-w39-s1's `billing-me-unreadable` and its one-shot recovery twin `billing-me-recovers` inside those same panels — the unreadable pair swaps the Manage section's one-line copy for a single .empty-state block, a geometry the two cells already walk at all 15 widths.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 4 vary zero-staging / denied / route-unreadable / me-unreadable states of the same panels — cch-w37-s6's `operator-me-unreadable` renders ONE empty-state block in place of the four cards, a geometry the two cells already walk at all 15 widths.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
   "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
@@ -449,8 +449,16 @@ export const RESIDUE_FAMILY_REASONS = {
 // "overview-member-empty-fleet" (family hash:#overview)` and the twin until the
 // entries below were written, and all five numerals were then RE-READ from
 // `scenarioReport`, never carried from the brief.
-// `familyOf` over all 111 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 85 is the RESIDUE, not the census.
+// cchi-w39-bl-mefault-must-be-exhaustible moved it: `billing-me-recovers` —
+// the first fixture whose /v1/me fault EXHAUSTS (`times: 1` through the
+// per-boot state bag), so the first able to measure the shared retry's
+// RECOVERY half rather than its presence — is the 112th scenario and the
+// 86th residue entry, in the family its unreadable twin already occupies.
+// The sweep exited 2 with `UNLISTED scenario "billing-me-recovers" (family
+// hash:#billing)` until the entry below was written; the numbers here were
+// RE-READ from `scenarioReport` after the entry landed.
+// `familyOf` over all 112 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 86 is the RESIDUE, not the census.
 //
 // WHICH ARM OWNS WHICH NUMERAL (cch-w47-s4, D527). The old header here read
 // "EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED" over typed numerals
@@ -458,7 +466,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // nothing. A COMMENT CANNOT BE DERIVED — it can only be RECOUNTED by an arm
 // that reads these bytes. Every numeral in this block is now named by the arm
 // that reds when it drifts, all in breakpoint-sweep.test.mjs:
-//   * 111 / 27 / 26 / 85 / 13 — "the census reconciles: …", whose TITLE is now
+//   * 112 / 27 / 26 / 86 / 13 — "the census reconciles: …", whose TITLE is now
 //     built from `scenarioReport` by template literal rather than typed, so the
 //     printed line has no second copy left to rot.
 //   * 15, and the two ZERO-residue names `hash:#sites` / `hash:#activity` —
@@ -567,10 +575,11 @@ export const SCENARIO_RESIDUE = {
   "theater-midflight": "path:/new",
   "theater-failed": "path:/new",
   "theater-ready": "path:/new",
-  // hash:#billing — 4
+  // hash:#billing — 5
   "billing-portal-return": "hash:#billing",
   "billing-member": "hash:#billing",
   "billing-me-unreadable": "hash:#billing",
+  "billing-me-recovers": "hash:#billing",
   "billing-cancelling": "hash:#billing",
   // hash:#operator — 4
   "operator-zero-staging": "hash:#operator",

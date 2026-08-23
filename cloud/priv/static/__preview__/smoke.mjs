@@ -2466,6 +2466,35 @@ const EXPECTATIONS = {
       assert.equal(reg.get("billing-tiers").hidden, true, "the plan grid stays closed while the role is unknown");
     },
   },
+  // cchi-w39-bl-mefault-must-be-exhaustible — THE RECOVERY, DRIVEN. The
+  // unreadable twin proves the shared retry RENDERS; this one proves it
+  // RECOVERS: the one-shot fault (times: 1) fails the boot read, the shared
+  // [data-me-retry] is clicked (fired count asserted — an unwired button would
+  // otherwise be a dead pass), the re-read lands 200 owner, and the owner
+  // affordances RETURN. Wire-asserted at both ends via ctx.countCalls.
+  "billing-me-recovers": {
+    what: "the owner's /v1/me 500s ONCE — clicking the shared retry re-reads, and Manage billing RETURNS",
+    async check(reg, hooks, ctx) {
+      const manageEl = reg.get("billing-manage");
+      const before = manageEl.innerHTML || "";
+      assert.ok(before.includes("We couldn't check your account"),
+        "the boot read must fail first — without the unknown arm there is no recovery to measure; got: " + before);
+      assert.ok(!before.includes(">Manage billing<"), "no portal button while the role is unknown");
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      const btns = manageEl.querySelectorAll("[data-me-retry]");
+      assert.equal(btns.length, 1, "the unknown arm mounts exactly one shared retry");
+      const fired = btns[0].click();
+      assert.ok(fired > 0, "[data-me-retry] dispatched " + fired + " handler(s) — the button is DEAD (wireMeRetry never ran)");
+      await ctx.settle();
+      assert.ok(ctx.countCalls("GET", "/v1/me") >= 2, "the retry never re-issued the /v1/me read");
+      const after = manageEl.innerHTML || "";
+      assert.ok(after.includes(">Manage billing<"),
+        "the landed 200 owner did not restore Manage billing — the retry re-read but the surface never healed; got: " + after);
+      assert.ok(!after.includes("We couldn't check your account"), "the failure copy retires once the read lands");
+      assert.equal(reg.get("billing-cancel-section").hidden, false, "the Cancel section returns with the proven owner");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage section is shown for the proven owner");
+    },
+  },
   "billing-cancelling": {
     what: "owner after an in-app cancel — the grace 'Access until' + Ending badge, Cancel section retired, Manage billing kept",
     check(reg) {

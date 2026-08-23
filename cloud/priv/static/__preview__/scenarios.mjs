@@ -3771,6 +3771,37 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cchi-w39-bl-mefault-must-be-exhaustible — the RECOVERY twin of
+  // billing-me-unreadable: the same owner, the same 500, but a ONE-SHOT fault
+  // (`times: 1` consumes through the per-boot state bag in route()). The first
+  // /v1/me read fails and the unknown arm mounts the shared [data-me-retry];
+  // the retry's re-read heals, and the owner affordances must RETURN. Without
+  // this fixture the crown's "the unknown has an exit" claim stops at "the
+  // button is present and pressable" — the recovery half would be asserted,
+  // never measured.
+  "billing-me-recovers": {
+    label: "Billing — the owner's /v1/me 500s ONCE: the shared retry re-reads, the answer lands, and Manage billing returns",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
 
   // The owner AFTER an in-app cancel: the subscription is now cancel_at_period_end
   // (grace) — the plan card reads "Access until {date}" + the Ending badge, the
@@ -4505,7 +4536,27 @@ export function route(name, method, path, state) {
   // absorbMe writes on a 500/502/offline — was unreachable from every scenario
   // in this file. `meFault` is a per-scenario override that fails the READ while
   // leaving `me` present: the account exists, the wire did not answer.
-  if (p === "/v1/me" && d.meFault) return d.meFault;
+  if (p === "/v1/me" && d.meFault) {
+    // cchi-w39-bl-mefault-must-be-exhaustible — the EXHAUSTIBLE form. A sticky
+    // fault can prove a retry RENDERS and re-issues the read, but never that it
+    // RECOVERS: the second read fails identically forever. `times: N` fails the
+    // first N reads and then heals, with the count kept in the PER-BOOT state
+    // bag (the 4th arg both harnesses already pass) — NEVER on this module's
+    // shared scenario object, which smoke.mjs drives across many scenarios in
+    // one process and which a browser reload must not inherit. No `times` — or
+    // a stateless caller that passed no bag — is the STICKY default, unchanged:
+    // operator-me-unreadable and billing-me-unreadable depend on a read that
+    // NEVER heals, and their surfaces pin exactly that.
+    if (typeof d.meFault.times === "number" && state) {
+      if ((state.meFaultServed || 0) < d.meFault.times) {
+        state.meFaultServed = (state.meFaultServed || 0) + 1;
+        return { status: d.meFault.status, body: d.meFault.body };
+      }
+      // exhausted — fall through to the healthy /v1/me arm below.
+    } else {
+      return d.meFault;
+    }
+  }
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
   // than 404 so every scenario answers HONESTLY ("No active sessions") instead
