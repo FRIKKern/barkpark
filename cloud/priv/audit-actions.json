@@ -132,6 +132,7 @@
       "reason": "A rollback was triggered on an instance; the site-level sibling site.rolled_back IS labelled 'rolled back a site'. Raw slug via D582. Copy owned by cch-w62-bl-thirty-six-audit-verbs-render-as-raw-machine-tokens."
     },
     { "verb": "barkpark.autoupdate_changed", "label": "changed autoupdate" },
+    { "verb": "barkpark.agent_key_delivered", "label": "delivered a model key to a support box" },
     {
       "verb": "barkpark.domain_attached",
       "label": null,

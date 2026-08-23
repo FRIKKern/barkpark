@@ -51,6 +51,8 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
     | post   | /v1/barkparks/:id/self-update                              | inline tid == team.id   |
     | post   | /v1/barkparks/:id/rollback                                 | inline tid == team.id   |
     | patch  | /v1/barkparks/:id/autoupdate                               | inline tid == team.id   |
+    | post   | /v1/barkparks/:id/agent-key                                | inline tid == team.id   |
+    | get    | /v1/barkparks/:id/agent-key                                | inline tid == team.id   |
     | post   | /v1/barkparks/:id/domain                                   | inline tid == team.id   |
     | get    | /v1/barkparks/:id/bootstrap                                | inline tid == team.id   |
     | post   | /v1/barkparks/:id/vercel-deploy                            | inline tid == team.id   |
@@ -70,7 +72,8 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
     | get    | /v1/barkparks/:id/usage/history                            | resolve_team_barkpark   |
     | get    | /v1/barkparks/:id/domain-status                            | resolve_team_barkpark   |
 
-    Tally: inline tid==team.id 14 · resolve_team_barkpark 5 · proxy_instance_webhook 9 · recent_events_for_team 2 = 30.
+    Tally: inline tid==team.id 16 · resolve_team_barkpark 5 · proxy_instance_webhook 9 · recent_events_for_team 2 = 32.
+    (PDF-D94 added the agent-key pair — both pattern-match the resolved row's team_id inline, fail-closed 404 cross-team.)
 
   CANDOR — what this proves and what it does NOT (D57 marginal value).
 
@@ -129,7 +132,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
 
   # Pinned population, re-derived on origin/main. A new barkparks/:id route moves
   # this and must be ruled on here.
-  @expected_route_count 30
+  @expected_route_count 32
 
   defp source, do: File.read!(@router_source)
 
@@ -192,7 +195,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
       |> Enum.frequencies()
 
     assert tally == %{
-             "inline tid == team.id" => 14,
+             "inline tid == team.id" => 16,
              "resolve_team_barkpark" => 5,
              "proxy_instance_webhook" => 9,
              "recent_events_for_team" => 2

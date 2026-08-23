@@ -1253,6 +1253,36 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  PDF-D94 (`pdf-bl-console-key-custody`): enqueue a `pending` PUSH_AGENT_KEY job
+  for `barkpark` — the console paste-a-key path. The job row carries ONLY the
+  routing fact (barkpark_id + kind); the key itself is stashed in-memory by the
+  ROUTER (`AgentKeyStash.put/3`, keyed by the job id this returns) so nothing
+  durable ever holds key material (D62 amended: NEVER KEEPS).
+
+  Same one-active-per-kind guard as the other kinds: an ACTIVE (pending/claimed)
+  `push_agent_key` job already in flight for this barkpark returns
+  `{:error, :already_delivering}` — one key in transit per box at a time.
+  """
+  @spec enqueue_agent_key_push_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_delivering | Ecto.Changeset.t()}
+  def enqueue_agent_key_push_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    if active_job_of_kind?(bp_id, "push_agent_key") do
+      {:error, :already_delivering}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{
+        barkpark_id: bp_id,
+        kind: "push_agent_key",
+        status: "pending"
+      })
+      |> Repo.insert()
+      |> translate_active_job_conflict(:already_delivering)
+    end
+  end
+
   # dwb-11: map a lost race on the one-active-job-per-barkpark-kind partial unique
   # index to a clean dedup atom. Any OTHER changeset error (or the {:ok, _} happy
   # path) passes through unchanged — only the money-path collision is rewritten.
@@ -1403,6 +1433,18 @@ defmodule BarkparkCloud.Registry do
   @spec claim_next_support_provision_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
   def claim_next_support_provision_job(claim_token) when is_binary(claim_token),
     do: claim_next_job(claim_token, "provision_support")
+
+  @doc """
+  PDF-D94: atomically claim the next claimable PUSH_AGENT_KEY job — the agent-key
+  delivery worker's pull. Same machinery as `claim_next_job/2`, filtered to
+  `kind: "push_agent_key"`. The ROUTER pops the in-memory key for the claimed job
+  id (`AgentKeyStash.take/1` — delete-on-read) and folds it onto the claim
+  payload; a missing stash entry (CP restart, expiry, second hand-out) fails the
+  job honestly at the route instead of delivering nothing.
+  """
+  @spec claim_next_agent_key_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_agent_key_job(claim_token) when is_binary(claim_token),
+    do: claim_next_job(claim_token, "push_agent_key")
 
   # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
   # claimers SKIP LOCKED past it. If a stale row has burned through its attempt
@@ -2193,7 +2235,37 @@ defmodule BarkparkCloud.Registry do
   @spec succeed_attach_domain_job(binary(), String.t() | nil, keyword()) ::
           {:ok, ProvisionJob.t()}
           | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
-  def succeed_attach_domain_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts) do
+  def succeed_attach_domain_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts),
+    do: succeed_job_row_only(id, ip, opts)
+
+  @doc """
+  PDF-D94: mark push-agent-key job `id` succeeded — the key line landed on the
+  box and the listener restarted. Flips the JOB ROW ONLY (`result_ip` when the
+  worker echoed the box ip): a key push must NEVER run `succeed_job/3`'s
+  barkpark upsert, which would clobber a LIVE support row back to
+  health "unknown" / agent "offline". Same idempotency + claim-fence contract
+  as `succeed_attach_domain_job/3`.
+  """
+  @spec succeed_agent_key_job(binary(), String.t() | nil, keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def succeed_agent_key_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts),
+    do: succeed_job_row_only(id, ip, opts)
+
+  @doc """
+  PDF-D94: mark push-agent-key job `id` failed with `error`. The support row is
+  untouched (it stays live — only the key delivery failed; re-paste is the
+  recovery). Delegates to `fail_job/3`, exactly like the attach-domain fail.
+  """
+  @spec fail_agent_key_job(binary(), String.t(), keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def fail_agent_key_job(id, error, opts \\ []), do: fail_job(id, error, opts)
+
+  # The shared job-row-only succeed (attach_domain + push_agent_key): flip the
+  # job to succeeded WITHOUT touching the owning barkpark. Idempotent + fenced
+  # exactly like succeed_job/3.
+  defp succeed_job_row_only(id, ip, opts) do
     claim_token = Keyword.get(opts, :claim_token)
 
     case uuid_or_nil(id) do
@@ -2248,6 +2320,23 @@ defmodule BarkparkCloud.Registry do
           {:ok, ProvisionJob.t()}
           | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
   def fail_attach_domain_job(id, error, opts \\ []), do: fail_job(id, error, opts)
+
+  @doc """
+  PDF-D94: the latest `push_agent_key` job for `barkpark`, or nil — the console's
+  delivery-status read (`GET /v1/barkparks/:id/agent-key`). Status/error only;
+  the job row never holds key material by construction.
+  """
+  @spec latest_agent_key_job(Barkpark.t() | binary()) :: ProvisionJob.t() | nil
+  def latest_agent_key_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    from(j in ProvisionJob,
+      where: j.barkpark_id == ^bp_id and j.kind == "push_agent_key",
+      order_by: [desc: j.inserted_at, desc: j.id],
+      limit: 1
+    )
+    |> Repo.one()
+  end
 
   @doc """
   The latest provision job for each barkpark id in `ids`, as a map
