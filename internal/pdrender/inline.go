@@ -49,9 +49,14 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 	switch attrStr(n, "type") {
 	case "text":
 		marks := attrSlice(n, "marks")
-		value := sanitizeDisplayText(attrStr(n, "value"))
+		// Dual-read "value" || legacy "text": raw mutate writers persisted text
+		// leaves keyed {"type":"text","text":…}; the Hollow predicate counts both
+		// spellings as content, so the renderers must agree or such a paper reads
+		// as structure with zero prose. Mirrors compose_inline in the Elixir twin
+		// (render/inline.ex).
+		value := sanitizeDisplayText(attrStrFirst(n, "value", "text"))
 		if hasCodeMark(marks) {
-			value = sanitizeText(attrStr(n, "value"))
+			value = sanitizeText(attrStrFirst(n, "value", "text"))
 		}
 		if len(marks) == 0 {
 			return value
