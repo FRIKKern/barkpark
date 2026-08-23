@@ -222,8 +222,7 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacks do
     try do
       cond do
         is_function(seeder, 0) ->
-          seeder.()
-          :ok
+          classify_seeder_result(seeder.())
 
         true ->
           {:error, {:not_a_zero_arity_function, seeder}}
@@ -246,6 +245,22 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacks do
         {:error, {kind, inspect(reason)}}
     end
   end
+
+  # A seeder that reports failure by RETURN VALUE must not be recorded as a
+  # success. Both OnixEdit seeders document "Never raises" and hand back
+  # `{:error, reason}` — `Barkpark.Codelists.EDItEUR.seed_thema/1` catches its
+  # own exceptions and returns `{:error, {:raised, msg}}`. Before this clause
+  # `invoke_seeder/2` discarded the return value and answered `:ok` for
+  # anything that did not throw, so a boot where the Thema seed died mid-write
+  # still recorded `RunStatus{seed: {:ok, 2}}` — the one instrument that
+  # reports seed health showed green while the codelist was absent.
+  #
+  # Only the explicitly-tagged shapes are classified. An unrecognised return
+  # (a third-party plugin seeder that answers with its own term) stays a
+  # success, so honouring the contract cannot newly fail a plugin that never
+  # opted into it.
+  defp classify_seeder_result({:error, reason}), do: {:error, reason}
+  defp classify_seeder_result(_other), do: :ok
 
   @doc """
   Notifies registered plugins after a blob upload lands in `media_files`.
