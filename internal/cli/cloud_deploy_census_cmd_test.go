@@ -2234,7 +2234,10 @@ func TestCloudDeploymentsRefusedShareNamesTheWindow(t *testing.T) {
 		}
 	}
 
-	remedy := censusLineContaining(t, stdout, "A WINDOW THAT COULD ANSWER")
+	// The headline carries its own copy of this remedy now (dr-w30-followup),
+	// so the SHARE remedy is looked up inside the classes region.
+	classes := stdout[strings.Index(stdout, "failure classes"):]
+	remedy := censusLineContaining(t, classes, "A WINDOW THAT COULD ANSWER")
 	for _, want := range []string{
 		"--from 2026-08-05T21:13:50Z",
 		"--to 2026-08-09T00:00:00Z",
@@ -2274,7 +2277,10 @@ func TestCloudDeploymentsSampleRefusalOffersNoImpossibleWindow(t *testing.T) {
 	if !strings.Contains(note, "sample 31 below min_sample 200") || !strings.Contains(note, "n=31") {
 		t.Fatalf("the sample refusal must be quoted with its denominator: %q", note)
 	}
-	remedy := censusLineContaining(t, stdout, "NO --from CAN UN-REFUSE THIS")
+	// The headline refusal carries the same no-window truth now (dr-w30-followup),
+	// so the SHARE remedy is looked up inside the classes region.
+	classes := stdout[strings.Index(stdout, "failure classes"):]
+	remedy := censusLineContaining(t, classes, "NO --from CAN UN-REFUSE THIS")
 	for _, want := range []string{"2026-08-05T21:13:50Z", "wholly after", "schema_commit"} {
 		if !strings.Contains(remedy, want) {
 			t.Fatalf("sample-refusal remedy %q missing %q", remedy, want)
@@ -2303,6 +2309,81 @@ func TestCloudDeploymentsRefusedShareInventsNoWindow(t *testing.T) {
 	// not send. A hardcoded boundary would surface exactly here.
 	if strings.Contains(stdout, "2026-08-05T21:13:50Z") {
 		t.Fatalf("an instant the envelope never carried was rendered — the boundary is hardcoded somewhere:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsHeadlineRefusalNamesTheWindow
+// (dr-w30-followup-headline-refusal-names-the-window): the HEADLINE
+// failure_rate refusal carries the same envelope-read window remedy the share
+// refusals carry — rendered in the headline region, above the classes, off the
+// same deployCensusShareRemedy. Before this, the operator read 'failure NO RATE
+// — the window STRADDLES … boundary at <instant>' and was never told that
+// `--from <instant>` answers it — dr-w30-s5 cured the shares and deliberately
+// left the headline outside its cut.
+func TestCloudDeploymentsHeadlineRefusalNamesTheWindow(t *testing.T) {
+	newCensusServer(t, 200, censusStraddleEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	head := stdout[:strings.Index(stdout, "failure classes")]
+	remedy := censusLineContaining(t, head, "A WINDOW THAT COULD ANSWER")
+	for _, want := range []string{
+		"--from 2026-08-05T21:13:50Z",
+		"--to 2026-08-09T00:00:00Z",
+		"schema_commit",
+		"#9615",
+		"min_sample 200",
+	} {
+		if !strings.Contains(remedy, want) {
+			t.Fatalf("headline remedy %q missing %q — the boundary, its provenance and the caveat all come off the envelope", remedy, want)
+		}
+	}
+}
+
+// TestCloudDeploymentsHeadlineSampleRefusalOffersNoImpossibleWindow: a headline
+// refused for SAMPLE gets the same honest no-window truth the shares get — a
+// narrower --from can only shrink the sample, and the render says so in the
+// headline region instead of offering a trim that would make it worse.
+func TestCloudDeploymentsHeadlineSampleRefusalOffersNoImpossibleWindow(t *testing.T) {
+	newCensusServer(t, 200, censusSampleRefusalEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-08T00:00:00Z", "--to", "2026-08-09T00:00:00Z")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	head := stdout[:strings.Index(stdout, "failure classes")]
+	remedy := censusLineContaining(t, head, "NO --from CAN UN-REFUSE THIS")
+	for _, want := range []string{"2026-08-05T21:13:50Z", "wholly after"} {
+		if !strings.Contains(remedy, want) {
+			t.Fatalf("headline sample-refusal remedy %q missing %q", remedy, want)
+		}
+	}
+	if strings.Contains(head, "A WINDOW THAT COULD ANSWER") {
+		t.Fatalf("a headline sample refusal must NOT be offered a narrower window:\n%s", head)
+	}
+}
+
+// TestCloudDeploymentsAnsweredHeadlineCarriesNoRemedy keeps the headline remedy
+// FALSIFIABLE: a headline that produced a percentage gets no remedy line at all
+// — a remedy under an answered rate would read as doubt the answer never
+// expressed.
+func TestCloudDeploymentsAnsweredHeadlineCarriesNoRemedy(t *testing.T) {
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, _, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	head := stdout[:strings.Index(stdout, "failure classes")]
+	for _, unwanted := range []string{"A WINDOW THAT COULD ANSWER", "NO --from CAN UN-REFUSE", "NO WINDOW SUGGESTION"} {
+		if strings.Contains(head, unwanted) {
+			t.Fatalf("an answered headline acquired a remedy (%q):\n%s", unwanted, head)
+		}
 	}
 }
 
