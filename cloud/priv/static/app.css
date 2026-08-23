@@ -5809,7 +5809,25 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .detail-head--inst { align-items: flex-start; }
 .detail-head-main { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .detail-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
-.detail-title-row h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+/* task-df8a6fced3a408a8: the SECOND host on this row, found while bisecting
+   .detail-url-text below. `instance-cruel-detail`'s fixture is cruel on TWO
+   strings at once (`bp.name` at its 255-char cap AND `custom_host` at its
+   253-char cap — scenarios.mjs's own comment: "the ONLY variable is the
+   length of two strings a person is allowed to type"), and element-hiding
+   bisection (headless Chrome, `instance-cruel-detail`, 320/720, both
+   unaffected by the .detail-url-text fix below) found THIS host, not that
+   one, driving the page: hiding `.detail-title-row h1` alone took
+   `documentElement.scrollWidth` from 808 to exactly `clientWidth` at both
+   320 and 720; hiding `.detail-url-text` alone left it at 808, unchanged.
+   `bp.name` reaches this h1 verbatim with no wrap treatment at all, and the
+   cruel fixture's name is one unbroken 62-character compound (a realistic
+   Norwegian shape, not a stress-test artifact) — a single flex item with no
+   break opportunity holds the ROW, and hence the PAGE, to its own
+   min-content width regardless of viewport. Same treatment as
+   `.instance-card-name` (app.css:3794, "BOTH DECLARATIONS ARE LOAD-BEARING":
+   `min-width: 0` lets the flex item shrink at all, `break-word` is what
+   stops the shrink from clipping instead of overflowing). */
+.detail-title-row h1 { margin: 0; font-size: 26px; letter-spacing: -0.02em; min-width: 0; overflow-wrap: break-word; }
 .detail-head--inst .detail-actions {
   display: flex; align-items: center; gap: 8px;
   flex-wrap: wrap; justify-content: flex-end; flex: 0 0 auto;
@@ -5916,7 +5934,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .vf-head-main h2 { margin: 0; font-size: 14px; }
 .vf-head-main .vf-meta { margin: 3px 0 0; }
 
-@media (max-width: 620px) {
+@media (max-width: 899px) {
   /* `align-items: stretch` IS THE FIX, and it is one declaration because the
      defect is one declaration doing a different job in the stacked axis than
      the one it was written for. `.detail-head--inst { align-items: flex-start }`
@@ -5942,7 +5960,27 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      320 reads scrollWidth 320 and the Copy button's right edge 304, with
      `.detail-url-text` ellipsising at 262 (its phone-width ellipsis is a
      separately filed row, not this one). Px are font-conditional (D218) — the
-     ORDINAL fact, a control past the viewport edge, is not. */
+     ORDINAL fact, a control past the viewport edge, is not.
+
+     WIDENED 620 -> 899 (task-df8a6fced3a408a8): the range above was bounded to
+     the phone fixture that found it, not to the shape of the defect — the
+     SHARED `.detail-head` this comment already cites stacks at 899, so a
+     `.detail-head--inst` fix that only restores stretch through 620 silently
+     opts back OUT of the second half for 621-899, which is exactly the band
+     the fix's own comment names as the precedent it is restoring. Confirmed
+     live (Chrome, headless CDP, `instance-cruel-detail` — the 253-char
+     custom_host that first made `.detail-url-text` cruel, both themes,
+     320/360/390/430/480/620/720/830/899/900/1000/1440): pre-widen,
+     `.detail-head-main`'s OWN computed width at 720 was 1984px (its content
+     size, unshrunk) inside a 688px `.detail-head--inst`, because
+     `align-items: flex-start` (the unconditional rule, same specificity,
+     later in source order) wins the 621-899 band and un-stretches it — the
+     leaf's `.detail-url-text` never gets a narrower box to ellipsis into, so
+     `min-width: 0` on the leaf alone is provably the same no-op measured
+     above (byte-identical scrollWidth/clientWidth with and without it, this
+     branch). `documentElement.scrollWidth` measured 2000-2240 against a
+     720-899 viewport pre-widen (`1280-1410px` of sideways drag); post-widen,
+     0/24 cells (12 widths x 2 themes) have `deSw > deCw`. */
   .detail-head--inst { flex-direction: column; align-items: stretch; }
   .detail-head--inst .detail-actions { justify-content: flex-start; }
 }
