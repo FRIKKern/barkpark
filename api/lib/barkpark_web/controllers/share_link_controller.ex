@@ -98,13 +98,16 @@ defmodule BarkparkWeb.ShareLinkController do
   `Auth.create_token/5` writes the caller's home membership in the resolved
   workspace, so the real-install admin passes.
 
-  The Studio LiveView revoke arm REMAINS OPEN: `studio_live/handlers/
-  item_share.ex:69` reaches the same unscoped `Sharing.Links.revoke/1` with a
-  raw `phx-value-id` behind `Caps.admin?/1` — so a link id from ANOTHER
-  workspace is still accepted on its face. A controller-only fix does not close
-  the revoke CLASS; that is tracked by
-  `arpss-item-share-revoke-unscoped-revoke`, which this correction does NOT
-  discharge.
+  The Studio LiveView revoke arm's own unscoped-id class is CLOSED (corrected
+  2026-08-23, was: "REMAINS OPEN"): `arpss-item-share-revoke-unscoped-revoke`
+  landed in PR #12707 (0f293badc2, closing #12362). `studio_live/handlers/
+  item_share.ex`'s `revoke_scoped/2` now resolves the `ShareLink` row first and
+  authorizes the actor against the ROW's OWN workspace via
+  `Tenancy.Auth.workspace_admin?/2` — the same predicate and the same denial
+  shape (a non-castable id, a missing row, and a foreign row all collapse to
+  `{:error, :not_found}`) as `revoke_scoped/2` here — before ever calling
+  `Sharing.Links.revoke/1`. A link id from ANOTHER workspace is now denied, with
+  a committed cross-tenant test.
 
   What DID change, and what this paragraph used to get wrong (corrected
   2026-08-19, arpss-w10 / charter D22): this paragraph used to call the
@@ -114,10 +117,10 @@ defmodule BarkparkWeb.ShareLinkController do
   `role_permits?(membership_role, ws_id, :admin)` on the MOUNTED workspace, for
   both principal kinds, and a nil/unresolved workspace DENIES. An
   `admin`-permissioned token must therefore ALSO hold an admin-conferring
-  membership ROLE in the workspace whose desk it is standing on. So arpss-w10
-  narrows WHO reaches the revoke arm to exactly the principals this controller
-  admits — it does not narrow WHICH ids the arm will act on, which is the open
-  class.
+  membership ROLE in the workspace whose desk it is standing on. arpss-w10
+  narrowed WHO reaches the revoke arm to exactly the principals this controller
+  admits; `arpss-item-share-revoke-unscoped-revoke` (above) separately narrowed
+  WHICH ids the arm will act on. Both are now closed.
 
   ## Proof limits, stated rather than implied
 
