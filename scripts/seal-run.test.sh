@@ -261,6 +261,39 @@ expect_code "a --repo with no origin/main to compare against" 7 "$CODE"
 expect_has  "it names the remedy" "fetch origin main"
 
 # ---------------------------------------------------------------------------
+# --predicate WAS A DECOY (dr-w34-bl-seal-run-predicate-flag-is-a-decoy): the
+# usage block advertised it, but refusal 4 compared the executed file against
+# the HARDCODED origin-ref blob of the canonical path, so any --predicate that
+# was not a byte-identical copy was a guaranteed pre-run exit 4 whose remedy
+# named a file the caller never passed. The flag is deleted. These probes pin
+# the deletion three ways: the refusal is DEDICATED (its sentence names the
+# removal — the generic unknown-argument arm cannot produce it, so deleting the
+# dedicated arm reds HERE, attributably), it is NOT the misleading blob-drift
+# refusal, and the usage block no longer advertises the flag. A revert that
+# makes --predicate parse again turns this run into an exit-0 vouch (the file
+# passed is byte-identical to the canonical copy) and reds the exit-7 probe.
+section "--predicate is no such flag — the decoy escape hatch is deleted"
+
+OTHERPRED="$TMP/other-predicate.mjs"
+printf '// not the canonical predicate\n' >"$OTHERPRED"
+cp "$FAKE" "$TMP/identical-predicate.mjs"
+
+OUT="$(bash "$SEAL" --repo "$CLEAN" --predicate "$OTHERPRED" 2>&1)"; CODE=$?
+expect_code  "--predicate <some other file> refuses at the parser" 7 "$CODE"
+expect_has   "the refusal is the DEDICATED one, naming the removal" "--predicate is no such flag (removed)"
+expect_has   "…and it names the ONLY path the runner executes" "cloud/priv/static/__preview__/seal-predicate.mjs"
+expect_lacks "…it is NOT the blob-drift refusal (which named the wrong file)" "blob"
+expect_lacks "…and no predicate was executed at all" "SEAL PREDICATE — fixture stand-in"
+
+OUT="$(bash "$SEAL" --repo "$CLEAN" --predicate "$TMP/identical-predicate.mjs" 2>&1)"; CODE=$?
+expect_code  "even a byte-identical --predicate is refused — there is no flag to satisfy" 7 "$CODE"
+expect_has   "…with the same dedicated sentence" "--predicate is no such flag (removed)"
+
+grep -q -- '--predicate <path>' "$SEAL" \
+  && bad "the usage block still advertises --predicate <path> — the decoy survives in the help text" \
+  || ok "the usage block no longer advertises --predicate"
+
+# ---------------------------------------------------------------------------
 section "a refusal is never a verdict — the exit-code table"
 
 table_code() { OUT="$(env "$2" bash "$SEAL" --repo "$1" 2>&1)"; echo $?; }
