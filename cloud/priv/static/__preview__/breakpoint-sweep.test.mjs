@@ -741,6 +741,33 @@ test("the two ZERO-residue families are named, and 15 families over all scenario
   assert.equal(allFamilies.size - residueFamilies.size, zeroResidue.length);
 });
 
+// ── the HEADER-CENSUS arm: the sweep's own summary line can actually lose ────
+// (cchi-w22-bl-breakpoint-sweep-prose-says-75.) The `SCENARIO  N scenarios,
+// N rendered, N in a COMMITTED residue literal` line at the top of
+// breakpoint-sweep.mjs carried 100/75 for a wave after the census moved to
+// 101/76 — three typed numbers, four lines above a paragraph written to make
+// exactly this staleness fatal, and no arm read them. The census test above
+// asserts the DERIVED report against typed constants in THIS file; nothing
+// asserted the sweep's own header. This arm reads that line from the committed
+// bytes and recounts every numeral from scenarioReport. THE MATCH-COUNT FLOOR
+// IS LOAD-BEARING (same law as the chronicle arm below): a wording drift that
+// slid out from under the regex would leave this arm vacuous-green — if the
+// floor reds, re-point the regex at the new wording, never delete the arm.
+test("the sweep's SCENARIO header line is recounted from the derived report", () => {
+  const r = scenarioReport({ scenarios: SCENARIOS });
+  const matches = [...SWEEP_SRC.matchAll(/SCENARIO\s+(\d+) scenarios, (\d+) rendered, (\d+) in a COMMITTED residue literal/g)];
+  assert.equal(matches.length, 1,
+    "match-count floor: the SCENARIO header wording slid out from under this regex " +
+    "(or a second copy appeared) — re-point the regex at the wording on disk, never lower the floor");
+  const [, total, rendered, residue] = matches[0];
+  assert.equal(Number(total), r.total,
+    `the header says ${total} scenarios; scenarioReport derives ${r.total}`);
+  assert.equal(Number(rendered), r.distinctCovered,
+    `the header says ${rendered} rendered; scenarioReport derives ${r.distinctCovered} distinct covered`);
+  assert.equal(Number(residue), r.residue,
+    `the header says ${residue} in the residue literal; scenarioReport derives ${r.residue}`);
+});
+
 // ── the CHRONICLE arm: the census history's ordinals can actually lose ───────
 // For fifteen days the chronicle above the census test — and its twin in
 // breakpoint-sweep.mjs — carried TWO blocks claiming the SAME landing slot

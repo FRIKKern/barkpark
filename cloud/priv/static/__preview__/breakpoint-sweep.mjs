@@ -26,6 +26,11 @@
 //             today and legA's own output says so. The declared HEIGHTS set
 //             carries a written reason per value.
 //   SCENARIO  111 scenarios, 26 rendered, 85 in a COMMITTED residue literal.
+//             DERIVED, never typed: `scenarioReport({scenarios: SCENARIOS})`
+//             prints these on every bare run (the `>> scenarios` line), and
+//             the header-census arm in breakpoint-sweep.test.mjs asserts THIS
+//             VERY LINE against that report — this file said 100/75 for a
+//             wave after the census moved, and no guard read the prose.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  WHY THIS EXISTS (cch wave 14, slice S1)
