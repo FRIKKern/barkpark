@@ -1,4 +1,4 @@
-<!-- doc-tier: agent | canonical-for: merge-gates | budget: 800tok -->
+<!-- doc-tier: agent | canonical-for: merge-gates | budget: 16000tok -->
 # Merge Gates (Phase 2 onward)
 
 > Why a PR cannot be merged until every gate below is green, and how to run
@@ -900,6 +900,28 @@ Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
 on a contended checkout (an older caution to avoid running it locally is
 retired; it was fixed in #4473).
+
+### What step 1 covers under `docs/ops/` — and what this page's own header means
+
+`scripts/check-doc-budgets.sh` gates a fixed 28-row byte table (pinned by
+`CAPS_ROWS_EXPECTED`), the 7 `docs/cards/*.md`, and the pinned
+`docs/setup/CODEX.md` onramp span — nothing else. Under `docs/ops/` that table
+names exactly **one** file of the twenty: `docs/ops/PROD_OPS.md` (6000B). Every
+other `docs/ops/*.md`, this page included, carries a G1 `budget:` figure that
+**no gate reads** — on those files the header is a declaration, not a cap.
+
+This page's own header claimed `budget: 800tok` until 2026-08-23 while the file
+was ~59KB (~15k tok) — a 50x-false figure nothing could red, precisely because
+the page is outside the CAPS table (filed as
+`cch-w49-bl-merge-gates-budget-header-enforces-nothing`). Decision, written
+down here: the header now states a ceiling the file actually lives under
+(`16000tok` ≈ 64,000B at the repo's ~4B/tok convention; the file measures
+~61KB) and remains **unenforced**. Dropping the figure instead was not an option — G1 in
+`scripts/docs-anchors-check.sh` requires `budget: [0-9]+tok` on every active
+doc — and enforcing the old 800tok would mean splitting the canonical
+merge-authority page. Adding this page to the CAPS table is a deliberate
+two-line `scripts/` edit (the row plus the `CAPS_ROWS_EXPECTED` bump) that
+belongs to the budget-gate owner, not to a header restatement.
 
 ### Touching `api/lib/barkpark_web/layouts/root.html.heex`
 
