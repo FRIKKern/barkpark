@@ -43,9 +43,11 @@
 //     Read either side alone and half the fences vanish. Both directions are
 //     proven live by assertHiddenUnionIsNecessary() below, which reds if either
 //     single-sided read starts catching both cases.
-// H3  document.querySelectorAll hard-returns []. CLOSED: enumeration is over the
-//     shim REGISTRY, never a document query, with a per-screen vacuity guard and
-//     a global FLOOR.
+// H3  document.querySelectorAll used to hard-return []; it is now a registry
+//     sweep (cch-bl-smoke-document-attr-selectors-still-dead). CLOSED under
+//     BOTH behaviours, because the closure never leaned on the hard-return:
+//     enumeration is over the shim REGISTRY, never a document query, with a
+//     per-screen vacuity guard and a global FLOOR.
 // H4  getElementById AUTO-CREATES, so a lookup — or a .click() — is vacuously
 //     true. CLOSED: nothing here infers "offered" from a lookup or a click
 //     count. Presence of a JS-emitted control is read ONLY through its mount:
