@@ -388,12 +388,13 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	// fleet's own labelling decides the size of; this is a count of publishes
 	// that are permanently gone.
 	out.outf("  %s", deployCensusAbandonment(census))
+	out.outf("  %s", deployCensusCompletenessLine(census.Completeness))
 	out.outf("")
 
 	if len(census.Classes) > 0 {
-		out.outf("failure classes (share of the %d failed)", census.Failed)
+		out.outf("failure classes (share of the %d failed · accuses = who the class blames: box / site / ambiguous)", census.Failed)
 		for _, c := range census.Classes {
-			out.outf("  %-28s %6d  %-7s %s", sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(c.Label))
+			out.outf("%s", deployCensusClassRow(c))
 		}
 		for _, line := range deployCensusShareNotes(census.Classes, boundaries, from, to, census.MinSample) {
 			out.outf("%s", line)
@@ -403,7 +404,7 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	if len(census.Deferred) > 0 {
 		out.outf("deferrals (in the volume, never in the failure numerator)")
 		for _, c := range census.Deferred {
-			out.outf("  %-28s %6d  %-7s %s", sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(c.Label))
+			out.outf("%s", deployCensusClassRow(c))
 		}
 		// THE DEFERRAL SHARES GET THEIR OWN NOTE, COMPUTED OVER THEIR OWN ROWS.
 		// Failure-class shares divide by the settled failures; deferral shares
@@ -787,6 +788,49 @@ func deployCensusPct(r cloudclient.DeployRate) (string, bool) {
 		return "", false
 	}
 	return strconv.FormatFloat(*r.Pct, 'f', -1, 64) + "%", true
+}
+
+// deployCensusClassRow is ONE class/deferral table row: class, count, share,
+// who it accuses, label. The agency cell is the dr-w31 addition
+// (dr-w31-fu-agency-reaches-the-cli): DeployLedger emits `agency` on every
+// class row (box / site / ambiguous, frozen in its own @agency map) and until
+// this cell the value was decoded by nobody — the operator could not see who a
+// failure class accuses. An older control plane that never sent the key
+// renders "not sent": an absent attribution is stated, never invented.
+func deployCensusClassRow(c cloudclient.DeployCensusClass) string {
+	agency := strings.TrimSpace(c.Agency)
+	if agency == "" {
+		agency = "not sent"
+	}
+	return fmt.Sprintf("  %-28s %6d  %-7s accuses: %-9s %s",
+		sanitizeCell(c.Class), c.Count, deployCensusShare(c.Share), sanitizeCell(agency), sanitizeCell(c.Label))
+}
+
+// deployCensusCompletenessLine renders census/3's SECOND independent count —
+// the census auditing itself (dr-w31-fu-agency-reaches-the-cli: decoded
+// already, rendered by nobody, so the self-audit rode the wire into silence).
+// Three endings, none of them silence-as-health:
+//
+//   - the control plane sent no node: it has not audited anything, and that is
+//     said — never rendered as a balanced census;
+//   - balanced: every audited row is accounted for by a named cohort, with the
+//     method string that names the audit's own blind spot;
+//   - NOT balanced: N rows are in NO named cohort — the census's own numbers
+//     do not sum, which is the loudest thing this line can say.
+func deployCensusCompletenessLine(c *cloudclient.DeployCensusCompleteness) string {
+	if c == nil {
+		return "completeness: NOT AUDITED — this control plane does not run the census's second count, so nothing here certifies the cohorts sum to the volume"
+	}
+	if c.Balanced {
+		return fmt.Sprintf("completeness: BALANCED — %d rows audited, every one accounted for by a named cohort (method: %s)",
+			c.Audited, sanitizeCell(c.Method))
+	}
+	reason := ""
+	if c.Reason != nil && strings.TrimSpace(*c.Reason) != "" {
+		reason = " · reason: " + sanitizeCell(*c.Reason)
+	}
+	return fmt.Sprintf("completeness: NOT BALANCED — %d of %d audited rows are in NO named cohort: the census's own numbers do not sum (accounted %d; method: %s%s)",
+		c.Unaccounted, c.Audited, c.Accounted, sanitizeCell(c.Method), reason)
 }
 
 // deployCensusRefusal is the in-band refusal in words: the control plane's own

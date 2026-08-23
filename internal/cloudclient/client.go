@@ -2361,10 +2361,18 @@ type DeployRate struct {
 // the share was taken against (class shares are denominated on `failed`,
 // deferred shares on `volume` — which is why the share carries its own sample).
 type DeployCensusClass struct {
-	Class string     `json:"class"`
-	Label string     `json:"label"`
-	Count int        `json:"count"`
-	Share DeployRate `json:"share"`
+	Class string `json:"class"`
+	Label string `json:"label"`
+	// Agency is WHO the class accuses — box / site / ambiguous, frozen in
+	// DeployLedger's own @agency map (dr-w31-fu-agency-reaches-the-cli).
+	// class_rows/3 has emitted it on EVERY census class row and this struct
+	// did not declare it, so json.Unmarshal dropped it silently — the
+	// operator running `bp cloud deployments` could not see who a failure
+	// class accuses. Empty means an older control plane that never sent it,
+	// and the render says "not sent" rather than inventing an attribution.
+	Agency string     `json:"agency"`
+	Count  int        `json:"count"`
+	Share  DeployRate `json:"share"`
 }
 
 // DeployCensusSite is one site's slice of the window: its volume, its failures,
