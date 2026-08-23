@@ -38,6 +38,24 @@ defmodule BarkparkCloud.Notifications.Withhold do
   therefore returns `0` for them rather than raising or inventing a recipient — a
   count, so a caller can still log or assert on it.
 
+  Until `dr-w18-s3-fu` that promise was only HALF kept, and the missing half made
+  the module unusable for the case it names. The zero-member team reaches it
+  honestly — it has a `team_id`, so it takes the recording clause and the fan-out
+  over an empty member list returns `0` on its own. The fleet digest does NOT: it
+  has no `team_id` by construction, so every call from it fell through to the
+  catch-all and logged `refused an unrecordable withhold` — a CONSENTED absence
+  reported as an operator bug, once per day, forever. A caller cannot be asked to
+  route through a funnel that answers it with a false error, so
+  `deliver_fleet_digest/1` did not call this module at all and the branch stayed
+  outside the shared vocabulary.
+
+  `@consented_reasons` closes that: a reason on that list is answered with a
+  quiet, honest `0` whatever `team_id` is — no row, no error line. Quiet HERE is
+  not quiet ANYWHERE: the count goes back to the caller, which accounts it on the
+  rail that already speaks (`fleet_digest phase=settled … withheld=0` at WARNING).
+  The loudness lives where an operator reads it, not on a line that names a bug
+  that is not one.
+
   ## The reason lands in `last_error`
 
   `Delivery.changeset/2` clamps `last_error` to the union of `DeliveryReason`'s
@@ -60,9 +78,23 @@ defmodule BarkparkCloud.Notifications.Withhold do
   # stand against that: the catch-all below LOGS instead of failing quietly, and
   # `withhold_test.exs` derives every reason atom passed to `Withhold.record/4`
   # from `notifications.ex`'s AST and asserts it is a member of this list.
-  @reasons [:reap_alert_cap, :dispatch_crashed, :chat_enqueue_failed, :chat_channel_gone]
+  # THE CONSENTED SUBSET — reasons whose ZERO is correct by construction, not a
+  # refusal. There is no recipient to name, so there is no row to write and
+  # nothing was decided against anybody; the catch-all's error line would be
+  # false. These are still REASONS, not an absence of one: they pass the
+  # AST-derived `@reasons` pin in `withhold_test.exs` like every other call, so a
+  # caller cannot reach the quiet path by inventing a name.
+  @consented_reasons [:no_recipient_by_construction]
 
-  @type reason :: :reap_alert_cap | :dispatch_crashed | :chat_enqueue_failed | :chat_channel_gone
+  @reasons [:reap_alert_cap, :dispatch_crashed, :chat_enqueue_failed, :chat_channel_gone] ++
+             @consented_reasons
+
+  @type reason ::
+          :reap_alert_cap
+          | :dispatch_crashed
+          | :chat_enqueue_failed
+          | :chat_channel_gone
+          | :no_recipient_by_construction
 
   @doc """
   The `Delivery.status` a withheld notification is recorded under. One word, no
@@ -77,6 +109,14 @@ defmodule BarkparkCloud.Notifications.Withhold do
   """
   @spec reasons() :: [reason()]
   def reasons, do: @reasons
+
+  @doc """
+  The CONSENTED subset of `reasons/0` — the withholds whose `0` is the honest
+  answer because there is no recipient by construction. `record/4` returns `0`
+  for these without the unrecordable-withhold error line.
+  """
+  @spec consented_reasons() :: [reason()]
+  def consented_reasons, do: @consented_reasons
 
   @doc """
   The person-facing sentence for a withhold reason. Every arm is a CONSTANT:
@@ -104,6 +144,11 @@ defmodule BarkparkCloud.Notifications.Withhold do
       "Withheld: the chat channel this alert was routed to was disconnected before " <>
         "it could be sent, so it was not delivered there."
 
+  def label(:no_recipient_by_construction),
+    do:
+      "Withheld: there was no one to send this to — the audience for this " <>
+        "notification is empty, so nothing was sent and no one was skipped."
+
   @doc """
   Every withhold sentence, for the `last_error` clamp in `Delivery.changeset/2`.
   """
@@ -127,6 +172,21 @@ defmodule BarkparkCloud.Notifications.Withhold do
   """
   @spec record(binary() | nil, String.t(), reason(), keyword()) :: non_neg_integer()
   def record(team_id, event, reason, opts \\ [])
+
+  # THE CONSENTED ZERO — first, so it wins for ANY `team_id`, present or nil.
+  # `Delivery.changeset/2` runs `validate_required([:recipient, :event])` and
+  # charter D362 refuses a synthetic address, so a reason on this list can never
+  # produce a row no matter who calls it; ordering the clause after the recording
+  # one would let a consented reason arriving WITH a team_id fan out `suppressed`
+  # rows to people the notification was never withheld from.
+  #
+  # It returns `0` and says nothing. That is not the quiet this module exists to
+  # kill: the count is the record, and it goes to a caller that is required to
+  # account it out loud. The catch-all below stays loud for everything else.
+  def record(_team_id, event, reason, _opts)
+      when is_binary(event) and reason in @consented_reasons do
+    0
+  end
 
   def record(team_id, event, reason, opts)
       when is_binary(team_id) and is_binary(event) and reason in @reasons do
