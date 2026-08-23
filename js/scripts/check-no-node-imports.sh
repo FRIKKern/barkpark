@@ -8,6 +8,7 @@ DIRS=(
   "packages/nextjs/src/server"
   "packages/nextjs/src/webhook"
   "packages/nextjs/src/draft-mode"
+  "packages/nextjs/src/csp"
 )
 HITS=0
 for dir in "${DIRS[@]}"; do

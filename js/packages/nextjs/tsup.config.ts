@@ -42,6 +42,7 @@ export default defineConfig({
     'draft-mode': 'src/draft-mode/index.ts',
     revalidate: 'src/revalidate/index.ts',
     preload: 'src/preload/index.ts',
+    csp: 'src/csp/index.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,
