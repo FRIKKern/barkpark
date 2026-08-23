@@ -1459,7 +1459,11 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; background: var(--paper-bg); padding-top: 8px; }
 
 .bp-paper-surface .bp-duel { margin: 1.4rem 0; }
-.bp-paper-surface .bp-duel__table { width: 100%; border-collapse: collapse; }
+/* jf-w1-engine-narrow-dark-fixes: self-contain horizontally, the same three
+   declarations .bp-table (above) uses — width:100% is kept so nothing changes
+   at >=720px, display:block + overflow-x:auto is the escape hatch for a duel
+   with long legend/value text at narrow measures. */
+.bp-paper-surface .bp-duel__table { width: 100%; border-collapse: collapse; display: block; max-width: 100%; overflow-x: auto; }
 .bp-paper-surface .bp-duel__th { font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); text-align: right; padding: 6px 10px; }
 .bp-paper-surface .bp-duel__th--a { color: var(--paper-accent); }
 .bp-paper-surface .bp-duel__label { font-size: 0.82rem; font-weight: 600; color: var(--paper-ink); text-align: left; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
@@ -1484,7 +1488,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; }
 .bp-paper-surface .bp-lineage__value { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 650; color: var(--paper-accent); margin-top: 4px; }
 .bp-paper-surface .bp-lineage__unit { font-size: 0.66rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
-.bp-paper-surface .bp-lineage__body { font-size: 0.76rem; color: var(--paper-ink-soft); line-height: 1.45; margin-top: 5px; }
+/* jf-w1-engine-narrow-dark-fixes: __nodes is an auto-fit minmax(150px,1fr)
+   grid, so a node can be squeezed to its 150px floor at narrow measures — a
+   long unbroken body string (a URL, a compound word) then blows the column
+   out sideways instead of wrapping. `anywhere` (not break-word) so it also
+   counts toward text-wrap balancing rather than being treated as unbreakable
+   for layout purposes. */
+.bp-paper-surface .bp-lineage__body { font-size: 0.76rem; color: var(--paper-ink-soft); line-height: 1.45; margin-top: 5px; overflow-wrap: anywhere; }
 
 .bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
 .bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
