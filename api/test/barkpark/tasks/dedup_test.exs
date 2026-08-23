@@ -542,4 +542,81 @@ defmodule Barkpark.Tasks.DedupTest do
                )
     end
   end
+
+  # ── the upsert INSERT branch (pds-bl-upsert-insert-branch-ungated-birth) ──
+  #
+  # `do_upsert_document` has its own insert branch (prev_doc nil -> Repo.insert)
+  # and its `with` chain used to call NEITHER dedup arm — run-proven on the
+  # pre-fix tree: `Content.create_document` REFUSED a near-duplicate
+  # ({:error, {:duplicate_task, _}}) while `Content.upsert_document` on the
+  # SAME attrs and an unseen doc_id BIRTHED it (drafts.probe-dup-upsert
+  # persisted). These pin the gate now riding that branch.
+  describe "upsert insert-branch birth gate" do
+    @up_title "add rate limiting to the mutate controller"
+    @up_desc "throttle writes on the REST mutate endpoint per token bucket"
+
+    test "an upsert onto an UNSEEN doc_id is a birth and the duplicate is REFUSED", %{
+      scope: scope
+    } do
+      {:ok, _} =
+        create_task("up-existing", @up_title, scope, %{
+          "description" => @up_desc,
+          "parent_id" => "epic-a"
+        })
+
+      assert {:error, {:duplicate_task, payload}} =
+               Content.upsert_document(
+                 "task",
+                 %{
+                   "doc_id" => "up-dup",
+                   "title" => @up_title,
+                   "content" => %{
+                     "kind" => "task",
+                     "lifecycle_status" => "open",
+                     "description" => @up_desc,
+                     "parent_id" => "epic-b"
+                   }
+                 },
+                 @dataset,
+                 scope
+               )
+
+      assert [%{id: "up-existing"} | _] = payload.similar
+
+      # Nothing was born: neither the draft nor a published twin exists.
+      assert {:error, :not_found} =
+               Content.get_document("drafts.up-dup", "task", @dataset, scope)
+    end
+
+    test "an upsert onto a LIVE row is an update and stays ungated (autosave parity)", %{
+      scope: scope
+    } do
+      {:ok, _} =
+        create_task("up-live", @up_title, scope, %{
+          "description" => @up_desc,
+          "parent_id" => "epic-a"
+        })
+
+      # Same near-duplicate text, but prev_doc resolves — the guard head-matches
+      # prev_doc == nil and must not fire on an update.
+      assert {:ok, doc} =
+               Content.upsert_document(
+                 "task",
+                 %{
+                   "doc_id" => "up-live",
+                   "title" => @up_title,
+                   "content" => %{
+                     "kind" => "task",
+                     "lifecycle_status" => "open",
+                     "description" => @up_desc <> " (edited)",
+                     "parent_id" => "epic-a"
+                   }
+                 },
+                 @dataset,
+                 scope
+               )
+
+      assert doc.content["description"] =~ "(edited)"
+    end
+  end
 end

@@ -3,7 +3,7 @@
 //
 // WAVE-2 CAPSTONE (charter D16-D23): Astro SSR-to-HTML DOM-shape parity.
 //
-// W1 proved `@barkpark/react`'s `PortableDoc` renders 42 non-plugin block types to
+// W1 proved `@barkpark/react`'s `PortableDoc` renders every frozen non-plugin block type to
 // HTML that DOM-shape-equals the Elixir `:article` golden, via `renderToStaticMarkup`
 // in a Node test. W2 re-runs the SAME proof from a DIFFERENT surface: a real Astro
 // STATIC build that SSRs each block through `renderPortableDocument` via `set:html`
@@ -12,7 +12,7 @@
 //   1. PARITY — every `.bp-paper-surface[data-pd-type]` container extracted from the
 //      built HTML is DOM-shape-equal to its Elixir golden, using the UNCHANGED
 //      comparator from `@barkpark/react`'s W1 harness (tests/support/dom-shape.ts).
-//      Coverage >= 42: all frozen goldens made it into the build.
+//      Coverage ≡ the golden set: all frozen goldens made it into the build.
 //
 //   2. ZERO SHIPPED JS (D16) — a first-class deliverable, not an afterthought: the
 //      built site ships NO JavaScript (`dist/**/*.js` is empty) and emits no
@@ -90,7 +90,7 @@ beforeAll(() => {
   }
 })
 
-describe('Astro SSR → HTML DOM-shape parity (42 non-plugin types)', () => {
+describe('Astro SSR → HTML DOM-shape parity (full frozen golden set)', () => {
   it('extracts one .bp-paper-surface[data-pd-type] container per golden from the BUILT HTML', () => {
     // Every fixture that went into the page must have a container in the output.
     expect(containers.length).toBe(goldens.size)
@@ -100,11 +100,13 @@ describe('Astro SSR → HTML DOM-shape parity (42 non-plugin types)', () => {
     }
   })
 
-  it('covers every frozen golden fixture (coverage >= 42, no silent gaps)', () => {
+  it('covers every frozen golden fixture (coverage >= the golden-dir census, no silent gaps)', () => {
     const built = new Set(containers.map((c) => c.type))
     const missing = [...goldens.keys()].filter((t) => !built.has(t))
     expect(missing, `goldens absent from the Astro build: ${missing.join(', ')}`).toHaveLength(0)
-    expect(containers.length).toBeGreaterThanOrEqual(42)
+    // Derived from the canonical golden directory, never a hand-counted literal
+    // (stale-count prose sweep): the floor moves WITH the frozen set.
+    expect(containers.length).toBeGreaterThanOrEqual(goldens.size)
   })
 
   // One assertion per built container: its DOM shape must equal the Elixir golden.

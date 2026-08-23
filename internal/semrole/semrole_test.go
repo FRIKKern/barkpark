@@ -19,6 +19,13 @@ var cloudTokens = []string{
 	// box the control plane has never heard a byte from. Before this slice all
 	// three fell to the neutral default and would have shipped UNCOLOURED.
 	"strained", "filling", "unreported",
+	// jpf-w1 D7: a queued deployment no builder claimed for 5 minutes. Its own
+	// word because "queued" is already pinned info/blue three lines up.
+	"deploy_stalled",
+	// The usage-meter STATE token for a read that was attempted and FAILED
+	// (dr-w3-s6 followup): before this entry it fell to the neutral default and
+	// painted identically to the deliberate "unmetered".
+	"unavailable",
 	"failed", "error", "offline", "removal_failed", "over_limit",
 }
 
@@ -39,9 +46,16 @@ func TestForCloudVocabulary(t *testing.T) {
 		// non-monotone (rank 5 shouting louder than rank 4).
 		"strained": "warn", "STRAINED": "warn", " filling ": "warn",
 		"filling": "warn", "unreported": "warn",
+		// deploy_stalled is warn, NOT the info tone "queued" carries: waiting is
+		// news, waiting five minutes with no builder is an alarm.
+		"deploy_stalled": "warn", "DEPLOY_STALLED": "warn",
 		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
 		// Usage-meter quota states: near_limit warns, over_limit is danger.
 		"near_limit": "warn", "NEAR_LIMIT": "warn", " over_limit ": "danger", "over_limit": "danger",
+		// A meter whose read FAILED is a broken instrument — warn, and tonally
+		// distinct from "unmetered", which is deliberate and stays neutral.
+		"unavailable": "warn", "UNAVAILABLE": "warn", " unavailable ": "warn",
+		"unmetered": "",
 		// Unknown strings get NO role.
 		"":                    "",
 		"banana":              "",

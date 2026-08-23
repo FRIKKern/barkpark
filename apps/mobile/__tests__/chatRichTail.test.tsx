@@ -51,8 +51,10 @@ import type { ChatMessage, StableWireEvent } from '../src/chat/wire'
 import { isStableEvent } from '../src/chat/wire'
 import {
   ChatSessionScreen,
+  TRANSCRIPT_ROW_GAP,
   assembleRows,
   groupSegmentRows,
+  rowLead,
   stableSegmentRows,
   transcriptItem,
   transcriptItemType,
@@ -895,7 +897,7 @@ describe('segment rows are keyed, bucketed, and identity-stable', () => {
       seg(1, 91, 300, 'code'),
     ])
     expect(rows.map(transcriptItemType)).toEqual([
-      'segment:heading',
+      'segment:lead:heading', // opens the turn — its measured height carries the 18px lead
       'segment:paragraph',
       'segment:code',
     ])
@@ -906,6 +908,38 @@ describe('segment rows are keyed, bucketed, and identity-stable', () => {
       { key: 'skeleton', kind: 'skeleton', label: 'table', prose: '' } as Row,
     ]
     expect(new Set(all.map(transcriptItemType)).size).toBe(all.length)
+  })
+
+  it('splits a turn-opening segment from a continuing one of the SAME block type (mob-lm-s5f)', () => {
+    // A segment row's measured height depends on whether it OPENS a turn —
+    // rowLead wraps the turn's first segment in the 18px turn-boundary lead and
+    // every continuing one in nothing — so one bucket per block type blended
+    // two height populations 18px apart and every estimate in it was wrong by
+    // a predictable fraction. getItemType receives (item, index) and can never
+    // see the predecessor; the ordering fact rides on the row instead.
+    const rows = stableSegmentRows(new Map(), [
+      seg(1, 0, 22, 'paragraph'),
+      seg(1, 22, 91, 'paragraph'),
+      seg(2, 0, 40, 'paragraph'),
+    ])
+    expect(rows.map(transcriptItemType)).toEqual([
+      'segment:lead:paragraph', // opens turn 1
+      'segment:paragraph', //      continues turn 1 — a DIFFERENT bucket
+      'segment:lead:paragraph', // opens turn 2
+    ])
+    // The flag is the SAME fact rowLead reads off the ordering: within a pure
+    // segment run, opensTurn=true rows are exactly the rows rowLead leads 18.
+    rows.forEach((row, i) => {
+      const lead = rowLead(rows, i)
+      if (row.kind !== 'segment') throw new Error('unreachable')
+      if (i === 0) return // rowLead returns 0 at the head of the transcript by law
+      expect(row.opensTurn).toBe(lead === TRANSCRIPT_ROW_GAP)
+    })
+    // And it is NOT `from === 0` in disguise: a resumed stream's first held
+    // segment starts mid-turn yet still opens it.
+    const resumed = stableSegmentRows(new Map(), [seg(3, 120, 200, 'paragraph')])
+    if (resumed[0]!.kind !== 'segment') throw new Error('unreachable')
+    expect(resumed[0]!.opensTurn).toBe(true)
   })
 
   it('groups by the turn read back OUT of the key, so grouping cannot drift', () => {

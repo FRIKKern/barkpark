@@ -86,11 +86,12 @@
 //   --repo <path>     repo root; asserted to BE a git repo (see below)
 //   --server <url>    Barkpark server (default https://guerrilla.barkpark.cloud)
 //
-// `opts.root` is NOT a cwd — rerun.mjs:359 spawns /bin/sh -c with no cwd — so
-// running from a scratch directory turns every git rerun into "not a git
-// repository", INCLUDING the positive control, which then reads FAILED and looks
-// exactly like a real finding. This command asserts its repo and chdir's to it,
-// and refuses (exit 2) rather than manufacture that finding.
+// `opts.root` IS the execution cwd since the rerun-root-is-cwd fix — rerun.mjs's
+// shell() now spawns /bin/sh -c under the derived root, so the library path
+// (adjudicateCriterion from any cwd) rules identically to this CLI. The chdir +
+// repo assertion below stays as belt-and-braces for everything OUTSIDE runRerun
+// (the git rev-parse probes, relative --ledger paths), and still refuses
+// (exit 2) rather than manufacture a finding from a scratch directory.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";

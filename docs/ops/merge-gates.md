@@ -1,4 +1,4 @@
-<!-- doc-tier: agent | canonical-for: merge-gates | budget: 800tok -->
+<!-- doc-tier: agent | canonical-for: merge-gates | budget: 16000tok -->
 # Merge Gates (Phase 2 onward)
 
 > Why a PR cannot be merged until every gate below is green, and how to run
@@ -218,7 +218,8 @@ is harmless:
   go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
   is structurally ineligible to be required, since an absent context reports
   `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 21 `(blocking)` steps below. Until 2026-08-08 it
+  the same sense as doc-gates' 21 `(fails this job)` steps below (that label
+  replaced `(blocking)` there in #12631). Until 2026-08-08 it
   appeared in **neither** `.github/required-checks.json` nor this page:
   `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
   caught by re-reading — `required-checks.json` is GENERATED from names observed
@@ -255,6 +256,34 @@ is harmless:
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
 `.github/required-checks.json` — and reds if this page ever again describes a
 transitive upstream of a required aggregator as unable to stop a merge.
+
+### A green gate does not prove the branch was rebased
+
+`pull_request` gate runs test the **ephemeral merge commit** (`refs/pull/N/merge`
+— the PR merged into `main` at dispatch time), never the branch tip in
+isolation: every test job keeps the default checkout on purpose ("they must
+test the merged result, not the head in isolation" — the checkout comment in
+`elixir.yml`; only the path-DISPATCH jobs pin `pull_request.head.sha`, for
+diff honesty, D34). And live protection sets
+`required_status_checks.strict: false`, so a branch never has to be up to date
+with `main` to merge. Together these are why wave 2's four branches merged with
+tips that were never rebased — soundly, by mechanism, not by luck. A red
+ADVISORY check (see above) leaves `mergeStateStatus: UNSTABLE`, which does not
+block; unmet REQUIRED contexts render `BLOCKED` instead. Re-derive rather than
+trust:
+
+```bash
+git merge-base <branch> origin/main    # where the tip actually forked
+gh api repos/FRIKKern/barkpark/branches/main/protection \
+  -q .required_status_checks.strict    # false → up-to-date not required
+```
+
+(The wave-2 record explained this posture with the exact claim the
+Security-gates topology note above retires as **false since 2026-07-28**. It is
+deliberately not re-quoted here — §18 of `scripts/required-checks.test.sh`
+censuses every unpinned restatement, and one pinned copy is enough. The
+conclusion survives on `strict: false` alone.)
+
 
 ### NOT APPLICABLE — the required green that ran nothing
 
@@ -900,6 +929,28 @@ Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
 on a contended checkout (an older caution to avoid running it locally is
 retired; it was fixed in #4473).
+
+### What step 1 covers under `docs/ops/` — and what this page's own header means
+
+`scripts/check-doc-budgets.sh` gates a fixed 28-row byte table (pinned by
+`CAPS_ROWS_EXPECTED`), the 7 `docs/cards/*.md`, and the pinned
+`docs/setup/CODEX.md` onramp span — nothing else. Under `docs/ops/` that table
+names exactly **one** file of the twenty: `docs/ops/PROD_OPS.md` (6000B). Every
+other `docs/ops/*.md`, this page included, carries a G1 `budget:` figure that
+**no gate reads** — on those files the header is a declaration, not a cap.
+
+This page's own header claimed `budget: 800tok` until 2026-08-23 while the file
+was ~59KB (~15k tok) — a 50x-false figure nothing could red, precisely because
+the page is outside the CAPS table (filed as
+`cch-w49-bl-merge-gates-budget-header-enforces-nothing`). Decision, written
+down here: the header now states a ceiling the file actually lives under
+(`16000tok` ≈ 64,000B at the repo's ~4B/tok convention; the file measures
+~61KB) and remains **unenforced**. Dropping the figure instead was not an option — G1 in
+`scripts/docs-anchors-check.sh` requires `budget: [0-9]+tok` on every active
+doc — and enforcing the old 800tok would mean splitting the canonical
+merge-authority page. Adding this page to the CAPS table is a deliberate
+two-line `scripts/` edit (the row plus the `CAPS_ROWS_EXPECTED` bump) that
+belongs to the budget-gate owner, not to a header restatement.
 
 ### Touching `api/lib/barkpark_web/layouts/root.html.heex`
 

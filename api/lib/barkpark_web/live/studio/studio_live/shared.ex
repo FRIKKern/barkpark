@@ -182,6 +182,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # `style: "article"`. `%{}` leaves `blocks` nil — the HTML-ingest path — so the
   # human got a document with nothing to click and nowhere to type (spd-w17).
   # Hand-rolling a paragraph here would bypass the template and lose all of it.
+  # A SESSION is a blocks-doc with NO birth template: the writer's
+  # `maybe_apply_paper_template` matches "paper" only, so the explicit empty
+  # list below persists as an untemplated EMPTY LIST — `read_blocks` returns
+  # it as-is, `setup_paper_view` takes the block branch (`paper_block_mode:
+  # true`) and the human gets a canvas with ZERO runs: a second, different
+  # blank from the one wave 17 fixed (spd-bl-session-birth-template, named
+  # out of scope there by charter D221). Seed ONE empty paragraph at this
+  # Studio seam instead — the same "somewhere to type" the paper template's
+  # `tpl-body` provides, without inventing a session template in core. The
+  # stable id keeps DocPatchOp addressing deterministic across the birth.
+  def seed_new_doc_content("session") do
+    %{"blocks" => [%{"id" => "session-body", "type" => "paragraph", "content" => []}]}
+  end
+
   def seed_new_doc_content(type) do
     if Content.blocks_type?(type), do: %{"blocks" => []}, else: %{}
   end
@@ -203,6 +217,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   defdelegate paper_pane_op(socket, op), to: Paper
+
+  @doc false
+  defdelegate paper_publish(socket), to: Paper
+
+  @doc false
+  defdelegate sidebar_description_change(socket, value), to: Paper
+
+  @doc false
+  defdelegate sidebar_label_add(socket, params), to: Paper
 
   @doc false
   defdelegate document_op(socket, op), to: Paper

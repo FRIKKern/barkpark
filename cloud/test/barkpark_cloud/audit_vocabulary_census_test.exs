@@ -66,7 +66,7 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   @declared_floor 50
   @produced_floor 35
   @webhook_layer_size 6
-  @lifecycle_layer_size 9
+  @lifecycle_layer_size 10
   @account_security_layer_size 2
 
   # Declared verbs with NO producer anywhere in cloud/lib. Named one by one,
@@ -319,7 +319,7 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
                  #{inspect(sorted(layer))}
 
              A rename of the helper resolves ZERO and reds HERE, which is the point: otherwise
-             the nine barkpark.* verbs would silently appear as zero-producer in arm (a).
+             the ten barkpark.* verbs would silently appear as zero-producer in arm (a).
              """
 
       assert Enum.all?(layer, &String.starts_with?(&1, "barkpark.")),

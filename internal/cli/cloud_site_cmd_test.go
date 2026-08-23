@@ -65,6 +65,11 @@ type siteCP struct {
 	listResp  fakeResp
 	listHits  int
 	listQuery string
+	// listSeq, when non-empty, answers the n-th LIST read with its n-th entry
+	// (the last entry repeats) — the --wait-for-live loop reads the list
+	// repeatedly, and its tests need the rebuild to appear live only on a later
+	// read.
+	listSeq []fakeResp
 	// PATCH /v1/sites/:id — `bp cloud site settings` (search-template W8/W10).
 	patchResp fakeResp
 	patchBody []byte
@@ -136,6 +141,14 @@ func (cp *siteCP) serve() *httptest.Server {
 		case r.Method == "GET" && path == "/v1/sites/"+testSiteID+"/deployments":
 			cp.listHits++
 			cp.listQuery = r.URL.RawQuery
+			if len(cp.listSeq) > 0 {
+				n := cp.listHits
+				if n > len(cp.listSeq) {
+					n = len(cp.listSeq)
+				}
+				cp.write(w, cp.listSeq[n-1])
+				break
+			}
 			if cp.listResp.body == "" && cp.listResp.status == 0 {
 				cp.write(w, fakeResp{200, `{"deployments":[],"next_cursor":null}`})
 				break
@@ -1087,6 +1100,141 @@ func TestRunCloudSiteDeployDeferredMidStreamStopsAtTheDeferral(t *testing.T) {
 	}
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0 (charter D543)", code)
+	}
+}
+
+// TestRunCloudSiteDeployWaitForLiveRidesPastTheDeferral is dr-w32-bl's proof:
+// the deploy settles DEFERRED (the honest deferral narration prints, as
+// always), and --wait-for-live then keeps polling the site's deployment LIST
+// until a live row for the same site+environment appears — a row that PROVABLY
+// postdates the deferral. The fixture's first list page carries the trap this
+// wait must not fall into: the site's PREVIOUS build is already live (older
+// inserted_at), and declaring victory on it would bless exactly the bytes the
+// caller is waiting to replace. The second page carries a preview-environment
+// live row (wrong environment, must be skipped) and the production rebuild.
+func TestRunCloudSiteDeployWaitForLiveRidesPastTheDeferral(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","build_id":"b-1","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","environment":"production","inserted_at":"2026-08-23T10:00:00Z",` +
+		`"failure_class":"BOX_AT_CAPACITY_DEFERRED","failure_reason":"box_at_capacity — deferred: refusal 1 of 12 in this site's current chain — a rebuild carrying this content has been re-queued","stages":[]}}`}
+	oldLive := `{"id":"dep-old","site_id":"` + testSiteID + `","status":"live","environment":"production","inserted_at":"2026-08-23T09:00:00Z","url":"https://old.example"}`
+	rebuildQueued := `{"id":"dep-rebuild","site_id":"` + testSiteID + `","status":"queued","environment":"production","inserted_at":"2026-08-23T10:00:05Z"}`
+	previewLive := `{"id":"dep-preview","site_id":"` + testSiteID + `","status":"live","environment":"preview","inserted_at":"2026-08-23T10:00:30Z","url":"https://preview.example"}`
+	rebuildLive := `{"id":"dep-rebuild","site_id":"` + testSiteID + `","status":"live","environment":"production","inserted_at":"2026-08-23T10:00:05Z","url":"https://site.example"}`
+	cp.listSeq = []fakeResp{
+		{200, `{"deployments":[` + rebuildQueued + `,` + oldLive + `],"next_cursor":null}`},
+		{200, `{"deployments":[` + rebuildLive + `,` + previewLive + `,` + oldLive + `],"next_cursor":null}`},
+	}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--wait-for-live", "5m")
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// The deferral narration still printed in full — the wait rides PAST it,
+	// never over it (the task's own wording).
+	for _, want := range []string{"deferred", "the box refused this round", "already queued", "do NOT re-publish"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("the deferral narration must still print %q under --wait-for-live:\n%s", want, stdout)
+		}
+	}
+	// Victory is the REBUILD, proven by id — not the previous build, not the
+	// preview-environment row.
+	if !strings.Contains(stdout, "site live") || !strings.Contains(stdout, "dep-rebuild") {
+		t.Fatalf("the wait must end on the rebuild going live:\n%s", stdout)
+	}
+	for _, forbidden := range []string{"dep-old", "dep-preview"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("the wait declared victory on %s — the wrong row:\n%s", forbidden, stdout)
+		}
+	}
+	// Two list reads: one that found only the queued rebuild, one that found it
+	// live. The wait stopped the moment it had its answer.
+	if cp.listHits != 2 {
+		t.Fatalf("list read %d times, want exactly 2\n%s", cp.listHits, stdout)
+	}
+}
+
+// TestRunCloudSiteDeployWaitForLiveDeadlineExpiresNonZero: the wait's deadline
+// is the CALLER'S, stated on the flag, and expiring it is a non-zero exit that
+// names the deadline and the last status read — never a bare timeout, and never
+// a claim that anything was lost (the rebuild stays queued).
+func TestRunCloudSiteDeployWaitForLiveDeadlineExpiresNonZero(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","environment":"production","inserted_at":"2026-08-23T10:00:00Z",` +
+		`"failure_reason":"box_at_capacity — deferred: refusal 1 of 12 in this site's current chain","stages":[]}}`}
+	// The rebuild never goes live inside the window.
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-rebuild","site_id":"` + testSiteID + `","status":"queued","environment":"production","inserted_at":"2026-08-23T10:00:05Z"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--wait-for-live", "1ms")
+	if code == exitOK {
+		t.Fatalf("an expired --wait-for-live deadline must exit non-zero\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	for _, want := range []string{"deadline 1ms expired", "queued", "Nothing was lost"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("the expiry must say %q (the deadline and the last status read, never a bare timeout):\nstderr:%s", want, stderr)
+		}
+	}
+	if !strings.Contains(stdout, "deferred") {
+		t.Fatalf("the deferral narration must still have printed:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteDeployWithoutWaitForLiveNeverReadsTheList pins criterion 2's
+// mechanism: the default path does not merely keep exit 0 — it performs ZERO
+// wait reads. Together with the unmodified D543 tests above (poll counts,
+// sentences, exit codes), this is the default path staying byte-identical.
+func TestRunCloudSiteDeployWithoutWaitForLiveNeverReadsTheList(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"queued","stage":"PLAN","stages":[]}}`}
+	cp.pollResp = fakeResp{200, `{"deployment":{"id":"dep-1","status":"deferred","stage":"BUILD","failure_reason":"box_at_capacity — deferred: refusal 1 of 12 in this site's current chain","stages":[]}}`}
+	cp.serve()
+
+	_, _, code := runSite(t, "table", "deploy", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0 (charter D543)", code)
+	}
+	if cp.listHits != 0 {
+		t.Fatalf("a deploy without --wait-for-live read the deployment list %d times — the default path must not change", cp.listHits)
+	}
+	if cp.pollHits != 1 {
+		t.Fatalf("polled %d times, want exactly 1", cp.pollHits)
+	}
+}
+
+// TestRunCloudSiteDeployWaitForLiveRefusals: the flag's own contract is refused
+// locally, before any network — a junk deadline, a follow-less wait, and the
+// machine outputs whose single-envelope stdout the wait cannot honour.
+func TestRunCloudSiteDeployWaitForLiveRefusals(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		out  string
+		want string
+	}{
+		{"junk deadline", []string{"deploy", testSiteID, "--wait-for-live", "soon"}, "table", "positive deadline"},
+		{"no-follow", []string{"deploy", testSiteID, "--wait-for-live", "5m", "--no-follow"}, "table", "drop --no-follow"},
+		{"json output", []string{"deploy", testSiteID, "--wait-for-live", "5m"}, "json", "exit code IS the machine answer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cp := newSiteCP(t)
+			cp.serve()
+			stdout, stderr, code := runSite(t, tc.out, tc.args...)
+			if code != exitUsage {
+				t.Fatalf("exit=%d want %d (exitUsage)\nstderr:%s", code, exitUsage, stderr)
+			}
+			// -o json refusals land as the error envelope on stdout; human ones
+			// on stderr. The sentence is what is pinned, wherever it went.
+			if all := stdout + stderr; !strings.Contains(all, tc.want) {
+				t.Fatalf("refusal must say %q:\n%s", tc.want, all)
+			}
+			if cp.deployHits != 0 {
+				t.Fatalf("a refused invocation reached the deploy route %d times", cp.deployHits)
+			}
+		})
 	}
 }
 

@@ -1,0 +1,66 @@
+name: run-level-reader-census
+
+# WHO ANSWERS A PASS/FAIL QUESTION FROM A WORKFLOW **RUN** CONCLUSION?
+#
+# A run conclusion and its job conclusions are different facts. `continue-on-error`
+# makes a job report `failure` while its run reports `success` — correctly, by
+# design. The green is real; it is a green about the wrong object. A reader that
+# asks the run "did the check pass" therefore reports success over a failed audit
+# with no red anywhere.
+#
+# Measured on main (hg-bl-scaffy-served-catalog-drift-and-run-level-lie): run
+# 30269281675 of scaffy-catalog-drift concluded `success` while its job
+# "served-catalog drift audit (advisory)" concluded `failure`, at a moment when
+# the served catalog really was drifted (21/22 MATCH). scripts/main-gate-watch.sh
+# states the same independently: "`gh run list` itself launders the red".
+#
+# WHY NO `paths:` FILTER
+# ---------------------
+# A run-level read can be added anywhere — a script, a workflow, a tooling .mjs.
+# A paths-filtered lane would only fire when the census's own files changed,
+# which is the shape of a check that is green because it never ran. Same argument
+# committed-symlink-gate.yml makes, and the same cost: one grep pass, ~2 seconds.
+#
+# WHY THE SELFTEST RUNS FIRST, IN CI, ON EVERY RUN
+# ------------------------------------------------
+# The census's expected steady state is "everything already adjudicated" — which
+# is also exactly what a broken scan produces. --selftest plants readers in
+# throwaway trees and proves the census BITES (unadjudicated reader, changed
+# count, stale row, bad verdict, blind scan, drifted pin) and REFUSES TO MEASURE
+# (exit 2) rather than reporting a clean tree it never read. It runs before the
+# census on every invocation, so it cannot rot unexecuted — which is precisely
+# what had happened to docs-anchors-check.sh's 18-case harness (#12764) and
+# check-doc-budgets.sh's 11-case harness (#12774), both of which had no caller.
+#
+# NOT one of main's required contexts (those are exactly: Elixir gate, PR
+# references an active task, Cloud gate, Console gate). Wiring it here makes it
+# RUN, not BLOCK.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: run-level-reader-census-${{ github.ref }}
+  # never cancel a main run — a cancelled run on main leaves no verdict at all,
+  # which reads identically to a clean one.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  run-level-reader-census:
+    name: Run-level reader census
+    runs-on: ubuntu-latest
+    steps:
+      # Default checkout is enough: this reads the tree it was handed and needs
+      # no base ref, no merge-base and no history depth.
+      - uses: actions/checkout@v4
+
+      - name: Prove the census can fail (--selftest)
+        run: bash scripts/run-level-reader-census.sh --selftest
+
+      - name: Every run-level reader is adjudicated
+        run: bash scripts/run-level-reader-census.sh

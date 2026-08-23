@@ -60,6 +60,13 @@ type buildConsole struct {
 
 	mu    sync.Mutex // guards fails (logf runs from phase code AND the tee goroutine)
 	fails int        // consecutive report() failures; >= maxConsoleFails latches narration off
+	// everLatched records that the latch FIRED at least once this build — even
+	// if a later success reset `fails`, lines were dropped in the gap. Until
+	// dr-bl-builder-console-narration-latch this fact lived only on the
+	// builder's stderr, so a build whose console latched was byte-
+	// indistinguishable from a build that was merely quiet — a reader calling
+	// a truncated console "the whole build" had no way to know otherwise.
+	everLatched bool
 }
 
 // newBuildConsole binds a console to ctx + the deployment id + this builder
@@ -100,11 +107,58 @@ func (c *buildConsole) logf(format string, args ...any) {
 		c.mu.Lock()
 		c.fails++
 		firstLatch := c.fails == maxConsoleFails
+		if firstLatch {
+			c.everLatched = true
+		}
 		c.mu.Unlock()
 		fmt.Fprintf(os.Stderr, "barkpark-builder: console report for deployment %s failed (non-fatal): %v\n", c.depID, err)
 		if firstLatch {
 			fmt.Fprintf(os.Stderr, "barkpark-builder: console narration for deployment %s disabled for the rest of the build after %d consecutive failures\n", c.depID, maxConsoleFails)
 		}
+		return
+	}
+	c.mu.Lock()
+	c.fails = 0
+	c.mu.Unlock()
+}
+
+// logfTerminal formats + redacts one TERMINAL console line (the failed:/
+// activate: outcome) and reports it with ONE attempt that BYPASSES the latch —
+// and, when the latch ever fired this build, precedes it with an explicit
+// truncation marker so the console says it is not the whole story.
+//
+// WHY THE BYPASS IS SAFE where per-line bypassing was not: the latch exists
+// because POSTing hundreds of mid-build lines into a wedged control plane
+// serializes a timeout per line and can trip the stale-deployment reaper. The
+// terminal line is ONE line (two with the marker) at the very END of the
+// build, after which nothing waits on the console — worst case it costs two
+// bounded timeouts and changes nothing. And the wave-33 measurement says the
+// control plane is usually BACK by build end (every BOX_UNREACHABLE episode
+// self-healed, median 1 row): the latch that saved the middle of the build
+// would otherwise eat the one line a reader needs most, which is the FOURTH
+// silent discard this file used to perform.
+//
+// A build whose console latched is therefore READABLE AS TRUNCATED: the marker
+// names the drop and points at the durable log, so "no failed:/activate: line
+// and no marker" stops being ambiguous between quiet and cut. nil-safe.
+func (c *buildConsole) logfTerminal(format string, args ...any) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	latched := c.everLatched
+	c.mu.Unlock()
+	if latched {
+		// Best-effort, deliberately unlatched: if the plane is still down this
+		// fails like any other line and the durable log remains the record.
+		if err := c.report("console TRUNCATED: narration was disabled mid-build after " +
+			fmt.Sprint(maxConsoleFails) + " consecutive failed reports — the lines above are NOT the whole build; the durable build log is"); err != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-builder: truncation marker for deployment %s failed (non-fatal): %v\n", c.depID, err)
+		}
+	}
+	line := redactBuildLine(fmt.Sprintf(format, args...), c.secrets)
+	if err := c.report(line); err != nil {
+		fmt.Fprintf(os.Stderr, "barkpark-builder: terminal console report for deployment %s failed (non-fatal): %v\n", c.depID, err)
 		return
 	}
 	c.mu.Lock()
@@ -134,6 +188,9 @@ func (c *buildConsole) caption(format string, args ...any) {
 	if err := c.reportDetail(line); err != nil {
 		c.mu.Lock()
 		c.fails++
+		if c.fails >= maxConsoleFails {
+			c.everLatched = true
+		}
 		c.mu.Unlock()
 		fmt.Fprintf(os.Stderr, "barkpark-builder: caption report for deployment %s failed (non-fatal): %v\n", c.depID, err)
 		return

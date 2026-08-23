@@ -8,6 +8,28 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   keeps working unchanged.
 
   See `api/lib/barkpark_web/layouts/root.html.heex` for the CSS.
+
+  ## The desk's selection vocabulary
+
+  spd-bl-plugin-link-aria-current: this section is the ONE place the split is
+  written down — do not fork it into per-site comments.
+
+  The desk speaks selection in three ARIA vocabularies, each chosen by what
+  the element IS, not by where it sits:
+
+    * **`aria-current="true"`** — in-desk rows (`pane_item/1`,
+      `pane_doc_item/1`, both `<button>`s). "true" because the selected row is
+      the current item of an ad-hoc collection that is NOT a page, a step, or a
+      date; `aria-selected` is refused because it is only meaningful inside a
+      listbox/tab/grid container, which a pane's row list is not.
+    * **`aria-current="page"`** — elements whose destination is a PAGE: the
+      crumb trail's leaf, and the `:plugin_link` desk anchors
+      (`a.pane-item.nav-plugin-entry` in `StudioLive.Components`). Those
+      anchors navigate by plain href — deliberately anchors, never buttons —
+      and carry `page` when the URL names them as the destination.
+    * **`aria-selected`** — the desk filter chips ONLY, because they sit inside
+      an explicit `role="tablist"` container, which is exactly the container
+      that makes `aria-selected` meaningful.
   """
   use Phoenix.Component
 
@@ -485,8 +507,20 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       }
     >
       <%= if @selectable do %>
-        <span
+        <%!-- A REAL control (spd-bl-doc-checkbox-is-an-unfocusable-span): this
+              was a bare <span phx-click> — unreachable by keyboard, silent to
+              AT, its checked state a bare glyph. Now a <button role="checkbox">
+              (legal here: the row body is a SIBLING button inside the outer
+              div, so no button-in-button) — Tab-reachable, Enter/Space
+              activatable, with aria-checked carrying the state and an
+              aria-label naming WHAT gets selected. The ✓ glyph stays visual
+              only; AT reads aria-checked. --%>
+        <button
+          type="button"
+          role="checkbox"
           class="bp-doc-checkbox"
+          aria-checked={to_string(@checked)}
+          aria-label={"Select #{@title}"}
           phx-click="toggle-doc-checkbox"
           phx-value-id={@phx_value_id}
           data-test-id={"doc-checkbox-#{@phx_value_id}"}
@@ -494,7 +528,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           <span class={"bp-doc-checkbox-box " <> if(@checked, do: "is-checked", else: "")}>
             <%= if @checked, do: "✓" %>
           </span>
-        </span>
+        </button>
       <% end %>
       <button
         type="button"

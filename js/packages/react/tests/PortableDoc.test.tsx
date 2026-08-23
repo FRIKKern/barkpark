@@ -452,6 +452,11 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     marker: 'bp-form-questionnaire',
   },
   {
+    type: 'field-number',
+    block: { type: 'field-number', label: 'Price', value: 19.99, unit: 'NOK' },
+    marker: 'bp-field',
+  },
+  {
     type: 'chat-thinking',
     block: { type: 'chat-thinking', tokens: 1500 },
     marker: 'bp-chat-thinking',
@@ -539,6 +544,27 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(html).toContain('<p>hi</p>')
   })
 
+  it('renders a text leaf keyed by legacy `text` — canonical `value` wins', () => {
+    // 2026-08-23: raw mutate writers persisted papers whose text leaves were
+    // keyed {"type":"text","text":…}; Hollow counts both spellings as content,
+    // so those papers passed every write seam and then rendered as structure
+    // with zero prose. Twins: inline.ex compose_inline, pdrender inline.go
+    // attrStrFirst(n, "value", "text").
+    const legacy = renderPortableDocument([
+      { type: 'paragraph', content: [{ type: 'text', text: 'legacy prose' }] } as unknown as Block,
+    ])
+    expect(legacy).toContain('legacy prose')
+
+    const both = renderPortableDocument([
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', value: 'canonical', text: 'stale' }],
+      } as unknown as Block,
+    ])
+    expect(both).toContain('canonical')
+    expect(both).not.toContain('stale')
+  })
+
   it('renders an empty document without throwing (honest empty surface)', () => {
     expect(renderToStaticMarkup(<PortableDoc value={[]} />)).toContain('class="bp-paper-surface"')
     expect(renderToStaticMarkup(<PortableDoc value={null} />)).toContain('class="bp-paper-surface"')
@@ -576,7 +602,8 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type ApiEndpoint MARK:js-count-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:js-count-code-tabs
     // scaffy:add-block-type Tabs MARK:js-count-tabs
-    expect(registered).toHaveLength(73)
+    // + 1: field-number (B085) React emitter (pbw-fix-field-number-react).
+    expect(registered).toHaveLength(74)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {
@@ -982,5 +1009,73 @@ describe('PortableDoc — the type-keyed renderer', () => {
         '<p class="bp-role-ingress"></p>',
       )
     })
+  })
+})
+
+// field-number (B085) — the React leg of the cross-surface fields row
+// (pbw-fix-field-number-react). Twin semantics pinned against compose.ex
+// field_number_text/1 and internal/pdrender/fields.go fieldNumberRenderer:
+// formatted value + optional unit, honest "—" empty state, never the
+// bp-unknown-block degrade.
+describe('field-number block (B085)', () => {
+  it('renders label, value and unit in the bp-field definition row — NOT "Unsupported block"', () => {
+    const html = renderPortableDocument([
+      { type: 'field-number', label: 'Price', value: 19.99, unit: 'NOK' },
+    ])
+    expect(html).toContain(
+      '<div class="bp-field"><span class="bp-field__l">Price</span><div class="bp-field__v"><span>19.99 NOK</span></div></div>',
+    )
+    expect(html).not.toContain('Unsupported block')
+    expect(html).not.toContain('bp-unknown-block')
+  })
+
+  it('an integer value renders without a decimal point (5, never 5.0)', () => {
+    const html = renderPortableDocument([{ type: 'field-number', label: 'Count', value: 5 }])
+    expect(html).toContain('<span>5</span>')
+  })
+
+  it('a whole float renders as its integer (Float.round parity with compose.ex)', () => {
+    const html = renderPortableDocument([{ type: 'field-number', label: 'Qty', value: 5.0 }])
+    expect(html).toContain('<span>5</span>')
+  })
+
+  it('a fully-numeric string value coerces; unit-less values carry no trailing space', () => {
+    const html = renderPortableDocument([{ type: 'field-number', label: 'W', value: '2.5' }])
+    expect(html).toContain('<span>2.5</span>')
+  })
+
+  it('absent and uncoercible values render the honest "—" empty state with NO unit suffix', () => {
+    for (const block of [
+      { type: 'field-number', label: 'Weight' },
+      { type: 'field-number', label: 'Weight', value: 'abc', unit: 'kg' },
+      { type: 'field-number', label: 'Weight', value: '12kg', unit: 'kg' },
+      { type: 'field-number', label: 'Weight', value: null, unit: 'kg' },
+    ] as const) {
+      const html = renderPortableDocument([block as unknown as Block])
+      expect(html).toContain('<div class="bp-field__v"><span>—</span></div>')
+      expect(html).not.toContain('— kg')
+      expect(html).not.toContain('Unsupported block')
+    }
+  })
+
+  it('escapes hostile label and unit strings (no markup injection)', () => {
+    const html = renderPortableDocument([
+      {
+        type: 'field-number',
+        label: '<script>x</script>',
+        value: 1,
+        unit: '<img src=x onerror=alert(1)>',
+      },
+    ])
+    expect(html).toContain('&lt;script&gt;')
+    expect(html).not.toContain('<script>')
+    expect(html).not.toContain('<img')
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+  })
+
+  it('genuinely-unknown field types still degrade to bp-unknown-block (fallback NOT weakened)', () => {
+    const html = renderPortableDocument([{ type: 'field-molarity', label: 'M', value: 1 }])
+    expect(html).toContain('bp-unknown-block')
+    expect(html).toContain('Unsupported block: field-molarity')
   })
 })

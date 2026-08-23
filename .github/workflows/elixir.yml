@@ -71,7 +71,49 @@ concurrency:
   group: elixir-${{ github.ref }}
   # Cancel superseded PR runs, but NEVER cancel main: fast push cadence
   # otherwise starves the suite (2026-06-10: 19 consecutive main runs
-  # cancelled, zero completions all day). Queued main runs collapse to one.
+  # cancelled, zero completions all day).
+  #
+  # WHAT THIS GUARD DOES NOT BUY, MEASURED 2026-08-23 (hg-pending-run-collapse).
+  # `cancel-in-progress: false` suppresses ACTIVE cancellation of a main run
+  # that has STARTED. It does not stop GitHub collapsing the PENDING queue:
+  # a concurrency group holds at most one running plus one pending run, and the
+  # arrival of a newer push evicts the older pending one, which is recorded as
+  # `cancelled`. That is a NON-PASS (charter D12) on a run nobody cancelled.
+  #
+  # PROVEN PENDING, NOT IN-PROGRESS — this is the discriminating evidence, and
+  # the earlier comment ("Queued main runs collapse to one") asserted the
+  # mechanism without it:
+  #   * 36 of the last 100 elixir.yml runs on main concluded `cancelled`, and
+  #     36 of 36 materialized ZERO jobs (`/actions/runs/<id>/jobs` total_count
+  #     = 0) — they never started.
+  #   * 35 of 35 of those with a successor in the window died within 5 seconds
+  #     of the NEXT run's created_at. Eviction by arrival, not by a signal.
+  #   * CONTROL, same query: non-main cancelled runs, where cancel-in-progress
+  #     is true, report 7 jobs with all 7 started. The instrument can tell the
+  #     two shapes apart, and an impossible run id 404s rather than reading 0.
+  #
+  # AND IT IS NOT A MERGE BLOCK. A collapsed run publishes NO check-run at all,
+  # so `Elixir gate` is ABSENT on that sha, never `failure` — verified on five
+  # collapsed shas. The cost is a VERIFICATION HOLE, not an unexplainable red:
+  # those main commits were never Elixir-verified at their own sha. The newest
+  # push in a burst always survives (collapse only evicts OLDER pending runs)
+  # and it verifies the cumulative tree, so main's CURRENT health is still
+  # measured; what is lost is per-commit granularity for bisection.
+  #
+  # THE REMEDY IS DELIBERATELY NOT TAKEN, and the reasoning is recorded here so
+  # the next reader does not re-litigate it. `group: elixir-${{ github.sha }}`
+  # removes collapse entirely, but it is the wrong trade at this cadence: the
+  # bursts that cause collapse are 3-4 pushes inside 60 seconds, so it would put
+  # 3-4 concurrent 7-job suites (21-28 jobs) against an account concurrency cap,
+  # where they queue at the ACCOUNT level instead — reproducing the 2026-04-26
+  # "queued forever" condition that cancel-in-progress used to mask, and risking
+  # the 2026-06-10 starvation this guard exists to prevent. Queue-with-no-
+  # collapse is not expressible in GitHub concurrency today. Collapse is
+  # load-shedding that keeps the newest tree verified; per-sha grouping buys
+  # bisection granularity at the price of the suite completing at all.
+  #
+  # scripts/never-cancel-main-check.sh forbids the ACTIVE-cancel shape and
+  # cannot see this one — do not read its green as covering collapse.
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -387,9 +429,23 @@ jobs:
       # #29). It used to run here but was non-blocking because mix-test
       # carried continue-on-error: true at the time (it no longer does).
 
-      - name: Install libvips for media renditions (Phase 1)
-        run: sudo apt-get update && sudo apt-get install -y libvips-dev
-        working-directory: .
+      # NO apt libvips-dev HERE, and the `:image` dep STAYS. The repo sets no
+      # VIX_COMPILATION_MODE, so vix (0.38) runs in its default
+      # PRECOMPILED_NIF_AND_LIBVIPS mode: the NIF arrives prebuilt with libvips
+      # bundled, and the system libvips-dev this step used to install was never
+      # consumed by this job (measured 40-64s of apt on the critical path,
+      # buying nothing). Only `:requires_vips`-tagged tests need the system
+      # `vips` BINARY on PATH, and those are default-excluded here
+      # (api/test/test_helper.exs).
+      #
+      # DO NOT reach for BARKPARK_SKIP_IMAGE=1 instead — that removes the
+      # `Image` MODULE, which plain (untagged) integration tests exercise at
+      # runtime: run 32641485143 reds v1_media_processing_test.exs:93 and
+      # media_delivery_test.exs:71 with `Image.open/1 is undefined` raised from
+      # Barkpark.Plugins.Media.after_media_upload/1. The dep was never the
+      # cost; the apt install was.
+      # If system libvips is ever genuinely needed here, prefer apt caching
+      # over re-adding a cold `apt-get update && install` to the critical path.
 
       - name: Install libxml2-utils for ONIX XSD validation (Phase 6 WI5)
         # The :validator-tagged tests under
@@ -559,6 +615,15 @@ jobs:
         env:
           MIX_ENV: prod
 
+      # THIS IS THE ONLY REMAINING libvips INSTALL, and it is deliberate: it
+      # keeps a system libvips available where the prod artifact is compiled,
+      # so a future switch to VIX_COMPILATION_MODE=PLATFORM_PROVIDED_LIBVIPS
+      # (or a vix bump that needs to fall back to a source build) is exercised
+      # here rather than discovered in prod. mix-test dropped its copy because
+      # vix's default precompiled NIF bundles libvips and that lane never
+      # touches the system `vips` binary (`:requires_vips` is default-excluded
+      # there). This job is off the critical path, so its ~37s is free
+      # wall-clock.
       - name: Install libvips for media renditions (Phase 1)
         run: sudo apt-get update && sudo apt-get install -y libvips-dev
         working-directory: .
@@ -731,10 +796,47 @@ jobs:
                   reds="${reds:+${reds}, }${job}"
                 fi
                 ;;
-              failure | cancelled)
-                echo "  FAIL    ${job}: ${result}"
+              failure)
+                echo "  FAIL    ${job}: failure"
                 bad=1
                 reds="${reds:+${reds}, }${job}"
+                ;;
+              cancelled)
+                # SPLIT OUT OF THE `failure` ARM (charter D57). Both are RED and
+                # both stay red — a cancelled upstream tested nothing, and D12
+                # says a non-pass is a non-pass. What changed is that the gate
+                # now SAYS WHICH.
+                #
+                # WHY THIS IS NOT COSMETIC. This fleet force-pushes stacked
+                # branches daily and this workflow cancels in-progress runs on
+                # non-main refs, so a superseded head is the COMMON way an
+                # upstream ends up cancelled. Before this arm, a superseded run
+                # and a genuine code failure were byte-identical at the required
+                # -context level: MEASURED on sha 6539d929 after `gh run cancel`,
+                # five upstream jobs read completed|cancelled while `Elixir gate`
+                # read completed|failure and the merge refused with
+                #   Required status check "Elixir gate" is failing.
+                # — not `is cancelled.` The natural response to `is failing.` is
+                # to go read a diff that is fine, on a branch nobody is on.
+                #
+                # The re-run prescription is the whole point: a cancelled
+                # upstream is cleared by producing a NEW run, never by reading
+                # code. Note the D102 trap while doing so — RE-RUNNING a workflow
+                # DELETES its existing check-runs, so the required context goes
+                # ABSENT (which never reports) before it goes green. Pushing a
+                # fresh head sha mints new runs and is the safer move.
+                echo "  FAIL    ${job}: CANCELLED — this job did not fail, it never finished."
+                echo "          Nothing was tested, so this gate is RED (charter D12): a"
+                echo "          non-pass is a non-pass and will not be laundered into green."
+                echo "          But do NOT go read the diff — a cancellation is almost always"
+                echo "          a SUPERSEDED HEAD (this workflow sets cancel-in-progress on"
+                echo "          non-main refs), not a defect in your code."
+                echo "          FIX: produce a NEW run. Push a fresh head sha. Re-running the"
+                echo "          workflow instead DELETES its check-runs, so the required"
+                echo "          context reads ABSENT rather than red until the re-run finishes"
+                echo "          (charter D102)."
+                bad=1
+                reds="${reds:+${reds}, }${job} (cancelled, not failed)"
                 ;;
               '')
                 echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"

@@ -58,6 +58,7 @@ lib/barkpark/studio_chat.ex	delete_session_attachments
 lib/barkpark/studio_chat.ex	read_attachment
 lib/barkpark/studio_chat.ex	store_attachment
 lib/barkpark/studio_chat/probe.ex	run
+lib/barkpark/studio_chat/runtime/codex/readiness.ex	version
 lib/barkpark/studio_chat/titles.ex	run
 lib/barkpark/tasks/validation.ex	fetch
 lib/barkpark/tenancy.ex	delete_allowlist_scoped

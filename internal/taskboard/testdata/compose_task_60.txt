@@ -1,44 +1,44 @@
 
-  ──────────────────────────────────────────────────────
- │ Wire the SSE live bridge to the task board pane      │
- │ ⠋ in_progress · P1 · task · fable-3                  │
- │                                                      │
- │ criteria 2/3                                         │
- │   ✓ SSE dirty-bit triggers a debounced refetch       │
- │     ↳ internal/taskboard/live.go:42                  │
- │   ✓ Connection dot renders honestly                  │
- │   ○ A stuck reconnect never reads ConnLive           │
- │                                                      │
- │ purpose · derived                                    │
- │   part of   standalone task                          │
- │   impact    blocks 0 · blocked by 0                  │
- │   does      Wire the SSE live bridge to the task     │
- │             board pane                               │
- │   why       Why this task is worth doing is not      │
- │             recorded.                                │
- │   endgame   Complete this task and its 3 direct      │
- │             children.                                │
- │   important 90/100 — Derived from P1 queue priority. │
- │   relevant  90/100 — Derived from active in-progress │
- │             status.                                  │
- │   proof     Recorded task intent — Wire the SSE live │
- │             bridge to the task board pane —          │
- │             document.title                           │
- │   proof     Acceptance contract — 3 recorded         │
- │             criteria — content.acceptance_criteria   │
- │   derived from recorded task facts · add authored p… │
- │                                                      │
- │ created 2d ago (Jul 02, 09:12)                       │
- │ updated 8m ago (Jul 04, 17:22)                       │
- │                                                      │
- │ ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)   │
- │                                                      │
- │   The board must repaint the moment the queue        │
- │   moves.                                             │
- │                                                      │
- │   • one dirty bit signals the refetch                │
- │   • one snapshot is the single source of truth       │
- │                                                      │
- │ labels  proj:task-tui · area:live                    │
- │   ↓ more below                                       │
+ Wire the SSE live bridge to the task board pane
+ ⠋ in_progress · P1 · task · fable-3
+
+ criteria 2/3
+   ✓ SSE dirty-bit triggers a debounced refetch
+     ↳ internal/taskboard/live.go:42
+   ✓ Connection dot renders honestly
+   ○ A stuck reconnect never reads ConnLive
+
+ purpose · derived
+   part of   standalone task
+   impact    blocks 0 · blocked by 0
+   does      Wire the SSE live bridge to the task board
+             pane
+   why       Why this task is worth doing is not
+             recorded.
+   endgame   Complete this task and its 3 direct
+             children.
+   important 90/100 — Derived from P1 queue priority.
+   relevant  90/100 — Derived from active in-progress
+             status.
+   proof     Recorded task intent — Wire the SSE live
+             bridge to the task board pane —
+             document.title
+   proof     Acceptance contract — 3 recorded criteria —
+             content.acceptance_criteria
+   derived from recorded task facts · add authored purpo…
+
+ created 2d ago (Jul 02, 09:12)
+ updated 8m ago (Jul 04, 17:22)
+
+ ○ created (Jul 02) → ⠋ claimed by fable-3 (Jul 04)
+
+   The board must repaint the moment the queue moves.
+
+   • one dirty bit signals the refetch
+   • one snapshot is the single source of truth
+
+ labels  proj:task-tui · area:live
+
+ claim  fable-3 · epoch 4 · claimed 4m ago (Jul 04, 17:2…
+   ↓ more below
  jk move · enter open · esc back · space scroll · M mouse

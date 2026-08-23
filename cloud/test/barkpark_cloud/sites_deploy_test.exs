@@ -232,7 +232,8 @@ defmodule BarkparkCloud.SitesDeployTest do
                  trigger: "content-auto"
                })
 
-      assert {"a build for this site is already in progress", _} = cs.errors[:git_ref]
+      assert {"is blocked — a build for this site is already in progress", _} =
+               cs.errors[:git_ref]
 
       # And the enqueue path turns that refusal into a COALESCE, never a lost
       # publish: the caller is handed the row already in flight.
@@ -1746,7 +1747,9 @@ defmodule BarkparkCloud.SitesDeployTest do
       {bp, site} = setup_site()
       FakeBoxRelay.program(rollback: {:ok, 422, %{"error" => "no_previous"}})
 
-      assert {:error, status, detail} = Deploy.rollback(site, bp)
+      # cch-w62-bl: the typed code now rides the tuple; the CLI still gates on
+      # status alone and the console classifies on the code.
+      assert {:error, status, detail, "no_previous"} = Deploy.rollback(site, bp)
       # Non-2xx is load-bearing: the CLI gates success on the HTTP status ALONE.
       refute status in 200..299
       assert detail =~ "no previous build"
@@ -1756,7 +1759,9 @@ defmodule BarkparkCloud.SitesDeployTest do
       {bp, site} = setup_site()
       FakeBoxRelay.program(rollback: {:ok, 409, %{"error" => "lock_held"}})
 
-      assert {:error, 409, detail} = Deploy.rollback(site, bp)
+      # cch-w62-bl: lock_held is typed on the wire now, still transient in the
+      # console (the 409 arm's copy is the honest recovery).
+      assert {:error, 409, detail, "lock_held"} = Deploy.rollback(site, bp)
       assert detail =~ "deploy is running"
     end
 
@@ -1823,6 +1828,57 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       assert {:error, 502, detail} = Deploy.rollback(site, bp)
       assert detail =~ "unreachable"
+    end
+
+    # cch-w62-bl — THE BOX'S TYPED REFUSALS TRAVEL AS A CODE the console can
+    # classify, via the 4-tuple relay cch-w63-s3 minted for identity_refused.
+    # Allowlisted (no_previous / not_supported / lock_held); everything else —
+    # including the nested already_running composite the W70 flat-detail law
+    # test pins at the route — keeps the 3-tuple and the route's constant
+    # `rollback_failed`. Mutation-proven: make `typed_rollback_code/1` return
+    # nil and every assert below on the 4th element reds.
+    test "a NESTED no_previous refusal mints the typed 4-tuple — prose in detail, code alongside" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 422,
+           %{"error" => %{"code" => "no_previous", "message" => "no previous release (exit 21)"}}}
+      )
+
+      assert {:error, 422, detail, "no_previous"} = Deploy.rollback(site, bp)
+      assert detail == "no_previous — no previous release (exit 21)"
+    end
+
+    test "a FLAT no_previous token mints the same typed code, with rollback_copy's prose" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(rollback: {:ok, 422, %{"error" => "no_previous"}})
+
+      assert {:error, 422, detail, "no_previous"} = Deploy.rollback(site, bp)
+      assert detail =~ "no previous build"
+    end
+
+    test "not_supported and lock_held mint their codes too — lock_held keeps its 409" do
+      {bp, site} = setup_site()
+      FakeBoxRelay.program(rollback: {:ok, 422, %{"error" => "not_supported"}})
+      assert {:error, 422, detail, "not_supported"} = Deploy.rollback(site, bp)
+      assert detail =~ "no live release"
+
+      FakeBoxRelay.program(rollback: {:ok, 409, %{"error" => "lock_held"}})
+      assert {:error, 409, detail409, "lock_held"} = Deploy.rollback(site, bp)
+      assert detail409 =~ "deploy is running"
+    end
+
+    test "an UNLISTED code stays the 3-tuple — already_running is pinned to the route constant" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 409,
+           %{"error" => %{"code" => "already_running", "message" => "deploy already running"}}}
+      )
+
+      assert {:error, 409, _detail} = Deploy.rollback(site, bp)
     end
   end
 

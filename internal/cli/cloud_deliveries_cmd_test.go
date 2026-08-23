@@ -683,6 +683,116 @@ func TestCloudDeliveriesRollbackVerdictReachesTheHuman(t *testing.T) {
 // the fixture's key sets
 // ---------------------------------------------------------------------------
 
+// TestCloudDeliveriesRowShaIsTheRecordsOwn is THE mutation target for
+// dr-w27-bl-decoded-but-never-rendered-sha: re-point deliveriesRowShaLine at the
+// caller's positional (or delete the line) and this test reds.
+//
+// The fixture here is DELIBERATELY inline and DELIBERATELY inconsistent: the
+// row's recorded sha differs from both the query and the envelope echo. Before
+// the fix, this render was byte-identical to a correct answer — the header
+// printed the operator's own input back at them and d.SHA was decoded and
+// dropped, so a control plane answering with a DIFFERENT commit's delivery was
+// structurally invisible.
+func TestCloudDeliveriesRowShaIsTheRecordsOwn(t *testing.T) {
+	const query = "2e38228b0048901b166d915d222cfc47f6f470d6"
+	const rowSha = "beefbeefbeefbeefbeefbeefbeefbeefbeefbeef"
+	body := `{"deliveries":[{"sha":"` + rowSha + `","delivering_run_id":"31255918184","first_seen_at":"2026-08-08T11:55:11.517221Z",` +
+		`"merged_at":"2026-08-08T11:51:21Z","queued_seconds":14,"queued_self_seconds":6,"queued_pickup_seconds":3,` +
+		`"queued_stall_seconds":5,"build_seconds":216,"serving_since":"2026-08-08T11:55:11.517221Z","target":"cp",` +
+		`"carried":false,"previous_sha":null,"transition":"forward","recorded_at":"2026-08-08T12:23:21.862544Z"}],` +
+		`"count":1,"sha":"` + query + `","limit":50,"scope":"platform"}`
+	newDeliveriesServer(t, 200, body)
+
+	stdout, stderr, code := runDeliveries(t, "table", query)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	// The row block opens with the RECORD'S OWN sha — the full recorded value,
+	// which shares not even a prefix with the query here.
+	if !strings.Contains(stdout, "sha "+rowSha) {
+		t.Fatalf("render never prints the row's own recorded sha %s:\n%s", rowSha, stdout)
+	}
+	// And the disagreement is LOUD, on the row, naming the sha that was asked for.
+	mismatch := deliveriesLineWith(t, stdout, "ROW MISMATCH")
+	if !strings.Contains(mismatch, shortSha(query)) {
+		t.Fatalf("the row mismatch does not name the requested sha %s: %q", shortSha(query), mismatch)
+	}
+}
+
+// TestCloudDeliveriesRowShaMatchIsQuietAndStillTheRecordsOwn: on a CONSISTENT
+// page the row sha line still reads d.SHA (the fixture's own value) and no
+// mismatch of either kind is printed — the loud words are reserved for
+// disagreement, so they cannot become wallpaper.
+func TestCloudDeliveriesRowShaMatchIsQuietAndStillTheRecordsOwn(t *testing.T) {
+	fx := loadDeliveriesFixture(t)
+	status, body := deliveriesScenario(t, fx, "fully_clocked")
+	newDeliveriesServer(t, status, body)
+
+	const sha = "2e38228b0048901b166d915d222cfc47f6f470d6"
+	stdout, _, code := runDeliveries(t, "table", sha)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	if !strings.Contains(stdout, "sha "+sha+" — the record's OWN sha for this row") {
+		t.Fatalf("row block does not open with the record's own sha:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "MISMATCH") {
+		t.Fatalf("a consistent page must not print MISMATCH:\n%s", stdout)
+	}
+}
+
+// TestCloudDeliveriesFilterEchoIsRendered: page.SHA (the echoed normalised
+// filter) and page.Limit stop being decoded-and-dropped (dr-w27-bl). Three
+// states, each its own sentence: the echo confirms the query, the echo is
+// absent (null — an older control plane, or an unfiltered read), or the echo
+// DISAGREES with the query, which means the page answers a different question
+// and must say so loudly.
+func TestCloudDeliveriesFilterEchoIsRendered(t *testing.T) {
+	const query = "2e38228b0048901b166d915d222cfc47f6f470d6"
+	empty := `"deliveries":[],"count":0`
+
+	t.Run("echo confirms the query and the limit is named", func(t *testing.T) {
+		newDeliveriesServer(t, 200, `{`+empty+`,"sha":"`+query+`","limit":50,"scope":"platform"}`)
+		stdout, _, code := runDeliveries(t, "table", query)
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+		}
+		line := deliveriesLineWith(t, stdout, "filter echoed")
+		if !strings.Contains(line, query) {
+			t.Fatalf("the echo line does not carry the confirmed sha: %q", line)
+		}
+		if !strings.Contains(line, "page limit 50") {
+			t.Fatalf("page.Limit is still decoded-and-dropped: %q", line)
+		}
+	})
+
+	t.Run("a null echo renders as NOT ECHOED, never omitted", func(t *testing.T) {
+		newDeliveriesServer(t, 200, `{`+empty+`,"sha":null,"limit":0,"scope":"platform"}`)
+		stdout, _, code := runDeliveries(t, "table", query)
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+		}
+		if !strings.Contains(stdout, "filter NOT ECHOED") {
+			t.Fatalf("a null echo must render as NOT ECHOED:\n%s", stdout)
+		}
+		if !strings.Contains(stdout, "page limit NOT NAMED") {
+			t.Fatalf("a zero limit must render as NOT NAMED, never dropped:\n%s", stdout)
+		}
+	})
+
+	t.Run("an echo that disagrees with the query is a loud mismatch", func(t *testing.T) {
+		newDeliveriesServer(t, 200, `{`+empty+`,"sha":"beefbeefbeefbeefbeefbeefbeefbeefbeefbeef","limit":50,"scope":"platform"}`)
+		stdout, _, code := runDeliveries(t, "table", query)
+		if code != exitOK {
+			t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+		}
+		line := deliveriesLineWith(t, stdout, "FILTER MISMATCH")
+		if !strings.Contains(line, shortSha(query)) || !strings.Contains(stdout, "beefbeef") {
+			t.Fatalf("the filter mismatch must name BOTH shas:\nline: %q\n%s", line, stdout)
+		}
+	})
+}
+
 // TestPlatformDeliveriesFixtureRowsCarryExactlyTheLiveKeySet holds every
 // scenario row to the fixture's declared live_key_set — EXACTLY, in both
 // directions. A serializer that adds a key without moving this file reds here,

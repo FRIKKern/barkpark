@@ -74,7 +74,7 @@ defmodule BarkparkCloud.Accounts.TeamInvitation do
     |> unique_constraint(:token_hash)
     |> unique_constraint([:team_id, :email],
       name: :team_invitations_team_email_pending_idx,
-      message: "an invitation is already pending for this email"
+      message: "already has a pending invitation for this email"
     )
   end
 

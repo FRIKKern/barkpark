@@ -224,10 +224,21 @@ defmodule BarkparkCloud.DomainStatus do
   # dropped. A row with no url (or a url that yields no host) falls back to
   # `provisioning_fqdn/1` — the pre-reservation shape, where the suffixed FQDN
   # genuinely IS the only name there is.
+  #
+  # Self-normalises `trim |> downcase` before stripping — the SAME fold as
+  # `Barkpark.subdomain_from_url/1` and the write-side `normalize_url` (D865,
+  # cch-w71-bl). This was the last divergent spelling of the url-to-host rule:
+  # without the downcase, an uppercase scheme defeats the case-sensitive
+  # `replace_prefix` and the "host" this yields is the SCHEME LABEL (`"HTTPS"`),
+  # so the console would probe (and report remediation copy for) a name nothing
+  # ever creates — for old rows, the pre-`normalize_url` write window, and any
+  # changeset-bypassing write. DNS names are case-insensitive, so downcasing the
+  # host is lossless for the probes this feeds.
   defp platform_host(%Barkpark{url: url} = bp) when is_binary(url) do
     host =
       url
       |> String.trim()
+      |> String.downcase()
       |> String.replace_prefix("https://", "")
       |> String.replace_prefix("http://", "")
       |> String.split("/", parts: 2)

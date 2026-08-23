@@ -104,6 +104,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   # 3600 s is a ~3.4x margin over it. Not a guess, and not five minutes.
   @default_max_age_seconds 3600
 
+  # Bound on one `ps -p` liveness probe. `ps` normally answers in
+  # milliseconds; a probe that takes longer than this is wedged (dead /proc,
+  # NFS-backed procfs, a stopped port) and the sweep must ADVANCE rather than
+  # hang the whole collection behind it — the rescue around sweep/1 never
+  # fires for a blocked synchronous port read, because a hang raises nothing
+  # (task-felix-w21-bl-janitor-ps-bound). Generous on purpose: the cost of a
+  # timeout is one file kept until the next boot, so the bound only needs to
+  # beat "forever", not be tight.
+  @ps_probe_timeout_ms 5_000
+
   @doc """
   Child spec for the boot-time sweep.
 
@@ -203,6 +213,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
     * `:dir` — directory to sweep (default `spill_dir/0`)
     * `:max_age_seconds` — staleness cutoff (default `max_age_seconds/0`)
     * `:now` — unix seconds treated as "now" (default `System.os_time/1`)
+    * `:ps_path` — the `ps` executable the liveness probe runs (default
+      `System.find_executable("ps")`; tests inject a stub here)
+    * `:ps_timeout_ms` — bound on one liveness probe (default
+      #{@ps_probe_timeout_ms} ms); a probe that exceeds it answers ALIVE
 
   Returns `{:ok, %{removed: [path], kept: n, skipped_live: n}}`. Never raises:
   this runs on the boot path and reclaiming disk is strictly best-effort.
@@ -212,13 +226,14 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
     dir = Keyword.get(opts, :dir) || spill_dir()
     max_age = Keyword.get(opts, :max_age_seconds) || max_age_seconds()
     now = Keyword.get(opts, :now) || System.os_time(:second)
+    probe_opts = Keyword.take(opts, [:ps_path, :ps_timeout_ms])
 
     result =
       dir
       |> candidates()
       |> Enum.reduce(%{removed: [], kept: 0, skipped_live: 0}, fn path, acc ->
         cond do
-          owner_alive?(path) ->
+          owner_alive?(path, probe_opts) ->
             %{acc | skipped_live: acc.skipped_live + 1}
 
           stale?(path, now, max_age) ->
@@ -293,11 +308,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   # `path` is a candidates/1 result under the configured spill root; the owner
   # filename adds only the fixed sidecar suffix.
   # sobelow_skip ["Traversal.FileModule"]
-  defp owner_alive?(path) do
+  defp owner_alive?(path, probe_opts) do
     case File.read(owner_path(path)) do
       {:ok, contents} ->
         case Integer.parse(String.trim(contents)) do
-          {pid, _} when pid > 0 -> os_process_alive?(pid)
+          {pid, _} when pid > 0 -> os_process_alive?(pid, probe_opts)
           # A sidecar exists but is unreadable as a pid: assume live.
           _ -> true
         end
@@ -315,21 +330,46 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   # user answers EPERM, which is indistinguishable from "gone" by exit status
   # alone and would make us delete a live foreign slot's spill. `ps -p` reports
   # existence regardless of ownership on both Darwin and Linux.
-  # `ps` is resolved by System.find_executable/1 and pid is converted to one argv
-  # element; no shell or command-string interpolation is involved.
+  #
+  # BOUNDED via the repo-standard async_nolink + `Task.yield || Task.shutdown`
+  # shape (task-felix-w21-bl-janitor-ps-bound): a synchronous `System.cmd`
+  # here had no bound, and a blocked port read raises nothing, so a wedged
+  # `ps` silently hung the one-shot sweep Task forever and every remaining
+  # candidate went unevaluated. Every undeterminable outcome — timeout, task
+  # crash, TaskSupervisor unavailable — answers TRUE (alive), the fail-safe
+  # direction: a hung probe must never let the janitor delete a bundle.
+  # Requires `Barkpark.TaskSupervisor`, which application.ex starts BEFORE
+  # this janitor's one-shot child.
+  #
+  # `ps` is resolved by System.find_executable/1 (tests may inject a stub path
+  # via sweep's `:ps_path`) and pid is converted to one argv element; no shell
+  # or command-string interpolation is involved.
   # sobelow_skip ["CI.System"]
-  defp os_process_alive?(pid) do
-    case System.find_executable("ps") do
+  defp os_process_alive?(pid, probe_opts) do
+    case Keyword.get(probe_opts, :ps_path) || System.find_executable("ps") do
       nil ->
         true
 
       ps ->
-        case System.cmd(ps, ["-p", Integer.to_string(pid)], stderr_to_stdout: true) do
-          {_out, 0} -> true
-          {_out, _} -> false
+        timeout = Keyword.get(probe_opts, :ps_timeout_ms) || @ps_probe_timeout_ms
+
+        task =
+          Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->
+            System.cmd(ps, ["-p", Integer.to_string(pid)], stderr_to_stdout: true)
+          end)
+
+        case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+          {:ok, {_out, 0}} -> true
+          {:ok, {_out, _}} -> false
+          # Timeout (nil), task crash ({:exit, _}): undeterminable → alive.
+          _ -> true
         end
     end
   rescue
     _ -> true
+  catch
+    # async_nolink against a not-yet-started supervisor exits rather than
+    # raises; an exit must degrade to "alive", never kill the sweep.
+    :exit, _ -> true
   end
 end

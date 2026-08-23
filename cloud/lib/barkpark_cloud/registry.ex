@@ -133,6 +133,16 @@ defmodule BarkparkCloud.Registry do
   # `config :barkpark_cloud, :deployment_stale_after_seconds`. Default: 15 minutes.
   @default_deployment_stale_after_seconds 15 * 60
 
+  # Queued-age ALARM horizon (jpf-w1-queue-age-alarm) — how long a `queued`
+  # container-site deployment may sit unclaimed before clients surface it as
+  # `deploy_stalled`. One third of the reaper threshold above ON PURPOSE: the
+  # reaper mutates builder LEASES (its passes are all claimed_at-gated — a row
+  # no builder ever claimed has claimed_at nil and is invisible to it by
+  # design), while this number judges exactly that never-claimed orphan class,
+  # read-only, and must fire well before anyone would call a builder lease
+  # abandoned. Default: 5 minutes.
+  @default_queued_deploy_alarm_after_seconds 5 * 60
+
   # The deploy claim budget: claim_next_deployment bumps `claim_epoch` on every
   # (re)claim, and a stale "building" row whose epoch has already reached this cap
   # is transitioned to "failed" ("exceeded max deploy claim attempts") instead of
@@ -1243,6 +1253,36 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  PDF-D94 (`pdf-bl-console-key-custody`): enqueue a `pending` PUSH_AGENT_KEY job
+  for `barkpark` — the console paste-a-key path. The job row carries ONLY the
+  routing fact (barkpark_id + kind); the key itself is stashed in-memory by the
+  ROUTER (`AgentKeyStash.put/3`, keyed by the job id this returns) so nothing
+  durable ever holds key material (D62 amended: NEVER KEEPS).
+
+  Same one-active-per-kind guard as the other kinds: an ACTIVE (pending/claimed)
+  `push_agent_key` job already in flight for this barkpark returns
+  `{:error, :already_delivering}` — one key in transit per box at a time.
+  """
+  @spec enqueue_agent_key_push_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_delivering | Ecto.Changeset.t()}
+  def enqueue_agent_key_push_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    if active_job_of_kind?(bp_id, "push_agent_key") do
+      {:error, :already_delivering}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{
+        barkpark_id: bp_id,
+        kind: "push_agent_key",
+        status: "pending"
+      })
+      |> Repo.insert()
+      |> translate_active_job_conflict(:already_delivering)
+    end
+  end
+
   # dwb-11: map a lost race on the one-active-job-per-barkpark-kind partial unique
   # index to a clean dedup atom. Any OTHER changeset error (or the {:ok, _} happy
   # path) passes through unchanged — only the money-path collision is rewritten.
@@ -1393,6 +1433,18 @@ defmodule BarkparkCloud.Registry do
   @spec claim_next_support_provision_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
   def claim_next_support_provision_job(claim_token) when is_binary(claim_token),
     do: claim_next_job(claim_token, "provision_support")
+
+  @doc """
+  PDF-D94: atomically claim the next claimable PUSH_AGENT_KEY job — the agent-key
+  delivery worker's pull. Same machinery as `claim_next_job/2`, filtered to
+  `kind: "push_agent_key"`. The ROUTER pops the in-memory key for the claimed job
+  id (`AgentKeyStash.take/1` — delete-on-read) and folds it onto the claim
+  payload; a missing stash entry (CP restart, expiry, second hand-out) fails the
+  job honestly at the route instead of delivering nothing.
+  """
+  @spec claim_next_agent_key_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_agent_key_job(claim_token) when is_binary(claim_token),
+    do: claim_next_job(claim_token, "push_agent_key")
 
   # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
   # claimers SKIP LOCKED past it. If a stale row has burned through its attempt
@@ -2183,7 +2235,37 @@ defmodule BarkparkCloud.Registry do
   @spec succeed_attach_domain_job(binary(), String.t() | nil, keyword()) ::
           {:ok, ProvisionJob.t()}
           | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
-  def succeed_attach_domain_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts) do
+  def succeed_attach_domain_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts),
+    do: succeed_job_row_only(id, ip, opts)
+
+  @doc """
+  PDF-D94: mark push-agent-key job `id` succeeded — the key line landed on the
+  box and the listener restarted. Flips the JOB ROW ONLY (`result_ip` when the
+  worker echoed the box ip): a key push must NEVER run `succeed_job/3`'s
+  barkpark upsert, which would clobber a LIVE support row back to
+  health "unknown" / agent "offline". Same idempotency + claim-fence contract
+  as `succeed_attach_domain_job/3`.
+  """
+  @spec succeed_agent_key_job(binary(), String.t() | nil, keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def succeed_agent_key_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts),
+    do: succeed_job_row_only(id, ip, opts)
+
+  @doc """
+  PDF-D94: mark push-agent-key job `id` failed with `error`. The support row is
+  untouched (it stays live — only the key delivery failed; re-paste is the
+  recovery). Delegates to `fail_job/3`, exactly like the attach-domain fail.
+  """
+  @spec fail_agent_key_job(binary(), String.t(), keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def fail_agent_key_job(id, error, opts \\ []), do: fail_job(id, error, opts)
+
+  # The shared job-row-only succeed (attach_domain + push_agent_key): flip the
+  # job to succeeded WITHOUT touching the owning barkpark. Idempotent + fenced
+  # exactly like succeed_job/3.
+  defp succeed_job_row_only(id, ip, opts) do
     claim_token = Keyword.get(opts, :claim_token)
 
     case uuid_or_nil(id) do
@@ -2238,6 +2320,23 @@ defmodule BarkparkCloud.Registry do
           {:ok, ProvisionJob.t()}
           | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
   def fail_attach_domain_job(id, error, opts \\ []), do: fail_job(id, error, opts)
+
+  @doc """
+  PDF-D94: the latest `push_agent_key` job for `barkpark`, or nil — the console's
+  delivery-status read (`GET /v1/barkparks/:id/agent-key`). Status/error only;
+  the job row never holds key material by construction.
+  """
+  @spec latest_agent_key_job(Barkpark.t() | binary()) :: ProvisionJob.t() | nil
+  def latest_agent_key_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    from(j in ProvisionJob,
+      where: j.barkpark_id == ^bp_id and j.kind == "push_agent_key",
+      order_by: [desc: j.inserted_at, desc: j.id],
+      limit: 1
+    )
+    |> Repo.one()
+  end
 
   @doc """
   The latest provision job for each barkpark id in `ids`, as a map
@@ -2481,6 +2580,28 @@ defmodule BarkparkCloud.Registry do
       :barkpark_cloud,
       :deployment_stale_after_seconds,
       @default_deployment_stale_after_seconds
+    )
+  end
+
+  @doc """
+  Seconds a `queued` container-site deployment may sit UNCLAIMED before clients
+  treat it as stalled (jpf-w1-queue-age-alarm, charter D6). Deliberately ONE
+  THIRD of `deployment_stale_after_seconds` (#{@default_queued_deploy_alarm_after_seconds}s
+  vs #{@default_deployment_stale_after_seconds}s): the reaper above is a MUTATING
+  builder-lease mechanism whose passes are all `claimed_at`-gated — a
+  never-claimed queued row has `claimed_at` nil and is invisible to it by
+  design — while this threshold judges exactly that orphan class, read-only.
+  The control plane only SERVES the raw age (`queued_deploy_age_seconds` on
+  `barkpark_json`); the Go CLI and the SPA own the comparison, so this knob is
+  the documented home of the 5min/15min relationship rather than a server-side
+  gate. Overridable via `config :barkpark_cloud, :queued_deploy_alarm_after_seconds`.
+  """
+  @spec queued_deploy_alarm_after_seconds() :: pos_integer()
+  def queued_deploy_alarm_after_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :queued_deploy_alarm_after_seconds,
+      @default_queued_deploy_alarm_after_seconds
     )
   end
 
@@ -4791,6 +4912,30 @@ defmodule BarkparkCloud.Registry do
   `opts`:
     * `:expires_at` — a `DateTime` after which the token is invalid (default: no
       expiry).
+
+  RULING (task-940e49f7300a8d1b, recorded after an independent review of PR
+  #13251): `scope` is NOT an authorization boundary today — see the ruling on
+  `verify_agent_token/1` below for why, and read that doc before minting a
+  scope you intend to be narrower than the box's full agent surface. It WILL
+  NOT be.
+
+  Accumulation, decided in writing: minting a NEW scope for a barkpark does
+  NOT revoke that barkpark's LIVE tokens of OTHER scopes (only same-scope
+  supersession is atomic here) — `router_agent_runtime_test.exs` pins this as
+  deliberate ("DISTINCT scope — mint_agent_token now supersedes a box's prior
+  same-scope [token only]"), so two live differently-scoped tokens coexisting
+  is intended, not a bug. It is ACCEPTABLE to leave as-is because, as of this
+  ruling, exactly ONE scope ("report") is ever minted by production code
+  (`web/router.ex`'s `put_agent_token`/`claim_json`) — there is no live
+  accumulation happening today, only a latent risk. A future caller that mints
+  a genuinely distinct scope for a box that already holds a live "report"
+  token is RESPONSIBLE for one of: reusing "report", explicitly revoking the
+  token(s) it means to replace via `revoke_agent_token/1`, or accepting that
+  the box now presents multiple live credentials and designing for it
+  on purpose. `AgentRetentionWorker` already bounds every DEAD token's
+  lifetime (30-day grace past `revoked_at`/`expires_at`) — the open edge is
+  LIVE, never-revoked, never-expired tokens of a scope nothing mints anymore,
+  which today can only arise by hand (there is no such production caller).
   """
   @spec mint_agent_token(Barkpark.t() | binary(), String.t(), keyword()) ::
           {:ok, binary(), AgentToken.t()} | {:error, Ecto.Changeset.t()}
@@ -4829,6 +4974,43 @@ defmodule BarkparkCloud.Registry do
   Verify a presented `plaintext` agent token. Returns the owning `%Barkpark{}`
   when the token exists, is not revoked, and is not past `expires_at`; otherwise
   `nil`. Lookup is by hash — the plaintext is never stored to compare against.
+
+  RULING (task-940e49f7300a8d1b, recorded after an independent review of PR
+  #13251): this check is DELIBERATELY scope-blind — it filters hash, revoked,
+  and expiry, and NEVER reads `scope`. Any live token for `barkpark` opens
+  EVERY route behind `Auth.require_agent/2` for that box, regardless of the
+  scope it was minted with. That is unchanged by this ruling; it is the
+  finding this ruling accepts.
+
+  Why NOT enforced: as of this ruling, `require_agent` gates
+  `/v1/agent/*` (beat/space/commands/results), `/v1/builder/*`
+  (jpf-w1-builder-identity), and `/v1/builder/sites/:id/env` — and every one
+  of those routes is opened, in production, by the SAME single "report"-scope
+  token the box mints at claim time and keeps on disk
+  (`/etc/barkpark/agent.token`). There is no existing route→scope requirement
+  matrix anywhere in this codebase to enforce; test suites mint whatever scope
+  string is convenient ("runtime", "deploy", "report:health", …) because
+  nothing reads it. Inventing a scoping scheme now, with no route that has
+  ever needed one, would inject an untested authorization model rather than
+  close a real gap — and could silently break the one production path (a
+  "report" token failing a builder or agent-runtime check it has always
+  passed) for zero measured benefit.
+
+  Why ACCEPTABLE to leave scope-blind: `barkpark_id` is still the real
+  boundary — every route re-derives `conn.assigns.current_barkpark` from the
+  verified token and scopes its query to that barkpark alone
+  (jpf-w1-builder-identity's box-scoping tests), so the worst case of this
+  gap is intra-box privilege flattening (one box's own live token can reach
+  every route that box's disk already has secrets for), never cross-tenant.
+
+  The loaded-gun edge, stated plainly for the next person who reaches for
+  `scope` as a control: a future mint of a WEAKER scope — intended to open
+  fewer routes than the box's full agent surface — will NOT be narrowed by
+  this function. If that need arrives, it must be built here (a route-level
+  or plug-level allow-list checked against `scope`), not assumed to already
+  exist. Until then, `scope` is descriptive metadata (which flow minted this
+  token, for audit/debugging), not an authorization control — treat it as
+  the former in any UI or log that surfaces it, never claim it as the latter.
   """
   @spec verify_agent_token(binary()) :: Barkpark.t() | nil
   def verify_agent_token(plaintext) when is_binary(plaintext) do
@@ -6839,6 +7021,84 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Atomically claim the oldest queued Deployment whose Site is a CONTAINER site
+  on `barkpark`, for `worker_id` — the box-scoped twin of
+  `claim_next_deployment/1`, and the only claim the builder route reaches
+  (jpf-w1-builder-identity).
+
+  WHY THIS EXISTS. `claim_next_deployment/1` selects FLEET-WIDE, so the route
+  in front of it could only ever be gated by a fleet-wide principal — the shared
+  `WORKER_TOKEN`, one secret that also opens `/v1/internal/*`. That secret now
+  lives on customer boxes running untrusted nixpacks builds. Narrowing the QUERY
+  to the caller's own box is what makes the per-box, hashed, revocable agent
+  token a sufficient credential for the route; without it, a box-scoped identity
+  in front of a fleet-wide query would still hand box A a build for box B.
+
+  ALSO A CORRECTNESS FIX, not only a scope one: the builder and the runtime
+  share one on-box cache directory and hand the built tarball over through the
+  filesystem, so a build claimed by the wrong box was already broken at two or
+  more planes — it just failed later and less legibly.
+
+  SUBQUERY, NOT A JOIN — deliberately copied from `claim_next_deployment/1` and
+  deliberately NOT from `claim_pending_deployment_for_barkpark/2`, which joins.
+  `FOR UPDATE` over a join locks the joined `sites` row as well, which would put
+  every builder claim in the lock path of every ordinary site update. Here the
+  site is read for two filters (`kind` and `barkpark_id`) and never written, so
+  a subquery is both sufficient and cheaper on the lock graph. The two filters
+  ride the SAME subquery for the same reason.
+
+  Returns `{:ok, deployment}` (status `queued → building`, epoch bumped), or
+  `{:error, :no_queued}` when this box has nothing waiting. A deployment queued
+  for ANOTHER box is not a distinguishable outcome — it is simply absent from
+  this box's queue, exactly as in `claim_pending_deployment_for_barkpark/2`, so
+  no caller can probe for the existence of another tenant's build.
+  """
+  @spec claim_queued_deployment_for_barkpark(Barkpark.t() | binary(), String.t()) ::
+          {:ok, Deployment.t()} | {:error, :no_queued}
+  def claim_queued_deployment_for_barkpark(barkpark, worker_id)
+      when is_binary(worker_id) and worker_id != "" do
+    bp_id = barkpark_id(barkpark)
+
+    Repo.transaction(fn ->
+      # site-spawner D22's CONTAINER guard, kept: a static deploy runs ON the
+      # box via site-deploy.sh and the container builder cannot build one, so a
+      # row it claimed would wedge `building` under a worker that never
+      # finishes. Narrowing by box does not relax that guard, it ANDs with it.
+      container_sites =
+        from(s in Site,
+          where: s.kind == "container" and s.barkpark_id == ^bp_id,
+          select: s.id
+        )
+
+      query =
+        from(d in Deployment,
+          where: d.status == "queued" and d.site_id in subquery(container_sites),
+          order_by: [asc: d.inserted_at],
+          limit: 1,
+          lock: "FOR UPDATE SKIP LOCKED"
+        )
+
+      case Repo.one(query) do
+        nil ->
+          Repo.rollback(:no_queued)
+
+        %Deployment{} = d ->
+          {:ok, claimed} =
+            d
+            |> Deployment.transition_changeset(%{
+              status: "building",
+              claim_worker: worker_id,
+              claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
+              claim_epoch: d.claim_epoch + 1
+            })
+            |> Repo.update()
+
+          claimed
+      end
+    end)
+  end
+
+  @doc """
   site-spawner D22: claim ONE specific Deployment for `worker_id` — the static
   driver's claim, the targeted twin of `claim_next_deployment/1`.
 
@@ -7219,6 +7479,39 @@ defmodule BarkparkCloud.Registry do
           claimed
       end
     end)
+  end
+
+  @doc """
+  Age (seconds) of the OLDEST `queued` container-site deployment per barkpark,
+  for the given barkpark ids — `%{barkpark_id => seconds}`, no entry for a
+  barkpark with nothing queued (jpf-w1-queue-age-alarm, charter D6).
+
+  READ-ONLY on purpose, and deliberately NOT a reaper pass: the reaper below is
+  a MUTATING builder-lease mechanism whose passes are all `claimed_at`-gated —
+  a queued row no builder ever claimed has `claimed_at` nil and is invisible to
+  it by design. This aggregate surfaces exactly that orphan class. ONE GROUP BY
+  query for the whole fleet list (the same no-N+1 shape as
+  `latest_health_payload_map/1`), joined Deployment→Site on `barkpark_id`.
+  `s.kind == "container"` mirrors the builder's own claim scope
+  (`claim_next_deployment`): only container-site rows wait on the off-box
+  builder, so only they can stall in this sense. MAX(age) == the oldest
+  `inserted_at`, so the row that has waited longest names the number.
+  """
+  @spec queued_deploy_age_map([Ecto.UUID.t()]) :: %{optional(Ecto.UUID.t()) => non_neg_integer()}
+  def queued_deploy_age_map([]), do: %{}
+
+  def queued_deploy_age_map(ids) when is_list(ids) do
+    now = DateTime.utc_now()
+
+    from(d in Deployment,
+      join: s in Site,
+      on: d.site_id == s.id,
+      where: s.barkpark_id in ^ids and d.status == "queued" and s.kind == "container",
+      group_by: s.barkpark_id,
+      select: {s.barkpark_id, min(d.inserted_at)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {id, oldest} -> {id, max(DateTime.diff(now, oldest, :second), 0)} end)
   end
 
   @doc """

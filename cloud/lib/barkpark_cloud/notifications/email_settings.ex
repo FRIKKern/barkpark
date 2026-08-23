@@ -189,10 +189,14 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
 
         cond do
           bad_event ->
-            add_error(changeset, :event_routes, "unknown event: #{inspect(bad_event)}")
+            add_error(changeset, :event_routes, "name an unknown event: #{inspect(bad_event)}")
 
           bad_channel ->
-            add_error(changeset, :event_routes, "unknown channel: #{inspect(bad_channel)}")
+            add_error(
+              changeset,
+              :event_routes,
+              "name an unknown channel: #{inspect(bad_channel)}"
+            )
 
           true ->
             changeset

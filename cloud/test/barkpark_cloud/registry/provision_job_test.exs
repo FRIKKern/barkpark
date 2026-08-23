@@ -15,9 +15,14 @@ defmodule BarkparkCloud.Registry.ProvisionJobTest do
   end
 
   describe "kinds" do
-    test "the exact kind list — provision_support is the 5th (PDF-D83)" do
+    test "the exact kind list — provision_support the 5th (PDF-D83), push_agent_key the 6th (PDF-D94)" do
       assert ProvisionJob.kinds() ==
-               ~w(provision deprovision attach_domain resurrect provision_support)
+               ~w(provision deprovision attach_domain resurrect provision_support push_agent_key)
+    end
+
+    test "a push_agent_key job changeset is valid (needs no bundle_ref — and has no key field to hold)" do
+      cs = changeset(%{barkpark_id: @bp_id, kind: "push_agent_key", status: "pending"})
+      assert cs.valid?
     end
 
     test "a provision_support job changeset is valid (needs no bundle_ref)" do

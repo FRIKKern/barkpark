@@ -10,16 +10,24 @@
 
 | Asset | Mechanism | Where | RPO |
 |---|---|---|---|
-| **Postgres** (all app + auth + audit data) | `bp cloud hetzner backup create` — `pg_dump -Fc` → gzip → S3 (Object Storage). Plus Hetzner **volume snapshots** as the infra-level base. | S3 bucket + Hetzner snapshots | ≤ 1h (hourly logical) / ≤ snapshot interval |
-| **Media / object storage** | Object Storage bucket versioning + periodic snapshot | same region + off-region copy | ≤ 24h |
+| **Postgres** (all app + auth + audit data) | `bp cloud hetzner backup create` — `pg_dump -Fc` → gzip → S3 (Object Storage). Plus Hetzner **volume snapshots** as the infra-level base. | S3 bucket + Hetzner snapshots | on operator run — **no scheduler**; see **Backup — routine** |
+| **Media / object storage** | Object Storage bucket versioning + operator-run snapshot | same region + off-region copy | on operator run — no scheduler |
 | **Key material** (KEK, SSO client secrets, run-secrets) | Encrypted at rest; the **KEK is backed up out-of-band** (operator secret manager), NOT in the DB dump. Everything else is ciphertext in the DB backup and useless without the KEK. | operator secret store | on rotation |
+
+**Nothing in this repo schedules any of the above.** There is no cron row, no
+systemd timer and no Oban worker for backups — the cloud crontab's `BackupWorker`
+mention is a comment naming a module that does not exist — so every logical
+backup happens when an operator runs the CLI verb. Hetzner **volume snapshots**
+are the only unattended layer, and this repo does not arm them either; they run
+only if enabled on the Hetzner side.
 
 The audit chain is inside Postgres, so it rides the DB backup; its hash chain lets
 you *prove* a restored copy is un-tampered (`Audit.verify_chain/1`).
 
 ## Targets
 
-- **RPO** (max data loss): **1 hour** (logical backup cadence).
+- **RPO** (max data loss): **since the last operator-run backup** — there is no
+  scheduler, so 1h holds only while someone (or a future scheduler) runs hourly.
 - **RTO** (max time to restore): **≤ 30 min** for the reference dataset — provision a
   DB + `bp cloud hetzner backup restore` + app redeploy.
 

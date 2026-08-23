@@ -37,9 +37,9 @@ check() { # label expected_state fixture
   fi
 }
 
-advice_contains() { # label state needle
+advice_contains() { # label state needle [run_id]
   local label="$1" state="$2" needle="$3" out
-  out="$(refusal_advice "$state" 123 deadbeef)"
+  out="$(refusal_advice "$state" 123 deadbeef "${4:-}")"
   case "$out" in
     *"$needle"*) pass=$((pass + 1)); echo "  ok   $label" ;;
     *) fail=$((fail + 1))
@@ -116,6 +116,16 @@ advice_contains "21 CLIENT_BLOCK advice says the API was never reached" CLIENT_B
 # the BRANCH requires; only the set difference against the committed spec can.
 advice_contains "21b CLIENT_BLOCK advice names the RESOLVING command, like every other arm (D79)" \
                                                              CLIENT_BLOCK 'required-checks-verify.sh --deadlock'
+
+# ── hgw4: the RED/RERUN advice interpolates a REAL run id when the caller
+# resolved one, and degrades to the placeholder + lookup command when it could
+# not. refusal_advice() itself stays pure — the id arrives as $4, resolved by
+# refuse() via gh; an empty $4 must never render a wrong id.
+advice_contains "22 RED advice interpolates a supplied run id"    RED   'gh run rerun --failed 987654321' 987654321
+advice_contains "23 RERUN advice interpolates a supplied run id"  RERUN 'gh run rerun --failed --repo FRIKKern/barkpark 987654321' 987654321
+advice_contains "24 RED advice without an id keeps the placeholder + lookup" RED   'gh run rerun --failed <run-id>'
+advice_contains "25 RED placeholder path names where to look the id up"      RED   'gh pr checks 123  prints the run links'
+advice_contains "26 RERUN advice without an id keeps the placeholder"        RERUN 'gh run rerun --failed --repo FRIKKern/barkpark <run-id>'
 
 # ── the counter-line: bp-merge's own refusal must not re-teach the dead verb ──
 # D78. gh quotes its own suggestion to override the branch policy whenever

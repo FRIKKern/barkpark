@@ -1372,3 +1372,103 @@ func TestRunOnceTimesOutAgainstHangingServer(t *testing.T) {
 		t.Fatalf("RunOnce took %s to return an error, want it to return promptly on client timeout", elapsed)
 	}
 }
+
+// TestConsoleLatchIsRecordedAsTruncation drives the narration latch (three
+// consecutive failed console POSTs) and proves the resulting deployment's
+// console is READABLE AS TRUNCATED rather than as complete
+// (dr-bl-builder-console-narration-latch): the terminal line punches through
+// the latch with ONE attempt, preceded by an explicit truncation marker, so
+// "no failed:/activate: line and no marker" stops being ambiguous between a
+// quiet build and a cut one. Before this, the latch was recorded ONLY on the
+// builder's stderr — a fourth silent discard.
+func TestConsoleLatchIsRecordedAsTruncation(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	failing := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if failing {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		var body struct {
+			Line string `json:"line"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got = append(got, body.Line)
+	}))
+	defer srv.Close()
+
+	b := &Builder{ControlURL: srv.URL, WorkerID: "w1", HTTPClient: srv.Client()}
+	con := b.newBuildConsole(context.Background(), "dep-latch")
+
+	// Drive the latch: three consecutive failures.
+	for i := 0; i < maxConsoleFails; i++ {
+		con.logf("build line %d", i)
+	}
+	// Mid-build lines during the outage are skipped (that is the latch working).
+	con.logf("mid-build line that must be dropped")
+
+	// The control plane recovers (the wave-33 measurement: every
+	// BOX_UNREACHABLE episode self-healed) — but ordinary lines stay latched.
+	mu.Lock()
+	failing = false
+	mu.Unlock()
+	con.logf("post-recovery line that must STILL be dropped — the latch is for the build's remainder")
+
+	mu.Lock()
+	if len(got) != 0 {
+		mu.Unlock()
+		t.Fatalf("latched lines leaked to the console: %q", got)
+	}
+	mu.Unlock()
+
+	// The TERMINAL line punches through — with the truncation marker first.
+	con.logfTerminal("failed: %s", "the build error a reader must see")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("terminal path posted %d line(s), want 2 (marker + terminal): %q", len(got), got)
+	}
+	if !strings.Contains(got[0], "console TRUNCATED") || !strings.Contains(got[0], "NOT the whole build") {
+		t.Fatalf("first line %q must be the truncation marker — a reader must be able to tell truncated from complete", got[0])
+	}
+	if !strings.Contains(got[1], "failed: the build error a reader must see") {
+		t.Fatalf("terminal line %q must carry the outcome", got[1])
+	}
+}
+
+// TestConsoleTerminalLineWithoutLatchHasNoMarker: a build whose console never
+// latched must NOT claim truncation — the marker fires only on a real gap.
+func TestConsoleTerminalLineWithoutLatchHasNoMarker(t *testing.T) {
+	var mu sync.Mutex
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		var body struct {
+			Line string `json:"line"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		got = append(got, body.Line)
+	}))
+	defer srv.Close()
+
+	b := &Builder{ControlURL: srv.URL, WorkerID: "w1", HTTPClient: srv.Client()}
+	con := b.newBuildConsole(context.Background(), "dep-clean")
+	con.logf("build line")
+	con.logfTerminal("activate: build complete")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(got) != 2 {
+		t.Fatalf("posted %d line(s), want 2: %q", len(got), got)
+	}
+	for _, l := range got {
+		if strings.Contains(l, "TRUNCATED") {
+			t.Fatalf("a never-latched console must not claim truncation: %q", got)
+		}
+	}
+}

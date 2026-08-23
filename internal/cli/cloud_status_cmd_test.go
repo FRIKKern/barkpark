@@ -110,6 +110,8 @@ func TestAttentionBucket(t *testing.T) {
 		"degraded": "attention",
 		// the D69 additions
 		"strained": "attention", "filling": "attention", "unreported": "attention",
+		// the jpf-w1 D7 addition — a stalled queue is a thing to LOOK AT
+		"deploy_stalled": "attention",
 		// unchanged from the shipped ladder — the drift tripwire
 		"behind":   "attention",
 		"removing": "in-flight", "provisioning": "in-flight",
@@ -130,13 +132,13 @@ func TestAttentionBucket(t *testing.T) {
 	}
 }
 
-// TestAttentionLadderIsElevenRungs pins the ladder itself — order and length —
+// TestAttentionLadderIsTwelveRungs pins the ladder itself — order and length —
 // so a rung inserted at the wrong height (which silently re-buckets its
 // neighbours) fails here rather than in an operator's terminal.
-func TestAttentionLadderIsElevenRungs(t *testing.T) {
+func TestAttentionLadderIsTwelveRungs(t *testing.T) {
 	want := []string{
 		"removal_failed", "failed", "suspended", "degraded",
-		"strained", "filling", "unreported", "behind",
+		"strained", "filling", "unreported", "deploy_stalled", "behind",
 		"removing", "provisioning", "ok",
 	}
 	if len(attentionRankOrder) != len(want) {
@@ -154,10 +156,11 @@ func TestAttentionLadderIsElevenRungs(t *testing.T) {
 		bucket string
 	}{
 		{"removal_failed", 1, "attention"},
-		{"behind", 8, "attention"}, // the LAST attention rung
-		{"removing", 9, "in-flight"},
-		{"provisioning", 10, "in-flight"},
-		{"ok", 11, "healthy"}, // the ONLY healthy rung
+		{"deploy_stalled", 8, "attention"}, // jpf-w1 D7: after unreported, before behind
+		{"behind", 9, "attention"},         // the LAST attention rung
+		{"removing", 10, "in-flight"},
+		{"provisioning", 11, "in-flight"},
+		{"ok", 12, "healthy"}, // the ONLY healthy rung
 	} {
 		if got := attentionRank(c.state); got != c.rank {
 			t.Errorf("attentionRank(%q) = %d, want %d", c.state, got, c.rank)
@@ -165,6 +168,77 @@ func TestAttentionLadderIsElevenRungs(t *testing.T) {
 		if got := attentionBucket(c.state); got != c.bucket {
 			t.Errorf("attentionBucket(%q) = %q, want %q", c.state, got, c.bucket)
 		}
+	}
+}
+
+// TestDeployStalledFence is the jpf-w1 D6/D7 fence table. The three honest-
+// silence shapes can NEVER stall — nil is both "nothing queued" and "a CP that
+// predates the field" — and the boundary is >= 300, not > 300. The nil arm is
+// the alarm's fail-closed contract stated positively: with no queued-age input
+// the alarm says NOTHING, it does not scan an empty corpus and report calm.
+func TestDeployStalledFence(t *testing.T) {
+	age := func(v float64) *float64 { return &v }
+	cases := []struct {
+		name string
+		bp   cloudclient.Barkpark
+		want bool
+	}{
+		{"no field (older CP / nothing queued)", cloudclient.Barkpark{}, false},
+		{"fresh queue, under the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(299)}, false},
+		{"exactly the fence", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(300)}, true},
+		{"the incident shape: 7.5h unclaimed", cloudclient.Barkpark{QueuedDeployAgeSeconds: age(27000)}, true},
+	}
+	for _, c := range cases {
+		if got := deployStalled(c.bp); got != c.want {
+			t.Errorf("%s: deployStalled = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestDeployStalledStatusAndDetail drives the full classification: a live,
+// healthy, current box whose only fault is a 7-minute unclaimed queued deploy
+// must read deploy_stalled, land in ATTENTION, and NAME THE AGE in its detail
+// — and the same box with a fresh queue (or none) must read ok with an empty
+// detail, so the assertion has a side that can fail.
+func TestDeployStalledStatusAndDetail(t *testing.T) {
+	age := func(v float64) *float64 { return &v }
+	base := cloudclient.Barkpark{
+		Host: "10.0.0.9", LastSeenAt: "2026-08-06T12:00:00Z",
+		HealthStatus: "up", AgentStatus: "online", UpdateState: "current",
+	}
+
+	stalled := base
+	stalled.QueuedDeployAgeSeconds = age(420)
+	if st := attentionStatus(stalled); st != "deploy_stalled" {
+		t.Fatalf("status = %q, want deploy_stalled", st)
+	}
+	if b := attentionBucket("deploy_stalled"); b != "attention" {
+		t.Fatalf("bucket = %q, want attention", b)
+	}
+	d := attentionDetail(stalled, "deploy_stalled")
+	if want := "deploy queued 7m — no builder claimed it"; d != want {
+		t.Fatalf("detail = %q, want %q", d, want)
+	}
+
+	// A DEGRADED box with the same stalled queue stays degraded: the stuck
+	// queue is a symptom and the box's own condition outranks it (D7).
+	degraded := stalled
+	degraded.AgentStatus = "offline"
+	if st := attentionStatus(degraded); st != "degraded" {
+		t.Fatalf("degraded+stalled = %q, want degraded (the box outranks its queue)", st)
+	}
+
+	// Fresh queue → ok, and the detail stays honestly empty.
+	fresh := base
+	fresh.QueuedDeployAgeSeconds = age(60)
+	if st := attentionStatus(fresh); st != "ok" {
+		t.Fatalf("fresh-queue status = %q, want ok", st)
+	}
+	if d := attentionDetail(fresh, "ok"); d != "" {
+		t.Fatalf("fresh-queue detail = %q, want empty", d)
+	}
+	if r := deployStalledReason(fresh); r != "" {
+		t.Fatalf("deployStalledReason under the fence = %q — it may never assert a stall it did not measure", r)
 	}
 }
 
@@ -508,9 +582,22 @@ func TestRankBarkparksTiebreakCaseInsensitive(t *testing.T) {
 func TestRunCloudStatusJSON(t *testing.T) {
 	withTempConfigHome(t)
 
-	var gotPath, gotAuth string
+	// dr-w19-s7 followup: the json path reads the census + site list too, so
+	// this fake records EVERY path hit and the assertion below checks
+	// /v1/barkparks was among them — not that it was hit LAST, which is the pin
+	// that used to make adding the reads impossible.
+	var gotPaths []string
+	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+		gotPaths, gotAuth = append(gotPaths, r.URL.Path), r.Header.Get("Authorization")
+		switch r.URL.Path {
+		case "/v1/deploy-ledger/census":
+			_, _ = io.WriteString(w, `{"volume":0,"failed":0,"failure_rate":{"sample":0,"pct":null,"numerator":0,"min_sample":200,"refused":true,"reason":"sample 0 below min_sample 200"},"classes":[],"not_attempted":[],"sites":[],"min_sample":200}`)
+			return
+		case "/v1/sites":
+			_, _ = io.WriteString(w, `{"sites":[]}`)
+			return
+		}
 		_, _ = io.WriteString(w, `{"barkparks":[
 			{"id":"a","name":"ok-box","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online","update_state":"current",
 			 "pressure":{"cpu_percent":4,"cpu_cores":4,"mem_used_percent":22,"load1":0.2,"load15":0.1,"disk_used_percent":31,"swap_used_percent":null,"swap_total_bytes":null,"beam_pss_bytes":null,"beam_swap_bytes":null,"err_5xx_per_s":null,"reported_at":"2026-08-06T12:00:00Z"}},
@@ -531,8 +618,14 @@ func TestRunCloudStatusJSON(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
 	}
-	if gotPath != "/v1/barkparks" {
-		t.Fatalf("hit %q, want /v1/barkparks", gotPath)
+	hitFleet := false
+	for _, p := range gotPaths {
+		if p == "/v1/barkparks" {
+			hitFleet = true
+		}
+	}
+	if !hitFleet {
+		t.Fatalf("hit %v, want /v1/barkparks among them", gotPaths)
 	}
 	if gotAuth != "Bearer sess-abc" {
 		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
@@ -546,12 +639,22 @@ func TestRunCloudStatusJSON(t *testing.T) {
 			InFlight  int `json:"in-flight"` // decision-32 bucket spelling
 			Healthy   int `json:"healthy"`
 		} `json:"buckets"`
+		Deploy struct {
+			State  string `json:"state"`
+			Window struct {
+				From string `json:"from"`
+				To   string `json:"to"`
+			} `json:"window"`
+		} `json:"deploy"`
 		Barkparks []struct {
 			Name   string `json:"name"`
 			Status string `json:"status"`
 			Bucket string `json:"bucket"`
 			Rank   int    `json:"rank"`
 			Detail string `json:"detail"`
+			Deploy struct {
+				State string `json:"state"`
+			} `json:"deploy"`
 		} `json:"barkparks"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &resp); err != nil {
@@ -566,10 +669,10 @@ func TestRunCloudStatusJSON(t *testing.T) {
 		t.Fatalf("buckets = %+v", resp.Buckets)
 	}
 	// Ranked most-urgent-first, ranks 1-based per the decision-32 fixture:
-	// failed (2) < degraded (4) < strained (5) < filling (6) < ok (11).
+	// failed (2) < degraded (4) < strained (5) < filling (6) < ok (12).
 	wantOrder := []string{"dead-box", "slow-box", "hot-box", "full-box", "ok-box"}
 	wantStatus := []string{"failed", "degraded", "strained", "filling", "ok"}
-	wantRank := []int{2, 4, 5, 6, 11}
+	wantRank := []int{2, 4, 5, 6, 12}
 	for i := range wantOrder {
 		if resp.Barkparks[i].Name != wantOrder[i] || resp.Barkparks[i].Status != wantStatus[i] || resp.Barkparks[i].Rank != wantRank[i] {
 			t.Fatalf("row %d = %s/%s/rank %d, want %s/%s/rank %d", i,
@@ -590,6 +693,17 @@ func TestRunCloudStatusJSON(t *testing.T) {
 	}
 	if d := resp.Barkparks[3].Detail; !strings.Contains(d, "disk 95% used") {
 		t.Fatalf("full-box detail = %q, want the measured disk reading", d)
+	}
+	// dr-w19-s7 followup: the deploy node is present at BOTH levels. This
+	// census was read and carried no site rows, so every box is "no_rows" — a
+	// measured empty window, not an omitted key.
+	if resp.Deploy.State != "read" || resp.Deploy.Window.From == "" || resp.Deploy.Window.To == "" {
+		t.Fatalf("fleet deploy node = %+v, want state read with a pinned window", resp.Deploy)
+	}
+	for i, b := range resp.Barkparks {
+		if b.Deploy.State != "no_rows" {
+			t.Fatalf("row %d deploy.state = %q, want no_rows", i, b.Deploy.State)
+		}
 	}
 }
 
@@ -853,13 +967,15 @@ func TestStatusDeployCensusRefusalNamesItself(t *testing.T) {
 	}
 }
 
-// TestStatusDeployIsAGaugeNotAFence: the diff adds no twelfth rung, no verdict
-// arm and no hardcoded floor. The ladder is still eleven, the buckets still
+// TestStatusDeployIsAGaugeNotAFence: the deploy-census diff added no rung, no
+// verdict arm and no hardcoded floor. The ladder is exactly the charter's
+// twelve (eleven D69 rungs + jpf-w1 D7's deploy_stalled — the ONE deliberate
+// addition, pinned by TestAttentionLadderIsTwelveRungs), the buckets still
 // three, and the ONLY threshold the deploy line consults is the census's own
 // min_sample off the wire.
 func TestStatusDeployIsAGaugeNotAFence(t *testing.T) {
-	if len(attentionRankOrder) != 11 {
-		t.Fatalf("the ladder grew a rung: %v", attentionRankOrder)
+	if len(attentionRankOrder) != 12 {
+		t.Fatalf("the ladder grew a rung beyond the charter's twelve: %v", attentionRankOrder)
 	}
 	// The floor is read, never carried: a census that sends min_sample 999 moves
 	// the refusal, which a hardcoded fence could not do.
@@ -1237,10 +1353,18 @@ func TestStatusRowKeySetIsPinned(t *testing.T) {
 		"update_checked_at": true, "commit_ancestry": true,
 		"commit_distance_checked_at": true, "autoupdate_paused": true,
 		"pinned_release": true, "channel": true,
+		// dr-w5-followup: the 5xx tri-state node — ALWAYS present, and its
+		// state key is what keeps nil-as-unmeasured from collapsing into 0.
+		"err_5xx": true,
 	}
 	// The two deliberate tri-states: emitted ONLY when the plane reported them,
 	// so their absence here is the contract, not a gap.
-	optional := map[string]bool{"autoupdate_enabled": true, "commit_distance": true}
+	optional := map[string]bool{
+		"autoupdate_enabled": true, "commit_distance": true,
+		// jpf-w1-queue-age-alarm: emitted only when the plane reported a queued
+		// row — absent is "nothing queued / older CP", never a fabricated 0.
+		"queued_deploy_age_seconds": true,
+	}
 
 	row := rankedBarkparkRow(rankBarkparks([]cloudclient.Barkpark{commitFleet()[0]})[0])
 	for k := range want {
@@ -1369,4 +1493,208 @@ func TestStatusCommitColumnDarkForOlderCP(t *testing.T) {
 	if strings.Contains(got, "COMMIT") || strings.Contains(got, "UNMETERED") {
 		t.Fatalf("an older control plane must render exactly as before — no column, no sentinel:\n%s", got)
 	}
+}
+
+// TestErr5xxThreeStatesStayThree (dr-w5-followup-5xx-reaches-no-eyes): the
+// beat's 5xx reading renders in three distinguishable states and none of them
+// is another — nil (or the agent's -1 sentinel) is UNMEASURED with per_s null,
+// a measured 0.0 is a real zero, a positive rate is itself. The table marker
+// prints only the positive sentence (runawayMarker's policy: a table sentence
+// claims something happened); the json node carries the full tri-state.
+func TestErr5xxThreeStatesStayThree(t *testing.T) {
+	mk := func(v *float64) cloudclient.Barkpark {
+		cores := 4.0
+		return cloudclient.Barkpark{Pressure: &cloudclient.Pressure{CPUCores: &cores, Err5xxPerS: v}}
+	}
+	pos, zero, sentinel := 0.22, 0.0, -1.0
+
+	cases := []struct {
+		name      string
+		bp        cloudclient.Barkpark
+		wantState string
+		wantPerS  any
+		wantMark  string // "" = no table sentence
+	}{
+		{"nil is unmeasured", mk(nil), "unmeasured", nil, ""},
+		{"the -1 sentinel is unmeasured", mk(&sentinel), "unmeasured", nil, ""},
+		{"a measured 0.0 is a real zero", mk(&zero), "zero", 0.0, ""},
+		{"a positive rate is itself", mk(&pos), "answering", 0.22, "answering 0.22 5xx/s"},
+		{"no pressure block at all is unmeasured", cloudclient.Barkpark{}, "unmeasured", nil, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row := err5xxRow(tc.bp)
+			if row["state"] != tc.wantState {
+				t.Fatalf("state = %v, want %v", row["state"], tc.wantState)
+			}
+			if row["per_s"] != tc.wantPerS {
+				t.Fatalf("per_s = %v, want %v — collapsing these states invents a measurement", row["per_s"], tc.wantPerS)
+			}
+			mark := err5xxMarker(tc.bp)
+			if tc.wantMark == "" && mark != "" {
+				t.Fatalf("table marker = %q, want none — only a happening earns a sentence", mark)
+			}
+			if tc.wantMark != "" && !strings.Contains(mark, tc.wantMark) {
+				t.Fatalf("table marker = %q, want it to carry %q — the beat's own number, never recomputed", mark, tc.wantMark)
+			}
+		})
+	}
+}
+
+// TestErr5xxAnsweringReachesTheDetailColumn: the D75 sentence reaches the
+// table — a box the ladder calls ok, answering 0.22 5xx/s, says so on its row.
+func TestErr5xxAnsweringReachesTheDetailColumn(t *testing.T) {
+	cores, rate := 4.0, 0.22
+	reported := "2026-08-06T12:00:00Z"
+	b := cloudclient.Barkpark{
+		Name: "ok-but-erroring", HealthStatus: "up", AgentStatus: "online", Host: "h",
+		LastSeenAt: reported,
+		Pressure: &cloudclient.Pressure{
+			CPUCores: &cores, Err5xxPerS: &rate, ReportedAt: &reported,
+		},
+	}
+	ranked := rankBarkparks([]cloudclient.Barkpark{b})
+	if len(ranked) != 1 {
+		t.Fatalf("rows = %d", len(ranked))
+	}
+	if !strings.Contains(ranked[0].Detail, "answering 0.22 5xx/s") {
+		t.Fatalf("detail = %q — the 5xx reading reaches no eyes", ranked[0].Detail)
+	}
+	// The reading changed NO rank and NO bucket — the ruling is a detail line.
+	if ranked[0].Status != "ok" || ranked[0].Bucket != "healthy" {
+		t.Fatalf("status/bucket = %s/%s — the 5xx detail line must not move the ladder", ranked[0].Status, ranked[0].Bucket)
+	}
+}
+
+// statusJSONWith drives `bp cloud status -o json` against a fake whose census
+// and site routes are supplied per case, returning the decoded payload.
+func statusJSONWith(t *testing.T, censusHandler, sitesHandler http.HandlerFunc) map[string]any {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/deploy-ledger/census":
+			censusHandler(w, r)
+		case "/v1/sites":
+			sitesHandler(w, r)
+		default:
+			_, _ = io.WriteString(w, `{"barkparks":[
+				{"id":"bp-1","name":"box-one","host":"h","last_seen_at":"2026-08-06T12:00:00Z","health_status":"up","agent_status":"online"}
+			]}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	seedCloudLogin(t, srv.URL)
+
+	stdout, _, code := runCloudCapture(t, true, func(out *writer) int {
+		return runCloudStatus(out, globals{}, nil)
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("decode: %v\n%s", err, stdout)
+	}
+	return payload
+}
+
+// statusJSONDeployNodes extracts the fleet deploy node and box-one's row node.
+func statusJSONDeployNodes(t *testing.T, payload map[string]any) (map[string]any, map[string]any) {
+	t.Helper()
+	fleet, ok := payload["deploy"].(map[string]any)
+	if !ok {
+		t.Fatalf("payload has no fleet deploy node: %v", payload)
+	}
+	rows, ok := payload["barkparks"].([]any)
+	if !ok || len(rows) == 0 {
+		t.Fatalf("payload has no barkpark rows: %v", payload)
+	}
+	row, ok := rows[0].(map[string]any)
+	if !ok {
+		t.Fatalf("row shape: %v", rows[0])
+	}
+	box, ok := row["deploy"].(map[string]any)
+	if !ok {
+		t.Fatalf("row has no deploy node — a refusal must be a NAMED key, never an omitted one: %v", row)
+	}
+	return fleet, box
+}
+
+// TestRunCloudStatusJSONDeployRefusalShapes pins the four refusal shapes of
+// the json deploy node (dr-w19-s7 followup). Each is a NAMED state with its
+// reason; live/volume/pct are null wherever they were not measured — never an
+// omitted key and never a zero standing in for "could not say".
+func TestRunCloudStatusJSONDeployRefusalShapes(t *testing.T) {
+	serve := func(body string, status int) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(status)
+			_, _ = io.WriteString(w, body)
+		}
+	}
+	okSites := serve(`{"sites":[{"id":"site-1","barkpark_id":"bp-1","name":"s1"}]}`, 200)
+	censusFor := func(siteRow string) http.HandlerFunc {
+		return serve(`{"volume":50,"failed":10,"failure_rate":{"sample":50,"pct":null,"numerator":10,"min_sample":200,"refused":true,"reason":"sample 50 below min_sample 200"},"classes":[],"not_attempted":[],"sites":[`+siteRow+`],"min_sample":200}`, 200)
+	}
+
+	t.Run("census_unreadable", func(t *testing.T) {
+		withTempConfigHome(t)
+		payload := statusJSONWith(t, serve(`{"error":"forbidden"}`, 403), okSites)
+		fleet, box := statusJSONDeployNodes(t, payload)
+		if fleet["state"] != "census_unreadable" || fleet["reason"] == nil || fleet["reason"] == "" {
+			t.Fatalf("fleet = %v, want state census_unreadable with a reason", fleet)
+		}
+		if box["state"] != "census_unreadable" || box["live"] != nil || box["volume"] != nil || box["pct"] != nil {
+			t.Fatalf("box = %v, want the refusal echoed with null measurements", box)
+		}
+	})
+
+	t.Run("sites_unattributable", func(t *testing.T) {
+		withTempConfigHome(t)
+		payload := statusJSONWith(t, censusFor(``), serve(`boom`, 500))
+		fleet, box := statusJSONDeployNodes(t, payload)
+		if fleet["state"] != "sites_unattributable" {
+			t.Fatalf("fleet = %v, want sites_unattributable", fleet)
+		}
+		reason, _ := fleet["reason"].(string)
+		if !strings.Contains(reason, "50 attempted rows") {
+			t.Fatalf("reason %q must carry the census volume that WAS read", reason)
+		}
+		if box["state"] != "sites_unattributable" || box["live"] != nil || box["volume"] != nil || box["pct"] != nil {
+			t.Fatalf("box = %v, want the refusal echoed with null measurements", box)
+		}
+	})
+
+	t.Run("live_unmetered", func(t *testing.T) {
+		withTempConfigHome(t)
+		// The site row carries volume but NO `live` key — a control plane
+		// predating #10519. live must be null, never 0.
+		payload := statusJSONWith(t, censusFor(`{"site_id":"site-1","volume":50,"failed":10,"deferred":5,"failure_rate":{"sample":50,"pct":null,"numerator":10,"min_sample":200,"refused":true,"reason":"sample 50 below min_sample 200"}}`), okSites)
+		fleet, box := statusJSONDeployNodes(t, payload)
+		if fleet["state"] != "read" {
+			t.Fatalf("fleet = %v, want read", fleet)
+		}
+		if box["state"] != "live_unmetered" || box["live"] != nil || box["volume"] != float64(50) || box["pct"] != nil {
+			t.Fatalf("box = %v, want live_unmetered with live null and volume 50", box)
+		}
+		reason, _ := box["reason"].(string)
+		if !strings.Contains(reason, "never read this as zero") {
+			t.Fatalf("reason %q must forbid the zero reading", reason)
+		}
+	})
+
+	t.Run("below_min_sample", func(t *testing.T) {
+		withTempConfigHome(t)
+		payload := statusJSONWith(t, censusFor(`{"site_id":"site-1","volume":50,"failed":10,"deferred":5,"live":35,"failure_rate":{"sample":50,"pct":null,"numerator":10,"min_sample":200,"refused":true,"reason":"sample 50 below min_sample 200"}}`), okSites)
+		fleet, box := statusJSONDeployNodes(t, payload)
+		if ms, ok := fleet["min_sample"].(float64); !ok || ms != 200 {
+			t.Fatalf("fleet.min_sample = %v, want 200", fleet["min_sample"])
+		}
+		if box["state"] != "below_min_sample" || box["pct"] != nil {
+			t.Fatalf("box = %v, want below_min_sample with pct null", box)
+		}
+		// The COUNTS are real and stay — only the percentage is refused.
+		if box["live"] != float64(35) || box["volume"] != float64(50) {
+			t.Fatalf("box = %v, want live 35 / volume 50 (counts stay; ratios go)", box)
+		}
+	})
 }

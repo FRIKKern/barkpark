@@ -852,6 +852,76 @@ else
   ok "the rendered context is not reported — the difference is a set operation, not a message grep"
 fi
 
+# hgw5-bl-deadlock-pending-informational: a required context that RENDERED but
+# has not SETTLED (conclusion null) used to return exit 0 with output
+# byte-shaped like green. It must now print an INFORMATIONAL PENDING line —
+# naming the context, its status and its started_at — and STILL exit 0
+# (charter D76: never a fifth failing state; bp-merge pre-flights this once,
+# so a failing PENDING would refuse every freshly pushed PR).
+# (a) in_progress with a null conclusion key
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (.conclusion = null | .status = "in_progress")' \
+  "$TMP/runs.json" > "$TMP/runs-pending-ip.json"
+set +e
+OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-pending-ip.json" --sha probe --deadlock 2>&1)"
+RC=$?
+set -e
+if [ "$RC" -eq 0 ]; then
+  ok "an in_progress required context still exits 0 (informational, not a fifth failing state)"
+else
+  bad "an in_progress required context exited $RC, not 0 — PENDING must never refuse (D76)"
+fi
+if grep -q "PENDING: $KEPT_CTX has not settled (status=in_progress, started_at=2026-07-28T01:00:00Z)" <<<"$OUT"; then
+  ok "the PENDING line names the context, its status and its started_at (in_progress)"
+else
+  bad "no PENDING line for an in_progress required context — rendered-but-unsettled reads as green"
+fi
+
+# (b) queued with NO conclusion key at all (the API omits it before a run starts)
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (del(.conclusion) | .status = "queued")' \
+  "$TMP/runs.json" > "$TMP/runs-pending-q.json"
+set +e
+OUT="$(bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-pending-q.json" --sha probe --deadlock 2>&1)"
+RC=$?
+set -e
+if [ "$RC" -eq 0 ] && grep -q "PENDING: $KEPT_CTX has not settled (status=queued" <<<"$OUT"; then
+  ok "queued-with-no-conclusion also prints the PENDING line and exits 0"
+else
+  bad "queued-with-no-conclusion did not print PENDING/exit 0 (exit $RC)"
+fi
+
+# (c) pending + MISSING still exits 3 — the failing states keep winning
+jq -c --arg keep "$KEPT_CTX" '(.check_runs[] | select(.name == $keep)) |= (.conclusion = null | .status = "in_progress")' \
+  "$TMP/runs.json" > "$TMP/runs-pending-dead.json"
+set +e
+bash "$VERIFY" --spec "$TMP/dead2.json" --runs "$TMP/runs-pending-dead.json" --sha probe --deadlock >/dev/null 2>&1
+RC=$?
+set -e
+if [ "$RC" -eq 3 ]; then
+  ok "pending + missing still exits 3 — PENDING never outranks DEADLOCK"
+else
+  bad "pending + missing exited $RC, not 3"
+fi
+
+# (d) pending + CANCELLED still exits 4
+OTHER_CTX="$(SPEC_CONTEXTS | sed -n 2p)"
+if [ -n "$OTHER_CTX" ]; then
+  jq -c --arg keep "$KEPT_CTX" --arg oth "$OTHER_CTX" \
+    '(.check_runs[] | select(.name == $keep)) |= (.conclusion = null | .status = "in_progress")
+     | (.check_runs[] | select(.name == $oth)  | .conclusion) = "cancelled"' \
+    "$TMP/runs.json" > "$TMP/runs-pending-cancel.json"
+  set +e
+  bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-pending-cancel.json" --sha probe --deadlock >/dev/null 2>&1
+  RC=$?
+  set -e
+  if [ "$RC" -eq 4 ]; then
+    ok "pending + cancelled still exits 4 — PENDING never outranks RE-RUN"
+  else
+    bad "pending + cancelled exited $RC, not 4"
+  fi
+else
+  bad "spec has fewer than 2 contexts — the pending+cancelled probe has nothing to drive"
+fi
+
 # Every required context rendered, PLUS one name the spec never asked for.
 jq -c '.check_runs += [
   { "name": "Some brand new advisory gate", "conclusion": "failure", "started_at": "2026-07-28T01:00:00Z" } ]' \
@@ -1508,10 +1578,40 @@ section "14b. EXCLUSION LOSS — the DECISION LEDGER gets the same pair: the mer
 # strongest form of "cannot render": no sampling window anywhere can restore it.
 SEEDX="$TMP/seeded-base.json"
 SEEDNAME="Ghost ceiling (blocking) — no workflow publishes this name"
-jq --arg c "$SEEDNAME" \
-   '.exclusions += [{context: $c, reason: "SEEDED BY THE TEST SUITE: a hand-added decision row whose name no workflow publishes, so no sample can ever re-derive it"}]' \
+# THE SECOND SEED IS SYNTHETIC FOR THE SAME REASON (hg: §14b was half-synthetic).
+# The PULL_REQUEST-ONLY half of the distinction used to be keyed to a REAL
+# workflow trigger shape (go-format.yml was the repo's only pull_request-only
+# specimen carrying an excluded context), so the CORRECT act of adding a push
+# arm to that workflow would red this section with a message naming neither the
+# workflow nor the reason. The seed row below pairs with a synthetic
+# pull_request-only WORKFLOW in a copied workflows dir, so the proof survives
+# any trigger edit to any real workflow — exactly the principle already stated
+# for the ghost seed.
+PRSEEDNAME="Seeded PR-only ceiling (blocking) — published against merge refs only"
+jq --arg c "$SEEDNAME" --arg pr "$PRSEEDNAME" \
+   '.exclusions += [
+      {context: $c,  reason: "SEEDED BY THE TEST SUITE: a hand-added decision row whose name no workflow publishes, so no sample can ever re-derive it"},
+      {context: $pr, reason: "SEEDED BY THE TEST SUITE: a decision row whose job exists only in a synthetic pull_request-only workflow, so it can never render on a branch head"}
+    ]' \
    "$SPEC" > "$SEEDX"
-SEEDARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
+# The synthetic workflows dir: every real workflow, plus ONE pull_request-only
+# workflow publishing the PR-only seed name. Used by §14b alone.
+mkdir -p "$TMP/workflows-14b"
+cp "$REPO_ROOT/.github/workflows"/*.yml "$TMP/workflows-14b/" 2>/dev/null || true
+cat >"$TMP/workflows-14b/zz-seeded-pr-only.yml" <<EOF
+name: zz-seeded-pr-only
+on:
+  pull_request:
+    paths:
+      - "zz-seeded-nonexistent-path/**"
+jobs:
+  seeded:
+    name: "$PRSEEDNAME"
+    runs-on: ubuntu-latest
+    steps:
+      - run: "true"
+EOF
+SEEDARGS=(--workflows "$TMP/workflows-14b" --fixture-dir "$FIXP"
           --merge-base "$SEEDX" --sha e34031104 --sha f69cfb1f6)
 
 X14_OUT="$(bash "$GEN" "${SEEDARGS[@]}" --expect-unrendered "Elixir gate" \
@@ -1524,13 +1624,21 @@ if [ "$X14_RC" -eq 1 ] \
 else
   bad "the exclusion loss was not refused (exit $X14_RC): $(grep -E 'EXCLUSION LOSS|LOST' <<<"$X14_OUT" | head -3)"
 fi
-if grep -qF "no job in" <<<"$X14_OUT" && grep -qF "PULL_REQUEST-ONLY" <<<"$X14_OUT"; then
-  ok "…and it says WHICH kind of absence each row is, so the operator's next move is not a guess"
+# The DISTINCTION, each half keyed to ITS OWN synthetic seed row's line — never
+# to a real workflow's trigger shape, which a correct edit is allowed to change.
+if grep -F "LOST  $SEEDNAME" <<<"$X14_OUT" | grep -qF "no job in"; then
+  ok "…the deleted-job absence is named ON the ghost row itself (no job in …)"
 else
-  bad "the exclusion refusal did not distinguish a deleted job from a pull_request-only one"
+  bad "the ghost row did not carry the deleted-job hint: $(grep -F "LOST  $SEEDNAME" <<<"$X14_OUT")"
+fi
+if grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT" | grep -qF "PULL_REQUEST-ONLY"; then
+  ok "…and the pull_request-only absence is named ON the seeded PR-only row — keyed to the synthetic workflow, so adding a push arm to any REAL workflow cannot red this"
+else
+  bad "the seeded PR-only row did not carry the PULL_REQUEST-ONLY hint: $(grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT")"
 fi
 
 bash "$GEN" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
+  --expect-unrendered "$PRSEEDNAME" \
   --out "$TMP/seeded-spec.json" >/dev/null 2>&1 || true
 if jq -e --arg c "$SEEDNAME" '[.exclusions[].context] | index($c)' "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and once acknowledged the seeded row SURVIVES the regeneration (the merge carries what the sample cannot see)"
@@ -1542,7 +1650,7 @@ if jq -e --slurpfile base "$SEEDX" \
      '[.exclusions[].context] as $out
       | ($base[0].exclusions | map(.context) | map(. as $c | $out | index($c) != null) | all)' \
      "$TMP/seeded-spec.json" >/dev/null 2>&1; then
-  ok "…and EVERY committed exclusion context survives, 'gofmt drift ceiling (blocking)' included (26 in, 26 out)"
+  ok "…and EVERY committed exclusion context survives, 'gofmt drift ceiling (blocking)' included (set inclusion over the whole seeded base)"
 else
   bad "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)"
 fi
@@ -1569,6 +1677,7 @@ else
   bad "the exclusion-union mutation did not apply — the expression moved, so the proof below is vacuous"
 fi
 bash "$NOUNION" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
+  --expect-unrendered "$PRSEEDNAME" \
   --out "$TMP/nounion-spec.json" >/dev/null 2>&1 || true
 if jq -e --arg c "$SEEDNAME" \
      '([.exclusions[].context] | index($c) | not) and (.exclusions | length < 20)' \

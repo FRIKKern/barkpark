@@ -29,9 +29,10 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
 
     S1  a properly-backfilled FOREIGN-workspace row is never touched
     S2  two NULL-dataset_id rows of the same (name, dataset) cannot coexist
-    S3  a NULL-dataset_id row in a NON-default workspace IS clobbered AND has
-        its workspace_id STOLEN into Default (real, but out of scope for the
-        guard — unreachable for a guerrilla pull, 0 NULL-dataset_id rows there)
+    S3  a NULL-dataset_id row in a NON-default workspace SURVIVES with content
+        and ownership intact (the theft this scenario ORIGINALLY pinned is
+        closed by the ownership guard in `upsert_schema/3` —
+        pds-bl-bootstrap-cross-tenant-theft; S3b/S3c prove no overfire)
     S4  re-running bootstrap inserts the Default duplicate ONCE, not per boot
     S5  `put_scope_attrs/2` RE-STAMPS the scope keys; it never NILs them
     S6  with only a foreign row present the insert happens once and converges
@@ -205,9 +206,17 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
     end
   end
 
-  # ── S3 — the real cross-tenant write (documented, out of guard scope) ──
+  # ── S3 — the cross-tenant theft is CLOSED (pds-bl-bootstrap-cross-tenant-theft) ──
+  #
+  # This scenario USED to pin the theft as observed behaviour: the nil-arm of
+  # `scope_schema_to_dataset/3` matched the foreign orphan, and the update
+  # clobbered its content AND rewrote workspace_id/project_id into Default.
+  # The ownership guard in `Content.Schema.upsert_schema/3` now refuses to
+  # update a row owned by a DIFFERENT workspace than the resolved write scope
+  # and inserts a fresh Default-scoped row instead.
 
-  test "S3 a NULL-dataset_id row in a NON-default workspace IS clobbered and STOLEN", ctx do
+  test "S3 a NULL-dataset_id row in a NON-default workspace SURVIVES bootstrap with content and ownership intact",
+       ctx do
     orphan =
       insert_row!(%{
         workspace_id: ctx.foreign_ws.id,
@@ -218,11 +227,56 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
     assert {:ok, 1} = run_bootstrap()
 
     reloaded = Repo.get!(SchemaDefinition, orphan.id)
-    # content clobbered...
+    # content survives...
+    assert reloaded.title == "Pulled Title"
+    assert reloaded.fields == [%{"name" => "pulled_field", "type" => "text"}]
+    # ...and ownership is NEVER rewritten outside the target scope.
+    assert reloaded.workspace_id == ctx.foreign_ws.id
+    assert reloaded.project_id == ctx.foreign_project.id
+    assert is_nil(reloaded.dataset_id)
+
+    # The plugin's schema landed as its OWN Default-scoped row instead.
+    all = rows()
+    assert length(all) == 2
+    default_row = Enum.find(all, &(&1.id != orphan.id))
+    assert default_row.workspace_id == ctx.default_ws.id
+    assert default_row.title == "Plugin Title"
+    assert default_row.dataset_id == ctx.default_ds.id
+
+    # Re-running converges on the Default row (dataset_id-first ordering):
+    # no third row, and the orphan is still untouched.
+    assert {:ok, 1} = run_bootstrap()
+    assert length(rows()) == 2
+    assert Repo.get!(SchemaDefinition, orphan.id).workspace_id == ctx.foreign_ws.id
+  end
+
+  # Positive controls: the guard must not OVERFIRE — the two legitimate
+  # update-in-place shapes keep their pre-guard behaviour byte-identical.
+
+  test "S3b a NULL-dataset_id row IN the Default workspace is still updated in place", ctx do
+    row =
+      insert_row!(%{
+        workspace_id: ctx.default_ws.id,
+        project_id: ctx.default_project.id,
+        dataset_id: nil
+      })
+
+    assert {:ok, 1} = run_bootstrap()
+
+    reloaded = Repo.get!(SchemaDefinition, row.id)
     assert reloaded.title == "Plugin Title"
-    # ...and the tenancy scope STOLEN into Default.
     assert reloaded.workspace_id == ctx.default_ws.id
-    assert reloaded.project_id == ctx.default_project.id
+    assert length(rows()) == 1
+  end
+
+  test "S3c a legacy GLOBAL row (nil workspace) is still adopted into Default", ctx do
+    row = insert_row!(%{workspace_id: nil, project_id: nil, dataset_id: nil})
+
+    assert {:ok, 1} = run_bootstrap()
+
+    reloaded = Repo.get!(SchemaDefinition, row.id)
+    assert reloaded.title == "Plugin Title"
+    assert reloaded.workspace_id == ctx.default_ws.id
     assert length(rows()) == 1
   end
 

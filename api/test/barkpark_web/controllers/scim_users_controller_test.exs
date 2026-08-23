@@ -414,4 +414,102 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
       assert resp["active"] == true
     end
   end
+
+  # ── the cross-org blast radius (pds-bl-deprovision-blast-radius-crosses-orgs) ──
+  #
+  # One user provisioned into TWO organizations; org A's IdP deprovisions them.
+  # Reachability was always org-fenced — the EFFECTS were not. The ruling (see
+  # the deprovision_user/3 @doc): sessions die globally BY DESIGN (a
+  # UserSession is an identity bearer no org kill can partially revoke,
+  # fail-closed); owner PATs are org-scoped on SOFT deprovision (org B's
+  # workspace-bound PATs survive; NULL-workspace tokens die, fail-closed) and
+  # global on HARD (the FK nilify would orphan any survivor). Every assertion
+  # below is a DIRECT Repo/verify read, never a second endpoint.
+  describe "cross-org deprovision blast radius (the differential)" do
+    alias Barkpark.Accounts.UserSession
+
+    defp two_org_user(tag) do
+      a = org_with_ws("#{tag}-a")
+      b = org_with_ws("#{tag}-b")
+      email = "shared@#{tag}.com"
+      provision(a.token, email) |> json_response(201)
+      provision(b.token, email) |> json_response(201)
+      user = Accounts.get_user_by_email(email)
+
+      {:ok, session} = Accounts.create_user_session_token(user)
+
+      {:ok, {raw_a, pat_a}} =
+        Auth.create_personal_access_token("a-device", ["read"],
+          role: "member",
+          workspace_id: a.ws.id,
+          owner_user_id: user.id
+        )
+
+      {:ok, {raw_b, pat_b}} =
+        Auth.create_personal_access_token("b-device", ["read"],
+          role: "member",
+          workspace_id: b.ws.id,
+          owner_user_id: user.id
+        )
+
+      %{
+        a: a,
+        b: b,
+        user: user,
+        session: session,
+        pat_a: {raw_a, pat_a},
+        pat_b: {raw_b, pat_b}
+      }
+    end
+
+    test "SOFT (PATCH active:false) from org A: sessions die globally (ruled), org B's PAT SURVIVES, org A's dies" do
+      %{a: a, b: b, user: user, session: session, pat_a: {raw_a, pat_a}, pat_b: {raw_b, pat_b}} =
+        two_org_user("soft-blast")
+
+      body =
+        Jason.encode!(%{
+          "Operations" => [%{"op" => "replace", "path" => "active", "value" => false}]
+        })
+
+      assert scim(a.token) |> patch("/scim/v2/Users/#{user.id}", body) |> json_response(200)
+
+      # Sessions: global kill, ruled intended — DIRECT Repo read: zero live rows.
+      assert Repo.aggregate(
+               from(st in UserSession,
+                 where: st.user_id == ^user.id and is_nil(st.revoked_at)
+               ),
+               :count,
+               :id
+             ) == 0
+
+      assert is_nil(Accounts.verify_user_session_token(session))
+
+      # Org A's PAT is dead…
+      assert %ApiToken{revoked_at: %DateTime{}} = Repo.get(ApiToken, pat_a.id)
+      assert {:error, :unauthorized} = Auth.verify_token(raw_a)
+
+      # …org B's workspace-bound PAT SURVIVES org A's deprovision.
+      assert %ApiToken{revoked_at: nil} = Repo.get(ApiToken, pat_b.id)
+      assert {:ok, %ApiToken{}} = Auth.verify_token(raw_b)
+
+      # And org B's membership is untouched (the fence half, direct read).
+      assert Repo.exists?(
+               from m in Membership,
+                 where:
+                   m.principal_type == "user" and m.principal_id == ^user.id and
+                     m.workspace_id == ^b.ws.id
+             )
+    end
+
+    test "HARD (DELETE) from org A: everything dies — the FK nilify would orphan any survivor" do
+      %{a: a, user: user, pat_a: {raw_a, _}, pat_b: {raw_b, pat_b}} = two_org_user("hard-blast")
+
+      assert scim(a.token) |> delete("/scim/v2/Users/#{user.id}") |> response(204)
+
+      # Global on hard, ruled: org B's PAT is revoked too (never orphaned live).
+      assert %ApiToken{revoked_at: %DateTime{}} = Repo.get(ApiToken, pat_b.id)
+      assert {:error, :unauthorized} = Auth.verify_token(raw_a)
+      assert {:error, :unauthorized} = Auth.verify_token(raw_b)
+    end
+  end
 end

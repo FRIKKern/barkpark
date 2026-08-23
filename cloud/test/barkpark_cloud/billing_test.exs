@@ -127,7 +127,7 @@ defmodule BarkparkCloud.BillingTest do
       team = team_fixture()
       assert {:ok, _} = Billing.subscribe(team, :supporter)
       assert {:error, changeset} = Billing.subscribe(team, :support_plus)
-      assert "this team already has a live subscription" in errors_on(changeset).team_id
+      assert "already has a live subscription" in errors_on(changeset).team_id
     end
   end
 

@@ -181,8 +181,9 @@ export async function runSearch({
     });
   } catch (err) {
     // Indx unavailable (unprovisioned instance, engine error) → ONE retry on
-    // Postgres so the caller still gets real results. Runs server-side, so the
-    // SSR seed benefits too. The shaper derives `indxUnavailable: true` from
+    // Postgres so the caller still gets real results. Only explicit
+    // `engine=indx` requests enter this branch — the SSR seed and the default
+    // browse ride DEFAULT_ENGINE and never do. The shaper derives `indxUnavailable: true` from
     // engine="indx" + engineUsed="postgres" — the honest-degrade signal the
     // Finder renders as a calm inline note. The retry never re-records the
     // query event (the first attempt already did, when recording was on).

@@ -1,0 +1,110 @@
+name: weekly-changelog
+
+on:
+  schedule:
+    # The prior ISO week is complete. Offset from the top of the hour to avoid
+    # GitHub's busiest cron window.
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      week_start:
+        description: "ISO-week Monday (YYYY-MM-DD); blank means the previous week"
+        required: false
+        type: string
+      backfill_all:
+        description: "Publish or refresh every curated historical edition"
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - ".github/workflows/weekly-changelog.yml"
+      - "scripts/weekly-changelog.py"
+      - "scripts/weekly-changelog.test.py"
+      - "changelog/editorial.json"
+      - "CHANGELOG.md"
+
+concurrency:
+  group: weekly-changelog-${{ github.event.inputs.week_start || 'previous' }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: Weekly changelog generator
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run hermetic generator tests
+        run: |
+          python3 scripts/weekly-changelog.test.py
+          python3 scripts/weekly-changelog.py --validate-editorial --ref HEAD
+
+  publish:
+    name: Publish weekly changelog
+    needs: verify
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Resolve the completed ISO week
+        id: week
+        env:
+          REQUESTED_WEEK: ${{ github.event.inputs.week_start }}
+        run: |
+          week="$REQUESTED_WEEK"
+          if [ -z "$week" ]; then
+            week="$(python3 - <<'PY'
+          import datetime as dt
+          today = dt.datetime.now(dt.timezone.utc).date()
+          this_monday = today - dt.timedelta(days=today.weekday())
+          print(this_monday - dt.timedelta(days=7))
+          PY
+          )"
+          fi
+          echo "week=$week" >> "$GITHUB_OUTPUT"
+      - name: Create or refresh Barkpark Weekly editions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WEEK: ${{ steps.week.outputs.week }}
+          BACKFILL_ALL: ${{ github.event.inputs.backfill_all || 'false' }}
+        run: |
+          if [ "$BACKFILL_ALL" = "true" ]; then
+            mapfile -t weeks < <(python3 scripts/weekly-changelog.py --list-editorial-weeks)
+          else
+            weeks=("$WEEK")
+          fi
+
+          gh label create weekly-changelog \
+            --description "Barkpark's curated weekly product journal" \
+            --color 5b4bdb --force
+
+          for week in "${weeks[@]}"; do
+            body="$RUNNER_TEMP/weekly-changelog-$week.md"
+            python3 scripts/weekly-changelog.py --week "$week" --ref main > "$body"
+            title="$(python3 scripts/weekly-changelog.py --week "$week" --ref main --title-only)"
+            number="$(gh issue list --state all --label weekly-changelog \
+              --search "$week in:title" --limit 100 --json number,title \
+              | jq -r --arg week "$week" \
+                '[.[] | select(.title | contains($week))][0].number // empty')"
+            if [ -n "$number" ]; then
+              gh issue edit "$number" --title "$title" --body-file "$body" \
+                --add-label weekly-changelog
+            else
+              url="$(gh issue create --title "$title" --body-file "$body" \
+                --label weekly-changelog)"
+              number="${url##*/}"
+            fi
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" \
+              -f state=closed -f state_reason=completed >/dev/null
+            cat "$body" >> "$GITHUB_STEP_SUMMARY"
+          done

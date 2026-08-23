@@ -278,7 +278,16 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 func (m *Model) primeFromCache() {
 	snap, ok := LoadCachedSnapshot(m.cacheDir, m.cacheKey)
 	if !ok {
-		return
+		// Dataset joined the cache identity after the board cache had already
+		// shipped. Read the old scope key once so an upgrade preserves the last
+		// real task corpus during a transient server failure, then migrate it to
+		// the dataset-scoped key. The legacy key is never written again.
+		legacyKey := legacyCacheKey(m.cfg.BaseURL, m.cfg.Workspace, m.cfg.Project)
+		snap, ok = LoadCachedSnapshot(m.cacheDir, legacyKey)
+		if !ok {
+			return
+		}
+		SaveCachedSnapshot(m.cacheDir, m.cacheKey, snap)
 	}
 	// Repo correlation is recomputed against live tasks on the first real
 	// snapshot; the cache paint uses an empty RepoContext (a no-op badge/boost)
@@ -1733,8 +1742,8 @@ func (m Model) readingWidth() int {
 // It mirrors Compose→composeAt's height chain EXACTLY: Compose floors height at 8,
 // prepends ONE blank row and hands composeAt height-1, which floors again at 8.
 // So the window composeAt actually paints is (height-1, re-floored) minus the
-// chrome it reserves — breadcrumb + footer in narrow (−2), the spanning
-// breadcrumb in wide (−1). The leading-blank hop is the off-by-one that a naive
+// chrome it reserves — the footer in narrow (−1), none in wide. The leading-
+// blank hop is the off-by-one that a naive
 // height-1 / height-2 split (measuring Compose's height, not composeAt's) missed.
 func (m Model) readingViewportHeight() int {
 	h := m.height
@@ -1746,9 +1755,9 @@ func (m Model) readingViewportHeight() int {
 		h = 8 // composeAt re-floors, so short panes never over-report
 	}
 	if m.wide {
-		return h - 1 // the sheet's ─ top edge (renderDocPane)
+		return h
 	}
-	return h - 2 // the reading footer + the sheet's ─ top edge
+	return h - 1 // reading footer
 }
 
 // readingSubjectTask resolves the task the act verbs (c/x/o) target in a pushed

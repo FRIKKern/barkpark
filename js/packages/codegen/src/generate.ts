@@ -7,6 +7,37 @@ import type { BarkparkSchemaJson, FieldDef, SchemaDef } from './types'
 /** Past this composite recursion depth the mapper bails to `unknown`. */
 const MAX_DEPTH = 5
 
+/**
+ * The server's reserved system keys — content/envelope.ex `@reserved`, the
+ * exact set BarkparkSystemFields re-declares in the PRELUDE. A user field with
+ * one of these names cannot coexist with the inherited member (a `_type` field
+ * would double-declare beside the pinned literal; an `_id` field redeclares
+ * the inherited `string` incompatibly), so it is refused loudly up front.
+ */
+const RESERVED_SYSTEM_KEYS: ReadonlySet<string> = new Set([
+  '_id',
+  '_type',
+  '_rev',
+  '_draft',
+  '_publishedId',
+  '_createdAt',
+  '_updatedAt',
+])
+
+/**
+ * The ONE collator every name sort goes through (cca-backlog-pinned-collator).
+ * Bare `localeCompare` reads the HOST's default locale (LANG/LC_ALL at process
+ * start), so emitted member order was in principle a function of the machine
+ * that ran the generator — a latent contract violation against the drift gate,
+ * which runs with no locale pin. Pinned to 'en-US', which is proven
+ * byte-identical to the committed web/lib/barkpark.types.ts under every locale
+ * measured (md5 6f33e5d1165dab07f4c6f869bb4f8bc8) — so this pin costs ZERO
+ * regen. A code-unit sort is NOT equivalent here (two of the fixture's 81 name
+ * lists flip, e.g. runRuleset|rune) and would force a regen of the committed
+ * artifact — outside this change's fence.
+ */
+const NAME_COLLATOR = new Intl.Collator('en-US')
+
 /** Read the optionality flag, tolerating both `required` and `required?` keys. */
 function isRequired(field: FieldDef): boolean {
   const q = (field as Record<string, unknown>)['required?']
@@ -185,7 +216,7 @@ function mapComposite(field: FieldDef, depth: number): string {
       )
     }
   }
-  const sorted = [...subs].sort((a, b) => a.name.localeCompare(b.name))
+  const sorted = [...subs].sort((a, b) => NAME_COLLATOR.compare(a.name, b.name))
   const members = sorted.map((sub) => {
     const opt = isRequired(sub) ? '' : '?'
     return `${propName(sub.name)}${opt}: ${mapField(sub, depth + 1)}`
@@ -196,7 +227,7 @@ function mapComposite(field: FieldDef, depth: number): string {
 /** Emit one `interface` for a schema, extending BarkparkSystemFields. */
 function emitInterface(schema: SchemaDef): string {
   const typeName = pascalCase(schema.name)
-  const fields = [...(schema.fields ?? [])].sort((a, b) => a.name.localeCompare(b.name))
+  const fields = [...(schema.fields ?? [])].sort((a, b) => NAME_COLLATOR.compare(a.name, b.name))
   // Narrow `_type` from the inherited `string` to the schema-name literal — this
   // is what makes the BarkparkAnyDocument union discriminable (`if (d._type ===
   // 'post')` narrows `d` to Post). Valid TS: a literal is assignable to string.
@@ -265,13 +296,22 @@ export interface GenerateOptions {
    * `"unknown"`.
    */
   dataset?: string
+  /**
+   * Absolute path of the file the caller will write the result to. When set,
+   * the prettier config is resolved against THIS path (the generated file is
+   * formatted like its committed siblings), so formatting is a function of the
+   * output location — never of the invoking CWD. When absent, no config search
+   * happens at all and prettier defaults apply (deterministic by construction).
+   */
+  outputPath?: string
 }
 
 /**
  * Generate the full TypeScript module from a schema envelope. Deterministic:
- * schemas and fields are sorted by name, union members are sorted, so the same
- * input always produces byte-identical output. The result is formatted with the
- * repo's prettier config.
+ * schemas and fields are sorted by name, union members are sorted, and the
+ * prettier config is resolved against `outputPath` (or skipped entirely when
+ * none is given), so the same input + output location always produces
+ * byte-identical output regardless of the directory the generator runs from.
  */
 export async function generateTypes(
   envelope: BarkparkSchemaJson,
@@ -294,7 +334,36 @@ export async function generateTypes(
     }
   })
 
-  const schemas = [...envelope.schemas].sort((a, b) => a.name.localeCompare(b.name))
+  // Belt-and-suspenders guards (cca-backlog-reserved-system-field-names). All
+  // three shapes are unreachable from the live /v1/schemas API — the server
+  // rejects reserved keys (content/envelope.ex @reserved) and duplicate names —
+  // so they arrive only via a hand-authored --from fixture. They used to emit
+  // TypeScript that failed at the CONSUMER's tsc (two identical interfaces, a
+  // twice-declared `_type` member, an `_id` redeclaring the inherited string
+  // with an incompatible type): invalid-but-loud in the wrong place. Fail HERE,
+  // with a locatable message, before writing a byte. Positions are pre-sort so
+  // they match what the author sees in the fixture.
+  const byInterface = new Map<string, { index: number; name: string }>()
+  envelope.schemas.forEach((schema, i) => {
+    const typeName = pascalCase(schema.name)
+    const prev = byInterface.get(typeName)
+    if (prev !== undefined) {
+      throw new Error(
+        `codegen: schema #${prev.index} ("${prev.name}") and schema #${i} ("${schema.name}") both become interface "${typeName}" — duplicate type names emit invalid TypeScript; rename one`,
+      )
+    }
+    byInterface.set(typeName, { index: i, name: schema.name })
+
+    ;(schema.fields ?? []).forEach((field, j) => {
+      if (typeof field?.name === 'string' && RESERVED_SYSTEM_KEYS.has(field.name)) {
+        throw new Error(
+          `codegen: schema "${schema.name}" field #${j} is named "${field.name}", a server-reserved system key — generated interfaces already carry it via BarkparkSystemFields; rename the field`,
+        )
+      }
+    })
+  })
+
+  const schemas = [...envelope.schemas].sort((a, b) => NAME_COLLATOR.compare(a.name, b.name))
   const dataset = options.dataset ?? 'unknown'
 
   const banner = `// Generated by @barkpark/codegen from dataset "${dataset}" at schema hash ${envelope.datasetSchemaHash}. DO NOT EDIT — run barkpark generate.`
@@ -316,7 +385,17 @@ export async function generateTypes(
 
   const source = [banner, '', PRELUDE, '', interfaces, '', typeMap, '', union, ''].join('\n')
 
-  const config = await prettier.resolveConfig(process.cwd()).catch(() => null)
+  // Config resolution is anchored to the OUTPUT file, never process.cwd():
+  // prettier treats the argument as a FILE path (the search starts in its
+  // parent), so the old resolveConfig(process.cwd()) made the emitted bytes a
+  // function of where the generator happened to run — cwd=js/ found nothing
+  // (defaults) while cwd=js/packages/codegen found js/.prettierrc, and the
+  // whole diff was semicolons. Without an outputPath there is deliberately NO
+  // filesystem search: prettier defaults, byte-stable anywhere.
+  const config =
+    options.outputPath !== undefined
+      ? await prettier.resolveConfig(options.outputPath).catch(() => null)
+      : null
   return prettier.format(source, {
     ...(config ?? {}),
     parser: 'typescript',

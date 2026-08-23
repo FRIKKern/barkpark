@@ -9,8 +9,30 @@
 # neutralise it too) that reds by name on any NEW off-roster gofmt drift and
 # fails closed on a vacuous/zero scan. See scripts/go-format-drift-ceiling.sh.
 name: Go format
+#
+# TRIGGERS. `pull_request` gates the change; `push: branches: [main]` measures
+# the result. Without the push arm the blocking ceiling below had NEVER executed
+# on main, so its "green on main" was UNMEASURED and a post-merge gofmt
+# regression stayed invisible until the next Go PR happened to arrive.
+#
+# THE PUSH ARM BUYS MAIN-VISIBILITY, NOT REQUIRABILITY (charter D18). The paths
+# filter here is at the WORKFLOW level, so on any head that touches no matching
+# path this workflow does not run at all and its check names are ABSENT, not
+# skipped — and a required context that is absent never reports, which deadlocks
+# every non-matching PR. That is why `gofmt drift ceiling (blocking)` is a
+# committed S4 PATHS-FILTERED exclusion in .github/required-checks.json and
+# cannot be added to any required-by-name list as written. Making it requirable
+# needs the skip-shim treatment elixir.yml uses (job-level `if:` behind a
+# dispatcher, workflow-level filter removed), which is a separate slice.
 on:
   pull_request:
+    paths:
+      - "**.go"
+      - ".github/workflows/go-format.yml"
+      - "scripts/go-format-drift-ceiling.sh"
+      - ".go-format-drift-ceiling"
+  push:
+    branches: [main]
     paths:
       - "**.go"
       - ".github/workflows/go-format.yml"

@@ -344,9 +344,10 @@ an explicit `check_origin` list (the belt-and-braces alternative in §5),
 revert that commit cleanly:
 
 ```bash
+# on a branch — a direct push to main is refused by branch protection
 git revert <sha-of-the-check_origin-commit>
-git push origin main
-# then on the server
+git push -u origin <branch>     # open a PR; merge via scripts/bp-merge.sh
+# then, once merged, on the server
 cd /opt/barkpark && make deploy
 ```
 

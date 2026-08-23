@@ -56,7 +56,17 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   # like a main, so Open Studio works; only `freshen` stays main-only) and the
   # SAME claim/stale-recovery machinery, but is claimed by a kind-filtered query
   # (`POST /v1/internal/support-jobs/claim`) so no provision worker grabs it.
-  @kinds ~w(provision deprovision attach_domain resurrect provision_support)
+  #
+  # PDF-D94 (`pdf-bl-console-key-custody`) — `push_agent_key` delivers a pasted
+  # agent provider key (browser → CP → box env) to an ALREADY-LIVE support box:
+  # rewrite one line of /etc/barkpark/fleet-listener.env over SSH + restart the
+  # listener. The job row NEVER carries the key — the key rides the in-memory
+  # `AgentKeyStash`, popped exactly once by the kind-filtered claim
+  # (`POST /v1/internal/agent-key-jobs/claim`). No step vocabulary (it is one
+  # SSH exec, not a create→live chain); succeed/fail flip the JOB ROW ONLY
+  # (`succeed_agent_key_job/3` — a key push must never clobber the live row's
+  # health/host the way a provision succeed does).
+  @kinds ~w(provision deprovision attach_domain resurrect provision_support push_agent_key)
 
   # dwb-14: the honest step vocabulary the Go worker reports as it walks the
   # create→live chain. Coarse-by-design (6 phases, not every SSH sub-step) so the
@@ -185,7 +195,7 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     # failure still enqueues.
     |> unique_constraint([:barkpark_id, :kind],
       name: :provision_jobs_one_active_per_barkpark_kind_idx,
-      message: "an active job of this kind already exists for this barkpark"
+      message: "already has an active job of this kind"
     )
   end
 

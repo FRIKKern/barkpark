@@ -1267,8 +1267,14 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
                "Your Azure service principal is missing a role. In the Azure Portal → Subscriptions → your subscription → Access control (IAM) → Add role assignment, grant it the Contributor role, then reconnect."
     end
 
-    test "a rejected credential is reported WITHOUT naming a party, an agent or a retry" do
-      for probe <- [@probe_site_token, @probe_npm] do
+    # RE-POINTED by task-fda5b6f19f1e06c9. `@probe_site_token` moved OUT of this
+    # loop and into its own assertion below: it is the one capture whose owner
+    # and remedy the producer's own bytes carry, so it now gets a sentence that
+    # names them. This loop keeps the ANONYMOUS captures, which is what the
+    # no-party discipline was always about — `@probe_npm` names no owner, so a
+    # sentence that claimed one would still be inventing it.
+    test "an ANONYMOUS rejected credential is reported WITHOUT naming a party, an agent or a retry" do
+      for probe <- [@probe_npm] do
         out = FailureCopy.humanize(probe)
 
         # It still classifies — the arm is narrowed, not deleted.
@@ -1329,6 +1335,110 @@ defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
         once = FailureCopy.humanize(probe)
         assert FailureCopy.humanize(once) == once, "second pass reclassified: #{once}"
       end
+    end
+  end
+
+  ## ---------------------------------------------------------------------------
+  ## THE SITE READ TOKEN 401 NAMES THE TOKEN AND THE FIX (task-fda5b6f19f1e06c9)
+  ## ---------------------------------------------------------------------------
+  ##
+  ## Wave 40 S6 stopped the credential arm LYING (it named a hosting provider
+  ## that is not in this story). It did not make it TELL: the one capture whose
+  ## owner and remedy the producer already spells out still received the same
+  ## say-nothing sentence as an anonymous 401, and the fix a person can actually
+  ## perform reached them only in the raw line folded one element below.
+  ##
+  ## The clause is keyed on `deploy/site-deploy.sh`'s OWN BYTES. These tests read
+  ## both shells at test time and extract the FATAL line with a regex, so the key
+  ## is never a hand-typed string that can drift away from its producer in
+  ## silence — the day a shell rewords, this file reds.
+
+  defp shell_fatal_line!(rel) do
+    shell = File.read!(Path.expand(rel, File.cwd!()))
+    [[_, line]] = Regex.scan(~r/echo "(FATAL: 401 Unauthorized[^"]*)" >&2/, shell)
+    line
+  end
+
+  @site_token_copy "This site's Barkpark read token was rejected, so the build couldn't fetch its content. Mint a fresh read token for the site in Barkpark, save it on the site, then deploy the site again."
+
+  describe "humanize/1 — a site read token 401 names the token and the fix" do
+    test "the producer's OWN bytes classify to the site-token sentence, read out of both shells" do
+      for rel <- ["../deploy/site-deploy.sh", "../deploy/site-deploy-node.sh"] do
+        line = shell_fatal_line!(rel)
+
+        # The precondition: the clause's key really is IN the producer's bytes.
+        assert line =~ "the site read token is invalid",
+               "#{rel} reworded its FATAL line — re-derive the clause key: #{line}"
+
+        assert FailureCopy.humanize(line) == @site_token_copy,
+               "#{rel}'s own capture did not reach the site-token clause: " <>
+                 FailureCopy.humanize(line)
+      end
+    end
+
+    test "the committed probe reaches the SAME sentence, and it names the token AND the fix" do
+      out = FailureCopy.humanize(@probe_site_token)
+
+      assert out == @site_token_copy
+
+      # THE TOKEN, in the classified sentence itself — not only in the raw line.
+      assert out =~ ~r/read token/i, "the class does not name the read token: #{out}"
+
+      # THE FIX, likewise.
+      assert out =~ ~r/mint a fresh read token/i, "the class names no fix: #{out}"
+
+      # It did NOT regress into the party/agent copy wave 40 removed.
+      refute out =~ ~r/hosting provider/i, "names a party: #{out}"
+      refute out =~ ~r/\bHetzner\b/i, "names a party: #{out}"
+      refute out =~ ~r/\bAzure\b/i, "names a party: #{out}"
+      refute out =~ ~r/we're on it/i, "asserts an agent: #{out}"
+      refute out =~ ~r/\bour credentials\b/i, "asserts whose credential: #{out}"
+
+      # …and the remedy it names is the TOKEN, not a bare wait-and-retry.
+      refute out =~ ~r/try again shortly/i, "prescribes a bare retry: #{out}"
+    end
+
+    test "it is a NARROWING, not a bypass: the anonymous credential arm still fires" do
+      # No site-token bytes anywhere — this must keep the say-nothing class.
+      out = FailureCopy.humanize(@probe_npm)
+
+      assert out =~ "credential", "the generic credential class stopped firing: #{out}"
+      refute out == @site_token_copy, "a generic 401 was captured by the site-token clause"
+      refute out =~ ~r/read token/i, "the generic class invented an owner: #{out}"
+
+      # The other generic shapes the wave-40 corpus and the unit suite pin.
+      for probe <- [
+            "hcloud: unauthorized (401)",
+            "provider returned invalid token",
+            @probe_sentence_dot,
+            @probe_mid_sentence_dot
+          ] do
+        assert FailureCopy.humanize(probe) =~ "credential",
+               "#{probe} lost the credential class"
+
+        refute FailureCopy.humanize(probe) == @site_token_copy,
+               "#{probe} was captured by the site-token clause"
+      end
+    end
+
+    test "the Azure RBAC clause is UNTOUCHED — the must-clear control still classifies first" do
+      assert FailureCopy.humanize(@probe_azure) ==
+               "Your Azure service principal is missing a role. In the Azure Portal → Subscriptions → your subscription → Access control (IAM) → Add role assignment, grant it the Contributor role, then reconnect."
+
+      # And the RBAC clause still wins over BOTH credential clauses when a
+      # capture carries Azure's token alongside a site-token phrase — ordering,
+      # not luck.
+      assert FailureCopy.humanize("az: AuthorizationFailed — the site read token is invalid") =~
+               "Azure service principal is missing a role"
+    end
+
+    test "the path guard survives: a slug is still not a site-token rejection" do
+      assert FailureCopy.humanize(@probe_disk_full) == FailureCopy.scrub(@probe_disk_full)
+      refute FailureCopy.humanize(@probe_disk_full) =~ ~r/read token/i
+    end
+
+    test "the site-token copy is idempotent under a second pass" do
+      assert FailureCopy.humanize(@site_token_copy) == @site_token_copy
     end
   end
 end

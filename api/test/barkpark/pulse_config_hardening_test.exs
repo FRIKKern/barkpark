@@ -26,6 +26,13 @@ defmodule Barkpark.PulseConfigHardeningTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.RateLimiterSandbox
+
+  # `:barkpark_rate_limiter` is a :named_table — WHOLE-NODE state no sandbox owns
+  # and nothing used to reset, so a bucket one test spent stayed spent for the
+  # rest of the run. Start from an unspent table.
+  setup :reset_rate_limiter!
+
   alias Barkpark.Pulse
 
   @no_fields_channel "hardening-no-fields"

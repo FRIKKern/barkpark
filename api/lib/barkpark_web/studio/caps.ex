@@ -150,6 +150,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-unbind-property paper-delete-block paper-move-block
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
     access-revoke
+    paper-publish sidebar-description-change sidebar-label-add
   )
 
   @doc """

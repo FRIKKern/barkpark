@@ -173,6 +173,19 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @e2_joins %{
     "datasets" => {"JOIN projects p ON p.id = t.project_id", "p.workspace_id"},
     "role_permissions" => {"JOIN roles r ON r.id = t.role_id", "r.workspace_id"},
+    # SECURITY INVARIANT (pds-bl-pin-webhook-deliveries-inner-join): this INNER
+    # JOIN is the ONLY thing keeping media signing secrets out of every bundle.
+    # Media deliveries are the one delivery kind whose `payload_snapshot` embeds
+    # a plaintext secret (`%{url, secret, body}` — media/delivery/events.ex),
+    # and BY DESIGN they carry no `endpoint_id` (media endpoints are
+    # config-driven, not `webhooks` rows), so the inner join makes them match no
+    # workspace and enter no bundle in any profile. Two changes silently open a
+    # credential-export leak:
+    #   1. relaxing this to a LEFT JOIN (step one of "orphan rows belong to
+    #      everyone" — `assert_partition!/1` raises on a non-inner join here);
+    #   2. backfilling `endpoint_id` onto media rows, which makes the secret
+    #      workspace-reachable through this join (`assert_partition!/1` raises
+    #      on any reachable secret-bearing snapshot).
     "webhook_deliveries" => {"JOIN webhooks w ON w.id = t.endpoint_id", "w.workspace_id"},
     "content_edges" => {"JOIN documents d ON d.id = t.from_id", "d.workspace_id"},
     "task_edges" => {"JOIN documents d ON d.id = t.from_id", "d.workspace_id"},
@@ -411,6 +424,44 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
 
     if phantom != [] do
       raise "WorkspaceBundle.Catalog: pinned table(s) #{inspect(phantom)} absent from the live schema"
+    end
+
+    assert_webhook_delivery_confinement!(repo)
+
+    :ok
+  end
+
+  # The webhook_deliveries E2 spec is a SECURITY boundary, not just an
+  # extraction shape (see the invariant comment at its `@e2_joins` entry).
+  # Both breakage modes are validated here:
+  #   * the join must stay INNER — a LEFT JOIN is the first half of the
+  #     "orphan rows export everywhere" regression;
+  #   * no secret-bearing `payload_snapshot` may be workspace-reachable through
+  #     the endpoint join — backfilling `endpoint_id` onto media rows would put
+  #     a plaintext signing secret into the next full-fidelity bundle.
+  defp assert_webhook_delivery_confinement!(repo) do
+    {join, pred} = Map.fetch!(@e2_joins, "webhook_deliveries")
+
+    unless String.starts_with?(join, "JOIN ") and pred == "w.workspace_id" do
+      raise "WorkspaceBundle.Catalog: webhook_deliveries must export via the reviewed " <>
+              "INNER `JOIN webhooks` on endpoint_id — got #{inspect({join, pred})}. " <>
+              "Relaxing this join is a credential-export hazard: media deliveries embed " <>
+              "a plaintext signing secret in payload_snapshot and are kept out of every " <>
+              "bundle ONLY by failing this join (nil endpoint_id)."
+    end
+
+    %{rows: [[reachable]]} =
+      repo.query!("""
+      SELECT COUNT(*) FROM webhook_deliveries t
+      JOIN webhooks w ON w.id = t.endpoint_id
+      WHERE t.payload_snapshot ? 'secret'
+      """)
+
+    if reachable > 0 do
+      raise "WorkspaceBundle.Catalog: #{reachable} secret-bearing webhook_deliveries " <>
+              "row(s) are workspace-reachable through the E2 endpoint join — a plaintext " <>
+              "signing secret would export in that workspace's bundle. Media deliveries " <>
+              "must keep endpoint_id NULL (config-driven endpoints); never backfill it."
     end
 
     :ok

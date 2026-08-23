@@ -5,7 +5,7 @@
 //
 // This is the Next.js consumption proof: it drops the canonical, RSC-safe
 // `@barkpark/react` `PortableDoc` component into a Next STATIC export (this is a
-// Server Component — no `'use client'`) and, for EACH of the 42 frozen pd-golden
+// Server Component — no `'use client'`) and, for EACH of the frozen pd-golden
 // fixtures (produced by W1 slice rpu-w1-golden-gen from the REAL Elixir `:article`
 // emitter), renders that single block through the REAL component — NOT `set:html`,
 // NOT the `renderPortableDocument` string form. The block array is NOT re-authored:

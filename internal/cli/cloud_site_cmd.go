@@ -8,7 +8,7 @@ package cli
 // on the roadmap.
 //
 //	bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node]
-//	bp cloud site deploy    <site> [--no-follow]   (alias: build)
+//	bp cloud site deploy    <site> [--no-follow] [--wait-for-live <deadline>]   (alias: build)
 //	bp cloud site rollback  <site>
 //	bp cloud site delete    <site> [--yes]         (alias: rm)
 //	bp cloud site status    <site>
@@ -85,6 +85,18 @@ func runCloudSite(out *writer, g globals, args []string) int {
 	verb := args[0]
 	rest := args[1:]
 	switch verb {
+	// THE TWO-NOUN RULING (dr-w14-bl-owner-cannot-list-own-sites): `bp sites`
+	// and `bp cloud site` are BOTH real and deliberately split — `bp sites` is
+	// the team-wide site surface (list/show/create/deployments/env/domains),
+	// `bp cloud site` is the spawner's lifecycle verbs on ONE site
+	// (create/deploy/rollback/delete/status/open/preflight/settings). The
+	// overlap is resolved by ALIASING, not by exclusivity: enumeration lives in
+	// runSitesList and `bp cloud site ls` routes THERE, so an owner standing at
+	// either noun can enumerate their own sites — the wave-14 verifier found
+	// their 13 sites only by curling /v1/sites because THIS noun refused `ls`
+	// while the other noun answered it.
+	case "ls", "list":
+		return runSitesList(out, rest)
 	case "create":
 		return runCloudSiteCreate(out, g, rest)
 	case "deploy", "build":
@@ -102,7 +114,7 @@ func runCloudSite(out *writer, g globals, args []string) int {
 	case "settings":
 		return runCloudSiteSettings(out, g, rest)
 	default:
-		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage)", verb), exitUsage)
+		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage; to list your team's sites: `bp sites` or `bp cloud site ls`)", verb), exitUsage)
 	}
 }
 
@@ -364,7 +376,8 @@ func chainSiteDeploy(out *writer, cfg *Config, ref string, site cloudclient.Spaw
 		}
 		return cloudFail(out, "deploy site", derr)
 	}
-	return streamSiteDeploy(out, cfg, ref, site.ID, dep, true)
+	code, _ := streamSiteDeploy(out, cfg, ref, site.ID, dep, true)
+	return code
 }
 
 // siteInstanceNotLive reports whether a deploy error is the control plane's 422
@@ -379,8 +392,8 @@ func siteInstanceNotLive(err error) bool {
 // runCloudSiteDeploy is `bp cloud site deploy <site>` (alias `build`) — enqueue a
 // build, then stream the six visible stages until the deploy lands or fails.
 func runCloudSiteDeploy(out *writer, g globals, args []string) int {
-	const usage = "bp cloud site deploy <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--via cloudflare --domain <host>]"
-	a, err := parseHzArgs(args, []string{"via", "domain", "prebuilt", "deployment"}, []string{"no-follow", "force"}, usage)
+	const usage = "bp cloud site deploy <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--via cloudflare --domain <host>] [--wait-for-live <deadline>]"
+	a, err := parseHzArgs(args, []string{"via", "domain", "prebuilt", "deployment", "wait-for-live"}, []string{"no-follow", "force"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -400,6 +413,27 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 		return useError(out, "usage", "--domain needs --via cloudflare (usage: "+usage+")", exitUsage)
 	}
 
+	// --wait-for-live <deadline> (dr-w32-bl-deploy-wait-for-live-flag): the
+	// opt-in for callers that genuinely need LIVENESS — a CD pipeline gating a
+	// release on the site actually serving the new bytes. D543 keeps a deferral
+	// at exit 0 for everybody (a deferral loses nothing and is ~74% of settled
+	// attempts); this flag is the other half of that ruling: keep polling PAST a
+	// deferral until a live deployment for the same site+environment appears, or
+	// exit non-zero when the caller's own deadline expires. Without it, nothing
+	// below behaves differently in any way.
+	waitForLive, werr := siteDeployWaitDeadline(a)
+	if werr != nil {
+		return useError(out, "usage", werr.Error()+" (usage: "+usage+")", exitUsage)
+	}
+	if waitForLive > 0 {
+		if a.bools["no-follow"] {
+			return useError(out, "usage", "--wait-for-live needs the follow stream to see the deferral settle — drop --no-follow (usage: "+usage+")", exitUsage)
+		}
+		if out.output == "json" || out.output == "yaml" {
+			return useError(out, "usage", "--wait-for-live speaks through the exit code and the human stream; with -o "+out.output+" the single-envelope stdout contract would need two envelopes. Drop -o "+out.output+" (the exit code IS the machine answer) or poll `bp cloud site status -o json` instead", exitUsage)
+		}
+	}
+
 	// --prebuilt <dir> is the lane where the build already happened somewhere
 	// else (charter D85): the bytes ship, the serving box runs no npm. It is a
 	// different two-call flow, so it branches before the one-call deploy — and
@@ -410,6 +444,9 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 	if prebuilt != "" {
 		if via != "" || domain != "" {
 			return useError(out, "usage", "--prebuilt does not take --via/--domain: bind the domain with a plain deploy (or `bp cloud site settings`) and ship the bytes separately (usage: "+usage+")", exitUsage)
+		}
+		if waitForLive > 0 {
+			return useError(out, "usage", "--wait-for-live is not wired for the --prebuilt lane: a prebuilt deploy switches on upload rather than riding the box's build queue, so the deferral this flag waits past does not occur there (usage: "+usage+")", exitUsage)
 		}
 		if _, verr := validatePrebuiltDir(prebuilt); verr != nil {
 			return useError(out, "usage", verr.Error(), exitUsage)
@@ -433,7 +470,107 @@ func runCloudSiteDeploy(out *writer, g globals, args []string) int {
 	if derr != nil {
 		return cloudFail(out, "deploy site", derr)
 	}
-	return streamSiteDeploy(out, cfg, ref, id, dep, !a.bools["no-follow"])
+	code, final := streamSiteDeploy(out, cfg, ref, id, dep, !a.bools["no-follow"])
+	if waitForLive <= 0 {
+		return code
+	}
+	if !siteDeployDeferred(final.Status) {
+		// The wait rides past a DEFERRAL and nothing else: live already answered,
+		// failed/cancelled are drops no amount of waiting will cure, and a stream
+		// that ran out of poll budget mid-build is narrated by the stream itself.
+		// Say which case declined the wait rather than silently ignoring the flag.
+		if !strings.EqualFold(final.Status, "live") {
+			out.progressf("→ --wait-for-live not engaged: the deploy settled %s, not deferred — the wait only rides past a deferral (a re-queued rebuild it can watch for); this outcome has nothing queued to wait on", hzCell(strings.ToLower(strings.TrimSpace(final.Status))))
+		}
+		return code
+	}
+	return waitSiteDeployLive(out, cfg, ref, id, final, waitForLive)
+}
+
+// siteDeployWaitDeadline reads --wait-for-live: absent means no wait (zero), a
+// value must be a positive Go duration — the caller's OWN deadline, stated up
+// front, because an unbounded wait would turn a CD gate into a hang and a
+// default deadline would be this CLI guessing how urgent someone's release is.
+func siteDeployWaitDeadline(a *hzArgs) (time.Duration, error) {
+	raw, has := lastVal(a, "wait-for-live")
+	if !has {
+		return 0, nil
+	}
+	raw = strings.TrimSpace(raw)
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("--wait-for-live wants a positive deadline as a Go duration (e.g. 10m, 90s), got %q", raw)
+	}
+	return d, nil
+}
+
+// waitSiteDeployWatchLimit is how many newest-first rows each wait poll reads
+// from the site's deployment list. The re-queued rebuild is by definition one of
+// the newest rows, so a page this size cannot miss it.
+const waitSiteDeployWatchLimit = 20
+
+// waitSiteDeployLive is the --wait-for-live loop (dr-w32-bl): the deploy above
+// settled DEFERRED — the honest deferral narration has already printed, exit 0
+// is everybody else's contract — and this caller opted into waiting for the
+// re-queued rebuild to actually go LIVE.
+//
+// WHAT COUNTS AS ARRIVAL: a deployment row for this site that (a) reads status
+// live, (b) belongs to the same environment as the deferred row (when both name
+// one — a row that names no environment cannot be held to a match it never
+// claimed), and (c) PROVABLY postdates the deferral by inserted_at. (c) is not
+// pedantry: the site usually HAS a live row already — the previous build, the
+// one visitors still see — and accepting it would declare victory on exactly
+// the bytes the caller is waiting to replace. A live row whose inserted_at is
+// missing is skipped, and the skip is narrated once rather than silently.
+//
+// ON THE DEADLINE it exits non-zero, naming the deadline it was given and the
+// newest status it last read — never a bare timeout. The rebuild it was
+// watching for is still queued; expiring the WAIT does not lose it.
+func waitSiteDeployLive(out *writer, cfg *Config, ref, id string, deferred cloudclient.SiteDeployment, deadline time.Duration) int {
+	env := strings.TrimSpace(deferred.Environment)
+	scope := "any environment (the deferred row named none)"
+	if env != "" {
+		scope = "environment " + sanitizeCell(env)
+	}
+	out.progressf("→ --wait-for-live: watching for a live deployment for this site (%s) for up to %s — the re-queued rebuild carries this same content", scope, deadline)
+
+	start := time.Now()
+	lastStatus := strings.ToLower(strings.TrimSpace(deferred.Status))
+	warnedUnprovable := false
+	for time.Since(start) < deadline {
+		time.Sleep(siteDeployPoll)
+		page, err := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, waitSiteDeployWatchLimit, "")
+		if err != nil {
+			return cloudFail(out, "poll for a live deployment", err)
+		}
+		for _, d := range page.Deployments {
+			if st := strings.ToLower(strings.TrimSpace(d.Status)); st != "" && d.ID != deferred.ID {
+				lastStatus = st
+			}
+			if !strings.EqualFold(strings.TrimSpace(d.Status), "live") {
+				continue
+			}
+			if env != "" && strings.TrimSpace(d.Environment) != "" && !strings.EqualFold(strings.TrimSpace(d.Environment), env) {
+				continue
+			}
+			if strings.TrimSpace(d.InsertedAt) == "" || strings.TrimSpace(deferred.InsertedAt) == "" {
+				if !warnedUnprovable {
+					warnedUnprovable = true
+					out.progressf("  skipping live deployment %s — without inserted_at on both rows the CLI cannot prove it postdates the deferral, and the site's PREVIOUS build is usually live too", sanitizeCell(d.ID))
+				}
+				continue
+			}
+			if d.InsertedAt <= deferred.InsertedAt {
+				continue // the previous build, or an older round — not the rebuild we queued behind
+			}
+			return renderSiteDeployVerdict(out, ref, d)
+		}
+	}
+
+	elapsed := time.Since(start).Round(time.Second)
+	out.userErr("--wait-for-live deadline %s expired after %s — no live deployment for this site (%s) provably postdates the deferral; the newest status read was %s. Nothing was lost: the re-queued rebuild is still queued — watch it land with `bp cloud site status %s`",
+		deadline, elapsed, scope, hzCell(lastStatus), ref)
+	return exitGeneric
 }
 
 // runCloudSitePrebuiltDeploy is `bp cloud site deploy <site> --prebuilt <dir>` —
@@ -515,7 +652,8 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	}
 	out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
 
-	return streamSiteDeploy(out, cfg, ref, id, dep, follow)
+	streamCode, _ := streamSiteDeploy(out, cfg, ref, id, dep, follow)
+	return streamCode
 }
 
 // prebuiltSiteBase is the value BARKPARK_SITE_BASE must carry: the PATH the site
@@ -649,7 +787,10 @@ func metaMarkerValue(html, name string) string {
 // completed stage is printed once, in order, then polls the deployment until it
 // reaches a terminal state (live / failed / cancelled). Progress rides progressf so
 // `-o json` keeps stdout a single envelope; the final deployment is the return value.
-func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.SiteDeployment, follow bool) int {
+// It returns the LAST deployment it read beside the exit code, so an opted-in
+// --wait-for-live caller can branch on how the stream settled without a second
+// read; the default path ignores it and behaves exactly as before.
+func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.SiteDeployment, follow bool) (int, cloudclient.SiteDeployment) {
 	prov := siteTriggerNarration(dep.Trigger)
 	if b := strings.TrimSpace(dep.BuildID); b != "" {
 		out.progressf("→ deploy queued for %s (build %s)%s", ref, sanitizeCell(b), prov)
@@ -684,16 +825,16 @@ func streamSiteDeploy(out *writer, cfg *Config, ref, id string, dep cloudclient.
 		time.Sleep(siteDeployPoll)
 		fresh, ferr := cfg.CloudClient().SpawnSiteDeployment(cloudCtx(), id, d.ID)
 		if ferr != nil {
-			return cloudFail(out, "poll deployment", ferr)
+			return cloudFail(out, "poll deployment", ferr), d
 		}
 		d = fresh
 		render(d)
 	}
 
 	if out.emitStructured(map[string]any{"deployment": siteDeploymentMap(d)}) {
-		return siteDeployExit(d)
+		return siteDeployExit(d), d
 	}
-	return renderSiteDeployVerdict(out, ref, d)
+	return renderSiteDeployVerdict(out, ref, d), d
 }
 
 // renderSiteDeployVerdict is the human verdict on a deployment the stream stopped
@@ -2810,8 +2951,9 @@ func printCloudSiteHelp(out *writer) {
 	const help = `bp cloud site — spawn a website that builds and serves next to your Barkpark.
 
 USAGE
+  bp cloud site ls                                  list your team's sites (alias of 'bp sites')
   bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--deploy]
-  bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force]  (alias: build)
+  bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--wait-for-live <deadline>]  (alias: build)
   bp cloud site rollback  <site>
   bp cloud site status    <site>
   bp cloud site open       <site> [--print-only]
@@ -2826,6 +2968,13 @@ USAGE
   SSR process on its own slot port, health-gated behind Caddy.
   --doc-type binds the content type the build reads (default 'post'); pass it
   when your dataset serves another type (e.g. 'paper').
+  --wait-for-live <deadline> (e.g. 10m) keeps watching past a DEFERRAL until a
+  live deployment for the same site+environment appears, then exits 0; when the
+  deadline expires first it exits non-zero, naming the deadline and the last
+  status it read. Without it a deferral still exits 0 (nothing is lost — the
+  re-queued rebuild carries the same content); this flag is for callers that
+  need LIVENESS, e.g. a CD pipeline gating a release on the site serving the
+  new bytes.
   --prebuilt <dir> ships a build you already made — the OUTPUT directory (./dist),
   not the project. The serving box runs NO npm for that deploy: it verifies the
   upload's sha256, stages those exact bytes, and BUILD reports skipped. It is two

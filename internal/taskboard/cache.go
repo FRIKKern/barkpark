@@ -50,6 +50,15 @@ func cacheKey(server, workspace, project, dataset string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
+// legacyCacheKey is the pre-dataset cache identity. Keep it only as a read
+// fallback so upgrades do not turn a perfectly good cached board into a blank
+// cold start. A successful fallback is immediately migrated to cacheKey by
+// primeFromCache; every subsequent write remains dataset-scoped.
+func legacyCacheKey(server, workspace, project string) string {
+	sum := sha256.Sum256([]byte(server + "\x00" + workspace + "\x00" + project))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
 // cacheFileName is the on-disk file name for a scope key.
 func cacheFileName(key string) string { return cacheFilePrefix + key + ".json" }
 

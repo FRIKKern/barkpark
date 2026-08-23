@@ -149,7 +149,7 @@ row and the completeness arm never notices it arrive. The quad is why
 
 Derived by `scripts/pds-elixir-receipt-census.exs` (build-free AST over 804
 `api/lib/**/*.ex` files, no mix project and no compile — it never boots the app; it
-prints its own `wall clock … ms` line on every run, which is where a runtime figure
+prints its own `user cpu … ms` line (D605) on every run, which is where a runtime figure
 belongs rather than in this sentence):
 
 | figure | today | what it is |

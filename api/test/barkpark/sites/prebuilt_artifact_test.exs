@@ -366,11 +366,30 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
       refute File.exists?(dest)
     end
 
-    @tag timeout: 120_000
     test "more than 20 000 entries is refused at the DEFAULT caps", %{dest: dest} do
-      # 20 001 zero-byte entries — 10.25 MiB inflated, i.e. UNDER the ratio floor,
-      # so this proves the entry-count guard and not the bomb guard.
-      tar = tarball(for i <- 1..20_001, do: file_entry("f#{i}.html", ""))
+      # 20 001 headers — 10.25 MiB inflated, i.e. UNDER the ratio floor, so this
+      # trips the entry-count guard (and not the bomb guard) at the REAL default
+      # cap, with no per-test override.
+      #
+      # The headers are 20 001 `./` ROOT directory entries ON PURPOSE. The guard
+      # counts HEADERS, not inodes or writes: a root entry takes the
+      # `{:dir, :root} -> count_entry` arm — counted and skipped, the same
+      # counter every file and directory entry passes through — and the
+      # "accepts the `./` root entry" case pins that it IS counted
+      # (`summary.entries == 4` there includes it). So the counter trips at
+      # exactly the same boundary as with 20 001 distinct files, while the
+      # extractor performs ZERO filesystem writes getting there.
+      #
+      # That matters because both write-shaped fixtures MEASURABLY time out
+      # under host load (task-a91269a34fe4aa0b): 20 001 distinct empty files put
+      # ~40k create+chmod syscalls plus a 20 000-entry `File.rm_rf` walk inside
+      # the budget (139s/136s against the old 120s tag — already double the
+      # default), and even 20 001 duplicate dir headers still funnel 20 000
+      # `File.mkdir_p` round-trips through the BEAM file server (82s). A guard
+      # that trips on the COUNT does not need the disk to have been touched to
+      # be proven, and the small-cap rows above already prove counting across
+      # real file writes.
+      tar = tarball(for _ <- 1..20_001, do: dir_entry("."))
 
       assert {:error, "E_TOO_MANY_ENTRIES", _} = stage(tar, dest)
       refute File.exists?(dest)

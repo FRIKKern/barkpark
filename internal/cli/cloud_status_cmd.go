@@ -60,7 +60,7 @@ const (
 const fillingDiskPercent = 90.0
 
 // attentionStatus classifies one Barkpark into its charter-decision-15 status
-// label. The ELEVEN labels (charter D69), MOST URGENT FIRST, are:
+// label. The TWELVE labels (charter D69 + jpf-w1 D7), MOST URGENT FIRST, are:
 //
 //  1. removal_failed — deprovision_status = "failed"
 //  2. failed         — no host && provision_status = "failed"
@@ -69,10 +69,11 @@ const fillingDiskPercent = 90.0
 //  5. strained       — live && sustained load per core over the D67 fence
 //  6. filling        — live && disk_used_percent >= 90
 //  7. unreported     — live && the CP has never heard a byte from the box
-//  8. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
-//  9. removing       — deprovision_status ∈ {pending, claimed}
-//  10. provisioning  — no host, nothing failed
-//  11. ok            — live, healthy, current
+//  8. deploy_stalled — live && a queued deployment no builder has claimed for 5m
+//  9. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
+//  10. removing      — deprovision_status ∈ {pending, claimed}
+//  11. provisioning  — no host, nothing failed
+//  12. ok            — live, healthy, current
 //
 // where "live" = a host is set with nothing in-flight/failed/suspended.
 //
@@ -115,10 +116,18 @@ func attentionStatus(b cloudclient.Barkpark) string {
 		return "strained"
 	case live && filling(b):
 		return "filling"
+	// jpf-w1 D7: a queued deployment no builder has claimed for 5 minutes.
+	// AFTER the vitals rungs — a degraded/strained box's stuck queue is a
+	// SYMPTOM, so the box's own condition outranks it — and BEFORE `behind`:
+	// a deploy someone asked for and nobody is building is more urgent than
+	// passive update drift.
+	case live && deployStalled(b):
+		return "deploy_stalled"
 	// TWO independent sources can say `behind`, and until dr-w24-s2 only the
 	// weaker one was read (see behindByCommits). The rung is UNCHANGED — same
-	// label, same rank 8, same bucket, same decision-32 vocabulary — it simply
-	// stops missing the boxes whose release-tag grade cannot express the gap.
+	// label, same bucket, same decision-32 vocabulary (rank 8 → 9 with the
+	// deploy_stalled insertion) — it simply stops missing the boxes whose
+	// release-tag grade cannot express the gap.
 	case live && (b.UpdateState == "behind" || behindByCommits(b)):
 		return "behind"
 	case removing:
@@ -165,6 +174,38 @@ func strained(b cloudclient.Barkpark) bool {
 func filling(b cloudclient.Barkpark) bool {
 	p := b.Pressure
 	return p != nil && p.DiskUsedPercent != nil && *p.DiskUsedPercent >= fillingDiskPercent
+}
+
+// queuedDeployStalledAfterSeconds is the `deploy_stalled` fence (jpf-w1 D6/D7):
+// how long a queued container-site deployment may sit with NO builder claiming
+// it before the fleet screen says so. The CLIENT owns this number by design —
+// the control plane serves only the raw `queued_deploy_age_seconds` — and it is
+// deliberately ONE THIRD of the CP's 15-minute StaleDeploymentReaper horizon
+// (registry.ex `queued_deploy_alarm_after_seconds`, default 300, documents the
+// same relationship server-side): the reaper is a MUTATING builder-lease sweep
+// that is claimed_at-gated and can NEVER see a never-claimed row; this alarm
+// exists for exactly that orphan class, because the builder is structurally
+// silent on failure (Run() discards claim errors unlogged).
+const queuedDeployStalledAfterSeconds = 300
+
+// deployStalled reports whether the box has a queued deployment older than the
+// fence. nil NEVER stalls — it is both "nothing queued" and "a CP that predates
+// the field", and neither is a measured problem (the same honest-silence rule
+// the vitals fences keep: an alarm may only fire on a number it was given).
+func deployStalled(b cloudclient.Barkpark) bool {
+	return b.QueuedDeployAgeSeconds != nil && *b.QueuedDeployAgeSeconds >= queuedDeployStalledAfterSeconds
+}
+
+// deployStalledReason renders the WHY for a deploy_stalled row: how long the
+// oldest queued deployment has waited and the fact that makes the wait a
+// problem — no builder has claimed it. Empty when the fence did not fire, so
+// it can never assert a stall it did not measure.
+func deployStalledReason(b cloudclient.Barkpark) string {
+	if !deployStalled(b) {
+		return ""
+	}
+	return fmt.Sprintf("deploy queued %s — no builder claimed it",
+		humanElapsed(*b.QueuedDeployAgeSeconds))
 }
 
 // strainedReason renders the WHY for a strained row. It says LOAD and never
@@ -476,10 +517,10 @@ func fleetKnowsCommit(fleet []rankedBarkpark) bool {
 // like a float dump.
 func round1(n float64) float64 { return math.Round(n*10) / 10 }
 
-// attentionRankOrder is the decision-15 / D69 ordering, most urgent first.
-// Index+1 is the charter rank (1–11), exactly as the decision-32 fixture pins
-// it. The eight pre-existing states keep their RELATIVE order and every one of
-// them keeps its bucket — only the integers moved.
+// attentionRankOrder is the decision-15 / D69 / jpf-w1-D7 ordering, most
+// urgent first. Index+1 is the charter rank (1–12), exactly as the decision-32
+// fixture pins it. The pre-existing states keep their RELATIVE order and every
+// one of them keeps its bucket — only the integers moved.
 var attentionRankOrder = []string{
 	"removal_failed", // 1
 	"failed",         // 2
@@ -488,14 +529,15 @@ var attentionRankOrder = []string{
 	"strained",       // 5
 	"filling",        // 6
 	"unreported",     // 7
-	"behind",         // 8
-	"removing",       // 9
-	"provisioning",   // 10
-	"ok",             // 11
+	"deploy_stalled", // 8 (jpf-w1 D7 — after the box-condition rungs, before behind)
+	"behind",         // 9
+	"removing",       // 10
+	"provisioning",   // 11
+	"ok",             // 12
 }
 
 // attentionRank is the sort key for a status label — its charter rank, 1 (most
-// urgent) through 11 (ok), matching the decision-32 fixture byte-for-byte. An
+// urgent) through 12 (ok), matching the decision-32 fixture byte-for-byte. An
 // unknown label ranks past the end (never panics) and so sorts last.
 func attentionRank(status string) int {
 	for i, s := range attentionRankOrder {
@@ -507,8 +549,8 @@ func attentionRank(status string) int {
 }
 
 // attentionBucket groups a status into the three charter buckets: attention
-// (ranks 1–8: removal_failed…behind), in-flight (9–10: removing/provisioning),
-// healthy (11: ok). The bucket strings are the decision-32 fixture's, verbatim —
+// (ranks 1–9: removal_failed…behind), in-flight (10–11: removing/provisioning),
+// healthy (12: ok). The bucket strings are the decision-32 fixture's, verbatim —
 // note "in-flight" is hyphenated there, so it is hyphenated here and in -o json.
 //
 // The boundary is stated as a MEMBERSHIP switch, not as a rank comparison, so a
@@ -523,8 +565,8 @@ func attentionBucket(status string) string {
 		return "healthy"
 	default:
 		// removal_failed, failed, suspended, degraded, strained, filling,
-		// unreported, behind — and any unknown label defensively surfaces in the
-		// attention bucket rather than hiding.
+		// unreported, deploy_stalled, behind — and any unknown label defensively
+		// surfaces in the attention bucket rather than hiding.
 		return "attention"
 	}
 }
@@ -553,6 +595,8 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		reason = strainedReason(b)
 	case "filling":
 		reason = fillingReason(b)
+	case "deploy_stalled":
+		reason = deployStalledReason(b)
 	case "behind":
 		// "" for a release-tag behind (the UPDATE column already says it); the
 		// commit-distance sentence for a box whose tag grade disagrees.
@@ -563,13 +607,62 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// (runawayMarker). Joined with the same separator the strained reason uses
 	// for its swap clause, and every empty one drops out rather than leaving a
 	// dangling dot.
-	parts := make([]string, 0, 3)
-	for _, s := range []string{reason, runawayMarker(b), unmeteredMarker(b)} {
+	parts := make([]string, 0, 4)
+	for _, s := range []string{reason, runawayMarker(b), err5xxMarker(b), unmeteredMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// --- the 5xx marker (dr-w5-followup-5xx-reaches-no-eyes) ----------------------
+//
+// THE RULING: DETAIL LINE, NOT A RUNG — the same call runawayMarker's block
+// above already argues, accepted here for the same two reasons. (1) The
+// decision-15 vocabulary is pinned across three surfaces by the decision-32
+// fixture and mirrored by the SPA; a twelfth status minted here alone is the
+// drift D32 exists to prevent, and a rung would have to move the ladder, both
+// fixtures and semrole.For in one commit for a signal that is (2) built on a
+// 60s PER-SLOT ring that re-arms EMPTY on every blue/green flip — a rung keyed
+// on it would flap to "unmeasured" on every deploy, and this fleet deploys
+// constantly. A detail line pays no flap cost: it changes no rank and no
+// bucket, it simply says the sentence D75 exists to make sayable — "this box
+// the table calls healthy is answering ~0.22 5xx/s" — on whatever row it rides.
+//
+// THE THREE STATES STAY THREE STATES, and none of them is another. The TABLE
+// marker below prints only the positive rate — exactly runawayMarker's policy:
+// a sentence on a table row claims something happened, and neither "we did not
+// measure" nor "measured, quiet" is a happening (the decision-15 tests pin an
+// ok row's detail EMPTY for both). The full tri-state renders in `-o json`
+// (err5xxRow), where a machine reader gets nil-as-unmeasured, zero-as-zero and
+// the rate as itself — never collapsed into each other.
+func err5xxMarker(b cloudclient.Barkpark) string {
+	p := b.Pressure
+	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("answering %.2f 5xx/s (60s per-slot ring — the beat's own number, blind to 5xx the BEAM never served)", *p.Err5xxPerS)
+}
+
+// err5xxRow is the `-o json` projection of the same reading, and it is where
+// the three states are DISTINGUISHED for a machine reader:
+//   - state "unmeasured", per_s null — the beat carried no reading (nil on the
+//     wire, or the agent's -1 sentinel relayed). No reading is NOT zero.
+//   - state "zero", per_s 0 — the 60s window was READ and held no 5xx. A real
+//     zero, still bounded: the ring is per-slot and blind to 5xx the BEAM
+//     never served.
+//   - state "answering", per_s <rate> — the beat's own number, never
+//     recomputed here.
+func err5xxRow(b cloudclient.Barkpark) map[string]any {
+	p := b.Pressure
+	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS < 0 {
+		return map[string]any{"state": "unmeasured", "per_s": nil}
+	}
+	if *p.Err5xxPerS == 0 {
+		return map[string]any{"state": "zero", "per_s": 0.0}
+	}
+	return map[string]any{"state": "answering", "per_s": *p.Err5xxPerS}
 }
 
 // rankedBarkpark is one fleet row with its computed decision-15 triage fields.
@@ -655,7 +748,10 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// boxes serve 0.2.25.164 … 0.2.25.2628. A number that can never move,
 		// sitting beside one that does, would read as freshness. If it is ever
 		// wanted it ships as `agent_version`, named for what it is.
-		"git_commit":             r.BP.GitCommit,
+		"git_commit": r.BP.GitCommit,
+		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
+		// rate-as-itself — the json render where the three states stay three.
+		"err_5xx":                err5xxRow(r.BP),
 		"name":                   r.BP.Name,
 		"slug":                   r.BP.Slug,
 		"id":                     r.BP.ID,
@@ -696,6 +792,13 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	// carries the reason the number is missing.
 	if r.BP.CommitDistance != nil {
 		row["commit_distance"] = *r.BP.CommitDistance
+	}
+	// Tri-state, same idiom (jpf-w1-queue-age-alarm): the queued-deploy age is
+	// emitted only when the plane reported a queued row. An absent key is
+	// "nothing queued / CP predates the field"; a 0 would tell a script a deploy
+	// was queued THIS second, which nobody measured.
+	if r.BP.QueuedDeployAgeSeconds != nil {
+		row["queued_deploy_age_seconds"] = *r.BP.QueuedDeployAgeSeconds
 	}
 	// The runaway list, tri-state like every honest field above and by the SAME
 	// rule: emit the key only when the box was actually MEASURED. A nil list is
@@ -810,9 +913,16 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	attention, inFlight, healthy := bucketCounts(ranked)
 
 	if out.output == "json" || out.output == "yaml" {
+		// dr-w19-s7 followup: the deploy truth reaches the MACHINE reader too.
+		// The section costs the same two extra control-plane reads the table
+		// pays (census + sites); a script reading the fleet could otherwise
+		// see a page of ok boxes on a day the live rate is 27.9%.
+		fleetDeploy, perBoxDeploy := statusDeployJSON(cfg, ranked)
 		rows := make([]any, 0, len(ranked))
 		for _, r := range ranked {
-			rows = append(rows, rankedBarkparkRow(r))
+			row := rankedBarkparkRow(r)
+			row["deploy"] = perBoxDeploy[r.BP.ID]
+			rows = append(rows, row)
 		}
 		out.emitStructured(map[string]any{
 			"ok":    true,
@@ -823,6 +933,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 				"in-flight": inFlight,
 				"healthy":   healthy,
 			},
+			"deploy":    fleetDeploy,
 			"barkparks": rows,
 		})
 		return exitOK
@@ -1138,15 +1249,104 @@ func statusDeployReadFailure(from, to time.Time, err error) string {
 	return "could not read the deploy census for your team: " + err.Error() + ". Nothing was read: this is NOT a fleet with zero failures."
 }
 
+// statusDeployJSON is the machine half of the deploy section (dr-w19-s7
+// followup): the fleet-level node plus one node per box, every refusal a NAMED
+// state — never an omitted key and never a zero standing in for "we could not
+// say". It reads the SAME census + site list the table reads, folds through
+// the SAME statusDeployFold, and words its refusals with the SAME sentences,
+// so the two outputs cannot tell an operator different stories.
+//
+// States, exhaustively (fleet node): "read" | "census_unreadable" |
+// "sites_unattributable". Per-box node: "rated" | "below_min_sample" |
+// "no_min_sample" | "live_unmetered" | "no_rows" | the two fleet refusals
+// echoed per row (so a row consumer never has to join against the fleet node
+// to learn why its numbers are null). live/volume/pct are null wherever they
+// were not measured — a JSON null is this contract's "could not measure", and
+// it is never collapsed into 0.
+func statusDeployJSON(cfg *Config, ranked []rankedBarkpark) (map[string]any, map[string]map[string]any) {
+	to := statusDeployNow().UTC().Truncate(time.Second)
+	from := to.Add(-statusDeployWindow)
+	window := map[string]any{
+		"from": from.Format(time.RFC3339),
+		"to":   to.Format(time.RFC3339),
+	}
+
+	perBox := make(map[string]map[string]any, len(ranked))
+	refuseAll := func(state, reason string) (map[string]any, map[string]map[string]any) {
+		for _, r := range ranked {
+			perBox[r.BP.ID] = map[string]any{
+				"state": state, "reason": reason,
+				"live": nil, "volume": nil, "pct": nil,
+			}
+		}
+		return map[string]any{"window": window, "state": state, "reason": reason}, perBox
+	}
+
+	census, cerr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
+	if cerr != nil {
+		return refuseAll("census_unreadable", statusDeployReadFailure(from, to, cerr))
+	}
+	sites, serr := cfg.CloudClient().ListSites(cloudCtx())
+	if serr != nil {
+		return refuseAll("sites_unattributable", fmt.Sprintf(
+			"the census was read (%d attempted rows over this window) but the site list was not: %s. Without it a census row cannot be tied to a box.",
+			census.Volume, serr.Error()))
+	}
+
+	boxes, orphanRows, orphanVolume := statusDeployFold(census, sites)
+	var minSampleVal any // null when the control plane sent none — absent is not zero
+	if census.MinSample > 0 {
+		minSampleVal = census.MinSample
+	}
+	fleet := map[string]any{
+		"window":     window,
+		"state":      "read",
+		"min_sample": minSampleVal,
+		"orphans":    map[string]any{"rows": orphanRows, "volume": orphanVolume},
+	}
+	for _, r := range ranked {
+		b := boxes[r.BP.ID]
+		switch {
+		case b == nil || b.Volume == 0:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "no_rows", "live": 0, "volume": 0, "pct": nil,
+				"reason": "no deploy rows in this window — nothing was attempted here, which is not the same as nothing failing",
+			}
+		case !b.LiveKnown:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "live_unmetered", "live": nil, "volume": b.Volume, "pct": nil,
+				"reason": fmt.Sprintf("%d attempted; this control plane sends no per-site `live`, so whether anything shipped is unknown (never read this as zero)", b.Volume),
+			}
+		case census.MinSample <= 0:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "no_min_sample", "live": b.Live, "volume": b.Volume, "pct": nil,
+				"reason": fmt.Sprintf("%d attempted, %d live; this control plane sent no min_sample, so nothing says whether a percentage on this sample is a measurement", b.Volume, b.Live),
+			}
+		case b.Volume < census.MinSample:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "below_min_sample", "live": b.Live, "volume": b.Volume, "pct": nil,
+				"reason": fmt.Sprintf("%d attempted is below the census min_sample of %d (%d live); a percentage on this sample would be noise", b.Volume, census.MinSample, b.Live),
+			}
+		default:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "rated", "live": b.Live, "volume": b.Volume,
+				"pct": float64(b.Live) / float64(b.Volume) * 100,
+			}
+		}
+	}
+	return fleet, perBox
+}
+
 // renderStatusDeploy prints the DEPLOY section: one line per box in the same
 // rank order as the tables above, carrying the box's live rate WITH its
 // denominator over a pinned DAILY window — or the refusal that stopped it being
 // a number.
 //
-// TABLE ONLY, ON PURPOSE. `-o json` emits the decision-15 ranked structure whose
-// keys scripts already consume; this section costs two extra control-plane reads
-// and is a human triage line, so it does not silently change that contract.
-// `bp cloud deployments` is the machine-readable reader of the same census.
+// The MACHINE half of this section is statusDeployJSON above (dr-w19-s7
+// followup): -o json carries the same census fold as ADDITIVE `deploy` nodes
+// (fleet + per row), so the decision-15 keys scripts already consume are
+// untouched and a machine reader no longer sees a fleet of ok boxes on a day
+// the live rate is 27.9%. `bp cloud deployments` remains the deep reader.
 func renderStatusDeploy(out *writer, cfg *Config, ranked []rankedBarkpark) {
 	to := statusDeployNow().UTC().Truncate(time.Second)
 	from := to.Add(-statusDeployWindow)

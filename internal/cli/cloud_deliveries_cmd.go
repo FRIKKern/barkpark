@@ -251,6 +251,7 @@ func deliveriesMessage(sha string, de *cloudclient.DeliveriesError) string {
 func renderDeliveries(out *writer, sha string, page cloudclient.DeliveriesPage) {
 	out.outf("%s", deliveriesHeader(sha))
 	out.outf("%s", deliveriesPopulationLine(page))
+	out.outf("%s", deliveriesFilterLine(sha, page))
 	out.outf("")
 
 	if len(page.Deliveries) == 0 {
@@ -262,7 +263,7 @@ func renderDeliveries(out *writer, sha string, page cloudclient.DeliveriesPage) 
 		if i > 0 {
 			out.outf("")
 		}
-		renderDelivery(out, d)
+		renderDelivery(out, sha, d)
 	}
 }
 
@@ -296,6 +297,45 @@ func deliveriesPopulationLine(page cloudclient.DeliveriesPage) string {
 	return "  scope: " + sanitizeCell(scope) + " — these rows are NOT team-filtered (a platform deploy has no site row, so there is no team to scope by) · " + rows + " on this page"
 }
 
+// deliveriesFilterLine renders the control plane's OWN account of what this
+// page is: the sha it says it filtered on (`page.SHA`, the echoed normalised
+// filter — a pointer precisely so null differs from pinned) and the row window
+// it clamped the read to (`page.Limit`).
+//
+// WHY THE ECHO IS RENDERED AT ALL (dr-w27-bl): before this line the render
+// echoed the OPERATOR'S OWN INPUT back at them — the header prints the typed
+// positional, so a normalisation mismatch, an echo mismatch, or a control plane
+// filtering on a different sha than the one requested was structurally
+// invisible. The echo is the wire's answer to "what did you actually filter
+// on?", and a page whose echo disagrees with the request answers a DIFFERENT
+// question than the one the caller typed — that is said loudly, never dropped.
+//
+// A null echo is NOT an error: an older control plane, or a read the route ran
+// unfiltered, sends no echo — and that renders as NOT ECHOED rather than being
+// silently omitted, so the reader knows the rows below are vouched for only by
+// their own per-row sha lines.
+func deliveriesFilterLine(requested string, page cloudclient.DeliveriesPage) string {
+	limit := "page limit NOT NAMED — this control plane did not say what row window it clamped this read to"
+	if page.Limit > 0 {
+		limit = fmt.Sprintf("page limit %d (the row window the control plane clamped this read to)", page.Limit)
+	}
+	if page.SHA == nil {
+		return "  filter NOT ECHOED — the control plane did not say which sha it filtered on, so the rows below are vouched for\n" +
+			"  only by their own sha lines, never by this read's filter · " + limit
+	}
+	echo := strings.ToLower(strings.TrimSpace(*page.SHA))
+	switch {
+	case echo == requested:
+		return "  filter echoed: the control plane confirms it filtered on sha " + sanitizeCell(echo) + " · " + limit
+	case strings.HasPrefix(echo, requested):
+		return "  filter echoed: the control plane filtered on the full sha " + sanitizeCell(echo) +
+			", extending the prefix you typed · " + limit
+	default:
+		return "  FILTER MISMATCH — you asked for " + shortSha(requested) + " but the control plane says it filtered on " + sanitizeCell(echo) + ",\n" +
+			"  so this page answers a DIFFERENT question than the one you typed · " + limit
+	}
+}
+
 // deliveriesEmptyState is the honest 200-with-nothing render. It is the single
 // most useful thing this record can say about a deploy that went silent, and it
 // is three different sentences away from the ones it must not be confused with.
@@ -310,7 +350,8 @@ func deliveriesEmptyState(sha string) string {
 // renderDelivery is ONE row: the run that delivered it, then the clocks in
 // causal order. Every clock either prints its own measured value or an UNMETERED
 // sentence naming why it is unknown — never 0, never a blank cell.
-func renderDelivery(out *writer, d cloudclient.PlatformDelivery) {
+func renderDelivery(out *writer, requested string, d cloudclient.PlatformDelivery) {
+	out.outf("%s", deliveriesRowShaLine(requested, d))
 	out.outf("%s", deliveriesRunLine(d))
 	if line := deliveriesCarriedLine(d); line != "" {
 		out.outf("%s", line)
@@ -323,6 +364,31 @@ func renderDelivery(out *writer, d cloudclient.PlatformDelivery) {
 	out.outf("  moved      %s", deliveriesTransitionLine(d))
 	out.outf("  first seen %s · recorded %s (when the control plane wrote the row, not a deploy clock)",
 		sanitizeCell(d.FirstSeenAt), sanitizeCell(d.RecordedAt))
+}
+
+// deliveriesRowShaLine opens every delivery block with the RECORD'S OWN sha
+// (`d.SHA`), never the caller's positional. This is the dr-w27-bl fix: until it
+// existed, `bp cloud deliveries <sha>` proved nothing about the rows it printed
+// — the header names the sha the OPERATOR typed, so a control plane answering
+// with a different commit's delivery rendered exactly like the right answer.
+// One sha can honestly carry several rows (two_rows_one_sha), which is exactly
+// why identity must be read off each row rather than assumed from the query.
+//
+// A row whose recorded sha does not match the request is a LOUD per-row
+// mismatch, not a dropped fact. A prefix relation in either direction is
+// consistent (the caller may type a 7-char prefix of the full recorded sha);
+// anything else means this row answers a different question than the one asked.
+func deliveriesRowShaLine(requested string, d cloudclient.PlatformDelivery) string {
+	own := strings.ToLower(strings.TrimSpace(d.SHA))
+	if own == "" {
+		return "sha UNRECORDED — this row carries NO sha of its own; nothing but your query links it to " + shortSha(requested)
+	}
+	line := "sha " + sanitizeCell(own) + " — the record's OWN sha for this row, not your query echoed back"
+	if own != requested && !strings.HasPrefix(own, requested) && !strings.HasPrefix(requested, own) {
+		line += "\n  ROW MISMATCH — this row's recorded sha is NOT the sha you asked for (" + shortSha(requested) + "): the control plane\n" +
+			"             answered with a DIFFERENT commit's delivery. Trust the row's own sha above, never the header's echo of your input."
+	}
+	return line
 }
 
 // deliveriesRunLine names the delivering run and the leg it delivered, and says

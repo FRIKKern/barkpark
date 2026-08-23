@@ -372,6 +372,194 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   def paper_ops(socket, _ops), do: socket
 
+  # ── spd-bl-publish-affordance-triple — the hand path's missing affordances ──
+  #
+  # Three writers, one guard ladder. The sidebar's description input, its
+  # label-add form and the pane header's Publish control all funnel through
+  # `paper_meta_write/2` below, which mounts the SAME three refusals — in the
+  # SAME order — as `paper_pane_op/2` and `paper_ops/2`: principal first
+  # (write_denied?), then grant containment, then the read-only pane. A sidebar
+  # affordance must never write where a canvas op could not.
+  #
+  # DRAFT-ONLY BY CONSTRUCTION. Every one of these affordances exists to move a
+  # hand-created draft toward (and through) the publish wall, and only a
+  # genuine `drafts.<slug>` row can take these writes: `Writer.upsert_document`
+  # forces `doc_id = DraftId.draft_id(raw_id)`, so pointing it at an in-place-
+  # published paper would silently mint a drafts twin beside the published row
+  # instead of editing it. The components render the controls only for
+  # `status == "draft"`; the guard here is the server-side floor for a forged
+  # event.
+
+  @doc false
+  def paper_meta_write(socket, fun) do
+    paper = socket.assigns[:paper_doc]
+    slug = paper && paper.doc_id
+
+    cond do
+      write_denied?(socket) ->
+        refuse_write_denied(socket)
+
+      grant_target_denied?(socket, doc_field(paper, :type), slug) ->
+        refuse_outside_grant(socket)
+
+      read_only_pane?(socket) ->
+        refuse_read_only_pane(socket)
+
+      is_nil(slug) ->
+        socket
+
+      doc_field(paper, :status) != "draft" ->
+        socket
+
+      true ->
+        fun.(socket, paper)
+    end
+  end
+
+  @doc false
+  # Persist the sidebar's description field into `content["description"]` — the
+  # first metadata the publish wall demands (LabelSpine fires on it before
+  # anything else, and NO amount of body authoring moves it). Rev-fenced so a
+  # concurrent canvas save is surfaced, never silently clobbered.
+  def sidebar_description_change(socket, value) when is_binary(value) do
+    paper_meta_write(socket, fn socket, paper ->
+      content = Map.put(doc_field(paper, :content) || %{}, "description", value)
+      persist_paper_meta(socket, paper, content)
+    end)
+  end
+
+  @doc false
+  # Append ONE complete weighted-tag entry — tag, strength 1..100, rationale —
+  # to `content["tags"]`. The three field floors mirror the publish wall's own
+  # entry rules (LabelSpine.check_entry) so a refused add says NOW, in the same
+  # plain words, what publish would have said later; the wall itself stays the
+  # sole authority (count, distinct strengths, duplicates, registry) and is
+  # untouched per charter D229/D230.
+  def sidebar_label_add(socket, params) when is_map(params) do
+    paper_meta_write(socket, fn socket, paper ->
+      tag = String.trim(to_string(params["tag"] || ""))
+      rationale = String.trim(to_string(params["rationale"] || ""))
+
+      strength =
+        case Integer.parse(to_string(params["strength"] || "")) do
+          {n, ""} -> n
+          _ -> nil
+        end
+
+      cond do
+        tag == "" ->
+          put_flash(socket, :error, "A label needs a tag name.")
+
+        not (is_integer(strength) and strength in 1..100) ->
+          put_flash(socket, :error, "A label's strength must be a whole number from 1 to 100.")
+
+        String.length(rationale) < 20 ->
+          put_flash(
+            socket,
+            :error,
+            "A label needs a rationale of at least 20 characters — say why this tag fits."
+          )
+
+        true ->
+          content = doc_field(paper, :content) || %{}
+          existing = if is_list(content["tags"]), do: content["tags"], else: []
+          entry = %{"tag" => tag, "strength" => strength, "rationale" => rationale}
+          persist_paper_meta(socket, paper, Map.put(content, "tags", existing ++ [entry]))
+      end
+    end)
+  end
+
+  @doc false
+  # The paper pane's Publish action — the control the hand path never had. The
+  # wall (`AuthoringWall.enforce` inside `Content.publish_document/4`) stays
+  # UNCHANGED; this seam only gives a human the door and translates each
+  # refusal into the same plain language `Shared.do_action/3` already speaks
+  # for the form editor. A `{:halted, reason}` carries the Bulldocs hollow-body
+  # copy verbatim ("…has a title but no content yet — add at least one body
+  # block"), which is the block-0-heading skeleton trap surfaced honestly.
+  def paper_publish(socket) do
+    paper_meta_write(socket, fn socket, paper ->
+      type = doc_field(paper, :type) || Content.paper_type()
+      pid = Content.published_id(paper.doc_id)
+
+      Barkpark.Content.Warnings.reset()
+
+      case Content.publish_document(pid, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+        {:ok, _published} ->
+          # The draft row is gone; re-open the pane on the PUBLISHED identity
+          # via the reserved ["open", type, id] path (the open_backlink route —
+          # no structure lookup, no remount).
+          socket
+          |> put_flash(
+            :info,
+            Shared.with_advisories("Published", Barkpark.Content.Warnings.drain())
+          )
+          |> push_patch(
+            to: Shared.studio_path(socket, ["open", type, pid], socket.assigns.dataset)
+          )
+
+        {:error, {:halted, reason}} ->
+          put_flash(socket, :error, "Publish blocked: #{reason}")
+
+        {:error, {:label_spine, details}} ->
+          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(details)}")
+
+        {:error, {:unknown_tag, payload}} ->
+          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+
+        {:error, {:duplicate_of, payload}} ->
+          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+
+        {:error, {:dedup_unavailable, _}} ->
+          put_flash(
+            socket,
+            :error,
+            "Publish blocked: the duplicate check is unavailable right now — try again in a moment."
+          )
+
+        {:error, {:invalid_epic_paper_quality, payload}} ->
+          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+
+        {:error, _} ->
+          put_flash(socket, :error, "Publish failed")
+      end
+    end)
+  end
+
+  # One writer for both sidebar metadata fields: whole-content upsert on the
+  # draft row, rev-fenced against a concurrent canvas save (the fence surfaces
+  # the race as a flash instead of silently reverting the newer blocks), then
+  # the standard re-sync so chips/inputs re-render off the persisted truth.
+  defp persist_paper_meta(socket, paper, content) do
+    attrs = %{
+      "doc_id" => doc_field(paper, :doc_id),
+      "title" => doc_field(paper, :title),
+      "content" => content
+    }
+
+    opts = Shared.hook_opts(socket) ++ [if_rev: doc_field(paper, :rev)]
+    type = doc_field(paper, :type) || Content.paper_type()
+
+    case Content.upsert_document(type, attrs, socket.assigns.dataset, opts) do
+      {:ok, _doc} ->
+        sync_paper_edit_doc(socket)
+
+      {:error, {:rev_mismatch, _}} ->
+        socket
+        |> sync_paper_edit_doc()
+        |> put_flash(
+          :error,
+          "The paper changed while you were editing — that metadata change was not saved; try again."
+        )
+
+      {:error, {:halted, reason}} ->
+        put_flash(socket, :error, "Save cancelled: #{reason}")
+
+      {:error, _} ->
+        put_flash(socket, :error, "Save failed")
+    end
+  end
+
   # spd-w19 / D258 — THE WAY OUT HAS TO GET YOU OUT.
   #
   # After an accepted single op the pane used to re-assign `paper_doc` and

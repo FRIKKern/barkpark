@@ -85,6 +85,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # hypothetical unthreaded call site rendering the flat grammar, which
   # `doc_list_href/3` at the bottom of this module now spells routably too.
   attr(:scope_prefix, :string, default: "")
+  # spd-bl-focus-after-select — threaded through to document_header.
+  attr(:focus_on_mount, :boolean, default: false)
 
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -144,6 +146,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     html_backed_body =
       is_binary(get_in((assigns.paper_doc && assigns.paper_doc.content) || %{}, ["body_html"]))
 
+    # spd-bl-publish-affordance-triple — whether the open document is a genuine
+    # `drafts.<slug>` row. Only that shape can take `Content.publish_document/4`
+    # (which REQUIRES a drafts twin), so the Publish control below renders for
+    # it and ONLY for it — absent on an in-place-published paper, where the
+    # action could never succeed.
+    paper_draft? = (assigns.paper_doc && Map.get(assigns.paper_doc, :status)) == "draft"
+
     assigns =
       assign(assigns,
         slug: slug,
@@ -153,16 +162,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         edit_blocks: edit_blocks,
         canvas_on: canvas_on,
         show_editor: show_editor,
+        paper_draft?: paper_draft?,
         inspector_destination: inspector_destination?
       )
 
     ~H"""
     <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
-      <.document_header dataset={@dataset} title={@title}>
+      <.document_header dataset={@dataset} title={@title} focus_on_mount={@focus_on_mount}>
         <:status_pill>
           <span class="badge badge-published">{@doc_type}</span>
         </:status_pill>
         <:actions>
+          <%!-- spd-bl-publish-affordance-triple — the hand path's missing
+                Publish. The doc-actions Publish CTA reaches the DOM only
+                through the studio_editor_shell branch papers never take, so
+                this pane never had one. Draft-only (see paper_draft? above);
+                the handler re-guards server-side and the publish wall itself
+                is untouched (charter D229/D230). --%>
+          <button
+            :if={@slug && @paper_draft?}
+            type="button"
+            class="btn btn-primary btn-sm"
+            phx-click="paper-publish"
+            aria-label="Publish"
+            data-test-id="paper-publish"
+          >
+            Publish
+          </button>
           <%!-- View ⇄ Edit toggle — the flag-OFF OPT-OUT path ONLY. With the
                 canvas on (the D7/D9 default) there are no modes: the editor is
                 always open, so this toggle is not rendered (rule 5). It survives
@@ -522,10 +548,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     # title expression in `studio_paper_view/1` above — same fallback ladder.
     destination_title = (paper && Map.get(paper, :title)) || slug || "Paper"
 
+    # spd-bl-publish-affordance-triple — the metadata affordances below render
+    # only for a genuine drafts row (same predicate as the pane's Publish
+    # control): the whole-content meta-write path can only land on a draft.
+    draft? = status == "draft"
+
+    description =
+      case paper && Map.get(paper, :content) do
+        %{"description" => d} when is_binary(d) -> d
+        _ -> ""
+      end
+
     assigns =
       assign(assigns,
         status: status,
         slug: slug,
+        draft?: draft?,
+        description: description,
         destination: destination?,
         destination_title: destination_title,
         feedback: feedback,
@@ -658,18 +697,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       </div>
 
       <div :if={@panel_open} id="bp-doc-sidebar-body" class="bp-doc-sidebar__body">
-        <%!-- Publish is READ-ONLY state, deliberately: papers publish IN PLACE
-              (`Content.upsert_paper/1` always writes `doc_id = slug`,
-              `status: "published"` — there is no drafts-twin row), while the
-              doc-level `publish` / `unpublish` events ride the twin-row model
-              (`Handlers.Doc` → `Content.publish_document/4`, which REQUIRES a
-              `drafts.<slug>` row, and `unpublish_document/4`, which DELETES the
-              published row and strands a `drafts.<slug>` twin that
-              `Content.get_paper/3` — exact-id, used by pane_builder AND the
-              public reader — can never resolve again). Wiring those buttons
-              here would make Publish always fail and Unpublish brick the paper.
-              A paper-aware publish action lands with the papers draft model
-              (t5/t7 territory), not this slice. --%>
+        <%!-- Publish state — read-only for an IN-PLACE-published paper only
+              (spd-bl-publish-affordance-triple corrected the old rationale
+              here, which claimed it for every paper): `Content.upsert_paper/1`
+              always writes `doc_id = slug`, `status: "published"` — no
+              drafts-twin row — so the doc-level `publish` / `unpublish`
+              events (which REQUIRE a `drafts.<slug>` row / would DELETE the
+              published row and strand an unresolvable twin) can never apply
+              to THAT shape. But every HAND-created paper is the opposite
+              shape: `Content.create_document` forces
+              `doc_id = DraftId.draft_id(raw_id)` and coerces status to
+              "draft" — a genuine `drafts.<slug>` row, exactly what
+              `Content.publish_document/4` requires. For those the pane header
+              carries the Publish control, and this section + Labels below
+              carry the description / weighted-tag affordances that satisfy
+              the publish wall. The wall itself is UNTOUCHED (charter
+              D229/D230). --%>
         <.sidebar_section
           key="publish"
           title="Publish"
@@ -687,6 +730,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               {PaperCanvas.visibility_label(@status)}
             </span>
           </div>
+          <%!-- spd-bl-publish-affordance-triple — the description the publish
+                wall demands FIRST (LabelSpine fires on it before anything
+                else, and no amount of body authoring moves it). Draft-only:
+                the meta-write path can only land on a drafts row. --%>
+          <form
+            :if={@draft?}
+            phx-change="sidebar-description-change"
+            class="bp-doc-field bp-doc-field--stacked"
+          >
+            <label for="bp-doc-desc-input" class="bp-doc-field__label">Description</label>
+            <textarea
+              id="bp-doc-desc-input"
+              name="value"
+              class="form-input"
+              rows="3"
+              phx-debounce="400"
+              spellcheck="true"
+              aria-describedby="bp-doc-desc-hint"
+              data-test-id="sidebar-description-input"
+            >{@description}</textarea>
+            <p id="bp-doc-desc-hint" class="bp-doc-empty">
+              Publishing needs a description of at least 20 characters.
+            </p>
+          </form>
         </.sidebar_section>
 
         <.sidebar_section
@@ -771,6 +838,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               </li>
             </ul>
           <% end %>
+          <%!-- spd-bl-publish-affordance-triple — the add affordance the
+                read-only chip list never had: one complete weighted-tag entry
+                (tag, strength 1–100, rationale ≥ 20 chars — the publish
+                wall's own per-entry floors, surfaced at add time in the same
+                plain words). Draft-only, like the description input above. --%>
+          <form
+            :if={@draft?}
+            phx-submit="sidebar-label-add"
+            class="bp-doc-field bp-doc-field--stacked"
+            data-test-id="sidebar-label-add"
+          >
+            <input
+              type="text"
+              name="tag"
+              required
+              class="form-input"
+              placeholder="tag"
+              aria-label="Tag name"
+              data-test-id="sidebar-label-add-tag"
+            />
+            <input
+              type="number"
+              name="strength"
+              required
+              min="1"
+              max="100"
+              class="form-input"
+              placeholder="strength 1–100"
+              aria-label="Tag strength, 1 to 100"
+              data-test-id="sidebar-label-add-strength"
+            />
+            <input
+              type="text"
+              name="rationale"
+              required
+              class="form-input"
+              placeholder="why this tag fits (at least 20 characters)"
+              aria-label="Tag rationale"
+              data-test-id="sidebar-label-add-rationale"
+            />
+            <button type="submit" class="btn btn-ghost btn-sm" data-test-id="sidebar-label-add-submit">
+              Add label
+            </button>
+          </form>
         </.sidebar_section>
 
         <%!-- Relations = OUTBOUND references (this paper → other docs, from its
@@ -1130,12 +1241,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <%!-- Post-type Share-access entry (airdrop-grants): mints a grant
                     scoped to THIS post type. Gated on holding shareable access,
                     not admin — the sheet's picker offers only held caps. --%>
+              <%!-- Icon-only: title= is mouse-hover only in several AT/browser
+                    pairs, so without aria-label the accessible name is the
+                    empty string (the defect PR #7567 fixed for the "+"). --%>
               <button
                 :if={@airdrop_can_share?}
                 class="pane-add-btn"
                 phx-click="airdrop-open"
                 phx-value-type={pane.type_name}
                 title={"Share access to #{pane.type_name}"}
+                aria-label={"Share access to #{pane.type_name}"}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
               <%!-- Access panel entry (airdrop-grants): review + revoke scoped
@@ -1145,6 +1260,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="access-open"
                 title="Review scoped access grants"
+                aria-label="Review scoped access grants"
                 data-test-id="access-open-type"
               ><.icon name="clock" size={14} /></button>
               <%!-- Icon-only: without an explicit label its accessible name
@@ -1160,15 +1276,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </:header_actions>
 
           <%= if Map.get(pane, :desk_groups, []) != [] do %>
-            <div class="bp-desk-filter" role="tablist" aria-label="Desk filters">
+            <%!-- spd-w18-desk-chips-answer / charter D244 — the chips are LINKS,
+                  and they say so. The old markup claimed role="tablist"/"tab"
+                  with aria-selected={active}: no aria-controls, no tabpanel
+                  anywhere in the tree, no roving tabindex — and HEEx rendered
+                  the boolean as a BARE VALUELESS aria-selected when true and
+                  omitted it when false, neither a valid ARIA boolean. Worse,
+                  role="tab" on an <a href> overwrites the link role, so AT
+                  stopped announcing a control that navigates (D79: an ARIA
+                  state that never changes truthfully is worse than absence).
+                  Resolution per D244: DROP the fake tab semantics — a plain
+                  group of links, every chip Tab-reachable (N tab stops is the
+                  correct link grammar; a one-tab-stop roving pattern belongs
+                  to the tablist D244 rejected), selection spoken as
+                  aria-current="true" exactly like the sibling pane rows (the
+                  vocabulary is written down once, in StudioComponents.Panes'
+                  moduledoc). --%>
+            <div class="bp-desk-filter" role="group" aria-label="Desk filters">
               <%= for grp <- pane.desk_groups do %>
                 <% gname = Map.get(grp, "name") || Map.get(grp, :name) %>
                 <% gtitle = Map.get(grp, "title") || Map.get(grp, :title) || gname %>
                 <% active = to_string(gname) == to_string(pane[:active_desk] || "") %>
                 <a
                   class={"bp-desk-chip " <> if(active, do: "is-active", else: "")}
-                  role="tab"
-                  aria-selected={active}
+                  aria-current={active && "true"}
                   href={Paths.desk_chip_href(@scope_prefix, @nav_path, @dataset, gname)}
                   phx-click="select-desk"
                   phx-value-desk={gname}
@@ -1230,10 +1361,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   </.pane_section_header>
 
                 <% :plugin_link -> %>
+                  <%!-- A real anchor ON PURPOSE (spd-bl-plugin-link-aria-current):
+                        it navigates by plain href — no phx-click — and the bare
+                        .pane-item class targeting keeps it in the rows' visual
+                        rhythm (see the comment in root.html.heex). Do NOT
+                        convert to a button. Selection: aria-current="page" when
+                        the URL names this link as the destination — the "page"
+                        token because an anchor's target is a page, where a
+                        sibling in-desk row speaks aria-current="true". The full
+                        selection vocabulary is documented ONCE, in
+                        `StudioComponents.Panes`' moduledoc. --%>
                   <a
                     id={"plugin-link-#{item.id}"}
                     href={item.href}
                     class="pane-item nav-plugin-entry"
+                    aria-current={item.id == pane[:selected] && "page"}
                     data-test-id="nav-plugin-entry"
                   >
                     <%= if item.icon do %>
@@ -1312,6 +1454,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view
+          focus_on_mount={@focus_doc_on_open}
           paper_doc={@paper_doc}
           paper_rev={@paper_rev}
           paper_html={@paper_html}
@@ -1466,7 +1609,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <% beta_ok = @editor_doc != nil and @editor_blocks != [] %>
         <%= if beta_ok and @editor_mode == :beta do %>
           <div class="editor-panel" data-role="content" data-test-id="studio-doc-beta-editor">
-            <.document_header dataset={@dataset} title={@editor_doc.title || "Untitled"}>
+            <.document_header
+              dataset={@dataset}
+              title={@editor_doc.title || "Untitled"}
+              focus_on_mount={@focus_doc_on_open}
+            >
               <:status_pill>
                 <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
                   <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
@@ -1494,6 +1641,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </div>
         <% else %>
           <.studio_editor_shell
+            focus_on_mount={@focus_doc_on_open}
             editor_doc={@editor_doc}
             editor_schema={@editor_schema}
             editor_type={@editor_type}

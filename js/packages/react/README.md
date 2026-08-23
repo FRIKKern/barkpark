@@ -61,3 +61,72 @@ import { BarkparkReference } from '@barkpark/react'
 ```
 
 PortableText and BarkparkImage are server-component friendly (exported under the `react-server` condition). BarkparkReference uses client-only React APIs (`createContext`, `useContext`) and must be imported from a `'use client'` component — pair with `@barkpark/nextjs` for App Router integration.
+
+## Hydrating media & tabs (`@barkpark/react/client`)
+
+`PortableDoc`/`renderPortableDocument` (see below) emit two block families as **inert, server-rendered mount points** — a Mermaid `<pre>` with the raw diagram source, an asciicast `<div>` with a poster-frame attribute, and tab strips with every panel visible — so the page is complete and readable with zero client JS. `hydratePortableDoc(root)` from `@barkpark/react/client` is the one framework-free, lazy, idempotent hook that turns those into live diagrams/players/tab strips. It has no React dependency — call it from a Next `useEffect`, an Astro `<script>`, or anywhere else the mount points are live.
+
+**Server/client boundary:** `renderPortableDocument`/`<PortableDoc>` are pure string/RSC-safe — no ref, no client API, safe in a Server Component. Hydration needs a DOM `ref` (or `document.getElementById`), which is client-only, so it is the *only* piece that needs a client boundary. Keep that boundary as small as the two recipes below — everything else (data fetching, layout) stays server work.
+
+**Next.js** (mirrors the shipped `create-barkpark-app` blog-starter's `app/posts/[slug]/portable-doc-surface.tsx`, type-checked against these exact exports in [`tests/docs-examples/nextjs-hydration-recipe.tsx`](tests/docs-examples/nextjs-hydration-recipe.tsx)):
+
+```tsx
+'use client'
+import { useEffect, useRef } from 'react'
+import { renderPortableDocument, type Block } from '@barkpark/react'
+import { hydratePortableDoc } from '@barkpark/react/client'
+
+export function PortableDocSurface({ blocks, className }: { blocks: Block[]; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (ref.current) void hydratePortableDoc(ref.current).catch(() => {})
+  }, [blocks]) // re-hydrate only when the content itself changes
+  const cls = className ? `bp-paper-surface ${className}` : 'bp-paper-surface'
+  return <div ref={ref} className={cls} dangerouslySetInnerHTML={{ __html: renderPortableDocument(blocks) }} />
+}
+// app/posts/[slug]/page.tsx (a Server Component): const blocks = await fetchBlocks()
+// return <PortableDocSurface blocks={blocks} />
+```
+
+**Astro** (a plain `<script>` island — no framework, no hydration directive; type-checked in [`tests/docs-examples/astro-hydration-recipe.ts`](tests/docs-examples/astro-hydration-recipe.ts)):
+
+```astro
+---
+import { renderPortableDocument } from '@barkpark/react/portable-doc'
+const surfaceHtml = renderPortableDocument(post.content)
+---
+<div id="post-surface" class="bp-paper-surface" set:html={surfaceHtml} />
+<script>
+  import { hydratePortableDoc } from '@barkpark/react/client'
+  const root = document.getElementById('post-surface')
+  if (root) void hydratePortableDoc(root).catch(() => {})
+</script>
+```
+
+**Avoiding double hydration:** `hydratePortableDoc` stamps every mount point it touches (`data-processed`/`data-asciicast-done`/`data-hydrated`), so a repeat call — React Strict Mode's dev double-invoke, an Astro View Transitions re-run, a parent re-render — is a no-op on already-hydrated nodes.
+
+**Error behavior:** `.catch(() => {})` is deliberate, not an oversight — the pre-hydration server markup is already valid, readable content, so a failed dynamic `import('mermaid')`/`import('asciinema-player')` (offline, CDN hiccup, ad-blocker) must degrade to that markup, never to a broken page.
+
+**Cleanup:** none needed. Hydration only mutates the DOM subtree it scans; it registers no listener, timer, or subscription outside it, so there is nothing to unregister on unmount — removing the node removes everything hydration attached.
+
+**CSP:** `mermaid` needs `'unsafe-eval'` in `script-src` (its layout engine evaluates generated code; this is documented by Mermaid itself, not specific to this integration) — there is no CSP-compatible mode that avoids it today. Both `mermaid` and `asciinema-player` here are loaded via `import()` — bundled by your app's own bundler (self-hosted, same-origin), the same posture as the rest of your first-party JS — so no extra `script-src` **host** allowlisting is needed. That only changes if you swap either library for a `<script src="https://cdn.jsdelivr.net/...">` tag instead of the npm package: then `script-src` also needs that CDN host.
+
+## Subpath exports (tree-shaking) & compatibility policy
+
+The two rendering surfaces ship as dedicated subpaths so an app that uses one
+never pays for the other:
+
+```ts
+import { PortableText } from '@barkpark/react/portable-text' // legacy Sanity-shaped shim (~1.3 KB gz)
+import { PortableDoc, renderPortableDocument } from '@barkpark/react/portable-doc' // canonical renderer, shim-free
+```
+
+**Compatibility policy:** the root barrel (`@barkpark/react`) keeps exporting
+BOTH surfaces, unchanged, indefinitely — existing imports never break and never
+need migrating. The subpaths are additive opt-in. (Since the entry split, even
+the root-barrel `import { PortableText }` tree-shakes free of the renderer
+chunk in bundlers that honor ESM tree-shaking; the subpaths make the boundary
+explicit and are the guaranteed form.) `@barkpark/react/portable-doc` is
+hook-free and safe in React Server Components; `@barkpark/react/portable-text`
+is a client component. Guarded by `tests/portable-subpath-split.test.ts` and
+the `.size-limit.json` budgets.

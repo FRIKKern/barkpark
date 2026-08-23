@@ -195,6 +195,14 @@ type Barkpark struct {
 	// beaten, or an agent that predates the vitals beat). Neither may ever be
 	// read as "measured, and it is fine".
 	Pressure *Pressure `json:"pressure"`
+
+	// QueuedDeployAgeSeconds is the age of the OLDEST `queued` container-site
+	// deployment on this box (jpf-w1-queue-age-alarm, charter D6) — the raw
+	// number `barkpark_json` serves so the CLIENT can own the stalled
+	// threshold. A POINTER for the same honesty rule as Pressure: nil is both
+	// "nothing queued" and "this CP predates the field", and neither may ever
+	// read as stalled — the alarm arms only on a real number.
+	QueuedDeployAgeSeconds *float64 `json:"queued_deploy_age_seconds"`
 }
 
 // Pressure is the host-pressure block a fleet row carries (`pressure` in
@@ -1657,10 +1665,7 @@ func (c *Client) ListDeployments(ctx context.Context, siteID string, q Deploymen
 	if !ok(status) {
 		return DeploymentPage{}, cloudError(status, body)
 	}
-	var out struct {
-		Deployments []Deployment `json:"deployments"`
-		NextCursor  *string      `json:"next_cursor"`
-	}
+	var out deploymentsEnvelope
 	if err := json.Unmarshal(body, &out); err != nil {
 		return DeploymentPage{}, fmt.Errorf("decode deployments response: %w", err)
 	}
@@ -1669,6 +1674,61 @@ func (c *Client) ListDeployments(ctx context.Context, siteID string, q Deploymen
 		page.NextCursor = *out.NextCursor
 	}
 	return page, nil
+}
+
+// deploymentsEnvelope is the NAMED wire shape of GET /v1/sites/:id/deployments
+// (dr-w14-s6 followup: this decode used to be an anonymous struct, which is how
+// an envelope key can ship with no reader and nobody's grep can say so).
+// `next_cursor` is a POINTER because the server sends null on the last window —
+// "no page behind this one" — and that must stay distinguishable from a cursor
+// the decode dropped.
+//
+// `publish_clock` is deliberately ABSENT, and the absence is the record: the
+// task that filed this struct predates dr-w26-s6, which DELETED that node from
+// this route as the reader-less-instrument census's first deletion (thirteen
+// waves, zero readers — see reader_less_instrument_census_test.exs, key
+// "publish_clock", disposition :deleted). Declaring a field for a key the wire
+// no longer carries would mint a PHANTOM — the payload census's own name for a
+// decoder field that decodes to zero forever — which is the same defect class
+// this slice exists to close, from the other side.
+type deploymentsEnvelope struct {
+	Deployments []Deployment `json:"deployments"`
+	NextCursor  *string      `json:"next_cursor"`
+}
+
+// ListDeploymentsAll walks the site's deployment ledger PAST the route's page
+// cap (default 100, max 200 per window) by following next_cursor until the
+// server stops sending one — the walk the cursor was built for in W1 S2 and
+// that no Go caller performed until this method (a decoded-but-unused cursor
+// is the same silence as an undecoded one).
+//
+// maxRows bounds the walk (a busy site accrues one row per push; an unbounded
+// walk over years of ledger is a mistake nobody should make by default);
+// maxRows <= 0 means no bound. A repeated cursor — a server bug that would
+// otherwise loop this walk forever — is an error, never an infinite request
+// stream.
+func (c *Client) ListDeploymentsAll(ctx context.Context, siteID string, pageLimit, maxRows int) ([]Deployment, error) {
+	var all []Deployment
+	seen := map[string]bool{}
+	before := ""
+	for {
+		page, err := c.ListDeployments(ctx, siteID, DeploymentQuery{Limit: pageLimit, Before: before})
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page.Deployments...)
+		if maxRows > 0 && len(all) >= maxRows {
+			return all[:maxRows], nil
+		}
+		if page.NextCursor == "" || len(page.Deployments) == 0 {
+			return all, nil
+		}
+		if seen[page.NextCursor] {
+			return nil, fmt.Errorf("deployments walk: server repeated cursor %q — refusing to loop", page.NextCursor)
+		}
+		seen[page.NextCursor] = true
+		before = page.NextCursor
+	}
 }
 
 // SetEnv REPLACES the encrypted env blob via POST /v1/sites/:id/env (Bearer).

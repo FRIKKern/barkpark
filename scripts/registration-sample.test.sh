@@ -316,6 +316,38 @@ if has "$libbody" 'refusing to generate'; then no "the shared primitive inherite
 if has "$(sed -e '/^#/d' "$SCRIPT")" 'scripts/lib/check-runs.sh'; then ok "the sampler sources the shared primitive"; else no "the sampler does not source scripts/lib/check-runs.sh"; fi
 echo
 
+# The primitive must OWN its exit status. As a bare pipeline it returned
+# SORT's rc, so a payload that broke jq mid-stream (e.g. {"check_runs":[1,…]})
+# read as rc 0 with EMPTY rows — the silent empty set its header forbids — for
+# any caller that did not set pipefail. These cases run in a FRESH bash with
+# DEFAULT options, so a pass can never be borrowed from this harness's own
+# `set -o pipefail`.
+LIBFIX="$TMPROOT/libfix"; mkdir -p "$LIBFIX"
+printf '%s\n' '{"check_runs":[1,{"name":"Elixir gate","conclusion":"success","status":"completed","started_at":"2026-08-23T00:00:00Z"}]}' > "$LIBFIX/checkruns-aaa.json"
+printf '%s\n' '{"check_runs":[null]}' > "$LIBFIX/checkruns-bbb.json"
+printf '%s\n' '{"check_runs":[{"conclusion":"success","status":"completed"}]}' > "$LIBFIX/checkruns-ccc.json"
+printf '%s\n' '{"check_runs":[]}' > "$LIBFIX/checkruns-ddd.json"
+run_rows() { # <sha> — fresh bash, default options, stdout only
+  bash -c '. "$1" && check_runs_rows repo "$2" "$3"' _ "$lib" "$1" "$LIBFIX"
+}
+set +e
+out="$(run_rows aaa 2>/dev/null)"; rc=$?
+set -e
+if [ "$rc" -eq 2 ] && [ -z "$out" ]; then ok "a non-object element returns 2 with nothing on stdout under DEFAULT shell options"; else no "non-object element: rc=$rc out='$out' — the silent empty set is back"; fi
+set +e
+out="$(run_rows bbb 2>/dev/null)"; rc=$?
+set -e
+if [ "$rc" -eq 2 ] && [ -z "$out" ]; then ok "a null element returns 2, never a phantom row"; else no "null element: rc=$rc out='$out'"; fi
+set +e
+out="$(run_rows ccc 2>/dev/null)"; rc=$?
+set -e
+if [ "$rc" -eq 2 ] && [ -z "$out" ]; then ok "a nameless run returns 2, never an empty-name row"; else no "nameless run: rc=$rc out='$out'"; fi
+set +e
+out="$(run_rows ddd 2>/dev/null)"; rc=$?
+set -e
+if [ "$rc" -eq 0 ] && [ -z "$out" ]; then ok "an EMPTY feed still returns 0 rows and exit 0 — the caller rules (the deliberate divergence holds)"; else no "empty feed: rc=$rc out='$out' — the deliberate divergence broke"; fi
+echo
+
 # ── usage guards ─────────────────────────────────────────────────────────────
 echo "usage — the instrument fails loudly rather than measuring nothing"
 set +e

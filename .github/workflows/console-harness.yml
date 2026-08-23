@@ -1189,7 +1189,7 @@ jobs:
               ;;
             2)
               verdict REFUSED
-              echo "::error title=Overflow guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about any screen: nothing here says the console is clean and nothing here says it is broken. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the guard's port, a bring-up that outran SERVER_CAP, or a defect id the guard has no coverage for. A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
+              echo "::error title=Overflow guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT, COVERAGE or INSTRUMENT-INTEGRITY fault, not a layout defect. NO claim is being made about any screen: nothing here says the console is clean and nothing here says it is broken. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the guard's port, a bring-up that outran SERVER_CAP, a defect id the guard has no coverage for, or the guard's own bytes corrupted by a keep-both merge (okLine called with more than one argument — a conflict resolved inside its argument list parses as valid JS while silently swallowing a leg's clean claim; the log names the call). A bring-up refusal is retried a bounded number of times in a fresh profile before this fires — every attempt's Chrome stderr is in the log."
               exit 1
               ;;
             1)

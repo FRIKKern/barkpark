@@ -7,7 +7,7 @@
 // never author-controlled inline colour. Empty/absent data → the honest
 // `bp-dataviz bp-dataviz--empty` box (the browser twin of pdrender's placeholder).
 
-import { type Block, escapeHtml, isMap } from '../inline'
+import { type Block, escapeHtml, isMap, safeUrl } from '../inline'
 
 type Emit = (block: Block) => string
 
@@ -196,7 +196,13 @@ function kildeHtml(refs: SourceRef[]): string {
       const inner =
         r.href === null
           ? escapeHtml(r.label)
-          : `<a href="${escapeHtml(r.href)}">${escapeHtml(r.label)}</a>`
+          : // safeUrl is defense-in-depth over the parseSourceRef https-only gate:
+            // today href is non-null ONLY for `https://…` refs, for which safeUrl
+            // returns the same attr-escaped bytes escapeHtml did (goldens
+            // byte-identical). If that parse-gate is ever loosened, the canonical
+            // scheme-allowlister still neutralizes javascript:/data:/protocol-
+            // relative values to `#` at the sink.
+            `<a href="${safeUrl(r.href)}">${escapeHtml(r.label)}</a>`
       return `<span class="bp-kilde__ref">${inner}</span>`
     })
     .join('')

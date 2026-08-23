@@ -1130,7 +1130,9 @@ defmodule BarkparkCloud.DeployLedgerTest do
     "runner_start_failed" =>
       "a cause the box DID author (its runner would not spawn), but it arrives on a 500 at the poll phase and folds into BOX_500 with the authorless crash. Naming it in that label would put a specific accusation on rows that mostly are not it. Silent, not wrong — and now written down rather than accidental.",
     "graph_200" =>
-      "the corpus read SUCCEEDED and carried nothing anchorable — ZERO rows all-time (D244), and the only graph status that is not an upstream failure at all. D8 governs: it rises in UNCLASSIFIED rather than being given a name on speculation, and this entry is the decision that says so out loud."
+      "the corpus read SUCCEEDED and carried nothing anchorable — ZERO rows all-time (D244), and the only graph status that is not an upstream failure at all. D8 governs: it rises in UNCLASSIFIED rather than being given a name on speculation, and this entry is the decision that says so out loud.",
+    "no_previous" =>
+      "a ROLLBACK-verb refusal, not a delivery cause. cch-w62-bl taught the producer test the box's nested no_previous exit (Sites.Deploy.rollback promotes it to a typed wire code for the console), which put the word into this scrape — but classify/2 is fed delivery attempts only, and a site rollback refusal never becomes a ledger row, so no class here can ever earn it. The console's own reader (siteRollbackFailure) is where the word gets its sentence."
   }
 
   # What it takes for a LABEL to name a cause: the code word itself, or a
@@ -1158,7 +1160,10 @@ defmodule BarkparkCloud.DeployLedgerTest do
     "graph_0" => ~w(dns tls),
     "graph_403" => ~w(forbidden judged),
     "graph_200" => ~w(anchor anchorable),
-    "no_corpus_status_marker" => ~w(unrecorded)
+    "no_corpus_status_marker" => ~w(unrecorded),
+    # A rollback-verb word (see @deliberately_unnamed) — the claim token exists
+    # so the scrape stays total, not because any delivery label may use it.
+    "no_previous" => ~w(previous)
   }
 
   # The producer's own test file, read at runtime. See (a).
@@ -1340,7 +1345,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
     test "@deliberately_unnamed carries a REASON per entry, and emptying it reds A" do
       assert Map.keys(@deliberately_unnamed) |> Enum.sort() ==
-               ["graph_200", "internal_error", "runner_start_failed"]
+               ["graph_200", "internal_error", "no_previous", "runner_start_failed"]
 
       for {word, reason} <- @deliberately_unnamed do
         assert is_binary(reason) and String.length(reason) > 40,
@@ -1352,12 +1357,14 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert Enum.any?(undeclared, &(&1 =~ "internal_error"))
       assert Enum.any?(undeclared, &(&1 =~ "runner_start_failed"))
       assert Enum.any?(undeclared, &(&1 =~ "graph_200"))
+      assert Enum.any?(undeclared, &(&1 =~ "no_previous"))
       # …and the two words are the ONLY silences on this tree — a count would
       # also red for any OTHER violation, which is not what this test is about,
       # so it names them instead.
       assert Enum.all?(
                undeclared,
                &(&1 =~ "internal_error" or &1 =~ "runner_start_failed" or &1 =~ "graph_200" or
+                   &1 =~ "no_previous" or
                    &1 =~ "feature_not_configured" or &1 =~ "deploy_runner_unavailable")
              )
     end

@@ -588,6 +588,21 @@ defmodule BarkparkCloud.Registry.Barkpark do
     # still admits six distinct rows for one claim host (enumerated in
     # `normalize_url/1`). NEW-WRITES-ONLY — see `normalize_url/1`.
     |> update_change(:url, &normalize_url/1)
+    # Scheme guard AFTER the normalise fold, so it judges the DERIVED value
+    # (an uppercase `HTTPS://` spelling is downcased first and legally passes;
+    # a guard on the raw request field would miss what the fold manufactures).
+    # This is the single chokepoint that casts `:url`: every server-derived url
+    # is `"https://" <> fqdn` by construction (`clean_url/1`,
+    # `provisioning_url/1`), and the ONLY caller-supplied path is
+    # `Registry.adopt_barkpark/3` via `POST /v1/internal/barkparks` — without
+    # this line that route persisted `http://` (and `not-a-url`, `ftp://`)
+    # verbatim, and the hourly UpdateStatusWorker sweep would have carried the
+    # DECRYPTED admin bearer to it over cleartext: `Billing.HttpClient`'s
+    # `verify_peer` ssl opts are attached unconditionally and are silently
+    # inert on an `http://` url (cch-w58-bl-barkparks-url-has-no-scheme-guard).
+    # Validate-on-change only — existing rows are untouched (prod population
+    # measured 2026-08-23: 9 rows, 0 non-https).
+    |> validate_format(:url, ~r{^https://}, message: "must be an https:// URL")
     |> validate_required([:name, :slug, :team_id])
     |> validate_length(:name, min: 1, max: 255)
     |> validate_length(:template, max: 255)
@@ -604,7 +619,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> assoc_constraint(:team)
     |> unique_constraint([:team_id, :slug],
       name: :barkparks_team_slug_unique_idx,
-      message: "a Barkpark with this slug already exists in this team"
+      message: "already has a Barkpark with this slug"
     )
     # Defense in depth: the resolved customer-facing FQDN (`url`) is GLOBALLY
     # unique. `provisioning_subdomain/1` already makes the label collision-free by

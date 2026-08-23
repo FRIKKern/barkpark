@@ -6,7 +6,7 @@ import { AVAILABLE_TEMPLATES, BARKPARK_VERSION, type TemplateName } from './cons
 import { runPrompts } from './prompts.js'
 import { scaffold } from './scaffold.js'
 import { detectPackageManager } from './pm.js'
-import { applyHostedDemo } from './hosted.js'
+import { applyHostedDemoSafely } from './hosted.js'
 import { runInstall } from './install.js'
 import { printNextSteps, runGitInit } from './post-install.js'
 import { cleanupPartialScaffold, ensureTargetEmpty } from './target-dir.js'
@@ -99,16 +99,27 @@ async function main(argv: string[]): Promise<number> {
   if (answers.hostedDemo) {
     const hs = p.spinner()
     hs.start('Applying --hosted-demo settings')
-    await applyHostedDemo({ targetDir })
-    hs.stop(`Pointed at hosted demo: ${pc.cyan('https://barkpark.dev')} (read-only)`)
+    // A throw here used to escape after the copy finished, aborting the run
+    // and leaving a COMPLETE tree that jammed ensureTargetEmpty on every
+    // retry. The remedy (recorded in applyHostedDemoSafely's doc) is relieve,
+    // not delete: warn with the manual steps and continue — the scaffold is
+    // usable and install/git/next-steps all still apply.
+    const applied = await applyHostedDemoSafely({ targetDir })
+    hs.stop(
+      applied
+        ? `Pointed at hosted demo: ${pc.cyan('https://barkpark.dev')} (read-only)`
+        : 'Hosted-demo settings failed — manual steps printed above.',
+    )
   }
 
   let didInstall = false
+  let installFailed = false
   if (answers.install) {
     try {
       await runInstall({ targetDir, pm })
       didInstall = true
     } catch (err) {
+      installFailed = true
       console.error(pc.yellow(`Dependency install failed: ${(err as Error).message}`))
       console.error(pc.yellow(`You can run "${pm.installCommand}" manually from ${targetDir}.`))
     }
@@ -118,7 +129,7 @@ async function main(argv: string[]): Promise<number> {
     await runGitInit(targetDir)
   }
 
-  p.outro(pc.green('Done.'))
+  p.outro(installFailed ? pc.yellow('Done, with warnings.') : pc.green('Done.'))
 
   printNextSteps({
     targetDir,
@@ -129,7 +140,13 @@ async function main(argv: string[]): Promise<number> {
     didInstall,
   })
 
-  return 0
+  // DECISION (cca-backlog-install-exit-code): an install the USER ASKED FOR
+  // that failed exits 1. Scripted use — `create-barkpark-app x -y && cd x &&
+  // npm test` — must not sail on past a half-installed tree, and a green
+  // "Done." would tonally contradict the yellow errors above. The scaffold
+  // itself is finished, usable work: nothing is deleted, git init still ran,
+  // and printNextSteps re-adds the manual install step for interactive users.
+  return installFailed ? 1 : 0
 }
 
 main(process.argv)

@@ -77,6 +77,8 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
       POST    /v1/fleet/supports   admin(d)  register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
       DELETE  /v1/fleet/supports/:id admin(d)  unbind + delete a SUPPORT fleet row (PDF-D61; same disjunction as the POST; mains refused 409)
+      POST    /v1/barkparks/:id/agent-key admin(d)  paste-a-key delivery to a LIVE support box (PDF-D94; key rides memory only, never stored)
+      GET     /v1/barkparks/:id/agent-key admin(d)  latest push_agent_key job status (status/error only — the row never held the key)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
@@ -162,6 +164,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/attach-domain-jobs/:id/fail worker  mark an attach-domain failed {error}
       POST    /v1/internal/resurrect-jobs/claim worker  claim oldest pending resurrect job
       POST    /v1/internal/support-jobs/claim worker  claim oldest pending provision_support job (+pinned support map)
+      POST    /v1/internal/agent-key-jobs/claim worker  claim oldest pending push_agent_key job (+one-time key pop — delete-on-read)
+      POST    /v1/internal/agent-key-jobs/:id/succeed worker  key line landed + listener restarted (job row only)
+      POST    /v1/internal/agent-key-jobs/:id/fail worker  delivery failed (row untouched; re-paste recovers)
       GET     /v1/internal/barkparks worker  list registry rows for the provisioner
       POST    /v1/internal/barkparks worker  create a registry row (provisioner-side)
       POST    /v1/internal/barkparks/:id/deprovision worker  enqueue a deprovision for one box
@@ -195,11 +200,11 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/webhooks/content-publish/:site_id —*  content-publish webhook → ISR revalidate (signed)
       POST    /v1/relay/chat-blocked/:barkpark_id —*  instance chat_blocked webhook → member-device push fan-out (signed; D15)
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
-      POST    /v1/builder/claim    worker    atomic next-queued deployment claim
-      POST    /v1/builder/deployments/:id/transition worker fenced status update
-      POST    /v1/builder/deployments/:id/console worker append a live build-console line {line} (capped, append-only) → SSE (gh-5)
-      POST    /v1/builder/deployments/:id/detail  worker set the live sub-caption {detail} (latest-wins) → SSE (dwb-19)
-      GET     /v1/builder/sites/:id/env worker decrypted site env for build-time injection (nixpacks --env)
+      POST    /v1/builder/claim    agent     atomic next-queued deployment claim (own box only)
+      POST    /v1/builder/deployments/:id/transition agent fenced status update (own box only)
+      POST    /v1/builder/deployments/:id/console agent append a live build-console line {line} (capped, append-only) → SSE (gh-5; own box only)
+      POST    /v1/builder/deployments/:id/detail  agent set the live sub-caption {detail} (latest-wins) → SSE (dwb-19; own box only)
+      GET     /v1/builder/sites/:id/env agent decrypted site env for build-time injection (nixpacks --env; own box only)
       GET     /v1/agent/pending    agent     deployments in pushing for this box
       GET     /v1/agent/sites/:id/env agent  decrypted site env for the running container (own box only)
       POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
@@ -282,6 +287,7 @@ defmodule BarkparkCloud.Web.Router do
 
   alias BarkparkCloud.Accounts.{Authz, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
+  alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
@@ -1407,7 +1413,10 @@ defmodule BarkparkCloud.Web.Router do
 
       # The agent's per-cycle signals become one append-only event. The full
       # report rides in the payload so the dashboard/event stream can show disk,
-      # PG size, backup, dirty-tree, and the granular health checks.
+      # PG size, dirty-tree, and the granular health checks. (The payload's
+      # `backup_ok` key rides too, but it is an unwired constant false — no
+      # BackupProbe exists — so it is not a signal the stream can honestly
+      # show; cch-w50-bl owns wiring it.)
       _ = Registry.record_event(barkpark, "health", report)
 
       # Push "fleet" so a live health change (up/down, version, agent online)
@@ -2111,12 +2120,22 @@ defmodule BarkparkCloud.Web.Router do
       # query for the whole page, never a per-row lookup (that is the N+1 this
       # domain already paid for once).
       hmap = Registry.latest_health_payload_map(ids)
+      # jpf-w1-queue-age-alarm: the queued-deployment age rides the SAME
+      # prefetch shape — one GROUP BY query for the whole page, never a per-row
+      # lookup (the N+1 this domain already paid for once).
+      qmap = Registry.queued_deploy_age_map(ids)
 
       json(conn, 200, %{
         barkparks:
           Enum.map(scoped_barkparks, fn {barkpark, role} ->
             row =
-              barkpark_json(barkpark, pmap[barkpark.id], dmap[barkpark.id], hmap[barkpark.id])
+              barkpark_json(
+                barkpark,
+                pmap[barkpark.id],
+                dmap[barkpark.id],
+                hmap[barkpark.id],
+                qmap[barkpark.id]
+              )
 
             if all_teams? do
               Map.put(row, :team, %{
@@ -2150,7 +2169,7 @@ defmodule BarkparkCloud.Web.Router do
   # NEVER be served. Newest-first. Each row is {fqdn, slug, source_provider,
   # created_at, bundle_ref, spec:{region, server_type}} — enough for the console
   # to render the row + a `bp cloud instance resurrect <slug> --provider <kind>`
-  # affordance (the console does not execute resurrect this wave).
+  # affordance.
   #
   # Honest degrade (D39): an unconfigured or unreachable store returns
   # {ok:false, error} at 502 — NEVER a fabricated empty-success, which would
@@ -2521,6 +2540,164 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 409, %{
               error: "not_a_support",
               detail: "only support rows can be unbound here"
+            })
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # ── Agent-key custody (PDF-D94, `pdf-bl-console-key-custody`) ──────────────
+  # The console replacement for the SSH one-liner: the developer pastes their
+  # provider key, the plane is TRANSPORT ONLY. Custody law (D62 amended by D94:
+  # NEVER WRITES → NEVER KEEPS): the key goes into the in-memory AgentKeyStash
+  # keyed by the enqueued push_agent_key job id; the DB job row, the audit
+  # event, and the logs carry NO key material (the audit metadata records the
+  # VAR NAME only). The SSH one-liner remains the documented fallback and the
+  # BYO story (the console card keeps rendering it, folded).
+  @agent_key_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY)
+  # Provider keys are url-safe token material (sk-ant-…/sk-proj-…). Bounded +
+  # shape-fenced BEFORE the key is accepted at all, mirroring the worker-side
+  # fence — a value that could break shell quoting is refused at the door.
+  @agent_key_re ~r/^[A-Za-z0-9._~+\/=-]{20,512}$/
+
+  # POST /v1/barkparks/:id/agent-key {key, key_var?} → 202 {ok, job_id}.
+  # Same credential family as POST /v1/fleet/supports: a PAT must carry
+  # `deploy`; a session must be team-admin. Support rows only, and only once
+  # the box is LIVE (a keyless host can't be written to). One delivery in
+  # flight per box (409 already_delivering).
+  post "/v1/barkparks/:id/agent-key" do
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted -> conn
+        conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
+        is_nil(conn.assigns[:current_team]) -> conn
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+        # cch-w37-s2 shape parity: handing a box a credential is group
+        # management — ADMIN on the resolved team, and the refusal names it.
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
+      end
+
+    key = conn.body_params["key"]
+    key_var = conn.body_params["key_var"] || "ANTHROPIC_API_KEY"
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      key_var not in @agent_key_vars ->
+        json(conn, 422, %{
+          error: "invalid",
+          details: %{key_var: ["must be one of: #{Enum.join(@agent_key_vars, ", ")}"]}
+        })
+
+      not (is_binary(key) and Regex.match?(@agent_key_re, key)) ->
+        # The shape sentence NEVER echoes the value — a malformed secret is
+        # still a secret.
+        json(conn, 422, %{
+          error: "invalid",
+          details: %{key: ["must be 20-512 url-safe characters (the pasted value is not echoed)"]}
+        })
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid, fleet_role: "support", host: host} = bp
+          when tid == team.id and is_binary(host) and host != "" ->
+            case Registry.enqueue_agent_key_push_job(bp) do
+              {:ok, job} ->
+                # The DURABLE job row is routing-only; the key itself rides
+                # memory, popped exactly once by the worker's claim.
+                :ok = AgentKeyStash.put(job.id, key_var, key)
+                # OC24 async-trigger discipline (the go_live prior art): the
+                # job is enqueued — record best-effort, never roll it back.
+                # Metadata carries the var NAME, never the key.
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.agent_key_delivered", %{
+                  key_var: key_var
+                })
+
+                push_event(team.id, "fleet")
+                json(conn, 202, %{ok: true, job_id: job.id})
+
+              {:error, :already_delivering} ->
+                json(conn, 409, %{
+                  error: "already_delivering",
+                  detail: "a key delivery is already in flight for this box"
+                })
+
+              {:error, %Ecto.Changeset{} = cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+
+          # In-team support that is NOT live yet — the key has nowhere to land.
+          %Barkpark{team_id: tid, fleet_role: "support"} when tid == team.id ->
+            json(conn, 409, %{
+              error: "not_live",
+              detail: "this support box has no host yet — deliver the key once it is live"
+            })
+
+          # In-team but a main / ungrouped row: the listener env is a SUPPORT
+          # concept (mirrors DELETE /v1/fleet/supports/:id's refusal).
+          %Barkpark{team_id: tid} when tid == team.id ->
+            json(conn, 422, %{
+              error: "not_a_support",
+              detail: "agent keys are delivered to fleet support boxes only"
+            })
+
+          # Cross-team, unknown, or malformed id → 404 (no existence leak).
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # GET /v1/barkparks/:id/agent-key → 200 {job: {id,status,error,inserted_at,
+  # updated_at} | null} — the console's delivery-status poll. Status/error
+  # ONLY: the job row cannot leak what it never held. Same auth disjunction as
+  # the POST (the read narrates a write only admins can make).
+  get "/v1/barkparks/:id/agent-key" do
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted -> conn
+        conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
+        is_nil(conn.assigns[:current_team]) -> conn
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
+      end
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            job = Registry.latest_agent_key_job(bp)
+
+            json(conn, 200, %{
+              job:
+                job &&
+                  %{
+                    id: job.id,
+                    status: job.status,
+                    error: job.error,
+                    inserted_at: job.inserted_at,
+                    updated_at: job.updated_at
+                  }
             })
 
           _ ->
@@ -3823,8 +4000,20 @@ defmodule BarkparkCloud.Web.Router do
                   }
                 })
 
-              {:error, %Ecto.Changeset{}} ->
-                json(conn, 422, %{error: %{code: "invalid"}})
+              {:error, %Ecto.Changeset{} = cs} ->
+                # cch-w62-bl — ONE envelope shape for the whole route. The 404
+                # arms are flat, and this arm used to be the route's lone nested
+                # `%{error: %{code: "invalid"}}` — one route, two shapes, and a
+                # validation refusal that reached the console details-blind: the
+                # wave-37 per-field ladder reads `details` off the TOP level, so
+                # the changeset's own answer (which field, what rule) was thrown
+                # away and a permanent refusal rendered as a generic. Flat
+                # `error` + `details` is the shape ~100 sibling 422 emitters
+                # already use, and both consumers of this route read it today:
+                # `friendly()` (app.js) keys flat strings natively, and the Go
+                # CLI's `decodeRouteErrorCode` tries object-then-string. The
+                # envelope-shape census pins this route all-flat.
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
             end
 
           _ ->
@@ -6633,6 +6822,129 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/internal/agent-key-jobs/claim → 200 {job:{id,claim_token}, ip,
+  # key_var, key} | 204 (PDF-D94). Kind-filtered (push_agent_key) so no other
+  # drain grabs it. THE ONE MOMENT key material leaves the plane: the stash pop
+  # is DELETE-ON-READ, so a stale re-claim (worker crash) or a CP restart finds
+  # nothing — and the job is failed HONESTLY right here ("paste it again"),
+  # never handed out keyless. A host-less row (removed mid-flight) fails the
+  # same way. The 204 lets the worker's poll loop continue to the next tick.
+  post "/v1/internal/agent-key-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_agent_key_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          case AgentKeyStash.take(job.id) do
+            {:ok, {key_var, key}} when is_binary(barkpark.host) and barkpark.host != "" ->
+              json(conn, 200, %{
+                job: %{id: job.id, claim_token: job.claim_token},
+                ip: barkpark.host,
+                key_var: key_var,
+                key: key
+              })
+
+            {:ok, _} ->
+              _ =
+                Registry.fail_agent_key_job(
+                  job.id,
+                  "the support box has no host — nowhere to deliver the key",
+                  claim_token: job.claim_token
+                )
+
+              broadcast_barkpark_team(job.barkpark_id, "fleet")
+              send_resp(conn, 204, "")
+
+            :error ->
+              _ =
+                Registry.fail_agent_key_job(
+                  job.id,
+                  "the pasted key expired in transit (control-plane restart or timeout) — paste it again",
+                  claim_token: job.claim_token
+                )
+
+              broadcast_barkpark_team(job.barkpark_id, "fleet")
+              send_resp(conn, 204, "")
+          end
+      end
+    end
+  end
+
+  # POST /v1/internal/agent-key-jobs/:id/succeed [{ip}] → the key line landed +
+  # listener restarted. Flips the JOB ROW ONLY (succeed_agent_key_job — a key
+  # push must never clobber a live row's health/host the way a provision
+  # succeed does). Mirrors the attach-domain succeed contract verbatim.
+  post "/v1/internal/agent-key-jobs/:id/succeed" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      ip =
+        case conn.body_params["ip"] do
+          ip when is_binary(ip) and ip != "" -> ip
+          _ -> nil
+        end
+
+      case Registry.succeed_agent_key_job(conn.path_params["id"], ip, claim_token_opts(conn)) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  # POST /v1/internal/agent-key-jobs/:id/fail {error} → delivery failed; the
+  # support row is untouched (still live — re-paste is the recovery).
+  post "/v1/internal/agent-key-jobs/:id/fail" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      reason = conn.body_params["error"]
+
+      case Registry.fail_agent_key_job(
+             conn.path_params["id"],
+             if(is_binary(reason), do: reason, else: "unspecified"),
+             claim_token_opts(conn)
+           ) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
   ## Internal fleet-ops (worker-token auth) — the registry surface behind the
   ## `bp cloud hetzner instance` admin verbs (decommission/adopt/eject/audit).
   ## Cross-team BY DESIGN: this is an operator tool authenticated with the
@@ -8227,19 +8539,33 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/builder/claim {worker_id} → 200 {deployment, observed_epoch} |
   # 404 {error: "no_queued"} | 422 missing worker_id.
-  # Atomic via Registry.claim_next_deployment/1 (FOR UPDATE SKIP LOCKED +
-  # epoch bump in one transaction).
+  # Atomic via Registry.claim_queued_deployment_for_barkpark/2 (FOR UPDATE SKIP
+  # LOCKED + epoch bump in one transaction). NOT claim_next_deployment/1 — that
+  # one is fleet-wide and is no longer reachable from any route.
   #
-  # WORKER-gated: claim_next_deployment/1 selects the oldest queued row
-  # FLEET-WIDE (no team filter), so this must NOT be reachable by an arbitrary
-  # logged-in user — any user of any team would otherwise claim another team's
-  # queued deployment (leaking git_ref/artifact_url) and drive its state
-  # machine. require_worker gates on the shared WORKER_TOKEN faceless principal
-  # (the off-box builder fleet presents it, same secret that gates
-  # /v1/internal/*), and fails closed when unset. A dedicated builder-token is a
-  # hardening follow-up.
+  # AGENT-gated and BOX-SCOPED (jpf-w1-builder-identity). This route used to
+  # gate on `require_worker` — the shared fleet WORKER_TOKEN, one secret that
+  # ALSO opens /v1/internal/* (list and deprovision any box) and, through the
+  # env route below, read any site's decrypted env. That secret had been placed
+  # on a customer box that runs untrusted nixpacks builds, so a build escaping
+  # its sandbox inherited the fleet.
+  #
+  # The credential is now the box's OWN hashed, revocable agent token, and the
+  # query behind it is narrowed to that box's sites, because a per-box identity
+  # in front of a fleet-wide query would still hand box A a build belonging to
+  # box B. Identity and scope only work as a pair.
+  #
+  # CHARTER D14 — the ordering matters and this route is where it is paid. No
+  # credential may ride the claim before the box-scoped flip. The claim envelope
+  # already carries `source` (the git clone recipe, and for a private repo a
+  # short-lived installation token, via builder_claim_source/1 below): as of
+  # this route, that is served ONLY to the box hosting the site.
+  #
+  # The runtime half of this same pipeline (/v1/agent/*) has been require_agent
+  # + barkpark-scoped all along — the builder half was the asymmetric outlier,
+  # not a deliberately broader design.
   post "/v1/builder/claim" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
     if conn.halted do
       conn
@@ -8251,7 +8577,9 @@ defmodule BarkparkCloud.Web.Router do
           json(conn, 422, %{error: "worker_id_required"})
 
         true ->
-          case Registry.claim_next_deployment(worker_id) do
+          bp = conn.assigns.current_barkpark
+
+          case Registry.claim_queued_deployment_for_barkpark(bp, worker_id) do
             {:ok, deployment} ->
               response =
                 Map.merge(
@@ -8276,8 +8604,12 @@ defmodule BarkparkCloud.Web.Router do
   # `deployment` in the builder-claim 200 envelope, or %{} when the row has an
   # artifact (nothing to clone) or the site has no linked repo.
   #
-  # TENANCY: this map rides ONLY the builder-claim response, which is gated to
-  # the shared WORKER_TOKEN principal. It must NEVER enter deployment_json/1 —
+  # TENANCY: this map rides ONLY the builder-claim response, which as of
+  # jpf-w1-builder-identity is gated to the AGENT TOKEN OF THE BOX HOSTING THE
+  # SITE — not, as before, to a shared fleet secret held by every box. That is
+  # charter D14's ordering: the clone recipe and its installation token became
+  # box-confined in the same commit that box-scoped the claim. It must NEVER
+  # enter deployment_json/1 —
   # that serializer feeds tenant-facing reads (site deployments list/get, SSE)
   # and the agent claim, none of which may carry a build-plane clone recipe.
   # (deployment_json's own `source` field is the UNRELATED build-provenance
@@ -8359,12 +8691,18 @@ defmodule BarkparkCloud.Web.Router do
   # from-status transition graph is enforced too: an illegal edge (e.g.
   # failed → live) → 409 illegal_transition.
   #
-  # WORKER-gated: the (worker, epoch) fence only proves the caller holds the
-  # claim it was handed — it is NOT a tenant scope, so this must be gated to the
-  # shared WORKER_TOKEN builder principal (require_worker, same as claim above),
-  # never any logged-in user.
+  # AGENT-gated + BOX-SCOPED (jpf-w1-builder-identity), mirroring the agent
+  # transition route exactly.
+  #
+  # The (worker, epoch) fence is NOT a tenant scope — it only proves the caller
+  # holds the claim it was handed, and it cannot say whose box the row belongs
+  # to. That is why the fence needs a scope check beside it rather than instead
+  # of one: `agent_owns_deployment?/2` answers 404 (never 403) for a row on
+  # another box, the same shape as a row that does not exist, so the route
+  # cannot be used to probe for another tenant's deployment ids. The fence
+  # itself is unchanged.
   post "/v1/builder/deployments/:id/transition" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
     if conn.halted do
       conn
@@ -8379,6 +8717,9 @@ defmodule BarkparkCloud.Web.Router do
 
         is_nil(epoch) ->
           json(conn, 422, %{error: "observed_epoch_required"})
+
+        not agent_owns_deployment?(conn.assigns.current_barkpark, conn.path_params["id"]) ->
+          json(conn, 404, %{error: "not_found"})
 
         true ->
           attrs =
@@ -8431,35 +8772,42 @@ defmodule BarkparkCloud.Web.Router do
   # deployment's console, then push "deployments" so an open site view refetches
   # + streams the new line. Append-only + capped server-side (oldest dropped).
   #
-  # Auth mirrors the builder claim/transition routes (`require_worker` — the
-  # off-box builder fleet presents the shared WORKER_TOKEN; a dedicated
-  # builder-token is a hardening follow-up). A logged-in user must NOT be able to
-  # inject text into another team's SSE-broadcast build console. Best-effort
-  # telemetry: a console report NEVER affects the build's outcome; the builder
-  # treats any non-2xx as "log and continue".
+  # Auth mirrors the builder claim/transition routes (`require_agent` + the box
+  # scope check — jpf-w1-builder-identity). Nobody may inject text into another
+  # team's SSE-broadcast build console, and before this flip the shared
+  # WORKER_TOKEN let any box do exactly that to any team's console. A row on
+  # another box now answers 404, indistinguishable from a row that does not
+  # exist. Best-effort telemetry: a console report NEVER affects the build's
+  # outcome; the builder treats any non-2xx as "log and continue" — so the
+  # scope check cannot break a legitimate build even if it were wrong.
   #   200 {ok: true}   — appended (or a late line after the deploy is terminal).
-  #   404 {not_found}  — no deployment with that id.
+  #   404 {not_found}  — no deployment with that id, OR it is on another box.
   #   422 {invalid}    — missing/blank line.
   post "/v1/builder/deployments/:id/console" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      case Registry.append_deployment_console(
-             conn.path_params["id"],
-             conn.body_params["line"]
-           ) do
-        {:ok, deployment} ->
-          broadcast_site_team(deployment.site_id, "deployments")
-          json(conn, 200, %{ok: true})
+    cond do
+      conn.halted ->
+        conn
 
-        {:error, :not_found} ->
-          json(conn, 404, %{error: "not_found"})
+      not agent_owns_deployment?(conn.assigns.current_barkpark, conn.path_params["id"]) ->
+        json(conn, 404, %{error: "not_found"})
 
-        {:error, :invalid} ->
-          json(conn, 422, %{error: "invalid"})
-      end
+      true ->
+        case Registry.append_deployment_console(
+               conn.path_params["id"],
+               conn.body_params["line"]
+             ) do
+          {:ok, deployment} ->
+            broadcast_site_team(deployment.site_id, "deployments")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+
+          {:error, :invalid} ->
+            json(conn, 422, %{error: "invalid"})
+        end
     end
   end
 
@@ -8467,32 +8815,37 @@ defmodule BarkparkCloud.Web.Router do
   # deployment's LIVE sub-caption (latest-wins, not appended), then push
   # "deployments" so an open site view renders the caption under the status pill.
   # The build-side twin of a provision step's `progress`. Same builder auth
-  # (`require_worker`, shared WORKER_TOKEN) + best-effort posture as /console — a
-  # detail report NEVER affects the build's outcome; the builder treats any
-  # non-2xx as "log and continue".
+  # (`require_agent` + the box scope check — jpf-w1-builder-identity) and the
+  # same best-effort posture as /console: a detail report NEVER affects the
+  # build's outcome; the builder treats any non-2xx as "log and continue".
   #   200 {ok: true}   — the caption was set (or a late one after the deploy is terminal).
-  #   404 {not_found}  — no deployment with that id.
+  #   404 {not_found}  — no deployment with that id, OR it is on another box.
   #   422 {invalid}    — missing/blank detail.
   post "/v1/builder/deployments/:id/detail" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      case Registry.set_deployment_detail(
-             conn.path_params["id"],
-             conn.body_params["detail"]
-           ) do
-        {:ok, deployment} ->
-          broadcast_site_team(deployment.site_id, "deployments")
-          json(conn, 200, %{ok: true})
+    cond do
+      conn.halted ->
+        conn
 
-        {:error, :not_found} ->
-          json(conn, 404, %{error: "not_found"})
+      not agent_owns_deployment?(conn.assigns.current_barkpark, conn.path_params["id"]) ->
+        json(conn, 404, %{error: "not_found"})
 
-        {:error, :invalid} ->
-          json(conn, 422, %{error: "invalid"})
-      end
+      true ->
+        case Registry.set_deployment_detail(
+               conn.path_params["id"],
+               conn.body_params["detail"]
+             ) do
+          {:ok, deployment} ->
+            broadcast_site_team(deployment.site_id, "deployments")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+
+          {:error, :invalid} ->
+            json(conn, 422, %{error: "invalid"})
+        end
     end
   end
 
@@ -8504,22 +8857,32 @@ defmodule BarkparkCloud.Web.Router do
   # `bp sites env set`. A site with no blob answers `{env: {}}` — the build
   # proceeds env-less rather than failing.
   #
-  # WORKER-gated, same reasoning as /claim above: the builder is a faceless
-  # fleet principal that builds any team's site, so the route must be reachable
-  # by the shared WORKER_TOKEN only — a user session or agent token → 401
-  # (require_worker does its own constant-time compare and fails closed when no
-  # worker token is configured). Reveals are not audit-logged — matching the
-  # existing secret-reveal surfaces (/v1/barkparks/:id/credentials, /bootstrap),
-  # which record writes (`site.env_changed`) but not reads.
+  # AGENT-gated + BOX-SCOPED (jpf-w1-builder-identity), and this route is the
+  # sharpest reason the flip could not wait. It hands back DECRYPTED site env —
+  # every secret a tenant set with `bp sites env set`. Gated on the shared
+  # WORKER_TOKEN it was an unscoped read: one secret, held by every box
+  # including customer boxes running untrusted nixpacks builds, returned ANY
+  # site's plaintext env. The scope is now the caller's own box, and a site on
+  # another box answers 404 — the same shape as a site that does not exist, so
+  # the route cannot be walked to discover which ids are real.
+  #
+  # Reveals are still not audit-logged, matching the existing secret-reveal
+  # surfaces (/v1/barkparks/:id/credentials, /bootstrap), which record writes
+  # (`site.env_changed`) but not reads.
   get "/v1/builder/sites/:id/env" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
     if conn.halted do
       conn
     else
+      bp = conn.assigns.current_barkpark
+
       case Registry.get_site(conn.path_params["id"]) do
-        %Registry.Site{} = site -> site_env_response(conn, site)
-        _ -> json(conn, 404, %{error: "not_found"})
+        %Registry.Site{barkpark_id: bp_id} = site when bp_id == bp.id ->
+          site_env_response(conn, site)
+
+        _ ->
+          json(conn, 404, %{error: "not_found"})
       end
     end
   end
@@ -8729,10 +9092,19 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/barkparks/:id/events → 200 {events: [...]} newest first | 404.
   # User-authed + TEAM-SCOPED: a wrong-team / nonexistent id is the SAME 404 (no
   # existence leak), matching DELETE /v1/barkparks/:id. Surfaces the granular
-  # history the agent already writes (disk%, PG size, backup, dirty-tree, the
-  # health-gate array) plus the new "status" transition rows — a pure read over
-  # Registry.recent_events_for_team/3, no new model. `?limit=` caps the window
-  # (default 50, max 200).
+  # history the agent already writes. The event kinds are exactly the four live
+  # `Registry.record_event` producers (cch-w51-bl, re-derived 2026-08-23):
+  # "health" — the full beat (disk%, PG size, dirty-tree, the health-gate
+  # array; NOT backup — the beat's `backup_ok` key is an unwired constant
+  # false, no BackupProbe exists, so the feed carries no backup truth) — plus
+  # "space", "verify", and the "status" transition rows the staleness worker
+  # writes. A pure read over Registry.recent_events_for_team/3, no new model.
+  # `?limit=` caps the window (default 50, max 200).
+  #
+  # LIMIT, stated on purpose (charter D341): __agent_event_vocabulary_census.mjs
+  # reads `Registry.record_event(` CALL SITES, not prose, so it can never red on
+  # this comment — and widening it to grep comments would be a false-red
+  # machine. This sentence is the durable note instead.
   get "/v1/barkparks/:id/events" do
     conn = Auth.require_user(conn, [])
 
@@ -9804,7 +10176,14 @@ defmodule BarkparkCloud.Web.Router do
   # has never beaten (a just-created / just-enqueued instance), and an internal
   # lookup would put a per-row query on those four WRITE paths. nil → the
   # `pressure` key renders all-unmetered, never zeros.
-  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil, pressure \\ nil) do
+  # `queued_age` is the PREFETCHED queued-deployment age for this box
+  # (`Registry.queued_deploy_age_map/1`), same parameter-not-lookup rule as
+  # `pressure` above: only the fleet list computes it (one GROUP BY for the
+  # page); the four write-path call sites serialize a box that by construction
+  # has no queued container deployment and pass nothing. nil means NONE QUEUED
+  # — clients own the stalled threshold (charter D6), the payload only carries
+  # the raw number.
+  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil, pressure \\ nil, queued_age \\ nil) do
     base = %{
       id: bp.id,
       name: bp.name,
@@ -9895,6 +10274,14 @@ defmodule BarkparkCloud.Web.Router do
       fleet_role: bp.fleet_role,
       fleet_parent_id: bp.fleet_parent_id,
       fleet_token_id: bp.fleet_token_id,
+      # jpf-w1-queue-age-alarm (charter D6): age in SECONDS of the oldest
+      # `queued` container-site deployment on this box, nil when none. A NUMBER
+      # rather than a verdict on purpose — the Go CLI and the SPA own the
+      # 5-minute `deploy_stalled` threshold and can render "queued 7m" honestly;
+      # the CP stays read-only here (the 15-min reaper is a different, MUTATING
+      # mechanism and never sees a never-claimed row). Always present, so a
+      # consumer branches on the VALUE, not the key.
+      queued_deploy_age_seconds: queued_age,
       inserted_at: bp.inserted_at
     }
 

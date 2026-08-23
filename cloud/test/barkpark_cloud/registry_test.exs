@@ -93,7 +93,7 @@ defmodule BarkparkCloud.RegistryTest do
       assert {:error, changeset} =
                Registry.register_barkpark(team_a, %{name: "Prod 2", slug: "prod"})
 
-      assert "a Barkpark with this slug already exists in this team" in errors_on(changeset).team_id
+      assert "already has a Barkpark with this slug" in errors_on(changeset).team_id
 
       # Same slug, DIFFERENT team → fine.
       assert {:ok, _} = Registry.register_barkpark(team_b, %{name: "Prod", slug: "prod"})
@@ -553,6 +553,23 @@ defmodule BarkparkCloud.RegistryTest do
 
       # The different-scope token is untouched by the "report" re-mint churn.
       assert Registry.verify_agent_token(other_pt)
+    end
+
+    # task-940e49f7300a8d1b — the RECORDED RULING (see the docs above
+    # mint_agent_token/3 and verify_agent_token/1): scope is deliberately NOT
+    # an authorization boundary today. This is a TRIPWIRE, not a feature test —
+    # it pins the CURRENT scope-blind behavior on purpose, so a future patch
+    # that starts filtering by scope has to consciously touch this test
+    # (and, per the ruling, update its doc) rather than silently narrowing
+    # what a token can reach.
+    test "TRIPWIRE (task-940e49f7300a8d1b): verify_agent_token ignores scope — any live scope opens the barkpark" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      {:ok, weird_pt, _} = Registry.mint_agent_token(bp, "an-utterly-invented-scope")
+
+      assert %Barkpark{id: bid} = Registry.verify_agent_token(weird_pt)
+      assert bid == bp.id
     end
   end
 

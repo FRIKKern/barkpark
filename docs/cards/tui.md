@@ -7,19 +7,19 @@ Editing (D12): v1 scalar/ref/array inline; v2 read-only→docs/contracts/schema-
 
 ## Papers / Bulldocs
 - Viewer `paper.go`; blocks via `internal/pdrender` (`Decode`→`DefaultRegistry(theme)`→`Render`); `bp paper` shares it.
-- **Parity:** new blocks ship in HTML, CSS + pdrender. Doctrine → docs/contracts/tui-render-doctrine.md
+- **Parity:** new blocks ship in HTML, CSS + pdrender → docs/contracts/tui-render-doctrine.md
 - **Go:** `go.mod` pins 1.25.0 (#726); don't bump.
 
 ## `bp tasks` — live portrait task board
-Pane `internal/taskboard`, zero-config, SSE-live. NAV (D11): `enter` descends board→task→paper→children…, `esc` ascends. **Mouse first-class**: wheel scrolls, click selects+activates, hover previews, `M` toggles reporting. Split = **draggable divider**, persisted `DetailsPaneRatio` in `taskboard-preferences.json`. Tasks open as a **sheet**: breadcrumb retired, centered 72-col measure, `─`/`│` edges. ACTS `c`/`x`/`o`. Entry `cli.go` `case "tasks"`→`taskboard.Run`; `spine.go` `spineRows`=sole paint+cursor producer, `compose.go` `Compose`=`View()`. `bp tasks`≠`bp task …`.
+Pane `internal/taskboard`, zero-config, SSE-live. NAV (D11): `enter` descends board→task→paper→children…, `esc` ascends. **Mouse**: wheel, click selects+activates, hover previews, `M` toggles reporting; `↑N`/`↓N` marker clicks scroll — never enter (D119/D121). Split divider drags; `DetailsPaneRatio` persists in `taskboard-preferences.json`. Tasks read in a centered 80-col borderless measure. ACTS `c`/`x`/`o`. `spine.go` `spineRows`=sole paint+cursor producer, `compose.go` `Compose`=`View()`. `bp tasks`≠`bp task …`. Hermetic drive gate: `scripts/taskboard-drive/drive.sh` `DRIVE_MODE=hermetic` — fixture-served, byte-deterministic; `hermetic-proof.sh`.
 
 ## `bp chat` — native terminal chat client
-Pane `internal/chat`. Launch=picker. Entry `cli.go` `case "chat"`→`chat.Run`. `reduce.go` `Reduce` settles at `result`, live-tails, handles interrupt (`aborted_streaming` non-error, 8s wedge) + ⧗ queued. `render.go` `renderAssistantDoc`=one `pdrender` RenderDoc/message. PATCH state on leave, re-GET on resume. Keys→cheatsheets/tui.md. Shelf: `a` archives, `s` opens, `enter`/`u` restores; `bp chat unarchive <id>`, `ls --archived`.
+Pane `internal/chat`. Launch=picker. `reduce.go` `Reduce` settles at `result`, live-tails, handles interrupt (`aborted_streaming` non-error, 8s wedge) + ⧗ queued. `render.go` `renderAssistantDoc`=one `pdrender` RenderDoc/message. PATCH state on leave, re-GET on resume. Keys→cheatsheets/tui.md. Shelf: `a` archives, `s` opens, `enter`/`u` restores; `bp chat unarchive <id>`, `ls --archived`.
 
 ## Code anchors
 - cmd/barkpark/paper.go — func buildPaperContent, func isPaper
 - internal/pdrender/pdrender.go — func DefaultRegistry
-- scripts/pdrender-dump.sh — offline fixture render; width defaults to 80
+- scripts/pdrender-dump.sh — offline fixture render (width 80)
 - internal/cli/tasks_board_cmd.go — func runTasksBoard
 - internal/cli/chat_cmd.go — func runChat
 - internal/chat/reduce.go — func Reduce

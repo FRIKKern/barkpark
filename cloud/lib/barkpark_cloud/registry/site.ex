@@ -256,7 +256,7 @@ defmodule BarkparkCloud.Registry.Site do
     |> assoc_constraint(:team)
     |> unique_constraint([:team_id, :slug],
       name: :sites_team_slug_unique_idx,
-      message: "a site with this slug already exists in this team"
+      message: "already has a site with this slug"
     )
   end
 
@@ -402,7 +402,7 @@ defmodule BarkparkCloud.Registry.Site do
         if String.length(d) <= 253 and Regex.match?(@domain_format, d) do
           changeset
         else
-          add_error(changeset, :cf_domain, "invalid domain: #{inspect(d)}")
+          add_error(changeset, :cf_domain, "is invalid: #{inspect(d)}")
         end
     end
   end

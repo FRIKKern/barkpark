@@ -77,24 +77,72 @@ import re, sys
 
 heex_path, bundle_path, heex_allow, bundle_allow = sys.argv[1:5]
 
-def canvas_classes(path):
-    s = open(path, encoding="utf-8").read()
+# Exit codes, kept distinct on purpose:
+#   0 = lockstep, 1 = DRIFT FOUND, 2 = REFUSED TO MEASURE (empty corpus,
+#   unreadable mirror, broken comparator). A refusal must never share the
+#   drift code — a crash that reads as a finding sends someone hunting a
+#   divergence that does not exist.
+
+def canvas_classes(path, side):
+    try:
+        s = open(path, encoding="utf-8").read()
+    except OSError as e:
+        print(f"paper-editor-mirror-check: REFUSED TO MEASURE — cannot read the {side} mirror: {e}")
+        sys.exit(2)
     s = re.sub(r"/\*.*?\*/", " ", s, flags=re.S)   # CSS comments
     s = re.sub(r"<!--.*?-->", " ", s, flags=re.S)  # HTML comments
     return set(re.findall(r"\.(bp-canvas-[a-z0-9-]+)", s))
 
-heex = canvas_classes(heex_path)
-bundle = canvas_classes(bundle_path)
+def compare(heex, bundle, h_allow, b_allow):
+    """0 lockstep, 1 drift (with the two one-sided sets), 2 empty corpus."""
+    if not heex or not bundle:
+        return 2, set(), set()
+    heex_only = heex - bundle - h_allow
+    bundle_only = bundle - heex - b_allow
+    if not heex_only and not bundle_only:
+        return 0, set(), set()
+    return 1, heex_only, bundle_only
+
+# ALWAYS-ON SELF-TEST (runs before every measurement): two empty sets satisfy
+# `not heex_only and not bundle_only`, so a refactor that empties BOTH corpora
+# (moving the Studio <style> out of root.html.heex, or renaming the
+# .bp-canvas-* convention) used to print 'PASS — 0 classes in lockstep'
+# forever. Prove the comparator can refuse AND can red before trusting it.
+for want, h, b in (
+    (2, set(), {"bp-canvas-x"}),                      # one empty side refuses
+    (2, set(), set()),                                # a corpus of zero refuses
+    (1, {"bp-canvas-x", "bp-canvas-y"}, {"bp-canvas-x"}),  # a planted one-sided class reds
+    (0, {"bp-canvas-x"}, {"bp-canvas-x"}),            # lockstep passes
+):
+    got = compare(h, b, set(), set())[0]
+    if got != want:
+        print(f"paper-editor-mirror-check: SELF-TEST FAILED — comparator returned {got}, "
+              f"expected {want} for heex={sorted(h)} bundle={sorted(b)}; "
+              f"refusing to measure with a broken instrument")
+        sys.exit(2)
+
+heex = canvas_classes(heex_path, "root.html.heex")
+bundle = canvas_classes(bundle_path, "styles.css bundle")
 heex_allow = set(filter(None, heex_allow.split()))
 bundle_allow = set(filter(None, bundle_allow.split()))
 
-heex_only = heex - bundle - heex_allow
-bundle_only = bundle - heex - bundle_allow
+code, heex_only, bundle_only = compare(heex, bundle, heex_allow, bundle_allow)
 
-if not heex_only and not bundle_only:
+if code == 2:
+    zero = []
+    if not heex: zero.append("root.html.heex")
+    if not bundle: zero.append("styles.css bundle")
+    print(f"paper-editor-mirror-check: REFUSED TO MEASURE — {' and '.join(zero)} yielded ZERO "
+          f".bp-canvas-* classes (heex={len(heex)}, bundle={len(bundle)}). A lockstep of two "
+          f"empty corpora is a green about nothing; if the convention moved or was renamed, "
+          f"update this check in the same PR.")
+    sys.exit(2)
+
+if code == 0:
     n = len(heex & bundle)
     print(f"paper-editor-mirror-check: PASS — {n} .bp-canvas-* classes in lockstep "
-          f"(+{len(heex_allow)} allowlisted heex-only).")
+          f"(heex corpus {len(heex)}, bundle corpus {len(bundle)}, "
+          f"+{len(heex_allow)} allowlisted heex-only).")
     sys.exit(0)
 
 print("paper-editor-mirror-check: FAILED — the two paper-editor style mirrors have drifted.\n")

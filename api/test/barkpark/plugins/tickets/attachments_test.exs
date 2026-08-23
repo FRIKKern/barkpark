@@ -20,6 +20,13 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
   """
   use Barkpark.DataCase, async: false
 
+  import Barkpark.RateLimiterSandbox
+
+  # `:barkpark_rate_limiter` is a :named_table — WHOLE-NODE state no sandbox owns
+  # and nothing used to reset, so a bucket one test spent stayed spent for the
+  # rest of the run. Start from an unspent table.
+  setup :reset_rate_limiter!
+
   import Phoenix.ConnTest
   import Plug.Conn
 

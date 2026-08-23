@@ -15155,3 +15155,66 @@ quoted" — **no such dataset exists in the tree and none was created**: no fire
 That criterion is **unpayable as written and obsolete** — the crown is sealed, no further fire is needed
 (the wave-21 review: "the crown is CLOSED — no further fire"), and sampling a retired gate on a closed
 climb would buy nothing. It is recorded as an honest miss, not flipped.
+
+## LATE ADJUDICATION — THE `:sync` PUBLISH-DOOR EXEMPTION, RULED (decided 2026-08-23, task `pds-bl-sync-source-bypasses-publish-door`)
+
+Not a wave. This is the wave-26 residue row `pds-bl-sync-source-bypasses-publish-door` (priority 1, filed
+2026-07-30) being answered. D362 shipped the criteria fence and named this hole in the same breath —
+"**NAMED AND NOT CLOSED:** `source: :sync` is exempted from the publish door wholesale" — but never ruled
+on WHICH of the two closures the row offered was the right one. This does, and records why the other loses.
+
+### PDS-D718 — THE CRITERIA FENCE IS SOURCE-BLIND; THE MIRROR EXEMPTIONS ARE NOT. SYNC-SIDE RECONCILIATION IS REFUSED.
+
+**THE CHOICE, STATED.** The row offered two closures: (A) the criteria fence applies regardless of source,
+or (B) the sync path carries its own explicit reconciliation. **A is ruled. B is refused.** Shipped in
+`#13033` (merge commit `8864daafa5`, merged 2026-08-23T06:57:15Z).
+
+**WHAT A ACTUALLY CHANGED, AND WHAT IT DELIBERATELY DID NOT.** The exemption was taken BEFORE any gate
+ran, so a `:sync` publish reached the published row with no guard at all. It is now taken AFTER the
+criteria fence: `ensure_task_publish_transition_legal/5` (`lifecycle.ex:323`) routes `:sync` to
+`criteria_fence/2` (`:362`) and every other source to `gate_task_publish/2` (`:343`), which runs the
+transition check, then `stale_claim?/2` (`:369`), then the same fence. **The transition and claim checks
+stay exempt for `:sync`, and that is not laziness — it is the correct semantics.** A verbatim mirror
+legitimately carries upstream's lifecycle: `done → open` reopens and foreign claim state are replication,
+not corruption. **No legitimate upstream can need to erase a stamped proof.** Every write door upstream —
+api, github, and now sync itself — refuses that erasure, so a sync payload that regresses
+`acceptance_criteria` is evidence of drift or forgery, never of replication. The exemption was never one
+thing; it was three checks wearing one name, and only two of them were ever earned.
+
+**WHY B LOSES — THREE REASONS, IN ORDER OF WEIGHT.** (i) **A reconciler fails OPEN by construction; a
+fence fails CLOSED.** A fence that mis-classifies refuses a legal write and someone notices; a reconciler
+that mis-classifies erases a stamped proof and nobody does. The whole defect class this epic is chasing
+is silent evidence loss, and B's failure mode IS that class. (ii) **It writes the rule twice.** B puts
+"what may overwrite a stamp" in `Pusher`/`Applier` while D362's fence keeps its own copy at the publish
+door — the error-emitters-duplicated shape, where the two drift and the weaker one is the one that runs.
+A is one rule at one seam, and the seam is the one every publisher already passes through. (iii) **It
+builds live machinery for a path with zero live traffic.** Cross-instance sync is not enabled for any
+dataset carrying tasks today, so B would ship, and be maintained, entirely unexercised.
+
+**WHY FAIL-CLOSED IS SAFE HERE — the caller list, enumerated rather than assumed.** The gate only ever
+bites `type == "task"`: the catch-all clause `ensure_task_publish_transition_legal(_type, …), do: :ok`
+(`lifecycle.ex:341`) returns `:ok` for every other type, so **no non-task sync flow can be refused by this
+change.** On the PULL side, `Sync.Applier.apply_upsert/4` synthesizes `[createOrReplace, publish]` and
+calls `apply_mutations` with `source: :sync` (`applier.ex:206-208`); a refusal returns
+`{:invalid_task_content, _}`, which `Applier.error_class/1` (`:160`) already classes `:terminal` — **the
+refusal cannot wedge the retry loop.** On the PUSH side, `Pusher.payload_mutations/3` (`pusher.ex:316-317`)
+appends the same conditional `publish` (`:327-329`), but that batch executes on the REMOTE box through its
+own `MutateController`, where `source` is `:api` — so the push half was already gated by D362's fence and
+this decision changes nothing for it. The blast radius of A is exactly one thing: a sync-sourced publish
+that would clear a `met: true` flag, blank a non-empty `evidence` string, or drop the row holding one.
+
+**THE PROOF IS PINNED, AND IT CAN FAIL.** `api/test/barkpark/content/publish_door_lifecycle_guard_test.exs`
+covers all three doors by name — the direct `:sync` publish, the exact `[createOrReplace, publish]` batch
+the Applier builds, and the Pusher's real `payload_mutations/3` output — plus a **mirror-legit control**
+("a `:sync` publish that PRESERVES the stamped proof still succeeds", crossing the `done → open` edge the
+`:sync` transition exemption is FOR), so the fence is proven to refuse the forgery without refusing
+replication. Mutation-proved in both directions: restoring the blanket `:sync` `:ok` reds it, and
+collapsing `criteria_fence/2` to `:ok` reds the Applier and Pusher tests too.
+
+**WHAT THIS DECISION DOES NOT CLAIM.** Nothing here was observed live. Cross-instance sync remains enabled
+for no dataset carrying tasks, so this is a test-level proof of an ARMED path, exactly as the row said when
+it was filed. That is the point: fail-closed costs nothing while the path is cold, and it never silently
+destroys stamped evidence once the path warms. **A future sync-of-tasks feature must now design its
+reconciliation deliberately, against a door that refuses it** — and this decision is the reason it must,
+rather than inheriting a hole nobody re-derived. `pds-bl-github-linkput-auto-publish-erasure` stays open
+for the audit-trail half neither closure answers.

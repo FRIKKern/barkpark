@@ -198,6 +198,7 @@ const DEFECTS = [
   "W13-detail-route-band",
   "W25-deploy-rail-fail-wrap",
   "W23-account-modal-identity-bounded",
+  "W22-2fa-enroll-phone-band",
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
   "W23-cred-remediation-reachable",
@@ -426,7 +427,13 @@ const CHIP_WIDTHS = [721, 725, 730, 735, 740, 741, 750, 768, 769, 775, 780, 785,
 const HEIGHT = 800;
 const CLASSIC_SCROLLBARS = process.env.OVERFLOW_GUARD_CLASSIC_SCROLLBARS === "1";
 
-const SERVER_CAP = 8000;
+// cchi-w18-bl-overflow-guard-server-cap-and-leaked-child (charter D208): 8000
+// manufactured FALSE exit-2 refusals in a chained per-leg sweep on a loaded
+// host — three serve.mjs children bound AFTER the cap and were then left
+// listening, poisoning the next run through the STALE SERVER path (one bug
+// manufacturing the other). Raised, env-tunable, and the value in force is
+// printed in the run header so a refusal names the budget it missed.
+const SERVER_CAP = Number(process.env.OVERFLOW_GUARD_SERVER_CAP || 15000);
 const DEVTOOLS_CAP = 15000;
 const RENDER_CAP = 12000;
 const EVAL_CAP = 10000;
@@ -549,6 +556,21 @@ async function main() {
   const serveChild = spawn("node", [path.join(HERE, "serve.mjs"), "--port", String(PORT)], {
     stdio: "ignore",
   });
+  // LAST-DITCH REAPER, on EVERY exit path. The refusal path is supposed to
+  // reap through die() -> teardown(), but any path that reaches process.exit
+  // without it (a thrown-through exit, a future bare exit — one shipped in a
+  // draft of the okLine refusal and its leaked child squatted :4199 for the
+  // NEXT run) must still not leak the server. 'exit' handlers run on
+  // process.exit(); kill(0-args-sync) is all that is allowed here.
+  process.once("exit", () => {
+    try { serveChild.kill("SIGKILL"); } catch { /* gone */ }
+    try { if (chrome) chrome.kill("SIGKILL"); } catch { /* gone */ }
+  });
+  process.stdout.write(
+    `>> caps: server ${SERVER_CAP}ms` +
+    `${process.env.OVERFLOW_GUARD_SERVER_CAP ? " (OVERFLOW_GUARD_SERVER_CAP)" : " (default)"}` +
+    ` · render ${RENDER_CAP}ms · eval ${EVAL_CAP}ms · port ${PORT}\n`,
+  );
 
   let chrome = null;
   let cdp = null;
@@ -597,6 +619,41 @@ async function main() {
   }
   // AUDITED (exit 2): the local static server never came up. Environment, not CSS.
   if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+
+  // 1b. THE SERVER IS THIS TREE'S SERVER (cchi-w22-bl-guard-port-contention-
+  //     silently-measures-a-foreign-tree). The byte-compare below cannot tell
+  //     two IDENTICAL trees apart — measured: with a concurrent worktree's
+  //     serve.mjs squatting :4199, an unmodified run here passed every byte
+  //     compare and printed OVERFLOW GUARD PASS while never once touching its
+  //     own tree's server. Identity is asserted FIRST, from serve.mjs's
+  //     /__tree endpoint; bytes are asserted after (a squatter can also be a
+  //     stale same-tree server, which identity alone cannot catch).
+  //     AUDITED (exit 2): both arms are ENVIRONMENT refusals, never defects.
+  {
+    let identity = null;
+    try {
+      const r = await fetch(`${BASE}/__tree`, { cache: "no-store" });
+      if (r.ok) identity = await r.json();
+    } catch { /* fall through to the refusal below */ }
+    if (!identity || typeof identity.root !== "string") {
+      return die(
+        `UNIDENTIFIABLE SQUATTER on :${PORT} — the server answered /app.css but not /__tree, ` +
+        `so it is an older serve.mjs or a foreign process. This guard only measures a server that ` +
+        `IDENTIFIES ITSELF as this tree (${ROOT}). Kill the squatter (lsof -nP -iTCP:${PORT} -sTCP:LISTEN) or ` +
+        `set OVERFLOW_GUARD_PORT to a free port.`,
+      );
+    }
+    if (path.resolve(identity.root) !== path.resolve(ROOT)) {
+      return die(
+        `FOREIGN TREE on :${PORT} — the server identifies as\n` +
+        `     ${identity.root} (pid ${identity.pid})\n` +
+        `   while this run measures\n` +
+        `     ${ROOT}\n` +
+        `   Identical bytes would pass the byte-compare below, so a run against that server would ` +
+        `quote ANOTHER WORKTREE's pixels as this tree's baseline. Refusing to measure.`,
+      );
+    }
+  }
 
   // 2. SERVED BYTES == DISK BYTES (GR125a). Compared for every file the
   //    measurement depends on, plus the injected shell "/" against the same
@@ -772,24 +829,151 @@ async function main() {
     fontPinRuns++;
   };
 
-  // Navigate and poll until `readyExpr` is truthy (the SPA mounts async).
-  const nav = async (url, readyExpr) => {
-    await cdp.send("Page.navigate", { url }, sessionId);
-    for (let w = 0; w < RENDER_CAP; w += 100) {
-      let ready = false;
-      // The pin is called OUTSIDE this catch on purpose: swallowing its refusal
-      // as "still navigating" would spend the whole RENDER_CAP and then report
-      // a never-ready page — a font fault wearing a timeout's clothes.
-      try { ready = !!(await evalJs(`!!(${readyExpr})`)); } catch { /* navigating */ }
-      if (ready) { await pinFonts(url); return; }
-      await sleep(100);
+  // THE RENDERED-HOST FLOOR (cchi-w20-bl-guard-greens-when-its-hosts-disappear).
+  // display:none keeps a node in the DOM: querySelector stays truthy, computed
+  // styles still read their specified values, and every rect is 0x0 — so
+  // `0 <= 0` scored 28/28 cells clean over 98 pills that no person could see.
+  // The floor is DERIVED from what each leg already declares: the literal
+  // selectors inside its own readyExpr. After readiness, every non-negated
+  // literal selector that MATCHES at least one node must also PAINT at least
+  // one non-zero box, or the guard refuses by name — the leg was about to
+  // certify an invisible screen.
+  //   HONEST LIMITS, stated rather than implied: (a) the floor runs at the
+  //   NAV width — a width-scoped display:none inside a leg's own width loop
+  //   is not caught here and stays each leg's own duty; (b) only LITERAL
+  //   querySelector('...')/getElementById('...') strings contribute — a
+  //   readyExpr built from variables derives nothing; (c) a NEGATED selector
+  //   (`!document.querySelector(...)` — a leg waiting on absence) is skipped,
+  //   as is a selector matching zero nodes (an || arm whose twin satisfied
+  //   the gate); (d) a ZERO-HEIGHT CLIPPING ANCESTOR (height:0;
+  //   overflow:hidden) passes this floor — child rects keep their laid-out
+  //   sizes (measured: 102.4x28 under a 0-height .attention-list) and
+  //   checkVisibility stays true, so that case remains each clip-walking
+  //   leg's own duty. visibility:hidden and content-visibility:hidden ARE
+  //   caught, via checkVisibility (measured: both flip it false while the
+  //   rect area stays 2868px²).
+  const READY_SELECTOR_RE = /(!?)\s*document\.(?:querySelector(?:All)?\(\s*'([^']+)'\s*\)|getElementById\(\s*'([^']+)'\s*\))/g;
+  const assertReadyHostsPaint = async (url, readyExpr) => {
+    const sels = [];
+    for (const m of readyExpr.matchAll(READY_SELECTOR_RE)) {
+      if (m[1] === "!") continue;
+      const q = m[2] != null ? m[2] : "#" + m[3];
+      if (!sels.includes(q)) sels.push(q);
     }
-    throw new Error(`page never became ready: ${url} (waited on: ${readyExpr})`);
+    if (sels.length === 0) return;
+    const report = await evalJs(
+      `(function(){return ${JSON.stringify(sels)}.map(function(q){` +
+      `var els=[].slice.call(document.querySelectorAll(q));` +
+      `var rendered=els.filter(function(el){var r=el.getBoundingClientRect();if(!(r.width>0&&r.height>0))return false;return el.checkVisibility?el.checkVisibility({checkVisibilityCSS:true,checkOpacity:true}):true;}).length;` +
+      `return {q:q, matches:els.length, rendered:rendered};});})()`,
+    );
+    for (const r of report) {
+      if (r.matches > 0 && r.rendered === 0) {
+        throw new Error(
+          `READY HOST NOT PAINTED: "${r.q}" matches ${r.matches} node(s) at ${url} and NONE paints a box — ` +
+          `display:none keeps querySelector truthy while every rect is 0x0, and visibility:hidden / content-visibility:hidden keep the rect while checkVisibility reads false. ` +
+          `The readiness gate passed on a host a person cannot see; measuring on would certify an invisible ` +
+          `screen, so this run refuses instead (cchi-w20-bl-guard-greens-when-its-hosts-disappear).`,
+        );
+      }
+    }
+  };
+
+  // Navigate and poll until `readyExpr` is truthy (the SPA mounts async).
+  //
+  // HONESTLY BOUNDED, WITH ONE STATED RETRY (cchi-w21-bl-guard-readiness-poll-
+  // nondeterministic). Three verifiers watched the old loop refuse on IDENTICAL
+  // bytes ("page never became ready") while an independent Chrome found the
+  // page ready, and the immediately following run passed. The old loop (a) was
+  // ITERATION-counted — `w += 100` per lap — so its printed 12000ms budget was
+  // nominal, not wall-clock; (b) swallowed EVERY eval error identically, so a
+  // slow asset, a dead session and a genuinely unready page all wore the same
+  // sentence; and (c) gave a one-off environment stall the same terminal
+  // verdict as a permanent fault. Now: the budget is ELAPSED time; a first
+  // timeout re-navigates ONCE and says so in the output (a flaked load is
+  // retried where a human would retry it — never more than once, so a real
+  // never-ready page still refuses within 2×RENDER_CAP); and the terminal
+  // refusal is headlined READINESS TIMEOUT — textually disjoint from the
+  // STALE SERVER refusals above, which fire before any navigation — carrying
+  // the poll's own diagnosis (expr-false vs eval-threw counts, the last eval
+  // error, and a final forced probe of what the page says it is).
+  const nav = async (url, readyExpr) => {
+    let exprFalse = 0, evalThrew = 0, lastErr = null;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await cdp.send("Page.navigate", { url }, sessionId);
+      const t0 = Date.now();
+      while (Date.now() - t0 < RENDER_CAP) {
+        let ready = false;
+        // The pin is called OUTSIDE this catch on purpose: swallowing its refusal
+        // as "still navigating" would spend the whole RENDER_CAP and then report
+        // a never-ready page — a font fault wearing a timeout's clothes.
+        try { ready = !!(await evalJs(`!!(${readyExpr})`)); if (!ready) exprFalse++; }
+        catch (e) { evalThrew++; lastErr = e && e.message ? e.message : String(e); }
+        if (ready) { await pinFonts(url); await assertReadyHostsPaint(url, readyExpr); return; }
+        await sleep(100);
+      }
+      if (attempt === 1) {
+        process.stdout.write(
+          `   · readiness timeout after ${Date.now() - t0}ms on ${url} — re-navigating once ` +
+          `(stated retry 1/1; a second timeout REFUSES at exit 2)\n`,
+        );
+      }
+    }
+    // Terminal: diagnose OUTSIDE the swallowing catch, then refuse.
+    let pageSays;
+    try {
+      pageSays = String(await evalJs(
+        `(function(){return location.href+' readyState='+document.readyState+` +
+        `' bodyLen='+((document.body&&document.body.innerHTML)||'').length;})()`,
+      ));
+    } catch (e) { pageSays = `the final probe itself threw: ${e && e.message ? e.message : e}`; }
+    throw new Error(
+      `READINESS TIMEOUT — the page never became ready within ${RENDER_CAP}ms elapsed, twice (1 stated retry): ${url} (waited on: ${readyExpr})\n` +
+      `   poll saw: expr-false ${exprFalse} · eval-threw ${evalThrew}${lastErr ? ` (last: ${lastErr})` : ""}\n` +
+      `   page says: ${pageSays}\n` +
+      `   NOT the STALE SERVER family — identity and bytes on :${PORT} matched this tree before any navigation.`,
+    );
   };
 
   const failures = [];
   const fail = (defect, msg) => { failures.push({ defect, msg }); process.stdout.write(`   ✗ ${msg}\n`); };
-  const okLine = (msg) => process.stdout.write(`   ✓ ${msg}\n`);
+  // ── okLine ARITY REFUSAL (cchi-w27-bl-okline-arity-swallows-a-leg) ────────
+  // A keep-both git merge at this file's shared SUCCESS tail produces VALID
+  // JS: git treats the surrounding `okLine(` and `);` lines as common context,
+  // so the conflict lands INSIDE the argument list and marker-strip keep-both
+  // yields either a FLAT `okLine(A, B)` — the second argument, one whole leg's
+  // clean claim, is silently DISCARDED (rc 0 on node --check, on import, at
+  // runtime) — or a NESTED `okLine(A, okLine(B))`, which prints the two slices
+  // in REVERSED order and rides the inner call's return value in as a bogus
+  // second argument. Both shapes now REFUSE at the first corrupted call:
+  // exactly one argument is the contract, anything else is the merge defect by
+  // name, exit 2 (a refusal to measure — the instrument's own bytes are
+  // corrupt, so no clean claim it prints can be trusted).
+  //
+  // HONEST LIMIT: this is a RUNTIME check. It fires in CI because
+  // console-harness.yml runs the guard with no --defect flag (every leg's
+  // success tail executes on a green run) — but a swallow inside a
+  // FAILURE-gated okLine call is invisible on a green run, and a static
+  // scanner is refuted: ${} interpolation inside template literals defeats
+  // naive paren/comma depth tracking (34 false positives over 57 clean calls).
+  const okLine = (...args) => {
+    if (args.length !== 1) {
+      process.stderr.write(
+        `!! GUARD (exit 2): okLine called with ${args.length} argument(s) — it takes exactly ONE. ` +
+        `This is the keep-both MERGE DEFECT this refusal exists to catch: a conflict resolved inside ` +
+        `okLine's argument list parses as valid JS while silently discarding a leg's clean claim ` +
+        `(flat okLine(A, B)) or printing two legs reversed (nested okLine(A, okLine(B))). ` +
+        `Re-resolve the merge at this call site by hand. First argument begins: "${String(args[0]).slice(0, 120)}"\n`,
+      );
+      // THROW, never process.exit: a bare exit here LEAKS the static-server
+      // child (measured — a squatter on :4199 survived the first draft of this
+      // refusal and made the NEXT run refuse as a foreign tree). The tail
+      // catch routes this through die(), which tears down server + browser
+      // before exiting 2.
+      throw new Error("okLine arity refusal (keep-both merge defect) — the named call is above");
+    }
+    return process.stdout.write(`   ✓ ${args[0]}\n`);
+  };
   // The FONT PINNED sentence is EARNED, never narrated: it prints the number
   // of successful pinFonts() executions this run, and when that number is
   // zero it WITHHOLDS the claim — under a `!`, never a ✓ — instead of
@@ -849,14 +1033,23 @@ async function main() {
               `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
             );
             if (!chip) { fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: #billing-chip missing`); chipRow.push(`${width}:missing`); continue; }
-            // 721-740 IS ASSERTED STRICTLY (W20-S8). The `+ 1` below is the
-            // undeclared epsilon owned by
-            // `cchi-w18-bl-overflow-guard-chip-epsilon-undeclared`; it is out of
-            // scope here and this band deliberately does NOT lean on it — it is
-            // what let 740/dark's 168/167 read as whole. With the 621-740 CSS
-            // block every one of these cells lands at 168/168 (full intrinsic
-            // width), so a pixel of tolerance could only hide a regression.
-            const cut = width <= 740 ? chip.sw > chip.cw : chip.sw > chip.cw + 1;
+            // EVERY WIDTH IS ASSERTED STRICTLY. The `+ 1` that used to sit on
+            // the >740 side was an UNDECLARED epsilon — no name, no cap, no
+            // marker, none of the four properties the retired band-A residual
+            // carried — and it once let 740/dark's real 168/167 read as whole
+            // (cchi-w18-bl-overflow-guard-chip-epsilon-undeclared, D211). The
+            // pixel it forgave was real sub-pixel geometry, not rasterisation:
+            // the dark theme-toggle painted ~2px wider than light and squeezed
+            // the chip by ~0.44px, which integer scrollWidth/clientWidth
+            // report as a whole pixel; OVERFLOW_GUARD_CLASSIC_SCROLLBARS=1
+            // reproduced every cell identically. On current bytes the W20-S8
+            // 621-740 block and the 830 tighten land ALL 68 cells at 168/168
+            // (full intrinsic width, measured both themes), so the epsilon
+            // forgave NOTHING and could only hide a one-pixel regression. A
+            // future sub-pixel residual must arrive as a NAMED constant with a
+            // reason, a cap and a printed marker on every cell it forgives —
+            // the band-A shape — never as `+ 1` on the comparison.
+            const cut = chip.sw > chip.cw;
             if (cut) { chipCut++; fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: billing chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} (rect ${chip.w}px, "${chip.text}")`); }
             chipRow.push(`${width}:${chip.sw}/${chip.cw}${cut ? "!" : ""}`);
           }
@@ -1881,6 +2074,77 @@ async function main() {
           process.stdout.write(`   ${r.name}/${theme}  ${row.join("  ")}\n`);
         }
       }
+
+      // ── THE PROBE CELL: the shipped `anywhere` gets a leg that can lose ────
+      //    (cchi-w26-bl-deploy-rail-fail-value-has-no-leg-that-can-lose /
+      //    charter D312-CCH.) On the shipped tree, flipping `.deploy-rail-fail`
+      //    from `overflow-wrap: anywhere` to `break-word` is BYTE-IDENTICAL in
+      //    all six cells above — #9255 hoisted `minmax(0, 1fr)` onto the base
+      //    `.detail-grid`, so the track absorbs either value. The difference
+      //    EXISTS and was measured under one named condition: a bare `1fr`
+      //    track (the pre-#9255 shape) with `.new-step-detail`'s min-content
+      //    neutralised — there `anywhere` holds the page at 900 and
+      //    `break-word` drags it (~1050 at filing). This cell reproduces that
+      //    condition INSIDE the run, so the shipped value decides a measured
+      //    outcome again. Injected-style caveat (D308): an injected <style>
+      //    outranks later same-specificity rules at EVERY width, so this probe
+      //    runs ONLY at 900 (the ≤899 collapse never competes), scopes to
+      //    #view-site, and REMOVES itself — arm (c) asserts the removal.
+      //    The mutation stays INSIDE the probe: `.new-step-detail` ships
+      //    unchanged (W24-theater-failed-hostname-whole still owns it).
+      {
+        const PROBE_BASE =
+          "#view-site .detail-grid { grid-template-columns: 1fr 260px !important; }" +
+          "#view-site .new-step-detail { overflow-wrap: anywhere !important; }";
+        const PROBE_FLIP =
+          "#view-site .deploy-rail-fail { overflow-wrap: break-word !important; }";
+        const probeRead =
+          `(function(){var d=document.documentElement;` +
+          `var f=document.querySelector('.deploy-rail-fail');` +
+          `return {sw:d.scrollWidth, cw:d.clientWidth,` +
+          ` ow:f?getComputedStyle(f).overflowWrap:'no-rail',` +
+          ` probe:!!document.getElementById('__rail_probe')};})()`;
+        for (const theme of ["light", "dark"]) {
+          await setViewport(900);
+          await nav(
+            `${BASE}/?scen=site-deploy-rail-failed&theme=${theme}${sc.deepLink}`,
+            `document.querySelector('.deploy-rail-fail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+          );
+          // (a) probe on, rail value SHIPPED: the cell the shipped value must carry.
+          await evalJs(
+            `(function(){var s=document.createElement('style');s.id='__rail_probe';` +
+            `s.textContent=${JSON.stringify("PROBE_BASE_LIT")};document.head.appendChild(s);return true;})()`
+              .replace('"PROBE_BASE_LIT"', JSON.stringify(PROBE_BASE)),
+          );
+          const a = await evalJs(probeRead);
+          if (a.sw > a.cw) {
+            fail(D, `probe/${theme}@900: under the probe grid (bare 1fr 260px, step detail neutralised) the page reads ${a.sw}/${a.cw} with the SHIPPED .deploy-rail-fail overflow-wrap "${a.ow}" — the shipped value no longer carries the one cell that can refuse break-word`);
+          }
+          // (b) positive control: the probe must be able to SEE the difference.
+          await evalJs(
+            `(function(){var s=document.getElementById('__rail_probe');` +
+            `s.textContent+=${JSON.stringify("PROBE_FLIP_LIT")};return true;})()`
+              .replace('"PROBE_FLIP_LIT"', JSON.stringify(PROBE_FLIP)),
+          );
+          const b = await evalJs(probeRead);
+          if (b.sw <= b.cw) {
+            fail(D, `probe/${theme}@900: POSITIVE CONTROL WENT VACUOUS — forcing overflow-wrap: break-word inside the probe still reads ${b.sw}/${b.cw} (rail computed "${b.ow}"), so this probe can no longer distinguish the values and arm (a) certifies nothing`);
+          }
+          // (c) hygiene: the probe removes itself and the page returns clean.
+          await evalJs(
+            `(function(){var s=document.getElementById('__rail_probe');` +
+            `if(s)s.parentNode.removeChild(s);return true;})()`,
+          );
+          const c = await evalJs(probeRead);
+          if (c.probe || c.sw > c.cw) {
+            fail(D, `probe/${theme}@900: PROBE RESIDUE — style present=${c.probe}, page ${c.sw}/${c.cw} after removal; later cells would measure a mutated tree`);
+          }
+          process.stdout.write(
+            `   probe/${theme}@900  shipped(${a.ow}):${a.sw}/${a.cw}  forced(break-word):${b.sw}/${b.cw}  removed:${c.sw}/${c.cw}\n`,
+          );
+        }
+      }
+
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${cells} / ${cells} cruel cells clean across ${RAIL_WIDTHS.join("/")} in both themes, plus ${kindCells} ` +
@@ -2434,6 +2698,100 @@ async function main() {
         fontPinnedEvidence(
           `\`.am-name\` inherits the UI face, not the mono fallback D248 named, and what is ASSERTED here is ` +
           `face-independent anyway: glyphs inside their own box, and a modal that does not scroll sideways`,
+        );
+      }
+    }
+
+
+    // ── W22: THE 2FA ENROLL PHASE, AT PHONE WIDTHS, AT REST ────────────────
+    //    (cchi-w22-bl-modal-oracle-never-visits-a-phone-width.) THE OWNERSHIP
+    //    DECISION, in one sentence: overflow-guard owns modal GEOMETRY because
+    //    it is the instrument console-harness actually blocks merges on, while
+    //    modal-oracle (1440-only, invoked by ZERO CI jobs — it prints that
+    //    itself) stays the behavioural oracle; so the enroll phase is driven
+    //    HERE rather than widening an instrument nothing runs.
+    //
+    //    THE DEFECT CLASS THIS CAN LOSE ON (cch-w22-s4 / D254, measured
+    //    pre-fix): the account card carried a ~460.45px min-content floor, the
+    //    modal root became a horizontal scroller with no visible affordance,
+    //    and at rest the QR sat at x=-135..-17 (@320) with Copy at
+    //    416.33..448.45 (@360/390/430) — OFF-SCREEN, while
+    //    documentElement.scrollWidth == clientWidth at every width, so every
+    //    page-level scorer read clean. The assertions here are therefore
+    //    VIEWPORT-RELATIVE RECTS AT REST, per control, plus the root's own
+    //    scroll pair — never the page number. Px are font-conditional (D218);
+    //    the ORDINAL fact — a control past the viewport edge at rest — is what
+    //    is asserted.
+    //
+    //    THE DRIVE IS REAL: scenario account-modal-2fa-badcode auto-drives
+    //    #a2f-start → POST enroll → type 000000 → #a2f-confirm → 422, and
+    //    app.js paints #a2f-error. Readiness keys on #a2f-error (the drive's
+    //    arrival sentinel — NOT one of the measured hosts), so a drive that
+    //    never reached the enroll phase refuses as exit 2 instead of
+    //    photographing the wrong screen.
+    if (requested.includes("W22-2fa-enroll-phone-band")) {
+      const D = "W22-2fa-enroll-phone-band";
+      const A2F_WIDTHS = [320, 360, 390, 430, 480];
+      // #a2f-copy ("Copy all") deliberately NOT here: it belongs to the
+      // recovery-codes phase AFTER a successful confirm — the driven 422 path
+      // never renders it (measured: zero matches in this phase). The enroll
+      // phase's copy control is #a2f-copy-secret.
+      const A2F_HOSTS = [".a2f-qr", "#a2f-secret", "#a2f-copy-secret", "#a2f-confirm"];
+      process.stdout.write(
+        `\n${D} — the driven enroll phase x ${A2F_WIDTHS.length} phone widths x 2 themes` +
+        ` (${A2F_HOSTS.length} controls viewport-checked AT REST in every cell)\n`,
+      );
+      let a2fCells = 0, a2fChecked = 0;
+      for (const theme of ["light", "dark"]) {
+        await setViewport(900);
+        await nav(
+          `${BASE}/?scen=account-modal-2fa-badcode&theme=${theme}&modal=account`,
+          `(function(){var r=document.getElementById('modal-root');` +
+          `return !!(r && !r.hidden && r.querySelector('.modal-card') && document.getElementById('a2f-error'));})()`,
+        );
+        const row = [];
+        for (const width of A2F_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;var vw=d.clientWidth;` +
+            `var root=document.getElementById('modal-root');` +
+            `var hosts=${JSON.stringify(A2F_HOSTS)}.map(function(q){` +
+            `  var els=[].slice.call(document.querySelectorAll(q));` +
+            `  return {q:q, n:els.length, rects:els.map(function(el){var r=el.getBoundingClientRect();` +
+            `    return {l:+r.left.toFixed(2), r:+r.right.toFixed(2), w:+r.width.toFixed(2), h:+r.height.toFixed(2)};})};` +
+            `});` +
+            `return {vw:vw, psw:d.scrollWidth, pcw:d.clientWidth,` +
+            ` rsw:root?root.scrollWidth:0, rcw:root?root.clientWidth:0,` +
+            ` rleft:root?root.scrollLeft:0, hosts:hosts};})()`,
+          );
+          a2fCells++;
+          for (const h of m.hosts) {
+            // A control that stopped rendering is a finding, never a skip: the
+            // enroll phase without its QR (or its Copy) is the defect wearing
+            // an emptier costume.
+            if (h.n === 0) { fail(D, `${theme}@${width}: ${h.q} matched NOTHING in the driven enroll phase — the control is gone, so nothing below can certify it reachable`); continue; }
+            for (const r of h.rects) {
+              a2fChecked++;
+              if (r.w <= 0 || r.h <= 0) { fail(D, `${theme}@${width}: ${h.q} paints a ${r.w}x${r.h} rect — present but invisible`); continue; }
+              // THE ORDINAL ASSERTION: on screen AT REST. scrollLeft is read,
+              // not reset — "at rest" is what a person gets.
+              if (r.l < 0 || r.r > m.vw) {
+                fail(D, `${theme}@${width}: ${h.q} rests at ${r.l}..${r.r} against a ${m.vw}px viewport — OFF-SCREEN AT REST behind a scroll with no visible affordance (root scrollLeft ${m.rleft}, root ${m.rsw}/${m.rcw})`);
+              }
+            }
+          }
+          row.push(`${width}:root ${m.rsw}/${m.rcw}${m.rsw > m.rcw ? "!" : ""}`);
+        }
+        process.stdout.write(`   ${theme}  ${row.join("  ")}\n`);
+      }
+      if (a2fChecked === 0) {
+        fail(D, `ZERO control rects measured across ${a2fCells} cells — the enroll phase never rendered, so this leg certifies nothing`);
+      } else if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${a2fChecked} control rect(s) across ${a2fCells} cells: QR, secret, Copy, Confirm all ON SCREEN ` +
+          `AT REST at ${A2F_WIDTHS.join("/")} in both themes, in the REAL driven enroll phase (start → enroll → 422). ` +
+          `The page number is not consulted — pre-fix, documentElement read clean at every one of these widths ` +
+          `while the QR sat at x=-135; the viewport-relative rects are what a person gets`,
         );
       }
     }
@@ -4150,7 +4508,11 @@ async function main() {
       const D = "W21-members-roster-identity-and-remove";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone and must never
       // read as shared file constants.
-      const MEM_SCENS = ["members-populated"];
+      // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts: the roster is now
+      // ALSO driven at the server's own email cap (one 160-char unbroken
+      // address, members-cruel-content) — before this the leg measured
+      // .set-row-name at 12-14 fixture-kind characters only.
+      const MEM_SCENS = ["members-populated", "members-cruel-content"];
       // The phone band where the row is broken, the fold, and 900 as a measured
       // upper edge on pre-fix bytes so the band's top is pinned rather than
       // assumed.
@@ -6733,6 +7095,13 @@ async function main() {
 }
 
 main().catch((err) => {
-  process.stderr.write(`!! OVERFLOW GUARD crashed: ${err && err.stack ? err.stack : err}\n`);
-  process.exit(1);
+  // AUDITED (exit 2): an unhandled crash measured NOTHING — by this guard's own
+  // doctrine (every die() path, and the inner measurement catch: "an incomplete
+  // run must never be reported as a measured overflow") that is a REFUSAL, not
+  // a finding. Exit 1 here made the console-harness wrapper print the
+  // MEASURED_DEFECT banner ("a measured geometry defect in a real browser",
+  // with selector/number guidance) for a run that never measured a screen.
+  // Sibling breakpoint-sweep.mjs maps this identical unhandled shape to 2.
+  process.stderr.write(`!! OVERFLOW GUARD crashed (exit 2 — nothing was measured): ${err && err.stack ? err.stack : err}\n`);
+  process.exit(2);
 });

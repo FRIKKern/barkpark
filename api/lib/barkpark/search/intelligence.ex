@@ -47,12 +47,32 @@ defmodule Barkpark.Search.Intelligence do
   @spec retention_days() :: pos_integer()
   def retention_days, do: @retention_days
 
+  @typedoc """
+  Why a `record/6` call recorded nothing (pds-bl-w36-record6-conflation).
+  These four-plus-one causes used to collapse to a bare `:skipped`, which
+  destroyed the information a caller needs to tell "recording is off" from
+  "we crashed" — the identical conflation `record_interaction/4` already had
+  repaired. Same vocabulary, one module.
+
+    * `:recording_disabled` — recording is off for this request. Deliberate.
+    * `:record_false` — the caller opted this one call out (`record: false`).
+    * `:offset_page` — a paginated follow-up page; only page one is an event.
+    * `:unqualified_query` — the query did not qualify for analytics
+      (blank/unusable after normalization). Nothing to record, not a fault.
+    * `:error` — an exception or exit was swallowed on the way to the insert.
+      A real failure.
+  """
+  @type record_skip_reason ::
+          :recording_disabled | :record_false | :offset_page | :unqualified_query | :error
+
   @doc """
-  Record a search event. Returns `{:ok, event_id}`, `:skipped`, or `{:rejected, reason}`.
+  Record a search event. Returns `{:ok, event_id}`, `{:skipped, reason}`, or
+  `{:rejected, reason}` — the skip reason names which of the causally distinct
+  no-write outcomes happened (see `t:record_skip_reason/0`).
   Never raises — analytics must not break search.
   """
   @spec record(String.t(), String.t(), map(), non_neg_integer(), non_neg_integer(), keyword()) ::
-          {:ok, Ecto.UUID.t()} | :skipped | {:rejected, atom()}
+          {:ok, Ecto.UUID.t()} | {:skipped, record_skip_reason()} | {:rejected, atom()}
   def record(surface, scope, context, total, duration_ms, opts \\ [])
       when is_binary(surface) and is_binary(scope) and is_map(context) do
     offset = Map.get(context, :offset, 0)
@@ -60,13 +80,13 @@ defmodule Barkpark.Search.Intelligence do
     result =
       cond do
         Keyword.get(opts, :disabled, false) ->
-          :skipped
+          {:skipped, :recording_disabled}
 
         Keyword.get(opts, :record, true) == false ->
-          :skipped
+          {:skipped, :record_false}
 
         offset > 0 ->
-          :skipped
+          {:skipped, :offset_page}
 
         true ->
           safe_record(surface, scope, context, total, duration_ms, opts)
@@ -77,11 +97,11 @@ defmodule Barkpark.Search.Intelligence do
   rescue
     _ ->
       emit_record_telemetry(surface, scope, :error)
-      :skipped
+      {:skipped, :error}
   catch
     _, _ ->
       emit_record_telemetry(surface, scope, :error)
-      :skipped
+      {:skipped, :error}
   end
 
   @doc """
@@ -271,9 +291,9 @@ defmodule Barkpark.Search.Intelligence do
   defp safe_record(surface, scope, context, total, duration_ms, opts) do
     do_record(surface, scope, context, total, duration_ms, opts)
   rescue
-    _ -> :skipped
+    _ -> {:skipped, :error}
   catch
-    _, _ -> :skipped
+    _, _ -> {:skipped, :error}
   end
 
   defp do_record(surface, scope, context, total, duration_ms, opts) do
@@ -309,7 +329,7 @@ defmodule Barkpark.Search.Intelligence do
 
     case qualify_query(raw_query, filters) do
       :skip ->
-        :skipped
+        {:skipped, :unqualified_query}
 
       {:reject, reason} ->
         submit_event(
@@ -1149,6 +1169,7 @@ defmodule Barkpark.Search.Intelligence do
     {status, reason} =
       case result do
         {:ok, _} -> {:ok, nil}
+        {:skipped, reason} -> {:skipped, reason}
         :skipped -> {:skipped, nil}
         {:rejected, reason} -> {:rejected, reason}
         :error -> {:error, nil}

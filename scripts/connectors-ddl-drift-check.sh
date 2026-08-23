@@ -23,8 +23,10 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
-SCHEMA_TS="connectors/src/db/schema.ts"
-TEST_HELPER="api/test/test_helper.exs"
+# Env-overridable scan paths (the seam --selftest re-invokes "$0" through, as
+# studio-link-lint's STUDIO_LINK_LINT_ROOT does): absolute paths welcome.
+SCHEMA_TS="${CONNECTORS_DDL_SCHEMA_TS:-connectors/src/db/schema.ts}"
+TEST_HELPER="${CONNECTORS_DDL_TEST_HELPER:-api/test/test_helper.exs}"
 
 # Extract the sorted, de-duplicated connector_installs column-NAME set from a
 # file. Column names are lowercase snake_case (the SQL keyword lines — PRIMARY
@@ -118,7 +120,66 @@ EOF
   if [ "$a" = "$c" ]; then
     echo "SELFTEST FAIL: a one-column drift went undetected"; return 1
   fi
-  echo "selftest OK: agree→green, one-column drift→red"
+
+  # ── END-TO-END ARMS: re-invoke "$0" so the VERDICT wiring and the
+  # fail-closed empties live inside the tripwire, not a fork of it. The arms
+  # above exercise only extract_columns; the real comparison and both
+  # empty-set exits could be disarmed while they stayed green (the
+  # selftest-reimplements-the-scan defect, cgsi-s3 class). Every arm asserts
+  # the EXIT CODE and the arm's own message.
+  local out rc
+  set +e
+  out="$(CONNECTORS_DDL_SCHEMA_TS="$tmp/schema.ts" CONNECTORS_DDL_TEST_HELPER="$tmp/agree.exs" bash "$0" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 0 ]; then
+    echo "SELFTEST FAIL: agreeing DDL exited $rc end-to-end, expected 0 — $out"; return 1
+  fi
+  case "$out" in *"PASS"*) ;; *) echo "SELFTEST FAIL: agreeing DDL did not print PASS end-to-end"; return 1 ;; esac
+
+  set +e
+  out="$(CONNECTORS_DDL_SCHEMA_TS="$tmp/schema.ts" CONNECTORS_DDL_TEST_HELPER="$tmp/drift.exs" bash "$0" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: a one-column drift exited $rc end-to-end, expected 1 — the real verdict comparison is disarmed"; return 1
+  fi
+  case "$out" in *"DDL DRIFT"*) ;; *) echo "SELFTEST FAIL: the drift red did not come from the DDL DRIFT verdict"; return 1 ;; esac
+
+  : > "$tmp/empty.exs"
+  set +e
+  out="$(CONNECTORS_DDL_SCHEMA_TS="$tmp/schema.ts" CONNECTORS_DDL_TEST_HELPER="$tmp/empty.exs" bash "$0" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: an EMPTY column set exited $rc end-to-end, expected 1 — the fail-closed empty arm is disarmed (a parse break would scan vacuously green)"; return 1
+  fi
+  case "$out" in *"no connector_installs columns parsed"*) ;; *) echo "SELFTEST FAIL: the empty-set red did not come from the empty-set arm"; return 1 ;; esac
+
+  set +e
+  out="$(CONNECTORS_DDL_SCHEMA_TS="$tmp/schema.ts" CONNECTORS_DDL_TEST_HELPER="$tmp/does-not-exist.exs" bash "$0" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: a MISSING DDL source exited $rc end-to-end, expected 1"; return 1
+  fi
+  case "$out" in *"DDL source not found"*) ;; *) echo "SELFTEST FAIL: the missing-source red did not come from the not-found arm"; return 1 ;; esac
+
+  # BOTH sides empty — the composite the single-side arms cannot see. A
+  # neutered empty-exit on ONE side degrades to the drift verdict (empty vs
+  # non-empty still reds, misattributed); neuter BOTH and empty == empty
+  # sails through the comparison as a vacuous PASS. Measured before this arm
+  # existed: both exits stripped -> rc 0 PASS over two parse breaks.
+  : > "$tmp/empty.ts"
+  set +e
+  out="$(CONNECTORS_DDL_SCHEMA_TS="$tmp/empty.ts" CONNECTORS_DDL_TEST_HELPER="$tmp/empty.exs" bash "$0" 2>&1)"
+  rc=$?
+  set -e
+  if [ "$rc" -ne 1 ]; then
+    echo "SELFTEST FAIL: TWO empty column sets exited $rc end-to-end, expected 1 — empty==empty scans vacuously green (both empty-set arms disarmed)"; return 1
+  fi
+
+  echo "selftest OK: agree→green, one-column drift→red — extractor arms plus END-TO-END re-invocation (verdict, empty-set fail-closed, missing source all assert exit codes)"
 }
 
 # Refuse an argument this gate does not understand. A swallowed flag — a

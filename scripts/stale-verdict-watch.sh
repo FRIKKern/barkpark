@@ -119,8 +119,34 @@ REPO_OVERRIDE=""
 BRANCH="main"
 FIXTURE=""
 COMMITS_FILE=""
+# ATTEMPTS / SLEEPS below are measured against real traffic, not tuned blind
+# (dr-w29-bl-watch-poll-budget-inadequate-under-a-merge-burst). 368 scheduled
+# runs from 2026-08-09T15:34Z to 2026-08-23T17:23Z (14 days, spanning the
+# whole window since the rc=5 and rc=6/rc=7 splits above both landed)
+# classified ZERO as rc=5 BLIND: 244 were rc=1 RED (a real CONFLICTING PR),
+# 34 rc=6 UNREACHABLE (token/rate-limit — never a poll-budget symptom), 2
+# rc=3 CONFIG, 88 clean. The single BLIND run that motivated suspicion of
+# this budget — 31311358759, 2026-08-09, 39/39 UNKNOWN after ~28s of waiting
+# behind five merges — predates rc=5 by hours; it is the incident rc=5 was
+# built to catch, not a second occurrence surviving past it. Raising ATTEMPTS
+# or SLEEPS now would add wall-clock to every one of ~370 runs/2wk to guard
+# against a failure mode this exact budget has not reproduced once since
+# going live. Left unchanged on that evidence; re-measure if a BLIND run
+# recurs rather than re-guessing the number.
 ATTEMPTS=3
 MIN_COMMITS=1
+# The TREND state (dr-w29): a line-oriented file the workflow persists between
+# runs. Two verbs only. `START <iso>` is appended the moment a run knows its
+# arguments — BEFORE any network call — so a run that is cancelled mid-read, or
+# that exits BLIND/UNREACHABLE, leaves a START with no READ behind it. `READ
+# <iso> reported=<n> classified=<c> open=<o>` is appended ONLY by a run that
+# actually read its population (classified > 0, or a legitimately empty 0).
+# The trend baseline is the LAST READ LINE, never the last run: a cancelled or
+# blind run can therefore never be a baseline, and the intervening dangling
+# STARTs are counted and SAID as UNREAD — never as "unchanged". No state file
+# (unset, or evicted by the store) is its own honest arm: no baseline, nothing
+# compared, and no run is ever called unchanged without one.
+STATE_SVW="${SVW_STATE_FILE:-}"
 # 0 in the harness; a live run waits long enough for GitHub to finish computing
 # mergeability for the rows it answered UNKNOWN on.
 SLEEPS="${SVW_RETRY_SLEEP:-8 20 0}"
@@ -302,6 +328,44 @@ render() { # reads the verdict JSON on stdin
   '
 }
 
+state_start() { # append the START marker; prune so the store never grows unbounded
+  [ -n "$STATE_SVW" ] || return 0
+  { echo "START $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$STATE_SVW" && tail -n 200 "$STATE_SVW" > "$STATE_SVW.prune" && mv "$STATE_SVW.prune" "$STATE_SVW"; } 2>/dev/null || true
+}
+
+state_read() { # <reported> <classified> <open> — only a run that READ may call this
+  [ -n "$STATE_SVW" ] || return 0
+  echo "READ $(date -u +%Y-%m-%dT%H:%M:%SZ) reported=$1 classified=$2 open=$3" >> "$STATE_SVW" 2>/dev/null || true
+}
+
+trend_report() { # <reported> — how the count moved since the last READ run
+  if [ -z "$STATE_SVW" ]; then
+    say "TREND: no state file configured — movement since the last READ run is unknown, and no run is called unchanged without a baseline."
+    return 0
+  fi
+  if [ ! -f "$STATE_SVW" ]; then
+    say "TREND: no baseline — the state file is absent (first run, or the store evicted it). Nothing is compared, and nothing is called unchanged."
+    return 0
+  fi
+  local base base_line_no base_rest base_ts base_count unread delta sign
+  base="$(grep -n '^READ ' "$STATE_SVW" 2>/dev/null | tail -1)"
+  if [ -z "$base" ]; then
+    unread="$(grep -c '^START ' "$STATE_SVW" 2>/dev/null)"; unread="${unread:-0}"
+    unread=$((unread - 1)); [ "$unread" -lt 0 ] && unread=0
+    say "TREND: no READ baseline yet — ${unread} earlier run(s) left a START with no READ (cancelled, blind, or unreachable). They are counted UNREAD, never as unchanged."
+    return 0
+  fi
+  base_line_no="${base%%:*}"
+  base_rest="${base#*:}"
+  base_ts="$(printf '%s\n' "$base_rest" | awk '{print $2}')"
+  base_count="$(printf '%s\n' "$base_rest" | sed -n 's/.*reported=\([0-9][0-9]*\).*/\1/p')"
+  # Dangling STARTs strictly after the baseline READ, minus this run's own.
+  unread="$(tail -n +$((base_line_no + 1)) "$STATE_SVW" 2>/dev/null | grep -c '^START ')"; unread="${unread:-0}"
+  unread=$((unread - 1)); [ "$unread" -lt 0 ] && unread=0
+  delta=$(( $1 - ${base_count:-0} )); sign=""; [ "$delta" -ge 0 ] && sign="+"
+  say "TREND: reported $1 — was ${base_count:-?} at ${base_ts:-?} (moved ${sign}${delta} since the last READ run); ${unread} intervening run(s) went UNREAD (cancelled, blind, or unreachable) and are counted UNREAD, never as unchanged."
+}
+
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -325,6 +389,7 @@ main() {
         [ "$ATTEMPTS" -ge 1 ] || { red "--attempts must be at least 1: 0 polls is not a read, and a run that never polls cannot report anything about the pull requests."; exit 3; }
         shift 2 ;;
       --min-commits) MIN_COMMITS="${2:-}"; shift 2 ;;
+      --state-file) STATE_SVW="${2:-}"; shift 2 ;;
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
       *) red "unknown argument: $1"; exit 3 ;;
     esac
@@ -334,6 +399,11 @@ main() {
   repo="${REPO_OVERRIDE:-$(spec_repo)}"
   req="$(required_contexts)" || { red "cannot read the required-check spec at $SPEC — this verdict has no set to check against"; exit 3; }
   [ -n "$req" ] && [ "$req" != "null" ] || { red "the spec at $SPEC lists no required contexts"; exit 3; }
+
+  # The START marker lands BEFORE any read is attempted, so a run cancelled
+  # mid-poll — or one that leaves through 5/6/7 — is visible to the next run
+  # as a dangling START and is counted UNREAD.
+  state_start
 
   if [ -n "$FIXTURE" ]; then
     [ -f "$FIXTURE" ] || { red "no such fixture: $FIXTURE"; exit 3; }
@@ -396,6 +466,15 @@ main() {
   unknown="$(jq '.unknown | length' <<<"$verdict")"
   open="$(jq '.open' <<<"$verdict")"
   classified="$(jq '.classified' <<<"$verdict")"
+  # The trend is computed BEFORE this run writes its own READ line, so the
+  # baseline is always a PREVIOUS read — and only a run that actually read
+  # (classified > 0, or a legitimately empty population) becomes one. A BLIND
+  # run writes no READ: its dangling START is the next run's UNREAD count.
+  say ""
+  trend_report "$reported"
+  if [ "${open:-0}" -eq 0 ] || [ "${classified:-0}" -gt 0 ]; then # MUT:G-READLINE
+    state_read "$reported" "$classified" "$open"
+  fi
   if [ "$reported" -gt 0 ]; then return 1; fi
   # BEFORE the unknown check: a run that classified nothing is a stronger
   # statement than "some rows went unread", and 2 is mapped to success by the

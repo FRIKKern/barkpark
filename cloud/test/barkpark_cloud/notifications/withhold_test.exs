@@ -567,6 +567,58 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
     assert Withhold.record(Ecto.UUID.generate(), "deployment_failed", :not_a_reason) == 0
   end
 
+  test "a CONSENTED reason returns 0 QUIETLY — the clause that made the funnel callable" do
+    # THE DEFECT THIS CLAUSE REMOVES. `record/4` guards on `is_binary(team_id)`,
+    # and the fleet digest has no team by construction, so before this clause
+    # every call from it fell to the catch-all: zero rows AND a Logger.error
+    # naming a consented absence as "an unrecordable withhold" needing a code
+    # fix. A funnel that answers its own documented caller with a false operator
+    # error is a funnel that caller cannot use — and `deliver_fleet_digest/1`
+    # did not use it, which is exactly how the branch stayed outside the shared
+    # vocabulary while the moduledoc claimed it was inside.
+    log =
+      capture_log(fn ->
+        assert Withhold.record(nil, "fleet_digest", :no_recipient_by_construction) == 0
+      end)
+
+    refute log =~ "refused an unrecordable withhold"
+    refute log =~ "[error]"
+  end
+
+  test "the catch-all is STILL loud for a reason that is not consented" do
+    # The counterpart of the test above, so the quiet is proved to be SCOPED to
+    # the consented vocabulary and not a blanket silencing of the catch-all.
+    log =
+      capture_log(fn ->
+        assert Withhold.record(nil, "deployment_failed", :dispatch_crashed) == 0
+      end)
+
+    assert log =~ "refused an unrecordable withhold"
+  end
+
+  test "a consented reason writes NO row even when a real team IS supplied" do
+    # Clause ORDER is the invariant here. The consented clause is first, so a
+    # consented reason can never reach the recording clause and fan `suppressed`
+    # rows out to members the notification was not withheld from — the row would
+    # tell a real person they were skipped for a send that had no audience.
+    {team, _emails} = team_with_members(2)
+
+    assert Withhold.record(team.id, "fleet_digest", :no_recipient_by_construction) == 0
+    assert Notifications.list_deliveries(team) == []
+  end
+
+  test "every consented reason is in the closed vocabulary and has a label" do
+    assert length(Withhold.consented_reasons()) >= 1
+
+    for reason <- Withhold.consented_reasons() do
+      assert reason in Withhold.reasons(),
+             "a consented reason outside reasons/0 would be reachable only through " <>
+               "the catch-all the clause exists to avoid"
+
+      assert is_binary(Withhold.label(reason))
+    end
+  end
+
   ## 4. THE CLAMP — `last_error` admits TWO vocabularies and nothing else.
   ##
   ##    `last_error` is PUBLISHED (`delivery_json/1` → app.js, verbatim), so it is
@@ -646,17 +698,22 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
       "The team's OWN switch: `alerts_enabled` off, or this event's toggle off. " <>
         "Charter D363's lens: a user's own disabled toggle is not a withhold — " <>
         "counting it would make 'withhold' mean 'any switch that is off'.",
-    {:deliver_fleet_digest, 1, 1, :do, "case(targets)>[]", :ok_atom} =>
-      "W6 — RECIPIENT-LESS BY CONSTRUCTION, one level up: a fleet digest with no " <>
-        "team that has a member. Same `validate_required` clause, same D362 " <>
-        "refusal to invent an address. Logged (WARNING + telemetry), and named. " <>
-        "dr-w19-s5 re-keyed this row from `case(platform_admin_emails())>[]`: the " <>
-        "audience moved off the empty platform allowlist onto each team's own " <>
-        "membership rows, so the branch that survives is the honest one — no team " <>
-        "in the fleet has a member at all. The recipient resolution is a SEPARATE " <>
-        "pass ahead of the case ON PURPOSE: sending inside that comprehension " <>
-        "would put `record_delivery/5` in this branch's prefix and absolve this " <>
-        "withhold, on a path where the comprehension ran zero times.",
+    # W6 — THE FLEET DIGEST'S ZERO-RECIPIENT ARM IS NO LONGER CONSENTED, IT IS
+    # FUNNELLED, and its consent row is deliberately GONE (dr-w18-s3-fu).
+    #
+    # Nothing about the branch's ETHICS changed — it is still recipient-less by
+    # construction, `Delivery.changeset/2` still requires a recipient, and D362
+    # still forbids inventing one, so it still writes no row. What changed is
+    # that it now ROUTES THROUGH THE FUNNEL to say so: it calls
+    # `Withhold.record(nil, "fleet_digest", :no_recipient_by_construction)` and
+    # accounts the returned count. `Withhold` could not answer that call before
+    # — a digest has no `team_id`, so every call hit the catch-all and reported
+    # a consented absence as an operator bug — which is why this branch was
+    # carrying a consent row instead of a trace in the first place.
+    #
+    # A consent row left here would now be STALE, and 5.1 would red on it by
+    # name. That is the point: consent and a trace are alternatives, and a
+    # branch cannot hold both.
     {:dispatch_site_event, 3, 1, :do, "with>else>_", :ok} =>
       "Charter D349(b): a since-deleted or non-UUID site has no team, so a row " <>
         "written here is returnable by NOBODY — 'a Logger line in a Delivery " <>
@@ -885,11 +942,22 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
     assert :ok = Notifications.dispatch_event(team, :test, %{})
     assert Notifications.list_deliveries(team, limit: 50) == []
 
-    # W6 — the fleet digest with no platform admins (config default is []).
+    # W6 — the fleet digest with no reachable recipient. It writes no row, and
+    # it now says so THROUGH THE FUNNEL: `deliver_fleet_digest/1` calls
+    # `Withhold.record/4` and accounts the count it returns on the same WARNING
+    # line an operator greps (`withheld=0`). `0` is the count this branch must
+    # report — a non-zero would be a row on a branch D362 forbids one on — and
+    # the absence of the catch-all's error line is what makes the call legal to
+    # place here at all.
     assert Notifications.platform_admin_emails() == []
 
-    capture_log(fn ->
-      assert {:ok, :no_admins} = Notifications.deliver_fleet_digest([])
-    end)
+    log =
+      capture_log(fn ->
+        assert {:ok, :no_admins} = Notifications.deliver_fleet_digest([])
+      end)
+
+    assert log =~ "fleet_digest phase=settled"
+    assert log =~ "withheld=0"
+    refute log =~ "refused an unrecordable withhold"
   end
 end

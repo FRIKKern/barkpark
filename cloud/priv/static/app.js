@@ -399,9 +399,11 @@
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
-    // cch-w62 (D740) — UNWRAP THE NESTED ENVELOPE before keying anything. Five
-    // route families (self-update 13, rollback 10, the webhook proxy 6, PATCH
-    // /autoupdate 1, PATCH /admin channel 1 — 31 emitters in router.ex) send
+    // cch-w62 (D740) — UNWRAP THE NESTED ENVELOPE before keying anything. Four
+    // route families (self-update, rollback, the webhook proxy, PATCH /admin
+    // channel — 29 emitters in router.ex, MEASURED and pinned by
+    // router_error_envelope_census_test.exs; PATCH /autoupdate left the set
+    // when cch-w62-bl flattened its 422 into the details-ladder shape) send
     // `{error: {code}}`, not the flat shape. Without this line `key` is a
     // truthy OBJECT and the humanized-slug return below calls `key.replace`
     // — a TypeError, in copy code whose whole job is to never crash. A nested
@@ -1663,13 +1665,22 @@
         title: "Sign out everywhere else?",
         confirmLabel: "Sign them out",
         busyLabel: "Signing out…",
-        // cch-w53-s1 — NO timing word. The old copy said "immediately", and it
-        // was measured false: an already-open SSE stream keeps delivering team
-        // events after revoke_all_user_sessions, unbounded (sse_loop/1 is a bare
-        // receive/after 25_000 park that re-reads no credential). A replacement
-        // timing ("within 25 seconds") would be false too until the mechanism
-        // slice lands, so this states the OUTCOME only — true before and after.
+        // cch-w53-s1 — no INVENTED timing word ("immediately" was measured
+        // false). cch-w53-s4 then landed the mechanism: sse_loop/3 re-checks the
+        // session per heartbeat, so an already-open stream now ENDS bounded by
+        // one ~25s tick (measured first-hand on the fixed lib with production
+        // timings: the chunked terminator arrived inside the first 25s window;
+        // a t+55s broadcast delivered nothing). cch-w53-bl DECIDES: state the
+        // bound, SOFTLY — "about a minute" is deliberately weaker than the
+        // measured ~25s (per-heartbeat, not instant; never stronger than
+        // measured), because a user watching another tab keep working for 20
+        // seconds with no explanation reads "it didn't work". THE SENTENCE
+        // BELONGS TO THIS SHEET ONLY: per-row revoke (DELETE
+        // /v1/account/sessions/:id) does NOT end that device's stream
+        // (cch-w53-bl-per-row-session-revoke-does-not-end-that-sessions-stream)
+        // and must not inherit this claim.
         bodyHtml: "Every other browser and device is signed out. " +
+          "Open screens elsewhere lose access within about a minute. " +
           "This device stays signed in, and anyone signed out can sign back in with their password.",
         // Named so the recovery arm can RE-ISSUE the request (a recovery
         // handler that only calls busy() spins the button forever).
@@ -2931,8 +2942,14 @@
   // member-readable, so a member still sees the roster + matrix (read-only), just
   // without the connect card or any Disconnect… button (GR33 plain-member law).
 
+  // cch-w41-bl (D486): reads the authority the SERVER states (teamAuthorityState)
+  // instead of re-deriving it from role literals — the provider write routes'
+  // gate is require_team_admin -> Authz.team_admin? -> role in @admin_roles,
+  // exactly the owner|admin fact team_authority.admin carries. Still boolean
+  // (D439): "grant" is the only true, so loading/failed/stale/refuse all fail
+  // closed exactly as the old meCache-falsy read did.
   function providerCanWrite() {
-    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+    return teamAuthorityState() === "grant";
   }
 
   // A prod-tier provider's display name for a matrix column / roster row.
@@ -4653,8 +4670,12 @@
   // A member may mint a READ-ONLY PAT only — the server's pat_abilities_allowed?
   // caps anyone below owner/admin at ["read"]. The picker mirrors that truth
   // UP-FRONT (GR34), never a post-click 403 toast.
+  // cch-w41-bl (D486): same conversion as providerCanWrite — the server cap is
+  // pat_abilities_allowed?(role, _) when role in ~w(owner admin) (accounts.ex),
+  // the exact fact team_authority.admin states. Boolean stays boolean (D439);
+  // every not-a-role band state fails closed to the read-only picker.
   function canMintAnyAbility() {
-    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+    return teamAuthorityState() === "grant";
   }
 
   // cch-w36-s3 — THE UNKNOWN ARM, and why the picker needs one. Every branch
@@ -5509,7 +5530,11 @@
     var h = String(hash == null ? "" : hash).replace(/^#/, "");
     var m = h.match(/^fleet\/([a-z]+)$/);
     if (!m) return null;
-    return m[1] === "attention" || m[1] === "inflight" || m[1] === "healthy" ? m[1] : null;
+    // The deep-link SEGMENT stays "inflight" (bookmarked URLs; the hash
+    // grammar is [a-z]+), but the returned FILTER is the decision-32 bucket
+    // string, hyphenated, so it compares equal to bucketOf everywhere.
+    if (m[1] === "inflight") return "in-flight";
+    return m[1] === "attention" || m[1] === "healthy" ? m[1] : null;
   }
 
   // Pure: the raw accept token from an invitation hash, or null. Tolerates the
@@ -6031,7 +6056,9 @@
   // ------------------------------------------------ status + attention (pure)
   // classifyBp collapses the fleet fields GET /v1/barkparks already returns
   // (provision/deprovision status, suspended, health_status, agent_status,
-  // update_state, last_seen_at) into exactly ONE of the nine ranked states of charter
+  // update_state, last_seen_at, queued_deploy_age_seconds) into exactly ONE of
+  // the TEN ranked states this console classifies (of the decision-32
+  // fixture's twelve — see the ATTENTION_RANK gap note) of charter
   // decision 15 — the single attention-order spec. Both statusOf (the pill) and
   // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
   // colour and the queue's order can never disagree. This is the JS twin of
@@ -6059,25 +6086,39 @@
     // last_seen_at null they were never measured, so they cannot rank this box.
     // This arm is checked BEFORE degraded because unknown is a different state,
     // not a lesser one; the ladder below is where its urgency is expressed.
-    if (live && bp.last_seen_at == null) return "unreported";      // 5
+    if (live && bp.last_seen_at == null) return "unreported";      // 7
     if (live && !healthy) return "degraded";                       // 4
-    if (live && bp.update_state === "behind") return "behind";     // 6
-    if (removing) return "removing";                              // 7
-    if (!host) return "provisioning";                            // 8 (rank-2 already excluded)
-    return "ok";                                                // 9
+    // jpf-w1 D7: a queued deployment no builder has claimed for 5 minutes.
+    // AFTER degraded/unreported — a sick box's stuck queue is a SYMPTOM, so
+    // the box's own condition outranks it — and BEFORE behind. The threshold
+    // is the CLIENT's by design (charter D6): the payload carries only the
+    // raw age, nil when nothing is queued, and nil NEVER alarms (an absent
+    // field on an older CP must not read as stalled).
+    if (live && typeof bp.queued_deploy_age_seconds === "number" &&
+        bp.queued_deploy_age_seconds >= 300) return "deploy_stalled"; // 8
+    if (live && bp.update_state === "behind") return "behind";     // 9
+    if (removing) return "removing";                              // 10
+    if (!host) return "provisioning";                            // 11 (rank-2 already excluded)
+    return "ok";                                                // 12
   }
 
-  // The rank number per decision 15 (1 = most urgent … 9 = ok). cch-w34-s6 adds
-  // `unreported` and the EXPLICIT ordering clause charter D332(b) requires:
-  // failed > unknown > pending > ok. A measured failure (removal_failed, failed,
-  // suspended, degraded) outranks the UNKNOWN state, which in turn outranks
-  // every pending/in-flight state (behind, removing, provisioning) and ok.
-  // The eight pre-existing kinds keep their RELATIVE order, so this ladder still
-  // agrees with the Go twin (cloud_status_cmd.go statusOf) on every shared kind.
+  // The rank number per decision 15 (1 = most urgent … 12 = ok), BYTE-EQUAL to
+  // the decision-32 fixture (__fixtures__/attention_order.json) — the node
+  // harness asserts every entry here against that file, which is how the SPA
+  // stops drifting silently (until jpf-w1-queue-age-alarm, Go was the
+  // fixture's only asserter and this ladder had wandered to its own 1–9
+  // numbering). KNOWN GAP, named where it lives: ranks 5 (strained) and
+  // 6 (filling) are fixture states this console does not classify yet — the
+  // holes keep every shared state on its fixture rank, and the harness pins
+  // the gap to exactly those two so a third missing state reds the suite.
+  // jpf-w1 D7 adds deploy_stalled at 8: after the box-condition rungs
+  // (degraded/unreported — a sick box's stuck queue is a symptom), before
+  // behind (a deploy nobody builds beats passive update drift).
   var ATTENTION_RANK = {
     removal_failed: 1, failed: 2, suspended: 3, degraded: 4,
-    unreported: 5,
-    behind: 6, removing: 7, provisioning: 8, ok: 9,
+    unreported: 7,
+    deploy_stalled: 8,
+    behind: 9, removing: 10, provisioning: 11, ok: 12,
   };
   function attentionRank(bp) { return ATTENTION_RANK[classifyBp(bp)]; }
 
@@ -6091,17 +6132,24 @@
     return an < bn ? -1 : an > bn ? 1 : 0;
   }
 
-  // Buckets (decision 15): attention = ranks 1–6, in-flight = 7–8, healthy = 9.
-  // `unreported` (5) sits in ATTENTION: a box we have never heard from is a box
-  // to look at, and it was already counted there when it read "degraded".
+  // Buckets (decision 15 / decision 32): attention = ranks 1–9
+  // (removal_failed…behind), in-flight = 10–11 (removing/provisioning),
+  // healthy = 12 (ok) — the SAME boundaries as the Go twin's attentionBucket.
+  // The bucket STRING is the fixture's, hyphenated: "in-flight", not the
+  // "inflight" this file used to emit while nothing held it to the fixture
+  // (the #fleet/inflight deep-link segment keeps its old spelling — that is a
+  // URL, not vocabulary — and parseFleetFilter maps it to the canonical
+  // bucket).
+  function bucketOfRank(r) {
+    return r <= 9 ? "attention" : r <= 11 ? "in-flight" : "healthy";
+  }
   function bucketOf(bp) {
-    var r = attentionRank(bp);
-    return r <= 6 ? "attention" : r <= 8 ? "inflight" : "healthy";
+    return bucketOfRank(attentionRank(bp));
   }
 
   // Pure rollup of a fleet list into the three bucket counts + total.
   function fleetSummary(list) {
-    var out = { attention: 0, inflight: 0, healthy: 0, total: 0 };
+    var out = { attention: 0, "in-flight": 0, healthy: 0, total: 0 };
     (list || []).forEach(function (bp) { out[bucketOf(bp)] += 1; out.total += 1; });
     return out;
   }
@@ -6194,11 +6242,16 @@
       if (missed) parts.push(missed);
       return { role: "warn", label: "Degraded", detail: parts.join(" · ") || "Needs attention" };
     }
+    // jpf-w1 D7: warn, never the info/blue tone "queued" would get — waiting
+    // is news, waiting five minutes with no builder is an alarm. The detail
+    // NAMES THE AGE off the payload's own number (the criterion's "queued 7m"),
+    // and says the fact that makes the wait a problem.
+    if (kind === "deploy_stalled") return { role: "warn", label: "Deploy stalled", detail: "Deploy queued " + Math.floor(bp.queued_deploy_age_seconds / 60) + "m — no builder claimed it" };
     if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
     if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
     if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
-    // Unreachable while classifyBp stays total over the nine kinds of
+    // Unreachable while classifyBp stays total over the kinds of
     // ATTENTION_RANK — and the CLOSED-ENUM test pins exactly that (charter D33).
     // It is deliberately NOT the calm "Unknown" it used to be: a tail that
     // announces the calmest word over an unhandled — and therefore possibly the
@@ -6565,7 +6618,7 @@
     });
   }
 
-  var BUCKET_LABEL = { attention: "needs attention", inflight: "in flight", healthy: "healthy" };
+  var BUCKET_LABEL = { attention: "needs attention", "in-flight": "in flight", healthy: "healthy" };
   function fleetFilterBar(bucket, n) {
     return '<div class="fleet-filter-bar">' +
       "<span>Showing " + n + " " + esc(BUCKET_LABEL[bucket] || bucket) + "</span>" +
@@ -6700,9 +6753,9 @@
     var chips =
       '<span class="ov-chip ov-chip--attention"><span class="ov-chip-glyph" aria-hidden="true">&#9650;</span>' +
         (sum.attention || 0) + " needs attention</span>" +
-      ((sum.inflight || 0) > 0
+      ((sum["in-flight"] || 0) > 0
         ? '<span class="ov-chip ov-chip--inflight"><span class="ov-chip-glyph ov-chip-pulse" aria-hidden="true">&#9680;</span>' +
-            sum.inflight + " in flight</span>"
+            sum["in-flight"] + " in flight</span>"
         : "") +
       '<span class="ov-chip ov-chip--healthy"><span class="ov-chip-glyph" aria-hidden="true">&#9679;</span>' +
         (sum.healthy || 0) + " healthy</span>";
@@ -7153,14 +7206,14 @@
       } else {
         // Nothing needs action. Stay honest when boxes are still in flight —
         // "all healthy" would be a lie while something is provisioning.
-        var settled = sum.inflight === 0;
+        var settled = sum["in-flight"] === 0;
         queueHtml = '<div class="overview-ok"><span class="status-pill status-pill--ok">' +
             '<span class="status-pill-dot" aria-hidden="true"></span>' +
             '<span class="status-pill-label">' + (settled ? "All healthy" : "All clear") + "</span></span>" +
           "<p>" + (settled
             ? "Every instance is up, current, and reporting in."
-            : "Nothing needs your attention right now — " + sum.inflight +
-              (sum.inflight === 1 ? " instance in flight." : " instances in flight.")) +
+            : "Nothing needs your attention right now — " + sum["in-flight"] +
+              (sum["in-flight"] === 1 ? " instance in flight." : " instances in flight.")) +
           "</p></div>";
       }
       // Rebuilding the body blanks the activity digest. It is AUDIT-derived and
@@ -7737,8 +7790,13 @@
       : lc.removing
         ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
         : lc.suspended
+          // cch-w54-followup — the SECOND raw render of this column. cch-w54-s1
+          // humanised statusOf; this banner still printed the literal slug, so
+          // a quota-suspended box put `quota_exceeded` on the instance detail
+          // page. Same helper, same sentences; the helper also owns the
+          // absent-reason fallback, so the || literal here would be dead copy.
           ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
-            esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
+            esc(suspendedReasonText(bp.suspended_reason)) + "</div>"
           : "";
 
     return '<div class="detail-head detail-head--inst"><div class="detail-head-main">' +
@@ -7895,6 +7953,8 @@
     if (!isSupportBp(bp)) loadSupportPresence(bp, supportsOf(fleetCache, bp.id));
     // MVP-0 offload (pdf-mvp0-offload-spa): each live support's Offload button.
     if (!isSupportBp(bp)) wireOffloadActions(bp, supportsOf(fleetCache, bp.id));
+    // PDF-D94: each live support's paste-a-key delivery form.
+    if (!isSupportBp(bp)) wireAgentKeyForms(bp, supportsOf(fleetCache, bp.id));
   }
 
   // cch-w46-s3 — WHAT THE MOUNTED RAIL IS MADE OF: {bp, caps} for the instance
@@ -8165,9 +8225,26 @@
         loadInstance(bp.id);
         return;
       }
-      if (btn) { btn.disabled = false; btn.textContent = opts.force ? "Update anyway" : "Update"; }
       // Errors arrive as {error: {code}} — NOT the flat string friendly() reads.
       var c = updateConflict(r.data);
+      // cch-w62-bl (D738's other half) — the predicate is minted AND consulted
+      // at this transport seam: a PERMANENT refusal changes what the operator
+      // is OFFERED, not only what they are told. The re-enabled Update button
+      // WAS the recovery control here (the toast has no buttons), and
+      // re-enabling it after e.g. `not_enabled` offered a re-POST into a 503
+      // the box will answer until someone changes its env. A terminal refusal
+      // now leaves the button disabled until the next data render — the hourly
+      // check / loadInstance repaint is what can honestly re-offer it, because
+      // only fresh server state can change the answer. Transient refusals
+      // (already_running, runner_start_failed, a pin's own force modal, any
+      // UNKNOWN code — fail-safe toward retry) keep the button live.
+      var terminal = updateRefusalTerminal(c);
+      if (btn) {
+        btn.disabled = terminal;
+        btn.textContent = terminal
+          ? "Update unavailable"
+          : (opts.force ? "Update anyway" : "Update");
+      }
       // cch-w38-s1: the raw envelope rides along so a gate refusal renders the
       // SERVER's authority sentence instead of "Please try again in a moment."
       var copy = updateConflictCopy(c, r.data);
@@ -8469,12 +8546,157 @@
       " \"printf 'ANTHROPIC_API_KEY=sk-your-key\\n' >> /etc/barkpark/fleet-listener.env && systemctl restart barkpark-fleet-listener\"";
   }
 
+  // PDF-D94 (pdf-bl-console-key-custody): the paste-a-key CARD replaces the
+  // one-liner as the primary hand-off — the plane is TRANSPORT ONLY (the key
+  // rides an in-memory one-time stash to the worker, never a DB row), and the
+  // SSH one-liner stays right here, folded, as the documented fallback and the
+  // BYO story. The input is type=password and is CLEARED the moment the POST
+  // is sent — the page holds the key no longer than the request needs.
   function supportKeyStepHtml(bp) {
     return '<div class="support-key-step">' +
       '<div class="support-key-title">Hand your box its model key</div>' +
-      '<p class="support-key-sub">Orders run on your own model key &mdash; it lives on the box, never stored by Barkpark. From your machine:</p>' +
-      cliChipHtml(supportKeyCommand(bp)) +
+      '<p class="support-key-sub">Orders run on your own model key &mdash; paste it and Barkpark delivers it straight to the box, then restarts the listener. The key lives on the box, never stored by Barkpark.</p>' +
+      '<div class="support-key-form">' +
+        '<input class="form-input" type="password" data-agent-key-input="' + esc(bp.id) + '" placeholder="sk-ant-&hellip;" autocomplete="off" spellcheck="false" aria-label="Model API key">' +
+        '<button class="btn btn-primary btn-sm" type="button" data-agent-key-send="' + esc(bp.id) + '">Deliver key</button>' +
+      '</div>' +
+      '<p class="support-key-status dim" data-agent-key-status="' + esc(bp.id) + '" hidden></p>' +
+      '<details class="support-key-fallback">' +
+        '<summary class="dim">Prefer SSH? The one-liner still works</summary>' +
+        cliChipHtml(supportKeyCommand(bp)) +
+      '</details>' +
     "</div>";
+  }
+
+  // Mirrors the server fence exactly (20-512 url-safe chars) so an obvious
+  // mispaste is refused before it ever leaves the page. Pure; hook-exported.
+  var AGENT_KEY_RE = /^[A-Za-z0-9._~+\/=-]{20,512}$/;
+  function agentKeyShapeValid(key) { return AGENT_KEY_RE.test(String(key || "")); }
+
+  // The terminal sentence for one delivery-status read (pure; hook-exported).
+  // null job = nothing ever delivered; pending/claimed = still in flight.
+  function agentKeyStatusCopy(job) {
+    if (!job || !job.status) return null;
+    if (job.status === "succeeded") return { kind: "success", text: "Key delivered \u2014 the listener restarted with it." };
+    if (job.status === "failed") return { kind: "error", text: job.error || "Delivery failed \u2014 paste the key again." };
+    return { kind: "pending", text: "Delivering\u2026" };
+  }
+
+  function agentKeyEl(kind, id) {
+    var els = document.querySelectorAll("[data-agent-key-" + kind + "]");
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].getAttribute("data-agent-key-" + kind) === String(id)) return els[i];
+    }
+    return null;
+  }
+
+  function paintAgentKeyStatus(id, copy) {
+    var el = agentKeyEl("status", id);
+    if (!el) return;
+    if (!copy) { el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = copy.text;
+    // Full literal class strings per branch (__css_check E3 — never concat).
+    if (copy.kind === "success") el.className = "support-key-status support-key-status--success";
+    else if (copy.kind === "error") el.className = "support-key-status support-key-status--error";
+    else el.className = "support-key-status dim";
+  }
+
+  // Poll GET /v1/barkparks/:id/agent-key to a terminal sentence (3s cadence,
+  // bounded ~2min — the delivery is one SSH exec on a 5s-poll worker). One
+  // chain per box; a re-render re-arms cleanly.
+  var agentKeyPollTimers = {};
+
+  function pollAgentKeyStatus(supportId, remaining) {
+    if (agentKeyPollTimers[supportId]) clearTimeout(agentKeyPollTimers[supportId]);
+    api("GET", "/v1/barkparks/" + encodeURIComponent(supportId) + "/agent-key").then(function (r) {
+      if (!r.ok) {
+        // A failed READ must never render as "no delivery" — say so, retry.
+        paintAgentKeyStatus(supportId, {
+          kind: remaining > 0 ? "pending" : "error",
+          text: remaining > 0
+            ? "Couldn't read the delivery status \u2014 retrying\u2026"
+            : "Couldn't read the delivery status."
+        });
+        if (remaining > 0) {
+          agentKeyPollTimers[supportId] = setTimeout(function () {
+            pollAgentKeyStatus(supportId, remaining - 1);
+          }, 3000);
+        }
+        return;
+      }
+      var job = r.data ? r.data.job : null;
+      var copy = agentKeyStatusCopy(job);
+      paintAgentKeyStatus(supportId, copy);
+      if (copy && copy.kind === "pending") {
+        if (remaining > 0) {
+          agentKeyPollTimers[supportId] = setTimeout(function () {
+            pollAgentKeyStatus(supportId, remaining - 1);
+          }, 3000);
+        } else {
+          paintAgentKeyStatus(supportId, {
+            kind: "pending",
+            text: "Still delivering \u2014 leave this page open or check back; the status updates on reload."
+          });
+        }
+      }
+    });
+  }
+
+  function submitAgentKey(support) {
+    var input = agentKeyEl("input", support.id);
+    var btn = agentKeyEl("send", support.id);
+    var key = input ? String(input.value || "").trim() : "";
+    if (!agentKeyShapeValid(key)) {
+      paintAgentKeyStatus(support.id, {
+        kind: "error",
+        text: "That doesn't look like a provider key (20-512 letters, digits or ._~+/=-). Nothing was sent."
+      });
+      return;
+    }
+    // The page's custody moment: clear the field the instant the key is handed
+    // to the request — the DOM never retains it.
+    if (input) input.value = "";
+    if (btn) { btn.disabled = true; btn.textContent = "Delivering\u2026"; }
+    paintAgentKeyStatus(support.id, { kind: "pending", text: "Delivering\u2026" });
+    api("POST", "/v1/barkparks/" + encodeURIComponent(support.id) + "/agent-key", { key: key }).then(function (r) {
+      if (btn) { btn.disabled = false; btn.textContent = "Deliver key"; }
+      if (r.status === 202) {
+        pollAgentKeyStatus(support.id, 40);
+        return;
+      }
+      var detail = (r.data && (r.data.detail || r.data.error)) || "Delivery couldn't start (status " + r.status + ").";
+      if (r.status === 409 && r.data && r.data.error === "already_delivering") {
+        // Truthful, and the poll shows how the in-flight one ends.
+        paintAgentKeyStatus(support.id, { kind: "pending", text: "A delivery is already in flight\u2026" });
+        pollAgentKeyStatus(support.id, 40);
+        return;
+      }
+      paintAgentKeyStatus(support.id, { kind: "error", text: detail });
+    });
+  }
+
+  // The DOM mount (add-listener-if-present, the wireOffloadActions shape):
+  // each live support's Deliver button + a status backfill for a delivery
+  // already in flight from an earlier visit.
+  function wireAgentKeyForms(mainBp, supports) {
+    (supports || []).forEach(function (s) {
+      if (!instanceLifecycle(s).live) return;
+      var btn = agentKeyEl("send", s.id);
+      if (btn) {
+        (function (support, b) {
+          b.addEventListener("click", function () { submitAgentKey(support); });
+          var input = agentKeyEl("input", support.id);
+          if (input) {
+            input.addEventListener("keydown", function (ev) {
+              if (ev.key === "Enter") { ev.preventDefault(); submitAgentKey(support); }
+            });
+          }
+        })(s, btn);
+        // Backfill: an in-flight or just-finished delivery paints without a click.
+        pollAgentKeyStatus(s.id, 40);
+      }
+    });
   }
 
   // ── The fleet card (PDF-D92: minimal group nesting IS this card) ────────────
@@ -9035,6 +9257,35 @@
       };
     }
     return { title: "Couldn't start the update", body: "Please try again in a moment.", forceLabel: null };
+  }
+
+  // cch-w62-bl — WHICH self-update refusals are TERMINAL for the seam's one
+  // recovery control (the Update button updateInstance re-enables). Keyed on
+  // updateConflict's normalized kind (+ code on the `other` arm), NEVER on an
+  // HTTP status, and NEVER a new key on updateConflict's frozen return shape.
+  //
+  // THE BUTTON-REACHABLE PERMANENT REFUSAL that makes this predicate a guard
+  // pointed at somebody: `not_enabled`. An UNARMED box (no
+  // BARKPARK_SELF_UPDATE_APPLY) still answers the hourly CHECK 200 with
+  // `apply_enabled: false` and `check.state` intact (registry.ex arming_of/1 +
+  // persist_update_check/3), so `update_state` stays "behind", the admin's
+  // Update button renders — and the apply POST 503s feature_not_configured
+  // until someone changes the box's env. `identity_refused` stays in the set
+  // but is API-reachable only (its probe rung co-writes update_state
+  // "unknown"); `suspended` likewise (lc.live is false for a suspended box, so
+  // the button never renders) — both are classified for the API-driven caller,
+  // not because a click can reach them. TRANSIENT: already_running and
+  // runner_start_failed (box-side, self-clearing), not_live (provisioning
+  // finishes), pinned (its OWN force modal is the designed affordance), and
+  // every unknown code — an invented permanent no is the same lie pointed the
+  // other way. Boolean, pure.
+  function updateRefusalTerminal(c) {
+    c = c || {};
+    if (c.kind === "other") return c.code === "forbidden" || c.code === "no_team";
+    return c.kind === "not_enabled" || c.kind === "not_supported" ||
+      c.kind === "suspended" || c.kind === "no_admin_token" ||
+      c.kind === "decrypt_failed" || c.kind === "not_found" ||
+      c.kind === "identity_refused";
   }
 
   // The request body for a forced (pin-overriding) self-update re-trigger.
@@ -13806,7 +14057,12 @@
     var err = (data && data.error) || {};
     var code = typeof err === "string" ? err : err.code;
     if (code === "identity_refused") return true;
-    return status === 422 && (code === "not_rollbackable" || code === "no_previous");
+    // cch-w62-bl — `not_supported` joins the terminal set: the box answers it
+    // when a site has no live release (or the wrong engine) — a shape no retry
+    // changes. `lock_held` stays transient: the 409 arm's "try again once it
+    // finishes" is the honest recovery there.
+    return status === 422 &&
+      (code === "not_rollbackable" || code === "no_previous" || code === "not_supported");
   }
 
   // Fold the SYNCHRONOUS 200 rollback envelope
@@ -13847,17 +14103,26 @@
           "back to. Use “Roll back to this” on an earlier deployment to rebuild from it instead.",
       };
     }
-    // cch-w63-s7 STATES WHAT THIS ARM IS: the site rollback route emits `error:
-    // "no_previous"` NOWHERE today — the box's typed `no_previous` exit reaches
-    // the wire as PROSE inside a `rollback_failed` detail (Sites.Deploy's
-    // rollback_copy), which the detail-relay arm below renders. It is kept, not
-    // deleted, because the plane is actively growing typed site codes (s3 minted
-    // the first one) and this is the correct reader for a word the plane already
-    // speaks; making it REACHABLE is a plane-side change, filed separately.
+    // cch-w62-bl MADE THIS ARM REACHABLE: Sites.Deploy now promotes the box's
+    // typed `no_previous` exit onto the wire as `error: "no_previous"` (the
+    // 4-tuple relay cch-w63-s3 minted for identity_refused), so this reader —
+    // kept dead through cch-w63-s7 precisely because the plane was growing
+    // typed site codes — finally has a producer. The prose `detail` still
+    // arrives alongside; this arm's static copy says the same fact.
     if (status === 422 && code === "no_previous") {
       return {
         title: "Nothing to roll back to",
         body: "This site has only ever had one release — there's no previous release to return to yet.",
+      };
+    }
+    // cch-w62-bl — `not_supported`: the box's static engine answered "nothing
+    // is live here to roll back". The plane's own measured sentence rides
+    // `detail`; relay it, with the static fact as fallback.
+    if (status === 422 && code === "not_supported") {
+      var nsDetail = (data && typeof data.detail === "string" && data.detail) || "";
+      return {
+        title: "Nothing to roll back",
+        body: nsDetail || "This site has no live release yet — there is nothing to roll back.",
       };
     }
     // cch-w63-s7 — THE CODE CHECK SITS ABOVE THE STATUS ARM, AND THE ORDER IS THE
@@ -17332,7 +17597,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 34 of the 56 declared verbs have no entry here: they render
+    // 34 of the 57 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -17355,6 +17620,7 @@
     "barkpark.go_live": "launched a Barkpark",
     "barkpark.deleted": "removed a Barkpark",
     "barkpark.autoupdate_changed": "changed autoupdate",
+    "barkpark.agent_key_delivered": "delivered a model key to a support box",
     // cch-w63-s8. The row a REFUSED write leaves: the plane declined to send an
     // instance write because the box answered our stored admin credential 401.
     // The actor tried; the request never left. The expanded detail carries the
@@ -24561,6 +24827,10 @@
       updateRefusalReason: updateRefusalReason,
       lastCheckedText: lastCheckedText, autoupdatePolicyLabel: autoupdatePolicyLabel,
       autoupdateActions: autoupdateActions, updateConflict: updateConflict,
+      // cch-w62-bl: the terminality predicate + the transport arm that consults
+      // it, hooked so the harness can drive the recovery control (the
+      // runDecommission precedent).
+      updateRefusalTerminal: updateRefusalTerminal, updateInstance: updateInstance,
       updateConflictCopy: updateConflictCopy, forceUpdateBody: forceUpdateBody,
       updatePanelHtml: updatePanelHtml, fleetRolloutBanner: fleetRolloutBanner,
       fleetRolloutBannerHtml: fleetRolloutBannerHtml,
@@ -24586,7 +24856,8 @@
       neverReportedEvidence: neverReportedEvidence,
       attentionKinds: Object.keys(ATTENTION_RANK),
       attentionRank: attentionRank, attentionCompare: attentionCompare,
-      bucketOf: bucketOf, fleetSummary: fleetSummary, filterFleet: filterFleet,
+      bucketOf: bucketOf, bucketOfRank: bucketOfRank, ATTENTION_RANK: ATTENTION_RANK,
+      fleetSummary: fleetSummary, filterFleet: filterFleet,
       // gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview pure helpers — greeting,
       // triage subline, header chips, the REAL slots meter, the attention row +
       // reason, instance cards + stats, the self-healing runway model/markup, the
@@ -24666,9 +24937,14 @@
       promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
       staleGuard: staleGuard,
       // stw5 → GR41 (charter D25/D28): the SITE-level synchronous rollback (distinct
-      // from the per-row async promote) + the capped deploy-history render. Only the
-      // PURE path/fold/copy/opts helpers are node-pinned; confirmSiteRollback /
-      // runSiteRollback (openConfirmModal + api) are browser-verified.
+      // from the per-row async promote) + the capped deploy-history render. The
+      // PURE path/fold/copy/opts helpers are node-pinned; confirmSiteRollback
+      // (openConfirmModal) stays browser-verified. cch-w62-bl HOOKS
+      // runSiteRollback so the harness can drive the refusal arm's RECOVERY
+      // CONTROL end to end (the runDecommission precedent, cch-w46-s2): a
+      // terminal refusal must wire Close and issue no second POST, and only a
+      // transport drive can prove that.
+      runSiteRollback: runSiteRollback,
       siteRollbackPath: siteRollbackPath, siteRollbackConfirmOpts: siteRollbackConfirmOpts,
       siteRollbackRefusalTerminal: siteRollbackRefusalTerminal,
       siteRollbackResult: siteRollbackResult, siteRollbackFailure: siteRollbackFailure,
@@ -25197,6 +25473,7 @@
       presenceSlotHtml: presenceSlotHtml, rosterRowFor: rosterRowFor,
       rosterCapacityText: rosterCapacityText, rosterUrl: rosterUrl,
       supportKeyCommand: supportKeyCommand, supportKeyStepHtml: supportKeyStepHtml,
+      agentKeyShapeValid: agentKeyShapeValid, agentKeyStatusCopy: agentKeyStatusCopy,
       fleetNest: fleetNest, fleetNestedRowsHtml: fleetNestedRowsHtml,
       // MVP-0 offload (PDF-D87/D92, pdf-mvp0-offload-spa): the order-doc
       // builder + tag-seed contingency, the eligibility gate, the watch

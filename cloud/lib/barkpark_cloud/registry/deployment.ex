@@ -308,7 +308,7 @@ defmodule BarkparkCloud.Registry.Deployment do
     # no-op) rather than a raised Ecto.ConstraintError.
     |> unique_constraint(:build_id,
       name: :deployments_site_build_id_index,
-      message: "a deployment with this build_id already exists"
+      message: "is already used by another deployment"
     )
     # dwb-18: the DB idempotency backstop. A lost race (concurrent redelivery, or
     # a second active build of the same commit) surfaces as a changeset error the
@@ -330,7 +330,7 @@ defmodule BarkparkCloud.Registry.Deployment do
     # what the new key actually enforces.
     |> unique_constraint(:git_ref,
       name: :deployments_active_site_env_index,
-      message: "a build for this site is already in progress"
+      message: "is blocked — a build for this site is already in progress"
     )
   end
 
@@ -376,12 +376,12 @@ defmodule BarkparkCloud.Registry.Deployment do
     |> unique_constraint(:delivery_id, name: :deployments_delivery_id_index)
     |> unique_constraint(:branch,
       name: :deployments_active_preview_branch_index,
-      message: "active preview already exists for this branch"
+      message: "already has an active preview"
     )
     # site-spawner W1: the same PLAN idempotency backstop on the preview path.
     |> unique_constraint(:build_id,
       name: :deployments_site_build_id_index,
-      message: "a deployment with this build_id already exists"
+      message: "is already used by another deployment"
     )
   end
 

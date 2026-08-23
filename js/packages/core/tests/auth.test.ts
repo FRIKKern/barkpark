@@ -3,6 +3,7 @@ import { http, HttpResponse } from 'msw'
 import { server } from './fixtures/server'
 import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createClient } from '../src/client'
+import { BarkparkAuthError } from '../src/errors'
 import type { BarkparkClientConfig } from '../src/types'
 
 const baseConfig: BarkparkClientConfig = {
@@ -72,6 +73,34 @@ describe('client.auth', () => {
       ),
     )
     expect(await createClient(baseConfig).auth.me()).toBeNull()
+  })
+
+  // The null-collapse discriminates (pds-bl-w49-core-auth-collapses-403-as-
+  // unauthenticated): ONLY a genuine 401 reads as "no current user". A 403 —
+  // the server's shape for forbidden, cors_forbidden and csrf_required alike —
+  // is a refusal-to-answer and must propagate as the typed BarkparkAuthError,
+  // never masquerade as an absent user.
+  it.each([
+    ['forbidden', 'token lacks permission'],
+    ['cors_forbidden', 'origin not allowed for dataset'],
+    ['csrf_required', 'missing x-requested-with header'],
+  ])('me propagates a 403 %s as BarkparkAuthError instead of null', async (code, message) => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/auth/me`, () =>
+        HttpResponse.json({ error: { code, message } }, { status: 403 }),
+      ),
+    )
+    const err = await createClient(baseConfig)
+      .auth.me()
+      .then(
+        () => {
+          throw new Error('resolved — the 403 was swallowed as "no current user"')
+        },
+        (e: unknown) => e,
+      )
+    expect(err).toBeInstanceOf(BarkparkAuthError)
+    expect((err as BarkparkAuthError).status).toBe(403)
+    expect((err as BarkparkAuthError).serverCode).toBe(code)
   })
 
   it('logout DELETEs /v1/auth/logout', async () => {

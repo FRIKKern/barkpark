@@ -485,9 +485,30 @@ defmodule BarkparkCloud.Notifications do
       # day apart from a day the fleet was mailed. The row stays forbidden; the
       # COUNT does not need a recipient.
       [] ->
+        # dr-w18-s3-fu: and the count comes from the SHARED vocabulary, not from
+        # this branch's own arithmetic. `Withhold.record/4` is the one funnel
+        # through which a withheld notification becomes visible, and its
+        # moduledoc has named THIS branch as a consented zero since wave 32 — but
+        # the module could not actually be called from here until it grew
+        # `:no_recipient_by_construction`, because a digest has no `team_id` and
+        # every call landed in the catch-all's `refused an unrecordable withhold`
+        # error. A funnel every branch routes through EXCEPT the one its own
+        # documentation names is not a funnel.
+        #
+        # It returns `0`, and `0` is the assertion: a non-zero here would mean a
+        # row was written for a branch D362 forbids one on. The count is carried
+        # into the accounting below rather than dropped, so it is observable on
+        # the same WARNING line an operator already greps for.
+        withheld = Withhold.record(nil, "fleet_digest", :no_recipient_by_construction)
+
         account_fleet_digest(
           %{recipients: 0, sent: 0},
-          %{instances: fleet.total, covered: 0, reason: "no_team_recipients"}
+          %{
+            instances: fleet.total,
+            covered: 0,
+            reason: "no_team_recipients",
+            withheld: withheld
+          }
         )
 
         {:ok, :no_admins}
@@ -571,7 +592,14 @@ defmodule BarkparkCloud.Notifications do
     line =
       "fleet_digest phase=#{meta.phase} recipients=#{m.recipients} sent=#{m.sent} " <>
         "instances=#{meta.instances} covered=#{Map.get(meta, :covered, 0)}" <>
-        if(is_nil(meta.reason), do: "", else: " reason=#{meta.reason}")
+        if(is_nil(meta.reason), do: "", else: " reason=#{meta.reason}") <>
+        case Map.fetch(meta, :withheld) do
+          # `Withhold.record/4`'s returned count, on the line an operator reads.
+          # Only the branches that funnel through it carry the key at all, so its
+          # absence is not silently rendered as a zero.
+          {:ok, n} -> " withheld=#{n}"
+          :error -> ""
+        end
 
     if m.sent < m.recipients or m.recipients == 0 do
       # THE LOSS CLASS: nobody was mailed, or somebody was not. Warning, because
@@ -1088,7 +1116,7 @@ defmodule BarkparkCloud.Notifications do
   defp channel_url_error(reason) do
     %EmailSettings{}
     |> Ecto.Changeset.change()
-    |> Ecto.Changeset.add_error(:channels, "unsafe webhook url", reason: reason)
+    |> Ecto.Changeset.add_error(:channels, "include an unsafe webhook url", reason: reason)
   end
 
   @doc """

@@ -70,6 +70,19 @@ defmodule Barkpark.DataCase do
   reconnect window — the cross-file flake cluster. Draining is scoped to THIS
   test's own tasks (matched via `$callers`), so concurrent tests never block
   on someone else's work.
+
+  THEN the long-lived PubSub singletons are quiesced, because `$callers` cannot
+  reach them. `Barkpark.Quiz.Bridge` is a boot-time GenServer subscribed to
+  `documents:<dataset>`; it is not a `Task`, is not rooted at this test's pid,
+  and so `drain_owned_tasks/3` is structurally blind to it. A test that
+  publishes a `quiz` document hands it a SHARED-mode connection implicitly, and
+  stopping the owner underneath that read is what produced 1,310 failures in CI
+  run 29710726459. See `Barkpark.PubSubSingletons`.
+
+  ORDER IS LOAD-BEARING: tasks drain FIRST, because a draining task can itself
+  broadcast the mutation that wakes a singleton. Quiescing the singletons before
+  the tasks that feed them would leave exactly the in-flight read this exists to
+  prevent.
   """
   def setup_sandbox(tags) do
     # A test that legitimately holds its connection longer than DBConnection's
@@ -88,6 +101,7 @@ defmodule Barkpark.DataCase do
 
     on_exit(fn ->
       drain_owned_tasks(test_pid, tags)
+      Barkpark.PubSubSingletons.drain!()
       Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
     end)
   end

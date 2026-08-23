@@ -33,7 +33,21 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     # the leaf never carries a non-binary into the walker (which would crash on a
     # bare number child, or 500 on `to_string/1` over a map). Mirrors the
     # `stringish/1` fail-soft in `Render.Compose`.
-    value = coerce_text_value(Map.get(n, "value", ""))
+    #
+    # Dual-read `value` || legacy `text`: raw mutate writers persisted whole
+    # papers whose text leaves were keyed `{"type":"text","text":…}`. The Hollow
+    # predicate blesses BOTH spellings as text-carrying (`@text_keys`), so such
+    # a paper passes every write seam as "has content" — and then rendered as
+    # structure with ZERO prose (2026-08-23: 2 published papers served HTTP 200
+    # with 22–34 headings and an empty-string text_sha256). The renderer must
+    # agree with the predicate or the corpus can hold readable-by-contract,
+    # blank-in-fact papers. Canonical `value` wins when non-empty; the Go twin
+    # does the same via `attrStrFirst(n, "value", "text")` (inline.go).
+    value =
+      case coerce_text_value(Map.get(n, "value", "")) do
+        "" -> coerce_text_value(Map.get(n, "text", ""))
+        canonical -> canonical
+      end
 
     case Map.get(n, "marks") do
       nil -> value

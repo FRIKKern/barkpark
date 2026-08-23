@@ -15,8 +15,8 @@ Setup: setup/{QUICKSTART,CLOUD-QUICKSTART,GO-LIVE,SETUP,WINDOWS,TASK-SYSTEM,pers
 
 Cheatsheets: cheatsheets/{bp,tui,tasks,http-api,papers}.md
 
-Frozen: api-v1.md · openapi.json · auth.md · auth-user-sessions.md · cli/{error-exit-table,m0-decisions,HANDBOOK}.md · spec/bokbasen-api-contract.md
+Frozen: api-v1.md openapi.json auth.md auth-user-sessions.md cli/{error-exit-table,m0-decisions,HANDBOOK}.md spec/bokbasen-api-contract.md
 
-Domain: search/INTELLIGENCE.md · search/ROADMAP.md · media/DISCOVERY.md · studio/user-guide.md · studio/web-components.md · plugins/codelists-byo.md · snippets/README.md
+Domain: search/INTELLIGENCE.md search/ROADMAP.md media/DISCOVERY.md studio/user-guide.md studio/web-components.md plugins/codelists-byo.md snippets/README.md
 
-Swarm (beta): swarm/ — sessions · rbac · PAT · notifications · teams · billing · oban
+Epic cycle: a wave produces a wave-strategy Paper, bp tasks, and builder commits — see the bp-epic-cycle workflow.

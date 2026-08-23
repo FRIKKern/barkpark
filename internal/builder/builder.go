@@ -151,7 +151,11 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 		// The build failed, but the row is ours and we MUST report — otherwise
 		// the lease eventually expires and another worker re-runs an
 		// already-broken build.
-		con.logf("failed: %s", buildErr.Error())
+		// The TERMINAL line punches through the console latch (one attempt,
+		// with a truncation marker when the latch fired) — a latched build
+		// used to end with no failed: line and no explanation, indistinguishable
+		// from a build that was merely quiet.
+		con.logfTerminal("failed: %s", buildErr.Error())
 		_ = b.transition(ctx, d.ID, map[string]any{
 			"worker_id":      b.WorkerID,
 			"observed_epoch": b.claimEpoch(d),
@@ -163,7 +167,7 @@ func (b *Builder) RunOnce(ctx context.Context) (bool, error) {
 	}
 
 	con.caption("Handing off to release…")
-	con.logf("activate: build complete — handing off to release (pushing), image %s", imageTag)
+	con.logfTerminal("activate: build complete — handing off to release (pushing), image %s", imageTag)
 
 	// Note the explicit `claim_worker: nil` + `claim_epoch: 0`: handing the row
 	// off to the agent. The builder is done; the row needs to look "unclaimed"

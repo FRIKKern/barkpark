@@ -178,4 +178,48 @@ const form: Render = (b, ctx, key) => {
 // shape the web twin chose (a delegating Emit).
 const questionnaire: Render = (b, ctx, key) => form(b, ctx, key)
 
-export const formsRenderers: Record<string, Render> = { form, questionnaire }
+/* ── field-number (B085) — the mobile leg of the cross-surface fields row ─────
+ *
+ * Twin of compose.ex field_number_text/1, react forms.ts fieldNumber and
+ * pdrender fieldNumberRenderer (pbw-fix-field-number-react): a labelled
+ * definition row — dim label, then the formatted `value` plus an optional
+ * trailing `unit`. An absent or uncoercible value renders the honest "—"
+ * empty state (the field-reference precedent) with NO unit suffix.
+ * `min`/`max`/`step` are Edit-mode control bounds — never read here. */
+
+/** compose.ex field_number_value/1: numbers pass through; a string must parse
+ * as a FULL decimal (Float.parse with empty rest) — partial parses and junk
+ * coerce to null, never to NaN output. */
+function fieldNumberValue(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t)) {
+      const n = Number(t)
+      if (Number.isFinite(n)) return n
+    }
+  }
+  return null
+}
+
+/** Integer values and whole floats drop the decimal point; fractions keep the
+ * shortest round-trip decimal — String(n) is JS's Float.to_string twin. */
+function fieldNumberText(b: Record<string, unknown>): string {
+  const n = fieldNumberValue(b.value)
+  if (n === null) return '—'
+  const unit = str(b.unit).trim()
+  return unit === '' ? String(n) : `${String(n)} ${unit}`
+}
+
+const fieldNumber: Render = (b, ctx, key) => (
+  <View key={key} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginVertical: 4 }}>
+    <Text style={{ ...scale.sm, color: ctx.theme.textMuted }}>{str(b.label)}</Text>
+    <Text style={{ ...scale.sm, color: ctx.theme.text }}>{fieldNumberText(b)}</Text>
+  </View>
+)
+
+export const formsRenderers: Record<string, Render> = {
+  form,
+  questionnaire,
+  'field-number': fieldNumber,
+}

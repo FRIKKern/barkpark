@@ -1238,6 +1238,67 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
              ).rows == [[1]]
     end
 
+    # pds-bl-import-409-http-test: the PDS-D9 same-slug/different-id root
+    # collision was pinned ONLY at the engine layer
+    # (workspace_bundle_test.exs "same slug + different id + NON-empty
+    # workspace"); the HTTP edge — status, code, and all three details keys —
+    # was unpinned, so a merge_import/3 refactor could silently change the
+    # error contract.
+    test "409 workspace_slug_conflict pins the FULL wire shape on a same-slug/different-id " <>
+           "root collision (PDS-D9, pds-bl-import-409-http-test)",
+         %{conn: conn} do
+      Application.put_env(:barkpark, :allow_bundle_import, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :allow_bundle_import) end)
+
+      raw_admin = "ws-slug-conflict-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      # SOURCE workspace, exported, then deleted — its slug becomes vacant.
+      {:ok, source} =
+        Tenancy.create_workspace_with_owner(%{name: "Slug Conflict Src"}, admin_token(raw_admin))
+
+      {:ok, bundle} = WorkspaceBundle.export(source.id)
+      {:ok, _} = Tenancy.delete_workspace(source)
+      {:ok, ws_bin} = Ecto.UUID.dump(source.id)
+      purge_fkless_audit!(ws_bin)
+
+      # A POPULATED squatter re-takes the SAME slug under a DIFFERENT id —
+      # one document makes it not-an-empty-shell, so the D9 pre-flight must
+      # REFUSE rather than adopt.
+      {:ok, squatter} =
+        Tenancy.create_workspace(%{slug: source.slug, name: "Slug Squatter WS"})
+
+      {:ok, sq_proj} =
+        Tenancy.create_project(squatter, %{slug: "sq-proj", name: "Sq Proj"})
+
+      {:ok, _doc} = TenancyFixtures.create_document_in!(squatter, sq_proj, "post", %{}, "test")
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{source.slug}/import?mode=merge", bundle)
+
+      # The FULL wire shape: status, code, and every details key.
+      assert resp.status == 409
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "workspace_slug_conflict"
+      assert err["message"] =~ "not an empty shell"
+      assert err["details"]["slug"] == source.slug
+      assert err["details"]["existing_id"] == squatter.id
+      assert err["details"]["bundle_id"] == source.id
+
+      # Fail-closed both ways: the squatter and its document survive, and the
+      # bundle workspace did NOT land.
+      assert Tenancy.get_workspace_by_slug(source.slug).id == squatter.id
+      assert scoped_row_count("documents", squatter.id) == 1
+
+      refute Repo.query!(
+               "SELECT count(*) FROM workspaces WHERE id = $1::text::uuid",
+               [source.id]
+             ).rows == [[1]]
+    end
+
     test "unmatched engine {:error, term} → NAMED, LOGGED 500 import_failed — never the silent internal_error (task-96d8ab2b582818a4)",
          %{conn: conn} do
       # The round-3 live fire: 500 internal_error, zero log lines — an

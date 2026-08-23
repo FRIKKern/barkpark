@@ -176,6 +176,89 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── webhook_deliveries E2 INNER JOIN confinement (pds-bl-pin-webhook-deliveries-inner-join) ──
+
+  describe "webhook_deliveries INNER JOIN keeps secret-bearing media snapshots out of every bundle" do
+    test "the media secret is absent from EVERY member, an endpoint-backed delivery still exports, and a backfilled endpoint_id trips catalog validation" do
+      ws_a = create_workspace!(unique("wsa"))
+      tag = System.unique_integer([:positive])
+
+      # A real workspace-owned endpoint + an endpoint-backed (audit-kind)
+      # delivery — the POSITIVE fixture proving ordinary deliveries still ride
+      # the E2 join into A's bundle.
+      endpoint_id = Ecto.UUID.generate()
+
+      Repo.query!(
+        "INSERT INTO webhooks (id, name, url, workspace_id, inserted_at, updated_at) " <>
+          "VALUES ($1::text::uuid, $2, 'https://example.test/hook', $3::text::uuid, now(), now())",
+        [endpoint_id, "ep-#{tag}", ws_a.id]
+      )
+
+      {:ok, _ordinary} =
+        %Barkpark.Webhooks.Delivery{}
+        |> Barkpark.Webhooks.Delivery.changeset(%{
+          endpoint_id: endpoint_id,
+          source_kind: "audit",
+          payload_snapshot: %{"body" => "ORDINARY-AUDIT-#{tag}"},
+          status: "ok"
+        })
+        |> Repo.insert()
+
+      # The secret-bearing row, written by the REAL media writer: media is the
+      # only delivery kind embedding a plaintext secret in payload_snapshot,
+      # and BY DESIGN it carries no endpoint_id (config-driven endpoints).
+      secret = "MEDIA-SECRET-#{tag}"
+
+      {:ok, media} =
+        Barkpark.Webhooks.create_media_delivery(%{
+          "url" => "https://example.test/media",
+          "secret" => secret,
+          "body" => ~s({"kind":"media.deleted"})
+        })
+
+      assert is_nil(media.endpoint_id)
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      member = Enum.find(manifest["tables"], &(&1["name"] == "webhook_deliveries"))
+      assert member["partition"] == "E2"
+
+      # Positive: the ordinary endpoint-backed delivery IS carried.
+      assert dumps["webhook_deliveries"] =~ "ORDINARY-AUDIT-#{tag}"
+
+      # Negative: the media signing secret appears in NO member of the bundle —
+      # the INNER JOIN on endpoint_id is what keeps it out.
+      for {name, dump} <- dumps do
+        refute dump =~ secret, "secret-bearing media snapshot leaked into member #{name}"
+      end
+
+      # Catalog validation: green while confined…
+      assert :ok = Catalog.assert_partition!(Repo)
+
+      # …and it FIRES when endpoint reachability admits the media row (the
+      # backfill breakage mode named at the @e2_joins invariant comment).
+      Repo.query!(
+        "UPDATE webhook_deliveries SET endpoint_id = $1::text::uuid WHERE id = $2",
+        [endpoint_id, media.id]
+      )
+
+      assert_raise RuntimeError, ~r/secret-bearing/, fn ->
+        Catalog.assert_partition!(Repo)
+      end
+
+      # The flagged hazard is REAL, not theoretical: the backfilled row now
+      # rides the join into A's bundle carrying the plaintext secret.
+      {:ok, bundle2} = WorkspaceBundle.export(ws_a.id)
+      {_m2, dumps2} = Archive.unpack(bundle2)
+      assert dumps2["webhook_deliveries"] =~ secret
+
+      # Restore confinement → validation is green again.
+      Repo.query!("UPDATE webhook_deliveries SET endpoint_id = NULL WHERE id = $1", [media.id])
+      assert :ok = Catalog.assert_partition!(Repo)
+    end
+  end
+
   # ── E3-dataset / allowlist bare-slug collision (bpb-e3-dataset-slug-collision) ──
 
   describe "export project-qualifies the E3-dataset/allowlist bare-slug copy" do

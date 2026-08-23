@@ -13,14 +13,17 @@ import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fet
  * computed `rootId` (highest-degree node, "barkpark" preferred) so the renderer
  * has an accent/anchor on first paint.
  *
- * Caching mirrors `lib/find-search.ts`: a hand-rolled `unstable_cache` (the
- * Phoenix origin marks responses `private, max-age=0`, so per-fetch revalidate
- * is a silent no-op). 5-min revalidate, tagged "graph" + the dataset `_all` tag
- * so a publish anywhere refreshes the graph via the existing webhook.
+ * Caching: a hand-rolled `unstable_cache` (the Phoenix origin marks responses
+ * `private, max-age=0`, so per-fetch revalidate is a silent no-op). 5-min
+ * revalidate, tagged "graph" + the dataset `_all` tag so a publish anywhere
+ * refreshes the graph via the existing webhook. (`lib/find-search.ts` used to
+ * cache the same way but dropped its Data Cache layer — search is always
+ * fresh; this module's cache is its own.)
  *
- * Scope/auth mirror find-search: Indx-style token-scoped route
- * (`/w/default/p/default`) when a read token is present, else the flat public
- * route. The token + base URL come from the `server-only` `bp-fetch` module.
+ * Scope/auth: ONE flat URL shape, always — `GET /v1/graph?dataset=…` with the
+ * bearer supplying tenancy (see `rawCorpusGraph`; the `/w/…/p/…`-scoped path
+ * 404s for this endpoint, so no token-conditional route branch exists here).
+ * The token + base URL come from the `server-only` `bp-fetch` module.
  */
 
 /** Cache tag for the graph Data Cache — `revalidateTag(GRAPH_TAG)` busts it. */

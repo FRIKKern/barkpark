@@ -349,7 +349,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ignores a malformed payload without crashing the session.
   def handle_event("width-bucket", %{"bucket" => bucket}, socket)
       when bucket in ~w(wide standard narrow phone),
-      do: {:noreply, Phoenix.Component.assign(socket, width_bucket: bucket, focus_pane_idx: nil)}
+      do:
+        {:noreply,
+         Phoenix.Component.assign(socket,
+           width_bucket: bucket,
+           focus_pane_idx: nil,
+           focus_doc_on_open: false
+         )}
 
   def handle_event("width-bucket", _params, socket), do: {:noreply, socket}
 
@@ -473,6 +479,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("sidebar-slug-change", params, socket),
     do: Paper.sidebar_slug_change(params, socket)
+
+  # spd-bl-publish-affordance-triple — the hand path's publish affordances:
+  # the sidebar description input, the label-add form, and the pane header's
+  # Publish control. All three ride the Shared.Paper meta-write guard ladder.
+  def handle_event("sidebar-description-change", params, socket),
+    do: Paper.sidebar_description_change(params, socket)
+
+  def handle_event("sidebar-label-add", params, socket),
+    do: Paper.sidebar_label_add(params, socket)
+
+  def handle_event("paper-publish", _params, socket), do: Paper.paper_publish(socket)
 
   def handle_event("backlinks-refresh", _params, socket), do: Paper.backlinks_refresh(socket)
   def handle_event("open-backlink", params, socket), do: Paper.open_backlink(params, socket)

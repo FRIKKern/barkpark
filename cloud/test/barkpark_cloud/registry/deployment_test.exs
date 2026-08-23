@@ -149,7 +149,7 @@ defmodule BarkparkCloud.Registry.DeploymentPersistenceTest do
     {:ok, first} = Registry.create_deployment(site, %{git_ref: "sha1"})
 
     assert {:error, cs} = Registry.create_deployment(site, %{git_ref: "sha2"})
-    assert {"a build for this site is already in progress", _} = cs.errors[:git_ref]
+    assert {"is blocked — a build for this site is already in progress", _} = cs.errors[:git_ref]
 
     # Once the first build is settled the slot is free — the build_id partial
     # index still exempts NULLs, so a second build_id-less row inserts fine.

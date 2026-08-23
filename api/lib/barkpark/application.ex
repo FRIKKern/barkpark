@@ -187,17 +187,6 @@ defmodule Barkpark.Application do
       # plugin-independent (unlike Pulse.Metrics), no Repo dependency; reads
       # :os_mon + /proc every few seconds and broadcasts on "server_vitals".
       Barkpark.HostVitals.Sampler,
-      # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
-      # could not clean up after itself (PDS-D210). The export engine's
-      # try/after covers raises and disconnects, but not the OOM killer — and
-      # the OOM killer is precisely the scenario the disk spill exists to
-      # survive, so a crashed BEAM's leftovers are collected by its successor.
-      # Placed BEFORE the Endpoint (and before the Repo, on which it does not
-      # depend at all — it is pure filesystem work) so stale bundles are
-      # reclaimed before this node can serve a new export into the same
-      # directory. A `:temporary` Task: it runs once, never restarts, and its
-      # own moduledoc explains why the sweep is boot-only rather than periodic.
-      Barkpark.Tenancy.WorkspaceBundle.Janitor,
       Barkpark.Repo,
       Barkpark.Vault,
       # WI1: plugin registry — must come up before workers/endpoint so any
@@ -247,6 +236,19 @@ defmodule Barkpark.Application do
       Barkpark.StudioChat.Supervisor,
       BarkparkWeb.Presence,
       {Task.Supervisor, name: Barkpark.TaskSupervisor},
+      # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
+      # could not clean up after itself (PDS-D210). The export engine's
+      # try/after covers raises and disconnects, but not the OOM killer — and
+      # the OOM killer is precisely the scenario the disk spill exists to
+      # survive, so a crashed BEAM's leftovers are collected by its successor.
+      # Placed BEFORE the Endpoint so stale bundles are reclaimed before this
+      # node can serve a new export into the same directory, and AFTER
+      # Barkpark.TaskSupervisor because the sweep's bounded `ps` liveness
+      # probe runs on it (task-felix-w21-bl-janitor-ps-bound) — it needs no
+      # Repo (pure filesystem work), but the supervisor must exist. A
+      # `:temporary` Task: it runs once, never restarts, and its own moduledoc
+      # explains why the sweep is boot-only rather than periodic.
+      Barkpark.Tenancy.WorkspaceBundle.Janitor,
       # Dedicated supervisor for outbound webhook/media deliveries. The
       # generic TaskSupervisor has max_children: :infinity, so a webhook
       # storm or a slow endpoint (each child sleeps in-task on retry

@@ -56,7 +56,11 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
 
   @opts Router.init([])
   @password "correct-horse-battery"
-  @worker_token "worker-token-test-fixed"
+  # jpf-w1-builder-identity: the builder claim is agent-gated and box-scoped, so
+  # the credential is the token of the box hosting THIS site — not a fleet
+  # secret. Memoised per box: mint_agent_token/3 supersedes the previous live
+  # token of the same scope, so minting twice for one box would revoke the token
+  # an earlier line is still holding.
   @installation_id "424242"
 
   defp user_team do
@@ -118,8 +122,20 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
     {user, team, site}
   end
 
-  defp claim(worker \\ "clone-auth-w") do
-    call(:post, "/v1/builder/claim", %{worker_id: worker}, @worker_token)
+  defp agent_token(%Registry.Site{barkpark_id: bp_id}) do
+    case Process.get({:agent_token, bp_id}) do
+      nil ->
+        {:ok, token, _} = Registry.mint_agent_token(bp_id, "report")
+        Process.put({:agent_token, bp_id}, token)
+        token
+
+      token ->
+        token
+    end
+  end
+
+  defp claim(site, worker \\ "clone-auth-w") do
+    call(:post, "/v1/builder/claim", %{worker_id: worker}, agent_token(site))
   end
 
   defp fake_token do
@@ -140,7 +156,7 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
       sha = String.duplicate("ab", 20)
       {:ok, dep} = Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil})
 
-      conn = claim()
+      conn = claim(site)
       assert conn.status == 200
       body = json_body(conn)
       assert body["deployment"]["id"] == dep.id
@@ -164,7 +180,7 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
       {_user, _team, site} = connected_site()
       {:ok, _} = Registry.create_deployment(site, %{git_ref: String.duplicate("cd", 20)})
 
-      source = json_body(claim())["source"]
+      source = json_body(claim(site))["source"]
       assert source["url"] == "https://github.com/owner/private-repo.git"
       refute source["url"] =~ "@github.com"
       refute source["url"] =~ "x-access-token"
@@ -176,7 +192,7 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
       {:ok, site} = Registry.set_site_github(site, "owner/public-repo", "main", "hook-secret")
       {:ok, _} = Registry.create_deployment(site, %{git_ref: String.duplicate("ef", 20)})
 
-      source = json_body(claim())["source"]
+      source = json_body(claim(site))["source"]
       assert source["kind"] == "git"
       assert source["url"] == "https://github.com/owner/public-repo.git"
       refute Map.has_key?(source, "token")
@@ -191,7 +207,7 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
           artifact_url: "file:///srv/artifacts/site.tar.gz"
         })
 
-      refute Map.has_key?(json_body(claim()), "source")
+      refute Map.has_key?(json_body(claim(site)), "source")
     end
   end
 
@@ -205,7 +221,7 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
       refute GitHub.configured?()
       {:ok, _} = Registry.create_deployment(site, %{git_ref: String.duplicate("ba", 20)})
 
-      source = json_body(claim())["source"]
+      source = json_body(claim(site))["source"]
       assert source["url"] == "https://github.com/owner/private-repo.git"
       refute Map.has_key?(source, "token")
     end
@@ -231,7 +247,7 @@ defmodule BarkparkCloud.Web.RouterBuilderCloneAuthTest do
       {:ok, site} = Registry.set_site_github(site, "owner/private-repo", "main", "hook-secret")
       {:ok, _} = Registry.create_deployment(site, %{git_ref: String.duplicate("ab", 20)})
 
-      conn = claim()
+      conn = claim(site)
       assert conn.status == 200
       source = json_body(conn)["source"]
       assert source["url"] == "https://github.com/owner/private-repo.git"

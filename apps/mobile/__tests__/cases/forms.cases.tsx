@@ -19,4 +19,8 @@ const questions = [
 export const formsCases: BlockCase[] = [
   { type: 'form', block: { type: 'form', questions } },
   { type: 'questionnaire', block: { type: 'questionnaire', questions } },
+  // field-number (B085) — the labelled numeric definition row
+  // (pbw-fix-field-number-react); value + unit exercises the full render path,
+  // and the crown floor drives this exact case in both registers.
+  { type: 'field-number', block: { type: 'field-number', label: 'Price', value: 19.99, unit: 'NOK' } },
 ]

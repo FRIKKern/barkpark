@@ -152,16 +152,49 @@ defmodule Barkpark.Content.Schema do
            |> Content.put_scope_attrs(opts) do
       case name && get_schema(name, dataset, opts) do
         {:ok, existing} ->
-          existing
-          |> SchemaDefinition.changeset(attrs)
-          |> Repo.update()
+          if owned_by_other_workspace?(existing, attrs) do
+            insert_schema(attrs)
+          else
+            existing
+            |> SchemaDefinition.changeset(attrs)
+            |> Repo.update()
+          end
 
         _ ->
-          %SchemaDefinition{}
-          |> SchemaDefinition.changeset(attrs)
-          |> Repo.insert()
+          insert_schema(attrs)
       end
     end
+  end
+
+  defp insert_schema(attrs) do
+    %SchemaDefinition{}
+    |> SchemaDefinition.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  # The cross-tenant ownership guard (pds-bl-bootstrap-cross-tenant-theft).
+  #
+  # An opts-less caller (Plugins.Bootstrap, Content.TagRegistry) reads through
+  # `scope_to_workspace_or_global/3` with NO workspace filter, and the nil arm
+  # of `scope_schema_to_dataset/3` (`dataset_id IS NULL AND dataset = <slug>`)
+  # can then match a legacy nil-dataset_id row owned by a FOREIGN workspace.
+  # Updating that row would clobber its content AND — because
+  # `put_scope_attrs/2` stamps the resolved (Default) scope into attrs —
+  # rewrite its workspace_id/project_id: a genuine cross-tenant write, proven
+  # by probe S3 in bootstrap_default_slot_probe_test.exs.
+  #
+  # When the matched row carries a non-nil workspace_id DIFFERENT from the
+  # server-resolved write-scope workspace, the update is refused and the write
+  # lands as a FRESH row in the target scope instead (get_schema's
+  # dataset_id-first ordering makes subsequent upserts converge on that row).
+  # Everything else is byte-identical: a same-workspace row and a legacy
+  # GLOBAL row (nil workspace_id — deliberately adopted into the resolved
+  # scope) still update in place, and workspace-scoped callers
+  # (SchemaController, provision_schemas) already read workspace-confined rows
+  # so this predicate is structurally false for them.
+  defp owned_by_other_workspace?(%SchemaDefinition{workspace_id: row_ws}, attrs) do
+    target_ws = Map.get(attrs, "workspace_id")
+    is_binary(row_ws) and is_binary(target_ws) and row_ws != target_ws
   end
 
   @doc """

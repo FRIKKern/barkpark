@@ -63,7 +63,7 @@ defmodule BarkparkCloud.Accounts.TeamMembership do
     |> assoc_constraint(:team)
     |> unique_constraint([:user_id, :team_id],
       name: :team_memberships_user_team_unique_idx,
-      message: "user is already a member of this team"
+      message: "is already a member of this team"
     )
   end
 end

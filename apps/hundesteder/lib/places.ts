@@ -1,4 +1,5 @@
 import "server-only";
+import { collectAllPages } from "./paginate";
 import { paperTags, type PaperTag } from "./paper-tags";
 
 /**
@@ -38,6 +39,14 @@ const TOKEN =
 
 const PLACE_TYPE = "place";
 const REVALIDATE_SECONDS = 300;
+// Pagination bounds (task-32a7f8c07041d4d6): the query API defaults limit to
+// 100 and CLAMPS it to 1000 (query_controller.ex), so an unpaginated query
+// silently truncates at 100 published places. 1000/page x 20 pages = 20k
+// places, far beyond any plausible corpus — the cap exists so a misbehaving
+// upstream that always returns full pages cannot spin the walk forever, and
+// hitting it is reported out loud, never absorbed.
+const PLACES_PAGE_LIMIT = 1000;
+const PLACES_MAX_PAGES = 20;
 
 /* ── domain types ───────────────────────────────────────────────────────── */
 
@@ -168,15 +177,32 @@ function sortPlaces(a: Place, b: Place): number {
  * result it returns `[]`, so callers render an empty state rather than crash.
  */
 export async function fetchPlaces(): Promise<Place[]> {
-  const json = await bpFetch(
-    `/v1/data/query/${encodeURIComponent(
-      DATASET,
-    )}/${PLACE_TYPE}?filter[status]=published`,
+  // Paginated (task-32a7f8c07041d4d6): one unbounded query used to ride the
+  // server's DEFAULT limit of 100 and silently truncate a grown corpus. The
+  // walk lives in lib/paginate.ts so the real loop is under test.
+  const { rows, truncated } = await collectAllPages(
+    async (limit, offset) => {
+      const json = await bpFetch(
+        `/v1/data/query/${encodeURIComponent(
+          DATASET,
+        )}/${PLACE_TYPE}?filter[status]=published&limit=${limit}&offset=${offset}`,
+      );
+      if (json === null) return null;
+      return (
+        (json as { result?: { documents?: unknown[] } }).result?.documents ?? []
+      );
+    },
+    { limit: PLACES_PAGE_LIMIT, maxPages: PLACES_MAX_PAGES },
   );
-  const docs =
-    (json as { result?: { documents?: unknown[] } } | null)?.result
-      ?.documents ?? [];
-  return docs
+  if (truncated !== undefined) {
+    // Partial truth, said out loud — the never-throw law still holds, but a
+    // silently shrunken directory is exactly the defect this walk retired.
+    console.warn(
+      `[places] PAGINATION COULD NOT TERMINATE CLEANLY (${truncated}) — ` +
+        `rendering the ${rows.length} places collected so far`,
+    );
+  }
+  return rows
     .map(normalizePlace)
     .filter((p): p is Place => p !== null)
     .sort(sortPlaces);

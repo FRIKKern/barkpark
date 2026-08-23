@@ -3404,7 +3404,9 @@ test("parseHash resolves both the old flat and the new canonical Settings hashes
 
 test("parseFleetFilter extracts a known bucket, else null (whole fleet)", () => {
   assert.equal(hooks.parseFleetFilter("#fleet/attention"), "attention");
-  assert.equal(hooks.parseFleetFilter("fleet/inflight"), "inflight");
+  // The URL SEGMENT stays "inflight" (bookmarks; the hash grammar is [a-z]+)
+  // but the returned filter is the decision-32 bucket string, hyphenated.
+  assert.equal(hooks.parseFleetFilter("fleet/inflight"), "in-flight");
   assert.equal(hooks.parseFleetFilter("#fleet/healthy"), "healthy");
   assert.equal(hooks.parseFleetFilter("#fleet"), null);
   assert.equal(hooks.parseFleetFilter("#fleet/bogus"), null);
@@ -3484,17 +3486,20 @@ const MIXED = [
   { name: "healthy-a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },       // ok (9), tiebreak before healthy-b
 ];
 
-test("attentionRank matches the D15 ladder for each state", () => {
+test("attentionRank matches the decision-32 fixture rank for each state", () => {
+  // jpf-w1-queue-age-alarm: these are the FIXTURE ranks (attention_order.json),
+  // no longer a private 1–9 numbering — 5 and 6 are strained/filling, which
+  // this console does not classify yet (the named gap in ATTENTION_RANK).
   const rankByName = Object.fromEntries(MIXED.map((b) => [b.name, hooks.attentionRank(b)]));
   assert.equal(rankByName["gone-fail"], 1);
   assert.equal(rankByName["prov-fail"], 2);
   assert.equal(rankByName["susp"], 3);
   assert.equal(rankByName["Alpha-degraded"], 4);
-  assert.equal(rankByName["never-said"], 5);
-  assert.equal(rankByName["behind-1"], 6);
-  assert.equal(rankByName["removing-x"], 7);
-  assert.equal(rankByName["prov"], 8);
-  assert.equal(rankByName["healthy-a"], 9);
+  assert.equal(rankByName["never-said"], 7);
+  assert.equal(rankByName["behind-1"], 9);
+  assert.equal(rankByName["removing-x"], 10);
+  assert.equal(rankByName["prov"], 11);
+  assert.equal(rankByName["healthy-a"], 12);
 });
 
 // cch-w34-s6 (charter D332(b)), stated as an ORDERING, not just as numbers:
@@ -3535,44 +3540,152 @@ test("attentionCompare sorts most-urgent-first, tiebreak name ascending case-ins
 
 // ── bucketOf / fleetSummary / filterFleet ───────────────────────────────────
 
-test("bucketOf maps ranks 1–6 → attention, 7–8 → inflight, 9 → healthy", () => {
+test("bucketOf maps ranks 1–9 → attention, 10–11 → in-flight, 12 → healthy", () => {
   assert.equal(hooks.bucketOf({ deprovision_status: "failed" }), "attention"); // 1
   assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "down" }), "attention"); // 4
-  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: null }), "attention"); // 5 unreported
-  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "inflight"); // 7
-  assert.equal(hooks.bucketOf({}), "inflight"); // 8 provisioning
-  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }), "healthy"); // 9
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: null }), "attention"); // 7 unreported
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", queued_deploy_age_seconds: 420 }), "attention"); // 8 deploy_stalled
+  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "in-flight"); // 10
+  assert.equal(hooks.bucketOf({}), "in-flight"); // 11 provisioning
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }), "healthy"); // 12
 });
 
 test("fleetSummary counts buckets — mixed, empty, and all-healthy", () => {
   const s = hooks.fleetSummary(MIXED);
   assert.equal(s.total, 10);
-  assert.equal(s.attention, 6); // removal_failed, failed, suspended, degraded, unreported, behind (ranks 1–6)
-  assert.equal(s.inflight, 2);  // removing, provisioning (ranks 7–8)
-  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 9)
-  assert.equal(s.attention + s.inflight + s.healthy, s.total);
+  assert.equal(s.attention, 6); // removal_failed, failed, suspended, degraded, unreported, behind (attention ranks)
+  assert.equal(s["in-flight"], 2); // removing, provisioning (ranks 10–11) — the fixture's hyphenated bucket key
+  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 12)
+  assert.equal(s.attention + s["in-flight"] + s.healthy, s.total);
 
   // Spread sandbox-realm returns into the test realm before deepEqual (the
   // node:vm objects carry a different Object.prototype — same trick as parseHash).
-  assert.deepEqual({ ...hooks.fleetSummary([]) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
-  assert.deepEqual({ ...hooks.fleetSummary(null) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
+  assert.deepEqual({ ...hooks.fleetSummary([]) }, { attention: 0, "in-flight": 0, healthy: 0, total: 0 });
+  assert.deepEqual({ ...hooks.fleetSummary(null) }, { attention: 0, "in-flight": 0, healthy: 0, total: 0 });
 
   const allHealthy = [
     { name: "a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
     { name: "b", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
   ];
-  assert.deepEqual({ ...hooks.fleetSummary(allHealthy) }, { attention: 0, inflight: 0, healthy: 2, total: 2 });
+  assert.deepEqual({ ...hooks.fleetSummary(allHealthy) }, { attention: 0, "in-flight": 0, healthy: 2, total: 2 });
 });
 
 test("filterFleet returns exactly one bucket; null bucket → the whole list (copied)", () => {
   const attention = hooks.filterFleet(MIXED, "attention").map((b) => b.name).sort();
   assert.deepEqual(attention, ["Alpha-degraded", "behind-1", "gone-fail", "never-said", "prov-fail", "susp"].sort());
-  assert.equal(hooks.filterFleet(MIXED, "inflight").length, 2);
+  assert.equal(hooks.filterFleet(MIXED, "in-flight").length, 2);
   assert.equal(hooks.filterFleet(MIXED, "healthy").length, 2);
   const all = hooks.filterFleet(MIXED, null);
   assert.equal(all.length, MIXED.length);
   assert.notEqual(all, MIXED); // a copy, not the same reference
   assert.deepEqual([...hooks.filterFleet(null, "attention")], []);
+});
+
+// ── the decision-32 fixture is now the SPA's asserter too (jpf-w1) ──────────
+//
+// Until this test, Go was attention_order.json's ONLY asserter and this file
+// drifted silently: the SPA ran a private 1–9 rank ladder and emitted the
+// bucket string "inflight" where the fixture (and Go, and -o json) say
+// "in-flight". This is the verify_probes.json pattern (C8 below): read the
+// committed fixture, hold the SPA's vocabulary to it byte-for-byte.
+
+test("D32: the SPA attention vocabulary matches attention_order.json", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(new URL("./__fixtures__/attention_order.json", import.meta.url), "utf8"),
+  );
+  const states = fixture.states;
+
+  // FAIL CLOSED ON AN EMPTY CORPUS: a fixture that parses to zero states must
+  // red here, never green a loop that asserted nothing. The floor states the
+  // sample size the rest of the test runs over.
+  assert.ok(Array.isArray(states) && states.length >= 12,
+    "attention_order.json carries " + (Array.isArray(states) ? states.length : 0) +
+    " states — the decision-32 vocabulary is at least twelve; an empty fixture would green every loop below vacuously");
+
+  // The BUCKET STRINGS, from the fixture side — including the hyphenated
+  // "in-flight" this file used to misspell as "inflight". Compared against a
+  // literal, not against the SPA, so both-empty can never scan green.
+  assert.deepEqual([...new Set(states.map((st) => st.bucket))],
+    ["attention", "in-flight", "healthy"]);
+
+  // …and from the SPA side: the three strings bucketOfRank can produce are the
+  // fixture's three, verbatim.
+  assert.equal(hooks.bucketOfRank(1), "attention");
+  assert.equal(hooks.bucketOfRank(10), "in-flight");
+  assert.equal(hooks.bucketOfRank(12), "healthy");
+
+  // KNOWN GAP, pinned to exactly two names: fixture states the SPA does not
+  // classify yet (their inputs — load/disk vitals — have no classifyBp arm).
+  // A THIRD state missing from ATTENTION_RANK reds this test; so does closing
+  // the gap without deleting its entry here.
+  const SPA_GAP = ["strained", "filling"];
+  const ranks = { ...hooks.ATTENTION_RANK };
+  assert.deepEqual(states.map((st) => st.state).filter((k) => !(k in ranks)), SPA_GAP,
+    "fixture states missing from the SPA ladder must be exactly the named gap");
+
+  // Every state the SPA ranks: fixture-listed, on the FIXTURE's rank, in the
+  // FIXTURE's bucket. This is the assertion that reds if either side renumbers
+  // alone — the drift this slice found (1–9 vs 1–11) could never have shipped
+  // through it.
+  for (const st of states) {
+    if (SPA_GAP.includes(st.state)) continue;
+    assert.equal(ranks[st.state], st.rank,
+      st.state + ": SPA rank " + ranks[st.state] + " != fixture rank " + st.rank);
+    assert.equal(hooks.bucketOfRank(st.rank), st.bucket,
+      st.state + ": SPA bucket for rank " + st.rank + " != fixture bucket " + st.bucket);
+  }
+
+  // No SPA state outside the fixture: a rung minted here alone is the same
+  // drift in the other direction.
+  for (const k of Object.keys(ranks)) {
+    assert.ok(states.some((st) => st.state === k),
+      "SPA state " + k + " is not in attention_order.json");
+  }
+
+  // The row this slice adds, by name: present in the fixture AND in the SPA,
+  // warn-toned, attention-bucketed, between unreported and behind.
+  const stalled = states.find((st) => st.state === "deploy_stalled");
+  assert.ok(stalled, "deploy_stalled missing from the fixture");
+  assert.equal(stalled.tone, "warn");
+  assert.equal(stalled.bucket, "attention");
+  assert.ok(ranks.unreported < ranks.deploy_stalled && ranks.deploy_stalled < ranks.behind,
+    "deploy_stalled must sit after unreported and before behind");
+});
+
+// ── deploy_stalled (jpf-w1 D6/D7): the queued-age alarm, client side ────────
+
+test("jpf-w1: a 5-minute unclaimed queued deploy is deploy_stalled — warn, attention, age named", () => {
+  const live = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  const stalled = { ...live, queued_deploy_age_seconds: 420 };
+  assert.equal(hooks.classifyBp(stalled), "deploy_stalled");
+  assert.equal(hooks.bucketOf(stalled), "attention");
+  const s = hooks.statusOf(stalled);
+  assert.equal(s.role, "warn"); // NOT the info/blue tone "queued" would get
+  assert.equal(s.label, "Deploy stalled");
+  assert.match(s.detail, /queued 7m/i);       // the criterion: the age, named
+  assert.match(s.detail, /no builder/i);      // and the fact that makes it a problem
+});
+
+test("jpf-w1: the fence never fires on a fresh queue, a nil field, or a non-number", () => {
+  const live = { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" };
+  // Fresh queue (under 300s) → ok: a just-enqueued deploy is news, not an alarm.
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: 299 }), "ok");
+  // nil / absent — an older CP or nothing queued — must NEVER read as stalled.
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: null }), "ok");
+  assert.equal(hooks.classifyBp(live), "ok");
+  // A stringly-typed age is a wire bug, not a stall.
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: "420" }), "ok");
+  // Exactly the fence (>= 300, not > 300).
+  assert.equal(hooks.classifyBp({ ...live, queued_deploy_age_seconds: 300 }), "deploy_stalled");
+});
+
+test("jpf-w1: a sick box's stuck queue is a symptom — degraded/unreported outrank deploy_stalled", () => {
+  const stalledAge = { queued_deploy_age_seconds: 9000 };
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "offline", ...stalledAge }), "degraded");
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: null, ...stalledAge }), "unreported");
+  // …and a stalled box that is ALSO behind reads stalled: someone asked for
+  // this deploy and nobody is building it, which beats passive update drift.
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind", ...stalledAge }), "deploy_stalled");
 });
 
 // ── esc: the HTML-injection shield used by every renderer ───────────────────
@@ -3670,7 +3783,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
   // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
   // most severe state. The enum is pinned, and every member has an explicit arm.
   const KINDS = ["removal_failed", "failed", "suspended", "degraded", "unreported",
-    "behind", "removing", "provisioning", "ok"];
+    "deploy_stalled", "behind", "removing", "provisioning", "ok"];
   assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
     "a new fleet state was added without a statusOf arm (or one was removed)");
   const REP = {
@@ -3679,6 +3792,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
     unreported: { host: "h", last_seen_at: null },
+    deploy_stalled: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", queued_deploy_age_seconds: 420 },
     behind: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
     removing: { deprovision_status: "pending" },
     provisioning: {},
@@ -5963,6 +6077,102 @@ test("siteRollbackFailure maps every typed refusal to one honest sentence", () =
   assert.match(hooks.siteRollbackFailure(422, { error: { code: "no_previous" } }).title, /Nothing to roll back to/);
   // Unknown → a generic, non-throwing sentence.
   assert.match(hooks.siteRollbackFailure(500, {}).title, /Couldn't roll back/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w62-bl — THE SITE PLANE SPEAKS TYPED CODES, AND THE MODAL'S RECOVERY
+// CONTROL OBEYS THEM. Sites.Deploy now promotes the box's typed rollback exits
+// (no_previous / not_supported / lock_held) onto the wire as flat
+// `{ok:false, error:<code>, detail:<prose>}` via the 4-tuple relay cch-w63-s3
+// minted; before, every box refusal collapsed into the constant
+// `rollback_failed` and siteRollbackRefusalTerminal(422, …) was FALSE for a
+// permanent no-previous-build refusal — Try again re-POSTed into a refusal
+// that cannot change by clicking. Transport drives below follow the
+// cch-w46-s2 runDecommission precedent.
+
+test("cch-w62-bl: not_supported joins the terminal set; lock_held stays transient", () => {
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: "not_supported" }), true,
+    "no retry gives a release-less site something to roll back to");
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: { code: "not_supported" } }), true,
+    "…in the nested envelope too");
+  assert.equal(hooks.siteRollbackRefusalTerminal(409, { error: "lock_held" }), false,
+    "a held deploy lock clears by itself — Try again is the honest recovery");
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: "wat" }), false,
+    "an unknown 422 still fails safe toward retry");
+});
+
+test("cch-w62-bl: the not_supported copy relays the plane's measured detail, with a static fallback", () => {
+  const relayed = hooks.siteRollbackFailure(422, {
+    ok: false, error: "not_supported",
+    detail: "this site has no live release yet — there is nothing to roll back",
+  });
+  assert.equal(relayed.title, "Nothing to roll back");
+  assert.equal(relayed.body, "this site has no live release yet — there is nothing to roll back");
+  const bare = hooks.siteRollbackFailure(422, { error: "not_supported" });
+  assert.match(bare.body, /no live release yet/);
+});
+
+// Swap fetch into the realm, run runSiteRollback to completion, then let the
+// caller CLICK the recovery it wired — same counter, so a re-POST is visible.
+async function driveSiteRollback(status, payload) {
+  const fetch = fetchStub(status, payload);
+  const rec = { fails: [], succeeded: 0, busied: 0 };
+  const ctl = {
+    rec,
+    busy() { rec.busied++; },
+    succeed() { rec.succeeded++; },
+    fail(msg, label, handler) { rec.fails.push({ msg, label, handler }); },
+  };
+  const inRealm = async (fn) => {
+    const saved = { fetch: sandbox.fetch };
+    sandbox.fetch = fetch;
+    try {
+      fn();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+  };
+  await inRealm(() => hooks.runSiteRollback({ id: "s1" }, "shop.example.com", ctl));
+  const last = () => rec.fails[rec.fails.length - 1];
+  return {
+    ctl, fetch, last, rec,
+    posts: () => fetch.calls.filter((c) => c.opts && c.opts.method === "POST").length,
+    clickRecovery: () => inRealm(() => last().handler(ctl)),
+  };
+}
+
+test("cch-w62-bl: a one-release site's Roll back click gets the true cause, a Close button, and exactly ONE POST", async () => {
+  // THE WIRE, as the plane now really answers it: Sites.Deploy reads the box's
+  // nested no_previous refusal, mints {:error, 422, <prose>, "no_previous"},
+  // and the route relays it flat.
+  const d = await driveSiteRollback(422, {
+    ok: false, error: "no_previous",
+    detail: "there is no previous build to roll back to — this site has only ever had one release",
+  });
+  assert.equal(d.posts(), 1, "the click that opened this failure issued exactly one POST");
+  const f = d.last();
+  assert.ok(f, "the refusal must FAIL the modal, never silently swallow");
+  assert.equal(f.label, "Close",
+    "a permanent no-previous refusal offers the only recovery that can work");
+  assert.match(f.msg, /Nothing to roll back to/, "the TRUE cause, not a busy-deploy story");
+  assert.match(f.msg, /only ever had one release/);
+  assert.equal(f.msg.indexOf("A deploy is already running"), -1,
+    "BEFORE this slice the wire said rollback_failed and the modal offered Try again");
+  await d.clickRecovery();
+  assert.equal(d.posts(), 1, "the terminal recovery issues NO second POST");
+  assert.equal(d.rec.busied, 0, "…and never re-arms the modal's busy state");
+});
+
+test("cch-w62-bl: the transient positive control — a lock_held 409 still offers Try again and really re-POSTs", async () => {
+  const d = await driveSiteRollback(409, {
+    ok: false, error: "lock_held",
+    detail: "a deploy is running on the box — try again once it finishes",
+  });
+  assert.equal(d.posts(), 1);
+  assert.equal(d.last().label, "Try again",
+    "a refusal a later click CAN repair keeps the retry that works");
+  await d.clickRecovery();
+  assert.equal(d.posts(), 2, "…and the retry genuinely re-POSTs");
+  assert.equal(d.rec.busied, 1);
 });
 
 test("siteRollbackFlashView: restored cue applies ONLY while its row is current + inside the TTL", () => {
@@ -8611,23 +8821,29 @@ test("cch-w53-s1: the delete sheet claims no containment it cannot perform", () 
   assert.match(region, /No instance changes/);
 });
 
-test("cch-w53-s1: the sign-out-everywhere sheet makes NO timing claim", () => {
-  // "immediately" was measured false — an already-open SSE stream kept delivering
-  // team events ~55s past revoke_all_user_sessions. "within 25 seconds" would be
-  // false too until the mechanism slice lands, so the sheet must state the outcome
-  // and nothing about when. This pin bans BOTH shapes.
+test("cch-w53-s1/bl: the sign-out-everywhere sheet states the SOFT measured bound and no stronger timing", () => {
+  // s1 banned every timing word while the plane could hold none ("immediately"
+  // was measured false; the stream outlived revoke ~55s+). s4 landed the
+  // mechanism — sse_loop/3 re-checks the session per heartbeat, the stream ends
+  // inside one ~25s tick — and cch-w53-bl DECIDED to state that bound SOFTLY:
+  // "within about a minute" is deliberately weaker than measured, carries no
+  // digits, and lives on THIS sheet only (per-row revoke does not end that
+  // device's stream and must not inherit the claim). The digit/immediacy bans
+  // survive verbatim: a future "within 25 seconds" or "immediately" reds here.
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const start = src.indexOf('title: "Sign out everywhere else?"');
   assert.ok(start > 0, "the sign-out-everywhere confirm must be locatable");
-  const region = src.slice(start, start + 2000);
+  const region = src.slice(start, start + 3000);
   const bodyAt = region.indexOf("bodyHtml:");
   const confirmAt = region.indexOf("onConfirm:");
   assert.ok(bodyAt > 0 && confirmAt > bodyAt, "the sheet's bodyHtml must precede onConfirm");
   const body = region.slice(bodyAt, confirmAt);
   assert.ok(body.includes("Every other browser and device is signed out."),
     "the outcome must still be stated plainly");
+  assert.ok(body.includes("lose access within about a minute"),
+    "the honest SOFT bound must be stated — silence left a user watching a live tab with no explanation");
   assert.ok(!/immediately|instantly|right away|within\s*\d+|\d+\s*second/i.test(body),
-    "the sign-out sheet must promise no timing the plane cannot hold");
+    "…and nothing stronger than the measured per-heartbeat bound may ever return");
   // The two accurate clauses stay.
   assert.match(body, /This device stays signed in/);
   assert.match(body, /can sign back in with their password/);
@@ -11376,6 +11592,102 @@ test("isu-w5: forceUpdateBody is the explicit {force:true} override payload", ()
   assert.deepEqual(plain(hooks.forceUpdateBody()), { force: true });
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w62-bl — THE UPDATE SEAM'S TERMINAL/TRANSIENT SPLIT, minted AND wired.
+// cch-w61-s2 shipped copy only and deliberately minted no predicate, because a
+// predicate no shipped path consults is a guard that structurally cannot lose
+// (D738). This slice is the other half: updateInstance CONSULTS
+// updateRefusalTerminal at its transport seam — the recovery control here is
+// the Update button the refusal arm re-enables (the toast has no buttons), and
+// re-enabling it after a permanent refusal offered a re-POST that cannot work.
+//
+// THE BUTTON-REACHABLE PERMANENT REFUSAL (the predicate's live subject):
+// `not_enabled`. An UNARMED box still answers the hourly CHECK 200 with
+// apply_enabled:false and check.state intact (registry.ex arming_of/1 +
+// persist_update_check/3), so update_state stays "behind", the admin's Update
+// button renders — and the apply POST 503s feature_not_configured until the
+// box's env changes. identity_refused / suspended are classified terminal for
+// API callers but are NOT button-reachable (their probe rungs write
+// update_state "unknown"; lc.live is false when suspended) — recorded here so
+// nobody mistakes them for the predicate's reachability story.
+
+test("cch-w62-bl: updateRefusalTerminal is hookable, boolean, and split over the seam's own vocabulary", () => {
+  assert.equal(typeof hooks.updateRefusalTerminal, "function",
+    "the predicate must be drivable at all (RED on origin/main: grep -c updateRefusalTerminal app.js is 0)");
+  assert.equal(typeof hooks.updateInstance, "function",
+    "…and so must the arm that consults it (RED on origin/main: zero harness references)");
+
+  for (const kind of ["not_enabled", "not_supported", "suspended", "no_admin_token",
+                      "decrypt_failed", "not_found", "identity_refused"]) {
+    const v = hooks.updateRefusalTerminal({ kind });
+    assert.equal(v, true, kind + " is terminal — no click changes the box's answer");
+    assert.equal(typeof v, "boolean", "predicates stay boolean, never truthy");
+  }
+  // The gate refusals ride the `other` arm with a code.
+  assert.equal(hooks.updateRefusalTerminal({ kind: "other", code: "forbidden" }), true);
+  assert.equal(hooks.updateRefusalTerminal({ kind: "other", code: "no_team" }), true);
+  for (const c of [{ kind: "already_running" }, { kind: "runner_start_failed" },
+                   { kind: "not_live" }, { kind: "pinned", pin: "v1" },
+                   { kind: "other", code: "wat" }, { kind: "other", code: null }, {}, null]) {
+    const v = hooks.updateRefusalTerminal(c);
+    assert.equal(v, false, JSON.stringify(c) + " stays retryable — unknown fails safe toward the user");
+    assert.equal(typeof v, "boolean");
+  }
+});
+
+test("cch-w62-bl: updateConflict's return shape stays FROZEN — the predicate is a separate reader, not a new key", () => {
+  // The isu-w5 classifier test round-trips the whole object; this names the
+  // exact contract so a drive-by "add terminal:true to the return" reds twice.
+  assert.deepEqual(Object.keys(hooks.updateConflict({ error: { code: "not_enabled" } })).sort(),
+    ["kind", "pin"]);
+  assert.deepEqual(Object.keys(hooks.updateConflict({ error: { code: "wat" } })).sort(),
+    ["code", "kind", "pin"]);
+});
+
+// Swap fetch into the realm, run updateInstance to completion against a fake
+// button, so the OFFERING (disabled/label) and the POST count are both visible.
+async function driveUpdate(status, payload) {
+  const fetch = fetchStub(status, payload);
+  const btn = { disabled: false, textContent: "Update" };
+  const inRealm = async (fn) => {
+    const saved = { fetch: sandbox.fetch };
+    sandbox.fetch = fetch;
+    try {
+      fn();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+  };
+  await inRealm(() => hooks.updateInstance({ id: "bp-1", name: "web" }, btn));
+  return {
+    btn, fetch,
+    posts: () => fetch.calls.filter((c) => c.opts && c.opts.method === "POST").length,
+    clickAgain: () => inRealm(() => hooks.updateInstance({ id: "bp-1", name: "web" }, btn)),
+  };
+}
+
+test("cch-w62-bl: a not_enabled 503 changes what is OFFERED — the button stays disabled, one POST total", async () => {
+  const d = await driveUpdate(503, { error: { code: "not_enabled" } });
+  assert.equal(d.posts(), 1, "the click that collected this refusal issued exactly one POST");
+  assert.equal(d.btn.disabled, true,
+    "BEFORE this slice the refusal arm re-enabled the button unconditionally — a live re-POST into a 503 the box answers until its env changes");
+  assert.equal(d.btn.textContent, "Update unavailable",
+    "…and the label says the offering changed, not merely the toast");
+});
+
+test("cch-w62-bl: the transient positive control — already_running keeps the button live and really re-POSTs", async () => {
+  const d = await driveUpdate(409, { error: { code: "already_running" } });
+  assert.equal(d.posts(), 1);
+  assert.equal(d.btn.disabled, false, "a box-side transient keeps the retry that works");
+  assert.equal(d.btn.textContent, "Update");
+  await d.clickAgain();
+  assert.equal(d.posts(), 2, "…and clicking again genuinely re-POSTs");
+});
+
+test("cch-w62-bl: an UNKNOWN refusal fails safe toward retry — the button stays live", async () => {
+  const d = await driveUpdate(500, { error: { code: "wat" } });
+  assert.equal(d.btn.disabled, false, "an invented permanent no is the same lie pointed the other way");
+});
+
 test("isu-w5: updatePanelHtml renders truth cells and degrades (no policy chip/buttons) on older CP", () => {
   const legacy = hooks.updatePanelHtml({
     update_state: "behind", update_running_release: "0.4.0", update_latest_release: "v0.4.1", version: "0.4.0",
@@ -13586,7 +13898,7 @@ test("overviewSubline: the triage sentence reads the truth (0 / 1 / N attention)
 });
 
 test("overviewHeadChipsHtml: attention always, in-flight only when >0 (pulsing), healthy, + slots slot", () => {
-  const withFlight = hooks.overviewHeadChipsHtml({ attention: 2, inflight: 1, healthy: 4 });
+  const withFlight = hooks.overviewHeadChipsHtml({ attention: 2, "in-flight": 1, healthy: 4 });
   assert.match(withFlight, /ov-chip--attention/);
   assert.match(withFlight, /2 needs attention/);
   assert.match(withFlight, /ov-chip--inflight/);
@@ -13595,7 +13907,7 @@ test("overviewHeadChipsHtml: attention always, in-flight only when >0 (pulsing),
   assert.match(withFlight, /ov-chip--healthy/);
   assert.match(withFlight, /4 healthy/);
   assert.match(withFlight, /id="overview-slots"/);
-  const noFlight = hooks.overviewHeadChipsHtml({ attention: 0, inflight: 0, healthy: 2 });
+  const noFlight = hooks.overviewHeadChipsHtml({ attention: 0, "in-flight": 0, healthy: 2 });
   assert.doesNotMatch(noFlight, /ov-chip--inflight/); // conditional
   assert.match(noFlight, /0 needs attention/); // amber chip always present
 });
@@ -14017,11 +14329,28 @@ test("GR24: a degraded header reads the honest two-axis breakdown off statusPill
 });
 
 test("GR24: suspended keeps the banner + the CLI disclosure (teardown stays reachable)", () => {
-  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: "payment failed" });
+  // cch-w54-followup: the fixture moved from the invented "payment failed" to a
+  // REAL reason slug the control plane writes — the banner now routes through
+  // suspendedReasonText, so the assertion pins the humanised sentence.
+  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: "billing_past_due" });
   assert.match(html, /notice notice-error/);
-  assert.match(html, /payment failed/);
+  assert.match(html, /Payment past due — nothing deleted/);
   assert.match(html, /id="inst-cli-toggle"/);
   assert.doesNotMatch(html, /id="inst-open-studio"/); // no Studio on a stopped box
+});
+
+test("cch-w54-followup: a quota-suspended header renders NO snake_case slug anywhere", () => {
+  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: "quota_exceeded" });
+  // The apostrophe rides esc() as &#39;, so the pin is the apostrophe-free tail.
+  assert.match(html, /instance limit — nothing deleted/,
+    "the banner speaks the humanised sentence");
+  assert.doesNotMatch(html, /quota_exceeded/,
+    "BEFORE: instanceHeaderHtml printed the raw column value in its banner");
+  assert.doesNotMatch(html, /\b[a-z]+_[a-z]+\b/,
+    "…and no snake_case token survives anywhere in the header HTML");
+  // The helper's absent-reason fallback replaces the banner's old || literal.
+  const bare = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: null });
+  assert.match(bare, /Suspended by Barkpark Cloud/);
 });
 
 test("GR24: a provisioning header keeps the live chip and offers no CLI disclosure", () => {
@@ -19888,6 +20217,54 @@ test("cch-w42-s1: grant/refuse come from team_authority.admin — an always-gran
   hooks.clearMe();
 });
 
+// cch-w41-bl (D486) — providerCanWrite and canMintAnyAbility CONSUME the
+// server-stated authority band at their definitions. Their server gates were
+// verified exactly owner|admin (require_team_admin -> Authz.team_admin? for
+// the provider write routes; pat_abilities_allowed?(role,_) when role in
+// ~w(owner admin) for the token-abilities cap), which is the fact
+// team_authority.admin states — so the local role literals were copies that
+// could drift. D439 holds: both stay boolean; every not-a-role band state
+// fails CLOSED.
+const W41BL_ADMIN = {
+  role: "admin",
+  team: { id: "t1", name: "Acme Inc" },
+  user: { id: "u2", email: "grace@acme.com" },
+  team_authority: { team_id: "t1", role: "admin", admin: true, owner: false },
+};
+
+test("cch-w41-bl: providerCanWrite and canMintAnyAbility read the band — owner true, admin true, member false", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.providerCanWrite(), true, "owner writes providers");
+  assert.equal(hooks.canMintAnyAbility(), true, "owner mints any ability");
+  hooks.clearMe();
+  await driveMe(200, W41BL_ADMIN);
+  assert.equal(hooks.providerCanWrite(), true,
+    "ADMIN true — the limb a role-literal regression drops first; the server gate is owner|admin");
+  assert.equal(hooks.canMintAnyAbility(), true, "admin mints any ability (accounts.ex's cap)");
+  hooks.clearMe();
+  await driveMe(200, ME_TA_MEMBER);
+  assert.equal(hooks.providerCanWrite(), false, "a member reads the roster, never the connect card");
+  assert.equal(hooks.canMintAnyAbility(), false, "a member is capped at the read-only PAT");
+  hooks.clearMe();
+});
+
+test("cch-w41-bl: both predicates fail CLOSED on BOTH not-a-role states, and stay boolean doing it", async () => {
+  hooks.clearMe(); // loading: never asked
+  for (const name of ["providerCanWrite", "canMintAnyAbility"]) {
+    const v = hooks[name]();
+    assert.equal(v, false, name + "(): an unknown authority grants nothing");
+    assert.equal(typeof v, "boolean", name + "() stays two-valued (D439)");
+  }
+  await driveMe(500, { error: "server_error" }); // failed: a different fact
+  for (const name of ["providerCanWrite", "canMintAnyAbility"]) {
+    const v = hooks[name]();
+    assert.equal(v, false, name + "(): an unproven actor is not an admin");
+    assert.equal(typeof v, "boolean", name + "() stays two-valued on the failed arm too");
+  }
+  hooks.clearMe();
+});
+
 test("cch-w42-s1: THE STALENESS ARM — the pin moving under a cached answer reads as stale, not as authority", async () => {
   await withTeamPin(async (store) => {
     store.setItem("bp.active-team", "t1");
@@ -22921,4 +23298,100 @@ test("cch-w74: the password 401 accusation keys on the invalid_current_password 
   // back the conflation this slice deletes.
   assert.equal((body.match(/Current password is wrong\./g) || []).length, 1,
     "the accusation copy exists once, only behind the slug guard");
+});
+
+test("cchi-w27: previewRow's .deploy-meta composes ONLY bounded terms — a new term reds here, never a comment", () => {
+  // THE CLASSIFICATION, re-derived against app.js (the filed row's premise was
+  // a SENTENCE; this arm is the measurement):
+  //   "preview"                          — literal, bounded (the pmeta initialiser).
+  //   esc(deployTriggerLabel(d.trigger)) — enum TODAY by the server's vocabulary
+  //        (deploy.ex mints only "manual" — enqueue's default — and
+  //        "content-auto" — AutoDeployWorker + the publish receiver; no route
+  //        accepts a caller-supplied trigger). BUT the SPA arm itself is NOT
+  //        bounded: deployTriggerLabel's default arm returns
+  //        String(trigger).replace(/[_-]+/g, " ") — raw passthrough. One added
+  //        server value reaches pmeta with no SPA edit, which is exactly why
+  //        this arm pins the TERM LIST rather than trusting the labeller.
+  //   esc(fmtDur(pdur))                  — bounded formatter ("Ns"/"Nm Ns"/"Nh Nm"/"—").
+  //   esc(fmtWhen(when))                 — bounded ("—" or toLocaleString()).
+  // A term added to pmeta that is not on this allowlist — a branch, an actor,
+  // an image tag — makes .deploy-meta person-shaped with zero CSS changes, and
+  // NO fixture in the corpus can currently make it clip (green by
+  // construction on the fixture axis), so the guard lives at the SOURCE: the
+  // composition itself is pinned.
+  const body = APP_SRC.match(/function previewRow\(d\) \{[\s\S]*?\n  \}\n/)[0];
+  const init = /var pmeta = \[([^\]]*)\];/.exec(body);
+  assert.ok(init, "previewRow no longer initialises pmeta as an array literal — re-derive this arm against the new shape, do not delete it");
+  assert.equal(init[1].trim(), '"preview"', "pmeta's first term must stay the bounded environment literal");
+  const pushLines = body.split("\n").filter((l) => l.includes("pmeta.push("));
+  const BOUNDED = [
+    /pmeta\.push\(esc\(deployTriggerLabel\(d\.trigger\)\)\)/,
+    /pmeta\.push\(esc\(fmtDur\(pdur\)\)\)/,
+    /pmeta\.push\(esc\(fmtWhen\(when\)\)\)/,
+  ];
+  assert.equal(pushLines.length, BOUNDED.length,
+    `previewRow pushes ${pushLines.length} pmeta term(s); the bounded allowlist holds ${BOUNDED.length} — ` +
+    "a term was added or removed. Classify the change (bounded/enum vs person-controlled, line cited) and " +
+    "update the allowlist in the same diff; an unbounded term needs a cruel fixture and a browser leg instead.");
+  for (const line of pushLines) {
+    assert.ok(BOUNDED.some((re) => re.test(line)),
+      `unrecognised pmeta term: ${line.trim()} — every .deploy-meta term must be bounded or enum; ` +
+      "a person-controlled term here is unmeasured by every committed instrument");
+  }
+  assert.ok(!/pmeta\.(unshift|splice|concat)\(|pmeta\[\d/.test(body),
+    "pmeta must only grow through the pinned push sites — a side door defeats the allowlist");
+  assert.ok(body.includes('\'<div class="deploy-meta">\' + pmeta.join(" &middot; ") + "</div>"'),
+    ".deploy-meta must render pmeta.join and nothing else — extra concatenated content bypasses the term pin");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// PDF-D94 (pdf-bl-console-key-custody): the console paste-a-key card replaces
+// the SSH one-liner as the PRIMARY hand-off; the one-liner survives, folded, as
+// the documented fallback + BYO story. Appended at the tail (OC9 append-only
+// law). Pure helpers only; the DOM mounts (submitAgentKey / pollAgentKeyStatus
+// / wireAgentKeyForms) are browser-verified.
+// ════════════════════════════════════════════════════════════════════════════
+
+test("PDF-D94: the key card ships the paste form AND keeps the SSH one-liner as the folded fallback", () => {
+  const html = hooks.supportKeyStepHtml(FLEET_SUPPORT_LIVE);
+  // The primary affordance: a password input + Deliver button, id-addressed.
+  assert.match(html, /data-agent-key-input="sup-1"/);
+  assert.match(html, /type="password"/);
+  assert.match(html, /data-agent-key-send="sup-1"/);
+  assert.match(html, /Deliver key/);
+  assert.match(html, /data-agent-key-status="sup-1"/);
+  // Custody copy: delivered to the box, never stored by the plane.
+  assert.match(html, /never stored by Barkpark/);
+  // The FALLBACK: the exact one-liner still renders, inside a <details> fold,
+  // with the shared copy affordance — D88's visible named step is not deleted.
+  assert.match(html, /<details class="support-key-fallback">/);
+  assert.match(html, /Prefer SSH\?/);
+  assert.ok(html.includes(hooks.supportKeyCommand(FLEET_SUPPORT_LIVE).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")) || /fleet-listener\.env/.test(html),
+    "the SSH one-liner must still render in the fallback fold");
+});
+
+test("agentKeyShapeValid mirrors the server fence: 20-512 url-safe chars, quoting breakouts refused", () => {
+  assert.ok(hooks.agentKeyShapeValid("sk-ant-api03-abcdefghijklmnop"));
+  assert.ok(hooks.agentKeyShapeValid("sk-proj-ABC123_underscore-and.dots~ok"));
+  // Too short, too long, shell-hostile — all refused before any request.
+  assert.ok(!hooks.agentKeyShapeValid("short"));
+  assert.ok(!hooks.agentKeyShapeValid("x".repeat(513)));
+  assert.ok(!hooks.agentKeyShapeValid("sk-ant-x'; rm -rf / #aaaaaaaaaaaa"));
+  assert.ok(!hooks.agentKeyShapeValid("sk ant spaces are not a key aaaa"));
+  assert.ok(!hooks.agentKeyShapeValid(null));
+});
+
+test("agentKeyStatusCopy: terminal sentences are honest; a failed job's own error wins over boilerplate", () => {
+  assert.equal(hooks.agentKeyStatusCopy(null), null);
+  assert.equal(hooks.agentKeyStatusCopy({ status: null }), null);
+  assert.equal(hooks.agentKeyStatusCopy({ status: "succeeded" }).kind, "success");
+  assert.match(hooks.agentKeyStatusCopy({ status: "succeeded" }).text, /delivered/i);
+  const failed = hooks.agentKeyStatusCopy({ status: "failed", error: "the pasted key expired in transit — paste it again" });
+  assert.equal(failed.kind, "error");
+  assert.match(failed.text, /expired in transit/);
+  // A failed job with no recorded error still says SOMETHING actionable.
+  assert.match(hooks.agentKeyStatusCopy({ status: "failed" }).text, /paste the key again/i);
+  for (const inflight of ["pending", "claimed"]) {
+    assert.equal(hooks.agentKeyStatusCopy({ status: inflight }).kind, "pending");
+  }
 });

@@ -14,9 +14,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
       {pane_idx, ""} when pane_idx >= 0 ->
         new_path = Enum.take(socket.assigns.nav_path, pane_idx) ++ [id]
 
+        # spd-bl-focus-after-select — THE DECISION, bucket by bucket (full
+        # write-up in studio_focus_after_select_test.exs):
+        #   wide/standard  -> nothing. The clicked row survives the patch
+        #                     (it re-renders wearing aria-current), so the
+        #                     browser never moves activeElement.
+        #   narrow/phone   -> the clicked row is DESTROYED (the pane strips
+        #                     at narrow and hides at phone), so focus falls
+        #                     to <body>. The strip is refused as a target —
+        #                     its activation truncates the document segment,
+        #                     i.e. focusing it puts "close the document"
+        #                     under the keyboard user's hands — and at phone
+        #                     no pane element exists at all. The mark lands
+        #                     on the opened document's own header instead
+        #                     (document_header/1), which announces the title.
+        # One-shot like focus_pane_idx: expand_pane and a width-bucket flip
+        # spend it, so it never re-fires on an unrelated re-render.
         {:noreply,
          socket
-         |> assign(focus_pane_idx: nil)
+         |> assign(
+           focus_pane_idx: nil,
+           focus_doc_on_open: socket.assigns[:width_bucket] in ["narrow", "phone"]
+         )
          |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       _ ->
@@ -174,7 +193,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
         {:noreply,
          socket
-         |> assign(focus_pane_idx: idx)
+         |> assign(focus_pane_idx: idx, focus_doc_on_open: false)
          |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
       _ ->

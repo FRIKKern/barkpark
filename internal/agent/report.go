@@ -274,6 +274,16 @@ type Report struct {
 	// answering.
 	Err5xxPerS float64 `json:"err_5xx_per_s"`
 
+	// WindowS is the width, in seconds, of the ring the three numbers above
+	// were measured over — the instance emits `window_s` on every request-stats
+	// response (api request_stats.ex), and until dr-w14-bl the agent decoded
+	// the three rates and DISCARDED their window at the door: three bare
+	// numbers riding the beat with no denominator-of-time, this epic's
+	// signature defect. -1 when the probe was not wired, failed, or the
+	// instance predates the key (absent/null) — a rate whose window is unknown
+	// says so, it never borrows the documented default.
+	WindowS int `json:"window_s"`
+
 	// Runaways names the box's LONG-RUNNING ORPHANED PROCESSES — the vital the
 	// 2026-08-06 guerrilla incident proved nothing was watching. A `journalctl -u
 	// bp-site-build-* --since -14d --no-pager` left behind by a dead SSH session
@@ -657,13 +667,14 @@ type ReportConfig struct {
 	// from a single line of /proc/loadavg, so a failed read leaves both sentinels
 	// rather than half a measurement.
 	LoadProbe func() (load1 float64, load15 float64, err error)
-	// ReqStatsProbe returns (req/s, p95 ms, 5xx/s) from the instance RequestStats
-	// route. nil → ReqPerS, P95Ms and Err5xxPerS all -1. Fail-soft like the other
-	// probes: a non-nil error leaves ALL sentinels; a successful read with a null
-	// instance-side p95 or err_5xx_per_s lands req/s but keeps that field at -1
-	// (see NewReqStatsProbe). Wire the production implementation with
-	// NewReqStatsProbe(base, token, rootCAs).
-	ReqStatsProbe func() (reqPerS float64, p95Ms int, err5xxPerS float64, err error)
+	// ReqStatsProbe returns (req/s, p95 ms, 5xx/s, window s) from the instance
+	// RequestStats route. nil → ReqPerS, P95Ms, Err5xxPerS and WindowS all -1.
+	// Fail-soft like the other probes: a non-nil error leaves ALL sentinels; a
+	// successful read with a null instance-side p95 or err_5xx_per_s lands
+	// req/s but keeps that field at -1, and an instance predating `window_s`
+	// keeps WindowS at -1 (see NewReqStatsProbe). Wire the production
+	// implementation with NewReqStatsProbe(base, token, rootCAs).
+	ReqStatsProbe func() (reqPerS float64, p95Ms int, err5xxPerS float64, windowS int, err error)
 	// RunawayProbe returns the box's long-running orphaned processes, worst first.
 	// nil → Runaways stays nil (UNMEASURED). A successful probe that found none
 	// must return a NON-NIL EMPTY slice, and gatherReport normalizes a nil-with-no-
@@ -723,6 +734,7 @@ func gatherReport(cfg ReportConfig) Report {
 		Load1:           -1,
 		Load15:          -1,
 		ReqPerS:         -1,
+		WindowS:         -1,
 		P95Ms:           -1,
 		Err5xxPerS:      -1,
 		SwapUsedPercent: -1,
@@ -771,10 +783,11 @@ func gatherReport(cfg ReportConfig) Report {
 	// err_5xx_per_s arrives as that field's -1 with a real req/s
 	// (NewReqStatsProbe applies that mapping).
 	if cfg.ReqStatsProbe != nil {
-		if rps, p95, err5xx, err := cfg.ReqStatsProbe(); err == nil {
+		if rps, p95, err5xx, windowS, err := cfg.ReqStatsProbe(); err == nil {
 			r.ReqPerS = rps
 			r.P95Ms = p95
 			r.Err5xxPerS = err5xx
+			r.WindowS = windowS
 		}
 	}
 
@@ -885,6 +898,10 @@ type reqStatsBody struct {
 	ReqPerS    float64  `json:"req_per_s"`
 	P95Ms      *int     `json:"p95_ms"`
 	Err5xxPerS *float64 `json:"err_5xx_per_s"`
+	// WindowS is a POINTER for the same reason its two siblings are: an
+	// instance built before the key (or sending null) must arrive as the -1
+	// sentinel, never as a confident 0-second window.
+	WindowS *int `json:"window_s"`
 }
 
 // NewReqStatsProbe builds the production ReqStatsProbe: a short-timeout HTTP GET
@@ -900,16 +917,16 @@ type reqStatsBody struct {
 // the same version-skew honesty the 404 path already keeps. base=="" returns a
 // nil probe (unwired), mirroring how the health gate is skipped when
 // HealthBaseURL is empty.
-func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float64, int, float64, error) {
+func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float64, int, float64, int, error) {
 	base = strings.TrimRight(base, "/")
 	if base == "" {
 		return nil
 	}
 	url := base + requestStatsPath
-	return func() (float64, int, float64, error) {
+	return func() (float64, int, float64, int, error) {
 		req, err := http.NewRequest(http.MethodGet, url, nil)
 		if err != nil {
-			return -1, -1, -1, err
+			return -1, -1, -1, -1, err
 		}
 		if token != "" {
 			req.Header.Set("Authorization", "Bearer "+token)
@@ -922,15 +939,15 @@ func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float6
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			return -1, -1, -1, err
+			return -1, -1, -1, -1, err
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			return -1, -1, -1, fmt.Errorf("request-stats: status %d", resp.StatusCode)
+			return -1, -1, -1, -1, fmt.Errorf("request-stats: status %d", resp.StatusCode)
 		}
 		var body reqStatsBody
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-			return -1, -1, -1, err
+			return -1, -1, -1, -1, err
 		}
 		p95 := -1
 		if body.P95Ms != nil {
@@ -940,7 +957,11 @@ func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float6
 		if body.Err5xxPerS != nil {
 			err5xx = *body.Err5xxPerS
 		}
-		return body.ReqPerS, p95, err5xx, nil
+		windowS := -1
+		if body.WindowS != nil {
+			windowS = *body.WindowS
+		}
+		return body.ReqPerS, p95, err5xx, windowS, nil
 	}
 }
 

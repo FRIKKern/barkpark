@@ -34,6 +34,16 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   """
   @behaviour Barkpark.Media.ImageBackend
 
+  # The `:image` dep is OPTIONAL by construction (api/mix.exs image_dep/0):
+  # absent on native Windows by default and under BARKPARK_SKIP_IMAGE=1 (the
+  # mix-test CI lane, which never executes a vips-reaching test — they are
+  # `:requires_vips`-tagged and default-excluded). `available?/0` is the
+  # runtime guard: no `Image.*` call is reachable when the module is missing,
+  # as the moduledoc records. Without this directive the compiler's
+  # undefined-module warning turns `mix compile --warnings-as-errors` red on
+  # every image-less host, which is exactly the supported configuration.
+  @compile {:no_warn_undefined, [Image, Image.Text]}
+
   # Explicit pre-decode raster ceiling, mirroring Magick's `-limit memory 256MiB`
   # so BOTH backends fail closed on the same class of decompression bomb. This is
   # the estimated fully-decoded size (one byte per 8-bit sample); libvips never

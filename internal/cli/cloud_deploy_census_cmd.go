@@ -377,7 +377,11 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("  the window is pinned by this command, not defaulted by the server — every number below is about THIS population.")
 	out.outf("%s", deployCensusScopeLine(census.Scope))
 	out.outf("")
+	boundaries := deployCensusBoundaries(census.Boundaries)
 	out.outf("%s", deployCensusHeadline(census))
+	if line := deployCensusHeadlineRemedy(census, boundaries, from, to); line != "" {
+		out.outf("%s", line)
+	}
 	out.outf("  basis: %s", deployCensusBasis(census))
 	// THE ONE QUANTITY NO BUCKET SWAP CAN DILUTE, printed beside the rates it
 	// cannot be reduced to. Every rate above is a ratio over a population the
@@ -386,7 +390,6 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("  %s", deployCensusAbandonment(census))
 	out.outf("")
 
-	boundaries := deployCensusBoundaries(census.Boundaries)
 	if len(census.Classes) > 0 {
 		out.outf("failure classes (share of the %d failed)", census.Failed)
 		for _, c := range census.Classes {
@@ -534,7 +537,7 @@ func deployCensusHeadline(census cloudclient.DeployCensus) string {
 //   - it has a percentage: the rate WITH the sample it was taken over.
 func deployCensusLiveTerm(census cloudclient.DeployCensus) string {
 	if census.LivePerAttempt == nil {
-		return "live per attempt: NOT SENT — this control plane does not compute it (nothing here says whether the fleet ships)"
+		return "live per attempt: NOT SENT — this control plane does not compute it (nothing here says whether this population ships)"
 	}
 	rate := *census.LivePerAttempt
 	if pct, okRate := deployCensusPct(rate); okRate {
@@ -769,11 +772,21 @@ func deployCensusAbandonment(census cloudclient.DeployCensus) string {
 // deployCensusPct renders a rate node as a percentage, or reports that it has
 // none. A REFUSED node, and a node whose pct is absent, both answer false — the
 // caller must then render a refusal, because there is no honest number here.
+//
+// dr-w8-s4 followup: the number rendered is the control plane's own `pct`,
+// VERBATIM — never recomputed from numerator/sample. The old path re-derived
+// it through pctOf's one-decimal format, so the census whose contract pct was
+// 37.55 printed 37.5% and a reader comparing the CLI against a raw curl of the
+// census route had to work out which figure was authoritative. The envelope is
+// the single definition of the number; this renderer repeats it. (pctOf keeps
+// its other callers — they render shares this client computes itself, where a
+// display format is the only definition there is.) Headline, class shares and
+// site shares all route through here, so one page renders one precision rule.
 func deployCensusPct(r cloudclient.DeployRate) (string, bool) {
 	if r.Refused || r.Pct == nil {
 		return "", false
 	}
-	return pctOf(float64(r.Numerator), float64(r.Sample)), true
+	return strconv.FormatFloat(*r.Pct, 'f', -1, 64) + "%", true
 }
 
 // deployCensusRefusal is the in-band refusal in words: the control plane's own
@@ -791,6 +804,31 @@ func deployCensusRefusal(r cloudclient.DeployRate, censusMin int) string {
 		return fmt.Sprintf("the control plane refused a percentage: sample %d below min_sample %d", r.Sample, min)
 	}
 	return fmt.Sprintf("the control plane sent no percentage for a sample of %d", r.Sample)
+}
+
+// deployCensusHeadlineRemedy gives the HEADLINE failure_rate refusal the same
+// envelope-read window remedy the share refusals carry
+// (dr-w30-followup-headline-refusal-names-the-window). dr-w30-s5 cured the
+// CLASS and DEFERRAL share refusals; the headline — the first refusal an
+// operator reads, and the only one on a census with no class rows at all —
+// still printed the straddle reason with no remedy, so the operator was told
+// the window straddles a boundary and not that `--from <instant>` answers it.
+//
+// It REUSES deployCensusShareRemedy — one owner of the boundary logic, exactly
+// as deployCensusSiteRemedy does — and renders nothing when the headline
+// carries a real percentage: a remedy under an answered rate would read as
+// doubt the answer never expressed.
+//
+// PER-SITE CELLS, DECIDED (this row's second criterion): they already carry
+// their remedy — deployCensusSiteRemedy renders under the site table for every
+// refused per-site rate, routed through the same shared helper when the reason
+// names a boundary — so nothing more is owed there and no second copy exists.
+func deployCensusHeadlineRemedy(census cloudclient.DeployCensus, boundaries []deployCensusBoundary, from, to time.Time) string {
+	if _, okRate := deployCensusPct(census.FailureRate); okRate {
+		return ""
+	}
+	reason := deployCensusRefusal(census.FailureRate, census.MinSample)
+	return "  " + deployCensusShareRemedy(reason, boundaries, from, to, census.MinSample)
 }
 
 // deployCensusShare renders a class/site share cell, or an em-dash where the
@@ -873,14 +911,14 @@ func deployCensusSiteLiveNote(rows []cloudclient.DeployCensusSite) string {
 //     where "these are all the sites" is a claim someone actually made.
 func deployCensusSiteTruncationLine(census cloudclient.DeployCensus) string {
 	if census.Truncated == nil {
-		return "  population NOT STATED — this control plane sends no truncated/total_sites marker, so whether these rows are the whole fleet or the top of a larger one is unknown."
+		return "  population NOT STATED — this control plane sends no truncated/total_sites marker, so whether these rows are the whole population or the top of a larger one is unknown."
 	}
 	if *census.Truncated {
 		if census.TotalSites != nil {
-			return fmt.Sprintf("  SERVER-TRUNCATED: the control plane sent %d of %d site(s) — the rows above are the TOP of the fleet, and no --sites value can restore rows that never rode the wire.",
+			return fmt.Sprintf("  SERVER-TRUNCATED: the control plane sent %d of %d site(s) — the rows above are the TOP of the population, and no --sites value can restore rows that never rode the wire.",
 				len(census.Sites), *census.TotalSites)
 		}
-		return "  SERVER-TRUNCATED: the control plane cut this list and did not say at what population — the rows above are the top of a larger fleet."
+		return "  SERVER-TRUNCATED: the control plane cut this list and did not say at what population — the rows above are the top of a larger one."
 	}
 	if census.TotalSites != nil {
 		return fmt.Sprintf("  complete: the control plane sent all %d site(s) in this window (before any display clamp).", *census.TotalSites)
@@ -975,7 +1013,7 @@ func deployCensusSiteRemedy(reason string, boundaries []deployCensusBoundary, fr
 		return deployCensusShareRemedy(reason, boundaries, from, to, minSample)
 	}
 	return "NO --from CAN UN-REFUSE THESE: a narrower window can only SHRINK each site's own sample. " +
-		"A per-site rate needs MORE deploys per site — a wider --from, or more time. The fleet headline above is " +
+		"A per-site rate needs MORE deploys per site — a wider --from, or more time. The headline above is " +
 		"the rate this population CAN support; it is not a per-site claim."
 }
 
@@ -1244,7 +1282,7 @@ func deployCensusWidth(d time.Duration) string {
 func renderDeployDelivery(out *writer, d *cloudclient.DeployDelivery, siteLimit int) {
 	if d == nil {
 		out.outf("delivery — how long content waited to reach the web")
-		out.outf("  NOT MEASURED — this control plane sends no delivery census. Nothing was read: this is NOT a fleet that delivers instantly.")
+		out.outf("  NOT MEASURED — this control plane sends no delivery census. Nothing was read: this is NOT a population that delivers instantly.")
 		out.outf("")
 		return
 	}
@@ -1392,7 +1430,7 @@ func deployDeliveryDuration(seconds float64) string {
 func renderDeployDeferralWait(out *writer, w *cloudclient.DeployDeferralWait) {
 	if w == nil {
 		out.outf("deferral wait — how long a deferred deploy waited to be re-queued")
-		out.outf("  NOT MEASURED — this control plane sends no deferral-wait census. Nothing was read: the deferrals above are a COUNT WITH NO CLOCK, and this is NOT a fleet that re-queues instantly.")
+		out.outf("  NOT MEASURED — this control plane sends no deferral-wait census. Nothing was read: the deferrals above are a COUNT WITH NO CLOCK, and this is NOT a population that re-queues instantly.")
 		out.outf("")
 		return
 	}
@@ -1558,7 +1596,7 @@ func deployCoverageWindowLine(pinned bool) string {
 	if pinned {
 		return "  window: BOTH edges pinned by --from/--to, so this population does not move when you run it again."
 	}
-	return "  window: LEFT-TRUNCATED — a --days window (7 by default) has its right edge at NOW and its left edge sliding with the clock, so rows older than the width are not in this population AT ALL. A wider --days finds more never-covered rows without one row of the fleet changing; only --from/--to pins both edges."
+	return "  window: LEFT-TRUNCATED — a --days window (7 by default) has its right edge at NOW and its left edge sliding with the clock, so rows older than the width are not in this population AT ALL. A wider --days finds more never-covered rows without one row of the population changing; only --from/--to pins both edges."
 }
 
 // renderDeployCoverageSites NAMES the never-covered tail. A count that cannot

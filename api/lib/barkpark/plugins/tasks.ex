@@ -308,11 +308,21 @@ defmodule Barkpark.Plugins.Tasks do
       |> Enum.map(fn {_entry, i} -> i end)
 
     if unflagged != [] do
-      Logger.warning(
-        "task quality gate: acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
+      message =
+        "acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
           "marker but carry no `merge_gate: true` — the close-time autostamp keys on the FLAG, not " <>
-          "the wording, so a lead merge will not flip them (soft warning, save proceeds)"
-      )
+          "the wording, so a lead merge will not flip them. Add \"merge_gate\": true to each " <>
+          "gate entry (soft warning, save proceeds)"
+
+      # Journal copy (grep-able in prod logs) AND the advisory channel: the
+      # Logger line alone let 669 unflagged rows accumulate in silence — its
+      # only reader was the server journal, which no task author ever sees.
+      # Warnings.put rides the mutate SUCCESS envelope (`warnings: [...]`),
+      # which the bp CLI prints to stderr (emitWarnings) and Studio folds into
+      # its save flash — so the author is told at the moment of authoring.
+      # Collect-only-when-listening: a caller with no open collector drops it.
+      Logger.warning("task quality gate: " <> message)
+      Barkpark.Content.Warnings.put("merge_gate_unflagged", message, "warning")
     end
 
     :ok
@@ -604,7 +614,14 @@ defmodule Barkpark.Plugins.Tasks do
         auth_tier: "read",
         args: [],
         flags: [
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
+          # default MUST match the server's actual page size (tasks_controller
+          # do_index: Params.parse_limit(params["limit"], 1000, 1000)). It was
+          # born as 50 — false from day one — and the CLI reads this field to
+          # calibrate its "page may be truncated" warning (internal/cli/run.go
+          # defaultPageLimit), so every `bp task ls` over a >=50-row corpus
+          # printed a false "more may be available" even when the server had
+          # returned everything.
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 1000},
           %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,
@@ -784,7 +801,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409.",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Two honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet) and a close by a non-holder (409 not_holder) — each with a loud on-the-record --set override (criteria_override / holder_override); see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
@@ -835,7 +852,20 @@ defmodule Barkpark.Plugins.Tasks do
                 "flipping a neighbouring criterion, and a text that does not match the row at that index " <>
                 "is REJECTED too (409 criteria_mismatch). An entry with met=false needs no text. Optional " <>
                 "evidence is presence-sensitive: omit the key to preserve stored evidence, or " <>
-                "send evidence:\"\" to clear it. Unmet criteria never block a close (soft warning only). " <>
+                "send evidence:\"\" to clear it. THE CRITERIA GATE (close honesty, PDS-D289): a " <>
+                "done close over unmet acceptance criteria is REFUSED — 409 criteria_unmet, naming " <>
+                "the 0-based unmet indices. Unmet is measured on the task AS STORED (criteria " <>
+                "flipped in this very close command do not count), and a criterion the merge-gate " <>
+                "autostamp is about to prove on its own authority (an explicit merge_gate:true " <>
+                "marker plus a landed digest riding this close) is deducted before the count. The " <>
+                "way through is --set criteria_override=\"<why it is done anyway>\": the close " <>
+                "lands ON THE RECORD as close_override.criteria (actor + unmet rows + reason) and " <>
+                "the unmet criteria stay met=false — an override never flips them. cancelled and " <>
+                "blocked closes are EXEMPT by name (abandoning acceptance criteria is what " <>
+                "cancelling means). THE HOLDER GATE (PDS-D288): a close by a worker other than " <>
+                "the claim's holder is REFUSED — 409 not_holder — unless it carries --set " <>
+                "holder_override=\"<why you are closing someone else's claim>\", recorded as " <>
+                "close_override.holder. A blank reason is NOT an override for either key. " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
           },

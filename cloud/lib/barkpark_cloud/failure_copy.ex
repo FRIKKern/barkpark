@@ -428,6 +428,32 @@ defmodule BarkparkCloud.FailureCopy do
   # space character, and a space is not a guarantee.
   @dns_step ~r/\b(?:hetzner dns (?:upsert|change-ttl|delete|resolve|list)|hcloud zone rrset (?:set-records|change-ttl|delete|list))\b/
 
+  # THE ONE CREDENTIAL CAPTURE WHOSE OWNER AND REMEDY ARE IN THE STRING.
+  #
+  # `deploy/site-deploy.sh` (and its byte-identical node twin,
+  # `deploy/site-deploy-node.sh`) emits, verbatim:
+  #
+  #   FATAL: 401 Unauthorized from <instance>/w/<ws>/p/<proj> — the site read token is invalid
+  #
+  # documented as the BUILD reason at site-deploy.sh:57, emitted at :1035 and
+  # :770 respectively, and asserted onto the stage line by the script's own e2e.
+  # It reaches `humanize/1` through `Sites.Deploy.stage_detail/2`.
+  #
+  # The distinctive half is the trailing clause, NOT the `401 Unauthorized`
+  # prefix: the prefix is a generic HTTP status any producer can emit, while this
+  # phrase is the shell's own sentence and nothing else in the tree says it. So
+  # the key is the PRODUCER'S BYTES, and it is derivable at ARITY 1 — no provider
+  # argument, nothing this predicate cannot see. That is the whole difference
+  # from the arity-2 seam the credential arm below argues against: the
+  # misattributed axis there is WHOSE credential, and here the string says whose.
+  #
+  # NOT HAND-TYPED, and the guard is a test rather than this comment:
+  # `failure_copy_test.exs` reads BOTH shells at test time, extracts the FATAL
+  # line with a regex, and asserts it classifies to the sentence below — so the
+  # day a shell reworks its wording, this file goes red instead of silently
+  # falling back to the say-nothing copy.
+  @site_read_token_rejected "the site read token is invalid"
+
   # A credential rejection, matched against the LOWERED reason. Both tokens are
   # ordinary English that a producer-controlled PATH carries routinely
   # (`dist/errors/unauthorized/index.html` is what a framework calls its 401
@@ -631,6 +657,24 @@ defmodule BarkparkCloud.FailureCopy do
           String.contains?(down, "resource_unavailable") ->
         "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
 
+      # Site read token rejected: the build could not authenticate to the
+      # instance it fetches content from. NARROWING, NOT A BYPASS — this is the
+      # single capture in which the rejected credential's OWNER and REMEDY are
+      # both spelled out by the producer, so it is the single capture that has
+      # earned a sentence naming them. Every other 401 still falls through to
+      # the deliberately party-less arm below.
+      #
+      # CHECKED BEFORE `@credential_rejected`, which this same string also
+      # matches on `unauthorized`. Order is the whole mechanism: after it, this
+      # clause is unreachable and the say-nothing copy wins.
+      #
+      # The output re-matches NO clause (it carries neither the key phrase nor
+      # `unauthorized`, `invalid token`, `quota`, `timeout` or `connection
+      # refused`), so it falls to the terminal arm on a second pass — a
+      # client-side `failureCopy()` re-run is idempotent.
+      String.contains?(down, @site_read_token_rejected) ->
+        "This site's Barkpark read token was rejected, so the build couldn't fetch its content. Mint a fresh read token for the site in Barkpark, save it on the site, then deploy the site again."
+
       # Credential rejected: SOMETHING refused SOMEONE'S credential.
       #
       # THE COPY NAMES NEITHER A PARTY NOR AN OWNER NOR A REMEDY, for the same
@@ -638,17 +682,20 @@ defmodule BarkparkCloud.FailureCopy do
       # this is a substring test over a string and `humanize/1` is arity 1. The
       # copy it used to get — "The hosting provider rejected our credentials.
       # We're on it — try again shortly." — asserted three things the predicate
-      # cannot see. On the capture the build script actually emits
-      # (`FATAL: 401 Unauthorized from …/w/acme/p/blog — the site read token is
-      # invalid`, deploy/site-deploy.sh, reaching here through
-      # `Sites.Deploy.stage_detail/2`) all three are wrong at once: the rejected
-      # credential is the USER'S OWN site read token, no hosting provider is in
-      # the story, nobody is "on it", and a retry is the one remedy that cannot
-      # work. An arity-2 (provider-aware) seam is buildable but would make this
-      # WORSE — the misattributed axis is WHOSE credential, not WHICH provider,
-      # so it would only upgrade the line to "Hetzner rejected our credentials".
-      # Nothing is lost by saying less: `Sites.Deploy.console_entry/1` folds the
-      # raw capture verbatim (scrubbed) into the console line beside this.
+      # cannot see. An arity-2 (provider-aware) seam is buildable but would make
+      # this WORSE — the misattributed axis is WHOSE credential, not WHICH
+      # provider, so it would only upgrade the line to "Hetzner rejected our
+      # credentials". Nothing is lost by saying less:
+      # `Sites.Deploy.console_entry/1` folds the raw capture verbatim (scrubbed)
+      # into the console line beside this.
+      #
+      # THIS ARM IS NOW THE UNKNOWN-CREDENTIAL ARM ONLY. The one capture whose
+      # owner and remedy the STRING itself carries — the site read token FATAL
+      # line the build script emits — is claimed by `@site_read_token_rejected`
+      # ABOVE, which names both. Saying less is correct where less is all that
+      # is knowable; it was never correct where the producer had already said
+      # more. What reaches here is a genuinely anonymous 401: an npm registry
+      # token, a provider API key, a capture that names no owner at all.
       #
       # THE PREDICATE IS PATH-GUARDED. `unauthorized` and `invalid token` are
       # ordinary words a producer-controlled PATH can carry —

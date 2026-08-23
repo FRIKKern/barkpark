@@ -907,7 +907,7 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
                |> Registry.Deployment.preview_changeset(attrs)
                |> BarkparkCloud.Repo.insert()
 
-      assert {"active preview already exists for this branch", _} = cs.errors[:branch]
+      assert {"already has an active preview", _} = cs.errors[:branch]
     end
 
     test "GET /v1/sites/:id/previews lists previews distinctly from production" do

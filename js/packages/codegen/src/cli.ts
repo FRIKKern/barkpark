@@ -54,6 +54,8 @@ interface GenerateCliOptions {
   watch?: boolean
   /** Read the schema envelope from a local JSON file instead of fetching it. */
   from?: string
+  /** Schema-fetch deadline in ms as typed on the command line (0 disables). */
+  timeout?: string
 }
 
 /**
@@ -76,11 +78,43 @@ let configLoadSeq = 0
 async function loadConfig(configPath?: string): Promise<Partial<BarkparkCodegenConfig>> {
   if (!configPath) return {}
   const abs = resolve(process.cwd(), configPath)
+  // The advertised `barkpark.config.ts` cannot load through the native ESM
+  // loader on the Node 20 engines floor (ERR_UNKNOWN_FILE_EXTENSION), and
+  // Node 22's type-stripping covers only erasable syntax (an enum throws
+  // ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX) — so .ts/.mts/.cts configs go through
+  // jiti. moduleCache + fsCache are OFF so `--watch` re-reads an edited
+  // config: the same freshness guarantee the `?t=` cache-bust below gives
+  // native loads (see loadconfig-cache.test.ts). The discriminating proof
+  // lives in cli-ts-config.test.ts, which drives the BUILT CLI in a
+  // subprocess: an in-process vitest import of a .ts file is transpiled by
+  // Vite's module runner, so an in-process test passes with or without this
+  // branch and proves nothing about the shipped loader.
+  if (/\.[cm]?ts$/.test(abs)) {
+    const { createJiti } = await import('jiti')
+    const jiti = createJiti(import.meta.url, { moduleCache: false, fsCache: false })
+    const mod = (await jiti.import(abs)) as { default?: BarkparkCodegenConfig }
+    return mod.default ?? {}
+  }
   const url = `${pathToFileURL(abs).href}?t=${++configLoadSeq}`
   const mod = (await import(url)) as {
     default?: BarkparkCodegenConfig
   }
   return mod.default ?? {}
+}
+
+/**
+ * Parse a timeout value arriving as text (the `--timeout` flag or the
+ * `BARKPARK_SCHEMA_TIMEOUT_MS` env var) into non-negative integer milliseconds.
+ * `0` disables the deadline (core's convention). Anything else fails LOUD —
+ * a mistyped deadline silently becoming the default is how a slow-link escape
+ * hatch stops being one.
+ */
+function parseTimeoutMs(raw: string, source: string): number {
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`Invalid ${source} value "${raw}": expected a non-negative integer of milliseconds (0 disables).`)
+  }
+  return n
 }
 
 /** Resolve the effective config from a config file overlaid with CLI flags. */
@@ -95,6 +129,16 @@ export async function resolveConfig(options: GenerateCliOptions): Promise<Barkpa
   if (options.project !== undefined) merged.project = options.project
   if (merged.apiUrl === undefined && process.env['BARKPARK_API_URL']) {
     merged.apiUrl = process.env['BARKPARK_API_URL']
+  }
+  // Deadline precedence mirrors apiUrl: flag > config file > environment.
+  if (options.timeout !== undefined) {
+    merged.timeoutMs = parseTimeoutMs(options.timeout, '--timeout')
+  }
+  if (merged.timeoutMs === undefined && process.env['BARKPARK_SCHEMA_TIMEOUT_MS']) {
+    merged.timeoutMs = parseTimeoutMs(
+      process.env['BARKPARK_SCHEMA_TIMEOUT_MS'],
+      'BARKPARK_SCHEMA_TIMEOUT_MS',
+    )
   }
 
   // Workspace + project are the two halves of a scoped schema path; supplying
@@ -146,8 +190,8 @@ async function runFromFile(options: GenerateCliOptions): Promise<string> {
     throw new Error(`Schema file ${fromAbs} failed validation: ${parsed.error.message}`)
   }
 
-  const code = await generateTypes(parsed.data, { dataset })
   const out = resolve(process.cwd(), output)
+  const code = await generateTypes(parsed.data, { dataset, outputPath: out })
   await writeFile(out, code, 'utf8')
   return out
 }
@@ -161,10 +205,11 @@ async function runOnce(config: BarkparkCodegenConfig): Promise<string> {
   if (config.token !== undefined) fetchArgs.token = config.token
   if (config.workspace !== undefined) fetchArgs.workspace = config.workspace
   if (config.project !== undefined) fetchArgs.project = config.project
+  if (config.timeoutMs !== undefined) fetchArgs.timeoutMs = config.timeoutMs
 
   const envelope = await fetchSchema(fetchArgs)
-  const code = await generateTypes(envelope, { dataset: config.dataset })
   const out = resolve(process.cwd(), config.output)
+  const code = await generateTypes(envelope, { dataset: config.dataset, outputPath: out })
   await writeFile(out, code, 'utf8')
   return out
 }
@@ -183,6 +228,10 @@ cli
     'Read the schema envelope from a local JSON file instead of fetching it (network-free; powers the CI drift gate)',
   )
   .option('--schema <file>', 'Alias for --from')
+  .option(
+    '--timeout <ms>',
+    'Schema-fetch deadline in milliseconds; 0 disables (or set BARKPARK_SCHEMA_TIMEOUT_MS; default 30000)',
+  )
   .option('--watch', 'Re-generate when the config file changes')
   .action(async (options: GenerateCliOptions & { schema?: string }) => {
     try {

@@ -109,7 +109,11 @@ classify_refusal() {
 # Exactly one named resolving command per state. A state whose advice is "look
 # into it" is not advice; if you cannot name the command, the row is not done.
 refusal_advice() {
-  local state="$1" pr="${2:-<pr>}" sha="${3:-<sha>}"
+  # $4 is an OPTIONAL run id resolved BY THE CALLER — this function stays pure
+  # (no gh, no I/O, no clock) so bp-merge.test.sh can drive the whole table
+  # over captured fixtures. An empty $4 degrades to the placeholder plus the
+  # command that looks the id up — never a wrong id.
+  local state="$1" pr="${2:-<pr>}" sha="${3:-<sha>}" run_id="${4:-}"
   case "$state" in
     CLIENT_BLOCK)
       # THE DOMINANT POST-FLIP ARM (D79). gh reads `mergeStateStatus: BLOCKED`
@@ -138,12 +142,20 @@ refusal_advice() {
       printf 'A required context concluded FAILURE — but RE-RUN FIRST, BEFORE reading any code: "Elixir gate"\n'
       printf 'launders cancellation into failure (D57), and on a fleet that force-pushes stacked branches a\n'
       printf 'superseded run is indistinguishable from a real defect at the required-context level.\n'
-      printf 'RESOLVE: gh run rerun --failed <run-id>          # gh pr checks %s  prints the run links\n' "$pr"
+      if [ -n "$run_id" ]; then
+        printf 'RESOLVE: gh run rerun --failed %s\n' "$run_id"
+      else
+        printf 'RESOLVE: gh run rerun --failed <run-id>          # gh pr checks %s  prints the run links\n' "$pr"
+      fi
       ;;
     RERUN)
       printf 'A required context concluded CANCELLED — a superseded run, not a code defect. It blocks with\n'
       printf 'neither "is failing." nor "is expected.", and nothing will ever re-report it on its own.\n'
-      printf 'RESOLVE: gh run rerun --failed --repo FRIKKern/barkpark <run-id>\n'
+      if [ -n "$run_id" ]; then
+        printf 'RESOLVE: gh run rerun --failed --repo FRIKKern/barkpark %s\n' "$run_id"
+      else
+        printf 'RESOLVE: gh run rerun --failed --repo FRIKKern/barkpark <run-id>          # gh pr checks %s  prints the run links\n' "$pr"
+      fi
       ;;
     WAIT)
       printf 'A required context is still running. This is the most common state and it is not an error.\n'
@@ -234,8 +246,45 @@ counter_line() {
   esac
 }
 
+# Resolve the numeric run id behind a required context that concluded
+# failure/cancelled on the head — the id the RED/RERUN advice interpolates.
+# IMPURE ON PURPOSE (it calls gh) and BEST-EFFORT: any miss prints nothing and
+# the advice degrades to the placeholder path. Lives in the CALLER so that
+# refusal_advice() keeps the no-network purity the test harness relies on.
+resolve_failed_run_id() { # $1 = head sha  -> prints a numeric run id, or nothing
+  local sha="$1" spec="$REPO_ROOT/.github/required-checks.json" runs required
+  [ -n "$sha" ] || return 0
+  runs="$(gh api "repos/{owner}/{repo}/commits/$sha/check-runs" --paginate \
+    --jq '.check_runs[] | select(.conclusion=="failure" or .conclusion=="cancelled") | [.name, .details_url] | @tsv' \
+    2>/dev/null)" || return 0
+  [ -n "$runs" ] || return 0
+  # Prefer a run behind a REQUIRED context (the committed spec); fall back to
+  # any failed/cancelled check when the spec cannot be read or none matches.
+  if [ -f "$spec" ]; then
+    # The COMMITTED spec nests protection under .protection (the live API
+    # read-back does not) — read both shapes so neither source of the file
+    # silently empties the required set.
+    required="$(jq -r '[(.protection.required_status_checks.checks[]?.context), (.required_status_checks.checks[]?.context), (.required_status_checks.contexts[]?)] | .[]' "$spec" 2>/dev/null)"
+    if [ -n "$required" ]; then
+      while IFS="$(printf '\t')" read -r name url; do
+        if printf '%s\n' "$required" | grep -qxF "$name"; then
+          printf '%s\n' "$url" | sed -n 's#.*/runs/\([0-9][0-9]*\)/.*#\1#p' | head -1
+          return 0
+        fi
+      done <<EOF
+$runs
+EOF
+    fi
+  fi
+  printf '%s\n' "$runs" | head -1 | cut -f2 | sed -n 's#.*/runs/\([0-9][0-9]*\)/.*#\1#p'
+  return 0
+}
+
 refuse() {
-  local state="$1" msg="$2"
+  local state="$1" msg="$2" run_id=""
+  case "$state" in
+    RED|RERUN) run_id="$(resolve_failed_run_id "$HEAD_SHA" || true)" ;;
+  esac
   {
     echo
     echo "bp-merge: REFUSED — $state"
@@ -243,7 +292,7 @@ refuse() {
     printf '%s\n' "$msg" | sed 's/^/    /'
     counter_line "$msg" | sed 's/^/    /'
     echo
-    refusal_advice "$state" "$PR_NUMBER" "$HEAD_SHA" | sed 's/^/  /'
+    refusal_advice "$state" "$PR_NUMBER" "$HEAD_SHA" "$run_id" | sed 's/^/  /'
     echo
     echo "  PR: $PR_URL"
   } >&2

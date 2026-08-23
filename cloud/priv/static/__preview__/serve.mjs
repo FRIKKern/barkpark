@@ -87,6 +87,17 @@ function serveIndex(res) {
 const server = http.createServer((req, res) => {
   const urlPath = (req.url || "/").split("?")[0];
 
+  // TREE IDENTITY (cchi-w22-bl-guard-port-contention-silently-measures-a-
+  // foreign-tree). Port 4199 is shared across concurrent worktrees, and a
+  // byte-compare cannot tell two IDENTICAL trees apart — a guard that only
+  // compares bytes can silently measure a FOREIGN worktree's server and quote
+  // it as its own baseline. This endpoint answers the only question bytes
+  // cannot: WHICH tree is this server rooted in.
+  if (urlPath === "/__tree") {
+    res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+    return res.end(JSON.stringify({ root: ROOT, pid: process.pid }));
+  }
+
   // Root and the SPA entry paths get the injected shell.
   if (urlPath === "/" || urlPath === "/index.html" || urlPath === "/new") {
     return serveIndex(res);
@@ -111,7 +122,88 @@ const server = http.createServer((req, res) => {
   });
 });
 
-server.listen(PORT, () => {
+// ── the stale-server guard (gr-blk-serve-stale-guard) ────────────────────────
+// REAL, HIT LIVE: a preview server left running by a FOREIGN worktree squatted
+// the port and served the primary checkout's app.css (187302 B) while the
+// measuring tree held 189086 B — a patched --after run printed output
+// byte-identical to --before, and would have reported "the fix does nothing"
+// about a fix that measurably works. serve.mjs used to have NO port-collision
+// story at all: `listen` raised EADDRINUSE, the unhandled error killed the
+// process with a bare stack, and every consumer that polls the port for
+// readiness then happily measured the SQUATTER's bytes.
+//
+// Two arms, so every consumer inherits the truth from serve.mjs itself:
+//   • EADDRINUSE → DIAGNOSE the squatter before dying: fetch its /app.css and
+//     /app.js and compare against THIS tree's disk bytes, then exit 2 naming
+//     the counts. "Port in use" alone sends the reader to lsof; "served
+//     187302 B but disk has 189086 B" tells them a foreign tree owns the port.
+//   • listen succeeded → SELF-PROBE through the same localhost URL a consumer
+//     uses, byte-compare against disk, exit 2 on mismatch. This is the arm a
+//     dual-stack split would trip (we bound one interface, a squatter owns the
+//     one `localhost` resolves to) — without it that shape serves foreign
+//     bytes forever with OUR pid alive, which no consumer can catch.
+//
+// REPRODUCE THE MUTATION PROOF (no /tmp probe — anyone can re-run it):
+//   cp -R cloud/priv/static /some/foreign-root && echo x >> /some/foreign-root/app.css
+//   node /some/foreign-root/__preview__/serve.mjs --port 4399 &   # the squatter
+//   node cloud/priv/static/__preview__/serve.mjs --port 4399; echo $?
+//     → "!! STALE SERVER on :4399 …" and exit 2
+//   kill the squatter, re-run → the ready banner, exit 0 on SIGTERM.
+const CANARIES = ["app.css", "app.js"];
+
+function canaryReport(served, rel, disk) {
+  return served.equals(disk)
+    ? "   /" + rel + ": served " + served.length + " B == disk " + disk.length + " B (SAME bytes — a concurrent server of this tree?)"
+    : "   /" + rel + ": served " + served.length + " B but disk has " + disk.length + " B (a FOREIGN tree)";
+}
+
+async function fetchCanary(rel) {
+  const r = await fetch("http://localhost:" + PORT + "/" + rel, { cache: "no-store" });
+  return Buffer.from(await r.arrayBuffer());
+}
+
+server.on("error", async (err) => {
+  if (err && err.code === "EADDRINUSE") {
+    const lines = [];
+    for (const rel of CANARIES) {
+      try {
+        lines.push(canaryReport(await fetchCanary(rel), rel, fs.readFileSync(path.join(ROOT, rel))));
+      } catch (e) {
+        lines.push("   /" + rel + ": the squatter did not answer (" + ((e && e.code) || e) + ")");
+      }
+    }
+    process.stderr.write(
+      "!! STALE SERVER on :" + PORT + " — another process already owns this port.\n" +
+      lines.join("\n") + "\n" +
+      "   Serving would be a lie and measuring the squatter certifies the wrong bytes — refusing.\n" +
+      "   Find it: lsof -nP -iTCP:" + PORT + " -sTCP:LISTEN\n",
+    );
+    process.exit(2);
+  }
+  process.stderr.write("!! serve.mjs: " + ((err && err.stack) || err) + "\n");
+  process.exit(2);
+});
+
+server.listen(PORT, async () => {
+  // The self-probe arm: what THIS URL answers must be THIS tree's bytes.
+  for (const rel of CANARIES) {
+    let served;
+    try {
+      served = await fetchCanary(rel);
+    } catch (e) {
+      process.stderr.write("!! serve.mjs: self-probe of /" + rel + " failed (" + ((e && e.code) || e) + ") — refusing to claim readiness.\n");
+      process.exit(2);
+    }
+    const disk = fs.readFileSync(path.join(ROOT, rel));
+    if (!served.equals(disk)) {
+      process.stderr.write(
+        "!! STALE SERVER on :" + PORT + " — the port answers, but not with this tree's bytes.\n" +
+        canaryReport(served, rel, disk) + "\n" +
+        "   Another server owns the interface `localhost` resolves to — refusing.\n",
+      );
+      process.exit(2);
+    }
+  }
   process.stdout.write(
     "Cloud preview on http://localhost:" + PORT + "/?scen=mixed-fleet\n" +
       "Scenarios: empty · mixed-fleet · provisioning · failed · loggedout" +

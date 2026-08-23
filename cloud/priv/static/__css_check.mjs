@@ -256,7 +256,24 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
-const read = (f) => fs.readFileSync(path.join(dir, f), "utf8");
+// REFUSAL IS NOT A FINDING. Every sibling in this instrument family
+// (__reason_arm_census, __me_envelope_census, __agent_event_vocabulary_census,
+// __unknown_census, __binding_census) exits 2 when it cannot read its input,
+// and the console-harness verdict wrapper maps 2→REFUSED / 1→MEASURED_DEFECT.
+// This file's reads used to throw raw (uncaught ENOENT → exit 1), which
+// reported "the tree has a measured defect" when the truth was "the instrument
+// could not read its input". Exit 2 here, with the file named — a checker that
+// cannot see its inputs must make NO claim about the tree, in either direction.
+const readOrRefuse = (abs, label) => {
+  try {
+    return fs.readFileSync(abs, "utf8");
+  } catch (e) {
+    console.error(`FAIL(2): required input ${label} not readable at ${abs} — ${e.message}`);
+    console.error("REFUSED (2): __css_check will not report a result it could not measure.");
+    process.exit(2);
+  }
+};
+const read = (f) => readOrRefuse(path.join(dir, f), f);
 
 // ── Allowlists — every entry is printed on every run so the list stays honest ─
 
@@ -885,7 +902,7 @@ function citationScanFiles() {
   const i = process.argv.indexOf("--swallow-check");
   if (i !== -1) {
     const f = process.argv[i + 1];
-    const errs = swallowedTokenErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    const errs = swallowedTokenErrors(readOrRefuse(f, f), path.basename(f));
     for (const e of errs) console.error("FAIL  " + e);
     console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
     process.exit(errs.length ? 1 : 0);
@@ -904,7 +921,7 @@ function citationScanFiles() {
   const i = process.argv.indexOf("--orphan-check");
   if (i !== -1) {
     const f = process.argv[i + 1];
-    const errs = orphanCommentErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    const errs = orphanCommentErrors(readOrRefuse(f, f), path.basename(f));
     for (const e of errs) console.error("FAIL  " + e);
     console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
     process.exit(errs.length ? 1 : 0);
@@ -922,7 +939,7 @@ function citationScanFiles() {
   const i = process.argv.indexOf("--wrap-parity-check");
   if (i !== -1) {
     const f = process.argv[i + 1];
-    const { errors: errs, copies } = wrapParityErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    const { errors: errs, copies } = wrapParityErrors(readOrRefuse(f, f), path.basename(f));
     for (const e of errs) console.error("FAIL  " + e);
     console.log(
       `__css_check --wrap-parity-check ${f}: ${copies.length} wrapper-scoped wrap copy(ies) ` +

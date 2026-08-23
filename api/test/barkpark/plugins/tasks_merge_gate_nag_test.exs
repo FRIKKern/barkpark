@@ -120,4 +120,36 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
       assert :ok = save(criteria)
     end
   end
+
+  describe "the nag rides the ADVISORY CHANNEL, not only the journal" do
+    alias Barkpark.Content.Warnings
+
+    test "an unflagged leading gate queues a merge_gate_unflagged entry for the envelope" do
+      Warnings.reset()
+
+      capture_log(fn ->
+        assert :ok =
+                 save([%{"criterion" => "[MERGE-GATED] PR merged to main.", "met" => false}])
+      end)
+
+      assert [%{code: "merge_gate_unflagged", severity: "warning", message: message}] =
+               Warnings.drain()
+
+      assert message =~ "merge_gate\": true"
+      assert message =~ "[0]"
+    end
+
+    test "a flagged gate queues nothing" do
+      Warnings.reset()
+
+      capture_log(fn ->
+        assert :ok =
+                 save([
+                   %{"criterion" => "[MERGE-GATED] x", "met" => false, "merge_gate" => true}
+                 ])
+      end)
+
+      assert Warnings.drain() == []
+    end
+  end
 end

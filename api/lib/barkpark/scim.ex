@@ -122,6 +122,29 @@ defmodule Barkpark.Scim do
   find the tokens. The revoke MUST precede the hard-delete. Share-edit tokens
   are scope-keyed (`share_scope`, `owner_user_id` NULL) and are deliberately
   untouched — they are revoked with their share, not their minter.
+
+  ## The cross-org blast radius, RULED (pds-bl-deprovision-blast-radius-crosses-orgs)
+
+  A user can be provisioned into MORE THAN ONE organization. Reachability is
+  org-scoped (the bearer's `:scim_org` fence holds), but this function's
+  EFFECTS used to be org-blind in two places. The ruling splits them:
+
+    * **Sessions: the global kill is INTENDED and stays.** A `UserSession` is
+      an IDENTITY bearer — it reaches every org the user belongs to and cannot
+      be partially revoked, so any narrower kill would leave a live bearer
+      still reaching the deprovisioning org. Fail-closed wins. The receipt's
+      `sessions_revoked` therefore counts sessions BEYOND the calling org, and
+      says so here rather than implying an org-scoped number.
+    * **Owner-bound PATs: the org-blind kill on SOFT deprovision was a
+      cross-tenant DEFECT and is scoped.** A PAT is workspace-bound, so org
+      A's IdP deprovisioning a shared user must not revoke the PATs that user
+      holds against org B's workspaces. Soft deprovision now revokes only the
+      owner's live PATs whose `workspace_id` is in the calling org's
+      workspaces — plus any with a NULL `workspace_id` (a credential bound to
+      no workspace reaches the calling org too; fail-closed). HARD deprovision
+      keeps the global kill: the identity row is destroyed and the FK nilifies
+      `owner_user_id`, so any surviving token would become an orphaned live
+      credential nobody could ever find again.
   """
   @spec deprovision_user(Organization.t(), User.t(), keyword()) :: {:ok, map()}
   def deprovision_user(%Organization{} = org, %User{} = user, opts \\ []) do
@@ -140,7 +163,9 @@ defmodule Barkpark.Scim do
         )
 
       # BEFORE the hard-delete nilifies owner_user_id (FK on_delete: :nilify_all).
-      tokens_revoked = revoke_owner_tokens(user)
+      # Soft: org-scoped (+ NULL-workspace fail-closed). Hard: global — see
+      # the blast-radius ruling in the @doc above.
+      tokens_revoked = revoke_owner_tokens(user, if(hard, do: :all, else: {:org, ws_ids}))
 
       audit(org, user, "user_deprovisioned", %{
         "hard" => hard,
@@ -181,21 +206,34 @@ defmodule Barkpark.Scim do
 
   def org_user_active?(_org, _), do: false
 
-  # Stamp `revoked_at` on every LIVE api_token owned by this user, so
-  # `Auth.verify_token/1` rejects it immediately. Owner-bound PATs ONLY: share
+  # Stamp `revoked_at` on LIVE api_tokens owned by this user, so
+  # `Auth.verify_token/1` rejects them immediately. Owner-bound PATs ONLY: share
   # tokens (`share_scope` set, `owner_user_id` NULL) never match this WHERE and
   # are left alone. Emits a `token/user_tokens_revoked` audit event when any
   # token was killed (a standing credential lifecycle event).
-  defp revoke_owner_tokens(%User{id: user_id} = user) do
+  #
+  # `scope` is `:all` (hard deprovision — the identity is being destroyed) or
+  # `{:org, ws_ids}` (soft — only the calling org's workspaces, plus
+  # NULL-workspace tokens, fail-closed). See the blast-radius ruling on
+  # `deprovision_user/3`.
+  defp revoke_owner_tokens(%User{id: user_id} = user, scope) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    {n, _} =
-      Repo.update_all(
-        from(t in ApiToken,
-          where: t.owner_user_id == ^user_id and is_nil(t.revoked_at)
-        ),
-        set: [revoked_at: now]
+    base =
+      from(t in ApiToken,
+        where: t.owner_user_id == ^user_id and is_nil(t.revoked_at)
       )
+
+    query =
+      case scope do
+        :all ->
+          base
+
+        {:org, ws_ids} ->
+          from(t in base, where: t.workspace_id in ^ws_ids or is_nil(t.workspace_id))
+      end
+
+    {n, _} = Repo.update_all(query, set: [revoked_at: now])
 
     if n > 0 do
       Audit.emit(%{
@@ -435,9 +473,14 @@ defmodule Barkpark.Scim do
   of the intended diff) rather than writes, so "granted three" and "granted
   nobody" reached the caller as the same number: a caller could not answer
   honestly over it, however carefully it matched (PDS-D551).
+
+  Returns `{:error, :invalid_role}` — with NO writes applied — when the
+  group's mapped role fails membership-changeset validation (see
+  `add_group_member/3`); the reconcile refuses rather than half-applies.
   """
   @spec replace_group_members(Organization.t(), Group.t(), [binary()]) ::
           {:ok, %{added: non_neg_integer(), removed: non_neg_integer(), unmatched: [binary()]}}
+          | {:error, :invalid_role}
   def replace_group_members(%Organization{} = org, %Group{} = group, user_ids)
       when is_list(user_ids) do
     {valid, malformed} = Enum.split_with(user_ids, &(Repo.uuid_or_nil(&1) != nil))
@@ -447,23 +490,30 @@ defmodule Barkpark.Scim do
     to_add = MapSet.difference(desired, current)
     to_remove = MapSet.difference(current, desired)
 
-    {added, unmatched} =
-      Enum.reduce(to_add, {0, malformed}, fn uid, {n, miss} ->
+    # `:invalid_role` halts the reconcile: the role is a property of the GROUP,
+    # so once one grant refuses it every remaining grant would too. The
+    # removals below are deliberately skipped on that path — a reconcile that
+    # cannot grant must not half-apply by only revoking.
+    add_result =
+      Enum.reduce_while(to_add, {0, malformed}, fn uid, {n, miss} ->
         case add_group_member(org, group, uid) do
-          {:ok, _} -> {n + 1, miss}
-          {:error, :no_membership} -> {n, miss ++ [uid]}
+          {:ok, _} -> {:cont, {n + 1, miss}}
+          {:error, :no_membership} -> {:cont, {n, miss ++ [uid]}}
+          {:error, :invalid_role} -> {:halt, {:error, :invalid_role}}
         end
       end)
 
-    removed =
-      Enum.reduce(to_remove, 0, fn uid, n ->
-        case remove_group_member(org, group, uid) do
-          {:ok, _} -> n + 1
-          {:error, :no_membership} -> n
-        end
-      end)
+    with {added, unmatched} <- add_result do
+      removed =
+        Enum.reduce(to_remove, 0, fn uid, n ->
+          case remove_group_member(org, group, uid) do
+            {:ok, _} -> n + 1
+            {:error, :no_membership} -> n
+          end
+        end)
 
-    {:ok, %{added: added, removed: removed, unmatched: unmatched}}
+      {:ok, %{added: added, removed: removed, unmatched: unmatched}}
+    end
   end
 
   @doc """
@@ -554,7 +604,10 @@ defmodule Barkpark.Scim do
   workspaces) to the group's mapped role. Audited.
 
   Returns `{:ok, n}` only when the write actually re-roled at least one stored
-  membership, and `{:error, :no_membership}` when the id named nobody this org
+  membership, `{:error, :invalid_role}` when the group's mapped role fails
+  `Membership.changeset/3` validation for any of the user's workspaces (the
+  same valid-role set `Tenancy.Auth.create_membership/4` enforces — nothing is
+  written), and `{:error, :no_membership}` when the id named nobody this org
   can see: a user never provisioned into the org, a user belonging to ANOTHER
   organization (the update is scoped to this org's workspaces, so a cross-org
   id matches zero rows), or a malformed non-UUID member value an IdP sent (it
@@ -568,13 +621,18 @@ defmodule Barkpark.Scim do
   audited: an audit row is a claim that a role changed hands, and none did.
   """
   @spec add_group_member(Organization.t(), Group.t(), binary()) ::
-          {:ok, pos_integer()} | {:error, :no_membership}
+          {:ok, pos_integer()} | {:error, :no_membership | :invalid_role}
   def add_group_member(%Organization{} = org, %Group{} = group, user_id) do
     with user_id when not is_nil(user_id) <- Repo.uuid_or_nil(user_id),
-         n when n > 0 <- set_member_role(org, user_id, group.role_name) do
+         {:ok, n} when n > 0 <- set_member_role(org, user_id, group.role_name) do
       audit_group(org, user_id, group, "group_member_added", group.role_name)
       {:ok, n}
     else
+      # The group's mapped role failed `Membership.changeset/3` validation for
+      # at least one of this user's workspaces (e.g. the Role row was deleted
+      # after the group was created, or is scoped to a DIFFERENT workspace of
+      # this org). Nothing was written — distinct from "the id named nobody".
+      {:error, :invalid_role} -> {:error, :invalid_role}
       _ -> {:error, :no_membership}
     end
   end
@@ -591,8 +649,11 @@ defmodule Barkpark.Scim do
   @spec remove_group_member(Organization.t(), Group.t(), binary()) ::
           {:ok, pos_integer()} | {:error, :no_membership}
   def remove_group_member(%Organization{} = org, %Group{} = group, user_id) do
+    # `@provision_role` ("member") is a built-in present in EVERY valid-role
+    # set, so set_member_role/3 cannot answer :invalid_role here — the only
+    # misses are the no-membership shapes documented above.
     with user_id when not is_nil(user_id) <- Repo.uuid_or_nil(user_id),
-         n when n > 0 <- set_member_role(org, user_id, @provision_role) do
+         {:ok, n} when n > 0 <- set_member_role(org, user_id, @provision_role) do
       audit_group(org, user_id, group, "group_member_removed", @provision_role)
       {:ok, n}
     else
@@ -602,27 +663,47 @@ defmodule Barkpark.Scim do
 
   # Set the user's role on every membership it holds in the org's workspaces.
   # `user_id` binds to the `:binary_id` principal_id — a non-UUID would raise
-  # Ecto.Query.CastError, so it folds to 0 (defense in depth; public callers
-  # already guard via Repo.uuid_or_nil).
+  # Ecto.Query.CastError, so it folds to `{:ok, 0}` (defense in depth; public
+  # callers already guard via Repo.uuid_or_nil).
+  #
+  # Every write routes through `Membership.changeset/3` with the SAME
+  # per-workspace valid-role set `Tenancy.Auth.create_membership/4` uses —
+  # this used to be a raw `Repo.update_all` gated only by the EXISTENCE check
+  # `known_role?/2`, so a Role scoped to one workspace (or deleted after the
+  # group was created) could be attached org-wide with zero validation
+  # (arpss-w10-bl-scim-set-member-role-unvalidated). Atomic on purpose: a role
+  # the changeset refuses in ANY of the org's workspaces rolls the whole call
+  # back — a partial grant is drift the IdP cannot see or reconcile.
   defp set_member_role(org, user_id, role_name) do
     case Repo.uuid_or_nil(user_id) do
       nil ->
-        0
+        {:ok, 0}
 
       user_id ->
         ws_ids = workspace_ids(org)
 
-        {n, _} =
-          Repo.update_all(
+        memberships =
+          Repo.all(
             from(m in Membership,
               where:
                 m.principal_type == "user" and m.principal_id == ^user_id and
                   m.workspace_id in ^ws_ids
-            ),
-            set: [role: role_name, updated_at: DateTime.utc_now()]
+            )
           )
 
-        n
+        Repo.transaction(fn ->
+          Enum.reduce(memberships, 0, fn m, n ->
+            case m
+                 |> Membership.changeset(
+                   %{role: role_name},
+                   Tenancy.Auth.valid_role_names(m.workspace_id)
+                 )
+                 |> Repo.update() do
+              {:ok, _} -> n + 1
+              {:error, %Ecto.Changeset{}} -> Repo.rollback(:invalid_role)
+            end
+          end)
+        end)
     end
   end
 

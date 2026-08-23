@@ -73,7 +73,7 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 		PGTopRelationsProbe: func() ([]RelationSize, error) {
 			return []RelationSize{{Name: "mutation_events", Bytes: 1510000000}}, nil
 		},
-		ReqStatsProbe: func() (float64, int, float64, error) { return 12.5, 87, 0.22, nil },
+		ReqStatsProbe: func() (float64, int, float64, int, error) { return 12.5, 87, 0.22, 60, nil },
 		BackupProbe:   func() (bool, string, error) { return true, "last backup 2h ago", nil },
 
 		HealthBaseURL: "https://server.example.com",
@@ -282,7 +282,7 @@ func TestGatherReportVitalsFailSoft(t *testing.T) {
 func TestGatherReportReqStatsWiring(t *testing.T) {
 	// Probe error → both sentinels.
 	rErr := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, float64, error) { return 0, 0, 0, errors.New("404") },
+		ReqStatsProbe: func() (float64, int, float64, int, error) { return 0, 0, 0, 0, errors.New("404") },
 	})
 	if rErr.ReqPerS != -1 {
 		t.Errorf("ReqPerS = %v, want -1 (probe errored, not a fake 0)", rErr.ReqPerS)
@@ -293,7 +293,7 @@ func TestGatherReportReqStatsWiring(t *testing.T) {
 
 	// Success with null p95 → req/s lands, p95 stays the -1 sentinel.
 	rNull := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, float64, error) { return 3.0, -1, -1, nil },
+		ReqStatsProbe: func() (float64, int, float64, int, error) { return 3.0, -1, -1, -1, nil },
 	})
 	if rNull.ReqPerS != 3.0 {
 		t.Errorf("ReqPerS = %v, want 3.0", rNull.ReqPerS)
@@ -304,7 +304,7 @@ func TestGatherReportReqStatsWiring(t *testing.T) {
 
 	// A real 0 req/s (idle box) is data, not the sentinel.
 	rIdle := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, float64, error) { return 0, 0, 0, nil },
+		ReqStatsProbe: func() (float64, int, float64, int, error) { return 0, 0, 0, 0, nil },
 	})
 	if rIdle.ReqPerS != 0 {
 		t.Errorf("ReqPerS = %v, want 0 (idle is real, not the -1 sentinel)", rIdle.ReqPerS)
@@ -335,7 +335,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		if probe == nil {
 			t.Fatal("probe is nil, want a wired probe")
 		}
-		rps, p95, _, err := probe()
+		rps, p95, _, windowS, err := probe()
 		if err != nil {
 			t.Fatalf("probe error: %v", err)
 		}
@@ -344,6 +344,9 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}
 		if p95 != 128 {
 			t.Errorf("p95 = %d, want 128", p95)
+		}
+		if windowS != 60 {
+			t.Errorf("window_s = %d, want 60 — the window must ride the beat with its rates (dr-w14-bl)", windowS)
 		}
 		if gotAuth != "Bearer sekret" {
 			t.Errorf("Authorization = %q, want Bearer sekret", gotAuth)
@@ -356,7 +359,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		rps, p95, _, err := NewReqStatsProbe(srv.URL, "", nil)()
+		rps, p95, _, windowS, err := NewReqStatsProbe(srv.URL, "", nil)()
 		if err != nil {
 			t.Fatalf("probe error: %v", err)
 		}
@@ -365,6 +368,9 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}
 		if p95 != -1 {
 			t.Errorf("p95 = %d, want -1 (instance reported null — no samples)", p95)
+		}
+		if windowS != 60 {
+			t.Errorf("window_s = %d, want 60", windowS)
 		}
 	})
 
@@ -384,7 +390,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.Write([]byte(`{"req_per_s": 0.0, "p95_ms": null, "err_5xx_per_s": null, "window_s": 60}`))
 		}))
 		defer srvNull.Close()
-		if _, _, e5, err := NewReqStatsProbe(srvNull.URL, "", nil)(); err != nil || e5 != -1 {
+		if _, _, e5, _, err := NewReqStatsProbe(srvNull.URL, "", nil)(); err != nil || e5 != -1 {
 			t.Errorf("(err5xx, err) = (%v, %v), want (-1, nil) on a null window", e5, err)
 		}
 
@@ -395,7 +401,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.Write([]byte(`{"req_per_s": 9.0, "p95_ms": 40, "window_s": 60}`))
 		}))
 		defer srvOld.Close()
-		rps, _, e5, err := NewReqStatsProbe(srvOld.URL, "", nil)()
+		rps, _, e5, _, err := NewReqStatsProbe(srvOld.URL, "", nil)()
 		if err != nil {
 			t.Fatalf("probe error: %v", err)
 		}
@@ -411,7 +417,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.Write([]byte(`{"req_per_s": 5.0, "p95_ms": 12, "err_5xx_per_s": 0.0, "window_s": 60}`))
 		}))
 		defer srvZero.Close()
-		if _, _, e5, _ := NewReqStatsProbe(srvZero.URL, "", nil)(); e5 != 0 {
+		if _, _, e5, _, _ := NewReqStatsProbe(srvZero.URL, "", nil)(); e5 != 0 {
 			t.Errorf("err5xx = %v, want 0 (measured clean window, not the -1 sentinel)", e5)
 		}
 	})
@@ -422,9 +428,12 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		rps, p95, _, err := NewReqStatsProbe(srv.URL, "", nil)()
+		rps, p95, _, windowS, err := NewReqStatsProbe(srv.URL, "", nil)()
 		if err == nil {
 			t.Fatal("err = nil, want a non-nil error on 404")
+		}
+		if windowS != -1 {
+			t.Errorf("window_s = %d, want -1 on a 404", windowS)
 		}
 		if rps != -1 || p95 != -1 {
 			t.Errorf("(req/s, p95) = (%v, %d), want (-1, -1) on 404", rps, p95)
@@ -441,7 +450,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer srv.Close()
-		if _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+		if _, _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
 			t.Error("err = nil, want a non-nil error on 500")
 		}
 	})
@@ -451,7 +460,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.Write([]byte(`not json`))
 		}))
 		defer srv.Close()
-		if _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+		if _, _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
 			t.Error("err = nil, want a non-nil error on an undecodable body")
 		}
 	})
@@ -461,7 +470,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		url := srv.URL
 		srv.Close()
-		if _, _, _, err := NewReqStatsProbe(url, "", nil)(); err == nil {
+		if _, _, _, _, err := NewReqStatsProbe(url, "", nil)(); err == nil {
 			t.Error("err = nil, want a transport error against a closed server")
 		}
 	})
@@ -2492,5 +2501,55 @@ func TestConsumerRootsBoundTOTALProbeTime(t *testing.T) {
 				"should have bought", elapsed, len(many), ceiling, consumerRootsLimit)
 		}
 		t.Logf("%d configured roots -> %d walks in %s", len(many), calls, elapsed)
+	})
+}
+
+// TestBeatPreservesWindowS is the dr-w14-bl pin: a beat built from an instance
+// body CARRYING window_s preserves it end to end — HTTP probe → gatherReport →
+// the marshaled beat JSON — and an instance body WITHOUT the key (built before
+// request_stats.ex shipped it) arrives as the -1 sentinel, never a confident
+// 0-second window. Before this slice the decode struct had no WindowS field:
+// three rates rode every beat with their measurement window discarded at the
+// door — a rate without its denominator-of-time, the epic's signature defect.
+func TestBeatPreservesWindowS(t *testing.T) {
+	t.Run("window_s carried through to the outbound beat", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 12.5, "p95_ms": 87, "err_5xx_per_s": 0.22, "window_s": 60}`))
+		}))
+		defer srv.Close()
+
+		r := gatherReport(ReportConfig{ReqStatsProbe: NewReqStatsProbe(srv.URL, "", nil)})
+		if r.WindowS != 60 {
+			t.Fatalf("Report.WindowS = %d, want 60 — the window must survive the decode", r.WindowS)
+		}
+		beat, err := json.Marshal(r)
+		if err != nil {
+			t.Fatalf("marshal beat: %v", err)
+		}
+		if !strings.Contains(string(beat), `"window_s":60`) {
+			t.Fatalf("outbound beat does not carry window_s:\n%s", beat)
+		}
+	})
+
+	t.Run("absent window_s (old instance) → -1 sentinel, rates still land", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 12.5, "p95_ms": 87}`))
+		}))
+		defer srv.Close()
+
+		r := gatherReport(ReportConfig{ReqStatsProbe: NewReqStatsProbe(srv.URL, "", nil)})
+		if r.ReqPerS != 12.5 {
+			t.Fatalf("ReqPerS = %v, want 12.5", r.ReqPerS)
+		}
+		if r.WindowS != -1 {
+			t.Fatalf("Report.WindowS = %d, want -1 — an absent window is UNMEASURED, not zero seconds", r.WindowS)
+		}
+	})
+
+	t.Run("unwired probe → -1", func(t *testing.T) {
+		r := gatherReport(ReportConfig{})
+		if r.WindowS != -1 {
+			t.Fatalf("Report.WindowS = %d, want -1 with no probe", r.WindowS)
+		}
 	})
 }

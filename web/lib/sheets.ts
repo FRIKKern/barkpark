@@ -423,7 +423,8 @@ export function truncationNotice(snapshot: {
   return `Sheet truncated — showing the first ${shown} rows`;
 }
 
-/** Normalize the two accepted merge shapes into {@link MergeRegion}s. */
+/** Normalize the three accepted merge shapes (A1-range string, [r1,c1,r2,c2]
+ * tuple, {row,col,rowspan,colspan} object) into {@link MergeRegion}s. */
 function normalizeMerges(merges: SheetTab["merges"]): MergeRegion[] {
   if (!Array.isArray(merges)) return [];
   const out: MergeRegion[] = [];

@@ -60,7 +60,7 @@ defmodule BarkparkCloud.Accounts.ExternalIdentity do
     |> assoc_constraint(:user)
     |> unique_constraint([:provider, :provider_uid],
       name: :external_identities_provider_uid_unique_idx,
-      message: "this identity is already linked to an account"
+      message: "is already linked to an account"
     )
   end
 end

@@ -14,6 +14,12 @@
 # (optionally) across a target Postgres DB via a per-table
 # `WHERE t::text ~ <alternation>`. If the value is in there, the scan fires.
 #
+# THE VALUE SHAPE HAS ITS OWN VACUITY, AND IT REFUSES INSTEAD. A value scan
+# over ZERO bytes is exactly as clean as the column scan it replaces: an empty
+# or manifest-only bundle, an unreachable DB, and a zero-table schema all have
+# nothing to fire on. Each of those is a REFUSED-TO-MEASURE exit 2 here, never
+# a CLEAN — and control steps 4-5 prove both refusal arms actually fire.
+#
 # THE AMMO — what was ruled OUT, and why (each checked live; do not re-litigate):
 #   * webhook_deliveries.payload_snapshot — RULED OUT (PDS-D24). Guerrilla's
 #     10,544 delivery rows are 100% source_kind=document with payload_snapshot
@@ -47,7 +53,9 @@
 # Exit codes:
 #   0  scan clean (no ammo value found) / control PASSED
 #   1  HITS — at least one ammo value found in the bundle or the target DB
-#   2  usage or environment error (no ammo, missing psql/tar, unreadable bundle)
+#   2  usage or environment error, or REFUSED TO MEASURE (no ammo, missing
+#      psql/tar, unreadable/empty/table-less bundle, unreachable DB, zero-table
+#      schema) — an empty corpus never reads as 0 CLEAN
 #   3  control mode did not behave as a control must (did not FIRE on the full
 #      bundle, or did not come back CLEAN on the deny-shaped bundle)
 #
@@ -64,7 +72,9 @@ die()  { printf '%s: %s\n' "$SELF" "$*" >&2; exit 2; }
 rule() { printf -- '─%.0s' $(seq 1 72); printf '\n'; }
 
 usage() {
-  sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
+  # Print the whole header, however long it grows: a fixed '2,60p' silently
+  # truncated the usage text every time the header gained a line.
+  sed -n '2,/^set -euo pipefail/p' "$0" | sed '$d' | sed 's/^# \{0,1\}//'
   exit "${1:-2}"
 }
 
@@ -154,7 +164,7 @@ ammo_count() { [ -s "$AMMO_FILE" ] && wc -l < "$AMMO_FILE" | tr -d ' ' || echo 0
 # ── the bundle scan: raw bytes, every member ────────────────────────────────
 # Returns the hit count via the global HITS; prints one line per hit.
 scan_bundle() { # tar-path
-  local bundle="$1" dir member label value n rel first
+  local bundle="$1" dir member label value n rel first table_members
   [ -r "$bundle" ] || die "cannot read bundle: $bundle"
   dir="$(mktemp -d "${TMPDIR:-/tmp}/pds-scan.XXXXXX")"
   TMP_DIRS="$TMP_DIRS $dir"
@@ -162,10 +172,12 @@ scan_bundle() { # tar-path
   tar -xf "$bundle" -C "$dir" || die "not a readable tar: $bundle"
 
   local members=0
+  table_members=0
   say "bundle: $bundle"
   while IFS= read -r member; do
     members=$((members + 1))
     rel="${member#"$dir"/}"
+    case "$rel" in tables/*) table_members=$((table_members + 1)) ;; esac
     while IFS="$(printf '\t')" read -r label value; do
       n="$(grep -a -c -F -e "$value" -- "$member" 2>/dev/null || true)"
       n="${n:-0}"
@@ -177,7 +189,19 @@ scan_bundle() { # tar-path
     done < "$AMMO_FILE"
   done < <(find "$dir" -type f | sort)
 
-  say "  members scanned: $members   ammo values: $(ammo_count)"
+  # PDS-D20 anti-vacuity, aimed at this scan's OWN blind spot: a value scan
+  # over zero bytes is vacuously clean. An empty tar has no members; a
+  # truncated or manifest-only container has no tables/ member; in both cases
+  # the ammo loop never ran, so a CLEAN verdict would be a true green about
+  # nothing. Refuse to measure (exit 2) instead of printing it.
+  if [ "$members" -eq 0 ]; then
+    die "bundle contains ZERO members — an empty or truncated tar. A scan over nothing proves nothing; refusing to print CLEAN."
+  fi
+  if [ "$table_members" -eq 0 ]; then
+    die "bundle carries no tables/ member ($members member(s) total, e.g. manifest-only) — none of the bytes this scan exists to check are present; refusing to print CLEAN."
+  fi
+
+  say "  members scanned: $members ($table_members under tables/)   ammo values: $(ammo_count)"
 }
 
 # ── the target-DB scan: per-table `t::text ~ <alternation>` ──────────────────
@@ -200,6 +224,21 @@ scan_db() { # conninfo
   alt="($alt)"
 
   say "target DB: $(printf '%s' "$conn" | sed 's/password=[^ ]*/password=***/')"
+
+  # Enumerate FIRST, capturing psql's own exit status. The old shape piped the
+  # enumeration through `2>/dev/null || true`, which converted an unreachable
+  # DB, a bad conninfo, or a permission failure into an EMPTY table list — and
+  # an empty corpus scans vacuously CLEAN. A failed enumeration is a refusal in
+  # its own right, distinct from a reachable-but-empty schema.
+  local tlist
+  tlist="$(mktemp "${TMPDIR:-/tmp}/pds-scan-tables.XXXXXX")"
+  TMP_FILES="$TMP_FILES $tlist"
+  if ! psql "$conn" -At -c \
+    "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','p') ORDER BY 1" \
+    >"$tlist" 2>"$errf"; then
+    die "cannot enumerate schema public — psql failed: $(head -1 "$errf" 2>/dev/null | cut -c1-200). An unreachable or unqueryable DB is an empty corpus; refusing to print CLEAN."
+  fi
+
   while IFS= read -r table; do
     [ -n "$table" ] || continue
     tables=$((tables + 1))
@@ -223,8 +262,7 @@ scan_db() { # conninfo
       HITS=$((HITS + 1))
       say "  HIT  table=$table  rows_matching_ammo=$count"
     fi
-  done < <(psql "$conn" -At -c \
-    "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','p') ORDER BY 1" 2>/dev/null || true)
+  done < "$tlist"
 
   # pg_class, NOT information_schema.tables: information_schema filters by the
   # CONNECTING ROLE's privileges, so a table the role holds no privilege on
@@ -234,7 +272,7 @@ scan_db() { # conninfo
   # ordinary and partitioned table regardless of privilege; a table the role
   # cannot read then lands in the UNSCANNED branch above WITH its reason.
   if [ "$tables" -eq 0 ]; then
-    die "enumerated 0 tables in schema public — the enumeration itself failed or the DB is empty. A scan over nothing proves nothing; refusing to print CLEAN."
+    die "schema public holds ZERO base tables — the DB answered but there is nothing to scan. A scan over nothing proves nothing; refusing to print CLEAN."
   fi
 
   say "  tables scanned: $tables   ammo values: $(ammo_count)"
@@ -306,8 +344,10 @@ cmd_scan() {
 
 # ── subcommand: control — the load-bearing artifact ─────────────────────────
 # A scan that has never fired is not a scan. This mode proves the instrument
-# both FIRES (full-fidelity bundle carrying a known webhook secret + grantee
-# email) and comes back CLEAN (the same bundle without the denied members).
+# FIRES (full-fidelity bundle carrying a known webhook secret + grantee
+# email), comes back CLEAN (the same bundle without the denied members), and
+# REFUSES on a corpus of zero (a manifest-only bundle and a dead conninfo must
+# both exit 2 — a green over nothing is not a green).
 #
 # PDS-D31 RAM LAW: this control is seeded LOCALLY and spends NO live guerrilla
 # export. A live full export peaks beam.smp at 1.83 GB RSS on a 3.8 GB box; two
@@ -407,7 +447,7 @@ JSON
   local ammo="$work/ammo.txt"
   printf '%s\n%s\n' "$secret" "$email" > "$ammo"
 
-  local rc_fire rc_clean rc_db_fire
+  local rc_fire rc_clean rc_db_fire rc_empty rc_dead
   say ""
   local step1="$work/full.tar"
   if [ "$broken" -eq 1 ]; then
@@ -415,7 +455,7 @@ JSON
     say "!! --simulate-broken-instrument: step 1 is handed the DENY-shaped bundle;"
     say "   this run MUST end in exit 3."
   fi
-  say "STEP 1/3 — FULL-fidelity bundle must FIRE (webhooks.secret + grantee_email present)"
+  say "STEP 1/5 — FULL-fidelity bundle must FIRE (webhooks.secret + grantee_email present)"
   rule
   set +e
   "$0" scan --bundle "$step1" --ammo-file "$ammo" --profile full
@@ -423,7 +463,7 @@ JSON
   set -e
 
   say ""
-  say "STEP 2/3 — target DB must FIRE (per-table t::text ~ alternation)"
+  say "STEP 2/5 — target DB must FIRE (per-table t::text ~ alternation)"
   rule
   set +e
   "$0" scan --db "$db" --ammo-file "$ammo" --profile full
@@ -431,12 +471,37 @@ JSON
   set -e
 
   say ""
-  say "STEP 3/3 — DENY-shaped bundle (webhooks + access_grants members absent) must be CLEAN"
+  say "STEP 3/5 — DENY-shaped bundle (webhooks + access_grants members absent) must be CLEAN"
   rule
   set +e
   "$0" scan --bundle "$work/dev.tar" --ammo-file "$ammo" --profile dev
   rc_clean=$?
   set -e
+
+  # Steps 4-5: the ANTI-VACUITY arms. A corpus of zero must REFUSE (exit 2),
+  # never read as CLEAN — and each refusal is matched on its MESSAGE too, so a
+  # regression that exits 2 for some other reason cannot impersonate it.
+  say ""
+  say "STEP 4/5 — manifest-only bundle (zero tables/ members) must REFUSE (exit 2)"
+  rule
+  local empty="$work/empty"; mkdir -p "$empty"
+  cp "$full/manifest.json" "$empty/manifest.json"
+  ( cd "$empty" && tar -cf "$work/empty.tar" manifest.json )
+  set +e
+  "$0" scan --bundle "$work/empty.tar" --ammo-file "$ammo" --profile dev >"$work/step4.out" 2>&1
+  rc_empty=$?
+  set -e
+  cat "$work/step4.out"
+
+  say ""
+  say "STEP 5/5 — unreachable DB must REFUSE (exit 2), never scan an empty corpus as CLEAN"
+  rule
+  set +e
+  "$0" scan --db "host=nowhere.invalid port=5432 dbname=pds_ctl_dead connect_timeout=3" \
+    --ammo-file "$ammo" --profile full >"$work/step5.out" 2>&1
+  rc_dead=$?
+  set -e
+  cat "$work/step5.out"
 
   rule
   local ok=1
@@ -457,6 +522,18 @@ JSON
     ok=0
   else
     say "deny-shaped bundle is CLEAN: exit 0 against the same ammo"
+  fi
+  if [ "$rc_empty" -ne 2 ] || ! grep -q "refusing to print CLEAN" "$work/step4.out"; then
+    say "CONTROL FAILED: manifest-only bundle scan exited $rc_empty, expected a REFUSAL (exit 2 naming the empty corpus)."
+    ok=0
+  else
+    say "manifest-only bundle REFUSES: exit 2 — the vacuous CLEAN is unprintable"
+  fi
+  if [ "$rc_dead" -ne 2 ] || ! grep -q "cannot enumerate schema public" "$work/step5.out"; then
+    say "CONTROL FAILED: dead-conninfo scan exited $rc_dead, expected a REFUSAL (exit 2 from the enumeration's own status)."
+    ok=0
+  else
+    say "unreachable DB REFUSES: exit 2 carried from psql's own failure, not laundered into an empty corpus"
   fi
   rule
   if [ "$ok" -eq 1 ]; then

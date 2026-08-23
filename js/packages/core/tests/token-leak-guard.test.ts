@@ -178,3 +178,22 @@ describe('token-leak guard — redaction does not break auth', () => {
     expect(seenAuth).toBe(`Bearer ${SENTINEL}`)
   })
 })
+
+// The KNOWN edge of the V3 cover, pinned as an HONEST CANARY
+// (arpss-js-structuredclone-residual-path): structuredClone ignores toJSON by
+// spec, so a structured clone of the config carries the RAW token. This test
+// asserts the limitation ON PURPOSE — it is documentation with teeth, not a
+// wish. If it ever fails, either the platform changed or someone landed the
+// non-enumerable-token redesign: in both cases the SDK SECURITY NOTES block in
+// client.ts (and this test) must be updated in the same change. No repo
+// consumer structured-clones the client or its config today (grep-confirmed);
+// standard Next App Router prop serialization is Flight, which honors toJSON.
+describe('structuredClone — the documented uncovered path (canary)', () => {
+  it('structuredClone(client.config) exposes the raw token (KNOWN, monitored)', () => {
+    const bp = createClient(baseConfig)
+    // The covered surfaces stay covered…
+    expect(JSON.stringify(bp.config)).not.toContain(SENTINEL)
+    // …and the uncovered one is exactly this wide, no wider.
+    expect(structuredClone(bp.config).token).toBe(SENTINEL)
+  })
+})

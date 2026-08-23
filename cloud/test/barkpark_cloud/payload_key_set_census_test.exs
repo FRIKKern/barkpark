@@ -3,7 +3,7 @@ defmodule BarkparkCloud.PayloadKeySetCensus.Extract do
   The Side-A extractor: the LITERAL map keys a serializer emits, read off the
   Elixir AST (`Code.string_to_quoted!/1`), never off a regex.
 
-  Why not a regex: a regex over `barkpark_json/4`'s base map literal sees 35
+  Why not a regex: a regex over `barkpark_json/5`'s base map literal sees 35
   keys. The function's actual payload is 56 — the other 21 are added by the
   `merge_*` pipeline it pipes the base through. A regex is 38% blind to the very
   thing this census exists to check, and blind SILENTLY.
@@ -790,13 +790,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   assertion in Go (`TestCloudDeliveriesRollbackVerdictReachesTheHuman`), which
   is what actually holds what a human reads.
 
-  What it finds TODAY, declared and not repaired here: `PlatformDelivery.SHA`,
-  `DeliveriesPage.SHA` and `DeliveriesPage.Limit` are decoded and never printed.
-  The row's own `SHA` is the interesting one — the render prints the sha the
-  CALLER ASKED FOR in its header and never the sha each row carries, so it never
-  demonstrates that the rows it printed are the sha you asked for. Repairing
-  that is a reader change with its own render decisions and is filed, not
-  smuggled in here.
+  What it found at its first cut (dr-w27-s2), since repaired by
+  dr-w27-bl-decoded-but-never-rendered-sha: `PlatformDelivery.SHA`,
+  `DeliveriesPage.SHA` and `DeliveriesPage.Limit` were decoded and never
+  printed — the render printed the sha the CALLER ASKED FOR in its header and
+  never the sha each row carries, so it never demonstrated that the rows it
+  printed were the sha you asked for. The reader now opens every row with
+  `d.SHA` and renders the filter echo and page limit, so the declared set below
+  is empty; this arm stays to red the day any decoded field goes silent again.
 
   It reads `internal/cloudclient/` through a `"../../../internal/cloudclient"`
   literal, which `scripts/cloud-path-escape-check.sh` resolves as a repo-root
@@ -845,16 +846,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # because the declaration must stay possible, not because anything uses it.
   @pairs [
     %{
-      name: "barkpark_json/4",
+      name: "barkpark_json/5",
       file: @router,
-      entry: {:barkpark_json, 4},
+      entry: {:barkpark_json, 5},
       schema: @barkpark_schema,
       go: "Barkpark"
     },
     %{
-      name: "barkpark_json/4 pressure",
+      name: "barkpark_json/5 pressure",
       file: @router,
-      entry: {:barkpark_json, 4},
+      entry: {:barkpark_json, 5},
       nested: "pressure",
       go: "Pressure"
     },
@@ -955,13 +956,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # real consumer that simply is not a Go struct, or a real emitter that is not
   # one of the serializers Side A walks.
   @reconciled [
-    {"barkpark_json/4", :unread, "provision_steps",
+    {"barkpark_json/5", :unread, "provision_steps",
      "BROWSER-ONLY. The /new page's refresh-durable provisioning narration (dwb-14); app.js reads provision_steps/provision_console at 17 call sites. `bp` narrates provisioning off its own poll, so decoding a live step list into a Go struct would be a SECOND renderer of the same bytes."},
-    {"barkpark_json/4", :unread, "provision_console",
+    {"barkpark_json/5", :unread, "provision_console",
      "BROWSER-ONLY, same reader as provision_steps above (dwb-16)."},
     {"site_deployment_json/3", :unread, "console",
      "BROWSER-ONLY. gh-5's live build console; the CLI streams its own lines from the deploy stream rather than re-rendering this list."},
-    {"barkpark_json/4", :phantom, "team",
+    {"barkpark_json/5", :phantom, "team",
      "EMITTED, outside Side A's scope by design. /v1/barkparks Map.put's `team` onto the row in its all_teams? arm (router.ex:2077), i.e. in the ROUTE, not in the base serializer this census walks. The same one-level bound that stops the walk over-collecting a helper's private shapes also makes this key invisible — and `Barkpark.Team` is decoded and read (client_test.go:208), so the read lands."}
   ]
 
@@ -969,17 +970,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # to RECONCILED to make a red go away — the whole point of the split is that
   # "we decided this is fine" and "nobody has looked" are different sentences.
   @known_open [
-    {"barkpark_json/4", :unread, "region",
+    {"barkpark_json/5", :unread, "region",
      "dr-w11-payload-divergence-close — launch placement the fleet table cannot show."},
-    {"barkpark_json/4", :unread, "server_type",
+    {"barkpark_json/5", :unread, "server_type",
      "dr-w11-payload-divergence-close — launch size, same gap as region."},
-    {"barkpark_json/4", :unread, "unreachable_count",
+    {"barkpark_json/5", :unread, "unreachable_count",
      "dr-w11-payload-divergence-close — the consecutive-miss counter behind health_status. `bp` prints the health VERDICT with none of its evidence."},
-    {"barkpark_json/4", :unread, "unreachable_notification_sent",
+    {"barkpark_json/5", :unread, "unreachable_notification_sent",
      "dr-w11-payload-divergence-close — the once-per-outage alert latch, unread."},
-    {"barkpark_json/4", :unread, "autoupdate_triggered_at",
+    {"barkpark_json/5", :unread, "autoupdate_triggered_at",
      "dr-w11-payload-divergence-close — the in-flight rollout marker; without it a CLI status can print a stale cached verdict over a landing rollout."},
-    {"barkpark_json/4", :unread, "custom_host",
+    {"barkpark_json/5", :unread, "custom_host",
      "dr-w11-payload-divergence-close — the attached platform-zone host."},
     # THE THREE FLEET ROWS SAID SOMETHING FALSE (corrected by hand, dr-w27-s2).
     # They read as "decoded by NOBODY", and all three are decoded today by
@@ -999,15 +1000,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # or json:"transition" either (`grep -rn 'json:"previous_sha"' internal/cli`
     # returns nothing), so the rollback verdict stays newly-unread under the
     # widened union too. Three correct sentences cost less than 212 blind spots.
-    {"barkpark_json/4", :unread, "fleet_role",
+    {"barkpark_json/5", :unread, "fleet_role",
      "dr-w11-payload-divergence-close — Personal Dev Fleet group record (PDF-D61). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1460 (json:\"fleet_role\"), which is outside this arm's internal/cloudclient union root."},
-    {"barkpark_json/4", :unread, "fleet_parent_id",
+    {"barkpark_json/5", :unread, "fleet_parent_id",
      "dr-w11-payload-divergence-close — the main this box binds to. No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1461 (json:\"fleet_parent_id\"), outside this arm's union root."},
-    {"barkpark_json/4", :unread, "fleet_token_id",
+    {"barkpark_json/5", :unread, "fleet_token_id",
      "dr-w11-payload-divergence-close — the opaque revocation-token id (not a secret). No CLIENT struct decodes it; `bp` DOES, at internal/cli/cloud_support_cmd.go:1462 (json:\"fleet_token_id\"), outside this arm's union root."},
-    {"barkpark_json/4 pressure", :unread, "p95_ms",
+    {"barkpark_json/5 pressure", :unread, "p95_ms",
      "dr-w11-payload-divergence-close — charter D131's p95 vital. The Pressure struct's own doc comment asserts its tags are @unmetered_pressure VERBATIM; that sentence is now false by two keys."},
-    {"barkpark_json/4 pressure", :unread, "req_per_s",
+    {"barkpark_json/5 pressure", :unread, "req_per_s",
      "dr-w11-payload-divergence-close — charter D103's DENOMINATOR. It rides WITH err_5xx_per_s precisely so nobody prints an error share without the volume it came from — and err_5xx_per_s IS decoded while this is not, which is the exact shape D103 forbids."},
     {"site_deployment_json/3", :unread, "preview_host",
      "dr-w11-payload-divergence-close — gh-6 preview identity. SiteDeployment decodes Branch and Environment but neither preview key, so a CLI preview deploy cannot name the surface it just built."},
@@ -1019,8 +1020,26 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
+    # ── RULING: route ENVELOPES stay OUT of this census (dr-w14-s6 followup,
+    # criterion 3, 2026-08-23). The question on the record was whether envelope
+    # keys added at the ROUTE (e.g. GET /v1/sites/:id/deployments'
+    # `next_cursor`, or the deleted `publish_clock`) should become a censused
+    # class here. They do not, for three reasons. (1) Side A's walker reads
+    # NAMED serializer entry functions (@pairs); route envelopes are composed
+    # inline in router.ex `json/3` calls, and a scanner over macro-generated
+    # route bodies is a DIFFERENT instrument with its own false-positive class
+    # — bolting it onto this file would blur what a red here means. (2) The
+    # class-level blindness already has one owner:
+    # dr-w18-bl-route-added-keys-escape-the-census (KNOWN OPEN, the `scope` row
+    # below is its second instance) — a walker fix belongs there, not as a
+    # side-effect of one envelope's reader. (3) The compensating control is
+    # typed Go readers with their own tests: the deployments envelope now has a
+    # NAMED decoder (internal/cloudclient deploymentsEnvelope) and a walked
+    # cursor (ListDeploymentsAll + TestListDeploymentsAllWalksPastTheCap), so
+    # the key this ruling was filed about is no longer silent. A divergence
+    # found later still lands here as an :unread/:phantom row, case by case. ──
     {"DeployLedger.census/3", :phantom, "scope",
-     "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/4`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
+     "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/5`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
   ]
 
   # MERGE RESOLUTION (wave-18 review, dr-w18-s2 rebased onto origin/main).
@@ -1146,7 +1165,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # THREE. Note which two rode free — it is NOT the pair a reader would
   # guess, which is the whole reason this number is measured and not derived.
   # The emitted floor does NOT move: this branch writes no serializer.
-  # W24 S2 (commit distance reaches the CLI): `barkpark_json/4` gains THREE keys
+  # W24 S2 (commit distance reaches the CLI): `barkpark_json/5` gains THREE keys
   # (commit_distance, commit_ancestry, commit_distance_checked_at) and
   # `cloudclient.Barkpark` gains the three matching json tags. Every number below
   # RE-MEASURED by the 999-technique on this branch — the four refusals printed
@@ -1302,7 +1321,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 999-technique on this branch, never summed: both pins set to 999 and the two
   # refusals printed "157 emitted key(s) collected" and "289 json tag(s) found in
   # internal/cloudclient".
-  @emitted_pinned 157
+  @emitted_pinned 158
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1347,7 +1366,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # moves the SITE register below instead, crossing INTO it at 2. That is charter
   # D260's shape and the exact reason the register exists. Measured by the
   # 999-technique on this branch, never summed.
-  @go_tag_pinned 300
+  @go_tag_pinned 301
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1563,8 +1582,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # them from there.
   # 62 -> 63: the `runaway_procs` key merge_pressure/2 now emits (see
   # @emitted_pinned above) is inside the barkpark_json family.
-  @barkpark_family_keys 63
-  @barkpark_family_keys_blind 46
+  @barkpark_family_keys 64
+  @barkpark_family_keys_blind 47
 
   # ---------------------------------------------------------------------------
 
@@ -1602,13 +1621,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # ---------------------------------------------------------------------------
 
   test "the extractor sees the merge_* PIPELINE, not just the base map literal" do
-    p = Extract.payload(@router, {:barkpark_json, 4})
+    p = Extract.payload(@router, {:barkpark_json, 5})
 
     assert p.unresolvable == []
 
-    # The base literal is 38 keys — what a regex would report. The pipeline adds
+    # The base literal is 39 keys (jpf-w1-queue-age-alarm added
+    # queued_deploy_age_seconds) — what a regex would report. The pipeline adds
     # the four job-status keys, the two list keys, and `pressure`.
-    assert MapSet.size(p.top) == 46
+    assert MapSet.size(p.top) == 47
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure) do
@@ -2058,9 +2078,14 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # The scan's bound is in the moduledoc and is not restated here: honest about
   # ABSENCE, optimistic about PRESENCE. The declared set below is a REPORT of
   # today's tree, not a blessing — each entry names what a reader cannot see.
+  # Both sets emptied by dr-w27-bl-decoded-but-never-rendered-sha: the reader
+  # now renders `d.SHA` (per-row identity), `page.SHA` (the filter echo) and
+  # `page.Limit` (the clamped window). An entry re-appears here only when a
+  # decoded field stops reaching the render — and it must arrive with a stated
+  # reason, not as a shrug.
   @never_rendered %{
-    "PlatformDelivery" => {"d", ["SHA"]},
-    "DeliveriesPage" => {"page", ["Limit", "SHA"]}
+    "PlatformDelivery" => {"d", []},
+    "DeliveriesPage" => {"page", []}
   }
 
   test "RENDER: every decoded delivery field reaches the human render, or is DECLARED unrendered" do
@@ -2130,33 +2155,33 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # THE THREE COMMIT_* ROWS THAT USED TO OPEN THIS LIST ARE GONE, and their
   # absence is the arm's first receipt. `commit_distance`, `commit_ancestry` and
   # `commit_distance_checked_at` were the headline hole this arm was built to
-  # name; dr-w24-s2 wired all three into `barkpark_json/4` in the SAME WAVE, so
+  # name; dr-w24-s2 wired all three into `barkpark_json/5` in the SAME WAVE, so
   # the rows died in the same commit as the emit, exactly as the arm's own
   # refusal text demands ("no longer unserialized … DELETE the allowlist row").
   # The arm closed a hole and then deleted its own paperwork; that is what it is
   # supposed to do.
   @schema_allowlist [
-    {"barkpark_json/4", "template",
+    {"barkpark_json/5", "template",
      "RULED — bootstrap custody. The schema comment states these ride the Vault encrypt-at-rest seam and are NEVER serialized in barkpark_json; they are revealed only through the team-admin-gated /bootstrap route."},
-    {"barkpark_json/4", "bootstrap_workspace",
+    {"barkpark_json/5", "bootstrap_workspace",
      "RULED — bootstrap custody, same /bootstrap route and same ruling as template above."},
-    {"barkpark_json/4", "bootstrap_project",
+    {"barkpark_json/5", "bootstrap_project",
      "RULED — bootstrap custody, same /bootstrap route and same ruling as template above."},
-    {"barkpark_json/4", "bootstrap_dataset",
+    {"barkpark_json/5", "bootstrap_dataset",
      "RULED — bootstrap custody, same /bootstrap route; its two token siblings need no row at all, they are carried by the *_encrypted class rule."},
-    {"barkpark_json/4", "vercel_project_id",
+    {"barkpark_json/5", "vercel_project_id",
      "RULED — zero-paste Vercel handoff (task-4e4a53b101a97051). The schema comment says plainly it is NEVER serialized in barkpark_json and is revealed through the team-admin-gated claim route instead."},
-    {"barkpark_json/4", "vercel_deploy_url",
+    {"barkpark_json/5", "vercel_deploy_url",
      "RULED — same custody as vercel_project_id above; display state for the claim page, not a fleet-row vital."},
-    {"barkpark_json/4", "vercel_claim_minted_at",
+    {"barkpark_json/5", "vercel_claim_minted_at",
      "RULED — the 24h-expiry stamp of the ENCRYPTED claim code. Emitting it without the code it dates would be a countdown to nothing."},
-    {"barkpark_json/4", "suspended_at",
+    {"barkpark_json/5", "suspended_at",
      "dr-w24-s4 KNOWN OPEN — the billing-suspension stamp. `suspended` and `suspended_reason` ARE emitted, so `bp` can say a box is suspended and why but never SINCE WHEN — the one field that separates a fresh suspension from a month-old one."},
-    {"barkpark_json/4", "apply_arming",
+    {"barkpark_json/5", "apply_arming",
      "dr-w24-s4 KNOWN OPEN, and the arm found it on its own first run against this tree. The ARMING verdict (armed | unarmed | NULL = not measured) does reach a wire — `operator_fleet_json/1` (router.ex:10377) emits it on the operator arming roster — but NOT the fleet row every `bp cloud` reader decodes, and `grep -rn apply_arming internal/` is EMPTY, so no Go struct decodes it from either route. `operator_fleet_json/1` is not a censused pair, so no arm in this file can say that second half; this row is where it is written down."},
-    {"barkpark_json/4", "apply_arming_checked_at",
+    {"barkpark_json/5", "apply_arming_checked_at",
      "dr-w24-s4 KNOWN OPEN — the freshness stamp of apply_arming, same custody and same measurement as its twin above. Without it an `unarmed` verdict cannot be told from one taken a month ago, which is the whole reason the column exists beside the verdict."},
-    {"barkpark_json/4", "updated_at",
+    {"barkpark_json/5", "updated_at",
      "RULED — deliberately off the wire: it moves on every hourly status poll, so a renderer diffing it would report 'something changed' about a box nothing happened to. `inserted_at` IS emitted, under its wire name created_at."},
     {"site_deployment_json/3", "claim_worker",
      "dr-w24-s4 KNOWN OPEN — which builder claimed this deployment. Lease bookkeeping today; it becomes a wire vital the moment two builders can race, which is the failure mode this epic exists for."},
@@ -2194,7 +2219,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #     macro-generated schema is the live version of that mutation.
   #   * @schema_unserialized_floor — the columns with no emitted key, allowlist
   #     included. It moves DOWN when a hole is closed, which is the point: wiring
-  #     one commit_* column into `barkpark_json/4` moves it and forces the
+  #     one commit_* column into `barkpark_json/5` moves it and forces the
   #     allowlist row's deletion in the SAME commit.
   #
   # BOTH NUMBERS ARE RE-MEASURED ON THIS TREE, not carried from the branch this
@@ -2206,11 +2231,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #
   # THE HISTORY, because both moved for reasons worth knowing:
   #   * @schema_unserialized_floor went 26 -> 23 when dr-w24-s2 wired the three
-  #     commit_* keys into `barkpark_json/4` — DOWN, because a hole closed, and
+  #     commit_* keys into `barkpark_json/5` — DOWN, because a hole closed, and
   #     the three allowlist rows died in the same commit as the emit.
   #   * It went 23 -> 25 on the rebase, and the arm named the cause ITSELF on its
   #     first run against today's tree: `apply_arming` and `apply_arming_checked_at`
-  #     (#13003, landed the same day as this reland) are columns `barkpark_json/4`
+  #     (#13003, landed the same day as this reland) are columns `barkpark_json/5`
   #     does not carry. That is the arm doing its job on a hole it was not built
   #     for, FOURTEEN DAYS after it was written (2026-08-08 -> 2026-08-22). See their rows above.
   #   * @schema_field_floor went 95 -> 103: eight columns joined the three
@@ -2390,7 +2415,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   test "THE FIX DIRECTION REDS TOO: emitting an allowlisted column forces its row's deletion" do
     # Not hypothetical and not a synthetic fixture: this runs the REAL assertion
     # over the REAL payload plus one key, which is exactly what wiring
-    # `suspended_at` into `barkpark_json/4` would look like from Side C. The
+    # `suspended_at` into `barkpark_json/5` would look like from Side C. The
     # allowlist row must die in the same commit as the emit — and it already
     # happened for real once in this wave: dr-w24-s2 emitted the three commit_*
     # columns and this arm refused until their three rows were deleted.
@@ -2529,8 +2554,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     end)
   end
 
-  defp barkpark, do: Enum.find(@pairs, &(&1.name == "barkpark_json/4"))
-  defp pressure, do: Enum.find(@pairs, &(&1.name == "barkpark_json/4 pressure"))
+  defp barkpark, do: Enum.find(@pairs, &(&1.name == "barkpark_json/5"))
+  defp pressure, do: Enum.find(@pairs, &(&1.name == "barkpark_json/5 pressure"))
 
   defp platform_delivery, do: Enum.find(@pairs, &(&1.name == "PlatformDelivery.to_json/1"))
 
@@ -2598,7 +2623,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
 
   A CALL-SHAPED predicate — one that also demands `curl` / `http.NewRequest` / a
   verb on that line — is REFUTED, not merely unused: measured on this tree it
-  scores 21 of 23 routes caller-less, because Go builds the path and issues the
+  scores most of the 26 routes caller-less, because Go builds the path and issues the
   request on different lines. A predicate that reds 21 true positives is not
   stricter, it is broken.
 
@@ -2624,8 +2649,8 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
   # Refused BY NAME, each for a measured reason:
   #   tooling/**   ledger prose; not under @roots today, so this is belt-and-braces
   #   *.md         prose. THE load-bearing refusal — see @moduledoc
-  #   router.ex    the producer itself. All 23 routes self-hit >= 2 (the route
-  #                line plus its own doc block), so including it scores 23/23 CALLED
+  #   router.ex    the producer itself. All 26 routes self-hit >= 2 (the route
+  #                line plus its own doc block), so including it scores 26/26 CALLED
   #   *_test.go    two Go tests carry a contiguous deprovision literal
   #   *_test.exs   the same shape on the Elixir side
   @refused ["tooling/**", "*.md", "router.ex", "*_test.go", "*_test.exs"]
@@ -2641,7 +2666,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
 
   @doc """
   The repo root, or a raise. NEVER a clean tree: a wrong root would walk nothing,
-  find no callers, and report all 23 routes caller-less — or, worse, parse no
+  find no callers, and report all 26 routes caller-less — or, worse, parse no
   routes at all and report a perfectly clean census over an empty population.
   """
   def repo_root!(root \\ @default_repo_root) do
@@ -2848,7 +2873,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
     3. THE CORPUS IS DECLARED — a floor on its size (a walk that silently
        stopped recursing would otherwise report a clean tree) and an explicit
        "prose entered the corpus" guard.
-    4. THE PREDICATE IS NOT THE PRODUCER — all 23 routes self-hit router.ex at
+    4. THE PREDICATE IS NOT THE PRODUCER — all 26 routes self-hit router.ex at
        least twice, so including the producer would score them all called; and
        the crown's LOOSE spellings are absent from the corpus, so its caller-less
        verdict is not an artefact of predicate strictness.
@@ -3015,7 +3040,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
   # arm 4 — the predicate is not the producer, and not merely strict
   # ---------------------------------------------------------------------------
 
-  test "THE PRODUCER SELF-HITS: every one of the 23 routes hits router.ex >= 2 times", ctx do
+  test "THE PRODUCER SELF-HITS: every one of the 26 routes hits router.ex >= 2 times", ctx do
     lines = @router |> File.read!() |> String.split("\n")
 
     self_hits =
@@ -3024,7 +3049,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
         {route, Enum.count(lines, &Seam.line_calls?(&1, s))}
       end)
 
-    assert map_size(self_hits) == 23, "expected 23 write routes, saw #{map_size(self_hits)}"
+    assert map_size(self_hits) == 26, "expected 26 write routes, saw #{map_size(self_hits)}"
 
     {min_route, min_hits} = Enum.min_by(self_hits, &elem(&1, 1))
 

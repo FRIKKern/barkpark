@@ -59,6 +59,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       # is CSS-owned and connect_params is nil on the static render — the
       # assign only ever narrows the desk once the live socket learns better.
       width_bucket: "wide",
+      # ── Focus-after-select mark (spd-bl-focus-after-select) ─────────────
+      # One-shot: set by Scope.select/2 ONLY at narrow/phone (where the
+      # clicked row is destroyed by the patch), rendered as tabindex="-1" +
+      # phx-mounted={JS.focus()} on the opened document's own header, and
+      # spent by expand_pane/2 and a width-bucket flip — the same lifecycle
+      # discipline focus_pane_idx keeps. Seeded false so an initial load
+      # never steals focus.
+      focus_doc_on_open: false,
       # ── Inspector summon flag (spd-b39, the Tier-2 ladder) ──────────────
       # Whether the user ASKED for the Document inspector, as opposed to it
       # being open because the bucket defaults it open. `sidebar_assigns/1`

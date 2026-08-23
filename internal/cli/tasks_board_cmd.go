@@ -68,7 +68,7 @@ func printTasksBoardHelp(out *writer) {
 	out.outf("enter descends — a task opens its full detail; from there its linked paper,")
 	out.outf("the paper's tasks, a child task, its children… esc/backspace ascends.")
 	out.outf("Wide terminals show a two-pane board+reader with the document centered at")
-	out.outf("the 72-col reading measure; narrow ones push full-frame. One view, no toggles.")
+	out.outf("the 80-col reading measure; narrow ones push full-frame. One view, no toggles.")
 	out.outf("")
 	out.outf("keys:")
 	out.outf("  j / k, ↓ / ↑   move the cursor")

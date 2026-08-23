@@ -1,0 +1,477 @@
+{
+  "2026-04-06": {
+    "edition": 1,
+    "kicker": "Genesis",
+    "title": "The first bark",
+    "dek": "Barkpark went from an empty repository to a working CMS with a terminal, a web studio, an API, and a path to production.",
+    "opener": "The first week was less a release than an act of assembly. A schema-driven terminal grew a Phoenix API, draft and publish semantics, live updates, media storage, a web studio, and a deploy story in six days. The product already had its defining idea: the same structured content should feel native wherever it is edited.",
+    "highlights": [
+      {
+        "title": "The terminal set the grammar",
+        "summary": "The initial TUI established Barkpark's structure-first editing model: schemas describe the desk, fields, and navigation instead of hard-coded screens.",
+        "changes": ["b4ddc1c274"]
+      },
+      {
+        "title": "A real content engine arrived",
+        "summary": "Phoenix brought the API, revisions, draft/publish behavior, media, and server-sent updates—the foundations that every later client would share.",
+        "changes": ["b2f652b8d9", "ee5e4a50b0"]
+      },
+      {
+        "title": "One model, two studios",
+        "summary": "A LiveView Studio joined the terminal and the first production deployment path landed, turning the prototype into an operable system.",
+        "changes": ["2c7448b22d", "4439c63075"]
+      }
+    ],
+    "closing": "By Sunday, Barkpark was already recognizably itself: structured content, multiple readers, and an insistence that local development and production tell the same story."
+  },
+  "2026-04-13": {
+    "edition": 2,
+    "kicker": "Platform",
+    "title": "From prototype to platform",
+    "dek": "Typed SDKs, replay-safe previews, a serious API tester, and public documentation made Barkpark something other teams could build on.",
+    "opener": "Week two was about contracts. The API became more expressive, the JavaScript packages became publishable, preview security hardened, and the Studio learned the small interaction details that separate a demo from a daily tool. Barkpark started speaking to builders beyond its own repository.",
+    "highlights": [
+      {
+        "title": "The SDK family took shape",
+        "summary": "Core, React, Next.js, and code-generation work turned the content API into typed building blocks with a coherent release path.",
+        "changes": ["3ff034fd63", "ccbe8cb67a"]
+      },
+      {
+        "title": "Preview links became trustworthy",
+        "summary": "Replay protection and response-envelope controls tightened the preview boundary without making the authoring flow heavier.",
+        "changes": ["8a16a6ed38", "3f8386c409"]
+      },
+      {
+        "title": "The product learned to explain itself",
+        "summary": "A public documentation site and flagship guides arrived alongside a much more capable API test runner.",
+        "changes": ["5ba29d4ba1", "73e28ca6f6"]
+      }
+    ],
+    "closing": "The important shift was not the number of endpoints. It was that Barkpark now had explicit contracts—from HTTP envelopes to package releases—that another developer could rely on."
+  },
+  "2026-04-20": {
+    "edition": 3,
+    "kicker": "Extensibility",
+    "title": "Plugins get real",
+    "dek": "OnixEdit became the proving ground for a plugin system that could own schemas, validation, codelists, and Studio behavior.",
+    "opener": "This was the week Barkpark stopped treating extensibility as a future promise. Publishing metadata supplied the pressure: rich nested schemas, external codelists, cross-field rules, and versioned errors all had to work together without leaking plugin knowledge into the host.",
+    "highlights": [
+      {
+        "title": "OnixEdit opened the door",
+        "summary": "The first substantial plugin brought a book schema and reusable contributor and text-content shapes into the registry.",
+        "changes": ["f0425b986c", "a45a3276fa"]
+      },
+      {
+        "title": "Validation became a language",
+        "summary": "Cross-codelist rules and a measured validation DSL made complex domain constraints explicit and testable.",
+        "changes": ["2d1331e33f", "4c301a7e84"]
+      },
+      {
+        "title": "Errors became a contract",
+        "summary": "A version-negotiated error envelope gave clients stable, actionable failure shapes while the Studio gained a plugin-schema adapter.",
+        "changes": ["deedb0d70f", "cd1d478265"]
+      }
+    ],
+    "closing": "OnixEdit was deliberately difficult. Passing that test gave Barkpark an extension seam shaped by real publishing work rather than a toy example."
+  },
+  "2026-04-27": {
+    "edition": 4,
+    "kicker": "Publishing",
+    "title": "A book can make the whole journey",
+    "dek": "ONIX import, validation, preview, and Bokbasen delivery connected into an end-to-end publishing workflow.",
+    "opener": "The month closed with a complete vertical slice. A book could enter as ONIX, move through a schema-aware Studio, pass Norwegian publishing checks, and reach Bokbasen. Around that path, browser sessions, a new web shell, and sharper Studio chrome made the workflow feel coherent rather than stitched together.",
+    "highlights": [
+      {
+        "title": "ONIX reached the other side",
+        "summary": "The importer, locale audit, pre-flight checks, and end-to-end fixture proved that publishing metadata could survive the entire system.",
+        "changes": ["3ec3e7d090", "59f60565f8"]
+      },
+      {
+        "title": "Bokbasen became operable",
+        "summary": "Background delivery gained an admin surface, command-line controls, mocked end-to-end coverage, and redacted evidence.",
+        "changes": ["a971b24e55", "162a6becdc"]
+      },
+      {
+        "title": "The Studio found its publishing shape",
+        "summary": "Native field inputs, Sanity-inspired chrome, and browser login aligned the specialist book editor with the rest of Barkpark.",
+        "changes": ["fd21ead9c3", "d7682b8c53"]
+      }
+    ],
+    "closing": "The result was more than an integration. It was proof that Barkpark could absorb a demanding domain and still make the workflow feel like one product."
+  },
+  "2026-05-04": {
+    "edition": 5,
+    "kicker": "Components",
+    "title": "Editors that know the schema",
+    "dek": "A focused component week gave rich text, media, references, and document previews reusable homes inside the Studio.",
+    "opener": "Only four product changes landed, but they formed a clean set. Barkpark's Studio began moving complex inputs behind Web Component boundaries, preserving the schema-driven host while allowing richer editing experiences to evolve independently.",
+    "highlights": [
+      {
+        "title": "Rich content got a native surface",
+        "summary": "The rich-text prototype and media picker established the interaction model for content that cannot be represented by a plain form control.",
+        "changes": ["d41c45583d", "34e23aae2b"]
+      },
+      {
+        "title": "Relationships became tangible",
+        "summary": "Reference picking moved from raw identifiers to a purpose-built browser for finding and connecting documents.",
+        "changes": ["e9faed1abb"]
+      },
+      {
+        "title": "Preview joined the editing loop",
+        "summary": "A document-preview component completed the set, making the rendered result part of authoring rather than a separate destination.",
+        "changes": ["190e161443"]
+      }
+    ],
+    "closing": "This quiet week mattered because it reduced future complexity: the Studio could stay schema-led while its most expressive fields gained dedicated craft."
+  },
+  "2026-05-11": {
+    "edition": 6,
+    "kicker": "Lifecycle",
+    "title": "Plugins can act",
+    "dek": "Plugins moved beyond describing content and began participating in document lifecycles, navigation, settings, and delivery.",
+    "opener": "The plugin boundary deepened. OnixEdit no longer needed the host to know when or how to publish a book; lifecycle hooks, resolver chains, settings schemas, and navigation entries let the extension carry its own behavior. The Studio simultaneously grew into a credible ONIX workspace.",
+    "highlights": [
+      {
+        "title": "The host stopped branching by plugin name",
+        "summary": "Resolver callbacks and registry collectors replaced hard-coded touchpoints with ordered, testable extension contracts.",
+        "changes": ["ed14d82ecd", "223900bb45"]
+      },
+      {
+        "title": "Publishing became an event",
+        "summary": "Document lifecycle hooks reached content CRUD, allowing OnixEdit to enqueue Bokbasen delivery after publish without special host code.",
+        "changes": ["c588a8fa62", "41278da9c3"]
+      },
+      {
+        "title": "The ONIX desk became a workplace",
+        "summary": "Tabs, live XML preview, conditional fields, filters, document actions, diffing, and cross-validation made specialist editing feel first-class.",
+        "changes": ["b4b21745ef", "dd830aba7e"]
+      }
+    ],
+    "closing": "Extensibility now meant ownership: a plugin could describe its content, shape its interface, respond to lifecycle events, and operate its external service."
+  },
+  "2026-05-18": {
+    "edition": 7,
+    "kicker": "Architecture",
+    "title": "A platform seam you can trust",
+    "dek": "Plugin routing, boot guarantees, a real kill switch, and a new paper editor made extensibility safer and authoring more ambitious.",
+    "opener": "Barkpark widened in two directions this week. Underneath, plugin boundaries became explicit enough to survive boot, routing, testing, and failure. Above them, a new block editor and theme system made the authoring experience feel less like a generated form and more like a writing environment.",
+    "highlights": [
+      {
+        "title": "Plugins earned their own roads",
+        "summary": "Compile-time route injection, scope tags, connection tests, and a genuine off switch made plugin execution both powerful and containable.",
+        "changes": ["db05a1b50a", "da48d79264"]
+      },
+      {
+        "title": "Paper became composable",
+        "summary": "Nested composite blocks and a Notion-style slash menu moved the editor toward direct, fluid document construction.",
+        "changes": ["909c3cda04", "2861383c2e"]
+      },
+      {
+        "title": "The Studio gained a point of view",
+        "summary": "A complete light-and-dark theme system and per-document editor switching let teams choose how they work without changing the content model.",
+        "changes": ["349f8a24f3", "7f6e5dcbda"]
+      }
+    ],
+    "closing": "The week's common thread was confidence: richer experiences above, stronger isolation below, and fewer reasons for either layer to know too much about the other."
+  },
+  "2026-05-25": {
+    "edition": 8,
+    "kicker": "Integrity",
+    "title": "Tenancy without ghosts",
+    "dek": "A deep integrity pass closed cross-workspace leaks and orphan paths while Paper and the TUI became calmer, more faithful readers.",
+    "opener": "This was Barkpark's first large correctness week. The team followed workspace, project, and dataset identity through reads, writes, migrations, deletion, background work, and caches. At the same time, Paper gained real view/edit parity and the terminal stopped refreshing on changes that were not changes at all.",
+    "highlights": [
+      {
+        "title": "Deletion finally meant deletion",
+        "summary": "Workspace cleanup reached blobs, plugins, webhooks, search records, mutations, and Paper events instead of leaving content to reappear under a default scope.",
+        "changes": ["68f248f102", "e183678a91"]
+      },
+      {
+        "title": "Paper read like Paper",
+        "summary": "Article rendering, block-owned rhythm, and per-block edit styles brought the editing canvas and final reader into visual agreement.",
+        "changes": ["dd41f33d4a", "9cef6de54c"]
+      },
+      {
+        "title": "The terminal stopped crying wolf",
+        "summary": "Stable snapshot hashing removed phantom refreshes, save failures became visible, and scoped indexes kept the correctness work fast.",
+        "changes": ["1f1fbcc35f", "f60b595775"]
+      }
+    ],
+    "closing": "The visible polish was welcome, but the durable achievement was invisible: content stayed attached to the workspace, project, and dataset that actually owned it."
+  },
+  "2026-06-01": {
+    "edition": 9,
+    "kicker": "Tooling",
+    "title": "bp becomes a toolbelt",
+    "dek": "Setup, migration, search, and a repaired terminal turned the CLI into the shortest path between a developer and their content.",
+    "opener": "The command line expanded from companion to control surface. Barkpark learned how to persist credentials, distinguish server kinds, migrate data between installations, export game-ready content, and retrieve through a search-engine-neutral seam.",
+    "highlights": [
+      {
+        "title": "Servers became movable",
+        "summary": "A server-kind model and cross-server migration command made local, self-hosted, and cloud Barkparks part of one workflow.",
+        "changes": ["10b615ec40", "c6c701d993"]
+      },
+      {
+        "title": "The terminal found its documents again",
+        "summary": "A response-envelope mismatch that emptied every TUI list was fixed, followed by careful field-box alignment.",
+        "changes": ["7fa57e959c", "bbd2f75b2b"]
+      },
+      {
+        "title": "Content learned new destinations",
+        "summary": "The FRT bridge exported deterministic JSON for Godot while the retriever seam opened Barkpark search to interchangeable engines.",
+        "changes": ["586eeface6", "e4e7e47db1"]
+      }
+    ],
+    "closing": "The CLI's value became coherence: the same content model could now be configured, moved, searched, and exported without leaving the terminal."
+  },
+  "2026-06-08": {
+    "edition": 10,
+    "kicker": "Collaboration",
+    "title": "Presence everywhere",
+    "dek": "Live sheets, safer sharing, richer editors, and visible task work made Barkpark feel inhabited by a team.",
+    "opener": "A broad collaboration wave connected the product's surfaces. Sheets gained cursors and soft locks, sharing learned to respect authenticated access, tasks became born-valid, and both Studio and TUI editors grew controls appropriate to their field shapes.",
+    "highlights": [
+      {
+        "title": "Sheets became multiplayer",
+        "summary": "Presence, selections, soft locks, per-user undo, and a live public reader turned a grid into a shared working surface.",
+        "changes": ["683301ed3b", "509afb9a9f"]
+      },
+      {
+        "title": "Sharing respected the reader",
+        "summary": "Canonical share URLs arrived with a crucial rule: a read link can never reduce the access of an already authenticated member.",
+        "changes": ["87d8ddb837", "f184228dcd"]
+      },
+      {
+        "title": "Schemas became friendlier controls",
+        "summary": "Rich-text tools, numeric inputs, grouped fields, mini-tables, and row-level reference pickers made generated editors feel deliberately designed.",
+        "changes": ["ad61656b71", "0512f63571"]
+      }
+    ],
+    "closing": "The week made collaboration less of a feature and more of a quality shared by every surface: people could see one another, trust the boundary, and keep moving."
+  },
+  "2026-06-15": {
+    "edition": 11,
+    "kicker": "Discovery",
+    "title": "Search learns the corpus",
+    "dek": "Finder, graph, and index work turned search from a result list into a fast, navigable map of Barkpark knowledge.",
+    "opener": "Search received a full-stack rethink. The index learned more of the document body, hydration lost its N+1 reads, the browser gained complete keyboard movement, and the graph stopped truncating the world at one hundred documents. Barkpark's own documentation then became the test corpus.",
+    "highlights": [
+      {
+        "title": "Finder became an instrument",
+        "summary": "Keyboard navigation now crosses search, facets, results, and document view, with graph hover linking the spatial and textual views.",
+        "changes": ["9427f6b797", "c1498d76e0"]
+      },
+      {
+        "title": "The index got faster and wiser",
+        "summary": "Batch hydration removed an N+1 query pattern while morphological matching and a broader corpus improved useful recall.",
+        "changes": ["f0dfd279fa", "27f7a17f04"]
+      },
+      {
+        "title": "Barkpark indexed itself",
+        "summary": "The project's documentation moved into Papers with cross-document edges, giving discovery a real, connected body of knowledge.",
+        "changes": ["6bd70d201a", "bb5150294d"]
+      }
+    ],
+    "closing": "Search now answered a richer question than “which title matches?” It helped a reader move through the relationships that make a corpus understandable."
+  },
+  "2026-06-22": {
+    "edition": 12,
+    "kicker": "Cloud",
+    "title": "Barkpark gets a control plane",
+    "dek": "A live cloud dashboard, deployable starters, stronger SDK queries, and a broader Paper canvas prepared Barkpark for hosted work.",
+    "opener": "The final week of June's first half connected product and platform. Cloud instances gained live state and billing, starters became easier to publish, the CLI and SDK learned expansion and ordering, and the Paper editor absorbed images and references without abandoning its block model.",
+    "highlights": [
+      {
+        "title": "Cloud became visible",
+        "summary": "A live dashboard joined instance lifecycle, account state, and billing into one continuously updated operator view.",
+        "changes": ["637fea309f", "762a777db4"]
+      },
+      {
+        "title": "The content API opened up",
+        "summary": "Reference expansion, arbitrary ordering, and actionable query errors reached both the core client and the CLI.",
+        "changes": ["46320d4d06", "2775757475"]
+      },
+      {
+        "title": "Paper welcomed richer blocks",
+        "summary": "Image and reference fields joined the canvas, while defensive normalization kept older list shapes editable.",
+        "changes": ["335b493e30", "a3380ae8a1"]
+      }
+    ],
+    "closing": "Barkpark now had the beginnings of a hosted product without giving up the composable API and editor foundations that made self-hosting attractive."
+  },
+  "2026-06-29": {
+    "edition": 13,
+    "kicker": "Acceleration",
+    "title": "A platform in fast-forward",
+    "dek": "More than a thousand mainline changes pushed auth, cloud deployment, Sheets, SDK resilience, Studio, and the terminal forward at once.",
+    "opener": "This was an extraordinary expansion week. Rather than one flagship feature, Barkpark advanced as a system: people could sign into Studio, ship sites through a guided cloud handoff, build serious spreadsheets, and depend on clients that recovered cleanly from real network behavior.",
+    "highlights": [
+      {
+        "title": "Studio met the person using it",
+        "summary": "Core authentication became the Studio's identity system, making user accounts first-class authoring principals instead of an outer shell.",
+        "changes": ["2a1b3ce122", "cec1c1e534"]
+      },
+      {
+        "title": "Deployment lost the copy-paste",
+        "summary": "A guided Vercel handoff and paced launch checklist turned cloud deployment into a comprehensible product journey.",
+        "changes": ["76733f94e4", "90bcd66487"]
+      },
+      {
+        "title": "The clients learned resilience",
+        "summary": "SSE gained watchdogs, jitter, bounded buffers, and clean teardown while the TUI adopted forward-only snapshots to eliminate state flicker.",
+        "changes": ["870fe03134", "eff637642b"]
+      }
+    ],
+    "closing": "The number is striking, but the story is cohesion: identity, deployment, real-time clients, editing, and data tools all moved toward a platform people could trust for daily work."
+  },
+  "2026-07-06": {
+    "edition": 14,
+    "kicker": "Work",
+    "title": "Work becomes visible",
+    "dek": "Projects, tasks, chat, access, and terminal rendering converged into a clearer picture of what a team is doing now.",
+    "opener": "Barkpark began treating work itself as content with shape. Project rows unfolded into criteria and timelines, chat gained a hand-task surface, tasks required real briefs, and the terminal could render the images embedded in the documents under discussion.",
+    "highlights": [
+      {
+        "title": "Chat grew hands",
+        "summary": "A Doing strip, ready picker, and task commands let a conversation claim and advance concrete work without losing context.",
+        "changes": ["99eb958355", "8aebedd77b"]
+      },
+      {
+        "title": "Projects explained themselves",
+        "summary": "Inline peeks, automatic expansion, criteria checks, and Gantt segments made a project row reveal both meaning and motion.",
+        "changes": ["d9fb8ee7d7", "370ce012ec"]
+      },
+      {
+        "title": "Trust reached every surface",
+        "summary": "A complete access-grant deny matrix closed search and backlink leaks while terminal Paper gained truecolor image rendering.",
+        "changes": ["602eb4a364", "e187026b02"]
+      }
+    ],
+    "closing": "The week's connective tissue was presence: the work, the person doing it, the evidence behind it, and the access boundary around it all became easier to see."
+  },
+  "2026-07-13": {
+    "edition": 15,
+    "kicker": "Orchestration",
+    "title": "Barkpark grows an operator brain",
+    "dek": "Chat modes, multiplexed agents, cloud workspace transfer, safer deploys, and stronger scaffolding turned operations into a designed experience.",
+    "opener": "Mid-July was about directing complex systems without drowning in them. Chat learned explicit Plan and Autopilot modes, the terminal gained a herd view, cloud workspaces could move with provenance, and deployment began yielding resources to the live product by design.",
+    "highlights": [
+      {
+        "title": "One console, many conversations",
+        "summary": "The chat multiplexer and Plan ⇄ Autopilot model made parallel agent work legible and intentional instead of a collection of detached sessions.",
+        "changes": ["d49ae90224", "c0146be51d"]
+      },
+      {
+        "title": "A workspace learned the pull dialect",
+        "summary": "Profile, dataset, merge behavior, streamed blobs, and a provenance receipt turned cloud transfer into an inspectable operation.",
+        "changes": ["32248a5605", "b88f6ffa6a"]
+      },
+      {
+        "title": "Operations respected the live system",
+        "summary": "Site builds moved to idle CPU and I/O priority while Scaffy planted contracts that detect drift across generated application zones.",
+        "changes": ["de7d4783db", "1ad6aeb36b"]
+      }
+    ],
+    "closing": "Barkpark was no longer merely automating operations. It was giving them modes, receipts, resource etiquette, and surfaces a human could reason about."
+  },
+  "2026-07-20": {
+    "edition": 16,
+    "kicker": "Evidence",
+    "title": "The wide view, with receipts",
+    "dek": "A purpose-led task reader, mobile truthfulness, fleet identity, and evidence tooling made complex work easier to inspect and harder to misstate.",
+    "opener": "The product's language shifted toward evidence. Tasks opened with purpose and acceptance criteria, machine responses became deliberately brief, fleet servers exposed a complete identity, and GRIP began filling its ledger by re-executing the claims it recorded.",
+    "highlights": [
+      {
+        "title": "Tasks opened with why",
+        "summary": "A purpose dossier, criteria-first reader, and resizable wide terminal view made the taskboard a place to understand work—not just count it.",
+        "changes": ["48bf746a1c", "66d27486ca"]
+      },
+      {
+        "title": "Mobile stopped guessing",
+        "summary": "Archive failures, fleet state, follow behavior, clocks, and empty rendered turns all gained explicit, observable outcomes.",
+        "changes": ["a385dcbe84", "65d9a0b606"]
+      },
+      {
+        "title": "Evidence became reproducible",
+        "summary": "GRIP populated its ledger through re-execution, while deployment preflight learned to refuse evidence gathered from a cold worktree.",
+        "changes": ["7193dfcc98", "e16869ac06"]
+      }
+    ],
+    "closing": "The premium here was epistemic: Barkpark got better at distinguishing what happened, what was inferred, and what could actually be proved."
+  },
+  "2026-07-27": {
+    "edition": 17,
+    "kicker": "Truthfulness",
+    "title": "Operations stop pretending",
+    "dek": "Cloud failures named their causes, read-only became a real capability, and CI, tasks, mobile, and the CLI stopped smoothing over unknown state.",
+    "opener": "Late July concentrated on honest interfaces. A failed deployment carried its raw cause to the console and email. Studio separated read access from write access. Task broadcasts used stored rows. CI learned to reject several classes of false green. The system became more useful by becoming less reassuring.",
+    "highlights": [
+      {
+        "title": "Failure got a full sentence",
+        "summary": "Cloud surfaces preserved the measured reason, displayed it without clipping, and stopped describing deferred or failed work as calm progress.",
+        "changes": ["3fca450816", "7a0e939b05"]
+      },
+      {
+        "title": "Read-only became an architecture",
+        "summary": "Studio split read permission from write permission and enforced the boundary again at the asynchronous write chokepoint.",
+        "changes": ["9d3bbd426e", "f4de8cad41"]
+      },
+      {
+        "title": "Unknown state stayed unknown",
+        "summary": "Required checks closed false-green paths, CLI errors retained server details, and mobile badges stopped claiming outcomes that were never confirmed.",
+        "changes": ["4adeb623b1", "93e0f8a259"]
+      }
+    ],
+    "closing": "Honesty is a product feature. This week made ambiguity visible at the exact point where a person has to decide what to do next."
+  },
+  "2026-08-03": {
+    "edition": 18,
+    "kicker": "Reliability",
+    "title": "No more false calm",
+    "dek": "Deferrals, stale evidence, unreadable checks, and mismatched deploys all became states the system could name and route to a human.",
+    "opener": "The first full week of August was a reliability campaign in the literal sense: not “more green,” but better reasons. Cloud deferrals gained coverage, console unknowns split into measured causes, deploys recorded what boxes actually served, and gates refused evidence they could not parse or place on the right ancestry.",
+    "highlights": [
+      {
+        "title": "Deferred work became visible work",
+        "summary": "Historical deferrals were backfilled, daily coverage reached an operator, and the console learned distinct visual and verbal treatment for a build that will not proceed yet.",
+        "changes": ["a9e70d52aa", "01ba5a50f9"]
+      },
+      {
+        "title": "Deploy truth reached the box",
+        "summary": "Deployment recorded the SHA actually served and turned mismatches into explicit verdicts instead of optimistic assumptions.",
+        "changes": ["9562316d81", "82ca34e731"]
+      },
+      {
+        "title": "Evidence gates failed closed",
+        "summary": "Stale checkouts, shallow history, unparseable workflow definitions, and unreadable distances became named refusal classes.",
+        "changes": ["8e83b709a4", "a95bc7ca97"]
+      }
+    ],
+    "closing": "Reliability improved because the system stopped collapsing distinct problems into one reassuring color. Each refusal now carried a route toward understanding."
+  },
+  "2026-08-10": {
+    "edition": 19,
+    "kicker": "Craft",
+    "title": "Paper earns its name",
+    "dek": "A working-copy protocol, measured reading geometry, stronger visual rhythm, and a focused terminal reader turned documents into the week's main event.",
+    "opener": "After months of platform expansion, Barkpark spent a week on the feel of a document. Paper gained a pull/status/diff/push workflow, section rhythm became measurable, evidence could escape the prose column when width helped, and the terminal reader was tuned around a deliberate reading measure.",
+    "highlights": [
+      {
+        "title": "Paper got a working copy",
+        "summary": "BPML connected local pull, status, diff, and push to server-side synchronization, giving documents a developer-grade editing loop.",
+        "changes": ["8fae26f9fe", "2ceff91d57"]
+      },
+      {
+        "title": "Reading rhythm became testable",
+        "summary": "Section boundaries, rule weight, evidence width, and centering moved from taste to a measured visual system with regression gates.",
+        "changes": ["ad080e3653", "3f6fdf516b"]
+      },
+      {
+        "title": "The terminal became a reading room",
+        "summary": "The task reader lost navigation clutter, found a centered measure, and learned to present the selected document as a focused sheet.",
+        "changes": ["c0c37aab03", "a0715cf5cc"]
+      }
+    ],
+    "closing": "The week closed on a simple idea: a document tool should reward reading. Protocol, geometry, and rendering all moved in service of that moment."
+  }
+}

@@ -81,3 +81,55 @@ test("generateNonce() returns a non-empty string", () => {
   assert.equal(typeof nonce, "string");
   assert.ok(nonce.length > 0, "nonce must be non-empty");
 });
+
+test("connect-src is bare 'self' when NEXT_PUBLIC_BARKPARK_WS_URL is unset", () => {
+  const prior = process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+  delete process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+  try {
+    assert.equal(directive(buildCspPolicy("n"), "connect-src"), "connect-src 'self'");
+  } finally {
+    if (prior === undefined) delete process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+    else process.env.NEXT_PUBLIC_BARKPARK_WS_URL = prior;
+  }
+});
+
+test("connect-src adds the CONFIGURED WS origin, never a bare ws:/wss: wildcard", () => {
+  const prior = process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+  process.env.NEXT_PUBLIC_BARKPARK_WS_URL = "wss://api.barkpark.cloud/socket";
+  try {
+    const connectSrc = directive(buildCspPolicy("n"), "connect-src");
+    assert.equal(connectSrc, "connect-src 'self' wss://api.barkpark.cloud");
+    assert.ok(
+      !/\bws:\b/.test(connectSrc) && !/\bwss:\b/.test(connectSrc),
+      `connect-src must never carry a bare ws:/wss: wildcard: ${connectSrc}`,
+    );
+  } finally {
+    if (prior === undefined) delete process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+    else process.env.NEXT_PUBLIC_BARKPARK_WS_URL = prior;
+  }
+});
+
+test("connect-src drops a port-carrying WS origin's path but keeps scheme+host+port", () => {
+  const prior = process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+  process.env.NEXT_PUBLIC_BARKPARK_WS_URL = "ws://localhost:4000/socket/websocket";
+  try {
+    assert.equal(
+      directive(buildCspPolicy("n"), "connect-src"),
+      "connect-src 'self' ws://localhost:4000",
+    );
+  } finally {
+    if (prior === undefined) delete process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+    else process.env.NEXT_PUBLIC_BARKPARK_WS_URL = prior;
+  }
+});
+
+test("connect-src falls back to bare 'self' on an unparseable WS URL", () => {
+  const prior = process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+  process.env.NEXT_PUBLIC_BARKPARK_WS_URL = "not-a-url";
+  try {
+    assert.equal(directive(buildCspPolicy("n"), "connect-src"), "connect-src 'self'");
+  } finally {
+    if (prior === undefined) delete process.env.NEXT_PUBLIC_BARKPARK_WS_URL;
+    else process.env.NEXT_PUBLIC_BARKPARK_WS_URL = prior;
+  }
+});

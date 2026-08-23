@@ -36,6 +36,16 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Readiness do
     end
   end
 
+  # Bounded shell-out under the standard async_nolink + Task.yield ||
+  # Task.shutdown(:brutal_kill) deadline. Sobelow CI.System is a
+  # false-positive here: `path` comes from resolve_binary/1 — a
+  # System.find_executable/1 lookup (or absolute-path stat) of the
+  # server-configured codex binary name, never request data — and the argv is
+  # the fixed ["--version"]; no shell string, no client input. This durable
+  # inline skip replaces the line-anchored `.sobelow-skips` fingerprint
+  # (readiness.ex:42), which any edit shifting this file would silently
+  # re-red on main — the exact fingerprint-drift the #2641 pattern cures.
+  # sobelow_skip ["CI.System"]
   defp version(path, timeout) do
     task =
       Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->

@@ -40,6 +40,20 @@ export function projectNameError(targetArg: string): string | undefined {
   return undefined
 }
 
+/**
+ * The interactive `p.text` validator — validates the NORMALISED name, i.e.
+ * what the run will actually use (runPrompts applies normalizeProjectName at
+ * return). The old validator checked the RAW entry, so `foo/..` passed and
+ * then normalised to `..`, pointing targetDir at the PARENT of cwd — not a
+ * clobber (ensureTargetEmpty aborts on the almost-always-non-empty parent),
+ * but a confusing "not empty" error naming a directory the user never typed.
+ * Delegating to projectNameError keeps ONE owner for the name rule, so the
+ * interactive and non-interactive paths cannot disagree again.
+ */
+export function interactiveNameError(value: string): string | undefined {
+  return projectNameError(value)
+}
+
 export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
   p.intro('Barkpark')
 
@@ -69,12 +83,7 @@ export async function runPrompts(inputs: PromptInputs): Promise<PromptAnswers> {
         message: 'Project name?',
         placeholder: 'my-barkpark-site',
         defaultValue: 'my-barkpark-site',
-        validate(value) {
-          const trimmed = value.trim()
-          if (!trimmed) return 'Project name is required.'
-          if (trimmed.startsWith('.')) return 'Project name may not start with "."'
-          return undefined
-        },
+        validate: interactiveNameError,
       })
 
   if (p.isCancel(projectName)) {

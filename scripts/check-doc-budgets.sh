@@ -348,16 +348,44 @@ if [ "$MODE" = selftest ]; then
   #     check while testing nothing — so each case greps for its OWN message,
   #     and the blinding step below is verified to have changed the copy before
   #     the copy is ever run.
-  #     THE PROBE RUNS AGAINST AN EMPTY ROOT, DELIBERATELY. This script derives
-  #     REPO_ROOT from its own location (`dirname $(dirname "$SELF")`), so a copy
-  #     under $TMP/scripts/ roots at $TMP — a tree with no docs at all, where the
-  #     size and card arms red loudly and meaninglessly. That is fine and it is
-  #     the point: the row COUNT is computed from the script's own data table
-  #     before any file is read, so it is the one verdict that is a property of
-  #     the table rather than of the tree. These arms therefore assert on that
-  #     ONE line and ignore the probe's overall exit, which carries no signal.
-  mkdir -p "$TMP/scripts"
-  caps_probe="$TMP/scripts/caps-probe.sh"
+  #     THE PROBE RUNS AGAINST A PLANTED GREEN ROOT. This script derives
+  #     REPO_ROOT from its own location (`dirname $(dirname "$SELF")`), so a
+  #     copy under $TMP/caps-root/scripts/ roots at $TMP/caps-root. The root is
+  #     planted GREEN from the script's own data — every caps-table path as a
+  #     tiny file, exactly 7 cards — and a CONTROL run of the unmutated copy
+  #     must exit 0 there. Only then does an exit code carry per-arm signal:
+  #     each mutated probe below must exit 1 for its OWN reason AND print its
+  #     OWN message. The previous shape captured output through `|| true` and
+  #     asserted only the string — which certifies the utterance, not the
+  #     refusal: disarm the ratchet's FAIL=1 and the diagnostic still prints
+  #     while the gate exits 0 (an exit code that formats rather than refuses).
+  caps_root="$TMP/caps-root"
+  mkdir -p "$caps_root/scripts" "$caps_root/docs/cards"
+  caps_probe="$caps_root/scripts/caps-probe.sh"
+  # Plant every caps-table path (2 bytes each, far under every cap), derived
+  # from the table itself so the fixture can never go stale against it.
+  while read -r fixture_path _fixture_cap; do
+    [ -n "$fixture_path" ] || continue
+    mkdir -p "$caps_root/$(dirname "$fixture_path")"
+    printf 'x\n' > "$caps_root/$fixture_path"
+  done < <(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$')
+  for card_i in 1 2 3 4 5 6 7; do
+    printf 'x\n' > "$caps_root/docs/cards/card-$card_i.md"
+  done
+  # The probe inherits DOC_BUDGETS_ONRAMP_DOC/GOLDEN (absolute, in $TMP);
+  # earlier arms mutated that doc, so restore + re-pin before the control run.
+  cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
+  bash "$SELF" --regen-onramp-golden >/dev/null
+
+  # jc: THE CONTROL — the unmutated copy must be GREEN on the planted root, or
+  #     no exit code below is attributable to its mutation.
+  cp "$SELF" "$caps_probe"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 0 ] \
+    || fail_selftest "the CONTROL probe exited $caps_rc on the planted green root — no mutated probe's exit is attributable. Its last lines: $(printf '%s' "$caps_out" | tail -3 | tr '\n' ' ')"
 
   # j0: the pinned literal agrees with the committed table. If these ever drift,
   #     every assertion below is about a number nobody maintains.
@@ -376,7 +404,12 @@ if [ "$MODE" = selftest ]; then
   probe_rows=$(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$caps_probe" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
   [ "$probe_rows" -eq 0 ] \
     || fail_selftest "the blinding step did not empty the CAPS table (still $probe_rows row(s)) — this arm would have proven nothing"
-  caps_out="$(bash "$caps_probe" 2>&1 || true)"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a DARK fixed-caps table exited $caps_rc, expected 1 — the diagnostic may still print, but the gate does not REFUSE (the FAIL=1 behind the row-count ratchet is disarmed)"
   case "$caps_out" in
     *"walked 0 row(s), expected $expected_literal"*) ;;
     *) fail_selftest "a DARK fixed-caps table did not print \`walked 0 row(s), expected $expected_literal\` — the row-count ratchet is gone, so an empty CAPS heredoc would verdict on NOTHING and still exit 0" ;;
@@ -390,16 +423,67 @@ if [ "$MODE" = selftest ]; then
   probe_rows=$(sed -n '/^done <<.CAPS.$/,/^CAPS$/p' "$caps_probe" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
   [ "$probe_rows" -eq $((expected_literal + 1)) ] \
     || fail_selftest "the row-adding step did not add a row (table has $probe_rows) — this arm would have proven nothing"
-  caps_out="$(bash "$caps_probe" 2>&1 || true)"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "an UNPINNED extra cap row exited $caps_rc, expected 1 — the mismatch prints but the gate does not refuse"
   case "$caps_out" in
     *"walked $((expected_literal + 1)) row(s), expected $expected_literal"*) ;;
     *) fail_selftest "an UNPINNED extra cap row did not print \`walked $((expected_literal + 1)) row(s), expected $expected_literal\` — the ratchet only bites downward, so rows can be added without review" ;;
   esac
 
-  echo "check-doc-budgets --selftest: PASS (13 arms: pristine, in-span plant," \
+  # j3: an OVER-CAP file must RED through check_cap's own primitive. No arm
+  #     ever planted one, so check_cap's over-cap FAIL=1 sat outside every
+  #     tripwire: disarm it and 13/13 arms still passed while a real over-cap
+  #     file sailed through. Shrink the FIRST table row's cap to 1 byte (row
+  #     count unchanged, file present at 2 bytes) so the ONLY red is the
+  #     over-cap arm.
+  awk 'BEGIN { intab = 0; done_shrink = 0 }
+       /^done <<.CAPS.$/ { print; intab = 1; next }
+       /^CAPS$/          { intab = 0; print; next }
+       intab == 1 && done_shrink == 0 && $0 ~ /^[A-Za-z].* [0-9]+$/ { $NF = 1; print; done_shrink = 1; next }
+       { print }' "$SELF" > "$caps_probe"
+  grep -qE '^[A-Za-z][^ ]* 1$' "$caps_probe" \
+    || fail_selftest "the cap-shrinking step did not produce a 1-byte cap row — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "an OVER-CAP file exited $caps_rc, expected 1 — check_cap's over-cap FAIL=1 is disarmed (the size line may still print while the gate exits 0)"
+  case "$caps_out" in
+    *"cap is 1B"*) ;;
+    *) fail_selftest "an OVER-CAP file did not print its \`cap is 1B\` FAIL line — the red came from something other than check_cap's over-cap arm" ;;
+  esac
+
+  # j4: a MISSING capped file must RED through check_cap's missing-file arm.
+  #     Swap the FIRST row's path for one that does not exist (row count
+  #     unchanged) so the ONLY red is the missing-file arm.
+  awk 'BEGIN { intab = 0; done_swap = 0 }
+       /^done <<.CAPS.$/ { print; intab = 1; next }
+       /^CAPS$/          { intab = 0; print; next }
+       intab == 1 && done_swap == 0 && $0 ~ /^[A-Za-z].* [0-9]+$/ { $1 = "no-such-file-planted-by-selftest.md"; print; done_swap = 1; next }
+       { print }' "$SELF" > "$caps_probe"
+  grep -q '^no-such-file-planted-by-selftest.md ' "$caps_probe" \
+    || fail_selftest "the path-swapping step did not swap a row — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a MISSING capped file exited $caps_rc, expected 1 — check_cap's missing-file FAIL=1 is disarmed"
+  case "$caps_out" in
+    *"no-such-file-planted-by-selftest.md is missing"*) ;;
+    *) fail_selftest "a MISSING capped file did not print its \`is missing\` FAIL line — the red came from something other than check_cap's missing-file arm" ;;
+  esac
+
+  echo "check-doc-budgets --selftest: PASS (16 arms: pristine, in-span plant," \
        "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
-       "span-cap clamp both directions, retired env var inert, caps-table dark," \
-       "caps-table unpinned row)"
+       "span-cap clamp both directions, retired env var inert, caps green control," \
+       "caps-table dark, caps-table unpinned row, over-cap file, missing capped" \
+       "file — every probe arm asserts the EXIT CODE and its own message)"
   exit 0
 fi
 

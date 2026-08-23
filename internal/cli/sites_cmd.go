@@ -13,7 +13,7 @@ package cli
 //   bp sites create --barkpark <slug> --name <name> — create a site
 //                   [--framework nextjs] [--domain <d>] [--scale-mode always_on|zero]
 //   bp deploy <site> [--artifact-url <url>] [--git-ref <ref>]  — enqueue a build
-//   bp sites deployments <site> [--limit N] [--before <cursor>] — list a window
+//   bp sites deployments <site> [--limit N] [--before <cursor>] [--all] — list a window
 //                                                   of the site's deployments
 //   bp sites env set <site> KEY=VAL [KEY=VAL...]    — replace the env blob
 //   bp sites domain add <site> <domain>             — add a domain
@@ -424,17 +424,27 @@ func statusColor(out *writer, status string) string {
 // the output is stable for golden compare. Empty domains print "—".
 func renderSitesTable(out *writer, sites []cloudclient.Site) {
 	const (
-		hName   = "NAME"
+		hName = "NAME"
+		// SLUG is the HANDLE every other verb takes (`bp sites deployments
+		// <slug>`, `bp deploy <slug>`, `bp cloud site deploy <slug>`), so a
+		// list that omits it names sites the reader cannot act on
+		// (dr-w14-bl-owner-cannot-list-own-sites: an owner had to curl
+		// /v1/sites to learn their own slugs).
+		hSlug   = "SLUG"
 		hDom    = "DOMAINS"
 		hStat   = "STATUS"
 		hDeploy = "LAST DEPLOY"
 	)
-	nameW, domW, statW := len(hName), len(hDom), len(hStat)
-	rows := make([][4]string, len(sites))
+	nameW, slugW, domW, statW := len(hName), len(hSlug), len(hDom), len(hStat)
+	rows := make([][5]string, len(sites))
 	for i, s := range sites {
 		dom := strings.Join(s.Domains, ", ")
 		if dom == "" {
 			dom = "—"
+		}
+		slug := strings.TrimSpace(s.Slug)
+		if slug == "" {
+			slug = "—"
 		}
 		status, when := "—", "—"
 		if s.LastDeployment != nil {
@@ -445,9 +455,12 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 				when = v
 			}
 		}
-		rows[i] = [4]string{s.Name, dom, status, when}
+		rows[i] = [5]string{s.Name, slug, dom, status, when}
 		if n := len(s.Name); n > nameW {
 			nameW = n
+		}
+		if n := len(slug); n > slugW {
+			slugW = n
 		}
 		if n := len(dom); n > domW {
 			domW = n
@@ -457,12 +470,12 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 		}
 	}
 
-	out.outf("%-*s  %-*s  %-*s  %s", nameW, hName, domW, hDom, statW, hStat, hDeploy)
+	out.outf("%-*s  %-*s  %-*s  %-*s  %s", nameW, hName, slugW, hSlug, domW, hDom, statW, hStat, hDeploy)
 	for _, r := range rows {
 		// Pad the raw status to the column width FIRST, then colorize, so the
 		// ANSI escape bytes never count toward statW and misalign the table.
-		stat := statusColor(out, fmt.Sprintf("%-*s", statW, r[2]))
-		out.outf("%-*s  %-*s  %s  %s", nameW, r[0], domW, r[1], stat, r[3])
+		stat := statusColor(out, fmt.Sprintf("%-*s", statW, r[3]))
+		out.outf("%-*s  %-*s  %-*s  %s  %s", nameW, r[0], slugW, r[1], domW, r[2], stat, r[4])
 	}
 }
 
@@ -835,12 +848,12 @@ func runSitesDeployments(out *writer, args []string) int {
 			return exitOK
 		}
 	}
-	handle, q, perr := parseDeploymentsArgs(args)
+	handle, q, all, perr := parseDeploymentsArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
 	if handle == "" {
-		return useError(out, "usage", "missing <site> — bp sites deployments <site> [--limit N] [--before <cursor>]", exitUsage)
+		return useError(out, "usage", "missing <site> — bp sites deployments <site> [--limit N] [--before <cursor>] [--all]", exitUsage)
 	}
 
 	cfg, ok := requireCloud(out)
@@ -852,11 +865,27 @@ func runSitesDeployments(out *writer, args []string) int {
 	if err != nil {
 		return useError(out, "failed", "resolve site: "+err.Error(), exitGeneric)
 	}
-	page, err := client.ListDeployments(cloudCtx(), site.ID, q)
-	if err != nil {
-		return useError(out, "failed", "list deployments: "+err.Error(), exitGeneric)
+	var ds []cloudclient.Deployment
+	var page cloudclient.DeploymentPage
+	if all {
+		// --all is the cursor's first CLI consumer (dr-w14-s6 followup): it
+		// follows next_cursor to the end of the ledger, so a rate or an audit
+		// over "the deployments" finally means all of them, not the newest
+		// hundred. The page NextCursor stays "" — there is nothing behind a
+		// full walk.
+		rows, err := client.ListDeploymentsAll(cloudCtx(), site.ID, q.Limit, 0)
+		if err != nil {
+			return useError(out, "failed", "list deployments: "+err.Error(), exitGeneric)
+		}
+		ds = rows
+	} else {
+		var err error
+		page, err = client.ListDeployments(cloudCtx(), site.ID, q)
+		if err != nil {
+			return useError(out, "failed", "list deployments: "+err.Error(), exitGeneric)
+		}
+		ds = page.Deployments
 	}
-	ds := page.Deployments
 
 	if out.output == "json" || out.output == "yaml" {
 		rows := make([]map[string]any, 0, len(ds))
@@ -885,7 +914,7 @@ func runSitesDeployments(out *writer, args []string) int {
 // parseDeploymentsArgs splits `bp sites deployments <site> [--limit N]
 // [--before <cursor>]`. The first positional is the site handle; a second
 // positional is a usage error, same as before the flags existed.
-func parseDeploymentsArgs(args []string) (handle string, q cloudclient.DeploymentQuery, err error) {
+func parseDeploymentsArgs(args []string) (handle string, q cloudclient.DeploymentQuery, all bool, err error) {
 	setLimit := func(v string) error {
 		n, cerr := strconv.Atoi(strings.TrimSpace(v))
 		if cerr != nil || n <= 0 {
@@ -905,6 +934,8 @@ func parseDeploymentsArgs(args []string) (handle string, q cloudclient.Deploymen
 			}
 		case strings.HasPrefix(a, "--limit="):
 			err = setLimit(a[len("--limit="):])
+		case a == "--all":
+			all = true
 		case a == "--before" || a == "--cursor":
 			q.Before, i, err = nextFlagValue(args, i)
 		case strings.HasPrefix(a, "--before="):
@@ -912,17 +943,20 @@ func parseDeploymentsArgs(args []string) (handle string, q cloudclient.Deploymen
 		case strings.HasPrefix(a, "--cursor="):
 			q.Before = a[len("--cursor="):]
 		case strings.HasPrefix(a, "-"):
-			return "", cloudclient.DeploymentQuery{}, fmt.Errorf("unknown flag %q (usage: bp sites deployments <site> [--limit N] [--before <cursor>])", a)
+			return "", cloudclient.DeploymentQuery{}, false, fmt.Errorf("unknown flag %q (usage: bp sites deployments <site> [--limit N] [--before <cursor>] [--all])", a)
 		case handle == "":
 			handle = a
 		default:
-			return "", cloudclient.DeploymentQuery{}, fmt.Errorf("too many arguments — bp sites deployments <site> [--limit N] [--before <cursor>]")
+			return "", cloudclient.DeploymentQuery{}, false, fmt.Errorf("too many arguments — bp sites deployments <site> [--limit N] [--before <cursor>] [--all]")
 		}
 		if err != nil {
-			return "", cloudclient.DeploymentQuery{}, err
+			return "", cloudclient.DeploymentQuery{}, false, err
 		}
 	}
-	return handle, q, nil
+	if all && q.Before != "" {
+		return "", cloudclient.DeploymentQuery{}, false, fmt.Errorf("--all walks every page from the newest row; it cannot start from a --before cursor")
+	}
+	return handle, q, all, nil
 }
 
 // minDeploymentSample is the smallest window this command will compute a
@@ -1473,7 +1507,7 @@ USAGE
   bp sites show <site-or-slug>                      show one site
   bp sites create --barkpark <slug> --name <name>   create a site under a Barkpark
                   [--framework nextjs] [--domain <d>] [--scale-mode always_on|zero]
-  bp sites deployments <site> [--limit N] [--before <c>]  list a window of a site's deployments
+  bp sites deployments <site> [--limit N] [--before <c>] [--all]  list a window of a site's deployments (--all walks every page)
                                                     (newest first; STATUS/CAUSE/TRIGGER/STARTED
                                                      plus a summary carrying its denominator)
   bp sites env set <site> KEY=VAL [KEY=VAL...]      replace the encrypted env blob

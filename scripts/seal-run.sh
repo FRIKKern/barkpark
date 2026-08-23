@@ -88,7 +88,6 @@ PRED_REL="cloud/priv/static/__preview__/seal-predicate.mjs"
 REPO=""
 EPIC=""
 ORIGIN_REF="origin/main"
-PREDICATE=""
 SHOW_WITHHELD=0
 PASSTHRU=()
 
@@ -99,7 +98,6 @@ usage() {
   --repo <path>        checkout to read (default: this script's own repo root)
   --epic <id>          forwarded to the predicate
   --origin-ref <ref>   the ref that defines "the tree worth quoting" (default: origin/main)
-  --predicate <path>   the predicate to execute (default: <repo>/cloud/priv/static/__preview__/seal-predicate.mjs)
   --show-withheld      print a withheld reading anyway (the letters are void)
   -- <args…>           forwarded verbatim to the predicate
 EOF
@@ -110,7 +108,15 @@ while [ $# -gt 0 ]; do
     --repo)        REPO="${2-}"; shift 2 ;;
     --epic)        EPIC="${2-}"; shift 2 ;;
     --origin-ref)  ORIGIN_REF="${2-}"; shift 2 ;;
-    --predicate)   PREDICATE="${2-}"; shift 2 ;;
+    --predicate)
+      # REMOVED (dr-w34-bl-seal-run-predicate-flag-is-a-decoy). The flag could
+      # never work: refusal 4 compares the executed file against the HARDCODED
+      # $ORIGIN_REF:$PRED_REL blob, so any --predicate that was not a
+      # byte-identical copy of that file was a guaranteed pre-run exit 4 whose
+      # remedy named a file the caller never passed. Dead surface that read as
+      # an escape hatch. The runner executes ONLY <repo>/$PRED_REL.
+      echo "seal-run: --predicate is no such flag (removed). This runner executes ONLY <repo>/$PRED_REL — point --repo at the checkout you want read." >&2
+      exit 7 ;;
     --show-withheld) SHOW_WITHHELD=1; shift ;;
     -h|--help)     usage; exit 0 ;;
     --)            shift; PASSTHRU=("$@"); break ;;
@@ -169,7 +175,7 @@ if ! git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   report_refusals; exit 7
 fi
 
-[ -n "$PREDICATE" ] || PREDICATE="$REPO/$PRED_REL"
+PREDICATE="$REPO/$PRED_REL"
 if [ ! -f "$PREDICATE" ]; then
   refuse 7 "the predicate is not on disk at $PREDICATE." "point --repo at a checkout that carries $PRED_REL"
   report_refusals; exit 7

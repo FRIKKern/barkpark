@@ -14,8 +14,7 @@ Browser LiveViews read the same token from `session["api_token"]` via
 ## Tenancy — token ↔ workspace
 
 The request principal is the API token; every token binds to exactly one
-**workspace** (the tenancy boundary; see the Workspace → Project → Dataset
-hierarchy in `docs/api-v1.md` §1a). The binding is two facts that must agree:
+**workspace** (the tenancy boundary — hierarchy: `docs/api-v1.md` §1a). The binding is two facts that must agree:
 
 - `api_tokens.workspace_id` — the workspace the token belongs to.
 - a `workspace_memberships` row — the principal is a member of it.
@@ -39,15 +38,14 @@ The mutate endpoint (`POST …/v1/data/mutate/:dataset`) enforces `write`
 ### Default workspace + flat alias
 
 Flat content paths (`/v1/data/:dataset/*`, etc.) resolve to the `"Default"`
-workspace/project; the dev token below is a `Default` member, so flat-route
-callers work unchanged.
+workspace/project; the dev token below is a `Default` member.
 
 ## Roles (permissions list on `ApiToken.permissions`)
 
 | Permission | Grants | Surfaces |
 |---|---|---|
-| `read` | Public reads on private datasets / private schemas | `/w/:workspace_slug/p/:project_slug/v1/data/query/*` (flat alias `/v1/data/query/*`), `/media` |
-| `write` | Mutations (create, patch, publish, unpublish, delete) | `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` (flat alias `POST /v1/data/mutate/:dataset`) |
+| `read` | Public reads on private datasets / private schemas | `/w/:ws/p/:proj/v1/data/query/*` (flat alias `/v1/data/query/*`), `/media` |
+| `write` | Mutations (create, patch, publish, unpublish, delete) | `POST /w/:ws/p/:proj/v1/data/mutate/:dataset` (flat alias `POST /v1/data/mutate/:dataset`) |
 | `public-read` | Anonymous-equivalent GET-only reads | Query/media reads; strict-list match when `permissions == ["public-read"]` exactly (`public_read.ex:53-58`); also satisfies `:read` (`tenancy/auth.ex:27`). Minted by `mix barkpark.rotate_public_read` (weekly) or `POST …/v1/tokens` (site-spawner) |
 | `chat` | Drive `/v1/chat` sessions owned by THIS workspace | `/v1/chat/*`; 403 fail-closed if the token is unbound; minted only by `create_chat_token/3`, which hardcodes `["chat"]` |
 | `ops` | Operate the Bokbasen publish pipeline (read-only on plugin secrets) | `/admin/onixedit/bokbasen` LiveView (old `/admin/bokbasen` 301-redirects here) |
@@ -60,9 +58,14 @@ callers work unchanged.
 ### Hierarchy
 
 `admin` is a **superset** of every other permission. Granting `admin`
-grants `ops` (and `read` + `write` for routes that check those plugs); `:ops`
+grants `ops` (and `read` + `write`); `:ops`
 stays separate because Bokbasen operators need submission status/retry/errors
 but must not read the encrypted `client_secret` `/studio/settings` exposes.
+
+But `admin` is **workspace-blind**: `RequireAdmin` takes no workspace
+argument, so `:require_admin` gates WHO may call a verb, never WHICH
+tenant — slug-resolving routes must also prove
+`Tenancy.Auth.workspace_admin?/2` in the action.
 
 `admin` must never enter the hardcoded `chat` literal: `RequireChatAccess`
 resolves `admin` to `:global`, stamping `owner_workspace_id = NULL` and
@@ -105,7 +108,6 @@ workspace converge on Default — answering `200` against the wrong tenant.
 `Default` workspace (with a `workspace_memberships` row), so it satisfies
 every gate here on scoped and flat-alias routes.
 
-**MUST rotate before prod**: the dev token carries read + write + admin
-and must not run in production. Starter templates bake `barkpark-dev-token`
+**MUST rotate before prod** — starter templates bake `barkpark-dev-token`
 into `BARKPARK_TOKEN` and `BARKPARK_SERVER_TOKEN`; replace **both** with
 freshly-issued tokens before deploying.

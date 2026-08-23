@@ -107,8 +107,19 @@ func For(status string) string {
 	// paints danger — that meter is judging a PLAN QUOTA, a contractual ceiling;
 	// this is judging triage urgency, and the number, not the tone, is what the
 	// two surfaces are required to agree on.)
+	// "unavailable" is a usage meter whose read was ATTEMPTED and FAILED
+	// (cloud_usage.go's third STATE token, dr-w3-s6) — a broken instrument, not
+	// a quiet one. It must be distinguishable in TONE from the deliberate
+	// "unmetered" (which stays neutral): a failed reading is attention-worthy,
+	// same grammar as degraded — look at it, it has not itself failed the plan.
+	// "deploy_stalled" (jpf-w1 D7) is warn for the ladder-monotony reason the
+	// D69 rungs give above — it sits at rank 8, between "unreported" (7, warn)
+	// and "behind" (9, info): a queued deploy nobody is building is a box to
+	// LOOK AT, not one that has failed. NAMING TRAP the state dodges: "queued"
+	// is already an info/blue token in this very switch, so the stalled state
+	// needed its own word to get its own tone.
 	case "degraded", "unknown", "suspended", "inactive", "near_limit",
-		"strained", "filling", "unreported":
+		"strained", "filling", "unreported", "deploy_stalled", "unavailable":
 		return "warn"
 	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling
 	// the operator must act on, so it paints the same danger tone as a failure.

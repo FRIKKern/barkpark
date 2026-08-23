@@ -492,6 +492,96 @@ defmodule BarkparkWeb.MutateControllerTest do
     end
   end
 
+  # ── the criteria fence, pinned at the HTTP seam (pds-bl-criteria-fence-http-level-pin) ──
+  #
+  # PDS wave 26 shipped the acceptance_criteria fence in gate_task_publish/2
+  # and proved it through Content.publish_document/4 only. This pins the seam
+  # an operator actually hits: a publish issued over /v1/data/mutate must map
+  # the fence refusal to a 422 validation_failed carrying the teachable
+  # acceptance_criteria message — and the stamped proof must survive, read
+  # back over HTTP, never from the repo.
+  describe "criteria fence over HTTP (pds-bl-criteria-fence-http-level-pin)" do
+    setup do
+      register_task_schemas!()
+      Barkpark.LabelFixtures.register_tags!("test")
+      :ok
+    end
+
+    test "a criteria-clearing publish over /v1/data/mutate answers 422 validation_failed " <>
+           "with the acceptance_criteria message, and the stamp survives the HTTP read-back",
+         %{conn: conn} do
+      # Publish a proof-bearing task through the HTTP door (birth — exempt).
+      content =
+        %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "priority" => 1,
+          "acceptance_criteria" => [
+            %{"criterion" => "it works", "met" => true, "evidence" => "run output pasted"}
+          ]
+        }
+        |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+
+      assert %{status: 200} =
+               mutate(conn, [
+                 %{
+                   "create" => %{
+                     "_id" => "fence-http-pin",
+                     "_type" => "task",
+                     "title" => "Fence HTTP pin fixture",
+                     "content" => content
+                   }
+                 },
+                 %{"publish" => %{"id" => "fence-http-pin", "type" => "task"}}
+               ])
+
+      # The stale draft: same doc, criteria regressed to unproven — written
+      # over HTTP too (a draft edit is a plain content edit; only the PUBLISH
+      # may refuse).
+      regressed =
+        Map.put(content, "acceptance_criteria", [
+          %{"criterion" => "it works", "met" => false, "evidence" => ""}
+        ])
+
+      assert %{status: 200} =
+               mutate(conn, [
+                 %{
+                   "createOrReplace" => %{
+                     "_id" => "drafts.fence-http-pin",
+                     "_type" => "task",
+                     "title" => "Fence HTTP pin fixture",
+                     "content" => regressed
+                   }
+                 }
+               ])
+
+      # The erasing publish over the wire: 422 validation_failed, and the
+      # refusal carries the fence's teachable acceptance_criteria message.
+      resp = mutate(conn, [%{"publish" => %{"id" => "fence-http-pin", "type" => "task"}}])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "validation_failed"
+      assert [message] = body["error"]["details"]["acceptance_criteria"]
+      assert message =~ "clear the `met: true` flag"
+      assert message =~ "bp task stamp"
+
+      # The proof survives — read back over HTTP, not from the repo.
+      read =
+        conn
+        |> authed()
+        |> get("/v1/data/doc/test/task/fence-http-pin")
+        |> json_response(200)
+
+      # /v1/data/doc answers the PUBLISHED row flattened under "result".
+      result = read["result"]
+      assert result["_draft"] == false
+
+      assert [%{"met" => true, "evidence" => "run output pasted"}] =
+               result["acceptance_criteria"]
+    end
+  end
+
   # ── cch-w2: the claim's own fence, and the create-family doors ────────────
   #
   # Round 1 (cch-w1 / D22) fenced the two `patch` clauses against a blind close.
@@ -1332,6 +1422,85 @@ defmodule BarkparkWeb.MutateControllerTest do
   # Every refusal test below FAILS against the pre-guard tree (verified by
   # reverting the two `with`-chain lines in `writer.ex` and re-running): the
   # refusals return 200 / 201 and the rows persist.
+  # ── the merge-gate flag advisory, pinned at the HTTP seam ──
+  #
+  # The wording nag (PR #12975) fired only into Logger — its sole reader was
+  # the server journal, so 669 open rows accumulated the MERGE-GATED wording
+  # without the machine-readable flag while every author stayed uninformed.
+  # This pins the fix: the advisory rides the mutate SUCCESS envelope as a
+  # `warnings` entry, which the bp CLI prints to stderr at the moment the
+  # criterion is authored.
+  describe "merge-gate flag advisory rides the mutate envelope" do
+    setup do
+      register_task_schemas!()
+      :ok
+    end
+
+    defp gate_task_create(id, criteria) do
+      %{
+        "create" => %{
+          "_id" => id,
+          "_type" => "task",
+          "title" => "Merge-gate advisory fixture #{id}",
+          "content" => %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "priority" => 2,
+            "acceptance_criteria" => criteria
+          }
+        }
+      }
+    end
+
+    test "an unflagged MERGE-GATED criterion puts a warning ON THE RESPONSE, not just the journal",
+         %{conn: conn} do
+      resp =
+        mutate(conn, [
+          gate_task_create("mg-advisory-unflagged", [
+            %{"criterion" => "the suite is green", "met" => false},
+            %{
+              "criterion" =>
+                "[MERGE-GATED] PR merged to main (LEAD closes this criterion on merge).",
+              "met" => false
+            }
+          ])
+        ])
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert [warning] =
+               Enum.filter(body["warnings"] || [], &(&1["code"] == "merge_gate_unflagged"))
+
+      assert warning["severity"] == "warning"
+      assert warning["message"] =~ "[1]"
+      assert warning["message"] =~ "merge_gate\": true"
+
+      # Advisory, never a gate: the write itself landed (as the draft row —
+      # a mutate `create` is draft-first, so the result id carries the prefix).
+      assert [%{"id" => "drafts.mg-advisory-unflagged"}] = body["results"]
+    end
+
+    test "the same criterion CARRYING the flag draws no merge-gate warning", %{conn: conn} do
+      resp =
+        mutate(conn, [
+          gate_task_create("mg-advisory-flagged", [
+            %{
+              "criterion" =>
+                "[MERGE-GATED] PR merged to main (LEAD closes this criterion on merge).",
+              "met" => false,
+              "merge_gate" => true
+            }
+          ])
+        ])
+
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert Enum.filter(body["warnings"] || [], &(&1["code"] == "merge_gate_unflagged")) == []
+    end
+  end
+
   describe "filing-law door guard (cch-w28, D307/D331)" do
     @epic "cloud-console-hardening-epic"
 

@@ -391,6 +391,93 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end
   end
 
+  describe "task.close manifest text vs the close honesty gates (mob-bl-close-manifest-lie)" do
+    # THE BINDING. The task.close manifest string IS `bp task close --help` —
+    # the CLI prints the server manifest verbatim — and it rotted silently once:
+    # from 448749cf1 (which made a done close over unmet criteria a REFUSAL)
+    # until 2026-08-23 it kept claiming "Unmet criteria never block a close
+    # (soft warning only)". Nothing caught it because no test read the prose.
+    #
+    # This bind is a PAIR. The behaviour half lives in
+    # test/barkpark/tasks/close_test.exs ("close/3 — criteria gate" and
+    # "close/3 — holder gate"): those tests pin the refusals themselves, so
+    # removing either gate goes red there. THIS half pins that the help text
+    # names those same gates by their stable wire tokens (params.ex
+    # reason_to_string/1: "criteria_unmet", "not_holder") and their overrides,
+    # so text drifting back toward the lie goes red here. Change the gates,
+    # change both tests — the prose can no longer diverge silently in either
+    # direction.
+    test "the close help names the refusals, the overrides, and the exemptions" do
+      close = Enum.find(Tasks.cli_commands(), &(&1.id == "task.close"))
+      assert close, "task.close must exist in the manifest"
+
+      text =
+        Enum.join(
+          [close.summary] ++
+            Enum.map(close.args, & &1.summary) ++ Enum.map(close.flags, & &1.summary),
+          " "
+        )
+
+      # The dead lie stays dead — in any wording.
+      refute text =~ ~r/never blocks? a close/i,
+             "the manifest claims unmet criteria cannot block a close — Close.close/3 refuses with criteria_unmet"
+
+      refute text =~ ~r/soft warning only/i
+
+      # The criteria gate: refusal by wire token, indices base, and escape hatch.
+      assert text =~ "REFUSED"
+      assert text =~ "criteria_unmet"
+      assert text =~ ~r/0-based/i
+      assert text =~ ~s(criteria_override="<why it is done anyway>")
+      assert text =~ "close_override.criteria"
+      # The override is accept-unmet-on-the-record: it never flips a criterion.
+      assert text =~ "met=false"
+      # The exemptions, by name (check_criteria_proven/4 exempts them BY NAME).
+      assert text =~ "cancelled"
+      assert text =~ "blocked"
+      assert text =~ ~r/EXEMPT/
+      # The autostamp deduction (Close.unmet_after_autostamp/2).
+      assert text =~ "merge_gate"
+      # The holder gate and its override (PDS-D288).
+      assert text =~ "not_holder"
+      assert text =~ "holder_override"
+      assert text =~ "close_override.holder"
+      # A blank reason is not an override (Close.override_reason/1).
+      assert text =~ ~r/blank reason is NOT an override/
+    end
+
+    # Same defect class, second instance found in the same sweep: task.ls
+    # declared `default: 50` while the server's page default is 1000
+    # (tasks_controller do_index — Params.parse_limit(params["limit"], 1000,
+    # 1000), unchanged since before the manifest entry existed). The CLI uses
+    # this field to calibrate its truncation warning, so the wrong value made
+    # `bp task ls` warn "more may be available" on fully-returned pages. This
+    # pins the manifest to the controller's real default; if the controller's
+    # page size ever changes, change both.
+    test "task.ls declares the server's REAL default page size, not a wish" do
+      ls = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ls"))
+      limit = Enum.find(ls.flags, &(&1.name == "limit"))
+      assert limit.default == 1000
+    end
+
+    # Third and fourth instances from the same sweep: doc.ls and doc.query both
+    # declared `default: 50` against QueryController.index's real default of
+    # 100 (parse_int(params["limit"], 100), unchanged since 8b81b12279 — the
+    # manifest entries were born claiming 50 two months later). media.ls (50)
+    # and search.query (50) match their controllers and stay untouched. If the
+    # controller's default ever changes, change these together.
+    test "doc.ls and doc.query declare QueryController's real default page size" do
+      manifest = Capabilities.manifest("admin", project: false)
+
+      for id <- ["doc.ls", "doc.query"] do
+        cmd = Enum.find(manifest["commands"], &(&1["id"] == id))
+        assert cmd, "#{id} must exist in the manifest"
+        limit = Enum.find(cmd["flags"], &(&1["name"] == "limit"))
+        assert limit["default"] == 100, "#{id} limit default must match the server (100)"
+      end
+    end
+  end
+
   describe "core content-graph verbs (Goal ges/graph-edge-seam)" do
     # FRESH-INSTALL invariant: the content graph roots on ANY content doc, so
     # its read verbs are CORE (not the disable-able Tasks plugin). They must be

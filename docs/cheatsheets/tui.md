@@ -9,7 +9,7 @@ Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` s
 |---|---|
 | `j/k` `h/l` | move · pane left/right (`l` drills in) |
 | `enter` | drill in / open document |
-| `/` | search the scope (modal: `enter` opens a hit) |
+| `/` | search scope (`enter` opens a hit) |
 | `s` | workspace / project / dataset selector |
 | `?` · `q` | key overlay · quit |
 
@@ -17,16 +17,19 @@ Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` s
 
 | Input | Does |
 |---|---|
-| wheel | scroll the list / detail |
-| click | select + activate in one gesture |
-| drag divider | resize the two panes (ratio persists) |
-| `M` | toggle mouse reporting on/off |
+| wheel | scroll list / detail |
+| click | select + activate |
+| click `↑N`/`↓N` marker | scroll past fold — never enters |
+| drag divider | resize panes (ratio persists) |
+| `M` | toggle mouse reporting |
+
+Hermetic drive gate: `scripts/taskboard-drive/drive.sh` `DRIVE_MODE=hermetic` (deterministic fixture run).
 
 ## Documents (list pane)
 
 | Key | Does |
 |---|---|
-| `n` | new doc — type a title, `enter` |
+| `n` | new doc — title, `enter` |
 | `y` | duplicate (verbatim content, " (copy)" title) |
 | `space` | mark row (✓) for bulk |
 | `ctrl+p` / `U` | publish / unpublish **all marked** |
@@ -41,18 +44,18 @@ Launch `bp` (no args). Miller columns: structure → doc lists → editor. `?` s
 | `enter` | edit field — ref: picker (`/` filters live); image: edits URL |
 | | text/richText/arrays open a **textarea**: `enter`=newline/item, `ctrl+s`=confirm |
 | `space` | toggle bool / cycle select (5+ options: `enter` opens a picker) |
-| `enter` on empty slug | pre-fills from title, `enter` again accepts |
+| `enter` on empty slug | pre-fill from title; `enter` accepts |
 | datetime | `now`, `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` |
 | validation | required shows `*`; bad pattern/number/date/color refused |
 | `ctrl+s` → `ctrl+p` | save, then publish the draft |
 | `U` | unpublish (back to draft) |
 | `d` | diff draft ↔ published (−pub, +draft) |
-| `H` | revision history — `enter` diffs a revision vs current |
-| `R R` | discard the draft (keeps the published twin) |
+| `H` | revisions — `enter` diffs one vs current |
+| `R R` | discard draft (published twin kept) |
 
-**Draft lifecycle:** `ctrl+s` saves to `drafts.<id>`, `ctrl+p` promotes, `U` demotes, `R R` discards; `d` first. Restore-from-revision is in Studio.
+**Drafts** save to `drafts.<id>`; restore-from-revision is Studio-only.
 
-**Blocks-doc bodies & Papers** are read-only here (editing would corrupt block structure); scroll Papers `j/k`, `ctrl+d/u`; edit in Studio.
+**Blocks-doc bodies & Papers**: read-only (edits would corrupt blocks) — scroll `j/k`, `ctrl+d/u`; edit in Studio.
 
 **Scope selector:** pick from lists; `n` creates a workspace/project (seeds Default/production), `m` = manual entry.
 

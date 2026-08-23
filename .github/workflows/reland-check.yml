@@ -40,9 +40,20 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true # advisory — report, never block
     steps:
-      - name: Checkout (full history for the base diff)
+      # PINNED TO THE PR HEAD SHA, not the default merge ref (charter D34).
+      # actions/checkout's default on a pull_request is refs/pull/N/merge — the
+      # PR head ALREADY MERGED with the current base tip. Diffing that against
+      # `base.sha` therefore reports every file anyone else landed on main since
+      # this PR branched, not this PR's own files. Measured: `Re-land advisory`
+      # concluded FAILURE on a probe PR whose only change was one docs file.
+      # This is the same one-line fix the Elixir dispatcher took; this workflow
+      # has exactly ONE checkout, so nothing else moves off the merge ref.
+      # Still advisory today — it becomes a BLOCKING false red the moment any
+      # name from this workflow is pinned into .github/required-checks.json.
+      - name: Checkout (PR head, full history for the base diff)
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Compute changed files
@@ -50,8 +61,31 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -uo pipefail
-          git fetch --no-tags --depth=1 origin "$BASE_SHA" 2>/dev/null || true
-          git diff --name-only "${BASE_SHA}...HEAD" > /tmp/changed.txt || git diff --name-only "$BASE_SHA" HEAD > /tmp/changed.txt
+          # NOT --depth=1. The checkout above has full HEAD history, but
+          # BASE_SHA (the base tip at event time) is usually NOT an ancestor of
+          # HEAD, and a depth-1 fetch of it brings no ancestry — so the
+          # three-dot diff below died `fatal: no merge base` on EVERY PR and the
+          # old silent two-dot fallback re-inflated the set with every file main
+          # gained since the branch point, reversed: the exact inflation the
+          # head-sha checkout pin (charter D34) was supposed to remove.
+          # MEASURED 2026-08-23: run 32643489947 counted 3 files for a 2-file
+          # PR, run 32643498138 counted 9 for an 8-file PR, both logs carrying
+          # `fatal: ...: no merge base` one line above the count.
+          git fetch --no-tags origin "$BASE_SHA" 2>/dev/null || true
+          if ! git merge-base "$BASE_SHA" HEAD >/dev/null 2>&1; then
+            # NO two-dot fallback — measured above, `BASE_SHA HEAD` sweeps in
+            # other people's commits. Same refusal the Elixir dispatcher
+            # documents (elixir.yml `changes` job): a verdict from an unknown
+            # base is worse than no verdict. This job is advisory
+            # (continue-on-error at the job level), so this red reports
+            # without blocking the PR.
+            echo "::error::reland-check: no merge base between BASE_SHA ${BASE_SHA} and HEAD — refusing the two-dot fallback, which scores every file main gained since the branch point. This advisory cannot compute THIS PR's own file set."
+            exit 1
+          fi
+          git diff --name-only "${BASE_SHA}...HEAD" > /tmp/changed.txt || {
+            echo "::error::reland-check: three-dot diff against ${BASE_SHA} failed despite a resolvable merge base — refusing to score an empty or partial file set."
+            exit 1
+          }
           echo "Changed files: $(wc -l < /tmp/changed.txt)"
 
       - name: Extract the PR's task id (for self/edge suppression)

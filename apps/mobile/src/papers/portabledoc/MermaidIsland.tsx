@@ -10,14 +10,26 @@
 // internally (scrollEnabled={false}), so the FAILing axis simply does not
 // apply. The document scroll stays 100% native FlatList.
 //
-// WHY CDN MERMAID: the reader is online-only in v1 (papers stream live off
-// /v1/data/query — there is no offline cache yet, that's wave 3), so the
-// island may assume the same network the paper itself needed. Bundling
-// mermaid (~2.5 MB) into the APK for a v1 reader would be dead weight on
-// every install to save one conditional fetch. On ANY failure — offline,
-// CDN unreachable, mermaid parse error, WebView crash — the island degrades
-// to the honest styled placeholder (label + verbatim diagram source), never
-// a blank hole and never a crash.
+// WHY CDN MERMAID: paper BODIES are cached offline since D42 (state/cache.ts
+// read-through), but diagrams are a RECORDED D42 OFFLINE EXCLUSION beside
+// images — no mermaid bytes and no rendered SVG are cached, so an offline
+// open of a cached paper degrades every diagram honestly instead of drawing
+// it (see the exclusion ledger in state/cache.ts's policy comment, and the
+// offline island test in paperReaderOffline.test.tsx). Bundling mermaid
+// (~2.5 MB) into the APK would be dead weight on every install to save one
+// conditional fetch. On ANY failure — offline, CDN unreachable, a hung
+// captive-portal fetch (the watchdog below), mermaid parse error, WebView
+// crash — the island degrades to the honest styled placeholder (label +
+// verbatim diagram source), never a blank hole and never a crash.
+//
+// FAILED NEVER RESETS UNTIL REMOUNT — decided, not forgotten
+// (mob-zb-bl-island-churn-offline criterion 1): regained connectivity does
+// not retry a failed island in place. There is no reliable connectivity
+// signal inside the island (the WebView is torn down on failure), a retry
+// loop against a captive portal burns data on a metered device, and the
+// natural reader gesture — scroll away and back — REMOUNTS the island under
+// FlatList virtualization, which is the retry. The height memo below makes
+// that remount cheap and jump-free.
 //
 // SECURITY POSTURE (review fix-round F1): the author-supplied diagram source
 // is embedded as a JSON string literal with "<" additionally escaped to
@@ -39,7 +51,7 @@
 // absurd reports) — when it ever engages, the island says "diagram
 // truncated" out loud instead of silently clipping (F4; the 1200dp silent
 // clip the emulator round caught is the lesson).
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { WebView } from 'react-native-webview'
 
@@ -53,6 +65,42 @@ const INITIAL_HEIGHT = 220
 // nothing ever silently vanishes. Honest tall diagrams (the capstone's login
 // flowchart is ~2000 dp) sit far below it.
 const MAX_HEIGHT = 8000
+// A captive portal or DNS blackhole neither errors nor resolves — without a
+// deadline the island sits as a mute bordered box for the platform timeout.
+// ~4s is generous for a CDN script + render on any network worth waiting for.
+const WATCHDOG_MS = 4000
+
+// ── last-known-height memo (defect 1: churn) ─────────────────────────────────
+// Height is otherwise component-local state: a deep scroll-back REMOUNTS the
+// island under FlatList virtualization and it re-painted at INITIAL_HEIGHT
+// (probe: 220 → 640 → 656 → remount → 220), a layout jump on every revisit.
+// Module-level, keyed by (theme.isDark, source) because the rendered height is
+// a pure function of those two; bounded so a long reading session cannot grow
+// it without limit (insertion-order eviction — a Map iterates oldest-first).
+const HEIGHT_MEMO_CAP = 200
+const knownHeights = new Map<string, number>()
+
+export function heightMemoKey(source: string, theme: Theme): string {
+  return `${theme.isDark ? 'dark' : 'light'}:${source}`
+}
+
+export function rememberHeight(key: string, px: number): void {
+  if (!knownHeights.has(key) && knownHeights.size >= HEIGHT_MEMO_CAP) {
+    const oldest = knownHeights.keys().next().value
+    if (oldest !== undefined) knownHeights.delete(oldest)
+  }
+  knownHeights.delete(key) // re-insert so recency is what eviction reads
+  knownHeights.set(key, px)
+}
+
+export function lastKnownHeight(key: string): number | undefined {
+  return knownHeights.get(key)
+}
+
+/** Jest-only: the memo is module state and must not leak between tests. */
+export function resetHeightMemoForTesting(): void {
+  knownHeights.clear()
+}
 
 /** Embed author content in a <script> context: JSON string literal with "<"
  * forced to the \u003c form so "</script>"/"<!--" in the source can never terminate
@@ -123,16 +171,37 @@ function Placeholder({ source, theme, note }: { source: string; theme: Theme; no
 }
 
 export function MermaidIsland({ source, theme }: { source: string; theme: Theme }) {
-  const [height, setHeight] = useState(INITIAL_HEIGHT)
+  const memoKey = heightMemoKey(source, theme)
+  // A remount paints at the LAST KNOWN height for this diagram, not the 220
+  // estimate — the memo read is the defect-1 fix. The CDN fetch itself is a
+  // recorded cost of the remount (the WebView document is torn down with the
+  // native view); what the memo removes is the layout jump while it reloads.
+  const [height, setHeight] = useState(() => lastKnownHeight(memoKey) ?? INITIAL_HEIGHT)
   const [truncated, setTruncated] = useState(false)
   const [failed, setFailed] = useState(false)
+  // Until the island posts its first height (or error), it is WORKING, and it
+  // says so (defect 2) — an empty bordered box reads as broken.
+  const [settled, setSettled] = useState(false)
   const html = useMemo(() => islandHtml(source, theme), [source, theme])
+
+  // Defect 3, the watchdog: a captive-portal/DNS-blackhole fetch neither
+  // errors nor renders. If the island has not settled within WATCHDOG_MS it is
+  // declared failed and degrades to the placeholder — the same honest arm
+  // every other failure takes. A message landing first disarms it.
+  useEffect(() => {
+    if (settled || failed) return
+    const t = setTimeout(() => setFailed(true), WATCHDOG_MS)
+    return () => clearTimeout(t)
+  }, [settled, failed])
 
   if (source.trim() === '') return null
   if (failed) return <Placeholder source={source} theme={theme} note="Diagram (mermaid) — could not render" />
 
   return (
     <View style={[styles.island, { borderColor: theme.border, backgroundColor: theme.surface }]}>
+      {!settled && (
+        <Text style={[styles.loadingLabel, { color: theme.textMuted }]}>Loading diagram…</Text>
+      )}
       <WebView
         source={{ html }}
         originWhitelist={['*']}
@@ -153,16 +222,22 @@ export function MermaidIsland({ source, theme }: { source: string; theme: Theme 
           try {
             const msg = JSON.parse(ev.nativeEvent.data) as { kind?: string; px?: number }
             if (msg.kind === 'height' && typeof msg.px === 'number' && Number.isFinite(msg.px) && msg.px > 0) {
+              setSettled(true)
               const wanted = Math.max(msg.px + 16, 60)
               if (wanted > MAX_HEIGHT) {
                 // Suspect report — clamp, but say so instead of silently clipping.
                 setHeight(MAX_HEIGHT)
                 setTruncated(true)
+                rememberHeight(memoKey, MAX_HEIGHT)
               } else {
                 setHeight(wanted)
                 setTruncated(false)
+                // The PAINTED height (post-padding, post-floor) is what a
+                // remount must reproduce, so that is what the memo holds.
+                rememberHeight(memoKey, wanted)
               }
             } else if (msg.kind === 'error') {
+              setSettled(true)
               setFailed(true)
             }
           } catch {
@@ -187,4 +262,5 @@ const styles = StyleSheet.create({
   placeholderLabel: { ...scale.xs, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5 },
   placeholderSource: { ...scale.micro, fontFamily: 'monospace' },
   truncatedNote: { ...scale.micro, fontStyle: 'italic', marginTop: 4 },
+  loadingLabel: { ...scale.micro, fontStyle: 'italic', marginBottom: 4 },
 })

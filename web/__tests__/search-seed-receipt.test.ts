@@ -27,6 +27,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { DEFAULT_ENGINE } from "../lib/find.ts";
 
 interface SeedBody {
   index?: Record<string, number[]>;
@@ -36,11 +37,16 @@ interface SeedBody {
 
 let answer: { status: number; body: unknown } = { status: 200, body: {} };
 
+/** The upstream URL of the LAST request the route issued — what the
+ * engine-parity arm reads to prove which engine the seed descends from. */
+let lastUrl: string | null = null;
+
 let server: Server;
 let GET: () => Promise<Response>;
 
 before(async () => {
-  server = createServer((_req, res) => {
+  server = createServer((req, res) => {
+    lastUrl = req.url ?? null;
     res.writeHead(answer.status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(answer.body));
   });
@@ -152,4 +158,28 @@ test("the success answer keeps its cache header", async () => {
   const res = await GET();
 
   assert.match(String(res.headers.get("cache-control")), /s-maxage=3600/);
+});
+
+/* ── engine parity with the (finder) layout's inlined seed ─────────────── */
+
+test("engine parity: the fetchable seed browses DEFAULT_ENGINE, the engine the finder actually inlines", async () => {
+  answer = { status: 200, body: { documents: [], count: 0 } };
+  lastUrl = null;
+  await GET();
+
+  assert.ok(lastUrl, "the route must have issued an upstream browse");
+  const engine = new URL(lastUrl!, "http://x").searchParams.get("engine");
+  // The (finder) layout builds the seed it inlines from its own DEFAULT_ENGINE
+  // browse (app/(finder)/layout.tsx). This route claims to serve the same
+  // construction over HTTP, so a hardcoded different engine here (the drift
+  // that sat unnoticed from birth to 2026-08-23: `engine: "indx"` vs the
+  // landing's postgres) would make the fetchable seed carry a DIFFERENT
+  // relevance ordering than the one the finder ships. Parity, not a hardcode:
+  // if DEFAULT_ENGINE ever changes, both sides move together and this stays
+  // green.
+  assert.equal(
+    engine,
+    DEFAULT_ENGINE,
+    `the seed browse must ride DEFAULT_ENGINE (${DEFAULT_ENGINE}) — got engine=${engine}; the fetchable seed and the layout's inlined seed must descend from the same engine ordering`,
+  );
 });

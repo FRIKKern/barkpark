@@ -104,9 +104,31 @@ jobs:
       - name: Prove the verdict can be shown wrong (stale-verdict-watch.test.sh)
         run: bash scripts/stale-verdict-watch.test.sh
 
+      # ── THE TREND STORE (dr-w29) ──────────────────────────────────────────
+      # The watch appends START/READ lines to a state file so a red can say how
+      # the reported count MOVED since the last run that actually READ — and so
+      # a cancelled or BLIND run is counted UNREAD, never as unchanged (its
+      # dangling START is the evidence). actions/cache is DELIBERATE here where
+      # crown-reconcile rejected it: eviction is silent, but the script's own
+      # "no baseline — the store evicted it" arm STATES the absence rather than
+      # mistaking it for an unchanged count, and a lost trend is advisory
+      # context on a verdict, never the verdict. The save key is per-run-id
+      # (a fixed key would never re-save — cache entries are immutable) and the
+      # restore falls back to the newest svw-state-* entry. STATED RESIDUAL: a
+      # cancellation that kills the VM before the always() save loses that
+      # run's START line, and that run goes uncounted.
+      - name: Restore the trend state (best effort)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/svw-state.txt
+          key: svw-state-${{ github.run_id }}
+          restore-keys: |
+            svw-state-
+
       - name: Is a conflicted PR still asserting a green it cannot earn?
         env:
           GH_TOKEN: ${{ github.token }}
+          SVW_STATE_FILE: ${{ runner.temp }}/svw-state.txt
         run: |
           set -uo pipefail
           rc=0
@@ -137,6 +159,15 @@ jobs:
             7) echo "::error::DISTANCE UNREADABLE — the pull requests WERE read and main's commit history was NOT, so no staleness distance exists this run and no row can be called stale or clean. This is not a credential fault on the pull-request read: that read worked. Look at the commits API for ${{ github.repository }}, not at the PR list."; exit 1 ;;
             *) echo "::error::stale-verdict-watch.sh exited $rc, which is not a verdict it defines"; exit 1 ;;
           esac
+
+      # always(): the save must run on the red paths above (a red IS the run
+      # whose START/READ the next trend needs) and on most cancellations.
+      - name: Save the trend state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/svw-state.txt
+          key: svw-state-${{ github.run_id }}
 
   stale-verdict-harness:
     name: Stale verdict harness

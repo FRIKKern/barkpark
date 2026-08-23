@@ -2864,11 +2864,15 @@ defmodule BarkparkWeb.Router do
   # to the OpenAPI drift gate (mirrors the DELETE route above, also absent from
   # the spec) — zero drift trip, zero local-OOM spec regen.
   #
-  # export is SYNC: `WorkspaceBundle.export/2` materializes the whole tar binary,
-  # streamed back with `send_resp/3` under an `application/x-tar` attachment.
-  # import reads the raw tar body and calls `import_bundle/2` — a RESTORE into a
-  # clean scope: E3/allowlist members are idempotent (INSERT ON CONFLICT DO
-  # NOTHING) but the copy-strategy members (root/E1/E2) assume an empty target.
+  # export is SYNC but CONSTANT-MEMORY (pds-w11-spill-engine):
+  # `WorkspaceBundle.export_to_file/2` streams the bundle to a per-request temp
+  # tar and the action `send_file/3`s it under an `application/x-tar`
+  # attachment — the whole-tar-in-RAM materialization is gone from the HTTP
+  # path (`export/2`'s `{:ok, binary()}` contract survives for the fidelity
+  # suite only). import SPILLS the raw tar body to disk in bounded chunks
+  # (`with_spilled_body/2` -> `import_bundle_file/2`) — a RESTORE into a clean
+  # scope: E3/allowlist members are idempotent (INSERT ON CONFLICT DO NOTHING)
+  # but the copy-strategy members (root/E1/E2) assume an empty target.
   scope "/api", BarkparkWeb do
     pipe_through([:api, :require_admin])
 

@@ -601,4 +601,12 @@
 # __css_check's E1/E2 scan still verifies each one exists. An ALLOW_PREFIXES
 # entry would have made that checker stop looking — verified by deleting BOTH
 # .pressure--danger rules and watching it report the class as unruled.
-1334
+#
+# Re-measured 2026-08-23 (PDF-D94, pdf-bl-console-key-custody, rebased onto main):
+# 1340 authored heads, MISSES 0 — the +6 are the console key-custody card's own
+# rules (.support-key-form, .support-key-form .form-input, .support-key-status,
+# .support-key-status--success, .support-key-status--error,
+# .support-key-fallback summary). Bumped in the same commit as the CSS change,
+# per the ratchet's own failure text, after confirming MISSES 0 locally
+# (Chrome, cssom-parity.mjs: 1340 authored == 1340 CSSOM rules).
+1340

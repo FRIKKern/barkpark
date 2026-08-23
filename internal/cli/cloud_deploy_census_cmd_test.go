@@ -127,7 +127,7 @@ func TestCloudDeploymentsW12S8Payload(t *testing.T) {
 		t.Fatalf("the headline is still on its older-control-plane arm against a payload that carries the rate:\n%s", stdout)
 	}
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
-	for _, want := range []string{"37.5%", "58.5% of 1423 terminal"} {
+	for _, want := range []string{"37.55%", "58.47% of 1423 terminal"} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — both denominators ride the SAME line or a reader compares two screens", headline, want)
 		}
@@ -141,7 +141,7 @@ func TestCloudDeploymentsW12S8Payload(t *testing.T) {
 	// THE PER-SITE TWIN — the reader who asks "which site" must not be sent back
 	// to the diluted column.
 	site := censusLineContaining(t, stdout, "site-alpha")
-	for _, want := range []string{"41.7%", "t 62.5%"} {
+	for _, want := range []string{"41.67%", "t 62.5%"} {
 		if !strings.Contains(site, want) {
 			t.Fatalf("site row %q missing %q — the per-site terminal rate did not render", site, want)
 		}
@@ -378,7 +378,7 @@ func TestCloudDeploymentsTodayPayload(t *testing.T) {
 	}
 
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
-	for _, want := range []string{"37.5%", "832 failed", "793 deferred", "ATTEMPTED"} {
+	for _, want := range []string{"37.55%", "832 failed", "793 deferred", "ATTEMPTED"} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — rate, volume and denominator must ride the SAME line", headline, want)
 		}
@@ -407,7 +407,7 @@ func TestCloudDeploymentsBothConventions(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
-	for _, want := range []string{"37.5%", "832 failed", "793 deferred", "591 live", "58.5% of 1423 terminal"} {
+	for _, want := range []string{"37.55%", "832 failed", "793 deferred", "591 live", "58.47% of 1423 terminal"} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — both conventions belong on the one line", headline, want)
 		}
@@ -778,15 +778,15 @@ func TestCloudDeploymentsLivePerAttemptLeadsTheHeadline(t *testing.T) {
 	}
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
 	for _, want := range []string{
-		"live 26.7% of 2216 attempted", "failure 37.5% of 2216 attempted",
-		"832 failed", "793 deferred", "591 live", "58.5% of 1423 terminal",
+		"live 26.67% of 2216 attempted", "failure 37.55% of 2216 attempted",
+		"832 failed", "793 deferred", "591 live", "58.47% of 1423 terminal",
 		"9 in flight", "4 cancelled", "0 residual",
 	} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — live-per-attempt is co-equal and rides the SAME line", headline, want)
 		}
 	}
-	if strings.Index(headline, "live 26.7%") > strings.Index(headline, "failure 37.5%") {
+	if strings.Index(headline, "live 26.67%") > strings.Index(headline, "failure 37.55%") {
 		t.Fatalf("the live rate must LEAD, not trail the failure rate: %q", headline)
 	}
 	// ONE line carries the denominator phrase — enforced by censusLineContaining
@@ -814,7 +814,10 @@ func TestDeployCensusHeadlineRendersLiveInBOTHBranches(t *testing.T) {
 		LivePerAttempt: &cloudclient.DeployRate{Sample: 12, Pct: &pct, Numerator: 3, MinSample: 200},
 	}
 	head := deployCensusHeadline(honest)
-	if !strings.HasPrefix(head, "live 25.0% of 12 attempted") {
+	// The envelope's pct renders VERBATIM (dr-w8-s4 followup): 25.0 on the
+	// wire is the number 25, so the shortest-form render is "25%", never a
+	// re-derived "25.0%".
+	if !strings.HasPrefix(head, "live 25% of 12 attempted") {
 		t.Fatalf("the refused branch dropped the live term — the prepend is on the ok branch only: %q", head)
 	}
 	if !strings.Contains(head, "failure NO RATE") {
@@ -1389,7 +1392,7 @@ func TestCloudDeploymentsWithoutDeliverySaysNotMeasured(t *testing.T) {
 	// bare "NOT MEASURED" needle would red as a hijack instead of silently
 	// asserting against another section — the specific sentence keeps it to one.
 	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no delivery census")
-	if !strings.Contains(line, "NOT a fleet that delivers instantly") {
+	if !strings.Contains(line, "NOT a population that delivers instantly") {
 		t.Fatalf("a missing delivery census must refuse out loud, not print nothing:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "STILL WAITING") {
@@ -1691,7 +1694,7 @@ func TestCloudDeploymentsWithoutDeferralWaitSaysNotMeasured(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no deferral-wait census")
-	for _, want := range []string{"COUNT WITH NO CLOCK", "NOT a fleet that re-queues instantly"} {
+	for _, want := range []string{"COUNT WITH NO CLOCK", "NOT a population that re-queues instantly"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("a missing deferral-wait census must refuse out loud:\n%s", stdout)
 		}
@@ -2231,7 +2234,10 @@ func TestCloudDeploymentsRefusedShareNamesTheWindow(t *testing.T) {
 		}
 	}
 
-	remedy := censusLineContaining(t, stdout, "A WINDOW THAT COULD ANSWER")
+	// The headline carries its own copy of this remedy now (dr-w30-followup),
+	// so the SHARE remedy is looked up inside the classes region.
+	classes := stdout[strings.Index(stdout, "failure classes"):]
+	remedy := censusLineContaining(t, classes, "A WINDOW THAT COULD ANSWER")
 	for _, want := range []string{
 		"--from 2026-08-05T21:13:50Z",
 		"--to 2026-08-09T00:00:00Z",
@@ -2251,7 +2257,7 @@ func TestCloudDeploymentsRefusedShareNamesTheWindow(t *testing.T) {
 	if strings.Contains(deferrals, "NO SHARE for") {
 		t.Fatalf("a section whose shares all answered must carry no refusal note:\n%s", deferrals)
 	}
-	if !strings.Contains(deferrals, "29.3%") {
+	if !strings.Contains(deferrals, "29.26%") {
 		t.Fatalf("the deferral share must still render its own percentage:\n%s", deferrals)
 	}
 }
@@ -2271,7 +2277,10 @@ func TestCloudDeploymentsSampleRefusalOffersNoImpossibleWindow(t *testing.T) {
 	if !strings.Contains(note, "sample 31 below min_sample 200") || !strings.Contains(note, "n=31") {
 		t.Fatalf("the sample refusal must be quoted with its denominator: %q", note)
 	}
-	remedy := censusLineContaining(t, stdout, "NO --from CAN UN-REFUSE THIS")
+	// The headline refusal carries the same no-window truth now (dr-w30-followup),
+	// so the SHARE remedy is looked up inside the classes region.
+	classes := stdout[strings.Index(stdout, "failure classes"):]
+	remedy := censusLineContaining(t, classes, "NO --from CAN UN-REFUSE THIS")
 	for _, want := range []string{"2026-08-05T21:13:50Z", "wholly after", "schema_commit"} {
 		if !strings.Contains(remedy, want) {
 			t.Fatalf("sample-refusal remedy %q missing %q", remedy, want)
@@ -2300,6 +2309,81 @@ func TestCloudDeploymentsRefusedShareInventsNoWindow(t *testing.T) {
 	// not send. A hardcoded boundary would surface exactly here.
 	if strings.Contains(stdout, "2026-08-05T21:13:50Z") {
 		t.Fatalf("an instant the envelope never carried was rendered — the boundary is hardcoded somewhere:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsHeadlineRefusalNamesTheWindow
+// (dr-w30-followup-headline-refusal-names-the-window): the HEADLINE
+// failure_rate refusal carries the same envelope-read window remedy the share
+// refusals carry — rendered in the headline region, above the classes, off the
+// same deployCensusShareRemedy. Before this, the operator read 'failure NO RATE
+// — the window STRADDLES … boundary at <instant>' and was never told that
+// `--from <instant>` answers it — dr-w30-s5 cured the shares and deliberately
+// left the headline outside its cut.
+func TestCloudDeploymentsHeadlineRefusalNamesTheWindow(t *testing.T) {
+	newCensusServer(t, 200, censusStraddleEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	head := stdout[:strings.Index(stdout, "failure classes")]
+	remedy := censusLineContaining(t, head, "A WINDOW THAT COULD ANSWER")
+	for _, want := range []string{
+		"--from 2026-08-05T21:13:50Z",
+		"--to 2026-08-09T00:00:00Z",
+		"schema_commit",
+		"#9615",
+		"min_sample 200",
+	} {
+		if !strings.Contains(remedy, want) {
+			t.Fatalf("headline remedy %q missing %q — the boundary, its provenance and the caveat all come off the envelope", remedy, want)
+		}
+	}
+}
+
+// TestCloudDeploymentsHeadlineSampleRefusalOffersNoImpossibleWindow: a headline
+// refused for SAMPLE gets the same honest no-window truth the shares get — a
+// narrower --from can only shrink the sample, and the render says so in the
+// headline region instead of offering a trim that would make it worse.
+func TestCloudDeploymentsHeadlineSampleRefusalOffersNoImpossibleWindow(t *testing.T) {
+	newCensusServer(t, 200, censusSampleRefusalEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 9, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table", "--from", "2026-08-08T00:00:00Z", "--to", "2026-08-09T00:00:00Z")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	head := stdout[:strings.Index(stdout, "failure classes")]
+	remedy := censusLineContaining(t, head, "NO --from CAN UN-REFUSE THIS")
+	for _, want := range []string{"2026-08-05T21:13:50Z", "wholly after"} {
+		if !strings.Contains(remedy, want) {
+			t.Fatalf("headline sample-refusal remedy %q missing %q", remedy, want)
+		}
+	}
+	if strings.Contains(head, "A WINDOW THAT COULD ANSWER") {
+		t.Fatalf("a headline sample refusal must NOT be offered a narrower window:\n%s", head)
+	}
+}
+
+// TestCloudDeploymentsAnsweredHeadlineCarriesNoRemedy keeps the headline remedy
+// FALSIFIABLE: a headline that produced a percentage gets no remedy line at all
+// — a remedy under an answered rate would read as doubt the answer never
+// expressed.
+func TestCloudDeploymentsAnsweredHeadlineCarriesNoRemedy(t *testing.T) {
+	newCensusServer(t, 200, censusTodayEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, _, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	head := stdout[:strings.Index(stdout, "failure classes")]
+	for _, unwanted := range []string{"A WINDOW THAT COULD ANSWER", "NO --from CAN UN-REFUSE", "NO WINDOW SUGGESTION"} {
+		if strings.Contains(head, unwanted) {
+			t.Fatalf("an answered headline acquired a remedy (%q):\n%s", unwanted, head)
+		}
 	}
 }
 
@@ -2521,7 +2605,7 @@ func TestCloudDeploymentsSiteNoteCanBeAbsent(t *testing.T) {
 	if strings.Contains(sites, "NO PER-SITE RATE") {
 		t.Fatalf("both site rates answered, so no refusal note may print:\n%s", sites)
 	}
-	if !strings.Contains(sites, "41.7%") || !strings.Contains(sites, "32.7%") {
+	if !strings.Contains(sites, "41.67%") || !strings.Contains(sites, "32.68%") {
 		t.Fatalf("the answered per-site rates must still render their percentages:\n%s", sites)
 	}
 	// TODAY'S payload carries no per-site `live` — which is a fact the reader
@@ -2637,7 +2721,7 @@ func TestCloudDeploymentsServerTruncationIsNamed(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	line := censusLineContaining(t, stdout, "SERVER-TRUNCATED")
-	for _, want := range []string{"2 of 120 site(s)", "TOP of the fleet", "no --sites value can restore"} {
+	for _, want := range []string{"2 of 120 site(s)", "TOP of the population", "no --sites value can restore"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("truncation line %q missing %q — the cut must carry the rows shown AND the population they were cut from", line, want)
 		}
@@ -2680,7 +2764,7 @@ func TestCloudDeploymentsTruncationAbsentIsNotCompleteness(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	line := censusLineContaining(t, stdout, "population NOT STATED")
-	if !strings.Contains(line, "whole fleet or the top of a larger one is unknown") {
+	if !strings.Contains(line, "whole population or the top of a larger one is unknown") {
 		t.Fatalf("not-stated line %q must say the completeness question is UNANSWERED, not answered", line)
 	}
 	if strings.Contains(stdout, "SERVER-TRUNCATED") || strings.Contains(stdout, "complete: the control plane") {
@@ -2741,5 +2825,73 @@ func TestDeployCensusFourKeysDecodeAndAbsenceIsNil(t *testing.T) {
 	}
 	if balanced.Completeness == nil || !balanced.Completeness.Balanced || balanced.Completeness.Reason != nil {
 		t.Fatalf("a balanced audit must decode with reason == nil: %+v", balanced.Completeness)
+	}
+}
+
+// TestDeployCensusRenderNeverSaysFleet (dr-w18-bl): the reader is TEAM-scoped
+// (GET /v1/deploy-ledger/census) on every path, so no rendered sentence may
+// call the population "the fleet" — on a 200 the scope line names the real
+// population, and the in-band NOT MEASURED / NOT SENT sentences must not
+// over-claim by one level either. The word is banned from the render outright:
+// a page that covers one team's thirteen sites and says "fleet" tells a team
+// owner something about every other team's deploys that this read never saw.
+func TestDeployCensusRenderNeverSaysFleet(t *testing.T) {
+	fixtures := map[string]string{
+		"w12s8":     censusW12S8Envelope,
+		"live":      censusLiveEnvelope,
+		"today":     censusTodayEnvelope,
+		"delivery":  censusDeliveryEnvelope,
+		"truncated": censusTruncatedEnvelope,
+		"thin":      censusThinEnvelope,
+	}
+	for name, env := range fixtures {
+		t.Run(name, func(t *testing.T) {
+			newCensusServer(t, 200, env)
+			pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+			stdout, stderr, code := runDeployments(t, "table")
+			if code != exitOK {
+				t.Fatalf("exit = %d\nstderr:\n%s", code, stderr)
+			}
+			for _, line := range strings.Split(stdout, "\n") {
+				if strings.Contains(strings.ToLower(line), "fleet") {
+					t.Errorf("a team-scoped render may not say \"fleet\": %q", line)
+				}
+			}
+		})
+	}
+}
+
+// TestDeployCensusPctRendersEnvelopeVerbatim pairs fixture pcts with their
+// rendered cells (dr-w8-s4 followup): the number printed IS the control
+// plane's own `pct`, shortest-form, never a one-decimal re-derivation from
+// numerator/sample. The 37.55 row is the one the divergence was filed on: the
+// old pctOf path rendered it 37.5%, and a reader comparing the CLI against a
+// raw curl of the census route had two numbers and no ruling.
+func TestDeployCensusPctRendersEnvelopeVerbatim(t *testing.T) {
+	cases := []struct {
+		pct  float64
+		want string
+	}{
+		{37.55, "37.55%"}, // two decimals survive
+		{37.5, "37.5%"},   // one decimal stays one decimal
+		{25.0, "25%"},     // a whole number is a whole number
+		{74.51, "74.51%"},
+	}
+	for _, tc := range cases {
+		r := cloudclient.DeployRate{Sample: 999, Pct: &tc.pct, Numerator: 1, MinSample: 200}
+		got, okRate := deployCensusPct(r)
+		if !okRate || got != tc.want {
+			t.Errorf("deployCensusPct(pct=%v) = %q ok=%v, want %q — the envelope's own number, verbatim", tc.pct, got, okRate, tc.want)
+		}
+	}
+	// Numerator/sample deliberately DISAGREE with pct above (1/999): a render
+	// that recomputes instead of repeating would print 0.1% and red every row.
+	refused := cloudclient.DeployRate{Sample: 12, Numerator: 3, MinSample: 200, Refused: true}
+	if _, okRate := deployCensusPct(refused); okRate {
+		t.Error("a refused node must never yield a percentage")
+	}
+	none := cloudclient.DeployRate{Sample: 500, Numerator: 3, MinSample: 200}
+	if _, okRate := deployCensusPct(none); okRate {
+		t.Error("a node without pct must never yield a percentage")
 	}
 }

@@ -177,18 +177,18 @@
 //   ratchet, not a proof of absence.
 //
 //   LIMIT 3 — THE INLINE-COND OVERLAY IS CONTENT-MATCHED, NOT LINE-PINNED.
-//   Six router routes refuse non-admins inside a `cond` rather than through an
+//   Eight router routes refuse non-admins inside a `cond` rather than through an
 //   `Auth.*` guard, so they are invisible to any guard grep. They are checked
 //   by counting the exact `Accounts.team_admin?(conn.assigns.current_user,
 //   conn.assigns.current_team)` form, so the check survives line drift — but it
-//   cannot tell WHICH route grew a seventh. It tells you to go look.
+//   cannot tell WHICH route grew a ninth. It tells you to go look.
 //
-//   The overlay also PRINTS a `router.ex:NNNN` per route, and those six numbers
+//   The overlay also PRINTS a `router.ex:NNNN` per route, and those numbers
 //   are DERIVED by the same two regexes at run time — nothing compares them to
 //   anything, so they cannot red and cannot go stale. What IS pinned is the six
 //   ROUTE NAMES, and the print pairs name to line BY SOURCE ORDER. So the one
-//   thing this print can still get wrong is a router that REORDERS these six
-//   while keeping the count at six: the lines stay right and the names slide.
+//   thing this print can still get wrong is a router that REORDERS these eight
+//   while keeping the count at eight: the lines stay right and the names slide.
 //   On any count change the pairing is dropped and the derived lines print
 //   UNLABELED, because a mis-labelled failure message is a new false statement
 //   of exactly the kind this census exists to remove.
@@ -367,6 +367,7 @@ const PIN = [
   { fn: "rollbackInstance", verb: "POST", route: "/v1/barkparks/:*/rollback", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: updatePanelHtml offers [data-rollback] only on a grant; refuse/unknown render the disabled control with no mount hook. cch-w48-s4 names the DECIDING function rather than the panel that hosts it: updatePanelHtml threads the answer through unchanged, and adminWriteControlHtml is where the data-rollback hook is withheld" },
   { fn: "attachDomain", verb: "POST", route: "/v1/barkparks/:*/domain", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w45-s5: instanceHeaderHtml offers #inst-domain only on a grant; refuse/unknown render the disabled control with no mount hook — again by way of adminWriteControlHtml, which is the function that actually decides" },
   { fn: "submitAddSupport", verb: "POST", route: "/v1/fleet/supports", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "fleetSupportCardHtml"), auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "cch-w48-s4 re-pin: fleetSupportCardHtml OMITS #fleet-add-support unless authority === \"grant\" (D514 rules this add OMITTED rather than disabled-and-explained). Found BY HAND, not by (2i-4): its read is loadInstance, which sibling rows already claim — see LIMIT 1b. POST /v1/fleet/supports still refuses non-admin sessions inside a cond, so the overlay stays" },
+  { fn: "submitAgentKey", verb: "POST", route: "/v1/barkparks/:*/agent-key", elevated: true, predicate: null, auth_fn: A_USER_OR_PAT, context_fn: C_TEAM_ADMIN, note: "UNPREDICATED (PDF-D94, pdf-bl-console-key-custody): supportRowHtml renders the paste-a-key form + Deliver button on EVERY live support row — no authority threads into it, so a plain member sees the affordance and the route's inline cond refuses them with Auth.forbidden(required: admin, scope: team) (same disjunction as POST /v1/fleet/supports: PAT needs deploy, session needs team-admin). The instanceAdminAuthority band is already read one hop up (fleetSupportCardHtml takes `authority` for the ADD button) so the fence is one thread away — needs a row of its own; recording the truth here, not fixing it" },
   { fn: "mintAppToken", verb: "POST", route: "/v1/barkparks/:*/app-token", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "team-scoped member action" },
   { fn: "patchAutoupdate", verb: "PATCH", route: "/v1/barkparks/:*/autoupdate", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadInstance", "adminWriteControlHtml"), auth_fn: A_PTADMIN, context_fn: null, note: "cch-w48-s4 re-pin: all four autoupdate controls (pause/resume/pin/unpin) are drawn by adminWriteControlHtml, which emits the data-au hook only when the answer is neither refuse nor unknown. Found BY HAND, not by (2i-4) — same shared read as rollbackInstance, see LIMIT 1b" },
 
@@ -480,7 +481,7 @@ const RESOLVERS = [
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE INLINE-COND OVERLAY (charter D421) — six router routes whose refusal of a
+// THE INLINE-COND OVERLAY (charter D421) — eight router routes whose refusal of a
 // non-admin lives in a `cond` clause, invisible to any `Auth.*` grep. Recorded
 // here because four of the console's unpredicated elevated writes are elevated
 // ONLY by these, and a census that read `Auth.*` alone would call them member.
@@ -493,6 +494,12 @@ const RESOLVERS = [
 // is a self-scope NARROWING on a GET (the notification delivery log fences a
 // member to their own rows), never a refusal. Inventing a seventh row would
 // have made the overlay wrong in the other direction.
+//
+// EIGHT SINCE PDF-D94 (pdf-bl-console-key-custody): the agent-key POST and its
+// status-poll GET both refuse non-admin sessions inside the same cond shape as
+// POST /v1/fleet/supports (the read narrates a write only admins can make, so
+// it carries the same disjunction). Recorded the day they landed, in the same
+// commit as the routes.
 // ═══════════════════════════════════════════════════════════════════════════
 
 // THE ROUTES ARE PINNED. THE LINE NUMBERS ARE NOT, AND NEVER AGAIN WILL BE.
@@ -507,6 +514,8 @@ const RESOLVERS = [
 const INLINE_COND_ROUTES = [
   "POST /v1/fleet/supports",
   "DELETE /v1/fleet/supports/:id",
+  "POST /v1/barkparks/:id/agent-key",
+  "GET /v1/barkparks/:id/agent-key (status poll — same cond, admin-narrated read)",
   "POST /v1/env-vars",
   "DELETE /v1/env-vars/:id",
   "POST /v1/launch + POST /v1/go-live (go_live/1)",
@@ -515,9 +524,10 @@ const INLINE_COND_ROUTES = [
 const INLINE_COND_EXCLUDED = { why: "self-scope NARROWING on GET /v1/notifications/deliveries — binds `admin?` as a local, never refuses" };
 
 // KEY ON THE TWO PRECISE FORMS, NEVER THE BARE STRING. `grep -n 'team_admin?'
-// router.ex` returns NINE hits, not eight — six refusal-form, one excluded
-// local binding, and TWO DECOYS that are not call sites of this predicate at
-// all. Re-derive them, do not trust a numeral: run that grep and you will find
+// router.ex` returns MORE hits than the eight refusal-form sites and the one
+// excluded local binding — the rest are DECOYS that are not call sites of this
+// predicate at all. Re-derive them, do not trust a numeral: run that grep and
+// you will find, among others,
 //
 //   · a DOC-COMMENT in the env-var route's `@doc`-style header, reading
 //     "… Write-gated to owner/admin (Accounts.team_admin?/2)." — prose, not code
@@ -922,7 +932,7 @@ console.log("");
 console.log(`THE ${pinnedUnpredicated.length} UNPREDICATED ELEVATED WRITES — an affordance a plain member can see, click, and be refused for.`);
 console.log("This census does NOT fix them. cch-w38-s1 (criterion 3) took the THREE this list was named for —");
 console.log("retryInstance, removeInstance and updateInstance — so cch-w38-bl-three-elevated-verbs-still-unpredicated");
-console.log("is FIXED and no longer the owner of what is left; the four below are unowned and need a row of their own.");
+console.log("is FIXED and no longer the owner of what is left; the rows below are unowned and need a row of their own.");
 console.log("The population SHRINKS by re-pinning as well as by fixing: cch-w48-s4 moved five rows out of this list");
 console.log("because the console had already fenced them and only the pin still said otherwise. A row leaves this");
 console.log("list on a FENCE, never on a tidier note.");
@@ -1005,7 +1015,12 @@ if (unresolved.length) {
 // DELETE /v1/sites/:id caller. `elevated` DELIBERATELY UNMOVED at 40: that route
 // is plain team membership (see the row's own note), so bumping it would be a
 // false statement about the router AND would red arm (2b) at rc=2.
-const EXPECT = { total: 80, elevated: 40, predicated: 36, unpredicated: 4 };
+// PDF-D94 (pdf-bl-console-key-custody): 80 -> 81. submitAgentKey's POST
+// /v1/barkparks/:*/agent-key is elevated by an inline-cond refusal (the overlay
+// grew 6 -> 8 in the same commit) and ships UNPREDICATED — the paste form
+// renders on every live support row regardless of authority — so elevated and
+// unpredicated both move by one, honestly. See the row's own note.
+const EXPECT = { total: 81, elevated: 41, predicated: 36, unpredicated: 5 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

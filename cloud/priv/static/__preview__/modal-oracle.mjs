@@ -117,6 +117,11 @@ const DEFAULT_SCEN = [
 //   $ grep -rn 'modal-oracle' .github/workflows/ scripts/
 //   (no output)
 //
+// MODAL GEOMETRY IS OWNED BY overflow-guard.mjs (cchi-w22-bl-modal-oracle-
+// never-visits-a-phone-width): its W22-2fa-enroll-phone-band leg drives the
+// REAL enroll phase at 320-480 in both themes under the CI-blocking gate,
+// because a phone-band assertion in a file nothing runs enforces nothing.
+// This oracle stays the 1440 behavioural instrument.
 // ZERO CI jobs and ZERO scripts invoke this oracle, so its exit 2 is read by
 // nobody today. The pin below buys EVIDENCE — a human running this by hand
 // learns which face resolved — and NOT enforcement. Saying so here is the
@@ -482,6 +487,29 @@ async function main() {
       await sleep(100);
     }
     if (!up) throw new Error(`preview server never answered on :${port} (port in use? node error?)`);
+    // The stale-server guard, CONSUMER SIDE (gr-blk-serve-stale-guard): "the
+    // port answers" is not "OUR server answers". If serve.mjs died EADDRINUSE
+    // (stdio is ignored here — nobody hears it), the 200 above came from a
+    // FOREIGN worktree's squatter and every modal state below would be judged
+    // against another tree's bytes. serve.mjs refuses and diagnoses on its own
+    // now, but a port-polling consumer must assert tree identity itself.
+    // EXIT 2 BY HAND, NOT BY THROW — the enclosing catch maps every throw to
+    // exit 1, "a modal defect was measured". A squatted port measured NOTHING
+    // about this tree's modals; laundering it into exit 1 is the exact
+    // accusation this file's Chrome bring-up refusal already documents.
+    for (const rel of ["app.css", "app.js"]) {
+      const served = Buffer.from(await (await fetch(`http://127.0.0.1:${port}/${rel}`, { cache: "no-store" })).arrayBuffer());
+      const disk = fs.readFileSync(path.join(HERE, "..", rel));
+      if (!served.equals(disk)) {
+        await teardown();
+        process.stderr.write(`\n!! ORACLE (exit 2): REFUSED TO MEASURE — STALE SERVER on :${port}.\n`);
+        process.stderr.write(`   /${rel} served ${served.length} B but this tree's disk has ${disk.length} B: a server rooted\n`);
+        process.stderr.write(`   at a DIFFERENT tree (a foreign worktree?) is squatting this port. Judging its bytes\n`);
+        process.stderr.write(`   would certify the wrong tree — not one modal state was asserted.\n`);
+        process.stderr.write(`   Find it: lsof -nP -iTCP:${port} -sTCP:LISTEN\n`);
+        process.exit(2);
+      }
+    }
     process.stdout.write(`>> preview  http://127.0.0.1:${port}\n>> chrome   ${chromeBin}\n`);
 
     // ── boot Chrome, letting IT pick the debug port (written to

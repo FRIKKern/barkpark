@@ -41,11 +41,31 @@ refuse() { echo "preview-parity-check: REFUSED TO MEASURE — $1" >&2; exit 2; }
 SCAN_ROOT="${PREVIEW_PARITY_SCAN_ROOT:-.}"
 
 # The ONE scan expression part 3 owns. $1 = regexp, $2 = root.
+# PRUNE THE SCRATCH TREES AT THE WALK (D18, applied here).
+#
+# The three original exclusions are not enough in a working checkout. Measured
+# 2026-08-23 at /Volumes/SATECHI/github/barkpark: 10,024 tracked files, and
+# 3,190,563 files ON DISK — a 318x amplification from nested worktrees and agent
+# scratch trees (.omx alone carries 45,310). This scan took over 90 SECONDS
+# there and had to be killed, against 1.5s in a clean worktree. That is the
+# definition of a gate that is not runnable LOCALLY, which is exactly where the
+# edits it guards are made.
+#
+# scripts/docs-anchors-check.sh already hit this and solved it the same way,
+# and its reasoning transfers exactly: these directories are COPIES of the repo,
+# so their contents are duplicates by construction — an oEmbed reference inside
+# one is also in the original, which is still scanned. Pruning them cannot hide
+# a violation; it only stops the walk reading the same file twenty times.
+#
+# At the walk, not after it: an exclusion applied to the RESULTS still pays the
+# I/O. Same result set, one order of magnitude less work.
 scan_sources() {
   grep -roil "$1" \
     --include='*.ex' --include='*.exs' --include='*.go' \
     --include='*.ts' --include='*.tsx' --include='*.heex' \
     --exclude-dir=node_modules --exclude-dir=deps --exclude-dir=_build \
+    --exclude-dir=.git --exclude-dir=.omx --exclude-dir=.tmp-bp89 \
+    --exclude-dir=.claude --exclude-dir=.artifacts \
     "$2" 2>/dev/null || true
 }
 SCANNED_EXTS="ex exs go ts tsx heex"
@@ -199,6 +219,21 @@ selftest() {
     && say "oEmbed in an unscanned extension (.md) -> PASS" 0 \
     || { say "oEmbed in an unscanned extension (.md) -> PASS (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
 
+  # 5b. SILENT ARM — the scratch-tree prunes (D18) actually apply. Without this,
+  #     the ONLY evidence they work is that the gate got faster, which is not
+  #     evidence that it still scans the right set. One arm per pruned directory:
+  #     a prune that silently stops applying takes the gate back to 90+ seconds
+  #     in a working checkout, and nothing else here would notice.
+  for d in .omx .tmp-bp89 .claude .artifacts; do
+    fresh; mkdir -p "$tmp/t/$d/copy"; printf 'oEmbed\n' > "$tmp/t/$d/copy/dup.ts"
+    [ -f "$tmp/t/$d/copy/dup.ts" ] \
+      || { say "PLANT CHECK: the $d plant did not land" 1; continue; }
+    rc="$(probe)"
+    { [ "$rc" -eq 0 ]; } \
+      && say "oEmbed under $d/ -> PASS (scratch copies are pruned, D18)" 0 \
+      || { say "oEmbed under $d/ -> PASS (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
+  done
+
   # 6. REFUSED TO MEASURE — nothing to scan. Silence here would be the defect:
   #    "no oEmbed found" is true of an empty directory, and that is the failure
   #    mode this whole selftest exists to make impossible.
@@ -209,7 +244,7 @@ selftest() {
     || { say "no scannable source at all -> REFUSED TO MEASURE (2) (got $rc)" 1; sed 's/^/        /' "$tmp/out"; }
 
   echo ""
-  if [ "$bad" -eq 0 ]; then echo "preview-parity-check --selftest: PASS (11/11)"; return 0; fi
+  if [ "$bad" -eq 0 ]; then echo "preview-parity-check --selftest: PASS (15/15)"; return 0; fi
   echo "preview-parity-check --selftest: FAILED ($bad case(s))"; return 1
 }
 

@@ -47,7 +47,16 @@ jest.mock('../src/api/papers', () => ({
   fetchPaper: jest.fn(),
   fetchPaperPage: jest.fn(),
 }))
-jest.mock('react-native-webview', () => ({ WebView: () => null }))
+// The WebView is mocked as an ELEMENT, not null (mob-zb-bl-island-churn-offline
+// criterion 3): a null stub silently skipped the MermaidIsland path, so no
+// offline test ever exercised how a cached paper's diagrams behave. The mock
+// renders nothing visible but lets the island mount, arm its watchdog and
+// degrade — which is the recorded D42 exclusion behavior under test below.
+jest.mock('react-native-webview', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require('react-native')
+  return { WebView: () => <View testID="mermaid-webview" /> }
+})
 jest.mock('expo-haptics', () => ({
   impactAsync: jest.fn(() => Promise.resolve()),
   notificationAsync: jest.fn(() => Promise.resolve()),
@@ -187,6 +196,40 @@ describe('PaperReaderScreen offline truth', () => {
       expect(text).toContain('Cached copy')
       expect(text).not.toContain(READER_OFFLINE_COPY)
       expect(text).not.toContain(READER_FAILED_COPY)
+    } finally {
+      await unmount(tree)
+    }
+  })
+
+  it('a cached paper opened OFFLINE renders its diagram through the ISLAND path and degrades honestly (D42 exclusion, mob-zb-bl-island-churn-offline)', async () => {
+    // Diagrams are the second recorded D42 offline exclusion (state/cache.ts
+    // policy comment): the body paints from cache, the island MOUNTS (WebView
+    // is an element here, not a null stub), and — offline, so its CDN document
+    // can never report back — the ~4s watchdog degrades it to the labeled
+    // placeholder carrying the verbatim source. Never a blank hole.
+    const DIAGRAM_SOURCE = 'graph TD; CACHE-->READER'
+    writeCachedPaper(
+      conn,
+      paper('p1', 'BODY WITH A DIAGRAM', '2026-07-20T10:00:00Z', [
+        { type: 'diagram', source: DIAGRAM_SOURCE },
+      ]),
+    )
+    mockFetchPaper.mockRejectedValue(OFFLINE())
+    const tree = await mountReader()
+    try {
+      // The island path ran: the WebView element is in the tree...
+      expect(tree.root.findAllByProps({ testID: 'mermaid-webview' }).length).toBeGreaterThan(0)
+      const before = textOf(tree)
+      expect(before).toContain('BODY WITH A DIAGRAM')
+      expect(before).toContain('Loading diagram…') // the island says it is working
+      // ...and the watchdog turns the dead CDN fetch into the honest degrade.
+      await act(async () => {
+        jest.advanceTimersByTime(4001)
+      })
+      const after = textOf(tree)
+      expect(after).toContain('could not render')
+      expect(after).toContain(DIAGRAM_SOURCE)
+      expect(after).not.toContain('Loading diagram…')
     } finally {
       await unmount(tree)
     }
