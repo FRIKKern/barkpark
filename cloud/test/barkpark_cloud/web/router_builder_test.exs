@@ -173,18 +173,26 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
 
     test "claims the oldest queued deployment, bumps epoch, stamps worker" do
+      # task-af5b8a7f816a7798: `site_fixture/1` mints a FRESH barkpark per site,
+      # so under box scoping (jpf-w1-builder-identity) two calls to it are two
+      # DIFFERENT boxes and the claiming token would see exactly one candidate
+      # row — "oldest queued" would pass even with `order_by: desc`. Both
+      # deployments must land on SIBLING sites of the SAME box for this test to
+      # exercise ordering at all.
       {_user, team} = user_team()
-      site = site_fixture(team)
-      {:ok, d1} = Registry.create_deployment(site, %{git_ref: "older"})
+      {bp, [site1, site2]} = sibling_sites(team, 2)
+      {:ok, d1} = Registry.create_deployment(site1, %{git_ref: "older"})
       # Force an ordering — the schema's inserted_at is microsecond-precision
       # but two inserts in a row may share the same microsecond. Bump.
       Process.sleep(2)
-      # A SECOND SITE: deploy-truth W1 re-keyed the active index onto
-      # (site_id, environment), so two builds can only be queued at once on two
-      # different sites. The claim is global, so the ordering claim still holds.
-      {:ok, _d2} = Registry.create_deployment(site_fixture(team), %{git_ref: "newer"})
+      # A SECOND SITE ON THE SAME BOX: deploy-truth W1 re-keyed the active
+      # index onto (site_id, environment), so two builds can only be queued at
+      # once on two different sites. The claim is scoped to ONE box
+      # (jpf-w1-builder-identity), so both rows must live on sibling sites of
+      # that box for the ordering assertion below to mean anything.
+      {:ok, _d2} = Registry.create_deployment(site2, %{git_ref: "newer"})
 
-      conn = call(:post, "/v1/builder/claim", %{worker_id: "builder-A"}, agent_token(site))
+      conn = call(:post, "/v1/builder/claim", %{worker_id: "builder-A"}, agent_token(bp))
       assert conn.status == 200
 
       body = json_body(conn)
@@ -489,7 +497,14 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       # accident of ordering and B would receive the only row left. Verified by
       # mutation: with the barkpark_id filter deleted, THIS assertion is the one
       # that reds.
+      #
+      # task-af5b8a7f816a7798: the sleep below is the same microsecond-tie
+      # guard the "claims the oldest queued deployment" test uses — without it,
+      # inserted_at could land on the SAME microsecond for both rows, and an
+      # unscoped claim could pick d_a first by coincidence rather than by a
+      # missing box filter, making this test's mutation-detection a coin flip.
       {:ok, d_b} = Registry.create_deployment(site_b, %{git_ref: "b"})
+      Process.sleep(2)
       {:ok, d_a} = Registry.create_deployment(site_a, %{git_ref: "a"})
 
       a = call(:post, "/v1/builder/claim", %{worker_id: "wa"}, agent_token(site_a))
