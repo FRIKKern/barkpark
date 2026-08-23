@@ -90,6 +90,21 @@ describe('createWebhookHandler', () => {
     expect(onMutation).not.toHaveBeenCalled()
   })
 
+  it('rejects a FUTURE-dated timestamp (>5 min ahead) with 401 stale — the other half of the window', async () => {
+    // Twin of core's future arm (clk-bl-js-webhook-future-arm-missing): reds
+    // if the handler's Math.abs freshness check decays to a one-sided (now-t).
+    const onMutation = vi.fn()
+    const { POST } = createWebhookHandler({ secret: SECRET, onMutation })
+
+    const t = Math.floor(Date.now() / 1000) + 6 * 60 // 6 minutes AHEAD
+    const body = JSON.stringify({ event: 'create' })
+    const res = await POST(makeRequest({ body, t }))
+
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'stale' })
+    expect(onMutation).not.toHaveBeenCalled()
+  })
+
   it('accepts a signature under previousSecret during rotation', async () => {
     const onMutation = vi.fn()
     const { POST } = createWebhookHandler({

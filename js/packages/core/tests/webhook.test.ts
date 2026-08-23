@@ -60,6 +60,40 @@ describe('verifyWebhookSignature', () => {
     ).toBe(false)
   })
 
+  // The FUTURE side of the freshness window (clk-bl-js-webhook-future-arm-
+  // missing): the source is two-sided (Math.abs(now - t) > tolerance) and
+  // matches the Elixir twins' inclusive 300s boundary, but until now the only
+  // negative freshness arm was the PAST one — the two-sidedness was asserted
+  // by reading, not by a test that can fail. These arms red if Math.abs is
+  // dropped to a bare (now - t): a future-dated diff goes negative, is never
+  // greater than the tolerance, and a forged future timestamp sails through.
+  it('rejects a FUTURE-dated timestamp beyond tolerance (the other half of the window)', async () => {
+    const sig = sign(SECRET, NOW + 1000, BODY)
+    expect(
+      await verifyWebhookSignature({
+        body: BODY,
+        signature: sig,
+        secret: SECRET,
+        nowSeconds: NOW,
+        toleranceSeconds: 300,
+      }),
+    ).toBe(false)
+  })
+
+  it('accepts BOTH inclusive boundaries (±300s exactly, the Elixir twins parity)', async () => {
+    for (const t of [NOW - 300, NOW + 300]) {
+      expect(
+        await verifyWebhookSignature({
+          body: BODY,
+          signature: sign(SECRET, t, BODY),
+          secret: SECRET,
+          nowSeconds: NOW,
+          toleranceSeconds: 300,
+        }),
+      ).toBe(true)
+    }
+  })
+
   it('accepts the previousSecret during rotation', async () => {
     const sig = sign('whsec_old', NOW, BODY)
     expect(
