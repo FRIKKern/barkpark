@@ -1688,6 +1688,72 @@ export function envAssignmentReason(name, value) {
   return null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// THE HEAD IS IDENTIFIED BY ITS BASENAME, AND A BASENAME IS NOT AN IDENTITY
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `screenSegment` resolves the head as `argv[0].split("/").pop()`. That is
+// exactly right for `/usr/bin/bash` — REFUSED_HEADS must see `bash` however it
+// is spelled — and it is the whole hole in the other direction: ANY path whose
+// LAST COMPONENT is an allowlisted name is admitted, whatever file is actually
+// there. Executed on the authoring host:
+//
+//     $ cat > /tmp/gripname/git <<'X'
+//     #!/bin/sh
+//     id > /tmp/DOTSLASH_MARK
+//     X
+//     $ chmod +x /tmp/gripname/git && cd /tmp/gripname && ./git log -1
+//     not git
+//     $ cat /tmp/DOTSLASH_MARK
+//     uid=501(pelle) gid=20(staff) …
+//
+// `screenCommand("./git log -1")` returns ok — gitRule reads the sub-verb `log`
+// off the read allowlist and never asks what `./git` IS. Same for
+// `./ls`, `./sed -n 1p`, `tooling/grip/ls`, `node_modules/.bin/curl <url>`,
+// `/tmp/evil/git log` and `../../../tmp/evil/cat`. This is arbitrary code
+// execution through the head allowlist, and it needs no flag, no cluster and no
+// value-eating global — just a slash.
+//
+// IT MATTERS BECAUSE OF WHERE THE CENSUS RUNS. It re-executes historical
+// commands inside a repo CHECKOUT, and harvest.mjs regenerates the corpus from
+// other agents' transcripts — so both the command text and the files a relative
+// path resolves against come from outside this module.
+//
+// THE ASYMMETRY THAT DECIDES THE FIX. For a BARE name, the screen already
+// controls the one lever that redirects resolution: `PATH=` is refused by
+// `envAssignmentReason`, by name, and DANGER_SET carries that row. For a
+// PATH-QUALIFIED name the token itself names the file and the screen controls
+// nothing. So a bare name keeps its existing bound and a path must earn one.
+//
+// Absolute paths under the system bin directories are admitted, because those
+// are not reachable from the corpus or the checkout; a relative path, and an
+// absolute path anywhere else, is refused. Under-enumerating TRUSTED_BIN_DIRS
+// costs a false REFUSAL, which is the direction this module is allowed to be
+// wrong in — the opposite polarity to every value-global set above, and chosen
+// deliberately for that reason.
+//
+// REACH COST, MEASURED: 0 of the 651 frozen corpus commands use a
+// path-qualified allowlisted head. The 23 slash-bearing head tokens in the
+// corpus are environment prefixes (already screened), non-allowlisted binaries
+// (`/tmp/bp-probe`, `bin/barkpark`) and `/usr/bin/time`, whose basename `time`
+// is in REFUSED_HEADS already.
+const TRUSTED_BIN_DIRS = ["/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/", "/opt/homebrew/bin/"];
+
+/**
+ * @param {string} token argv[0] exactly as typed
+ * @param {string} head its basename, the name every rule below is keyed on
+ * @returns {string|null} why a path-qualified head is refused, or null
+ */
+export function headPathReason(token, head) {
+  if (!token.includes("/")) return null;
+  // A refused head stays refused by NAME however it is spelled; saying so here
+  // keeps `/bin/bash` reading as "bash runs a script" rather than as a path
+  // complaint, which is the more useful diagnosis.
+  if (REFUSED_HEADS.has(head)) return null;
+  if (TRUSTED_BIN_DIRS.some((d) => token.startsWith(d))) return null;
+  return `"${token}" names a FILE, not the program "${head}" — a head is identified by its basename, so any path ending in an allowlisted name is admitted whatever is actually there (\`./git log\` ran an arbitrary script on the authoring host). Use the bare name, or an absolute path under ${TRUSTED_BIN_DIRS.join(", ")}`;
+}
+
 /** Screen ONE pipeline segment. @returns {string|null} refusal reason or null */
 export function screenSegment(segment) {
   let s = String(segment ?? "").trim();
@@ -1709,6 +1775,8 @@ export function screenSegment(segment) {
   if (!argv.length) return "not allowlisted: empty segment";
 
   const head = argv[0].split("/").pop();
+  const path = headPathReason(argv[0], head);
+  if (path) return `not allowlisted: ${path}`;
   const refused = REFUSED_HEADS.get(head);
   if (refused) return `not allowlisted: ${refused}`;
 
@@ -2042,6 +2110,18 @@ export const DANGER_SET = [
   "bp webhook replay wh-abc",
   "bp session log my-session --kind push",
   "bp -s http://localhost:4000 doc mutate task task-abc",
+  // THE HEAD IS IDENTIFIED BY ITS BASENAME. A path ending in an allowlisted
+  // name was admitted whatever file was actually there — `./git log -1` RAN an
+  // arbitrary script on the authoring host and wrote a marker carrying live
+  // `id` output, while the screen read the sub-verb `log` off the read
+  // allowlist and never asked what `./git` IS.
+  "./git log -1",
+  "./ls -la",
+  "./sed -n 1p api/lib/x.ex",
+  "/tmp/evil/git log -1",
+  "tooling/grip/ls",
+  "node_modules/.bin/curl https://example.com/",
+  "../../../tmp/evil/cat /etc/passwd",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -2125,6 +2205,13 @@ export const NEVER_CRY_WOLF_SET = [
   "bp task get task-abc",
   "bp capabilities -o json",
   "bp search grip screen release",
+  // The mirror: a BARE name keeps the bound it already had (`PATH=` is refused
+  // by name one layer up), and an absolute path under a system bin directory is
+  // not reachable from the corpus or the checkout.
+  "/usr/bin/git log -1",
+  "/bin/ls -la",
+  "/usr/local/bin/rg -n handleRequest api/lib",
+  "/opt/homebrew/bin/jq .foo file.json",
 ];
 
 /**
