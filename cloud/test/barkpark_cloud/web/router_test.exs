@@ -494,10 +494,16 @@ defmodule BarkparkCloud.Web.RouterTest do
       {:ok, site_b} = Registry.create_site(bp, %{name: "S2", slug: "s2"})
 
       {:ok, d_old} =
-        Registry.create_deployment(site_a, %{git_ref: "old-sha", artifact_url: "file:///tmp/a.tgz"})
+        Registry.create_deployment(site_a, %{
+          git_ref: "old-sha",
+          artifact_url: "file:///tmp/a.tgz"
+        })
 
       {:ok, d_new} =
-        Registry.create_deployment(site_b, %{git_ref: "new-sha", artifact_url: "file:///tmp/b.tgz"})
+        Registry.create_deployment(site_b, %{
+          git_ref: "new-sha",
+          artifact_url: "file:///tmp/b.tgz"
+        })
 
       backdate = fn id, seconds ->
         ts = DateTime.add(DateTime.utc_now(), -seconds, :second)
