@@ -8611,23 +8611,29 @@ test("cch-w53-s1: the delete sheet claims no containment it cannot perform", () 
   assert.match(region, /No instance changes/);
 });
 
-test("cch-w53-s1: the sign-out-everywhere sheet makes NO timing claim", () => {
-  // "immediately" was measured false — an already-open SSE stream kept delivering
-  // team events ~55s past revoke_all_user_sessions. "within 25 seconds" would be
-  // false too until the mechanism slice lands, so the sheet must state the outcome
-  // and nothing about when. This pin bans BOTH shapes.
+test("cch-w53-s1/bl: the sign-out-everywhere sheet states the SOFT measured bound and no stronger timing", () => {
+  // s1 banned every timing word while the plane could hold none ("immediately"
+  // was measured false; the stream outlived revoke ~55s+). s4 landed the
+  // mechanism — sse_loop/3 re-checks the session per heartbeat, the stream ends
+  // inside one ~25s tick — and cch-w53-bl DECIDED to state that bound SOFTLY:
+  // "within about a minute" is deliberately weaker than measured, carries no
+  // digits, and lives on THIS sheet only (per-row revoke does not end that
+  // device's stream and must not inherit the claim). The digit/immediacy bans
+  // survive verbatim: a future "within 25 seconds" or "immediately" reds here.
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const start = src.indexOf('title: "Sign out everywhere else?"');
   assert.ok(start > 0, "the sign-out-everywhere confirm must be locatable");
-  const region = src.slice(start, start + 2000);
+  const region = src.slice(start, start + 3000);
   const bodyAt = region.indexOf("bodyHtml:");
   const confirmAt = region.indexOf("onConfirm:");
   assert.ok(bodyAt > 0 && confirmAt > bodyAt, "the sheet's bodyHtml must precede onConfirm");
   const body = region.slice(bodyAt, confirmAt);
   assert.ok(body.includes("Every other browser and device is signed out."),
     "the outcome must still be stated plainly");
+  assert.ok(body.includes("lose access within about a minute"),
+    "the honest SOFT bound must be stated — silence left a user watching a live tab with no explanation");
   assert.ok(!/immediately|instantly|right away|within\s*\d+|\d+\s*second/i.test(body),
-    "the sign-out sheet must promise no timing the plane cannot hold");
+    "…and nothing stronger than the measured per-heartbeat bound may ever return");
   // The two accurate clauses stay.
   assert.match(body, /This device stays signed in/);
   assert.match(body, /can sign back in with their password/);
