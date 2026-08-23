@@ -385,16 +385,6 @@ jobs:
       SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
       BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
-      # Drops the `:image` dep (api/mix.exs:132 image_dep/0), and with it the
-      # `:vix` NIF build, so this job needs no libvips-dev. It buys back the 64s
-      # apt install that used to sit on the critical path here.
-      #
-      # IT BUYS ZERO COVERAGE TO LOSE: `:requires_vips` is in the DEFAULT
-      # exclude list (api/test/test_helper.exs), so this lane has never executed
-      # a single test that reaches the vips binary. prod-compile keeps
-      # libvips-dev and still exercises the real vix compile path, so the
-      # compile-side coverage is not silently dropped — see the note there.
-      BARKPARK_SKIP_IMAGE: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -439,12 +429,23 @@ jobs:
       # #29). It used to run here but was non-blocking because mix-test
       # carried continue-on-error: true at the time (it no longer does).
 
-      # NO libvips-dev HERE. `BARKPARK_SKIP_IMAGE: "1"` above removes the
-      # `:image` dep from this job's dep set, so there is no vix NIF to build
-      # and nothing to link against. Measured cost of the step that used to sit
-      # here: 64s, on the critical path, buying zero executed tests.
-      # If this ever needs to come back, prefer apt caching over re-adding a
-      # cold `apt-get update && install` to the critical path.
+      # NO apt libvips-dev HERE, and the `:image` dep STAYS. The repo sets no
+      # VIX_COMPILATION_MODE, so vix (0.38) runs in its default
+      # PRECOMPILED_NIF_AND_LIBVIPS mode: the NIF arrives prebuilt with libvips
+      # bundled, and the system libvips-dev this step used to install was never
+      # consumed by this job (measured 40-64s of apt on the critical path,
+      # buying nothing). Only `:requires_vips`-tagged tests need the system
+      # `vips` BINARY on PATH, and those are default-excluded here
+      # (api/test/test_helper.exs).
+      #
+      # DO NOT reach for BARKPARK_SKIP_IMAGE=1 instead — that removes the
+      # `Image` MODULE, which plain (untagged) integration tests exercise at
+      # runtime: run 32641485143 reds v1_media_processing_test.exs:93 and
+      # media_delivery_test.exs:71 with `Image.open/1 is undefined` raised from
+      # Barkpark.Plugins.Media.after_media_upload/1. The dep was never the
+      # cost; the apt install was.
+      # If system libvips is ever genuinely needed here, prefer apt caching
+      # over re-adding a cold `apt-get update && install` to the critical path.
 
       - name: Install libxml2-utils for ONIX XSD validation (Phase 6 WI5)
         # The :validator-tagged tests under
@@ -614,12 +615,15 @@ jobs:
         env:
           MIX_ENV: prod
 
-      # THIS IS THE ONLY REMAINING libvips INSTALL, and it is deliberate: this
-      # job is where the `:image`/`:vix` compile path is still exercised end to
-      # end (no BARKPARK_SKIP_IMAGE here). mix-test dropped its copy because
-      # `:requires_vips` is default-excluded there; dropping it HERE too would
-      # mean nothing in CI ever compiles the NIF again. This job is off the
-      # critical path, so its ~37s is free wall-clock.
+      # THIS IS THE ONLY REMAINING libvips INSTALL, and it is deliberate: it
+      # keeps a system libvips available where the prod artifact is compiled,
+      # so a future switch to VIX_COMPILATION_MODE=PLATFORM_PROVIDED_LIBVIPS
+      # (or a vix bump that needs to fall back to a source build) is exercised
+      # here rather than discovered in prod. mix-test dropped its copy because
+      # vix's default precompiled NIF bundles libvips and that lane never
+      # touches the system `vips` binary (`:requires_vips` is default-excluded
+      # there). This job is off the critical path, so its ~37s is free
+      # wall-clock.
       - name: Install libvips for media renditions (Phase 1)
         run: sudo apt-get update && sudo apt-get install -y libvips-dev
         working-directory: .
