@@ -29,12 +29,16 @@ defmodule BarkparkWeb.ScimGroupsController do
 
     case Scim.create_group(org, params) do
       {:ok, group} ->
-        %{unmatched: unmatched} = apply_members(org, group, member_ids(params["members"]))
+        case apply_members(org, group, member_ids(params["members"])) do
+          {:error, :invalid_role} ->
+            invalid_role_error(conn)
 
-        conn
-        |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
-        |> put_status(201)
-        |> json(render_group(conn, group, Scim.group_member_ids(org, group), unmatched))
+          %{unmatched: unmatched} ->
+            conn
+            |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
+            |> put_status(201)
+            |> json(render_group(conn, group, Scim.group_member_ids(org, group), unmatched))
+        end
 
       {:error, :unknown_role} ->
         ScimResponse.error(
@@ -112,8 +116,10 @@ defmodule BarkparkWeb.ScimGroupsController do
         with_precondition(conn, group, fn conn ->
           # Every op's outcome is READ: an add/remove that matched nobody in
           # this org is collected, never discarded into a 200 that claims it.
-          unmatched =
-            Enum.reduce(member_ops(params["Operations"]), [], fn {op, uid}, miss ->
+          # `:invalid_role` halts the loop: the role is a property of the
+          # group, so every remaining :add would refuse for the same reason.
+          outcome =
+            Enum.reduce_while(member_ops(params["Operations"]), [], fn {op, uid}, miss ->
               result =
                 case op do
                   :add -> Scim.add_group_member(org, group, uid)
@@ -121,18 +127,26 @@ defmodule BarkparkWeb.ScimGroupsController do
                 end
 
               case result do
-                {:ok, _n} -> miss
-                {:error, :no_membership} -> miss ++ [uid]
+                {:ok, _n} -> {:cont, miss}
+                {:error, :no_membership} -> {:cont, miss ++ [uid]}
+                {:error, :invalid_role} -> {:halt, {:error, :invalid_role}}
               end
             end)
 
-          # Re-read AFTER the loop: `group` was fetched before the writes, so
-          # rendering it would answer for the PRE-mutation resource (PDS-D551).
-          group = Scim.get_org_group(org, id) || group
+          case outcome do
+            {:error, :invalid_role} ->
+              invalid_role_error(conn)
 
-          conn
-          |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
-          |> json(render_group(conn, group, Scim.group_member_ids(org, group), unmatched))
+            unmatched ->
+              # Re-read AFTER the loop: `group` was fetched before the writes,
+              # so rendering it would answer for the PRE-mutation resource
+              # (PDS-D551).
+              group = Scim.get_org_group(org, id) || group
+
+              conn
+              |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
+              |> json(render_group(conn, group, Scim.group_member_ids(org, group), unmatched))
+          end
         end)
     end
   end
@@ -149,12 +163,17 @@ defmodule BarkparkWeb.ScimGroupsController do
         with_precondition(conn, group, fn conn ->
           case Scim.update_group(org, group, params) do
             {:ok, updated} ->
-              {:ok, %{unmatched: unmatched}} =
-                Scim.replace_group_members(org, updated, member_ids(params["members"]))
+              case Scim.replace_group_members(org, updated, member_ids(params["members"])) do
+                {:ok, %{unmatched: unmatched}} ->
+                  conn
+                  |> ScimResponse.with_etag(ScimResponse.version(updated.updated_at))
+                  |> json(
+                    render_group(conn, updated, Scim.group_member_ids(org, updated), unmatched)
+                  )
 
-              conn
-              |> ScimResponse.with_etag(ScimResponse.version(updated.updated_at))
-              |> json(render_group(conn, updated, Scim.group_member_ids(org, updated), unmatched))
+                {:error, :invalid_role} ->
+                  invalid_role_error(conn)
+              end
 
             {:error, %Ecto.Changeset{} = cs} ->
               changeset_error(conn, cs)
@@ -195,14 +214,31 @@ defmodule BarkparkWeb.ScimGroupsController do
 
   # Grant the group's role to each supplied member id and READ every grant's
   # outcome — `Enum.each/2` here used to throw all of them away, so a 201 could
-  # claim a membership set the write never created.
+  # claim a membership set the write never created. `:invalid_role` halts: the
+  # role belongs to the GROUP, so every remaining grant would refuse too.
   defp apply_members(org, group, ids) do
-    Enum.reduce(ids, %{granted: 0, unmatched: []}, fn id, acc ->
+    Enum.reduce_while(ids, %{granted: 0, unmatched: []}, fn id, acc ->
       case Scim.add_group_member(org, group, id) do
-        {:ok, _n} -> %{acc | granted: acc.granted + 1}
-        {:error, :no_membership} -> %{acc | unmatched: acc.unmatched ++ [id]}
+        {:ok, _n} -> {:cont, %{acc | granted: acc.granted + 1}}
+        {:error, :no_membership} -> {:cont, %{acc | unmatched: acc.unmatched ++ [id]}}
+        {:error, :invalid_role} -> {:halt, {:error, :invalid_role}}
       end
     end)
+  end
+
+  # The group's mapped role failed membership-changeset validation — it is not
+  # in the valid-role set of every workspace the write would touch (deleted
+  # after the group was created, or scoped to a different workspace of this
+  # org). Same 400/invalidValue family as create's :unknown_role, but a
+  # DISTINCT message: this refusal comes from the WRITE, not the existence
+  # check, and no membership was changed.
+  defp invalid_role_error(conn) do
+    ScimResponse.error(
+      conn,
+      400,
+      "the mapped role is not a valid role for this organization's workspaces; no memberships were changed",
+      "invalidValue"
+    )
   end
 
   defp member_ids(nil), do: []

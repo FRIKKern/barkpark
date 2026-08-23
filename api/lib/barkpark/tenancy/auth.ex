@@ -221,11 +221,20 @@ defmodule Barkpark.Tenancy.Auth do
     |> Repo.insert()
   end
 
-  # The role names accepted for a membership in this workspace: the built-ins
-  # (owner/admin/member) plus any custom roles defined for the workspace (or
-  # global custom roles). A defined custom role is accepted; a typo'd or
-  # nonexistent role is still rejected by the changeset.
-  defp valid_role_names(workspace_id) do
+  @doc """
+  The role names accepted for a membership in this workspace: the built-ins
+  (owner/admin/member) plus any custom roles defined for the workspace (or
+  global custom roles). A defined custom role is accepted; a typo'd or
+  nonexistent role is still rejected by the changeset.
+
+  Public because it is THE valid-role set for a membership write — every
+  membership writer must validate against it (`create_membership/4` here,
+  `Barkpark.Scim.add_group_member/3` for SCIM group grants), so a role write
+  can never land that `Membership.changeset/3` would refuse
+  (arpss-w10-bl-scim-set-member-role-unvalidated).
+  """
+  @spec valid_role_names(binary()) :: [String.t()]
+  def valid_role_names(workspace_id) do
     custom =
       Repo.all(
         from r in Role,
