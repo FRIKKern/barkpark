@@ -1,0 +1,199 @@
+name: Grip suite
+
+# tooling/grip/ is the source-of-truth substrate the truth-grip epic writes
+# facts through (charter: .claude/workflows/bp-truth-grip-charter.md). Its own
+# node --test suite has NEVER run on the merge path: `git grep -l grip -- \
+# .github/workflows/` on origin/main returns nothing, 39 workflows, zero grip.
+# That leaves a builder's pasted local-terminal output as the ONLY evidence
+# any grip change did not break screening, binding, or rerun classification —
+# exactly the kind of unre-derived claim this epic exists to make impossible
+# for everything ELSE it certifies. This closes that gap for grip itself.
+#
+# THE GATE SHAPE — THREE CLAUSES, deliberately, because two are DEFEATED.
+# D100's original predicate (`# fail 0` AND `# skipped 1`) passes even when 15
+# of 16 real test files never ran: `node --test tooling/grip/test/rerun.test.mjs
+# tooling/grip/test/DOES-NOT-EXIST.test.mjs` exits 0 with `# fail 0` AND
+# `# skipped 1` — the missing path is never even named. A bare glob expanding
+# to zero files is the same silent-zero-test green. The file-count FLOOR below
+# is what closes it: it is proven able to fail by moving one real test file
+# aside (see the PR body for the mutation's red/green pair). The floor is a
+# LOWER bound re-derived at write time, never a pinned total — the suite's own
+# TEST count moves constantly (622 one day, 736 the next) and asserting it
+# would make this gate a maintenance chore, not a guard; asserting a MINIMUM
+# FILE count still catches a silently-shrunk glob without that churn.
+#
+# `# skipped 1` is not incidental — it names a real fact. rerun.test.mjs keeps
+# one opt-in probe against production behind `{ skip: process.env.GRIP_LIVE
+# !== "1" }`. GRIP_LIVE is left UNSET here on purpose: setting it would flip
+# that probe from skipped to run, which REDS this same predicate (skipped
+# becomes 0), because the predicate is asserting an ENVIRONMENT shape, not a
+# preference. Do not "fix" a red here by setting GRIP_LIVE=1 — that is exactly
+# the trap D113 exists to name.
+#
+# WHY PATH-FILTERED, PR AND PUSH ALIKE: no other epic's PR should ever wait on
+# grip's own suite, and a PR-only filter would let a direct push to main go
+# unre-checked forever (the mirrored-list discipline every tenant in
+# shell-harnesses.yml already follows, and doc-gates-paths-parity-check.sh
+# polices generally for that file — this one is a single two-entry pair, kept
+# by hand and by inspection since drift here has only one place to hide).
+#
+# WHY fetch-depth: 0. A shallow, ref-scoped checkout (the shape a PR-only
+# fetch of a single commit produces, with no `origin/main` remote-tracking ref
+# at all) reds rerun.test.mjs's own ref-resolution test with `+ 'UNAVAILABLE'
+# - 'FAILED'` — re-derived directly: a `git init` + `git fetch --depth 1
+# origin <sha>` checkout with no origin/main ref fails that test; adding
+# `git fetch --depth=1 origin +refs/heads/main:refs/remotes/origin/main` (or,
+# as chosen here, a full `fetch-depth: 0` matching this repo's existing
+# house style in shell-harnesses.yml) restores it. The dependency is REF
+# RESOLUTION, not history depth.
+#
+# ADVISORY, NOT REQUIRED (D104b/D101 honesty). Re-derived against this repo's
+# live branch protection at the time this workflow was written: `GET
+# /repos/FRIKKern/barkpark/branches/main/protection` returns 200 with
+# `required_status_checks.contexts` = exactly ["Elixir gate", "PR references
+# an active task", "Cloud gate", "Console gate"] — this workflow's check name
+# is not among them, nor is anything else outside that four. `rulesets` and
+# `rules/branches/main` both return `[]`. Wiring makes the suite RUN; it does
+# not make it BLOCK, and the step summary re-derives and states this live on
+# every run rather than trusting a comment to stay true.
+#
+# NO bp INVOCATION ANYWHERE IN THIS FILE. BARKPARK_TASK_TOKEN does not exist
+# in any CI scope, and a workflow that tries to write through the ledger
+# mutation shape gets an HTTP 200 while creating an invisible DRAFT `bp task
+# ready` never sees — a false-success alerting path is worse than none.
+# Escalation on failure goes through scripts/file-ci-failure-issue.sh instead,
+# which uses the built-in GITHUB_TOKEN to file (or update) a real GitHub
+# issue, the same path paper-readers.yml already uses for its own nightly
+# gate.
+
+on:
+  pull_request:
+    paths:
+      - "tooling/grip/**"
+      - ".github/workflows/grip-suite.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tooling/grip/**"
+      - ".github/workflows/grip-suite.yml"
+
+permissions:
+  contents: read
+  issues: write # so a failed run on main can surface itself to a human
+
+concurrency:
+  group: grip-suite-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the suite dark
+  # (never-cancel-main-check.sh / honest-gates D12). A no-op on PRs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  grip-suite:
+    name: tooling/grip full node --test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so `origin/main` resolves for rerun.test.mjs's own
+          # ref-resolution tests — see the file header for the measurement
+          # that a shallower, ref-scoped checkout reds test 38.
+          fetch-depth: 0
+
+      - name: what this run does NOT certify (advisory status, re-derived live)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          {
+            echo "### Grip suite — advisory, and what a hermetic green does not certify"
+            echo
+            echo "This check is **advisory** and cannot block a merge. Re-derived against"
+            echo "this repo's live branch protection on this run:"
+            echo
+            prot_code=$(gh api -i repos/${{ github.repository }}/branches/main/protection 2>/dev/null | head -1 | awk '{print $2}')
+            if [ "$prot_code" = "200" ]; then
+              contexts=$(gh api repos/${{ github.repository }}/branches/main/protection --jq '.required_status_checks.contexts | join(", ")' 2>/dev/null)
+              echo "- \`branches/main/protection\`: 200 — required contexts: ${contexts:-<unreadable>}"
+              echo "  (\`Grip suite\` is not among them — advisory only)"
+            else
+              echo "- \`branches/main/protection\`: ${prot_code:-<unreachable>} (no classic protection object)"
+            fi
+            rulesets=$(gh api repos/${{ github.repository }}/rulesets --jq 'length' 2>/dev/null)
+            echo "- \`rulesets\`: ${rulesets:-<unreachable>} entries"
+            branch_rules=$(gh api repos/${{ github.repository }}/rules/branches/main --jq 'length' 2>/dev/null)
+            echo "- \`rules/branches/main\`: ${branch_rules:-<unreachable>} entries"
+            echo
+            echo "A hermetic green here means the checked-out source passed \`node --test\`"
+            echo "on THIS runner, nothing more. It does not certify GRIP_LIVE=1 behaviour"
+            echo "(left deliberately unset — see the workflow file header), does not certify"
+            echo "anything about \`tooling/grip/ledger/\` beyond what the suite itself reads,"
+            echo "and does not run against a live host."
+            echo
+            echo "Tool availability on this runner (repo instruments this suite does NOT"
+            echo "invoke, but whose absence bounds what any OTHER gate here could re-derive):"
+            for c in bp gh go curl; do
+              if command -v "$c" >/dev/null 2>&1; then
+                echo "- \`$c\`: present"
+              else
+                echo "- \`$c\`: ABSENT"
+              fi
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: expected grip test-file floor (mutation-proven, not a pinned total)
+        run: |
+          set +e
+          shopt -s nullglob
+          files=(tooling/grip/test/*.test.mjs)
+          count=${#files[@]}
+          printf '%s\n' "${files[@]}"
+          echo "found $count tooling/grip/test/*.test.mjs files"
+          floor=20
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::expected at least $floor tooling/grip/test/*.test.mjs files, found $count: ${files[*]}"
+            exit 1
+          fi
+          echo "GRIP_TEST_FILE_COUNT=$count" >> "$GITHUB_ENV"
+
+      - name: grip suite — fail 0 AND skipped 1 AND the file floor above (D100/D113)
+        run: |
+          set +e
+          set -o pipefail
+          node --test tooling/grip/test/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/grip-suite.log"
+          run_rc=${PIPESTATUS[0]}
+
+          fail=$(awk -F'# fail ' '/^# fail /{print $2}' "$RUNNER_TEMP/grip-suite.log")
+          skipped=$(awk -F'# skipped ' '/^# skipped /{print $2}' "$RUNNER_TEMP/grip-suite.log")
+          echo "parsed clauses: run_rc=$run_rc fail=$fail skipped=$skipped (file floor already asserted: $GRIP_TEST_FILE_COUNT files)"
+
+          status=0
+          if [ "$run_rc" != "0" ]; then
+            echo "::error::node --test exited $run_rc"
+            status=1
+          fi
+          if [ "$fail" != "0" ]; then
+            echo "::error::expected '# fail 0', got '# fail ${fail:-<none>}'"
+            status=1
+          fi
+          if [ "$skipped" != "1" ]; then
+            echo "::error::expected '# skipped 1' (rerun.test.mjs's opt-in GRIP_LIVE=1 probe, left unset), got '# skipped ${skipped:-<none>}' — either GRIP_LIVE leaked into this job or a skip was added/removed upstream"
+            status=1
+          fi
+          exit $status
+
+      - name: report failure to a human
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: grip-suite
+          CI_FAILURE_DETAIL: |
+            The tooling/grip node --test suite failed (or its file-count floor
+            tripped) on ${{ github.ref }} at ${{ github.sha }}. This suite backs
+            every fact-store write the truth-grip epic makes — see
+            .claude/workflows/bp-truth-grip-charter.md — and this check is
+            advisory (not a required context), so a red run does not block
+            anything on its own. Open the run's log for the failing test names
+            or the found-file list.
+        run: bash scripts/file-ci-failure-issue.sh
