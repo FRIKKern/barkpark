@@ -779,6 +779,79 @@ test("the four corpus rows the collision fix newly ADMITS are named, member by m
   assert.equal(NEWLY_ADMITTED.length, COLLISION_FIX_REACH, "the named rows must account for the whole +4 delta");
 });
 
+// ── 9c. THE PNPM/DOCKER VALUE-TAKING-GLOBAL COLLISION (sibling of tgw12-s1) ──
+//
+// `verbRule` (docker, systemctl, launchctl, pnpm) fed `firstNonFlag` straight
+// off `argv`, with no `dropValueGlobals` normalisation — the same hole 9b
+// fixed for git/go/npm, unfixed here. Confirmed live on origin/main before
+// this fix: `pnpm -C ls add lodash` and `pnpm --prefix ls install` both
+// ADMITTED (`add`/`install` are writes/code-exec, judged as the eaten value
+// `ls`), and `docker --host ps exec -it foo bash` ADMITTED `docker exec` —
+// arbitrary code execution inside a container — because `--host`'s eaten
+// value `ps` collided with an allowlisted docker verb, so the real verb
+// `exec` two tokens later was never examined. systemctl/launchctl are left
+// alone (out of this task's fence: pnpm + docker only).
+
+test("pnpm/docker value-taking-global collision is REFUSED — a global's eaten arg is not the sub-verb", () => {
+  const refused = [
+    // pnpm — `-C`/`--prefix` hid `add`/`install` (writes / code-exec).
+    "pnpm -C ls add lodash",
+    "pnpm --prefix ls install",
+    "pnpm -C view add lodash",
+    // docker — `-H`/`--host`/`--context`/`--config` hid `exec`/`run` (code exec).
+    "docker --host ps exec -it foo bash",
+    "docker -H info run --rm -v /:/host alpine sh",
+    "docker --context ps exec -it foo bash",
+    "docker --config ps run --privileged alpine sh",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the collision: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("the pnpm/docker collision fix does NOT over-refuse legitimate value-global reads", () => {
+  const admitted = [
+    "pnpm ls",
+    "pnpm -C /some/dir ls",
+    "pnpm -C /some/dir view foo",
+    "pnpm --prefix /some/dir outdated",
+    "docker ps",
+    "docker -H tcp://myhost:2375 ps",
+    "docker --host tcp://myhost:2375 images",
+    "docker --config /home/me/.docker version",
+    "docker --context myctx info",
+  ];
+  for (const cmd of admitted) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, true, `MUST ADMIT the honest read: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("MUTATION PROOF: reverting pnpm/docker to a bare verbRule (no value-globals) re-admits the collision", () => {
+  // Mirrors the module's own dropValueGlobals mechanism rather than reimplementing
+  // a parallel comparison — proves the FIX, not a copy of the fix's logic.
+  const bareVerbRule = (verbs, label) => ({
+    verbs: new Set(verbs),
+    check(argv) {
+      const verb = argv.slice(1).find((t) => !t.startsWith("-")) ?? null;
+      if (verb === null) return `${argv[0]} without a sub-verb`;
+      if (!this.verbs.has(verb)) return `${argv[0]} sub-verb "${verb}" is not on the read-only allowlist (${[...verbs].sort().join(", ")})`;
+      return null;
+    },
+  });
+  const reverted = {
+    pnpm: bareVerbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm"),
+    docker: bareVerbRule(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"], "docker"),
+  };
+  const tokenize = (cmd) => cmd.split(" ");
+  assert.equal(reverted.pnpm.check(tokenize("pnpm -C ls add lodash")), null, "REVERTED rule ADMITS the pnpm collision (proves the shipped fix earns its keep)");
+  assert.equal(reverted.docker.check(tokenize("docker --host ps exec -it foo bash")), null, "REVERTED rule ADMITS the docker collision (proves the shipped fix earns its keep)");
+  // And the shipped screenCommand — using the real dropValueGlobals fix — still refuses both live.
+  assert.equal(screenCommand("pnpm -C ls add lodash").ok, false, "shipped fix REFUSES");
+  assert.equal(screenCommand("docker --host ps exec -it foo bash").ok, false, "shipped fix REFUSES");
+});
+
 // ── 10. THE ARBITRARY FILE-OVERWRITE PRIMITIVE (wave 4) ──────────────────────
 //
 // `sort`, `uniq` and `tree` shipped as bare `plainRule()`, filed under

@@ -393,10 +393,25 @@ function dropValueGlobals(argv, valueGlobals) {
   return out;
 }
 
-/** A head whose sub-verb must appear in `verbs`. */
-const verbRule = (verbs, label) => ({
+const EMPTY_VALUE_GLOBALS = new Set();
+
+/**
+ * A head whose sub-verb must appear in `verbs`.
+ *
+ * `valueGlobals` (optional) is a Set of pre-verb global option tokens that eat
+ * their next token as a value — the same `dropValueGlobals` normaliser gitRule
+ * / goRule / npmRule use. Without it, `firstNonFlag` reads the EATEN VALUE as
+ * the sub-verb: `pnpm -C ls add lodash` and `pnpm --prefix ls install` both
+ * ADMITTED (`add`/`install` are writes/code-exec, judged as the read verb
+ * `ls`), and `docker --host ps exec -it foo bash` ADMITTED docker exec
+ * (arbitrary code execution in a container) because `--host` ate `ps`, which
+ * happens to be an allowed docker verb, and the real verb `exec` was never
+ * looked at.
+ */
+const verbRule = (verbs, label, valueGlobals = EMPTY_VALUE_GLOBALS) => ({
   verbs: new Set(verbs),
-  check(argv) {
+  check(rawArgv) {
+    const argv = valueGlobals.size ? dropValueGlobals(rawArgv, valueGlobals) : rawArgv;
     const verb = firstNonFlag(argv);
     if (verb === null) return `${argv[0]} without a sub-verb — ${label} requires one of: ${[...verbs].sort().join(", ")}`;
     if (!this.verbs.has(verb)) return `${argv[0]} sub-verb "${verb}" is not on the read-only allowlist (${[...verbs].sort().join(", ")})`;
@@ -1057,6 +1072,21 @@ const sedRule = {
   },
 };
 
+// docker's value-taking pre-verb globals. `docker --host ps exec -it foo bash`
+// runs `docker exec` — arbitrary code execution inside a container — with the
+// daemon socket repointed by `--host`; `--host`'s eaten value `ps` collided
+// with an allowlisted verb, so the real verb `exec` two tokens later was never
+// examined. `-H` is docker's short alias for `--host`; `--context` and
+// `--config` also take a separate-token value ahead of the verb.
+const DOCKER_VALUE_GLOBALS = new Set(["-H", "--host", "--context", "--config"]);
+
+// pnpm's value-taking pre-verb globals. `pnpm -C ls add lodash` and
+// `pnpm --prefix ls install` both ADMITTED (confirmed live on origin/main):
+// `add`/`install` are writes/code-exec, judged instead as the eaten value `ls`
+// read as the sub-verb. `-C` is pnpm's short alias for `--prefix` (mirrors
+// npm's own `-C`/`--prefix`).
+const PNPM_VALUE_GLOBALS = new Set(["-C", "--prefix"]);
+
 /**
  * THE ALLOWLIST. Every entry is a head this census may run. Anything absent is
  * REFUSED — that is the fail-closed property, and it is why this is a Map of
@@ -1133,7 +1163,7 @@ export const ALLOWED_HEADS = new Map([
   ["go", goRule],
   ["mix", mixRule],
   ["curl", curlRule],
-  ["docker", verbRule(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"], "docker")],
+  ["docker", verbRule(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"], "docker", DOCKER_VALUE_GLOBALS)],
   ["systemctl", verbRule(["is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-unit-files", "get-default"], "systemctl")],
   // journalctl READS the journal — except for the handful of flags that vacuum,
   // rotate or flush it, which delete log history irreversibly.
@@ -1150,7 +1180,7 @@ export const ALLOWED_HEADS = new Map([
   // something?" rather than "does it write?". Removing it costs the census
   // nothing: 0 of the 651 frozen corpus commands use it.
   ["npm", npmRule],
-  ["pnpm", verbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm")],
+  ["pnpm", verbRule(["ls", "view", "info", "outdated", "why", "list", "root", "bin"], "pnpm", PNPM_VALUE_GLOBALS)],
 ]);
 
 /**
