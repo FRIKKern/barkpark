@@ -85,6 +85,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # hypothetical unthreaded call site rendering the flat grammar, which
   # `doc_list_href/3` at the bottom of this module now spells routably too.
   attr(:scope_prefix, :string, default: "")
+  # spd-bl-focus-after-select — threaded through to document_header.
+  attr(:focus_on_mount, :boolean, default: false)
 
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -158,7 +160,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
     ~H"""
     <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
-      <.document_header dataset={@dataset} title={@title}>
+      <.document_header dataset={@dataset} title={@title} focus_on_mount={@focus_on_mount}>
         <:status_pill>
           <span class="badge badge-published">{@doc_type}</span>
         </:status_pill>
@@ -1312,6 +1314,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view
+          focus_on_mount={@focus_doc_on_open}
           paper_doc={@paper_doc}
           paper_rev={@paper_rev}
           paper_html={@paper_html}
@@ -1466,7 +1469,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <% beta_ok = @editor_doc != nil and @editor_blocks != [] %>
         <%= if beta_ok and @editor_mode == :beta do %>
           <div class="editor-panel" data-role="content" data-test-id="studio-doc-beta-editor">
-            <.document_header dataset={@dataset} title={@editor_doc.title || "Untitled"}>
+            <.document_header
+              dataset={@dataset}
+              title={@editor_doc.title || "Untitled"}
+              focus_on_mount={@focus_doc_on_open}
+            >
               <:status_pill>
                 <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
                   <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
@@ -1494,6 +1501,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </div>
         <% else %>
           <.studio_editor_shell
+            focus_on_mount={@focus_doc_on_open}
             editor_doc={@editor_doc}
             editor_schema={@editor_schema}
             editor_type={@editor_type}
