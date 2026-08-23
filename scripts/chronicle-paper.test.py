@@ -54,6 +54,14 @@ class ChroniclePaperTest(unittest.TestCase):
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=check,
         )
 
+    def read_fixture_events(self):
+        previous = pathlib.Path.cwd()
+        os.chdir(self.repo)
+        try:
+            return chronicle.read_events("main")
+        finally:
+            os.chdir(previous)
+
     def test_builds_five_native_papers_from_one_calendar_graph(self):
         output = self.run_script(
             "--date", "2026-08-23", "--ref", "main", "--repo", "acme/project",
@@ -107,11 +115,76 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("/papers/barkpark-changelog-2026-08", index_json)
 
     def test_historical_build_reads_git_once(self):
-        events = chronicle.read_events("main")
+        events = self.read_fixture_events()
         with mock.patch.object(chronicle, "read_events", return_value=events) as read_events:
             payloads = chronicle.build(dt.date(2026, 8, 23), "main", "acme/project", 12)
         self.assertEqual(1, read_events.call_count)
         self.assertIn("month:2026-07", payloads)
+
+    def test_full_history_builds_every_active_period_and_hierarchical_links(self):
+        events = self.read_fixture_events()
+        with mock.patch.object(chronicle, "read_events", return_value=events) as read_events:
+            payloads = chronicle.build(
+                dt.date(2026, 8, 23),
+                "main",
+                "acme/project",
+                full_history=True,
+            )
+
+        self.assertEqual(1, read_events.call_count)
+        by_slug = {payload["slug"]: payload for payload in payloads.values()}
+        self.assertEqual(10, len(by_slug))
+        self.assertEqual(len(payloads), len(by_slug))
+        self.assertEqual(
+            {
+                "barkpark-chronicle",
+                "barkpark-changelog-2026",
+                "barkpark-changelog-2026-07",
+                "barkpark-changelog-2026-08",
+                "barkpark-changelog-2026-w31",
+                "barkpark-changelog-2026-w34",
+                "barkpark-changelog-2026-07-31",
+                "barkpark-changelog-2026-08-17",
+                "barkpark-changelog-2026-08-18",
+                "barkpark-changelog-2026-08-23",
+            },
+            set(by_slug),
+        )
+        self.assertTrue(
+            all(
+                payload.get("dedup_bypass") is True
+                for slug, payload in by_slug.items()
+                if slug != "barkpark-chronicle"
+            )
+        )
+
+        year_json = json.dumps(by_slug["barkpark-changelog-2026"])
+        self.assertIn("Monthly chapters", year_json)
+        self.assertIn("/papers/barkpark-changelog-2026-07", year_json)
+        self.assertIn("/papers/barkpark-changelog-2026-08", year_json)
+
+        august_json = json.dumps(by_slug["barkpark-changelog-2026-08"])
+        self.assertIn("Weekly dispatches", august_json)
+        self.assertIn("Daily shiplogs", august_json)
+        self.assertIn("/papers/barkpark-changelog-2026-w34", august_json)
+        self.assertIn("/papers/barkpark-changelog-2026-08-17", august_json)
+        self.assertIn("/papers/barkpark-changelog-2026-08-23", august_json)
+
+        week_json = json.dumps(by_slug["barkpark-changelog-2026-w34"])
+        self.assertIn("/papers/barkpark-changelog-2026-08-17", week_json)
+        self.assertIn("/papers/barkpark-changelog-2026-08-18", week_json)
+        self.assertIn("/papers/barkpark-changelog-2026-08-23", week_json)
+
+    def test_full_history_cli_writes_one_file_per_unique_paper(self):
+        output_dir = self.repo / "chronicle"
+        self.run_script(
+            "--date", "2026-08-23",
+            "--ref", "main",
+            "--repo", "acme/project",
+            "--full-history",
+            "--output-dir", str(output_dir),
+        )
+        self.assertEqual(10, len(list(output_dir.glob("*.json"))))
 
     def test_utc_boundaries_and_iso_week_are_independent_of_month(self):
         periods = chronicle.periods_for(dt.date(2026, 1, 1))
@@ -149,6 +222,24 @@ class ChroniclePaperTest(unittest.TestCase):
             with mock.patch.object(chronicle.json, "load", return_value={"result": {"source_doc": payload["source_doc"]}}):
                 chronicle.publish([payload], "https://example.test", "secret")
         self.assertEqual(1, urlopen.call_count)
+
+    def test_parallel_publish_keeps_the_chronicle_index_last(self):
+        payloads = [
+            {"slug": "day-a", "source_doc": "a"},
+            {"slug": "barkpark-chronicle", "source_doc": "index"},
+            {"slug": "week-a", "source_doc": "b"},
+        ]
+        completed = []
+
+        def publish_one(payload, _api_url, _token):
+            completed.append(payload["slug"])
+            return f"published {payload['slug']}"
+
+        with mock.patch.object(chronicle, "publish_one", side_effect=publish_one):
+            chronicle.publish(payloads, "https://example.test", "secret", workers=2)
+
+        self.assertEqual("barkpark-chronicle", completed[-1])
+        self.assertEqual({"day-a", "week-a"}, set(completed[:-1]))
 
 
 if __name__ == "__main__":

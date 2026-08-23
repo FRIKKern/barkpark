@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import concurrent.futures
 import datetime as dt
 import hashlib
 import json
@@ -20,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-mvp-9"
+RENDERER_VERSION = "chronicle-mvp-10"
 LEDGER_PREVIEW_LIMIT = 24
 DEFAULT_HISTORY_MONTHS = 18
 DEFAULT_REPO = "FRIKKern/barkpark"
@@ -183,6 +184,26 @@ def historical_months(events: list[Event], through: dt.date, limit: int) -> list
     return [month_period(dt.date(year, month, 1)) for year, month in keys]
 
 
+def historical_periods(events: list[Event], through: dt.date) -> dict[str, list[Period]]:
+    """Return every active day, ISO week, month, and year through ``through``."""
+    periods: dict[str, dict[str, Period]] = {
+        "day": {},
+        "week": {},
+        "month": {},
+        "year": {},
+    }
+    for event in events:
+        event_day = event.occurred_at.date()
+        if event_day > through:
+            continue
+        for kind, period in periods_for(event_day).items():
+            periods[kind][period.key] = period
+    return {
+        kind: [by_key[key] for key in sorted(by_key)]
+        for kind, by_key in periods.items()
+    }
+
+
 def events_in_period(events: Iterable[Event], period: Period) -> list[Event]:
     return [event for event in events if period.start <= event.occurred_at.date() < period.end]
 
@@ -304,13 +325,93 @@ def navigation_blocks(periods: dict[str, Period], active: str) -> list[dict[str,
     return [paragraph("auto:period-nav", nodes)]
 
 
-def period_payload(period: Period, selected: list[Event], periods: dict[str, Period], repo: str) -> dict[str, Any]:
+def archive_list(block_id: str, periods: list[Period], events: list[Event]) -> dict[str, Any]:
+    items = []
+    for period in periods:
+        count = len(events_in_period(events, period))
+        items.append(
+            [
+                link(period.title, f"/papers/{period.slug}"),
+                text(f" · {count:,} verified mainline changes"),
+            ]
+        )
+    return {"id": block_id, "type": "list", "ordered": False, "items": items}
+
+
+def linked_summary_list(block_id: str, items: list[dict[str, str]]) -> dict[str, Any]:
+    return {
+        "id": block_id,
+        "type": "list",
+        "ordered": False,
+        "items": [
+            [link(item["title"], item["href"]), text(f" · {item['text']}")]
+            for item in items
+        ],
+    }
+
+
+def child_archive_blocks(
+    period: Period,
+    selected: list[Event],
+    events: list[Event],
+    archive: dict[str, list[Period]],
+) -> list[dict[str, Any]]:
+    sections: list[tuple[str, str, list[Period]]] = []
+    if period.kind == "year":
+        children = [child for child in archive["month"] if period.start <= child.start < period.end]
+        sections.append(("Monthly chapters", "Every active month in this annual volume.", children))
+    elif period.kind == "month":
+        week_keys = {periods_for(event.occurred_at.date())["week"].key for event in selected}
+        weeks = [child for child in archive["week"] if child.key in week_keys]
+        days = [child for child in archive["day"] if period.start <= child.start < period.end]
+        sections.extend(
+            [
+                ("Weekly dispatches", "ISO-week views touching this month, including boundary weeks.", weeks),
+                ("Daily shiplogs", "Every active mainline day in this monthly chapter.", days),
+            ]
+        )
+    elif period.kind == "week":
+        days = [child for child in archive["day"] if period.start <= child.start < period.end]
+        sections.append(("Daily shiplogs", "Every active mainline day in this weekly dispatch.", days))
+
+    blocks: list[dict[str, Any]] = []
+    for index, (title_value, description, children) in enumerate(sections):
+        if not children:
+            continue
+        suffix = str(index + 1)
+        blocks.extend(
+            [
+                {"id": f"auto:divider-archive-{suffix}", "type": "divider"},
+                heading(f"auto:archive-title-{suffix}", 2, title_value),
+                paragraph(f"auto:archive-dek-{suffix}", description),
+                archive_list(f"auto:archive-{suffix}", children, events),
+            ]
+        )
+    return blocks
+
+
+def period_payload(
+    period: Period,
+    selected: list[Event],
+    periods: dict[str, Period],
+    repo: str,
+    *,
+    events: list[Event] | None = None,
+    archive: dict[str, list[Period]] | None = None,
+) -> dict[str, Any]:
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in selected)
     leading_areas = [sentence_case(area) for area, _count in areas.most_common(3)]
     public_titles = {
-        "day": f"Daily shiplog report · {period.start.strftime('%A')}, {period.title}",
-        "week": f"Week {period.key.split('-W')[-1]} dispatch · {period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}",
+        "day": (
+            f"Daily shiplog · {period.start.strftime('%A')}, {period.title} · "
+            f"edition {digest(selected)[:8]} {digest(selected)[8:]}"
+        ),
+        "week": (
+            f"Week {period.key.split('-W')[-1]} dispatch · {period.start.strftime('%d %b')}–"
+            f"{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')} · "
+            f"edition {digest(selected)[:8]} {digest(selected)[8:]}"
+        ),
         "month": (
             f"{period.title} field journal · {len(selected):,} changes, "
             f"{', '.join(leading_areas) if leading_areas else 'quiet'} leading · "
@@ -366,6 +467,9 @@ def period_payload(period: Period, selected: list[Event], periods: dict[str, Per
             paragraph("auto:product-dek", "The freshest features, fixes, performance changes, and reversions from this chapter."),
             event_lineage("auto:product-signals", product_signals, repo, limit=8),
         ]
+    if events is not None and archive is not None:
+        insertion = blocks.index(next(block for block in blocks if block["id"] == "auto:divider-ledger"))
+        blocks[insertion:insertion] = child_archive_blocks(period, selected, events, archive)
     if selected:
         items = []
         for event in reversed(selected[-ledger_limit:]):
@@ -414,10 +518,10 @@ def period_payload(period: Period, selected: list[Event], periods: dict[str, Per
         ],
         "blocks": blocks,
     }
-    if period.kind == "month":
-        # Monthly chapters intentionally share an editorial series shape. The
-        # calendar key and source digest prove distinct source intervals; this
-        # persisted flag records the deliberate series-level dedup exemption.
+    if period.kind in {"day", "week", "month", "year"}:
+        # Chronicle editions intentionally share an editorial series shape.
+        # The calendar key and source digest prove distinct source intervals;
+        # this persisted flag records the deliberate series-level exemption.
         payload["dedup_bypass"] = True
     return payload
 
@@ -490,11 +594,11 @@ def index_payload(
         {"id": "auto:divider-editions", "type": "divider"},
         heading("auto:editions-title", 2, "Read the current editions"),
         paragraph("auto:editions-dek", "Four lenses on the same source ledger. Start close to the work, then widen the frame."),
-        {"id": "auto:periods", "type": "cards", "items": cards},
+        linked_summary_list("auto:periods", cards),
         {"id": "auto:divider-archive", "type": "divider"},
         heading("auto:archive-title", 2, "Monthly chapters"),
         paragraph("auto:archive-dek", "A durable month-by-month reading path through the verified mainline record, newest chapter first."),
-        {"id": "auto:month-archive", "type": "cards", "items": archive_cards},
+        linked_summary_list("auto:month-archive", archive_cards),
         {"id": "auto:divider-motion", "type": "divider"},
         heading("auto:motion-title", 2, "The year in motion"),
         paragraph("auto:motion-dek", f"Monthly mainline activity across {periods['year'].key}. The shape is evidence, not a release score: a busy month is not automatically a better month."),
@@ -533,26 +637,48 @@ def build(
     ref: str,
     repo: str,
     history_months: int = 0,
+    full_history: bool = False,
 ) -> dict[str, dict[str, Any]]:
     events = read_events(ref)
     periods = periods_for(day)
-    archive = historical_months(events, day, history_months or DEFAULT_HISTORY_MONTHS)
+    complete_archive = historical_periods(events, day)
+    month_archive = (
+        complete_archive["month"]
+        if full_history
+        else historical_months(events, day, history_months or DEFAULT_HISTORY_MONTHS)
+    )
     payloads = {
-        kind: period_payload(period, events_in_period(events, period), periods, repo)
+        kind: period_payload(
+            period,
+            events_in_period(events, period),
+            periods,
+            repo,
+            events=events,
+            archive=complete_archive if full_history else None,
+        )
         for kind, period in periods.items()
     }
-    if history_months:
-        for month in archive:
-            if month.key == periods["month"].key:
+    archive_kinds = (
+        ("day", "week", "month", "year")
+        if full_history
+        else (("month",) if history_months else ())
+    )
+    for kind in archive_kinds:
+        for historical in complete_archive[kind] if full_history else month_archive:
+            if historical.key == periods[kind].key:
                 continue
-            month_periods = periods_for(month.start)
-            payloads[f"month:{month.key}"] = period_payload(
-                month,
-                events_in_period(events, month),
-                month_periods,
+            selected = events_in_period(events, historical)
+            anchor = selected[0].occurred_at.date() if selected else historical.start
+            context = periods_for(anchor)
+            payloads[f"{kind}:{historical.key}"] = period_payload(
+                historical,
+                selected,
+                context,
                 repo,
+                events=events,
+                archive=complete_archive if full_history else None,
             )
-    payloads["index"] = index_payload(periods, events, repo, archive)
+    payloads["index"] = index_payload(periods, events, repo, month_archive)
     return payloads
 
 
@@ -569,21 +695,36 @@ def current_source_doc(api_url: str, slug: str) -> str | None:
     return result.get("source_doc") if isinstance(result, dict) else None
 
 
-def publish(payloads: Iterable[dict[str, Any]], api_url: str, token: str) -> None:
+def publish_one(payload: dict[str, Any], api_url: str, token: str) -> str:
     endpoint = api_url.rstrip("/") + "/v1/plugins/bulldocs/papers"
-    for payload in payloads:
-        if current_source_doc(api_url, payload["slug"]) == payload["source_doc"]:
-            print(f"unchanged /papers/{payload['slug']}", file=sys.stderr)
-            continue
-        request = urllib.request.Request(
-            endpoint,
-            data=json.dumps(payload, separators=(",", ":")).encode(),
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(request, timeout=30) as response:
-            receipt = json.load(response)
-        print(f"published {receipt['liveview_path']} rev {receipt['rev']}", file=sys.stderr)
+    if current_source_doc(api_url, payload["slug"]) == payload["source_doc"]:
+        return f"unchanged /papers/{payload['slug']}"
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload, separators=(",", ":")).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        receipt = json.load(response)
+    return f"published {receipt['liveview_path']} rev {receipt['rev']}"
+
+
+def publish(
+    payloads: Iterable[dict[str, Any]],
+    api_url: str,
+    token: str,
+    workers: int = 6,
+) -> None:
+    ordered = list(payloads)
+    indexes = [payload for payload in ordered if payload["slug"] == "barkpark-chronicle"]
+    editions = [payload for payload in ordered if payload["slug"] != "barkpark-chronicle"]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(publish_one, payload, api_url, token) for payload in editions]
+        for future in concurrent.futures.as_completed(futures):
+            print(future.result(), file=sys.stderr)
+    for payload in indexes:
+        print(publish_one(payload, api_url, token), file=sys.stderr)
 
 
 def parse_date(value: str) -> dt.date:
@@ -606,14 +747,28 @@ def main() -> int:
         metavar="N",
         help=f"also emit the newest N active monthly chapters (default {DEFAULT_HISTORY_MONTHS}; zero disables backfill)",
     )
+    parser.add_argument(
+        "--full-history",
+        action="store_true",
+        help="emit every active day, ISO week, month, and year Paper",
+    )
     parser.add_argument("--output-dir", type=pathlib.Path)
     parser.add_argument("--publish", action="store_true")
+    parser.add_argument(
+        "--publish-workers",
+        type=int,
+        default=6,
+        metavar="N",
+        help="bounded concurrent edition publishes; the Chronicle index is always last (default 6)",
+    )
     parser.add_argument("--api-url", default=os.environ.get("BARKPARK_API_URL") or "https://guerrilla.barkpark.cloud")
     args = parser.parse_args()
     try:
         if args.history_months < 0:
             raise RuntimeError("--history-months must be zero or greater")
-        payloads = build(args.date, args.ref, args.repo, args.history_months)
+        if args.publish_workers < 1:
+            raise RuntimeError("--publish-workers must be one or greater")
+        payloads = build(args.date, args.ref, args.repo, args.history_months, args.full_history)
         selected = payloads.values() if args.only == "all" else [payloads[args.only]]
         selected = list(selected)
         if args.output_dir:
@@ -629,7 +784,7 @@ def main() -> int:
             token = os.environ.get("BARKPARK_INGEST_TOKEN")
             if not token:
                 raise RuntimeError("--publish requires BARKPARK_INGEST_TOKEN")
-            publish(selected, args.api_url, token)
+            publish(selected, args.api_url, token, args.publish_workers)
     except (RuntimeError, subprocess.CalledProcessError, urllib.error.URLError) as exc:
         print(f"chronicle-paper: {exc}", file=sys.stderr)
         return 1
