@@ -1,0 +1,77 @@
+name: chronicle-paper
+
+on:
+  schedule:
+    - cron: "17 0 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "UTC date to project (YYYY-MM-DD); blank means today"
+        required: false
+        type: string
+      publish:
+        description: "Publish the generated Papers"
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - ".github/workflows/chronicle-paper.yml"
+      - "scripts/chronicle-paper.py"
+      - "scripts/chronicle-paper.test.py"
+
+concurrency:
+  group: chronicle-paper-${{ github.event.inputs.date || 'today' }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: python3 scripts/chronicle-paper.test.py
+      - name: Build the five-paper MVP
+        env:
+          REQUESTED_DATE: ${{ github.event.inputs.date }}
+        run: |
+          args=(--ref HEAD --output-dir "$RUNNER_TEMP/chronicle")
+          if [ -n "$REQUESTED_DATE" ]; then args+=(--date "$REQUESTED_DATE"); fi
+          python3 scripts/chronicle-paper.py "${args[@]}"
+          test "$(find "$RUNNER_TEMP/chronicle" -name '*.json' | wc -l | tr -d ' ')" = 5
+
+  publish:
+    needs: verify
+    if: github.event_name == 'schedule' || github.event.inputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Check publish credentials
+        id: credentials
+        env:
+          BARKPARK_INGEST_TOKEN: ${{ secrets.BARKPARK_INGEST_TOKEN }}
+        run: |
+          if [ -n "$BARKPARK_INGEST_TOKEN" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::BARKPARK_INGEST_TOKEN is not configured; Chronicle publish skipped"
+          fi
+      - name: Publish current Chronicle projections
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          BARKPARK_API_URL: ${{ secrets.BARKPARK_API_URL }}
+          BARKPARK_INGEST_TOKEN: ${{ secrets.BARKPARK_INGEST_TOKEN }}
+          REQUESTED_DATE: ${{ github.event.inputs.date }}
+        run: |
+          args=(--ref main --publish)
+          if [ -n "$REQUESTED_DATE" ]; then args+=(--date "$REQUESTED_DATE"); fi
+          python3 scripts/chronicle-paper.py "${args[@]}"
