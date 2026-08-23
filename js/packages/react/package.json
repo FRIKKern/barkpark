@@ -39,6 +39,26 @@
         "default": "./dist/client.cjs"
       }
     },
+    "./portable-text": {
+      "import": {
+        "types": "./dist/portable-text.d.mts",
+        "default": "./dist/portable-text.mjs"
+      },
+      "require": {
+        "types": "./dist/portable-text.d.ts",
+        "default": "./dist/portable-text.cjs"
+      }
+    },
+    "./portable-doc": {
+      "import": {
+        "types": "./dist/portable-doc.d.mts",
+        "default": "./dist/portable-doc.mjs"
+      },
+      "require": {
+        "types": "./dist/portable-doc.d.ts",
+        "default": "./dist/portable-doc.cjs"
+      }
+    },
     "./paper-surface.css": "./dist/paper-surface.css",
     "./package.json": "./package.json"
   },
