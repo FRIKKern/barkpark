@@ -22922,3 +22922,47 @@ test("cch-w74: the password 401 accusation keys on the invalid_current_password 
   assert.equal((body.match(/Current password is wrong\./g) || []).length, 1,
     "the accusation copy exists once, only behind the slug guard");
 });
+
+test("cchi-w27: previewRow's .deploy-meta composes ONLY bounded terms — a new term reds here, never a comment", () => {
+  // THE CLASSIFICATION, re-derived against app.js (the filed row's premise was
+  // a SENTENCE; this arm is the measurement):
+  //   "preview"                          — literal, bounded (the pmeta initialiser).
+  //   esc(deployTriggerLabel(d.trigger)) — enum TODAY by the server's vocabulary
+  //        (deploy.ex mints only "manual" — enqueue's default — and
+  //        "content-auto" — AutoDeployWorker + the publish receiver; no route
+  //        accepts a caller-supplied trigger). BUT the SPA arm itself is NOT
+  //        bounded: deployTriggerLabel's default arm returns
+  //        String(trigger).replace(/[_-]+/g, " ") — raw passthrough. One added
+  //        server value reaches pmeta with no SPA edit, which is exactly why
+  //        this arm pins the TERM LIST rather than trusting the labeller.
+  //   esc(fmtDur(pdur))                  — bounded formatter ("Ns"/"Nm Ns"/"Nh Nm"/"—").
+  //   esc(fmtWhen(when))                 — bounded ("—" or toLocaleString()).
+  // A term added to pmeta that is not on this allowlist — a branch, an actor,
+  // an image tag — makes .deploy-meta person-shaped with zero CSS changes, and
+  // NO fixture in the corpus can currently make it clip (green by
+  // construction on the fixture axis), so the guard lives at the SOURCE: the
+  // composition itself is pinned.
+  const body = APP_SRC.match(/function previewRow\(d\) \{[\s\S]*?\n  \}\n/)[0];
+  const init = /var pmeta = \[([^\]]*)\];/.exec(body);
+  assert.ok(init, "previewRow no longer initialises pmeta as an array literal — re-derive this arm against the new shape, do not delete it");
+  assert.equal(init[1].trim(), '"preview"', "pmeta's first term must stay the bounded environment literal");
+  const pushLines = body.split("\n").filter((l) => l.includes("pmeta.push("));
+  const BOUNDED = [
+    /pmeta\.push\(esc\(deployTriggerLabel\(d\.trigger\)\)\)/,
+    /pmeta\.push\(esc\(fmtDur\(pdur\)\)\)/,
+    /pmeta\.push\(esc\(fmtWhen\(when\)\)\)/,
+  ];
+  assert.equal(pushLines.length, BOUNDED.length,
+    `previewRow pushes ${pushLines.length} pmeta term(s); the bounded allowlist holds ${BOUNDED.length} — ` +
+    "a term was added or removed. Classify the change (bounded/enum vs person-controlled, line cited) and " +
+    "update the allowlist in the same diff; an unbounded term needs a cruel fixture and a browser leg instead.");
+  for (const line of pushLines) {
+    assert.ok(BOUNDED.some((re) => re.test(line)),
+      `unrecognised pmeta term: ${line.trim()} — every .deploy-meta term must be bounded or enum; ` +
+      "a person-controlled term here is unmeasured by every committed instrument");
+  }
+  assert.ok(!/pmeta\.(unshift|splice|concat)\(|pmeta\[\d/.test(body),
+    "pmeta must only grow through the pinned push sites — a side door defeats the allowlist");
+  assert.ok(body.includes('\'<div class="deploy-meta">\' + pmeta.join(" &middot; ") + "</div>"'),
+    ".deploy-meta must render pmeta.join and nothing else — extra concatenated content bypasses the term pin");
+});
