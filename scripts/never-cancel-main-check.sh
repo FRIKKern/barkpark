@@ -296,7 +296,72 @@ EOF
     echo "$out" >&2
     exit 1
   fi
-  echo "never-cancel-main selftest OK — reds on push-to-main + bare true, green on the guard, on never-cancel, and on pull_request-only."
+  # ── E2E ARMS: the VERDICT WIRING, not just scan() ────────────────────────
+  #
+  # Every arm above asserts on the TEXT scan() returned. None of them execute
+  # the branch that turns that text into an exit code, so the whole tail of
+  # this script — the `grep -q '^FAIL '` verdict and its `exit 1` — was outside
+  # the harness's reach. MEASURED (task-5c4187dda277d445): rewriting that one
+  # line to `if false; then` left this selftest fully green while the real gate
+  # returned 0 on a planted push-to-main + `cancel-in-progress: true` workflow
+  # and printed "never-cancel-main gate OK". doc-gates.yml runs --selftest
+  # first as the durable tripwire; it certified nothing about that branch.
+  #
+  # So these arms re-exec THIS SCRIPT against fixture roots and assert on the
+  # exit code of the whole program. A disarm of the verdict now reds here.
+  local e2e_rc
+
+  # (a) a root carrying the hazard must exit 1.
+  e2e_rc=0
+  NCM_SCAN_ROOT="$tmp" bash "$0" >/dev/null 2>&1 || e2e_rc=$?
+  if [ "$e2e_rc" -ne 1 ]; then
+    echo "SELFTEST FAILED (E2E): a scan root carrying the hazard must exit 1, got ${e2e_rc}." >&2
+    echo "  The verdict wiring — \`grep -q '^FAIL ' <<<\"\$RESULT\"\` then exit 1 — is disarmed or unreachable." >&2
+    failed=1
+  fi
+
+  # (b) a root carrying ONLY safe shapes must exit 0. Without this arm a gate
+  #     hard-wired to `exit 1` would pass arm (a) and fail every real PR.
+  local safe_dir="$tmp/safe-only"
+  mkdir -p "$safe_dir"
+  cp "$tmp/guarded.yml" "$tmp/nevercancel.yml" "$safe_dir/"
+  e2e_rc=0
+  NCM_SCAN_ROOT="$safe_dir" bash "$0" >/dev/null 2>&1 || e2e_rc=$?
+  if [ "$e2e_rc" -ne 0 ]; then
+    echo "SELFTEST FAILED (E2E): a scan root of only safe shapes must exit 0, got ${e2e_rc}." >&2
+    failed=1
+  fi
+
+  # (c) an EMPTY root must exit 2, never 0. `scan` over a glob that matches
+  #     nothing prints nothing and exits 0, so without the non-empty floor the
+  #     verdict reports "gate OK" over a corpus of zero files — a green that
+  #     measured nothing, and the exact failure the override could otherwise
+  #     introduce.
+  local empty_dir="$tmp/empty-root"
+  mkdir -p "$empty_dir"
+  e2e_rc=0
+  NCM_SCAN_ROOT="$empty_dir" bash "$0" >/dev/null 2>&1 || e2e_rc=$?
+  if [ "$e2e_rc" -ne 2 ]; then
+    echo "SELFTEST FAILED (E2E): an EMPTY scan root must exit 2 (could not RUN), got ${e2e_rc}." >&2
+    echo "  The non-empty floor is missing: this gate would report green over zero files." >&2
+    failed=1
+  fi
+
+  # (d) a MISSING root must exit 2 too — a typo'd override must never green.
+  e2e_rc=0
+  NCM_SCAN_ROOT="$tmp/does-not-exist" bash "$0" >/dev/null 2>&1 || e2e_rc=$?
+  if [ "$e2e_rc" -ne 2 ]; then
+    echo "SELFTEST FAILED (E2E): a MISSING scan root must exit 2 (could not RUN), got ${e2e_rc}." >&2
+    failed=1
+  fi
+
+  if [ "$failed" -ne 0 ]; then
+    echo "--- selftest scan output ---" >&2
+    echo "$out" >&2
+    exit 1
+  fi
+
+  echo "never-cancel-main selftest OK — reds on push-to-main + bare true, green on the guard, on never-cancel, and on pull_request-only; and E2E: the whole script exits 1 on a hazard root, 0 on a safe root, 2 on an empty or missing root."
 }
 
 # Refuse an argument this gate does not understand. A swallowed flag — a
@@ -319,8 +384,30 @@ fi
 # had no way to tell a missing PyYAML from a real finding. That is charter D3
 # defeated by the very script that cites it: the discriminating text must reach
 # the log, so the failure is captured here and re-emitted below.
+# The scan root is overridable ONLY so the selftest can drive this script
+# end-to-end against a fixture tree (see the E2E arms in selftest()). CI and
+# every human invocation leave it unset and get `.github/workflows`.
+SCAN_ROOT="${NCM_SCAN_ROOT:-.github/workflows}"
+
+# THE NON-EMPTY FLOOR, and it is the whole reason this override is safe to
+# exist. `scan` walks a glob: pointed at a missing or empty directory it prints
+# NOTHING and exits 0, and the verdict below then reports
+# "never-cancel-main gate OK" over a corpus of zero files. That is a gate that
+# certifies rather than measures — a typo'd override, a moved workflows dir, or
+# a checkout that never materialised would all read as green. A root that
+# cannot be measured is exit 2 (could not RUN), never exit 0.
+if [ ! -d "$SCAN_ROOT" ]; then
+  echo "never-cancel-main gate could not RUN: scan root '$SCAN_ROOT' is not a directory — this is NOT a verdict on the workflows." >&2
+  exit 2
+fi
+SCAN_ROOT_COUNT="$(find "$SCAN_ROOT" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) -type f | wc -l | tr -d ' ')"
+if [ "$SCAN_ROOT_COUNT" -eq 0 ]; then
+  echo "never-cancel-main gate could not RUN: scan root '$SCAN_ROOT' holds ZERO workflow files — refusing to report a green over an empty corpus." >&2
+  exit 2
+fi
+
 SCAN_STATUS=0
-RESULT="$(scan .github/workflows)" || SCAN_STATUS=$?
+RESULT="$(scan "$SCAN_ROOT")" || SCAN_STATUS=$?
 
 if [ "$SCAN_STATUS" -ne 0 ] || grep -q '^HARNESS-UNAVAILABLE' <<<"$RESULT"; then
   echo "never-cancel-main gate could not RUN (harness exit ${SCAN_STATUS}) — this is NOT a verdict on the workflows." >&2
