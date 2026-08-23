@@ -77,6 +77,8 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
       POST    /v1/fleet/supports   admin(d)  register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
       DELETE  /v1/fleet/supports/:id admin(d)  unbind + delete a SUPPORT fleet row (PDF-D61; same disjunction as the POST; mains refused 409)
+      POST    /v1/barkparks/:id/agent-key admin(d)  paste-a-key delivery to a LIVE support box (PDF-D94; key rides memory only, never stored)
+      GET     /v1/barkparks/:id/agent-key admin(d)  latest push_agent_key job status (status/error only — the row never held the key)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
@@ -162,6 +164,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/attach-domain-jobs/:id/fail worker  mark an attach-domain failed {error}
       POST    /v1/internal/resurrect-jobs/claim worker  claim oldest pending resurrect job
       POST    /v1/internal/support-jobs/claim worker  claim oldest pending provision_support job (+pinned support map)
+      POST    /v1/internal/agent-key-jobs/claim worker  claim oldest pending push_agent_key job (+one-time key pop — delete-on-read)
+      POST    /v1/internal/agent-key-jobs/:id/succeed worker  key line landed + listener restarted (job row only)
+      POST    /v1/internal/agent-key-jobs/:id/fail worker  delivery failed (row untouched; re-paste recovers)
       GET     /v1/internal/barkparks worker  list registry rows for the provisioner
       POST    /v1/internal/barkparks worker  create a registry row (provisioner-side)
       POST    /v1/internal/barkparks/:id/deprovision worker  enqueue a deprovision for one box
@@ -282,6 +287,7 @@ defmodule BarkparkCloud.Web.Router do
 
   alias BarkparkCloud.Accounts.{Authz, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
+  alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Registry.HetznerCatalog
@@ -2534,6 +2540,164 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 409, %{
               error: "not_a_support",
               detail: "only support rows can be unbound here"
+            })
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # ── Agent-key custody (PDF-D94, `pdf-bl-console-key-custody`) ──────────────
+  # The console replacement for the SSH one-liner: the developer pastes their
+  # provider key, the plane is TRANSPORT ONLY. Custody law (D62 amended by D94:
+  # NEVER WRITES → NEVER KEEPS): the key goes into the in-memory AgentKeyStash
+  # keyed by the enqueued push_agent_key job id; the DB job row, the audit
+  # event, and the logs carry NO key material (the audit metadata records the
+  # VAR NAME only). The SSH one-liner remains the documented fallback and the
+  # BYO story (the console card keeps rendering it, folded).
+  @agent_key_vars ~w(ANTHROPIC_API_KEY OPENAI_API_KEY)
+  # Provider keys are url-safe token material (sk-ant-…/sk-proj-…). Bounded +
+  # shape-fenced BEFORE the key is accepted at all, mirroring the worker-side
+  # fence — a value that could break shell quoting is refused at the door.
+  @agent_key_re ~r/^[A-Za-z0-9._~+\/=-]{20,512}$/
+
+  # POST /v1/barkparks/:id/agent-key {key, key_var?} → 202 {ok, job_id}.
+  # Same credential family as POST /v1/fleet/supports: a PAT must carry
+  # `deploy`; a session must be team-admin. Support rows only, and only once
+  # the box is LIVE (a keyless host can't be written to). One delivery in
+  # flight per box (409 already_delivering).
+  post "/v1/barkparks/:id/agent-key" do
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted -> conn
+        conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
+        is_nil(conn.assigns[:current_team]) -> conn
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+        # cch-w37-s2 shape parity: handing a box a credential is group
+        # management — ADMIN on the resolved team, and the refusal names it.
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
+      end
+
+    key = conn.body_params["key"]
+    key_var = conn.body_params["key_var"] || "ANTHROPIC_API_KEY"
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 422, %{error: "no_team"})
+
+      key_var not in @agent_key_vars ->
+        json(conn, 422, %{
+          error: "invalid",
+          details: %{key_var: ["must be one of: #{Enum.join(@agent_key_vars, ", ")}"]}
+        })
+
+      not (is_binary(key) and Regex.match?(@agent_key_re, key)) ->
+        # The shape sentence NEVER echoes the value — a malformed secret is
+        # still a secret.
+        json(conn, 422, %{
+          error: "invalid",
+          details: %{key: ["must be 20-512 url-safe characters (the pasted value is not echoed)"]}
+        })
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid, fleet_role: "support", host: host} = bp
+          when tid == team.id and is_binary(host) and host != "" ->
+            case Registry.enqueue_agent_key_push_job(bp) do
+              {:ok, job} ->
+                # The DURABLE job row is routing-only; the key itself rides
+                # memory, popped exactly once by the worker's claim.
+                :ok = AgentKeyStash.put(job.id, key_var, key)
+                # OC24 async-trigger discipline (the go_live prior art): the
+                # job is enqueued — record best-effort, never roll it back.
+                # Metadata carries the var NAME, never the key.
+                audit_lifecycle_trigger(conn, team, bp.id, "barkpark.agent_key_delivered", %{
+                  key_var: key_var
+                })
+
+                push_event(team.id, "fleet")
+                json(conn, 202, %{ok: true, job_id: job.id})
+
+              {:error, :already_delivering} ->
+                json(conn, 409, %{
+                  error: "already_delivering",
+                  detail: "a key delivery is already in flight for this box"
+                })
+
+              {:error, %Ecto.Changeset{} = cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+
+          # In-team support that is NOT live yet — the key has nowhere to land.
+          %Barkpark{team_id: tid, fleet_role: "support"} when tid == team.id ->
+            json(conn, 409, %{
+              error: "not_live",
+              detail: "this support box has no host yet — deliver the key once it is live"
+            })
+
+          # In-team but a main / ungrouped row: the listener env is a SUPPORT
+          # concept (mirrors DELETE /v1/fleet/supports/:id's refusal).
+          %Barkpark{team_id: tid} when tid == team.id ->
+            json(conn, 422, %{
+              error: "not_a_support",
+              detail: "agent keys are delivered to fleet support boxes only"
+            })
+
+          # Cross-team, unknown, or malformed id → 404 (no existence leak).
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # GET /v1/barkparks/:id/agent-key → 200 {job: {id,status,error,inserted_at,
+  # updated_at} | null} — the console's delivery-status poll. Status/error
+  # ONLY: the job row cannot leak what it never held. Same auth disjunction as
+  # the POST (the read narrates a write only admins can make).
+  get "/v1/barkparks/:id/agent-key" do
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted -> conn
+        conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
+        is_nil(conn.assigns[:current_team]) -> conn
+        Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
+      end
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            job = Registry.latest_agent_key_job(bp)
+
+            json(conn, 200, %{
+              job:
+                job &&
+                  %{
+                    id: job.id,
+                    status: job.status,
+                    error: job.error,
+                    inserted_at: job.inserted_at,
+                    updated_at: job.updated_at
+                  }
             })
 
           _ ->
@@ -6654,6 +6818,129 @@ defmodule BarkparkCloud.Web.Router do
 
         {job, barkpark} ->
           json(conn, 200, support_provision_claim_json(job, barkpark))
+      end
+    end
+  end
+
+  # POST /v1/internal/agent-key-jobs/claim → 200 {job:{id,claim_token}, ip,
+  # key_var, key} | 204 (PDF-D94). Kind-filtered (push_agent_key) so no other
+  # drain grabs it. THE ONE MOMENT key material leaves the plane: the stash pop
+  # is DELETE-ON-READ, so a stale re-claim (worker crash) or a CP restart finds
+  # nothing — and the job is failed HONESTLY right here ("paste it again"),
+  # never handed out keyless. A host-less row (removed mid-flight) fails the
+  # same way. The 204 lets the worker's poll loop continue to the next tick.
+  post "/v1/internal/agent-key-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_agent_key_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          case AgentKeyStash.take(job.id) do
+            {:ok, {key_var, key}} when is_binary(barkpark.host) and barkpark.host != "" ->
+              json(conn, 200, %{
+                job: %{id: job.id, claim_token: job.claim_token},
+                ip: barkpark.host,
+                key_var: key_var,
+                key: key
+              })
+
+            {:ok, _} ->
+              _ =
+                Registry.fail_agent_key_job(
+                  job.id,
+                  "the support box has no host — nowhere to deliver the key",
+                  claim_token: job.claim_token
+                )
+
+              broadcast_barkpark_team(job.barkpark_id, "fleet")
+              send_resp(conn, 204, "")
+
+            :error ->
+              _ =
+                Registry.fail_agent_key_job(
+                  job.id,
+                  "the pasted key expired in transit (control-plane restart or timeout) — paste it again",
+                  claim_token: job.claim_token
+                )
+
+              broadcast_barkpark_team(job.barkpark_id, "fleet")
+              send_resp(conn, 204, "")
+          end
+      end
+    end
+  end
+
+  # POST /v1/internal/agent-key-jobs/:id/succeed [{ip}] → the key line landed +
+  # listener restarted. Flips the JOB ROW ONLY (succeed_agent_key_job — a key
+  # push must never clobber a live row's health/host the way a provision
+  # succeed does). Mirrors the attach-domain succeed contract verbatim.
+  post "/v1/internal/agent-key-jobs/:id/succeed" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      ip =
+        case conn.body_params["ip"] do
+          ip when is_binary(ip) and ip != "" -> ip
+          _ -> nil
+        end
+
+      case Registry.succeed_agent_key_job(conn.path_params["id"], ip, claim_token_opts(conn)) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  # POST /v1/internal/agent-key-jobs/:id/fail {error} → delivery failed; the
+  # support row is untouched (still live — re-paste is the recovery).
+  post "/v1/internal/agent-key-jobs/:id/fail" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      reason = conn.body_params["error"]
+
+      case Registry.fail_agent_key_job(
+             conn.path_params["id"],
+             if(is_binary(reason), do: reason, else: "unspecified"),
+             claim_token_opts(conn)
+           ) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
       end
     end
   end

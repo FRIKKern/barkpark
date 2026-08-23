@@ -6481,6 +6481,12 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .support-key-step { display: flex; flex-direction: column; gap: 6px; padding: 2px 0 6px; }
 .support-key-title { font-weight: 600; font-size: 13.5px; }
 .support-key-sub { margin: 0; color: var(--muted-text); font-size: 12.5px; }
+.support-key-form { display: flex; gap: 8px; align-items: center; }
+.support-key-form .form-input { flex: 1; min-width: 0; }
+.support-key-status { margin: 0; font-size: 12.5px; }
+.support-key-status--success { color: var(--ok-strong); }
+.support-key-status--error { color: var(--danger); }
+.support-key-fallback summary { cursor: pointer; font-size: 12px; color: var(--muted-text); }
 
 /* #fleet nesting: a support rides indented under its main (PDF-D92). */
 .fleet-row--support { margin-left: 28px; }

@@ -324,6 +324,11 @@ type Worker struct {
 	// queue (like Deprovision/AttachDomain/Resurrect). Injected like Provision;
 	// tests bind it to fakes via DefaultSupportProvision(SupportSeams{…}).
 	SupportProvision SupportProvisionFunc
+	// AgentKeyPush delivers one claimed push_agent_key job (PDF-D94 — the
+	// console paste-a-key custody path: rewrite one listener-env line on a live
+	// support box + restart). nil → the worker skips the agent-key queue.
+	// Injected like the others; tests bind it via DefaultAgentKeyPush(AgentKeySeams{…}).
+	AgentKeyPush AgentKeyPushFunc
 	// ProvisionTimeout bounds a single Provision call. Zero means
 	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
 	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce

@@ -144,6 +144,10 @@ const EXPECT = [
   { f: "wireLifecycleActions", p: '"/v1/providers/capabilities"', v: "guarded",
     proof: [/r && r\.ok && r\.data \? r\.data : null/],
     why: "a null payload paints 'capabilities unavailable' + Retry; decommission stays live" },
+  // pdf-bl-console-key-custody (PDF-D94): the paste-a-key delivery status poll.
+  { f: "pollAgentKeyStatus", p: '"/v1/barkparks/" + encodeURIComponent(supportId) + "/agent-key"', v: "guarded",
+    proof: [/Couldn\'t read the delivery status/],
+    why: "a failed status read speaks and retries — it never renders as 'no delivery in flight'" },
   { f: "loadFleetRollout", p: "OPERATOR_AUTOUPDATE", v: "sanctioned",
     proof: [/if \(!r\.ok \|\| !r\.data\) return;/],
     why: "operator-gated banner slot stays empty on non-ok (older CP 404 / non-operator 403) — by design" },

@@ -32,6 +32,11 @@ defmodule BarkparkCloud.Application do
         # Same table-owning-GenServer shape as TwoFactorRateLimiter, its OWN table
         # (key shapes differ). Started in every env with reset/0 for test determinism.
         BarkparkCloud.DeviceAuth.RateLimiter,
+        # pdf-bl-console-key-custody (PDF-D94): the ETS-backed ONE-TIME stash a
+        # pasted agent provider key rides between the console POST and the Go
+        # worker's claim. In-memory by LAW (never-keeps custody): a restart
+        # empties it and the pending job fails honestly at claim time.
+        BarkparkCloud.Registry.AgentKeyStash,
         # azure-retail-pricing: an ETS-backed ~24h cache of Azure's global,
         # UNAUTHENTICATED Retail Prices sheet (no tenant, no credential), read to
         # stamp real monthly USD onto the neutral catalog's azure server types.

@@ -23295,3 +23295,55 @@ test("cchi-w27: previewRow's .deploy-meta composes ONLY bounded terms — a new 
   assert.ok(body.includes('\'<div class="deploy-meta">\' + pmeta.join(" &middot; ") + "</div>"'),
     ".deploy-meta must render pmeta.join and nothing else — extra concatenated content bypasses the term pin");
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// PDF-D94 (pdf-bl-console-key-custody): the console paste-a-key card replaces
+// the SSH one-liner as the PRIMARY hand-off; the one-liner survives, folded, as
+// the documented fallback + BYO story. Appended at the tail (OC9 append-only
+// law). Pure helpers only; the DOM mounts (submitAgentKey / pollAgentKeyStatus
+// / wireAgentKeyForms) are browser-verified.
+// ════════════════════════════════════════════════════════════════════════════
+
+test("PDF-D94: the key card ships the paste form AND keeps the SSH one-liner as the folded fallback", () => {
+  const html = hooks.supportKeyStepHtml(FLEET_SUPPORT_LIVE);
+  // The primary affordance: a password input + Deliver button, id-addressed.
+  assert.match(html, /data-agent-key-input="sup-1"/);
+  assert.match(html, /type="password"/);
+  assert.match(html, /data-agent-key-send="sup-1"/);
+  assert.match(html, /Deliver key/);
+  assert.match(html, /data-agent-key-status="sup-1"/);
+  // Custody copy: delivered to the box, never stored by the plane.
+  assert.match(html, /never stored by Barkpark/);
+  // The FALLBACK: the exact one-liner still renders, inside a <details> fold,
+  // with the shared copy affordance — D88's visible named step is not deleted.
+  assert.match(html, /<details class="support-key-fallback">/);
+  assert.match(html, /Prefer SSH\?/);
+  assert.ok(html.includes(hooks.supportKeyCommand(FLEET_SUPPORT_LIVE).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")) || /fleet-listener\.env/.test(html),
+    "the SSH one-liner must still render in the fallback fold");
+});
+
+test("agentKeyShapeValid mirrors the server fence: 20-512 url-safe chars, quoting breakouts refused", () => {
+  assert.ok(hooks.agentKeyShapeValid("sk-ant-api03-abcdefghijklmnop"));
+  assert.ok(hooks.agentKeyShapeValid("sk-proj-ABC123_underscore-and.dots~ok"));
+  // Too short, too long, shell-hostile — all refused before any request.
+  assert.ok(!hooks.agentKeyShapeValid("short"));
+  assert.ok(!hooks.agentKeyShapeValid("x".repeat(513)));
+  assert.ok(!hooks.agentKeyShapeValid("sk-ant-x'; rm -rf / #aaaaaaaaaaaa"));
+  assert.ok(!hooks.agentKeyShapeValid("sk ant spaces are not a key aaaa"));
+  assert.ok(!hooks.agentKeyShapeValid(null));
+});
+
+test("agentKeyStatusCopy: terminal sentences are honest; a failed job's own error wins over boilerplate", () => {
+  assert.equal(hooks.agentKeyStatusCopy(null), null);
+  assert.equal(hooks.agentKeyStatusCopy({ status: null }), null);
+  assert.equal(hooks.agentKeyStatusCopy({ status: "succeeded" }).kind, "success");
+  assert.match(hooks.agentKeyStatusCopy({ status: "succeeded" }).text, /delivered/i);
+  const failed = hooks.agentKeyStatusCopy({ status: "failed", error: "the pasted key expired in transit — paste it again" });
+  assert.equal(failed.kind, "error");
+  assert.match(failed.text, /expired in transit/);
+  // A failed job with no recorded error still says SOMETHING actionable.
+  assert.match(hooks.agentKeyStatusCopy({ status: "failed" }).text, /paste the key again/i);
+  for (const inflight of ["pending", "claimed"]) {
+    assert.equal(hooks.agentKeyStatusCopy({ status: inflight }).kind, "pending");
+  }
+});

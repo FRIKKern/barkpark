@@ -7943,6 +7943,8 @@
     if (!isSupportBp(bp)) loadSupportPresence(bp, supportsOf(fleetCache, bp.id));
     // MVP-0 offload (pdf-mvp0-offload-spa): each live support's Offload button.
     if (!isSupportBp(bp)) wireOffloadActions(bp, supportsOf(fleetCache, bp.id));
+    // PDF-D94: each live support's paste-a-key delivery form.
+    if (!isSupportBp(bp)) wireAgentKeyForms(bp, supportsOf(fleetCache, bp.id));
   }
 
   // cch-w46-s3 — WHAT THE MOUNTED RAIL IS MADE OF: {bp, caps} for the instance
@@ -8534,12 +8536,157 @@
       " \"printf 'ANTHROPIC_API_KEY=sk-your-key\\n' >> /etc/barkpark/fleet-listener.env && systemctl restart barkpark-fleet-listener\"";
   }
 
+  // PDF-D94 (pdf-bl-console-key-custody): the paste-a-key CARD replaces the
+  // one-liner as the primary hand-off — the plane is TRANSPORT ONLY (the key
+  // rides an in-memory one-time stash to the worker, never a DB row), and the
+  // SSH one-liner stays right here, folded, as the documented fallback and the
+  // BYO story. The input is type=password and is CLEARED the moment the POST
+  // is sent — the page holds the key no longer than the request needs.
   function supportKeyStepHtml(bp) {
     return '<div class="support-key-step">' +
       '<div class="support-key-title">Hand your box its model key</div>' +
-      '<p class="support-key-sub">Orders run on your own model key &mdash; it lives on the box, never stored by Barkpark. From your machine:</p>' +
-      cliChipHtml(supportKeyCommand(bp)) +
+      '<p class="support-key-sub">Orders run on your own model key &mdash; paste it and Barkpark delivers it straight to the box, then restarts the listener. The key lives on the box, never stored by Barkpark.</p>' +
+      '<div class="support-key-form">' +
+        '<input class="form-input" type="password" data-agent-key-input="' + esc(bp.id) + '" placeholder="sk-ant-&hellip;" autocomplete="off" spellcheck="false" aria-label="Model API key">' +
+        '<button class="btn btn-primary btn-sm" type="button" data-agent-key-send="' + esc(bp.id) + '">Deliver key</button>' +
+      '</div>' +
+      '<p class="support-key-status dim" data-agent-key-status="' + esc(bp.id) + '" hidden></p>' +
+      '<details class="support-key-fallback">' +
+        '<summary class="dim">Prefer SSH? The one-liner still works</summary>' +
+        cliChipHtml(supportKeyCommand(bp)) +
+      '</details>' +
     "</div>";
+  }
+
+  // Mirrors the server fence exactly (20-512 url-safe chars) so an obvious
+  // mispaste is refused before it ever leaves the page. Pure; hook-exported.
+  var AGENT_KEY_RE = /^[A-Za-z0-9._~+\/=-]{20,512}$/;
+  function agentKeyShapeValid(key) { return AGENT_KEY_RE.test(String(key || "")); }
+
+  // The terminal sentence for one delivery-status read (pure; hook-exported).
+  // null job = nothing ever delivered; pending/claimed = still in flight.
+  function agentKeyStatusCopy(job) {
+    if (!job || !job.status) return null;
+    if (job.status === "succeeded") return { kind: "success", text: "Key delivered \u2014 the listener restarted with it." };
+    if (job.status === "failed") return { kind: "error", text: job.error || "Delivery failed \u2014 paste the key again." };
+    return { kind: "pending", text: "Delivering\u2026" };
+  }
+
+  function agentKeyEl(kind, id) {
+    var els = document.querySelectorAll("[data-agent-key-" + kind + "]");
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].getAttribute("data-agent-key-" + kind) === String(id)) return els[i];
+    }
+    return null;
+  }
+
+  function paintAgentKeyStatus(id, copy) {
+    var el = agentKeyEl("status", id);
+    if (!el) return;
+    if (!copy) { el.hidden = true; return; }
+    el.hidden = false;
+    el.textContent = copy.text;
+    // Full literal class strings per branch (__css_check E3 — never concat).
+    if (copy.kind === "success") el.className = "support-key-status support-key-status--success";
+    else if (copy.kind === "error") el.className = "support-key-status support-key-status--error";
+    else el.className = "support-key-status dim";
+  }
+
+  // Poll GET /v1/barkparks/:id/agent-key to a terminal sentence (3s cadence,
+  // bounded ~2min — the delivery is one SSH exec on a 5s-poll worker). One
+  // chain per box; a re-render re-arms cleanly.
+  var agentKeyPollTimers = {};
+
+  function pollAgentKeyStatus(supportId, remaining) {
+    if (agentKeyPollTimers[supportId]) clearTimeout(agentKeyPollTimers[supportId]);
+    api("GET", "/v1/barkparks/" + encodeURIComponent(supportId) + "/agent-key").then(function (r) {
+      if (!r.ok) {
+        // A failed READ must never render as "no delivery" — say so, retry.
+        paintAgentKeyStatus(supportId, {
+          kind: remaining > 0 ? "pending" : "error",
+          text: remaining > 0
+            ? "Couldn't read the delivery status \u2014 retrying\u2026"
+            : "Couldn't read the delivery status."
+        });
+        if (remaining > 0) {
+          agentKeyPollTimers[supportId] = setTimeout(function () {
+            pollAgentKeyStatus(supportId, remaining - 1);
+          }, 3000);
+        }
+        return;
+      }
+      var job = r.data ? r.data.job : null;
+      var copy = agentKeyStatusCopy(job);
+      paintAgentKeyStatus(supportId, copy);
+      if (copy && copy.kind === "pending") {
+        if (remaining > 0) {
+          agentKeyPollTimers[supportId] = setTimeout(function () {
+            pollAgentKeyStatus(supportId, remaining - 1);
+          }, 3000);
+        } else {
+          paintAgentKeyStatus(supportId, {
+            kind: "pending",
+            text: "Still delivering \u2014 leave this page open or check back; the status updates on reload."
+          });
+        }
+      }
+    });
+  }
+
+  function submitAgentKey(support) {
+    var input = agentKeyEl("input", support.id);
+    var btn = agentKeyEl("send", support.id);
+    var key = input ? String(input.value || "").trim() : "";
+    if (!agentKeyShapeValid(key)) {
+      paintAgentKeyStatus(support.id, {
+        kind: "error",
+        text: "That doesn't look like a provider key (20-512 letters, digits or ._~+/=-). Nothing was sent."
+      });
+      return;
+    }
+    // The page's custody moment: clear the field the instant the key is handed
+    // to the request — the DOM never retains it.
+    if (input) input.value = "";
+    if (btn) { btn.disabled = true; btn.textContent = "Delivering\u2026"; }
+    paintAgentKeyStatus(support.id, { kind: "pending", text: "Delivering\u2026" });
+    api("POST", "/v1/barkparks/" + encodeURIComponent(support.id) + "/agent-key", { key: key }).then(function (r) {
+      if (btn) { btn.disabled = false; btn.textContent = "Deliver key"; }
+      if (r.status === 202) {
+        pollAgentKeyStatus(support.id, 40);
+        return;
+      }
+      var detail = (r.data && (r.data.detail || r.data.error)) || "Delivery couldn't start (status " + r.status + ").";
+      if (r.status === 409 && r.data && r.data.error === "already_delivering") {
+        // Truthful, and the poll shows how the in-flight one ends.
+        paintAgentKeyStatus(support.id, { kind: "pending", text: "A delivery is already in flight\u2026" });
+        pollAgentKeyStatus(support.id, 40);
+        return;
+      }
+      paintAgentKeyStatus(support.id, { kind: "error", text: detail });
+    });
+  }
+
+  // The DOM mount (add-listener-if-present, the wireOffloadActions shape):
+  // each live support's Deliver button + a status backfill for a delivery
+  // already in flight from an earlier visit.
+  function wireAgentKeyForms(mainBp, supports) {
+    (supports || []).forEach(function (s) {
+      if (!instanceLifecycle(s).live) return;
+      var btn = agentKeyEl("send", s.id);
+      if (btn) {
+        (function (support, b) {
+          b.addEventListener("click", function () { submitAgentKey(support); });
+          var input = agentKeyEl("input", support.id);
+          if (input) {
+            input.addEventListener("keydown", function (ev) {
+              if (ev.key === "Enter") { ev.preventDefault(); submitAgentKey(support); }
+            });
+          }
+        })(s, btn);
+        // Backfill: an in-flight or just-finished delivery paints without a click.
+        pollAgentKeyStatus(s.id, 40);
+      }
+    });
   }
 
   // ── The fleet card (PDF-D92: minimal group nesting IS this card) ────────────
@@ -17440,7 +17587,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 34 of the 56 declared verbs have no entry here: they render
+    // 34 of the 57 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -17463,6 +17610,7 @@
     "barkpark.go_live": "launched a Barkpark",
     "barkpark.deleted": "removed a Barkpark",
     "barkpark.autoupdate_changed": "changed autoupdate",
+    "barkpark.agent_key_delivered": "delivered a model key to a support box",
     // cch-w63-s8. The row a REFUSED write leaves: the plane declined to send an
     // instance write because the box answered our stored admin credential 401.
     // The actor tried; the request never left. The expanded detail carries the
@@ -25315,6 +25463,7 @@
       presenceSlotHtml: presenceSlotHtml, rosterRowFor: rosterRowFor,
       rosterCapacityText: rosterCapacityText, rosterUrl: rosterUrl,
       supportKeyCommand: supportKeyCommand, supportKeyStepHtml: supportKeyStepHtml,
+      agentKeyShapeValid: agentKeyShapeValid, agentKeyStatusCopy: agentKeyStatusCopy,
       fleetNest: fleetNest, fleetNestedRowsHtml: fleetNestedRowsHtml,
       // MVP-0 offload (PDF-D87/D92, pdf-mvp0-offload-spa): the order-doc
       // builder + tag-seed contingency, the eligibility gate, the watch

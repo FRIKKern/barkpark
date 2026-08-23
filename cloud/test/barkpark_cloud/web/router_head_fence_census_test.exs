@@ -168,8 +168,22 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `last_used` bookkeeping every session GET in this baseline already shares. So
   # a bare HEAD is inert and no `side_effecting_get?/1` clause is owed. machine
   # and public are unchanged: no existing route changed class.
-  @baseline_total 67
-  @baseline_session 48
+  # 2026-08-23: 68 / 49 / 7 / 12. pdf-bl-console-key-custody (PDF-D94) added ONE
+  # session-or-PAT GET, `/v1/barkparks/:id/agent-key` — the console's delivery-
+  # status poll for the paste-a-key path (the write half is the POST twin, which
+  # does not move this GET census). SESSION for the standard reason:
+  # `Auth.require_user_or_pat` is a session wrapper and the `require_ability
+  # ("deploy")` beside it narrows a PAT rather than reclassifying the route.
+  # RULED NOT SIDE-EFFECTING by reading the whole path: the team-admin check is
+  # a pure membership read, the handler is `Registry.get_barkpark/1` (Repo.get)
+  # + `Registry.latest_agent_key_job/1` (one Repo.one) — no row minted, no
+  # credential burned, no nonce spent, and pointedly NO stash read: the one-time
+  # key pop lives on the worker CLAIM route, so a bare HEAD here can never
+  # consume a key in transit. The only write on the path is the same throttled
+  # `last_used` bookkeeping every session GET in this baseline shares. machine
+  # and public are unchanged: no existing route changed class.
+  @baseline_total 68
+  @baseline_session 49
   @baseline_machine 7
   @baseline_public 12
 
