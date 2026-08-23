@@ -1358,6 +1358,13 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
              port: port,
              sink: sink,
              sink_ref: sink_ref,
+             # The child's OS pid, read while the port is certainly alive.
+             # `cleanup_stderr/1` waits on THIS pid before removing the capture
+             # file: the shell creates it via `2>>` (O_CREAT) asynchronously
+             # after Port.open, so an rm that merely follows Port.close races
+             # that open and the shell RE-CREATES the file — every "passing"
+             # close leaked one (spd-bl-claude-chat-stderr-leak).
+             os_pid: port_os_pid(port),
              stderr_path: stderr_path,
              # The loopback credential + temp config (charter D63/D64): revoked
              # and removed in BOTH terminate clauses; the token's short TTL is
@@ -1565,9 +1572,52 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
 
     # The stderr capture file must not outlive the session (charter D54) — remove
     # it on every teardown path (clean close, exit, crash). Best-effort.
+    #
+    # AFTER THE CHILD IS REAPED, not merely after Port.close
+    # (spd-bl-claude-chat-stderr-leak): the spawn shell opens the `2>>` capture
+    # file (O_CREAT) asynchronously after Port.open, so an immediate rm races
+    # that open — if rm wins, the shell re-creates the file a moment later and
+    # the capture OUTLIVES the session on every close of that shape (measured
+    # 6/6 leaks on passing runs). Once the pid is gone the `2>>` open has
+    # either happened or never will, so the rm below is race-free. The wait is
+    # BOUNDED: on the exit-status path the child is already dead so it costs
+    # one probe; the close-while-alive path polls `kill -0` for at most ~1s
+    # and then removes best-effort anyway.
     # sobelow_skip ["Traversal.FileModule"]
-    defp cleanup_stderr(%{stderr_path: path}) when is_binary(path), do: File.rm(path)
+    defp cleanup_stderr(%{stderr_path: path} = state) when is_binary(path) do
+      await_child_exit(Map.get(state, :os_pid), 100)
+      File.rm(path)
+    end
+
     defp cleanup_stderr(_), do: :ok
+
+    # The child's OS pid, read at spawn time (Port.info answers nil once the
+    # port closes, which is exactly when cleanup needs the pid).
+    defp port_os_pid(port) do
+      case Port.info(port, :os_pid) do
+        {:os_pid, pid} -> pid
+        _ -> nil
+      end
+    end
+
+    # Bounded reap-wait: `kill -0` (signal 0) probes liveness without
+    # signalling. ~10ms per round, `rounds` rounds — then give up and let the
+    # caller proceed best-effort. A nil pid (spawn raced away) waits nothing.
+    defp await_child_exit(nil, _rounds), do: :ok
+    defp await_child_exit(_pid, 0), do: :ok
+
+    defp await_child_exit(pid, rounds) when is_integer(pid) do
+      case System.cmd("kill", ["-0", Integer.to_string(pid)], stderr_to_stdout: true) do
+        {_, 0} ->
+          Process.sleep(10)
+          await_child_exit(pid, rounds - 1)
+
+        _ ->
+          :ok
+      end
+    rescue
+      _ -> :ok
+    end
 
     # The loopback credential + temp config must not outlive the session
     # (charter D63): revoke the token (idempotent — a re-revoke merely

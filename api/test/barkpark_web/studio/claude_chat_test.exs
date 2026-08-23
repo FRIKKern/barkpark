@@ -816,10 +816,34 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
       ref = Process.monitor(session)
 
+      # WAIT FOR THE CHILD TO CREATE THE CAPTURE FILE before closing
+      # (spd-bl-claude-chat-stderr-leak): the spawn shell opens `2>>` (O_CREAT)
+      # asynchronously after Port.open. Closing before that open made this
+      # test a spawn-latency lottery (1-in-13013 red under CI load) AND made
+      # its green vacuous — cleanup raced the open, the shell re-created the
+      # file, and every passing run leaked one. With the file proven present,
+      # the assertion below measures CLEANUP, which is the invariant named in
+      # this test's own title.
+      assert await_file(path, 200),
+             "the child never created the stderr capture file — spawn broke, " <>
+               "so this test cannot say anything about cleanup"
+
       ClaudeChat.close(session)
       assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
 
       refute File.exists?(path)
+    end
+
+    # Bounded poll (10ms x rounds) for the capture file's creation.
+    defp await_file(_path, 0), do: false
+
+    defp await_file(path, rounds) do
+      if File.exists?(path) do
+        true
+      else
+        Process.sleep(10)
+        await_file(path, rounds - 1)
+      end
     end
 
     # ── stdout buffer ceiling (charter D126, codex-twin parity) ───────────────
