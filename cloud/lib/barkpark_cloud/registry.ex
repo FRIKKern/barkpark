@@ -234,10 +234,81 @@ defmodule BarkparkCloud.Registry do
   @spec register_barkpark(Team.t() | binary(), map()) ::
           {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t() | :limit_reached}
   def register_barkpark(team, attrs) do
+    # The transaction's VALUE carries the outcome; `Repo.rollback/1` is
+    # deliberately not used. `adopt_barkpark/3` calls this from INSIDE its own
+    # `Repo.transaction`, where a rollback would sink the caller's transaction
+    # instead of returning it a decision — and that caller's `with/else` already
+    # rolls back on `{:error, reason}` itself.
+    case Repo.transaction(fn -> register_barkpark_txn(team, attrs) end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  # THE QUOTA CHECK AND THE INSERT ARE ONE ATOMIC ACT (acpc-bl-cloud-registry-
+  # barkpark-limit-toctou). They used to be two uncoordinated calls:
+  #
+  #     if Billing.barkpark_limit_reached?(team), do: ..., else: insert_barkpark(...)
+  #
+  # Two registrations for the same team arriving at the ceiling both evaluated
+  # `barkpark_limit_reached?/1` before either inserted, both read the same count,
+  # both saw `false`, and both inserted — one box over the plan ceiling, per
+  # racing pair. Not admin-gated: go-live, adopt and agent-register all reach it,
+  # and unlike the api-side twin this one guards a PAID boundary, so the overshoot
+  # is billable capacity given away.
+  #
+  # THE INVARIANT IS ENFORCED BY THE DATABASE, not by a wider application check —
+  # an application-level check can never be atomic against another node. The team
+  # row is taken `FOR UPDATE` first, so concurrent registrations for the SAME team
+  # serialize: the second blocks until the first commits, then counts a table that
+  # already includes the first's row.
+  #
+  # WHY A ROW LOCK AND NOT A CONSTRAINT. The rejected alternatives, recorded:
+  #
+  #   * CHECK constraint — cannot express this invariant. The ceiling is not a
+  #     constant: it is `Billing.limits()[subscription.plan]`, read at call time
+  #     from application config, and a CHECK may not read another table.
+  #   * counter column on `teams` + CHECK — expressible, but it duplicates a fact
+  #     the `barkparks` table already holds, and every writer that inserts or
+  #     deletes a box (including the FK cascades) becomes responsible for keeping
+  #     the mirror true. A denormalised counter that drifts is a worse failure
+  #     than the race it fixes.
+  #   * partial unique / exclusion constraint — has no rank to key on; the boxes
+  #     are not numbered 1..N.
+  #   * `pg_advisory_xact_lock(hashtext("team:" <> tid))` — equivalent
+  #     serialization and the idiom `api/`'s task mutations use. Rejected only
+  #     because the real team row exists and locking it is narrower: it takes no
+  #     shared hash space, and it cannot collide with an unrelated advisory key.
+  #
+  # SCOPE: the lock is per-TEAM, so registrations for different teams do not
+  # contend at all. It is NOT a global registration lock.
+  defp register_barkpark_txn(team, attrs) do
+    _ = lock_team_for_quota(team)
+
     if Billing.barkpark_limit_reached?(team) do
       {:error, :limit_reached}
     else
       insert_barkpark(team, attrs)
+    end
+  end
+
+  # Take the team row `FOR UPDATE` so the count-then-insert below is serialized
+  # per team. Held until the enclosing transaction commits — including an OUTER
+  # one (`adopt_barkpark/3`), which is correct: the quota decision must not be
+  # observable to a racing writer before the row that satisfies it is committed.
+  #
+  # A missing or non-UUID team returns nil rather than raising: the insert that
+  # follows fails its `team_id` FK anyway, and the error a caller gets should be
+  # the changeset it would have got before this lock existed, not a new
+  # `Ecto.Query.CastError` from the lock. `Repo.uuid_or_nil/1` is the codebase's
+  # one home for that guard.
+  defp lock_team_for_quota(team) do
+    case Repo.uuid_or_nil(team_id(team)) do
+      nil ->
+        nil
+
+      tid ->
+        Repo.one(from(t in Team, where: t.id == ^tid, select: t.id, lock: "FOR UPDATE"))
     end
   end
 
@@ -249,7 +320,15 @@ defmodule BarkparkCloud.Registry do
   defp insert_barkpark(team, attrs) do
     %Barkpark{}
     |> Barkpark.changeset(put_team_id(attrs, team))
-    |> Repo.insert()
+    # `mode: :savepoint` because BOTH callers now run inside a transaction
+    # (`register_barkpark/2` for the quota lock, `register_support_barkpark/2` for
+    # the fleet write). Without it a unique-constraint violation aborts the whole
+    # enclosing transaction, and `Repo.transaction` answers `{:error, :rollback}`
+    # instead of the `{:error, %Ecto.Changeset{}}` every caller matches on —
+    # which is exactly how `insert_with_url_reservation/4`'s clean-label retry
+    # decides to fall back to the suffixed FQDN. The savepoint keeps the
+    # constraint error a VALUE the caller can read, as it was before the lock.
+    |> Repo.insert(mode: :savepoint)
   end
 
   @doc """
