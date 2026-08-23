@@ -1272,7 +1272,8 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 // apiError carries request_id + hint + details) so a scripted `bp … -o json | jq`
 // gets a parseable body rather than empty stdout. For table/minimal it prints the
 // human shape to stderr: the message line, the server's `details` as sorted
-// `key: value` lines, an indented fix-suggestion hint when one is registered,
+// `key: value` lines (per-code actionable lines for the two publish-wall codes
+// — see detailLinesForCode), an indented fix-suggestion hint when one is registered,
 // and — under -v — the machine code and request id for support. details comes
 // FIRST of the continuation lines because it is the specific fact (which filter,
 // which field, which rule) while the hint is the generic advice; a reader who
@@ -1283,7 +1284,7 @@ func renderError(out *writer, ae apiError) {
 		return
 	}
 	out.userErr("%s", ae.errorMessage())
-	for _, line := range detailLines(ae.details) {
+	for _, line := range detailLinesForCode(ae.code, ae.details) {
 		out.errf("  %s", line)
 	}
 	if h := ae.hint(); h != "" {
