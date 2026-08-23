@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -424,6 +425,99 @@ func detailLines(raw json.RawMessage) []string {
 	}
 	sort.Strings(keys)
 	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, k+": "+detailValue(obj[k]))
+	}
+	return lines
+}
+
+// detailLinesForCode renders the human (table/minimal) detail lines for ONE
+// error code. The two publish-wall codes get an ACTIONABLE per-fact rendering —
+// unknown_tag prints one line per unknown tag name with its trgm-nearest
+// registered suggestions, and duplicate_of leads with the incumbent published
+// id — because the generic compact-JSON lines bury exactly the token the author
+// must copy into the retry (the per-name pairing, the one claimable id). Every
+// other code, and a wall payload whose shape is not the contracted one, falls
+// back to the generic sorted key:value lines (detailLines), so no payload is
+// ever silently dropped. The machine channel (-o json/yaml) never routes
+// through here — it carries `details` verbatim.
+func detailLinesForCode(code string, raw json.RawMessage) []string {
+	d := normalizeDetails(raw)
+	if d == nil {
+		return nil
+	}
+	switch code {
+	case "unknown_tag":
+		if lines := unknownTagLines(d); lines != nil {
+			return lines
+		}
+	case "duplicate_of":
+		if lines := duplicateOfLines(d); lines != nil {
+			return lines
+		}
+	}
+	return detailLines(raw)
+}
+
+// maxTagSuggestions bounds the per-name suggestion list unknown_tag prints —
+// the server sends the trgm-nearest few, but a hostile/buggy payload must not
+// flood stderr.
+const maxTagSuggestions = 5
+
+// unknownTagLines renders the unknown_tag wall payload {unknown:[name],
+// suggestions:{name=>[nearest]}} (api tag_registry.ex, validate_publish) as one
+// line per unknown name carrying ITS OWN suggestions — the pairing the generic
+// sorted rendering destroys by printing the two maps as unrelated blobs. Names
+// keep the server's `unknown` order (the document's tag order). Returns nil
+// when the shape is not the contracted one, so the caller falls back to the
+// generic lines.
+func unknownTagLines(d json.RawMessage) []string {
+	var p struct {
+		Unknown     []string            `json:"unknown"`
+		Suggestions map[string][]string `json:"suggestions"`
+	}
+	if err := json.Unmarshal(d, &p); err != nil || len(p.Unknown) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(p.Unknown))
+	for _, name := range p.Unknown {
+		sugg := p.Suggestions[name]
+		if len(sugg) > maxTagSuggestions {
+			sugg = sugg[:maxTagSuggestions]
+		}
+		if len(sugg) == 0 {
+			lines = append(lines, "unknown tag "+strconv.Quote(name)+" — no similar registered tag; publish a type:tag doc with this _id, or drop it")
+		} else {
+			lines = append(lines, "unknown tag "+strconv.Quote(name)+" — did you mean: "+strings.Join(sugg, ", "))
+		}
+	}
+	return lines
+}
+
+// duplicateOfLines renders the duplicate_of wall payload {duplicate_of:<id>,
+// similar:[…], advise:…} (api content/errors.ex) with the incumbent published
+// id FIRST and verbatim — the one token the author needs to claim or extend the
+// incumbent instead of republishing. The remaining keys keep their generic
+// sorted rendering below it, so similar/advise (or any future key) survive
+// whole. Returns nil when the incumbent id is absent or not a string, so the
+// caller falls back to the generic lines.
+func duplicateOfLines(d json.RawMessage) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(d, &obj); err != nil {
+		return nil
+	}
+	var id string
+	if err := json.Unmarshal(obj["duplicate_of"], &id); err != nil || id == "" {
+		return nil
+	}
+	lines := []string{"duplicate of: " + id + " — claim or extend the incumbent instead of republishing"}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		if k != "duplicate_of" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
 	for _, k := range keys {
 		lines = append(lines, k+": "+detailValue(obj[k]))
 	}
