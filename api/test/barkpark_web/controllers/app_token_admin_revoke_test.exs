@@ -17,9 +17,13 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.RateLimiterSandbox
+
   alias Barkpark.Auth
 
   @dataset "production"
+
+  setup :reset_rate_limiter!
 
   setup do
     admin = "apptok-admin-#{System.unique_integer([:positive])}"
