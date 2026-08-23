@@ -824,14 +824,23 @@ async function main() {
               `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
             );
             if (!chip) { fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: #billing-chip missing`); chipRow.push(`${width}:missing`); continue; }
-            // 721-740 IS ASSERTED STRICTLY (W20-S8). The `+ 1` below is the
-            // undeclared epsilon owned by
-            // `cchi-w18-bl-overflow-guard-chip-epsilon-undeclared`; it is out of
-            // scope here and this band deliberately does NOT lean on it — it is
-            // what let 740/dark's 168/167 read as whole. With the 621-740 CSS
-            // block every one of these cells lands at 168/168 (full intrinsic
-            // width), so a pixel of tolerance could only hide a regression.
-            const cut = width <= 740 ? chip.sw > chip.cw : chip.sw > chip.cw + 1;
+            // EVERY WIDTH IS ASSERTED STRICTLY. The `+ 1` that used to sit on
+            // the >740 side was an UNDECLARED epsilon — no name, no cap, no
+            // marker, none of the four properties the retired band-A residual
+            // carried — and it once let 740/dark's real 168/167 read as whole
+            // (cchi-w18-bl-overflow-guard-chip-epsilon-undeclared, D211). The
+            // pixel it forgave was real sub-pixel geometry, not rasterisation:
+            // the dark theme-toggle painted ~2px wider than light and squeezed
+            // the chip by ~0.44px, which integer scrollWidth/clientWidth
+            // report as a whole pixel; OVERFLOW_GUARD_CLASSIC_SCROLLBARS=1
+            // reproduced every cell identically. On current bytes the W20-S8
+            // 621-740 block and the 830 tighten land ALL 68 cells at 168/168
+            // (full intrinsic width, measured both themes), so the epsilon
+            // forgave NOTHING and could only hide a one-pixel regression. A
+            // future sub-pixel residual must arrive as a NAMED constant with a
+            // reason, a cap and a printed marker on every cell it forgives —
+            // the band-A shape — never as `+ 1` on the comparison.
+            const cut = chip.sw > chip.cw;
             if (cut) { chipCut++; fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: billing chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} (rect ${chip.w}px, "${chip.text}")`); }
             chipRow.push(`${width}:${chip.sw}/${chip.cw}${cut ? "!" : ""}`);
           }
