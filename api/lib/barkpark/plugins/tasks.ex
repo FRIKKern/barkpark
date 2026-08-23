@@ -604,7 +604,14 @@ defmodule Barkpark.Plugins.Tasks do
         auth_tier: "read",
         args: [],
         flags: [
-          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 50},
+          # default MUST match the server's actual page size (tasks_controller
+          # do_index: Params.parse_limit(params["limit"], 1000, 1000)). It was
+          # born as 50 — false from day one — and the CLI reads this field to
+          # calibrate its "page may be truncated" warning (internal/cli/run.go
+          # defaultPageLimit), so every `bp task ls` over a >=50-row corpus
+          # printed a false "more may be available" even when the server had
+          # returned everything.
+          %{name: "limit", type: "int", summary: "Max tasks to return.", default: 1000},
           %{name: "offset", type: "int", summary: "Task-index row offset.", default: 0}
         ],
         writes: false,

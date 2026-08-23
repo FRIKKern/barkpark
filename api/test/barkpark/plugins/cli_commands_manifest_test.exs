@@ -445,6 +445,20 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       # A blank reason is not an override (Close.override_reason/1).
       assert text =~ ~r/blank reason is NOT an override/
     end
+
+    # Same defect class, second instance found in the same sweep: task.ls
+    # declared `default: 50` while the server's page default is 1000
+    # (tasks_controller do_index — Params.parse_limit(params["limit"], 1000,
+    # 1000), unchanged since before the manifest entry existed). The CLI uses
+    # this field to calibrate its truncation warning, so the wrong value made
+    # `bp task ls` warn "more may be available" on fully-returned pages. This
+    # pins the manifest to the controller's real default; if the controller's
+    # page size ever changes, change both.
+    test "task.ls declares the server's REAL default page size, not a wish" do
+      ls = Enum.find(Tasks.cli_commands(), &(&1.id == "task.ls"))
+      limit = Enum.find(ls.flags, &(&1.name == "limit"))
+      assert limit.default == 1000
+    end
   end
 
   describe "core content-graph verbs (Goal ges/graph-edge-seam)" do
