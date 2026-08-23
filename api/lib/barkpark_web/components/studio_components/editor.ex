@@ -11,6 +11,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   """
   use Phoenix.Component
 
+  alias Phoenix.LiveView.JS
+
   import BarkparkWeb.Icons
 
   alias BarkparkWeb.Components.FieldInputs
@@ -54,6 +56,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :dataset, :string, required: true
   attr :title, :string, required: true
   attr :back_href, :string, default: nil
+  # spd-bl-focus-after-select — when true, this header is the focus target
+  # for the navigation that just opened the document: at narrow/phone a
+  # Structure-row select DESTROYS the clicked row (strip/hidden), so focus
+  # falls to <body> unless the opened document itself catches it. Same
+  # tabindex="-1" + phx-mounted={JS.focus()} idiom pane_column/1 pins for
+  # expand-pane (absent by default, so an initial load never steals focus).
+  attr :focus_on_mount, :boolean, default: false
 
   slot :status_pill
   slot :presence
@@ -62,7 +71,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def document_header(assigns) do
     ~H"""
-    <div class="pane-header editor-header">
+    <div
+      class="pane-header editor-header"
+      tabindex={@focus_on_mount && "-1"}
+      phx-mounted={@focus_on_mount && JS.focus()}
+    >
       <div style="display: flex; align-items: center; gap: 8px;">
         <%= if @back_href do %>
           <a href={@back_href} class="btn btn-ghost btn-sm" aria-label="Back to Studio">&larr;</a>
@@ -453,6 +466,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # action buttons — the action bar should be considered authoritative.
   attr :doc_actions, :list, default: []
 
+  # spd-bl-focus-after-select — threaded through to document_header above.
+  attr :focus_on_mount, :boolean, default: false
+
   slot :extra_actions
   slot :empty_state
 
@@ -477,6 +493,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <.document_header
           dataset={@dataset}
           title={@editor_doc.title || "Untitled"}
+          focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
             <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
