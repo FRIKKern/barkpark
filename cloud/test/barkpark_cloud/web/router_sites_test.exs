@@ -2015,6 +2015,49 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert body["detail"] =~ "no previous build"
     end
 
+    # cch-w62-bl — the wire carries the box's TYPED code in `error`, flat, so
+    # the console's siteRollbackRefusalTerminal can classify the refusal instead
+    # of string-matching prose. The nested already_running case below this
+    # describe (the W70 flat-detail law) keeps `rollback_failed` — the promotion
+    # is allowlisted to the box's typed site-rollback exits.
+    test "a no_previous refusal reaches the wire as error: no_previous — flat, beside its prose" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(rollback: {:ok, 422, %{"error" => "no_previous"}})
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 422
+
+      body = json_body(conn)
+      assert body["ok"] == false
+      assert body["error"] == "no_previous"
+      assert body["detail"] =~ "no previous build"
+    end
+
+    test "a NESTED not_supported refusal relays code AND the box's words in flat detail" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        rollback:
+          {:ok, 422,
+           %{"error" => %{"code" => "not_supported", "message" => "no current symlink (exit 22)"}}}
+      )
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 422
+
+      body = json_body(conn)
+      assert body["error"] == "not_supported"
+      assert is_binary(body["detail"])
+      assert body["detail"] =~ "no current symlink (exit 22)"
+    end
+
     ## W70 (D847/D854) — THE FLAT-DETAIL LAW, mutation-proven at the route. The
     ## box's REAL pre-poll refusal is NESTED (`%{error: %{code, message}}`,
     ## relayed verbatim by BoxRelay.HTTP), and the CLI's site arms

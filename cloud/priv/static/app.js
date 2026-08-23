@@ -13808,7 +13808,12 @@
     var err = (data && data.error) || {};
     var code = typeof err === "string" ? err : err.code;
     if (code === "identity_refused") return true;
-    return status === 422 && (code === "not_rollbackable" || code === "no_previous");
+    // cch-w62-bl — `not_supported` joins the terminal set: the box answers it
+    // when a site has no live release (or the wrong engine) — a shape no retry
+    // changes. `lock_held` stays transient: the 409 arm's "try again once it
+    // finishes" is the honest recovery there.
+    return status === 422 &&
+      (code === "not_rollbackable" || code === "no_previous" || code === "not_supported");
   }
 
   // Fold the SYNCHRONOUS 200 rollback envelope
@@ -13849,17 +13854,26 @@
           "back to. Use “Roll back to this” on an earlier deployment to rebuild from it instead.",
       };
     }
-    // cch-w63-s7 STATES WHAT THIS ARM IS: the site rollback route emits `error:
-    // "no_previous"` NOWHERE today — the box's typed `no_previous` exit reaches
-    // the wire as PROSE inside a `rollback_failed` detail (Sites.Deploy's
-    // rollback_copy), which the detail-relay arm below renders. It is kept, not
-    // deleted, because the plane is actively growing typed site codes (s3 minted
-    // the first one) and this is the correct reader for a word the plane already
-    // speaks; making it REACHABLE is a plane-side change, filed separately.
+    // cch-w62-bl MADE THIS ARM REACHABLE: Sites.Deploy now promotes the box's
+    // typed `no_previous` exit onto the wire as `error: "no_previous"` (the
+    // 4-tuple relay cch-w63-s3 minted for identity_refused), so this reader —
+    // kept dead through cch-w63-s7 precisely because the plane was growing
+    // typed site codes — finally has a producer. The prose `detail` still
+    // arrives alongside; this arm's static copy says the same fact.
     if (status === 422 && code === "no_previous") {
       return {
         title: "Nothing to roll back to",
         body: "This site has only ever had one release — there's no previous release to return to yet.",
+      };
+    }
+    // cch-w62-bl — `not_supported`: the box's static engine answered "nothing
+    // is live here to roll back". The plane's own measured sentence rides
+    // `detail`; relay it, with the static fact as fallback.
+    if (status === 422 && code === "not_supported") {
+      var nsDetail = (data && typeof data.detail === "string" && data.detail) || "";
+      return {
+        title: "Nothing to roll back",
+        body: nsDetail || "This site has no live release yet — there is nothing to roll back.",
       };
     }
     // cch-w63-s7 — THE CODE CHECK SITS ABOVE THE STATUS ARM, AND THE ORDER IS THE
@@ -24668,9 +24682,14 @@
       promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
       staleGuard: staleGuard,
       // stw5 → GR41 (charter D25/D28): the SITE-level synchronous rollback (distinct
-      // from the per-row async promote) + the capped deploy-history render. Only the
-      // PURE path/fold/copy/opts helpers are node-pinned; confirmSiteRollback /
-      // runSiteRollback (openConfirmModal + api) are browser-verified.
+      // from the per-row async promote) + the capped deploy-history render. The
+      // PURE path/fold/copy/opts helpers are node-pinned; confirmSiteRollback
+      // (openConfirmModal) stays browser-verified. cch-w62-bl HOOKS
+      // runSiteRollback so the harness can drive the refusal arm's RECOVERY
+      // CONTROL end to end (the runDecommission precedent, cch-w46-s2): a
+      // terminal refusal must wire Close and issue no second POST, and only a
+      // transport drive can prove that.
+      runSiteRollback: runSiteRollback,
       siteRollbackPath: siteRollbackPath, siteRollbackConfirmOpts: siteRollbackConfirmOpts,
       siteRollbackRefusalTerminal: siteRollbackRefusalTerminal,
       siteRollbackResult: siteRollbackResult, siteRollbackFailure: siteRollbackFailure,
