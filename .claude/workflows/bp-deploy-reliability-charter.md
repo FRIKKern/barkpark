@@ -6656,6 +6656,8 @@ wave cites was read with `git show origin/main:` — the primary checkout's copy
 stump and must never be read as the charter. **D320 is not in this charter at all** (it is an
 `overflow-wrap: anywhere` ruling in the console-hardening charter); neither `59.3` nor `50.3` appears here.
 
+**Union rider (appended 2026-08-23, task-2115d2d6796dd6b3):** the note above describes the pre-union state and is retained as history — D302–D336 landed on origin/main via the wave-35 union charter-reconcile PR #11699 (`a653550420`, merged 2026-08-17), and #10496/#10522 then closed as superseded 2026-08-19. D594's five-site rider census (:5436 :5438 :6307 :6559 :6940) enumerated the other five “unmerged/stranded” sentences but missed this sixth site.
+
 ### Decisions (wave 20)
 
 - **D337 — DEPLOYS ARE NOT BEING LOST. "MERGED = LIVE" HOLDS, MEASURED, AND `UNCOVERED` CANNOT BE THE
@@ -11644,6 +11646,8 @@ promising green would be dishonest, and D502 already conceded this.
 this epic's own stranded wave charters. `grep -cE '^#+ +(D25[0-9]|D3[0-2][0-9]) '` over origin/main's charter
 returns **0** — D256–D336 exist NOWHERE on main; charter:5609 already records the stranding. **Closing those
 four deletes unrecorded charter history. Salvage the decisions before closing.**
+
+**Union rider (appended 2026-08-23, task-2115d2d6796dd6b3):** the trap above was executed in D594's order and is retained as history — the decisions were salvaged into the wave-35 union charter-reconcile PR #11699 (`a653550420`, merged 2026-08-17) before #10173/#10407/#10496/#10522 closed as superseded 2026-08-19, so D256–D336 now all resolve on origin/main (per-number scan: MISSING NONE).
 
 ### D515 — #11209 IS A ONE-WORD TEST EDIT, AND THE WORD IS `runner_start_failed`.
 
