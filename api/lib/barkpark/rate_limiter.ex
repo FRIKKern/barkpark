@@ -31,14 +31,60 @@ defmodule Barkpark.RateLimiter do
   # The table holds one {key, tokens, last_ms} bucket per rate-limit key
   # (IP/token) and nothing ever deleted them — so in the long-lived API server it
   # grew without bound (one permanent entry per unique client ever seen).
-  # maybe_prune/1 opportunistically drops buckets untouched for @stale_after_ms.
-  # The plug's capacity/refill is a CONSTANT 60s full-refill (both scale with
-  # per_minute), so any bucket idle ≥5 min is fully refilled — dropping it is
-  # behaviour-identical to keeping it (the next request just re-creates a full
-  # bucket), with no rate-limit reset/bypass. The prune only runs once the table
-  # passes @max_entries, so the steady-state hot path costs one :ets.info/2.
+  # maybe_prune/1 opportunistically drops buckets untouched for @stale_after_ms,
+  # and only once the table passes @max_entries, so the steady-state hot path
+  # costs one :ets.info/2.
+  #
+  # @stale_after_ms IS AN INVARIANT, NOT A TUNABLE. Deleting a bucket re-creates
+  # it FULL on the owner's next request, so the cutoff must be >= the SLOWEST
+  # full-refill-from-empty time of any RateLimiter.check/2 call site in the tree.
+  # Below that line a still-DEPLETED bucket is dropped as "stale" and its owner
+  # is handed a fresh allowance: a rate-limit RESET, not the behaviour-identical
+  # no-op the prune is sold as.
+  #
+  # Census of every call site, as capacity / refill_per_sec = seconds to refill
+  # from empty. RE-DERIVE THIS before moving the constant — a new call site with
+  # a slower window silently invalidates it:
+  #
+  #   pulse READ (pulse_controller)        30 / 10.0            =    3s
+  #   Plugs.RateLimit                      N / (N/60)           =   60s
+  #   app_token_controller (revoke)        10 / (10/60)         =   60s
+  #   pulse WRITE (pulse_controller)       3 / (rate/60)        =  180s worst
+  #       (rate = channel rate_per_min; Pulse.sane_rate/1 clamps it to a
+  #        positive integer, so rate=1 is the floor and 180s the worst case)
+  #   bulldocs_form_controller             20 / (1/60)          = 1200s
+  #   Plugs.TicketRateLimit                N / (N/3600)         = 3600s
+  #   Plugs.AuthWriteRateLimit             N / (N/3600)         = 3600s
+  #
+  # HOW THE OLD 300_000 (5 min) WENT WRONG, because the shape repeats: it was
+  # written when Plugs.RateLimit was the ONLY caller, and its comment said so —
+  # "the plug", singular, a CONSTANT 60s full-refill. TicketRateLimit landed one
+  # day later and AuthWriteRateLimit six weeks after that, both hourly, and
+  # neither author opened this file. A depleted hourly bucket idle 5 min had
+  # legitimately earned only limit/12 tokens, was deleted as stale, and came back
+  # FULL — ~12x the hourly budget on the UNAUTHENTICATED POST /v1/auth/register
+  # path whose entire job is bounding third-party mailbombing. bulldocs_form is a
+  # third shape: at 20 tokens and 1/60 per sec it can never be both stale and
+  # empty, but a bucket emptied 310s ago has earned 5 of 20 and the prune re-
+  # grants all 20.
+  #
+  # COMPOUNDING IT: the :rate_limited branch of debit/4 writes NOTHING, so
+  # last_ms freezes at the last SUCCESSFUL admit. A client that hammers and keeps
+  # getting denied never refreshes its row, and ages toward prune-eligibility
+  # WHILE being denied — the reset lands on precisely the abuser the bucket
+  # exists to stop.
+  #
+  # "Prune only fully-refilled buckets" is NOT expressible here: the row
+  # {key, tokens, last_ms} carries neither capacity nor refill rate — that
+  # arithmetic lives entirely in the caller's opts. The flat cutoff IS the whole
+  # mechanism, which is why it has to track the slowest window by hand.
+  #
+  # PRICE OF THE WIDEN, measured: the table sits over @max_entries for longer, so
+  # the select_delete below runs a full scan that deletes nothing (~512us median
+  # on a 12k-row table, vs <1us for a keyed lookup). That is per NEW-KEY insert,
+  # not per request.
   @max_entries 10_000
-  @stale_after_ms 300_000
+  @stale_after_ms 3_600_000
 
   # Bounded retry budget for the lock-free debit below. Not a caller option:
   # the bound is a property of the commit protocol, not of any call site.
@@ -255,9 +301,11 @@ defmodule Barkpark.RateLimiter do
   # handing out a fresh one.
   defp ip_to_string(_), do: "unknown"
 
-  # Drop fully-refilled (stale) buckets once the table grows past @max_entries.
-  # Runs on the new-key path only, and does real work only when over the bound,
-  # so a pruned table stays under it until it grows again — naturally throttled.
+  # Drop buckets idle past @stale_after_ms once the table grows past
+  # @max_entries. Runs on the new-key path only, and does real work only when
+  # over the bound, so a pruned table stays under it until it grows again —
+  # naturally throttled. The cutoff, not this scan, is what makes the delete
+  # safe: see @stale_after_ms above for the census it has to track.
   defp maybe_prune(now_ms) do
     if :ets.info(@table, :size) > @max_entries do
       cutoff = now_ms - @stale_after_ms
