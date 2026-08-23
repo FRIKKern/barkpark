@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-mvp-7"
+RENDERER_VERSION = "chronicle-mvp-8"
 LEDGER_PREVIEW_LIMIT = 24
 DEFAULT_HISTORY_MONTHS = 18
 DEFAULT_REPO = "FRIKKern/barkpark"
@@ -313,7 +313,8 @@ def period_payload(period: Period, selected: list[Event], periods: dict[str, Per
         "week": f"Week {period.key.split('-W')[-1]} dispatch · {period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}",
         "month": (
             f"{period.title} field journal · {len(selected):,} changes, "
-            f"{', '.join(leading_areas) if leading_areas else 'quiet'} leading"
+            f"{', '.join(leading_areas) if leading_areas else 'quiet'} leading · "
+            f"edition {digest(selected)[:8]}"
         ),
         "year": f"Annual product record · {period.title}",
     }
