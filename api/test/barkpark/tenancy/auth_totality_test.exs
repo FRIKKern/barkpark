@@ -60,6 +60,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     permits?: 2,
     role_for_permissions: 1,
     role_permits?: 3,
+    valid_role_names: 1,
     workspace_admin?: 2,
     workspace_admin?: 3
   ]
@@ -74,6 +75,13 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   #     crash is unreachable from client input.
   #   * permits?/2 — already total via its catch-all in auth.ex; it takes no id.
   #     Pinned as a control below rather than driven through the matrix.
+  #   * valid_role_names/1 — the valid-role SET for a membership write, made
+  #     public so `Barkpark.Scim` validates group role grants against the
+  #     IDENTICAL set `create_membership/4` enforces
+  #     (arpss-w10-bl-scim-set-member-role-unvalidated). A write-path helper
+  #     like the constructors above, not a request-path predicate: every
+  #     caller passes a workspace id derived from a loaded row, never client
+  #     input, so LOUD on malformed input is the correct posture.
   #   * role_permits?/3 — SPLIT expectation, own dedicated test at the bottom.
   #     Its first argument is a ROLE NAME, not a principal id, and built-in
   #     roles are workspace-id-INDEPENDENT by design, so a blanket
@@ -115,7 +123,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 15 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 16 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end
