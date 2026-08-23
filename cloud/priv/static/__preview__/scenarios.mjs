@@ -2238,6 +2238,30 @@ const cruelAccountMe = (function () {
   return Object.assign({}, m, { user: Object.assign({}, m.user, { email: cruelAccountEmail }) });
 })();
 
+// ── cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — THE CRUEL MEMBER ──
+// The roster's committed emails ship 12-14 characters against
+// `validate_length(:email, max: 160)` (cloud/lib/barkpark_cloud/accounts/
+// user.ex, validate_email/1) — so the members leg has only ever measured
+// fixture kindness on `.set-row-name`, never the cap. Same derivation as the
+// account identity above (160 − "@" − the 1-char domain @email_format admits =
+// 158 unbroken local characters; lowercase because validate_email/1 downcases
+// on the way in), with its OWN stem so two users never share an address.
+const cruelMemberLocal = dnsLabel("solveigmargretheeriksdatterholmenkollveien", AM_NAME_MAX);
+const cruelMemberEmail = `${cruelMemberLocal}@x`;
+if (cruelMemberEmail.length !== ACCOUNT_EMAIL_MAX || !ACCOUNT_EMAIL_FORMAT.test(cruelMemberEmail)) {
+  throw new Error(`cruel member: ${cruelMemberEmail.length} chars against the ${ACCOUNT_EMAIL_MAX} cap (user.ex validate_email/1), or not admissible by @email_format — an address the server would REJECT proves nothing`);
+}
+if (/[^a-z0-9]/.test(cruelMemberLocal)) {
+  throw new Error("cruel member: the local part carries a break opportunity — BREAKABLE, it would wrap on its own and certify a bound that never held it");
+}
+// CONCAT, never an edit: `teamMembers` and every count assertion, residue line
+// and wire leg standing on its three rows stays byte-for-byte unmoved (the
+// cch-w45-s1 fence). usr_sol is never an ACTOR, so corpusActorEmail's fatal
+// unknown-id arm is untouched.
+const teamMembersCruel = teamMembers.concat([
+  { user_id: "usr_sol", email: cruelMemberEmail, role: "member", joined_at: tMinus(3 * 86400) },
+]);
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -2576,6 +2600,24 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       members: teamMembers,
+      invitations: teamInvites,
+    },
+  },
+  // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — the members roster
+  // at the server's own email cap. Identical frame to members-populated (owner
+  // actor, buttons rendered) with ONE appended 160-char member, so the members
+  // leg finally measures `.set-row-name` under content the server would store.
+  "members-cruel-content": {
+    label: "Members — cruel content: one roster email at the 160-char server cap, unbroken",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersCruel,
       invitations: teamInvites,
     },
   },
@@ -3516,6 +3558,27 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts (absorbing
+  // cch-w15-bl-detail-url-fixture-never-overflows): the CRUEL instance's OWN
+  // detail screen. fleet-cruel-content already carries cruelInstance and its
+  // 253-char custom_host (registry/barkpark.ex custom_host cap under
+  // @external_host_format), but no committed scenario ever deep-linked
+  // #instance/<cruel id> — so `.detail-url-text`, which renders
+  // publicUrl(bp) = "https://" + custom_host, had never rendered a string that
+  // overflows anywhere in the corpus (the w15 measurement: sw == cw == 240 in
+  // EVERY cell). Same data, the cruel box's route.
+  "instance-cruel-detail": {
+    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, with the copy-btn carrying the full value",
+    authed: true,
+    deepLink: "#instance/5b2c1e00-0000-4000-8000-0000000000c1",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
   "fleet-archives-stored": {
     label: "Fleet Archives — portable bundles listed with a per-provider resurrect",
     authed: true,
@@ -3755,6 +3818,37 @@ export const SCENARIOS = {
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [liveInstance],
+      subscription: {
+        plan: "supporter",
+        status: "active",
+        past_due: false,
+        cancel_at_period_end: false,
+        current_period_end: new Date(Date.parse(T) + 18 * 86400 * 1000).toISOString(),
+        canceled_at: null,
+        started_at: tMinus(40 * 86400),
+        is_trial: false,
+        trial_days_remaining: null,
+      },
+      sites: [],
+      audit: [],
+    },
+  },
+  // cchi-w39-bl-mefault-must-be-exhaustible — the RECOVERY twin of
+  // billing-me-unreadable: the same owner, the same 500, but a ONE-SHOT fault
+  // (`times: 1` consumes through the per-boot state bag in route()). The first
+  // /v1/me read fails and the unknown arm mounts the shared [data-me-retry];
+  // the retry's re-read heals, and the owner affordances must RETURN. Without
+  // this fixture the crown's "the unknown has an exit" claim stops at "the
+  // button is present and pressable" — the recovery half would be asserted,
+  // never measured.
+  "billing-me-recovers": {
+    label: "Billing — the owner's /v1/me 500s ONCE: the shared retry re-reads, the answer lands, and Manage billing returns",
+    authed: true,
+    deepLink: "#billing",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
       barkparks: [liveInstance],
       subscription: {
         plan: "supporter",
@@ -4505,7 +4599,27 @@ export function route(name, method, path, state) {
   // absorbMe writes on a 500/502/offline — was unreachable from every scenario
   // in this file. `meFault` is a per-scenario override that fails the READ while
   // leaving `me` present: the account exists, the wire did not answer.
-  if (p === "/v1/me" && d.meFault) return d.meFault;
+  if (p === "/v1/me" && d.meFault) {
+    // cchi-w39-bl-mefault-must-be-exhaustible — the EXHAUSTIBLE form. A sticky
+    // fault can prove a retry RENDERS and re-issues the read, but never that it
+    // RECOVERS: the second read fails identically forever. `times: N` fails the
+    // first N reads and then heals, with the count kept in the PER-BOOT state
+    // bag (the 4th arg both harnesses already pass) — NEVER on this module's
+    // shared scenario object, which smoke.mjs drives across many scenarios in
+    // one process and which a browser reload must not inherit. No `times` — or
+    // a stateless caller that passed no bag — is the STICKY default, unchanged:
+    // operator-me-unreadable and billing-me-unreadable depend on a read that
+    // NEVER heals, and their surfaces pin exactly that.
+    if (typeof d.meFault.times === "number" && state) {
+      if ((state.meFaultServed || 0) < d.meFault.times) {
+        state.meFaultServed = (state.meFaultServed || 0) + 1;
+        return { status: d.meFault.status, body: d.meFault.body };
+      }
+      // exhausted — fall through to the healthy /v1/me arm below.
+    } else {
+      return d.meFault;
+    }
+  }
   if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
   // than 404 so every scenario answers HONESTLY ("No active sessions") instead

@@ -1715,6 +1715,28 @@ const EXPECTATIONS = {
   // gets a real expectation, and every string below is DERIVED FROM THE FIXTURE
   // rather than typed — a corpus edit that quietly shortens the cruel content
   // reds here instead of passing on a stale literal.
+  // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts (absorbing
+  // cch-w15-bl-detail-url-fixture-never-overflows): the cruel instance's own
+  // detail. BOTH halves of the w15 fix shape that a fake DOM can see are
+  // pinned here: the full 253-char host renders as the span's TEXT, and the
+  // adjacent copy-btn's data-copy carries the identical full value — so the
+  // truncation the browser paints (CSS ellipsis) is always recoverable. The
+  // GEOMETRY half (scrollWidth > clientWidth at 1440) needs a real browser and
+  // is driven, not asserted here.
+  "instance-cruel-detail": {
+    what: "Instance detail — the 253-char custom host reaches .detail-url-text whole, and data-copy carries the identical full value",
+    check(reg) {
+      const bp = SCENARIOS["instance-cruel-detail"].data.barkparks[0];
+      assert.ok(bp.custom_host && bp.custom_host.length === 253,
+        "the fixture's custom_host must sit AT the 253 cap — it reads " + String(bp.custom_host || "").length + " — GONE KIND otherwise");
+      const url = "https://" + bp.custom_host;
+      const body = reg.get("instance-body").innerHTML || "";
+      assert.ok(body.includes("detail-url-text"), "the address line renders through .detail-url-text");
+      assert.ok(body.includes(">" + url + "<"), "the FULL public URL is the span's text — the DOM carries the whole value, CSS does the clipping");
+      assert.ok(body.includes('data-copy="' + url + '"'),
+        "the adjacent copy-btn's data-copy equals the full untruncated value — the w15 recoverability half");
+    },
+  },
   "fleet-cruel-content": {
     what: "server-legal worst-case CONTENT on the fleet table — a 253-char custom domain, a 255-char name and a 512-char single-token provision error, all rendered beside a KIND neighbour in the same DOM",
     check(reg) {
@@ -2466,6 +2488,35 @@ const EXPECTATIONS = {
       assert.equal(reg.get("billing-tiers").hidden, true, "the plan grid stays closed while the role is unknown");
     },
   },
+  // cchi-w39-bl-mefault-must-be-exhaustible — THE RECOVERY, DRIVEN. The
+  // unreadable twin proves the shared retry RENDERS; this one proves it
+  // RECOVERS: the one-shot fault (times: 1) fails the boot read, the shared
+  // [data-me-retry] is clicked (fired count asserted — an unwired button would
+  // otherwise be a dead pass), the re-read lands 200 owner, and the owner
+  // affordances RETURN. Wire-asserted at both ends via ctx.countCalls.
+  "billing-me-recovers": {
+    what: "the owner's /v1/me 500s ONCE — clicking the shared retry re-reads, and Manage billing RETURNS",
+    async check(reg, hooks, ctx) {
+      const manageEl = reg.get("billing-manage");
+      const before = manageEl.innerHTML || "";
+      assert.ok(before.includes("We couldn't check your account"),
+        "the boot read must fail first — without the unknown arm there is no recovery to measure; got: " + before);
+      assert.ok(!before.includes(">Manage billing<"), "no portal button while the role is unknown");
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      const btns = manageEl.querySelectorAll("[data-me-retry]");
+      assert.equal(btns.length, 1, "the unknown arm mounts exactly one shared retry");
+      const fired = btns[0].click();
+      assert.ok(fired > 0, "[data-me-retry] dispatched " + fired + " handler(s) — the button is DEAD (wireMeRetry never ran)");
+      await ctx.settle();
+      assert.ok(ctx.countCalls("GET", "/v1/me") >= 2, "the retry never re-issued the /v1/me read");
+      const after = manageEl.innerHTML || "";
+      assert.ok(after.includes(">Manage billing<"),
+        "the landed 200 owner did not restore Manage billing — the retry re-read but the surface never healed; got: " + after);
+      assert.ok(!after.includes("We couldn't check your account"), "the failure copy retires once the read lands");
+      assert.equal(reg.get("billing-cancel-section").hidden, false, "the Cancel section returns with the proven owner");
+      assert.equal(reg.get("billing-manage-section").hidden, false, "the Manage section is shown for the proven owner");
+    },
+  },
   "billing-cancelling": {
     what: "owner after an in-app cancel — the grace 'Access until' + Ending badge, Cancel section retired, Manage billing kept",
     check(reg) {
@@ -2919,6 +2970,31 @@ const EXPECTATIONS = {
   // ── G-06 Members + env-vars (Settings wave, phase 4) ──────────────────────
   // The roster on the GR33 .set-* anatomy: view-members visible, both cards, the
   // 3-role chips, per-manageable-row Change role + Remove, the "(you)" self-tag.
+  // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts — the roster at the
+  // 160-char email cap. Every needle DERIVES from the fixture, so a fixture
+  // that goes kind cannot leave this check asserting a shorter string.
+  "members-cruel-content": {
+    what: "Members — the 160-char cruel email renders WHOLE in its row (identity recoverable at the DOM), roster grown by concat to 4 rows",
+    check(reg) {
+      const cruel = SCENARIOS["members-cruel-content"].data.members.find((m) => m.email.length >= 100);
+      assert.ok(cruel, "the cruel roster fixture lost its at-cap member — GONE KIND, nothing cruel is being asserted");
+      assert.equal(cruel.email.length, 160, "the cruel email must sit AT the user.ex validate_email cap (160), not near it");
+      const body = reg.get("members-body").innerHTML || "";
+      // THE NAME DIV, not any attribute: the full address also rides the
+      // Change-role/Remove buttons' data-email attributes, so a bare
+      // body.includes(email) is satisfiable by markup a person cannot read —
+      // measured: truncating the name render to 40 chars left that weaker
+      // needle GREEN. The needle below pins the text node a person sees.
+      assert.ok(body.includes('set-row-name">' + cruel.email + "<"),
+        "the 160-char email must render WHOLE as the row's visible name — CSS may clip it, the DOM must carry it");
+      const rows = SCENARIOS["members-cruel-content"].data.members.length;
+      assert.equal(rows, 4, "the roster is teamMembers.concat(one cruel member) — the three committed rows stay byte-for-byte unmoved");
+      for (const m of SCENARIOS["members-cruel-content"].data.members) {
+        assert.ok(body.includes(m.email), "every roster row renders, including " + m.email.slice(0, 24) + "…");
+      }
+      assert.ok(body.includes(">Change role<") && body.includes(">Remove<"), "the owner actor still gets manage affordances beside the cruel row");
+    },
+  },
   "members-populated": {
     what: "Members (admin) — roster + invitations, 3 real roles — AND real clicks: Remove shrinks the SERVER roster 3→2, Revoke shrinks invitations 2→1",
     async check(reg, hooks, ctx) {
