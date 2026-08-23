@@ -195,11 +195,11 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/webhooks/content-publish/:site_id —*  content-publish webhook → ISR revalidate (signed)
       POST    /v1/relay/chat-blocked/:barkpark_id —*  instance chat_blocked webhook → member-device push fan-out (signed; D15)
       GET     /v1/tls/ask          —         on-demand-TLS gate (200/404 by domain)
-      POST    /v1/builder/claim    worker    atomic next-queued deployment claim
-      POST    /v1/builder/deployments/:id/transition worker fenced status update
-      POST    /v1/builder/deployments/:id/console worker append a live build-console line {line} (capped, append-only) → SSE (gh-5)
-      POST    /v1/builder/deployments/:id/detail  worker set the live sub-caption {detail} (latest-wins) → SSE (dwb-19)
-      GET     /v1/builder/sites/:id/env worker decrypted site env for build-time injection (nixpacks --env)
+      POST    /v1/builder/claim    agent     atomic next-queued deployment claim (own box only)
+      POST    /v1/builder/deployments/:id/transition agent fenced status update (own box only)
+      POST    /v1/builder/deployments/:id/console agent append a live build-console line {line} (capped, append-only) → SSE (gh-5; own box only)
+      POST    /v1/builder/deployments/:id/detail  agent set the live sub-caption {detail} (latest-wins) → SSE (dwb-19; own box only)
+      GET     /v1/builder/sites/:id/env agent decrypted site env for build-time injection (nixpacks --env; own box only)
       GET     /v1/agent/pending    agent     deployments in pushing for this box
       GET     /v1/agent/sites/:id/env agent  decrypted site env for the running container (own box only)
       POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
@@ -8252,19 +8252,33 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/builder/claim {worker_id} → 200 {deployment, observed_epoch} |
   # 404 {error: "no_queued"} | 422 missing worker_id.
-  # Atomic via Registry.claim_next_deployment/1 (FOR UPDATE SKIP LOCKED +
-  # epoch bump in one transaction).
+  # Atomic via Registry.claim_queued_deployment_for_barkpark/2 (FOR UPDATE SKIP
+  # LOCKED + epoch bump in one transaction). NOT claim_next_deployment/1 — that
+  # one is fleet-wide and is no longer reachable from any route.
   #
-  # WORKER-gated: claim_next_deployment/1 selects the oldest queued row
-  # FLEET-WIDE (no team filter), so this must NOT be reachable by an arbitrary
-  # logged-in user — any user of any team would otherwise claim another team's
-  # queued deployment (leaking git_ref/artifact_url) and drive its state
-  # machine. require_worker gates on the shared WORKER_TOKEN faceless principal
-  # (the off-box builder fleet presents it, same secret that gates
-  # /v1/internal/*), and fails closed when unset. A dedicated builder-token is a
-  # hardening follow-up.
+  # AGENT-gated and BOX-SCOPED (jpf-w1-builder-identity). This route used to
+  # gate on `require_worker` — the shared fleet WORKER_TOKEN, one secret that
+  # ALSO opens /v1/internal/* (list and deprovision any box) and, through the
+  # env route below, read any site's decrypted env. That secret had been placed
+  # on a customer box that runs untrusted nixpacks builds, so a build escaping
+  # its sandbox inherited the fleet.
+  #
+  # The credential is now the box's OWN hashed, revocable agent token, and the
+  # query behind it is narrowed to that box's sites, because a per-box identity
+  # in front of a fleet-wide query would still hand box A a build belonging to
+  # box B. Identity and scope only work as a pair.
+  #
+  # CHARTER D14 — the ordering matters and this route is where it is paid. No
+  # credential may ride the claim before the box-scoped flip. The claim envelope
+  # already carries `source` (the git clone recipe, and for a private repo a
+  # short-lived installation token, via builder_claim_source/1 below): as of
+  # this route, that is served ONLY to the box hosting the site.
+  #
+  # The runtime half of this same pipeline (/v1/agent/*) has been require_agent
+  # + barkpark-scoped all along — the builder half was the asymmetric outlier,
+  # not a deliberately broader design.
   post "/v1/builder/claim" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
     if conn.halted do
       conn
@@ -8276,7 +8290,9 @@ defmodule BarkparkCloud.Web.Router do
           json(conn, 422, %{error: "worker_id_required"})
 
         true ->
-          case Registry.claim_next_deployment(worker_id) do
+          bp = conn.assigns.current_barkpark
+
+          case Registry.claim_queued_deployment_for_barkpark(bp, worker_id) do
             {:ok, deployment} ->
               response =
                 Map.merge(
@@ -8301,8 +8317,12 @@ defmodule BarkparkCloud.Web.Router do
   # `deployment` in the builder-claim 200 envelope, or %{} when the row has an
   # artifact (nothing to clone) or the site has no linked repo.
   #
-  # TENANCY: this map rides ONLY the builder-claim response, which is gated to
-  # the shared WORKER_TOKEN principal. It must NEVER enter deployment_json/1 —
+  # TENANCY: this map rides ONLY the builder-claim response, which as of
+  # jpf-w1-builder-identity is gated to the AGENT TOKEN OF THE BOX HOSTING THE
+  # SITE — not, as before, to a shared fleet secret held by every box. That is
+  # charter D14's ordering: the clone recipe and its installation token became
+  # box-confined in the same commit that box-scoped the claim. It must NEVER
+  # enter deployment_json/1 —
   # that serializer feeds tenant-facing reads (site deployments list/get, SSE)
   # and the agent claim, none of which may carry a build-plane clone recipe.
   # (deployment_json's own `source` field is the UNRELATED build-provenance
@@ -8384,12 +8404,18 @@ defmodule BarkparkCloud.Web.Router do
   # from-status transition graph is enforced too: an illegal edge (e.g.
   # failed → live) → 409 illegal_transition.
   #
-  # WORKER-gated: the (worker, epoch) fence only proves the caller holds the
-  # claim it was handed — it is NOT a tenant scope, so this must be gated to the
-  # shared WORKER_TOKEN builder principal (require_worker, same as claim above),
-  # never any logged-in user.
+  # AGENT-gated + BOX-SCOPED (jpf-w1-builder-identity), mirroring the agent
+  # transition route exactly.
+  #
+  # The (worker, epoch) fence is NOT a tenant scope — it only proves the caller
+  # holds the claim it was handed, and it cannot say whose box the row belongs
+  # to. That is why the fence needs a scope check beside it rather than instead
+  # of one: `agent_owns_deployment?/2` answers 404 (never 403) for a row on
+  # another box, the same shape as a row that does not exist, so the route
+  # cannot be used to probe for another tenant's deployment ids. The fence
+  # itself is unchanged.
   post "/v1/builder/deployments/:id/transition" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
     if conn.halted do
       conn
@@ -8404,6 +8430,9 @@ defmodule BarkparkCloud.Web.Router do
 
         is_nil(epoch) ->
           json(conn, 422, %{error: "observed_epoch_required"})
+
+        not agent_owns_deployment?(conn.assigns.current_barkpark, conn.path_params["id"]) ->
+          json(conn, 404, %{error: "not_found"})
 
         true ->
           attrs =
@@ -8456,35 +8485,42 @@ defmodule BarkparkCloud.Web.Router do
   # deployment's console, then push "deployments" so an open site view refetches
   # + streams the new line. Append-only + capped server-side (oldest dropped).
   #
-  # Auth mirrors the builder claim/transition routes (`require_worker` — the
-  # off-box builder fleet presents the shared WORKER_TOKEN; a dedicated
-  # builder-token is a hardening follow-up). A logged-in user must NOT be able to
-  # inject text into another team's SSE-broadcast build console. Best-effort
-  # telemetry: a console report NEVER affects the build's outcome; the builder
-  # treats any non-2xx as "log and continue".
+  # Auth mirrors the builder claim/transition routes (`require_agent` + the box
+  # scope check — jpf-w1-builder-identity). Nobody may inject text into another
+  # team's SSE-broadcast build console, and before this flip the shared
+  # WORKER_TOKEN let any box do exactly that to any team's console. A row on
+  # another box now answers 404, indistinguishable from a row that does not
+  # exist. Best-effort telemetry: a console report NEVER affects the build's
+  # outcome; the builder treats any non-2xx as "log and continue" — so the
+  # scope check cannot break a legitimate build even if it were wrong.
   #   200 {ok: true}   — appended (or a late line after the deploy is terminal).
-  #   404 {not_found}  — no deployment with that id.
+  #   404 {not_found}  — no deployment with that id, OR it is on another box.
   #   422 {invalid}    — missing/blank line.
   post "/v1/builder/deployments/:id/console" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      case Registry.append_deployment_console(
-             conn.path_params["id"],
-             conn.body_params["line"]
-           ) do
-        {:ok, deployment} ->
-          broadcast_site_team(deployment.site_id, "deployments")
-          json(conn, 200, %{ok: true})
+    cond do
+      conn.halted ->
+        conn
 
-        {:error, :not_found} ->
-          json(conn, 404, %{error: "not_found"})
+      not agent_owns_deployment?(conn.assigns.current_barkpark, conn.path_params["id"]) ->
+        json(conn, 404, %{error: "not_found"})
 
-        {:error, :invalid} ->
-          json(conn, 422, %{error: "invalid"})
-      end
+      true ->
+        case Registry.append_deployment_console(
+               conn.path_params["id"],
+               conn.body_params["line"]
+             ) do
+          {:ok, deployment} ->
+            broadcast_site_team(deployment.site_id, "deployments")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+
+          {:error, :invalid} ->
+            json(conn, 422, %{error: "invalid"})
+        end
     end
   end
 
@@ -8492,32 +8528,37 @@ defmodule BarkparkCloud.Web.Router do
   # deployment's LIVE sub-caption (latest-wins, not appended), then push
   # "deployments" so an open site view renders the caption under the status pill.
   # The build-side twin of a provision step's `progress`. Same builder auth
-  # (`require_worker`, shared WORKER_TOKEN) + best-effort posture as /console — a
-  # detail report NEVER affects the build's outcome; the builder treats any
-  # non-2xx as "log and continue".
+  # (`require_agent` + the box scope check — jpf-w1-builder-identity) and the
+  # same best-effort posture as /console: a detail report NEVER affects the
+  # build's outcome; the builder treats any non-2xx as "log and continue".
   #   200 {ok: true}   — the caption was set (or a late one after the deploy is terminal).
-  #   404 {not_found}  — no deployment with that id.
+  #   404 {not_found}  — no deployment with that id, OR it is on another box.
   #   422 {invalid}    — missing/blank detail.
   post "/v1/builder/deployments/:id/detail" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      case Registry.set_deployment_detail(
-             conn.path_params["id"],
-             conn.body_params["detail"]
-           ) do
-        {:ok, deployment} ->
-          broadcast_site_team(deployment.site_id, "deployments")
-          json(conn, 200, %{ok: true})
+    cond do
+      conn.halted ->
+        conn
 
-        {:error, :not_found} ->
-          json(conn, 404, %{error: "not_found"})
+      not agent_owns_deployment?(conn.assigns.current_barkpark, conn.path_params["id"]) ->
+        json(conn, 404, %{error: "not_found"})
 
-        {:error, :invalid} ->
-          json(conn, 422, %{error: "invalid"})
-      end
+      true ->
+        case Registry.set_deployment_detail(
+               conn.path_params["id"],
+               conn.body_params["detail"]
+             ) do
+          {:ok, deployment} ->
+            broadcast_site_team(deployment.site_id, "deployments")
+            json(conn, 200, %{ok: true})
+
+          {:error, :not_found} ->
+            json(conn, 404, %{error: "not_found"})
+
+          {:error, :invalid} ->
+            json(conn, 422, %{error: "invalid"})
+        end
     end
   end
 
@@ -8529,22 +8570,32 @@ defmodule BarkparkCloud.Web.Router do
   # `bp sites env set`. A site with no blob answers `{env: {}}` — the build
   # proceeds env-less rather than failing.
   #
-  # WORKER-gated, same reasoning as /claim above: the builder is a faceless
-  # fleet principal that builds any team's site, so the route must be reachable
-  # by the shared WORKER_TOKEN only — a user session or agent token → 401
-  # (require_worker does its own constant-time compare and fails closed when no
-  # worker token is configured). Reveals are not audit-logged — matching the
-  # existing secret-reveal surfaces (/v1/barkparks/:id/credentials, /bootstrap),
-  # which record writes (`site.env_changed`) but not reads.
+  # AGENT-gated + BOX-SCOPED (jpf-w1-builder-identity), and this route is the
+  # sharpest reason the flip could not wait. It hands back DECRYPTED site env —
+  # every secret a tenant set with `bp sites env set`. Gated on the shared
+  # WORKER_TOKEN it was an unscoped read: one secret, held by every box
+  # including customer boxes running untrusted nixpacks builds, returned ANY
+  # site's plaintext env. The scope is now the caller's own box, and a site on
+  # another box answers 404 — the same shape as a site that does not exist, so
+  # the route cannot be walked to discover which ids are real.
+  #
+  # Reveals are still not audit-logged, matching the existing secret-reveal
+  # surfaces (/v1/barkparks/:id/credentials, /bootstrap), which record writes
+  # (`site.env_changed`) but not reads.
   get "/v1/builder/sites/:id/env" do
-    conn = Auth.require_worker(conn, [])
+    conn = Auth.require_agent(conn, [])
 
     if conn.halted do
       conn
     else
+      bp = conn.assigns.current_barkpark
+
       case Registry.get_site(conn.path_params["id"]) do
-        %Registry.Site{} = site -> site_env_response(conn, site)
-        _ -> json(conn, 404, %{error: "not_found"})
+        %Registry.Site{barkpark_id: bp_id} = site when bp_id == bp.id ->
+          site_env_response(conn, site)
+
+        _ ->
+          json(conn, 404, %{error: "not_found"})
       end
     end
   end

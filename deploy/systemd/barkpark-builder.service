@@ -5,7 +5,7 @@ After=network-online.target docker.service
 [Service]
 ExecStart=/usr/local/bin/barkpark-builder \
   --control-url https://api.barkpark.cloud \
-  --token-file __BUILDER_TOKEN__ \
+  --token-file /etc/barkpark/agent.token \
   --cache-dir /var/lib/barkpark-builder/images \
   --log-dir /var/log/barkpark-builder \
   --platform __PLATFORM__

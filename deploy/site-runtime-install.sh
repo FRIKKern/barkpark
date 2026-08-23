@@ -86,16 +86,24 @@ echo "== binaries built =="
 
 mkdir -p /var/lib/barkpark-builder/images /var/log/barkpark-builder
 
-# The builder claims with the shared WORKER token when the box has one
-# (installed by cp-ops builder-token-fix); reinstalls must not clobber that.
-BUILDER_TOKEN=/etc/barkpark/agent.token
-[ -f /etc/barkpark/worker.token ] && BUILDER_TOKEN=/etc/barkpark/worker.token
-
-# Both services otherwise authenticate with the box's existing agent identity.
+# BOTH services authenticate with the box's own agent identity — one credential
+# on the box, and it is the per-box, hashed, revocable one (jpf-w1-builder-identity).
+#
+# There used to be a preference here: if /etc/barkpark/worker.token existed (put
+# there by cp-ops builder-token-fix) the builder used it instead. That token is
+# the SHARED fleet WORKER_TOKEN, which also opens /v1/internal/* — list and
+# deprovision any box — and, until this change, read any site's decrypted env.
+# Preferring it meant a box that had ever been hand-fixed kept holding the
+# fleet's keys through every reinstall, on hardware that runs untrusted nixpacks
+# builds. The preference is deleted rather than inverted so reinstalls CONVERGE:
+# a box cannot stay on the old credential by still having the old file.
+#
+# The builder unit therefore names agent.token directly and carries no token
+# placeholder, exactly like the runtime unit beside it.
 #
 # The two heredocs below are BYTE-IDENTICAL copies of the staged canonical units
 # deploy/systemd/barkpark-builder.service and deploy/systemd/barkpark-runtime.service
-# (placeholders __PLATFORM__ / __BUILDER_TOKEN__ included). They are inlined and
+# (placeholder __PLATFORM__ included). They are inlined and
 # not read from the repo on purpose: cp-ops scp's exactly ONE file to the box, so
 # this script must stay self-contained. deploy/site-runtime-install_test.sh
 # byte-diffs each heredoc against its staged file, so the copies cannot drift —
@@ -108,7 +116,7 @@ After=network-online.target docker.service
 [Service]
 ExecStart=/usr/local/bin/barkpark-builder \
   --control-url https://api.barkpark.cloud \
-  --token-file __BUILDER_TOKEN__ \
+  --token-file /etc/barkpark/agent.token \
   --cache-dir /var/lib/barkpark-builder/images \
   --log-dir /var/log/barkpark-builder \
   --platform __PLATFORM__
@@ -138,7 +146,7 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
-sed -i "s#__PLATFORM__#$PLATFORM#;s#__BUILDER_TOKEN__#$BUILDER_TOKEN#" /etc/systemd/system/barkpark-builder.service
+sed -i "s#__PLATFORM__#$PLATFORM#" /etc/systemd/system/barkpark-builder.service
 
 systemctl daemon-reload
 systemctl enable --now barkpark-builder barkpark-runtime

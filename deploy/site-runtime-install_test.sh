@@ -110,28 +110,36 @@ for unit in barkpark-builder.service barkpark-runtime.service; do
 done
 
 echo "== placeholders =="
+# PLATFORM is the ONLY placeholder left. jpf-w1-builder-identity deleted
+# __BUILDER_TOKEN__: the builder's token file is now fixed at agent.token, the
+# same shape the runtime unit has always had, so there is nothing per-box to
+# substitute and no way for a stale worker.token to be selected at install time.
 for side in "$SCRIPT" "$STAGED/barkpark-builder.service"; do
-  check "builder placeholders present in $(basename "$side")" \
-    "grep -q '__PLATFORM__' '$side' && grep -q '__BUILDER_TOKEN__' '$side'"
+  check "builder platform placeholder present in $(basename "$side")" \
+    "grep -q '__PLATFORM__' '$side'"
+  check "builder token placeholder is GONE from $(basename "$side")" \
+    "! grep -q '__BUILDER_TOKEN__' '$side'"
 done
 check "runtime unit carries no placeholder (fixed agent-token identity)" \
   "! grep -q '__' '$STAGED/barkpark-runtime.service'"
 
-# The script's own sed line, replayed against the staged unit: both placeholders
+# The script's own sed line, replayed against the staged unit: the placeholder
 # must be filled, and nothing placeholder-shaped may survive on the box.
 sed_line="$(grep -F 's#__PLATFORM__#' "$SCRIPT" | head -1)"
 printf '%s' "$sed_line" > "$TMP/sed_line"   # via a file: never re-expand it
-check "the script substitutes both placeholders in one sed" \
-  "grep -qF '__BUILDER_TOKEN__' '$TMP/sed_line'"
+check "the sed line no longer substitutes a token placeholder" \
+  "! grep -qF '__BUILDER_TOKEN__' '$TMP/sed_line'"
 cp "$STAGED/barkpark-builder.service" "$TMP/builder.installed"
 sed_body="${sed_line#sed -i \"}"; sed_body="${sed_body%\" *}"
-PLATFORM=linux/amd64 BUILDER_TOKEN=/etc/barkpark/worker.token \
+PLATFORM=linux/amd64 \
   bash -c "sed -i.bak \"$sed_body\" '$TMP/builder.installed'" 2>/dev/null
 check "substituted unit keeps NO placeholder" "! grep -q '__' '$TMP/builder.installed'"
 check "substituted unit carries the resolved platform" \
   "grep -q -- '--platform linux/amd64' '$TMP/builder.installed'"
-check "substituted unit carries the resolved token file" \
-  "grep -q -- '--token-file /etc/barkpark/worker.token' '$TMP/builder.installed'"
+check "substituted unit points at the box's OWN agent token" \
+  "grep -q -- '--token-file /etc/barkpark/agent.token' '$TMP/builder.installed'"
+check "substituted unit names NO worker token" \
+  "! grep -q 'worker.token' '$TMP/builder.installed'"
 
 echo "== go toolchain arch =="
 arch_block="$(extract_block 'go-toolchain arch')"
@@ -198,8 +206,20 @@ check "git present: pre-existing git reported"    "[ -n \"\$(printf %s \"$out\" 
 echo "== self-containment =="
 check "the script reads no repo file at run time (units stay inlined)" \
   "! grep -qE '(cp|cat|install) +[^|]*deploy/systemd/' '$SCRIPT'"
-check "the builder-token preference is untouched (jarl box reinstall safety)" \
-  "grep -q 'BUILDER_TOKEN=/etc/barkpark/worker.token' '$SCRIPT'"
+# INVERTED BY jpf-w1-builder-identity. This check used to assert the OPPOSITE —
+# that the worker.token preference stayed in the script, so a hand-fixed box
+# would keep its shared fleet credential across reinstalls. That is the hazard,
+# not the safety: the preference is gone and reinstalls must CONVERGE on the
+# box's own agent token. Flipping the assertion rather than deleting it keeps a
+# guard on the seam, so a revert reds here by name instead of passing silently.
+# Comments are stripped first, deliberately: the script KEEPS a paragraph
+# explaining what the worker.token preference was and why it was deleted, and
+# that history is worth more than a grep that cannot tell a warning from a
+# reintroduction. What must not come back is an EXECUTABLE reference.
+check "no executable line in the install script references worker.token" \
+  "! grep -v '^[[:space:]]*#' '$SCRIPT' | grep -q 'worker.token'"
+check "the builder unit in the script names the box's own agent token" \
+  "grep -q -- '--token-file /etc/barkpark/agent.token' '$SCRIPT'"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; exit 0; else echo "$fails FAILURE(S)"; exit 1; fi

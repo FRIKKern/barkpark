@@ -6871,6 +6871,84 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Atomically claim the oldest queued Deployment whose Site is a CONTAINER site
+  on `barkpark`, for `worker_id` — the box-scoped twin of
+  `claim_next_deployment/1`, and the only claim the builder route reaches
+  (jpf-w1-builder-identity).
+
+  WHY THIS EXISTS. `claim_next_deployment/1` selects FLEET-WIDE, so the route
+  in front of it could only ever be gated by a fleet-wide principal — the shared
+  `WORKER_TOKEN`, one secret that also opens `/v1/internal/*`. That secret now
+  lives on customer boxes running untrusted nixpacks builds. Narrowing the QUERY
+  to the caller's own box is what makes the per-box, hashed, revocable agent
+  token a sufficient credential for the route; without it, a box-scoped identity
+  in front of a fleet-wide query would still hand box A a build for box B.
+
+  ALSO A CORRECTNESS FIX, not only a scope one: the builder and the runtime
+  share one on-box cache directory and hand the built tarball over through the
+  filesystem, so a build claimed by the wrong box was already broken at two or
+  more planes — it just failed later and less legibly.
+
+  SUBQUERY, NOT A JOIN — deliberately copied from `claim_next_deployment/1` and
+  deliberately NOT from `claim_pending_deployment_for_barkpark/2`, which joins.
+  `FOR UPDATE` over a join locks the joined `sites` row as well, which would put
+  every builder claim in the lock path of every ordinary site update. Here the
+  site is read for two filters (`kind` and `barkpark_id`) and never written, so
+  a subquery is both sufficient and cheaper on the lock graph. The two filters
+  ride the SAME subquery for the same reason.
+
+  Returns `{:ok, deployment}` (status `queued → building`, epoch bumped), or
+  `{:error, :no_queued}` when this box has nothing waiting. A deployment queued
+  for ANOTHER box is not a distinguishable outcome — it is simply absent from
+  this box's queue, exactly as in `claim_pending_deployment_for_barkpark/2`, so
+  no caller can probe for the existence of another tenant's build.
+  """
+  @spec claim_queued_deployment_for_barkpark(Barkpark.t() | binary(), String.t()) ::
+          {:ok, Deployment.t()} | {:error, :no_queued}
+  def claim_queued_deployment_for_barkpark(barkpark, worker_id)
+      when is_binary(worker_id) and worker_id != "" do
+    bp_id = barkpark_id(barkpark)
+
+    Repo.transaction(fn ->
+      # site-spawner D22's CONTAINER guard, kept: a static deploy runs ON the
+      # box via site-deploy.sh and the container builder cannot build one, so a
+      # row it claimed would wedge `building` under a worker that never
+      # finishes. Narrowing by box does not relax that guard, it ANDs with it.
+      container_sites =
+        from(s in Site,
+          where: s.kind == "container" and s.barkpark_id == ^bp_id,
+          select: s.id
+        )
+
+      query =
+        from(d in Deployment,
+          where: d.status == "queued" and d.site_id in subquery(container_sites),
+          order_by: [asc: d.inserted_at],
+          limit: 1,
+          lock: "FOR UPDATE SKIP LOCKED"
+        )
+
+      case Repo.one(query) do
+        nil ->
+          Repo.rollback(:no_queued)
+
+        %Deployment{} = d ->
+          {:ok, claimed} =
+            d
+            |> Deployment.transition_changeset(%{
+              status: "building",
+              claim_worker: worker_id,
+              claimed_at: DateTime.truncate(DateTime.utc_now(), :microsecond),
+              claim_epoch: d.claim_epoch + 1
+            })
+            |> Repo.update()
+
+          claimed
+      end
+    end)
+  end
+
+  @doc """
   site-spawner D22: claim ONE specific Deployment for `worker_id` — the static
   driver's claim, the targeted twin of `claim_next_deployment/1`.
 
