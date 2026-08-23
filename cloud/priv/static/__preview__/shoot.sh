@@ -147,9 +147,28 @@ if [[ -n "${SCEN:-}" ]]; then
   done
   if [[ -n "$unknown" ]]; then
     echo "!! shoot.sh: SCEN names match no scenario:$unknown" >&2
-    echo "   $SCEN_TOTAL scenarios exist in scenarios.mjs. Closest by prefix:" >&2
+    echo "   $SCEN_TOTAL scenarios exist in scenarios.mjs." >&2
     for want in $unknown; do
-      printf '%s\n' "$ALL_SCEN" | grep -i -- "${want%%-*}" | sed 's/^/     /' >&2 || true
+      # Progressively shorter needles, first hit wins. The previous version
+      # grepped ONLY on "${want%%-*}", which for a hyphen-FREE typo (`empy`) is
+      # the whole typo and therefore matches nothing — so the commonest typo
+      # shape printed a bare "Closest by prefix:" header with no entries under
+      # it. An empty suggestion list reads as "there is nothing like this",
+      # which is the opposite of the truth and sends the reader to the wrong
+      # question. Suggest, or say plainly that there is no near match.
+      hits=""
+      for needle in "${want%%-*}" "${want:0:6}" "${want:0:4}" "${want:0:3}"; do
+        [[ -z "$needle" ]] && continue
+        hits="$(printf '%s\n' "$ALL_SCEN" | grep -i -- "$needle" || true)"
+        if [[ -n "$hits" ]]; then break; fi
+      done
+      if [[ -n "$hits" ]]; then
+        echo "   Did you mean (near '$want'):" >&2
+        printf '%s\n' "$hits" | sed 's/^/     /' >&2
+      else
+        echo "   No scenario resembles '$want'. The names are the keys of" >&2
+        echo "   SCENARIOS in $HERE/scenarios.mjs; leaving SCEN unset shoots all $SCEN_TOTAL." >&2
+      fi
     done
     exit 1
   fi
