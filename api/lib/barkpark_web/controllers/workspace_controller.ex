@@ -111,9 +111,22 @@ defmodule BarkparkWeb.WorkspaceController do
     token = conn.assigns[:api_token]
 
     # D13 Tier A, same law as :projects — unknown slug 404, refused caller 403.
+    #
+    # `authorize(token, workspace.id, :write)` — NOT `member?/2`. This route's
+    # pipeline is [:api, :require_token]: no :require_write, no
+    # ResolveWorkspace, so nothing else on the way in checks the token's
+    # permissions[]. `member?/2` alone only proves the caller is SOME member;
+    # role_for_permissions/1 maps a read-only or a permissions:[] token to the
+    # "member" ROLE, which role_permits?/3 grants :write — so a read-only
+    # token minted through the very endpoint whose router comment promises
+    # "this can never be a privilege-mint" could POST here and get a real
+    # Project + production Dataset (arpss-w10-bl-readonly-member-creates-projects).
+    # `authorize/3` composes member?/2 with permits?(token, :write) — the SAME
+    # single membership load member?/2 already paid for, so this is not a new
+    # query, just the conjunct this write was missing.
     case Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
-        if TenancyAuth.member?(token, workspace.id) do
+        if TenancyAuth.authorize(token, workspace.id, :write) == :ok do
           # A changeset error flows to the FallbackController (422).
           with {:ok, project} <-
                  Tenancy.create_project_with_dataset(workspace, project_attrs(params)) do
@@ -1074,6 +1087,17 @@ defmodule BarkparkWeb.WorkspaceController do
     # workspace the caller is refused is 403 — the same answer
     # `Plugs.ResolveWorkspace` already gives on the /w/:ws/p/:project family.
     # See DENIAL SHAPE in the @moduledoc for why these two must agree.
+    #
+    # DISPOSITIONED member?-sufficient (arpss-w10-bl-readonly-member-creates-projects
+    # criterion 3), deliberately NOT authorize(:read): `permits?(token, :read)`
+    # requires "read"/"admin"/"public-read" in permissions[], so a token minted
+    # with permissions: [] — no permissions at all — would lose LIST access it
+    # holds today under member?/2 alone. That is a narrower, pre-existing
+    # question (can a permissionless member enumerate slugs it is already a
+    # member of?), not the write-escalation this task proves and fixes at
+    # create_project/2 above. Flipping this read gate is a separate, own-merits
+    # change — it needs its own caller sweep for who mints permissions: []
+    # member tokens today and would be denied a list they can currently see.
     case Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.member?(token, workspace.id) do
@@ -1099,6 +1123,12 @@ defmodule BarkparkWeb.WorkspaceController do
     # the caller was admitted to stays 404 (Tier B): project-slug existence is
     # tenant-interior, and the caller who reaches that clause is already a
     # member, so 404 there confirms nothing it could not list anyway.
+    #
+    # DISPOSITIONED member?-sufficient — same reasoning and same task as
+    # `projects/2` above (arpss-w10-bl-readonly-member-creates-projects
+    # criterion 3): authorize(:read) would deny a permissions: [] member a
+    # list it can see today; that is a separate change from this task's
+    # write-escalation fix at create_project/2.
     case Tenancy.get_workspace_by_slug(ws_slug) do
       %Tenancy.Workspace{} = workspace ->
         if TenancyAuth.member?(token, workspace.id) do
