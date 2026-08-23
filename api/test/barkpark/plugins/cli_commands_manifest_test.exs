@@ -459,6 +459,23 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       limit = Enum.find(ls.flags, &(&1.name == "limit"))
       assert limit.default == 1000
     end
+
+    # Third and fourth instances from the same sweep: doc.ls and doc.query both
+    # declared `default: 50` against QueryController.index's real default of
+    # 100 (parse_int(params["limit"], 100), unchanged since 8b81b12279 — the
+    # manifest entries were born claiming 50 two months later). media.ls (50)
+    # and search.query (50) match their controllers and stay untouched. If the
+    # controller's default ever changes, change these together.
+    test "doc.ls and doc.query declare QueryController's real default page size" do
+      manifest = Capabilities.manifest("admin", project: false)
+
+      for id <- ["doc.ls", "doc.query"] do
+        cmd = Enum.find(manifest["commands"], &(&1["id"] == id))
+        assert cmd, "#{id} must exist in the manifest"
+        limit = Enum.find(cmd["flags"], &(&1["name"] == "limit"))
+        assert limit["default"] == 100, "#{id} limit default must match the server (100)"
+      end
+    end
   end
 
   describe "core content-graph verbs (Goal ges/graph-edge-seam)" do
