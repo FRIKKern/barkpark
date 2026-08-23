@@ -8,6 +8,7 @@ import {
   type UpstreamSearchJson,
 } from "@/lib/find-shape";
 import { DATASET } from "@/lib/config";
+import { SEARCH_FIELDS } from "@/lib/search-fields";
 
 /**
  * Per-keystroke live search over ONE persistent WebSocket, browser → Barkpark
@@ -122,6 +123,13 @@ export function useLiveSearch(): UseLiveSearch {
             engine,
             types: CONTENT_TYPES_CSV,
             limit: MAX_HITS,
+            // The SAME column projection the HTTP transport sends
+            // (`find-search.ts`'s `?fields=`). Without it `SearchChannel`'s
+            // `build_reply/8` hands `nil` to `HitEnvelope.build(fields: …)` and
+            // every keystroke comes back as FULL documents — the extracted
+            // search-starter fork measured 9-15MB PER FRAME on a papers corpus
+            // before it sent this. See `lib/search-fields.ts`.
+            fields: SEARCH_FIELDS,
             seq,
           })
           .receive("ok", (reply: UpstreamSearchJson & { seq?: number }) => {

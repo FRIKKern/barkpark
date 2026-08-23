@@ -12,6 +12,7 @@ import {
 } from "@/lib/find-shape";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { DATASET } from "@/lib/config";
+import { SEARCH_FIELDS } from "@/lib/search-fields";
 
 /**
  * Shared upstream search — the one place that talks to the Barkpark search API.
@@ -60,28 +61,6 @@ const SEARCH_BASE = TOKEN ? `${ORIGIN}${SCOPE}` : ORIGIN;
 /** Cap the working set; the client facets + sorts + paginates over it. */
 const MAX_HITS = 100;
 
-/**
- * Upstream column projection: everything `normalizeHit` actually reads —
- * scalar candidates for title/excerpt/date/slug/facets, PLUS `blocks`
- * (deriveTitle/Excerpt/Body all walk the block tree; dropping it kills the
- * contextual snippets). Meta keys (`_id`, `_type`, `_draft`, `_publishedId`,
- * `_createdAt`, `_updatedAt`) always ride along server-side. Cuts the browse
- * payload ~2.7MB→732KB on the demo corpus at the fastest server ms.
- */
-const SEARCH_FIELDS = [
-  "title",
-  "name",
-  "slug",
-  "excerpt",
-  "description",
-  "bio",
-  "body",
-  "publishedAt",
-  "status",
-  "author",
-  "category",
-  "blocks",
-].join(",");
 /** The finder is a CONTENT browser: scope to known content types via the API's
  * `types` allowlist so both engines stay consistent and private config schemas
  * (siteSettings, navigation, …) never leak into browse + facet counts. */
