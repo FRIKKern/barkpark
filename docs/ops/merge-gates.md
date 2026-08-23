@@ -256,6 +256,34 @@ aggregators' `needs:` from `.github/workflows/`, the required contexts from
 `.github/required-checks.json` — and reds if this page ever again describes a
 transitive upstream of a required aggregator as unable to stop a merge.
 
+### A green gate does not prove the branch was rebased
+
+`pull_request` gate runs test the **ephemeral merge commit** (`refs/pull/N/merge`
+— the PR merged into `main` at dispatch time), never the branch tip in
+isolation: every test job keeps the default checkout on purpose ("they must
+test the merged result, not the head in isolation" — the checkout comment in
+`elixir.yml`; only the path-DISPATCH jobs pin `pull_request.head.sha`, for
+diff honesty, D34). And live protection sets
+`required_status_checks.strict: false`, so a branch never has to be up to date
+with `main` to merge. Together these are why wave 2's four branches merged with
+tips that were never rebased — soundly, by mechanism, not by luck. A red
+ADVISORY check (see above) leaves `mergeStateStatus: UNSTABLE`, which does not
+block; unmet REQUIRED contexts render `BLOCKED` instead. Re-derive rather than
+trust:
+
+```bash
+git merge-base <branch> origin/main    # where the tip actually forked
+gh api repos/FRIKKern/barkpark/branches/main/protection \
+  -q .required_status_checks.strict    # false → up-to-date not required
+```
+
+(The wave-2 record explained this posture with the exact claim the
+Security-gates topology note above retires as **false since 2026-07-28**. It is
+deliberately not re-quoted here — §18 of `scripts/required-checks.test.sh`
+censuses every unpinned restatement, and one pinned copy is enough. The
+conclusion survives on `strict: false` alone.)
+
+
 ### NOT APPLICABLE — the required green that ran nothing
 
 The two classes above are both about whether a **red** can block. There is a
