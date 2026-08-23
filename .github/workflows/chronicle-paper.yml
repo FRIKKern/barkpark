@@ -17,6 +17,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/chronicle-paper.yml"
+      - "changelog/README.md"
       - "scripts/chronicle-paper.py"
       - "scripts/chronicle-paper.test.py"
 

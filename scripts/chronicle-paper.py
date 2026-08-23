@@ -186,11 +186,10 @@ def sentence_case(value: str) -> str:
 
 
 def ledger_url(period: Period, repo: str) -> str:
-    end = period.end - dt.timedelta(seconds=0)
     return (
         f"https://github.com/{repo}/commits/main"
         f"?since={period.start.isoformat()}T00%3A00%3A00Z"
-        f"&until={end.isoformat()}T00%3A00%3A00Z"
+        f"&until={period.end.isoformat()}T00%3A00%3A00Z"
     )
 
 
