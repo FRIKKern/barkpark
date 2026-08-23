@@ -83,7 +83,20 @@ const WRITE_SHAPES = [
   // PERMISSION on a command about to run, and the `-C <path>` form is exactly
   // how an agent addresses ANOTHER worktree. Consuming the global options first
   // closes it. This narrows the gate; nothing here widens it.
-  [/\bgit\s+(?:(?:-[cC]\s+\S+|-{1,2}[\w-]+(?:=\S+)?)\s+)*(push|commit|checkout|switch|reset|rebase|mergetool|merge(?!-base)|clean|apply|am|tag|stash)\b/, "git write verb"],
+  // SEPARATED-VALUE GLOBALS, second pass (wave 11): the first pass consumed
+  // only `-c`/`-C` <value> pairs; the SEVEN long globals that also eat their
+  // next token when written with a space (`--git-dir <path>`, not
+  // `--git-dir=<path>`) left the value standing between the globals and the
+  // verb, so `git --git-dir log push` classified SAFE — measured against
+  // origin/main's own module on 2026-08-23: 84 of the 108 cells in the
+  // nine-globals × twelve-verbs matrix laundered. This module EXECUTES what
+  // it admits (runRerun gates on classifySafety alone), so the pair branch
+  // now carries the same nine value-taking globals as screen.mjs's
+  // GIT_VALUE_GLOBALS (PR #12180 fixed only the screen half). Attached `=`
+  // forms still ride the generic `-{1,2}[\w-]+(?:=\S+)?` branch, and a
+  // valueless global (`--no-pager`) must NOT eat the verb, so only the nine
+  // sit in the pair branch. Another narrowing; nothing here widens.
+  [/\bgit\s+(?:(?:(?:-[cC]|--git-dir|--work-tree|--namespace|--exec-path|--super-prefix|--attr-source|--config-env)\s+\S+|-{1,2}[\w-]+(?:=\S+)?)\s+)*(push|commit|checkout|switch|reset|rebase|mergetool|merge(?!-base)|clean|apply|am|tag|stash)\b/, "git write verb"],
   [/\b(npm|pnpm|yarn)\s+(publish|install|add|remove)\b/, "package mutation"],
   [/--write\b/, "--write"],
   [/--fix\b/, "--fix"],
