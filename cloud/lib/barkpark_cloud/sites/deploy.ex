@@ -102,8 +102,9 @@ defmodule BarkparkCloud.Sites.Deploy do
       is WATCHING (`.deploy-rail-fail`, fed from the failed stage's `detail`) and
       the settled row that replaces it seconds later therefore named two
       different causes off ONE string: the rail said `FATAL: 401 Unauthorized …`
-      while the row said "The hosting provider rejected our credentials." Same
-      event, same minute, two stories — the exact shape wave 26 S3 closed in the
+      while the row spoke `FailureCopy`'s `@credential_rejected` arm — today
+      "A credential was rejected. This capture doesn't say whose credential it
+      was — the raw error line names it." Same event, same minute, two stories — the exact shape wave 26 S3 closed in the
       `provision_failed` email (charter D310).
 
       The RAW CAPTURE IS NOT DESTROYED, which is what D310's "both, not either"
