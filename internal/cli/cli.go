@@ -626,6 +626,19 @@ func Execute(args []string) int {
 		return runTaskClaim(out, g, ctx, m, *cmd, tail)
 	}
 
+	// `bp task close` and `bp task pulse` — the SAME read-back `bp task stamp`
+	// got in wave 26 (PDS-D359/D361), extended to its two siblings on this
+	// ledger. close is the seal and pulse writes the board's now-line; both
+	// reported success on an exit code alone. The POST is unchanged — each
+	// wrapper only adds the second read and renders the verdict from what the
+	// store holds. See tasks_close_pulse_cmd.go.
+	if noun == "task" && verb == "close" {
+		return runTaskClose(out, g, ctx, m, *cmd, tail)
+	}
+	if noun == "task" && verb == "pulse" {
+		return runTaskPulse(out, g, ctx, m, *cmd, tail)
+	}
+
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 

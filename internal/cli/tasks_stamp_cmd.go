@@ -189,28 +189,19 @@ func stampRequestOf(cmd manifest.Command, forward []string) (stampRequest, bool)
 // unclassified starting point (origRC == exitOK, meaning the POST itself gave
 // no hint of trouble) falls back to exitGeneric.
 func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest, origRC int) int {
-	client := apiclient.New(apiclient.Config{
-		BaseURL:   ctx.Server,
-		Token:     ctx.Token,
-		Workspace: ctx.Workspace,
-		Project:   ctx.Project,
-		Dataset:   ctx.Dataset,
-		// Perspective is inert for this call: GET /v1/tasks/:doc_id is the flat,
-		// token-scoped task route and carries no perspective query param. It is
-		// set only so this client is constructed identically to every other one
-		// in the CLI.
-		//
-		// It used to say here that "the read-back always sees the row `bp task
-		// stamp` wrote, which is the PUBLISHED one (PDS-D360)". That was FALSE,
-		// and a run refuted it. The route falls back to the `drafts.` twin when
-		// no published row exists (tasks_controller.ex find_task_by_doc_id), and
-		// `bp task create --yes` produces exactly such a draft-only row at rc=0
-		// — so on those rows there IS no published row to see. The read-back now
-		// carries the answering row's identity and the verdict refuses a green
-		// when a draft answered; see renderStampVerdict.
-		Perspective: "drafts",
-	})
-	stored, readback, err := taskboard.FetchCriterion(client, req.docID, req.index)
+	// taskReadbackClient (tasks_close_pulse_cmd.go) is the ONE constructor the
+	// three ledger read-backs share, so stamp, close and pulse can never drift
+	// into reading the store through differently-configured clients.
+	//
+	// A comment here used to assert that "the read-back always sees the row
+	// `bp task stamp` wrote, which is the PUBLISHED one (PDS-D360)". That was
+	// FALSE, and a run refuted it. The route falls back to the `drafts.` twin
+	// when no published row exists (tasks_controller.ex find_task_by_doc_id),
+	// and `bp task create --yes` produces exactly such a draft-only row at rc=0
+	// — so on those rows there IS no published row to see. The read-back now
+	// carries the answering row's identity and the verdict refuses a green when
+	// a draft answered; see renderStampVerdict.
+	stored, readback, err := taskboard.FetchCriterion(taskReadbackClient(ctx), req.docID, req.index)
 	if err != nil {
 		out.userErr("stamp sent but NOT confirmed — the read-back of %s criterion index %d failed: %v",
 			req.docID, req.index, err)

@@ -1303,6 +1303,17 @@ type TaskReadback struct {
 	// DocID is the id the SERVER matched, which is NOT necessarily the id that
 	// was asked for: a draft-only row answers as "drafts.<id>".
 	DocID string
+	// LifecycleStatus is `doc.lifecycle_status` — the SEAL. `bp task close`
+	// writes it, so a close receipt that does not read it is asserting the seal
+	// it asked for rather than the one the store took.
+	LifecycleStatus string
+	// Claim is `doc.claim` VERBATIM. It is a SEPARATE field rather than part of
+	// Content because the server moves it out: render_doc emits
+	// `content: Map.delete(content, "claim")` and surfaces the claim at the top
+	// level, so anything reading content for a claim (a pulse's now-line, for
+	// one) finds nothing there. Raw, because the claim/pulse decode with its
+	// tolerance contract belongs to internal/taskboard.
+	Claim json.RawMessage
 }
 
 // IsDraft reports whether the row that answered is a draft rather than a
@@ -1349,9 +1360,11 @@ func (c *Client) TaskGetContent(docID string) (TaskReadback, error) {
 		OK     bool   `json:"ok"`
 		Reason string `json:"reason"`
 		Doc    struct {
-			Content json.RawMessage `json:"content"`
-			Status  string          `json:"status"`
-			DocID   string          `json:"doc_id"`
+			Content         json.RawMessage `json:"content"`
+			Status          string          `json:"status"`
+			DocID           string          `json:"doc_id"`
+			LifecycleStatus string          `json:"lifecycle_status"`
+			Claim           json.RawMessage `json:"claim"`
 		} `json:"doc"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
@@ -1368,9 +1381,11 @@ func (c *Client) TaskGetContent(docID string) (TaskReadback, error) {
 		return TaskReadback{}, fmt.Errorf("task read-back %s: envelope carried no doc.content", docID)
 	}
 	return TaskReadback{
-		Content: env.Doc.Content,
-		Status:  env.Doc.Status,
-		DocID:   env.Doc.DocID,
+		Content:         env.Doc.Content,
+		Status:          env.Doc.Status,
+		DocID:           env.Doc.DocID,
+		LifecycleStatus: env.Doc.LifecycleStatus,
+		Claim:           env.Doc.Claim,
 	}, nil
 }
 
