@@ -215,6 +215,52 @@ func (d Doc) ClaimEpoch() (int, bool) {
 	return c.Epoch, true
 }
 
+// ClaimInfo is the flattened content.claim object read back RAW — unlike
+// ClaimEpoch (which only answers "is there a currently-fenceable claim"), this
+// exposes worker/released_at/expired_at even on a claim object a caller would
+// otherwise call "no live claim". It exists so a refusal like `bp task claim`'s
+// `not_ready` can be diagnosed honestly: the claim predicate is server-side and
+// this struct does not re-implement it, but it lets a caller tell "no claim
+// object at all" apart from "a claim object whose worker field is still set to
+// someone else" — which a bare bool collapses (task-eb2b6170e19f1611: `bp task
+// stage` is a third writer that can move lifecycle_status while leaving
+// claim.worker in place, so a RELEASED claim can still name a stale holder).
+type ClaimInfo struct {
+	Present    bool // false when content.claim is absent or JSON null
+	Worker     string
+	Epoch      int
+	ReleasedAt string
+	ExpiredAt  string
+}
+
+// ClaimInfo decodes this document's claim object. Absent, null, or
+// unparseable all report Present:false; a present-but-empty worker field
+// decodes to Worker:"" (a genuinely vacant claim), which callers must tell
+// apart from Present:false (no claim object was ever written).
+func (d Doc) ClaimInfo() ClaimInfo {
+	raw, ok := d.Extra["claim"]
+	if !ok {
+		return ClaimInfo{}
+	}
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return ClaimInfo{}
+	}
+	var c struct {
+		Worker     *string `json:"worker"`
+		Epoch      int     `json:"epoch"`
+		ReleasedAt string  `json:"released_at"`
+		ExpiredAt  string  `json:"expired_at"`
+	}
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return ClaimInfo{}
+	}
+	info := ClaimInfo{Present: true, Epoch: c.Epoch, ReleasedAt: c.ReleasedAt, ExpiredAt: c.ExpiredAt}
+	if c.Worker != nil {
+		info.Worker = *c.Worker
+	}
+	return info
+}
+
 // PaperBlocks returns the raw JSON for this document's portable-doc block tree,
 // preferring the top-level "blocks" the live API emits and falling back through
 // a nested "content":{"blocks":[…]} envelope and then a "body":{"blocks":[…]}
