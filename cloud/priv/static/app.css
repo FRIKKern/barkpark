@@ -5577,7 +5577,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   background: transparent; border: 1px solid rgba(var(--cc-line-rgb), 0.12);
   border-radius: var(--radius); color: var(--text); font: inherit; font-size: var(--text-sm);
 }
-.team-search input:focus { outline: none; border-color: rgba(var(--cc-line-rgb), 0.28); }
+/* task-5acf9b5ad30f9a74 — THE HOUSE RING, because this input had none. This rule
+   used to read `outline: none; border-color: rgba(var(--cc-line-rgb), 0.28)`:
+   it killed the UA outline and replaced it with a line tint moving 0.12 -> 0.28.
+   Measured keyboard-focused in headless Chrome, that was the ELEMENT'S ONLY
+   indicator (outline-style none, box-shadow none) at 1.824:1 light / 2.510:1
+   dark against --cc-modal, and 1.433:1 / 1.782:1 against its own resting border.
+   `.team-search input` is not in the shared ring block's class list and carries
+   no `.form-input`, so nothing else painted one. Alpha 0.28 ceils at 2.53:1 over
+   ANY opaque backdrop, so no accent could have lifted it. Same shape as
+   `.form-input:focus` above — opaque border-color: var(--ring) is E12's escape,
+   and the tint stays as the decorative halo it always was. */
+.team-search input:focus {
+  outline: none;
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px hsl(var(--primary-hsl) / 0.15);
+}
 .team-list { display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow-y: auto; }
 .team-item {
   display: flex; align-items: center; gap: 10px;
