@@ -2634,7 +2634,7 @@ defmodule Barkpark.Sites.DeployRunner do
       dir
       |> build_log_entries()
       |> Enum.reject(&MapSet.member?(protected, &1.path))
-      |> Enum.sort_by(&recency_key/1, :desc)
+      |> order_newest_first()
       |> Enum.split_with(&older_than?(&1, caps.max_age_ms))
 
     {within_count, over_count} = Enum.split(fresh, caps.max_logs)
@@ -2836,15 +2836,50 @@ defmodule Barkpark.Sites.DeployRunner do
         # tombstones are what make an evicted deploy read as `:evicted` instead
         # of `:never_recorded`. Sorting on mtime alone left ties to `File.ls/1`'s
         # arbitrary order, so the OS decided which deployment lost its record.
+        # The decision itself lives in `terminal_records_to_evict/2` so it can be
+        # observed apart from the directory that produced the entries.
         records
-        |> Enum.sort_by(&recency_key/1, :desc)
-        |> Enum.drop(max_records)
+        |> terminal_records_to_evict(max_records)
         |> Enum.each(&File.rm(&1.path))
 
       {:error, _} ->
         :ok
     end
   end
+
+  @doc """
+  Which terminal records a sweep condemns, given the stat entries and the count
+  cap — the eviction decision with the filesystem taken back out of it.
+
+  PUBLIC and pure so a test can hand it the entries in an ADVERSARIAL order. The
+  whole hazard here is invisible from a directory: `File.stat/2` reports mtime at
+  one-second resolution, tombstones written inside the same second tie on it, and
+  a tie left to `Enum.sort_by/3`'s stable sort silently inherits whatever order
+  `File.ls/1` returned. A test that can only ever see the order the filesystem
+  happened to hand back cannot tell a total order from a lucky one — on one host
+  the arbitrary order agrees with the intended answer and the bug reads as fixed.
+  Feeding this function an order that DISAGREES with the answer is what makes the
+  collapse observable everywhere rather than only where the OS is unkind.
+  """
+  @spec terminal_records_to_evict([map()], non_neg_integer()) :: [map()]
+  def terminal_records_to_evict(entries, max_records) do
+    entries
+    |> order_newest_first()
+    |> Enum.drop(max_records)
+  end
+
+  @doc """
+  Retention's newest-first ordering over stat entries, as a TOTAL order — the one
+  answer to "which of these is newer" that every sweep in this module uses, so the
+  log cap and the tombstone cap cannot disagree about it.
+
+  Ties on the one-second mtime break on the path, descending; see `recency_key/1`
+  for why the key is the unix integer and not the `%DateTime{}`. PUBLIC for the
+  same reason as `terminal_records_to_evict/2`: the order has to be observable
+  independently of the directory listing that fed it.
+  """
+  @spec order_newest_first([map()]) :: [map()]
+  def order_newest_first(entries), do: Enum.sort_by(entries, &recency_key/1, :desc)
 
   # ── config knobs ──────────────────────────────────────────────────────────
 
