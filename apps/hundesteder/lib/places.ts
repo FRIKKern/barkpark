@@ -1,6 +1,11 @@
 import "server-only";
 import { collectAllPages } from "./paginate";
-import { paperTags, type PaperTag } from "./paper-tags";
+import { normalizePlace, sortPlaces, type Place } from "./normalize";
+
+// The `Place` shape is re-exported so every consumer keeps importing it from
+// `@/lib/places` — the data layer stays the one public door, and `normalize.ts`
+// is an implementation detail that exists so the pure half is TESTABLE.
+export type { Place } from "./normalize";
 
 /**
  * The data layer for Hundesteder.no — every page's source of places.
@@ -48,100 +53,6 @@ const REVALIDATE_SECONDS = 300;
 const PLACES_PAGE_LIMIT = 1000;
 const PLACES_MAX_PAGES = 20;
 
-/* ── domain types ───────────────────────────────────────────────────────── */
-
-export interface Place {
-  id: string;
-  slug: string;
-  title: string;
-  description?: string;
-  category?: string;
-  city?: string;
-  /** Latitude, parsed from the upstream string. */
-  lat: number;
-  /** Longitude, parsed from the upstream string. */
-  lng: number;
-  address?: {
-    street?: string;
-    postalCode?: string;
-    country?: string;
-  };
-  websiteUrl?: string;
-  priceRange?: string;
-  tags: string[];
-}
-
-/* ── upstream parsing ───────────────────────────────────────────────────── */
-
-function str(v: unknown): string | undefined {
-  return typeof v === "string" && v.length > 0 ? v : undefined;
-}
-
-/** Coerce a coordinate that arrives as a numeric string (or, defensively, a
- * number). Returns undefined when the value can't be read as a finite number. */
-function coord(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = parseFloat(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-
-/** Normalise one raw upstream `place` document into a `Place`, or null if it
- * lacks a usable coordinate (the map can only show what it can place, and the
- * detail page centres on the pin). */
-function normalizePlace(raw: unknown): Place | null {
-  if (!raw || typeof raw !== "object") return null;
-  const r = raw as Record<string, unknown>;
-
-  const geo = (r.geo && typeof r.geo === "object" ? r.geo : {}) as Record<
-    string,
-    unknown
-  >;
-  const lat = coord(geo.latitude);
-  const lng = coord(geo.longitude);
-  if (lat === undefined || lng === undefined) return null;
-  // A literal (0,0) is an unset default, not a real place — drop it.
-  if (lat === 0 && lng === 0) return null;
-
-  const id = str(r._id) ?? str(r.id) ?? str(r.slug);
-  if (!id) return null;
-
-  const slug = str(r.slug) ?? id;
-
-  const addrRaw = (
-    r.address && typeof r.address === "object" ? r.address : {}
-  ) as Record<string, unknown>;
-  const address = {
-    street: str(addrRaw.street),
-    postalCode: str(addrRaw.postal_code),
-    country: str(addrRaw.country),
-  };
-  const hasAddress = address.street || address.postalCode || address.country;
-
-  // Paper surfaces carry weighted tags (charter D8–D10): a flat-string-only
-  // filter here silently drops any `{tag,strength,rationale}` object, so lean
-  // on the shared `paperTags` normaliser instead (ported from
-  // `web/lib/paper-tags.ts`, which fixed the identical bug in listings.ts).
-  const tags = paperTags(r.tags as PaperTag[] | undefined);
-
-  return {
-    id,
-    slug,
-    title: str(r.title) ?? id,
-    description: str(r.description),
-    category: str(r.category),
-    city: str(r.city),
-    lat,
-    lng,
-    address: hasAddress ? address : undefined,
-    websiteUrl: str(r.website_url),
-    priceRange: str(r.price_range),
-    tags,
-  };
-}
-
 /* ── upstream fetch ─────────────────────────────────────────────────────── */
 
 function authHeaders(): HeadersInit {
@@ -162,14 +73,6 @@ async function bpFetch(path: string): Promise<unknown | null> {
   } catch {
     return null;
   }
-}
-
-/** Sort: group by city (alphabetical), then by title within a city. Gives the
- * landing grid and the index a stable, scannable order. */
-function sortPlaces(a: Place, b: Place): number {
-  const c = (a.city ?? "").localeCompare(b.city ?? "", "nb");
-  if (c !== 0) return c;
-  return a.title.localeCompare(b.title, "nb");
 }
 
 /**
