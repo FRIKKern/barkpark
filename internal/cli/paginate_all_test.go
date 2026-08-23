@@ -169,12 +169,21 @@ func TestRunPaginatedAll_RefusesUnreadablePage(t *testing.T) {
 				t.Fatalf("exit = %d, want %d — the refusal reddened an honest read; stdout=%q stderr=%q",
 					code, exitOK, stdout.String(), stderr.String())
 			}
-			var got map[string][]json.RawMessage
+			// Decode tolerates envelope SIBLINGS (count): a single-page --all
+			// walk now passes the server's envelope through verbatim
+			// (pds-w27-bl-task-next-and-all-corrupt-the-honest-shape), so the
+			// honest body carries count alongside the rows. The assertions are
+			// unchanged: exitOK, the right key, the right row count.
+			var got map[string]json.RawMessage
 			if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
 				t.Fatalf("output not JSON: %v\n%s", err, stdout.String())
 			}
-			if len(got[tc.wantKey]) != tc.wantRows {
-				t.Fatalf("rows under %q = %d, want %d: %s", tc.wantKey, len(got[tc.wantKey]), tc.wantRows, stdout.String())
+			var rows []json.RawMessage
+			if err := json.Unmarshal(got[tc.wantKey], &rows); err != nil {
+				t.Fatalf("no array under %q: %v\n%s", tc.wantKey, err, stdout.String())
+			}
+			if len(rows) != tc.wantRows {
+				t.Fatalf("rows under %q = %d, want %d: %s", tc.wantKey, len(rows), tc.wantRows, stdout.String())
 			}
 		})
 	}
