@@ -639,8 +639,29 @@ const GH_READ_NOUNS = new Map([
   ["version", null],
 ]);
 
+// gh's value-taking pre-verb global — the THIRD head of the same bug #13346
+// fixed for docker/pnpm (and this wave fixed for systemctl). `gh -R status
+// repo clone owner/repo /tmp/evil` ADMITTED (confirmed live on origin/main):
+// `-R`'s separate-token value `status` collided with the read noun `status`
+// (which needs no sub-verb, per GH_READ_NOUNS), so `noun` resolved to
+// "status" and the real noun/sub-verb pair `repo clone` — a write that clones
+// an arbitrary repository to disk — was never checked against
+// GH_READ_NOUNS at all, and `clone` is not in the GH_WRITE_VERBS denylist
+// either (that loop is a second-layer catch, not the gate). `-R`/`--repo`
+// is gh's global "run this command against OWNER/REPO" flag and is the only
+// pre-verb global gh's root command takes.
+//
+// ghRule is a BESPOKE object, not built on the `verbRule` factory — it has a
+// second level (noun → allowed sub-verbs) that `verbRule` does not model, the
+// same shape as `npmRule`. So it cannot receive #13346's fix by threading
+// `valueGlobals` through the factory; it needs the same `dropValueGlobals`
+// defence applied explicitly, exactly as `gitRule`/`npmRule`/`goRule` already
+// do for their own bespoke checks.
+const GH_VALUE_GLOBALS = new Set(["-R", "--repo"]);
+
 const ghRule = {
-  check(argv) {
+  check(rawArgv) {
+    const argv = dropValueGlobals(rawArgv, GH_VALUE_GLOBALS);
     const noun = firstNonFlag(argv);
     if (noun === null) return "gh without a sub-verb";
     if (!GH_READ_NOUNS.has(noun)) {
@@ -1087,6 +1108,25 @@ const DOCKER_VALUE_GLOBALS = new Set(["-H", "--host", "--context", "--config"]);
 // npm's own `-C`/`--prefix`).
 const PNPM_VALUE_GLOBALS = new Set(["-C", "--prefix"]);
 
+// systemctl's value-taking pre-verb globals — the SECOND head of the same bug
+// #13346 fixed for docker/pnpm ("systemctl and launchctl are untouched", per
+// that PR's own commit message). `systemctl -H status restart
+// barkpark.service` ADMITTED (confirmed live on origin/main): `-H`'s
+// separate-token value `status` collided with the allowlisted read verb
+// `status`, so the real verb `restart` two tokens later was never examined.
+// `-H` is systemctl's short alias for `--host=[USER@]HOST` (repoints the
+// command at a remote systemd over ssh/machined); `-M`/`--machine=CONTAINER`
+// is the same shape, one container hop instead of one host hop; `--root=PATH`
+// takes a separate-token value ahead of the verb too (an offline root for
+// preset/enable-style operations).
+const SYSTEMCTL_VALUE_GLOBALS = new Set(["-H", "--host", "-M", "--machine", "--root"]);
+
+// launchctl was CHECKED for the same shape and CLEARED, not skipped. Its
+// SYNOPSIS is `launchctl subcommand [arguments ...]` — there is no pre-verb
+// global-option region at all, so there is no token for a value-taking global
+// to eat before the subcommand. `firstNonFlag` reads the subcommand directly.
+// Do not add a valueGlobals set here; there is nothing to normalise.
+
 /**
  * THE ALLOWLIST. Every entry is a head this census may run. Anything absent is
  * REFUSED — that is the fail-closed property, and it is why this is a Map of
@@ -1164,7 +1204,7 @@ export const ALLOWED_HEADS = new Map([
   ["mix", mixRule],
   ["curl", curlRule],
   ["docker", verbRule(["ps", "images", "logs", "inspect", "version", "info", "stats", "top", "port"], "docker", DOCKER_VALUE_GLOBALS)],
-  ["systemctl", verbRule(["is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-unit-files", "get-default"], "systemctl")],
+  ["systemctl", verbRule(["is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-unit-files", "get-default"], "systemctl", SYSTEMCTL_VALUE_GLOBALS)],
   // journalctl READS the journal — except for the handful of flags that vacuum,
   // rotate or flush it, which delete log history irreversibly.
   ["journalctl", {
@@ -1624,6 +1664,19 @@ export const DANGER_SET = [
   "sed -n 'w /opt/barkpark/deploy/site-deploy.sh' notes.md",
   "sed 's/x/y/w /opt/barkpark/deploy/site-deploy.sh' notes.md",
   "sed -f /tmp/evil.sed notes.md",
+  // ── the value-eating-global collision, heads 2 and 3. #13346 fixed this
+  // shape for docker/pnpm and named systemctl and gh as untouched scope. Both
+  // were ADMITTED by the shipped screen: `-H`'s eaten value `status` collides
+  // with systemctl's own allowlisted read verb, and `-R`'s eaten value
+  // `status` collides with gh's read noun `status` (which needs no sub-verb),
+  // so in both cases the real verb/noun+subverb pair after the eaten value was
+  // never examined.
+  "systemctl -H status restart barkpark.service",
+  "systemctl --host status restart barkpark.service",
+  "systemctl --root status restart barkpark.service",
+  "gh -R status repo clone owner/repo /tmp/evil",
+  "gh --repo status repo clone owner/repo /tmp/evil",
+  "gh -R status release download owner/repo",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -1677,6 +1730,12 @@ export const NEVER_CRY_WOLF_SET = [
   "hostname",
   "hostname -f",
   "CC=/usr/bin/clang MIX_ENV=test mix test --seed 111",
+  // The value-eating-global fix must not refuse the HONEST use of the global
+  // it now normalises — `-H`/`-R` pointed at a real host/repo, followed by a
+  // real allowlisted read verb/noun+subverb.
+  "systemctl -H example.com status barkpark.service",
+  "gh -R owner/repo pr view 1",
+  "gh --repo owner/repo issue list",
 ];
 
 /**

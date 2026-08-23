@@ -38,7 +38,7 @@ const CLOUD_WF = join(REPO, '.github', 'workflows', 'cloud.yml');
 const REQUIRED_CHECKS = join(REPO, '.github', 'required-checks.json');
 const AGG = 'Cloud gate';
 
-const SEAL = 0, NO_SEAL = 1, INFRA = 2;
+const SEAL = 0, NO_SEAL = 1, INFRA = 2, REFUSED = 3; // REFUSED (exit 3): nothing measured — a Refusal, never a verdict
 const EPIC = 'cloud-console-hardening-epic';
 
 const tmp = (prefix) => mkdtempSync(join(tmpdir(), prefix));
@@ -95,7 +95,7 @@ const token = (out) => out.split('\n').find((l) => l.startsWith('VERDICT-TOKEN:'
 // exactly at the moment of success — the one run anybody would ever quote.
 test('defect 1: zero live rows + a null successor REFUSES instead of sealing', () => {
   const { status, out } = fixtureRun('zero-live-null-successor.json');
-  assert.equal(status, NO_SEAL, 'a null successor must not exit 0');
+  assert.equal(status, REFUSED, 'a null successor must not exit 0');
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=NO-SUCCESSOR/);
   assert.doesNotMatch(out, /VERDICT: SEAL$/m);
   assert.doesNotMatch(out, /to null/, 'the "to null" forwarding sentence must be unreachable');
@@ -104,7 +104,7 @@ test('defect 1: zero live rows + a null successor REFUSES instead of sealing', (
 // ── DEFECT 2 — THE THIRD RENDERING ──────────────────────────────────────────
 test('defect 2: a fixture omitting the successor key never renders "to undefined"', () => {
   const { status, out } = fixtureRun('no-successor-key.json');
-  assert.equal(status, NO_SEAL);
+  assert.equal(status, REFUSED);
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=NO-SUCCESSOR/);
   assert.doesNotMatch(out, /undefined/, 'no rendering of the successor may say "undefined"');
 });
@@ -115,7 +115,7 @@ test('defect 2: a fixture omitting the successor key never renders "to undefined
 test('defect 3: an unresolvable successor is refused and never printed as a forwarding address', () => {
   const BOGUS = 'task-DOES-NOT-EXIST-9999';
   const { status, out } = fixtureRun('sealable.json', ['--successor', BOGUS]);
-  assert.equal(status, NO_SEAL, 'an id that resolves to nothing must not seal');
+  assert.equal(status, REFUSED, 'an id that resolves to nothing must not seal');
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=UNRESOLVABLE-SUCCESSOR/);
   assert.match(out, new RegExp(`Rejected id: ${BOGUS}`), 'the rejected id is named AS rejected');
   // It may appear as the id that was refused; it may never appear as an address.
@@ -131,7 +131,7 @@ test('defect 3b: a successor that exists but is UNPUBLISHED does not resolve', (
   const path = join(tmp('seal-pred-'), 'draft-successor.json');
   writeFileSync(path, JSON.stringify(fx));
   const { status, out } = run(['--ledger', path, '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(status, NO_SEAL);
+  assert.equal(status, REFUSED);
   assert.match(out, /reason=UNRESOLVABLE-SUCCESSOR/);
   assert.match(out, /status=draft/);
 });
@@ -157,7 +157,7 @@ test('defect 4: an empty KNOWN_DEFECTS register cannot seal (sentinel derived, n
   writeFileSync(path, mutated);
   const r = spawnSync('node', [path, '--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'], { encoding: 'utf8' });
   const out = `${r.stdout}${r.stderr}`;
-  assert.equal(r.status, NO_SEAL, 'a register of zero defects must not exit 0');
+  assert.equal(r.status, REFUSED, 'a register of zero defects must not exit 0');
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=EMPTY-DEFECT-REGISTER/);
   assert.doesNotMatch(out, /VERDICT: SEAL$/m);
 });
@@ -255,7 +255,7 @@ test('an unreadable ledger is INFRA FAULT (exit 2), never NO SEAL (exit 1)', () 
 // ── R0 — THE OVERRIDE CANNOT REACH A LIVE RUN ────────────────────────────────
 test('R0: --guard-cmd without --ledger is REFUSED before any clause runs', () => {
   const { status, out } = run(['--repo', REPO, '--guard-cmd', 'true', '--successor', 'whatever']);
-  assert.equal(status, NO_SEAL, 'a live run with a stubbed guard must never seal');
+  assert.equal(status, REFUSED, 'a live run with a stubbed guard must never seal');
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=GUARD-OVERRIDE-WITHOUT-FIXTURE/);
   assert.match(out, /a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
   assert.doesNotMatch(out, /VERDICT: SEAL$/m);
@@ -314,7 +314,7 @@ test('wave 7: --epic retargets the subject of every clause, including the refusa
 // mutation runs the SAME invocation against an R4-less copy.
 test('R4: a successor equal to the epic is REFUSED before any clause is evaluated', () => {
   const { status, out } = fixtureRun('self-successor.json');
-  assert.equal(status, NO_SEAL);
+  assert.equal(status, REFUSED);
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=SELF-SUCCESSOR/);
   assert.match(out, /Forwarding to yourself is not forwarding/);
   assert.match(out, /a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
@@ -367,7 +367,7 @@ const DROP_R6 = (src) => src.replace(/  const epic = opts\.epic;\n  if \(epic\) 
 
 test('R5: a successor that is a DONE row is REFUSED — a corpse is a dead letterbox', () => {
   const { status, out } = run(['--ledger', DEAD('done'), '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(status, NO_SEAL, 'a done successor must not seal');
+  assert.equal(status, REFUSED, 'a done successor must not seal');
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=DEAD-SUCCESSOR/);
   assert.match(out, /lifecycle_status=done/);
   assert.match(out, /dead letterbox/);
@@ -380,7 +380,7 @@ test('R5: a successor that is a DONE row is REFUSED — a corpse is a dead lette
 
 test('R5: cancelled and a MISSING lifecycle_status are refused by the same fence', () => {
   const cancelled = run(['--ledger', DEAD('cancelled'), '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(cancelled.status, NO_SEAL);
+  assert.equal(cancelled.status, REFUSED);
   assert.match(token(cancelled.out), /REFUSED reason=DEAD-SUCCESSOR/);
   assert.match(cancelled.out, /lifecycle_status=cancelled/);
 
@@ -388,7 +388,7 @@ test('R5: cancelled and a MISSING lifecycle_status are refused by the same fence
   // refusal says `(absent)` rather than rendering `undefined` at a reader.
   const absent = run(['--ledger', successorFixture((t) => { delete t.lifecycle_status; }, 'no-lifecycle.json'),
     '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(absent.status, NO_SEAL);
+  assert.equal(absent.status, REFUSED);
   assert.match(token(absent.out), /REFUSED reason=DEAD-SUCCESSOR/);
   assert.match(absent.out, /lifecycle_status=\(absent\)/);
   assert.doesNotMatch(absent.out, /undefined/);
@@ -413,7 +413,7 @@ test('R5 MUTATION PROOF: with the lifecycle fence removed, the DONE successor re
 
 test('R6: a successor that is a CHILD of the epic is REFUSED — R4 only caught the epic itself', () => {
   const { status, out } = run(['--ledger', INSIDE(EPIC), '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(status, NO_SEAL, 'a child of the epic is not OUT of the epic');
+  assert.equal(status, REFUSED, 'a child of the epic is not OUT of the epic');
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=SUCCESSOR-INSIDE-EPIC/);
   assert.match(out, /after 1 hop\(s\): cch-fixture-successor-epic -> cloud-console-hardening-epic/);
   assert.doesNotMatch(out, /successor: cch-fixture-successor-epic/);
@@ -433,7 +433,7 @@ test('R6: a GRANDCHILD of the epic is refused too, and the trail is printed hop 
   const p = join(tmp('seal-pred-succ-'), 'grandchild.json');
   writeFileSync(p, JSON.stringify(fx));
   const { status, out } = run(['--ledger', p, '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(status, NO_SEAL);
+  assert.equal(status, REFUSED);
   assert.match(token(out), /REFUSED reason=SUCCESSOR-INSIDE-EPIC/);
   assert.match(out, /after 2 hop\(s\): cch-fixture-successor-epic -> cch-fixture-middle -> cloud-console-hardening-epic/);
 });
@@ -512,7 +512,7 @@ test('TERMINAL seals ONLY on a roster read of live==0 AND considering==0', () =>
 
 test('TERMINAL is REFUTED by one live row — the flag is not the claim', () => {
   const { status, out } = fixtureRun('terminal-one-live-row.json');
-  assert.equal(status, NO_SEAL);
+  assert.equal(status, REFUSED);
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=TERMINAL-CLAIM-REFUTED/);
   assert.match(out, /gr-fixture-still-open-1/, 'the row that refutes the claim is NAMED');
   assert.match(out, /after the post-condition roster read/,
@@ -522,7 +522,7 @@ test('TERMINAL is REFUTED by one live row — the flag is not the claim', () => 
 
 test('TERMINAL is REFUTED by one CONSIDERING row', () => {
   const { status, out } = fixtureRun('terminal-one-considering-row.json');
-  assert.equal(status, NO_SEAL);
+  assert.equal(status, REFUSED);
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=TERMINAL-CLAIM-REFUTED/);
   assert.match(out, /gr-fixture-considering-1/, 'the considering row is NAMED');
   assert.doesNotMatch(out, /VERDICT: SEAL$/m);
@@ -1130,7 +1130,7 @@ test('wave 11: --ladder-only reaches the ladder the live refusals never can', ()
   // stubbed in source (see above) so the refusal is driven on the LIVE branch without
   // a network call.
   const refused = mutatedRun(stubbedLiveRoster, ['--repo', REPO, '--successor', 'TERMINAL']);
-  assert.equal(refused.status, NO_SEAL);
+  assert.equal(refused.status, REFUSED);
   assert.match(refused.out, /1 live row\(s\) \[stub-open-row\]/,
     'the refusal must have counted the STUBBED live roster — that is what proves the live branch ran');
   assert.match(token(refused.out),
@@ -1181,13 +1181,13 @@ test('wave 11: --ladder-only is still bound by R0 and R1 — no stub, no empty r
   // live --guard-cmd would read a stub as a measurement, and an empty register would
   // read zero defects as a clean ladder.
   const stub = run(['--ladder-only', '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(stub.status, NO_SEAL, 'R0 still refuses a live stub — a reading of a stub is not a reading');
+  assert.equal(stub.status, REFUSED, 'R0 still refuses a live stub — a reading of a stub is not a reading');
   assert.match(token(stub.out), /REFUSED reason=GUARD-OVERRIDE-WITHOUT-FIXTURE/);
 
   const emptied = mutatedRun(
     (s) => s.replace(/^const KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const KNOWN_DEFECTS = [];'),
     ['--ladder-only', '--repo', REPO]);
-  assert.equal(emptied.status, NO_SEAL, 'R1 still refuses an empty register on the reading path too');
+  assert.equal(emptied.status, REFUSED, 'R1 still refuses an empty register on the reading path too');
   assert.match(token(emptied.out), /REFUSED reason=EMPTY-DEFECT-REGISTER/);
 });
 
@@ -1318,7 +1318,7 @@ const emptyLiveRoster = (src) => {
 
 test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over nobody', () => {
   const refused = mutatedRun(emptyLiveRoster, ['--repo', REPO, '--successor', 'TERMINAL']);
-  assert.equal(refused.status, NO_SEAL, 'a roster of nobody must not exit 0');
+  assert.equal(refused.status, REFUSED, 'a roster of nobody must not exit 0');
   assert.match(token(refused.out), /REFUSED reason=EMPTY-ROSTER a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
   assert.match(refused.out, /the live roster of \S+ is EMPTY/);
   assert.match(refused.out, /orphans=0 is arithmetic, not evidence/);
@@ -1874,7 +1874,7 @@ test('wave 29: bucket (c) REFUSES an empty gate table instead of certifying c=PA
     return out;
   };
   const emptied = mutatedRun(empty, ['--repo', REPO, '--successor', 'TERMINAL']);
-  assert.equal(emptied.status, NO_SEAL);
+  assert.equal(emptied.status, REFUSED);
   assert.match(token(emptied.out), /REFUSED reason=EMPTY-GATE-TABLE a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
   assert.match(emptied.out, /would print no row at all and still certify c=PASS over zero gates/);
   assert.doesNotMatch(token(emptied.out), /\bc=PASS\b/, 'the letter this refusal exists to prevent may not be printed');

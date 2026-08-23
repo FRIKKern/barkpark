@@ -789,8 +789,11 @@ test("the four corpus rows the collision fix newly ADMITS are named, member by m
 // `ls`), and `docker --host ps exec -it foo bash` ADMITTED `docker exec` —
 // arbitrary code execution inside a container — because `--host`'s eaten
 // value `ps` collided with an allowlisted docker verb, so the real verb
-// `exec` two tokens later was never examined. systemctl/launchctl are left
-// alone (out of this task's fence: pnpm + docker only).
+// `exec` two tokens later was never examined. systemctl/launchctl were left
+// alone (out of THIS fix's fence: pnpm + docker only) — systemctl carried the
+// identical hole and is closed below in 9d; launchctl was checked and cleared,
+// also in 9d; gh — a bespoke rule, not built on `verbRule` — carried the same
+// hole under its own noun/sub-verb allowlist and is closed in 9e.
 
 test("pnpm/docker value-taking-global collision is REFUSED — a global's eaten arg is not the sub-verb", () => {
   const refused = [
@@ -850,6 +853,152 @@ test("MUTATION PROOF: reverting pnpm/docker to a bare verbRule (no value-globals
   // And the shipped screenCommand — using the real dropValueGlobals fix — still refuses both live.
   assert.equal(screenCommand("pnpm -C ls add lodash").ok, false, "shipped fix REFUSES");
   assert.equal(screenCommand("docker --host ps exec -it foo bash").ok, false, "shipped fix REFUSES");
+});
+
+// ── 9d. THE SYSTEMCTL VALUE-TAKING-GLOBAL COLLISION (second head of 9c) ─────
+//
+// 9c's own comment said "systemctl/launchctl are left alone (out of this task's
+// fence: pnpm + docker only)" — a scope statement, not a clearance. systemctl was
+// STILL registered as a bare `verbRule(...)` with no third `valueGlobals` arg, so
+// `dropValueGlobals` never ran for it. Confirmed live on origin/main before this
+// fix: `systemctl -H status restart barkpark.service` ADMITTED — `-H`'s eaten
+// separate-token value `status` collided with systemctl's own allowlisted read
+// verb `status`, so the real (mutating) verb `restart` two tokens later was never
+// examined. Layer (c)'s WRITE_SHAPES backstop does not catch it either: its
+// systemctl regex requires the mutating verb immediately after `systemctl `, and
+// a global-plus-eaten-value sits in between.
+//
+// launchctl was RE-VERIFIED here, not merely re-asserted: `man launchctl`'s own
+// SYNOPSIS is `launchctl subcommand [arguments ...]` — no pre-verb global-option
+// region at all, so there is no token position for a value-eating global to
+// occupy before the subcommand. No counter-example was found; launchctl is left
+// on a bare `verbRule` on purpose.
+test("systemctl value-taking-global collision is REFUSED — a global's eaten arg is not the sub-verb", () => {
+  const refused = [
+    "systemctl -H status restart barkpark.service",
+    "systemctl --host status restart barkpark.service",
+    "systemctl -M status restart barkpark.service",
+    "systemctl --machine status restart barkpark.service",
+    "systemctl --root status restart barkpark.service",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the collision: ${cmd} → ${r.reason}`);
+  }
+  // The control: the bare mutating verb, no decoy global, was already refused
+  // before this fix and must stay refused.
+  assert.equal(screenCommand("systemctl restart barkpark.service").ok, false);
+});
+
+test("the systemctl collision fix does NOT over-refuse legitimate value-global reads", () => {
+  const admitted = [
+    "systemctl status barkpark.service",
+    "systemctl -H example.com status barkpark.service",
+    "systemctl --host example.com status barkpark.service",
+    "systemctl -M mycontainer status barkpark.service",
+    "systemctl is-active barkpark.service",
+  ];
+  for (const cmd of admitted) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, true, `MUST ADMIT the honest read: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("MUTATION PROOF: reverting systemctl to a bare verbRule (no value-globals) re-admits the collision", () => {
+  const bareVerbRule = (verbs, label) => ({
+    verbs: new Set(verbs),
+    check(argv) {
+      const verb = argv.slice(1).find((t) => !t.startsWith("-")) ?? null;
+      if (verb === null) return `${argv[0]} without a sub-verb`;
+      if (!this.verbs.has(verb)) return `${argv[0]} sub-verb "${verb}" is not on the read-only allowlist (${[...verbs].sort().join(", ")})`;
+      return null;
+    },
+  });
+  const reverted = bareVerbRule(
+    ["is-active", "is-enabled", "is-failed", "status", "show", "cat", "list-units", "list-unit-files", "get-default"],
+    "systemctl",
+  );
+  const tokenize = (cmd) => cmd.split(" ");
+  assert.equal(reverted.check(tokenize("systemctl -H status restart barkpark.service")), null,
+    "REVERTED rule ADMITS the systemctl collision (proves the shipped fix earns its keep)");
+  // And the shipped screenCommand — using the real dropValueGlobals fix — still refuses it live.
+  assert.equal(screenCommand("systemctl -H status restart barkpark.service").ok, false, "shipped fix REFUSES");
+});
+
+// ── 9e. THE GH VALUE-TAKING-GLOBAL COLLISION (third head of 9c, bespoke rule) ─
+//
+// `ghRule` is NOT built on the shared `verbRule` factory — it has its own
+// two-level noun→sub-verb allowlist (`GH_READ_NOUNS`), the same shape as
+// `npmRule`. So threading `valueGlobals` through `verbRule` alone could never
+// have reached it; #13346 and 9c/9d's fix both leave a bespoke rule with the
+// identical positional hole untouched unless that rule gets the same
+// `dropValueGlobals` defence applied explicitly inside its own `check`.
+//
+// Confirmed live on origin/main before this fix: `gh -R status repo clone
+// owner/repo /tmp/evil` ADMITTED — `-R`'s eaten separate-token value `status`
+// collided with gh's own read noun `status` (mapped to "any sub-verb" in
+// `GH_READ_NOUNS`), so the real noun+sub-verb pair `repo clone` — a write that
+// clones an arbitrary repository to disk — was never checked against the
+// allowlist, and `clone` is deliberately absent from the `GH_WRITE_VERBS`
+// denylist (that loop is a second-layer catch, not the gate; `repo clone` and
+// `release download` were pulled OUT of it into the noun/sub-verb allowlist for
+// exactly this reason, per the module's own comment).
+test("gh value-taking-global collision is REFUSED — a global's eaten arg is not the noun", () => {
+  const refused = [
+    "gh -R status repo clone owner/repo /tmp/evil",
+    "gh --repo status repo clone owner/repo /tmp/evil",
+    "gh -R status release download owner/repo",
+    "gh --repo status release download owner/repo",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the collision: ${cmd} → ${r.reason}`);
+  }
+  // The controls: no decoy -R/--repo, and a write verb behind a decoy, were
+  // already refused before this fix and must stay refused.
+  assert.equal(screenCommand("gh repo clone owner/repo /tmp/evil").ok, false);
+  assert.equal(screenCommand("gh -R status pr merge 123").ok, false);
+});
+
+test("the gh collision fix does NOT over-refuse legitimate value-global reads", () => {
+  const admitted = [
+    "gh -R owner/repo pr view 1",
+    "gh --repo owner/repo issue list",
+    "gh -R owner/repo repo view",
+    "gh pr view 1",
+  ];
+  for (const cmd of admitted) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, true, `MUST ADMIT the honest read: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("MUTATION PROOF: reverting ghRule to read the noun straight off argv re-admits the collision", () => {
+  // Mirrors ghRule's OWN pre-fix shape (firstNonFlag on raw argv, no
+  // dropValueGlobals) rather than reimplementing a parallel comparison — proves
+  // the FIX, not a copy of the fix's logic.
+  const firstNonFlag = (argv, from = 1) => argv.slice(from).find((t) => !t.startsWith("-")) ?? null;
+  const GH_READ_NOUNS = new Map([
+    ["repo", new Set(["view", "list"])],
+    ["status", null],
+  ]);
+  const bareGhCheck = (argv) => {
+    const noun = firstNonFlag(argv);
+    if (noun === null) return "gh without a sub-verb";
+    if (!GH_READ_NOUNS.has(noun)) return `gh noun "${noun}" is not on the read-only allowlist`;
+    const subs = GH_READ_NOUNS.get(noun);
+    if (subs) {
+      const sub = firstNonFlag(argv, argv.indexOf(noun) + 1);
+      if (sub === null) return `gh ${noun} without a sub-verb`;
+      if (!subs.has(sub)) return `gh ${noun} sub-verb "${sub}" is not read-only`;
+    }
+    return null;
+  };
+  const tokenize = (cmd) => cmd.split(" ");
+  assert.equal(bareGhCheck(tokenize("gh -R status repo clone owner/repo /tmp/evil")), null,
+    "REVERTED rule ADMITS the gh collision (proves the shipped fix earns its keep)");
+  // And the shipped screenCommand — using the real dropValueGlobals fix — still refuses it live.
+  assert.equal(screenCommand("gh -R status repo clone owner/repo /tmp/evil").ok, false, "shipped fix REFUSES");
 });
 
 // ── 10. THE ARBITRARY FILE-OVERWRITE PRIMITIVE (wave 4) ──────────────────────
