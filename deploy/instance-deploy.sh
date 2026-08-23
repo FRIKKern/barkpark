@@ -792,6 +792,32 @@ exec 8>&-   # leaf lock: released the moment the flip is written + reloaded, so
             # the long non-Caddy tail below (go builds, npm ci) never holds it
 code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}/api/schemas" || true)"
 log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}/api/schemas = $code)"
+# GATE, not just log (pds-bl-w49): the pre-flip loop above only proves the app
+# boots on its OWN port (localhost:$TARGET_PORT) — it cannot catch a flip that
+# landed wrong (a sed that missed the live upstream line, a Caddy reload that
+# "succeeded" onto a stale worker, TLS/SNI misrouting on the PUBLIC host). This
+# curl is the first proof the public hostname actually reaches the new slot,
+# and it used to be captured into $code, logged, and then ignored — a broken
+# flip still exited 0 and the deploy reported success. The old slot is still
+# running and NOT yet retired (that happens below), so failing here can still
+# flip Caddy back and walk away clean instead of shipping a silently-broken
+# deploy.
+if [ "$code" != "200" ]; then
+  log "post-flip public health check FAILED (https://${HEALTH_HOST}/api/schemas = $code) — flipping back to :$ACTIVE_PORT; it was never retired"
+  revert_post_flip_health_fail() {
+    cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
+    if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
+      log "WARN: pre-deploy Caddyfile backup failed to validate on revert — Caddy left as-is, fix by hand"
+      return 1
+    fi
+    systemctl reload caddy || log "WARN: caddy reload failed while reverting the flip — Caddyfile restored on disk, reload manually"
+  }
+  with_caddy_lock revert_post_flip_health_fail
+  systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
+  git reset --hard "$OLD"
+  exit 14
+fi
 
 # ---- Drain, then retire the old slot AND the pre-blue/green legacy unit.
 # Exactly one slot stays enabled (survives reboot). Rollback is NOT a bare

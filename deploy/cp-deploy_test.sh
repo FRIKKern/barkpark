@@ -62,5 +62,29 @@ check "idempotent re-run keeps a single stable-front control-url" \
   "[ \"\$(grep -oc -- '--control-url https://barkpark.cloud' '$tmp')\" = '1' ]"
 
 echo
+echo "cp-deploy slot health-check status codes (pds-bl-w49)"
+# ROOT CAUSE it guards: the '/' probe used to accept 404 as "healthy" — a
+# container that boots but serves nothing but 404s (crashed app, wrong port, a
+# static server up with the SPA missing) is exactly the broken-deploy shape
+# this gate exists to catch, and 404 waved it through as green. Extract the
+# EXACT status-code class the script classifies as healthy, so a regression
+# (404 sneaking back in, or 200/301/302 sneaking OUT) fails here too — not just
+# a hardcoded string match.
+HEALTH_LINE="$(grep -n '200|301|302' "$SCRIPT" | head -1)"
+HEALTH_LINE="${HEALTH_LINE#*:}"
+HEALTH_RE="${HEALTH_LINE#*"grep -qE '^("}"
+HEALTH_RE="${HEALTH_RE%%")\$'"*}"
+check "found the health-check regex class in the script" "[ -n '$HEALTH_RE' ]"
+
+code_is_healthy() { echo "$1" | grep -qE "^(${HEALTH_RE})\$"; }  # replays the script's EXACT classification
+
+check "200 (OK) classified healthy"                     "code_is_healthy 200"
+check "301 (redirect) classified healthy"                "code_is_healthy 301"
+check "302 (redirect) classified healthy"                "code_is_healthy 302"
+check "404 (not found) NOT healthy — the fixed defect"   "! code_is_healthy 404"
+check "500 (server error) NOT healthy"                    "! code_is_healthy 500"
+check "000 (curl failure / connection refused) NOT healthy" "! code_is_healthy 000"
+
+echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi
 exit "$fails"

@@ -162,10 +162,18 @@ echo "install $*" >> "$SYSCTLLOG"; exit 0
 EOF
   # URL-aware: the connectors health probe (:4020) answers with its OWN code, so
   # a healthy app slot and a silent bridge can be simulated in the same run.
+  # The PUBLIC post-flip probe (--resolve HOST:443:..., https://HOST/...) also
+  # answers with its OWN code (PUBLIC_HEALTH_CODE, defaulting to HEALTH_CODE) —
+  # so a slot that boots healthy on its OWN port (pre-flip, plain
+  # http://localhost:$PORT) can still be driven to fail the PUBLIC post-flip
+  # gate (pds-bl-w49: that curl used to be captured, logged, and ignored).
   cat > "$dir/curl" <<'EOF'
 #!/usr/bin/env bash
 for a in "$@"; do
   case "$a" in *:4020*) printf '%s' "${CONNECTORS_HEALTH_CODE:-000}"; exit 0 ;; esac
+done
+for a in "$@"; do
+  case "$a" in --resolve) printf '%s' "${PUBLIC_HEALTH_CODE:-${HEALTH_CODE:-200}}"; exit 0 ;; esac
 done
 printf '%s' "${HEALTH_CODE:-200}"
 EOF
@@ -263,7 +271,7 @@ EOF
   : > "$MIXLOG"; : > "$SYSCTLLOG"; : > "$GITLOG"
 }
 
-run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NODE_*/NPM_*/UNIT_ACTIVE from env)
+run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NODE_*/NPM_*/UNIT_ACTIVE/PUBLIC_HEALTH_CODE from env)
   env PATH="$FAKE:$PATH" \
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
@@ -274,6 +282,7 @@ run_deploy() { # $1=health code  $2=fake sha  (DEPLOY_REF/DEPLOY_REMOTE/GO_*/NOD
     BARKPARK_SANDBOX_RUNNER_BIN="$TMP/cloud-sandbox-runner" \
     BARKPARK_SANDBOX_RUNNER_MJS="$TMP/cloud-sandbox-runner.mjs" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
+    PUBLIC_HEALTH_CODE="${PUBLIC_HEALTH_CODE:-$1}" \
     REMOTE_SHA="${REMOTE_SHA:-$2}" MIX_FAIL="${MIX_FAIL:-}" \
     BARKPARK_CLOUD_EGRESS_IPS="${BARKPARK_CLOUD_EGRESS_IPS:-}" \
     DEPLOY_REF="${DEPLOY_REF:-}" DEPLOY_REMOTE="${DEPLOY_REMOTE:-}" \
@@ -287,6 +296,7 @@ run_rollback() { # $1=health code  $2=fake sha (live HEAD)
   env PATH="$FAKE:$PATH" \
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
+    PUBLIC_HEALTH_CODE="${PUBLIC_HEALTH_CODE:-$1}" \
     BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
     HOME="$TMP/home" FAKE_SHA="$2" HEALTH_CODE="$1" \
     bash "$SCRIPT" --rollback > "$TMP/rollback.log" 2>&1
@@ -411,6 +421,29 @@ check "legacy unit not touched on failure" "! grep -qE 'disable --now barkpark($
 check "no enable of the failed slot"      "! grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "state file NOT advanced"           "[ ! -f '$APP/.instance-deploy-last' ]"
 check "no recompile after failure (2 compile lines)" "[ \"\$(grep -c compile '$MIXLOG')\" = '2' ]"
+rm -rf "$TMP"
+
+echo "== Case 3b: slot healthy on its OWN port but the PUBLIC post-flip probe fails -> flip REVERTED (pds-bl-w49) =="
+# ROOT CAUSE this guards: the flip's public health curl used to be captured
+# into \$code, logged, and never tested — a broken flip (bad Caddyfile sed,
+# stale reload, SNI/TLS misroute on the public host) still exited 0 and the
+# deploy reported success. The pre-flip own-port loop (localhost:$TARGET_PORT)
+# passes here (HEALTH_CODE=200) — only the PUBLIC probe
+# (https://test.example/api/schemas) is made to fail, so this proves the gate
+# added AFTER the flip, not the pre-existing boot gate before it.
+setup_case
+rc="$(PUBLIC_HEALTH_CODE=500 run_deploy 200 postflipbadsha)"
+check "exit 14 (not 0 — a broken flip must not report success)" "[ '$rc' = '14' ]"
+check "post-flip failure logged by name" "grep -q 'post-flip public health check FAILED' '$TMP/out.log'"
+check "Caddy flipped BACK to :4000 (not left on the unproven :4001)" "[ \"\$(first_upstream)\" = 'localhost:4000' ]"
+check "reverted Caddyfile still caddy-valid" "caddy validate --adapter caddyfile --config '$CADDY' >/dev/null 2>&1"
+check "unproven green slot disabled"      "grep -q 'disable --now barkpark-slot@green' '$SYSCTLLOG'"
+check "active blue slot never stopped/disabled" "! grep -qE '(stop|disable --now) barkpark-slot@blue' '$SYSCTLLOG'"
+check "legacy unit not touched on this failure" "! grep -qE 'disable --now barkpark($| )' '$SYSCTLLOG'"
+check "no enable of the unproven slot"    "! grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
+check "state file NOT advanced"           "[ ! -f '$APP/.instance-deploy-last' ]"
+check "slot sha stamp NOT left claiming an unproven build" "[ ! -e '$APP/.slots/green.sha' ]"
+check "checkout reset --hard ran on the failure path" "grep -q 'reset --hard' '$GITLOG'"
 rm -rf "$TMP"
 
 echo "== Case 4: production box (no .staging) REFUSES a non-main DEPLOY_REF =="
