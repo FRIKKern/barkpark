@@ -25,8 +25,10 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
        `already_running` — a run in flight that is NOT ours, marked in-flight and
        left to the settle grace, never announced as ours and never paused for
        being busy (cch-w58-s2). A 503 means the box never armed one-click apply,
-       so we pause it rather than retry forever; any other outcome is transient
-       and simply retried next tick.
+       so we RECORD that (`Registry.record_apply_unarmed/1`) and let
+       `next_autoupdate_candidate/1` skip it from then on — never
+       `pause_autoupdate/1`, which no code path clears (task-0dd7578bc3d2bcbd);
+       any other outcome is transient and simply retried next tick.
 
   Serial (cohort of 1) is the SAFEST v1 canary — every instance is proven live
   on the new release before the next is touched. Parallel cohorts that grow once
@@ -174,12 +176,54 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
           "autoupdate: #{bp.slug} already had a run in flight (HTTP 409 already_running) — NOT started by this tick; waiting for it to settle"
         )
 
+      # A 503 IS A MEASUREMENT, NOT A POLICY DECISION (task-0dd7578bc3d2bcbd).
+      #
+      # The box's handler answers 503 `feature_not_configured` off exactly one
+      # input — `Runner.enabled?/0`, the running BEAM's boot-frozen read of
+      # BARKPARK_SELF_UPDATE_APPLY. That is the SAME fact the hourly arming probe
+      # reads as `apply_enabled`. So the honest response is to write what we just
+      # learned into `apply_arming`, which `next_autoupdate_candidate/1` now
+      # disqualifies on, and NOT to touch `autoupdate_paused`.
+      #
+      # WHY THE OLD `pause_autoupdate/1` HERE WAS AN OUTAGE WAITING TO HAPPEN.
+      # `autoupdate_paused` has NO automatic clear: its only `false` writer is a
+      # human PATCH on `/v1/barkparks/:id/autoupdate`, gated on a team admin.
+      # There is a `pause_autoupdate/1` verb and no resume verb at all. So one
+      # bless against an unarmed fleet walked every box into this branch — one
+      # per 5-minute tick, since this branch never stamps
+      # `autoupdate_triggered_at` and the serial-of-1 gate therefore never slowed
+      # it — and latched each one off autoupdate until a human went box by box.
+      # Recovery was not slow; it was absent.
+      #
+      # The replacement recovers by itself: the operator arms the box and
+      # restarts it, the next `UpdateStatusWorker` sweep reads
+      # `apply_enabled: true`, `refresh_update_status/1` writes `"armed"`, and
+      # the box re-enters the candidate set. Nobody clears a flag.
+      #
+      # THE PAUSE SURVIVES AS A LAST RESORT, and only where dropping it would
+      # wedge. If the arming write itself fails, the box stays eligible and
+      # `order_by: update_checked_at` re-picks it every tick forever. A latched
+      # box is bad; a rollout that advances nothing is worse, so a failed write
+      # falls back to the old containment — loudly, because it is now the
+      # abnormal path.
       {:ok, 503, _body} ->
-        _ = Registry.pause_autoupdate(bp)
+        case Registry.record_apply_unarmed(bp) do
+          {:ok, _} ->
+            Logger.warning(
+              "autoupdate: #{bp.slug} has no one-click apply (503) — recorded unarmed and " <>
+                "skipped (needs BARKPARK_SELF_UPDATE_APPLY=1; re-enters automatically once " <>
+                "the hourly sweep reads it armed)"
+            )
 
-        Logger.warning(
-          "autoupdate: #{bp.slug} has no one-click apply (503) — paused (needs BARKPARK_SELF_UPDATE_APPLY=1)"
-        )
+          {:error, reason} ->
+            _ = Registry.pause_autoupdate(bp)
+
+            Logger.error(
+              "autoupdate: #{bp.slug} answered 503 and the unarmed record FAILED " <>
+                "(#{inspect(reason)}) — fell back to pausing it, which no code path clears; " <>
+                "a human must resume it after arming"
+            )
+        end
 
       {:ok, status, _body} ->
         Logger.warning(
