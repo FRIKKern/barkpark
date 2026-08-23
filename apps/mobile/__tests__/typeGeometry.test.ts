@@ -477,9 +477,11 @@ const CENSUS: Record<string, Record<string, number>> = {
   'papers/portabledoc/blocks/forms.tsx': {
     // base ×2 = the question prompt and its static control rows (a control is
     // read at body measure — it is the answer affordance, not apparatus);
-    // sm ×2 = the two dim context lines, rationale and recommendation.
+    // sm ×4 = the two dim context lines (rationale and recommendation) plus
+    // the field-number definition row's label and value
+    // (pbw-fix-field-number-react — label chrome, no prose measure).
     'scale.base': 2,
-    'scale.sm': 2,
+    'scale.sm': 4,
   },
   'papers/portabledoc/blocks/math.tsx': {
     // The equation's THREE steps, declared once each in the STEPS table: lg is
