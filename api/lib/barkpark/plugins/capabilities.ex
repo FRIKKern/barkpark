@@ -736,7 +736,11 @@ defmodule Barkpark.Plugins.Capabilities do
         "none",
         args: [arg("type", true, "string", "Document type to list.")],
         flags: [
-          flag("limit", "int", "Max rows to return.", default: 50),
+          # default MUST match the server's real page size (QueryController.index:
+          # parse_int(params["limit"], 100) — 100 since 8b81b12279, never 50). The
+          # CLI calibrates its truncation warning from this field, so 50 made a
+          # fully-returned 60-row page warn "more may be available".
+          flag("limit", "int", "Max rows to return.", default: 100),
           flag("offset", "int", "Rows to skip.", default: 0),
           flag("all", "bool", "Fetch every page.", default: false),
           flag("perspective", "string", "published | drafts | raw.", default: "published"),
@@ -915,7 +919,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
           ),
-          flag("limit", "int", "Max rows to return.", default: 50),
+          # default MUST match the server's real page size (QueryController.index:
+          # parse_int(params["limit"], 100) — 100 since 8b81b12279, never 50). The
+          # CLI calibrates its truncation warning from this field, so 50 made a
+          # fully-returned 60-row page warn "more may be available".
+          flag("limit", "int", "Max rows to return.", default: 100),
           flag("offset", "int", "Rows to skip.", default: 0),
           flag("perspective", "string", "published | drafts | raw.", default: "published"),
           flag(
