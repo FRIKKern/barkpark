@@ -55,17 +55,17 @@ echo "pds-published-artifact-door_test — hermetic fixture"
 
 out="$(bash "$DOOR" "$DIRTY" 2>&1)"; rc=$?
 if [ "$rc" = "1" ]; then ok "IT CAN RED: a subpath added after R is REFUSED (rc 1)"; else bad "can red" "rc=$rc want 1"; fi
-if printf '%s' "$out" | grep -q './client'; then ok "the refusal NAMES ./client — an unnamed refusal is not actionable"; else bad "names subpath" "refusal did not name ./client"; fi
-if printf '%s' "$out" | grep -q 'secret.*SKIP private:true'; then ok "HATCH private:true SKIPs a package that would otherwise REFUSE"; else bad "hatch private" "secret was not skipped as private"; fi
-if printf '%s' "$out" | grep -q 'holdr.*SKIP version literal is 0.0.0-placeholder'; then ok "PROBE: the placeholder LITERAL alone produces the skip"; else bad "hatch placeholder" "holdr was not skipped on its literal"; fi
-if printf '%s' "$out" | grep -q 'create-thing'; then ok "AN UNSCOPED PACKAGE IS NAMED BY ITS package.json, never by scope plus dir"; else bad "unscoped" "create-thing never appeared — a scope-builder stops checking it silently"; fi
+if grep -q <<<"$out" './client'; then ok "the refusal NAMES ./client — an unnamed refusal is not actionable"; else bad "names subpath" "refusal did not name ./client"; fi
+if grep -q <<<"$out" 'secret.*SKIP private:true'; then ok "HATCH private:true SKIPs a package that would otherwise REFUSE"; else bad "hatch private" "secret was not skipped as private"; fi
+if grep -q <<<"$out" 'holdr.*SKIP version literal is 0.0.0-placeholder'; then ok "PROBE: the placeholder LITERAL alone produces the skip"; else bad "hatch placeholder" "holdr was not skipped on its literal"; fi
+if grep -q <<<"$out" 'create-thing'; then ok "AN UNSCOPED PACKAGE IS NAMED BY ITS package.json, never by scope plus dir"; else bad "unscoped" "create-thing never appeared — a scope-builder stops checking it silently"; fi
 
 out="$(bash "$DOOR" "$BASE" 2>&1)"; rc=$?
 if [ "$rc" = "0" ]; then ok "IT CAN GREEN: the tree without the added subpath PASSes (rc 0)"; else bad "can green" "rc=$rc want 0 — a door that cannot pass refuses everything"; fi
-if printf '%s' "$out" | grep -q 'REFUSALS 0' && printf '%s' "$out" | grep -q 'VERDICT: PASS'; then ok "the exit code descends: REFUSALS 0 => VERDICT PASS"; else bad "exit descends" "green run did not print REFUSALS 0 + VERDICT: PASS"; fi
-if printf '%s' "$out" | grep -q 'RELEASE DEBT'; then ok "RELEASE DEBT is printed on a run that still exits 0 — a column, not a verdict"; else bad "debt reported" "debt section missing on a green run"; fi
-if printf '%s' "$out" | grep -q 'reads the exports MAP only'; then ok "THE BLIND SPOT IS PRINTED: exports MAP only, behaviour-only changes pass"; else bad "blind spot printed" "the run did not print the blind-spot sentence"; fi
-if printf '%s' "$out" | grep -q 'SKIP-WITH-REASON'; then ok "THE ENHANCEMENT ARM PRINTS SKIP-WITH-REASON on a GREEN run"; else bad "enhancement arm" "the optional byte arm did not print SKIP-WITH-REASON"; fi
+if grep -q <<<"$out" 'REFUSALS 0' && grep -q <<<"$out" 'VERDICT: PASS'; then ok "the exit code descends: REFUSALS 0 => VERDICT PASS"; else bad "exit descends" "green run did not print REFUSALS 0 + VERDICT: PASS"; fi
+if grep -q <<<"$out" 'RELEASE DEBT'; then ok "RELEASE DEBT is printed on a run that still exits 0 — a column, not a verdict"; else bad "debt reported" "debt section missing on a green run"; fi
+if grep -q <<<"$out" 'reads the exports MAP only'; then ok "THE BLIND SPOT IS PRINTED: exports MAP only, behaviour-only changes pass"; else bad "blind spot printed" "the run did not print the blind-spot sentence"; fi
+if grep -q <<<"$out" 'SKIP-WITH-REASON'; then ok "THE ENHANCEMENT ARM PRINTS SKIP-WITH-REASON on a GREEN run"; else bad "enhancement arm" "the optional byte arm did not print SKIP-WITH-REASON"; fi
 
 # MUTATION: remove private:true and the SAME package must be checked and refuse.
 # The version literal is left ALONE, or R would move onto the mutation commit and
@@ -73,7 +73,7 @@ if printf '%s' "$out" | grep -q 'SKIP-WITH-REASON'; then ok "THE ENHANCEMENT ARM
 pkg secret '{"name":"@barkpark/secret","version":"9.9.9","exports":{".":"x","./added":"y"}}'
 commit "mutation: drop private"
 out="$(bash "$DOOR" HEAD 2>&1)"
-if printf '%s' "$out" | grep -q 'secret.*REFUSE'; then ok "MUTATION: the SAME package without private:true is CHECKED and REFUSES"; else bad "hatch private mutation" "dropping private:true did not make secret refuse"; fi
+if grep -q <<<"$out" 'secret.*REFUSE'; then ok "MUTATION: the SAME package without private:true is CHECKED and REFUSES"; else bad "hatch private mutation" "dropping private:true did not make secret refuse"; fi
 git reset -q --hard "$DIRTY"
 
 # THE PAIRED PROBE: holdr and holdr-twin differ in the version LITERAL and in
@@ -81,7 +81,7 @@ git reset -q --hard "$DIRTY"
 # skipped, which is what proves the hatch keys on the literal rather than on the
 # package identity or on absence from a registry.
 out="$(bash "$DOOR" "$DIRTY" 2>&1)"
-if printf '%s' "$out" | grep -q 'holdr-twin.*REFUSE'; then ok "PAIRED PROBE: the twin at a NON-placeholder literal is CHECKED and REFUSES — the hatch keys on the LITERAL, not the package identity"; else bad "hatch placeholder twin" "holdr-twin at 3.0.0 was not checked"; fi
+if grep -q <<<"$out" 'holdr-twin.*REFUSE'; then ok "PAIRED PROBE: the twin at a NON-placeholder literal is CHECKED and REFUSES — the hatch keys on the LITERAL, not the package identity"; else bad "hatch placeholder twin" "holdr-twin at 3.0.0 was not checked"; fi
 
 # HATCH .changeset ignore, and its mutation twin.
 #
@@ -105,6 +105,25 @@ pkg react '{"name":"@barkpark/react","version":"2.0.0","exports":{".":"x","./cli
 commit "release: bump literal"
 out="$(bash "$DOOR" HEAD 2>&1)"
 if printf '%s' "$out" | grep -qE '@barkpark/react .*2\.0\.0 .*PASS'; then ok "A RELEASE IS STRUCTURALLY SILENT: bumping the literal moves R onto itself"; else bad "release silent" "react still refuses after a real release bump — a door that fires on a release will be weakened"; fi
+git reset -q --hard "$DIRTY"
+
+# READER FAILURES ARE NAMED, NEVER CLASSIFIED (task-4dba2e52ea7c1b04). A
+# package.json blob that EXISTS but fails to parse must ERROR — it must never
+# silently read as "field absent" and get treated as public/not-private. Before
+# this fix, json_field's `except Exception: sys.exit(0)` made an unparseable
+# private:true package's `priv` read as empty, which is indistinguishable from
+# a genuinely absent field: the package would be CHECKED (and could PASS or
+# REFUSE) instead of the ERROR a reader failure demands.
+mkdir -p js/packages/unreadable
+printf 'not valid json {{{\n' > js/packages/unreadable/package.json
+commit "add a package.json that exists but does not parse"
+out="$(bash "$DOOR" HEAD 2>&1)"; rc=$?
+if grep -q <<<"$out" 'unreadable.*ERROR unreadable package.json'; then
+  ok "READER FAILURE: a package.json that exists but fails to parse is an ERROR row, never a silent classification"
+else
+  bad "reader failure named" "unreadable/package.json did not produce an ERROR row: $out"
+fi
+if [ "$rc" = "2" ]; then ok "READER FAILURE: an ERROR row takes the whole door to VERDICT ERROR (rc 2)"; else bad "reader failure verdict" "rc=$rc want 2 — a reader failure must never look like a clean or merely-refusing tree"; fi
 git reset -q --hard "$DIRTY"
 
 if grep -nE '\b(curl|wget|npm|pnpm|yarn|nc|ping)\b' "$DOOR" | grep -vE '^[0-9]+:[[:space:]]*#' | grep -q .; then
