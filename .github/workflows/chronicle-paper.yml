@@ -35,14 +35,15 @@ jobs:
         with:
           fetch-depth: 0
       - run: python3 scripts/chronicle-paper.test.py
-      - name: Build the five-paper MVP
+      - name: Build current editions and historical monthly chapters
         env:
           REQUESTED_DATE: ${{ github.event.inputs.date }}
         run: |
-          args=(--ref HEAD --output-dir "$RUNNER_TEMP/chronicle")
+          args=(--ref HEAD --history-months 18 --output-dir "$RUNNER_TEMP/chronicle")
           if [ -n "$REQUESTED_DATE" ]; then args+=(--date "$REQUESTED_DATE"); fi
           python3 scripts/chronicle-paper.py "${args[@]}"
-          test "$(find "$RUNNER_TEMP/chronicle" -name '*.json' | wc -l | tr -d ' ')" = 5
+          test "$(find "$RUNNER_TEMP/chronicle" -name '*.json' | wc -l | tr -d ' ')" -ge 5
+          test -f "$RUNNER_TEMP/chronicle/barkpark-chronicle.json"
 
   publish:
     needs: verify
@@ -66,13 +67,13 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning::BARKPARK_INGEST_TOKEN is not configured; Chronicle publish skipped"
           fi
-      - name: Publish current Chronicle projections
+      - name: Publish current editions and historical monthly chapters
         if: steps.credentials.outputs.configured == 'true'
         env:
           BARKPARK_API_URL: ${{ secrets.BARKPARK_API_URL }}
           BARKPARK_INGEST_TOKEN: ${{ secrets.BARKPARK_INGEST_TOKEN }}
           REQUESTED_DATE: ${{ github.event.inputs.date }}
         run: |
-          args=(--ref main --publish)
+          args=(--ref main --history-months 18 --publish)
           if [ -n "$REQUESTED_DATE" ]; then args+=(--date "$REQUESTED_DATE"); fi
           python3 scripts/chronicle-paper.py "${args[@]}"

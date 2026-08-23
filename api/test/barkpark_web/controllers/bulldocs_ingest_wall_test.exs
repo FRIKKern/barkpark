@@ -231,6 +231,54 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
     refute Content.get_paper(dup_slug, @dataset)
   end
 
+  test "a deliberate editorial-series ingest can persist the dedup bypass trail", %{conn: conn} do
+    tag_names = ["seriesalpha", "seriesbeta", "seriesgamma"]
+    LabelFixtures.register_tags!(@dataset, tag_names)
+
+    tags =
+      tag_names
+      |> Enum.with_index()
+      |> Enum.map(fn {name, i} ->
+        %{
+          "tag" => name,
+          "strength" => 90 - i,
+          "rationale" =>
+            "Registered series tag ##{i} for an intentionally repeated chapter format."
+        }
+      end)
+
+    title = "Monthly verified delivery field journal"
+
+    for {suffix, bypass?} <- [{"april", false}, {"may", true}] do
+      slug = "ingest-wall-series-#{suffix}-#{System.unique_integer([:positive])}"
+
+      params = %{
+        "slug" => slug,
+        "blocks" => [
+          title_block(title),
+          %{
+            "id" => "p1",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Distinct #{suffix} source interval."}]
+          }
+        ],
+        "tags" => tags,
+        "description" =>
+          "The #{suffix} chapter in a deliberate calendar series with distinct evidence."
+      }
+
+      conn = authed(if(bypass?, do: build_conn(), else: conn))
+
+      conn =
+        post(conn, @path, if(bypass?, do: Map.put(params, "dedup_bypass", true), else: params))
+
+      assert %{"ok" => true, "slug" => ^slug} = json_response(conn, 200)
+      paper = Content.get_paper(slug, @dataset)
+      assert paper.status == "published"
+      if bypass?, do: assert(paper.content["dedup_bypass"] == true)
+    end
+  end
+
   test "a compliant ingest whose only issue is advisory returns 200 with a non-empty warnings array (D36)",
        %{conn: conn} do
     slug = "ingest-wall-advisory-#{System.unique_integer([:positive])}"

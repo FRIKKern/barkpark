@@ -55,7 +55,10 @@ class ChroniclePaperTest(unittest.TestCase):
         )
 
     def test_builds_five_native_papers_from_one_calendar_graph(self):
-        output = self.run_script("--date", "2026-08-23", "--ref", "main", "--repo", "acme/project").stdout
+        output = self.run_script(
+            "--date", "2026-08-23", "--ref", "main", "--repo", "acme/project",
+            "--history-months", "0",
+        ).stdout
         payloads = json.loads(output)
         by_slug = {payload["slug"]: payload for payload in payloads}
         self.assertEqual(5, len(by_slug))
@@ -78,6 +81,37 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("/papers/barkpark-changelog-2026-w34", serialized_index)
         self.assertIn('"text": "The year in motion"', serialized_index)
         self.assertIn("https://github.com/acme/project/pull/13", serialized_index)
+
+    def test_backfills_active_months_and_builds_a_richer_month_archive(self):
+        output = self.run_script(
+            "--date", "2026-08-23",
+            "--ref", "main",
+            "--repo", "acme/project",
+            "--history-months", "12",
+        ).stdout
+        payloads = json.loads(output)
+        by_slug = {payload["slug"]: payload for payload in payloads}
+
+        # The current five projections plus July's historical monthly chapter.
+        self.assertEqual(6, len(by_slug))
+        july = by_slug["barkpark-changelog-2026-07"]
+        july_json = json.dumps(july, ensure_ascii=False)
+        self.assertIn("How the month unfolded", july_json)
+        self.assertIn("Weekly cadence · July 2026", july_json)
+        self.assertIn("Product-facing signals", july_json)
+        self.assertTrue(july["dedup_bypass"])
+
+        index_json = json.dumps(by_slug["barkpark-chronicle"])
+        self.assertIn("Monthly chapters", index_json)
+        self.assertIn("/papers/barkpark-changelog-2026-07", index_json)
+        self.assertIn("/papers/barkpark-changelog-2026-08", index_json)
+
+    def test_historical_build_reads_git_once(self):
+        events = chronicle.read_events("main")
+        with mock.patch.object(chronicle, "read_events", return_value=events) as read_events:
+            payloads = chronicle.build(dt.date(2026, 8, 23), "main", "acme/project", 12)
+        self.assertEqual(1, read_events.call_count)
+        self.assertIn("month:2026-07", payloads)
 
     def test_utc_boundaries_and_iso_week_are_independent_of_month(self):
         periods = chronicle.periods_for(dt.date(2026, 1, 1))

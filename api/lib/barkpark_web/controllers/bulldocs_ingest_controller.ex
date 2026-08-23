@@ -684,7 +684,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # whitelist — dropping them made every honest POST structurally
         # unable to pass. nil (absent params) adds nothing.
         "tags" => params["tags"],
-        "description" => params["description"]
+        "description" => params["description"],
+        # Explicit authoring-wall trail for deliberate editorial series (for
+        # example one Chronicle chapter per calendar month). The wall owns the
+        # semantics; ingest must not silently discard the caller's auditable
+        # bypass decision before Content.upsert_paper/1 evaluates it.
+        "dedup_bypass" => params["dedup_bypass"]
       }
       |> put_scope(conn, params)
 
@@ -793,7 +798,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
         # Label-spine passthrough (charter D26) — see the blocks head above;
         # the legacy HTML leg is walled identically.
         "tags" => params["tags"],
-        "description" => params["description"]
+        "description" => params["description"],
+        "dedup_bypass" => params["dedup_bypass"]
       }
       |> put_scope(conn, params)
 
