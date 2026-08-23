@@ -446,6 +446,29 @@ check "slot sha stamp NOT left claiming an unproven build" "[ ! -e '$APP/.slots/
 check "checkout reset --hard ran on the failure path" "grep -q 'reset --hard' '$GITLOG'"
 rm -rf "$TMP"
 
+echo "== Case 3c: the flip sed matches NOTHING -> refused, the live slot is never retired =="
+# ROOT CAUSE this guards: the post-flip PUBLIC gate above claims to catch "a sed
+# that missed the live upstream line". It CANNOT. Both slots serve
+# /api/schemas, so when the flip is a no-op the OLD slot answers the public
+# probe 200 through the UNCHANGED Caddyfile and the gate passes -- and the very
+# next thing the script does is disable that old slot, leaving Caddy proxying a
+# dead port. A Caddyfile whose upstream is spelled 127.0.0.1:<port> (no literal
+# 'localhost:<slot port>' token) is invisible to the ACTIVE_PORT grep, the
+# FLIP_FROM re-read AND the flip sed, so the file comes out byte-identical and
+# every downstream check still says healthy. Only the file itself can see this.
+setup_case
+printf 'guerrilla.barkpark.cloud {\n\treverse_proxy 127.0.0.1:4000\n}\n' > "$CADDY"
+rc="$(run_deploy 200 noopflipsha)"
+check "exit 14 (not 0 -- a flip that never landed must not report success)" "[ '$rc' = '14' ]"
+check "the no-op flip is named in the log"   "grep -q 'FLIP DID NOT LAND' '$TMP/out.log'"
+check "Caddyfile upstream untouched"         "grep -q 'reverse_proxy 127.0.0.1:4000' '$CADDY'"
+check "the LIVE slot was NEVER disabled"     "! grep -qE 'disable --now barkpark-slot@blue' '$SYSCTLLOG'"
+check "the unproven green slot disabled"     "grep -q 'disable --now barkpark-slot@green' '$SYSCTLLOG'"
+check "no enable of the unproven slot"       "! grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
+check "state file NOT advanced"              "[ ! -f '$APP/.instance-deploy-last' ]"
+check "slot sha stamp NOT left claiming an unproven build" "[ ! -e '$APP/.slots/green.sha' ]"
+rm -rf "$TMP"
+
 echo "== Case 4: production box (no .staging) REFUSES a non-main DEPLOY_REF =="
 setup_case   # no $APP/.staging marker
 rc="$(DEPLOY_REF=feature-x run_deploy 200 refusesha)"
@@ -556,6 +579,28 @@ check "STATE rewritten to rolled-back sha" "[ \"\$(cat '$APP/.instance-deploy-la
 check "rolled-back slot enabled (reboot-safe)" "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "rolled-away slot retired"          "grep -q 'disable --now barkpark-slot@blue' '$SYSCTLLOG'"
 check "no rebuild during rollback"        "[ \"\$(grep -c compile '$MIXLOG')\" = '0' ]"
+rm -rf "$TMP"
+
+echo "== Case 9b: a rollback flip that matches NOTHING is refused, live slot kept =="
+# The rollback path's own post-flip curl is deliberately log-only (its pre-flip
+# own-port loop is the gate), so a no-op rewrite here has NOTHING downstream to
+# catch it: without the landed-check it logged ROLLED BACK, rewrote STATE,
+# exited 0 -- and then disabled the slot Caddy was still pointing at.
+setup_case
+run_deploy 200 v1sha >/dev/null           # green live :4001
+run_deploy 200 v2sha >/dev/null           # blue live  :4000
+: > "$SYSCTLLOG"; : > "$GITLOG"
+# Make the live upstream invisible to the grep AND to the sed, without touching
+# the armed /mcp and /connectors routes.
+sed -i.bak 's/reverse_proxy localhost:4000/reverse_proxy 127.0.0.1:4000/' "$CADDY" && rm -f "$CADDY.bak"
+rc="$(run_rollback 200 v2sha)"
+check "rollback exit 24 (not 0)"             "[ '$rc' = '24' ]"
+check "the no-op flip is named in the log"   "grep -q 'FLIP DID NOT LAND' '$TMP/rollback.log'"
+check "no ROLLED BACK claim"                 "! grep -q 'ROLLED BACK' '$TMP/rollback.log'"
+check "Caddyfile upstream untouched"         "grep -q 'reverse_proxy 127.0.0.1:4000' '$CADDY'"
+check "the LIVE blue slot was NEVER disabled" "! grep -qE 'disable --now barkpark-slot@blue' '$SYSCTLLOG'"
+check "the rollback target slot re-disabled" "grep -q 'disable --now barkpark-slot@green' '$SYSCTLLOG'"
+check "checkout reset back to the live sha"  "grep -q 'reset --hard v2sha' '$GITLOG'"
 rm -rf "$TMP"
 
 echo "== Case 10: unhealthy rollback fails CLOSED — Caddy untouched, slot re-disabled, checkout back =="
