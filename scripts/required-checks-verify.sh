@@ -329,8 +329,11 @@ rendered_names() {
   jq -e '.check_runs | length > 0' <<<"$json" >/dev/null 2>&1 \
     || fail "check-runs for $sha is EMPTY — refusing to declare agreement against an empty feed"
   # latest row per name; a re-run leaves both and only the newest is the truth.
-  jq -r '.check_runs | sort_by(.started_at // "") | .[] | [.name, (.conclusion // "null"), (.started_at // "")] | @tsv' <<<"$json" \
-    | awk -F'\t' '{ seen[$1] = $2 } END { for (n in seen) printf "%s\t%s\n", n, seen[n] }' | sort
+  # Four columns: name, conclusion ("null" when unsettled), status, started_at.
+  # Downstream consumers key on $1/$2 and are untouched by the extra columns;
+  # the PENDING clause below is what reads $3/$4.
+  jq -r '.check_runs | sort_by(.started_at // "") | .[] | [.name, (.conclusion // "null"), (.status // ""), (.started_at // "")] | @tsv' <<<"$json" \
+    | awk -F'\t' '{ seen[$1] = $2 "\t" $3 "\t" $4 } END { for (n in seen) printf "%s\t%s\n", n, seen[n] }' | sort
 }
 
 # A SETTLED head, deliberately: a MERGED PR's checks have all reported, while
@@ -416,6 +419,36 @@ EOF
     echo "         Note (D57): \"Elixir gate\" launders cancellation into failure, so a cancelled upstream can also surface as \"is failing.\"" >&2
     return 4
   fi
+  # PENDING is INFORMATIONAL, deliberately NOT a fifth failing state (charter
+  # D76: additive-safe — bp-merge.sh calls this detector once pre-flight, so a
+  # failing PENDING would refuse every freshly pushed PR in the fleet). But a
+  # required context that is rendered and UNSETTLED (conclusion null —
+  # in_progress, or queued with no conclusion) used to print the same ok line
+  # as green, and an operator running the pre-flight before a PUT could not
+  # tell rendered-but-unsettled from satisfied. Name it, with its status and
+  # started_at, and still exit 0. An age threshold on started_at (refusing a
+  # dispatched-then-never-scheduled check early) is a later enhancement.
+  local pending_seen=0
+  while IFS= read -r ctx; do
+    [ -n "$ctx" ] || continue
+    local row concl st sat
+    row="$(awk -F'\t' -v c="$ctx" '$1 == c { print; exit }' <<<"$names")"
+    [ -n "$row" ] || continue
+    concl="$(cut -f2 <<<"$row")"
+    if [ "$concl" = "null" ]; then
+      st="$(cut -f3 <<<"$row")"
+      sat="$(cut -f4 <<<"$row")"
+      echo "PENDING: $ctx has not settled (status=${st:-unknown}, started_at=${sat:-unknown})"
+      pending_seen=1
+    fi
+  done <<EOF
+$(jq -r '.protection.required_status_checks.checks[].context' "$SPEC")
+EOF
+  if [ "$pending_seen" -eq 1 ]; then
+    say "  ok     every required context RENDERED on $sha — but the PENDING line(s) above have not settled; rendered is not satisfied"
+    return 0
+  fi
+
   say "  ok     every required context appears in the $(printf '%s' "$names" | grep -c . || true) name(s) rendered on $sha"
   return 0
 }
