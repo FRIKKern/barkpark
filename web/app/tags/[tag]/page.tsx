@@ -5,6 +5,7 @@ import {
   paperSlug,
   paperTitle,
   paperExcerpt,
+  fetchPapersByTag,
   type PaperDocument,
 } from "@/lib/papers";
 import {
@@ -29,18 +30,10 @@ async function TagListing({ tag }: { tag: string }) {
   let error: string | null = null;
 
   try {
-    // Server-side weighted-tag membership (charter D77): `hasStrong("tags", "<tag>:1")`
-    // matches every paper carrying this tag at strength ≥ 1 — i.e. every weighted
-    // tag. The generic `has` op is single-shape (legacy `{_ref}`/scalar elements
-    // only) and matches ZERO weighted docs on the live corpus, so the old
-    // fetch-all-then-filter path is replaced by this real server filter. The
-    // `_updatedAt:desc` order is the tiebreak the strength sort preserves.
-    papers = await client
-      .docs<PaperDocument>("paper")
-      .hasStrong("tags", `${tag}:1`)
-      .order("_updatedAt:desc")
-      .limit(200)
-      .find();
+    // `fetchPapersByTag` (lib/papers.ts) walks the corpus page by page — it
+    // used to be a single capped `.limit(200).find()` call here, which would
+    // have silently dropped members past 200 (task-269eefbe4864d8a5).
+    papers = await fetchPapersByTag(client, tag);
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
   }

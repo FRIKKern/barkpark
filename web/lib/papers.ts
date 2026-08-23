@@ -168,6 +168,50 @@ export async function fetchPapers(
   return rows as PaperDocument[];
 }
 
+/** Every paper carrying `tag` at weighted strength >= 1 (charter D77:
+ * `hasStrong` — the generic `has` op is single-shape and matches ZERO
+ * weighted docs on the live corpus), newest-updated first, walked page by
+ * page until a short page terminates. Shares `fetchPapers`' pagination law:
+ * `/app/tags/[tag]/page.tsx` used to issue ONE `.limit(200).find()` call with
+ * no offset, so a tag whose membership exceeded 200 papers would silently
+ * lose the rest — the fourth instance of the class fetchPapers/fetchPosts
+ * already fixed (task-269eefbe4864d8a5, PR #13340). 118 papers live in the
+ * `docs` dataset today (under 200), so this was latent, not active — caught
+ * before it went live. Same bounds as fetchPapers/fetchPosts. */
+export async function fetchPapersByTag(
+  client: BarkparkClient,
+  tag: string,
+): Promise<PaperDocument[]> {
+  const { rows, truncated } = await collectAllPages(
+    async (limit, offset) => {
+      try {
+        return (await client
+          .docs<PaperDocument>("paper")
+          .hasStrong("tags", `${tag}:1`)
+          .order("_updatedAt:desc")
+          .limit(limit)
+          .offset(offset)
+          .find()) as unknown[];
+      } catch (err) {
+        // Same first-page-vs-mid-walk split as fetchPapers: a first-page
+        // failure propagates (the caller renders the error panel); a later
+        // page failing mid-walk degrades to null so collectAllPages returns
+        // the rows already collected, flagged.
+        if (offset === 0) throw err;
+        return null;
+      }
+    },
+    { limit: PAPERS_PAGE_LIMIT, maxPages: PAPERS_MAX_PAGES },
+  );
+  if (truncated !== undefined) {
+    console.warn(
+      `[tags] PAGINATION COULD NOT TERMINATE CLEANLY (${truncated}) — ` +
+        `returning the ${rows.length} papers collected so far for #${tag}`,
+    );
+  }
+  return rows as PaperDocument[];
+}
+
 /** Single paper by slug (or id) — same fallback shape as posts. */
 export async function fetchPaperBySlug(
   client: BarkparkClient,
