@@ -78,11 +78,19 @@ usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' 
 # ── readers: every one of them is `git show`, and that is the offline property ──
 blob_at() { git show "$1:$2" 2>/dev/null; }
 
+# READER FAILURES ARE NAMED, NEVER CLASSIFIED. These helpers used to swallow
+# every failure into empty output (`except: sys.exit(0)`), so a python3 spawn
+# hiccup or a truncated read under CI load made `private` read as not-true and
+# a private package got CHECKED instead of SKIPPED (measured: the hatch-private
+# selftest arm failing on a PR that could not touch it). A parse/read failure
+# now exits 3 — an ABSENT field is still exit 0 with empty output — and every
+# call site converts a 3 into a named ERROR row or a die, so load turns into a
+# visible REFUSED-TO-MEASURE instead of a wrong verdict.
 json_field() { # <json on stdin> <dotted field>
   python3 -c '
 import json,sys
 try: d = json.load(sys.stdin)
-except Exception: sys.exit(0)
+except Exception: sys.exit(3)
 v = d.get(sys.argv[1])
 if v is None: sys.exit(0)
 print(v if not isinstance(v, bool) else ("true" if v else "false"))
@@ -93,7 +101,7 @@ exports_keys() { # <json on stdin> -> one key per line, sorted
   python3 -c '
 import json,sys
 try: d = json.load(sys.stdin)
-except Exception: sys.exit(0)
+except Exception: sys.exit(3)
 e = d.get("exports")
 if isinstance(e, dict):
     for k in sorted(e): print(k)
@@ -101,10 +109,14 @@ if isinstance(e, dict):
 }
 
 ignore_list() { # <ref>
+  # An ABSENT config is a legitimately empty ignore list; an UNREADABLE one is
+  # a reader failure (return 3) — an empty list born from a failed read would
+  # silently un-skip every ignored package.
+  git cat-file -e "$1:$CHANGESET_CONFIG" 2>/dev/null || return 0
   blob_at "$1" "$CHANGESET_CONFIG" | python3 -c '
 import json,sys
 try: d = json.load(sys.stdin)
-except Exception: sys.exit(0)
+except Exception: sys.exit(3)
 for n in d.get("ignore", []) or []: print(n)
 '
 }
@@ -115,9 +127,22 @@ for n in d.get("ignore", []) or []: print(n)
 resolve_r() { # <ref> <path>
   local ref="$1" path="$2" c v p pv
   for c in $(git log --format=%H "$ref" -- "$path" 2>/dev/null); do
-    v="$(blob_at "$c" "$path" | json_field version)"
+    # Existence-aware on purpose: a commit where the blob is ABSENT (the
+    # package\'s birth parent, or a deletion commit git log also lists) reads
+    # as an empty version, exactly as before. Only a blob that EXISTS and then
+    # fails to parse — or a reader that fails under load — returns 3, so a
+    # transient failure can never mis-pick R.
+    if git cat-file -e "$c:$path" 2>/dev/null; then
+      v="$(blob_at "$c" "$path" | json_field version)" || return 3
+    else
+      v=""
+    fi
     if ! p="$(git rev-parse --verify -q "$c^" 2>/dev/null)"; then printf '%s\n' "$c"; return 0; fi
-    pv="$(blob_at "$p" "$path" | json_field version)"
+    if git cat-file -e "$p:$path" 2>/dev/null; then
+      pv="$(blob_at "$p" "$path" | json_field version)" || return 3
+    else
+      pv=""
+    fi
     [ "$v" != "$pv" ] && { printf '%s\n' "$c"; return 0; }
   done
   printf '\n'
@@ -127,7 +152,8 @@ run_door() { # <ref>
   local ref="$1"
   local sha; sha="$(git rev-parse --verify -q "$ref^{commit}")" || die "not a commit: $ref"
 
-  local ignores; ignores="$(ignore_list "$ref")"
+  local ignores
+  ignores="$(ignore_list "$ref")" || die "reader failed on $CHANGESET_CONFIG at $ref — refusing to verdict with an ignore list born from a failed read"
 
   printf 'pds-published-artifact-door — REF=%s (%s)\n\n' "$ref" "${sha:0:9}"
   printf 'IGNORE LIST (%s @ REF): %s\n\n' "$CHANGESET_CONFIG" "$(printf '%s' "$ignores" | tr '\n' ' ')"
@@ -143,14 +169,26 @@ run_door() { # <ref>
   for d in $dirs; do
     path="$PKG_ROOT/$d/package.json"
     pjson="$(blob_at "$ref" "$path")"
-    [ -n "$pjson" ] && continue_marker=1 || continue
+    if [ -z "$pjson" ]; then
+      # A dir with NO package.json is a legit non-package entry — skipped
+      # silently, as always. A blob that EXISTS and read as nothing is the
+      # reader failing under load, and a silent skip there un-checks a real
+      # package with no trace: name it as an ERROR instead.
+      if git cat-file -e "$ref:$path" 2>/dev/null; then
+        errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR reader failed (blob exists, read empty)\n' "$d" "-" "-"
+      fi
+      continue
+    fi
     enumerated=$((enumerated + 1))
 
     # NAMED BY ITS package.json, never by @barkpark/$dir — create-barkpark-app
-    # is unscoped and a scope-builder stops checking it silently.
-    name="$(printf '%s' "$pjson" | json_field name)"
-    ver="$(printf '%s' "$pjson" | json_field version)"
-    priv="$(printf '%s' "$pjson" | json_field private)"
+    # is unscoped and a scope-builder stops checking it silently. A json_field
+    # rc 3 is a parse/read failure — an ERROR row, never a classification.
+    if ! name="$(printf '%s' "$pjson" | json_field name)" ||
+       ! ver="$(printf '%s' "$pjson" | json_field version)" ||
+       ! priv="$(printf '%s' "$pjson" | json_field private)"; then
+      errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR unreadable package.json (reader failed, not a verdict)\n' "$d" "-" "-"; continue
+    fi
     [ -n "$name" ] || { errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR no name field\n' "$d" "-" "-"; continue; }
 
     if [ "$priv" = "true" ]; then
@@ -163,15 +201,25 @@ run_door() { # <ref>
       skipped=$((skipped + 1)); printf '%-26s %-20s %-11s SKIP .changeset ignore\n' "$name" "$ver" "-"; continue
     fi
 
-    r="$(resolve_r "$ref" "$path")"
+    if ! r="$(resolve_r "$ref" "$path")"; then
+      errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR reader failed while deriving R (not a verdict)\n' "$name" "$ver" "-"; continue
+    fi
     if [ -z "$r" ]; then
       errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR no R (version literal never changed)\n' "$name" "$ver" "-"; continue
     fi
     checked=$((checked + 1))
 
-    new_keys="$(comm -23 \
-      <(printf '%s' "$pjson" | exports_keys) \
-      <(blob_at "$r" "$path" | exports_keys))"
+    # Both key sets are read INTO variables first: a process substitution\'s
+    # exit status is invisible to comm, so a parse failure there used to yield
+    # an empty set and a wrong verdict in either direction.
+    local head_keys r_keys
+    if ! head_keys="$(printf '%s' "$pjson" | exports_keys)"; then
+      errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR unreadable exports at HEAD (reader failed)\n' "$name" "$ver" "${r:0:9}"; continue
+    fi
+    if ! r_keys="$(blob_at "$r" "$path" | exports_keys)"; then
+      errors=$((errors + 1)); printf '%-26s %-20s %-11s ERROR unreadable exports at R (reader failed)\n' "$name" "$ver" "${r:0:9}"; continue
+    fi
+    new_keys="$(comm -23 <(printf '%s\n' "$head_keys") <(printf '%s\n' "$r_keys"))"
 
     if [ -n "$new_keys" ]; then
       refusals=$((refusals + 1))
