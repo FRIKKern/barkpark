@@ -661,11 +661,32 @@ defmodule Barkpark.Accounts do
     end
   end
 
-  @doc "Disable TOTP and clear recovery codes."
+  @doc """
+  Disable TOTP and clear recovery codes.
+
+  `last_totp_at` IS PART OF THE WIPE, and this is the whole reason the
+  attribute list is spelled out rather than inherited. The stamp is the
+  replay guard for ONE secret (`totp_opts/1` feeds it to NimbleTOTP as
+  `since:`, and `reused?/3` rejects any code whose 30s step is <= it). Carrying
+  it across a disable attaches the OLD secret's consumed step to a BRAND NEW
+  one: re-enrol inside the same 30s period as the last successful verify and
+  the first `verify_totp/2` against the new secret returns `:error` on a
+  perfectly valid code.
+
+  The other two MFA-wipe paths — `do_reset_password/3` with `reset_mfa: true`
+  and `Accounts.Privacy` erasure — already clear it. This one drifted, and
+  nothing structurally holds the three together, so keep them in sync by hand:
+  a field added to the TOTP set belongs in ALL THREE.
+  """
   @spec disable_totp(User.t()) :: {:ok, User.t()}
   def disable_totp(%User{} = user) do
     user
-    |> User.totp_changeset(%{totp_secret: nil, totp_enabled: false, recovery_codes_hashed: []})
+    |> User.totp_changeset(%{
+      totp_secret: nil,
+      totp_enabled: false,
+      recovery_codes_hashed: [],
+      last_totp_at: nil
+    })
     |> Repo.update()
   end
 

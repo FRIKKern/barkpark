@@ -419,13 +419,25 @@ defmodule Barkpark.AccountsTest do
     # `valid_totp?/2` and `verify_totp/2` which both pass `totp_opts(user)`.
     # That asymmetry reads like an oversight. It is not.
     #
-    # `disable_totp/1` clears `totp_secret`/`totp_enabled`/`recovery_codes_hashed`
-    # but NOT `last_totp_at` (`do_reset_password/2` does clear it — the two
-    # MFA-wipe paths disagree, which is filed separately as wave-2 work). So
-    # after a disable, the row still carries the stamp from the OLD secret. If
-    # `enable_totp/3` passed `totp_opts(user)`, that stale stamp would arrive as
-    # `since:` and reject a perfectly valid code minted from a BRAND NEW secret —
-    # a permanent enrolment lockout for any user who ever used MFA before.
+    # If `enable_totp/3` passed `totp_opts(user)`, a `last_totp_at` left on the
+    # row would arrive as `since:` and reject a perfectly valid code minted from
+    # a BRAND NEW secret — a permanent enrolment lockout.
+    #
+    # THE FENCE'S SOURCE OF THAT STAMP CHANGED, and this is why the setup below
+    # is explicit rather than incidental. It used to arrive for free:
+    # `disable_totp/1` cleared `totp_secret`/`totp_enabled`/`recovery_codes_hashed`
+    # but NOT `last_totp_at`, so a disable handed this test the hazardous state
+    # by accident. That disagreement between the MFA-wipe paths was itself the
+    # defect (`hg-bl-disable-totp-stale-last-totp-at`) and is now fixed, so a
+    # disable leaves the stamp nil, `totp_opts/1` returns `[]`, and the tempting
+    # mutation would look harmless HERE while still being a lockout wherever a
+    # stamp does survive.
+    #
+    # So the fence now BUILDS the stamp itself. What it guards is
+    # `enable_totp/3`'s contract — enrolment validates against the candidate
+    # secret alone — not any other function's field set. Constructing the state
+    # directly is what keeps that guarantee testable after the only accidental
+    # producer of it went away.
     test "FENCE A: re-enrolling a NEW secret after disable_totp accepts a valid code" do
       user = user_fixture(%{email: "re-enrol@example.com"})
       first_secret = Accounts.totp_secret()
@@ -441,7 +453,19 @@ defmodule Barkpark.AccountsTest do
 
       {:ok, user} = Accounts.disable_totp(user)
       refute user.totp_enabled
-      # The disable left the old stamp behind. That is the hazard.
+
+      # The disable now clears the stamp — that is the fix, and it is asserted
+      # here so this fence reds if the two wipe paths ever drift apart again.
+      assert is_nil(user.last_totp_at)
+
+      # Re-attach a consumed step directly. This is the hazardous state the
+      # fence is about: whatever puts a stamp on a row, `enable_totp/3` must not
+      # read it as `since:`.
+      {:ok, user} =
+        user
+        |> User.totp_changeset(%{last_totp_at: DateTime.utc_now()})
+        |> Barkpark.Repo.update()
+
       refute is_nil(user.last_totp_at)
 
       # A brand new secret and a freshly minted, valid code for it. This MUST
