@@ -54,6 +54,8 @@ interface GenerateCliOptions {
   watch?: boolean
   /** Read the schema envelope from a local JSON file instead of fetching it. */
   from?: string
+  /** Schema-fetch deadline in ms as typed on the command line (0 disables). */
+  timeout?: string
 }
 
 /**
@@ -83,6 +85,21 @@ async function loadConfig(configPath?: string): Promise<Partial<BarkparkCodegenC
   return mod.default ?? {}
 }
 
+/**
+ * Parse a timeout value arriving as text (the `--timeout` flag or the
+ * `BARKPARK_SCHEMA_TIMEOUT_MS` env var) into non-negative integer milliseconds.
+ * `0` disables the deadline (core's convention). Anything else fails LOUD —
+ * a mistyped deadline silently becoming the default is how a slow-link escape
+ * hatch stops being one.
+ */
+function parseTimeoutMs(raw: string, source: string): number {
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`Invalid ${source} value "${raw}": expected a non-negative integer of milliseconds (0 disables).`)
+  }
+  return n
+}
+
 /** Resolve the effective config from a config file overlaid with CLI flags. */
 export async function resolveConfig(options: GenerateCliOptions): Promise<BarkparkCodegenConfig> {
   const file = await loadConfig(options.config)
@@ -95,6 +112,16 @@ export async function resolveConfig(options: GenerateCliOptions): Promise<Barkpa
   if (options.project !== undefined) merged.project = options.project
   if (merged.apiUrl === undefined && process.env['BARKPARK_API_URL']) {
     merged.apiUrl = process.env['BARKPARK_API_URL']
+  }
+  // Deadline precedence mirrors apiUrl: flag > config file > environment.
+  if (options.timeout !== undefined) {
+    merged.timeoutMs = parseTimeoutMs(options.timeout, '--timeout')
+  }
+  if (merged.timeoutMs === undefined && process.env['BARKPARK_SCHEMA_TIMEOUT_MS']) {
+    merged.timeoutMs = parseTimeoutMs(
+      process.env['BARKPARK_SCHEMA_TIMEOUT_MS'],
+      'BARKPARK_SCHEMA_TIMEOUT_MS',
+    )
   }
 
   // Workspace + project are the two halves of a scoped schema path; supplying
@@ -161,6 +188,7 @@ async function runOnce(config: BarkparkCodegenConfig): Promise<string> {
   if (config.token !== undefined) fetchArgs.token = config.token
   if (config.workspace !== undefined) fetchArgs.workspace = config.workspace
   if (config.project !== undefined) fetchArgs.project = config.project
+  if (config.timeoutMs !== undefined) fetchArgs.timeoutMs = config.timeoutMs
 
   const envelope = await fetchSchema(fetchArgs)
   const code = await generateTypes(envelope, { dataset: config.dataset })
@@ -183,6 +211,10 @@ cli
     'Read the schema envelope from a local JSON file instead of fetching it (network-free; powers the CI drift gate)',
   )
   .option('--schema <file>', 'Alias for --from')
+  .option(
+    '--timeout <ms>',
+    'Schema-fetch deadline in milliseconds; 0 disables (or set BARKPARK_SCHEMA_TIMEOUT_MS; default 30000)',
+  )
   .option('--watch', 'Re-generate when the config file changes')
   .action(async (options: GenerateCliOptions & { schema?: string }) => {
     try {
