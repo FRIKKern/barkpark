@@ -14,9 +14,34 @@ defmodule Barkpark.Sites.DeployRunnerStageNamesTest do
   active task`, `Cloud gate`, `Console gate`), so it could not block a merge
   even when it did run.
 
-  This file is the durable half: it runs on the REQUIRED Elixir lane, which
-  fires on `api/**` — the very tree the attribute lives in. Widening the
-  harness workflow's `paths:` is belt-and-braces on top.
+  This file is the durable half FOR THE `@stage_names` ATTRIBUTE ONLY — it
+  runs on the REQUIRED Elixir lane, which fires on `api/**`, the very tree the
+  attribute lives in. It is NOT the durable half for the two engines' own
+  `--self-test` assertions: those still ride only
+  `.github/workflows/deploy-harnesses.yml` (`deploy/**`-filtered, not a
+  required check), unchanged by anything here. What this file's `@engines`
+  reads (`deploy/site-deploy.sh`, `deploy/site-deploy-node.sh`, both via the
+  `Path.expand(@repo_root, __DIR__)` root-anchor idiom above) DOES buy: until
+  `elixir-path-escape-check.sh` learned to see that idiom, those two reads —
+  plus `.github/workflows/deploy.yml` and `scripts/check-deployyml-filters.sh`
+  read by this file's sibling `deployyml_connectors_pathfilter_test.exs` —
+  were UNDECLARED to the REQUIRED Elixir gate's dispatcher: a PR touching only
+  `deploy/site-deploy.sh` could skip the suite and still report green, with
+  neither this pin nor the engines' own self-test able to fire. Declaring the
+  four paths in `ELIXIR_TEST_ONLY_PATHS` makes THIS file's own pins durable
+  against changes to the files they read — it does not make the shell
+  engines' internal self-tests required; that remains advisory via
+  deploy-harnesses.yml. The cost: every `deploy/**` PR now runs the full
+  Elixir suite (9m31s-16m29s per that workflow's own note) — paid once here,
+  for a doctrine whose only other guard could not block a merge at all.
+
+  The four-path declaration is a LOWER BOUND, not a closed set: it covers the
+  literal + root-anchor idioms `elixir-path-escape-check.sh` can see. An
+  interpolated anchor (`Path.expand("../\#{x}", __DIR__)`), the list form
+  `Path.join([root, a, b])`, and an execution-cwd read via
+  `System.cmd(_, cd: root)` (used by
+  `api/test/barkpark/pds_door_census_test.exs`, a separate class this
+  widening does not close) remain invisible to it.
 
   WHY THE DOCTRINE MATTERS. `ROUTE` is a REPORT, not a verdict. Both engines
   emit `BPSTAGE name=ROUTE …` on a real deploy; `parse_stage_line/2` folds a

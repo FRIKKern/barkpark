@@ -8,6 +8,14 @@
 #
 # The cases that matter are the ones that prove the ratchet can FAIL:
 #   * an uncovered repo-root read must red                  (case 3)
+#   * an uncovered read reached ONLY through the ROOT-ANCHOR
+#     idiom must red                                        (case 3b) — the
+#     newest measured false OK: `@repo_root Path.expand("../../../..",
+#     __DIR__)` + `Path.join(@repo_root, "deploy/site-deploy.sh")` carries no
+#     `"../<file>"` literal at the read site, so the literal doors never saw
+#     it. On origin/main the ratchet printed `OK: every repo-root read … is
+#     dispatched on.` at rc=0 on a byte-clean tree while FOUR such reads went
+#     undeclared, inside the REQUIRED Elixir gate.
 #   * an uncovered read in an UNTRACKED file must red       (case 4) — the
 #     measured vacuous pass this ratchet was redesigned to avoid: a prototype
 #     enumerating via `git ls-files` printed "OK: every repo-root read is
@@ -64,14 +72,23 @@ trap cleanup EXIT
 # `covered_rel` is a path INSIDE a declared set; `uncovered_rel` is not in any.
 #
 # THE FIXTURE MUST CLEAR EVERY IDIOM FLOOR, not one aggregate number. The
-# ratchet now floors each of its four doors separately (`--print-floors`:
-# test-cwd 8, test-dir 8, lib-cwd 5, lib-dir 5), so a fixture that reads only
+# ratchet floors each of its doors separately (`--print-floors`: test-cwd 8,
+# test-dir 8, lib-cwd 5, lib-dir 5, test-root 2), so a fixture that reads only
 # from api/test would red on `lib-*: 0` and the coverage cases below would
 # "prove" coverage using a floor failure. Every `../../../…` literal written
 # from api/{lib,test}/barkpark resolves identically under BOTH bases — the
 # file's own directory and `api/` — so one literal feeds one `-dir` row and one
 # `-cwd` row. Hence: ten literals in the api/test file, six in the api/lib file,
 # which leaves real headroom over 8 and 5 rather than sitting exactly on them.
+#
+# The `test-root` block is the ROOT-ANCHOR idiom — an anchor bound once with
+# `Path.expand("../../..", __DIR__)` and then `Path.join(@root, "literal")` at
+# each read site. It is here for the same reason the api/lib literals are: it
+# is a door with its own floor, and a fixture that omitted it would make every
+# mutation case below red on `test-root: 0` instead of on the thing it tests.
+# The anchor's own literal contributes NO `-dir`/`-cwd` row (it normalises to
+# the empty string — which is exactly why the literal doors could never see
+# this idiom, and why the door had to be added).
 make_fixture() {
   local root="$1"
   mkdir -p "$root/api/lib/barkpark" "$root/api/test/barkpark" \
@@ -100,6 +117,14 @@ make_fixture() {
   @j Path.expand("../../../internal/pdrender/testdata/blocks.json", __DIR__)
   @k Path.expand("../../../cmd/barkpark/testdata/preview-parity.json", __DIR__)
   @i File.read!("../design/status-manifest.json")
+  # ROOT-ANCHOR idiom -> test-root 4 (floor: 2). The anchor literal itself
+  # normalises to "" and is dropped, so these rows can ONLY come from the
+  # `-root` door.
+  @root Path.expand("../../..", __DIR__)
+  @r1 Path.join(@root, "internal/taskboard/components.go")
+  @r2 Path.join(@root, "design/tokens.json")
+  @r3 Path.join(@root, "cmd/barkpark/testdata/preview-parity.json")
+  @r4 Path.join(@root, "internal/pdrender/testdata/blocks.json")
   # traversal-attack fixtures: asserted on, never read — must NOT be counted
   @x "../etc/passwd"
   @y "../up"
@@ -222,6 +247,70 @@ if has "$out" "read from: api/test/barkpark/escaping_test.exs"; then
   ok "names the file that reads it"
 else
   no "did not attribute the read: $out"
+fi
+echo
+
+# ── case 3b: THE ROOT-ANCHOR DOOR — the read no `"../…"` literal reveals ────
+# The mutation that used to pass GREEN. `@repo_root Path.expand("../../..",
+# __DIR__)` + `Path.join(@repo_root, "…")` carries no `"../<file>"` literal at
+# the read site: the only literal is the anchor, which norm_path reduces to the
+# empty string and the scanner discards. On origin/main this exact fixture
+# exited 0 with the OK verdict — the same false-OK shape that hid four live
+# undeclared reads (deploy/site-deploy.sh, deploy/site-deploy-node.sh,
+# .github/workflows/deploy.yml, scripts/check-deployyml-filters.sh) inside the
+# REQUIRED Elixir gate.
+#
+# The uncovered path is reached ONLY through this idiom, so a scanner that
+# loses the `-root` door greens here again — which is what makes this a case
+# that can fail, not decoration.
+echo "case 3b: an uncovered read via the ROOT-ANCHOR idiom reds"
+FX_ROOT="$TMPROOT/rootanchor"
+make_fixture "$FX_ROOT"
+mkdir -p "$FX_ROOT/nowhere"
+: >"$FX_ROOT/nowhere/anchored.json"
+cat >"$FX_ROOT/api/test/barkpark/anchored_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @bad Path.join(@repo_root, "nowhere/anchored.json")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ROOT" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a root-anchored uncovered read"
+else
+  no "PASSED with a root-anchored uncovered read — the -root door is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/anchored.json"; then
+  ok "names the path the anchor+Path.join resolved to"
+else
+  no "did not name the root-anchored path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/anchored_test.exs"; then
+  ok "attributes the root-anchored read to its file"
+else
+  no "did not attribute the root-anchored read: $out"
+fi
+# The `lower-case var =` binding form, not just the `@attr` form.
+cat >"$FX_ROOT/api/test/barkpark/anchored_test.exs" <<'EX'
+  root = Path.expand("../../..", __DIR__)
+  bad = Path.join(root, "nowhere/anchored.json")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ROOT" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has "$out" "UNCOVERED repo-root read: nowhere/anchored.json"; then
+  ok "the plain-variable anchor binding is seen too"
+else
+  no "a plain-variable anchor binding is invisible to the -root door: $out"
+fi
+# A root-anchored read that IS declared must stay green — the door must not
+# turn every anchored read into a red.
+rm -f "$FX_ROOT/api/test/barkpark/anchored_test.exs"
+cat >"$FX_ROOT/api/test/barkpark/anchored_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @good Path.join(@repo_root, "internal/taskboard/tokens_gen.go")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ROOT" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a DECLARED root-anchored read stays green"
+else
+  no "a declared root-anchored read redded — the door over-reports: $out"
 fi
 echo
 
