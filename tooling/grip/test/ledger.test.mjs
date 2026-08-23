@@ -1412,9 +1412,38 @@ test("CONTROL: the committed rows fold CLEAN under the hardening — unreadable 
   //
   // The scope is a SHAPE computed from each file's own bytes, never a pinned
   // list of filenames, and it grows with the store by construction.
+  //
+  // ── ONE NAMED EXCEPTION, AND WHY IT IS NOT A SOFTENING ────────────────────
+  // The bp write set is now DERIVED from `bp capabilities -o json` rather than
+  // hand-written (screen.mjs, BP_WRITE_COMMANDS), which closed 62 writing bp
+  // commands the screen used to admit — `bp doc mutate`, `bp secret
+  // scoped-set`, `bp auth mfa-disable` among them. Exactly ONE attested row
+  // falls to that tightening, and it is named below rather than absorbed into a
+  // `<= 1`, so a SECOND unfoldable row still reds this control immediately.
+  //
+  // THE COST IS REAL AND IS STATED, not hidden: this row's evidence can no
+  // longer be re-derived by the census, because the command that produced it is
+  // no longer re-runnable. That is the honest price of the tightening.
+  //
+  // WHY THE ROW IS NOT SIMPLY RE-ADMITTED. `--dry-run` is what makes it safe,
+  // and NO writing command in bp's manifest declares `--dry-run` in its own
+  // flag list — checked: 0 of 97. Its per-verb support is documented in `bp
+  // --help` and nowhere machine-readable, so the screen cannot DERIVE that the
+  // command is a read. Admitting it would be trusting a flag, in the one
+  // direction this module is not allowed to be wrong in. The same documentation
+  // standard already appears above for `tree -o`, and it is used there to
+  // REFUSE.
+  const BP_DRY_RUN_ROW = "bp task move legendary-quality-takeover-review-remediation legendary-quality-takeover-root --dry-run -o json";
+
   const realNow = new Date().toISOString().replace(/\.\d+Z$/, "Z");
   const folded = foldLedger(DEFAULT_LEDGER_DIR, { now: realNow, screen: screenCommand, scope: "attested" });
-  assert.equal(folded.unreadable.length, 0, `every row the write path admitted must still fold clean: ${JSON.stringify(folded.unreadable.slice(0, 3))}`);
+  const unexpected = folded.unreadable.filter((u) => !(u.reason === "REFUSED-COMMAND" && String(u.message).includes(BP_DRY_RUN_ROW)));
+  assert.equal(unexpected.length, 0, `every row the write path admitted must still fold clean: ${JSON.stringify(unexpected.slice(0, 3))}`);
+  // …and the exception is asserted to still BE there. A named exception that
+  // silently stops applying is how a scoped control dies quietly — the same
+  // failure mode the run/row floors below exist for.
+  assert.equal(folded.unreadable.length, 1, `the bp write-set tightening rejects EXACTLY the one named row: ${JSON.stringify(folded.unreadable.map((u) => u.reason))}`);
+  assert.match(folded.unreadable[0].message, /declared WRITING by bp's own capabilities manifest/, "and for the stated reason, not some other refusal that happens to name the same row");
   assert.ok(folded.stats.runs >= ATTESTED_RUNS_FLOOR, `the attested scope must not SHRINK: ${folded.stats.runs} run(s) < floor ${ATTESTED_RUNS_FLOOR}`);
   assert.ok(folded.stats.rows >= ATTESTED_ROWS_FLOOR, `a vacuous clean fold proves nothing: ${folded.stats.rows} row(s) < floor ${ATTESTED_ROWS_FLOOR}`);
 
