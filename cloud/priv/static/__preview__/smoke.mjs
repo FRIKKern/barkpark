@@ -2382,6 +2382,27 @@ const EXPECTATIONS = {
       assert.ok(body.includes("bob@acme.com"), "the second actor's singleton renders separately");
       // The keyset Load-more control survives the regrow.
       assert.ok(reg.get("activity-more"), "the Load more control still mounts");
+
+      // ── cch-w12-followup-smoke-who-axis-expectation: the Who axis, SEEN ──
+      // cch-w12-s1 gave this fixture a members roster (ada/lin/rex) so the
+      // actor axis could stop being structurally invisible here — but the
+      // assertion was outside that slice's file fence, so until now nothing
+      // read it. This boot IS the cold ordering the latch bug lived in:
+      // applyRoute() deep-links #activity in the same synchronous turn as the
+      // un-awaited loadMe() (meCache === null), and the roster lands only via
+      // loadMe() calling back in — MEASURED, not assumed: re-introducing the
+      // pre-fix bug (activityActorsTried = true hoisted above the team-id
+      // guard) makes lin/rex vanish from this very innerHTML while all three
+      // source-shape pins in __app.test.mjs are what they are. So this is a
+      // live cold-boot-latch guard, not a decoration over the unit pins.
+      const who = filters.split("Who</span>")[1] || "";
+      assert.ok(who.length > 0, "the Who axis segment renders at all");
+      assert.ok(who.includes('data-actfilter="usr_ada"') && who.includes(">Just me<"),
+        "the caller renders as Just me (ada is the me() user)");
+      assert.ok(who.includes('data-actfilter="usr_lin"') && who.includes(">lin<"),
+        "the roster read landed: lin renders on the actor axis — if this reds, the cold-boot latch burned before the members fetch was issued");
+      assert.ok(who.includes('data-actfilter="usr_rex"') && who.includes(">rex<"),
+        "the roster read landed: rex renders on the actor axis");
     },
   },
 
