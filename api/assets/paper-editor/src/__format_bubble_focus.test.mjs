@@ -151,15 +151,56 @@ try {
   });
 
   // Escape path: open the row again, Escape returns focus with the bubble alive.
+  // Also proves the double-fire fix (paper-editor-bundle-stale-and-escape-
+  // stoppropagation): a window-level Escape listener — standing in for the
+  // palette/menu layer's own capture-bubbling handler — must NOT observe this
+  // keydown once stopPropagation() runs on the link input's Escape branch.
   mousedown(linkBtn);
   await frame();
   await settle();
+  let windowEscapeCount = 0;
+  const onWindowEscape = (e) => {
+    if (e.key === "Escape") windowEscapeCount++;
+  };
+  // A CAPTURE-phase listener stands in for the palette/menu layer's own
+  // handler: capture runs root -> target BEFORE this element's bubble-phase
+  // stopPropagation() ever executes, so it must still fire — proving the fix
+  // eliminates the bubble-phase double-fire without touching capture-phase
+  // precedence (both directions of the task's browser measurement: E1 window
+  // BUBBLE=0, E2 palette-open menu capture stays =1).
+  let captureEscapeCount = 0;
+  const onCaptureEscape = (e) => {
+    if (e.key === "Escape") captureEscapeCount++;
+  };
+  window.addEventListener("keydown", onWindowEscape);
+  window.addEventListener("keydown", onCaptureEscape, { capture: true });
   keydown(linkInput, "Escape");
+  window.removeEventListener("keydown", onWindowEscape);
+  window.removeEventListener("keydown", onCaptureEscape, { capture: true });
   await settle();
   check("Escape closes the row, refocuses the editor, bubble alive", () => {
     assert.equal(linkRow.style.display, "none", "row closed");
     assert.equal(bubble.style.display, "flex", "bubble alive");
     assert.ok(editor.view.hasFocus(), "editor refocused");
+  });
+  check("Escape in the link input does not double-fire a window bubble-phase Escape handler", () => {
+    assert.equal(
+      windowEscapeCount,
+      0,
+      "the link input's Escape branch must stopPropagation() so a window/menu-layer " +
+        "bubble-phase Escape listener never also sees this keydown — without it, one " +
+        "Escape press closes the link row AND fires whatever else is listening for " +
+        "Escape on window.",
+    );
+  });
+  check("...while a capture-phase Escape listener (palette precedence) still fires", () => {
+    assert.equal(
+      captureEscapeCount,
+      1,
+      "stopPropagation() on the bubble phase must not suppress a capture-phase " +
+        "listener that already ran before the event reached the input — a palette " +
+        "open at the same time must keep first say over Escape.",
+    );
   });
 
   // The hide path the fix must not break: focus leaving BOTH the editor and the
