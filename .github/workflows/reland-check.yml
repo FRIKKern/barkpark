@@ -40,9 +40,20 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true # advisory — report, never block
     steps:
-      - name: Checkout (full history for the base diff)
+      # PINNED TO THE PR HEAD SHA, not the default merge ref (charter D34).
+      # actions/checkout's default on a pull_request is refs/pull/N/merge — the
+      # PR head ALREADY MERGED with the current base tip. Diffing that against
+      # `base.sha` therefore reports every file anyone else landed on main since
+      # this PR branched, not this PR's own files. Measured: `Re-land advisory`
+      # concluded FAILURE on a probe PR whose only change was one docs file.
+      # This is the same one-line fix the Elixir dispatcher took; this workflow
+      # has exactly ONE checkout, so nothing else moves off the merge ref.
+      # Still advisory today — it becomes a BLOCKING false red the moment any
+      # name from this workflow is pinned into .github/required-checks.json.
+      - name: Checkout (PR head, full history for the base diff)
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Compute changed files
