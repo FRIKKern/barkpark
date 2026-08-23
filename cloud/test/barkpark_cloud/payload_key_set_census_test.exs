@@ -1366,7 +1366,19 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # moves the SITE register below instead, crossing INTO it at 2. That is charter
   # D260's shape and the exact reason the register exists. Measured by the
   # 999-technique on this branch, never summed.
-  @go_tag_pinned 301
+  #
+  # 301 -> 302 (dr-w31-fu-agency-reaches-the-cli, PR #13359): DeployLedger has
+  # emitted `agency` (who a failure class accuses — box / site / ambiguous) on
+  # every class row since dr-w31 landed on the Cloud side, and until this slice
+  # `DeployCensusClass` never declared the tag — `json.Unmarshal` dropped it
+  # silently, so the CLI could decode the class but never who it blames. ONE
+  # new name, ONE new site: `agency` was not previously declared anywhere else
+  # in the package, so it does not cross into the SITE register below — the
+  # SITE partition test's expected total moves by exactly 1 alongside this pin,
+  # never independently. Measured by the 999-technique on this branch (pin set
+  # to 999, refusal printed "302 json tag(s) found in internal/cloudclient"),
+  # never summed.
+  @go_tag_pinned 302
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
