@@ -342,11 +342,25 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert metadata.reason == "no_team_recipients"
     assert metadata.instances == 1
 
+    # (a2) THE WITHHOLD COUNT, from the shared funnel and not from this
+    # branch's own arithmetic (dr-w18-s3 criterion 5 / dr-w18-s3-fu).
+    # `deliver_fleet_digest/1` calls `Withhold.record(nil, "fleet_digest",
+    # :no_recipient_by_construction)` and threads its RETURNED value here, so
+    # this assertion is on the call's answer and not on a literal: `0` is the
+    # honest count because `Delivery` requires a recipient this branch does not
+    # have, and a non-zero would mean a row was written where D362 forbids one.
+    # Before the consented clause landed, that same call returned 0 too — but
+    # only after logging "refused an unrecordable withhold" as an operator
+    # error, every day, for a case withhold.ex's own moduledoc calls consented.
+    assert metadata.withheld == 0
+    refute log =~ "refused an unrecordable withhold"
+
     # (b) THE LINE — greppable in journald, at WARNING, because "nobody was
     # mailed" must not read like the info-level chatter of a healthy run.
     assert log =~ "fleet_digest phase=settled"
     assert log =~ "recipients=0"
     assert log =~ "sent=0"
+    assert log =~ "withheld=0"
     assert log =~ "[warning]"
 
     # The Swoosh Test adapter posts {:email, _} to this process on any send —
