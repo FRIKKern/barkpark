@@ -7739,8 +7739,13 @@
       : lc.removing
         ? '<div class="notice notice-warn" role="status">Tearing down the server and stopping billing — this can take a moment.</div>'
         : lc.suspended
+          // cch-w54-followup — the SECOND raw render of this column. cch-w54-s1
+          // humanised statusOf; this banner still printed the literal slug, so
+          // a quota-suspended box put `quota_exceeded` on the instance detail
+          // page. Same helper, same sentences; the helper also owns the
+          // absent-reason fallback, so the || literal here would be dead copy.
           ? '<div class="notice notice-error" role="alert"><b>Suspended.</b> ' +
-            esc(bp.suspended_reason || "Suspended for billing reasons") + "</div>"
+            esc(suspendedReasonText(bp.suspended_reason)) + "</div>"
           : "";
 
     return '<div class="detail-head detail-head--inst"><div class="detail-head-main">' +
