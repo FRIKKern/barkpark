@@ -2301,6 +2301,10 @@ async function main() {
         `REPORTED — the wrap costs vertical room and no pixel is pinned\n`,
       );
       let cells = 0, refs = 0, cruelSeen = 0, kindSeen = 0, clipped = 0, spilled = 0, pageOver = 0;
+      // cch-w28-bl (b): the truncation this leg no longer keys on was 40 chars.
+      // Print the widest clipper class actually seen so a reader can tell how
+      // far the old key was from colliding, instead of taking it on trust.
+      let widestClass = 0, clipperIds = 0;
       for (const theme of ["light", "dark"]) {
         // Enter at the WIDEST width — the previews card mounts once, from the
         // previews fetch; entering narrow would measure a layout the mount
@@ -2328,6 +2332,7 @@ async function main() {
             `    var rs=r.getClientRects();for(var i=0;i<rs.length;i++){if(rs[i].width>0&&(max===null||rs[i].right>max))max=rs[i].right;}}` +
             `  return max;}` +
             `var out={sw:d.scrollWidth,cw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),refs:[]};` +
+            `var clippers=[];` +
             // EVERY .deploy-ref in the PREVIEWS card, never a pinned one (D228):
             // querySelector singular cannot tell a card that rendered nothing
             // from a card of clean rows. Scoped to `.previews` because the
@@ -2352,7 +2357,18 @@ async function main() {
             `    gr:null,cl:null,clsw:0,clcw:0,clov:'',edge:null,lost:null,rect:+f.getBoundingClientRect().right.toFixed(2)};` +
             `  var g=glyphRight(f);if(g!==null)rec.gr=+g.toFixed(2);` +
             `  var cl=clipperOf(f);` +
-            `  if(cl){var r=cl.getBoundingClientRect();rec.cl=(cl.className||cl.tagName||'?').toString().slice(0,40);` +
+            // cch-w28-bl (b): THE DEDUPE KEY IS THE ELEMENT, NOT ITS CLASS
+            // STRING. `.slice(0,40)` made the key a 40-char PREFIX, so two
+            // different clipping ancestors agreeing in their first 40 chars
+            // collapsed into one Set entry and the second real clipper was
+            // SILENCED. `clippers.indexOf(cl)` is element identity and cannot
+            // collide however the class lists are spelled. MEASURED HONESTLY:
+            // on today's fixtures the clipper classes are 7 and 16 chars, so
+            // the truncation has never yet collided — this closes a LATENT
+            // hazard, and the leg now prints the widest class string it saw so
+            // a reader can tell when that stops being true.
+            `  if(cl){var r=cl.getBoundingClientRect();var ci=clippers.indexOf(cl);if(ci<0){ci=clippers.push(cl)-1;}rec.ci=ci;` +
+            `    rec.cl=(cl.className||cl.tagName||'?').toString();` +
             `    rec.clsw=cl.scrollWidth;rec.clcw=cl.clientWidth;rec.clov=getComputedStyle(cl).overflowX;` +
             `    rec.edge=+(r.left+cl.clientLeft+cl.clientWidth).toFixed(2);` +
             `    if(rec.gr!==null)rec.lost=+(rec.gr-rec.edge).toFixed(2);` +
@@ -2380,6 +2396,10 @@ async function main() {
           // ONE VOICE PER CLIPPER. Three preview rows share the previews card,
           // so an unguarded loop shouts the same clipped card three times and
           // buries WHICH row filled it.
+          for (const b of m.refs) {
+            if (b.cl) widestClass = Math.max(widestClass, String(b.cl).length);
+            if (typeof b.ci === "number") clipperIds = Math.max(clipperIds, b.ci + 1);
+          }
           const clippersSaid = new Set();
           for (const b of m.refs) {
             refs++;
@@ -2403,11 +2423,35 @@ async function main() {
               fail(D, `site-states/${theme}@${width} .deploy-ref (${b.len} chars): no clipping ancestor found — the walk that finds the element doing the swallowing returned nothing, so the clipper assertion measured nothing`);
               continue;
             }
-            if (b.clov !== "visible" && b.clsw > b.clcw && !clippersSaid.has(b.cl)) {
-              clippersSaid.add(b.cl);
+            if (b.clov !== "visible" && b.clsw > b.clcw && !clippersSaid.has(b.ci)) {
+              clippersSaid.add(b.ci);
               clipped++;
-              const filler = m.refs.filter((x) => x.cl === b.cl).sort((x, y) => (y.lost ?? -1e9) - (x.lost ?? -1e9))[0];
-              fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of a branch name a person chose is inside a box that clips it, with no scrollbar and no page scroll (widest ref inside it: ${filler.len} chars, longest run ${filler.run}, overflow-wrap:${filler.ow}, word-break:${filler.wb})`);
+              // THE SAME THREE DEFECTS, IN THE SAME SHAPE, ONE LEG UP.
+              // cch-w28-bl names only W26-deploy-fail-clip, but this block is a
+              // structural clone of it — same `clipperOf` walk, same
+              // 40-char-prefix Set key, same `filter(cl).sort(lost)` filler —
+              // and the clipper it finds (.previews) likewise holds siblings
+              // this leg does not own. Fixing only the named instance would
+              // leave the identical false attribution standing here, worded
+              // about a BRANCH NAME instead of a failure reason.
+              //
+              // WHAT IS AND IS NOT PROVEN HERE. The browser re-derivation
+              // (16 false findings, anyPanelLost=false) was driven on the W26
+              // leg; this leg is repaired by PARITY, and its own mutation proof
+              // is the whole-file one below — deleting .deploy-fail's
+              // `overflow-wrap: anywhere` makes .deploys spill for real and
+              // BOTH legs must keep speaking, W26 attributed and this one
+              // silent. It is not claimed that a false report was observed
+              // coming out of THIS leg.
+              const under = m.refs.filter((x) => x.ci === b.ci);
+              const spillers = under.filter((x) => x.lost !== null && x.lost > 0.5);
+              if (spillers.length) {
+                const filler = spillers.slice().sort((x, y) => y.lost - x.lost)[0];
+                fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of a branch name a person chose is inside a box that clips it, with no scrollbar and no page scroll (${spillers.length} of ${under.length} ref(s) under it lose glyphs; the worst loses ${filler.lost}px past the clip edge — ${filler.len} chars, longest run ${filler.run}, overflow-wrap:${filler.ow}, word-break:${filler.wb})`);
+              } else {
+                const closest = under.reduce((a, x) => (x.lost !== null && (a === null || x.lost > a) ? x.lost : a), null);
+                fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of this card is swallowed with no scrollbar and no page scroll, and it is UN-ATTRIBUTED: not one of the ${under.length} .deploy-ref line(s) under it loses a glyph (the closest stops ${closest === null ? "?" : Math.abs(closest)}px short of the clip edge). The overflow is real and belongs to a SIBLING in the same card — .preview-url, the status pill or the timestamps — which this leg does not own. Do NOT read this line as a branch name being cut`);
+              }
             }
             // (5) THE ELEMENT'S OWN BOX. NOT a spare for the clipper — it goes
             // green the moment a remedy moves the clip up a level — and NOT a
@@ -2473,6 +2517,13 @@ async function main() {
           `cruel ${PREVIEW_CRUEL_BRANCH.length}-char branch beside its ${PREVIEW_CRUEL_HOST.length}-char producer-` +
           `capped host, ${kindSeen} the "${KIND_BRANCH}" control), ${clipped} clipper(s) holding more than they ` +
           `show, ${spilled} box(es) painting glyphs past their own edge`,
+        );
+        okLine(
+          `ATTRIBUTION: every clipper finding above is keyed on the clipping ELEMENT (${clipperIds} distinct one(s) ` +
+          `seen in a cell), never on a truncated class string — the widest clipper class measured was ${widestClass} ` +
+          `chars against the 40-char prefix this leg used to dedupe on, so the old key was ${40 - widestClass} chars ` +
+          `from silencing a second real clipper. A clipper that overflows while no .deploy-ref under it loses a glyph ` +
+          `is reported as UN-ATTRIBUTED and names the siblings it could have come from instead`,
         );
         okLine(
           `THE SELECTOR AXIS IS CLOSED BY THIS LEG: before it, git grep -c 'deploy-ref|preview-url' origin/main ` +
@@ -6184,6 +6235,10 @@ async function main() {
         `panel height, REPORTED — the wrap costs vertical room and no pixel is pinned\n`,
       );
       let cells = 0, panels = 0, cruelSeen = 0, kindSeen = 0, clipped = 0, spilled = 0, pageOver = 0;
+      // cch-w28-bl (b): the truncation this leg no longer keys on was 40 chars.
+      // Print the widest clipper class actually seen so a reader can tell how
+      // far the old key was from colliding, instead of taking it on trust.
+      let widestClass = 0, clipperIds = 0;
       for (const theme of ["light", "dark"]) {
         // Enter at the WIDEST width — the deploy list mounts once, from the
         // deployments fetch; entering narrow would measure a layout the mount
@@ -6213,6 +6268,7 @@ async function main() {
             `    var rs=r.getClientRects();for(var i=0;i<rs.length;i++){if(rs[i].width>0&&(max===null||rs[i].right>max))max=rs[i].right;}}` +
             `  return max;}` +
             `var out={sw:d.scrollWidth,cw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),boxes:[]};` +
+            `var clippers=[];` +
             // EVERY panel on the page, never a pinned one (D228): querySelector
             // singular cannot tell a list that rendered nothing from a list of
             // clean panels.
@@ -6224,7 +6280,18 @@ async function main() {
             `    gr:null,cl:null,clsw:0,clcw:0,clov:'',edge:null,lost:null,rect:+f.getBoundingClientRect().right.toFixed(2)};` +
             `  var g=glyphRight(f);if(g!==null)rec.gr=+g.toFixed(2);` +
             `  var cl=clipperOf(f);` +
-            `  if(cl){var r=cl.getBoundingClientRect();rec.cl=(cl.className||cl.tagName||'?').toString().slice(0,40);` +
+            // cch-w28-bl (b): THE DEDUPE KEY IS THE ELEMENT, NOT ITS CLASS
+            // STRING. `.slice(0,40)` made the key a 40-char PREFIX, so two
+            // different clipping ancestors agreeing in their first 40 chars
+            // collapsed into one Set entry and the second real clipper was
+            // SILENCED. `clippers.indexOf(cl)` is element identity and cannot
+            // collide however the class lists are spelled. MEASURED HONESTLY:
+            // on today's fixtures the clipper classes are 7 and 16 chars, so
+            // the truncation has never yet collided — this closes a LATENT
+            // hazard, and the leg now prints the widest class string it saw so
+            // a reader can tell when that stops being true.
+            `  if(cl){var r=cl.getBoundingClientRect();var ci=clippers.indexOf(cl);if(ci<0){ci=clippers.push(cl)-1;}rec.ci=ci;` +
+            `    rec.cl=(cl.className||cl.tagName||'?').toString();` +
             `    rec.clsw=cl.scrollWidth;rec.clcw=cl.clientWidth;rec.clov=getComputedStyle(cl).overflowX;` +
             `    rec.edge=+(r.left+cl.clientLeft+cl.clientWidth).toFixed(2);` +
             `    if(rec.gr!==null)rec.lost=+(rec.gr-rec.edge).toFixed(2);}` +
@@ -6250,6 +6317,10 @@ async function main() {
           // an unguarded loop shouts the same clipped card three times and buries
           // WHICH panel filled it. The clipper is asserted once, named by the
           // widest panel inside it.
+          for (const b of m.boxes) {
+            if (b.cl) widestClass = Math.max(widestClass, String(b.cl).length);
+            if (typeof b.ci === "number") clipperIds = Math.max(clipperIds, b.ci + 1);
+          }
           const clippersSaid = new Set();
           for (const b of m.boxes) {
             panels++;
@@ -6274,11 +6345,54 @@ async function main() {
               fail(D, `site-states/${theme}@${width} .deploy-fail (${b.len} chars): no clipping ancestor found — the walk that finds the element doing the swallowing returned nothing, so the clipper assertion measured nothing`);
               continue;
             }
-            if (b.clov !== "visible" && b.clsw > b.clcw && !clippersSaid.has(b.cl)) {
-              clippersSaid.add(b.cl);
+            if (b.clov !== "visible" && b.clsw > b.clcw && !clippersSaid.has(b.ci)) {
+              clippersSaid.add(b.ci);
               clipped++;
-              const filler = m.boxes.filter((x) => x.cl === b.cl).sort((x, y) => (y.lost ?? -1e9) - (x.lost ?? -1e9))[0];
-              fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of a failed deploy's reason is inside a box that clips it, with no scrollbar and no page scroll (widest panel inside it: ${filler.len} chars, longest run ${filler.run}, overflow-wrap:${filler.ow}, word-break:${filler.wb})`);
+              // cch-w28-bl-overflow-guard-clipper-blames-the-wrong-panel (a)
+              // and (c): THE PREDICATE WAS ABOUT THE CLIPPER AND THE SENTENCE
+              // WAS ABOUT THE PANEL. `b.clsw > b.clcw` is the ANCESTOR card's
+              // own overflow. `clipperOf` walks up to the first ancestor whose
+              // overflow-x is not visible — measured to be the .deploys card,
+              // which also holds .deploy-ref, .preview-url and the timestamps.
+              // ANY of those overflowing fired this assertion, and the message
+              // blamed the deploy FAILURE REASON.
+              //
+              // RE-DERIVED IN A BROWSER, never from the source. Delete
+              // `.deploy-ref { overflow-wrap: anywhere }` from app.css — a
+              // SIBLING regression, and a realistic one, since that declaration
+              // is W27-deploy-ref-branch-bounded's own shipped remedy — and
+              // this assertion fired 16 times across the 20 cells saying
+              // "388px of a failed deploy's reason is inside a box that clips
+              // it" while EVERY .deploy-fail under that clipper stopped
+              // 106-506px SHORT of the clip edge. Not one pixel of a failure
+              // reason was lost in any of the 16.
+              //
+              // SO ATTRIBUTION IS ASSERTED, NOT ASSUMED — and the assertion is
+              // NOT deleted. It is this leg's only signal for content thrown
+              // away without a page-scrollWidth change, so it splits instead:
+              // some panel under this clipper lost glyphs (ATTRIBUTED, name it
+              // by pixels lost), or none did (UN-ATTRIBUTED, and say whose
+              // overflow it is not).
+              //
+              // (c) IS PARTLY REFUTED, AND THE RESIDUE IS THE LABEL. The row
+              // said the sort degrades to `boxes[0]` because every `lost` is
+              // null. Measured: `lost` is a SIGNED distance, non-null whenever
+              // the panel paints any text at all, so the sort was never a
+              // no-op — it ranked by proximity to the clip edge and then
+              // announced its winner as "widest panel inside it", a different
+              // wrong label. Under the sibling mutation it named a 22-char
+              // panel whose glyphs stop 106.06px short of the edge as the
+              // filler of a 388px overflow. The winner is now selected and
+              // DESCRIBED by the same quantity, among spillers only.
+              const under = m.boxes.filter((x) => x.ci === b.ci);
+              const spillers = under.filter((x) => x.lost !== null && x.lost > 0.5);
+              if (spillers.length) {
+                const filler = spillers.slice().sort((x, y) => y.lost - x.lost)[0];
+                fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of a failed deploy's reason is inside a box that clips it, with no scrollbar and no page scroll (${spillers.length} of ${under.length} panel(s) under it lose glyphs; the worst loses ${filler.lost}px past the clip edge — ${filler.len} chars, longest run ${filler.run}, overflow-wrap:${filler.ow}, word-break:${filler.wb})`);
+              } else {
+                const closest = under.reduce((a, x) => (x.lost !== null && (a === null || x.lost > a) ? x.lost : a), null);
+                fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of this card is swallowed with no scrollbar and no page scroll, and it is UN-ATTRIBUTED: not one of the ${under.length} .deploy-fail panel(s) under it loses a glyph (the closest stops ${closest === null ? "?" : Math.abs(closest)}px short of the clip edge). The overflow is real and belongs to a SIBLING in the same card — .deploy-ref, .preview-url or the timestamps — which this leg does not own. Do NOT read this line as a failure reason being cut; W27-deploy-ref-branch-bounded owns the ref line`);
+              }
             }
             // (5) THE PANEL'S OWN BORDER. Third signal, and the cheapest: the
             // text span is a flex item at the default `min-width: auto`, so an
@@ -6330,6 +6444,13 @@ async function main() {
           `panel(s) measured — EVERY one on the page, not a pinned selector; ${cruelSeen} carried the cruel ` +
           `${DEPLOY_FAIL_CRUEL_REASON.length}-char stage report, ${kindSeen} the ${KIND.length}-char KIND control), ` +
           `${clipped} clipper(s) holding more than they show, ${spilled} panel(s) painting glyphs past their card`,
+        );
+        okLine(
+          `ATTRIBUTION: every clipper finding above is keyed on the clipping ELEMENT (${clipperIds} distinct one(s) ` +
+          `seen in a cell), never on a truncated class string — the widest clipper class measured was ${widestClass} ` +
+          `chars against the 40-char prefix this leg used to dedupe on, so the old key was ${40 - widestClass} chars ` +
+          `from silencing a second real clipper. A clipper that overflows while no .deploy-fail under it loses a ` +
+          `glyph is reported as UN-ATTRIBUTED and names the siblings it could have come from instead`,
         );
         okLine(
           `${DRIVEN.join("/")} are the DRIVEN widths — every one of them LOST PIXELS on the defective tree: 186.39 ` +

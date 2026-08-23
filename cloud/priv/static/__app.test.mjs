@@ -17290,6 +17290,63 @@ test("cch-w25-s2: the <=720 theater block escapes min-content AND pays the step-
     "the cruel-host page number is 320/320 now and is ASSERTED; the reported-not-asserted block must be gone");
 });
 
+// ── cch-w28-bl-overflow-guard-clipper-blames-the-wrong-panel ─────────────────
+//
+// The two clipper legs (W26-deploy-fail-clip, W27-deploy-ref-branch-bounded)
+// used to fire on the ANCESTOR CARD's overflow while their sentence named the
+// PANEL. Re-derived in a browser by deleting `.deploy-ref { overflow-wrap:
+// anywhere }`: 16 findings across 20 cells saying "388px of a failed deploy's
+// reason is inside a box that clips it" while every `.deploy-fail` under that
+// clipper stopped 106-506px SHORT of the clip edge.
+//
+// A BROWSER CANNOT GUARD THIS ONE. The false report only appears while some
+// SIBLING regression is live, so a green tree renders nothing to assert against
+// — there is no pixel that reds when the wording rots back. What is durable is
+// the SHAPE of the two legs, which is why this is a source read and not a
+// render: the dedupe key must be element identity, the grouping must be element
+// identity, and the un-attributed arm must exist in both legs.
+test("cch-w28-bl: both clipper legs key on the ELEMENT and refuse to attribute an unattributable overflow", () => {
+  const guard = fs.readFileSync(new URL("./__preview__/overflow-guard.mjs", import.meta.url), "utf8");
+
+  // (b) THE DEDUPE KEY. `clippersSaid` used to hold a 40-char class PREFIX, so
+  // two different clipping ancestors agreeing in their first 40 chars collapsed
+  // into one entry and the second real clipper was silenced. Proven live under a
+  // 41-char shared prefix: 16 findings with the prefix key, 26 with element
+  // identity, and only one of the two clippers named per cell.
+  assert.equal((guard.match(/clippersSaid\.add\(b\.ci\)/g) || []).length, 2,
+    "both clipper legs must key their one-voice-per-clipper Set on the clipping ELEMENT (b.ci)");
+  assert.equal((guard.match(/clippersSaid\.(add|has)\(b\.cl\)/g) || []).length, 0,
+    "no leg may key the clipper Set on b.cl — that is a class STRING, and it was truncated to 40 chars");
+  assert.match(guard, /rec\.ci=ci;/,
+    "the in-page collector must stamp a per-element clipper id");
+  assert.ok(!/rec\.cl=\(cl\.className\|\|cl\.tagName\|\|'\?'\)\.toString\(\)\.slice\(0,40\)/.test(guard),
+    "the clipper class must be carried UNTRUNCATED — it is display text now, never a key");
+
+  // (a) + (c) THE GROUPING AND THE SENTENCE. The panels under a clipper must be
+  // gathered by element identity too (the same collision, one line down), and
+  // an overflow no panel accounts for must say so rather than name an innocent
+  // one as its filler.
+  assert.equal((guard.match(/\.filter\(\(x\) => x\.ci === b\.ci\)/g) || []).length, 2,
+    "both legs must gather the panels under a clipper by element identity");
+  assert.equal((guard.match(/\.filter\(\(x\) => x\.cl === b\.cl\)/g) || []).length, 0,
+    "no leg may gather panels by a truncated class string");
+  assert.equal((guard.match(/UN-ATTRIBUTED: not one of the/g) || []).length, 2,
+    "both legs must carry the un-attributed arm — a clipper that overflows while nothing under it loses a glyph");
+  // ANCHORED ON THE EMITTED STRING, NOT THE PHRASE. A bare phrase match reds on
+  // the comment that EXPLAINS the old label — the fix's own prose would fail its
+  // own guard. `${` after the colon is what makes this an interpolated fail()
+  // argument rather than a sentence about one.
+  assert.equal((guard.match(/widest (panel|ref) inside it: \$\{/g) || []).length, 0,
+    "the old label is gone: the winner was selected by glyph proximity and then announced as the WIDEST, which it need not be");
+  // The filler is now chosen among SPILLERS only, by the same quantity it is
+  // described with. The `?? -1e9` guard is what made a null `lost` sort like a
+  // value; with spillers pre-filtered, `lost` is a number by construction.
+  assert.equal((guard.match(/\(y\.lost \?\? -1e9\) - \(x\.lost \?\? -1e9\)/g) || []).length, 0,
+    "no clipper filler may be sorted with a null-coalescing key — filter to spillers first");
+  assert.equal((guard.match(/spillers\.slice\(\)\.sort\(\(x, y\) => y\.lost - x\.lost\)\[0\]/g) || []).length, 2,
+    "both legs must pick the filler from the spillers, ranked by pixels actually lost");
+});
+
 // ── cch-w28-s8: A NEVER-DEPLOYED SITE ROW SAYS SO ────────────────────────────
 //
 // siteRow's badge strip was siteOpenLink + siteBindingChip + freshnessBadge.
