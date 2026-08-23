@@ -93,6 +93,16 @@
         "default": "./dist/preload.cjs"
       }
     },
+    "./csp": {
+      "import": {
+        "types": "./dist/csp.d.mts",
+        "default": "./dist/csp.mjs"
+      },
+      "require": {
+        "types": "./dist/csp.d.ts",
+        "default": "./dist/csp.cjs"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": [
