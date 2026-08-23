@@ -19,7 +19,17 @@ export interface BarkparkServerConfig<C extends BarkparkClient = BarkparkClient>
   workspace?: string
   /** Optional project slug. Mirrors / overrides `client.config.project`. See {@link workspace}. */
   project?: string
-  /** Browser-exposed preview token (used by createDraftModeRoutes / SSE). Optional in v0.1. */
+  /**
+   * Browser-exposed preview token (used by createDraftModeRoutes / SSE).
+   * Optional in v0.1 — and today a DECLARED-ONLY field: nothing in
+   * js/packages/nextjs reads, attaches, or forwards it, so it has NO leak
+   * surface (ruled SAFE, arpss-js-browsertoken-dead-field). WIRING-UP
+   * OBLIGATION: the change that first READS this field must pass the
+   * four-vector token review — attached as a header, never in a URL;
+   * redacted in JSON.stringify / util.inspect / error serializations; and a
+   * deliberate ruling on whether a browser-exposed-by-design token still
+   * needs sink redaction (see the V3 doctrine in core's client.ts).
+   */
   browserToken?: string
   /** Per-call defaults applied by barkparkFetch. */
   fetchOptions?: {

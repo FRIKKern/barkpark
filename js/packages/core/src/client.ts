@@ -101,6 +101,28 @@ import { createHandshakeCache, type HandshakeCache } from './handshake'
 // derived client and break auth), and createClient re-attaches the hooks on every
 // derived client. Direct `config.token` access (transport/listen/export) still
 // returns the real value — only the serialization surfaces are redacted.
+//
+// SDK SECURITY NOTES — the two KNOWN edges of this cover, re-derived 2026-08-23:
+//
+// * structuredClone IGNORES toJSON by spec: structuredClone(client.config)
+//   .token IS the raw token (run-confirmed on the current build;
+//   arpss-js-structuredclone-residual-path). Standard Next App Router prop
+//   serialization is Flight, which honors toJSON — structuredClone is a
+//   NON-STANDARD path and no repo consumer structured-clones the client or its
+//   config (grep-confirmed). The only structural cover would be a
+//   non-enumerable/private token store, which breaks the withConfig spread —
+//   a redesign, not a patch. token-leak-guard.test.ts pins this edge as an
+//   HONEST CANARY so the limitation cannot be silently forgotten or silently
+//   "fixed" without updating these notes.
+//
+// * React Flight honors this toJSON on the RSC wire (re-derived on the repo's
+//   react/react-server-dom-webpack 19.2.5: dev AND prod builds ship
+//   '[REDACTED]', never the raw token; dev additionally warns 'Objects with
+//   toJSON methods are not supported' — arpss-js-rsc-tojson-durability). React
+//   documents object-with-toJSON as UNSUPPORTED across the boundary, so this
+//   coverage is best-effort: never pass the client/config as a Client
+//   Component prop; the four-vector guard (JSON.stringify / util.inspect /
+//   errors / URL) stays valid regardless of what React does.
 const INSPECT_CUSTOM = Symbol.for('nodejs.util.inspect.custom')
 
 function redactedConfig(config: BarkparkClientConfig): Record<string, unknown> {
