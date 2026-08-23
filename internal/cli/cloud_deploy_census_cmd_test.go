@@ -2578,3 +2578,168 @@ func TestCloudDeploymentsSiteNotesDescribeTheRenderedRows(t *testing.T) {
 		t.Fatalf("the clamp must still disclose what it hid:\n%s", one)
 	}
 }
+
+// ── dr-w24: the SERVER-side cut marker reaches a reader ──────────────────────
+//
+// `DeployLedger.census/3` clamps `sites` at 50 rows and marks the cut with
+// `truncated` + `total_sites`. Before this slice no Go field declared either
+// key, and the CLI's own "… and N more" line — derived from its DISPLAY clamp —
+// actively reassured the reader that the list was complete. The three tests
+// below pin the three honest endings: the server SAID it cut, the server SAID
+// it did not, and the server (an older control plane) said NOTHING — which must
+// never render as completeness.
+
+// censusTruncatedEnvelope: two site rows survive the wire out of a 120-site
+// population, and the server says so.
+const censusTruncatedEnvelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2216,
+  "failed": 832,
+  "failure_rate": {"sample": 2216, "pct": 37.5, "numerator": 832, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "not_attempted": [],
+  "sites": [
+    {"site_id": "site-alpha", "volume": 1381, "failed": 723, "deferred": 100, "failure_rate": {"sample": 1381, "pct": 52.4, "numerator": 723, "min_sample": 200, "refused": false, "reason": null}, "top_class": "BOX_BUSY_409"},
+    {"site_id": "site-beta", "volume": 835, "failed": 109, "deferred": 50, "failure_rate": {"sample": 835, "pct": 13.1, "numerator": 109, "min_sample": 200, "refused": false, "reason": null}, "top_class": null}
+  ],
+  "total_sites": 120,
+  "truncated": true,
+  "min_sample": 200
+}`
+
+// censusCompleteEnvelope is the same census with the server AFFIRMING that no
+// site row was cut.
+const censusCompleteEnvelope = `{
+  "window": {"from": "2026-07-31T00:00:00Z", "to": "2026-08-07T00:00:00Z"},
+  "volume": 2216,
+  "failed": 832,
+  "failure_rate": {"sample": 2216, "pct": 37.5, "numerator": 832, "min_sample": 200, "refused": false, "reason": null},
+  "classes": [],
+  "not_attempted": [],
+  "sites": [
+    {"site_id": "site-alpha", "volume": 1381, "failed": 723, "deferred": 100, "failure_rate": {"sample": 1381, "pct": 52.4, "numerator": 723, "min_sample": 200, "refused": false, "reason": null}, "top_class": "BOX_BUSY_409"},
+    {"site_id": "site-beta", "volume": 835, "failed": 109, "deferred": 50, "failure_rate": {"sample": 835, "pct": 13.1, "numerator": 109, "min_sample": 200, "refused": false, "reason": null}, "top_class": null}
+  ],
+  "total_sites": 2,
+  "truncated": false,
+  "min_sample": 200
+}`
+
+// TestCloudDeploymentsServerTruncationIsNamed: `truncated: true` renders the
+// server's cut with BOTH numbers — rows on the wire and the real population —
+// and never the display-clamp reassurance or the not-stated arm.
+func TestCloudDeploymentsServerTruncationIsNamed(t *testing.T) {
+	newCensusServer(t, 200, censusTruncatedEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "SERVER-TRUNCATED")
+	for _, want := range []string{"2 of 120 site(s)", "TOP of the fleet", "no --sites value can restore"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("truncation line %q missing %q — the cut must carry the rows shown AND the population they were cut from", line, want)
+		}
+	}
+	if strings.Contains(stdout, "population NOT STATED") {
+		t.Fatalf("the server DID state the population; the not-stated arm must not render:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsServerAffirmsCompleteness: `truncated: false` is a claim
+// someone actually made, and it renders as one — with the population.
+func TestCloudDeploymentsServerAffirmsCompleteness(t *testing.T) {
+	newCensusServer(t, 200, censusCompleteEnvelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "complete: the control plane sent all")
+	if !strings.Contains(line, "all 2 site(s)") {
+		t.Fatalf("completeness line %q missing the affirmed population", line)
+	}
+	if strings.Contains(stdout, "SERVER-TRUNCATED") || strings.Contains(stdout, "population NOT STATED") {
+		t.Fatalf("an affirmed-complete list must render neither the cut arm nor the not-stated arm:\n%s", stdout)
+	}
+}
+
+// TestCloudDeploymentsTruncationAbsentIsNotCompleteness: an envelope with NO
+// `truncated` key (every control plane older than dr-w18-s2) must say the
+// population is NOT STATED — absence decoding into "complete" is the exact
+// false reassurance the pointer polarity exists to prevent, and this epic's
+// signature defect (ABSENT collapsed into ZERO).
+func TestCloudDeploymentsTruncationAbsentIsNotCompleteness(t *testing.T) {
+	newCensusServer(t, 200, censusW12S8Envelope)
+	pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+
+	stdout, stderr, code := runDeployments(t, "table")
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
+	}
+	line := censusLineContaining(t, stdout, "population NOT STATED")
+	if !strings.Contains(line, "whole fleet or the top of a larger one is unknown") {
+		t.Fatalf("not-stated line %q must say the completeness question is UNANSWERED, not answered", line)
+	}
+	if strings.Contains(stdout, "SERVER-TRUNCATED") || strings.Contains(stdout, "complete: the control plane") {
+		t.Fatalf("an unstated population must claim neither cut nor complete:\n%s", stdout)
+	}
+}
+
+// TestDeployCensusFourKeysDecodeAndAbsenceIsNil pins the DECODE of the four
+// dr-w24 keys — and, just as load-bearing, that their ABSENCE decodes to nil,
+// never to a zero-valued claim.
+func TestDeployCensusFourKeysDecodeAndAbsenceIsNil(t *testing.T) {
+	full := `{
+	  "total_sites": 120,
+	  "truncated": true,
+	  "completeness": {
+	    "audited": 2216, "accounted": 2200, "unaccounted": 16, "balanced": false,
+	    "method": "Repo.aggregate", "reason": "16 row(s) are in the population and in NO cohort"
+	  },
+	  "boundaries": [
+	    {"subject": "deferred settle status", "instant": "2026-08-05T21:13:50Z", "method": "schema_commit", "source": "#9615"}
+	  ]
+	}`
+	var census cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(full), &census); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if census.TotalSites == nil || *census.TotalSites != 120 {
+		t.Fatalf("total_sites did not decode: %+v", census.TotalSites)
+	}
+	if census.Truncated == nil || !*census.Truncated {
+		t.Fatalf("truncated did not decode: %+v", census.Truncated)
+	}
+	c := census.Completeness
+	if c == nil || c.Audited != 2216 || c.Accounted != 2200 || c.Unaccounted != 16 || c.Balanced {
+		t.Fatalf("completeness did not decode: %+v", c)
+	}
+	if c.Reason == nil || !strings.Contains(*c.Reason, "NO cohort") {
+		t.Fatalf("completeness.reason did not decode: %+v", c.Reason)
+	}
+	if len(census.Boundaries) != 1 || census.Boundaries[0].Source != "#9615" || census.Boundaries[0].Method != "schema_commit" {
+		t.Fatalf("boundaries did not decode: %+v", census.Boundaries)
+	}
+
+	var absent cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(`{"volume": 10}`), &absent); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if absent.TotalSites != nil || absent.Truncated != nil || absent.Completeness != nil || absent.Boundaries != nil {
+		t.Fatalf("an envelope without the four keys must decode them all to nil — absence is NOT a measurement: %+v %+v %+v %+v",
+			absent.TotalSites, absent.Truncated, absent.Completeness, absent.Boundaries)
+	}
+	// balanced-null polarity: a BALANCED audit sends reason null, and that must
+	// stay nil rather than becoming "" — "nothing to say" is not "a reason the
+	// decode dropped".
+	var balanced cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(`{"completeness": {"audited": 5, "accounted": 5, "unaccounted": 0, "balanced": true, "method": "m", "reason": null}}`), &balanced); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if balanced.Completeness == nil || !balanced.Completeness.Balanced || balanced.Completeness.Reason != nil {
+		t.Fatalf("a balanced audit must decode with reason == nil: %+v", balanced.Completeness)
+	}
+}
