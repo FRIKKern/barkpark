@@ -1323,7 +1323,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           <div class="pane-body">
             <%= if pane.items == [] and pane[:type_name] != nil and pane[:filter_error] == nil do %>
               <.pane_empty message="No documents yet">
-                <:icon><.icon name={pane[:icon] || "file"} size={32} /></:icon>
+                <%!-- `drawable_name/2`, not `||` (icons-tab-icon-tenant-guard):
+                      a pane's icon is schema/structure DATA, and `||` answers
+                      only nil/false. An unknown string, or a truthy non-binary
+                      (`:folder || "file"` is `:folder`), reached `icon/1` — a
+                      document glyph in dev/prod, a RAISE in :test. --%>
+                <:icon><.icon name={Icons.drawable_name(pane[:icon], "file")} size={32} /></:icon>
                 <button
                   class="btn btn-primary btn-sm"
                   phx-click="new-document"
@@ -1378,8 +1383,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     aria-current={item.id == pane[:selected] && "page"}
                     data-test-id="nav-plugin-entry"
                   >
+                    <%!-- UNGUARDED UNTIL icons-tab-icon-tenant-guard, between two
+                          guarded siblings (`:header` above, the `_` catch-all
+                          below, both already on `drawable_name/2`). A
+                          `:plugin_link` node's `:icon` is `item[:icon]` copied
+                          verbatim off a PLUGIN's declared nav item
+                          (`Barkpark.Structure.plugin_item_to_node/2`), so it is
+                          an unbounded out-of-tree value that the `lib/` literal
+                          tripwire structurally cannot see. The `if` covers nil;
+                          it does NOT cover an unknown string or a truthy
+                          non-binary, both of which reached `icon/1`. "circle" —
+                          the neutral glyph `tab_icon/1` already uses — because a
+                          link is not a document and "file" would claim it is. --%>
                     <%= if item.icon do %>
-                      <span class="pane-item-icon"><.icon name={item.icon} size={16} /></span>
+                      <span class="pane-item-icon"><.icon name={Icons.drawable_name(item.icon, "circle")} size={16} /></span>
                     <% end %>
                     <span class="pane-item-label"><%= item.title %></span>
                     <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
