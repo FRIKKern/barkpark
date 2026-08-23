@@ -377,7 +377,11 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("  the window is pinned by this command, not defaulted by the server — every number below is about THIS population.")
 	out.outf("%s", deployCensusScopeLine(census.Scope))
 	out.outf("")
+	boundaries := deployCensusBoundaries(census.Boundaries)
 	out.outf("%s", deployCensusHeadline(census))
+	if line := deployCensusHeadlineRemedy(census, boundaries, from, to); line != "" {
+		out.outf("%s", line)
+	}
 	out.outf("  basis: %s", deployCensusBasis(census))
 	// THE ONE QUANTITY NO BUCKET SWAP CAN DILUTE, printed beside the rates it
 	// cannot be reduced to. Every rate above is a ratio over a population the
@@ -386,7 +390,6 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("  %s", deployCensusAbandonment(census))
 	out.outf("")
 
-	boundaries := deployCensusBoundaries(census.Boundaries)
 	if len(census.Classes) > 0 {
 		out.outf("failure classes (share of the %d failed)", census.Failed)
 		for _, c := range census.Classes {
@@ -801,6 +804,31 @@ func deployCensusRefusal(r cloudclient.DeployRate, censusMin int) string {
 		return fmt.Sprintf("the control plane refused a percentage: sample %d below min_sample %d", r.Sample, min)
 	}
 	return fmt.Sprintf("the control plane sent no percentage for a sample of %d", r.Sample)
+}
+
+// deployCensusHeadlineRemedy gives the HEADLINE failure_rate refusal the same
+// envelope-read window remedy the share refusals carry
+// (dr-w30-followup-headline-refusal-names-the-window). dr-w30-s5 cured the
+// CLASS and DEFERRAL share refusals; the headline — the first refusal an
+// operator reads, and the only one on a census with no class rows at all —
+// still printed the straddle reason with no remedy, so the operator was told
+// the window straddles a boundary and not that `--from <instant>` answers it.
+//
+// It REUSES deployCensusShareRemedy — one owner of the boundary logic, exactly
+// as deployCensusSiteRemedy does — and renders nothing when the headline
+// carries a real percentage: a remedy under an answered rate would read as
+// doubt the answer never expressed.
+//
+// PER-SITE CELLS, DECIDED (this row's second criterion): they already carry
+// their remedy — deployCensusSiteRemedy renders under the site table for every
+// refused per-site rate, routed through the same shared helper when the reason
+// names a boundary — so nothing more is owed there and no second copy exists.
+func deployCensusHeadlineRemedy(census cloudclient.DeployCensus, boundaries []deployCensusBoundary, from, to time.Time) string {
+	if _, okRate := deployCensusPct(census.FailureRate); okRate {
+		return ""
+	}
+	reason := deployCensusRefusal(census.FailureRate, census.MinSample)
+	return "  " + deployCensusShareRemedy(reason, boundaries, from, to, census.MinSample)
 }
 
 // deployCensusShare renders a class/site share cell, or an em-dash where the
