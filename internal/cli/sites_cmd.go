@@ -424,17 +424,27 @@ func statusColor(out *writer, status string) string {
 // the output is stable for golden compare. Empty domains print "—".
 func renderSitesTable(out *writer, sites []cloudclient.Site) {
 	const (
-		hName   = "NAME"
+		hName = "NAME"
+		// SLUG is the HANDLE every other verb takes (`bp sites deployments
+		// <slug>`, `bp deploy <slug>`, `bp cloud site deploy <slug>`), so a
+		// list that omits it names sites the reader cannot act on
+		// (dr-w14-bl-owner-cannot-list-own-sites: an owner had to curl
+		// /v1/sites to learn their own slugs).
+		hSlug   = "SLUG"
 		hDom    = "DOMAINS"
 		hStat   = "STATUS"
 		hDeploy = "LAST DEPLOY"
 	)
-	nameW, domW, statW := len(hName), len(hDom), len(hStat)
-	rows := make([][4]string, len(sites))
+	nameW, slugW, domW, statW := len(hName), len(hSlug), len(hDom), len(hStat)
+	rows := make([][5]string, len(sites))
 	for i, s := range sites {
 		dom := strings.Join(s.Domains, ", ")
 		if dom == "" {
 			dom = "—"
+		}
+		slug := strings.TrimSpace(s.Slug)
+		if slug == "" {
+			slug = "—"
 		}
 		status, when := "—", "—"
 		if s.LastDeployment != nil {
@@ -445,9 +455,12 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 				when = v
 			}
 		}
-		rows[i] = [4]string{s.Name, dom, status, when}
+		rows[i] = [5]string{s.Name, slug, dom, status, when}
 		if n := len(s.Name); n > nameW {
 			nameW = n
+		}
+		if n := len(slug); n > slugW {
+			slugW = n
 		}
 		if n := len(dom); n > domW {
 			domW = n
@@ -457,12 +470,12 @@ func renderSitesTable(out *writer, sites []cloudclient.Site) {
 		}
 	}
 
-	out.outf("%-*s  %-*s  %-*s  %s", nameW, hName, domW, hDom, statW, hStat, hDeploy)
+	out.outf("%-*s  %-*s  %-*s  %-*s  %s", nameW, hName, slugW, hSlug, domW, hDom, statW, hStat, hDeploy)
 	for _, r := range rows {
 		// Pad the raw status to the column width FIRST, then colorize, so the
 		// ANSI escape bytes never count toward statW and misalign the table.
-		stat := statusColor(out, fmt.Sprintf("%-*s", statW, r[2]))
-		out.outf("%-*s  %-*s  %s  %s", nameW, r[0], domW, r[1], stat, r[3])
+		stat := statusColor(out, fmt.Sprintf("%-*s", statW, r[3]))
+		out.outf("%-*s  %-*s  %-*s  %s  %s", nameW, r[0], slugW, r[1], domW, r[2], stat, r[4])
 	}
 }
 

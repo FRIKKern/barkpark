@@ -85,6 +85,18 @@ func runCloudSite(out *writer, g globals, args []string) int {
 	verb := args[0]
 	rest := args[1:]
 	switch verb {
+	// THE TWO-NOUN RULING (dr-w14-bl-owner-cannot-list-own-sites): `bp sites`
+	// and `bp cloud site` are BOTH real and deliberately split — `bp sites` is
+	// the team-wide site surface (list/show/create/deployments/env/domains),
+	// `bp cloud site` is the spawner's lifecycle verbs on ONE site
+	// (create/deploy/rollback/delete/status/open/preflight/settings). The
+	// overlap is resolved by ALIASING, not by exclusivity: enumeration lives in
+	// runSitesList and `bp cloud site ls` routes THERE, so an owner standing at
+	// either noun can enumerate their own sites — the wave-14 verifier found
+	// their 13 sites only by curling /v1/sites because THIS noun refused `ls`
+	// while the other noun answered it.
+	case "ls", "list":
+		return runSitesList(out, rest)
 	case "create":
 		return runCloudSiteCreate(out, g, rest)
 	case "deploy", "build":
@@ -102,7 +114,7 @@ func runCloudSite(out *writer, g globals, args []string) int {
 	case "settings":
 		return runCloudSiteSettings(out, g, rest)
 	default:
-		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage)", verb), exitUsage)
+		return useError(out, "usage", fmt.Sprintf("unknown site command %q (run `bp cloud site -h` for usage; to list your team's sites: `bp sites` or `bp cloud site ls`)", verb), exitUsage)
 	}
 }
 
@@ -2810,6 +2822,7 @@ func printCloudSiteHelp(out *writer) {
 	const help = `bp cloud site — spawn a website that builds and serves next to your Barkpark.
 
 USAGE
+  bp cloud site ls                                  list your team's sites (alias of 'bp sites')
   bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro] [--kind static|node] [--doc-type <type>] [--deploy]
   bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force]  (alias: build)
   bp cloud site rollback  <site>
