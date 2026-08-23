@@ -800,16 +800,21 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
 // onto the stage line at :1062) is this one, verbatim. It reaches the rail as
 // `BPSTAGE name=BUILD status=failed detail="…"`.
 //
-// It classifies: `unauthorized` → "A credential was rejected. This capture
-// doesn't say whose credential it was — the raw error line names it." — which
-// is what the settled row shows, and what the rail showed NOTHING of before
-// this slice.
+// It classifies on its OWN distinctive phrase — `the site read token is
+// invalid`, not the generic `unauthorized` prefix — to "This site's Barkpark
+// read token was rejected, so the build couldn't fetch its content. Mint a
+// fresh read token for the site in Barkpark, save it on the site, then deploy
+// the site again." That is what the settled row shows, and what the rail showed
+// NOTHING of before this slice.
 //
-// The copy is deliberately vague about WHOSE credential (wave 40 S6): the
-// credential this very line reports is the USER'S OWN site read token, and the
-// sentence that used to sit here ("The hosting provider rejected our
-// credentials. We're on it — try again shortly.") named a party, an owner and
-// a remedy that `humanize/1` — arity 1, a substring test — cannot see.
+// TWO CORRECTIONS, IN ORDER. Wave 40 S6 removed a sentence that LIED ("The
+// hosting provider rejected our credentials. We're on it — try again shortly.")
+// — it named a party, an owner and a remedy `humanize/1`, arity 1, cannot see;
+// the credential this very line reports is the USER'S OWN site read token and
+// no hosting provider is in the story. task-fda5b6f19f1e06c9 then made the
+// clause TELL: this is the one capture in which the producer already spells the
+// owner and the remedy out, so it is keyed on the shell's bytes and says both.
+// Every anonymous 401 still gets the deliberately party-less copy.
 //
 // RE-DERIVE THE WHOLE STRING:
 //   grep -n 'FATAL: 401 Unauthorized' deploy/site-deploy.sh
