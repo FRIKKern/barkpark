@@ -71,6 +71,15 @@ export function str(v: unknown): string {
   return ''
 }
 
+/** A text leaf's payload, dual-read `value` || legacy `text`: raw mutate
+ * writers persisted text leaves keyed {"type":"text","text":…}, and the Hollow
+ * predicate counts BOTH spellings as content — so every reader of the leaf must
+ * agree or such a paper renders (or suppresses) as structure with zero prose.
+ * Twins: inline.ex compose_inline, pdrender inline.go attrStrFirst. */
+export function textLeafValue(n: Record<string, unknown>): string {
+  return str(n.value) || str(n.text)
+}
+
 /** Positive finite number from a number or numeric string, else undefined. */
 export function num(v: unknown): number | undefined {
   if (typeof v === 'number') return Number.isFinite(v) && v > 0 ? v : undefined
@@ -380,7 +389,7 @@ function inlineText(nodes: unknown): string {
   if (typeof nodes === 'string' || typeof nodes === 'number') return String(nodes)
   if (!Array.isArray(nodes)) return ''
   return nodes
-    .map((n) => (isMap(n) ? str(n.value) || inlineText(n.children) : inlineText(n)))
+    .map((n) => (isMap(n) ? textLeafValue(n) || inlineText(n.children) : inlineText(n)))
     .join('')
 }
 
@@ -399,7 +408,12 @@ export function renderInline(node: Inline): string {
 
   switch (str(node.type)) {
     case 'text': {
-      const value = escapeHtml(str(node.value))
+      // Dual-read `value` || legacy `text`: raw mutate writers persisted text
+      // leaves keyed {"type":"text","text":…}; the Hollow predicate counts both
+      // spellings as content, so the renderers must agree or such a paper reads
+      // as structure with zero prose. Twins: inline.ex compose_inline,
+      // pdrender inline.go attrStrFirst(n, "value", "text").
+      const value = escapeHtml(textLeafValue(node))
       const marks = asList(node.marks)
       return marks.length ? applyMarks(value, marks) : value
     }
@@ -476,7 +490,7 @@ export function renderCell(cell: unknown): string {
       if (typeof n === 'number') return `<span>${escapeHtml(String(n))}</span>`
       if (!isMap(n)) return ''
       if (str(n.type) === 'text') {
-        const value = escapeHtml(str(n.value))
+        const value = escapeHtml(textLeafValue(n))
         const inner = asList(n.marks).length ? applyMarks(value, asList(n.marks)) : value
         // A mark that produced a wrapper element (bold/italic/code/link/…) is the
         // PdText span itself; only genuinely-bare text needs the base `<span>`.

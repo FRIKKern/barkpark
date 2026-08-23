@@ -20,6 +20,7 @@ import {
   labelForRole,
   meaningForRole,
   LEGEND_ROLES,
+  textLeafValue,
 } from '../inline'
 import { renderBlock, renderBlocks } from './registry'
 import { CHAT_DIFF_BUDGET, diffRowsHtml, splitLines, type DiffLine } from './chat'
@@ -501,7 +502,9 @@ function isBlankParagraphNode(n: unknown): boolean {
   if (!isMap(n)) return true // null/bool — renderInline emits '' for these
   // Only an UNMARKED whitespace text leaf counts as scaffold; every other node
   // type (and any marked run) is authored content and keeps the paragraph.
-  return str(n.type) === 'text' && asList(n.marks).length === 0 && str(n.value).trim() === ''
+  // Dual-read value || legacy text (textLeafValue): a legacy-keyed leaf with
+  // real prose must NOT count as scaffold, or the whole paragraph vanishes.
+  return str(n.type) === 'text' && asList(n.marks).length === 0 && textLeafValue(n).trim() === ''
 }
 
 const paragraph: Emit = (b) => {

@@ -544,6 +544,27 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(html).toContain('<p>hi</p>')
   })
 
+  it('renders a text leaf keyed by legacy `text` — canonical `value` wins', () => {
+    // 2026-08-23: raw mutate writers persisted papers whose text leaves were
+    // keyed {"type":"text","text":…}; Hollow counts both spellings as content,
+    // so those papers passed every write seam and then rendered as structure
+    // with zero prose. Twins: inline.ex compose_inline, pdrender inline.go
+    // attrStrFirst(n, "value", "text").
+    const legacy = renderPortableDocument([
+      { type: 'paragraph', content: [{ type: 'text', text: 'legacy prose' }] } as unknown as Block,
+    ])
+    expect(legacy).toContain('legacy prose')
+
+    const both = renderPortableDocument([
+      {
+        type: 'paragraph',
+        content: [{ type: 'text', value: 'canonical', text: 'stale' }],
+      } as unknown as Block,
+    ])
+    expect(both).toContain('canonical')
+    expect(both).not.toContain('stale')
+  })
+
   it('renders an empty document without throwing (honest empty surface)', () => {
     expect(renderToStaticMarkup(<PortableDoc value={[]} />)).toContain('class="bp-paper-surface"')
     expect(renderToStaticMarkup(<PortableDoc value={null} />)).toContain('class="bp-paper-surface"')

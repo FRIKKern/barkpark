@@ -184,6 +184,34 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert Render.render_html(underline, @opts) =~ "text-decoration:underline"
     end
 
+    test "text leaf keyed by legacy `text` renders its prose — canonical `value` wins" do
+      # 2026-08-23: raw mutate writers persisted whole papers whose text leaves
+      # were keyed {"type":"text","text":…}. Hollow's @text_keys blesses BOTH
+      # spellings as content, so those papers passed every write seam — and then
+      # rendered as 22–34 headings with ZERO visible characters (text_sha256 of
+      # the empty string). The leaf must dual-read value || legacy text, in
+      # parity with the Go twin's attrStrFirst(n, "value", "text").
+      assert Render.Inline.compose_inline(%{"type" => "text", "text" => "legacy prose"}, false) ==
+               "legacy prose"
+
+      assert Render.Inline.compose_inline(
+               %{"type" => "text", "value" => "canonical", "text" => "stale"},
+               false
+             ) == "canonical"
+
+      # Marks still wrap the fallback-read prose.
+      marked =
+        Render.Inline.compose_inline(
+          %{"type" => "text", "text" => "bold legacy", "marks" => [%{"type" => "strong"}]},
+          false
+        )
+
+      assert Render.render_html(marked, @opts) =~ "bold legacy"
+
+      # A junk legacy key degrades to "" exactly like a junk canonical value.
+      assert Render.Inline.compose_inline(%{"type" => "text", "text" => %{"x" => 1}}, false) == ""
+    end
+
     test "wikilink / blockref / tag inline nodes compose + render (no raise, graceful)" do
       # Internal-link infra: compose_inline must produce PdWikilink/PdBlockref/
       # PdTag (NOT fall through to the unknown-type catch-all in
