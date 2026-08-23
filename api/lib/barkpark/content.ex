@@ -589,6 +589,10 @@ defmodule Barkpark.Content do
   def paper_topic(slug, workspace_id, dataset \\ Papers.paper_default_dataset()),
     do: Papers.paper_topic(slug, workspace_id, dataset)
 
+  @doc "Workspace-scoped PubSub topic for materialised Paper relationship changes."
+  def paper_relations_topic(workspace_id, dataset \\ Papers.paper_default_dataset()),
+    do: Broadcast.paper_relations_topic(workspace_id, dataset)
+
   @doc "Per-doc PubSub topic for an ordinary document, scoped to the owning workspace."
   defdelegate doc_topic(pubid, type, workspace_id, dataset), to: Broadcast
 

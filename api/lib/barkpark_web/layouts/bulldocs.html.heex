@@ -716,6 +716,138 @@
     .bp-paper-article [data-block-id]:first-child h2,
     .bp-paper-article [data-block-id]:first-child h3 { margin-top: 0; }
 
+    /* Graph-backed related Papers. Flat editorial cards keep the article's
+       quiet hierarchy while making each relationship feel like a real object,
+       not a bare backlink. The LiveView swaps this section after projection. */
+    .bp-paper-shell .bp-paper-connections {
+      margin-top: 4.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--paper-rule, #dde7e2);
+    }
+    .bp-paper-shell .bp-paper-connections + .bp-paper-connections {
+      margin-top: 2.5rem;
+    }
+    .bp-paper-shell .bp-paper-connections-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 1.5rem;
+      margin-bottom: 1.25rem;
+    }
+    .bp-paper-shell .bp-paper-connections-kicker {
+      margin: 0 0 0.35rem;
+      color: var(--paper-accent, #1e5347);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+    }
+    .bp-paper-shell .bp-paper-connections-head h2 {
+      margin: 0;
+      color: var(--paper-ink, #17211e);
+      font-size: 1.45rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+    .bp-paper-shell .bp-paper-connections-head h2 + p {
+      max-width: 32rem;
+      margin: 0.4rem 0 0;
+      color: var(--paper-ink-soft, #55635e);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
+    .bp-paper-shell .bp-paper-live {
+      display: inline-flex;
+      flex: none;
+      align-items: center;
+      gap: 0.4rem;
+      margin-top: 0.2rem;
+      color: var(--paper-ink-soft, #55635e);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.68rem;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    .bp-paper-shell .bp-paper-live i {
+      width: 0.42rem;
+      height: 0.42rem;
+      border-radius: 50%;
+      background: var(--paper-accent, #1e5347);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--paper-accent, #1e5347) 14%, transparent);
+    }
+    .bp-paper-shell .bp-paper-card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.75rem;
+    }
+    .bp-paper-shell .bp-paper-card {
+      display: flex;
+      min-width: 0;
+      min-height: 10.5rem;
+      flex-direction: column;
+      padding: 1rem;
+      border: 1px solid var(--paper-rule, #dde7e2);
+      border-radius: 0;
+      background: color-mix(in srgb, var(--paper-bg, #f8faf8) 84%, transparent);
+      color: var(--paper-ink, #17211e);
+      text-decoration: none;
+      transition: border-color 150ms ease, background-color 150ms ease, transform 150ms ease;
+    }
+    .bp-paper-shell .bp-paper-card:hover {
+      border-color: color-mix(in srgb, var(--paper-accent, #1e5347) 52%, var(--paper-rule, #dde7e2));
+      background: var(--paper-bg, #f8faf8);
+      transform: translateY(-2px);
+    }
+    .bp-paper-shell .bp-paper-card:focus-visible {
+      outline: 2px solid var(--paper-accent, #1e5347);
+      outline-offset: 3px;
+    }
+    .bp-paper-shell .bp-paper-card-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.1rem;
+    }
+    .bp-paper-shell .bp-paper-card-badge,
+    .bp-paper-shell .bp-paper-card-meta {
+      color: var(--paper-ink-soft, #55635e);
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.67rem;
+      letter-spacing: 0.075em;
+      text-transform: uppercase;
+    }
+    .bp-paper-shell .bp-paper-card-arrow {
+      color: var(--paper-accent, #1e5347);
+      font-size: 1rem;
+      transition: transform 150ms ease;
+    }
+    .bp-paper-shell .bp-paper-card:hover .bp-paper-card-arrow { transform: translate(2px, -2px); }
+    .bp-paper-shell .bp-paper-card strong {
+      display: block;
+      color: var(--paper-ink, #17211e);
+      font-family: ui-serif, Georgia, serif;
+      font-size: 1.05rem;
+      line-height: 1.28;
+    }
+    .bp-paper-shell .bp-paper-card-summary {
+      display: -webkit-box;
+      overflow: hidden;
+      margin-top: 0.45rem;
+      color: var(--paper-ink-soft, #55635e);
+      font-size: 0.79rem;
+      line-height: 1.45;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+    }
+    .bp-paper-shell .bp-paper-card-meta { margin-top: auto; padding-top: 1rem; }
+    @media (max-width: 620px) {
+      .bp-paper-shell .bp-paper-card-grid { grid-template-columns: 1fr; }
+      .bp-paper-shell .bp-paper-connections-head { gap: 0.75rem; }
+    }
+
     /* Native form block styles moved to the canonical paper-surface source
        (paper-surface.css §form/questionnaire, gui-premium w2) — the reader
        article carries .bp-paper-surface, so it resolves them from the shared

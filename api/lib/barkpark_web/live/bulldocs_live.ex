@@ -134,6 +134,14 @@ defmodule BarkparkWeb.BulldocsLive do
         )
       )
 
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Content.paper_relations_topic(
+          (paper && paper.workspace_id) || reader_scope[:workspace_id],
+          dataset
+        )
+      )
+
       # Live plans: a paper embedding a task query ALSO listens on its tenant's
       # document stream, so an embedded board/list/roadmap re-resolves and
       # re-renders the moment a task moves (the "always feel progress" criterion
@@ -188,7 +196,7 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:simplify?, paper_goal_id(paper) != nil)
       |> assign(:pending_simplify, nil)
       |> assign(:last_simplify, nil)
-      # "Linked mentions" + "Driven tasks" — both sections read the SAME
+      # Related Papers + "Driven tasks" — both sections read the SAME
       # inbound-edge walk, so they are assigned together off ONE
       # `reverse_referencers/2` call (am-w1-s3). See `assign_linked_sections/3`
       # for the scope + engine posture; each assign is `""` when its section
@@ -225,7 +233,7 @@ defmodule BarkparkWeb.BulldocsLive do
     Barkpark.Tenancy.workspace_theme(workspace)
   end
 
-  # Assign the "Linked mentions" AND "Driven tasks" sections for a paper off
+  # Assign the related-Paper AND "Driven tasks" sections for a paper off
   # ONE inbound-edge walk. Empty strings (no markup) when the paper is absent
   # or nothing links to it.
   #
@@ -855,6 +863,16 @@ defmodule BarkparkWeb.BulldocsLive do
 
   def handle_info({:paper_updated, _msg}, socket), do: {:noreply, refetch(socket)}
 
+  # Emitted only after the edge projector has reconciled the materialised
+  # graph. Re-read the compact related-Paper projection without replacing the
+  # article body, so cards update in place when links or source details change.
+  def handle_info({:paper_relations_changed, _msg}, socket) do
+    paper =
+      fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
+
+    {:noreply, assign_linked_sections(socket, paper, socket.assigns[:dataset])}
+  end
+
   # Live-plan push: a task moved in this paper's tenant → re-resolve the
   # embedded task blocks (resolve-at-read) and re-stream. Only reacts to
   # `type:"task"` docs and only while in block mode; the paper's own edits ride
@@ -922,6 +940,7 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:block_mode, false)
         |> assign(:found, false)
         |> assign(:source_error, nil)
+        |> assign_linked_sections(nil, socket.assigns[:dataset])
 
       paper ->
         article? = paper_article?(paper)
@@ -952,6 +971,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:block_mode, true)
             |> assign(:found, true)
             |> assign(:source_error, nil)
+            |> assign_linked_sections(paper, socket.assigns[:dataset])
 
           {:html, html} ->
             # Refetched a paper that has reverted to HTML-only — fall back.
@@ -962,6 +982,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:block_mode, false)
             |> assign(:found, true)
             |> assign(:source_error, nil)
+            |> assign_linked_sections(paper, socket.assigns[:dataset])
 
           {:error, reason} ->
             socket
@@ -972,6 +993,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:block_mode, false)
             |> assign(:found, false)
             |> assign(:source_error, reason)
+            |> assign_linked_sections(paper, socket.assigns[:dataset])
         end
     end
   end
@@ -1086,11 +1108,10 @@ defmodule BarkparkWeb.BulldocsLive do
           <article id="paper-body" data-rev={@rev}>{raw(@html)}</article>
       <% end %>
 
-      <%!-- "Linked mentions" (Phase-3 backlinks). Papers that wikilink TO this
-            one, server-rendered AFTER the body as a section (NOT an inline
-            node). `@backlinks_html` is the full <section> or "" — empty string
-            ⇒ no markup ⇒ the section is hidden when nothing links here. Not
-            flag-gated: derived from the stored blocks + wikilink nodes. --%>
+      <%!-- Related Papers. Real graph-backed document cards rendered AFTER the
+            body and refreshed in place when projection completes.
+            `@backlinks_html` is the full <section> or "" — empty string means
+            no markup, so the section disappears when nothing links here. --%>
       {raw(@backlinks_html)}
 
       <%!-- "Driven tasks" (lvw-t8 expectation reverse view). Tasks that cite
