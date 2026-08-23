@@ -385,6 +385,20 @@ defmodule BarkparkWeb.WorkspaceController do
       CONFLICT DO NOTHING, but the copy-strategy members (root/E1/E2) assume a
       CLEAN target: a second import over a still-populated workspace
       PK-conflicts. Unchanged behavior.
+
+      RULED, on the record (pds-bl-clean-import-ungated-500): `mode=clean`
+      stays UNGATED by `:allow_bundle_import`, deliberately. The gate exists
+      to protect a LIVE, populated workspace from convergent writes (PDS-D10)
+      — a risk `clean` does not carry: its copy members PK-conflict on any
+      populated target and the whole import rolls back atomically, so the
+      only workspace `clean` can actually fill is an empty one, which is the
+      full-fidelity restore path the Cloud consumers (backup restore, eject,
+      rebalance, graduation, migration) depend on. Gating `clean` would break
+      every one of them for zero added protection; what the populated-target
+      collision NEEDED was honesty, not a gate — it answers the typed 409
+      below (the 25P02 blindfold that made it a bare `internal_error` 500 is
+      gone, task-63a199c0a0ce2a06), and that refusal is pinned by an
+      HTTP-level test.
     * `mode=merge` (PDS-D8/D10) — convergent upsert over a possibly-populated
       workspace. FAIL-CLOSED OPT-IN: refused with 403 `bundle_import_disabled`
       unless `Application.get_env(:barkpark, :allow_bundle_import, false)` is

@@ -921,6 +921,54 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert scoped_row_count("documents", target.id) > 0
     end
 
+    # pds-bl-clean-import-ungated-500: `clean` is the DEFAULT mode and is
+    # deliberately ungated (ruling in the controller @doc), so the populated-
+    # target collision is reachable by any admin who simply forgets `--merge`.
+    # Live, that used to die as `internal_error` 500 whose real cause (a 25P02
+    # masking the PK conflict) only the server log knew. This pins the honest
+    # refusal: a typed 409 naming the pg error class + constraint + table, and
+    # a fully rolled-back target.
+    test "CLEAN into a still-populated workspace answers a typed 409 naming the constraint — " <>
+           "never a bare internal_error 500 (pds-bl-clean-import-ungated-500)",
+         %{conn: conn} do
+      raw_admin = "ws-clean-collide-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Clean Collide WS"}, admin_token(raw_admin))
+
+      project = Tenancy.get_project(target.slug, "default")
+      {:ok, _doc} = TenancyFixtures.create_document_in!(target, project, "post", %{}, "test")
+
+      {:ok, bundle} = WorkspaceBundle.export(target.id)
+      docs_before = scoped_row_count("documents", target.id)
+
+      # NO cleanup: the workspace is still populated, so the copy-strategy
+      # members must PK-collide (the root `workspaces` row re-imports under
+      # its own still-resident id).
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> put_req_header("content-type", "application/x-tar")
+        |> post("/api/workspaces/#{target.slug}/import", bundle)
+
+      assert resp.status == 409
+
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["code"] == "import_constraint_violation"
+      assert err["details"]["pg_code"] == "unique_violation"
+
+      # The envelope NAMES the cause — a caller can see what collided without
+      # the server journal.
+      assert is_binary(err["details"]["constraint"])
+      assert is_binary(err["details"]["table"])
+
+      # Atomic refusal: the target is byte-for-byte the workspace it was —
+      # nothing landed, nothing was lost.
+      assert Tenancy.get_workspace_by_slug(target.slug).name == "Clean Collide WS"
+      assert scoped_row_count("documents", target.id) == docs_before
+    end
+
     test "403 for a NON-admin token (permission denial before the action)",
          %{conn: conn, raw_token: raw, member_ws: member_ws} do
       resp =
