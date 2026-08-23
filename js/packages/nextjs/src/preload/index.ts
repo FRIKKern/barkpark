@@ -100,7 +100,14 @@ export function createPreloader(server: PreloadableServer): Preloader {
 
   return {
     preloadDocument(id: string, opts?: BarkparkFetchOptions): void {
-      void cachedFetch(id, opts)
+      // Fire-and-forget, so the promise MUST get a rejection handler here: a
+      // server that is down at preload time would otherwise surface as an
+      // unhandledrejection — which crashes a default-configured Node process,
+      // turning a warm-up optimization into an outage. `.catch` on this derived
+      // consumer marks the SHARED stored promise handled without swallowing
+      // anything for a later loadDocument awaiting the same key (it gets the
+      // original rejection from the Map).
+      cachedFetch(id, opts).catch(() => undefined)
     },
     loadDocument<T = unknown>(id: string, opts?: BarkparkFetchOptions): Promise<T> {
       return cachedFetch(id, opts) as Promise<T>
@@ -126,8 +133,11 @@ export function preloadDocument(
   id: string,
   opts?: BarkparkFetchOptions,
 ): void {
-  void cache((i: string, o?: BarkparkFetchOptions) => server.barkparkFetch({ ...o, id: i }))(
+  // Same rejection-safety contract as Preloader.preloadDocument above: this is
+  // fire-and-forget, so a rejecting fetch must be marked handled or it raises
+  // an unhandledrejection (process-fatal in default Node).
+  cache((i: string, o?: BarkparkFetchOptions) => server.barkparkFetch({ ...o, id: i }))(
     id,
     opts,
-  )
+  ).catch(() => undefined)
 }
