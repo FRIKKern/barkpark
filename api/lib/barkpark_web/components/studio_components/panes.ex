@@ -8,6 +8,28 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   keeps working unchanged.
 
   See `api/lib/barkpark_web/layouts/root.html.heex` for the CSS.
+
+  ## The desk's selection vocabulary
+
+  spd-bl-plugin-link-aria-current: this section is the ONE place the split is
+  written down — do not fork it into per-site comments.
+
+  The desk speaks selection in three ARIA vocabularies, each chosen by what
+  the element IS, not by where it sits:
+
+    * **`aria-current="true"`** — in-desk rows (`pane_item/1`,
+      `pane_doc_item/1`, both `<button>`s). "true" because the selected row is
+      the current item of an ad-hoc collection that is NOT a page, a step, or a
+      date; `aria-selected` is refused because it is only meaningful inside a
+      listbox/tab/grid container, which a pane's row list is not.
+    * **`aria-current="page"`** — elements whose destination is a PAGE: the
+      crumb trail's leaf, and the `:plugin_link` desk anchors
+      (`a.pane-item.nav-plugin-entry` in `StudioLive.Components`). Those
+      anchors navigate by plain href — deliberately anchors, never buttons —
+      and carry `page` when the URL names them as the destination.
+    * **`aria-selected`** — the desk filter chips ONLY, because they sit inside
+      an explicit `role="tablist"` container, which is exactly the container
+      that makes `aria-selected` meaningful.
   """
   use Phoenix.Component
 

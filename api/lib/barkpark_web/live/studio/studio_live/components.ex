@@ -1230,10 +1230,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   </.pane_section_header>
 
                 <% :plugin_link -> %>
+                  <%!-- A real anchor ON PURPOSE (spd-bl-plugin-link-aria-current):
+                        it navigates by plain href — no phx-click — and the bare
+                        .pane-item class targeting keeps it in the rows' visual
+                        rhythm (see the comment in root.html.heex). Do NOT
+                        convert to a button. Selection: aria-current="page" when
+                        the URL names this link as the destination — the "page"
+                        token because an anchor's target is a page, where a
+                        sibling in-desk row speaks aria-current="true". The full
+                        selection vocabulary is documented ONCE, in
+                        `StudioComponents.Panes`' moduledoc. --%>
                   <a
                     id={"plugin-link-#{item.id}"}
                     href={item.href}
                     class="pane-item nav-plugin-entry"
+                    aria-current={item.id == pane[:selected] && "page"}
                     data-test-id="nav-plugin-entry"
                   >
                     <%= if item.icon do %>
