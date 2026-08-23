@@ -7,6 +7,7 @@ import {
 import { client, createClient } from "./barkpark-client";
 import { bpAll, bpType } from "./bp-tags";
 import type { Post, BarkparkTypeMap } from "./barkpark.types";
+import { collectAllPages } from "./paginate.ts";
 
 /**
  * The shape of a `post` document as this demo reader consumes it.
@@ -48,17 +49,48 @@ export function postSlug(post: PostDocument): string {
   return post.slug ?? post.content?.slug ?? post._publishedId ?? post._id;
 }
 
-/** Listing query — works for any scope, since the client carries the scope. */
+// Pagination bounds (task-269eefbe4864d8a5): shares the fetchPapers defect
+// shape (`web/lib/papers.ts`) — a bare `.limit(50).find()` silently truncates
+// past 50. posts is only 4 published rows today so this was latent, not
+// active, but the fix is identical and shares this module's walk. Same bounds
+// as papers.ts: 1000/page (the server's own clamp) x 20 pages.
+const POSTS_PAGE_LIMIT = 1000;
+const POSTS_MAX_PAGES = 20;
+
+/** Listing query — works for any scope, since the client carries the scope.
+ * Walked page by page until a short page terminates. */
 export async function fetchPosts(
   client: BarkparkClient,
 ): Promise<PostDocument[]> {
   // `typedClient<BarkparkTypeMap>` narrows `docs("post")` to the generated
   // `Post`; cast to the demo's wider `PostDocument` view at the boundary.
-  return typedClient<BarkparkTypeMap>(client)
-    .docs("post")
-    .order("_updatedAt:desc")
-    .limit(50)
-    .find() as Promise<PostDocument[]>;
+  const bp = typedClient<BarkparkTypeMap>(client);
+  const { rows, truncated } = await collectAllPages(
+    async (limit, offset) => {
+      try {
+        return (await bp
+          .docs("post")
+          .order("_updatedAt:desc")
+          .limit(limit)
+          .offset(offset)
+          .find()) as unknown[];
+      } catch (err) {
+        // See fetchPapers (lib/papers.ts) for the offset===0 rationale: keep
+        // the pre-existing throw-on-total-failure behaviour for the first
+        // page, recover with a flagged partial result for a later one.
+        if (offset === 0) throw err;
+        return null;
+      }
+    },
+    { limit: POSTS_PAGE_LIMIT, maxPages: POSTS_MAX_PAGES },
+  );
+  if (truncated !== undefined) {
+    console.warn(
+      `[posts] PAGINATION COULD NOT TERMINATE CLEANLY (${truncated}) — ` +
+        `returning the ${rows.length} posts collected so far`,
+    );
+  }
+  return rows as PostDocument[];
 }
 
 /**
