@@ -218,7 +218,8 @@ is harmless:
   go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
   is structurally ineligible to be required, since an absent context reports
   `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 21 `(blocking)` steps below. Until 2026-08-08 it
+  the same sense as doc-gates' 21 `(fails this job)` steps below (that label
+  replaced `(blocking)` there in #12631). Until 2026-08-08 it
   appeared in **neither** `.github/required-checks.json` nor this page:
   `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
   caught by re-reading — `required-checks.json` is GENERATED from names observed
