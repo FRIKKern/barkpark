@@ -7000,6 +7000,13 @@ async function main() {
 }
 
 main().catch((err) => {
-  process.stderr.write(`!! OVERFLOW GUARD crashed: ${err && err.stack ? err.stack : err}\n`);
-  process.exit(1);
+  // AUDITED (exit 2): an unhandled crash measured NOTHING — by this guard's own
+  // doctrine (every die() path, and the inner measurement catch: "an incomplete
+  // run must never be reported as a measured overflow") that is a REFUSAL, not
+  // a finding. Exit 1 here made the console-harness wrapper print the
+  // MEASURED_DEFECT banner ("a measured geometry defect in a real browser",
+  // with selector/number guidance) for a run that never measured a screen.
+  // Sibling breakpoint-sweep.mjs maps this identical unhandled shape to 2.
+  process.stderr.write(`!! OVERFLOW GUARD crashed (exit 2 — nothing was measured): ${err && err.stack ? err.stack : err}\n`);
+  process.exit(2);
 });
