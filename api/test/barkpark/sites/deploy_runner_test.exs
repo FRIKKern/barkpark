@@ -2254,4 +2254,65 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert record.failure_reason =~ "evicted by retention before this run was finalized"
     end
   end
+
+  # ── retention ordering, observed APART from the filesystem ────────────────
+  #
+  # The integration tests above stamp real tombstones and let `File.ls/1` order
+  # them. That proves the sweep on THIS host's directory order — and one host's
+  # order can happen to agree with the intended answer, which is exactly how the
+  # log-side tie bug passed locally and failed on CI. These tests hand the
+  # ordering its entries DIRECTLY, in every permutation, so the tie-break is
+  # pinned on any host: collapse it to a bare mtime sort and the stable sort
+  # falls through to the input order, which here DISAGREES with the answer.
+
+  @tie_second 1_770_000_000
+
+  defp tie_entry(name, ts \\ @tie_second),
+    do: %{path: "/run/state/#{name}", size: 100, mtime: DateTime.from_unix!(ts)}
+
+  defp permutations([]), do: [[]]
+  defp permutations(list), do: for(h <- list, t <- permutations(list -- [h]), do: [h | t])
+
+  describe "retention eviction order is TOTAL, not the directory's" do
+    @tying_records ~w(
+      recordtie-r1.terminal.json
+      recordtie-r2.terminal.json
+      recordtie-r3.terminal.json
+    )
+
+    test "tombstones tying on mtime condemn the SAME two from every input order" do
+      for order <- permutations(@tying_records) do
+        evicted =
+          order
+          |> Enum.map(&tie_entry/1)
+          |> DeployRunner.terminal_records_to_evict(1)
+          |> Enum.map(&Path.basename(&1.path))
+
+        assert evicted == ~w(recordtie-r2.terminal.json recordtie-r1.terminal.json),
+               "input order #{inspect(order)} changed which tombstones the sweep condemned — " <>
+                 "the eviction is following the listing, not a total order"
+      end
+    end
+
+    test "the survivor of a tie is the same record however the directory listed them" do
+      for order <- permutations(@tying_records) do
+        kept = order |> Enum.map(&tie_entry/1) |> DeployRunner.order_newest_first() |> hd()
+
+        assert Path.basename(kept.path) == "recordtie-r3.terminal.json",
+               "input order #{inspect(order)} decided the survivor"
+      end
+    end
+
+    test "mtime still decides when it differs — the path is a TIE-break, not a recency claim" do
+      entries = [
+        tie_entry("aaa-newest.terminal.json", @tie_second + 60),
+        tie_entry("zzz-oldest.terminal.json", @tie_second)
+      ]
+
+      for order <- permutations(entries) do
+        assert order |> DeployRunner.order_newest_first() |> Enum.map(&Path.basename(&1.path)) ==
+                 ~w(aaa-newest.terminal.json zzz-oldest.terminal.json)
+      end
+    end
+  end
 end
