@@ -112,6 +112,31 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     assert reloaded.autoupdate_enabled == true
   end
 
+  # cch-w62-bl — the 422 arm is FLAT and carries the changeset's own answer.
+  # This route used to be the router's one mixed-shape route: flat 404s beside
+  # a nested, details-less `%{error: %{code: "invalid"}}` 422 — so the console's
+  # per-field details ladder (wave 37, D412) was unreachable here and a
+  # PERMANENT validation refusal rendered as a generic. The flat shape below is
+  # what the ladder reads; the envelope-shape census
+  # (router_error_envelope_census_test.exs) pins the route all-flat.
+  test "a refused policy → 422 FLAT %{error, details} naming the field and rule" do
+    {user, team} = user_with_team()
+    bp = barkpark_fixture(team)
+    {:ok, token} = Accounts.create_user_session_token(user)
+
+    conn = patch_autoupdate(bp.id, token, %{"pinned_release" => String.duplicate("v", 256)})
+
+    assert conn.status == 422
+    body = json_body(conn)
+    # FLAT: the slug is a string at the top level, never `%{"code" => …}` …
+    assert body["error"] == "invalid"
+    # … and the changeset's per-field answer rides `details` at the TOP level,
+    # where friendly()'s ladder reads it.
+    assert body["details"] == %{"pinned_release" => ["should be at most 255 character(s)"]}
+    # the row did not move
+    assert Registry.get_barkpark(bp.id).pinned_release == nil
+  end
+
   test "a plain team member → 403" do
     {user, team} = user_with_team("member")
     bp = barkpark_fixture(team)
