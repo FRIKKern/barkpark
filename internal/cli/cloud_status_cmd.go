@@ -862,9 +862,16 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	attention, inFlight, healthy := bucketCounts(ranked)
 
 	if out.output == "json" || out.output == "yaml" {
+		// dr-w19-s7 followup: the deploy truth reaches the MACHINE reader too.
+		// The section costs the same two extra control-plane reads the table
+		// pays (census + sites); a script reading the fleet could otherwise
+		// see a page of ok boxes on a day the live rate is 27.9%.
+		fleetDeploy, perBoxDeploy := statusDeployJSON(cfg, ranked)
 		rows := make([]any, 0, len(ranked))
 		for _, r := range ranked {
-			rows = append(rows, rankedBarkparkRow(r))
+			row := rankedBarkparkRow(r)
+			row["deploy"] = perBoxDeploy[r.BP.ID]
+			rows = append(rows, row)
 		}
 		out.emitStructured(map[string]any{
 			"ok":    true,
@@ -875,6 +882,7 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 				"in-flight": inFlight,
 				"healthy":   healthy,
 			},
+			"deploy":    fleetDeploy,
 			"barkparks": rows,
 		})
 		return exitOK
@@ -1190,15 +1198,104 @@ func statusDeployReadFailure(from, to time.Time, err error) string {
 	return "could not read the deploy census for your team: " + err.Error() + ". Nothing was read: this is NOT a fleet with zero failures."
 }
 
+// statusDeployJSON is the machine half of the deploy section (dr-w19-s7
+// followup): the fleet-level node plus one node per box, every refusal a NAMED
+// state — never an omitted key and never a zero standing in for "we could not
+// say". It reads the SAME census + site list the table reads, folds through
+// the SAME statusDeployFold, and words its refusals with the SAME sentences,
+// so the two outputs cannot tell an operator different stories.
+//
+// States, exhaustively (fleet node): "read" | "census_unreadable" |
+// "sites_unattributable". Per-box node: "rated" | "below_min_sample" |
+// "no_min_sample" | "live_unmetered" | "no_rows" | the two fleet refusals
+// echoed per row (so a row consumer never has to join against the fleet node
+// to learn why its numbers are null). live/volume/pct are null wherever they
+// were not measured — a JSON null is this contract's "could not measure", and
+// it is never collapsed into 0.
+func statusDeployJSON(cfg *Config, ranked []rankedBarkpark) (map[string]any, map[string]map[string]any) {
+	to := statusDeployNow().UTC().Truncate(time.Second)
+	from := to.Add(-statusDeployWindow)
+	window := map[string]any{
+		"from": from.Format(time.RFC3339),
+		"to":   to.Format(time.RFC3339),
+	}
+
+	perBox := make(map[string]map[string]any, len(ranked))
+	refuseAll := func(state, reason string) (map[string]any, map[string]map[string]any) {
+		for _, r := range ranked {
+			perBox[r.BP.ID] = map[string]any{
+				"state": state, "reason": reason,
+				"live": nil, "volume": nil, "pct": nil,
+			}
+		}
+		return map[string]any{"window": window, "state": state, "reason": reason}, perBox
+	}
+
+	census, cerr := cfg.CloudClient().FleetDeployCensus(cloudCtx(), from, to)
+	if cerr != nil {
+		return refuseAll("census_unreadable", statusDeployReadFailure(from, to, cerr))
+	}
+	sites, serr := cfg.CloudClient().ListSites(cloudCtx())
+	if serr != nil {
+		return refuseAll("sites_unattributable", fmt.Sprintf(
+			"the census was read (%d attempted rows over this window) but the site list was not: %s. Without it a census row cannot be tied to a box.",
+			census.Volume, serr.Error()))
+	}
+
+	boxes, orphanRows, orphanVolume := statusDeployFold(census, sites)
+	var minSampleVal any // null when the control plane sent none — absent is not zero
+	if census.MinSample > 0 {
+		minSampleVal = census.MinSample
+	}
+	fleet := map[string]any{
+		"window":     window,
+		"state":      "read",
+		"min_sample": minSampleVal,
+		"orphans":    map[string]any{"rows": orphanRows, "volume": orphanVolume},
+	}
+	for _, r := range ranked {
+		b := boxes[r.BP.ID]
+		switch {
+		case b == nil || b.Volume == 0:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "no_rows", "live": 0, "volume": 0, "pct": nil,
+				"reason": "no deploy rows in this window — nothing was attempted here, which is not the same as nothing failing",
+			}
+		case !b.LiveKnown:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "live_unmetered", "live": nil, "volume": b.Volume, "pct": nil,
+				"reason": fmt.Sprintf("%d attempted; this control plane sends no per-site `live`, so whether anything shipped is unknown (never read this as zero)", b.Volume),
+			}
+		case census.MinSample <= 0:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "no_min_sample", "live": b.Live, "volume": b.Volume, "pct": nil,
+				"reason": fmt.Sprintf("%d attempted, %d live; this control plane sent no min_sample, so nothing says whether a percentage on this sample is a measurement", b.Volume, b.Live),
+			}
+		case b.Volume < census.MinSample:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "below_min_sample", "live": b.Live, "volume": b.Volume, "pct": nil,
+				"reason": fmt.Sprintf("%d attempted is below the census min_sample of %d (%d live); a percentage on this sample would be noise", b.Volume, census.MinSample, b.Live),
+			}
+		default:
+			perBox[r.BP.ID] = map[string]any{
+				"state": "rated", "live": b.Live, "volume": b.Volume,
+				"pct": float64(b.Live) / float64(b.Volume) * 100,
+			}
+		}
+	}
+	return fleet, perBox
+}
+
 // renderStatusDeploy prints the DEPLOY section: one line per box in the same
 // rank order as the tables above, carrying the box's live rate WITH its
 // denominator over a pinned DAILY window — or the refusal that stopped it being
 // a number.
 //
-// TABLE ONLY, ON PURPOSE. `-o json` emits the decision-15 ranked structure whose
-// keys scripts already consume; this section costs two extra control-plane reads
-// and is a human triage line, so it does not silently change that contract.
-// `bp cloud deployments` is the machine-readable reader of the same census.
+// The MACHINE half of this section is statusDeployJSON above (dr-w19-s7
+// followup): -o json carries the same census fold as ADDITIVE `deploy` nodes
+// (fleet + per row), so the decision-15 keys scripts already consume are
+// untouched and a machine reader no longer sees a fleet of ok boxes on a day
+// the live rate is 27.9%. `bp cloud deployments` remains the deep reader.
 func renderStatusDeploy(out *writer, cfg *Config, ranked []rankedBarkpark) {
 	to := statusDeployNow().UTC().Truncate(time.Second)
 	from := to.Add(-statusDeployWindow)
