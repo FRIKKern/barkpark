@@ -324,42 +324,106 @@ defmodule Barkpark.Content.Codelists do
     end
   end
 
+  # ── Bulk value writer ────────────────────────────────────────────────────
+  #
+  # `register/3` runs the ENTIRE payload inside one `Repo.transaction`, so
+  # the statement count is a correctness property, not a tuning knob. The
+  # original writer issued one `Repo.insert!` per value AND one per
+  # translation: the bundled Thema snapshot (9187 codes, a label each) cost
+  # ~18,400 round trips under a single connection deadline. On 2026-08-19 a
+  # loaded host overran that deadline and Postgres cancelled the write
+  # (`ERROR 57014 (query_canceled)`) — the transaction rolled back, boot
+  # carried on, and the registry was left with the codelist ABSENT while the
+  # server served 200s. `codelists_bulk_write_test.exs` reproduces the same
+  # disconnect with a 1200-row payload.
+  #
+  # Both tables use `:binary_id` primary keys, so ids are generated here and
+  # the whole tree — parents and children alike — goes out in one flat pass
+  # with `parent_id` already resolved. No per-level returning round trip.
+  #
+  # Trade-off, recorded deliberately: `insert_all/2` bypasses the changesets,
+  # so a nil `:code` now surfaces as a Postgres NOT NULL violation and a
+  # duplicate code as a unique violation, where the per-row writer raised
+  # `Ecto.InvalidChangesetError`. Both still raise inside the transaction and
+  # both still roll the whole registration back; only the exception struct
+  # differs. `Map.fetch!/2` on `:code`, `:language`, and `:label` is kept
+  # verbatim, so a payload missing a required key still fails before any SQL.
+
+  # 8 columns per value row; 2_000 rows is 16_000 bind parameters, well under
+  # Postgres' 65_535 limit with headroom for the wider translation row.
+  @insert_chunk 2_000
+
   defp replace_values!(%Codelist{id: codelist_id}, values) do
     # Cascading FK deletes translations along with values.
     Repo.delete_all(from v in Value, where: v.codelist_id == ^codelist_id)
-    Enum.each(values, &insert_value!(&1, codelist_id, nil))
+
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    {value_rows, translation_rows} =
+      flatten_values(values, codelist_id, nil, now, {[], []})
+
+    # Values before translations: the FK on `codelist_value_id` is checked
+    # per statement, so the parents must already be on disk. Within the value
+    # list, the depth-first order below guarantees a parent precedes its
+    # children, satisfying the self-referencing `parent_id` FK too.
+    insert_all_chunked!(Value, Enum.reverse(value_rows))
+    insert_all_chunked!(Translation, Enum.reverse(translation_rows))
   end
 
-  defp insert_value!(input, codelist_id, parent_id) do
-    code = Map.fetch!(input, :code)
-    position = Map.get(input, :position)
-    metadata = Map.get(input, :metadata)
-    translations = Map.get(input, :translations, [])
-    children = Map.get(input, :children, [])
+  # Depth-first pre-order walk — the exact visit order the per-row writer
+  # produced — accumulating REVERSED lists so each step is a prepend. The
+  # caller reverses once.
+  defp flatten_values(inputs, codelist_id, parent_id, now, acc) do
+    Enum.reduce(inputs, acc, fn input, {values, translations} ->
+      id = Ecto.UUID.generate()
 
-    value =
-      %Value{}
-      |> Value.changeset(%{
+      value_row = %{
+        id: id,
         codelist_id: codelist_id,
         parent_id: parent_id,
-        code: code,
-        position: position,
-        metadata: metadata
-      })
-      |> Repo.insert!()
+        code: Map.fetch!(input, :code),
+        position: Map.get(input, :position),
+        metadata: Map.get(input, :metadata),
+        inserted_at: now,
+        updated_at: now
+      }
 
-    Enum.each(translations, fn t ->
-      %Translation{}
-      |> Translation.changeset(%{
-        codelist_value_id: value.id,
-        language: Map.fetch!(t, :language),
-        label: Map.fetch!(t, :label),
-        description: Map.get(t, :description)
-      })
-      |> Repo.insert!()
+      translations =
+        input
+        |> Map.get(:translations, [])
+        |> Enum.reduce(translations, fn t, acc ->
+          [
+            %{
+              id: Ecto.UUID.generate(),
+              codelist_value_id: id,
+              language: Map.fetch!(t, :language),
+              label: Map.fetch!(t, :label),
+              description: Map.get(t, :description),
+              inserted_at: now,
+              updated_at: now
+            }
+            | acc
+          ]
+        end)
+
+      flatten_values(
+        Map.get(input, :children, []),
+        codelist_id,
+        id,
+        now,
+        {[value_row | values], translations}
+      )
     end)
+  end
 
-    Enum.each(children, &insert_value!(&1, codelist_id, value.id))
+  defp insert_all_chunked!(_schema, []), do: :ok
+
+  defp insert_all_chunked!(schema, rows) do
+    rows
+    |> Enum.chunk_every(@insert_chunk)
+    |> Enum.each(&Repo.insert_all(schema, &1))
+
+    :ok
   end
 
   defp latest_codelist_id(plugin_name, list_id) do
