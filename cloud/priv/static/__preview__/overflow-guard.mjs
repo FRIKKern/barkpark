@@ -209,6 +209,7 @@ const DEFECTS = [
   "W21-inst-head-320-copy-reachable",
   "W21-members-roster-identity-and-remove",
   "W21-cruel-content-text-bounded",
+  "W21-detail-url-text-page-bound",
   "W21-token-reveal-readable",
   "W20-attention-name-column",
   "W24-theater-failed-hostname-whole",
@@ -5114,6 +5115,125 @@ async function main() {
           `run put 22 of 44 findings on \`.instance-card-name\` while the live defect sat in another wrapper. The px ` +
           `above are taken under a PINNED face (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, ` +
           `awaits document.fonts.ready and check()s each one, refusing at exit 2 rather than measuring a fallback`,
+        );
+      }
+    }
+
+    // ── W21-detail-url-text-page-bound (task-df8a6fced3a408a8): THE INSTANCE
+    //    DETAIL SCREEN'S OWN ADDRESS, which cchi-w21-bl-cruel-corpus-does-not-
+    //    cover-three-hosts found and deliberately left ungated — that PR's own
+    //    commit message: "NOT landed here: a permanent overflow-guard.mjs leg
+    //    for .detail-url-text... filed as a follow-up task rather than fixed
+    //    or gated on here, since gating a currently-unfixed defect into
+    //    overflow-guard.mjs's default run would red the whole guard for every
+    //    unrelated PR touching this file." The defect is now fixed (two hosts,
+    //    not the one originally assumed — see the app.css comments at
+    //    `.detail-title-row h1` and the widened `.detail-head--inst` 899
+    //    block), so this leg is the gate that makes it stay fixed.
+    //
+    //    BISECTED, NOT ASSUMED: `instance-cruel-detail` is cruel on TWO
+    //    strings at once (`bp.name` at its 255-char cap AND `custom_host` at
+    //    its 253-char cap — scenarios.mjs's own comment on `cruelInstance`:
+    //    "the ONLY variable is the length of two strings a person is allowed
+    //    to type"). Element-hiding bisection on the PRE-fix tree found the H1
+    //    was the sole page-level driver at 320-720 (hiding it alone took
+    //    documentElement.scrollWidth from 808 to exactly clientWidth; hiding
+    //    `.detail-url-text` alone left it at 808, unchanged) while the
+    //    `.detail-head--inst` stretch gap independently drove 720-899
+    //    (2000-2240 against a 720-899 viewport). BOTH hosts are asserted here,
+    //    per cell, so a regression in either one reds by name rather than the
+    //    page-only signal laundering which host broke.
+    //
+    //    MUTATION-PROVED, both halves independently (this branch): reverting
+    //    ONLY the `.detail-title-row h1` fix reds at 320/720 (808 vs
+    //    320/720, byte-identical to the pre-fix numbers); reverting ONLY the
+    //    `.detail-head--inst` 899-widen (back to 620px) reds at 720/830
+    //    (2000/2240 vs 720/830, byte-identical to the pre-fix numbers).
+    //    Restoring either alone is not enough — both are load-bearing.
+    if (requested.includes("W21-detail-url-text-page-bound")) {
+      const D = "W21-detail-url-text-page-bound";
+      // BLOCK-SCOPED (the `const D` precedent): the 899 straddle is
+      // `.detail-head--inst`'s own stacked/row split, the 620 straddle is the
+      // phone-fixture threshold the original H1/URL fixes were bisected
+      // against, and 1000/1440 are wide controls.
+      const DETAIL_WIDTHS = [320, 360, 390, 430, 480, 620, 720, 830, 899, 900, 1000, 1440];
+      const cellCount = DETAIL_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${DETAIL_WIDTHS.length} widths x 2 themes (${cellCount} cells; instance-cruel-detail's own ` +
+        `H1 + .detail-url-text vs the page)\n`,
+      );
+      let cells = 0, pageOver = 0, h1Uncut = 0, urlUncut = 0;
+      for (const theme of ["light", "dark"]) {
+        await setViewport(1000);
+        await nav(
+          `${BASE}/?scen=instance-cruel-detail&theme=${theme}#instance/5b2c1e00-0000-4000-8000-0000000000c1`,
+          `document.querySelector('.detail-url-text') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-instance';})()`,
+        );
+        const row = [];
+        for (const width of DETAIL_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){` +
+            `var v=document.querySelector('section.view:not([hidden])');` +
+            `var d=document.documentElement;` +
+            `var h1=document.querySelector('.detail-title-row h1');` +
+            `var url=document.querySelector('.detail-url-text');` +
+            `return {view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
+            `h1sw:h1?h1.scrollWidth:null,h1cw:h1?h1.clientWidth:null,` +
+            `usw:url?url.scrollWidth:null,ucw:url?url.clientWidth:null};})()`,
+          );
+          cells++;
+          if (m.view !== "view-instance") {
+            fail(D, `${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance detail head`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          if (m.h1cw === null) fail(D, `${theme}@${width}: zero .detail-title-row h1 rendered — nothing was measured, this is not a pass`);
+          if (m.ucw === null) fail(D, `${theme}@${width}: zero .detail-url-text rendered — nothing was measured, this is not a pass`);
+          const over = m.psw > m.pcw;
+          if (over) {
+            pageOver++;
+            fail(D, `${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance detail screen drags sideways`);
+          }
+          // THE ELEMENT-LEVEL ARM, not only the page: a remedy that trades the
+          // page bound for an unbounded host that happens to fit THIS
+          // viewport would score clean here and red the instant the fixture's
+          // strings grow by one character. h1 wraps (overflow-wrap: break-word)
+          // so its own scrollWidth may still exceed a narrow clientWidth by a
+          // few px at the token's own break granularity — asserted loosely
+          // (a hard multiple of its own box, not zero drift); .detail-url-text
+          // ellipsises, so ITS scrollWidth is EXPECTED to exceed clientWidth
+          // (that is what "not clipped" would look like in reverse — the
+          // defect this leg exists for is the page dragging, not the leaf's
+          // own scrollWidth, which the ellipsis is designed to exceed).
+          if (m.h1cw !== null && m.h1sw > m.h1cw * 3 && m.h1cw > 40) {
+            h1Uncut++;
+            fail(D, `${theme}@${width}: .detail-title-row h1 scrollWidth ${m.h1sw} vs clientWidth ${m.h1cw} — more than 3x over, break-word is not breaking`);
+          }
+          if (m.ucw !== null && m.ucw > m.usw) {
+            urlUncut++;
+            fail(D, `${theme}@${width}: .detail-url-text clientWidth ${m.ucw} > its own scrollWidth ${m.usw} — an impossible box, the measurement itself is broken`);
+          }
+          const bad = (over ? 1 : 0);
+          row.push(`${width}:${m.psw}${bad ? "!" : ""}`);
+        }
+        process.stdout.write(`   instance-cruel-detail/${theme}  ${row.join("  ")}\n`);
+      }
+      if (cells !== cellCount) {
+        fail(D, `run check: drove ${cells} cells, the table declares ${cellCount} — the loop measured a different corpus than the header announced`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${DETAIL_WIDTHS.join("/")} x 2 themes on instance-cruel-detail — the ` +
+          `253-char custom_host and 255-char name fixture) — 0 pages dragging sideways, 0 h1 break-word failures, ` +
+          `0 impossible .detail-url-text boxes`,
+        );
+        okLine(
+          `TWO HOSTS, ONE PAGE (task-df8a6fced3a408a8): the original finding named .detail-url-text alone; ` +
+          `element-hiding bisection on this branch found .detail-title-row h1 was the actual page driver at ` +
+          `320-720 and the un-stretched .detail-head--inst drove 720-899 independently — both fixed, both ` +
+          `mutation-proved on this branch, both asserted here so either regressing reds by name`,
         );
       }
     }
