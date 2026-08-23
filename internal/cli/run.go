@@ -914,7 +914,24 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		if commandHasFileFlag(cmd) {
 			return nil, nil, "", fmt.Errorf("piped stdin is unused; pass --file - to consume it")
 		}
-		return nil, nil, "", fmt.Errorf("piped stdin is unused and %s %s does not accept --file; remove the stdin redirect", cmd.Noun, cmd.Verb)
+		// A mutation command (create/patch/etc via --set) has NO file flag but
+		// its payload is still plausibly meant to come from a piped body — a
+		// user might reasonably expect `cat doc.json | bp doc patch task <id>`
+		// to work the way `--file -` does. Keep the hard refusal there so that
+		// expectation never silently loses data (the doc-patch boundary,
+		// gfr-w1-stdin-guard-altitude — decided explicitly, not by omission).
+		if cmd.MutationOp != "" {
+			return nil, nil, "", fmt.Errorf("piped stdin is unused and %s %s does not accept --file; remove the stdin redirect", cmd.Noun, cmd.Verb)
+		}
+		// Every other write command (task close, task next, webhook create,
+		// media upload, most cloud verbs — 59 of the 72 write commands in the
+		// served manifest) has NEITHER a file flag NOR a mutation_op: there is
+		// NO way for it to read a body from stdin at all, so a piped/redirected
+		// stdin can never be silently swallowed here. Refusing anyway only
+		// serves to abort `while read -r id; do bp task close "$id" …; done`
+		// on every iteration (Gyldendal finding #20 — 'knekker enhver
+		// while-read-lokke'). Proceed: the command was going to ignore stdin
+		// either way, so nothing about its behavior changes.
 	}
 
 	// Seed the body object from declared body-location args, then merge --set.
@@ -1094,6 +1111,21 @@ func stdinHasRedirectedInput() bool {
 		return false
 	}
 	if info.Mode().IsRegular() {
+		// SIZE is not BYTES REMAINING: a `while read ... done < file` loop
+		// shares this fd's offset with the shell's own `read` builtin (both
+		// inherited it from the same open file description), so by the time
+		// bp runs mid-loop the file has already been partially or fully
+		// consumed. info.Size() reports the file's total length regardless of
+		// offset, so a fully-drained regular-file redirect (0 bytes left to
+		// read) still measured as "has data" and tripped this guard on every
+		// iteration — the offset-blind half of the Gyldendal while-read
+		// finding (gfr-w1-stdin-guard-altitude). Compare size against the
+		// CURRENT offset instead. A Seek failure (a regular file that somehow
+		// can't report position) falls back to the historical size-only
+		// answer rather than silently disabling the guard.
+		if pos, err := os.Stdin.Seek(0, io.SeekCurrent); err == nil {
+			return info.Size() > pos
+		}
 		return info.Size() > 0
 	}
 	n, ok := stdinPendingBytes(os.Stdin)

@@ -1544,6 +1544,107 @@ func TestBuildBodyEmptyPipeStdin(t *testing.T) {
 	})
 }
 
+// TestBuildBodyNoStdinSinkProceedsOnRedirectedStdin is the gfr-w1-stdin-guard-
+// altitude regression (Gyldendal finding #20, "knekker enhver while-read-lokke"):
+// a write command that declares NEITHER a file flag nor a mutation_op — task
+// close, task next, webhook create, most cloud verbs; 59 of the 72 write
+// commands in the served manifest — has NO way to read a request body from
+// stdin at all, so a redirected/piped stdin can never be silently swallowed by
+// it. The guard used to refuse anyway, which aborts EVERY iteration of
+// `while read -r id; do bp task close "$id" …; done < ids.txt` (the loop and bp
+// share the same fd 0). On unpatched main this fails with
+// "piped stdin is unused and task close does not accept --file".
+func TestBuildBodyNoStdinSinkProceedsOnRedirectedStdin(t *testing.T) {
+	taskClose := manifest.Command{
+		ID: "task.close", Noun: "task", Verb: "close", Writes: true,
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/tasks/:doc_id/close"},
+		Args: []manifest.Arg{
+			{Name: "id", Required: true, Type: "string"},
+			{Name: "worker", Required: true, Type: "string"},
+			{Name: "epoch", Required: true, Type: "int"},
+		},
+		// No file flag, no MutationOp: this command cannot read a body from
+		// stdin under ANY flag combination.
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "ids-*.txt")
+	if err != nil {
+		t.Fatalf("create temp stdin file: %v", err)
+	}
+	if _, err := io.WriteString(f, "task-aaa\ntask-bbb\ntask-ccc\n"); err != nil {
+		t.Fatalf("write temp stdin file: %v", err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("rewind temp stdin file: %v", err)
+	}
+	original := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() {
+		os.Stdin = original
+		_ = f.Close()
+	})
+
+	body, _, _, err := buildBody(taskClose, map[string][]string{}, map[string]string{"id": "task-aaa", "worker": "w1", "epoch": "1"})
+	if err != nil {
+		t.Fatalf("a command with no stdin sink must proceed on redirected stdin (nothing could have been swallowed): %v", err)
+	}
+	if body == nil {
+		t.Fatalf("expected a non-nil body for a plain write with no body source")
+	}
+}
+
+// TestBuildBodyDrainedRegularFileStdinDoesNotTrip is the second half of the
+// gfr-w1-stdin-guard-altitude finding: the regular-file arm of
+// stdinHasRedirectedInput compared the file's total SIZE against zero, not the
+// BYTES REMAINING at the current offset. In a `while read ... done < file`
+// loop, bp's stdin fd shares its offset with the shell's own `read` builtin
+// (both inherited the same open file description), so by the time a mid-loop
+// or post-loop bp write runs, the file may already be fully drained — yet
+// info.Size() still reports the original length and the guard still tripped.
+// On unpatched main this fails with "piped stdin is unused; pass --file - to
+// consume it" even though zero bytes remain to read.
+func TestBuildBodyDrainedRegularFileStdinDoesNotTrip(t *testing.T) {
+	// docCreate declares a file flag, so buildBody actually consults
+	// stdinRedirected here (the no-sink command above never reaches the
+	// regular-file size/offset comparison at all).
+	docCreate := manifest.Command{
+		ID: "doc.create", Noun: "doc", Verb: "create", Writes: true, MutationOp: "create",
+		HTTP:  manifest.HTTP{Method: "POST", PathTemplate: "/v1/data/mutate/:dataset"},
+		Args:  []manifest.Arg{{Name: "type", Required: true, Type: "string"}},
+		Flags: []manifest.Flag{{Name: "file", Type: "file"}},
+	}
+
+	f, err := os.CreateTemp(t.TempDir(), "drained-*.json")
+	if err != nil {
+		t.Fatalf("create temp stdin file: %v", err)
+	}
+	if _, err := io.WriteString(f, `{"title":"already consumed"}`); err != nil {
+		t.Fatalf("write temp stdin file: %v", err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("rewind temp stdin file: %v", err)
+	}
+	// Drain it fully — mimicking the shell's `read` having already consumed
+	// every byte before bp's turn on the shared fd.
+	if _, err := io.ReadAll(f); err != nil {
+		t.Fatalf("drain temp stdin file: %v", err)
+	}
+	original := os.Stdin
+	os.Stdin = f
+	t.Cleanup(func() {
+		os.Stdin = original
+		_ = f.Close()
+	})
+
+	body, _, _, err := buildBody(docCreate, map[string][]string{}, map[string]string{"type": "paper"})
+	if err != nil {
+		t.Fatalf("a fully-drained regular-file stdin must not trip the unused-stdin guard: %v", err)
+	}
+	if want := `{"mutations":[{"create":{"type":"paper"}}]}`; string(body) != want {
+		t.Fatalf("request body = %s, want %s", body, want)
+	}
+}
+
 // TestMCPStdioWriteIgnoresProtocolPipe is the mutation-sensitive regression for
 // the real transport failure found by Team300. A built bp process keeps JSON-RPC
 // on stdin while task_next must still reach exactly one loopback backend write.
