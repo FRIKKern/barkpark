@@ -95,34 +95,23 @@ const questionnaire: Emit = (b) =>
 // precedent) with NO unit suffix. `min`/`max`/`step` are Edit-mode control
 // bounds — never read here.
 
-// Mirrors Elixir field_number_value/1: numbers pass through; a string must
-// parse as a full decimal (Float.parse with an empty rest) — partial parses
-// and non-numeric garbage coerce to null, never to NaN-ish output.
-function fieldNumberValue(v: unknown): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return v
-  if (typeof v === 'string') {
-    const t = v.trim()
-    if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t)) {
-      const n = Number(t)
-      if (Number.isFinite(n)) return n
-    }
-  }
-  return null
-}
-
-// Integer values (and whole floats) drop the decimal point; fractions keep the
-// shortest round-trip decimal — String(n) is JS's Float.to_string twin.
-function fieldNumberText(b: Block): string {
-  const n = fieldNumberValue(b.value)
-  if (n === null) return '—'
-  const unit = str(b.unit).trim()
-  return unit === '' ? String(n) : `${String(n)} ${unit}`
-}
-
 // The article definition row compose.ex field_row_article/2 emits — byte-shape
-// parity with the Elixir renderer's bp-field grid (gui-premium w2).
-const fieldNumber: Emit = (b) =>
-  `<div class="bp-field"><span class="bp-field__l">${escapeHtml(str(b.label))}</span><div class="bp-field__v"><span>${escapeHtml(fieldNumberText(b))}</span></div></div>`
+// parity with the Elixir renderer's bp-field grid (gui-premium w2). Value
+// coercion mirrors field_number_value/1: numbers pass through; a string must
+// parse as a FULL decimal (Float.parse with an empty rest) — partial parses
+// and garbage fall to NaN, and every non-finite value (including a regex-passing
+// overflow like "1e999") renders the "—" empty state with no unit suffix.
+// Integer values and whole floats drop the decimal point; fractions keep the
+// shortest round-trip decimal — String(n) is JS's Float.to_string twin.
+// (Kept deliberately compact: this emitter rides the size-limit budget.)
+const fieldNumber: Emit = (b) => {
+  const v = b.value
+  const t = typeof v === 'string' ? v.trim() : ''
+  const n = typeof v === 'number' ? v : /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t) ? Number(t) : NaN
+  const unit = str(b.unit).trim()
+  const text = Number.isFinite(n) ? String(n) + (unit && ' ' + unit) : '—'
+  return `<div class="bp-field"><span class="bp-field__l">${escapeHtml(str(b.label))}</span><div class="bp-field__v"><span>${escapeHtml(text)}</span></div></div>`
+}
 
 export const formsEmitters: Record<string, Emit> = {
   form,
