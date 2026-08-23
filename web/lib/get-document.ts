@@ -3,6 +3,7 @@ import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { client } from "./barkpark-client";
 import { bpAll, bpType } from "./bp-tags";
+import { docResultFromError } from "./doc-absence";
 
 /**
  * The raw document, type-agnostic. Every reader (post / paper / sheet / meta)
@@ -73,16 +74,24 @@ const cachedDoc = (type: string) =>
  * Error handling lives here too, so callers stay declarative: they branch on
  * `{ doc, error }` rather than each wrapping their own try/catch. Mirrors
  * `getPost` exactly.
+ *
+ * The two absent-doc shapes are kept DISTINCT (they render differently):
+ *   { doc: null, error: null }   → not found           → the page 404s honestly
+ *   { doc: null, error: "…" }    → upstream unavailable → inline error panel
+ * An upstream 404 belongs to the FIRST bucket: the by-id leg already maps it to
+ * null inside `@barkpark/core`, but the slug-query leg THROWS
+ * `BarkparkNotFoundError` when the TYPE itself is unknown or private to this
+ * token (a decided asymmetry — `js/packages/core/src/docs.ts`, wave-7 D72). It
+ * used to be caught here and reported as a failure, so a document that does not
+ * exist wore a red panel behind an HTTP 200 instead of 404ing. The ruling lives
+ * in `./doc-absence.ts`.
  */
 export const getDocument = cache(
   async (type: string, slug: string): Promise<DocResult> => {
     try {
       return { doc: await cachedDoc(type)(slug), error: null };
     } catch (err) {
-      return {
-        doc: null,
-        error: err instanceof Error ? err.message : String(err),
-      };
+      return docResultFromError(err);
     }
   },
 );
