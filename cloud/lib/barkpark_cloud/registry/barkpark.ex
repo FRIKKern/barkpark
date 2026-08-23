@@ -604,7 +604,7 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> assoc_constraint(:team)
     |> unique_constraint([:team_id, :slug],
       name: :barkparks_team_slug_unique_idx,
-      message: "a Barkpark with this slug already exists in this team"
+      message: "already has a Barkpark with this slug"
     )
     # Defense in depth: the resolved customer-facing FQDN (`url`) is GLOBALLY
     # unique. `provisioning_subdomain/1` already makes the label collision-free by

@@ -143,7 +143,7 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
                })
                |> Repo.insert()
 
-      assert "a team-scoped var with this key already exists" in errors_on(changeset).key
+      assert "is already taken by a team-scoped var" in errors_on(changeset).key
     end
 
     test "same key under team AND barkpark scope both succeed (NULL≠NULL)" do

@@ -118,11 +118,11 @@ defmodule BarkparkCloud.Registry.EnvVar do
     |> assoc_constraint(:barkpark)
     |> unique_constraint([:key, :team_id],
       name: :env_vars_team_key_unique_idx,
-      message: "a team-scoped var with this key already exists"
+      message: "is already taken by a team-scoped var"
     )
     |> unique_constraint([:key, :barkpark_id],
       name: :env_vars_barkpark_key_unique_idx,
-      message: "a var with this key already exists on this instance"
+      message: "is already taken by a var on this instance"
     )
   end
 

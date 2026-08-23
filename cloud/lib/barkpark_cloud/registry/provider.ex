@@ -103,7 +103,7 @@ defmodule BarkparkCloud.Registry.Provider do
     if is_binary(credential) and String.trim(credential) != "" do
       changeset
     else
-      add_error(changeset, :credential, "a Hetzner API token can't be blank")
+      add_error(changeset, :credential, "can't be blank — a Hetzner API token is required")
     end
   end
 
@@ -117,7 +117,7 @@ defmodule BarkparkCloud.Registry.Provider do
         add_error(
           changeset,
           :credential,
-          "azure credentials require #{Enum.join(@azure_fields, ", ")}"
+          "must be Azure JSON carrying #{Enum.join(@azure_fields, ", ")}"
         )
     end
   end
@@ -131,10 +131,10 @@ defmodule BarkparkCloud.Registry.Provider do
   defp validate_credential_shape(changeset, "cloudflare", credential) do
     cond do
       not is_binary(credential) or String.trim(credential) == "" ->
-        add_error(changeset, :credential, "a Cloudflare API token can't be blank")
+        add_error(changeset, :credential, "can't be blank — a Cloudflare API token is required")
 
       cloudflare_blob_missing_token?(credential) ->
-        add_error(changeset, :credential, "cloudflare credentials as JSON require api_token")
+        add_error(changeset, :credential, "must carry api_token when supplied as JSON")
 
       true ->
         changeset

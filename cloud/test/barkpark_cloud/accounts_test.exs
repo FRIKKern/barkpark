@@ -167,7 +167,7 @@ defmodule BarkparkCloud.AccountsTest do
       assert {:ok, _} = Accounts.add_member(team, user, "owner")
 
       assert {:error, changeset} = Accounts.add_member(team, user, "member")
-      assert "user is already a member of this team" in errors_on(changeset).user_id
+      assert "is already a member of this team" in errors_on(changeset).user_id
     end
 
     test "the same user can belong to two different teams", %{user: user, team: team} do

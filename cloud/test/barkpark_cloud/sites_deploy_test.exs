@@ -232,7 +232,8 @@ defmodule BarkparkCloud.SitesDeployTest do
                  trigger: "content-auto"
                })
 
-      assert {"a build for this site is already in progress", _} = cs.errors[:git_ref]
+      assert {"is blocked — a build for this site is already in progress", _} =
+               cs.errors[:git_ref]
 
       # And the enqueue path turns that refusal into a COALESCE, never a lost
       # publish: the caller is handed the row already in flight.
