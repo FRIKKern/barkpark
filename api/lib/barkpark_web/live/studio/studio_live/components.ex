@@ -1130,12 +1130,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <%!-- Post-type Share-access entry (airdrop-grants): mints a grant
                     scoped to THIS post type. Gated on holding shareable access,
                     not admin — the sheet's picker offers only held caps. --%>
+              <%!-- Icon-only: title= is mouse-hover only in several AT/browser
+                    pairs, so without aria-label the accessible name is the
+                    empty string (the defect PR #7567 fixed for the "+"). --%>
               <button
                 :if={@airdrop_can_share?}
                 class="pane-add-btn"
                 phx-click="airdrop-open"
                 phx-value-type={pane.type_name}
                 title={"Share access to #{pane.type_name}"}
+                aria-label={"Share access to #{pane.type_name}"}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
               <%!-- Access panel entry (airdrop-grants): review + revoke scoped
@@ -1145,6 +1149,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="access-open"
                 title="Review scoped access grants"
+                aria-label="Review scoped access grants"
                 data-test-id="access-open-type"
               ><.icon name="clock" size={14} /></button>
               <%!-- Icon-only: without an explicit label its accessible name

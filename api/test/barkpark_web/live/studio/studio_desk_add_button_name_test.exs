@@ -126,6 +126,42 @@ defmodule BarkparkWeb.Studio.StudioDeskAddButtonNameTest do
     end
   end
 
+  # spd-w18-share-access-btn-names: the two share-access controls that sit in
+  # the SAME pane header as the "+" — icon-only over an aria-hidden svg, so
+  # like the "+" their accessible name exists solely because of aria-label
+  # (title= does not count; accessible_name/1 above ignores it on purpose).
+  for {event, what} <- [
+        {"airdrop-open", "share-access entry"},
+        {"access-open", "access-panel entry"}
+      ] do
+    test "the pane-header #{what} (#{event}) has a non-empty accessible name",
+         %{conn: conn} do
+      event = unquote(event)
+      what = unquote(what)
+
+      [button] = desk(conn, ~s(button.pane-add-btn[phx-click="#{event}"]))
+
+      # aria-label itself must carry the name: with only a decorative
+      # <svg aria-hidden="true"> inside, stripped text is empty, so an empty
+      # or absent aria-label leaves AT announcing a bare "button".
+      assert [label | _] = LazyHTML.attribute(button, "aria-label"),
+             """
+             The #{what} (phx-click=#{event}) renders with NO aria-label.
+
+             Its only content is a decorative <svg aria-hidden="true"> and its
+             title= is mouse-hover only in several AT/browser pairs, so its
+             accessible name is the EMPTY STRING. Restore the aria-label in
+             lib/barkpark_web/live/studio/studio_live/components.ex.
+
+             Rendered: #{LazyHTML.to_html(button)}
+             """
+
+      assert String.trim(label) != "",
+             "the #{what}'s aria-label is present but blank — that is still " <>
+               "an empty accessible name (phx-click=#{event})"
+    end
+  end
+
   test ~s(the header "+" button names the post type it creates), %{conn: conn} do
     # Scoped to `.pane-add-btn`: this is the icon-only one, the only control on
     # the desk whose name exists SOLELY because of its aria-label. The
