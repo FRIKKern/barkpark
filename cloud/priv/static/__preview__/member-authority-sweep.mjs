@@ -339,7 +339,7 @@ const KNOWN = [
 // Derived-but-pinned, so corpus growth is NAMED rather than silently absorbed
 // (LIMIT L1). Update them in the same commit that grows the corpus.
 const PIN_MEMBER_SCENARIOS = 10;
-const PIN_TOTAL_SCENARIOS = 111;
+const PIN_TOTAL_SCENARIOS = 112;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;
