@@ -71,10 +71,28 @@ check_runs_rows() {
     return 2
   }
 
-  # No rows is a legal, informative answer. Say nothing and succeed.
-  jq -r '
-      .check_runs | sort_by(.started_at // "") | .[]
-      | [ .name, (.conclusion // "null"), (.status // "null") ] | @tsv' <<<"$json" \
+  # No rows is a legal, informative answer — but the transform must OWN its
+  # status. As a plain pipeline this function returned SORT's exit code, so a
+  # payload whose elements broke jq mid-stream (measured: {"check_runs":[1,…]},
+  # bare jq rc 5) returned 0 with EMPTY rows under the shell's default options
+  # — the silent empty set the header forbids — and only a caller that happened
+  # to set pipefail saw the failure. Capture the jq stage first so the
+  # documented return 2 holds under ANY caller options, and reject non-object
+  # elements and nameless runs as unreadable rather than emitting phantom rows.
+  local tsv
+  tsv="$(jq -r '
+      .check_runs
+      | map(
+          if type != "object" then error("non-object element in check_runs")
+          elif ((.name // "") | tostring) == "" then error("check run with an empty name")
+          else . end)
+      | sort_by(.started_at // "") | .[]
+      | [ .name, (.conclusion // "null"), (.status // "null") ] | @tsv' <<<"$json" 2>&1)" || {
+    echo "check-runs: unreadable check_runs elements for $sha — $(printf '%s' "$tsv" | head -1 | cut -c1-200) (refusing to emit rows)" >&2
+    return 2
+  }
+  [ -n "$tsv" ] || return 0
+  printf '%s\n' "$tsv" \
     | awk -F'\t' '{ seen[$1] = $0 } END { for (n in seen) print seen[n] }' \
     | LC_ALL=C sort
 }
