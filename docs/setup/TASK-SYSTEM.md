@@ -9,7 +9,7 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the que
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system); `dependencies`/`claim` read-only. |
 | **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / close / move` — manifest-driven (`GET /v1/capabilities`). |
-| **Terminal TUI** | `bp tasks` (= `bp task tui`) opens the criteria-first reader; `c`/`x` claim/close (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Keys: [tui cheatsheet](../cheatsheets/tui.md). |
+| **Terminal TUI** | `bp tasks` (= `bp task tui`) opens the reader; `c`/`x` claim/close (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Keys: [tui cheatsheet](../cheatsheets/tui.md). |
 | **HTTP API** | Sixteen bearer endpoints under `/v1/tasks/*` (read tier): the verbs plus fetch, edges, labels, papers. |
 | **Events** | Each op emits a `mutation_events` row — `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
 
@@ -30,7 +30,7 @@ The wizard's **clean profile pre-checks `bulldocs` + `tasks`** (server unions `m
 BARKPARK_PLUGINS=bulldocs,tasks    # CSV whitelist · unset = all plugins · empty = kill switch
 ```
 
-The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); two Oban crons ride along: lease sweeper (1 min), compaction (6 h).
+The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); two Oban crons ride along: lease sweeper, compaction (6 h).
 
 ## Point an AI agent at it
 
@@ -62,7 +62,7 @@ bp task next agent-1                # prints doc_id + epoch; no_ready on empty q
 # Targeted claim: name the row
 bp task claim t1 agent-1            # <doc_id> <worker_id>
 
-# Voluntary walk-away: holder + claim epoch are both fenced
+# Voluntary walk-away (fenced)
 bp task release t1 agent-1 1        # <doc_id> <worker> <epoch>
 
 # Mid-claim: stamp a criterion — met or honestly missed
@@ -72,7 +72,7 @@ bp task stamp t1 agent-1 1 --criterion 1 --miss --note "flaky under sandbox"
 # ... pulse the now-line as you work (renews the lease)
 bp task pulse t1 agent-1 --now "warm-up pinned, rerunning" --criterion 2
 
-# Close: CAS on the epoch handed at claim
+# Close (epoch-fenced)
 bp task close t1 agent-1 1          # <doc_id> <worker> <epoch> [status] [reason]
 
 # Close with evidence: flips ride the same rev-CAS — but a flip made HERE is not proof of itself.
@@ -138,11 +138,11 @@ Leave a field absent when unknown; never fabricate a ref.
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks (SessionStart · PreToolUse · Stop · SessionEnd → `bp cmux hook <event>`) + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims (re-claim = renewal), **PreToolUse** renews ≤1/60s, **Stop**/**SessionEnd** close IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
+A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks (SessionStart · PreToolUse · Stop · SessionEnd → `bp cmux hook <event>`) + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims, **PreToolUse** renews ≤1/60s, **Stop**/**SessionEnd** close IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
 
 ## Working with your AI in Studio
 
-Open `/studio` → the **Tasks ✅** group. You (form) flip `lifecycle_status`/`priority`/`assignee` and edit titles/descriptions; the agent (API) claims/closes with fencing, adds edges, relabels, links papers. The TUI edits flat fields (`c`/`x`); composites (`acceptance_criteria`) are Studio/API-only, `dependencies`/`claim` read-only — the API single-writes structured values. Live over PubSub.
+Open `/studio` → the **Tasks ✅** group. You (form) flip `lifecycle_status`/`priority`/`assignee` and edit titles/descriptions; the agent (API) claims/closes with fencing, adds edges, relabels, links papers. The TUI edits flat fields; composites (`acceptance_criteria`) are Studio/API-only — the API single-writes structured values. Live over PubSub.
 
 The live board at **`/admin/projects`** (`:ops` admin-gated) is a kanban over the same docs: five realtime columns — open · ready · in_progress · blocked · done (cancelled → tally); a claim/close flashes and slides the card, no refresh. Its reader leads with criteria + the purpose dossier. **Drag** restages through the fenced `claim`/`close` primitives (foreign-held card refuses, as does a `done` drop over unmet criteria; `ready` is derived, no drop). **Group**/**filter** via chips in a shareable URL (`?group=&goal=&priority=&label=&worker=`).
 
@@ -163,7 +163,7 @@ A scattered board is a defect — make every new task fit the structure:
 2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"* — never after provenance/process (`loop`, `cleanup`, `misc`) or a label.
 3. **Group by ancestry** — tasks sharing a goal nest beneath it; the parent tree is the spine.
 4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, plus gates `needs-human`/`decision`/`security`.
-5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. Decisions and goals may omit them.
+5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. Decisions and goals may omit them. Merge-gated criteria need `merge_gate:true` — a `landed` close auto-flips only the flag; wording alone just warns.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; one waiting on a human carries `needs-human`/`decision`.
 
 ## Workspaces, projects, datasets — experiment without mess
@@ -186,7 +186,7 @@ Scoped Studio: `/w/:workspace_slug/p/:project_slug/studio`; scoped data routes m
 | `404` on `/v1/tasks/*` | Plugin disabled — the routes mount only when the tasks plugin is on. |
 | `404 task not found` right after create | Bare `t1` auto-resolves to `drafts.t1`; check plugin enabled + token access. |
 | `400 worker_id is required` | Claim/release/stamp/pulse/close need `worker_id` — positional via bp, JSON body via curl. |
-| `409 not_holder` / `criteria_unmet` | Only the claim holder may release/stamp/pulse/**close**, and a `done` needs its criteria met **as stored** (flips in this very close don't count). Re-read, stamp as you prove — or record why: `--set holder_override=`/`criteria_override="<why>"`. |
+| `409 not_holder` / `criteria_unmet` | Holder-only (contract above); a `done` needs criteria met **as stored** (same-close flips don't count). Re-read, stamp as you prove — or record why: `--set holder_override=`/`criteria_override="<why>"`. |
 | `409 fenced_off` | Stale `observed_epoch` — lease swept, **or a blocker/move landed on your claimed task** (L4). Renew: `bp task claim <id> <same-worker>`, close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |
 | `409 doc_changed_since_claim` | The brief was edited under your claim. Re-read (`bp task get <id>`), close again, or pass `observed_rev`. |
