@@ -391,6 +391,62 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
     end
   end
 
+  describe "task.close manifest text vs the close honesty gates (mob-bl-close-manifest-lie)" do
+    # THE BINDING. The task.close manifest string IS `bp task close --help` —
+    # the CLI prints the server manifest verbatim — and it rotted silently once:
+    # from 448749cf1 (which made a done close over unmet criteria a REFUSAL)
+    # until 2026-08-23 it kept claiming "Unmet criteria never block a close
+    # (soft warning only)". Nothing caught it because no test read the prose.
+    #
+    # This bind is a PAIR. The behaviour half lives in
+    # test/barkpark/tasks/close_test.exs ("close/3 — criteria gate" and
+    # "close/3 — holder gate"): those tests pin the refusals themselves, so
+    # removing either gate goes red there. THIS half pins that the help text
+    # names those same gates by their stable wire tokens (params.ex
+    # reason_to_string/1: "criteria_unmet", "not_holder") and their overrides,
+    # so text drifting back toward the lie goes red here. Change the gates,
+    # change both tests — the prose can no longer diverge silently in either
+    # direction.
+    test "the close help names the refusals, the overrides, and the exemptions" do
+      close = Enum.find(Tasks.cli_commands(), &(&1.id == "task.close"))
+      assert close, "task.close must exist in the manifest"
+
+      text =
+        Enum.join(
+          [close.summary] ++
+            Enum.map(close.args, & &1.summary) ++ Enum.map(close.flags, & &1.summary),
+          " "
+        )
+
+      # The dead lie stays dead — in any wording.
+      refute text =~ ~r/never blocks? a close/i,
+             "the manifest claims unmet criteria cannot block a close — Close.close/3 refuses with criteria_unmet"
+
+      refute text =~ ~r/soft warning only/i
+
+      # The criteria gate: refusal by wire token, indices base, and escape hatch.
+      assert text =~ "REFUSED"
+      assert text =~ "criteria_unmet"
+      assert text =~ ~r/0-based/i
+      assert text =~ ~s(criteria_override="<why it is done anyway>")
+      assert text =~ "close_override.criteria"
+      # The override is accept-unmet-on-the-record: it never flips a criterion.
+      assert text =~ "met=false"
+      # The exemptions, by name (check_criteria_proven/4 exempts them BY NAME).
+      assert text =~ "cancelled"
+      assert text =~ "blocked"
+      assert text =~ ~r/EXEMPT/
+      # The autostamp deduction (Close.unmet_after_autostamp/2).
+      assert text =~ "merge_gate"
+      # The holder gate and its override (PDS-D288).
+      assert text =~ "not_holder"
+      assert text =~ "holder_override"
+      assert text =~ "close_override.holder"
+      # A blank reason is not an override (Close.override_reason/1).
+      assert text =~ ~r/blank reason is NOT an override/
+    end
+  end
+
   describe "core content-graph verbs (Goal ges/graph-edge-seam)" do
     # FRESH-INSTALL invariant: the content graph roots on ANY content doc, so
     # its read verbs are CORE (not the disable-able Tasks plugin). They must be
