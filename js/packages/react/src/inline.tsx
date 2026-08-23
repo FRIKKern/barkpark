@@ -187,29 +187,19 @@ const ROLE_BY_NAME: Record<string, StatusRole> = Object.fromEntries(
   STATUS_ROLES.map((r) => [r.role, r]),
 )
 
-// The canonical manifest ladder — the EIGHT roles that live in
-// design/status-manifest.json today. `LEGEND_ROLES` (below) is the cross-surface
-// parity KEY and must stay byte-frozen to what the Elixir StatusVocab emits.
-const MANIFEST_LADDER = new Set([
-  'open',
-  'ready',
-  'progress',
-  'blocked',
-  'done',
-  'cancel',
-  'considering',
-  'researching',
-])
-
 /** The status-legend ladder — the cross-surface vocabulary KEY. Byte-frozen to
- * the Elixir StatusVocab / design/status-manifest.json (the 8 canonical states),
- * so the react legend stays shape-equal to the Elixir golden. The manifest has
- * ADOPTED `considering`/`researching` (task-lifecycle-visibility substrate), so
- * they are legend rows now. ONE role is held OUT deliberately: the fail-open
- * `unknown` sentinel is JS-only and NEVER a real lifecycle state.
+ * the Elixir StatusVocab / design/status-manifest.json (the canonical states),
+ * so the react legend stays shape-equal to the Elixir golden. ONE role is held
+ * OUT deliberately: the fail-open `unknown` sentinel is JS-only and NEVER a
+ * real lifecycle state — so the legend is DERIVED as "everything but the
+ * sentinel" rather than from a second hand-maintained role-name list (the old
+ * MANIFEST_LADDER set was a duplicate of STATUS_ROLES' manifest rows, and a
+ * duplicate list is a drift surface; rpu-backlog-role-ladder-drift-guard).
+ * tests/status-manifest-parity.test.ts pins LEGEND_ROLES ≡ the manifest's
+ * roles array — order, glyph, spinner, label, meaning.
  * Everything else (roleOf, glyphHtml, the board columns) already resolves all
  * nine roles via ROLE_BY_NAME — only the legend key is manifest-scoped. */
-export const LEGEND_ROLES: StatusRole[] = STATUS_ROLES.filter((r) => MANIFEST_LADDER.has(r.role))
+export const LEGEND_ROLES: StatusRole[] = STATUS_ROLES.filter((r) => r.role !== UNKNOWN_ROLE)
 
 export function roleOf(status: unknown): string {
   const s = str(status)
