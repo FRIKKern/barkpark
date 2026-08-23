@@ -408,6 +408,15 @@ export interface SearchSuggestions {
 export interface SearchSuggestionsOptions {
   /** Max suggestions per bucket (server default 8, max 20). */
   limit?: number
+  /**
+   * Per-session identity for tokenless callers, sent as the
+   * `x-bp-search-client` header — the same per-session UUID the browser UI
+   * mints. Since the anonymous fail-close, header-less tokenless callers get
+   * `[]` recents (they have no stable identity); pass the SAME key here and on
+   * `client.search()` (the record path) to keep a safe per-session recents
+   * view. Never a shared or guessable value — one UUID per user session.
+   */
+  sessionKey?: string
   /** AbortSignal to cancel the request. */
   signal?: AbortSignal
 }
@@ -899,6 +908,13 @@ export interface SearchOptions {
    *  unprovisioned/unknown engine is served by Postgres and the response's
    *  `engineUsed` reports which retriever actually answered. */
   engine?: 'postgres' | (string & {})
+  /**
+   * Per-session identity for tokenless callers, sent as the
+   * `x-bp-search-client` header. Searches are RECORDED under this key, so the
+   * same value passed to `client.getSearchSuggestions()` reads them back as
+   * `recent` — see {@link SearchSuggestionsOptions.sessionKey}.
+   */
+  sessionKey?: string
   /** AbortSignal forwarded to fetch. */
   signal?: AbortSignal
 }

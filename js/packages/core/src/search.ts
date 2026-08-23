@@ -60,8 +60,12 @@ export async function searchDocuments<T = BarkparkDocument>(
 
   const path = `${scopePrefix(config)}/v1/data/search/${encodeURIComponent(config.dataset)}?${params.toString()}`
 
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  const reqOpts: { kind: 'read'; signal?: AbortSignal; headers?: Record<string, string> } = {
+    kind: 'read',
+  }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  // Tokenless per-session identity (mirrors the browser UI's session UUID).
+  if (opts?.sessionKey !== undefined) reqOpts.headers = { 'x-bp-search-client': opts.sessionKey }
 
   const { data } = await request<SearchResult<T> & { result?: SearchResult<T> }>(
     config,
@@ -107,8 +111,12 @@ export async function getSearchSuggestions(
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
   const qs = params.toString()
   const path = `${scopePrefix(config)}/v1/data/search/${encodeURIComponent(config.dataset)}/suggestions${qs ? `?${qs}` : ''}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
+  const reqOpts: { kind: 'read'; signal?: AbortSignal; headers?: Record<string, string> } = {
+    kind: 'read',
+  }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  // Tokenless per-session identity (mirrors the browser UI's session UUID).
+  if (opts?.sessionKey !== undefined) reqOpts.headers = { 'x-bp-search-client': opts.sessionKey }
 
   const { data } = await request<
     { result?: Partial<SearchSuggestions> } & Partial<SearchSuggestions>
