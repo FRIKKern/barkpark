@@ -222,7 +222,7 @@ jobs:
           # PRESENT-EMPTY, zero in-window rows — where the script prints its
           # own ::warning naming the class, so the deferral is SAID without
           # this table's help. Measured 2026-08-15T18:28Z..08-17: the
-          # empty-population rc 2 paged SIX consecutive scheduled runs on a
+          # empty-population rc 2 filed on SIX consecutive scheduled runs on a
           # quiet repo (#11217 at 41 comments) — paging here is what mutes the
           # alarm for the one case that is not (the rc-4 precedent, dr-w31-s2).
           # Rows-exist-but-no-runs is NOT quiescence and STAYS rc 2: a row

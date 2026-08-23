@@ -1195,7 +1195,7 @@ fi
 if [ "$DELIVERING" -eq 0 ]; then
   # ── QUIET WINDOW (charter D597): an empty window on a VERIFIED crown ───────
   # A repo that stops merging empties this window BY CONSTRUCTION, and rc 2
-  # here paged every 6 hours forever (6-run streak 2026-08-15..17, #11217 at 41
+  # here filed every 6 hours forever (6-run streak 2026-08-15..17, #11217 at 41
   # comments). Quiescence reads green ONLY when all three hold: (1) the serving
   # check verified the served sha has its cp row, (2) the re-ask list was
   # PRESENT-EMPTY, (3) zero ledger rows sit inside the window. Any OTHER
