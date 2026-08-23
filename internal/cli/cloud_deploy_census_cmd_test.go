@@ -1389,7 +1389,7 @@ func TestCloudDeploymentsWithoutDeliverySaysNotMeasured(t *testing.T) {
 	// bare "NOT MEASURED" needle would red as a hijack instead of silently
 	// asserting against another section — the specific sentence keeps it to one.
 	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no delivery census")
-	if !strings.Contains(line, "NOT a fleet that delivers instantly") {
+	if !strings.Contains(line, "NOT a population that delivers instantly") {
 		t.Fatalf("a missing delivery census must refuse out loud, not print nothing:\n%s", stdout)
 	}
 	if strings.Contains(stdout, "STILL WAITING") {
@@ -1691,7 +1691,7 @@ func TestCloudDeploymentsWithoutDeferralWaitSaysNotMeasured(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	line := censusLineContaining(t, stdout, "NOT MEASURED — this control plane sends no deferral-wait census")
-	for _, want := range []string{"COUNT WITH NO CLOCK", "NOT a fleet that re-queues instantly"} {
+	for _, want := range []string{"COUNT WITH NO CLOCK", "NOT a population that re-queues instantly"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("a missing deferral-wait census must refuse out loud:\n%s", stdout)
 		}
@@ -2637,7 +2637,7 @@ func TestCloudDeploymentsServerTruncationIsNamed(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	line := censusLineContaining(t, stdout, "SERVER-TRUNCATED")
-	for _, want := range []string{"2 of 120 site(s)", "TOP of the fleet", "no --sites value can restore"} {
+	for _, want := range []string{"2 of 120 site(s)", "TOP of the population", "no --sites value can restore"} {
 		if !strings.Contains(line, want) {
 			t.Fatalf("truncation line %q missing %q — the cut must carry the rows shown AND the population they were cut from", line, want)
 		}
@@ -2680,7 +2680,7 @@ func TestCloudDeploymentsTruncationAbsentIsNotCompleteness(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	line := censusLineContaining(t, stdout, "population NOT STATED")
-	if !strings.Contains(line, "whole fleet or the top of a larger one is unknown") {
+	if !strings.Contains(line, "whole population or the top of a larger one is unknown") {
 		t.Fatalf("not-stated line %q must say the completeness question is UNANSWERED, not answered", line)
 	}
 	if strings.Contains(stdout, "SERVER-TRUNCATED") || strings.Contains(stdout, "complete: the control plane") {
@@ -2741,5 +2741,38 @@ func TestDeployCensusFourKeysDecodeAndAbsenceIsNil(t *testing.T) {
 	}
 	if balanced.Completeness == nil || !balanced.Completeness.Balanced || balanced.Completeness.Reason != nil {
 		t.Fatalf("a balanced audit must decode with reason == nil: %+v", balanced.Completeness)
+	}
+}
+
+// TestDeployCensusRenderNeverSaysFleet (dr-w18-bl): the reader is TEAM-scoped
+// (GET /v1/deploy-ledger/census) on every path, so no rendered sentence may
+// call the population "the fleet" — on a 200 the scope line names the real
+// population, and the in-band NOT MEASURED / NOT SENT sentences must not
+// over-claim by one level either. The word is banned from the render outright:
+// a page that covers one team's thirteen sites and says "fleet" tells a team
+// owner something about every other team's deploys that this read never saw.
+func TestDeployCensusRenderNeverSaysFleet(t *testing.T) {
+	fixtures := map[string]string{
+		"w12s8":     censusW12S8Envelope,
+		"live":      censusLiveEnvelope,
+		"today":     censusTodayEnvelope,
+		"delivery":  censusDeliveryEnvelope,
+		"truncated": censusTruncatedEnvelope,
+		"thin":      censusThinEnvelope,
+	}
+	for name, env := range fixtures {
+		t.Run(name, func(t *testing.T) {
+			newCensusServer(t, 200, env)
+			pinCensusClock(t, time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC))
+			stdout, stderr, code := runDeployments(t, "table")
+			if code != exitOK {
+				t.Fatalf("exit = %d\nstderr:\n%s", code, stderr)
+			}
+			for _, line := range strings.Split(stdout, "\n") {
+				if strings.Contains(strings.ToLower(line), "fleet") {
+					t.Errorf("a team-scoped render may not say \"fleet\": %q", line)
+				}
+			}
+		})
 	}
 }

@@ -534,7 +534,7 @@ func deployCensusHeadline(census cloudclient.DeployCensus) string {
 //   - it has a percentage: the rate WITH the sample it was taken over.
 func deployCensusLiveTerm(census cloudclient.DeployCensus) string {
 	if census.LivePerAttempt == nil {
-		return "live per attempt: NOT SENT — this control plane does not compute it (nothing here says whether the fleet ships)"
+		return "live per attempt: NOT SENT — this control plane does not compute it (nothing here says whether this population ships)"
 	}
 	rate := *census.LivePerAttempt
 	if pct, okRate := deployCensusPct(rate); okRate {
@@ -873,14 +873,14 @@ func deployCensusSiteLiveNote(rows []cloudclient.DeployCensusSite) string {
 //     where "these are all the sites" is a claim someone actually made.
 func deployCensusSiteTruncationLine(census cloudclient.DeployCensus) string {
 	if census.Truncated == nil {
-		return "  population NOT STATED — this control plane sends no truncated/total_sites marker, so whether these rows are the whole fleet or the top of a larger one is unknown."
+		return "  population NOT STATED — this control plane sends no truncated/total_sites marker, so whether these rows are the whole population or the top of a larger one is unknown."
 	}
 	if *census.Truncated {
 		if census.TotalSites != nil {
-			return fmt.Sprintf("  SERVER-TRUNCATED: the control plane sent %d of %d site(s) — the rows above are the TOP of the fleet, and no --sites value can restore rows that never rode the wire.",
+			return fmt.Sprintf("  SERVER-TRUNCATED: the control plane sent %d of %d site(s) — the rows above are the TOP of the population, and no --sites value can restore rows that never rode the wire.",
 				len(census.Sites), *census.TotalSites)
 		}
-		return "  SERVER-TRUNCATED: the control plane cut this list and did not say at what population — the rows above are the top of a larger fleet."
+		return "  SERVER-TRUNCATED: the control plane cut this list and did not say at what population — the rows above are the top of a larger one."
 	}
 	if census.TotalSites != nil {
 		return fmt.Sprintf("  complete: the control plane sent all %d site(s) in this window (before any display clamp).", *census.TotalSites)
@@ -975,7 +975,7 @@ func deployCensusSiteRemedy(reason string, boundaries []deployCensusBoundary, fr
 		return deployCensusShareRemedy(reason, boundaries, from, to, minSample)
 	}
 	return "NO --from CAN UN-REFUSE THESE: a narrower window can only SHRINK each site's own sample. " +
-		"A per-site rate needs MORE deploys per site — a wider --from, or more time. The fleet headline above is " +
+		"A per-site rate needs MORE deploys per site — a wider --from, or more time. The headline above is " +
 		"the rate this population CAN support; it is not a per-site claim."
 }
 
@@ -1244,7 +1244,7 @@ func deployCensusWidth(d time.Duration) string {
 func renderDeployDelivery(out *writer, d *cloudclient.DeployDelivery, siteLimit int) {
 	if d == nil {
 		out.outf("delivery — how long content waited to reach the web")
-		out.outf("  NOT MEASURED — this control plane sends no delivery census. Nothing was read: this is NOT a fleet that delivers instantly.")
+		out.outf("  NOT MEASURED — this control plane sends no delivery census. Nothing was read: this is NOT a population that delivers instantly.")
 		out.outf("")
 		return
 	}
@@ -1392,7 +1392,7 @@ func deployDeliveryDuration(seconds float64) string {
 func renderDeployDeferralWait(out *writer, w *cloudclient.DeployDeferralWait) {
 	if w == nil {
 		out.outf("deferral wait — how long a deferred deploy waited to be re-queued")
-		out.outf("  NOT MEASURED — this control plane sends no deferral-wait census. Nothing was read: the deferrals above are a COUNT WITH NO CLOCK, and this is NOT a fleet that re-queues instantly.")
+		out.outf("  NOT MEASURED — this control plane sends no deferral-wait census. Nothing was read: the deferrals above are a COUNT WITH NO CLOCK, and this is NOT a population that re-queues instantly.")
 		out.outf("")
 		return
 	}
@@ -1558,7 +1558,7 @@ func deployCoverageWindowLine(pinned bool) string {
 	if pinned {
 		return "  window: BOTH edges pinned by --from/--to, so this population does not move when you run it again."
 	}
-	return "  window: LEFT-TRUNCATED — a --days window (7 by default) has its right edge at NOW and its left edge sliding with the clock, so rows older than the width are not in this population AT ALL. A wider --days finds more never-covered rows without one row of the fleet changing; only --from/--to pins both edges."
+	return "  window: LEFT-TRUNCATED — a --days window (7 by default) has its right edge at NOW and its left edge sliding with the clock, so rows older than the width are not in this population AT ALL. A wider --days finds more never-covered rows without one row of the population changing; only --from/--to pins both edges."
 }
 
 // renderDeployCoverageSites NAMES the never-covered tail. A count that cannot
