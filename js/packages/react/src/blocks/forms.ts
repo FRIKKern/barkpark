@@ -72,7 +72,16 @@ function questionHtml(q: unknown): string {
   const rationale = mutedLine(q.rationale, '')
   const recommendation = mutedLine(q.recommendation, 'Recommendation: ')
   const control = `<div class="bp-form-opts">${controlHtml(type, id, q)}</div>`
-  const typeClass = ` bp-form-q--${escapeAttr(type)}`
+  // FAIL-CLOSED type-class slug (defense-in-depth, charter D23/D26 pattern —
+  // mirrors core.ts apiEndpoint's methodSlug): escapeAttr already made attribute
+  // breakout impossible, but an unslugified `type` with a space would inject an
+  // extra class token (CSS-selector/style pollution). Only lowercase [a-z0-9-]
+  // survives; an empty slug drops the modifier class entirely. The legit type
+  // vocabulary (yesno/single/multi/scale/text) is pure [a-z], so goldens are
+  // byte-identical. NOTE: the Elixir twin (render/forms.ex) still escape-onlys
+  // its type class — this surface deliberately fails closed harder.
+  const typeSlug = type.toLowerCase().replace(/[^a-z0-9-]/g, '')
+  const typeClass = typeSlug === '' ? '' : ` bp-form-q--${typeSlug}`
   return `<fieldset class="bp-form-question${typeClass}">${legend}${rationale}${recommendation}${control}</fieldset>`
 }
 
