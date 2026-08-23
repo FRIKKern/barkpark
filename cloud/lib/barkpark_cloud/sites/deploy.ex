@@ -1812,15 +1812,21 @@ defmodule BarkparkCloud.Sites.Deploy do
         finish_rollback(site, bp, was, target)
 
       {:ok, 409, body} ->
-        {:error, 409,
-         rollback_refusal(body, "a deploy is running on the box — try again once it finishes")}
+        typed_rollback_error(
+          409,
+          body,
+          "a deploy is running on the box — try again once it finishes"
+        )
 
       {:ok, status, body} when status in 400..599 ->
-        {:error, 422,
-         rollback_refusal(body, "the instance could not roll this site back (HTTP #{status})")}
+        typed_rollback_error(
+          422,
+          body,
+          "the instance could not roll this site back (HTTP #{status})"
+        )
 
       {:ok, _status, body} ->
-        {:error, 422, rollback_refusal(body, "the instance could not roll this site back")}
+        typed_rollback_error(422, body, "the instance could not roll this site back")
 
       # THE REFUSED BOX (D741/D763). Nothing went on the wire, so this is a
       # CONFLICT with the box's own verdict about our credential, not a 502 about
@@ -1949,6 +1955,44 @@ defmodule BarkparkCloud.Sites.Deploy do
   # composes "code — message"; its flat arm is a strict superset of the old
   # chain (it also reads `failure_reason`), so every settle_* sentence and
   # await-timeout body still passes through unchanged.
+  # cch-w62-bl — the box's three TYPED site-rollback refusals travel as a CODE
+  # the console can classify, not only as prose inside `detail`. The router's
+  # 4-tuple arm (cch-w63-s3 / D763) relays `{:error, status, detail, code}` as
+  # flat `%{ok: false, error: code, detail: detail}`; before this, only
+  # `identity_refused` used it and every box refusal collapsed into the constant
+  # `rollback_failed`, so `siteRollbackRefusalTerminal(422, …)` was false for a
+  # permanent no-previous-build refusal and the modal offered "Try again" into a
+  # refusal that cannot change by clicking. ALLOWLISTED, not open-ended: only
+  # the box's typed site-rollback exits are promoted; every other body —
+  # including the nested `already_running` composite, whose wire shape the W70
+  # flat-detail law test pins as `rollback_failed` — keeps the constant. The
+  # code is read from the nested `%{"error" => %{"code" => …}}` envelope
+  # (`refusal_code/1`, the box's real pre-poll transport) or from the flat
+  # `%{"error" => token}` fixture shape; `detail` still carries
+  # `rollback_refusal/2`'s prose either way, so nothing a human reads changed.
+  @typed_rollback_codes ~w(no_previous not_supported lock_held)
+
+  defp typed_rollback_error(status, body, fallback) do
+    detail = rollback_refusal(body, fallback)
+
+    case typed_rollback_code(body) do
+      nil -> {:error, status, detail}
+      code -> {:error, status, detail, code}
+    end
+  end
+
+  defp typed_rollback_code(body) when is_map(body) do
+    code =
+      case refusal_code(body) do
+        c when is_binary(c) -> c
+        _ -> if is_binary(body["error"]), do: body["error"], else: nil
+      end
+
+    if code in @typed_rollback_codes, do: code, else: nil
+  end
+
+  defp typed_rollback_code(_body), do: nil
+
   defp rollback_refusal(body, fallback) when is_map(body) do
     case refusal_detail(body) do
       d when is_binary(d) and d != "" -> rollback_copy(d, fallback)

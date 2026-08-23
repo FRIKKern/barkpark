@@ -5965,6 +5965,102 @@ test("siteRollbackFailure maps every typed refusal to one honest sentence", () =
   assert.match(hooks.siteRollbackFailure(500, {}).title, /Couldn't roll back/);
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w62-bl — THE SITE PLANE SPEAKS TYPED CODES, AND THE MODAL'S RECOVERY
+// CONTROL OBEYS THEM. Sites.Deploy now promotes the box's typed rollback exits
+// (no_previous / not_supported / lock_held) onto the wire as flat
+// `{ok:false, error:<code>, detail:<prose>}` via the 4-tuple relay cch-w63-s3
+// minted; before, every box refusal collapsed into the constant
+// `rollback_failed` and siteRollbackRefusalTerminal(422, …) was FALSE for a
+// permanent no-previous-build refusal — Try again re-POSTed into a refusal
+// that cannot change by clicking. Transport drives below follow the
+// cch-w46-s2 runDecommission precedent.
+
+test("cch-w62-bl: not_supported joins the terminal set; lock_held stays transient", () => {
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: "not_supported" }), true,
+    "no retry gives a release-less site something to roll back to");
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: { code: "not_supported" } }), true,
+    "…in the nested envelope too");
+  assert.equal(hooks.siteRollbackRefusalTerminal(409, { error: "lock_held" }), false,
+    "a held deploy lock clears by itself — Try again is the honest recovery");
+  assert.equal(hooks.siteRollbackRefusalTerminal(422, { error: "wat" }), false,
+    "an unknown 422 still fails safe toward retry");
+});
+
+test("cch-w62-bl: the not_supported copy relays the plane's measured detail, with a static fallback", () => {
+  const relayed = hooks.siteRollbackFailure(422, {
+    ok: false, error: "not_supported",
+    detail: "this site has no live release yet — there is nothing to roll back",
+  });
+  assert.equal(relayed.title, "Nothing to roll back");
+  assert.equal(relayed.body, "this site has no live release yet — there is nothing to roll back");
+  const bare = hooks.siteRollbackFailure(422, { error: "not_supported" });
+  assert.match(bare.body, /no live release yet/);
+});
+
+// Swap fetch into the realm, run runSiteRollback to completion, then let the
+// caller CLICK the recovery it wired — same counter, so a re-POST is visible.
+async function driveSiteRollback(status, payload) {
+  const fetch = fetchStub(status, payload);
+  const rec = { fails: [], succeeded: 0, busied: 0 };
+  const ctl = {
+    rec,
+    busy() { rec.busied++; },
+    succeed() { rec.succeeded++; },
+    fail(msg, label, handler) { rec.fails.push({ msg, label, handler }); },
+  };
+  const inRealm = async (fn) => {
+    const saved = { fetch: sandbox.fetch };
+    sandbox.fetch = fetch;
+    try {
+      fn();
+      for (let i = 0; i < 12; i++) await Promise.resolve();
+    } finally { Object.assign(sandbox, saved); }
+  };
+  await inRealm(() => hooks.runSiteRollback({ id: "s1" }, "shop.example.com", ctl));
+  const last = () => rec.fails[rec.fails.length - 1];
+  return {
+    ctl, fetch, last, rec,
+    posts: () => fetch.calls.filter((c) => c.opts && c.opts.method === "POST").length,
+    clickRecovery: () => inRealm(() => last().handler(ctl)),
+  };
+}
+
+test("cch-w62-bl: a one-release site's Roll back click gets the true cause, a Close button, and exactly ONE POST", async () => {
+  // THE WIRE, as the plane now really answers it: Sites.Deploy reads the box's
+  // nested no_previous refusal, mints {:error, 422, <prose>, "no_previous"},
+  // and the route relays it flat.
+  const d = await driveSiteRollback(422, {
+    ok: false, error: "no_previous",
+    detail: "there is no previous build to roll back to — this site has only ever had one release",
+  });
+  assert.equal(d.posts(), 1, "the click that opened this failure issued exactly one POST");
+  const f = d.last();
+  assert.ok(f, "the refusal must FAIL the modal, never silently swallow");
+  assert.equal(f.label, "Close",
+    "a permanent no-previous refusal offers the only recovery that can work");
+  assert.match(f.msg, /Nothing to roll back to/, "the TRUE cause, not a busy-deploy story");
+  assert.match(f.msg, /only ever had one release/);
+  assert.equal(f.msg.indexOf("A deploy is already running"), -1,
+    "BEFORE this slice the wire said rollback_failed and the modal offered Try again");
+  await d.clickRecovery();
+  assert.equal(d.posts(), 1, "the terminal recovery issues NO second POST");
+  assert.equal(d.rec.busied, 0, "…and never re-arms the modal's busy state");
+});
+
+test("cch-w62-bl: the transient positive control — a lock_held 409 still offers Try again and really re-POSTs", async () => {
+  const d = await driveSiteRollback(409, {
+    ok: false, error: "lock_held",
+    detail: "a deploy is running on the box — try again once it finishes",
+  });
+  assert.equal(d.posts(), 1);
+  assert.equal(d.last().label, "Try again",
+    "a refusal a later click CAN repair keeps the retry that works");
+  await d.clickRecovery();
+  assert.equal(d.posts(), 2, "…and the retry genuinely re-POSTs");
+  assert.equal(d.rec.busied, 1);
+});
+
 test("siteRollbackFlashView: restored cue applies ONLY while its row is current + inside the TTL", () => {
   const site = { current_deployment_id: "d7" };
   const flash = { kind: "restored", deploymentId: "d7", at: 1000 };
