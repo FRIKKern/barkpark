@@ -773,10 +773,47 @@ jobs:
                   reds="${reds:+${reds}, }${job}"
                 fi
                 ;;
-              failure | cancelled)
-                echo "  FAIL    ${job}: ${result}"
+              failure)
+                echo "  FAIL    ${job}: failure"
                 bad=1
                 reds="${reds:+${reds}, }${job}"
+                ;;
+              cancelled)
+                # SPLIT OUT OF THE `failure` ARM (charter D57). Both are RED and
+                # both stay red — a cancelled upstream tested nothing, and D12
+                # says a non-pass is a non-pass. What changed is that the gate
+                # now SAYS WHICH.
+                #
+                # WHY THIS IS NOT COSMETIC. This fleet force-pushes stacked
+                # branches daily and this workflow cancels in-progress runs on
+                # non-main refs, so a superseded head is the COMMON way an
+                # upstream ends up cancelled. Before this arm, a superseded run
+                # and a genuine code failure were byte-identical at the required
+                # -context level: MEASURED on sha 6539d929 after `gh run cancel`,
+                # five upstream jobs read completed|cancelled while `Elixir gate`
+                # read completed|failure and the merge refused with
+                #   Required status check "Elixir gate" is failing.
+                # — not `is cancelled.` The natural response to `is failing.` is
+                # to go read a diff that is fine, on a branch nobody is on.
+                #
+                # The re-run prescription is the whole point: a cancelled
+                # upstream is cleared by producing a NEW run, never by reading
+                # code. Note the D102 trap while doing so — RE-RUNNING a workflow
+                # DELETES its existing check-runs, so the required context goes
+                # ABSENT (which never reports) before it goes green. Pushing a
+                # fresh head sha mints new runs and is the safer move.
+                echo "  FAIL    ${job}: CANCELLED — this job did not fail, it never finished."
+                echo "          Nothing was tested, so this gate is RED (charter D12): a"
+                echo "          non-pass is a non-pass and will not be laundered into green."
+                echo "          But do NOT go read the diff — a cancellation is almost always"
+                echo "          a SUPERSEDED HEAD (this workflow sets cancel-in-progress on"
+                echo "          non-main refs), not a defect in your code."
+                echo "          FIX: produce a NEW run. Push a fresh head sha. Re-running the"
+                echo "          workflow instead DELETES its check-runs, so the required"
+                echo "          context reads ABSENT rather than red until the re-run finishes"
+                echo "          (charter D102)."
+                bad=1
+                reds="${reds:+${reds}, }${job} (cancelled, not failed)"
                 ;;
               '')
                 echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
