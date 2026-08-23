@@ -214,3 +214,49 @@ describe('getSearchSuggestions', () => {
     ).rejects.toBeInstanceOf(BarkparkValidationError)
   })
 })
+
+// sessionKey (sdk-search-suggestions-session-key-opt): the tokenless
+// per-session identity, threaded as x-bp-search-client on BOTH halves of the
+// loop — search() records under the key, getSearchSuggestions() reads it back
+// — mirroring the per-session UUID the browser UI mints. Without it, a
+// header-less tokenless caller gets [] recents by design (the anon
+// fail-close), which is correct but leaves SDK consumers no ergonomic opt-in.
+describe('sessionKey → x-bp-search-client (tokenless per-session recents)', () => {
+  it('getSearchSuggestions threads sessionKey as the x-bp-search-client header', async () => {
+    let seenHeader: string | null = null
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds/suggestions`, ({ request }) => {
+        seenHeader = request.headers.get('x-bp-search-client')
+        return HttpResponse.json({ result: {} })
+      }),
+    )
+    await createClient(baseConfig).getSearchSuggestions('rea', {
+      sessionKey: 'sess-uuid-1234',
+    })
+    expect(seenHeader).toBe('sess-uuid-1234')
+  })
+
+  it('search() threads the SAME opt — the record half of the recents loop', async () => {
+    let seenHeader: string | null = null
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds`, ({ request }) => {
+        seenHeader = request.headers.get('x-bp-search-client')
+        return HttpResponse.json({ result: { documents: [], count: 0, query: 'cms', correctedTo: null } })
+      }),
+    )
+    await createClient(baseConfig).search('cms', { sessionKey: 'sess-uuid-1234' })
+    expect(seenHeader).toBe('sess-uuid-1234')
+  })
+
+  it('no sessionKey → no header (the fail-closed default is untouched)', async () => {
+    let present: boolean | null = null
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/search/:ds/suggestions`, ({ request }) => {
+        present = request.headers.has('x-bp-search-client')
+        return HttpResponse.json({ result: {} })
+      }),
+    )
+    await createClient(baseConfig).getSearchSuggestions()
+    expect(present).toBe(false)
+  })
+})
