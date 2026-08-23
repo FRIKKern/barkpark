@@ -7,9 +7,22 @@ trap 'trash "$tmp" >/dev/null 2>&1 || true' EXIT
 
 cat >"$tmp/fake-bp" <<'FAKE_BP'
 #!/usr/bin/env bash
+# Per-verb invocation counters for the transport-retry fixtures.
+bp_count() {
+  local key="$1" file count
+  [[ -n "${BP_FIXTURE_COUNT_DIR:-}" ]] || { printf 1; return; }
+  file="$BP_FIXTURE_COUNT_DIR/bp_$key"
+  count=$(( $(cat "$file" 2>/dev/null || printf 0) + 1 ))
+  printf '%s' "$count" >"$file"
+  printf '%s' "$count"
+}
 if [[ " $* " == *" search query "* ]]; then
   if [[ -n "${BP_FIXTURE_INVENTORY_ARGS_FILE:-}" ]]; then
     printf '%s\n' "$*" >"$BP_FIXTURE_INVENTORY_ARGS_FILE"
+  fi
+  if [[ "${BP_FIXTURE_INVENTORY_FLAKY:-}" == "1" && "$(bp_count inventory)" -le 2 ]]; then
+    printf '%s\n' '{"error":{"code":"internal_error","message":"server error (fixture)"},"ok":false}' >&2
+    exit 8
   fi
   if [[ "${BP_FIXTURE_EMPTY:-}" == "1" ]]; then
     printf '%s\n' '{"documents":[]}'
@@ -19,6 +32,10 @@ if [[ " $* " == *" search query "* ]]; then
   exit 0
 fi
 if [[ " $* " == *" paper view "* && " $* " == *" --profile none "* ]]; then
+  if [[ "${BP_FIXTURE_CLI_FLAKY:-}" == "1" && "$(bp_count cli)" -le 2 ]]; then
+    printf '%s\n' '{"error":{"code":"internal_error","message":"server error (fixture)"},"ok":false}' >&2
+    exit 8
+  fi
   if [[ "${BP_FIXTURE_WIDE:-}" == "1" ]]; then
     printf '%081d\n' 0
     exit 0
@@ -45,6 +62,23 @@ while (($#)); do
     *) url="$1"; shift ;;
   esac
 done
+# Per-URL invocation counter, used by the transport-retry fixtures and by the
+# no-retry assertions (a 4xx must be fetched exactly once).
+count=1
+if [[ -n "${BP_FIXTURE_COUNT_DIR:-}" ]]; then
+  key="$(printf '%s' "$url" | tr -c 'A-Za-z0-9' '_')"
+  count_file="$BP_FIXTURE_COUNT_DIR/$key"
+  count=$(( $(cat "$count_file" 2>/dev/null || printf 0) + 1 ))
+  printf '%s' "$count" >"$count_file"
+fi
+# Transport flake: the server's per-request internal_error 500 (dropped DB
+# connection). FLAKY heals on the third try; PERSISTENT never does.
+if [[ "${BP_FIXTURE_FLAKY_500:-}" == "1" && "$count" -le 2 ]] ||
+  [[ "${BP_FIXTURE_PERSISTENT_500:-}" == "1" ]]; then
+  printf '%s' '{"error":{"code":"internal_error","hint":"Retry shortly","message":"server error (fixture)"},"ok":false}' >"$out"
+  printf '500'
+  exit 0
+fi
 if [[ "$url" == */source ]]; then
   if [[ "$url" == *html-paper* ]]; then
     printf '%s' '{"source":{"kind":"html","html":"<p>legacy</p>"}}' >"$out"
@@ -229,4 +263,58 @@ fi
 
 jq -e '.ok == false and .error == "paper inventory must be a non-empty documents array with string ids"' \
   "$tmp/empty-result.json" >/dev/null
+
+# ── Narrow transport retry (dropped-DB-connection 500s) ───────────────────────
+# Production measurement 2026-08-23: ~27% of requests answered HTTP 500 with
+# the `"code":"internal_error"` envelope — per REQUEST (one BEAM losing
+# individual DB connections), so one flake anywhere in 871 papers x 4 edges
+# red the whole audit. The audit retries EXACTLY that shape up to 3 times.
+
+# 1. A transient internal_error 500 (heals on the 3rd try) must PASS — on
+#    every edge: GUI/email/source curls, the CLI reader, and the inventory.
+mkdir "$tmp/counts-flaky"
+PATH="$tmp:$PATH" BP_FIXTURE_FLAKY_500=1 BP_FIXTURE_CLI_FLAKY=1 \
+  BP_FIXTURE_INVENTORY_FLAKY=1 BP_FIXTURE_COUNT_DIR="$tmp/counts-flaky" \
+  BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/flaky-result.json" || {
+  printf 'transient internal_error 500s were not retried to green\n' >&2
+  exit 1
+}
+jq -e '.ok and .failed == 0 and all(.results[]; .gui.status == 200 and .cli.ok)' \
+  "$tmp/flaky-result.json" >/dev/null
+
+# 2. A PERSISTENT internal_error 500 must still FAIL — the retry gives up and
+#    the last answer stands. An audit that retries forever has stopped looking.
+if PATH="$tmp:$PATH" BP_FIXTURE_PERSISTENT_500=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/persistent-500-result.json"; then
+  printf 'persistent internal_error 500s unexpectedly passed\n' >&2
+  exit 1
+fi
+jq -e '.ok == false and .failed == 2 and all(.failures[]; .gui.status == 500)' \
+  "$tmp/persistent-500-result.json" >/dev/null
+
+# 3. NON-transport failures are never retried: the 422 fixture must hit each
+#    GUI route exactly once. Retrying a 4xx would be the first step toward an
+#    audit that launders real refusals as flakes.
+mkdir "$tmp/counts-422"
+if PATH="$tmp:$PATH" BP_FIXTURE_GUI_422=1 BP_FIXTURE_COUNT_DIR="$tmp/counts-422" \
+  BP_AUDIT_BIN="$tmp/fake-bp" BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >/dev/null; then
+  printf 'HTTP 422 on the GUI route unexpectedly passed (retry-count run)\n' >&2
+  exit 1
+fi
+for count_file in "$tmp/counts-422"/https___fixture_invalid_papers_blocks_paper \
+  "$tmp/counts-422"/https___fixture_invalid_papers_html_paper; do
+  if [[ ! -f "$count_file" ]]; then
+    printf 'retry-count fixture never saw the GUI fetch: %s\n' "$count_file" >&2
+    exit 1
+  fi
+  if [[ "$(cat "$count_file")" != "1" ]]; then
+    printf 'a 422 GUI response was retried (%s fetches) — retry must stay transport-narrow\n' \
+      "$(cat "$count_file")" >&2
+    exit 1
+  fi
+done
+
 printf 'paper reader audit fixture: PASS\n'

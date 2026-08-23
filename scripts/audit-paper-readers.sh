@@ -45,8 +45,21 @@ inventory_scope=(-s "$server" -d "$dataset")
 if [[ "$workspace" != "default" || "$project" != "default" ]]; then
   inventory_scope+=(-w "$workspace" -p "$project")
 fi
-if ! "$bp_bin" "${inventory_scope[@]}" search query '*' --type paper \
-  --perspective published --all -o json >"$inventory" 2>"$inventory_stderr"; then
+# The inventory read gets the same narrow transport retry as the reader edges
+# below (see fetch_route): one dropped DB connection here would abort the whole
+# audit before it audits anything. Retries ONLY on the server's internal_error
+# envelope; every other failure aborts exactly as before.
+inventory_ok=false
+for inventory_delay in 0 0.25 1 4; do
+  [[ "$inventory_delay" == 0 ]] || sleep "$inventory_delay"
+  if "$bp_bin" "${inventory_scope[@]}" search query '*' --type paper \
+    --perspective published --all -o json >"$inventory" 2>"$inventory_stderr"; then
+    inventory_ok=true
+    break
+  fi
+  grep -q '"code":"internal_error"' "$inventory_stderr" 2>/dev/null || break
+done
+if [[ "$inventory_ok" != true ]]; then
   jq -n --arg server "$server" --rawfile detail "$inventory_stderr" \
     '{ok:false,error:"paper inventory query failed",server:$server,detail:($detail|gsub("[[:space:]]+$"; ""))}'
   exit 2
@@ -74,6 +87,46 @@ if [[ -n "${BP_AUDIT_EXPECTED_COUNT:-}" ]]; then
   fi
 fi
 
+# ── Narrow transport retry ────────────────────────────────────────────────────
+# The production box drops individual DB connections under memory pressure
+# (measured 2026-08-23: ~27% of requests answer HTTP 500 with
+# `"code":"internal_error"` / DBConnection.ConnectionError — per REQUEST, not
+# per connection: /api/schemas fails at the same rate as any paper route, and
+# back-to-back probes alternate which one fails). One such 500 anywhere in
+# 871 papers x 4 reader edges reds the whole audit while every paper is fine.
+#
+# Retry is deliberately NARROW so it can never launder a real failure:
+#   - ONLY an HTTP 500 whose body is the server's internal_error shape (the
+#     JSON `"code":"internal_error"` envelope, or the generic "500 · Internal
+#     Server Error" HTML card, which is the same crash served by the HTML
+#     routes) is retried;
+#   - a 4xx (422 invalid_blocks/semantic_empty …), a 200 with a hollow body,
+#     a timeout, and any OTHER 500 body are never retried — they stay exactly
+#     as loud as before;
+#   - at most 3 retries (0.25s / 1s / 4s backoff), then the last answer stands,
+#     so a PERSISTENT 500 still fails the paper.
+retryable_500() {
+  local code="$1" body="$2"
+  [[ "$code" == "500" ]] || return 1
+  grep -q '"code":"internal_error"' "$body" 2>/dev/null && return 0
+  grep -q '500 · Internal Server Error' "$body" 2>/dev/null && return 0
+  return 1
+}
+
+fetch_route() {
+  # fetch_route <outfile> <url> [extra curl args…] — echoes the final HTTP code.
+  local out="$1" url="$2" code delay
+  shift 2
+  code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" "$@" -o "$out" -w '%{http_code}' "$url" || true)"
+  for delay in 0.25 1 4; do
+    retryable_500 "$code" "$out" || break
+    sleep "$delay"
+    : >"$out"
+    code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" "$@" -o "$out" -w '%{http_code}' "$url" || true)"
+  done
+  printf '%s' "$code"
+}
+
 jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r id; do
   encoded="$(jq -rn --arg value "$id" '$value|@uri')"
   encoded_ws="$(jq -rn --arg value "$workspace" '$value|@uri')"
@@ -90,9 +143,9 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   : >"$tmp/gui"
   : >"$tmp/email"
   : >"$tmp/source"
-  gui_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -o "$tmp/gui" -w '%{http_code}' "$public_url" || true)"
-  email_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -o "$tmp/email" -w '%{http_code}' "$public_url/email" || true)"
-  source_code="$(curl -L -sS --connect-timeout "$curl_connect_timeout" --max-time "$curl_max_time" -H 'accept: */*' -o "$tmp/source" -w '%{http_code}' "$public_url/source" || true)"
+  gui_code="$(fetch_route "$tmp/gui" "$public_url")"
+  email_code="$(fetch_route "$tmp/email" "$public_url/email")"
+  source_code="$(fetch_route "$tmp/source" "$public_url/source" -H 'accept: */*')"
 
   [[ "$gui_code" =~ ^[0-9]{3}$ ]] || gui_code=0
   [[ "$email_code" =~ ^[0-9]{3}$ ]] || email_code=0
@@ -117,10 +170,20 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
     fi
   fi
 
+  # Same narrow transport retry for the CLI reader edge: retry ONLY when the
+  # command failed AND its stderr carries the server's internal_error envelope.
+  # A CLI failure for any other reason (bad render, empty body, auth, usage)
+  # is never retried.
   cli_reader_ok=false
-  "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
-    paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err" && \
-    [[ -s "$tmp/cli" ]] && cli_reader_ok=true
+  for cli_delay in 0 0.25 1 4; do
+    [[ "$cli_delay" == 0 ]] || sleep "$cli_delay"
+    if "$bp_bin" -s "$server" -w "$workspace" -p "$project" -d "$dataset" \
+      paper view "$public_url" --profile none >"$tmp/cli" 2>"$tmp/cli.err"; then
+      [[ -s "$tmp/cli" ]] && cli_reader_ok=true
+      break
+    fi
+    grep -q '"code":"internal_error"' "$tmp/cli.err" 2>/dev/null || break
+  done
 
   tui_metrics="$("$tmp/widthcheck" "$tmp/cli" 80)"
   tui_max_display_width="$(jq -r '.max_display_width' <<<"$tui_metrics")"
