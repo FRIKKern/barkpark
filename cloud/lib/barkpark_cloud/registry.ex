@@ -4912,6 +4912,30 @@ defmodule BarkparkCloud.Registry do
   `opts`:
     * `:expires_at` — a `DateTime` after which the token is invalid (default: no
       expiry).
+
+  RULING (task-940e49f7300a8d1b, recorded after an independent review of PR
+  #13251): `scope` is NOT an authorization boundary today — see the ruling on
+  `verify_agent_token/1` below for why, and read that doc before minting a
+  scope you intend to be narrower than the box's full agent surface. It WILL
+  NOT be.
+
+  Accumulation, decided in writing: minting a NEW scope for a barkpark does
+  NOT revoke that barkpark's LIVE tokens of OTHER scopes (only same-scope
+  supersession is atomic here) — `router_agent_runtime_test.exs` pins this as
+  deliberate ("DISTINCT scope — mint_agent_token now supersedes a box's prior
+  same-scope [token only]"), so two live differently-scoped tokens coexisting
+  is intended, not a bug. It is ACCEPTABLE to leave as-is because, as of this
+  ruling, exactly ONE scope ("report") is ever minted by production code
+  (`web/router.ex`'s `put_agent_token`/`claim_json`) — there is no live
+  accumulation happening today, only a latent risk. A future caller that mints
+  a genuinely distinct scope for a box that already holds a live "report"
+  token is RESPONSIBLE for one of: reusing "report", explicitly revoking the
+  token(s) it means to replace via `revoke_agent_token/1`, or accepting that
+  the box now presents multiple live credentials and designing for it
+  on purpose. `AgentRetentionWorker` already bounds every DEAD token's
+  lifetime (30-day grace past `revoked_at`/`expires_at`) — the open edge is
+  LIVE, never-revoked, never-expired tokens of a scope nothing mints anymore,
+  which today can only arise by hand (there is no such production caller).
   """
   @spec mint_agent_token(Barkpark.t() | binary(), String.t(), keyword()) ::
           {:ok, binary(), AgentToken.t()} | {:error, Ecto.Changeset.t()}
@@ -4950,6 +4974,43 @@ defmodule BarkparkCloud.Registry do
   Verify a presented `plaintext` agent token. Returns the owning `%Barkpark{}`
   when the token exists, is not revoked, and is not past `expires_at`; otherwise
   `nil`. Lookup is by hash — the plaintext is never stored to compare against.
+
+  RULING (task-940e49f7300a8d1b, recorded after an independent review of PR
+  #13251): this check is DELIBERATELY scope-blind — it filters hash, revoked,
+  and expiry, and NEVER reads `scope`. Any live token for `barkpark` opens
+  EVERY route behind `Auth.require_agent/2` for that box, regardless of the
+  scope it was minted with. That is unchanged by this ruling; it is the
+  finding this ruling accepts.
+
+  Why NOT enforced: as of this ruling, `require_agent` gates
+  `/v1/agent/*` (beat/space/commands/results), `/v1/builder/*`
+  (jpf-w1-builder-identity), and `/v1/builder/sites/:id/env` — and every one
+  of those routes is opened, in production, by the SAME single "report"-scope
+  token the box mints at claim time and keeps on disk
+  (`/etc/barkpark/agent.token`). There is no existing route→scope requirement
+  matrix anywhere in this codebase to enforce; test suites mint whatever scope
+  string is convenient ("runtime", "deploy", "report:health", …) because
+  nothing reads it. Inventing a scoping scheme now, with no route that has
+  ever needed one, would inject an untested authorization model rather than
+  close a real gap — and could silently break the one production path (a
+  "report" token failing a builder or agent-runtime check it has always
+  passed) for zero measured benefit.
+
+  Why ACCEPTABLE to leave scope-blind: `barkpark_id` is still the real
+  boundary — every route re-derives `conn.assigns.current_barkpark` from the
+  verified token and scopes its query to that barkpark alone
+  (jpf-w1-builder-identity's box-scoping tests), so the worst case of this
+  gap is intra-box privilege flattening (one box's own live token can reach
+  every route that box's disk already has secrets for), never cross-tenant.
+
+  The loaded-gun edge, stated plainly for the next person who reaches for
+  `scope` as a control: a future mint of a WEAKER scope — intended to open
+  fewer routes than the box's full agent surface — will NOT be narrowed by
+  this function. If that need arrives, it must be built here (a route-level
+  or plug-level allow-list checked against `scope`), not assumed to already
+  exist. Until then, `scope` is descriptive metadata (which flow minted this
+  token, for audit/debugging), not an authorization control — treat it as
+  the former in any UI or log that surfaces it, never claim it as the latter.
   """
   @spec verify_agent_token(binary()) :: Barkpark.t() | nil
   def verify_agent_token(plaintext) when is_binary(plaintext) do
