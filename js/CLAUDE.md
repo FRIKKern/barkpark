@@ -20,7 +20,7 @@ pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test`.
 - **No `node:` imports** in `@barkpark/core` or the `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`). `webhook` was ported to Web Crypto via `@barkpark/core` (#498) — now Edge-compatible. Only `draft-mode` still VIOLATES this (Phase-5 `node:crypto`, sync `signDraftModeToken`) — the check step is ADVISORY pending the ADR-002 port-or-amend decision (`docs/decisions/deferred.md`).
 - **Bundle budget:** `pnpm size`; the CI gate fails on >2% regression. Don't grow core to fix an integration.
 - **ADR amendment rule:** any change to the Decision section of a locked ADR requires a follow-up amendment ADR (in `docs/decisions/`).
-- **Changesets:** every PR touching `packages/**` needs `pnpm changeset` — the `changesets` CI job blocks PRs without one.
+- **Changesets:** every PR touching `packages/**` should carry `pnpm changeset`. The `changesets` job (js-tests.yml) checks this but is NOT in main's required-status-check set — red does not block merge, it is advisory. Green only certifies a changeset FILE exists, never that its version bump is correct (#9601 shipped a wrong one green).
 
 ## Root-export stub trap
 
