@@ -617,11 +617,20 @@ defmodule Barkpark.Content.Writer do
     # (autosave, patch merges, media/sheets/GitHub/forms/revision-restore) is
     # structurally untouched — they no-op on a live row exactly as they do on
     # the create path.
+    # THE DEDUP GATE RIDES HERE TOO (pds-bl-upsert-insert-branch-ungated-birth).
+    # Run-proven before this line existed: the create path refused a
+    # near-duplicate ({:error, {:duplicate_task, _}}) while
+    # `Content.upsert_document` on the SAME attrs and an unseen doc_id BIRTHED
+    # it (drafts.<id> persisted). `check_new_task/5` head-matches on
+    # `prev_doc == nil` exactly like the two birth guards above, so every
+    # UPDATE arriving here (autosave, patch merges, block ops, forms) is
+    # structurally untouched — parity with `do_create_document:175`.
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <-
            ensure_close_reason_lands_with_a_close(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
-         :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts) do
+         :ok <- ensure_task_surface_declared(type, attrs, doc_id, prev_doc, opts),
+         :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
       upsert_after_gate(type, attrs, dataset, ctx, prev_doc, opts)
     end
   end
