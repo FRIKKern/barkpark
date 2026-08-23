@@ -1,9 +1,9 @@
 <!-- doc-tier: agent | canonical-for: tenancy-model | budget: 2000tok -->
 # Tenancy — workspace · project · dataset · membership
 
-How Barkpark isolates data across tenants and scopes every read/write. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope). High blast radius — most content reads route through here.
+How Barkpark isolates data across tenants and scopes every read/write. Code: `api/lib/barkpark/tenancy/` (schemas + `Barkpark.Tenancy` context + `Tenancy.Auth`) and `api/lib/barkpark/content/scope.ex` (the data-layer scope).
 
-**This doc owns the model + scoping.** Auth enforcement and URL shapes are not restated here — see Canonical homes below.
+**This doc owns the model + scoping** — auth enforcement and URL shapes live in Canonical homes below.
 
 ## The hierarchy
 
@@ -43,7 +43,7 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 **Two role axes (GR46).** `owner · admin · member` is the *only* team-role vocabulary — every settings gate reads it. `platform_operator` is **not** a team role but an interim *platform* principal: a fail-closed boolean off the `:platform_admin_emails` allowlist (`Notifications.platform_admin_emails/0`) gating the Operator entry + `/v1/operator/*`, reconciled by `isu-backlog-operator-principal`. **Supporter** is a billing *plan*, never a role — the owner/supporter/operator 5-role list is archived design fiction.
 
-Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises.
+Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises. `Tenancy.Auth`'s read predicates (`membership/2` … `authorize/3`) are **total**: a malformed or absent id **denies**, never raises — ruling + widening: the `Tenancy.Auth` moduledoc.
 
 → Plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`, `:scoped_api`/`:scoped_admin`), 404/403 table: **`docs/auth.md`**. URL shapes (`/w/:ws/p/:proj`, flat alias, Studio canonical): **`docs/api-v1.md` §1a**.
 
@@ -54,7 +54,7 @@ Canonical scope helpers in `api/lib/barkpark/content/scope.ex`:
 - **`scope_to_workspace/3`** — **fail-closed**: a `nil` workspace_id compiles to `where: false` (zero rows), never a silent all-rows query. Binary id → `WHERE workspace_id = $1` (`AND project_id = $2` when given).
 - **`scope_to_workspace_global/1`** — explicit, greppable cross-tenant opt-in; used by surfaces not yet path-scoped.
 - **`scope_to_workspace_or_global/3`** — back-compat bridge for flat routes: nil → global, binary → the fail-closed form.
-- **`maybe_scope_to_grants/2`** — the single opts-gated owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grant union (fail-closed `where: false` on an undecidable grant). One wrapper serves every grant-aware read (`Content.Query`, `DocumentsRetriever`, Indx hydration, `Content.Graph` backlinks) — no read forgets the gate.
+- **`maybe_scope_to_grants/2`** — the single opts-gated owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grant union (fail-closed `where: false` on an undecidable grant). One wrapper serves every grant-aware read (`Content.Query`, `DocumentsRetriever`, Indx hydration, `Content.Graph` backlinks).
 
 In multi-tenant installs the content-edge projection uses strict `scope_to_workspace/3` (not the `_or_global` bridge), preventing cross-tenant `content_edges`.
 
@@ -86,4 +86,4 @@ The OR clause keeps legacy/un-backfilled rows (`dataset_id` never stamped) visib
 | HTTP API: scoped/flat URL shapes, hierarchy summary | `docs/api-v1.md` §1a |
 | Agent quick-note on tenant-scoping | `api/CLAUDE.md` (orientation only) |
 
-> `docs/decisions/deferred.md` tracks the missing workspace/project delete **verb** (API/CLI exposure); the server-side cascade `Tenancy.delete_workspace/1` is implemented (above).
+> Missing workspace/project delete **verb** (API/CLI exposure): tracked in `docs/decisions/deferred.md`.
