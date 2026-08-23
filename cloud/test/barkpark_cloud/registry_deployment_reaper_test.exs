@@ -401,6 +401,38 @@ defmodule BarkparkCloud.RegistryDeploymentReaperTest do
     assert id == d.id
   end
 
+  ## 9b. (site-spawner D22, box-scoped twin) task-349157180e91561e:
+  ##     `claim_queued_deployment_for_barkpark/2` ANDs the same container guard
+  ##     as `claim_next_deployment/1` (tested in 8/9 above) — narrowing the query
+  ##     by box must not relax it. Every test site elsewhere in this suite (and
+  ##     the router_builder_test.exs concurrency test that already drives this
+  ##     function) defaults to kind "container" (Registry.Site's schema default),
+  ##     so nothing but a differential against a NON-container site on the SAME
+  ##     barkpark can catch the conjunct's deletion — and tests 8/9 above don't
+  ##     catch it either, because they drive claim_next_deployment/1, not this
+  ##     function.
+  ##
+  ##     Mutation-proof: delete `s.kind == "container"` from the subquery in
+  ##     `Registry.claim_queued_deployment_for_barkpark/2` and the FIRST
+  ##     assertion below reds (the static row becomes claimable); restore it and
+  ##     the test is green again.
+  test "claim_queued_deployment_for_barkpark fences a static row off the SAME box's container queue" do
+    bp = team_fixture() |> barkpark_fixture()
+    static = static_site_fixture(bp)
+    {:ok, _d} = Registry.create_deployment(static, %{build_id: "b1", content_rev: "c1"})
+
+    assert {:error, :no_queued} = Registry.claim_queued_deployment_for_barkpark(bp, "builder-1")
+
+    # A container row ON THE SAME BOX IS claimable — proves the :no_queued
+    # above is the kind guard doing its job, not an empty/broken queue or a
+    # box-scoping bug hiding every row on this barkpark.
+    container = site_fixture(bp)
+    {:ok, d} = Registry.create_deployment(container, %{git_ref: "main"})
+
+    assert {:ok, claimed} = Registry.claim_queued_deployment_for_barkpark(bp, "builder-1")
+    assert claimed.id == d.id
+  end
+
   ## 10. (deploy-reliability W17 S5) `resumed:` IS the recovery metric — the
   ##     reaper puts it straight into the Oban job meta. It used to be
   ##     `length(orphans)`, the count of rows FOUND, over a fire-and-forget
