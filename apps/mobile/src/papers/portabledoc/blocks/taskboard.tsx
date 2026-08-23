@@ -9,9 +9,16 @@
 // STATUS_ROLES / roleOf, whose own source of truth is
 // design/status-manifest.json (the Elixir side inlines the manifest at compile
 // time and cannot drift; every JS-side copy CAN).
-// DRIFT RISK: a role, glyph or label added or changed in the manifest must be
-// mirrored here in lockstep — this comment is the guard until the
-// manifest→client generator lands.
+// DRIFT GUARD: a role, glyph or label added or changed in the manifest must be
+// mirrored here in lockstep. That used to be guarded by THIS COMMENT and
+// nothing else — scripts/status-manifest-check.sh Part 5 byte-checks the react
+// and web twins but has never seen apps/mobile at all
+// (mob-bl-status-manifest-mobile-gate). __tests__/statusManifestParity.test.ts
+// is now the real guard: it reads design/status-manifest.json off disk and
+// compares the four tables below against it, so a manifest edit that mobile
+// does not mirror reds the mobile gate. The tables are EXPORTED for that test
+// and for no other reason — nothing outside this file may render from them,
+// because the ladder still lives here once.
 import type { ReactNode } from 'react'
 import { Text, View } from 'react-native'
 
@@ -19,7 +26,7 @@ import { scale } from '../../../ui/typography'
 import { asList, isMap, str } from '../model'
 import { MONO, type BlockCtx, type Render } from '../register'
 
-const STATUS_TO_ROLE: Record<string, string> = {
+export const STATUS_TO_ROLE: Record<string, string> = {
   open: 'open',
   ready: 'ready',
   in_progress: 'progress',
@@ -31,7 +38,7 @@ const STATUS_TO_ROLE: Record<string, string> = {
   researching: 'researching',
 }
 
-const ROLE_GLYPH: Record<string, string> = {
+export const ROLE_GLYPH: Record<string, string> = {
   open: '○',
   ready: '○',
   // The web paints `progress` as an EMPTY span whose ::before CSS-animates the
@@ -51,7 +58,7 @@ const ROLE_GLYPH: Record<string, string> = {
   unknown: '◦',
 }
 
-const ROLE_LABEL: Record<string, string> = {
+export const ROLE_LABEL: Record<string, string> = {
   open: 'Open',
   ready: 'Ready',
   progress: 'In progress',
@@ -66,7 +73,7 @@ const ROLE_LABEL: Record<string, string> = {
 /** The board's lane roles, in white-ladder order. `cancel` is NOT a lane (it
  * folds to a tally on the web) and neither is the `unknown` sentinel — see
  * taskBoard for what happens to their rows. */
-const BOARD_ROLES: readonly string[] = [
+export const BOARD_ROLES: readonly string[] = [
   'open',
   'ready',
   'progress',
@@ -78,17 +85,17 @@ const BOARD_ROLES: readonly string[] = [
 
 /** An absent or empty status is `open`; an unrecognized one is `unknown`
  * (react inline.tsx roleOf — DEFAULT_ROLE vs UNKNOWN_ROLE). */
-function roleOf(status: unknown): string {
+export function roleOf(status: unknown): string {
   const s = str(status)
   if (s === '') return 'open'
   return STATUS_TO_ROLE[s] ?? 'unknown'
 }
 
-function glyphOf(role: string): string {
+export function glyphOf(role: string): string {
   return ROLE_GLYPH[role] ?? ROLE_GLYPH.unknown ?? ''
 }
 
-function labelOf(role: string): string {
+export function labelOf(role: string): string {
   return ROLE_LABEL[role] ?? ROLE_LABEL.unknown ?? ''
 }
 
