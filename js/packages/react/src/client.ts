@@ -132,13 +132,144 @@ async function hydrateMermaid(root: ParentNode): Promise<number> {
     if (n.dataset.bpSrc == null) n.dataset.bpSrc = n.textContent ?? ''
   }
 
+  const doc = ownerDocument(root)
   const mermaid = (await import('mermaid')).default as unknown as MermaidLike
   // Manual mode (`startOnLoad:false`): we drive rendering, mirroring the hook —
   // `mermaid.run` marks each processed node `data-processed="true"`. Theme
   // derives from the active mode so dark-surface diagrams stay legible.
-  mermaid.initialize({ startOnLoad: false, theme: activeMermaidTheme() })
+  mermaid.initialize({ startOnLoad: false, theme: activeMermaidTheme(doc) })
+  await mermaid.run({ nodes })
+  // A diagram exists on this page now, so a LATER theme flip has something to
+  // repaint. Installing the watch here (rather than in `hydratePortableDoc`)
+  // keeps a diagram-free page at zero listeners.
+  ensureMermaidThemeWatch(root)
+  return nodes.length
+}
+
+/** Every diagram whose source we stashed — processed or not. */
+const MERMAID_STASHED_SELECTOR = 'pre.mermaid[data-bp-src]'
+
+/**
+ * Repaint every stashed diagram under `root` at `theme`.
+ *
+ * Mermaid bakes its palette into the emitted SVG and exposes no restyle API, so
+ * "re-theme" means "render again from source". That is exactly what
+ * `data-bp-src` was stashed for at first hydration — the `<pre>`'s own
+ * `textContent` is the SVG by then, not the diagram source.
+ *
+ * The `data-processed` stamp is cleared before the run and re-applied by
+ * `mermaid.run` itself, so idempotency survives: a `hydratePortableDoc` call
+ * that interleaves with a repaint still sees a correctly-stamped node.
+ */
+async function rerenderMermaid(
+  root: ParentNode,
+  theme: 'dark' | 'default',
+): Promise<number> {
+  const nodes = Array.from(
+    root.querySelectorAll<HTMLElement>(MERMAID_STASHED_SELECTOR),
+  )
+  if (nodes.length === 0) return 0
+
+  for (const n of nodes) {
+    n.textContent = n.dataset.bpSrc ?? ''
+    // `mermaid.run` SKIPS a node still marked processed — without this the
+    // repaint is a silent no-op and the diagram keeps the stale palette.
+    n.removeAttribute('data-processed')
+  }
+
+  const mermaid = (await import('mermaid')).default as unknown as MermaidLike
+  mermaid.initialize({ startOnLoad: false, theme })
   await mermaid.run({ nodes })
   return nodes.length
+}
+
+/** `root`'s document — `root` may be the document itself, or an element in it. */
+function ownerDocument(root: ParentNode): Document {
+  const asDoc = root as Partial<Document>
+  if (typeof asDoc.createElement === 'function') return root as Document
+  return (root as Element).ownerDocument ?? document
+}
+
+// One watch per document. `hydrateMermaid` may run on every render/stream
+// delta, and stacking an observer per call would repaint N times per flip.
+const themeWatches = new WeakMap<Document, () => void>()
+
+/**
+ * Repaint this page's diagrams whenever the colour mode changes.
+ *
+ * Two sources, because `activeMermaidTheme` reads two:
+ *   • a `MutationObserver` on `<html data-theme>` — the explicit consumer
+ *     toggle (Studio / blog-starter);
+ *   • the `prefers-color-scheme` media query — the OS-level flip that matters
+ *     only while no explicit stamp is present.
+ *
+ * This package NEVER stamps `data-theme` itself: which element carries the
+ * colour mode is the consuming app's contract, and we are strictly a reader.
+ *
+ * Repaints are guarded on the RESOLVED theme, not on the event: flipping
+ * `data-theme` from `light` to `sepia`, or an OS flip underneath an explicit
+ * stamp, both resolve to the same mermaid theme and repaint nothing.
+ *
+ * @param root  The subtree whose diagrams get repainted (defaults to `document`).
+ * @returns     An unsubscribe function. Calling it twice is safe.
+ */
+export function watchMermaidTheme(root: ParentNode = document): () => void {
+  const doc = ownerDocument(root)
+  const win = doc.defaultView
+  let applied = activeMermaidTheme(doc)
+
+  const onChange = (): void => {
+    const next = activeMermaidTheme(doc)
+    if (next === applied) return
+    applied = next
+    void rerenderMermaid(root, next)
+  }
+
+  const observer =
+    typeof win?.MutationObserver === 'function'
+      ? new win.MutationObserver(onChange)
+      : null
+  if (observer && doc.documentElement) {
+    observer.observe(doc.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    })
+  }
+
+  const mq =
+    typeof win?.matchMedia === 'function'
+      ? win.matchMedia('(prefers-color-scheme: dark)')
+      : null
+  mq?.addEventListener?.('change', onChange)
+
+  let stopped = false
+  const stop = (): void => {
+    if (stopped) return
+    stopped = true
+    observer?.disconnect()
+    mq?.removeEventListener?.('change', onChange)
+    if (themeWatches.get(doc) === stop) themeWatches.delete(doc)
+  }
+  return stop
+}
+
+function ensureMermaidThemeWatch(root: ParentNode): void {
+  const doc = ownerDocument(root)
+  if (themeWatches.has(doc)) return
+  themeWatches.set(doc, watchMermaidTheme(doc))
+}
+
+/**
+ * Tear down the theme watch `hydratePortableDoc` installed on `doc`. Rarely
+ * needed in an app (the listeners die with the document) — it exists so a
+ * long-lived test environment, or a consumer unmounting a whole surface, has a
+ * way back to zero listeners.
+ */
+export function stopMermaidThemeWatch(doc: Document = document): void {
+  const stop = themeWatches.get(doc)
+  if (!stop) return
+  themeWatches.delete(doc)
+  stop()
 }
 
 // asciinema-player's stylesheet is loaded at most once per document. The import
