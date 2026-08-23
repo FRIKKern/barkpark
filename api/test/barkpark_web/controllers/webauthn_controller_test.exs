@@ -253,13 +253,11 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     assert Repo.one(from e in Event, where: e.action == "passkey_login")
     assert :ok == Audit.verify_chain(nil)
 
-    # delete removes it
+    # delete removes it — DIRECT Repo readback, not the list endpoint: a bug
+    # present in both delete and list would sail through an HTTP-list check
+    # (pds-bl-w36-groupc-remainder criterion 1).
     assert authed(token) |> delete("/v1/auth/webauthn/credentials/#{id}") |> json_response(200)
-
-    assert authed(token)
-           |> get("/v1/auth/webauthn/credentials")
-           |> json_response(200)
-           |> Map.fetch!("credentials") == []
+    assert Repo.get(Barkpark.Accounts.WebauthnCredential, id) == nil
   end
 
   # BinToTerm scar: the stored `cose_key` is decoded with `binary_to_term/2
@@ -302,5 +300,135 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
     # context guard short-circuits before any Postgres cast
     assert {:error, :not_found} == Webauthn.delete_credential(user, "not-a-uuid")
+  end
+
+  # ── direct-Repo readback differentials (pds-bl-w36-groupc-remainder) ──────
+  #
+  # PDS-D501 ruling: these land HERE, beside the file's own ES256/P-256
+  # software authenticator — never a duplicated harness elsewhere. The prior
+  # Repo reads in this file were audit-Event EXISTENCE assertions
+  # (side-effect-existence-only); each test below reads the ROW the verb's
+  # receipt is about, directly, and ties it to the response byte-for-byte.
+  describe "direct-Repo readback differentials" do
+    alias Barkpark.Accounts.WebauthnCredential
+
+    test "register (201 receipt) is backed by the STORED credential row", %{
+      token: token,
+      user: user
+    } do
+      ch =
+        authed(token) |> post("/v1/auth/webauthn/register/challenge", "{}") |> json_response(200)
+
+      cred = make_credential(ch["challenge"])
+
+      resp =
+        authed(token)
+        |> post(
+          "/v1/auth/webauthn/register",
+          Jason.encode!(Map.put(cred.body, :challenge_token, ch["challenge_token"]))
+        )
+        |> json_response(201)
+
+      # The receipt's credential id names a REAL stored row, owned by the
+      # registering user, carrying the key material a later login needs.
+      assert %WebauthnCredential{} = row = Repo.get(WebauthnCredential, resp["credential"]["id"])
+      assert row.user_id == user.id
+      assert is_binary(row.cose_key) and byte_size(row.cose_key) > 0
+      assert row.sign_count == 0
+    end
+
+    test "step-up (200 receipt) is backed by the STORED session mfa_verified_at — " <>
+           "fresh_until derives from the row, not from prose",
+         %{token: token, user: user} do
+      cred = register!(token)
+      assert Accounts.mfa_enrolled?(user)
+
+      hash = Accounts.UserSession.hash_token(token)
+
+      old =
+        DateTime.utc_now() |> DateTime.add(-20 * 60, :second) |> DateTime.truncate(:microsecond)
+
+      Repo.update_all(from(s in Accounts.UserSession, where: s.token_hash == ^hash),
+        set: [mfa_verified_at: old]
+      )
+
+      ch =
+        authed(token) |> post("/v1/auth/webauthn/step-up/challenge", "{}") |> json_response(200)
+
+      assertion = make_assertion(cred, ch["challenge"], 1)
+
+      step =
+        authed(token)
+        |> post(
+          "/v1/auth/webauthn/step-up",
+          Jason.encode!(Map.put(assertion, :challenge_token, ch["challenge_token"]))
+        )
+        |> json_response(200)
+
+      # DIRECT row read: the stamp actually landed (not the aged value)…
+      stored =
+        Repo.one(from s in Accounts.UserSession, where: s.token_hash == ^hash)
+
+      assert DateTime.compare(stored.mfa_verified_at, old) == :gt
+
+      # …and the receipt's fresh_until is DERIVED from the stored stamp.
+      expected =
+        DateTime.add(
+          stored.mfa_verified_at,
+          Accounts.UserSession.default_step_up_window(),
+          :second
+        )
+
+      assert {:ok, fresh_until, _} = DateTime.from_iso8601(step["fresh_until"])
+      assert DateTime.compare(fresh_until, expected) == :eq
+    end
+
+    test "delete is USER-SCOPED and the claim is ROW ABSENCE: a foreign user's DELETE " <>
+           "404s and the row survives; the owner's DELETE removes the row",
+         %{token: token} do
+      cred_id =
+        register!(token)
+        |> then(fn _ ->
+          [%{"id" => id}] =
+            authed(token)
+            |> get("/v1/auth/webauthn/credentials")
+            |> json_response(200)
+            |> Map.fetch!("credentials")
+
+          id
+        end)
+
+      # A SECOND authenticated user attacks the first user's credential id.
+      build_conn()
+      |> json_conn()
+      |> post(
+        "/v1/auth/register",
+        Jason.encode!(%{email: "intruder@example.com", password: @password})
+      )
+
+      other_token =
+        build_conn()
+        |> json_conn()
+        |> post(
+          "/v1/auth/login",
+          Jason.encode!(%{email: "intruder@example.com", password: @password})
+        )
+        |> json_response(201)
+        |> Map.fetch!("token")
+
+      assert authed(other_token)
+             |> delete("/v1/auth/webauthn/credentials/#{cred_id}")
+             |> json_response(404)
+
+      # The row SURVIVED the cross-user attempt — direct read, not a list.
+      assert %WebauthnCredential{} = Repo.get(WebauthnCredential, cred_id)
+
+      # The owner's delete removes it — the receipt's claim is the ABSENCE.
+      assert authed(token)
+             |> delete("/v1/auth/webauthn/credentials/#{cred_id}")
+             |> json_response(200)
+
+      assert Repo.get(WebauthnCredential, cred_id) == nil
+    end
   end
 end
