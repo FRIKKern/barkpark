@@ -1283,56 +1283,95 @@ func (c *Client) TaskRelabel(docID string, add, remove []string) error {
 	return err
 }
 
+// TaskReadback is what the store handed back on a second read: the task's
+// content, plus the two fields that say WHICH ROW answered.
+//
+// Status and DocID are not decoration. GET /v1/tasks/:doc_id falls back to the
+// `drafts.` twin when no published row exists for the id
+// (tasks_controller.ex find_task_by_doc_id), so an id the caller believes names
+// a board row can be answered by a draft the board never shows. The server has
+// always sent both fields (Params.render_doc emits `doc_id` and `status`); the
+// CLI simply threw them away, which made the read-back unable to name the row
+// it read.
+type TaskReadback struct {
+	// Content is `doc.content` VERBATIM. It is returned raw rather than decoded
+	// here because the criteria decode (with the server's exact tolerance
+	// contract) belongs to internal/taskboard, which owns that shape.
+	Content json.RawMessage
+	// Status is the document's publish state — "published" for a board row.
+	Status string
+	// DocID is the id the SERVER matched, which is NOT necessarily the id that
+	// was asked for: a draft-only row answers as "drafts.<id>".
+	DocID string
+}
+
+// IsDraft reports whether the row that answered is a draft rather than a
+// published board row. Both signals are honoured because either one alone is
+// enough to mean "the board will not show this": the `drafts.` doc_id prefix
+// and a status that is not "published". An EMPTY status is not treated as a
+// draft — an absent field is unknown, not a verdict.
+func (r TaskReadback) IsDraft() bool {
+	if strings.HasPrefix(r.DocID, "drafts.") {
+		return true
+	}
+	return r.Status != "" && r.Status != "published"
+}
+
 // TaskGetContent RE-READS one task via GET /v1/tasks/:doc_id and returns its
-// `doc.content` object verbatim (the flat, token-scoped task route — tenancy
-// rides the bearer token, exactly like the claim/close/stamp POSTs above).
+// `doc.content` object plus the identity of the row that answered (the flat,
+// token-scoped task route — tenancy rides the bearer token, exactly like the
+// claim/close/stamp POSTs above).
 //
 // It exists for the PDS success-claim law (charter PDS-D359/D361): a ledger
 // writer may not report a write it never read back. `bp task stamp` POSTs and
 // then calls this to ask the STORE what it now holds, so a write dropped by a
 // transport ceiling, a second door, or a bad minute on the box cannot be
-// reported as a success. The content is returned RAW rather than decoded here
-// because the criteria decode (with the server's exact tolerance contract)
-// belongs to internal/taskboard, which owns that shape.
+// reported as a success.
 //
 // An ok:false envelope surfaces the server's reason string VERBATIM as the
 // error; a non-200 carries the status. Both are honest read failures — the
 // caller must NOT read them as "the write landed".
-func (c *Client) TaskGetContent(docID string) (json.RawMessage, error) {
+func (c *Client) TaskGetContent(docID string) (TaskReadback, error) {
 	resp, err := c.authGet(c.flatURL("/v1/tasks/" + url.PathEscape(docID)))
 	if err != nil {
-		return nil, err
+		return TaskReadback{}, err
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
-		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+		return TaskReadback{}, fmt.Errorf("task read-back %s: %w", docID, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("task read-back %s: status %d", docID, resp.StatusCode)
+		return TaskReadback{}, fmt.Errorf("task read-back %s: status %d", docID, resp.StatusCode)
 	}
 	var env struct {
 		OK     bool   `json:"ok"`
 		Reason string `json:"reason"`
 		Doc    struct {
 			Content json.RawMessage `json:"content"`
+			Status  string          `json:"status"`
+			DocID   string          `json:"doc_id"`
 		} `json:"doc"`
 	}
 	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+		return TaskReadback{}, fmt.Errorf("task read-back %s: %w", docID, err)
 	}
 	if !env.OK {
 		reason := env.Reason
 		if reason == "" {
 			reason = "task read-back returned ok:false with no reason"
 		}
-		return nil, fmt.Errorf("%s", reason)
+		return TaskReadback{}, fmt.Errorf("%s", reason)
 	}
 	if len(bytes.TrimSpace(env.Doc.Content)) == 0 {
-		return nil, fmt.Errorf("task read-back %s: envelope carried no doc.content", docID)
+		return TaskReadback{}, fmt.Errorf("task read-back %s: envelope carried no doc.content", docID)
 	}
-	return env.Doc.Content, nil
+	return TaskReadback{
+		Content: env.Doc.Content,
+		Status:  env.Doc.Status,
+		DocID:   env.Doc.DocID,
+	}, nil
 }
 
 // GraphNode is one node of a GET /v1/graph/:id response — the id ↔ doc_id join

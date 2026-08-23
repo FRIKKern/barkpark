@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
@@ -488,13 +489,21 @@ func stampStoredContradicted() taskboard.CriterionItem {
 	return taskboard.CriterionItem{Criterion: stampVerdictReq.text}
 }
 
+// stampReadbackPublished is the row IDENTITY every pre-existing verdict case
+// assumes: the read-back landed on the published board row. It is held fixed so
+// those cases keep probing what the store HOLDS; the draft case below varies
+// this half instead.
+func stampReadbackPublished() apiclient.TaskReadback {
+	return apiclient.TaskReadback{DocID: stampVerdictReq.docID, Status: "published"}
+}
+
 // The verdict must be read off the STORE. A row that disagrees exits non-zero
 // and the message has to name the index, the expected criterion text, and what
 // the store actually held — a builder who reads only the last line still learns
 // which row failed and why.
 func TestRenderStampVerdict_ContradictionNamesIndexExpectedAndFound(t *testing.T) {
 	out, buf := stampVerdictWriter()
-	code := renderStampVerdict(out, stampVerdictReq, stampStoredContradicted(), exitOK)
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredContradicted(), stampReadbackPublished(), exitOK)
 	if code != exitConflict {
 		t.Fatalf("exit = %d, want exitConflict (%d) — an unlanded stamp must not report success", code, exitConflict)
 	}
@@ -517,7 +526,7 @@ func TestRenderStampVerdict_ContradictionNamesIndexExpectedAndFound(t *testing.T
 // must exit zero.
 func TestRenderStampVerdict_ConfirmedReportsTheStoredRow(t *testing.T) {
 	out, buf := stampVerdictWriter()
-	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), exitOK)
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), stampReadbackPublished(), exitOK)
 	if code != exitOK {
 		t.Fatalf("exit = %d, want exitOK on a landed stamp; out:\n%s", code, buf())
 	}
@@ -533,7 +542,7 @@ func TestRenderStampVerdict_ConfirmedReportsTheStoredRow(t *testing.T) {
 // landed branch) would report a real write as a failure.
 func TestRenderStampVerdict_LandedOverridesA5xx(t *testing.T) {
 	out, buf := stampVerdictWriter()
-	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), exitServer)
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), stampReadbackPublished(), exitServer)
 	if code != exitOK {
 		t.Fatalf("exit = %d, want exitOK — a confirmed-landed row is a success regardless of what the POST answered; out:\n%s", code, buf())
 	}
@@ -551,7 +560,7 @@ func TestRenderStampVerdict_LandedOverridesA5xx(t *testing.T) {
 // carries no false "despite a 5xx" claim since nothing landed.
 func TestRenderStampVerdict_ConfirmedAbsentAfter5xxStillConflict(t *testing.T) {
 	out, buf := stampVerdictWriter()
-	code := renderStampVerdict(out, stampVerdictReq, stampStoredContradicted(), exitServer)
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredContradicted(), stampReadbackPublished(), exitServer)
 	if code != exitConflict {
 		t.Fatalf("exit = %d, want exitConflict; out:\n%s", code, buf())
 	}
@@ -767,4 +776,87 @@ func stampCommandFixture(t *testing.T) manifest.Command {
 	}
 	t.Fatal("minimal manifest declares no task stamp command")
 	return manifest.Command{}
+}
+
+// --- the read-back must NAME the row it read (pds-w43) ---
+//
+// GET /v1/tasks/:doc_id falls back to the `drafts.` twin when no published row
+// exists (tasks_controller.ex find_task_by_doc_id), and `bp task create --yes`
+// produces exactly such a draft-only row at rc=0. The read-back therefore found
+// the criterion it had just written, on the draft, and printed the green
+// verdict — while `bp doc get task <id>` answered not_found and no board ever
+// showed the row. The value landed somewhere nobody reads.
+//
+// These cases vary the row IDENTITY while holding the STORED row fixed at the
+// one that would otherwise earn a green, so nothing but the identity can be
+// producing the refusal.
+
+// TestRenderStampVerdict_DraftRowRefusesTheGreen is the row's core assertion: a
+// perfect stamp on a draft twin must exit non-zero and say so.
+func TestRenderStampVerdict_DraftRowRefusesTheGreen(t *testing.T) {
+	cases := []struct {
+		name     string
+		readback apiclient.TaskReadback
+		wantIn   string
+	}{
+		{
+			name:     "drafts. doc_id",
+			readback: apiclient.TaskReadback{DocID: "drafts." + stampVerdictReq.docID, Status: "published"},
+			wantIn:   "drafts." + stampVerdictReq.docID,
+		},
+		{
+			name:     "status is not published",
+			readback: apiclient.TaskReadback{DocID: stampVerdictReq.docID, Status: "draft"},
+			wantIn:   `status "draft"`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, buf := stampVerdictWriter()
+
+			// stampStoredBacked() is the row that earns a green when the identity
+			// is a published one — see TestRenderStampVerdict above. Only the
+			// identity differs here.
+			code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), tc.readback, exitOK)
+
+			if code == exitOK {
+				t.Fatalf("a stamp confirmed only on a DRAFT exited 0 — the board will never show it; output:\n%s", buf())
+			}
+			got := buf()
+			if !strings.Contains(got, tc.wantIn) {
+				t.Errorf("the receipt does not name the row it read (want %q); got:\n%s", tc.wantIn, got)
+			}
+			if !strings.Contains(got, "DRAFT") {
+				t.Errorf("the receipt does not say the row is a draft; got:\n%s", got)
+			}
+		})
+	}
+}
+
+// TestRenderStampVerdict_PublishedRowStillGreens is the negative arm. Widening
+// the refusal until it swallows the ordinary success would trade a false green
+// for a false red, so the published identity must stay a clean exit 0.
+func TestRenderStampVerdict_PublishedRowStillGreens(t *testing.T) {
+	out, buf := stampVerdictWriter()
+
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), stampReadbackPublished(), exitOK)
+
+	if code != exitOK {
+		t.Fatalf("a landed stamp on the PUBLISHED row exited %d, want 0; output:\n%s", code, buf())
+	}
+}
+
+// TestRenderStampVerdict_UnnamedRowIsNotCalledADraft pins the honesty limit: a
+// server that sends neither doc_id nor status has told us nothing about which
+// row answered, and "nothing" is not evidence of a draft. Asserting a draft
+// here would be the same overclaim in the other direction.
+func TestRenderStampVerdict_UnnamedRowIsNotCalledADraft(t *testing.T) {
+	out, buf := stampVerdictWriter()
+
+	code := renderStampVerdict(out, stampVerdictReq, stampStoredBacked(), apiclient.TaskReadback{}, exitOK)
+
+	if code != exitOK {
+		t.Fatalf("an unnamed row was treated as a draft (exit %d) — an absent field is unknown, not a verdict; output:\n%s", code, buf())
+	}
 }
