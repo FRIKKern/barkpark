@@ -110,13 +110,25 @@
 // ---------------------------------------------------------------------------
 // WHY A GUARD'S EXIT 2 IS AN INFRA FAULT AND NOT A DEFECT CLAIM
 //
-// `overflow-guard.mjs` exits 2 for "unknown --defect" — a REFUSAL to measure — and the
-// prior shape of this file laundered any non-zero into "the defect is still measurable
-// at origin/main", i.e. it reported a defect it had never measured. This file now reads
-// a guard's exit 2 as REFUSED → its own INFRA FAULT (exit 2), never a verdict.
-// The GUARD-SIDE fix (overflow-guard.mjs's own exit vocabulary) is NOT duplicated here:
-// it is owned by the open row `hg-overflow-guard-refusal-exits-1`, and that file is
-// deliberately left untouched by this slice.
+// HISTORY, kept because the rule came from it: `overflow-guard.mjs` exits 2 for
+// "unknown --defect" — a REFUSAL to measure — and the prior shape of this file
+// laundered any non-zero into "the defect is still measurable at origin/main",
+// i.e. it reported a defect it had never measured. This file now reads a guard's
+// exit 2 as REFUSED → its own INFRA FAULT (exit 2), never a verdict.
+//
+// WHAT THIS FILE ACTUALLY SPAWNS (cchi-w18-bl-seal-predicate-header-asserts-
+// absent-wiring): clause (b)'s spawn site reaches EXACTLY the `guard:` entries
+// in KNOWN_DEFECTS, and the live register carries TWO —
+// `cloud/priv/static/__app.test.mjs` (CCH-D1) and `design/emit-fence.test.mjs`
+// (CCH-D7). overflow-guard.mjs is NOT among them and is never spawned here; it
+// appears in this block as the historical example only. No clause-(b) entry
+// naming it exists or is intended — wiring one in would be NEW work for its own
+// row, none is filed. The guard-side vocabulary row
+// `hg-overflow-guard-refusal-exits-1` has since CLOSED with a residual its
+// closure does not cover: the die() refusal paths exit 2, but overflow-guard's
+// outer `main().catch` still exits 1, so an unhandled crash there wears CI's
+// measured-defect banner — a closed row is not proof the capability is
+// complete.
 //
 // ---------------------------------------------------------------------------
 // WHY FOUR REFUSALS FIRE BEFORE ANY CLAUSE IS EVALUATED
@@ -1070,8 +1082,9 @@ function evaluateLadder(fixture, guardOverride, waivers) {
         } else if (r.status === 2) {
           // A guard's exit 2 is a REFUSAL to measure, never a defect claim. Reading it
           // as "still measurable" reports a defect nobody measured. The guard-side fix
-          // is owned by the open row `hg-overflow-guard-refusal-exits-1`.
-          throw new Infra(`guard ${d.guard} exited 2 for ${d.id} — that is a REFUSAL to measure (its own infra code), not a defect claim. Nothing is asserted about ${d.id}. The guard-side vocabulary fix is owned by hg-overflow-guard-refusal-exits-1, which this file names rather than duplicates.`);
+          // is owned by `hg-overflow-guard-refusal-exits-1` (CLOSED — its
+          // die() paths are paid; the outer main().catch residual is not).
+          throw new Infra(`guard ${d.guard} exited 2 for ${d.id} — that is a REFUSAL to measure (its own infra code), not a defect claim. Nothing is asserted about ${d.id}. The guard-side vocabulary fix was owned by hg-overflow-guard-refusal-exits-1 (closed; its main().catch residual is recorded at the comment above this throw), which this file names rather than duplicates.`);
         } else if (r.status !== 0) {
           problems.push(`guard exited ${r.status} — the defect is still measurable at origin/main`);
         } else if (!guardOverride && d.guardExpect && !out.includes(d.guardExpect)) {
