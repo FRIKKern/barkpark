@@ -318,6 +318,19 @@ defmodule Barkpark.Codelists.EDItEUR do
   end
 
   @doc """
+  The issue `seed_thema/1` pins the bundled Thema snapshot to.
+
+  Exposed so the OnixEdit plugin's declared codelist contract
+  (`Barkpark.Plugins.OnixEdit.CodelistSeeders.requirements/0`) can READ the
+  issue boot actually writes instead of restating it. The two had drifted:
+  the contract declared `"93"`, which is the ONIX list number for
+  "Supplier role" — Thema is published separately and carries its own
+  version, currently `"1.6"`.
+  """
+  @spec thema_issue() :: String.t()
+  def thema_issue, do: @thema_issue
+
+  @doc """
   Locate the bundled Thema JSON snapshot on disk via `:code.priv_dir/1`.
 
   Returns `{:ok, abs_path}` when the file exists, `{:error, :not_found}`

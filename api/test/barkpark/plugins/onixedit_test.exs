@@ -124,12 +124,19 @@ defmodule Barkpark.Plugins.OnixEditTest do
              "ContributorRole list 17 must be in the codelist requirements (D17)"
     end
 
-    test "Thema codelist 93 is declared" do
+    test "Thema is declared at the issue boot actually seeds, not at ONIX list 93" do
       reqs = OnixEdit.codelist_requirements()
+      thema = Enum.find(reqs, &(&1.list_id == "onixedit:thema"))
 
-      assert Enum.any?(reqs, fn r ->
-               r.list_id == "onixedit:thema" and r.issue == "93"
-             end)
+      # The declaration must track `seed_thema/1`'s pinned constant. It used
+      # to say "93", which is the ONIX list NUMBER for "Supplier role" —
+      # EDItEUR publishes Thema separately, with its own version.
+      assert thema.issue == Barkpark.Codelists.EDItEUR.thema_issue()
+      assert thema.issue == "1.6"
+
+      refute thema.issue == "93",
+             "ONIX list 93 is Supplier role; the 93 beside Thema in book.json " <>
+               "is a SubjectSchemeIdentifier value inside list 27"
     end
 
     test "all requirements are scoped to the onixedit plugin (D20)" do
