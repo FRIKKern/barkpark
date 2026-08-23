@@ -61,7 +61,19 @@ export default defineConfig({
   // and never perturbs the hook-free renderer chunk `server.mjs` re-exports —
   // guarded by `tests/rsc-chunk-hook-free.test.ts` (chunk stays hook-free) and
   // by the media-parity package's byte-identity md5 check on `server.mjs`.
-  entry: { index: 'src/index.ts', server: 'src/server.ts', image: 'src/Image.tsx', client: 'src/client.ts' },
+  // `portable-text` / `portable-doc` are subpath entries (rpu-backlog-
+  // subpath-split-portabletext): each re-exports ONE surface so a consumer can
+  // opt into tree-shaking free of the other. Code stays in the shared split
+  // chunks — the entries are thin re-export shims, so neither duplicates the
+  // renderer nor perturbs the hook-free chunk `server.mjs` re-exports.
+  entry: {
+    index: 'src/index.ts',
+    server: 'src/server.ts',
+    image: 'src/Image.tsx',
+    client: 'src/client.ts',
+    'portable-text': 'src/portable-text.ts',
+    'portable-doc': 'src/portable-doc.ts',
+  },
   format: ['cjs', 'esm'],
   dts: true,
   sourcemap: true,
@@ -92,6 +104,12 @@ export default defineConfig({
     // normal server module under the `react-server` condition.
     await prependUseClient('index.mjs')
     await prependUseClient('index.cjs')
+    // The legacy PortableText shim is a client component (its source carries
+    // 'use client'); its subpath entry gets the same banner treatment as index.
+    // `portable-doc.*` stays UNbannered on purpose — it re-exports the hook-free
+    // renderer chunk, which must remain server-evaluable (rsc-chunk guard).
+    await prependUseClient('portable-text.mjs')
+    await prependUseClient('portable-text.cjs')
 
     // The isolated client-surface entry (`BarkparkImage`, which calls
     // `useEffect`) plus the hashed chunk it re-exports from. Bannering the

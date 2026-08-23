@@ -61,3 +61,23 @@ import { BarkparkReference } from '@barkpark/react'
 ```
 
 PortableText and BarkparkImage are server-component friendly (exported under the `react-server` condition). BarkparkReference uses client-only React APIs (`createContext`, `useContext`) and must be imported from a `'use client'` component — pair with `@barkpark/nextjs` for App Router integration.
+
+## Subpath exports (tree-shaking) & compatibility policy
+
+The two rendering surfaces ship as dedicated subpaths so an app that uses one
+never pays for the other:
+
+```ts
+import { PortableText } from '@barkpark/react/portable-text' // legacy Sanity-shaped shim (~1.3 KB gz)
+import { PortableDoc, renderPortableDocument } from '@barkpark/react/portable-doc' // canonical renderer, shim-free
+```
+
+**Compatibility policy:** the root barrel (`@barkpark/react`) keeps exporting
+BOTH surfaces, unchanged, indefinitely — existing imports never break and never
+need migrating. The subpaths are additive opt-in. (Since the entry split, even
+the root-barrel `import { PortableText }` tree-shakes free of the renderer
+chunk in bundlers that honor ESM tree-shaking; the subpaths make the boundary
+explicit and are the guaranteed form.) `@barkpark/react/portable-doc` is
+hook-free and safe in React Server Components; `@barkpark/react/portable-text`
+is a client component. Guarded by `tests/portable-subpath-split.test.ts` and
+the `.size-limit.json` budgets.
