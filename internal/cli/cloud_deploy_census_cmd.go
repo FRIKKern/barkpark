@@ -386,7 +386,7 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 	out.outf("  %s", deployCensusAbandonment(census))
 	out.outf("")
 
-	boundaries := deployCensusBoundaries(census.Raw)
+	boundaries := deployCensusBoundaries(census.Boundaries)
 	if len(census.Classes) > 0 {
 		out.outf("failure classes (share of the %d failed)", census.Failed)
 		for _, c := range census.Classes {
@@ -451,6 +451,9 @@ func renderDeployCensus(out *writer, from, to time.Time, census cloudclient.Depl
 		}
 		if n := len(census.Sites) - len(rows); n > 0 {
 			out.outf("  … and %d more (raise the display clamp with --sites 0)", n)
+		}
+		if line := deployCensusSiteTruncationLine(census); line != "" {
+			out.outf("%s", line)
 		}
 		if line := deployCensusSiteLiveNote(rows); line != "" {
 			out.outf("%s", line)
@@ -853,6 +856,38 @@ func deployCensusSiteLiveNote(rows []cloudclient.DeployCensusSite) string {
 		"it folds in-flight, cancelled and residual rows into live.", unmetered, len(rows))
 }
 
+// deployCensusSiteTruncationLine says whether the site rows above are the whole
+// population — the SERVER's claim, never one derived from this process's own
+// display clamp. The "… and N more" line beside it is about what this render
+// chose not to print; this line is about what the control plane never sent.
+// Three endings, and none of them is silence-as-completeness:
+//
+//   - Truncated == nil: the control plane predates the marker (dr-w18-s2). It
+//     did not say whether the list is complete, and this line says exactly
+//     that, because an unstated population is how the top 50 of a large fleet
+//     reads as a complete 50-site fleet.
+//   - *Truncated == true: the SERVER cut the list. No --sites flag can restore
+//     rows that never rode the wire, and the line says so; TotalSites names
+//     the real population when it was sent.
+//   - *Truncated == false: the server AFFIRMED completeness — the one case
+//     where "these are all the sites" is a claim someone actually made.
+func deployCensusSiteTruncationLine(census cloudclient.DeployCensus) string {
+	if census.Truncated == nil {
+		return "  population NOT STATED — this control plane sends no truncated/total_sites marker, so whether these rows are the whole fleet or the top of a larger one is unknown."
+	}
+	if *census.Truncated {
+		if census.TotalSites != nil {
+			return fmt.Sprintf("  SERVER-TRUNCATED: the control plane sent %d of %d site(s) — the rows above are the TOP of the fleet, and no --sites value can restore rows that never rode the wire.",
+				len(census.Sites), *census.TotalSites)
+		}
+		return "  SERVER-TRUNCATED: the control plane cut this list and did not say at what population — the rows above are the top of a larger fleet."
+	}
+	if census.TotalSites != nil {
+		return fmt.Sprintf("  complete: the control plane sent all %d site(s) in this window (before any display clamp).", *census.TotalSites)
+	}
+	return "  complete: the control plane affirmed no site row was cut (before any display clamp)."
+}
+
 // deployCensusSiteNotes is deployCensusShareNotes' counterpart for the site
 // section: the refusal behind every em-dash, named, with the remedy that fits.
 //
@@ -979,36 +1014,19 @@ func deployCensusSiteRemedy(reason string, boundaries []deployCensusBoundary, fr
 // census body, so it renders through deployCensusMessage's own arm and keeps its
 // own wording: no window suggestion is attached to a refusal no window can fix.
 
-// deployCensusBoundary is ONE row of the census envelope's `boundaries` list:
-// an instant at which the ledger's own vocabulary changed, with the derivation
-// that fixed it (method + source), so a suggestion built on it can show its
-// provenance.
-//
-// It is decoded HERE, out of the raw envelope, rather than off a typed field:
-// cloudclient.DeployCensus does not model `boundaries`, and this render must
-// only ever repeat what the control plane actually sent.
-type deployCensusBoundary struct {
-	Subject string `json:"subject"`
-	Instant string `json:"instant"`
-	Method  string `json:"method"`
-	Source  string `json:"source"`
-}
+// deployCensusBoundary is ONE row of the census envelope's `boundaries` list —
+// the typed cloudclient shape, aliased under the name every render helper in
+// this file already carries. dr-w24: the raw side-channel decode that used to
+// live here is retired; cloudclient.DeployCensus models `boundaries` now, so
+// this render reads the SAME field every other consumer of the struct does.
+type deployCensusBoundary = cloudclient.DeployCensusBoundary
 
-// deployCensusBoundaries decodes the envelope's boundary list. A row whose
+// deployCensusBoundaries filters the envelope's boundary list. A row whose
 // instant does not parse is DROPPED: a boundary this reader cannot place on the
 // timeline cannot support a `--from`, and half a boundary is not evidence.
-func deployCensusBoundaries(raw []byte) []deployCensusBoundary {
-	if len(raw) == 0 {
-		return nil
-	}
-	var env struct {
-		Boundaries []deployCensusBoundary `json:"boundaries"`
-	}
-	if err := json.Unmarshal(raw, &env); err != nil {
-		return nil
-	}
-	kept := make([]deployCensusBoundary, 0, len(env.Boundaries))
-	for _, b := range env.Boundaries {
+func deployCensusBoundaries(rows []cloudclient.DeployCensusBoundary) []deployCensusBoundary {
+	kept := make([]deployCensusBoundary, 0, len(rows))
+	for _, b := range rows {
 		if _, ok := deployCensusInstant(b.Instant); ok {
 			kept = append(kept, b)
 		}

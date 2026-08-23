@@ -2481,7 +2481,61 @@ type DeployCensus struct {
 	// `-o json` re-emits Raw verbatim — no Go struct in this package named it,
 	// so no human render could.
 	CoalescedAttempts *DeployCoalescedAttempts `json:"coalesced_attempts"`
-	Raw               []byte                   `json:"-"`
+	// TotalSites and Truncated are the dr-w24 server-side cut markers.
+	// `DeployLedger.census/3` clamps `sites` at 50 rows and has always cut
+	// SILENTLY on this wire: before these two fields the CLI's own "… and N
+	// more" line was derived from its DISPLAY clamp, so the top 50 of a large
+	// fleet was byte-indistinguishable from a complete 50-site fleet.
+	//
+	// BOTH ARE POINTERS, and the polarity is the point. A control plane older
+	// than dr-w18-s2 sends neither key; a `bool` would decode that absence as
+	// `false` — "this list is complete" — which is the most flattering possible
+	// reading of an absence and exactly the claim the marker exists to stop.
+	// nil = the control plane did not say; false = it AFFIRMED completeness;
+	// true = the server cut the list and TotalSites names the real population.
+	TotalSites *int  `json:"total_sites"`
+	Truncated  *bool `json:"truncated"`
+	// Completeness is `census/3`'s second independent count: `audited` rows in
+	// the window reconciled against every cohort the envelope names. A POINTER
+	// because an older control plane has not audited anything, and that must
+	// never decode into a zero-valued struct whose `balanced: false` reads as a
+	// real reconciliation failure (or `unaccounted: 0` as a real balance).
+	Completeness *DeployCensusCompleteness `json:"completeness"`
+	// Boundaries is the vocabulary-boundary list: the instants at which the
+	// ledger's own labels changed meaning, with the derivation that fixed each.
+	// A nil slice is a control plane that sent none; the render layer already
+	// treats "no boundary rows" as "no provenance to offer", never as an error.
+	Boundaries []DeployCensusBoundary `json:"boundaries"`
+	Raw        []byte                 `json:"-"`
+}
+
+// DeployCensusCompleteness is the envelope's own audit of itself: a SECOND,
+// independent count of the window's rows (`audited`) against the sum every
+// cohort accounts for (`accounted`). `unaccounted` is the difference the
+// producer computed — carried on the wire rather than recomputed here, so this
+// reader repeats the audit instead of performing a third one. `reason` is a
+// POINTER: the producer sends null when the audit balanced, and an empty string
+// would erase the difference between "balanced, nothing to say" and "a reason
+// the decode dropped".
+type DeployCensusCompleteness struct {
+	Audited     int     `json:"audited"`
+	Accounted   int     `json:"accounted"`
+	Unaccounted int     `json:"unaccounted"`
+	Balanced    bool    `json:"balanced"`
+	Method      string  `json:"method"`
+	Reason      *string `json:"reason"`
+}
+
+// DeployCensusBoundary is ONE row of the census envelope's `boundaries` list:
+// an instant at which the ledger's own vocabulary changed, with the derivation
+// that fixed it (method + source), so a refusal remedy built on it can show its
+// provenance. Instant stays a STRING here — parsing (and dropping rows whose
+// instant does not parse) is the render layer's judgment, not the decoder's.
+type DeployCensusBoundary struct {
+	Subject string `json:"subject"`
+	Instant string `json:"instant"`
+	Method  string `json:"method"`
+	Source  string `json:"source"`
 }
 
 // DeployCoalescedAttempts is the coalesced-attempt gauge WITH its own refusal —

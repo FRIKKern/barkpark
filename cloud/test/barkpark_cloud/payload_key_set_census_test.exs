@@ -1019,14 +1019,6 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — emitted on the box's deploy_payload (sites/deploy.ex:751), never on a deployment row. Decodes to \"\" forever."},
     {"site_deployment_json/3", :unread, "refusal_phase",
      "dr-w15-s3-emit-the-two-corpses emits it; the Go reader is dr-w15-s3-followup-decode-refusal-phase. Start-vs-poll is legible over HTTP now and NOT yet in `bp cloud site status`. Deliberately not decoded in the same PR: this slice is fenced out of internal/cloudclient."},
-    {"DeployLedger.census/3", :unread, "boundaries",
-     "dr-w18-s5 — the vocabulary-boundary LIST. Emitted by census/3 as of dr-w18-s2; the Go decode and render ride the round-2 slice, which is fenced out of this file. Until then a reader of `bp cloud deployments` sees the refusal but not the instant that caused it."},
-    {"DeployLedger.census/3", :unread, "completeness",
-     "dr-w18-s5 — the second independent count reconciled against volume + not_attempted. It reds IN THE ENVELOPE today; the Go reader must learn to print `unaccounted` rather than a balanced-looking number."},
-    {"DeployLedger.census/3", :unread, "total_sites",
-     "dr-w18-s5 — the population behind a site list the server cut at 50. The Go side's existing marker is over its OWN 10-row clamp and is structurally blind to the server cut."},
-    {"DeployLedger.census/3", :unread, "truncated",
-     "dr-w18-s5 — the server-side cut marker, twin of total_sites above."},
     {"DeployLedger.census/3", :phantom, "scope",
      "dr-w18-bl-route-added-keys-escape-the-census — A WALKER BLIND SPOT, NOT A DEAD KEY. `scope` IS emitted, but by the ROUTE (router.ex:3613 `Map.put(census, :scope, census_scope(team, scoped))`), not by `DeployLedger.census/3`, which this pair walks and which has ZERO `scope` hits. This is the SECOND instance of the identical shape (`barkpark_json/4`/`team`, blessed @reconciled at a time when it was the only one), and a second instance is the argument for fixing the walker rather than blessing the divergence again: filed as the CLOSER above. Deliberately KNOWN OPEN, not RECONCILED — nothing here is intentional divergence; the census simply cannot see where the key is written."}
   ]
@@ -1311,6 +1303,22 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # refusals printed "157 emitted key(s) collected" and "289 json tag(s) found in
   # internal/cloudclient".
   @emitted_pinned 157
+  # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
+  # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
+  # `completeness` and `boundaries` — finally have Go readers, so their four
+  # allowlist rows are DELETED below and the go-tag floor moves 289 -> 300.
+  # MEASURED by the 999-technique on this branch — pin set to 999 and the
+  # refusal printed "300 json tag(s) found in internal/cloudclient" — never
+  # summed. ELEVEN new names for FOURTEEN new tag sites: `total_sites`,
+  # `truncated`, `completeness`, `boundaries` on DeployCensus; `audited`,
+  # `accounted`, `unaccounted`, `balanced` on the new DeployCensusCompleteness;
+  # `subject`, `instant` on the new DeployCensusBoundary — while `reason`
+  # (8 -> 9 sites), `source` (2 -> 3) ride free on the name union and `method`
+  # crosses INTO the site register at x2 (Completeness.Method +
+  # Boundary.Method), all three read off the register test's own delta listing
+  # on this branch. The emitted floor does NOT move: this slice writes no
+  # Elixir serializer — it declares readers for keys `census/3` already emits,
+  # which is the whole point of the pair.
   # 275 -> 279: internal/cloudclient gained `runaway_procs` on Pressure plus the
   # RunawayProc row it decodes (`pid`, `elapsed_s`, `command`). FOUR, not five:
   # `cpu_percent` was already a name here (Pressure's host-CPU vital), so the new
@@ -1339,7 +1347,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # moves the SITE register below instead, crossing INTO it at 2. That is charter
   # D260's shape and the exact reason the register exists. Measured by the
   # 999-technique on this branch, never summed.
-  @go_tag_pinned 289
+  @go_tag_pinned 300
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -1460,6 +1468,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "max" => 2,
     "measured_at" => 2,
     "meters" => 2,
+    # dr-w24: Completeness.Method + Boundary.Method — two different derivation
+    # labels sharing one name, kept visible here.
+    "method" => 2,
     "min_sample" => 6,
     "name" => 11,
     "never_covered" => 3,
@@ -1476,7 +1487,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "provider" => 3,
     "quantile" => 2,
     "reachable" => 3,
-    "reason" => 8,
+    "reason" => 9,
     "refused" => 4,
     # W6 S4: MetricsSpace.ReportedAt — the space report stamps its own cadence,
     # which is why it is not the health beat's `as_of`.
@@ -1496,7 +1507,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the deployed-sites section of the host-space report (W6 S4).
     "sites" => 4,
     "slug" => 7,
-    "source" => 2,
+    "source" => 3,
     "stage" => 3,
     "stages" => 2,
     "status" => 13,
