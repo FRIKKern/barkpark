@@ -133,6 +133,16 @@ defmodule BarkparkCloud.Registry do
   # `config :barkpark_cloud, :deployment_stale_after_seconds`. Default: 15 minutes.
   @default_deployment_stale_after_seconds 15 * 60
 
+  # Queued-age ALARM horizon (jpf-w1-queue-age-alarm) — how long a `queued`
+  # container-site deployment may sit unclaimed before clients surface it as
+  # `deploy_stalled`. One third of the reaper threshold above ON PURPOSE: the
+  # reaper mutates builder LEASES (its passes are all claimed_at-gated — a row
+  # no builder ever claimed has claimed_at nil and is invisible to it by
+  # design), while this number judges exactly that never-claimed orphan class,
+  # read-only, and must fire well before anyone would call a builder lease
+  # abandoned. Default: 5 minutes.
+  @default_queued_deploy_alarm_after_seconds 5 * 60
+
   # The deploy claim budget: claim_next_deployment bumps `claim_epoch` on every
   # (re)claim, and a stale "building" row whose epoch has already reached this cap
   # is transitioned to "failed" ("exceeded max deploy claim attempts") instead of
@@ -2481,6 +2491,28 @@ defmodule BarkparkCloud.Registry do
       :barkpark_cloud,
       :deployment_stale_after_seconds,
       @default_deployment_stale_after_seconds
+    )
+  end
+
+  @doc """
+  Seconds a `queued` container-site deployment may sit UNCLAIMED before clients
+  treat it as stalled (jpf-w1-queue-age-alarm, charter D6). Deliberately ONE
+  THIRD of `deployment_stale_after_seconds` (#{@default_queued_deploy_alarm_after_seconds}s
+  vs #{@default_deployment_stale_after_seconds}s): the reaper above is a MUTATING
+  builder-lease mechanism whose passes are all `claimed_at`-gated — a
+  never-claimed queued row has `claimed_at` nil and is invisible to it by
+  design — while this threshold judges exactly that orphan class, read-only.
+  The control plane only SERVES the raw age (`queued_deploy_age_seconds` on
+  `barkpark_json`); the Go CLI and the SPA own the comparison, so this knob is
+  the documented home of the 5min/15min relationship rather than a server-side
+  gate. Overridable via `config :barkpark_cloud, :queued_deploy_alarm_after_seconds`.
+  """
+  @spec queued_deploy_alarm_after_seconds() :: pos_integer()
+  def queued_deploy_alarm_after_seconds do
+    Application.get_env(
+      :barkpark_cloud,
+      :queued_deploy_alarm_after_seconds,
+      @default_queued_deploy_alarm_after_seconds
     )
   end
 
@@ -7219,6 +7251,39 @@ defmodule BarkparkCloud.Registry do
           claimed
       end
     end)
+  end
+
+  @doc """
+  Age (seconds) of the OLDEST `queued` container-site deployment per barkpark,
+  for the given barkpark ids — `%{barkpark_id => seconds}`, no entry for a
+  barkpark with nothing queued (jpf-w1-queue-age-alarm, charter D6).
+
+  READ-ONLY on purpose, and deliberately NOT a reaper pass: the reaper below is
+  a MUTATING builder-lease mechanism whose passes are all `claimed_at`-gated —
+  a queued row no builder ever claimed has `claimed_at` nil and is invisible to
+  it by design. This aggregate surfaces exactly that orphan class. ONE GROUP BY
+  query for the whole fleet list (the same no-N+1 shape as
+  `latest_health_payload_map/1`), joined Deployment→Site on `barkpark_id`.
+  `s.kind == "container"` mirrors the builder's own claim scope
+  (`claim_next_deployment`): only container-site rows wait on the off-box
+  builder, so only they can stall in this sense. MAX(age) == the oldest
+  `inserted_at`, so the row that has waited longest names the number.
+  """
+  @spec queued_deploy_age_map([Ecto.UUID.t()]) :: %{optional(Ecto.UUID.t()) => non_neg_integer()}
+  def queued_deploy_age_map([]), do: %{}
+
+  def queued_deploy_age_map(ids) when is_list(ids) do
+    now = DateTime.utc_now()
+
+    from(d in Deployment,
+      join: s in Site,
+      on: d.site_id == s.id,
+      where: s.barkpark_id in ^ids and d.status == "queued" and s.kind == "container",
+      group_by: s.barkpark_id,
+      select: {s.barkpark_id, min(d.inserted_at)}
+    )
+    |> Repo.all()
+    |> Map.new(fn {id, oldest} -> {id, max(DateTime.diff(now, oldest, :second), 0)} end)
   end
 
   @doc """

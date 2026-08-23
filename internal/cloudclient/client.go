@@ -195,6 +195,14 @@ type Barkpark struct {
 	// beaten, or an agent that predates the vitals beat). Neither may ever be
 	// read as "measured, and it is fine".
 	Pressure *Pressure `json:"pressure"`
+
+	// QueuedDeployAgeSeconds is the age of the OLDEST `queued` container-site
+	// deployment on this box (jpf-w1-queue-age-alarm, charter D6) — the raw
+	// number `barkpark_json` serves so the CLIENT can own the stalled
+	// threshold. A POINTER for the same honesty rule as Pressure: nil is both
+	// "nothing queued" and "this CP predates the field", and neither may ever
+	// read as stalled — the alarm arms only on a real number.
+	QueuedDeployAgeSeconds *float64 `json:"queued_deploy_age_seconds"`
 }
 
 // Pressure is the host-pressure block a fleet row carries (`pressure` in

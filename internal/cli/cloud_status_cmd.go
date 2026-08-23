@@ -60,7 +60,7 @@ const (
 const fillingDiskPercent = 90.0
 
 // attentionStatus classifies one Barkpark into its charter-decision-15 status
-// label. The ELEVEN labels (charter D69), MOST URGENT FIRST, are:
+// label. The TWELVE labels (charter D69 + jpf-w1 D7), MOST URGENT FIRST, are:
 //
 //  1. removal_failed — deprovision_status = "failed"
 //  2. failed         — no host && provision_status = "failed"
@@ -69,10 +69,11 @@ const fillingDiskPercent = 90.0
 //  5. strained       — live && sustained load per core over the D67 fence
 //  6. filling        — live && disk_used_percent >= 90
 //  7. unreported     — live && the CP has never heard a byte from the box
-//  8. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
-//  9. removing       — deprovision_status ∈ {pending, claimed}
-//  10. provisioning  — no host, nothing failed
-//  11. ok            — live, healthy, current
+//  8. deploy_stalled — live && a queued deployment no builder has claimed for 5m
+//  9. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
+//  10. removing      — deprovision_status ∈ {pending, claimed}
+//  11. provisioning  — no host, nothing failed
+//  12. ok            — live, healthy, current
 //
 // where "live" = a host is set with nothing in-flight/failed/suspended.
 //
@@ -115,10 +116,18 @@ func attentionStatus(b cloudclient.Barkpark) string {
 		return "strained"
 	case live && filling(b):
 		return "filling"
+	// jpf-w1 D7: a queued deployment no builder has claimed for 5 minutes.
+	// AFTER the vitals rungs — a degraded/strained box's stuck queue is a
+	// SYMPTOM, so the box's own condition outranks it — and BEFORE `behind`:
+	// a deploy someone asked for and nobody is building is more urgent than
+	// passive update drift.
+	case live && deployStalled(b):
+		return "deploy_stalled"
 	// TWO independent sources can say `behind`, and until dr-w24-s2 only the
 	// weaker one was read (see behindByCommits). The rung is UNCHANGED — same
-	// label, same rank 8, same bucket, same decision-32 vocabulary — it simply
-	// stops missing the boxes whose release-tag grade cannot express the gap.
+	// label, same bucket, same decision-32 vocabulary (rank 8 → 9 with the
+	// deploy_stalled insertion) — it simply stops missing the boxes whose
+	// release-tag grade cannot express the gap.
 	case live && (b.UpdateState == "behind" || behindByCommits(b)):
 		return "behind"
 	case removing:
@@ -165,6 +174,38 @@ func strained(b cloudclient.Barkpark) bool {
 func filling(b cloudclient.Barkpark) bool {
 	p := b.Pressure
 	return p != nil && p.DiskUsedPercent != nil && *p.DiskUsedPercent >= fillingDiskPercent
+}
+
+// queuedDeployStalledAfterSeconds is the `deploy_stalled` fence (jpf-w1 D6/D7):
+// how long a queued container-site deployment may sit with NO builder claiming
+// it before the fleet screen says so. The CLIENT owns this number by design —
+// the control plane serves only the raw `queued_deploy_age_seconds` — and it is
+// deliberately ONE THIRD of the CP's 15-minute StaleDeploymentReaper horizon
+// (registry.ex `queued_deploy_alarm_after_seconds`, default 300, documents the
+// same relationship server-side): the reaper is a MUTATING builder-lease sweep
+// that is claimed_at-gated and can NEVER see a never-claimed row; this alarm
+// exists for exactly that orphan class, because the builder is structurally
+// silent on failure (Run() discards claim errors unlogged).
+const queuedDeployStalledAfterSeconds = 300
+
+// deployStalled reports whether the box has a queued deployment older than the
+// fence. nil NEVER stalls — it is both "nothing queued" and "a CP that predates
+// the field", and neither is a measured problem (the same honest-silence rule
+// the vitals fences keep: an alarm may only fire on a number it was given).
+func deployStalled(b cloudclient.Barkpark) bool {
+	return b.QueuedDeployAgeSeconds != nil && *b.QueuedDeployAgeSeconds >= queuedDeployStalledAfterSeconds
+}
+
+// deployStalledReason renders the WHY for a deploy_stalled row: how long the
+// oldest queued deployment has waited and the fact that makes the wait a
+// problem — no builder has claimed it. Empty when the fence did not fire, so
+// it can never assert a stall it did not measure.
+func deployStalledReason(b cloudclient.Barkpark) string {
+	if !deployStalled(b) {
+		return ""
+	}
+	return fmt.Sprintf("deploy queued %s — no builder claimed it",
+		humanElapsed(*b.QueuedDeployAgeSeconds))
 }
 
 // strainedReason renders the WHY for a strained row. It says LOAD and never
@@ -476,10 +517,10 @@ func fleetKnowsCommit(fleet []rankedBarkpark) bool {
 // like a float dump.
 func round1(n float64) float64 { return math.Round(n*10) / 10 }
 
-// attentionRankOrder is the decision-15 / D69 ordering, most urgent first.
-// Index+1 is the charter rank (1–11), exactly as the decision-32 fixture pins
-// it. The eight pre-existing states keep their RELATIVE order and every one of
-// them keeps its bucket — only the integers moved.
+// attentionRankOrder is the decision-15 / D69 / jpf-w1-D7 ordering, most
+// urgent first. Index+1 is the charter rank (1–12), exactly as the decision-32
+// fixture pins it. The pre-existing states keep their RELATIVE order and every
+// one of them keeps its bucket — only the integers moved.
 var attentionRankOrder = []string{
 	"removal_failed", // 1
 	"failed",         // 2
@@ -488,14 +529,15 @@ var attentionRankOrder = []string{
 	"strained",       // 5
 	"filling",        // 6
 	"unreported",     // 7
-	"behind",         // 8
-	"removing",       // 9
-	"provisioning",   // 10
-	"ok",             // 11
+	"deploy_stalled", // 8 (jpf-w1 D7 — after the box-condition rungs, before behind)
+	"behind",         // 9
+	"removing",       // 10
+	"provisioning",   // 11
+	"ok",             // 12
 }
 
 // attentionRank is the sort key for a status label — its charter rank, 1 (most
-// urgent) through 11 (ok), matching the decision-32 fixture byte-for-byte. An
+// urgent) through 12 (ok), matching the decision-32 fixture byte-for-byte. An
 // unknown label ranks past the end (never panics) and so sorts last.
 func attentionRank(status string) int {
 	for i, s := range attentionRankOrder {
@@ -507,8 +549,8 @@ func attentionRank(status string) int {
 }
 
 // attentionBucket groups a status into the three charter buckets: attention
-// (ranks 1–8: removal_failed…behind), in-flight (9–10: removing/provisioning),
-// healthy (11: ok). The bucket strings are the decision-32 fixture's, verbatim —
+// (ranks 1–9: removal_failed…behind), in-flight (10–11: removing/provisioning),
+// healthy (12: ok). The bucket strings are the decision-32 fixture's, verbatim —
 // note "in-flight" is hyphenated there, so it is hyphenated here and in -o json.
 //
 // The boundary is stated as a MEMBERSHIP switch, not as a rank comparison, so a
@@ -523,8 +565,8 @@ func attentionBucket(status string) string {
 		return "healthy"
 	default:
 		// removal_failed, failed, suspended, degraded, strained, filling,
-		// unreported, behind — and any unknown label defensively surfaces in the
-		// attention bucket rather than hiding.
+		// unreported, deploy_stalled, behind — and any unknown label defensively
+		// surfaces in the attention bucket rather than hiding.
 		return "attention"
 	}
 }
@@ -553,6 +595,8 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 		reason = strainedReason(b)
 	case "filling":
 		reason = fillingReason(b)
+	case "deploy_stalled":
+		reason = deployStalledReason(b)
 	case "behind":
 		// "" for a release-tag behind (the UPDATE column already says it); the
 		// commit-distance sentence for a box whose tag grade disagrees.
@@ -748,6 +792,13 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	// carries the reason the number is missing.
 	if r.BP.CommitDistance != nil {
 		row["commit_distance"] = *r.BP.CommitDistance
+	}
+	// Tri-state, same idiom (jpf-w1-queue-age-alarm): the queued-deploy age is
+	// emitted only when the plane reported a queued row. An absent key is
+	// "nothing queued / CP predates the field"; a 0 would tell a script a deploy
+	// was queued THIS second, which nobody measured.
+	if r.BP.QueuedDeployAgeSeconds != nil {
+		row["queued_deploy_age_seconds"] = *r.BP.QueuedDeployAgeSeconds
 	}
 	// The runaway list, tri-state like every honest field above and by the SAME
 	// rule: emit the key only when the box was actually MEASURED. A nil list is

@@ -469,6 +469,72 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert row2["last_verified_at"] =~ "2026-07-16"
     end
 
+    # jpf-w1-queue-age-alarm (charter D6): the fleet row carries the age of the
+    # oldest never-claimed queued container deployment — a NUMBER, nil when
+    # none — computed by Registry.queued_deploy_age_map/1, ONE GROUP BY for the
+    # whole list. The stalled VERDICT belongs to the clients (Go/SPA at 300s);
+    # this payload only states the raw fact.
+    test "the fleet row carries queued_deploy_age_seconds — oldest queued age, nil when none" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team, %{name: "Stalled", slug: "stalled"})
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # No sites, no deployments: the key is PRESENT and honestly nil — "none
+      # queued" must be distinguishable from a field that was never emitted.
+      conn = call(:get, "/v1/barkparks", nil, token)
+      [row] = json_body(conn)["barkparks"]
+      assert Map.has_key?(row, "queued_deploy_age_seconds")
+      assert is_nil(row["queued_deploy_age_seconds"])
+
+      # TWO SITES on the box (the active-deployment unique index allows only
+      # ONE active production row per site), 7 minutes and 2 minutes queued:
+      # the aggregate must name the OLDEST row's age across the whole box
+      # (max age == min inserted_at over the Deployment→Site join).
+      {:ok, site_a} = Registry.create_site(bp, %{name: "S1", slug: "s1"})
+      {:ok, site_b} = Registry.create_site(bp, %{name: "S2", slug: "s2"})
+
+      {:ok, d_old} =
+        Registry.create_deployment(site_a, %{
+          git_ref: "old-sha",
+          artifact_url: "file:///tmp/a.tgz"
+        })
+
+      {:ok, d_new} =
+        Registry.create_deployment(site_b, %{
+          git_ref: "new-sha",
+          artifact_url: "file:///tmp/b.tgz"
+        })
+
+      backdate = fn id, seconds ->
+        ts = DateTime.add(DateTime.utc_now(), -seconds, :second)
+
+        {1, _} =
+          Repo.update_all(
+            from(d in BarkparkCloud.Registry.Deployment, where: d.id == ^id),
+            set: [inserted_at: ts]
+          )
+      end
+
+      backdate.(d_old.id, 420)
+      backdate.(d_new.id, 120)
+
+      conn2 = call(:get, "/v1/barkparks", nil, token)
+      [row2] = json_body(conn2)["barkparks"]
+      age = row2["queued_deploy_age_seconds"]
+      assert is_integer(age), "expected a number, got: #{inspect(age)}"
+      assert age >= 420 and age < 480, "oldest row is ~420s old, got #{age}"
+
+      # Status filter has TEETH: once every queued row leaves "queued" the field
+      # returns to nil — a "building" row is the reaper's business, not this
+      # alarm's. (This is the arm that reds if the WHERE clause is dropped.)
+      {:ok, _} = Registry.transition_deployment(d_old, %{status: "building"})
+      {:ok, _} = Registry.transition_deployment(d_new, %{status: "building"})
+
+      conn3 = call(:get, "/v1/barkparks", nil, token)
+      [row3] = json_body(conn3)["barkparks"]
+      assert is_nil(row3["queued_deploy_age_seconds"])
+    end
+
     test "no token → 401" do
       conn = call(:get, "/v1/barkparks")
       assert conn.status == 401
