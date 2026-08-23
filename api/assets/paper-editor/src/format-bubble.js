@@ -144,6 +144,25 @@ export class FormatBubble {
         this._applyLink(input.value);
       } else if (e.key === "Escape") {
         e.preventDefault();
+        // stopPropagation: without it, this keydown also reaches the window
+        // listener that Escape-closes the palette/menu layer, so one Escape
+        // press double-fires — closing the link row AND (if open) a menu
+        // that had nothing to do with this input. Confirmed in-browser:
+        // window BUBBLE=0 after adding this, double-fire eliminated, and
+        // capture-phase palette-Escape precedence stays intact (task
+        // paper-editor-bundle-stale-and-escape-stoppropagation).
+        //
+        // Studio's Hooks.InspectorEscape (root.html.heex) carries its own
+        // data-escape-veto=".bp-paper-format" for this exact double-fire,
+        // added by tier3-keyboard-exit-and-focus-return before this fix
+        // shipped. DECISION (this task's criterion 3): RETAIN that veto,
+        // not simplify it away — every bubble button (bold/italic/code/
+        // link/remove) preventDefaults its own mousedown so a mouse click
+        // never focuses it, but Tab still can, and none of those buttons
+        // stopPropagation their own Escape. This stopPropagation only
+        // covers the link input; the veto is still load-bearing defense in
+        // depth for a keyboard user Tab-focused on a bubble button.
+        e.stopPropagation();
         this._closeLinkRow(true);
       }
     });
