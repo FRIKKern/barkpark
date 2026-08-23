@@ -48,11 +48,32 @@ export class FormatBubble {
     const { selection } = state;
     const { empty, from, to } = selection;
 
-    // Hide unless there is a non-empty, focused, text range. `view.hasFocus()`
-    // keeps the bubble from lingering after a blur (e.g. clicking another block).
+    // Hide unless there is a non-empty text range. An empty/collapsed selection
+    // always hides immediately.
     const hasText = !empty && to > from && this._selectionHasText(state, from, to);
-    if (!hasText || !view.hasFocus()) {
+    if (!hasText) {
       this._hide();
+      return;
+    }
+
+    // Focus rule. `view.hasFocus()` keeps the bubble from lingering after a blur
+    // (e.g. clicking another block) — but focus held INSIDE the bubble (the link
+    // URL input) must count as alive: focusing that input necessarily blurs
+    // ProseMirror, and hiding here made the link row unusable (proven live in
+    // Chrome: the bubble self-hid one frame after the link button opened it,
+    // because the deferred input.focus() blurred the editor and this branch ran).
+    // A blur can also fire while focus is still IN FLIGHT (before the new target
+    // reports as document.activeElement), so never hide synchronously on blur —
+    // re-check after focus settles and hide only if it landed outside both the
+    // editor and the bubble.
+    if (!view.hasFocus() && !this._focusInBubble()) {
+      setTimeout(() => {
+        if (!this._editor || this._editor.isDestroyed) {
+          this._hide();
+          return;
+        }
+        if (!this._editor.view.hasFocus() && !this._focusInBubble()) this._hide();
+      }, 0);
       return;
     }
 
@@ -72,6 +93,15 @@ export class FormatBubble {
   }
 
   // ── internals ────────────────────────────────────────────────────────────
+
+  // True while document focus sits inside the bubble itself — the one state
+  // where the editor is legitimately blurred yet the bubble must survive (the
+  // link URL input, or a toolbar button that took focus).
+  _focusInBubble() {
+    if (!this._el) return false;
+    const active = document.activeElement;
+    return !!active && this._el.contains(active);
+  }
 
   // True when the selected range contains at least one non-whitespace char, so
   // a selection spanning only a gap/node boundary never floats the bubble.
@@ -141,6 +171,14 @@ export class FormatBubble {
     el.addEventListener("mousedown", (e) => {
       // Let the URL input take focus normally; block blur for the buttons.
       if (e.target !== input) e.preventDefault();
+    });
+
+    // When focus leaves the bubble (Tab out, click elsewhere) no editor event
+    // fires — the editor was already blurred when the input took focus — so
+    // re-evaluate once the new focus target settles: landing outside both the
+    // editor and the bubble hides it; a hop back into either keeps it open.
+    el.addEventListener("focusout", () => {
+      setTimeout(() => this.update(), 0);
     });
 
     document.body.appendChild(el);
