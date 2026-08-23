@@ -495,6 +495,56 @@ emit("needs_without_decide",
 emit("needs_count", len(agg_needs))
 emit("needs_results_count", len(var_for))
 emit("decide_consumes_count", len(consumed))
+# ── the allow-set guard never asserted decide()'s THIRD positional ─────────
+# `consumed` above only proves a job's result reaches `decide` at all — not
+# that it is judged against the RIGHT pole. `decide "path-escape ratchet"
+# "${R_ESCAPE}" "${O_COMPILE}"` reaches `decide` exactly as easily as the
+# correct "NEVER", and every fact above stays byte-identical between the two:
+# `consumed`'s regex only ever captures the SECOND positional. So capture the
+# THIRD too, derive what it SHOULD be from the job's own `if:`, and compare.
+#
+# Derivation: a job with no `if:` at all must be gated NEVER (it always runs,
+# so a skip is never legitimate for it). A job whose `if:` is exactly
+# `needs.changes.outputs.<X> == 'true'` must be gated on whichever env var the
+# aggregator itself binds to `needs.changes.outputs.<X>`. Anything else — a
+# compound `if:`, or one that does not reference a dispatcher output at all —
+# cannot be derived, and MUST surface as an explicit mismatch rather than
+# silently defaulting to NEVER: defaulting there would launder exactly the
+# kind of job this guard exists to catch (one gated on something that is not
+# a dispatcher output at all).
+decide_calls = re.findall(
+    r'^\s*decide\s+"([^"]*)"\s+"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?"\s+"([^"]*)"',
+    step.get("run", ""), re.M)
+emit("decide_gates_count", len(decide_calls))
+result_var_to_job = {v: k for k, v in var_for.items()}
+out_var_for = {}
+for var, expr in (step.get("env") or {}).items():
+    m = re.search(r"needs\.changes\.outputs\.([A-Za-z0-9_]+)", str(expr))
+    if m:
+        out_var_for[m.group(1)] = var
+def expected_gate(job):
+    if_expr = str(jobs.get(job, {}).get("if") or "").strip()
+    if if_expr == "":
+        return "NEVER"
+    m = re.fullmatch(r"needs\.changes\.outputs\.([A-Za-z0-9_]+) == 'true'", if_expr)
+    if m:
+        var = out_var_for.get(m.group(1))
+        if var:
+            return "${%s}" % var
+    return None   # unresolvable — never defaults to NEVER
+mismatches = []
+for label, second_var, third_val in decide_calls:
+    job = result_var_to_job.get(second_var)
+    if job is None:
+        continue
+    want = expected_gate(job)
+    if want is None:
+        mismatches.append("%s: if: %r is not a recognised dispatcher-output "
+                           "guard, got gate=%s"
+                           % (job, jobs.get(job, {}).get("if"), third_val))
+    elif third_val != want:
+        mismatches.append("%s: gate=%s want=%s" % (job, third_val, want))
+emit("gate_mismatches", ",".join(mismatches))
 disp = jobs.get("changes", {})
 emit("dispatcher_if", str(disp.get("if", "")))
 emit("dispatcher_matrix", "strategy" in disp)
@@ -555,6 +605,13 @@ PY
   assert_fact "if::mix-test" "needs.changes.outputs.test == 'true'"
   assert_fact "if::mix-prod-compile" "needs.changes.outputs.compile == 'true'"
   assert_fact "if::validation-perf" "needs.changes.outputs.compile == 'true'"
+  # …and every decide() call's THIRD positional (the gate) matches what the
+  # job's own `if:` says it should be. `needs_without_decide` above proves the
+  # job's RESULT is judged; this proves it is judged against the RIGHT POLE —
+  # a job silently gated NEVER (always accepted skipped) while its `if:` says
+  # it only runs conditionally is invisible to every fact above it.
+  assert_fact gate_mismatches ""
+  assert_fact_min decide_gates_count 5
 
   # ── D36 mutation proof: the fifth fact must FIRE, and must go quiet ────────
   # Four deliberately-broken copies of the REAL elixir.yml, one per direction
@@ -570,7 +627,9 @@ src, dst, mode = sys.argv[1], sys.argv[2], sys.argv[3]
 wf = yaml.safe_load(open(src))
 agg = wf["jobs"]["elixir-gate"]
 step = next(s for s in agg["steps"] if "run" in s)
-assert mode in ("clean", "needs", "env", "wired"), mode   # a typo'd mode is not a pass
+MODES = ("clean", "needs", "env", "wired",
+         "gate-mixtest-never", "gate-escape-compile", "gate-compound-if")
+assert mode in MODES, mode   # a typo'd mode is not a pass
 if mode in ("needs", "env", "wired"):
     # a BLOCKING job (no continue-on-error), wired into the aggregator's needs
     wf["jobs"]["format-ceiling"] = {"runs-on": "ubuntu-latest",
@@ -582,6 +641,39 @@ if mode == "wired":
     step["run"] = step["run"].replace(
         'decide "changes (dispatcher)"',
         'decide "format ceiling"         "${R_CEILING}" "NEVER"\n'
+        'decide "changes (dispatcher)"', 1)
+# ── the two directions the THIRD-positional guard exists to catch (D... this
+#    slice) ──────────────────────────────────────────────────────────────
+# MUT1: a job whose `if:` DOES gate it on a dispatcher output, mutated to the
+# literal NEVER — the false-RED direction's mirror: it would now accept a skip
+# that its own `if:` never licensed.
+if mode == "gate-mixtest-never":
+    step["run"] = step["run"].replace(
+        'decide "mix-test"                "${R_TEST}"    "${O_TEST}"',
+        'decide "mix-test"                "${R_TEST}"    "NEVER"', 1)
+# MUT2: the unfiltered ratchet — gated NEVER because it has no `if:` at all —
+# mutated onto a dispatcher output. This is the false-GREEN this slice exists
+# for: measured on origin/main, it passes the pre-fix harness 101/101 while a
+# docs-only PR would then legitimately skip a job that must never skip.
+if mode == "gate-escape-compile":
+    step["run"] = step["run"].replace(
+        'decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"',
+        'decide "path-escape ratchet"     "${R_ESCAPE}"  "${O_COMPILE}"', 1)
+# a job gated on a COMPOUND if: (references a dispatcher output but is not
+# exactly `needs.changes.outputs.X == 'true'`) must be an explicit mismatch,
+# never a silent default to NEVER — the derivation cannot tell what pole a
+# compound condition implies, so it must say so rather than guess.
+if mode == "gate-compound-if":
+    wf["jobs"]["compound-job"] = {
+        "runs-on": "ubuntu-latest",
+        "if": "needs.changes.outputs.test == 'true' && github.actor != 'nobody'",
+        "steps": [{"run": "exit 0"}],
+    }
+    agg["needs"] = list(agg["needs"]) + ["compound-job"]
+    step.setdefault("env", {})["R_COMPOUND"] = "${{ needs.compound-job.result }}"
+    step["run"] = step["run"].replace(
+        'decide "changes (dispatcher)"',
+        'decide "compound job"           "${R_COMPOUND}" "${O_TEST}"\n'
         'decide "changes (dispatcher)"', 1)
 yaml.safe_dump(wf, open(dst, "w"))
 PY
@@ -604,6 +696,37 @@ PY
   direction needs "format-ceiling"               # in needs, no env binding
   direction env   "format-ceiling"               # in needs + env, never decided
   direction wired ""                             # fully wired — silent again
+
+  # ── mutation proof for gate_mismatches, BOTH directions + the third case ──
+  # direction_gate <mode> <fact-must-contain>
+  direction_gate() {
+    local mode="$1" want_substr="$2" f="$TMPROOT/mut-$1.yml" ff="$TMPROOT/mut-$1.facts" got
+    python3 "$MUT" "$WF" "$f" "$mode"
+    python3 "$EMIT" "$f" "$ff"
+    got="$(sed -n 's|^gate_mismatches=||p' "$ff")"
+    if has "$got" "$want_substr"; then
+      ok "  mutation[$mode]: gate_mismatches names it ($got)"
+    else
+      no "  mutation[$mode]: gate_mismatches = '${got}', wanted to contain '${want_substr}'"
+    fi
+  }
+  # a clean tree must report no mismatches even after the round-trip
+  ff="$TMPROOT/mut-clean.facts"
+  got="$(sed -n 's|^gate_mismatches=||p' "$ff")"
+  if [ "$got" = "" ]; then
+    ok "  mutation[clean]: gate_mismatches = ''"
+  else
+    no "  mutation[clean]: gate_mismatches = '${got}', wanted ''"
+  fi
+  # MUT1: mix-test's gate mutated to the literal NEVER — its `if:` says
+  # otherwise, so this must be reported as got=NEVER want=${O_TEST}.
+  direction_gate gate-mixtest-never "mix-test: gate=NEVER want=\${O_TEST}"
+  # MUT2: path-escape's gate mutated onto the compile output — it has no
+  # `if:` at all, so this must be reported as got=${O_COMPILE} want=NEVER.
+  direction_gate gate-escape-compile 'path-escape: gate=${O_COMPILE} want=NEVER'
+  # a compound `if:` cannot be derived and must be an EXPLICIT mismatch, not a
+  # silent default to NEVER.
+  direction_gate gate-compound-if "compound-job: if:"
 fi
 echo
 
