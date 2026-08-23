@@ -6326,6 +6326,70 @@
     if (!rel) return "never verified";
     return "verified " + rel;
   }
+  // ── commit distance vs main (cch-w61-bl-the-console-asserts-current-…) ─────
+  // `update_state` is the box's RELEASE-TAG self-grade; `commit_ancestry` /
+  // `commit_distance` are the control plane's OWN compare of the sha the box
+  // actually serves against `main` (barkpark_json emits all three, written
+  // hourly). They answer DIFFERENT questions and they disagree in production
+  // right now — one row reads commit_distance 2493, commit_ancestry "behind",
+  // update_state "current", because no release tag has been cut since
+  // 2026-07-08, so a box pinned at the newest tag grades itself `current`
+  // however far main runs ahead. Until this block the console read update_state
+  // twelve times and these columns ZERO times — a reassuring grade rendered
+  // beside a refutation it never looked at.
+  //
+  // Ported from the Go CLI's shipped reader (internal/cli/cloud_status_cmd.go:
+  // behindCell / behindDetail / commitDistanceUnknown), phrasing and all —
+  // the disagreement sentence is Go's, not a newly minted one. THE TWO
+  // DEGENERATE ARMS ARE DISTINCT AND MUST STAY SO:
+  //   · ancestry PRESENT with distance null → UNMETERED (the plane asked and
+  //     could not grade — a rate-limited compare, an unknown sha). Never a
+  //     number: a null rendered as 0 would say "even with main" about a box
+  //     nobody could measure.
+  //   · ancestry ABSENT (older control plane, or a row the plane never graded)
+  //     → "" — the segment collapses out entirely, byte-identical to before.
+  // `== null` (never truthiness) is what keeps a MEASURED zero rendering
+  // "even" instead of collapsing into the unmetered arm.
+  var COMMIT_DISTANCE_UNMETERED = "UNMETERED";
+  function behindByCommits(bp) {
+    return String((bp && bp.commit_ancestry) || "").trim() === "behind";
+  }
+  function commitBehindCell(bp) {
+    bp = bp || {};
+    var ancestry = String(bp.commit_ancestry || "").trim();
+    if (!ancestry) return "";
+    if (bp.commit_distance == null) return COMMIT_DISTANCE_UNMETERED;
+    var n = String(bp.commit_distance);
+    if (ancestry === "current") return "even"; // a MEASURED zero — identical to main
+    if (ancestry === "behind") return n;
+    if (ancestry === "ahead_of_main") return "ahead " + n;
+    if (ancestry === "diverged") return "diverged " + n;
+    return ancestry; // unrecognised vocabulary renders as itself (escaped at the seam)
+  }
+  // The WHY for a row behind BY COMMITS — the sentence that keeps the
+  // release-tag grade from reading as an all-clear beside it. Verbatim Go
+  // phrasing (behindDetail): naming the disagreement IS the finding.
+  function commitBehindDetail(bp) {
+    bp = bp || {};
+    if (!behindByCommits(bp)) return "";
+    var reason = bp.commit_distance == null
+      ? "behind main by an unmeasured number of commits"
+      : String(bp.commit_distance) + " commits behind main";
+    var grade = String(bp.update_state || "").trim();
+    if (grade && grade !== "behind") {
+      reason += " · release-tag grade still reads " + grade;
+    }
+    return reason;
+  }
+  // The mono-line/rail segment: the full disagreement sentence when the row is
+  // behind by commits, the labelled cell otherwise. "" collapses the segment.
+  function fleetCommitDistanceText(bp) {
+    var detail = commitBehindDetail(bp);
+    if (detail) return detail;
+    var cell = commitBehindCell(bp);
+    return cell ? "vs main: " + cell : "";
+  }
+
   function fleetMetaHtml(bp) {
     bp = bp || {};
     var parts = [];
@@ -6337,6 +6401,8 @@
     if (au) parts.push(esc(au));
     var vt = fleetVerifyText(bp);
     if (vt) parts.push(esc(vt));
+    var cd = fleetCommitDistanceText(bp);
+    if (cd) parts.push(esc(cd));
     return parts.length ? '<div class="fleet-meta">' + parts.join(" · ") + "</div>" : "";
   }
 
@@ -9472,6 +9538,7 @@
     // control plane that sends neither column shows no row at all instead of an
     // invented "never verified".
     var verifyLine = fleetVerifyText(bp);
+    var cdLine = commitBehindDetail(bp) || commitBehindCell(bp);
 
     var rows =
       railRow("Running", running) +
@@ -9484,6 +9551,11 @@
       railRowPlain(refusal ? "Update check" : "Last checked",
         lastCheckedText(bp.update_checked_at, refusal)) +
       (verifyLine ? railRowPlain("Verification", cap(verifyLine)) : "") +
+      // cch-w61: the plane's own commit compare, beside the release-tag badge
+      // above — the sentence that keeps "Up to date" from reading as an
+      // all-clear on a row the plane has already measured as behind main.
+      // Presence-conditional: an older CP that sends no ancestry renders no row.
+      (cdLine ? railRowPlain("Vs main", cdLine) : "") +
       (policy ? railRowHtml("Autoupdate", badge(policy.text, policy.dot)) : "");
 
     var buttons = "";
@@ -25352,6 +25424,8 @@
       // stay browser-verified. archivesModel now carries the notConfigured state.
       fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
       fleetVerifyText: fleetVerifyText,
+      commitBehindCell: commitBehindCell, commitBehindDetail: commitBehindDetail,
+      fleetCommitDistanceText: fleetCommitDistanceText,
       fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
       withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,
       // cch-w20-s3: the TEXT form of the address (scheme shaved) beside the
