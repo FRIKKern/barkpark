@@ -87,7 +87,7 @@ def bullet(change: Change, repo: str) -> str:
     return f"- {prefix}{title} ({link})"
 
 
-def render(ref: str, repo: str, week: dt.date) -> tuple[str, str]:
+def render(ref: str, repo: str, week: dt.date) -> str:
     changes, base, head = week_changes(ref, week)
     if not head:
         raise RuntimeError(f"no commit exists on {ref} before the end of {week.isoformat()}")
@@ -138,7 +138,7 @@ def render(ref: str, repo: str, week: dt.date) -> tuple[str, str]:
     lines.append(
         "Package-specific release notes remain in each package's `CHANGELOG.md`."
     )
-    return "\n".join(lines) + "\n", head
+    return "\n".join(lines) + "\n"
 
 
 def main() -> int:
@@ -150,14 +150,13 @@ def main() -> int:
         default=os.environ.get("GITHUB_REPOSITORY", "FRIKKern/barkpark"),
         help="GitHub owner/repository used for links",
     )
-    parser.add_argument("--head-only", action="store_true", help="print the week's final SHA")
     args = parser.parse_args()
     try:
-        notes, head = render(args.ref, args.repo, args.week)
+        notes = render(args.ref, args.repo, args.week)
     except (RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"weekly-changelog: {exc}", file=sys.stderr)
         return 1
-    print(head if args.head_only else notes, end="\n" if args.head_only else "")
+    print(notes, end="")
     return 0
 
 

@@ -68,25 +68,20 @@ class WeeklyChangelogTest(unittest.TestCase):
         self.assertIn("2 documentation, test, CI, refactor, build, or maintenance changes", output)
         self.assertNotIn("next week", output)
 
-    def test_head_only_returns_the_last_commit_before_the_next_week(self):
-        output = self.run_script(
-            "--week", "2026-08-17", "--ref", "main", "--head-only"
-        ).stdout.strip()
-        self.assertEqual(self.week_head, output)
-
     def test_rejects_a_non_monday(self):
         result = self.run_script("--week", "2026-08-18", "--ref", "main", check=False)
         self.assertEqual(2, result.returncode)
         self.assertIn("ISO-week Monday", result.stderr)
 
-    def test_workflow_is_scheduled_idempotent_and_cannot_replace_latest_cli_release(self):
+    def test_workflow_is_scheduled_idempotent_and_keeps_changelog_out_of_open_work(self):
         workflow = WORKFLOW.read_text()
         self.assertIn('cron: "17 6 * * 1"', workflow)
-        self.assertIn('echo "tag=weekly-$week"', workflow)
-        self.assertIn('gh release view "$TAG"', workflow)
-        self.assertIn('gh release edit "$TAG"', workflow)
-        self.assertIn('gh release create "$TAG"', workflow)
-        self.assertEqual(2, workflow.count("--prerelease"))
+        self.assertIn("issues: write", workflow)
+        self.assertIn('gh issue list --state all', workflow)
+        self.assertIn('gh issue edit "$number"', workflow)
+        self.assertIn('gh issue create --title "$title"', workflow)
+        self.assertIn("-f state=closed -f state_reason=completed", workflow)
+        self.assertNotIn("gh release", workflow)
 
 
 if __name__ == "__main__":

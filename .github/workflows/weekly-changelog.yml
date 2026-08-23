@@ -41,7 +41,8 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,27 +64,27 @@ jobs:
           )"
           fi
           echo "week=$week" >> "$GITHUB_OUTPUT"
-          echo "tag=weekly-$week" >> "$GITHUB_OUTPUT"
-      - name: Render release notes
-        id: notes
+      - name: Render weekly notes
         env:
           WEEK: ${{ steps.week.outputs.week }}
         run: |
           python3 scripts/weekly-changelog.py --week "$WEEK" --ref main > "$RUNNER_TEMP/weekly-changelog.md"
-          head_sha="$(python3 scripts/weekly-changelog.py --week "$WEEK" --ref main --head-only)"
-          echo "head_sha=$head_sha" >> "$GITHUB_OUTPUT"
           cat "$RUNNER_TEMP/weekly-changelog.md" >> "$GITHUB_STEP_SUMMARY"
-      - name: Create or refresh the week's release
+      - name: Create or refresh the week's changelog issue
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.week.outputs.tag }}
           WEEK: ${{ steps.week.outputs.week }}
-          HEAD_SHA: ${{ steps.notes.outputs.head_sha }}
         run: |
           title="Weekly changelog · $WEEK"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            gh release edit "$TAG" --title "$title" --notes-file "$RUNNER_TEMP/weekly-changelog.md" --prerelease
+          gh label create weekly-changelog --description "Automated project-wide weekly changelog" --color 0e8a16 --force
+          number="$(gh issue list --state all --search "$title in:title" --limit 100 --json number,title \
+            | jq -r --arg title "$title" '.[] | select(.title == $title) | .number' \
+            | head -n 1)"
+          if [ -n "$number" ]; then
+            gh issue edit "$number" --body-file "$RUNNER_TEMP/weekly-changelog.md" --add-label weekly-changelog
           else
-            gh release create "$TAG" --target "$HEAD_SHA" --title "$title" \
-              --notes-file "$RUNNER_TEMP/weekly-changelog.md" --prerelease
+            url="$(gh issue create --title "$title" --body-file "$RUNNER_TEMP/weekly-changelog.md" --label weekly-changelog)"
+            number="${url##*/}"
           fi
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/issues/$number" \
+            -f state=closed -f state_reason=completed >/dev/null
