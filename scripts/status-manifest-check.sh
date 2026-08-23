@@ -50,6 +50,11 @@ CSS="api/assets/paper-surface/paper-surface.css"
 GO="internal/pdrender/gridblocks.go"
 REACT_TSX="js/packages/react/src/inline.tsx"
 WEB_TS="web/lib/component-projections.ts"
+# apps/mobile is the THIRD hand-maintained JS/TS copy and was absent from this
+# gate entirely until mob-bl-status-manifest-mobile-gate. Its shape differs from
+# the other two — four Records/arrays instead of one array-of-objects — so Part 5
+# parses it with its own reader; see the block there.
+MOBILE_TSX="apps/mobile/src/papers/portabledoc/blocks/taskboard.tsx"
 # `MODE="${1:-check}"` used to pass ANY argument straight through to the Python,
 # which treats everything that is not `--write` as check mode — so a typo, or a
 # `--selftest` this gate does not have, ran the ordinary check and exited 0.
@@ -62,11 +67,11 @@ elif [ -n "${1:-}" ]; then
   exit 2
 fi
 
-python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$REACT_TSX" "$WEB_TS" <<'PY'
+python3 - "$MANIFEST" "$CSS" "$MODE" "$GO" "$REACT_TSX" "$WEB_TS" "$MOBILE_TSX" <<'PY'
 import json, re, sys
 
 manifest_path, css_path, mode, go_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
-react_path, web_path = sys.argv[5], sys.argv[6]
+react_path, web_path, mobile_path = sys.argv[5], sys.argv[6], sys.argv[7]
 m = json.load(open(manifest_path))
 css = open(css_path).read()
 
@@ -262,6 +267,13 @@ print(f"status-manifest-check part 4: PASS — Go pdrender label+meaning in lock
 # state, so it is the ONE sanctioned non-manifest role; any other extra, any
 # missing role, any reorder, any glyph/label mismatch reds this gate.
 SANCTIONED_EXTRA = {"unknown"}
+# The apps/mobile surface key, as it appears in the manifest's platform_overrides.
+mobile_surface = "apps/mobile"
+# `cancel` resolves and renders on mobile but is NOT a board lane: the web folds
+# cancelled rows into a tally rather than giving them a column, and mobile mirrors
+# that. Recorded here so the lane assertion stays a check against manifest ORDER
+# rather than a second hand-kept list.
+MOBILE_NON_LANE_ROLES = {"cancel"}
 man_roles_order = [r["role"] for r in m["roles"]]
 p5_glyph = {r["role"]: r["glyph"] for r in m["roles"]}
 p5_label = {r["role"]: r["label"] for r in m["roles"]}
@@ -340,4 +352,167 @@ if p5_fails:
     sys.exit(1)
 print(f"status-manifest-check part 5: PASS — JS/TS vocab twins in lockstep "
       f"({len(man_roles_order)} manifest roles, order+glyph+label byte-equal; {', '.join(p5_counts)}).")
+
+# ── Part 5b: apps/mobile — the THIRD hand-maintained twin ────────────────────
+# It was absent from this gate entirely until mob-bl-status-manifest-mobile-gate,
+# so mobile's copy of the whole vocabulary had no drift check at all; the file's
+# own header said the guard was a comment.
+#
+# WHY ITS OWN READER. react and web each hold ONE array-of-objects that
+# parse_ts_ladder can walk. Mobile holds FOUR separate literals — STATUS_TO_ROLE
+# and ROLE_GLYPH and ROLE_LABEL as `Record<string, string>` maps, plus a
+# BOARD_ROLES string array — because a React Native block renderer resolves a
+# status to a role and then looks up glyph/label/hue separately. Forcing that
+# into the array reader would mean reshaping the shipped source to suit the gate.
+#
+# THE TWO SANCTIONED DIFFERENCES, both mechanical and both CHECKED, not skipped:
+#   1. GLYPH: `progress` diverges, and the divergence is ADJUDICATED IN THE
+#      MANIFEST (platform_overrides) rather than hardcoded here — the manifest
+#      gives it an empty glyph with spinner:true because the web CSS-animates
+#      Braille frames, and a pure D50 renderer would paint a blank cell. The
+#      override is held honest below: it must name a real role, must ACTUALLY
+#      differ, and the set of roles that diverge must EQUAL the set declared —
+#      so a second drift can never hide behind the sanctioned one.
+#   2. LABEL: mobile renders labels as column headings and sentence-cases the
+#      first character ("in progress" -> "In progress"). That is a mechanical
+#      relation, not a licence to diverge: asserting it still catches
+#      "In Progress", a renamed label, or a dropped role.
+# The JS-only `unknown` sentinel (D11) is the one sanctioned non-manifest role,
+# exactly as for the other two twins.
+
+def parse_ts_record(txt, var, path):
+    """Extract the ordered [(key, value), ...] from a `const <var>: T = { ... }`
+    TS object literal of string->string. Values hold no nested braces, so a flat
+    scan to the first line that is exactly `}` is exact."""
+    am = re.search(r"(?:export\s+)?const\s+" + re.escape(var) + r"\b[^=]*=\s*\{(.*?)\n\}", txt, re.DOTALL)
+    if am is None:
+        print(f"status-manifest-check part 5: FAILED — `{var} = {{...}}` object literal "
+              f"not found in {path}. The vocabulary moved or was renamed; this gate "
+              f"reads THAT literal and cannot check what it cannot find.", file=sys.stderr)
+        sys.exit(1)
+    rows = []
+    for line in am.group(1).split("\n"):
+        line = line.strip()
+        if line.startswith("//") or line.startswith("*") or line.startswith("/*"):
+            continue
+        # `key: 'value',` — key may be bare or quoted; value is single/double quoted.
+        km = re.match(r"^['\"]?([A-Za-z_][A-Za-z0-9_]*)['\"]?\s*:\s*['\"](.*)['\"]\s*,?\s*$", line)
+        if km:
+            rows.append((km.group(1), km.group(2)))
+    return rows
+
+
+def parse_ts_string_array(txt, var, path):
+    """Extract the ordered [value, ...] from a `const <var>: T = [ ... ]` TS array
+    literal of plain strings."""
+    am = re.search(r"(?:export\s+)?const\s+" + re.escape(var) + r"\b[^=]*=\s*\[(.*?)\n\]", txt, re.DOTALL)
+    if am is None:
+        print(f"status-manifest-check part 5: FAILED — `{var} = [...]` array literal "
+              f"not found in {path}.", file=sys.stderr)
+        sys.exit(1)
+    return re.findall(r"['\"]([^'\"]+)['\"]", am.group(1))
+
+
+mobile_txt = open(mobile_path).read()
+mob_status_to_role = parse_ts_record(mobile_txt, "STATUS_TO_ROLE", mobile_path)
+mob_glyph = parse_ts_record(mobile_txt, "ROLE_GLYPH", mobile_path)
+mob_label = parse_ts_record(mobile_txt, "ROLE_LABEL", mobile_path)
+mob_board = parse_ts_string_array(mobile_txt, "BOARD_ROLES", mobile_path)
+
+overrides = (m.get("platform_overrides") or {}).get(mobile_surface, {})
+overrides = {k: v for k, v in overrides.items() if not k.startswith("$")}
+
+p5b = []
+if not mob_glyph or not mob_label or not mob_status_to_role:
+    p5b.append(f"  {mobile_path}: parsed ZERO entries from one of STATUS_TO_ROLE / "
+               f"ROLE_GLYPH / ROLE_LABEL — the literal shape changed.")
+
+mob_glyph_by = dict(mob_glyph)
+mob_label_by = dict(mob_label)
+mob_s2r = dict(mob_status_to_role)
+
+# STATUS -> ROLE: exactly the manifest's statuses map, aliases and terminals included.
+for status, role in m["statuses"].items():
+    if status not in mob_s2r:
+        p5b.append(f"  STATUS_TO_ROLE: MISSING manifest status {status!r} (-> {role!r})")
+    elif mob_s2r[status] != role:
+        p5b.append(f"  STATUS_TO_ROLE[{status!r}] = {mob_s2r[status]!r} != manifest {role!r}")
+for status in mob_s2r:
+    if status not in m["statuses"]:
+        p5b.append(f"  STATUS_TO_ROLE: non-manifest status {status!r} (hand-added?)")
+
+# ROLE SET, in both tables: the manifest roles plus the ONE sanctioned sentinel.
+for var, table in (("ROLE_GLYPH", mob_glyph_by), ("ROLE_LABEL", mob_label_by)):
+    for r in man_roles_order:
+        if r not in table:
+            p5b.append(f"  {var}: MISSING manifest role {r!r}")
+    for r in table:
+        if r not in p5_glyph and r not in SANCTIONED_EXTRA:
+            p5b.append(f"  {var}: non-manifest role {r!r} not in the sanctioned set "
+                       f"{sorted(SANCTIONED_EXTRA)} (hand-added?)")
+    # ORDER: the manifest roles, in the order they appear, must equal manifest order.
+    seq = [k for k, _ in (mob_glyph if var == "ROLE_GLYPH" else mob_label) if k in p5_glyph]
+    if seq != man_roles_order:
+        p5b.append(f"  {var}: manifest roles OUT OF ORDER — got {seq}, want {man_roles_order}")
+
+# GLYPH: byte-equal to the manifest, or to the manifest's own recorded override.
+for r in man_roles_order:
+    if r not in mob_glyph_by:
+        continue
+    want = overrides[r]["glyph"] if r in overrides else p5_glyph[r]
+    if mob_glyph_by[r] != want:
+        where = "platform_overrides" if r in overrides else "manifest"
+        p5b.append(f"  ROLE_GLYPH[{r!r}] = {mob_glyph_by[r]!r} != {where} {want!r}")
+
+# THE OVERRIDES ARE HELD HONEST — a sanctioned exception that stops earning its
+# keep, or one that hides a second drift, reds here.
+for r, ov in overrides.items():
+    if r not in p5_glyph:
+        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: not a manifest role")
+        continue
+    if ov.get("glyph") == p5_glyph[r]:
+        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: override equals the "
+                   f"manifest glyph {p5_glyph[r]!r} — it no longer earns its exemption, delete it")
+    if len((ov.get("reason") or "").strip()) < 40:
+        p5b.append(f"  platform_overrides[{mobile_surface!r}][{r!r}]: a ruling needs a reason "
+                   f"(>=40 chars) saying why conforming would be WRONG")
+diverging = sorted(r for r in man_roles_order
+                   if r in mob_glyph_by and mob_glyph_by[r] != p5_glyph[r])
+if diverging != sorted(overrides):
+    p5b.append(f"  platform_overrides[{mobile_surface!r}]: the roles that ACTUALLY diverge "
+               f"{diverging} != the roles declared {sorted(overrides)} — every divergence is a "
+               f"ruling or it is drift; nothing hides behind a sanctioned one")
+
+# LABEL: the manifest label, sentence-cased. Mechanical, and still byte-exact.
+for r in man_roles_order:
+    if r not in mob_label_by:
+        continue
+    lab = p5_label[r]
+    want = lab[:1].upper() + lab[1:]
+    if mob_label_by[r] != want:
+        p5b.append(f"  ROLE_LABEL[{r!r}] = {mob_label_by[r]!r} != sentence-cased manifest {want!r}")
+
+# BOARD LANES: manifest ORDER, minus the roles that are not lanes.
+want_board = [r for r in man_roles_order if r not in MOBILE_NON_LANE_ROLES]
+if mob_board != want_board:
+    p5b.append(f"  BOARD_ROLES: {mob_board} != manifest order minus "
+               f"{sorted(MOBILE_NON_LANE_ROLES)} = {want_board}")
+
+if p5b:
+    print("status-manifest-check part 5: FAILED — the apps/mobile status-vocabulary twin is "
+          "STALE vs design/status-manifest.json:", file=sys.stderr)
+    for f in p5b:
+        print(f, file=sys.stderr)
+    print(f"\n  Fix: edit {mobile_path} to match design/status-manifest.json — "
+          f"STATUS_TO_ROLE mirrors `statuses`; ROLE_GLYPH and ROLE_LABEL carry every "
+          f"manifest role in manifest ORDER plus the `unknown` sentinel; labels are the "
+          f"manifest label sentence-cased; BOARD_ROLES is manifest order minus "
+          f"{sorted(MOBILE_NON_LANE_ROLES)}. A glyph that MUST differ on this platform is a "
+          f"RULING and belongs in the manifest's platform_overrides with its reason — never "
+          f"as a silent skip here. The sibling pin that runs inside the mobile suite is "
+          f"apps/mobile/__tests__/statusManifestParity.test.ts.", file=sys.stderr)
+    sys.exit(1)
+print(f"status-manifest-check part 5b: PASS — apps/mobile vocab twin in lockstep "
+      f"({len(mob_s2r)} statuses, {len(mob_glyph_by)} roles, {len(mob_board)} board lanes; "
+      f"{len(overrides)} recorded platform override(s)).")
 PY

@@ -2,30 +2,35 @@
 // (mob-bl-status-manifest-mobile-gate).
 //
 // WHAT THIS FILE RETIRES. design/status-manifest.json is the SINGLE SOURCE for
-// the task status vocabulary. Three surfaces derive from it under a gate and a
+// the task status vocabulary. Three surfaces derived from it under a gate and a
 // fourth did not: scripts/status-manifest-check.sh byte-checks the CSS tone
-// block (Part 1), the Go pdrender inline copy (Part 3) and exactly TWO JS/TS
-// twins (Part 5 — `STATUS_ROLES` in js/packages/react and `STATUS_LADDER` in
-// web). Its Part 5 loop iterates `((react_path, "STATUS_ROLES"), (web_path,
-// "STATUS_LADDER"))` and nothing else, so apps/mobile — which hand-copies the
-// WHOLE vocabulary in src/papers/portabledoc/blocks/taskboard.tsx — was absent
-// from the drift gate entirely. Its own header said as much: the guard was a
-// comment. This file makes it a test.
+// block (Part 1), the Go pdrender inline copy (Part 3) and TWO JS/TS twins
+// (Part 5 — `STATUS_ROLES` in js/packages/react and `STATUS_LADDER` in web).
+// apps/mobile hand-copies the WHOLE vocabulary in
+// src/papers/portabledoc/blocks/taskboard.tsx and appeared nowhere in that
+// script; the file's own header said the guard was a comment.
 //
-// WHY HERE AND NOT ONLY IN THE SHELL GATE. The shell gate runs from
-// doc-gates.yml, whose paths block filters on design/** and scripts/**. A gate
-// that lives only there cannot fire on an apps/mobile edit — the exact edit
-// that introduces mobile-side drift. Running inside the mobile jest suite is
-// what makes a taskboard.tsx edit red. The reverse direction (a manifest edit
-// mobile never mirrors) needs `design/status-manifest.json` added to
-// .github/workflows/mobile.yml's paths, for precisely the reason that file's
-// own header already gives for its three non-mobile paths; that half is filed,
-// not silently assumed.
+// THE TWO GATES, AND WHY BOTH. This file is one of a PAIR, and the pair is the
+// point — each half fires on the edit the other cannot see:
+//   • THIS test runs inside the mobile jest suite, which .github/workflows/
+//     mobile.yml triggers on apps/mobile/**. So an edit to taskboard.tsx —
+//     the edit that introduces MOBILE-side drift — reds here.
+//   • scripts/status-manifest-check.sh Part 5b byte-checks the same file from
+//     doc-gates.yml, whose paths block carries design/status-manifest.json by
+//     name. So a MANIFEST edit mobile never mirrors reds there — the direction
+//     mobile.yml cannot see, because it does not trigger on design/**.
+// That job's paths block also carries `**/*.tsx`, so a taskboard.tsx edit runs
+// the shell gate too; both surfaces are watched from both sides, and NO
+// workflow change was needed to get there — a claim worth checking rather than
+// assuming, because an added path that a glob already covers is noise, and a
+// gate whose job never runs is a decoration.
+// Neither half alone is a gate: a checker whose job never runs on the edit it
+// exists to catch is a decoration, and shipping one is worse than shipping none.
 //
-// THE ONE RECORDED DIVERGENCE. `progress` is the only role whose glyph is NOT
-// byte-equal to the manifest, and it is a RULING, not an oversight — see
-// PROGRESS_GLYPH_RULING below. The ruling is asserted to be EXHAUSTIVE, so a
-// second divergence cannot hide behind the first.
+// THE ADJUDICATED DIVERGENCE lives in the MANIFEST, not here — `progress`, in
+// `platform_overrides`, with its reason. This file reads it rather than
+// restating it, so there is one source and not two places to drift. See the
+// OVERRIDES block below for what keeps it honest.
 //
 // MUTATION-VALIDITY (both directions, proven at authoring time):
 //   1. change ROLE_GLYPH.done from '✓' to '✔' in taskboard.tsx → the glyph
@@ -33,8 +38,10 @@
 //   2. add a role to design/status-manifest.json's roles array → the role-set
 //      and BOARD_ROLES-order cases red; restore → green.
 //   3. drop `researching` from BOARD_ROLES → the lane-order case reds.
-//   4. widen PROGRESS_GLYPH_RULING to a second role → the exhaustiveness case
-//      reds, because that role's glyph does in fact match.
+//   4. delete the `progress` row from platform_overrides → the glyph case reds,
+//      because mobile's ◐ is then unexplained drift.
+//   5. add a second role to platform_overrides whose glyph does NOT differ →
+//      the exhaustiveness case reds.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -60,10 +67,16 @@ interface ManifestRole {
   label: string
   meaning: string
 }
+interface PlatformOverride {
+  glyph: string
+  reason: string
+}
 interface StatusManifest {
   statuses: Record<string, string>
   default_role: string
   roles: ManifestRole[]
+  /** Adjudicated per-surface divergences, keyed by surface then role. */
+  platform_overrides?: Record<string, Record<string, PlatformOverride>>
 }
 
 // Read off disk, from the repo root — the SAME artifact the shell gate reads,
@@ -85,15 +98,34 @@ const SENTINEL = 'unknown'
  * check against the manifest rather than a hand-kept second list. */
 const NON_LANE_ROLES: ReadonlySet<string> = new Set(['cancel'])
 
-/** THE ONE GLYPH RULING. The manifest gives `progress` an EMPTY glyph with
- * spinner:true — the web paints an empty span whose ::before CSS-animates the
- * Braille frames. A mobile block renderer is pure by charter D50 (no hooks), so
- * there is no animation to run and an empty glyph would render as a blank cell.
- * Mobile ships '◐', the glyph it already uses for in_progress in chat.tsx, so
- * the app stays internally consistent instead of importing the web's
- * reduced-motion fallback frame. This map is the recorded decision AND its
- * expected value: a change to either side reds. */
-const PROGRESS_GLYPH_RULING: Readonly<Record<string, string>> = { progress: '◐' }
+/** THE ADJUDICATED DIVERGENCES, READ FROM THE MANIFEST — not restated here.
+ *
+ * `progress` is the one role whose glyph is legitimately not byte-equal: the
+ * manifest gives it an EMPTY glyph with spinner:true (the web paints an empty
+ * span whose ::before CSS-animates the Braille frames), and a mobile block
+ * renderer is pure by charter D50, so there is no animation to run and an empty
+ * glyph would paint a blank cell. Mobile ships the glyph it already uses for
+ * in_progress in chat.tsx. Mobile CONFORMING would be the regression.
+ *
+ * That ruling and its reason live in design/status-manifest.json's
+ * `platform_overrides`, so this file and scripts/status-manifest-check.sh read
+ * ONE source instead of each carrying a copy — a hardcoded exception here would
+ * be a second place to update and therefore a second place to drift. The cases
+ * below hold the override honest in both directions: it must name a real role,
+ * it must ACTUALLY differ, it must carry a reason, and the set of roles that
+ * diverge must EQUAL the set declared, so a second divergence can never hide
+ * behind the sanctioned one. */
+const OVERRIDES: Readonly<Record<string, PlatformOverride>> = Object.fromEntries(
+  Object.entries(manifest.platform_overrides?.['apps/mobile'] ?? {}).filter(
+    ([role]) => !role.startsWith('$'),
+  ),
+)
+
+/** The glyph mobile must ship for a role: the manifest's, unless the manifest
+ * itself records an override for this surface. */
+function wantGlyph(role: string): string {
+  return OVERRIDES[role]?.glyph ?? manifestByRole.get(role)!.glyph
+}
 
 /** Manifest labels are lowercase prose ("in progress"); mobile renders them as
  * a column heading and sentence-cases the first character ("In progress"). That
@@ -140,29 +172,31 @@ describe('mobile status vocabulary ≡ design/status-manifest.json', () => {
     expect(Object.keys(ROLE_LABEL).sort()).toEqual(want)
   })
 
-  it('byte-matches the manifest glyph for every role outside the recorded ruling', () => {
+  it('ships the glyph the manifest calls for on every role — its own, or its recorded override', () => {
     for (const role of manifestOrder) {
-      if (role in PROGRESS_GLYPH_RULING) continue
-      expect([role, ROLE_GLYPH[role]]).toEqual([role, manifestByRole.get(role)!.glyph])
+      expect([role, ROLE_GLYPH[role]]).toEqual([role, wantGlyph(role)])
     }
   })
 
-  it('holds the recorded glyph ruling to its recorded value', () => {
-    for (const [role, glyph] of Object.entries(PROGRESS_GLYPH_RULING)) {
+  it('holds every recorded override to a real role, a real value and a stated reason', () => {
+    expect(Object.keys(OVERRIDES).length).toBeGreaterThan(0)
+    for (const [role, ov] of Object.entries(OVERRIDES)) {
       expect(manifestByRole.has(role)).toBe(true)
-      expect(ROLE_GLYPH[role]).toBe(glyph)
+      expect(ROLE_GLYPH[role]).toBe(ov.glyph)
+      // A ruling without a reason is a skip wearing a ruling's clothes.
+      expect((ov.reason ?? '').trim().length).toBeGreaterThanOrEqual(40)
     }
   })
 
-  it('keeps the ruling EXHAUSTIVE — every ruled role genuinely diverges from the manifest', () => {
-    // Without this, widening the ruling would silently exempt a role that could
-    // have conformed. A ruling row that no longer earns its exemption reds.
-    for (const role of Object.keys(PROGRESS_GLYPH_RULING)) {
+  it('keeps the overrides EXHAUSTIVE — every ruled role genuinely diverges, and nothing else does', () => {
+    // Without this, widening the override map would silently exempt a role that
+    // could have conformed. An override that no longer earns its keep reds.
+    for (const role of Object.keys(OVERRIDES)) {
       expect(ROLE_GLYPH[role]).not.toBe(manifestByRole.get(role)!.glyph)
     }
-    // And the divergence is exactly the ruled set — nothing else drifts.
+    // And the divergence is exactly the declared set — nothing else drifts.
     const diverging = manifestOrder.filter((r) => ROLE_GLYPH[r] !== manifestByRole.get(r)!.glyph)
-    expect(diverging.sort()).toEqual(Object.keys(PROGRESS_GLYPH_RULING).sort())
+    expect(diverging.sort()).toEqual(Object.keys(OVERRIDES).sort())
   })
 
   it('sentence-cases the manifest label for every role, byte for byte', () => {

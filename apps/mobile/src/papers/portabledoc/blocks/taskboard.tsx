@@ -10,15 +10,23 @@
 // design/status-manifest.json (the Elixir side inlines the manifest at compile
 // time and cannot drift; every JS-side copy CAN).
 // DRIFT GUARD: a role, glyph or label added or changed in the manifest must be
-// mirrored here in lockstep. That used to be guarded by THIS COMMENT and
-// nothing else — scripts/status-manifest-check.sh Part 5 byte-checks the react
-// and web twins but has never seen apps/mobile at all
-// (mob-bl-status-manifest-mobile-gate). __tests__/statusManifestParity.test.ts
-// is now the real guard: it reads design/status-manifest.json off disk and
-// compares the four tables below against it, so a manifest edit that mobile
-// does not mirror reds the mobile gate. The tables are EXPORTED for that test
-// and for no other reason — nothing outside this file may render from them,
-// because the ladder still lives here once.
+// mirrored here in lockstep. THIS COMMENT IS NOT THE GUARD — it used to be, and
+// saying so was the whole defect (mob-bl-status-manifest-mobile-gate). Two real
+// gates now watch this file from opposite directions, and both are proven able
+// to fail by mutation:
+//   • apps/mobile/__tests__/statusManifestParity.test.ts runs inside the mobile
+//     jest suite, so an edit HERE reds on the mobile gate.
+//   • scripts/status-manifest-check.sh Part 5b byte-checks this file from
+//     doc-gates.yml, whose paths block already covers BOTH directions —
+//     design/status-manifest.json by name, and this file via `**/*.tsx` — so a
+//     MANIFEST edit this file does not mirror reds there.
+// The one glyph that legitimately differs (`progress`) is adjudicated in the
+// manifest's own `platform_overrides`, with its reason — not skipped in either
+// gate, and the gates refuse an override that stops earning its exemption or
+// that would let a second divergence hide behind it.
+// The tables are EXPORTED for the test and for no other reason — nothing
+// outside this file may render from them, because the ladder still lives here
+// once.
 import type { ReactNode } from 'react'
 import { Text, View } from 'react-native'
 

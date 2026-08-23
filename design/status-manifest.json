@@ -25,6 +25,16 @@
     { "role": "researching", "glyph": "◎", "spinner": false, "label": "researching", "meaning": "under active investigation" }
   ],
 
+  "platform_overrides": {
+    "$comment": "A RECORDED, ADJUDICATED divergence — never a silent exemption. A surface listed here renders the named role differently from the roles table above, because conforming would be WRONG on that platform, and scripts/status-manifest-check.sh reads this map as the expected value rather than hardcoding an exception. The gate also holds each entry HONEST: the role must exist in `roles`, the override must actually differ from the manifest glyph, and the set of diverging roles on that surface must equal the set listed here — so a second divergence can never hide behind the first, and an override that stops earning its keep reds instead of rotting. Adding a row here is a RULING and must carry its reason.",
+    "apps/mobile": {
+      "progress": {
+        "glyph": "\u25d0",
+        "reason": "The manifest gives `progress` an EMPTY glyph with spinner:true because the web paints an empty span whose ::before CSS-animates the Braille frames. A React Native block renderer is pure by mobile charter D50 (no hooks), so there is no animation to run and an empty glyph would paint a blank cell in the board lane. Mobile therefore ships the half-filled circle it already uses for in_progress in its chat todo vocabulary, keeping the app internally consistent rather than importing the web's reduced-motion fallback frame. Mobile CONFORMING here would be a regression, which is why the ruling lives in the manifest and not as a skip in the checker. Adjudicated under mob-bl-status-manifest-mobile-gate."
+      }
+    }
+  },
+
   "tones": {
     "info":   { "light": "#2563eb", "dark": "#60a5fa" },
     "ok":     { "light": "#0d9488", "dark": "#2dd4bf" },
