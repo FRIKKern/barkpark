@@ -1,44 +1,44 @@
 
-  ──────────────────────────────────────────────────────────────────────────
- │ Task-TUI wave 5 charter                                                  │
- │ task-tui-wave5-charter · rev-7                                           │
- │                                                                          │
- │ PAPER FRAME CHARTER                                                      │
- │ ───────────────────                                                      │
- │                                                                          │
- │ Driven by task-alpha — read it inline.                                   │
- │                                                                          │
- │ ▌ BASH                                                                   │
- │ ▌ go test ./internal/taskboard/...                                       │
- │                                                                          │
- │ Tasks driven by this paper (1)                                           │
- │ ▎ ⠋ Wire the SSE live bridge to the task board pane                   8m │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
- │                                                                          │
+ Task-TUI wave 5 charter
+ task-tui-wave5-charter · rev-7
+
+ PAPER FRAME CHARTER
+ ───────────────────
+
+ Driven by task-alpha — read it inline.
+
+ ▌ BASH
+ ▌ go test ./internal/taskboard/...
+
+ Tasks driven by this paper (1)
+ ▎ ⠋ Wire the SSE live bridge to the task board pane                       8m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
  jk move · enter open · esc back · space scroll · M mouse

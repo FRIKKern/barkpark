@@ -389,6 +389,19 @@ func TestHeaderNamesSnapshotFailureInsteadOfCallingItOffline(t *testing.T) {
 	}
 }
 
+func TestEmptyFailedSnapshotDoesNotClaimAllClear(t *testing.T) {
+	empty := Board{Counts: map[string]int{}}
+	frame := ansi.Strip(Render(empty, UIState{
+		Conn: ConnOffline, ConnProblem: "server error",
+	}, 80, 30, fixedNow))
+	if !strings.Contains(frame, "Unable to load tasks") || !strings.Contains(frame, "server error") {
+		t.Fatalf("failed cold snapshot omitted its honest empty state:\n%s", frame)
+	}
+	if strings.Contains(frame, "All clear") {
+		t.Fatalf("failed cold snapshot falsely claimed all clear:\n%s", frame)
+	}
+}
+
 // TestRenderActionStrip proves transient feedback replaces the help row rather
 // than expanding the fixed three-line footer.
 func TestRenderActionStrip(t *testing.T) {
