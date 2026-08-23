@@ -7,6 +7,23 @@ import type { BarkparkSchemaJson, FieldDef, SchemaDef } from './types'
 /** Past this composite recursion depth the mapper bails to `unknown`. */
 const MAX_DEPTH = 5
 
+/**
+ * The server's reserved system keys — content/envelope.ex `@reserved`, the
+ * exact set BarkparkSystemFields re-declares in the PRELUDE. A user field with
+ * one of these names cannot coexist with the inherited member (a `_type` field
+ * would double-declare beside the pinned literal; an `_id` field redeclares
+ * the inherited `string` incompatibly), so it is refused loudly up front.
+ */
+const RESERVED_SYSTEM_KEYS: ReadonlySet<string> = new Set([
+  '_id',
+  '_type',
+  '_rev',
+  '_draft',
+  '_publishedId',
+  '_createdAt',
+  '_updatedAt',
+])
+
 /** Read the optionality flag, tolerating both `required` and `required?` keys. */
 function isRequired(field: FieldDef): boolean {
   const q = (field as Record<string, unknown>)['required?']
@@ -292,6 +309,35 @@ export async function generateTypes(
         `codegen: schema #${i} has an empty \`name\`; every schema needs a name to become a typed interface`,
       )
     }
+  })
+
+  // Belt-and-suspenders guards (cca-backlog-reserved-system-field-names). All
+  // three shapes are unreachable from the live /v1/schemas API — the server
+  // rejects reserved keys (content/envelope.ex @reserved) and duplicate names —
+  // so they arrive only via a hand-authored --from fixture. They used to emit
+  // TypeScript that failed at the CONSUMER's tsc (two identical interfaces, a
+  // twice-declared `_type` member, an `_id` redeclaring the inherited string
+  // with an incompatible type): invalid-but-loud in the wrong place. Fail HERE,
+  // with a locatable message, before writing a byte. Positions are pre-sort so
+  // they match what the author sees in the fixture.
+  const byInterface = new Map<string, { index: number; name: string }>()
+  envelope.schemas.forEach((schema, i) => {
+    const typeName = pascalCase(schema.name)
+    const prev = byInterface.get(typeName)
+    if (prev !== undefined) {
+      throw new Error(
+        `codegen: schema #${prev.index} ("${prev.name}") and schema #${i} ("${schema.name}") both become interface "${typeName}" — duplicate type names emit invalid TypeScript; rename one`,
+      )
+    }
+    byInterface.set(typeName, { index: i, name: schema.name })
+
+    ;(schema.fields ?? []).forEach((field, j) => {
+      if (typeof field?.name === 'string' && RESERVED_SYSTEM_KEYS.has(field.name)) {
+        throw new Error(
+          `codegen: schema "${schema.name}" field #${j} is named "${field.name}", a server-reserved system key — generated interfaces already carry it via BarkparkSystemFields; rename the field`,
+        )
+      }
+    })
   })
 
   const schemas = [...envelope.schemas].sort((a, b) => a.name.localeCompare(b.name))
