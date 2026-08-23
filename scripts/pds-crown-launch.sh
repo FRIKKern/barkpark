@@ -206,6 +206,52 @@ pid_live() { # $1 = pid
   return 1
 }
 
+# ── identity (pds-bl-pid-live-identity-blind) ────────────────────────────────
+#
+# A pid number is a temporary slot. On this host the pid space was OBSERVED
+# wrapping inside ~20 minutes, and collect's cadence is deliberately "hours
+# later" — so `ps -p` alone can vouch for an unrelated process that inherited
+# the recorded number. The fingerprint is comm + lstart: start time is fixed at
+# fork, so the pair changes whenever the slot is reused. Captured at arm by
+# write_run_meta, verified by pid_live_ours before anything says STILL-RUNNING.
+#
+# Whitespace is squeezed to single spaces because `ps` pads columns and both
+# the capture and the comparison must normalise identically.
+pid_fingerprint() { # $1 = pid  -> prints "comm lstart", empty if unevaluable
+  ps -p "${1:-}" -o comm=,lstart= 2>/dev/null | tr -s ' ' | sed 's/^ //; s/ $//' || true
+}
+
+# Identity-aware liveness. Same contract as pid_live, plus one more state:
+#
+#   returns 0 = live AND it is the process the meta recorded (or no fingerprint
+#               was recorded — pre-fix run dirs degrade to plain pid_live)
+#           1 = not live
+#           2 = pid unusable (liveness UNPROVEN)
+#           3 = the pid is LIVE but the identity DIFFERS — the slot was RECYCLED
+#               by an unrelated process; the armed child is gone
+#
+# On every live path it leaves what it saw in PID_IDENT_RECORDED and
+# PID_IDENT_SEEN so the caller can print EXACTLY what was compared — a mismatch
+# must never be acted on without showing both strings.
+PID_IDENT_RECORDED=""
+PID_IDENT_SEEN=""
+# Like pid_live, callers wrap this in set +e — nonzero returns are its grammar.
+pid_live_ours() { # $1 = pid · $2 = meta file (may be absent)
+  local pid="${1:-}" meta="${2:-}" rc
+  PID_IDENT_RECORDED=""
+  PID_IDENT_SEEN=""
+  pid_live "$pid"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then return "$rc"; fi
+  if [ -n "$meta" ] && [ -f "$meta" ]; then
+    PID_IDENT_RECORDED="$(grep '^pid_fingerprint=' "$meta" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+  fi
+  PID_IDENT_SEEN="$(pid_fingerprint "$pid")"
+  if [ -z "$PID_IDENT_RECORDED" ]; then return 0; fi
+  if [ "$PID_IDENT_SEEN" = "$PID_IDENT_RECORDED" ]; then return 0; fi
+  return 3
+}
+
 # ── THE FORK (PDS-D243 + PDS-D249) ───────────────────────────────────────────
 #
 # The ONE place this file detaches, and the ONE place the budget is resolved.
@@ -462,6 +508,10 @@ write_run_meta() {
     printf 'armed_at=%s\n'   "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     printf 'budget=%s\n'     "${PDS_FULL_EXPORT_BUDGET:-}"
     arm_floor_record
+    # comm+lstart of the child at arm time — the identity pid_live_ours checks
+    # before anyone calls the recorded pid STILL-RUNNING. Empty when the child
+    # died before this read; verification then degrades to plain pid_live.
+    printf 'pid_fingerprint=%s\n' "$(pid_fingerprint "$4")"
     printf 'transcript=%s\n' "$5"
   } > "$1/meta"
 }
@@ -470,7 +520,7 @@ write_run_meta() {
 
 cmd_arm() {
   local force=0 run_id run_tag run_dir log pid_file child payload pid t0 t1
-  local child_state arc read_at
+  local child_state arc read_at prc
   DO_PREWARM=1
 
   while [ $# -gt 0 ]; do
@@ -511,8 +561,20 @@ cmd_arm() {
     local prev prev_pid
     prev="$(cat "$STATE_DIR/last")"
     prev_pid="$(cat "$STATE_DIR/$prev/child.pid" 2>/dev/null || echo '')"
-    if pid_live "$prev_pid"; then
+    set +e
+    pid_live_ours "$prev_pid" "$STATE_DIR/$prev/meta"
+    prc=$?
+    set -e
+    if [ "$prc" -eq 0 ]; then
       die "run $prev is STILL-RUNNING (pid $prev_pid). Two concurrent full exports would OOM the live box. Use \`collect\` first, or --force if you know that pid is not a climb."
+    elif [ "$prc" -eq 3 ]; then
+      # The number is alive but the process is not ours — the previous climb is
+      # dead and its pid slot was reused. Refusing here would be the self-lock
+      # this task exists to remove; say exactly what was compared and proceed.
+      say "previous run $prev: pid $prev_pid is ALIVE but it is NOT the armed child — the pid was RECYCLED."
+      info "recorded at arm: $PID_IDENT_RECORDED"
+      info "seen now:        $PID_IDENT_SEEN"
+      say "the previous climb is dead; arming proceeds. Do NOT kill pid $prev_pid — it is an unrelated process."
     fi
   fi
 
@@ -635,12 +697,13 @@ classify() { # $1 = transcript · $2 = pid file  -> prints the state token
 
   pid="$(cat "$p" 2>/dev/null | tr -d ' \n' || true)"
   set +e
-  pid_live "$pid"
+  pid_live_ours "$pid" "${p:+$(dirname "$p")/meta}"
   rc=$?
   set -e
   case "$rc" in
     0) printf 'STILL-RUNNING\n' ;;
     1) printf 'KILLED\n' ;;
+    3) printf 'KILLED\n' ;;   # pid RECYCLED — the armed child is dead; collect names it
     *) printf 'KILLED\n' ;;   # pid unusable — caller prints the caveat
   esac
   return 0
@@ -830,10 +893,19 @@ cmd_collect() {
       ;;
     KILLED)
       set +e
-      pid_live "$pid"
+      pid_live_ours "$pid" "${p:+$(dirname "$p")/meta}"
       rc=$?
       set -e
-      if [ "$rc" -eq 2 ]; then
+      if [ "$rc" -eq 3 ]; then
+        info "PID RECYCLED — pid $pid is ALIVE, but it is NOT the process this"
+        info "run armed. The fingerprint the arm recorded and the one ps sees"
+        info "now DISAGREE:"
+        info "  recorded at arm: $PID_IDENT_RECORDED"
+        info "  seen now:        $PID_IDENT_SEEN"
+        info "The armed child is gone; its pid number was reused by an"
+        info "unrelated process. This reads KILLED because the CLIMB is dead —"
+        info "do NOT kill pid $pid, it belongs to something else."
+      elif [ "$rc" -eq 2 ]; then
         # NOT kern.maxproc — see pid_live's header: maxproc caps concurrent
         # processes, not pid VALUES, and bounding on it calls live pids dead.
         # This branch means the pid file held nothing usable, or `ps` itself
@@ -1048,6 +1120,63 @@ DUMMY
   pid_live 100000; rc=$?
   set -e
   check "$rc" "2" "pid_live 100000 is UNUSABLE — ps rejects it as 'too large', which is not proof of death"
+
+  # ── identity: a recycled pid must NOT read STILL-RUNNING ─────────────────
+  # (pds-bl-pid-live-identity-blind). The live pid here is this selftest shell
+  # itself — guaranteed alive for the whole run — standing in for "an unrelated
+  # process now holds the number the arm recorded".
+  say ""
+  say "4b · a live pid with the WRONG identity is a dead climb, not a running one"
+  printf 'STEP 3 — the full export\n  ... mid-rung, no sentinel\n' > "$scratch/ident.log"
+
+  # (a) meta fingerprint MATCHES the live process -> still STILL-RUNNING
+  mkdir -p "$scratch/ident-match"
+  printf '%s\n' "$$" > "$scratch/ident-match/child.pid"
+  printf 'pid_fingerprint=%s\n' "$(pid_fingerprint "$$")" > "$scratch/ident-match/meta"
+  state="$(classify "$scratch/ident.log" "$scratch/ident-match/child.pid")"
+  check "$state" "STILL-RUNNING" "matching fingerprint keeps STILL-RUNNING (no false refusal)"
+
+  # (b) meta fingerprint DIFFERS -> the armed child is gone; KILLED, not alive
+  mkdir -p "$scratch/ident-recycled"
+  printf '%s\n' "$$" > "$scratch/ident-recycled/child.pid"
+  printf 'pid_fingerprint=%s\n' "someothercomm Mon Jan  1 00:00:00 2020" > "$scratch/ident-recycled/meta"
+  state="$(classify "$scratch/ident.log" "$scratch/ident-recycled/child.pid")"
+  check "$state" "KILLED" "mismatched fingerprint refuses STILL-RUNNING (recycled pid)"
+
+  # (c) no fingerprint recorded (pre-fix run dir) -> degrade to plain pid_live
+  mkdir -p "$scratch/ident-legacy"
+  printf '%s\n' "$$" > "$scratch/ident-legacy/child.pid"
+  state="$(classify "$scratch/ident.log" "$scratch/ident-legacy/child.pid")"
+  check "$state" "STILL-RUNNING" "a run dir with no recorded fingerprint degrades to plain pid_live"
+
+  # (d) collect NAMES the mismatch and prints BOTH strings it compared — a
+  # refusal that does not say what it saw is banned by the task brief.
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/ident.log" --pid-file "$scratch/ident-recycled/child.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"PID RECYCLED"*) ok "collect names the recycled pid by name" ;;
+    *)                bad "collect does not name PID RECYCLED on an identity mismatch" ;;
+  esac
+  case "$out" in
+    *"someothercomm Mon Jan  1 00:00:00 2020"*) ok "collect prints the fingerprint recorded at arm" ;;
+    *)                                          bad "collect hides the recorded fingerprint" ;;
+  esac
+  case "$out" in
+    *"seen now:"*) ok "collect prints the fingerprint it sees now" ;;
+    *)             bad "collect hides the fingerprint it sees now" ;;
+  esac
+  case "$out" in
+    *"do NOT re-arm"*) bad "a recycled pid still tells the operator not to re-arm (the self-lock)" ;;
+    *)                 ok "a recycled pid no longer forbids re-arming" ;;
+  esac
+
+  # (e) write_run_meta captures the fingerprint of the pid it is given
+  mkdir -p "$scratch/identmeta"
+  write_run_meta "$scratch/identmeta" cafe0002 ident-id "$$" "$scratch/ident.log"
+  out="$(grep '^pid_fingerprint=' "$scratch/identmeta/meta" | cut -d= -f2- || true)"
+  check "$out" "$(pid_fingerprint "$$")" "write_run_meta records the arm-time comm+lstart fingerprint"
 
   # NO-TRANSCRIPT
   state="$(classify "$scratch/absent.log" "$scratch/dummy.pid")"
