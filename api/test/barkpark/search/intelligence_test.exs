@@ -70,9 +70,22 @@ defmodule Barkpark.Search.IntelligenceTest do
            end)
   end
 
-  test "record/6 returns skipped when disabled option is set" do
-    assert :skipped =
+  test "record/6 names each no-write cause instead of a bare :skipped (pds-bl-w36-record6-conflation)" do
+    # disabled — recording is off for this request.
+    assert {:skipped, :recording_disabled} =
              Intelligence.record(@surface, @scope, %{query: "skip-me"}, 1, 5, disabled: true)
+
+    # record: false — the caller opted this one call out.
+    assert {:skipped, :record_false} =
+             Intelligence.record(@surface, @scope, %{query: "skip-me"}, 1, 5, record: false)
+
+    # offset > 0 — a follow-up page is not a new search event.
+    assert {:skipped, :offset_page} =
+             Intelligence.record(@surface, @scope, %{query: "skip-me", offset: 20}, 1, 5)
+
+    # unqualifiable query — blank after normalization, nothing to record.
+    assert {:skipped, :unqualified_query} =
+             Intelligence.record(@surface, @scope, %{query: "   "}, 1, 5)
 
     assert Repo.aggregate(Event, :count, :id) == 0
   end
@@ -96,11 +109,17 @@ defmodule Barkpark.Search.IntelligenceTest do
     assert_receive {:telemetry, %{count: 1},
                     %{surface: "media", scope: "production", result: :ok}}
 
-    assert :skipped =
+    assert {:skipped, :record_false} =
              Intelligence.record(@surface, @scope, %{query: "x"}, 0, 1, record: false)
 
+    # Telemetry now carries the named cause alongside the coarse status.
     assert_receive {:telemetry, %{count: 1},
-                    %{surface: "media", scope: "production", result: :skipped}}
+                    %{
+                      surface: "media",
+                      scope: "production",
+                      result: :skipped,
+                      reason: :record_false
+                    }}
 
     :telemetry.detach(handler_id)
   end
