@@ -741,6 +741,12 @@ async function main() {
   //
   // A refusal is exit 2 via die() — a missing woff2 is an ENVIRONMENT fault,
   // never a measured overflow.
+  // Successful pin executions THIS RUN. The FONT PINNED evidence lines below
+  // are DERIVED from this count — printed BY the act, never narrating it
+  // (cchi-w26-bl-font-pinned-evidence-narrates-instead-of-reporting: with the
+  // pin probe-bypassed, the old unconditional lines kept printing the full
+  // claim while the pin had not been called once).
+  let fontPinRuns = 0;
   const pinFonts = async (url) => {
     let report = null;
     try {
@@ -762,6 +768,7 @@ async function main() {
     // baselines re-measured" is a real proof and not a re-read of a changed
     // format. The pin speaks only when it refuses.
     if (!report || !report.ok) return die(fontPinRefusal(url, report));
+    fontPinRuns++;
   };
 
   // Navigate and poll until `readyExpr` is truthy (the SPA mounts async).
@@ -782,6 +789,24 @@ async function main() {
   const failures = [];
   const fail = (defect, msg) => { failures.push({ defect, msg }); process.stdout.write(`   ✗ ${msg}\n`); };
   const okLine = (msg) => process.stdout.write(`   ✓ ${msg}\n`);
+  // The FONT PINNED sentence is EARNED, never narrated: it prints the number
+  // of successful pinFonts() executions this run, and when that number is
+  // zero it WITHHOLDS the claim — under a `!`, never a ✓ — instead of
+  // printing it.
+  const fontPinnedEvidence = (tail) => {
+    if (fontPinRuns > 0) {
+      okLine(
+        `FONT PINNED ${fontPinRuns}x THIS RUN (D218, paid by cch-w22-s1; count measured in pinFonts, not narrated): ` +
+        `nav() load()s every declared @font-face, awaits document.fonts.ready and check()s each face before ` +
+        `these px are read — a missing face is exit 2. ${tail}`,
+      );
+    } else {
+      process.stdout.write(
+        `   ! FONT PIN NOT EXECUTED THIS RUN (0 successful pinFonts() runs) — the FONT PINNED claim is ` +
+        `WITHHELD: nothing certifies which faces these px were read under. ${tail}\n`,
+      );
+    }
+  };
 
   try {
     // ── GR108: page-level overflow sweep + the chip's money message ─────────
@@ -2347,9 +2372,7 @@ async function main() {
           `${AM_NAME_CAP}-char cap) and the kind cells to still be ordinary, so a fixture that drifts reds this leg ` +
           `rather than greening it`,
         );
-        okLine(
-          `FONT PINNED (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
-          `document.fonts.ready and check()s each face before these px are read — a missing face is exit 2. ` +
+        fontPinnedEvidence(
           `\`.am-name\` inherits the UI face, not the mono fallback D248 named, and what is ASSERTED here is ` +
           `face-independent anyway: glyphs inside their own box, and a modal that does not scroll sideways`,
         );
@@ -4227,9 +4250,7 @@ async function main() {
           `scrolling sideways. Every row is walked, never sampled — row 0 is the self row, has no buttons, ` +
           `and is clean on the PRE-FIX bytes, so a sampled leg certifies the screen off the one row that works`,
         );
-        okLine(
-          `FONT PINNED (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
-          `document.fonts.ready and check()s each face before these px are read — a missing face is exit 2. ` +
+        fontPinnedEvidence(
           `What is ASSERTED is face-independent anyway — a control's right edge inside the viewport, and ` +
           `text that either fits or carries a paintable cue`,
         );
@@ -4872,10 +4893,9 @@ async function main() {
           `and Copy's right edge with its (x,y) gap to the token — so a fix that wins readability by pushing ` +
           `the button away is visible in the same line`,
         );
-        okLine(
-          `FONT PINNED (D218/D248, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
-          `document.fonts.ready and check()s each face before these px are read, refusing at exit 2 on a ` +
-          `missing one. The clipped/not-clipped verdicts and the character RATIOS are what it stands behind`,
+        fontPinnedEvidence(
+          `D248's mono-face exposure lives on this screen. The clipped/not-clipped verdicts and the ` +
+          `character RATIOS are what the pin stands behind`,
         );
       }
     }
