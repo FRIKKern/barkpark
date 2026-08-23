@@ -449,26 +449,15 @@ func unreachableWhoamiServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// TestWhoamiCloudBlockLoggedIn: with a Cloud session on disk, whoami's json
-// payload carries a cloud block (logged_in/url/team) and NEVER the token value.
-func TestWhoamiCloudBlockLoggedIn(t *testing.T) {
-	withTempConfigHome(t)
-	if err := SaveConfig(&Config{
-		CloudURL:   "https://api.barkpark.cloud",
-		CloudToken: "sess-secret-must-not-leak",
-		CloudTeam:  "team-abc",
-	}); err != nil {
-		t.Fatalf("SaveConfig: %v", err)
-	}
-	srv := unreachableWhoamiServer(t)
-
+// whoamiCloudPayload runs `bp whoami -o json` and returns its cloud block.
+func whoamiCloudPayload(t *testing.T, contentServer string) (map[string]any, string) {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
 	w := newWriter(&stdout, &stderr)
 	w.output = "json"
-	if code := runWhoami(w, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+	if code := runWhoami(w, globals{}, manifest.Context{Server: contentServer}); code != exitOK {
 		t.Fatalf("runWhoami exit = %d\n%s", code, stderr.String())
 	}
-
 	var payload map[string]any
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("parse json: %v\n%s", err, stdout.String())
@@ -477,18 +466,140 @@ func TestWhoamiCloudBlockLoggedIn(t *testing.T) {
 	if !ok {
 		t.Fatalf("whoami json missing a cloud block:\n%s", stdout.String())
 	}
-	if cloud["logged_in"] != true {
-		t.Errorf("cloud.logged_in = %v, want true", cloud["logged_in"])
+	return cloud, stdout.String()
+}
+
+// TestWhoamiCloudBlockVerified: a Cloud session whose token the control plane
+// ANSWERS FOR reads logged_in:true / session:"verified" — and the token value
+// itself never appears. The old test pinned logged_in:true from token PRESENCE
+// against an unreachable plane, a pin that structurally could not fail on an
+// invalid session (dr-w35-bl-whoami-presence-oracle); the /v1/me probe is what
+// earns `true` now, so this fixture must actually answer it.
+func TestWhoamiCloudBlockVerified(t *testing.T) {
+	withTempConfigHome(t)
+	cloudSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/me" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer sess-secret-must-not-leak" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":"unauthorized"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"user":{"id":"u1","email":"x@example.com"},"teams":[]}`))
+	}))
+	t.Cleanup(cloudSrv.Close)
+	if err := SaveConfig(&Config{
+		CloudURL:   cloudSrv.URL,
+		CloudToken: "sess-secret-must-not-leak",
+		CloudTeam:  "team-abc",
+	}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
 	}
-	if cloud["url"] != "https://api.barkpark.cloud" {
+	srv := unreachableWhoamiServer(t)
+
+	cloud, raw := whoamiCloudPayload(t, srv.URL)
+	if cloud["logged_in"] != true {
+		t.Errorf("cloud.logged_in = %v, want true (the plane VERIFIED the token)", cloud["logged_in"])
+	}
+	if cloud["session"] != "verified" {
+		t.Errorf("cloud.session = %v, want verified", cloud["session"])
+	}
+	if cloud["token_present"] != true {
+		t.Errorf("cloud.token_present = %v, want true", cloud["token_present"])
+	}
+	if cloud["url"] != cloudSrv.URL {
 		t.Errorf("cloud.url = %v", cloud["url"])
 	}
 	if cloud["team"] != "team-abc" {
 		t.Errorf("cloud.team = %v", cloud["team"])
 	}
 	// The token value must NEVER appear anywhere in the output.
-	if strings.Contains(stdout.String(), "sess-secret-must-not-leak") {
-		t.Fatalf("whoami leaked the cloud token:\n%s", stdout.String())
+	if strings.Contains(raw, "sess-secret-must-not-leak") {
+		t.Fatalf("whoami leaked the cloud token:\n%s", raw)
+	}
+}
+
+// TestWhoamiCloudBlockRejectedSession is the test the old suite structurally
+// could not have: a token that IS on disk and that the control plane REJECTS.
+// logged_in must be false — presence is not a session — and the human line must
+// say the session is dead rather than "logged in".
+func TestWhoamiCloudBlockRejectedSession(t *testing.T) {
+	withTempConfigHome(t)
+	cloudSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized: session expired"}`))
+	}))
+	t.Cleanup(cloudSrv.Close)
+	if err := SaveConfig(&Config{CloudURL: cloudSrv.URL, CloudToken: "dead-tok"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	srv := unreachableWhoamiServer(t)
+
+	cloud, _ := whoamiCloudPayload(t, srv.URL)
+	if cloud["logged_in"] != false {
+		t.Errorf("cloud.logged_in = %v, want false — the plane REJECTED the token and a presence-derived true is the defect this slice removes", cloud["logged_in"])
+	}
+	if cloud["session"] != "rejected" {
+		t.Errorf("cloud.session = %v, want rejected", cloud["session"])
+	}
+	if cloud["token_present"] != true {
+		t.Errorf("cloud.token_present = %v, want true — the FILE fact stays honest under its own name", cloud["token_present"])
+	}
+
+	// Human line: the dead session is named, and "logged in" is not claimed.
+	var hOut, hErr bytes.Buffer
+	hw := newWriter(&hOut, &hErr)
+	hw.output = "table"
+	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+		t.Fatalf("runWhoami (human) exit = %d\n%s", code, hErr.String())
+	}
+	if !strings.Contains(hOut.String(), "REJECTED") || !strings.Contains(hOut.String(), "bp login") {
+		t.Fatalf("a rejected session must be named with its remedy:\n%s", hOut.String())
+	}
+	if strings.Contains(hOut.String(), "logged in to") {
+		t.Fatalf("a rejected session must not read as logged in:\n%s", hOut.String())
+	}
+}
+
+// TestWhoamiCloudBlockUnverifiedSession: a token on disk and a control plane
+// that cannot be reached is a MISSING MEASUREMENT, not a session and not its
+// absence — logged_in is null (the epic's signature defect is ABSENT collapsing
+// into a confident reading, in either direction).
+func TestWhoamiCloudBlockUnverifiedSession(t *testing.T) {
+	withTempConfigHome(t)
+	// A closed port: reserve one with a listener, then shut it down.
+	dead := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	deadURL := dead.URL
+	dead.Close()
+	if err := SaveConfig(&Config{CloudURL: deadURL, CloudToken: "some-tok"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	srv := unreachableWhoamiServer(t)
+
+	cloud, _ := whoamiCloudPayload(t, srv.URL)
+	if cloud["logged_in"] != nil {
+		t.Errorf("cloud.logged_in = %v, want null — an unreachable plane cannot adjudicate the token, and neither true (presence oracle) nor false (invented rejection) is honest", cloud["logged_in"])
+	}
+	if cloud["session"] != "unverified" {
+		t.Errorf("cloud.session = %v, want unverified", cloud["session"])
+	}
+	if cloud["token_present"] != true {
+		t.Errorf("cloud.token_present = %v, want true", cloud["token_present"])
+	}
+
+	var hOut, hErr bytes.Buffer
+	hw := newWriter(&hOut, &hErr)
+	hw.output = "table"
+	if code := runWhoami(hw, globals{}, manifest.Context{Server: srv.URL}); code != exitOK {
+		t.Fatalf("runWhoami (human) exit = %d\n%s", code, hErr.String())
+	}
+	if !strings.Contains(hOut.String(), "UNVERIFIED") {
+		t.Fatalf("an unverified session must say so:\n%s", hOut.String())
+	}
+	if strings.Contains(hOut.String(), "logged in to") {
+		t.Fatalf("an unverified session must not read as logged in:\n%s", hOut.String())
 	}
 }
 
@@ -527,5 +638,11 @@ func TestWhoamiCloudBlockLoggedOut(t *testing.T) {
 	}
 	if cloud["logged_in"] != false {
 		t.Errorf("cloud.logged_in = %v, want false", cloud["logged_in"])
+	}
+	if cloud["session"] != "none" {
+		t.Errorf("cloud.session = %v, want none", cloud["session"])
+	}
+	if cloud["token_present"] != false {
+		t.Errorf("cloud.token_present = %v, want false", cloud["token_present"])
 	}
 }

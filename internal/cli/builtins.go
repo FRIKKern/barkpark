@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -204,21 +208,56 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		tierVal = authTier
 	}
 
-	// Cloud control-plane session (cloud-12) — SEPARATE from the content target
-	// above. `bp login` is the primary onboarding, so whoami reports whether a
-	// Cloud session is present, its url, and team — but NEVER the token value
-	// (presence only, like `gh auth status`). Purely additive: a missing/unreadable
-	// config or an empty CloudToken simply reads as "not logged in".
-	cloudLoggedIn := false
+	// Cloud control-plane session (cloud-12, re-derived in dr-w35) — SEPARATE
+	// from the content target above, and no longer a presence oracle. The old
+	// arm derived `logged_in: true` from cfg.HasCloudToken() alone — a config
+	// file stat — while every control-plane call from the same session could be
+	// 401ing: a green local reading over a dead remote, the epic's founding
+	// shape, inside its own diagnostic. The SAME function already probes the
+	// CONTENT server for `reachable`; the cloud plane now gets the same
+	// treatment: one cheap authed GET /v1/me with a short timeout, best-effort,
+	// never fatal (whoami still always exits 0).
+	//
+	// The verdict is a TRI-STATE and the json says which: `logged_in` is true
+	// only when the control plane VERIFIED the token, false when there is no
+	// token or the plane REJECTED it (401/403), and null when a token is
+	// present but the plane could not be reached — "could not measure" is not
+	// "no". `session` names the arm outright (none/verified/rejected/
+	// unverified) and `token_present` keeps the old fact honest under its own
+	// name. The token value itself still NEVER appears.
+	cloudTokenPresent := false
 	cloudURL := ""
 	cloudTeam := ""
+	cloudSession := "none"
+	var cloudLoggedIn any = false // true | false | nil (null = unverifiable)
 	if cfg, _ := LoadConfig(); cfg != nil && cfg.HasCloudToken() {
-		cloudLoggedIn = true
+		cloudTokenPresent = true
 		cloudURL = strings.TrimSpace(cfg.CloudURL)
 		if cloudURL == "" {
 			cloudURL = cloudclient.DefaultBaseURL
 		}
 		cloudTeam = cfg.CloudTeam
+
+		probe := cfg.CloudClient()
+		// whoami is a diagnostic, not a workload: a plane that answers slowly
+		// reads UNVERIFIED rather than hanging the command for 30s.
+		probe.HTTP = &http.Client{Timeout: 4 * time.Second}
+		pctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		_, meErr := probe.Me(pctx)
+		cancel()
+		var refusal *cloudclient.CloudRefusal
+		switch {
+		case meErr == nil:
+			cloudSession = "verified"
+			cloudLoggedIn = true
+		case errors.As(meErr, &refusal) && (refusal.HTTPStatus == http.StatusUnauthorized || refusal.HTTPStatus == http.StatusForbidden):
+			cloudSession = "rejected"
+			cloudLoggedIn = false
+		default:
+			// Network failure, timeout, 5xx: the token was never adjudicated.
+			cloudSession = "unverified"
+			cloudLoggedIn = nil
+		}
 	}
 
 	payload := map[string]any{
@@ -240,11 +279,15 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 			"min": meta.MinAPIVersion,
 			"max": meta.MaxAPIVersion,
 		},
-		// Cloud session block — presence + url + team only, no token value.
+		// Cloud session block — presence + probe verdict + url + team, no token
+		// value. logged_in is a tri-state: null means the probe could not reach
+		// the plane, which is a different fact from false.
 		"cloud": map[string]any{
-			"logged_in": cloudLoggedIn,
-			"url":       cloudURL,
-			"team":      cloudTeam,
+			"logged_in":     cloudLoggedIn,
+			"token_present": cloudTokenPresent,
+			"session":       cloudSession,
+			"url":           cloudURL,
+			"team":          cloudTeam,
 		},
 	}
 	switch out.output {
@@ -293,14 +336,20 @@ func runWhoami(out *writer, g globals, ctx manifest.Context) int {
 		out.outf("token:     none — anonymous")
 	}
 
-	// Cloud control-plane session line — presence/url/team only, never the token.
-	if cloudLoggedIn {
-		if cloudTeam != "" {
-			out.outf("cloud:     logged in to %s (team %s)", cloudURL, cloudTeam)
-		} else {
-			out.outf("cloud:     logged in to %s", cloudURL)
-		}
-	} else {
+	// Cloud control-plane session line — the probe's verdict, never the token.
+	// Four arms, and none of them reads token-presence as a session.
+	teamSuffix := ""
+	if cloudTeam != "" {
+		teamSuffix = fmt.Sprintf(" (team %s)", cloudTeam)
+	}
+	switch cloudSession {
+	case "verified":
+		out.outf("cloud:     logged in to %s%s — session verified", cloudURL, teamSuffix)
+	case "rejected":
+		out.outf("cloud:     token PRESENT but REJECTED by %s — the saved session is dead; run 'bp login'", cloudURL)
+	case "unverified":
+		out.outf("cloud:     token present for %s — UNVERIFIED (control plane unreachable); presence is not a session", cloudURL)
+	default:
 		out.outf("cloud:     not logged in — run 'bp login'")
 	}
 
