@@ -6,6 +6,15 @@
     "skipLibCheck": true,
     "strict": true,
     "noEmit": true,
+    // The test files and lib/normalize.ts import siblings WITH the .ts
+    // extension because `node --test` is an ESM loader and will not resolve an
+    // extensionless relative specifier. That is legal here and only here:
+    // `noEmit` is true, so tsc never has to rewrite a specifier it cannot
+    // rewrite. WITHOUT this flag `tsc --noEmit` fails TS5097 — and it HAS been
+    // failing on main since the pagination fix (#13316) added
+    // `../lib/paginate.ts`, unseen because apps/hundesteder has no CI job at
+    // all (filed separately).
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",

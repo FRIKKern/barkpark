@@ -1,31 +1,34 @@
 /**
- * Tests for the places data layer's tag handling and normalisation
- * (`apps/hundesteder/lib/places.ts`).
+ * Tests for the places data layer's normalisation and tag handling.
  *
- * `normalizePlace()` used to extract a place's tags with a FLAT-ONLY filter:
+ * THESE TESTS NOW IMPORT THE SHIPPED CODE. They did not used to. `places.ts`
+ * imports `server-only`, which is not resolvable under bare `node --test`, so
+ * this file used to carry HAND-COPIED MIRRORS of `str()`, `coord()` and
+ * `normalizePlace()` labelled "verbatim mirror … keep them in sync on any
+ * future edit to that file". A mirror is not a link: it is a promise, and the
+ * suite could not tell when the promise was broken.
  *
- *     const tags = Array.isArray(tagsRaw)
- *       ? tagsRaw.filter((t): t is string => typeof t === "string")
- *       : [];
+ * MEASURED, not assumed. Deleting the `(0,0)` guard from the REAL
+ * `normalizePlace()` in `lib/places.ts` left all 24 tests green — including the
+ * one named "normalizePlace returns null for a literal (0,0) coordinate". The
+ * suite reported coverage it did not have.
  *
- * That silently DROPPED authoring-excellence weighted-tag objects
- * `{tag, strength, rationale}` (charter D8–D10) — a place tagged with the
- * weighted shape lost every chip. This is the exact bug `web/lib/listings.ts`
- * already fixed via `web/lib/paper-tags.ts`; hundesteder is workspace-isolated
- * (pnpm-workspace.yaml `packages: []`) so the fix was PORTED, not imported,
- * into `apps/hundesteder/lib/paper-tags.ts`. `normalizePlace()` now leans on
- * that shared `paperTags` normaliser, so both shapes — and a mid-migration
- * mix — survive.
+ * THE FIX, following the precedent this folder already set. `lib/paginate.ts`
+ * exists for exactly this reason and says so: "This module deliberately imports
+ * nothing, so the pagination behaviour ships and is tested as ONE artifact."
+ * `lib/normalize.ts` now does the same for normalisation — it imports only the
+ * dependency-free `paper-tags`, so it loads under `node --test`, and
+ * `places.ts` consumes it rather than duplicating it. There is one
+ * `normalizePlace` in this app and this file tests it.
  *
- * `places.ts` itself imports `server-only`, which isn't a resolvable package
- * outside the Next.js build (it isn't a direct dependency of this workspace),
- * so it can't be loaded under bare `node --test` — the same constraint
- * `web/__tests__/listings.test.ts` documents for `web/lib/listings.ts`.
- * These tests mirror `coord()` and `normalizePlace()` verbatim from
- * `../lib/places.ts` (keep them in sync on any future edit to that file) and
- * exercise the real, importable `paperTags` normaliser for the tag-shape
- * coverage, side by side with the OLD flat-only filter as the fail-before
- * baseline.
+ * WHAT THE TAG TESTS COVER. `normalizePlace()` used to extract tags with a
+ * FLAT-ONLY filter, which silently DROPPED authoring-excellence weighted-tag
+ * objects `{tag, strength, rationale}` (charter D8–D10) — a place tagged with
+ * the weighted shape lost every chip. That is the same bug `web/lib/listings.ts`
+ * fixed via `web/lib/paper-tags.ts`; hundesteder is workspace-isolated
+ * (pnpm-workspace.yaml `packages: []`) so the fix was PORTED, not imported, into
+ * `lib/paper-tags.ts`. `oldFlatOnlyFilter` below is kept as the fail-before
+ * baseline so the regression stays legible.
  *
  * Runs under Node's built-in test runner (`node --test`), which strips
  * TypeScript types at load time in Node v22+.
@@ -36,84 +39,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { paperTags, type PaperTag } from "../lib/paper-tags.ts";
-
-/* ── mirrors of ../lib/places.ts (kept in sync by hand; see file header) ── */
-
-function str(v: unknown): string | undefined {
-  return typeof v === "string" && v.length > 0 ? v : undefined;
-}
-
-/** Verbatim mirror of `coord()` in `../lib/places.ts`. */
-function coord(v: unknown): number | undefined {
-  if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = parseFloat(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-
-interface Place {
-  id: string;
-  slug: string;
-  title: string;
-  description?: string;
-  category?: string;
-  city?: string;
-  lat: number;
-  lng: number;
-  address?: { street?: string; postalCode?: string; country?: string };
-  websiteUrl?: string;
-  priceRange?: string;
-  tags: string[];
-}
-
-/** Verbatim mirror of `normalizePlace()` in `../lib/places.ts`. */
-function normalizePlace(raw: unknown): Place | null {
-  if (!raw || typeof raw !== "object") return null;
-  const r = raw as Record<string, unknown>;
-
-  const geo = (r.geo && typeof r.geo === "object" ? r.geo : {}) as Record<
-    string,
-    unknown
-  >;
-  const lat = coord(geo.latitude);
-  const lng = coord(geo.longitude);
-  if (lat === undefined || lng === undefined) return null;
-  if (lat === 0 && lng === 0) return null;
-
-  const id = str(r._id) ?? str(r.id) ?? str(r.slug);
-  if (!id) return null;
-
-  const slug = str(r.slug) ?? id;
-
-  const addrRaw = (
-    r.address && typeof r.address === "object" ? r.address : {}
-  ) as Record<string, unknown>;
-  const address = {
-    street: str(addrRaw.street),
-    postalCode: str(addrRaw.postal_code),
-    country: str(addrRaw.country),
-  };
-  const hasAddress = address.street || address.postalCode || address.country;
-
-  const tags = paperTags(r.tags as PaperTag[] | undefined);
-
-  return {
-    id,
-    slug,
-    title: str(r.title) ?? id,
-    description: str(r.description),
-    category: str(r.category),
-    city: str(r.city),
-    lat,
-    lng,
-    address: hasAddress ? address : undefined,
-    websiteUrl: str(r.website_url),
-    priceRange: str(r.price_range),
-    tags,
-  };
-}
+// THE REAL FUNCTIONS — the ones `lib/places.ts` calls, not copies of them.
+import {
+  coord,
+  normalizePlace,
+  sortPlaces,
+  str,
+  type Place,
+} from "../lib/normalize.ts";
 
 /** The FLAT-ONLY filter `normalizePlace()` used BEFORE this fix — kept here
  * verbatim as the fail-before baseline. */
@@ -259,4 +192,80 @@ test("coord() rejects null, undefined, NaN, and Infinity", () => {
   assert.equal(coord(undefined), undefined);
   assert.equal(coord(NaN), undefined);
   assert.equal(coord(Infinity), undefined);
+});
+
+/* ── str() ───────────────────────────────────────────────────────────────── */
+/* Newly reachable: `str()` decides ABSENT vs PRESENT for every optional field
+ * on a Place, so its empty-string rule is what keeps an empty upstream value
+ * from rendering as a blank chip, a blank address line or an empty link. It
+ * was unreachable while it lived behind `server-only`. */
+
+test("str() treats an empty string as ABSENT, not as a present empty value", () => {
+  assert.equal(str(""), undefined);
+  assert.equal(str("Oslo"), "Oslo");
+});
+
+test("str() rejects every non-string, including numbers and objects", () => {
+  for (const v of [null, undefined, 0, 42, true, {}, [], { toString: () => "x" }]) {
+    assert.equal(str(v), undefined);
+  }
+});
+
+test("str() preserves whitespace-only strings — trimming is the caller's job", () => {
+  // Deliberate: `paperTags` trims tag names, but a title of "  " is a content
+  // problem, not a parsing one, and silently blanking it would hide it.
+  assert.equal(str("  "), "  ");
+});
+
+/* ── sortPlaces() ────────────────────────────────────────────────────────── */
+/* Newly reachable: this comparator sets the order of the landing grid, the
+ * /steder index and the map list. It was untestable behind `server-only`. */
+
+function placeAt(city: string | undefined, title: string): Place {
+  return { id: title, slug: title, title, lat: 1, lng: 1, tags: [], city };
+}
+
+test("sortPlaces groups by city first, then by title within the city", () => {
+  const out = [
+    placeAt("Oslo", "Zoo"),
+    placeAt("Bergen", "Torget"),
+    placeAt("Oslo", "Akersparken"),
+    placeAt("Bergen", "Bryggen"),
+  ]
+    .sort(sortPlaces)
+    .map((p) => `${p.city}/${p.title}`);
+  assert.deepEqual(out, [
+    "Bergen/Bryggen",
+    "Bergen/Torget",
+    "Oslo/Akersparken",
+    "Oslo/Zoo",
+  ]);
+});
+
+test("sortPlaces sorts a place with NO city before every named city", () => {
+  // `(a.city ?? "")` makes the empty string the comparison key, and "" sorts
+  // first. Pinned so the fallback is a decision rather than an accident.
+  const out = [placeAt("Bergen", "B"), placeAt(undefined, "A")]
+    .sort(sortPlaces)
+    .map((p) => p.title);
+  assert.deepEqual(out, ["A", "B"]);
+});
+
+test("sortPlaces uses NORWEGIAN collation — Ø sorts after Z, not with O", () => {
+  // The distinguishing case: 'Ørsta'.localeCompare('Zakopane', 'nb') is +1,
+  // but under 'en' it is -1 (ICU folds Ø to O). Dropping the "nb" argument
+  // therefore flips this pair — which is exactly what this test exists to catch.
+  const out = [placeAt("Ørsta", "A"), placeAt("Zakopane", "B")]
+    .sort(sortPlaces)
+    .map((p) => p.city);
+  assert.deepEqual(out, ["Zakopane", "Ørsta"]);
+});
+
+test("sortPlaces is case-insensitive on titles — 'apple' before 'Banana'", () => {
+  // A raw `<` comparison would put 'Banana' (0x42) before 'apple' (0x61).
+  // localeCompare puts them in reading order, which is what a grid needs.
+  const out = [placeAt("Oslo", "Banana"), placeAt("Oslo", "apple")]
+    .sort(sortPlaces)
+    .map((p) => p.title);
+  assert.deepEqual(out, ["apple", "Banana"]);
 });
