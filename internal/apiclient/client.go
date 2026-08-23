@@ -162,6 +162,10 @@ type Client struct {
 	// the 1s default; tests set a tiny value so the capped 5xx-retry path runs
 	// in milliseconds instead of tens of seconds.
 	listenBackoffFloor time.Duration
+	// retry is the GET-only transient-500 retry installed by New. It is held
+	// here (not just inside client.Transport) so Retries can report the count —
+	// a retry nobody can count is a retry that hides a sick server. See retry.go.
+	retry *retryTransport
 }
 
 // New constructs a Client from cfg, applying defaults for any empty scope field
@@ -180,6 +184,11 @@ func New(cfg Config) *Client {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
+	// Every Client gets the narrow transient-500 retry (retry.go): GET only,
+	// HTTP 500 only, error.code "internal_error" only, announced on stderr.
+	// Installed here rather than at ~20 call sites so there is ONE owner of the
+	// policy and no read path can be forgotten.
+	rt := &retryTransport{onRetry: stderrRetryNotifier}
 	return &Client{
 		baseURL:     cfg.BaseURL,
 		token:       cfg.Token,
@@ -187,7 +196,8 @@ func New(cfg Config) *Client {
 		Project:     cfg.Project,
 		Dataset:     cfg.Dataset,
 		Perspective: cfg.Perspective,
-		client:      &http.Client{Timeout: timeout},
+		client:      &http.Client{Timeout: timeout, Transport: rt},
+		retry:       rt,
 	}
 }
 
