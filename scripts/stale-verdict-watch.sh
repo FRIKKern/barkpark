@@ -119,6 +119,20 @@ REPO_OVERRIDE=""
 BRANCH="main"
 FIXTURE=""
 COMMITS_FILE=""
+# ATTEMPTS / SLEEPS below are measured against real traffic, not tuned blind
+# (dr-w29-bl-watch-poll-budget-inadequate-under-a-merge-burst). 368 scheduled
+# runs from 2026-08-09T15:34Z to 2026-08-23T17:23Z (14 days, spanning the
+# whole window since the rc=5 and rc=6/rc=7 splits above both landed)
+# classified ZERO as rc=5 BLIND: 244 were rc=1 RED (a real CONFLICTING PR),
+# 34 rc=6 UNREACHABLE (token/rate-limit — never a poll-budget symptom), 2
+# rc=3 CONFIG, 88 clean. The single BLIND run that motivated suspicion of
+# this budget — 31311358759, 2026-08-09, 39/39 UNKNOWN after ~28s of waiting
+# behind five merges — predates rc=5 by hours; it is the incident rc=5 was
+# built to catch, not a second occurrence surviving past it. Raising ATTEMPTS
+# or SLEEPS now would add wall-clock to every one of ~370 runs/2wk to guard
+# against a failure mode this exact budget has not reproduced once since
+# going live. Left unchanged on that evidence; re-measure if a BLIND run
+# recurs rather than re-guessing the number.
 ATTEMPTS=3
 MIN_COMMITS=1
 # The TREND state (dr-w29): a line-oriented file the workflow persists between
