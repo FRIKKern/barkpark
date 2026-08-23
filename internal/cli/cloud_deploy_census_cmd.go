@@ -769,11 +769,21 @@ func deployCensusAbandonment(census cloudclient.DeployCensus) string {
 // deployCensusPct renders a rate node as a percentage, or reports that it has
 // none. A REFUSED node, and a node whose pct is absent, both answer false — the
 // caller must then render a refusal, because there is no honest number here.
+//
+// dr-w8-s4 followup: the number rendered is the control plane's own `pct`,
+// VERBATIM — never recomputed from numerator/sample. The old path re-derived
+// it through pctOf's one-decimal format, so the census whose contract pct was
+// 37.55 printed 37.5% and a reader comparing the CLI against a raw curl of the
+// census route had to work out which figure was authoritative. The envelope is
+// the single definition of the number; this renderer repeats it. (pctOf keeps
+// its other callers — they render shares this client computes itself, where a
+// display format is the only definition there is.) Headline, class shares and
+// site shares all route through here, so one page renders one precision rule.
 func deployCensusPct(r cloudclient.DeployRate) (string, bool) {
 	if r.Refused || r.Pct == nil {
 		return "", false
 	}
-	return pctOf(float64(r.Numerator), float64(r.Sample)), true
+	return strconv.FormatFloat(*r.Pct, 'f', -1, 64) + "%", true
 }
 
 // deployCensusRefusal is the in-band refusal in words: the control plane's own

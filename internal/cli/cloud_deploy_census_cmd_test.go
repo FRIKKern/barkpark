@@ -127,7 +127,7 @@ func TestCloudDeploymentsW12S8Payload(t *testing.T) {
 		t.Fatalf("the headline is still on its older-control-plane arm against a payload that carries the rate:\n%s", stdout)
 	}
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
-	for _, want := range []string{"37.5%", "58.5% of 1423 terminal"} {
+	for _, want := range []string{"37.55%", "58.47% of 1423 terminal"} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — both denominators ride the SAME line or a reader compares two screens", headline, want)
 		}
@@ -141,7 +141,7 @@ func TestCloudDeploymentsW12S8Payload(t *testing.T) {
 	// THE PER-SITE TWIN — the reader who asks "which site" must not be sent back
 	// to the diluted column.
 	site := censusLineContaining(t, stdout, "site-alpha")
-	for _, want := range []string{"41.7%", "t 62.5%"} {
+	for _, want := range []string{"41.67%", "t 62.5%"} {
 		if !strings.Contains(site, want) {
 			t.Fatalf("site row %q missing %q — the per-site terminal rate did not render", site, want)
 		}
@@ -378,7 +378,7 @@ func TestCloudDeploymentsTodayPayload(t *testing.T) {
 	}
 
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
-	for _, want := range []string{"37.5%", "832 failed", "793 deferred", "ATTEMPTED"} {
+	for _, want := range []string{"37.55%", "832 failed", "793 deferred", "ATTEMPTED"} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — rate, volume and denominator must ride the SAME line", headline, want)
 		}
@@ -407,7 +407,7 @@ func TestCloudDeploymentsBothConventions(t *testing.T) {
 		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr)
 	}
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
-	for _, want := range []string{"37.5%", "832 failed", "793 deferred", "591 live", "58.5% of 1423 terminal"} {
+	for _, want := range []string{"37.55%", "832 failed", "793 deferred", "591 live", "58.47% of 1423 terminal"} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — both conventions belong on the one line", headline, want)
 		}
@@ -778,15 +778,15 @@ func TestCloudDeploymentsLivePerAttemptLeadsTheHeadline(t *testing.T) {
 	}
 	headline := censusLineContaining(t, stdout, "of 2216 attempted")
 	for _, want := range []string{
-		"live 26.7% of 2216 attempted", "failure 37.5% of 2216 attempted",
-		"832 failed", "793 deferred", "591 live", "58.5% of 1423 terminal",
+		"live 26.67% of 2216 attempted", "failure 37.55% of 2216 attempted",
+		"832 failed", "793 deferred", "591 live", "58.47% of 1423 terminal",
 		"9 in flight", "4 cancelled", "0 residual",
 	} {
 		if !strings.Contains(headline, want) {
 			t.Fatalf("headline %q missing %q — live-per-attempt is co-equal and rides the SAME line", headline, want)
 		}
 	}
-	if strings.Index(headline, "live 26.7%") > strings.Index(headline, "failure 37.5%") {
+	if strings.Index(headline, "live 26.67%") > strings.Index(headline, "failure 37.55%") {
 		t.Fatalf("the live rate must LEAD, not trail the failure rate: %q", headline)
 	}
 	// ONE line carries the denominator phrase — enforced by censusLineContaining
@@ -814,7 +814,10 @@ func TestDeployCensusHeadlineRendersLiveInBOTHBranches(t *testing.T) {
 		LivePerAttempt: &cloudclient.DeployRate{Sample: 12, Pct: &pct, Numerator: 3, MinSample: 200},
 	}
 	head := deployCensusHeadline(honest)
-	if !strings.HasPrefix(head, "live 25.0% of 12 attempted") {
+	// The envelope's pct renders VERBATIM (dr-w8-s4 followup): 25.0 on the
+	// wire is the number 25, so the shortest-form render is "25%", never a
+	// re-derived "25.0%".
+	if !strings.HasPrefix(head, "live 25% of 12 attempted") {
 		t.Fatalf("the refused branch dropped the live term — the prepend is on the ok branch only: %q", head)
 	}
 	if !strings.Contains(head, "failure NO RATE") {
@@ -2251,7 +2254,7 @@ func TestCloudDeploymentsRefusedShareNamesTheWindow(t *testing.T) {
 	if strings.Contains(deferrals, "NO SHARE for") {
 		t.Fatalf("a section whose shares all answered must carry no refusal note:\n%s", deferrals)
 	}
-	if !strings.Contains(deferrals, "29.3%") {
+	if !strings.Contains(deferrals, "29.26%") {
 		t.Fatalf("the deferral share must still render its own percentage:\n%s", deferrals)
 	}
 }
@@ -2521,7 +2524,7 @@ func TestCloudDeploymentsSiteNoteCanBeAbsent(t *testing.T) {
 	if strings.Contains(sites, "NO PER-SITE RATE") {
 		t.Fatalf("both site rates answered, so no refusal note may print:\n%s", sites)
 	}
-	if !strings.Contains(sites, "41.7%") || !strings.Contains(sites, "32.7%") {
+	if !strings.Contains(sites, "41.67%") || !strings.Contains(sites, "32.68%") {
 		t.Fatalf("the answered per-site rates must still render their percentages:\n%s", sites)
 	}
 	// TODAY'S payload carries no per-site `live` — which is a fact the reader
@@ -2774,5 +2777,40 @@ func TestDeployCensusRenderNeverSaysFleet(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestDeployCensusPctRendersEnvelopeVerbatim pairs fixture pcts with their
+// rendered cells (dr-w8-s4 followup): the number printed IS the control
+// plane's own `pct`, shortest-form, never a one-decimal re-derivation from
+// numerator/sample. The 37.55 row is the one the divergence was filed on: the
+// old pctOf path rendered it 37.5%, and a reader comparing the CLI against a
+// raw curl of the census route had two numbers and no ruling.
+func TestDeployCensusPctRendersEnvelopeVerbatim(t *testing.T) {
+	cases := []struct {
+		pct  float64
+		want string
+	}{
+		{37.55, "37.55%"}, // two decimals survive
+		{37.5, "37.5%"},   // one decimal stays one decimal
+		{25.0, "25%"},     // a whole number is a whole number
+		{74.51, "74.51%"},
+	}
+	for _, tc := range cases {
+		r := cloudclient.DeployRate{Sample: 999, Pct: &tc.pct, Numerator: 1, MinSample: 200}
+		got, okRate := deployCensusPct(r)
+		if !okRate || got != tc.want {
+			t.Errorf("deployCensusPct(pct=%v) = %q ok=%v, want %q — the envelope's own number, verbatim", tc.pct, got, okRate, tc.want)
+		}
+	}
+	// Numerator/sample deliberately DISAGREE with pct above (1/999): a render
+	// that recomputes instead of repeating would print 0.1% and red every row.
+	refused := cloudclient.DeployRate{Sample: 12, Numerator: 3, MinSample: 200, Refused: true}
+	if _, okRate := deployCensusPct(refused); okRate {
+		t.Error("a refused node must never yield a percentage")
+	}
+	none := cloudclient.DeployRate{Sample: 500, Numerator: 3, MinSample: 200}
+	if _, okRate := deployCensusPct(none); okRate {
+		t.Error("a node without pct must never yield a percentage")
 	}
 }
