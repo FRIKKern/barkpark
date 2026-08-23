@@ -181,8 +181,12 @@ const REGISTER_BLIND: Record<string, Reason> = {
   diff: 'mono-apparatus',
   filetree: 'mono-apparatus',
 
-  // ── label / row chrome (14)
+  // ── label / row chrome (15)
   action: 'label-chrome',
+  // field-number (B085): a labelled numeric definition row — label + value
+  // chrome with no prose measure to carry, the `stat` precedent
+  // (pbw-fix-field-number-react).
+  'field-number': 'label-chrome',
   byline: 'label-chrome',
   eyebrow: 'label-chrome',
   toc: 'label-chrome',
@@ -397,7 +401,8 @@ describe('arm 3 — the register fingerprint (D50 REGISTER_BLIND)', () => {
     // on my own allowlist — growing it should cost a deliberate edit, because
     // every new row is a RULING that something legitimately ignores the
     // register. It cannot rot from the outside.
-    expect(Object.keys(REGISTER_BLIND)).toHaveLength(43)
+    // 43 → 44: field-number's label-chrome ruling (pbw-fix-field-number-react).
+    expect(Object.keys(REGISTER_BLIND)).toHaveLength(44)
     // Derived from the map, never a second copy of the literal above: the
     // partition must be total, with no type both blind and sensitive.
     const sensitive = Object.keys(BLOCK_RENDERERS).filter((t) => REGISTER_BLIND[t] === undefined)

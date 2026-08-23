@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 //
-// `form` / `questionnaire` block emitter — the JS twin of forms.ex at
-// style=:article. Render-only: one `<fieldset>` per question, semantic controls
-// per the grill.js input types, no `<script>`/action/method. `questionnaire` is
-// a pure alias of `form`, differentiated only by the container class.
+// `form` / `questionnaire` / `field-number` block emitters — the JS twin of
+// forms.ex at style=:article. Render-only: one `<fieldset>` per question,
+// semantic controls per the grill.js input types, no `<script>`/action/method.
+// `questionnaire` is a pure alias of `form`, differentiated only by the
+// container class. `field-number` (B085) is the labelled numeric definition
+// row (compose.ex field_number_text twin) — see its section below.
 
 import { type Block, escapeHtml, escapeAttr, str, asList, isMap } from '../inline'
 
@@ -85,4 +87,45 @@ const form: Emit = (b) => {
 const questionnaire: Emit = (b) =>
   form({ ...b, type: 'form', kind: b.kind ?? 'questionnaire' } as Block)
 
-export const formsEmitters: Record<string, Emit> = { form, questionnaire }
+// ── field-number (B085) — the JS twin of compose.ex field_number_text/1 and
+// pdrender fieldNumberRenderer (internal/pdrender/fields.go). A labelled
+// definition row in the article bp-field grid: dim mono label beside the
+// formatted `value` plus an optional trailing `unit`. An absent or
+// uncoercible value renders the honest "—" empty state (the field-reference
+// precedent) with NO unit suffix. `min`/`max`/`step` are Edit-mode control
+// bounds — never read here.
+
+// Mirrors Elixir field_number_value/1: numbers pass through; a string must
+// parse as a full decimal (Float.parse with an empty rest) — partial parses
+// and non-numeric garbage coerce to null, never to NaN-ish output.
+function fieldNumberValue(v: unknown): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string') {
+    const t = v.trim()
+    if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t)) {
+      const n = Number(t)
+      if (Number.isFinite(n)) return n
+    }
+  }
+  return null
+}
+
+// Integer values (and whole floats) drop the decimal point; fractions keep the
+// shortest round-trip decimal — String(n) is JS's Float.to_string twin.
+function fieldNumberText(b: Block): string {
+  const n = fieldNumberValue(b.value)
+  if (n === null) return '—'
+  const unit = str(b.unit).trim()
+  return unit === '' ? String(n) : `${String(n)} ${unit}`
+}
+
+// The article definition row compose.ex field_row_article/2 emits — byte-shape
+// parity with the Elixir renderer's bp-field grid (gui-premium w2).
+const fieldNumber: Emit = (b) =>
+  `<div class="bp-field"><span class="bp-field__l">${escapeHtml(str(b.label))}</span><div class="bp-field__v"><span>${escapeHtml(fieldNumberText(b))}</span></div></div>`
+
+export const formsEmitters: Record<string, Emit> = {
+  form,
+  questionnaire,
+  'field-number': fieldNumber,
+}
