@@ -451,8 +451,14 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
   echo "              charter CITES a decision, not how it defines one."
   echo "  titled:     ${n_occ} definitions over ${n_distinct} distinct PDS-D"
   echo "  duplicated: ${n_dup} number(s) defined more than once"
+  # The printed class counts are DERIVED from the lists, never typed: a typed
+  # literal stands still while the list grows, printing "18 genuine" beside a
+  # 19-entry list (the printed-a-measurement-when-nothing-was-measured shape).
+  local n_base_genuine n_base_benign
+  n_base_genuine="$(echo "$DUP_BASELINE_GENUINE" | wc -w | tr -d ' ')"
+  n_base_benign="$(echo "$DUP_BASELINE_BENIGN" | wc -w | tr -d ' ')"
   if [ "$baselined" -eq 1 ]; then
-    echo "  baseline:   PINNED for $(basename -- "$CHARTER") — 18 genuine + 2 benign, BY NUMBER."
+    echo "  baseline:   PINNED for $(basename -- "$CHARTER") — ${n_base_genuine} genuine + ${n_base_benign} benign, BY NUMBER."
     echo "              Lines are printed, never pinned: cite-by-line is refuted on"
     echo "              this epic's own record (D399 was :6503/:6586, is :8625/:8708)."
   else
@@ -487,6 +493,30 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
         echo "                         defines it once. Drop it from the baseline."
       fi
     done
+  fi
+
+  # THE COUNTED CLASSES MUST MATCH THE LISTS THAT EXCUSED THEM. benign/genuine
+  # used to be computed here and then never read — the ruling ran on unexpected
+  # and vanished alone, so a baselined number classified by the WRONG arm (or a
+  # number sitting in both lists) changed nothing. Re-derive, per list, how many
+  # baselined numbers actually FIRED and require the classification counters to
+  # agree; disagreement is DIVERGENT, not decoration.
+  local misclass=0
+  if [ "$baselined" -eq 1 ]; then
+    local fired_genuine=0 fired_benign=0
+    for n in $DUP_BASELINE_GENUINE; do
+      grep -q "^PDS-D${n} " "$dups" && fired_genuine=$((fired_genuine + 1))
+    done
+    for n in $DUP_BASELINE_BENIGN; do
+      grep -q "^PDS-D${n} " "$dups" && fired_benign=$((fired_benign + 1))
+    done
+    if [ "$genuine" -ne "$fired_genuine" ] || [ "$benign" -ne "$fired_benign" ]; then
+      misclass=1
+      echo "    BASELINE-MISCOUNT    classified genuine=${genuine} benign=${benign}, but the lists say"
+      echo "                         ${fired_genuine} genuine + ${fired_benign} benign fired — a baselined number was"
+      echo "                         classified by a different arm than its list claims (or sits in"
+      echo "                         both lists). The baseline no longer describes the classifier."
+    fi
   fi
 
   # THE THREE SHAPES A NAIVE GREP GETS WRONG, HANDLED BY NAME. A naive
@@ -549,8 +579,8 @@ uniqueness_leg() { # uniqueness_leg <cites-file>
     echo "             including this one. Fix the pointer, not the symptom."
   fi
 
-  if [ "$unexpected" -gt 0 ] || [ "$vanished" -gt 0 ]; then
-    echo "  DIVERGENT: ${unexpected} unbaselined duplicate(s), ${vanished} stale baseline entrie(s)."
+  if [ "$unexpected" -gt 0 ] || [ "$vanished" -gt 0 ] || [ "$misclass" -gt 0 ]; then
+    echo "  DIVERGENT: ${unexpected} unbaselined duplicate(s), ${vanished} stale baseline entrie(s), ${misclass} baseline miscount(s)."
     echo "             The baseline is two-sided on purpose — it must keep descending from"
     echo "             a measurement of the charter as it is, not as it was."
     raise 1
