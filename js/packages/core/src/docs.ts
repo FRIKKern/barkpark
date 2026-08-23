@@ -36,6 +36,22 @@ interface QueryResultBody<T> {
  * Returns a {@link DocsBuilder} whose `.find()` / `.findOne()` hit the wire.
  * `.where(field, op, value)` chains; see {@link FilterOp} for supported ops.
  * Prefer `client.docs(type)` — this factory is for config-only callers.
+ *
+ * ERROR SEMANTICS — DECIDED, deliberately asymmetric to `getDoc`
+ * (site-spawner-backlog-core-list-404-swallow, wave-7 D72):
+ *
+ * - A PUBLIC type with zero matching documents is a 200 with an empty page:
+ *   `.find()` resolves `[]`, `.findOne()` resolves `null`. Absence of DATA is
+ *   a normal state, not an error.
+ * - A missing or private TYPE is a 404: `.find()` / `.findOne()` REJECT with
+ *   the typed `BarkparkNotFoundError` (status + serverCode intact). This is a
+ *   misconfiguration signal the caller must see — a schema-name typo, or a
+ *   doc_type that is private for this token. Swallowing it to `[]` would make
+ *   a misconfigured site indistinguishable from an empty one at build time.
+ * - `getDoc` maps its 404 to `{ data: null }` because the absence of ONE
+ *   document of a valid type IS a normal data state — the asymmetry is the
+ *   point, not an oversight. Consumers that prefer an empty page can guard
+ *   in-page (the D72 next-starter precedent).
  */
 export function createDocsOperation<T = BarkparkDocument>(
   config: BarkparkClientConfig,
