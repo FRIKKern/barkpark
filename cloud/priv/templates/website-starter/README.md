@@ -7,7 +7,7 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 
 - Next.js 15 App Router, React 19, TypeScript
 - `@barkpark/nextjs` for server fetching + Server Actions
-- `@barkpark/react` for `PortableText` rendering
+- `@barkpark/react` `PortableDoc` — the canonical, Phoenix-faithful PortableDocument renderer, plus `@barkpark/react/client` media hydration (mermaid diagrams + asciicasts) and `@barkpark/react/paper-surface.css` for the skin
 - Tailwind CSS
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
 - Sample schemas (`page`, `post`, `author`) + seed script
@@ -29,7 +29,7 @@ Open http://localhost:3000 · Studio: http://localhost:4000/studio
 
 ## Auth
 
-Default dev token: `barkpark-dev-token` (read + write + admin). **Must not be used in production — rotate before deploying.** See [docs/auth.md](https://github.com/barkpark/barkpark/blob/main/docs/auth.md) for the rotation rule. This is enforced: if `BARKPARK_SERVER_TOKEN` is unset with `NODE_ENV=production`, `lib/barkpark.ts` throws at startup instead of silently falling back to the dev token.
+Default dev token: `barkpark-dev-token` (read + write + admin). **Must not be used in production — rotate before deploying.** See [docs/auth.md](https://github.com/barkpark/barkpark/blob/main/docs/auth.md) for the rotation rule.
 
 > **Note:** `.env.example` ships with the placeholder value `changeme-barkpark-dev-token`. After `cp .env.example .env.local`, replace that placeholder with `barkpark-dev-token` — the value the API seeds on first boot. Auth calls will fail until you do.
 

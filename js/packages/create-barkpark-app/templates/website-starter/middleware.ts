@@ -14,7 +14,10 @@ import { buildCspPolicy, generateNonce } from './lib/csp'
 // Because the nonce is delivered on the request header (not read via
 // `headers()` in the layout), Next keeps the template routes static-eligible —
 // the middleware flips ZERO routes static→dynamic (wave verify V2). This is
-// pure defense-in-depth: the scaffold has no innerHTML sinks.
+// defense-in-depth on top of the one trusted `dangerouslySetInnerHTML` sink
+// (`PortableDocSurface`, fed only by `renderPortableDocument`'s escaped
+// output — see lib/csp.ts): a nonce-gated `script-src` means an injected
+// `<script>` still cannot execute even if that emitter ever regressed.
 
 export function middleware(request: NextRequest): NextResponse {
   const nonce = generateNonce()

@@ -1,9 +1,13 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
-import { PortableText } from '@barkpark/react'
+import type { Block } from '@barkpark/react'
 import { barkparkMetadata } from '@barkpark/nextjs'
+// The canonical PortableDoc skin — ONE stylesheet for the `bp-*` classes the
+// renderer emits (the same one Phoenix's `/papers` reader compiles in).
+import '@barkpark/react/paper-surface.css'
 import { getDocBySlug } from '../../../lib/barkpark'
 import { formatDate } from '../../../lib/format-date'
+import { PortableDocSurface } from '../../portable-doc-surface'
 
 interface Post {
   _id: string
@@ -11,7 +15,10 @@ interface Post {
   excerpt?: string
   publishedAt?: string
   slug?: { current: string }
-  content?: Parameters<typeof PortableText>[0]['value']
+  // The canonical, type-keyed PortableDocument block array (Barkpark's own
+  // block grammar) — rendered by `@barkpark/react`'s PortableDoc, NOT Sanity
+  // PortableText.
+  content?: Block[]
 }
 
 export async function generateMetadata({
@@ -32,7 +39,7 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
   if (!post) notFound()
 
   return (
-    <article className="prose max-w-none dark:prose-invert">
+    <article>
       <h1 className="text-4xl font-bold">{post.title}</h1>
       {formatDate(post.publishedAt) ? (
         <p className="text-sm text-slate-500">
@@ -40,7 +47,11 @@ export default async function PostPage({ params }: { params: Promise<{ slug: str
         </p>
       ) : null}
       {post.excerpt ? <p className="text-lg">{post.excerpt}</p> : null}
-      {post.content ? <PortableText value={post.content} /> : null}
+      {/*
+        renderPortableDocument runs inside PortableDocSurface (SSR-rendered); only
+        the mermaid diagram + asciicast mount points hydrate on the client.
+      */}
+      {post.content ? <PortableDocSurface blocks={post.content} /> : null}
     </article>
   )
 }
