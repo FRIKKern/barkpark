@@ -204,6 +204,66 @@ func TestDeployCensusAbandonmentThreeStates(t *testing.T) {
 	}
 }
 
+// TestDeployCensusClassRowDecodesAndRendersAgency pins the dr-w31 fix:
+// DeployLedger emits `agency` on every class row and it must (a) decode onto
+// DeployCensusClass.Agency and (b) render as an "accuses:" cell — an older
+// control plane that never sent the key renders "not sent", never an invented
+// attribution. A struct edit that drops the `json:"agency"` tag (or a render
+// edit that stops printing the cell) reds this test; proved by removing the
+// tag and re-running, then restoring it.
+func TestDeployCensusClassRowDecodesAndRendersAgency(t *testing.T) {
+	const payload = `{"classes":[{"class":"BOX_UNREACHABLE","label":"box unreachable","count":9,"agency":"box","share":{"pct":42.0,"sample":21}}]}`
+
+	var census cloudclient.DeployCensus
+	if err := json.Unmarshal([]byte(payload), &census); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(census.Classes) != 1 {
+		t.Fatalf("expected 1 class row, got %d", len(census.Classes))
+	}
+	if got := census.Classes[0].Agency; got != "box" {
+		t.Fatalf("Agency decoded as %q, want %q — the field is silently dropped again", got, "box")
+	}
+
+	row := deployCensusClassRow(census.Classes[0])
+	if !strings.Contains(row, "accuses: box") {
+		t.Fatalf("class row %q does not render the agency cell", row)
+	}
+
+	// An older control plane sends no `agency` key at all — the render must
+	// say so rather than inventing an attribution or printing an empty cell
+	// that reads as a silent success.
+	older := cloudclient.DeployCensusClass{Class: "OLD_CLASS", Label: "old", Count: 3}
+	if got := deployCensusClassRow(older); !strings.Contains(got, "accuses: not sent") {
+		t.Fatalf("a class row with no agency must render %q, got %q", "accuses: not sent", got)
+	}
+}
+
+// TestDeployCensusCompletenessLineThreeStates: the census's own self-audit had
+// been decoded since dr-w24 but rendered by nobody — this pins all three
+// endings so the audit can never again ride the wire into silence.
+func TestDeployCensusCompletenessLineThreeStates(t *testing.T) {
+	if got := deployCensusCompletenessLine(nil); !strings.Contains(got, "NOT AUDITED") {
+		t.Fatalf("nil completeness must say NOT AUDITED, got %q", got)
+	}
+
+	balanced := &cloudclient.DeployCensusCompleteness{
+		Audited: 8383, Accounted: 8383, Unaccounted: 0, Balanced: true, Method: "cohort-sum",
+	}
+	if got := deployCensusCompletenessLine(balanced); !strings.Contains(got, "BALANCED") || !strings.Contains(got, "8383") {
+		t.Fatalf("balanced completeness rendered wrong: %q", got)
+	}
+
+	reason := "3 rows in a cohort not yet named"
+	unbalanced := &cloudclient.DeployCensusCompleteness{
+		Audited: 100, Accounted: 97, Unaccounted: 3, Balanced: false, Method: "cohort-sum", Reason: &reason,
+	}
+	got := deployCensusCompletenessLine(unbalanced)
+	if !strings.Contains(got, "NOT BALANCED") || !strings.Contains(got, "3 of 100") || !strings.Contains(got, reason) {
+		t.Fatalf("unbalanced completeness rendered wrong: %q", got)
+	}
+}
+
 // TestDeployCensusDeferredTotalPrefersTheServer: the client-side sum over the
 // class rows is a SECOND definition of the number, and it is the one that can be
 // confidently wrong — a control plane that sent no class rows makes it answer 0
