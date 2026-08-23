@@ -1407,7 +1407,10 @@ defmodule BarkparkCloud.Web.Router do
 
       # The agent's per-cycle signals become one append-only event. The full
       # report rides in the payload so the dashboard/event stream can show disk,
-      # PG size, backup, dirty-tree, and the granular health checks.
+      # PG size, dirty-tree, and the granular health checks. (The payload's
+      # `backup_ok` key rides too, but it is an unwired constant false — no
+      # BackupProbe exists — so it is not a signal the stream can honestly
+      # show; cch-w50-bl owns wiring it.)
       _ = Registry.record_event(barkpark, "health", report)
 
       # Push "fleet" so a live health change (up/down, version, agent online)
@@ -8741,10 +8744,19 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/barkparks/:id/events → 200 {events: [...]} newest first | 404.
   # User-authed + TEAM-SCOPED: a wrong-team / nonexistent id is the SAME 404 (no
   # existence leak), matching DELETE /v1/barkparks/:id. Surfaces the granular
-  # history the agent already writes (disk%, PG size, backup, dirty-tree, the
-  # health-gate array) plus the new "status" transition rows — a pure read over
-  # Registry.recent_events_for_team/3, no new model. `?limit=` caps the window
-  # (default 50, max 200).
+  # history the agent already writes. The event kinds are exactly the four live
+  # `Registry.record_event` producers (cch-w51-bl, re-derived 2026-08-23):
+  # "health" — the full beat (disk%, PG size, dirty-tree, the health-gate
+  # array; NOT backup — the beat's `backup_ok` key is an unwired constant
+  # false, no BackupProbe exists, so the feed carries no backup truth) — plus
+  # "space", "verify", and the "status" transition rows the staleness worker
+  # writes. A pure read over Registry.recent_events_for_team/3, no new model.
+  # `?limit=` caps the window (default 50, max 200).
+  #
+  # LIMIT, stated on purpose (charter D341): __agent_event_vocabulary_census.mjs
+  # reads `Registry.record_event(` CALL SITES, not prose, so it can never red on
+  # this comment — and widening it to grep comments would be a false-red
+  # machine. This sentence is the durable note instead.
   get "/v1/barkparks/:id/events" do
     conn = Auth.require_user(conn, [])
 
