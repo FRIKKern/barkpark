@@ -1729,6 +1729,20 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		}
 		all = append(all, docs...)
 		if len(docs) < pageSize {
+			// A walk that never advanced past page one has the server's OWN
+			// envelope in hand — render it VERBATIM, exactly as the non---all
+			// path would. The re-wrap below marshals a nil []json.RawMessage as
+			// JSON null and drops every sibling field (`count` first among
+			// them), so `--all` over an honest empty queue printed
+			// {"documents":null} — a corrupted twin of the {"count":0,
+			// "documents":[]} the server sent, breaking `jq '.documents[]'` on
+			// exactly the emptiest page (pds-w27-bl-task-next-and-all-corrupt-
+			// the-honest-shape). Multi-page walks keep the re-wrap: a stitched
+			// result has no single server body to pass through.
+			if offset == 0 {
+				renderSuccess(out, cmd, respBody)
+				return exitOK
+			}
 			break
 		}
 		offset += pageSize
@@ -1816,7 +1830,14 @@ func bodyPreview(body []byte) string {
 	return strings.TrimSpace(s)
 }
 
+// mustArray marshals rows for the multi-page re-wrap. A nil slice would render
+// as JSON null — the empty-page corruption the single-page pass-through above
+// exists to prevent — so it is pinned to []. (Multi-page walks always carry
+// rows today; this is the belt to that suspender.)
 func mustArray(items []json.RawMessage) []byte {
+	if items == nil {
+		items = []json.RawMessage{}
+	}
 	b, _ := json.Marshal(items)
 	return b
 }
