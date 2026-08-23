@@ -122,6 +122,29 @@ defmodule Barkpark.Scim do
   find the tokens. The revoke MUST precede the hard-delete. Share-edit tokens
   are scope-keyed (`share_scope`, `owner_user_id` NULL) and are deliberately
   untouched — they are revoked with their share, not their minter.
+
+  ## The cross-org blast radius, RULED (pds-bl-deprovision-blast-radius-crosses-orgs)
+
+  A user can be provisioned into MORE THAN ONE organization. Reachability is
+  org-scoped (the bearer's `:scim_org` fence holds), but this function's
+  EFFECTS used to be org-blind in two places. The ruling splits them:
+
+    * **Sessions: the global kill is INTENDED and stays.** A `UserSession` is
+      an IDENTITY bearer — it reaches every org the user belongs to and cannot
+      be partially revoked, so any narrower kill would leave a live bearer
+      still reaching the deprovisioning org. Fail-closed wins. The receipt's
+      `sessions_revoked` therefore counts sessions BEYOND the calling org, and
+      says so here rather than implying an org-scoped number.
+    * **Owner-bound PATs: the org-blind kill on SOFT deprovision was a
+      cross-tenant DEFECT and is scoped.** A PAT is workspace-bound, so org
+      A's IdP deprovisioning a shared user must not revoke the PATs that user
+      holds against org B's workspaces. Soft deprovision now revokes only the
+      owner's live PATs whose `workspace_id` is in the calling org's
+      workspaces — plus any with a NULL `workspace_id` (a credential bound to
+      no workspace reaches the calling org too; fail-closed). HARD deprovision
+      keeps the global kill: the identity row is destroyed and the FK nilifies
+      `owner_user_id`, so any surviving token would become an orphaned live
+      credential nobody could ever find again.
   """
   @spec deprovision_user(Organization.t(), User.t(), keyword()) :: {:ok, map()}
   def deprovision_user(%Organization{} = org, %User{} = user, opts \\ []) do
@@ -140,7 +163,9 @@ defmodule Barkpark.Scim do
         )
 
       # BEFORE the hard-delete nilifies owner_user_id (FK on_delete: :nilify_all).
-      tokens_revoked = revoke_owner_tokens(user)
+      # Soft: org-scoped (+ NULL-workspace fail-closed). Hard: global — see
+      # the blast-radius ruling in the @doc above.
+      tokens_revoked = revoke_owner_tokens(user, if(hard, do: :all, else: {:org, ws_ids}))
 
       audit(org, user, "user_deprovisioned", %{
         "hard" => hard,
@@ -181,21 +206,34 @@ defmodule Barkpark.Scim do
 
   def org_user_active?(_org, _), do: false
 
-  # Stamp `revoked_at` on every LIVE api_token owned by this user, so
-  # `Auth.verify_token/1` rejects it immediately. Owner-bound PATs ONLY: share
+  # Stamp `revoked_at` on LIVE api_tokens owned by this user, so
+  # `Auth.verify_token/1` rejects them immediately. Owner-bound PATs ONLY: share
   # tokens (`share_scope` set, `owner_user_id` NULL) never match this WHERE and
   # are left alone. Emits a `token/user_tokens_revoked` audit event when any
   # token was killed (a standing credential lifecycle event).
-  defp revoke_owner_tokens(%User{id: user_id} = user) do
+  #
+  # `scope` is `:all` (hard deprovision — the identity is being destroyed) or
+  # `{:org, ws_ids}` (soft — only the calling org's workspaces, plus
+  # NULL-workspace tokens, fail-closed). See the blast-radius ruling on
+  # `deprovision_user/3`.
+  defp revoke_owner_tokens(%User{id: user_id} = user, scope) do
     now = DateTime.utc_now() |> DateTime.truncate(:second)
 
-    {n, _} =
-      Repo.update_all(
-        from(t in ApiToken,
-          where: t.owner_user_id == ^user_id and is_nil(t.revoked_at)
-        ),
-        set: [revoked_at: now]
+    base =
+      from(t in ApiToken,
+        where: t.owner_user_id == ^user_id and is_nil(t.revoked_at)
       )
+
+    query =
+      case scope do
+        :all ->
+          base
+
+        {:org, ws_ids} ->
+          from(t in base, where: t.workspace_id in ^ws_ids or is_nil(t.workspace_id))
+      end
+
+    {n, _} = Repo.update_all(query, set: [revoked_at: now])
 
     if n > 0 do
       Audit.emit(%{
