@@ -113,11 +113,13 @@ async function main(argv: string[]): Promise<number> {
   }
 
   let didInstall = false
+  let installFailed = false
   if (answers.install) {
     try {
       await runInstall({ targetDir, pm })
       didInstall = true
     } catch (err) {
+      installFailed = true
       console.error(pc.yellow(`Dependency install failed: ${(err as Error).message}`))
       console.error(pc.yellow(`You can run "${pm.installCommand}" manually from ${targetDir}.`))
     }
@@ -127,7 +129,7 @@ async function main(argv: string[]): Promise<number> {
     await runGitInit(targetDir)
   }
 
-  p.outro(pc.green('Done.'))
+  p.outro(installFailed ? pc.yellow('Done, with warnings.') : pc.green('Done.'))
 
   printNextSteps({
     targetDir,
@@ -138,7 +140,13 @@ async function main(argv: string[]): Promise<number> {
     didInstall,
   })
 
-  return 0
+  // DECISION (cca-backlog-install-exit-code): an install the USER ASKED FOR
+  // that failed exits 1. Scripted use — `create-barkpark-app x -y && cd x &&
+  // npm test` — must not sail on past a half-installed tree, and a green
+  // "Done." would tonally contradict the yellow errors above. The scaffold
+  // itself is finished, usable work: nothing is deleted, git init still ran,
+  // and printNextSteps re-adds the manual install step for interactive users.
+  return installFailed ? 1 : 0
 }
 
 main(process.argv)
