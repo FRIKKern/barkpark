@@ -214,8 +214,13 @@ defmodule BarkparkCloud.SitesDeployStageCaptionTest do
       refute FailureCopy.humanize(derived) == FailureCopy.scrub(derived),
              "the classifying fixture does not classify — the guard below would be green by construction"
 
+      # CO-UPDATED by task-fda5b6f19f1e06c9. This capture no longer lands on the
+      # anonymous credential arm: `@site_read_token_rejected` claims it FIRST and
+      # names the token and the fix. The discrimination clause above is
+      # untouched — the fixture still has to CLASSIFY for this guard to mean
+      # anything; only the sentence it classifies to moved.
       assert FailureCopy.humanize(derived) ==
-               "A credential was rejected. This capture doesn't say whose credential it was — the raw error line names it."
+               "This site's Barkpark read token was rejected, so the build couldn't fetch its content. Mint a fresh read token for the site in Barkpark, save it on the site, then deploy the site again."
 
       # …and the wave-26 pair does NOT move. A rail-vs-row parity assertion built
       # on either one passes whether the fix exists or not.
@@ -269,7 +274,7 @@ defmodule BarkparkCloud.SitesDeployStageCaptionTest do
       assert stage_row(dep, "BUILD")["detail"] == class
     end
 
-    test "the divergence was real: the raw capture and the class share NO significant word" do
+    test "the divergence was real — and the class now names the SAME credential the raw names" do
       {site, bp, token} = setup_site()
       {:ok, d} = Sites.Deploy.enqueue(site, bp)
       raw = derived_classifying_detail()
@@ -287,8 +292,22 @@ defmodule BarkparkCloud.SitesDeployStageCaptionTest do
 
       dep = rendered_deployment(site, d, token)
 
-      assert MapSet.disjoint?(significant_words(raw), significant_words(dep["failure_reason"])),
-             "the two halves of the old contradiction now share a word — re-derive the corpus"
+      # RE-POINTED by task-fda5b6f19f1e06c9, and the inversion is the POINT.
+      # Wave 27 measured the contradiction as DISJOINTNESS: the class named a
+      # hosting provider the raw capture never mentions, so sharing no word was
+      # exactly the defect. The site-token clause makes the class name the SAME
+      # credential the raw names, so AGREEMENT is now the guard, and a class that
+      # went back to sharing nothing would be naming a different subject again.
+      class_words = significant_words(dep["failure_reason"])
+
+      assert MapSet.subset?(MapSet.new(["read", "token"]), class_words),
+             "the class stopped naming the credential the raw capture names — re-derive the corpus"
+
+      refute MapSet.disjoint?(significant_words(raw), class_words),
+             "the class shares no word with the raw capture — it is naming a different subject again"
+
+      # …and it is still a CLASS, not the raw echoed back: the fold still folds.
+      refute dep["failure_reason"] == raw
     end
 
     test "the raw capture is NOT destroyed — it survives verbatim in the console LINE the build console prints" do
