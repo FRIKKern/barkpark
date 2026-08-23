@@ -1670,7 +1670,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert Map.has_key?(env, "HOME")
       assert Map.has_key?(env, "PATH")
 
-      ClaudeChat.close(session)
+      # @sid is SHARED with the next test in this describe. `close/1` is a
+      # cast, so returning while teardown still holds the registry name hands
+      # the next `start_session` an `{:already_started, pid}`.
+      close_and_reap(session, @sid)
     end
 
     test "task_hands/1 is :not_attempted without a minter, :unknown once the session is gone" do
@@ -1681,9 +1684,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
 
       assert ClaudeChat.task_hands(session) == :not_attempted
 
-      ref = Process.monitor(session)
-      ClaudeChat.close(session)
-      assert_receive {:DOWN, ^ref, :process, ^session, _}, 2_000
+      close_and_reap(session, @sid)
 
       assert ClaudeChat.task_hands(session) == :unknown
     end
@@ -2228,6 +2229,38 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     File.chmod!(path, 0o755)
     on_exit(fn -> File.rm_rf(path) end)
     path
+  end
+
+  # Close a PINNED session and wait until its registry name is actually FREE.
+  #
+  # `close/1` is a cast and `terminate/2` does real teardown work (Port.close,
+  # child reap, capture + mcp-config cleanup), so a test that closes a pinned
+  # session and returns immediately leaves the uuid registered in
+  # Barkpark.StudioChat.SessionRegistry for as long as teardown takes — and the
+  # NEXT test to pin the SAME uuid gets `{:error, {:already_started, pid}}`
+  # (CI run 32627503939 red exactly this way on the @sid pair, this file's
+  # env-dump test into task_hands). The DOWN alone is not the whole story:
+  # Registry sweeps its entry AFTER the process dies, so poll the lookup until
+  # it answers [].
+  defp close_and_reap(session, sid) do
+    ref = Process.monitor(session)
+    ClaudeChat.close(session)
+    assert_receive {:DOWN, ^ref, :process, ^session, _}, 5_000
+
+    assert await_unregistered(sid, 200),
+           "session #{sid} is DOWN but still registered — the registry sweep never freed the name"
+  end
+
+  # Bounded poll (10ms x rounds) for the registry entry's removal.
+  defp await_unregistered(_sid, 0), do: false
+
+  defp await_unregistered(sid, rounds) do
+    if Registry.lookup(Barkpark.StudioChat.SessionRegistry, sid) == [] do
+      true
+    else
+      Process.sleep(10)
+      await_unregistered(sid, rounds - 1)
+    end
   end
 
   # `head -n 1` drains exactly the first written frame to a file (flushing on
