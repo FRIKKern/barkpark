@@ -427,7 +427,8 @@ const SITE_PHONE_WIDTHS = [320, 340, 360, 375, 390, 412, 430, 480, 495, 496, 620
 // asserted, the worst case. The row named `site-binding-bound` as the fixture
 // still overhanging at 390 (+5); on today's bytes it does not overhang at ANY
 // width, in either theme, WITH THE FIX DELETED. It has never deployed
-// (`current_deployment_id` absent -> `siteHasEverDeployed` false, app.js:10441),
+// (`current_deployment_id` absent -> `siteHasEverDeployed()` false — re-derive
+// with `grep -n 'function siteHasEverDeployed' cloud/priv/static/app.js`),
 // so its detail head emits NO live-URL line at all and there is nothing to
 // overhang. That makes it the leg's attribution control: 84 findings land on the
 // two fixtures that carry `.site-open` and ZERO on the one that does not, which
@@ -1733,7 +1734,8 @@ async function main() {
         }
         // THE POPULATION IS DERIVED TOO, not counted after the fact. `.site-open`
         // appears in the detail head's `.fleet-url` sub-line only when
-        // `siteHasEverDeployed(site)` (app.js:10441 — `!!s.current_deployment_id`),
+        // `siteHasEverDeployed(site)` — `!!s.current_deployment_id`, re-derived with
+        // `grep -n 'function siteHasEverDeployed' cloud/priv/static/app.js` —
         // so whether this fixture owes a link is a property of the FIXTURE. A
         // leg that merely tallied what it found would print a happy total while
         // a fixture quietly stopped rendering the element the row is named for.
