@@ -172,7 +172,18 @@ export interface SessionSnapshot {
   loading: boolean
   /** initial-load failure — the screen renders error-with-retry. */
   loadError: string | undefined
-  /** transport failures of fire-and-forget POSTs (send/interrupt). */
+  /** transport failures of fire-and-forget POSTs (send/interrupt/setChoice).
+   *
+   * RECONCILED write/clear ledger (mob-bl-transport-error-sticky) — set() is a
+   * shallow merge, so any field without a deliberate clear survives every later
+   * write. Every writer therefore has a matching clear, plus one global one:
+   *   writes:  send-fail, interrupt-fail, setChoice-fail
+   *   clears:  send() entry, interrupt() entry, setChoice() entry (a fresh
+   *            attempt drops the old verdict), and onStatus('open') — a healthy
+   *            stream is the transport re-asserting itself, so a stale failure
+   *            must not outlive the transport it indicts. Without that last
+   *            clear, one failed send masked every later reducer notice via the
+   *            screen's `transportError ?? state.notice` until the next send. */
   transportError: string | undefined
   streamStatus: StreamStatus
   /** rides along with 'degraded'/'refused' — the refused header label needs
@@ -270,7 +281,16 @@ export class ChatSessionStore {
           // exit — a superseded stream's 'closed' must never clobber the live
           // stream's status.
           if (this.stopped || gen !== this.startGen) return
-          this.set({ streamStatus, streamFailure })
+          // A healthy stream clears a stale POST failure (the reconciled-ledger
+          // clear at the field declaration). ONLY 'open' clears — a degraded or
+          // refused status is not evidence the transport recovered, and wiping
+          // the error on it would be the same claim-without-evidence in the
+          // other direction.
+          if (streamStatus === 'open') {
+            this.set({ streamStatus, streamFailure, transportError: undefined })
+          } else {
+            this.set({ streamStatus, streamFailure })
+          }
         },
       })
     })()
@@ -295,6 +315,10 @@ export class ChatSessionStore {
   }
 
   interrupt(): void {
+    // Entry-clear, same as send()/setChoice(): a fresh attempt drops the old
+    // verdict — and without it 'interrupting…' (a reducer notice this very
+    // dispatch produces) stayed hidden behind a stale send failure.
+    this.set({ transportError: undefined })
     this.dispatch({ type: 'interrupt' })
   }
 
