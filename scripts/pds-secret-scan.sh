@@ -187,8 +187,10 @@ regex_escape() { # POSIX-ERE-escape a literal value
 sql_quote() { printf '%s' "$1" | sed "s/'/''/g"; }
 
 scan_db() { # conninfo
-  local conn="$1" alt="" label value table count tables=0
+  local conn="$1" alt="" label value table count tables=0 errf reason
   command -v psql >/dev/null 2>&1 || die "--db needs psql on PATH"
+  errf="$(mktemp "${TMPDIR:-/tmp}/pds-scan-err.XXXXXX")"
+  TMP_FILES="$TMP_FILES $errf"
 
   while IFS="$(printf '\t')" read -r label value; do
     if [ -z "$alt" ]; then alt="$(regex_escape "$value")"
@@ -202,9 +204,18 @@ scan_db() { # conninfo
     [ -n "$table" ] || continue
     tables=$((tables + 1))
     count="$(psql "$conn" -At -c \
-      "SELECT count(*) FROM public.\"$table\" t WHERE t::text ~ '$(sql_quote "$alt")'" 2>/dev/null || echo "")"
+      "SELECT count(*) FROM public.\"$table\" t WHERE t::text ~ '$(sql_quote "$alt")'" 2>"$errf" || echo "")"
     if [ -z "$count" ]; then
-      say "  skip table=$table (not scannable — no text cast; counted as UNSCANNED)"
+      # Say WHY it was skipped — a permission-invisible table must be named as
+      # such, never blamed on a missing text cast (that false reason is exactly
+      # the class this instrument exists to kill).
+      if grep -q 'permission denied' "$errf" 2>/dev/null; then
+        reason="permission denied — the connecting role cannot read it"
+      else
+        reason="$(head -1 "$errf" 2>/dev/null | cut -c1-160)"
+        [ -n "$reason" ] || reason="query returned nothing"
+      fi
+      say "  skip table=$table (not scannable — $reason; counted as UNSCANNED)"
       UNSCANNED=$((UNSCANNED + 1))
       continue
     fi
@@ -213,7 +224,18 @@ scan_db() { # conninfo
       say "  HIT  table=$table  rows_matching_ammo=$count"
     fi
   done < <(psql "$conn" -At -c \
-    "SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' ORDER BY 1" 2>/dev/null || true)
+    "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE n.nspname = 'public' AND c.relkind IN ('r','p') ORDER BY 1" 2>/dev/null || true)
+
+  # pg_class, NOT information_schema.tables: information_schema filters by the
+  # CONNECTING ROLE's privileges, so a table the role holds no privilege on
+  # drops out of the enumeration entirely and the scan reports "tables
+  # scanned: 0 · RESULT: CLEAN" with no disclosure — with the secret still in
+  # the database (run-proven with a REVOKE ALL role). pg_class names every
+  # ordinary and partitioned table regardless of privilege; a table the role
+  # cannot read then lands in the UNSCANNED branch above WITH its reason.
+  if [ "$tables" -eq 0 ]; then
+    die "enumerated 0 tables in schema public — the enumeration itself failed or the DB is empty. A scan over nothing proves nothing; refusing to print CLEAN."
+  fi
 
   say "  tables scanned: $tables   ammo values: $(ammo_count)"
 }
