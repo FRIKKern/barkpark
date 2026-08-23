@@ -1,4 +1,5 @@
 import { execa } from 'execa'
+import { rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import pc from 'picocolors'
 import type { PmInfo } from './pm.js'
@@ -13,6 +14,13 @@ export interface PostInstallOptions {
 }
 
 export async function runGitInit(targetDir: string): Promise<void> {
+  // Whether a .git already existed BEFORE this run: a re-run inside an
+  // existing repository must never have its history deleted by our cleanup.
+  const gitDir = path.join(targetDir, '.git')
+  const preexisting = await stat(gitDir).then(
+    () => true,
+    () => false,
+  )
   try {
     await execa('git', ['init', '-q'], { cwd: targetDir })
     await execa('git', ['add', '-A'], { cwd: targetDir })
@@ -26,8 +34,26 @@ export async function runGitInit(targetDir: string): Promise<void> {
         GIT_COMMITTER_EMAIL: process.env.GIT_COMMITTER_EMAIL || 'barkpark@example.com',
       },
     })
-  } catch {
-    // non-fatal
+  } catch (err) {
+    // Still non-fatal — the scaffold is complete and usable without git — but
+    // no longer SILENT, and no longer a strand: a failure mid-sequence (e.g. a
+    // global commit.gpgsign with a broken signer) used to leave a
+    // half-initialised .git (files staged, zero commits) and say nothing.
+    // Mirror the dependency-install failure path: one yellow warning + the
+    // manual recovery command, and remove the .git THIS run created
+    // (create-next-app precedent). A pre-existing repository is left intact.
+    const message = (err as Error).message.split('\n')[0]
+    console.error(pc.yellow(`git init failed: ${message}`))
+    console.error(
+      pc.yellow(
+        `Your project files are intact. Run "git init && git add -A && git commit" manually from ${targetDir}.`,
+      ),
+    )
+    if (!preexisting) {
+      await rm(gitDir, { recursive: true, force: true }).catch(() => {
+        // Cleanup is best-effort; the warning above already told the user.
+      })
+    }
   }
 }
 
