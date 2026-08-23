@@ -20217,6 +20217,54 @@ test("cch-w42-s1: grant/refuse come from team_authority.admin — an always-gran
   hooks.clearMe();
 });
 
+// cch-w41-bl (D486) — providerCanWrite and canMintAnyAbility CONSUME the
+// server-stated authority band at their definitions. Their server gates were
+// verified exactly owner|admin (require_team_admin -> Authz.team_admin? for
+// the provider write routes; pat_abilities_allowed?(role,_) when role in
+// ~w(owner admin) for the token-abilities cap), which is the fact
+// team_authority.admin states — so the local role literals were copies that
+// could drift. D439 holds: both stay boolean; every not-a-role band state
+// fails CLOSED.
+const W41BL_ADMIN = {
+  role: "admin",
+  team: { id: "t1", name: "Acme Inc" },
+  user: { id: "u2", email: "grace@acme.com" },
+  team_authority: { team_id: "t1", role: "admin", admin: true, owner: false },
+};
+
+test("cch-w41-bl: providerCanWrite and canMintAnyAbility read the band — owner true, admin true, member false", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_TA);
+  assert.equal(hooks.providerCanWrite(), true, "owner writes providers");
+  assert.equal(hooks.canMintAnyAbility(), true, "owner mints any ability");
+  hooks.clearMe();
+  await driveMe(200, W41BL_ADMIN);
+  assert.equal(hooks.providerCanWrite(), true,
+    "ADMIN true — the limb a role-literal regression drops first; the server gate is owner|admin");
+  assert.equal(hooks.canMintAnyAbility(), true, "admin mints any ability (accounts.ex's cap)");
+  hooks.clearMe();
+  await driveMe(200, ME_TA_MEMBER);
+  assert.equal(hooks.providerCanWrite(), false, "a member reads the roster, never the connect card");
+  assert.equal(hooks.canMintAnyAbility(), false, "a member is capped at the read-only PAT");
+  hooks.clearMe();
+});
+
+test("cch-w41-bl: both predicates fail CLOSED on BOTH not-a-role states, and stay boolean doing it", async () => {
+  hooks.clearMe(); // loading: never asked
+  for (const name of ["providerCanWrite", "canMintAnyAbility"]) {
+    const v = hooks[name]();
+    assert.equal(v, false, name + "(): an unknown authority grants nothing");
+    assert.equal(typeof v, "boolean", name + "() stays two-valued (D439)");
+  }
+  await driveMe(500, { error: "server_error" }); // failed: a different fact
+  for (const name of ["providerCanWrite", "canMintAnyAbility"]) {
+    const v = hooks[name]();
+    assert.equal(v, false, name + "(): an unproven actor is not an admin");
+    assert.equal(typeof v, "boolean", name + "() stays two-valued on the failed arm too");
+  }
+  hooks.clearMe();
+});
+
 test("cch-w42-s1: THE STALENESS ARM — the pin moving under a cached answer reads as stale, not as authority", async () => {
   await withTeamPin(async (store) => {
     store.setItem("bp.active-team", "t1");

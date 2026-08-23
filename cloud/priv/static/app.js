@@ -2942,8 +2942,14 @@
   // member-readable, so a member still sees the roster + matrix (read-only), just
   // without the connect card or any Disconnect… button (GR33 plain-member law).
 
+  // cch-w41-bl (D486): reads the authority the SERVER states (teamAuthorityState)
+  // instead of re-deriving it from role literals — the provider write routes'
+  // gate is require_team_admin -> Authz.team_admin? -> role in @admin_roles,
+  // exactly the owner|admin fact team_authority.admin carries. Still boolean
+  // (D439): "grant" is the only true, so loading/failed/stale/refuse all fail
+  // closed exactly as the old meCache-falsy read did.
   function providerCanWrite() {
-    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+    return teamAuthorityState() === "grant";
   }
 
   // A prod-tier provider's display name for a matrix column / roster row.
@@ -4664,8 +4670,12 @@
   // A member may mint a READ-ONLY PAT only — the server's pat_abilities_allowed?
   // caps anyone below owner/admin at ["read"]. The picker mirrors that truth
   // UP-FRONT (GR34), never a post-click 403 toast.
+  // cch-w41-bl (D486): same conversion as providerCanWrite — the server cap is
+  // pat_abilities_allowed?(role, _) when role in ~w(owner admin) (accounts.ex),
+  // the exact fact team_authority.admin states. Boolean stays boolean (D439);
+  // every not-a-role band state fails closed to the read-only picker.
   function canMintAnyAbility() {
-    return !!(meCache && (meCache.role === "owner" || meCache.role === "admin"));
+    return teamAuthorityState() === "grant";
   }
 
   // cch-w36-s3 — THE UNKNOWN ARM, and why the picker needs one. Every branch
