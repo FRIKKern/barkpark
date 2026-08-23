@@ -14017,11 +14017,28 @@ test("GR24: a degraded header reads the honest two-axis breakdown off statusPill
 });
 
 test("GR24: suspended keeps the banner + the CLI disclosure (teardown stays reachable)", () => {
-  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: "payment failed" });
+  // cch-w54-followup: the fixture moved from the invented "payment failed" to a
+  // REAL reason slug the control plane writes — the banner now routes through
+  // suspendedReasonText, so the assertion pins the humanised sentence.
+  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: "billing_past_due" });
   assert.match(html, /notice notice-error/);
-  assert.match(html, /payment failed/);
+  assert.match(html, /Payment past due — nothing deleted/);
   assert.match(html, /id="inst-cli-toggle"/);
   assert.doesNotMatch(html, /id="inst-open-studio"/); // no Studio on a stopped box
+});
+
+test("cch-w54-followup: a quota-suspended header renders NO snake_case slug anywhere", () => {
+  const html = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: "quota_exceeded" });
+  // The apostrophe rides esc() as &#39;, so the pin is the apostrophe-free tail.
+  assert.match(html, /instance limit — nothing deleted/,
+    "the banner speaks the humanised sentence");
+  assert.doesNotMatch(html, /quota_exceeded/,
+    "BEFORE: instanceHeaderHtml printed the raw column value in its banner");
+  assert.doesNotMatch(html, /\b[a-z]+_[a-z]+\b/,
+    "…and no snake_case token survives anywhere in the header HTML");
+  // The helper's absent-reason fallback replaces the banner's old || literal.
+  const bare = hooks.instanceHeaderHtml({ ...GR24_LIVE, suspended: true, suspended_reason: null });
+  assert.match(bare, /Suspended by Barkpark Cloud/);
 });
 
 test("GR24: a provisioning header keeps the live chip and offers no CLI disclosure", () => {
