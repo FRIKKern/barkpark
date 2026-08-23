@@ -215,6 +215,16 @@ func runPaperView(out *writer, g globals, args []string) int {
 		Project:     ctx.Project,
 		Dataset:     ctx.Dataset,
 		Perspective: perspective,
+		// A one-shot reader read gets a 30s budget, not the 5s apiclient
+		// default: papers carrying live blocks (task-board/task-list/chart)
+		// resolve their queries at render time, and the production dashboard
+		// papers measure 10-14s steady-state under load (2026-08-23,
+		// cloud-console-hardening-dashboard / block-wishlist-100 — the nightly
+		// paper-reader audit's CLI edge failed BOTH while every curl edge, on
+		// its 30s cap, passed). 30s matches fetchSharedPaper below and the
+		// audit's BP_AUDIT_MAX_TIME; the server's own slowness stays a filed
+		// defect, but a reader command must outlast a slow render, not error.
+		Timeout: 30 * time.Second,
 	})
 	releaseRef, pinned, pinErr := releasePaperRef(opt)
 	if pinErr != nil {
