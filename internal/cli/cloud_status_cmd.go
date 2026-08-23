@@ -563,13 +563,62 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// (runawayMarker). Joined with the same separator the strained reason uses
 	// for its swap clause, and every empty one drops out rather than leaving a
 	// dangling dot.
-	parts := make([]string, 0, 3)
-	for _, s := range []string{reason, runawayMarker(b), unmeteredMarker(b)} {
+	parts := make([]string, 0, 4)
+	for _, s := range []string{reason, runawayMarker(b), err5xxMarker(b), unmeteredMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// --- the 5xx marker (dr-w5-followup-5xx-reaches-no-eyes) ----------------------
+//
+// THE RULING: DETAIL LINE, NOT A RUNG — the same call runawayMarker's block
+// above already argues, accepted here for the same two reasons. (1) The
+// decision-15 vocabulary is pinned across three surfaces by the decision-32
+// fixture and mirrored by the SPA; a twelfth status minted here alone is the
+// drift D32 exists to prevent, and a rung would have to move the ladder, both
+// fixtures and semrole.For in one commit for a signal that is (2) built on a
+// 60s PER-SLOT ring that re-arms EMPTY on every blue/green flip — a rung keyed
+// on it would flap to "unmeasured" on every deploy, and this fleet deploys
+// constantly. A detail line pays no flap cost: it changes no rank and no
+// bucket, it simply says the sentence D75 exists to make sayable — "this box
+// the table calls healthy is answering ~0.22 5xx/s" — on whatever row it rides.
+//
+// THE THREE STATES STAY THREE STATES, and none of them is another. The TABLE
+// marker below prints only the positive rate — exactly runawayMarker's policy:
+// a sentence on a table row claims something happened, and neither "we did not
+// measure" nor "measured, quiet" is a happening (the decision-15 tests pin an
+// ok row's detail EMPTY for both). The full tri-state renders in `-o json`
+// (err5xxRow), where a machine reader gets nil-as-unmeasured, zero-as-zero and
+// the rate as itself — never collapsed into each other.
+func err5xxMarker(b cloudclient.Barkpark) string {
+	p := b.Pressure
+	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("answering %.2f 5xx/s (60s per-slot ring — the beat's own number, blind to 5xx the BEAM never served)", *p.Err5xxPerS)
+}
+
+// err5xxRow is the `-o json` projection of the same reading, and it is where
+// the three states are DISTINGUISHED for a machine reader:
+//   - state "unmeasured", per_s null — the beat carried no reading (nil on the
+//     wire, or the agent's -1 sentinel relayed). No reading is NOT zero.
+//   - state "zero", per_s 0 — the 60s window was READ and held no 5xx. A real
+//     zero, still bounded: the ring is per-slot and blind to 5xx the BEAM
+//     never served.
+//   - state "answering", per_s <rate> — the beat's own number, never
+//     recomputed here.
+func err5xxRow(b cloudclient.Barkpark) map[string]any {
+	p := b.Pressure
+	if p == nil || p.Err5xxPerS == nil || *p.Err5xxPerS < 0 {
+		return map[string]any{"state": "unmeasured", "per_s": nil}
+	}
+	if *p.Err5xxPerS == 0 {
+		return map[string]any{"state": "zero", "per_s": 0.0}
+	}
+	return map[string]any{"state": "answering", "per_s": *p.Err5xxPerS}
 }
 
 // rankedBarkpark is one fleet row with its computed decision-15 triage fields.
@@ -655,7 +704,10 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 		// boxes serve 0.2.25.164 … 0.2.25.2628. A number that can never move,
 		// sitting beside one that does, would read as freshness. If it is ever
 		// wanted it ships as `agent_version`, named for what it is.
-		"git_commit":             r.BP.GitCommit,
+		"git_commit": r.BP.GitCommit,
+		// The 5xx tri-state (dr-w5-followup): nil-as-unmeasured, zero-as-zero,
+		// rate-as-itself — the json render where the three states stay three.
+		"err_5xx":                err5xxRow(r.BP),
 		"name":                   r.BP.Name,
 		"slug":                   r.BP.Slug,
 		"id":                     r.BP.ID,
