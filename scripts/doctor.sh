@@ -31,7 +31,17 @@ if git fetch --quiet origin main 2>/dev/null; then
   else
     ok "checkout is current with origin/main"
   fi
-  [ "$AHEAD" -gt 0 ] && bad "$AHEAD local commit(s) not pushed — run: git push"
+  if [ "$AHEAD" -gt 0 ]; then
+    # NEVER advise a bare `git push` toward main: branch protection refuses a
+    # direct push to main for everyone, admins included, and GH006 there is
+    # CORRECT — not a retry cue. Code reaches main by PR only.
+    CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')"
+    if [ "$CUR_BRANCH" = "main" ]; then
+      bad "$AHEAD local commit(s) on main that origin/main lacks — do NOT run git push: a direct push to main is REFUSED by branch protection (GH006 is correct, not a retry cue). Move them to a branch and open a PR: git branch rescue/<name>, then git reset --hard origin/main, push the branch, and merge with scripts/bp-merge.sh"
+    else
+      bad "$AHEAD local commit(s) not pushed — run: git push -u origin $CUR_BRANCH (then open a PR; the merge verb is scripts/bp-merge.sh)"
+    fi
+  fi
 else
   skip "fetch failed (offline?) — behind-check skipped"
 fi
