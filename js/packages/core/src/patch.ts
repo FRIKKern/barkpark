@@ -332,7 +332,12 @@ export function createPatch(
           body: data,
         })
       }
-      return first
+      // [publish-warnings-dropped] Same carry-through as publish.ts's onlyResult
+      // (kept inline rather than imported so this file's typed BarkparkAPIError
+      // — status + body, which the validation-flavoured helper does not raise —
+      // stays the empty-results signal). The batch is this one patch, so the
+      // envelope's advisories are this result's. Omitted when there are none.
+      return data.warnings?.length ? { ...first, warnings: data.warnings } : first
     },
   }
 
