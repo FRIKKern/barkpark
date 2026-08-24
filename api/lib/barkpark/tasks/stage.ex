@@ -628,6 +628,23 @@ defmodule Barkpark.Tasks.Stage do
 
     {new_content, engagement} = apply_engagement(content, to, object, holder, ts_iso)
 
+    # THE NOTE THIS STAGE IS ABOUT TO SUPERSEDE. `apply_durable_reason` is a
+    # plain `Map.put` — one disposition holds ONE reason, so a second annotator
+    # replaces the first's text with no trace in the row. That is the intended
+    # shape of the FIELD and the wrong shape for what callers do with it: notes
+    # reading "do not execute this row as written" are written here and are
+    # gone the moment anyone re-adjudicates. Reconstructing the lost text meant
+    # replaying every task.staged event for the row and diffing — possible, and
+    # nobody knew to do it. So the event now carries the OLD text beside the
+    # new one: one event answers "what did I just overwrite", the receipt shows
+    # the supersession instead of hiding it, and no read-before-write or client
+    # upgrade is required to see it.
+    superseded_note =
+      case adj.note do
+        nil -> nil
+        _ -> Map.get(content || %{}, @durable_reason_key)
+      end
+
     # The adjudication triple lands in this ONE map, which this ONE CAS update
     # persists — there is no window in which a row is parked without its
     # trigger, because there is no second write.
@@ -649,7 +666,7 @@ defmodule Barkpark.Tasks.Stage do
             observed_rev,
             "api",
             Map.merge(
-              staged_payload(from, to, engagement, holder, adj),
+              staged_payload(from, to, engagement, holder, adj, superseded_note),
               caller_stamp(caller_token_id)
             )
           )
@@ -731,9 +748,10 @@ defmodule Barkpark.Tasks.Stage do
   # The adjudication triple is echoed the same way the note is — the VALUE plus
   # the KEY it landed on — so a consumer of the event can tell an adjudication
   # that was written from one that was merely passed.
-  defp staged_payload(from, to, engagement, holder, adj) do
+  defp staged_payload(from, to, engagement, holder, adj, superseded_note) do
     %{
       "staged" => %{
+        "superseded_note" => superseded_note,
         "from" => from,
         "to" => to,
         "object" => engagement && Map.get(engagement, "object"),

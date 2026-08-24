@@ -1101,7 +1101,7 @@ defmodule Barkpark.Plugins.Tasks do
             name: "note",
             type: "string",
             summary:
-              "Free-text adjudication reason. Written to the DURABLE content.disposition_reason — NOT to the engagement lease, which the TTL sweeper deletes after ~900s. Recorded on every stageable target; a blank note overwrites nothing."
+              "Free-text adjudication reason. Written to the DURABLE content.disposition_reason — NOT to the engagement lease, which the TTL sweeper deletes after ~900s. Recorded on every stageable target. IT REPLACES, IT DOES NOT APPEND: the field holds ONE reason for ONE disposition, so a second annotator supersedes the first WITHOUT WARNING — do not use it as a general annotation channel, and never put a caution there that another agent must still see. Nothing is destroyed: every stage emits a task.staged event carrying the note IN FULL, so a superseded note is recoverable from `bp task events`. A blank note overwrites nothing."
           },
           %{
             name: "worker",
