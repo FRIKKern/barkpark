@@ -457,13 +457,14 @@ defmodule Barkpark.Media do
   NOT the fail-closed `where: false` of `scope_to_workspace/3`.
 
   Who can reach that nil arm, stated precisely — the sentinel covers LESS than
-  its name suggests. `ScopeHelpers.scope_opts/1` picks its mode by carrier
-  (scope_helpers.ex:62-68): a `%Plug.Conn{}` gets `:sentinel` and therefore
-  `:shared_only`, but a `%Phoenix.LiveView.Socket{}` or `%Phoenix.Socket{}`
-  gets `:legacy`, which OMITS the key entirely (:134). That exclusion is
-  deliberate and documented there. So the nil arm is reachable by an internal
-  caller that omits the key AND by a socket-borne read — never by an HTTP
-  request. Do not clear a socket-reached path on the sentinel's guarantee.
+  its name suggests. `BarkparkWeb.ScopeHelpers.scope_opts/1` picks its mode by
+  CARRIER: a `%Plug.Conn{}` gets `:sentinel` and therefore `:shared_only`, but
+  a `%Phoenix.LiveView.Socket{}` or `%Phoenix.Socket{}` gets `:legacy`, whose
+  `put_workspace_scope/3` clause OMITS the key entirely. That exclusion is
+  deliberate and documented on `scope_opts/1` itself. So the nil arm is
+  reachable by an internal caller that omits the key AND by a socket-borne
+  read — never by an HTTP request. Do not clear a socket-reached path on the
+  sentinel's guarantee.
   """
   def get_file(id, opts \\ []) do
     workspace_id = Keyword.get(opts, :workspace_id)

@@ -68,12 +68,12 @@ defmodule Barkpark.Content.Query do
   NOT the fail-closed `where: false` of `scope_to_workspace/3` — which is
   exactly the back-compat the `nil = unscoped` note above describes.
 
-  The sentinel covers LESS than its name suggests: `ScopeHelpers.scope_opts/1`
-  picks its mode by carrier (scope_helpers.ex:62-68), so a `%Plug.Conn{}` gets
-  `:shared_only` but a `%Phoenix.LiveView.Socket{}` / `%Phoenix.Socket{}` gets
-  `:legacy`, which OMITS the key (:134) and lands on the nil arm above. A
-  socket-borne read is therefore NOT covered by the sentinel and must be
-  cleared on its own.
+  The sentinel covers LESS than its name suggests:
+  `BarkparkWeb.ScopeHelpers.scope_opts/1` picks its mode by CARRIER, so a
+  `%Plug.Conn{}` gets `:shared_only` but a `%Phoenix.LiveView.Socket{}` /
+  `%Phoenix.Socket{}` gets `:legacy`, whose `put_workspace_scope/3` clause
+  OMITS the key and lands on the nil arm above. A socket-borne read is
+  therefore NOT covered by the sentinel and must be cleared on its own.
   """
   def list_documents(type, dataset, opts \\ []) do
     limit = opts |> Keyword.get(:limit, 100) |> min(@max_limit) |> max(1)
@@ -1169,12 +1169,12 @@ defmodule Barkpark.Content.Query do
   NOT the fail-closed `where: false` of `scope_to_workspace/3` — which is
   exactly the back-compat the `nil = unscoped` note above describes.
 
-  The sentinel covers LESS than its name suggests: `ScopeHelpers.scope_opts/1`
-  picks its mode by carrier (scope_helpers.ex:62-68), so a `%Plug.Conn{}` gets
-  `:shared_only` but a `%Phoenix.LiveView.Socket{}` / `%Phoenix.Socket{}` gets
-  `:legacy`, which OMITS the key (:134) and lands on the nil arm above. A
-  socket-borne read is therefore NOT covered by the sentinel and must be
-  cleared on its own.
+  The sentinel covers LESS than its name suggests:
+  `BarkparkWeb.ScopeHelpers.scope_opts/1` picks its mode by CARRIER, so a
+  `%Plug.Conn{}` gets `:shared_only` but a `%Phoenix.LiveView.Socket{}` /
+  `%Phoenix.Socket{}` gets `:legacy`, whose `put_workspace_scope/3` clause
+  OMITS the key and lands on the nil arm above. A socket-borne read is
+  therefore NOT covered by the sentinel and must be cleared on its own.
   """
   def get_document(doc_id, type, dataset, opts \\ [])
 
