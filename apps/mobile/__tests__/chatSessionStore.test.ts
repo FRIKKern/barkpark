@@ -381,3 +381,120 @@ test('a failure after stop() touches nothing', async () => {
   await flushMicro()
   expect(store.getSnapshot().transportError).toBeUndefined()
 })
+
+// ── the per-start fence, on the EFFECT closures (not just start()'s own) ─────
+//
+// setChoice's rollback was fenced after a superseded failure was found writing
+// a stale value into a newer snapshot. Its comment then claimed "every other
+// async closure in this class fences on `gen !== this.startGen`". That was not
+// true of the FIVE closures inside run(): each checked only `this.stopped`, and
+// `stopped` is cleared again by the very next start() — so a callback from a
+// superseded start lands on the LIVE store rather than being dropped.
+//
+// The restart is not exotic: stop()/start() is a documented TRUE PAIR (D25),
+// React StrictMode double-invokes the mount effect on the same store, and the
+// tests above already exercise it.
+
+test('a superseded turn-boundary refetch must not overwrite a choice made AFTER the restart', async () => {
+  jest.useFakeTimers()
+  try {
+    // start #1 seeds mode=default.
+    mockGet.mockResolvedValueOnce({ ...session(), mode: 'default' })
+    const streams: ChatStreamOptions[] = []
+    mockStream.mockImplementation((_c: unknown, _id: unknown, opts: ChatStreamOptions) => {
+      streams.push(opts)
+      return new Promise(() => {})
+    })
+
+    const store = new ChatSessionStore(conn, 's1')
+    store.start()
+    await flushMicro()
+    expect(store.getSnapshot().choices.mode).toBe('default')
+
+    // The turn-boundary refetch, held OPEN so it can land after the restart.
+    let releaseTail: ((s: ChatSession) => void) | undefined
+    mockGet.mockImplementationOnce(
+      () =>
+        new Promise<ChatSession>((resolve) => {
+          releaseTail = resolve
+        }),
+    )
+    streams[0]!.onFrame({ event: 'chat', data: '{"type":"system","subtype":"init"}' })
+    streams[0]!.onFrame({ event: 'chat', data: '{"type":"result","subtype":"success"}' })
+    await flushMicro()
+    // The effect really fired — without this the whole test is vacuous, because
+    // a refetch that never happened can hardly clobber anything.
+    expect(releaseTail).toBeDefined()
+
+    // The restart (remount / StrictMode double-effect / the D25 true pair).
+    store.stop()
+    mockGet.mockResolvedValueOnce({ ...session(), mode: 'default' })
+    store.start()
+    await flushMicro()
+
+    // The user picks a mode after the restart, and the server ACCEPTS it.
+    mockPatch.mockResolvedValue(undefined)
+    store.setChoice('mode', 'plan')
+    await flushMicro()
+    expect(store.getSnapshot().choices.mode).toBe('plan')
+
+    // Now the superseded refetch lands, carrying the PRE-restart truth.
+    releaseTail!({ ...session(), mode: 'default' })
+    await flushMicro()
+
+    // It belongs to a start that is over. It owns nothing here.
+    expect(store.getSnapshot().choices.mode).toBe('plan')
+    store.stop()
+  } finally {
+    jest.useRealTimers()
+  }
+})
+
+test('a superseded send failure must not raise a banner on the restarted store', async () => {
+  jest.useFakeTimers()
+  try {
+    mockGet.mockResolvedValue(session())
+    mockStream.mockImplementation(() => new Promise(() => {}))
+
+    // Hold the POST open so its rejection can land after the restart.
+    let failSend: ((e: Error) => void) | undefined
+    mockSendMsg.mockImplementationOnce(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          failSend = reject
+        }),
+    )
+
+    const store = new ChatSessionStore(conn, 's1')
+    store.start()
+    await flushMicro()
+    store.send('into the void')
+    await flushMicro()
+    expect(failSend).toBeDefined()
+
+    store.stop()
+    store.start()
+    await flushMicro()
+
+    failSend!(new Error('Network request failed'))
+    await flushMicro()
+
+    // The banner would name an action taken before the restart — this view's
+    // chrome, and not this start's to raise.
+    expect(store.getSnapshot().transportError).toBeUndefined()
+
+    // THE OTHER HALF, and the reason the fence is not a blanket one. The
+    // optimistic echo is REDUCER state, and reducer state survives a restart —
+    // that bubble is still on screen, still painted as though it were
+    // delivered, and no persisted row will ever arrive to retire it (the POST
+    // was refused). So the sendFailed dispatch must STILL land. A fence that
+    // dropped it would trade a stale banner for a permanent lie in the
+    // transcript, which is the worse of the two.
+    const echo = store.getSnapshot().state.local.find((l) => l.content === 'into the void')
+    expect(echo).toBeDefined()
+    expect(echo!.failed).toBe(true)
+    store.stop()
+  } finally {
+    jest.useRealTimers()
+  }
+})
