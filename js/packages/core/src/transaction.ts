@@ -11,7 +11,7 @@ import type {
 } from './types'
 import { request } from './transport'
 import { scopePrefix } from './scope'
-import { selectorField } from './patch'
+import { FORBIDDEN_SET_KEYS, requireItems, selectorField } from './patch'
 import { BarkparkValidationError } from './errors'
 
 type Mutation =
@@ -21,6 +21,7 @@ type Mutation =
   | {
       patch: {
         id: string
+        type: string
         set: Record<string, unknown>
         setIfMissing?: Record<string, unknown>
         unset?: string[]
@@ -36,16 +37,6 @@ type Mutation =
   | { discardDraft: { id: string; type: string } }
   | { delete: { id: string; type: string; ifMatch?: string } }
 
-const FORBIDDEN_PATCH_FIELDS: ReadonlySet<string> = new Set([
-  '_id',
-  '_type',
-  '_rev',
-  '_createdAt',
-  '_updatedAt',
-  '_draft',
-  '_publishedId',
-])
-
 /**
  * Build a multi-mutation transaction.
  *
@@ -58,7 +49,7 @@ const FORBIDDEN_PATCH_FIELDS: ReadonlySet<string> = new Set([
  *
  * @example
  *   await createTransaction(config)
- *     .patch('p1', (p) => p.set({ title: 'Hi' }), { ifMatch: rev })
+ *     .patch('p1', 'post', (p) => p.set({ title: 'Hi' }), { ifMatch: rev })
  *     .publish('p1', 'post')
  *     .commit()
  */
@@ -98,7 +89,9 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       mutations.push({ createIfNotExists: doc })
       return tx
     },
-    patch(id, build, opts) {
+    patch(id, type, build, opts) {
+      // `type` is required by the server (api-v1.md §6) and enforced in the signature,
+      // mirroring publish/unpublish/delete, which have always taken (id, type).
       if (typeof id !== 'string' || id.length === 0) {
         throw new BarkparkValidationError('transaction.patch requires a non-empty document id', {
           field: 'id',
@@ -121,7 +114,7 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       }
       const assertNotForbidden = (op: string, keys: string[]): void => {
         for (const k of keys) {
-          if (FORBIDDEN_PATCH_FIELDS.has(k)) {
+          if (FORBIDDEN_SET_KEYS.has(k)) {
             throw new BarkparkValidationError(`patch.${op} cannot modify ${k}`, { field: k })
           }
         }
@@ -187,21 +180,13 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
           })
         },
         append(selector, items) {
-          if (!Array.isArray(items)) {
-            throw new BarkparkValidationError('patch.append requires an array of items', {
-              field: 'append',
-            })
-          }
+          requireItems('append', items)
           const field = selectorField('append', selector)
           append[field] = (append[field] ?? []).concat(items)
           return miniBuilder
         },
         prepend(selector, items) {
-          if (!Array.isArray(items)) {
-            throw new BarkparkValidationError('patch.prepend requires an array of items', {
-              field: 'prepend',
-            })
-          }
+          requireItems('prepend', items)
           const field = selectorField('prepend', selector)
           prepend[field] = (prepend[field] ?? []).concat(items)
           return miniBuilder
@@ -234,6 +219,7 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       }
       const patchOp: {
         id: string
+        type: string
         set: Record<string, unknown>
         setIfMissing?: Record<string, unknown>
         unset?: string[]
@@ -242,7 +228,7 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
         append?: Record<string, unknown[]>
         prepend?: Record<string, unknown[]>
         ifMatch?: string
-      } = { id, set }
+      } = { id, type, set }
       if (Object.keys(setIfMissing).length > 0) patchOp.setIfMissing = setIfMissing
       if (unset.length > 0) patchOp.unset = unset
       if (Object.keys(inc).length > 0) patchOp.inc = inc

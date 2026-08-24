@@ -68,8 +68,9 @@ export interface CreateDocInput {
 export interface BarkparkActions {
   /** Validates via schema (if registered), creates the document, and fans out revalidate tags. */
   createDoc(input: CreateDocInput): Promise<MutateResult>
-  /** Patches a document (set/setIfMissing/unset/inc/dec/append/prepend) and fans out revalidate tags. Honors `ifMatch`. */
-  patchDoc(id: string, patch: PatchInput): Promise<MutateResult>
+  /** Patches a document (set/setIfMissing/unset/inc/dec/append/prepend) and fans out revalidate tags.
+   *  `type` is the document's `_type`, required by the server on every patch op. Honors `ifMatch`. */
+  patchDoc(id: string, type: string, patch: PatchInput): Promise<MutateResult>
   /** Publishes the draft for `id` and fans out tags. */
   publish(id: string, type: string): Promise<MutateResult>
   /** Unpublishes `id` back to draft and fans out tags. */
@@ -175,8 +176,8 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       return result
     },
 
-    async patchDoc(id, patch) {
-      let builder = client.patch(id)
+    async patchDoc(id, type, patch) {
+      let builder = client.patch(id, type)
       if (patch.set !== undefined && Object.keys(patch.set).length > 0) {
         builder = builder.set(patch.set)
       }

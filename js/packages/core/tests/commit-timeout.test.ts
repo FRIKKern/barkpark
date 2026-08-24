@@ -43,7 +43,7 @@ describe('CommitOptions.timeoutMs is forwarded to the request', () => {
   it('patch.commit({ timeoutMs }) overrides the write default', async () => {
     vi.useFakeTimers()
     const bp = client(hangingFetch())
-    const p = bp.patch('p1').set({ title: 'x' }).commit({ timeoutMs: 100 })
+    const p = bp.patch('p1', 'post').set({ title: 'x' }).commit({ timeoutMs: 100 })
     const expectation = expect(p).rejects.toBeInstanceOf(BarkparkTimeoutError)
     await vi.advanceTimersByTimeAsync(100)
     await expectation

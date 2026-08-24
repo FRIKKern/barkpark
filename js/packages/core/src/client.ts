@@ -567,8 +567,8 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     deleteWebhook(id, opts) {
       return deleteWebhook(frozen, id, opts)
     },
-    patch(id: string): PatchBuilder {
-      return createPatch(frozen, id)
+    patch(id: string, type: string): PatchBuilder {
+      return createPatch(frozen, id, type)
     },
     transaction(): TransactionBuilder {
       return createTransaction(frozen)

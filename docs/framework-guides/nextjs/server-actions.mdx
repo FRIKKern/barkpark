@@ -171,9 +171,9 @@ const client = createClient({
   token: 'sk_live',
 })
 
-async function safePatch(id: string, etag: string) {
+async function safePatch(id: string, type: string, etag: string) {
   try {
-    await client.patch(id).set({ title: 'hi' }).commit({ ifMatch: etag })
+    await client.patch(id, type).set({ title: 'hi' }).commit({ ifMatch: etag })
   } catch (e) {
     const isConflict =
       e instanceof BarkparkConflictError ||

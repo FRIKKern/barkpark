@@ -60,15 +60,15 @@ describe('createPatch', () => {
       }),
     )
 
-    const result = await createPatch(config, 'p1').set({ title: 'New' }).commit()
+    const result = await createPatch(config, 'p1', 'post').set({ title: 'New' }).commit()
     expect(result.id).toBe('p1')
     expect(result.operation).toBe('update')
     expect(result.document.title).toBe('New')
   })
 
   it('set() rejects forbidden system fields', () => {
-    expect(() => createPatch(config, 'p1').set({ _id: 'other' })).toThrow(BarkparkValidationError)
-    expect(() => createPatch(config, 'p1').set({ _rev: 'x' })).toThrow(BarkparkValidationError)
+    expect(() => createPatch(config, 'p1', 'post').set({ _id: 'other' })).toThrow(BarkparkValidationError)
+    expect(() => createPatch(config, 'p1', 'post').set({ _rev: 'x' })).toThrow(BarkparkValidationError)
   })
 
   it('setIfMissing() sends a patch.setIfMissing wire op (Phase-1B), composing with set', async () => {
@@ -88,20 +88,20 @@ describe('createPatch', () => {
     )
 
     // setIfMissing-only: no set() required.
-    await createPatch(config, 'p1').setIfMissing({ lang: 'en', region: 'EU' }).commit()
+    await createPatch(config, 'p1', 'post').setIfMissing({ lang: 'en', region: 'EU' }).commit()
     expect(seen?.setIfMissing).toEqual({ lang: 'en', region: 'EU' })
 
     // set + setIfMissing compose in one commit.
-    await createPatch(config, 'p2').set({ tier: 'pro' }).setIfMissing({ plan: 'basic' }).commit()
+    await createPatch(config, 'p2', 'post').set({ tier: 'pro' }).setIfMissing({ plan: 'basic' }).commit()
     expect(seen?.set).toEqual({ tier: 'pro' })
     expect(seen?.setIfMissing).toEqual({ plan: 'basic' })
   })
 
   it('setIfMissing() validates: non-object and system fields throw', () => {
     expect(() =>
-      createPatch(config, 'p1').setIfMissing([] as unknown as Record<string, unknown>),
+      createPatch(config, 'p1', 'post').setIfMissing([] as unknown as Record<string, unknown>),
     ).toThrow(BarkparkValidationError)
-    expect(() => createPatch(config, 'p1').setIfMissing({ _rev: 'x' })).toThrow(/system field/)
+    expect(() => createPatch(config, 'p1', 'post').setIfMissing({ _rev: 'x' })).toThrow(/system field/)
   })
 
   it('inc()/dec() send patch.inc/patch.dec wire ops (Phase-1B), composing with set', async () => {
@@ -126,23 +126,23 @@ describe('createPatch', () => {
     )
 
     // inc-only: no set() required.
-    await createPatch(config, 'p1').inc({ views: 1, hits: 5 }).commit()
+    await createPatch(config, 'p1', 'post').inc({ views: 1, hits: 5 }).commit()
     expect(seen?.inc).toEqual({ views: 1, hits: 5 })
 
     // set + inc + dec compose in one commit.
-    await createPatch(config, 'p2').set({ title: 'New' }).inc({ a: 2 }).dec({ b: 3 }).commit()
+    await createPatch(config, 'p2', 'post').set({ title: 'New' }).inc({ a: 2 }).dec({ b: 3 }).commit()
     expect(seen?.set).toEqual({ title: 'New' })
     expect(seen?.inc).toEqual({ a: 2 })
     expect(seen?.dec).toEqual({ b: 3 })
   })
 
   it('inc()/dec() validate: non-object, system fields, and non-finite deltas throw', () => {
-    expect(() => createPatch(config, 'p1').inc(42 as unknown as Record<string, number>)).toThrow(
+    expect(() => createPatch(config, 'p1', 'post').inc(42 as unknown as Record<string, number>)).toThrow(
       BarkparkValidationError,
     )
-    expect(() => createPatch(config, 'p1').inc({ _rev: 1 })).toThrow(/system field/)
-    expect(() => createPatch(config, 'p1').dec({ x: Infinity })).toThrow(/finite/)
-    expect(() => createPatch(config, 'p1').inc({ x: 'nope' as unknown as number })).toThrow(
+    expect(() => createPatch(config, 'p1', 'post').inc({ _rev: 1 })).toThrow(/system field/)
+    expect(() => createPatch(config, 'p1', 'post').dec({ x: Infinity })).toThrow(/finite/)
+    expect(() => createPatch(config, 'p1', 'post').inc({ x: 'nope' as unknown as number })).toThrow(
       /finite/,
     )
   })
@@ -164,28 +164,28 @@ describe('createPatch', () => {
     )
 
     // unset-only: no set() call required (was "requires at least one set" before).
-    await createPatch(config, 'p1').unset(['draft', 'legacy']).commit()
+    await createPatch(config, 'p1', 'post').unset(['draft', 'legacy']).commit()
     expect(seen?.unset).toEqual(['draft', 'legacy'])
 
     // set + unset compose in one commit.
-    await createPatch(config, 'p2').set({ title: 'New' }).unset(['draft']).commit()
+    await createPatch(config, 'p2', 'post').set({ title: 'New' }).unset(['draft']).commit()
     expect(seen?.set).toEqual({ title: 'New' })
     expect(seen?.unset).toEqual(['draft'])
   })
 
   it('unset() validates: non-array, non-string keys, and system fields all throw', () => {
-    expect(() => createPatch(config, 'p1').unset('draft' as unknown as string[])).toThrow(
+    expect(() => createPatch(config, 'p1', 'post').unset('draft' as unknown as string[])).toThrow(
       BarkparkValidationError,
     )
-    expect(() => createPatch(config, 'p1').unset([1 as unknown as string])).toThrow(
+    expect(() => createPatch(config, 'p1', 'post').unset([1 as unknown as string])).toThrow(
       BarkparkValidationError,
     )
-    expect(() => createPatch(config, 'p1').unset(['_rev'])).toThrow(/system field/)
+    expect(() => createPatch(config, 'p1', 'post').unset(['_rev'])).toThrow(/system field/)
   })
 
   it('insert / diffMatchPatch (still Phase 1A) throw helpful errors', () => {
-    expect(() => createPatch(config, 'p1').insert('after', 'tags[-1]', ['x'])).toThrow(/Phase 1A/)
-    expect(() => createPatch(config, 'p1').diffMatchPatch({ body: '@@ -1 +1 @@' })).toThrow(
+    expect(() => createPatch(config, 'p1', 'post').insert('after', 'tags[-1]', ['x'])).toThrow(/Phase 1A/)
+    expect(() => createPatch(config, 'p1', 'post').diffMatchPatch({ body: '@@ -1 +1 @@' })).toThrow(
       /patch\.diffMatchPatch.*Phase 1A/,
     )
   })
@@ -208,7 +208,7 @@ describe('createPatch', () => {
 
     // selector `tags[-1]` / `tags[0]` resolve to the field `tags`; repeated
     // append on the same field concatenates.
-    await createPatch(config, 'p1')
+    await createPatch(config, 'p1', 'post')
       .append('tags[-1]', ['a'])
       .append('tags', ['b'])
       .prepend('tags[0]', ['z'])
@@ -218,15 +218,15 @@ describe('createPatch', () => {
   })
 
   it('append()/prepend() validate: non-array items, nested selectors, and system fields throw', () => {
-    expect(() => createPatch(config, 'p1').append('tags', 'x' as unknown as unknown[])).toThrow(
+    expect(() => createPatch(config, 'p1', 'post').append('tags', 'x' as unknown as unknown[])).toThrow(
       BarkparkValidationError,
     )
-    expect(() => createPatch(config, 'p1').append('obj.tags', ['x'])).toThrow(/top-level/)
-    expect(() => createPatch(config, 'p1').prepend('_rev', ['x'])).toThrow(/system field/)
+    expect(() => createPatch(config, 'p1', 'post').append('obj.tags', ['x'])).toThrow(/top-level/)
+    expect(() => createPatch(config, 'p1', 'post').prepend('_rev', ['x'])).toThrow(/system field/)
   })
 
   it('commit() without any set() throws BarkparkValidationError', async () => {
-    await expect(createPatch(config, 'p1').commit()).rejects.toThrow(BarkparkValidationError)
+    await expect(createPatch(config, 'p1', 'post').commit()).rejects.toThrow(BarkparkValidationError)
   })
 
   it('commit({ ifMatch }) includes ifMatch in the mutation body', async () => {
@@ -249,7 +249,7 @@ describe('createPatch', () => {
       }),
     )
 
-    await createPatch(config, 'p1').set({ title: 'v2' }).commit({ ifMatch: 'W/"abc"' })
+    await createPatch(config, 'p1', 'post').set({ title: 'v2' }).commit({ ifMatch: 'W/"abc"' })
 
     expect(capturedPatch).not.toBeNull()
     expect(capturedPatch!.id).toBe('p1')
@@ -270,7 +270,7 @@ describe('createPatch', () => {
       }),
     )
 
-    await createPatch(config, 'p1')
+    await createPatch(config, 'p1', 'post')
       .set({ title: 'x' })
       .commit({ idempotencyKey: 'user-supplied-key-xyz' })
 
@@ -296,7 +296,7 @@ describe('createPatch', () => {
       }),
     )
 
-    await createPatch(config, 'p1').set({ title: 'x' }).commit({ retry: true })
+    await createPatch(config, 'p1', 'post').set({ title: 'x' }).commit({ retry: true })
 
     expect(calls).toBe(2)
     // Attempt 1 must already carry a key (regression: it used to be omitted).
