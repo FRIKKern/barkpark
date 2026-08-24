@@ -100,10 +100,12 @@ function writeBaseline(findings) {
 }
 
 // ── selftest ─────────────────────────────────────────────────────────────────
-// Four arms. The gate must be provably able to RED, provably able to stay
-// SILENT, provably able to tell known from novel, and provably still reading
-// files that plain `grep` goes blind on — an arm that cannot fire is the same
-// defect this gate was built to catch.
+// Six arms. The gate must be provably able to RED, provably able to stay
+// SILENT, provably able to tell known from novel, provably still reading files
+// that plain `grep` goes blind on, and provably able to see a cited window that
+// is one line TOO NARROW — plus the control proving that last arm reds on
+// narrowness rather than on the mere presence of a range. An arm that cannot
+// fire is the same defect this gate was built to catch.
 
 // Derive the plant's target from the live corpus rather than hardcoding one.
 // A hardcoded `media.ex:99999` rots the day that file is renamed, and a
@@ -120,6 +122,46 @@ function derivePlantTarget() {
     const m = text.match(/^\s{2}def ([a-z_][a-z0-9_]*)\(/m);
     if (!m) continue;
     return { base: rel.split("/").pop(), symbol: m[1], beyond: lines.length + 10000 };
+  }
+  return null;
+}
+
+// Derive a CLIPPABLE RUN for arms (e)/(f): a maximal block of >= 3 consecutive
+// lines sharing a substantial common prefix, bounded on BOTH sides by a
+// non-sibling. Maximality is load-bearing — arm (f) cites the run whole and must
+// come back silent, which is only true if nothing adjacent shares the prefix.
+// Derived from the live corpus for the same reason as derivePlantTarget: a
+// hardcoded run rots on the first reflow of the file that holds it.
+// Returns {base, lo, hi} or null.
+function deriveClipTarget() {
+  const { present } = codeCommentCorpus();
+  const pfx = (a, b) => { let i = 0; while (i < a.length && i < b.length && a[i] === b[i]) i++; return a.slice(0, i); };
+  for (const rel of present) {
+    if (rel.includes("/test/") || rel.includes("_test.")) continue;
+    const base = rel.split("/").pop();
+    let text;
+    try { text = readFileSync(join(ROOT, rel), "utf8"); } catch { continue; }
+    const lines = text.split("\n").map((l) => l.replace(/\s+$/, ""));
+    let i = 0;
+    while (i < lines.length) {
+      if (lines[i].trim() === "") { i++; continue; }
+      let j = i + 1, p = lines[i];
+      while (j < lines.length && lines[j].trim() !== "" && pfx(p, lines[j]).trim().length >= 8) {
+        p = pfx(p, lines[j]);
+        j++;
+      }
+      const runLen = j - i;
+      // `lo >= 11` is not cosmetic: the citation grammar only recognises line
+      // numbers of 2-5 digits, so a run at lines 4-6 yields `foo.exs:5-6`, which
+      // never classifies as a lineref at all and would fail arm (e) for a reason
+      // that has nothing to do with narrowness.
+      if (runLen >= 3 && p.trim().length >= 8 && i + 1 >= 11) {
+        // Bounded above/below by a non-sibling? (j is already the first non-sibling.)
+        const above = i > 0 ? lines[i - 1] : "";
+        if (!above.startsWith(p)) return { base, lo: i + 1, hi: j };
+      }
+      i = Math.max(j, i + 1);
+    }
   }
   return null;
 }
@@ -205,6 +247,52 @@ function selftest() {
         );
       }
     }
+
+    // (e)/(f) TOO-NARROW WINDOW. Arms (a)-(d) all pin citations that are stale in
+    //     a way that ANNOUNCES itself — the cited line moved, or the reader went
+    //     blind. This pair pins the variant that never announces itself: a cited
+    //     window that is IN RANGE, NON-BLANK, and one line too narrow, so the
+    //     lines it names say exactly what the claim says while the line it
+    //     EXCLUDED refutes the claim. "In range and non-blank" is not "correct".
+    //     (f) is the control that gives (e) its meaning: the same run cited WHOLE
+    //     must stay silent, or (e) is just a detector that reds on ranges.
+    const clip = deriveClipTarget();
+    if (!clip) {
+      fails.push("(e) SETUP: could not derive a clippable run from the corpus — arms (e)/(f) would be vacuous");
+    } else {
+      const exhaustive = "the file declares only these entries";
+      // (e) BITES: cite the run's TAIL, clipping its first line, and claim totality.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # ${exhaustive} (${clip.base}:${clip.lo + 1}-${clip.hi}).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const clipped = linerefFindings([probeRel]);
+      if (!clipped.some((f) => /EXHAUSTIVE claim over a CLIPPED run/.test(f.evidence || ""))) {
+        fails.push(
+          `(e) TOO-NARROW: an exhaustive claim over ${clip.base}:${clip.lo + 1}-${clip.hi}, which clips the` +
+            ` sibling at line ${clip.lo}, produced NO clipped-run finding — the gate cannot see a window` +
+            " that is too narrow",
+        );
+      }
+      // (f) CONTROL: the same run cited WHOLE must stay silent.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # ${exhaustive} (${clip.base}:${clip.lo}-${clip.hi}).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const whole = linerefFindings([probeRel]);
+      if (whole.some((f) => /EXHAUSTIVE claim over a CLIPPED run/.test(f.evidence || ""))) {
+        fails.push(
+          `(f) CONTROL: the SAME run cited whole (${clip.base}:${clip.lo}-${clip.hi}) also flagged as clipped` +
+            " — the detector reds on ranges, not on narrowness, and arm (e) proves nothing",
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -221,6 +309,8 @@ function selftest() {
   process.stdout.write("  ok: (b) silent on a clean probe\n");
   process.stdout.write("  ok: (c) baseline key is line-insensitive and citation-sensitive\n");
   process.stdout.write("  ok: (d) still reads a NUL-containing file that plain grep goes blind on\n");
+  process.stdout.write("  ok: (e) bites on an exhaustive claim over a window one line too narrow\n");
+  process.stdout.write("  ok: (f) silent on the SAME run cited whole — (e) reds on narrowness, not on ranges\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
