@@ -58,12 +58,38 @@ set -a; . cloud/.env; set +a
 export BARKPARK_GIT_SHA="$NEW"
 
 # ---- Which slot serves now? Caddy's upstream port is the source of truth.
-ACTIVE_PORT="$(grep -oE 'localhost:41[0-9]{2}' "$CADDYFILE" | head -1 | cut -d: -f2)"
-ACTIVE_PORT="${ACTIVE_PORT:-4100}"
-if [ "$ACTIVE_PORT" = "4100" ]; then
-  TARGET=green; TARGET_PORT="${PORT_GREEN:-4101}"
+# SLOT PORTS ONLY (this used to grep the loose 'localhost:41[0-9]{2}'): any
+# OTHER localhost:41xx line in the Caddyfile — a sibling service, an admin
+# route, a future front — is picked up by `head -1` as if it were the active
+# slot, and the flip sed below then rewrites THAT line instead of the real
+# upstream. instance-deploy.sh pinned its own grep to exactly the two slot ports
+# for precisely this reason; cp-deploy was left behind on the loose pattern.
+#
+# The ports are also read from the SAME place compose publishes them
+# (PORT_BLUE/PORT_GREEN out of cloud/.env, sourced above), never hardcoded:
+# `[ "$ACTIVE_PORT" = "4100" ]` compared a configurable port against a literal,
+# so an operator who set PORT_BLUE/PORT_GREEN in cloud/.env silently inverted
+# the slot derivation and every deploy targeted the LIVE slot.
+BLUE_PORT="${PORT_BLUE:-4100}"
+GREEN_PORT="${PORT_GREEN:-4101}"
+ACTIVE_PORT="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" | head -1 | cut -d: -f2)"
+ACTIVE_PORT="${ACTIVE_PORT:-$BLUE_PORT}"
+if [ "$ACTIVE_PORT" = "$BLUE_PORT" ]; then
+  TARGET=green; TARGET_PORT="$GREEN_PORT"
 else
-  TARGET=blue; TARGET_PORT="${PORT_BLUE:-4100}"
+  TARGET=blue; TARGET_PORT="$BLUE_PORT"
+fi
+# The target and the live port must DISAGREE. Deploying onto the port Caddy is
+# already serving means recreating the LIVE container — every "active slot
+# untouched / no downtime" claim in this log becomes a lie, and the health gate
+# below then probes the very slot it is tearing down. This can only fire when
+# the derivation above is wrong (PORT_BLUE and PORT_GREEN set to the same value,
+# or a future edit that breaks the branch), so it never fires on a correctly
+# configured box. Fail closed BEFORE anything is built, booted or stopped.
+if [ "$TARGET_PORT" = "$ACTIVE_PORT" ]; then
+  log "REFUSING: slot '$TARGET' resolves to :$TARGET_PORT, the port Caddy already serves — deploying there would recreate the LIVE container (check PORT_BLUE/PORT_GREEN in cloud/.env)"
+  git reset --hard "$OLD"
+  exit 16
 fi
 log "active upstream :$ACTIVE_PORT -> deploying slot '$TARGET' on :$TARGET_PORT"
 
@@ -157,6 +183,18 @@ log "slot $TARGET DB probe ok (login=401)"
 # ---- Hot swap: point Caddy at the new slot (graceful reload, no drops).
 cp -a "$CADDYFILE" "$CADDYFILE.pre-deploy"
 sed -i "s/localhost:${ACTIVE_PORT}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
+# Did the rewrite actually MOVE the upstream? A sed whose pattern matched
+# nothing (the Caddyfile spells the upstream 127.0.0.1:<port>, a hand-edit
+# changed the line, ACTIVE_PORT was misread) leaves the file BYTE-IDENTICAL —
+# and every step after this still reports success: `caddy validate` passes on an
+# unchanged file, the reload succeeds, and the public probe below answers 200
+# because the OLD slot is still the one serving. The deploy then stops that old
+# slot and barkpark.cloud goes dark, having logged "healthy" the whole way. No
+# downstream check can see this; only the file itself can.
+if grep -q "localhost:${ACTIVE_PORT}" "$CADDYFILE" || ! grep -q "localhost:${TARGET_PORT}" "$CADDYFILE"; then
+  log "FLIP DID NOT LAND: after the rewrite $CADDYFILE still carries :$ACTIVE_PORT (or never gained :$TARGET_PORT) — the upstream is not written as 'localhost:<slot port>'; restoring, no swap"
+  cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"; abort_deploy; exit 14
+fi
 if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
   log "Caddyfile invalid after port flip — restoring, no swap"
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"; abort_deploy; exit 14
@@ -168,6 +206,27 @@ if ! systemctl reload caddy; then
 fi
 code="$(curl -sk -o /dev/null -w '%{http_code}' --max-time 10 --resolve "barkpark.cloud:443:127.0.0.1" "https://barkpark.cloud/" || true)"
 log "Caddy now -> :$TARGET_PORT (https://barkpark.cloud/ = $code)"
+# GATE, not just a log line. instance-deploy.sh's twin of this curl was fixed in
+# pds-bl-w49; cp-deploy's was left captured, logged and never tested, so a
+# control-plane deploy whose flip landed on a dead front still exited 0. The
+# pre-flip loop above only proves the app answers on its OWN port
+# (localhost:$TARGET_PORT) — it cannot see a Caddy reload that "succeeded" onto
+# a stale worker, or TLS/SNI misrouting on the PUBLIC hostname. This is the
+# first and only proof that barkpark.cloud itself reaches the new slot, and it
+# runs while the old slot is STILL RUNNING and not yet retired — so failing here
+# can still flip back and walk away clean instead of retiring the one container
+# that was actually serving. Same accepted class as the pre-flip probe: only a
+# success or a redirect on '/' counts.
+if ! echo "$code" | grep -qE '^(200|301|302)$'; then
+  log "post-flip public health check FAILED (https://barkpark.cloud/ = $code) — flipping back to :$ACTIVE_PORT; the old slot is still running and was never retired"
+  cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
+  if caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
+    systemctl reload caddy || log "WARN: caddy reload failed while reverting the flip — Caddyfile restored on disk, reload it by hand"
+  else
+    log "WARN: the pre-deploy Caddyfile backup does not validate — Caddy left as-is, fix by hand"
+  fi
+  abort_deploy; exit 14
+fi
 
 # ---- Drain, then retire the old slot. Its container is kept stopped for
 # instant manual rollback: flip the Caddyfile port back, reload caddy,
