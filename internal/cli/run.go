@@ -1546,6 +1546,13 @@ func handleResponse(out *writer, cmd manifest.Command, status int, respBody []by
 		return exitOK
 	}
 	ae := classifyError(status, respBody)
+	// Record WHICH refusal this was, for the client-side wrappers that layer a
+	// second read on top of a failed dispatch (runTaskClaim). They only get an
+	// exit code back from runCommand, and exit 6 covers the whole task
+	// claim/close contention row of the exit table — six different reasons whose
+	// diagnoses are not interchangeable. Per-invocation state on the writer, not
+	// a package global: one writer per bp run.
+	out.lastErrorCode = ae.code
 	renderError(out, ae)
 	return ae.exit
 }

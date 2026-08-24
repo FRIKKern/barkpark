@@ -32,6 +32,26 @@ func runTaskClaim(out *writer, g globals, ctx manifest.Context, m *manifest.Mani
 	if rc != exitConflict {
 		return rc
 	}
+	// Exit 6 is the WHOLE task claim/close contention row of the exit table
+	// (docs/cli/error-exit-table.md:110), and this read-back only explains the
+	// reasons that are ABOUT THE TARGET ROW'S CLAIM. resource_conflict is not
+	// one: the fence is held by a DIFFERENT row, so reading this row back finds
+	// no holder and claimVerdict then announced
+	//
+	//   "the store shows NO holder and an apparently-open row — this does not
+	//    match a real conflict; likely the server-side predicate defect … not a
+	//    legitimate refusal"
+	//
+	// over a refusal that was entirely legitimate and whose holder the server
+	// had already named. Measured live: claiming a fresh row with a path another
+	// live claim fences printed exactly that, at rc=6, on both channels. Telling
+	// an operator a working fence is a known server bug is worse than saying
+	// nothing, so the diagnosis stands down and the refusal's own
+	// conflicts[]-backed holder lines (classifyError → resourceConflictLines)
+	// are what the caller reads.
+	if out.lastErrorCode == "resource_conflict" {
+		return rc
+	}
 	req, ok := claimRequestOf(cmd, tail)
 	if !ok {
 		return rc

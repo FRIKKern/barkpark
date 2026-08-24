@@ -140,7 +140,10 @@ func describeSkip(p taskboard.Pick, outcome apiclient.TaskClaimOutcome) frontier
 func holderText(conflicts []apiclient.TaskConflict) string {
 	parts := make([]string, 0, len(conflicts))
 	for _, c := range conflicts {
-		who := taskboard.BareID(c.Task)
+		// HolderID, never .Task: the server spells this key `doc_id`, so reading
+		// .Task made every real skip render a LEADING BLANK where the holder's
+		// row id belongs (apiclient.TaskConflict).
+		who := taskboard.BareID(c.HolderID())
 		if c.Worker != "" {
 			who += " (" + c.Worker + ")"
 		}
