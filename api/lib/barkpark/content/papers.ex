@@ -430,6 +430,40 @@ defmodule Barkpark.Content.Papers do
   end
 
   @doc """
+  The paper map `Bpml.print_paper/1` is handed — the ONE builder for it.
+
+  Two call sites print a paper as BPML: the source route (`bp paper pull`) and
+  the ingest route's post-write canonical echo (`bp paper push`). They MUST
+  agree — `bp paper push` compares the echo against the next pull, so any drift
+  between them shows up as a working copy that changes under an author who
+  edited nothing.
+
+  They drifted: both built the map inline as slug/title/blocks, omitting the
+  label spine. `print_paper/1` has emitted `<meta><description>`/`<tag>` and the
+  parser has read it back since #11640, so the metadata was dropped on the way
+  IN, not on the way out. The visible symptom was a FALSE publish-wall verdict —
+  an UNEDITED pull fed to `bp paper push --check` failed `label_spine` "a
+  published document requires a description" on the 1002 of 1015 published
+  papers that have one.
+
+  Blocks are passed separately because the two callers resolve them
+  differently (the reader resolves tasks/wikilinks; the echo reads what was
+  just persisted) — the label spine is the part that must not vary.
+  """
+  @spec bpml_paper_map(Document.t(), list()) :: map()
+  def bpml_paper_map(%Document{} = paper, blocks) when is_list(blocks) do
+    content = paper.content || %{}
+
+    %{
+      "slug" => paper.doc_id,
+      "title" => paper.title,
+      "description" => Map.get(content, "description"),
+      "tags" => Map.get(content, "tags", []),
+      "blocks" => blocks
+    }
+  end
+
+  @doc """
   Per-doc PubSub topic for a paper, SCOPED to the owning workspace:
   `doc:ws:<workspace_id>:<dataset>:paper:<slug>`.
 

@@ -52,14 +52,18 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "eyebrow"} = b, d), do: text_tag("eyebrow", b, d)
 
   defp block(%{"type" => "heading", "level" => l} = b, d) when l in 1..3,
-    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{esc(Map.get(b, "text", ""))}</h#{l}>"
+    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
 
   defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d)
   defp block(%{"type" => "pullquote"} = b, d), do: inline_tag("pullquote", b, d)
   defp block(%{"type" => "ingress"} = b, d), do: inline_tag("ingress", b, d)
 
   defp block(%{"type" => "byline"} = b, d) do
-    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<item>#{byline_item(&1)}</item>")
+    items =
+      Enum.map(
+        alias_get(b, ["items", "content"]) || [],
+        &"#{pad(d + 1)}<item>#{byline_item(&1)}</item>"
+      )
     wrap("byline", attr_str(b, ["id"]), items, d)
   end
 
@@ -75,7 +79,10 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   end
 
   defp block(%{"type" => "code"} = b, d),
-    do: pad(d) <> "<code#{attr_str(b, ["id"])}>#{esc(Map.get(b, "value", ""))}</code>"
+    do:
+      pad(d) <>
+        "<code#{attr_str(b, ["id"])}>" <>
+        "#{esc(plain_alias(b, ["value", "code", "content", "text"]) || "")}</code>"
 
   defp block(%{"type" => "diagram"} = b, d),
     do:
@@ -123,8 +130,10 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp block(%{"type" => "steps"} = b, d) do
     items =
-      Enum.map(Map.get(b, "steps", []), fn s ->
-        case Map.get(s, "blocks", []) do
+      Enum.map(alias_get(b, ["steps", "items"]) || [], fn s ->
+        # A step's body is canonically `blocks`; the corpus also spells it
+        # `content` (a nested block list, not inline nodes).
+        case alias_get(s, ["blocks", "content"]) || [] do
           [] ->
             "#{pad(d + 1)}<step#{attr_str(s, ["title"])}/>"
 
@@ -138,7 +147,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp block(%{"type" => "table"} = b, d) do
     head =
-      case Map.get(b, "head", []) do
+      case alias_get(b, ["head", "header", "headers", "columns"]) || [] do
         [] ->
           []
 
@@ -157,7 +166,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   end
 
   defp block(%{"type" => "section"} = b, d) do
-    children = Enum.map(Map.get(b, "blocks", []), &block(&1, d + 1))
+    children = Enum.map(alias_get(b, ["blocks", "children"]) || [], &block(&1, d + 1))
     wrap("section", attr_str(drop_nonscalar_variant(b), ["id", "title", "variant"]), children, d)
   end
 
@@ -174,9 +183,11 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # fully on the web, so printing it empty would be a silent loss through sync.
   # The parser emits canonical "blocks", so the second print is byte-stable.
   defp block(%{"type" => "expandable"} = b, d) do
-    body = Map.get(b, "children") || Map.get(b, "blocks") || []
+    body = alias_get(b, ["children", "blocks"]) || []
     children = Enum.map(body, &block(&1, d + 1))
-    wrap("expandable", attr_str(b, ["id", "summary"]), children, d)
+    summary = plain_alias(b, ["summary", "title"])
+    attrs = attr_str(%{"id" => Map.get(b, "id"), "summary" => summary}, ["id", "summary"])
+    wrap("expandable", attrs, children, d)
   end
 
   # Fail-honest catchalls. EVERY shape the kernel cannot spell raises the ONE
@@ -244,7 +255,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp inline_node(%{"type" => "text"} = n) do
     Map.get(n, "marks", [])
     |> Enum.reverse()
-    |> Enum.reduce(esc(Map.get(n, "value", "")), fn mark, acc ->
+    |> Enum.reduce(text_value(Map.get(n, "value", "")), fn mark, acc ->
       tag = mark_tag(mark)
       "<#{tag}>#{acc}</#{tag}>"
     end)
@@ -307,13 +318,95 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp mark_tag(_other), do: raise(UnprintableError.new(:mark, nil))
 
+  # ── alias-key read tolerance ────────────────────────────────────────────────
+  #
+  # The corpus stores the SAME body under more than one key per block type:
+  # producers drifted over time, and the RENDER side reads several spellings
+  # while this printer read exactly one. Reading one key meant the element
+  # printed EMPTY, the pull answered 200, and `bp paper push` wrote that
+  # emptiness back over the stored paper — silent destruction of 2974 blocks in
+  # 254 of the 567 pullable published papers (census 2026-08-24).
+  #
+  # The rule — the same read-tolerance / canonical-write contract `head_cell/2`
+  # and the `expandable` body already document: ACCEPT every spelling on read,
+  # EMIT the canonical one. The BODY is the invariant, not the key. The parser
+  # returns the canonical key, so printing the parse is a fixed point (the
+  # idempotence leg of bpml_roundtrip_property_test.exs pins exactly that).
+  #
+  # A key present but EMPTY is not an answer — it falls through to the next
+  # spelling, which is what makes `%{"content" => [], "text" => "x"}` print "x".
+  defp alias_get(b, keys) do
+    Enum.find_value(keys, fn k ->
+      case Map.get(b, k) do
+        v when v in [nil, "", [], %{}] -> nil
+        v -> v
+      end
+    end)
+  end
+
+  # `<h1..3>` and `<eyebrow>` hold PLAIN escaped text — the spelling carries no
+  # marks. An UNMARKED inline array flattens losslessly (all 4878 content-keyed
+  # heading bodies in the corpus are exactly that shape). A body carrying a MARK
+  # or a non-text node cannot be spelled here, so it takes the ONE typed refusal
+  # rather than dropping the mark silently — the whole point of this module.
+  defp plain_body(b, keys), do: esc(plain_alias(b, keys) || "")
+
+  # The PLAIN-TEXT reading of an alias body, for every position that holds
+  # escaped text rather than inline markup: `<h1..3>`, `<eyebrow>`, `<code>`,
+  # and the `summary` ATTRIBUTE. An alias key can hold the body as a bare
+  # string OR as an inline-node list (14 `code` blocks and 1 `expandable`
+  # carry a list in the corpus) — a list reaches `esc/1`'s `to_string/1`
+  # fallback and raises ArgumentError, which is NOT an UnprintableError and so
+  # would escape the read path's rescue as a raw 500. It flattens instead.
+  defp plain_alias(b, keys) do
+    case alias_get(b, keys) do
+      nil -> nil
+      s when is_binary(s) -> s
+      nodes when is_list(nodes) -> flatten_plain(nodes)
+      _other -> raise(UnprintableError.new(:inline, nil))
+    end
+  end
+
+  defp flatten_plain(nodes) do
+    Enum.map_join(nodes, "", fn
+      %{"type" => "text", "value" => v} = n when is_binary(v) ->
+        if Map.get(n, "marks", []) == [],
+          do: v,
+          else: raise(UnprintableError.new(:mark, "plain-text position"))
+
+      s when is_binary(s) ->
+        s
+
+      %{"type" => type} ->
+        raise(UnprintableError.new(:inline, type))
+
+      _other ->
+        raise(UnprintableError.new(:inline, nil))
+    end)
+  end
+
+  # A text node's `value` is canonically a binary. Producer drift also nests a
+  # TYPED INLINE NODE there (`%{"type" => "code", "value" => …}`). That shape
+  # used to reach `esc/1`'s `to_string/1` fallback, which raises
+  # Protocol.UndefinedError on a map — NOT an UnprintableError, so it escaped
+  # the read path's rescue as a raw HTTP 500 (1 paper on the 2026-08-24 census:
+  # ctx-compression-handle-doctrine). A typed node now prints through the node
+  # printer (lossless); any other non-binary takes the typed refusal.
+  defp text_value(v) when is_binary(v), do: esc(v)
+  defp text_value(%{"type" => _} = node), do: inline_node(node)
+  defp text_value(v) when is_number(v) or is_boolean(v), do: esc(to_string(v))
+  defp text_value(nil), do: ""
+  defp text_value(_other), do: raise(UnprintableError.new(:inline, "text"))
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   defp text_tag(tag, b, d),
-    do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{esc(Map.get(b, "text", ""))}</#{tag}>"
+    do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</#{tag}>"
 
   defp inline_tag(tag, b, d),
-    do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{inline(Map.get(b, "content", []))}</#{tag}>"
+    do:
+      pad(d) <>
+        "<#{tag}#{attr_str(b, ["id"])}>#{inline(alias_get(b, ["content", "text"]) || [])}</#{tag}>"
 
   defp wrap(tag, attrs, [], d), do: pad(d) <> "<#{tag}#{attrs}/>"
 

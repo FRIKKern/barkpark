@@ -547,12 +547,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # nobody can prove is a rescue nobody should trust.
   @doc false
   def canonical_echo(paper) do
+    blocks = get_in(paper.content || %{}, ["blocks"]) || []
+
     bpml =
-      Barkpark.PortableDoc.Bpml.print_paper(%{
-        "slug" => paper.doc_id,
-        "title" => paper.title,
-        "blocks" => get_in(paper.content || %{}, ["blocks"]) || []
-      })
+      Barkpark.PortableDoc.Bpml.print_paper(
+        Barkpark.Content.Papers.bpml_paper_map(paper, blocks)
+      )
 
     {bpml, nil}
   rescue
