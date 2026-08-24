@@ -1,0 +1,143 @@
+name: Research-coverage suite
+
+# tooling/research-coverage/ holds the ledger the research corpus is built on,
+# and its write path had two data-loss defects that a successful command
+# reported as success: entries were rebuilt from a fixed seven-key literal (so
+# any field a newer writer added was silently dropped), and saveLedger was a
+# bare writeFileSync (so two concurrent writers deterministically destroyed one
+# whole contribution, both exiting 0). Both were proven by mutation before being
+# fixed; the suite this workflow runs is the regression cover for both, and it
+# is itself mutation-proven — removing the lock, the CAS, or the entry-merge
+# each turns a named test red (see the PR body for the three red/green pairs).
+#
+# WIRED PR AND PUSH ALIKE, PATH-FILTERED. A PR-only filter would let a direct
+# push to main go unre-checked forever; a push-only filter would red after the
+# merge, on protected main, which is the shape nobody can land a fix through.
+# The two `paths:` lists below are hand-maintained twins and must stay
+# set-equal — the same discipline shell-harnesses.yml and doc-gates.yml follow.
+#
+# WHY A FILE FLOOR AND NOT A TEST TOTAL. `node --test <glob>` exits 0 with
+# `# fail 0` when the glob expands to nothing, so a silently-shrunk glob is a
+# green that ran zero tests. A LOWER BOUND on the file count closes that without
+# turning the gate into a maintenance chore every time a test is added. The
+# TOTAL is deliberately not pinned: it moves with every new case.
+#
+# `# skipped 0` is asserted, not incidental — this suite has no opt-in probes,
+# and a skip appearing here would mean a test quietly stopped running.
+#
+# ADVISORY, NOT REQUIRED. This check's name is not in main's required-contexts
+# set, so a red here does not block a merge on its own. The step summary
+# re-derives that live on every run rather than trusting this comment to stay
+# true.
+
+on:
+  pull_request:
+    paths:
+      - "tooling/research-coverage/**"
+      - ".github/workflows/research-coverage-suite.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tooling/research-coverage/**"
+      - ".github/workflows/research-coverage-suite.yml"
+
+permissions:
+  contents: read
+  issues: write # so a failed run on main can surface itself to a human
+
+concurrency:
+  group: research-coverage-suite-${{ github.ref }}
+  # NEVER a literal `true`: on push-to-main that self-cancels the suite dark.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  research-coverage-suite:
+    name: tooling/research-coverage node --test suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: what this run does NOT certify (advisory status, re-derived live)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          {
+            echo "### Research-coverage suite — advisory, and what a green does not certify"
+            echo
+            prot_code=$(gh api -i repos/${{ github.repository }}/branches/main/protection 2>/dev/null | head -1 | awk '{print $2}')
+            if [ "$prot_code" = "200" ]; then
+              contexts=$(gh api repos/${{ github.repository }}/branches/main/protection --jq '.required_status_checks.contexts | join(", ")' 2>/dev/null)
+              echo "- \`branches/main/protection\`: 200 — required contexts: ${contexts:-<unreadable>}"
+              echo "  (this workflow's check is not among them — advisory only)"
+            else
+              echo "- \`branches/main/protection\`: ${prot_code:-<unreachable>} (no classic protection object)"
+            fi
+            echo
+            echo "A green here means the checked-out source passed \`node --test\` on THIS"
+            echo "runner. It says nothing about the ledger's CONTENT: research-ledger.json"
+            echo "is gitignored and absent from every clone, so no coverage percentage is"
+            echo "re-derivable here and none is asserted (see the open row"
+            echo "tgw-bl-coverage-ledger-unreproducible)."
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: test-file floor (a glob that expands to nothing exits 0)
+        run: |
+          set +e
+          shopt -s nullglob
+          files=(tooling/research-coverage/test/*.test.mjs)
+          count=${#files[@]}
+          printf '%s\n' "${files[@]}"
+          echo "found $count tooling/research-coverage/test/*.test.mjs files"
+          floor=2
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::expected at least $floor tooling/research-coverage/test/*.test.mjs files, found $count: ${files[*]}"
+            exit 1
+          fi
+
+      - name: suite — exit 0 AND '# fail 0' AND '# skipped 0'
+        run: |
+          set +e
+          set -o pipefail
+          node --test tooling/research-coverage/test/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/rc-suite.log"
+          run_rc=${PIPESTATUS[0]}
+
+          fail=$(awk -F'# fail ' '/^# fail /{print $2}' "$RUNNER_TEMP/rc-suite.log")
+          skipped=$(awk -F'# skipped ' '/^# skipped /{print $2}' "$RUNNER_TEMP/rc-suite.log")
+          echo "parsed clauses: run_rc=$run_rc fail=$fail skipped=$skipped"
+
+          status=0
+          if [ "$run_rc" != "0" ]; then
+            echo "::error::node --test exited $run_rc"
+            status=1
+          fi
+          if [ "$fail" != "0" ]; then
+            echo "::error::expected '# fail 0', got '# fail ${fail:-<none>}'"
+            status=1
+          fi
+          if [ "$skipped" != "0" ]; then
+            echo "::error::expected '# skipped 0' — this suite has no opt-in probes, so a skip means a test quietly stopped running; got '# skipped ${skipped:-<none>}'"
+            status=1
+          fi
+          exit $status
+
+      - name: report failure to a human
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: research-coverage-suite
+          CI_FAILURE_DETAIL: |
+            The tooling/research-coverage node --test suite failed (or its
+            file-count floor tripped) on ${{ github.ref }} at ${{ github.sha }}.
+            That suite guards the research-ledger write path against the two
+            data-loss defects recorded in tooling/research-coverage/ledger-io.mjs
+            (silent field strip, and a lost update between concurrent writers).
+            This check is advisory, so a red run does not block anything on its
+            own. Open the run's log for the failing test names.
+        run: bash scripts/file-ci-failure-issue.sh
