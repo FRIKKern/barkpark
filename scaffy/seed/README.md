@@ -79,5 +79,31 @@ nonzero on any non-MATCH**:
 It fails **loud** on any network error (unreachable host, non-200, bad JSON): a
 check that cannot reach the catalog exits nonzero, never a false green. Run it
 in seconds from any session; CI runs it as an ACTING post-merge gate
-(.github/workflows/scaffy-catalog-drift.yml, charter D100) that auto-seeds
-drift when BARKPARK_SEED_TOKEN exists and reds the suite hard otherwise.
+(.github/workflows/scaffy-catalog-drift.yml, charter D100).
+
+### Repairing drift from CI
+
+The gate DETECTS drift on every trigger (push to main, the daily cron, and
+dispatch) and reds hard on it. It only WRITES on a manually dispatched run that
+opts in: **Actions → scaffy-catalog-drift → Run workflow → repair = true**,
+with `BARKPARK_SEED_TOKEN` installed.
+
+The write is deliberately withheld from unattended runs. The repair logic had
+executed zero times across the workflow's first twelve runs — every red stopped
+at the credential guard and every green skipped the step — so wiring the secret
+to a cron would have promoted never-executed shell to an unattended writer
+against production content, with its first execution and its first evidence in
+the same 06:17 UTC event.
+
+That logic now lives in `repair.sh` rather than inline in the workflow,
+precisely so it can be tested: `repair-selftest.sh` drives it against a local
+fixture server on every run of the gate and asserts four arms — the happy path
+posts one atomic `createOrReplace` + `publish` batch per id, the E3
+`unknown_tag` wall is cleared by registering tag docs and the retry succeeds, a
+refused write reds instead of being swallowed, and an empty drifted-id list is
+an error rather than a silent success. Zero egress, zero credentials, so it
+runs anywhere:
+
+```
+bash scaffy/seed/repair-selftest.sh
+```

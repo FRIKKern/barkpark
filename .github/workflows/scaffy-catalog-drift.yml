@@ -19,15 +19,36 @@ name: scaffy-catalog-drift
 # gate a merge pre-merge: drift is a serve-side condition, so the PR diff
 # that introduces it is exactly what a pre-merge run cannot see.
 #
-# FAILURE SEMANTICS — the job reds on exactly four conditions:
-#   1. SELF-TEST FAILURE — the hermetic fixture below cannot prove the check
-#      both passes on a clean corpus and fires on a broken one.
-#   2. UNREACHABLE — the served catalog could not be fetched. A check that
+# FAILURE SEMANTICS — the job reds on exactly five conditions:
+#   1. SELF-TEST FAILURE (detection) — the hermetic fixture cannot prove the
+#      check both passes on a clean corpus and fires on a broken one.
+#   2. SELF-TEST FAILURE (repair) — repair-selftest.sh cannot prove
+#      scaffy/seed/repair.sh posts the right mutations, clears the E3
+#      unknown_tag wall, reds on a refused write, and refuses an empty run.
+#   3. UNREACHABLE — the served catalog could not be fetched. A check that
 #      cannot check never reports clean; distinguished from DRIFT (no table).
-#   3. DRIFT with no BARKPARK_SEED_TOKEN — the served catalog is behind main
-#      and this runner holds no credential to fix it.
-#   4. DRIFT, auto-seed ran, and the re-check did not come back green.
+#   4. DRIFT this run is not authorized to repair — either the run is
+#      unattended (push/cron) or the operator did not opt in, or repair WAS
+#      authorized but no BARKPARK_SEED_TOKEN is present.
+#   5. DRIFT, repair ran, and the re-check did not come back green.
 # Green means: in sync, or drifted-and-repaired-to-green this run.
+#
+# WHO MAY WRITE (D100 amendment). Detection runs everywhere; REPAIR runs only
+# on a workflow_dispatch carrying repair=true. The repair arm had executed
+# ZERO times in this workflow's first 12 runs — every red took the credential
+# guard, every green skipped the step — so installing BARKPARK_SEED_TOKEN
+# under the old shape would have promoted never-executed shell to an
+# UNATTENDED CRON WRITER against production content, with first execution and
+# first evidence in the same 06:17 UTC event. Two independent changes fix
+# that: the write now needs a human present AND opting in, and the logic
+# itself is exercised against a local fixture on EVERY run. This narrows who
+# may WRITE, never what the gate SEES — cron and push still detect drift and
+# still red hard on it, exactly as D100 requires.
+#
+# THE AUTHORIZATION CHECK LIVES IN THE STEP BODY, NOT IN ITS `if:`. A step
+# skipped by its `if:` concludes SUCCESS; gating authorization there would
+# turn every unauthorized DRIFT run GREEN on a drifted catalog. Do not
+# "simplify" it into the `if:`.
 #
 # TOKEN. BARKPARK_SEED_TOKEN is a guerrilla API token; permissions ["write"]
 # suffices — /v1/data/mutate rides the require_write gate and publish is a
@@ -60,6 +81,11 @@ on:
     # server edit, a reverted re-seed) with no corresponding push.
     - cron: "17 6 * * *"
   workflow_dispatch:
+    inputs:
+      repair:
+        description: "Re-seed drifted commands into the served catalog (WRITES to production content)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -147,6 +173,21 @@ jobs:
           fi
           echo "self-test OK — hermetic fixture green on the full corpus, red (exit $code + DRIFT/MISSING row) minus one doc; zero guerrilla egress."
 
+      # ── Self-test: prove the REPAIR arm works, before it ever writes ──────
+      # The repair logic had executed ZERO times across this workflow's first
+      # 12 runs — nine reds took the credential guard above it, three greens
+      # skipped the step entirely. That left ~60 lines of never-executed shell
+      # one repo secret away from mutating production content, where its first
+      # execution would also be its first evidence. repair-selftest.sh drives
+      # scaffy/seed/repair.sh against a local fixture server every run and
+      # asserts four arms: the happy path posts one atomic
+      # createOrReplace+publish batch per id, the E3 unknown_tag 422 wall is
+      # cleared by registering tag docs and the retry SUCCEEDS, a refused
+      # write REDS instead of being swallowed, and an empty drifted-id list is
+      # an ERROR rather than a silent success. Zero egress, zero credentials.
+      - name: Self-test — repair arm proven against a local fixture
+        run: bash scaffy/seed/repair-selftest.sh
+
       # ── Real audit: served catalog vs main corpus ─────────────────────────
       # Same audit `make seed-check` runs locally. Verdicts: in sync → green
       # here; UNREACHABLE → hard red here (distinguished from drift: the fetch
@@ -191,22 +232,45 @@ jobs:
           echo "::error::scaffy catalog audit UNREACHABLE — served catalog fetch failed; drift status unknown; failing hard."
           exit 1
 
-      # ── Auto-seed (secret-gated) or hard red ──────────────────────────────
-      # DRIFT verdicts land here. With BARKPARK_SEED_TOKEN: re-derive the
-      # payloads and, per drifted id, post ONE atomic mutation batch
-      # (createOrReplace + publish) to /v1/data/mutate/production; the E3
-      # unknown_tag wall (422) is cleared by registering the payload's tag
-      # docs and retrying once (scaffy/seed/README.md §unknown_tag). The
-      # repair only counts if seed --check then comes back GREEN. Without the
-      # token: hard red — behind main with no credential to fix it.
-      - name: Auto-seed drifted commands or red honestly
+      # ── Repair (dispatch-only, opt-in, secret-gated) or hard red ──────────
+      # DRIFT verdicts land here. The repair itself lives in
+      # scaffy/seed/repair.sh and is proven by the self-test above; this step
+      # decides only WHETHER it is allowed to run, then judges convergence.
+      #
+      # DISPATCH-ONLY AND OPT-IN (D100 amendment). Installing
+      # BARKPARK_SEED_TOKEN under the old shape would have made never-executed
+      # shell an UNATTENDED CRON WRITER against production content — firing at
+      # 06:17 UTC with nobody watching. Repair now requires BOTH a
+      # human-triggered run (workflow_dispatch) AND an explicit repair=true
+      # opt-in, so a person is present and has said the word "write". The cron
+      # and push arms still DETECT drift and still red on it; they simply no
+      # longer mutate. This narrows who may WRITE, never what the gate SEES —
+      # the detection arm is untouched, and D100's hard-red degrade stands.
+      - name: Repair drifted commands (dispatch-only, opt-in) or red honestly
         if: steps.audit.outputs.status == 'drift'
         env:
           BARKPARK_SEED_TOKEN: ${{ secrets.BARKPARK_SEED_TOKEN }}
+          REPAIR_AUTHORIZED: ${{ github.event_name == 'workflow_dispatch' && inputs.repair }}
         run: |
           set -uo pipefail
+          summary() { printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"; }
+
+          # AUTHORIZATION IS CHECKED INSIDE THIS STEP, NEVER IN ITS `if:`.
+          # A step skipped by its `if:` concludes SUCCESS, so gating
+          # authorization there would turn every unauthorized DRIFT run GREEN
+          # on a drifted catalog — the exact "satisfiable by skipping" shape
+          # this gate exists to refuse. The step must always be REACHED on a
+          # DRIFT verdict so that it can red. Keep this check in the body.
+          if [ "${REPAIR_AUTHORIZED}" != "true" ]; then
+            summary "**DRIFT — not repaired**" \
+                    "The served catalog is behind main. Repair is dispatch-only and opt-in, and this run (event \`${GITHUB_EVENT_NAME}\`) is not authorized to write." \
+                    "" "To repair: Actions → scaffy-catalog-drift → Run workflow, with **repair = true**."
+            echo "::error::DRIFT — the served catalog is behind main and this run is NOT authorized to repair it (event=${GITHUB_EVENT_NAME}; repair opt-in absent). Detection is working; the write is deliberately withheld from unattended runs. Failing hard. To repair: dispatch this workflow manually with repair=true."
+            exit 1
+          fi
+
           if [ -z "${BARKPARK_SEED_TOKEN:-}" ]; then
-            echo "::error::DRIFT — the served catalog is behind main and this runner holds no credential to fix it (BARKPARK_SEED_TOKEN absent; minting is task scaffy-backlog-seed-token-mint). Failing hard."
+            echo "::error::DRIFT — repair was authorized for this run, but the runner holds no credential (BARKPARK_SEED_TOKEN absent; minting is task scaffy-backlog-seed-token-mint). Failing hard."
             exit 1
           fi
 
@@ -217,66 +281,24 @@ jobs:
           # Fresh payloads for the re-seed (scaffy/seed/out is gitignored).
           go run ./scaffy/seed
 
-          post() {
-            # post <body-file>: response body → $RUNNER_TEMP/resp.json,
-            # prints the HTTP status code (empty on transport failure).
-            curl -sS -o "$RUNNER_TEMP/resp.json" -w '%{http_code}' \
-              -X POST "$server/v1/data/mutate/production" \
-              -H "Authorization: Bearer $BARKPARK_SEED_TOKEN" \
-              -H "Content-Type: application/json" \
-              --data @"$1"
-          }
-
-          while IFS= read -r id; do
-            [ -n "$id" ] || continue
-            payload="scaffy/seed/out/$id.json"
-            if [ ! -f "$payload" ]; then
-              echo "::error::drifted id '$id' has no derived payload — cannot re-seed it."
-              exit 1
-            fi
-            # ONE atomic batch per id: createOrReplace + publish together.
-            jq --arg id "$id" \
-              '{mutations: [{createOrReplace: (. + {_type: "command"})}, {publish: {id: $id, type: "command"}}]}' \
-              "$payload" > "$RUNNER_TEMP/body.json"
-            http="$(post "$RUNNER_TEMP/body.json")" || true
-            if [ "$http" = "422" ] && grep -q 'unknown_tag' "$RUNNER_TEMP/resp.json"; then
-              echo "unknown_tag on $id — registering its tag docs, then one retry (E3 wall)"
-              for tag in $(jq -r '.tags[].tag' "$payload"); do
-                jq -n --arg t "$tag" \
-                  '{mutations: [{createOrReplace: {_id: $t, _type: "tag", title: $t, description: "Tag used by the scaffy command catalog; registered by the scaffy-catalog-drift auto-seed."}}, {publish: {id: $t, type: "tag"}}]}' \
-                  > "$RUNNER_TEMP/tag-body.json"
-                thttp="$(post "$RUNNER_TEMP/tag-body.json")" || true
-                case "$thttp" in
-                  2??) echo "registered tag doc '$tag' (HTTP $thttp)" ;;
-                  *)
-                    echo "::error::tag-doc registration for '$tag' failed (HTTP ${thttp:-transport-error}): $(cat "$RUNNER_TEMP/resp.json" 2>/dev/null)"
-                    exit 1
-                    ;;
-                esac
-              done
-              http="$(post "$RUNNER_TEMP/body.json")" || true
-            fi
-            case "$http" in
-              2??) echo "re-seeded $id (HTTP $http)" ;;
-              *)
-                echo "::error::re-seed of '$id' failed (HTTP ${http:-transport-error}): $(cat "$RUNNER_TEMP/resp.json" 2>/dev/null)"
-                exit 1
-                ;;
-            esac
-          done < "$RUNNER_TEMP/drifted-ids.txt"
+          SERVER="$server" \
+          BARKPARK_SEED_TOKEN="$BARKPARK_SEED_TOKEN" \
+          DRIFTED_IDS_FILE="$RUNNER_TEMP/drifted-ids.txt" \
+          PAYLOAD_DIR="scaffy/seed/out" \
+          WORK_DIR="$RUNNER_TEMP/repair-work" \
+            bash scaffy/seed/repair.sh || exit 1
 
           # The repair only counts if the audit itself comes back green.
           code=0
           out="$(go run ./scaffy/seed --check 2>&1)" || code=$?
           echo "$out"
-          summary() { printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"; }
           if [ "$code" -eq 0 ] && grep -q 'MATCH — catalog in sync' <<<"$out"; then
-            summary "**Repaired** — drift auto-seeded and the re-check is green." \
+            summary "**Repaired** — drift re-seeded on an operator-dispatched run and the re-check is green." \
                     "" '```' "$(grep -E 'MATCH,|MATCH —|catalog drift check' <<<"$out")" '```'
-            echo "auto-seed converged — served catalog back in sync."
+            echo "repair converged — served catalog back in sync."
             exit 0
           fi
-          summary "**NOT CONVERGED** — auto-seed ran but the re-check is still red (EXTRA rows need a human retire; see scaffy/seed/README.md)." \
+          summary "**NOT CONVERGED** — repair ran but the re-check is still red (EXTRA rows need a human retire; see scaffy/seed/README.md)." \
                   "" '```' "$out" '```'
-          echo "::error::auto-seed did not converge to green (re-check exit $code) — failing hard."
+          echo "::error::repair did not converge to green (re-check exit $code) — failing hard."
           exit 1
