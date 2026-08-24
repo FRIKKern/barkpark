@@ -15,12 +15,9 @@
 1 api/test/barkpark_web/live/studio/studio_session_birth_template_test.exs
 3 api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs
 1 api/test/barkpark/content/disposition_trigger_gate_test.exs
-1 api/test/barkpark/content/papers_cache_provenance_test.exs
-2 api/test/barkpark/content/papers/reader_lagging_stamp_test.exs
 1 api/test/barkpark/content/schema_surface_runtime_test.exs
 1 api/test/barkpark/content/task_birth_fence_test.exs
 1 api/test/barkpark/content/tombstone_fence_test.exs
-2 api/test/barkpark/content/validation_test.exs
 1 api/test/barkpark/content/writer_transition_gate_test.exs
 3 api/test/barkpark/media/share_scope_test.exs
 1 api/test/barkpark/plugins/bulldocs_patch_verbs_manifest_test.exs
@@ -46,4 +43,3 @@
 1 api/test/barkpark/tasks_schema_dossier_test.exs
 1 api/test/barkpark/tasks/close_test.exs
 1 api/test/barkpark/tenancy_delete_workspace_test.exs
-5 api/test/barkpark/tenancy_singleton_slug_test.exs
