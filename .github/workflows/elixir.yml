@@ -366,7 +366,22 @@ jobs:
       fail-fast: false
       matrix:
         otp: ["27.0"]
-        elixir: ["1.18.1"]
+        # THE DECLARED TOOLCHAIN, not the historical one. `.tool-versions` says
+        # `elixir 1.18.4-otp-27`, and that declaration is what PRODUCTION runs:
+        # release-artifact.yml builds the prebuilt with `version-file:
+        # .tool-versions` under a comment requiring it to "match the box runtime
+        # exactly", and deploy/azure-base-install.sh pins every box's asdf to the
+        # same file. The gate sat one patch BELOW it at 1.18.1, so a developer
+        # who honoured the pin formatted with a formatter this job did not use
+        # and could not clear the red no matter how many times they fixed it —
+        # and a permanently-red advisory gate teaches the fleet to skip the one
+        # red that is real. Moving the DECLARATION down instead would have
+        # changed what prod installs to settle a formatter disagreement, which
+        # is the wrong direction: one CI matrix has no consumers outside CI,
+        # while .tool-versions has three outside it. OTP is deliberately NOT
+        # moved here (the pin says erlang 27.3.4, this says 27.0) — formatter
+        # output is an Elixir-level rule, and OTP is a wider blast radius.
+        elixir: ["1.18.4"]
     defaults:
       run:
         working-directory: api
