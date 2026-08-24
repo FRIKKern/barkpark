@@ -304,6 +304,16 @@ class ChroniclePaperTest(unittest.TestCase):
         )
         self.assertEqual("Tasks return to view", editorial["theme"])
         self.assertIn("restore tasks", editorial["plain_summary"])
+        forbidden = (
+            "Opening up new possibilities",
+            "Useful progress, carefully made",
+            "Making everyday work smoother",
+            "Making Barkpark better",
+            "A steadier product",
+            "More useful ways to work",
+        )
+        visible_titles = [editorial["theme"], *[item["title"] for item in editorial["work_themes"]]]
+        self.assertTrue(all(title not in forbidden for title in visible_titles))
 
     def test_editorial_generation_falls_back_without_blocking_the_archive(self):
         events = self.read_fixture_events()

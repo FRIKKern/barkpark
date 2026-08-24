@@ -379,20 +379,20 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
     fix_heavy = sum(event.kind == "fix" for event in selected) >= max(1, len(selected) // 2)
     feature_heavy = sum(event.kind == "feat" for event in selected) > sum(event.kind == "fix" for event in selected)
     clusters = [
-        ("Clearer when things go wrong", "Errors and awkward states were made easier to understand and recover from.", "Less guesswork when something needs attention.", ("error", "fail", "status", "refus", "invalid")),
-        ("More complete results", "Work focused on returning the full picture instead of something partial or misleading.", "People can trust that what they see is the whole story.", ("page", "trunc", "partial", "complete", "result", "list")),
-        ("Safer everyday access", "Access rules and sensitive paths were tightened without adding friction to ordinary use.", "The product is more dependable around who can see and do what.", ("access", "auth", "token", "member", "permission", "security")),
-        ("A steadier product", "The less visible edges received the care they need to hold up during real use.", "Everyday work should feel calmer and more predictable.", ("bound", "limit", "buffer", "recover", "retry", "reliab")),
-        ("More useful ways to work", "New capabilities were added and connected to the rest of the product.", "There is more that people can accomplish without leaving Barkpark.", ("add", "introduc", "support", "enable", "create")),
+        ("Errors and awkward states were made easier to understand and recover from.", "Less guesswork when something needs attention.", ("error", "fail", "status", "refus", "invalid")),
+        ("Work focused on returning the full picture instead of something partial or misleading.", "People can trust that what they see is the whole story.", ("page", "trunc", "partial", "complete", "result", "list")),
+        ("Access rules and sensitive paths were tightened without adding friction to ordinary use.", "The product is more dependable around who can see and do what.", ("access", "auth", "token", "member", "permission", "security")),
+        ("The less visible edges received the care they need to hold up during real use.", "Everyday work should feel calmer and more predictable.", ("bound", "limit", "buffer", "recover", "retry", "reliab")),
+        ("New capabilities were added and connected to the rest of the product.", "There is more that people can accomplish without leaving Barkpark.", ("add", "introduc", "support", "enable", "create")),
     ]
     remaining = list(reversed(selected))
     work_themes = []
-    for title_value, explanation, outcome, needles in clusters:
+    for explanation, outcome, needles in clusters:
         matches = [event for event in remaining if any(needle in event.title.lower() for needle in needles)]
         if not matches:
             continue
         work_themes.append({
-            "title": title_value,
+            "title": concrete_fallback_headline(matches[0]),
             "explanation": explanation,
             "outcome": outcome,
             "source_refs": [event.sha[:10] for event in matches[:3]],
@@ -402,8 +402,12 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
         if len(work_themes) == 3:
             break
     if not work_themes:
+        representative = next(
+            (event for event in reversed(selected) if event.kind in PRODUCT_KINDS),
+            selected[-1],
+        )
         work_themes.append({
-            "title": "Making Barkpark better",
+            "title": concrete_fallback_headline(representative),
             "explanation": "This period was spent improving the product and tidying the rough edges around it.",
             "outcome": "The result is a more capable, more dependable place to work.",
             "source_refs": [event.sha[:10] for event in reversed(selected[-3:])],
