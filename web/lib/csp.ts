@@ -1,3 +1,5 @@
+import { mapLandingActive, tileOrigins, tilesEnabled } from "@/lib/map-tiles";
+
 /**
  * Content-Security-Policy for the web/ demo — the CONSUMER-side backstop for
  * the XSS campaign.
@@ -47,6 +49,26 @@
  * `ws:`/`wss:` wildcard would let an XSS payload phone home to ANY WebSocket
  * host — the exact origin keeps the backstop tight even when live search is
  * on.
+ *
+ * ## img-src and the map landing's basemap tiles
+ *
+ * `img-src` is `'self' data: blob:` plus, ONLY on a deployment that actually
+ * draws the map landing (`NEXT_PUBLIC_FINDER_LANDING=map`, tiles not switched
+ * off), the exact ORIGINS the configured tile template resolves to — including
+ * the same `{s}` subdomain expansion `components/listings-map.tsx` performs, so
+ * the host the map fetches and the host the policy allows are derived from ONE
+ * place (`lib/map-tiles.ts`).
+ *
+ * This directive used to be the bare `'self' data: blob:`, which blocked EVERY
+ * basemap tile the map requested — not as a rare upstream blip, but as the
+ * app's own policy, on every request, in every deployment. The map degrades to
+ * its graticule without complaining (deliberately — see `listings-map.tsx`), so
+ * `NEXT_PUBLIC_MAP_TILE_URL` was accepted, documented in `.env.example`, and
+ * then structurally inert, while the popover still printed the OpenStreetMap
+ * attribution for tiles that never arrived. Same posture rule as `connect-src`
+ * above: exact origins, never a bare `https:` wildcard — an allowed `img-src`
+ * host is a channel an injected payload can send bytes down, so the policy
+ * widens exactly as far as the feature needs and no further.
  */
 
 /**
@@ -60,7 +82,7 @@ export function buildCspPolicy(nonce: string): string {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob:",
+    `img-src 'self' data: blob:${mapTileImgSrcSuffix()}`,
     "font-src 'self'",
     `connect-src 'self'${wsConnectSrcSuffix()}`,
     "object-src 'none'",
@@ -85,6 +107,27 @@ function wsConnectSrcSuffix(): string {
   } catch {
     return "";
   }
+}
+
+/**
+ * The `img-src` addition for the map landing's basemap tiles, or `""` when the
+ * deployment draws no tiles — in which case `img-src` stays exactly as it was.
+ *
+ * Gated on the map landing being the mounted one AND tiles not being switched
+ * off, because an allowed image host is a place an injected payload can send
+ * bytes: the policy widens only for a surface that is really on screen. Both
+ * predicates, the tile template, and the `{s}` expansion come from
+ * `lib/map-tiles.ts` — the same module `components/listings-map.tsx` reads — so
+ * the fetched host and the allowed host cannot drift apart.
+ *
+ * A same-origin or unparseable template yields NO origins and therefore no
+ * suffix, rather than a fabricated host: `'self'` already covers the first, and
+ * the second was never going to load.
+ */
+function mapTileImgSrcSuffix(): string {
+  if (!mapLandingActive() || !tilesEnabled()) return "";
+  const origins = tileOrigins();
+  return origins.length > 0 ? ` ${origins.join(" ")}` : "";
 }
 
 /**
