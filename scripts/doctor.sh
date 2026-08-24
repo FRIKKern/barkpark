@@ -86,6 +86,35 @@ else
   skip "published stable cli release, jq, or origin/main ref unavailable — release-cadence check skipped"
 fi
 
+# ── 1c. Orphaned test databases ──────────────────────────────────────────────
+# Every lane runs `MIX_TEST_PARTITION=<lane> mix ecto.create`; nothing drops
+# them, so the count is MONOTONIC and the ceiling is max_connections (100), not
+# disk. This matters here rather than in a log nobody reads because pool
+# exhaustion is MISREAD BY DEFAULT: `mix ecto.create` dies with "couldn't be
+# created: killed" and a run dies with FATAL 53300 — neither names the cause,
+# and both read like a code fault. A lane that records that abort as a red has
+# invented a failure. Read-only: this counts, it never drops.
+TEST_DB_WARN="${BARKPARK_TEST_DB_WARN:-60}"
+if command -v psql >/dev/null 2>&1; then
+  TEST_DBS="$(psql -h "${BARKPARK_TEST_DB_HOST:-localhost}" -U "${BARKPARK_TEST_DB_USER:-postgres}" \
+      -tAc "select count(*) from pg_database where datname like 'barkpark\\_test%';" 2>/dev/null)"
+  CONN_USED="$(psql -h "${BARKPARK_TEST_DB_HOST:-localhost}" -U "${BARKPARK_TEST_DB_USER:-postgres}" \
+      -tAc "select count(*) from pg_stat_activity;" 2>/dev/null)"
+  CONN_MAX="$(psql -h "${BARKPARK_TEST_DB_HOST:-localhost}" -U "${BARKPARK_TEST_DB_USER:-postgres}" \
+      -tAc "select setting from pg_settings where name='max_connections';" 2>/dev/null)"
+  if [ -n "$TEST_DBS" ]; then
+    if [ "$TEST_DBS" -gt "$TEST_DB_WARN" ] 2>/dev/null; then
+      bad "$TEST_DBS orphaned barkpark_test* databases (connections ${CONN_USED:-?}/${CONN_MAX:-?}) — at the ceiling, ecto.create dies with \"couldn't be created: killed\" and tests with \"FATAL 53300 too_many_connections\". NEITHER is a code fault; do not record such an abort as a red. Preview: make reap-test-dbs"
+    else
+      ok "$TEST_DBS barkpark_test* databases (connections ${CONN_USED:-?}/${CONN_MAX:-?})"
+    fi
+  else
+    skip "postgres unreachable — orphaned-test-database check skipped"
+  fi
+else
+  skip "psql not on PATH — orphaned-test-database check skipped"
+fi
+
 # ── 2. Installed bp binary stale? ────────────────────────────────────────────
 # bp embeds its build commit via -ldflags; it is stale only if Go-side inputs
 # changed on the MERGED tip since. The compare-target is origin/main, NOT local
