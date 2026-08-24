@@ -846,7 +846,7 @@ func TestHandleResponseErrorJSONEnvelope(t *testing.T) {
 	w := newWriter(&so, &se)
 	w.output = "json"
 
-	code := handleResponse(w, manifest.Command{}, 404, body)
+	code := handleResponse(w, nil, manifest.Command{}, 404, body)
 	if code != exitNotFound {
 		t.Fatalf("exit = %d, want %d", code, exitNotFound)
 	}
@@ -870,7 +870,7 @@ func TestHandleResponseErrorJSONEnvelope(t *testing.T) {
 	var so2, se2 bytes.Buffer
 	wt := newWriter(&so2, &se2)
 	wt.output = "table"
-	handleResponse(wt, manifest.Command{}, 404, body)
+	handleResponse(wt, nil, manifest.Command{}, 404, body)
 	if so2.Len() != 0 {
 		t.Errorf("table mode must not write stdout:\n%s", so2.String())
 	}
