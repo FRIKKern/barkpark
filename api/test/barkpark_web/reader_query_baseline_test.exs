@@ -60,8 +60,25 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   # that mints the reader's ETag. It buys the 304 halt: a revalidating
   # reader's dead leg costs 1 statement instead of all 16. A priced
   # capability, not a silent regression — the next unexplained +1 still reds.
-  @dead_leg_budget 16
-  @both_legs_budget 31
+  #
+  # +2 dead (16→18) / +4 both (31→35): the schema-visibility clamp at the
+  # batch-read seat (task-38786b2edab15955 — `?expand=` hydrated a reference
+  # into a PRIVATE type with no visibility check, and Envelope.render only
+  # redacts FIELDS). `Query.restrict_to_visible_types/3` now guards
+  # `get_documents_by_ids/3`, which the driven-tasks reverse view rides, so an
+  # unauthenticated reader pays the READ-TIME allowlist: +1 schema_definitions
+  # (the allowlist itself) and +1 datasets (its dataset resolution — this
+  # LiveView path passes no `memoize: true`, by the barkpark-sknf gate). The
+  # connected leg is a second full render, hence ×2 on both legs. Measured,
+  # not estimated: dead 18 (documents 6, datasets 4, schema_definitions 3,
+  # workspaces 2, content_edges 1, projects 1, task_edges 1); both 35.
+  #
+  # CONSTANT, not fan-out — the property this harness really guards: the
+  # sibling N+1 slope test is UNCHANGED at 0.0 statements per additional citing
+  # task per leg (dead 18->18, both 35->35). A priced security capability, and
+  # the next unexplained +1 still reds.
+  @dead_leg_budget 18
+  @both_legs_budget 35
   @max_n_plus_one_slope 1.0
 
   setup do

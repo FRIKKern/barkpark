@@ -336,6 +336,37 @@ defmodule Barkpark.Content.Schema do
   end
 
   @doc """
+  Has this caller EARNED the unclamped view of schema visibility?
+
+  The single owner of the "which tier is asking" half of every schema-visibility
+  decision — the other half being `public_schema?/1` / `public_type_names/2`,
+  which decide what the clamped tier may see. It was previously hand-written
+  twice (`DocumentsRetriever.bypasses_visibility_gate?/1` and `visible_schemas/2`
+  below) and, by omission, not at all on the batch document read — the hole
+  `?expand=` walked through. Two copies of one visibility rule is how this
+  family recurs, so there is now one.
+
+  DEFAULT-NARROW. The widening arm matches ONLY a `%CallerContext{}` for an
+  authenticated principal (`:api_token` or `:user`) outside the public-read
+  tier. Anonymous, `nil`, a public-read token, a bare map, a render sentinel
+  (`:internal`) and any future principal shape all land in the narrow arm by
+  construction — "unrecognised" must never mean "show everything".
+
+  The tier test is `"public-read" in roles` — MEMBERSHIP, never list equality:
+  `CallerContext.from_token/1` stores the token's permission list VERBATIM and
+  `TokenController` mints `["public-read", "read"]` as a real shape, so a
+  `roles == ["public-read"]` pin would be escapable by construction. Same
+  predicate as `PublicRead.public_read_token?/1`.
+  """
+  # @canonical capability:visibility-gate-tier aka:bypasses_visibility_gate,public_read_principal,anonymous type clamp,who may see private types doc:docs/cards/search-media.md
+  @spec bypasses_visibility_gate?(any()) :: boolean()
+  def bypasses_visibility_gate?(%Barkpark.Content.CallerContext{principal_type: p, roles: roles})
+      when p in [:api_token, :user] and is_list(roles),
+      do: "public-read" not in roles
+
+  def bypasses_visibility_gate?(_), do: false
+
+  @doc """
   The corpus-graph schema-visibility clamp, keyed on the PRINCIPAL — the ONE
   owner of the "which schemas may this caller see in a whole-corpus read"
   decision. Both corpus derivations (`TasksController.derive_graph_corpus/2`,
@@ -354,35 +385,29 @@ defmodule Barkpark.Content.Schema do
   clamps. Anonymous, `nil`, a public-read token, a bare map, and any future
   principal shape all land in the narrow arm by construction.
 
-  The tier test is `"public-read" in roles` — MEMBERSHIP, never list equality
-  (`CallerContext.from_token/1` stores the token's permission list verbatim,
-  and `TokenController` mints `["public-read", "read"]` as a real shape), the
-  same predicate as `PublicRead.public_read_token?/1` and
-  `DocumentsRetriever.public_read_principal?/1`.
+  The tier test itself is `bypasses_visibility_gate?/1` above — one predicate,
+  shared with the anonymous search allowlist
+  (`DocumentsRetriever.restrict_anonymous_to_public_types/3`) and the batch
+  document read (`Query.restrict_to_visible_types/3`).
 
   The narrow view is `public_schema?/1` over the already-read rows — derived
   at READ TIME, so a schema flipped to private drops out on the very next
   corpus read, and an empty allowlist means the caller sees NOTHING, not
   everything.
   """
+  # The TIER half of the decision is `bypasses_visibility_gate?/1` above — the
+  # one owner, shared with the anonymous search allowlist and the batch document
+  # read. The narrow arm is the DEFAULT: anything that has not affirmatively
+  # earned the wider view — anonymous, nil, a non-struct, an unknown future
+  # principal — sees public-visibility schemas only. "Unrecognised" must never
+  # fall through to "show everything" again.
   # @canonical capability:corpus-visible-schemas aka:visible_schemas,graph_payload,finder leak,private type titles,schema visibility clamp doc:docs/cards/search-media.md
-  def visible_schemas(schemas, caller_context)
-
-  def visible_schemas(schemas, %Barkpark.Content.CallerContext{principal_type: p, roles: roles})
-      when is_list(schemas) and p in [:api_token, :user] and is_list(roles) do
-    if "public-read" in roles do
-      Enum.filter(schemas, &public_schema?/1)
-    else
+  def visible_schemas(schemas, caller_context) when is_list(schemas) do
+    if bypasses_visibility_gate?(caller_context) do
       schemas
+    else
+      Enum.filter(schemas, &public_schema?/1)
     end
-  end
-
-  # The narrow arm is the DEFAULT: anything that has not affirmatively earned
-  # the wider view — anonymous, nil, a non-struct, an unknown future principal
-  # — sees public-visibility schemas only. "Unrecognised" must never fall
-  # through to "show everything" again.
-  def visible_schemas(schemas, _unearned) when is_list(schemas) do
-    Enum.filter(schemas, &public_schema?/1)
   end
 
   @doc """

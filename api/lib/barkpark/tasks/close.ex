@@ -22,6 +22,17 @@ defmodule Barkpark.Tasks.Close do
   #     EXEMPT BY NAME — abandoning criteria is the point of cancelling. There is
   #     no third criterion state: this is accept-unmet-with-a-recorded-reason.
   #   * WORKER ID — sentinel ids (`""`, `None`, `null`, `nil`, `-`) are refused.
+  #   * ACKNOWLEDGEMENT — a `done` or `cancelled` close of a row BORN from an
+  #     outsider's GitHub issue (`gh-<num>`, see `Github.Acknowledgement`) needs
+  #     its `ack_gate` criterion stamped met, or `:ack_override` with a reason,
+  #     recorded as `close_override.acknowledgement`. Measured 2026-08-24: of the
+  #     11 intaken issues, 8 carried no non-bot comment at all — the bridge's own
+  #     birth backlink, up to 29 days old, was the only thing ever said to those
+  #     reporters, while their bugs were fixed in this repo. The row that closed
+  #     `done` over it (`gh-11555`) carried ZERO criteria, so the CRITERIA gate
+  #     above was vacuously satisfied and could not see it.
+  #     `blocked` is exempt BY NAME; `cancelled` deliberately is NOT — see
+  #     `check_acknowledgement/3`.
   #
   # NONE OF THIS IS AUTHORIZATION. `worker_id` arrives as a client-supplied body
   # param (`tasks_controller.ex` close/2), never from the api_token, so a caller
@@ -48,6 +59,7 @@ defmodule Barkpark.Tasks.Close do
     ]
 
   alias Barkpark.Content.{Document, Scope}
+  alias Barkpark.Plugins.Github.Acknowledgement
   alias Barkpark.Repo
   alias Barkpark.Tasks.Edges
   alias Barkpark.Tasks.WorkDigest
@@ -80,7 +92,14 @@ defmodule Barkpark.Tasks.Close do
     # absent (or blank) means "no override", and the corresponding gate refuses.
     overrides = %{
       holder: override_reason(Keyword.get(opts, :holder_override)),
-      criteria: override_reason(Keyword.get(opts, :criteria_override))
+      criteria: override_reason(Keyword.get(opts, :criteria_override)),
+      # DELIBERATELY ITS OWN KEY. `criteria_override` must not discharge the
+      # acknowledgement gate: those are two different admissions ("this work is
+      # done though a criterion is unproven" vs "I am closing an outsider's bug
+      # report without telling them"), and folding them would let the first
+      # silently buy the second — which is how a reporter gets orphaned by a
+      # close that looked fully accounted for.
+      acknowledgement: override_reason(Keyword.get(opts, :ack_override))
     }
 
     cond do
@@ -363,8 +382,24 @@ defmodule Barkpark.Tasks.Close do
                      # are unmet" is the wrong thing to say — re-read first.
                      :ok <- check_work_digest(doc, observed_rev_opt),
                      :ok <- check_criteria_payload(doc, criteria),
+                     # AHEAD of the criteria gate, and a test caught why. The
+                     # acknowledgement criterion IS an acceptance criterion, so
+                     # with the order reversed D289 fires first and the caller
+                     # hears `criteria_unmet: [0]` — a message that says nothing
+                     # about a waiting reporter and points at
+                     # `criteria_override`, the ONE override that must never
+                     # discharge this. The refusal a caller actually sees has to
+                     # be the one that teaches; running first is what makes it so.
+                     {:ok, ack_record} <-
+                       check_acknowledgement(doc, new_status, overrides.acknowledgement),
                      {:ok, criteria_record} <-
-                       check_criteria_proven(doc, new_status, landed, overrides.criteria),
+                       check_criteria_proven(
+                         doc,
+                         new_status,
+                         landed,
+                         overrides.criteria,
+                         overrides.acknowledgement
+                       ),
                      {:ok, updated} <-
                        apply_close_update(
                          doc,
@@ -374,7 +409,12 @@ defmodule Barkpark.Tasks.Close do
                          reason,
                          criteria,
                          landed,
-                         compose_override_record(holder_record, criteria_record, worker_id),
+                         compose_override_record(
+                           holder_record,
+                           criteria_record,
+                           ack_record,
+                           worker_id
+                         ),
                          caller_token_id
                        ) do
                   ev =
@@ -476,8 +516,8 @@ defmodule Barkpark.Tasks.Close do
   # a closer asserting its own proof; the marker + the merge artifact ARE the
   # proof, and counting them would refuse every lead seal close and re-break the
   # exact ritual D288 protects.
-  defp check_criteria_proven(%Document{} = doc, "done", landed, override_reason) do
-    case unmet_after_autostamp(doc, landed) do
+  defp check_criteria_proven(%Document{} = doc, "done", landed, override_reason, ack_override) do
+    case unmet_after_autostamp(doc, landed, ack_override) do
       [] ->
         {:ok, nil}
 
@@ -490,11 +530,71 @@ defmodule Barkpark.Tasks.Close do
   end
 
   # Exempt BY NAME — not by falling through a catch-all.
-  defp check_criteria_proven(%Document{}, status, _landed, _override)
+  defp check_criteria_proven(%Document{}, status, _landed, _override, _ack_override)
        when status in ~w(cancelled blocked),
        do: {:ok, nil}
 
-  defp unmet_after_autostamp(%Document{content: content}, landed) do
+  # ACKNOWLEDGEMENT GATE — the reporter loop.
+  #
+  # A `gh-<num>` row is not an internal task. It exists because somebody OUTSIDE
+  # this ledger filed a bug, and the only surface they can see is their GitHub
+  # issue, where the bridge's birth backlink promised them updates. Closing that
+  # row is the moment the promise comes due.
+  #
+  # MEASURED 2026-08-24, which is why this refuses rather than warns: 11 issues
+  # had been intaken; 8 carried no non-bot comment at all, and 5 of those were
+  # still OPEN — the bridge's own backlink, oldest 29 days old, was everything
+  # those reporters ever heard, while the defects they reported had been fixed
+  # here. The platform's existing answer to the shape of that gap is
+  # `Plugins.Tasks.warn_if_create_zero/1`, a soft `Logger.warning` on a
+  # zero-criteria task; it fired on 9 of those 11 births and changed nothing,
+  # because its only reader is the server journal. A second warning would have
+  # been the same instrument aimed at the same blind spot. So this REFUSES — in the exact
+  # PDS-D288/D289 idiom, which means "refuse UNLESS you say why on the record",
+  # not a wall: `--set ack_override="<reason>"` always lands.
+  #
+  # `blocked` is exempt BY NAME (the same honest-partial reasoning as the criteria
+  # gate: work continues, so the reporter's answer is not yet due).
+  # `cancelled` is deliberately NOT exempt, and that DIVERGES from the criteria
+  # gate above on purpose: abandoning acceptance criteria is what cancelling
+  # MEANS, but "we are not going to do this" is the single message an outsider
+  # most needs and is least likely to ever receive. A cancel is the case where
+  # silence is worst, so it is the last place to hand out an exemption.
+  #
+  # THIS IS NOT AUTHORIZATION, and it is not proof the comment was posted — the
+  # stamp is a self-report like every other criterion. It makes the obligation
+  # impossible to close over UNKNOWINGLY, and every deliberate skip auditable.
+  defp check_acknowledgement(%Document{} = doc, status, override_reason)
+       when status in ~w(done cancelled) do
+    content = doc.content || %{}
+
+    cond do
+      not Acknowledgement.intake_born?(doc.doc_id, content) ->
+        {:ok, nil}
+
+      Acknowledgement.acknowledged?(content) ->
+        {:ok, nil}
+
+      is_nil(override_reason) ->
+        {:error, {:acknowledgement_unposted, Acknowledgement.issue_number(content)}}
+
+      true ->
+        {:ok,
+         %{
+           "issue" => Acknowledgement.issue_number(content),
+           "had_criterion" => Acknowledgement.has_criterion?(content),
+           "reason" => override_reason
+         }}
+    end
+  end
+
+  # `blocked` — exempt BY NAME, like the criteria gate. Every other lifecycle is
+  # unreachable here (`close/3` refuses anything outside the three terminal
+  # statuses before the txn opens), so this clause is the blocked arm and not a
+  # catch-all standing in for one.
+  defp check_acknowledgement(%Document{}, _status, _override), do: {:ok, nil}
+
+  defp unmet_after_autostamp(%Document{content: content}, landed, ack_override) do
     autostamped =
       if is_map(landed) and map_size(landed) > 0 do
         content
@@ -504,23 +604,44 @@ defmodule Barkpark.Tasks.Close do
         MapSet.new()
       end
 
+    # A SECOND deduction, in the same spirit as the merge-gate one above and
+    # bounded just as narrowly. An acknowledgement criterion is itself an
+    # acceptance criterion, so a close that already answered it with a recorded
+    # `ack_override` would otherwise be refused AGAIN by this gate, for the same
+    # single fact, and the only way through would be to pass `criteria_override`
+    # as well. That is the reflexive-override habit the D56 hints exist to
+    # prevent: make people pass `criteria_override` routinely and it stops
+    # meaning anything. So the ack rows — AND ONLY the ack rows, addressed by
+    # `Acknowledgement.criterion_indices/1` — drop out when this close carries
+    # an ack override. The reverse never holds: `criteria_override` cannot
+    # discharge the acknowledgement gate, which runs BEFORE this one and reads
+    # `ack_override` alone.
+    acknowledged =
+      if is_nil(ack_override) do
+        MapSet.new()
+      else
+        MapSet.new(Acknowledgement.criterion_indices(content))
+      end
+
     content
     |> unmet_criteria()
     |> Enum.reject(&MapSet.member?(autostamped, Map.get(&1, "index")))
+    |> Enum.reject(&MapSet.member?(acknowledged, Map.get(&1, "index")))
   end
 
   # The durable override record, or nil when neither gate was overridden. ONE
   # `close_override` map so a re-read of the closed doc answers "was this close
   # honest?" in a single key — `actor` is who closed, `held_by` is who the ledger
   # thought held the lease, `reason` is why they overrode it anyway.
-  defp compose_override_record(nil, nil, _worker_id), do: nil
+  defp compose_override_record(nil, nil, nil, _worker_id), do: nil
 
-  defp compose_override_record(holder_record, criteria_record, worker_id) do
+  defp compose_override_record(holder_record, criteria_record, ack_record, worker_id) do
     ts_iso = DateTime.utc_now() |> DateTime.to_iso8601()
 
     %{}
     |> maybe_put_override("holder", holder_record, worker_id, ts_iso)
     |> maybe_put_override("criteria", criteria_record, worker_id, ts_iso)
+    |> maybe_put_override("acknowledgement", ack_record, worker_id, ts_iso)
   end
 
   defp maybe_put_override(acc, _key, nil, _worker_id, _ts_iso), do: acc
@@ -762,8 +883,9 @@ defmodule Barkpark.Tasks.Close do
   # claims about the world:
   #   * "close"       — a close carried a `landed` map. NOTHING was observed;
   #     `verified: false`. The actor is recorded twice on purpose:
-  #     `asserted_worker` is the client-supplied `worker_id` (close.ex:26-31 —
-  #     not authorization, a caller can claim to be anyone) and
+  #     `asserted_worker` is the client-supplied `worker_id` (see the
+  #     "NONE OF THIS IS AUTHORIZATION" note in this module's header — not
+  #     authorization, a caller can claim to be anyone) and
   #     `authenticated_token_id` is the api_token the server actually
   #     authenticated (nil for internal callers). A record that named only the
   #     first would carry the fabricator's chosen name and nothing else.
@@ -846,7 +968,8 @@ defmodule Barkpark.Tasks.Close do
   #
   # It used to read "auto: lead-closed on merge by <worker> (epoch <n>) — landed
   # <what>", which asserted TWO things nothing on this path observed: that the
-  # closer is a LEAD (`worker_id` is a client-supplied body param — close.ex:26-31)
+  # closer is a LEAD (`worker_id` is a client-supplied body param — see the
+  # "NONE OF THIS IS AUTHORIZATION" note in this module's header)
   # and that a MERGE happened (no GitHub call runs here, and none may: this
   # executes under `pg_advisory_xact_lock`, where a network round-trip converts a
   # fabrication bug into an availability bug). A scratch worker paid a gate citing

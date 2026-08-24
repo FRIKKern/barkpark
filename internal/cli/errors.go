@@ -119,6 +119,15 @@ var codeExit = map[string]int{
 	// illegal_transition is emitted with :unprocessable_entity (a 422) and is the
 	// one member of this family that can never succeed on a retry, so it belongs
 	// with the payload guards rather than the conflict bucket.
+	// The reporter loop. A `done`/`cancelled` close of a `gh-<num>` row born from
+	// an outsider's GitHub issue, refused while its ack_gate criterion is unmet.
+	// VALIDATION, not conflict: nothing moved under the caller and re-sending the
+	// identical command can never succeed — the fix is an action OUTSIDE this
+	// request (post the comment, stamp the criterion) or an explicit
+	// `--set ack_override="<reason>"`. Mints compound as
+	// `acknowledgement_unposted:<issue>`; the family lookup keys on the part
+	// before the colon.
+	"acknowledgement_unposted":    exitValidation,
 	"criteria_mismatch":           exitValidation,
 	"criteria_index_out_of_range": exitValidation,
 	"criterion_text_required":     exitValidation,

@@ -801,7 +801,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Two honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet) and a close by a non-holder (409 not_holder) — each with a loud on-the-record --set override (criteria_override / holder_override); see the set flag.",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Three honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), and a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override), and none of them discharges another; see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
         auth_tier: "read",
         args: [
@@ -865,7 +865,16 @@ defmodule Barkpark.Plugins.Tasks do
                 "cancelling means). THE HOLDER GATE (PDS-D288): a close by a worker other than " <>
                 "the claim's holder is REFUSED — 409 not_holder — unless it carries --set " <>
                 "holder_override=\"<why you are closing someone else's claim>\", recorded as " <>
-                "close_override.holder. A blank reason is NOT an override for either key. " <>
+                "close_override.holder. THE ACKNOWLEDGEMENT GATE (the reporter loop): a done or " <>
+                "cancelled close of a gh-<num> row born from an OUTSIDER's GitHub issue is " <>
+                "REFUSED — 409 acknowledgement_unposted — while its ack_gate criterion is unmet. " <>
+                "The reporter is outside this ledger and the issue is the only surface they can " <>
+                "see; post the outcome there, then stamp the criterion with the comment URL. The " <>
+                "way through is --set ack_override=\"<why the reporter is not being told>\", " <>
+                "recorded as close_override.acknowledgement. criteria_override does NOT discharge " <>
+                "it, and blocked closes are EXEMPT by name (cancelled deliberately is not — a " <>
+                "cancel is when silence hurts most). A blank reason is NOT an override for any of " <>
+                "the three keys. " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
           },
@@ -1298,6 +1307,16 @@ defmodule Barkpark.Plugins.Tasks do
       `Barkpark.Content.Edge`, so they pass changeset validation.
     * `content.parent_id` — the hierarchy parent → one `parent` edge
       (`from_id` = child, `to_id` = parent).
+    * `content.wave_paper` and `content.papers` — the paper this task cites →
+      one edge per distinct target, `kind` = the source field name. Neither key
+      reaches the CORE extractor as an edge (`wave_paper` is undeclared;
+      `papers` is a bare `"array"`, not `arrayOf reference`), so without this
+      they contributed nothing to the graph. `design_doc` is a declared
+      `reference` and is projected by the core extractor, NOT here — a task
+      citing one paper through several keys gets one edge per key, which is
+      what `Tasks.Expectations.driven_tasks/2` reports as its `via` list. See
+      `paper_citation_edges/2` for the measured corpus impact and for why this
+      rides the plugin callback rather than a schema `reference` declaration.
 
   When `doc.task_edges` is absent (an un-hydrated payload — e.g. a task saved
   outside the projector worker, or a non-task doc), NO dependency edge is
@@ -1328,8 +1347,9 @@ defmodule Barkpark.Plugins.Tasks do
 
       dep_edges = dep_edges_from_task_edges(doc, from_id)
       parent_edges = parent_edge(content, from_id)
+      paper_edges = paper_citation_edges(content, from_id)
 
-      dep_edges ++ parent_edges
+      dep_edges ++ parent_edges ++ paper_edges
     else
       []
     end
@@ -1385,6 +1405,71 @@ defmodule Barkpark.Plugins.Tasks do
       _ ->
         []
     end
+  end
+
+  # ── Paper citations: `wave_paper` + `papers` (graph-papers) ────────────────
+  #
+  # A task cites the Paper that drives it through THREE keys, and until this
+  # function existed only ONE of them reached the graph:
+  #
+  #   * `design_doc` — declared `"type" => "reference"` on the task schema, so
+  #     `Content.Edges.extract_edges/2` projects it. Untouched here.
+  #   * `papers` — declared `"type" => "array"`. `extract_field_edges/2` matches
+  #     only `"reference"` and `"arrayOf"`-of-`"reference"`; a bare `"array"`
+  #     falls to its catch-all `[]` clause.
+  #   * `wave_paper` — not declared on the task schema at all, so it is never in
+  #     the `fields` list the core extractor folds over. The epic-cycle harness
+  #     is its only writer.
+  #
+  # MEASURED on the live corpus (2026-08-24, 7249 published tasks / 1015
+  # published papers): 213 tasks carry `design_doc`, 412 carry `papers`, 4320
+  # carry `wave_paper`. Distinct papers reachable through `bp graph tasks` was
+  # 24; the three keys together cite 564. Every wave paper the epic-cycle
+  # harness has written was disconnected from its own wave.
+  #
+  # WHY HERE AND NOT ON THE SCHEMA. `parent_id` is the precedent directly above:
+  # a plain content key the plugin knows names a document, projected by this
+  # pure callback rather than by a schema `reference` declaration. Taking that
+  # route keeps two properties the schema route would break — `papers` stays the
+  # v1 read-only array whose sole writer is `POST /v1/tasks/:id/papers` (and its
+  # `check_optional_string_list` validation), and `wave_paper` stays undeclared,
+  # so declaring it does not hand 4320 rows an editable Studio input on a field
+  # the harness owns. `design_doc` also stays the ONE single-reference field, so
+  # `?expand=design_doc` is unaffected.
+  #
+  # `kind` IS the source field name, matching the graph-edge-seam convention the
+  # core extractor follows, so `Tasks.Expectations.driven_tasks/2` reports the
+  # citing channel in its `via` list. That reader is kind-agnostic and already
+  # documents the multi-channel case ("a task may cite the paper via more than
+  # one field"), so nothing downstream needed a change to read these.
+  defp paper_citation_edges(content, from_id) do
+    wave_edges =
+      content
+      |> Map.get("wave_paper")
+      |> List.wrap()
+      |> paper_edges(from_id, "wave_paper")
+
+    list_edges =
+      content
+      |> Map.get("papers")
+      |> List.wrap()
+      |> paper_edges(from_id, "papers")
+
+    wave_edges ++ list_edges
+  end
+
+  # One edge per non-blank id. Deduped on the resolved target because
+  # `content_edges` is unique on `(from_id, to_id, kind)` — a `papers` list that
+  # names the same paper twice (or names both `slug` and `drafts.slug`, which
+  # `published_id/1` collapses to one target) must not emit a colliding pair.
+  defp paper_edges(values, from_id, kind) do
+    values
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.map(&Barkpark.Content.published_id(String.trim(&1)))
+    |> Enum.uniq()
+    |> Enum.map(fn to_id ->
+      %{from_id: from_id, to_id: to_id, kind: kind, plugin_source: "tasks"}
+    end)
   end
 
   @doc """

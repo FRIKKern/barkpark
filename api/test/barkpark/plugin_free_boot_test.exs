@@ -150,7 +150,22 @@ defmodule Barkpark.PluginFreeBootTest do
     {"Barkpark.Plugins.Bulldocs", "lib/barkpark/content/papers/block_ops.ex"},
     {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/backfill.ex"},
     {"Barkpark.Plugins.Tasks", "lib/barkpark/edge_projector/projector_worker.ex"},
-    {"Barkpark.Plugins.Github", "lib/barkpark/tasks/board.ex"}
+    {"Barkpark.Plugins.Github", "lib/barkpark/tasks/board.ex"},
+    # The close-time ACKNOWLEDGEMENT gate (the reporter loop). `Tasks.Close`
+    # calls five functions on `Github.Acknowledgement` — `intake_born?/2`,
+    # `acknowledged?/1`, `has_criterion?/1`, `issue_number/1`,
+    # `criterion_indices/1` — and every one of them is PURE over the doc's own
+    # `content` map. None reads `Settings`, `Auth`, `Client`, config, the
+    # network, or the DB; the module's one DB-touching function (`census/2`) is
+    # called ONLY by `Github.Health`, which is inside the plugin namespace.
+    #
+    # Under `:plugins []` the behaviour is therefore not merely non-crashing but
+    # IDENTICAL: a doc with no `content.github` fails `intake_born?/2`, the gate
+    # returns `{:ok, nil}`, and the close path is byte-for-byte what it was
+    # before this coupling existed. Pinned by
+    # `Barkpark.Tasks.CloseAcknowledgementTest`, which closes both a plain task
+    # and an outbound-mirrored one and asserts no `close_override` key appears.
+    {"Barkpark.Plugins.Github", "lib/barkpark/tasks/close.ex"}
   ]
 
   @sanctioned_host_plugin_coupling @coupling_studio_ui ++
