@@ -3,6 +3,8 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   use GenServer
 
+  require Logger
+
   alias Barkpark.StudioChat.Runtime.Codex.Protocol
 
   @default_timeout 15_000
@@ -220,11 +222,15 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
 
   @impl true
   def terminate(_reason, %{port: port} = state) do
+    # The rescue is CONFINED to reap_port (below), never wrapped around this
+    # whole body (task-95b4b28a56583b1c, twin of task-2f44ed9d10be629f). A
+    # whole-body rescue here swallowed a raise out of reap_port AND skipped
+    # `cleanup_task_token`, so the session's task-hands credential stayed live
+    # past the session that minted it. The revoke must not depend on whether
+    # the statement before it raised.
     reap_port(port)
     cleanup_task_token(state[:task_token])
     :ok
-  rescue
-    _ -> :ok
   end
 
   # Closing a `{:spawn_executable, _}` port closes the pipe fds and NOTHING ELSE —
@@ -238,13 +244,25 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   # The pid is read WHILE the port is still open, never remembered from spawn
   # time: `Port.info/2` answers nil once closed, and a pid cached earlier may
   # since have been reaped and recycled onto an unrelated process.
+  #
+  # `if Port.info(port), do: ... Port.close(port)` was a check-then-act: it is a
+  # membership test (Port.info/1 answers nil once the port is closed) and the
+  # port can die inside the window before the close, which then raises badarg.
+  # That raise used to escape into terminate/2's whole-body rescue and skip BOTH
+  # the kill below and the task-token revoke after it. The membership test bought
+  # nothing — the raise has to be handled either way — so it is gone and the
+  # rescue is confined to the close alone. The pid is still read BEFORE the
+  # close, which is the ordering the paragraph above requires.
   defp reap_port(port) do
-    if Port.info(port) do
-      os_pid = port_os_pid(port)
+    os_pid = port_os_pid(port)
+
+    try do
       Port.close(port)
-      kill_os_process(os_pid)
+    rescue
+      _ -> :ok
     end
 
+    kill_os_process(os_pid)
     :ok
   end
 
@@ -608,6 +626,28 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
     end
   end
 
+  # TOTAL by design, mirroring the claude twin's `safe_revoke/1`: with the
+  # whole-body rescue gone from terminate/2 (task-95b4b28a56583b1c), this is the
+  # last statement of teardown and nothing else would catch it. A dead Repo at
+  # teardown — a sandbox owner that died WITH the session, a Repo already shut
+  # down — must never turn a normal stop into a crash. The token's own expiry is
+  # the backstop for a genuinely unreachable Repo.
   defp cleanup_task_token(nil), do: :ok
-  defp cleanup_task_token(token), do: Barkpark.Auth.revoke_token(token)
+
+  defp cleanup_task_token(token) do
+    _ = Barkpark.Auth.revoke_token(token)
+    :ok
+  rescue
+    e in DBConnection.OwnershipError ->
+      Logger.debug("codex session: task token revoke skipped (sandbox gone): #{inspect(e)}")
+      :ok
+
+    e ->
+      Logger.warning("codex session: task token revoke failed: #{inspect(e)}")
+      :ok
+  catch
+    :exit, reason ->
+      Logger.debug("codex session: task token revoke skipped (repo down): #{inspect(reason)}")
+      :ok
+  end
 end
