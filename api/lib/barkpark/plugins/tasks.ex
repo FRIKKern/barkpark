@@ -1298,6 +1298,16 @@ defmodule Barkpark.Plugins.Tasks do
       `Barkpark.Content.Edge`, so they pass changeset validation.
     * `content.parent_id` — the hierarchy parent → one `parent` edge
       (`from_id` = child, `to_id` = parent).
+    * `content.wave_paper` and `content.papers` — the paper this task cites →
+      one edge per distinct target, `kind` = the source field name. Neither key
+      reaches the CORE extractor as an edge (`wave_paper` is undeclared;
+      `papers` is a bare `"array"`, not `arrayOf reference`), so without this
+      they contributed nothing to the graph. `design_doc` is a declared
+      `reference` and is projected by the core extractor, NOT here — a task
+      citing one paper through several keys gets one edge per key, which is
+      what `Tasks.Expectations.driven_tasks/2` reports as its `via` list. See
+      `paper_citation_edges/2` for the measured corpus impact and for why this
+      rides the plugin callback rather than a schema `reference` declaration.
 
   When `doc.task_edges` is absent (an un-hydrated payload — e.g. a task saved
   outside the projector worker, or a non-task doc), NO dependency edge is
@@ -1328,8 +1338,9 @@ defmodule Barkpark.Plugins.Tasks do
 
       dep_edges = dep_edges_from_task_edges(doc, from_id)
       parent_edges = parent_edge(content, from_id)
+      paper_edges = paper_citation_edges(content, from_id)
 
-      dep_edges ++ parent_edges
+      dep_edges ++ parent_edges ++ paper_edges
     else
       []
     end
@@ -1385,6 +1396,71 @@ defmodule Barkpark.Plugins.Tasks do
       _ ->
         []
     end
+  end
+
+  # ── Paper citations: `wave_paper` + `papers` (graph-papers) ────────────────
+  #
+  # A task cites the Paper that drives it through THREE keys, and until this
+  # function existed only ONE of them reached the graph:
+  #
+  #   * `design_doc` — declared `"type" => "reference"` on the task schema, so
+  #     `Content.Edges.extract_edges/2` projects it. Untouched here.
+  #   * `papers` — declared `"type" => "array"`. `extract_field_edges/2` matches
+  #     only `"reference"` and `"arrayOf"`-of-`"reference"`; a bare `"array"`
+  #     falls to its catch-all `[]` clause.
+  #   * `wave_paper` — not declared on the task schema at all, so it is never in
+  #     the `fields` list the core extractor folds over. The epic-cycle harness
+  #     is its only writer.
+  #
+  # MEASURED on the live corpus (2026-08-24, 7249 published tasks / 1015
+  # published papers): 213 tasks carry `design_doc`, 412 carry `papers`, 4320
+  # carry `wave_paper`. Distinct papers reachable through `bp graph tasks` was
+  # 24; the three keys together cite 564. Every wave paper the epic-cycle
+  # harness has written was disconnected from its own wave.
+  #
+  # WHY HERE AND NOT ON THE SCHEMA. `parent_id` is the precedent directly above:
+  # a plain content key the plugin knows names a document, projected by this
+  # pure callback rather than by a schema `reference` declaration. Taking that
+  # route keeps two properties the schema route would break — `papers` stays the
+  # v1 read-only array whose sole writer is `POST /v1/tasks/:id/papers` (and its
+  # `check_optional_string_list` validation), and `wave_paper` stays undeclared,
+  # so declaring it does not hand 4320 rows an editable Studio input on a field
+  # the harness owns. `design_doc` also stays the ONE single-reference field, so
+  # `?expand=design_doc` is unaffected.
+  #
+  # `kind` IS the source field name, matching the graph-edge-seam convention the
+  # core extractor follows, so `Tasks.Expectations.driven_tasks/2` reports the
+  # citing channel in its `via` list. That reader is kind-agnostic and already
+  # documents the multi-channel case ("a task may cite the paper via more than
+  # one field"), so nothing downstream needed a change to read these.
+  defp paper_citation_edges(content, from_id) do
+    wave_edges =
+      content
+      |> Map.get("wave_paper")
+      |> List.wrap()
+      |> paper_edges(from_id, "wave_paper")
+
+    list_edges =
+      content
+      |> Map.get("papers")
+      |> List.wrap()
+      |> paper_edges(from_id, "papers")
+
+    wave_edges ++ list_edges
+  end
+
+  # One edge per non-blank id. Deduped on the resolved target because
+  # `content_edges` is unique on `(from_id, to_id, kind)` — a `papers` list that
+  # names the same paper twice (or names both `slug` and `drafts.slug`, which
+  # `published_id/1` collapses to one target) must not emit a colliding pair.
+  defp paper_edges(values, from_id, kind) do
+    values
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.map(&Barkpark.Content.published_id(String.trim(&1)))
+    |> Enum.uniq()
+    |> Enum.map(fn to_id ->
+      %{from_id: from_id, to_id: to_id, kind: kind, plugin_source: "tasks"}
+    end)
   end
 
   @doc """
