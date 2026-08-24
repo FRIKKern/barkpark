@@ -1,9 +1,23 @@
 ---
 // Base layout — bakes the HEALTH markers (bp-build-id / bp-content-rev /
 // bp-doc-id) the deploy engine asserts by value, plus the two-axis theme
-// bootstrap (data-theme mode × data-bp-theme identity, deploy-pinned default).
+// bootstrap (data-theme mode × data-bp-theme identity, deploy-pinned default),
+// plus the HUMAN-readable half of the build markers as two `data-bp-*`
+// attributes on <body>.
+//
+// Why the body attributes exist alongside the <meta> markers: the markers carry
+// the deploy SENTINELS ("dev"/"unknown") because the HEALTH gate asserts a
+// non-empty `content=`, so a page that was never deployed is indistinguishable
+// from a build genuinely NAMED "dev". These attributes carry the RAW env —
+// empty string means "not stamped", which `lib/provenance` renders as a state
+// rather than as a value.
+//
+// Why on <body> and not only inside the baked graph.json: GraphPane's caption
+// has to be able to name the build even when the corpus asset is the thing that
+// failed to load. Both come from the same `buildIdentity` constant in
+// src/lib/bp.ts, so the attribute and the asset stamp cannot drift.
 import { ClientRouter } from 'astro:transitions'
-import { env } from '../lib/bp'
+import { buildIdentity, env } from '../lib/bp'
 interface Props {
   title: string
   docId?: string
@@ -52,7 +66,10 @@ const themeBoot =
         the navigation instead of remounting. */}
     <ClientRouter />
   </head>
-  <body>
+  <body
+    data-bp-build-id={buildIdentity.buildId ?? ''}
+    data-bp-content-rev={buildIdentity.contentRev ?? ''}
+  >
     <slot />
   </body>
 </html>
