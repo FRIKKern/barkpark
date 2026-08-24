@@ -33,8 +33,9 @@ promise passed to `use()` nor a throw in the render resumed after it reaches a
 boundary — the subtree never settles, which is worse than the blank it replaces.
 
 The client entry's gzip budget in `.size-limit.json` is re-baselined from
-22.5 KB to 22.75 KB: the discrimination measures 22.7 KB (was 22.48 KB, +0.98%,
-inside the repo's 2% regression bar). It is stated rather than absorbed silently
+22.5 KB to 22.75 KB: the discrimination measures 22.7 KB (was 22.48 KB).
+The percentage is not the argument — there is no 2% bar in this repo, only the
+absolute cap in `.size-limit.json`. It is stated rather than absorbed silently
 — the previous cap left only ~20 B of slack, so no amount of trimming fits an
 error path under it.
 

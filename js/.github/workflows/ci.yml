@@ -1,3 +1,20 @@
+# ############################################################################
+# INERT — GitHub Actions NEVER RUNS THIS FILE.
+#
+# Actions only reads workflows from `.github/workflows/` at the REPOSITORY
+# ROOT. Everything under `js/.github/workflows/` is dead configuration: it is
+# not in `gh api repos/<owner>/<repo>/actions/workflows` (63 registered
+# workflows, none under js/), it produces no check run, and nothing it asserts
+# about CI behaviour is true of this repository.
+#
+# The real js/ gate is `.github/workflows/js-tests.yml` at the repo root.
+#
+# This header exists because a comment in THIS TREE claiming a "+2% bundle-size
+# regression gate" was copied into js/CLAUDE.md and docs/cards/js-sdk.md, where
+# it told every agent that a mechanism existed which never had. An inert file
+# that describes gate behaviour is a lie with a long reach.
+# ############################################################################
+
 name: js-ci
 on:
   push:
@@ -121,9 +138,12 @@ jobs:
           cache-dependency-path: js/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      # `pnpm size` enforces the ABSOLUTE per-entry caps in each package's
+      # .size-limit.json. It is a bare invocation: no --compare-with, no stored
+      # baseline, no percentage. (An earlier comment here claimed a "+2%
+      # regression gate"; that mechanism never existed, and the claim was
+      # copied from here into js/CLAUDE.md and docs/cards/js-sdk.md.)
       - run: pnpm size
-      # +2% bundle-size regression gate — size-limit's built-in
-      # compare uses the previous build artifact; CI fails on diff > 2%.
 
   changeset-check:
     if: github.event_name == 'pull_request'
