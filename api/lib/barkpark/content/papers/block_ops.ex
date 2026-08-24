@@ -1531,6 +1531,69 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
+  @doc """
+  Reject a block list that contains a non-OBJECT element, at any level the
+  render walk descends. The STRUCTURAL arm of `validate_render_shapes/1`, alone.
+
+  `Render.render_blocks/2` guards its argument with `is_list/1` but not its
+  ELEMENTS, and `Render.render_block/2` is `when is_map(block)`. A non-map
+  element therefore satisfies the outer guard, matches no `render_block/2`
+  clause, and raises an uncaught `FunctionClauseError` — a 500 with an HTML body
+  where `docs/api-v1.md` §9 promises a JSON envelope. `Projection.bound?/1` fails
+  safe on a non-map (`bound?(_block) -> false`), so the element is always sorted
+  into the FREE blocks and always reaches the renderer; nothing upstream drops it.
+
+  Split out of `validate_render_shapes/1` rather than reusing it wholesale
+  because that function's other rules — list-item inline content, table cells,
+  the `bulletList` dialect ban — are PAPER doctrine. Imposing them on every
+  document type would reject writes that are legitimate today. This entry point
+  carries only the invariant the renderer itself enforces with a guard, so the
+  generic document writers can fail closed on the crashing shape without
+  inheriting doctrine they were never held to.
+  """
+  @spec validate_block_objects(term()) :: :ok | {:error, {:invalid_block_structure, map()}}
+  def validate_block_objects(blocks) when is_list(blocks) do
+    case block_object_errors(blocks, "blocks") do
+      [] -> :ok
+      errors -> {:error, {:invalid_block_structure, %{"blocks" => errors}}}
+    end
+  end
+
+  # A non-list is not a block list. `render_blocks/2`'s own `is_list/1` guard
+  # already refuses to walk it, so there is no crash here to fail closed on.
+  # Deliberately NOT an error, unlike `validate_render_shapes/1`: a Paper that
+  # DECLARES a block body must supply an array, but a generic document (a legacy
+  # flat field-map save, `content["body"]` as a markdown string) need not.
+  def validate_block_objects(_other), do: :ok
+
+  defp block_object_errors(blocks, prefix) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {block, index} when is_map(block) ->
+        # The SAME two keys `render_block_errors/2`'s catch-all recurses into, so
+        # the structural check reaches exactly as deep as the paper validator and
+        # a nested non-map is caught at whatever depth it was buried.
+        Enum.flat_map(["blocks", "children"], fn key ->
+          case Map.get(block, key) do
+            nested when is_list(nested) ->
+              block_object_errors(nested, "#{prefix}[#{index}].#{key}")
+
+            _ ->
+              []
+          end
+        end)
+
+      {_block, index} ->
+        [not_an_object_error(prefix, index)]
+    end)
+  end
+
+  # ONE string for the message, shared with `render_shape_errors/2` so the paper
+  # validator and the structural validator can never drift in what they tell a
+  # caller about the same defect.
+  defp not_an_object_error(prefix, index), do: "#{prefix}[#{index}] must be an object"
+
   def validate_render_shapes(_),
     do:
       {:error,
@@ -1545,7 +1608,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         render_block_errors(block, "#{prefix}[#{index}]")
 
       {_block, index} ->
-        ["#{prefix}[#{index}] must be an object"]
+        [not_an_object_error(prefix, index)]
     end)
   end
 

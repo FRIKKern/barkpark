@@ -140,6 +140,14 @@ defmodule Barkpark.Content.Writer do
            # projects to bpId:null → spurious insert-after → duplicate-block
            # corruption on the next edit. Additive (present ids preserved), idempotent.
            |> maybe_ensure_block_ids(),
+         # Fail closed on a non-OBJECT element inside a client-supplied block
+         # list. Placed AFTER `maybe_ensure_block_ids` (whose
+         # `normalize_render_shapes` is the coercion pass) and BEFORE any
+         # projection, so a shape normalization can legitimately repair is never
+         # rejected — the same normalize-then-validate order
+         # `Lifecycle.prepare_paper_render_shapes/2` uses. See
+         # `validate_block_shapes/1`.
+         :ok <- validate_block_shapes(attrs),
          :ok <- validate_task_kind(type, attrs) do
       do_create_document(type, attrs, dataset, doc_id, opts)
     end
@@ -529,6 +537,14 @@ defmodule Barkpark.Content.Writer do
            # content["body_html"] on the patch/autosave path so poisoned markup
            # never persists as a draft that publish later promotes unchanged.
            |> maybe_sanitize_paper_body_html(type),
+         # Fail closed on a non-OBJECT element inside a client-supplied block
+         # list. Placed AFTER `maybe_ensure_block_ids` (whose
+         # `normalize_render_shapes` is the coercion pass) and BEFORE any
+         # projection, so a shape normalization can legitimately repair is never
+         # rejected — the same normalize-then-validate order
+         # `Lifecycle.prepare_paper_render_shapes/2` uses. See
+         # `validate_block_shapes/1`.
+         :ok <- validate_block_shapes(attrs),
          :ok <- validate_task_kind(type, attrs) do
       do_upsert_document(type, attrs, dataset, doc_id, opts)
     end
@@ -1187,6 +1203,42 @@ defmodule Barkpark.Content.Writer do
         attrs
     end
   end
+
+  # Every client-supplied block list the RENDER WALK will descend must contain
+  # only objects. `Render.render_blocks/2` guards `is_list/1` on the LIST, but
+  # `Render.render_block/2` is `when is_map(block)` — so a non-map ELEMENT clears
+  # the outer guard, matches no clause, and raises an uncaught
+  # FunctionClauseError: HTTP 500 with an HTML body instead of the §9 JSON
+  # envelope. `Projection.bound?/1` fails safe on a non-map, so the element is
+  # always sorted into the FREE blocks and always reaches the renderer.
+  #
+  # TWO lists, because there are TWO writers that project — the sibling-writer
+  # gap this closes. The predicate (`BlockOps.validate_block_objects/1`) already
+  # existed and already emitted this exact message, but was reachable ONLY from
+  # the paper writers (`BlockOps.validate_render_shapes_for_type/2` is keyed on
+  # @paper_type; `Lifecycle.prepare_paper_render_shapes/2` on "paper"), so the
+  # generic document writers inherited none of it:
+  #
+  #   * content["blocks"]         -> `maybe_project_document_content/2`, the
+  #                                  patch/upsert path, for EVERY type.
+  #   * content["body"]["blocks"] -> `scaffold_expectation/3` on the create path,
+  #                                  which reuses these blocks VERBATIM via
+  #                                  `Synthesis.scaffold_body_blocks/2`. Only
+  #                                  LAYOUT-bearing types reach that branch.
+  #
+  # A write carrying neither key, or a non-list under either, is untouched: the
+  # renderer's own `is_list/1` guard already refuses to walk those, so there is
+  # nothing to fail closed on and no currently-accepted write changes shape.
+  defp validate_block_shapes(%{"content" => content}) when is_map(content) do
+    with :ok <- BlockOps.validate_block_objects(Map.get(content, "blocks")) do
+      BlockOps.validate_block_objects(body_blocks(content))
+    end
+  end
+
+  defp validate_block_shapes(_attrs), do: :ok
+
+  defp body_blocks(%{"body" => %{"blocks" => blocks}}), do: blocks
+  defp body_blocks(_content), do: nil
 
   # Re-project content[fieldName]/content["body"] from content["blocks"] when a
   # whole-document write carries a block list (Exp-P3.1 — generalizes the

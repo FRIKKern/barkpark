@@ -671,6 +671,24 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # A client-supplied block list carried a non-OBJECT element
+  # (`BlockOps.validate_block_objects/1`). Before this clause the element sailed
+  # past every writer guard into `Render.render_blocks/2`, whose `render_block/2`
+  # is `when is_map(block)` — an uncaught FunctionClauseError, so the caller got a
+  # 500 with a Phoenix HTML body and no request_id to correlate. Ordinary
+  # malformed input is a 422, and it rides the CANONICAL `validation_failed` code
+  # (already an @hints member) so no new code enters known_codes/0, §9 or the
+  # OpenAPI document. `details` names the offending path — `blocks[2].children[0]`
+  # — so the caller fixes the right element instead of bisecting the payload.
+  defp build({:error, {:invalid_block_structure, errors}}) when is_map(errors) do
+    %{
+      code: "validation_failed",
+      message: "document blocks failed validation",
+      status: 422,
+      details: errors
+    }
+  end
+
   # A schema upsert (`POST /v1/schemas/:dataset`) whose `fields` payload is
   # structurally invalid — `SchemaDefinition.parse/2` rejected it (missing field
   # name, unknown v2 type, reserved `plugin:` prefix, non-list fields, …). Fail
