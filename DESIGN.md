@@ -12,22 +12,26 @@
 - Avoid: Internal build jargon in primary copy, dashboard-like density, ornamental gradients, generic SaaS card walls, fake urgency, and metrics without a reader job.
 
 ## Product goals
-- Goals: Make Barkpark shipping activity easy to scan, understand, browse, and trust; make every edition feel like a premium product changelog rather than generated Git output.
+- Goals: Make Barkpark shipping activity easy to scan, understand, browse, and trust; make every edition feel like a considered review of the period rather than generated Git output; give project managers, stakeholders, investors, contributors, and curious readers a shared understanding of momentum.
 - Non-goals: Marketing landing pages, raw commit mirrors, release-volume leaderboards, or a new Paper design system.
 - Success signals: A first-time reader can identify the newest release, understand what changed, choose a day/week/month/year view, and reach source evidence without instruction.
 
 ## Personas and jobs
-- Primary personas: Barkpark users following product progress; contributors checking what landed; operators auditing a release period.
-- User jobs: Discover what is new, judge relevance quickly, browse prior releases, inspect evidence, and share a stable edition URL.
+- Primary personas: Project managers tracking movement and risk; stakeholders and investors judging direction and momentum; Barkpark users following product progress; contributors checking what landed; operators auditing a release period.
+- User jobs: Understand the period's story, see what materially moved forward, judge why it matters, identify uncertainty, browse prior releases, inspect evidence, and share a stable edition URL.
 - Key contexts of use: Desktop reading, mobile scanning, linked release announcements, Studio editing, terminal/email parity.
 
 ## Information architecture
 - Primary navigation: Chronicle index → current day/week/month/year editions → adjacent editions and source evidence.
 - Core routes/screens: `/papers/barkpark-chronicle`, `/papers/barkpark-changelog-YYYY-MM-DD`, `/papers/barkpark-changelog-YYYY-wWW`, `/papers/barkpark-changelog-YYYY-MM`, `/papers/barkpark-changelog-YYYY`.
-- Content hierarchy: What is new → featured release → browse by cadence → archive → shipping activity → source-backed latest changes → provenance.
+- Content hierarchy: Branded edition → period in one sentence → editorial review → progress stories → audience impact → watchlist / next horizon → release shape → source-backed ledger → provenance.
 
 ## Design principles
 - Lead with reader value: Describe the shipped outcome before its repository mechanics.
+- Review, do not transcribe: Synthesize the period into a defensible point of view; counts and commit subjects are evidence, not the story.
+- Brand the period: Every edition earns a short editorial theme that makes the day, week, or month memorable without becoming promotional.
+- Translate across audiences: Explain product, operating, and business relevance in ordinary language; never require repository knowledge.
+- Be candid about uncertainty: Separate shipped facts from interpretation, risks, and future signals. Never invent customers, revenue, adoption, deadlines, or promises.
 - Familiar at first glance: Use recognizable changelog conventions—release date, category, highlight, details, archive, source.
 - Evidence without noise: Keep Git provenance available and explicit, but subordinate it to the product story.
 - One premium system: Compose existing Paper blocks and tokens; improve Chronicle authorship rather than forking the renderer.
@@ -43,7 +47,7 @@
 
 ## Components
 - Existing components to reuse: Eyebrow, heading, ingress, byline, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, and inline link.
-- New/changed components: No renderer component required. Chronicle gains linked cadence cards, linked archive cards, featured-release cards, and plain-language category sections composed from existing blocks.
+- New/changed components: No renderer component required. Chronicle gains an editorial theme, period review callout, source-linked progress-story cards, audience-lens cards, watchlist, and next-horizon section composed from existing blocks.
 - Variants and states: Day/week/month/year cards use distinct labels, not arbitrary colors; empty periods receive an explicit quiet-edition message and retain navigation.
 - Token/component ownership: `design/tokens.json` and `api/assets/paper-surface/paper-surface.css` remain canonical; Chronicle-specific composition lives in `scripts/chronicle-paper.py`.
 
@@ -68,17 +72,27 @@
 - Offline/slow network: Core text and links are server-rendered; no remote media is required for the reading path.
 
 ## Content voice
-- Tone: Clear, confident, useful, and human; closer to a polished release note than an engineering ledger.
+- Tone: Clear, reflective, specific, and human; closer to a thoughtful Linear, Stripe, or Vercel-style release review than an engineering ledger. Confident about shipped facts, restrained about interpretation.
 - Terminology: Prefer “shipped,” “release,” “improvement,” and “fix.” Reserve “first-parent,” “digest,” and “renderer” for provenance.
-- Microcopy rules: Lead with outcomes; use sentence case; keep labels under five words; avoid unexplained counts; never expose a commit subject as the page's primary promise without rewriting its conventional prefix.
+- Microcopy rules: Lead with outcomes; use sentence case; keep labels under five words; avoid unexplained counts; never expose a commit subject as the page's primary promise without rewriting its conventional prefix; use “we” only for a grounded editorial interpretation, never as a substitute for evidence.
+
+## Editorial system
+- Edition contract: `theme`, `standfirst`, `review`, two-to-four `progress_stories`, three audience lenses, `watchlist`, and `next_horizon`.
+- Scale: Daily editions explain what changed and the immediate effect; weekly editions connect changes into a direction of travel; monthly editions assess durable progress, operating posture, and the next strategic signal; annual editions describe the larger arc.
+- Authorship: An AI editorial pass may synthesize the verified event packet. It receives bounded source records and aggregate facts, returns strict structured JSON, and is rejected unless every progress story cites supplied commit identifiers.
+- Grounding: Numeric facts are rendered deterministically outside model prose. Model prose must not introduce numbers, customer claims, financial claims, adoption claims, security guarantees, dates, deadlines, or unshipped promises.
+- Fallback: If editorial generation is unavailable or invalid, every edition still receives the same narrative sections from a deterministic, source-grounded editor. Generation and publishing fail soft; evidence never disappears.
+- Freshness: The scheduled publisher generates editorial copy only for the current day, week, month, and year. Historical editions remain stable at their last published review; full-history generation remains available for verification and deliberate backfills.
+- Reader trust: Interpretation is labeled as review or watchlist; the complete source ledger and provenance remain below the editorial layer.
 
 ## Implementation constraints
 - Framework/styling system: Phoenix/LiveView public reader with PortableDoc block composition and the canonical Paper stylesheet.
 - Design-token constraints: Reuse existing generated tokens and Paper component CSS; no new token family for Chronicle MVP.
-- Performance constraints: One Git history scan; bounded publish concurrency; no client-side data dependency for core content.
+- Performance constraints: One Git history scan; one bounded editorial request for the current edition family; bounded publish concurrency; no client-side data dependency for core content.
 - Compatibility constraints: Generated blocks must render in reader, Studio, email, and TUI; stable Paper URLs and source documents remain deterministic.
 - Test/screenshot expectations: Generator tests, structure/quality audit, design checks, and hermetic light/dark screenshots at 360/768/1280/1920.
 
 ## Open questions
 - [ ] Decide whether future product screenshots should be captured automatically per release or curated manually / product owner / affects media-rich release cards.
 - [ ] Decide whether literally quiet calendar days deserve public editions or only navigation placeholders / product owner / affects archive completeness and volume.
+- [ ] Decide whether a human editor should be able to lock or amend an AI-written review without losing automatic source updates / product owner / affects protected editorial overlays.

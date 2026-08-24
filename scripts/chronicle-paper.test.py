@@ -85,9 +85,14 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("https://github.com/acme/project/pull/13", serialized)
         self.assertIn('"type": "bar-chart"', serialized)
         self.assertIn('"type": "lineage"', serialized)
+        self.assertIn('"text": "The week in review"', serialized)
+        self.assertIn('"text": "What moved forward"', serialized)
+        self.assertIn('"text": "Why this matters"', serialized)
+        self.assertIn('"title": "What we\\u2019re watching"', serialized)
+        self.assertIn('"text": "The next horizon"', serialized)
         week_h1 = next(block for block in week["blocks"] if block["id"] == "auto:title")
         self.assertEqual(week["title"], week_h1["text"])
-        self.assertRegex(week_h1["text"], r"Week 34 .* Dispatch w034-[a-f0-9]{4}-[a-f0-9]{4}")
+        self.assertRegex(week_h1["text"], r".* — Week 34 .* Dispatch w034-[a-f0-9]{4}-[a-f0-9]{4}")
         index = by_slug["barkpark-chronicle"]
         serialized_index = json.dumps(index)
         self.assertIn("/papers/barkpark-changelog-2026-w34", serialized_index)
@@ -202,6 +207,15 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("restore tasks", json.dumps(payload))
         self.assertNotIn("typed exports", json.dumps(payload))
 
+    def test_backdated_family_does_not_leak_later_events_into_the_index(self):
+        events = self.read_fixture_events()
+        payloads = chronicle.build(
+            dt.date(2026, 8, 18), "main", "acme/project", events=events,
+        )
+        serialized = json.dumps(payloads)
+        self.assertIn("restore tasks", serialized)
+        self.assertNotIn("explain the chronicle", serialized)
+
     def test_quiet_periods_receive_distinct_dedup_folios(self):
         first = chronicle.periods_for(dt.date(2026, 8, 24))["week"]
         second = chronicle.periods_for(dt.date(2026, 8, 31))["week"]
@@ -216,6 +230,75 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertEqual(first, second)
         for payload in json.loads(first):
             self.assertTrue(all(block["id"].startswith("auto:") for block in payload["blocks"]))
+
+    def test_editorial_validation_requires_grounded_sources_and_rejects_claims(self):
+        events = self.read_fixture_events()
+        period = chronicle.periods_for(dt.date(2026, 8, 23))["week"]
+        selected = chronicle.events_in_period(events, period)
+        refs = [event.sha[:10] for event in chronicle.representative_events(selected)]
+        raw = {
+            "theme": "Closing the quiet failure paths",
+            "standfirst": "The product became more dependable where incomplete states once looked complete.",
+            "review": "This was a week of making system truth easier to see and act on.",
+            "stories": [
+                {"title": "Tasks return to view", "narrative": "The task surface once again reflects the work that is actually available.", "source_refs": [refs[0]]},
+                {"title": "The record becomes legible", "narrative": "The Chronicle gives shipped work a durable narrative and its evidence a stable home.", "source_refs": [refs[-1]]},
+            ],
+            "audiences": [
+                {"label": "For the team", "text": "Planning starts from a more trustworthy operating picture."},
+                {"label": "For stakeholders", "text": "Progress is visible as outcomes with evidence."},
+                {"label": "For readers", "text": "The practical changes are easier to understand."},
+            ],
+            "watchlist": "A broad repair week still needs follow-through in ordinary use.",
+            "next_horizon": "The next signal is whether reliability work creates a calmer product experience.",
+        }
+        editorial = chronicle.validate_editorial(raw, period, selected)
+        self.assertEqual("ai", editorial["mode"])
+
+        raw["stories"][0]["source_refs"] = ["not-a-source"]
+        with self.assertRaisesRegex(ValueError, "cite supplied sources"):
+            chronicle.validate_editorial(raw, period, selected)
+
+        raw["stories"][0]["source_refs"] = [refs[0]]
+        raw["review"] = "Revenue rose by 20 percent."
+        with self.assertRaisesRegex(ValueError, "numeric claims"):
+            chronicle.validate_editorial(raw, period, selected)
+
+    def test_editorial_generation_falls_back_without_blocking_the_archive(self):
+        events = self.read_fixture_events()
+        periods = chronicle.periods_for(dt.date(2026, 8, 23))
+        with mock.patch.object(chronicle, "request_editorials", side_effect=RuntimeError("offline")):
+            editorials = chronicle.generate_current_editorials(events, periods, "anthropic")
+        self.assertEqual({}, editorials)
+        payloads = chronicle.build(
+            dt.date(2026, 8, 23), "main", "acme/project", events=events, editorials=editorials,
+        )
+        week = payloads["week"]
+        self.assertIn("deterministic editorial review", json.dumps(week))
+
+    def test_editorial_packet_samples_the_whole_period_and_deduplicates_prompt_sources(self):
+        start = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+        events = [
+            chronicle.Event(start + dt.timedelta(days=index), f"{index:040x}", f"fix(area-{index % 9}): repair path {index}")
+            for index in range(100)
+        ]
+        sampled = chronicle.representative_events(events)
+        self.assertLessEqual(len(sampled), 36)
+        self.assertEqual(events[0], sampled[0])
+        self.assertEqual(events[-1], sampled[-1])
+        self.assertGreater(len({event.occurred_at.month for event in sampled}), 3)
+
+        period = chronicle.Period("year", "2026", dt.date(2026, 1, 1), dt.date(2027, 1, 1), "year", "2026")
+        packet = chronicle.editorial_source_packet(period, events)
+        prompt = chronicle.editorial_prompt([packet, {**packet, "kind": "month"}])
+        self.assertEqual(1, prompt.count("repair path 99"))
+        self.assertIn('"source_catalog"', prompt)
+
+    def test_model_parser_accepts_fenced_anthropic_text(self):
+        response = json.dumps(
+            {"content": [{"type": "text", "text": '```json\n{"schema":"ok"}\n```'}]}
+        )
+        self.assertEqual({"schema": "ok"}, chronicle.parse_model_json(response))
 
     def test_publish_requires_a_token_before_network_access(self):
         env = os.environ.copy()

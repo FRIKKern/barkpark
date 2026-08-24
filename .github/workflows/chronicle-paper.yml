@@ -18,6 +18,7 @@ on:
     paths:
       - ".github/workflows/chronicle-paper.yml"
       - "changelog/README.md"
+      - "DESIGN.md"
       - "scripts/chronicle-paper.py"
       - "scripts/chronicle-paper.test.py"
 
@@ -67,13 +68,24 @@ jobs:
             echo "configured=false" >> "$GITHUB_OUTPUT"
             echo "::warning::BARKPARK_INGEST_TOKEN is not configured; Chronicle publish skipped"
           fi
-      - name: Publish the complete Chronicle archive
+      - name: Publish the current Chronicle family
         if: steps.credentials.outputs.configured == 'true'
         env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           BARKPARK_API_URL: ${{ secrets.BARKPARK_API_URL }}
           BARKPARK_INGEST_TOKEN: ${{ secrets.BARKPARK_INGEST_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
           REQUESTED_DATE: ${{ github.event.inputs.date }}
         run: |
-          args=(--ref main --full-history --publish)
-          if [ -n "$REQUESTED_DATE" ]; then args+=(--date "$REQUESTED_DATE"); fi
+          args=(--ref main --history-months 0 --publish)
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            args+=(--editorial-provider anthropic)
+          else
+            echo "::warning::ANTHROPIC_API_KEY is not configured; Chronicle will use its grounded editorial fallback"
+          fi
+          if [ -n "$REQUESTED_DATE" ]; then
+            args+=(--date "$REQUESTED_DATE")
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            args+=(--date "$(date -u -d yesterday +%F)")
+          fi
           python3 scripts/chronicle-paper.py "${args[@]}"
