@@ -15,6 +15,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
   # honest, minimal isolation — not a widened guard, not an allowlist.
   use ExUnit.Case, async: false
 
+  alias Barkpark.Tenancy.WorkspaceBundle.Archive
   alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   @max_age 3600
@@ -179,6 +180,86 @@ defmodule Barkpark.Tenancy.WorkspaceBundleJanitorTest do
       Application.put_env(:barkpark, :bundle_spill_dir, "/var/lib/barkpark/spill")
 
       assert Janitor.spill_dir() == "/var/lib/barkpark/spill"
+    end
+
+    test "the engine and the janitor resolve the spill dir through ONE function" do
+      # The two used to agree by both spelling `:bundle_spill_dir` in two places
+      # — agreement by coincidence, one rename away from a silent divergence no
+      # test would catch (pds-w11-janitor-engine-handshake). Now there is a
+      # single resolver and this proves BOTH sides ride it: swap the key and the
+      # janitor must follow the engine, not merely happen to match it.
+      prior = Application.get_env(:barkpark, :bundle_spill_dir)
+
+      on_exit(fn ->
+        if is_nil(prior),
+          do: Application.delete_env(:barkpark, :bundle_spill_dir),
+          else: Application.put_env(:barkpark, :bundle_spill_dir, prior)
+      end)
+
+      Application.put_env(:barkpark, :bundle_spill_dir, "/var/lib/barkpark/handshake-probe")
+
+      assert Archive.spill_dir_config() == {:ok, "/var/lib/barkpark/handshake-probe"}
+      assert Janitor.spill_dir() == "/var/lib/barkpark/handshake-probe"
+    end
+
+    test "the MISSING-key policies stay deliberately different: engine raises, janitor falls back" do
+      prior = Application.get_env(:barkpark, :bundle_spill_dir)
+
+      on_exit(fn ->
+        if is_nil(prior),
+          do: Application.delete_env(:barkpark, :bundle_spill_dir),
+          else: Application.put_env(:barkpark, :bundle_spill_dir, prior)
+      end)
+
+      Application.delete_env(:barkpark, :bundle_spill_dir)
+
+      assert Archive.spill_dir_config() == :error
+
+      # The engine must FAIL, not quietly pick a directory most likely to be the
+      # tmpfs its own assertion exists to refuse.
+      assert_raise ArgumentError, ~r/bundle_spill_dir/, fn -> Archive.spill_dir() end
+
+      # The janitor must NOT fail: it is a boot-time `restart: :temporary` task,
+      # and a reclaim sweep can never be the thing that breaks a boot.
+      assert is_binary(Janitor.spill_dir())
+    end
+
+    test "every scratch path the ENGINE builds is a sweep candidate", %{dir: dir} do
+      # The regression bar for a real leak: the extraction directory used to be
+      # named `members-<int>`, which matches none of the janitor's three
+      # prefixes, so a killed import stranded it permanently while the code's
+      # own doc claimed the janitor collected it. Asserting on the engine's
+      # NAMER (not on a literal retyped here) is what keeps this non-circular.
+      scratch = Archive.scratch_path(dir)
+      File.mkdir_p!(scratch)
+      File.write!(Path.join(scratch, "member.copy"), "payload")
+      File.touch!(scratch, System.os_time(:second) - (@max_age + 600))
+
+      survivor = seed(dir, "unrelated.txt", @max_age + 600)
+
+      assert {:ok, result} = sweep(dir)
+
+      refute File.exists?(scratch),
+             "an engine-built scratch directory was NOT collected — its prefix is outside " <>
+               "the janitor's candidate glob, which is exactly the `members-` leak"
+
+      assert scratch in result.removed
+
+      assert File.exists?(survivor), "the sweep took an unrelated file with it"
+
+      # And the leak itself, pinned: the OLD name is not a candidate, so if the
+      # engine ever regresses to a bare `members-` the test above goes red
+      # rather than the directory going quietly uncollectable.
+      legacy = Path.join(dir, "members-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(legacy)
+      File.touch!(legacy, System.os_time(:second) - (@max_age + 600))
+
+      assert {:ok, second} = sweep(dir)
+
+      assert File.exists?(legacy),
+             "a `members-` directory is NOT sweepable — that is why the engine must not use it"
+
+      refute legacy in second.removed
     end
   end
 

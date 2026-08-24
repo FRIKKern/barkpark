@@ -62,6 +62,7 @@ defmodule BarkparkWeb.WorkspaceController do
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.Archive
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
+  alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -290,7 +291,12 @@ defmodule BarkparkWeb.WorkspaceController do
         )
         |> send_file(200, path)
       after
+        # We are the deleter, so we are the disowner. The engine deliberately
+        # leaves the ownership sidecar on a tar it hands off — that is what keeps
+        # the janitor from reaping this file WHILE it is being streamed to the
+        # client, which for a multi-GB bundle on a slow link is a real window.
         File.rm(path)
+        Janitor.disown(path)
       end
     else
       nil ->
@@ -859,9 +865,10 @@ defmodule BarkparkWeb.WorkspaceController do
   # Spill the raw tar body to a scratch directory, run `fun`, then always remove
   # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.
   #
-  # File.rm_rf removes exactly the directory `Archive.open_scratch_dir!/0` just
-  # created — `spill_dir/0` (operator config) plus System.unique_integer/1. No
-  # request input reaches the path, same basis as archive.ex:229-231.
+  # The removal (`Archive.discard_scratch_dir/1`) acts on exactly the directory
+  # `Archive.open_scratch_dir!/0` just created — `spill_dir/0` (operator config)
+  # plus System.unique_integer/1. No request input reaches the path; `spill_body`
+  # below writes only to `Path.join(scratch, "body.tar")` under it.
   # sobelow_skip ["Traversal.FileModule"]
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
@@ -890,7 +897,11 @@ defmodule BarkparkWeb.WorkspaceController do
           end
       end
     after
-      File.rm_rf(scratch)
+      # `discard_scratch_dir/1`, not a bare `File.rm_rf/1`: `open_scratch_dir!/0`
+      # now marks the directory live for the janitor, and removing the subject
+      # without its `.owner` sidecar strands a file the sweep is structurally
+      # unable to collect (it rejects `.owner` entries as candidates by design).
+      Archive.discard_scratch_dir(scratch)
     end
   end
 
