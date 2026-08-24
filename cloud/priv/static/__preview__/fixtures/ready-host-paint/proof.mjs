@@ -6,11 +6,13 @@
 // Chrome against committed fixtures, in BOTH directions, and it does not pass
 // unless every direction lands where it should:
 //
-//   1. DEFECT REPRODUCED   animating.html with the settle DEFEATED (cap 0 — the
-//                          exact pre-fix code path: probe once, judge now)
-//                          must REFUSE, quoting computed opacity "0" on a host
-//                          measured at 300x40. This is the bug, on demand.
-//   2. FIX WORKS           the same fixture with the shipped cap must PASS.
+//   1. DEFECT REPRODUCED   animating-triggered.html with the settle DEFEATED
+//                          (cap 0 — the exact pre-fix code path: probe once,
+//                          judge now) must REFUSE, quoting computed opacity "0"
+//                          on a host measured at 300x40. This is the bug, on
+//                          demand — and it is ARMED, not raced: see below.
+//   2. FIX WORKS           animating.html (a natural on-load entry animation)
+//                          with the shipped cap must PASS.
 //   3. NESTED CASE         nested-modal.html — the host is a DESCENDANT of the
 //                          animated element, which is the shape both `#a2f-error`
 //                          main refusals had — must also PASS.
@@ -23,6 +25,21 @@
 //
 // Direction 1 is why this file exists rather than a screenshot: a fix whose
 // proof cannot reproduce the defect is a story about the pixels.
+//
+// AND DIRECTION 1 MUST NOT RACE A CLOCK, which cost one main run to learn. Its
+// first version loaded animating.html — whose animation starts on load — and
+// trusted the probe to beat a 280ms window. MEASURED under 24 CPU stressors
+// (load 155): that approach goes VACUOUS 1 in 14 trials, reporting "the defect
+// no longer reproduces" because computed opacity had already crept to
+// 0.0203205 — non-zero is all checkOpacity needs. It duly failed on main inside
+// one run of merging (console-harness 32690594539, job 97323534019).
+//
+// A flaky anti-vacuous-green check is worse than none: it teaches the reader to
+// re-run, which is precisely how the floor's own intermittency survived four
+// main runs. So direction 1 now ARMS the state instead of racing it — the
+// animation is inert until a class lands, and the class-add and the read happen
+// in the SAME evaluate. Same measurement, 0 in 14 vacuous at the same load, and
+// no animation was lengthened to buy the margin.
 //
 //   node cloud/priv/static/__preview__/fixtures/ready-host-paint/proof.mjs
 //   CHROME=/path/to/chrome node …/proof.mjs
@@ -158,6 +175,23 @@ async function load(file) {
 }
 
 const results = [];
+
+// Judge the page AS IT STANDS, without navigating — used where the caller has
+// already put the DOM into the exact state under test and a re-navigation would
+// throw that state away and restart the race this proof exists to remove.
+async function runFloorHere(readyExpr, { cap = SETTLE_CAP_MS } = {}) {
+  const t0 = Date.now();
+  const lines = [];
+  try {
+    await assertReadyHostsPaint({
+      url: "file://…/animating-triggered.html", readyExpr, evalJs, sleep, cap, log: (l) => lines.push(l),
+    });
+    return { ok: true, ms: Date.now() - t0, lines };
+  } catch (e) {
+    return { ok: false, ms: Date.now() - t0, lines, message: e.message };
+  }
+}
+
 async function runFloor(file, readyExpr, { cap = SETTLE_CAP_MS } = {}) {
   await load(file);
   const t0 = Date.now();
@@ -196,7 +230,42 @@ const zeroBox = await quoteProbe("zero-box.html", ".deploy-detail");
 process.stdout.write(`  zero-box.html .deploy-detail -> ${JSON.stringify(zeroBox)}\n`);
 
 process.stdout.write("\n=== 1. DEFECT REPRODUCED: settle defeated (cap 0) on a screen that renders ===\n");
-const d1 = await runFloor("animating.html", "document.querySelector('.deploy-detail')", { cap: 0 });
+// THE PRECONDITION IS ESTABLISHED, NOT HOPED FOR.
+//
+// The first version of this direction loaded animating.html — whose animation
+// starts on load — and trusted the probe to outrace a 280ms clock. That held
+// locally and FAILED ON MAIN inside one run (console-harness 32690594539, job
+// 97323534019): "it passed — the defect no longer reproduces, so this proof
+// certifies nothing". On a loaded runner the navigation outlasted the
+// animation, so the pre-fix path was handed a host that had already painted.
+// A flaky anti-vacuous-green check is worse than none: it teaches the reader to
+// re-run, which is exactly how the floor's own intermittency survived.
+//
+// The repair is the one this whole row is about — do not wait on a clock,
+// control the CONDITION. animating-triggered.html leaves the animation INERT
+// until `.is-entering` lands, so the navigation is paid FIRST and then the
+// animation is started and READ IN THE SAME EVALUATE. Nothing can intervene
+// between the two at any load, and no animation was lengthened to buy margin.
+await load("animating-triggered.html");
+const armed = await evalJs(
+  `(function(){document.querySelector('.deploy-detail').classList.add('is-entering');` +
+  `return (${paintProbeJs([".deploy-detail"])})[0];})()`,
+);
+process.stdout.write(`  armed in one task -> ${JSON.stringify(armed)}\n`);
+// If the state could not be established, this direction makes NO CLAIM and says
+// so as an environment refusal — it must never pass by accident, and it must
+// never red as though the floor misbehaved.
+if (!(armed.matches > 0 && armed.rendered === 0 && (armed.animations || []).length > 0)) {
+  process.stderr.write(
+    `!! PROOF (exit 2): could not put the host into the pre-fix state (unpainted WITH a running animation).\n` +
+    `   measured: ${JSON.stringify(armed)}\n` +
+    `   NO CLAIM is being made about the floor. Adding .is-entering must start the animation in the\n` +
+    `   same task that reads it; if that stopped being true, fix the fixture, not the cap.\n`,
+  );
+  ws.close();
+  process.exit(2);
+}
+const d1 = await runFloorHere("document.querySelector('.deploy-detail')", { cap: 0 });
 EXPECT("the pre-fix code path REFUSES a perfectly-rendering screen", !d1.ok, d1.ok ? "it passed — the defect no longer reproduces, so this proof certifies nothing" : d1.message.slice(0, 200));
 EXPECT("and the refusal quotes the computed opacity it judged on", !d1.ok && /computed opacity "0"/.test(d1.message), !d1.ok ? `refusal contains: ${(d1.message.match(/measured on the first match: [^.]+\./) || ["(nothing)"])[0]}` : "n/a");
 EXPECT("on a host it also measured as LAID OUT — the box is not the problem", !d1.ok && /box 300x40/.test(d1.message), "box 300x40 present in the refusal");

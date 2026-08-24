@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ready-host floor fixture — the entry animation starts ON COMMAND</title>
+<!--
+  THE DEFECT FIXTURE, MADE DETERMINISTIC.
+
+  animating.html starts its animation on load, which means catching the host
+  mid-fade-in depends on the probe outracing a 280ms clock. That held locally
+  and FAILED ON MAIN inside one run (console-harness run 32690594539, job
+  97323534019): direction 1 reported "it passed — the defect no longer
+  reproduces, so this proof certifies nothing". On a loaded runner the
+  navigation itself outlasted the animation, so the pre-fix code path was handed
+  a host that had already finished painting.
+
+  That is the SAME disease the floor had — a judgment racing a clock it does not
+  control — reproduced inside the instrument built to prove it. The repair is
+  the same one: do not wait on a clock, control the CONDITION.
+
+  Here the animation is not applied until `.is-entering` is added, so the proof
+  pays the whole navigation cost FIRST and then starts the animation and reads
+  it in the SAME evaluate. Nothing can intervene between the two, at any load,
+  and no animation was lengthened to buy the margin.
+-->
+<style>
+  @keyframes new-detail-in {
+    from { opacity: 0; transform: translateY(-2px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .deploy-detail { width: 300px; height: 40px; background: #333; color: #fff; }
+  /* The animation is INERT until the class lands. */
+  .deploy-detail.is-entering { animation: new-detail-in 0.28s ease; }
+</style>
+<div class="deploy-detail">a screen that renders perfectly</div>
