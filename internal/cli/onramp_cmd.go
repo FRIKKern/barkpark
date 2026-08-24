@@ -323,6 +323,11 @@ func renderAgentsMDBody(workerPrefix, mcpDocRef string) string {
 	workerLine := "- Worker id: `" + workerPrefix + "-<your-name-or-branch>` — pick one and keep it for claim/close symmetry."
 	mcpFooter := "MCP-native surface? The same verbs are first-class MCP tools via `bp mcp serve` — see `" + mcpDocRef + "`."
 	lines := []string{
+		// The doctrine leads: WHEN to register (always, before the work) and WHY,
+		// ahead of the verb list that teaches HOW. One const, shared with the MCP
+		// server instructions — see movement_doctrine.go.
+		movementLedgerDoctrine,
+		"",
 		"All task tracking uses Barkpark — never markdown TODO lists, never a TODO tool.",
 		"The `bp` CLI talks to the configured server (`~/.config/barkpark/`).",
 		"",

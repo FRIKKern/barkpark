@@ -273,6 +273,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			return code
 		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
+		emitMovementDoctrine(out, cmd)
 		emitHelpHints(out, respBody)
 	}
 	return handleResponse(out, m, cmd, status, respBody)

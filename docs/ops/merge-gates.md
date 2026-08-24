@@ -55,7 +55,13 @@ A PR targeting `main` must clear:
    not block merge**. It is on this list because a PR that trips it is broken,
    not because the merge button waits for it.
 
-7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. Enforces
+7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. **Claim the
+   row BEFORE you open the PR**: this gate reads the LEDGER, not the diff, so a
+   correct `Task:` trailer on a row that was never claimed FAILS. And no gate
+   here — this one included — ever opens `acceptance_criteria`, so a `met:true`
+   is worth exactly what the person who stamped it made it worth; a criterion
+   should therefore name a check a reader can RE-RUN, not a state someone once
+   observed. Enforces
    task-obsession layer 1: every PR must carry a `Task: <doc_id>` trailer in its
    description naming a task that is task-backed on the ledger-of-record
    (guerrilla). No task / task not found / task unowned → the check fails. The

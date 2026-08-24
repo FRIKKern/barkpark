@@ -1,7 +1,19 @@
 <!-- doc-tier: human | canonical-for: agent-onramps | budget: 1600tok -->
 # Agent Onramps
 
-One command, any agent. Point an AI at Barkpark — local or Cloud — and it goes from "never heard of it" to a schema, a document, a task, and a paper in under two minutes. This hub owns the two shared journeys (**AUTH**, **CREATE**); each per-target doc hands you the config that surface understands and points back here.
+One command, any agent. Point an AI at Barkpark — local or Cloud — and it goes from "never heard of it" to a schema, a document, a task and a paper in under two minutes. This hub owns the doctrine and the two shared journeys (**AUTH**, **CREATE**); each per-target doc hands you that surface's config and points back here.
+
+## Register the movement
+
+Every unit of work — build, research, plan, audit, spike — runs under a claimed task: if no row names it, create one and claim it FIRST, then work. Unregistered work is unrecoverable — a lost session is rebuilt only from the ledger, and "what has been going on lately" is answerable only from task events.
+
+Written as mechanism, not exhortation — an agent that *believes* it registered its work behaves exactly like one that did. Three ways a registration you think you made never landed:
+
+- A redirected or piped stdin makes `bp` REFUSE a mutating write — exit 2, `piped stdin is unused and <noun> <verb> does not accept --file`. In a heredoc-fed script every `claim`/`create`/`stamp` aborts **while the reads around them succeed**, so the run looks healthy. Pass arguments, never a pipe.
+- A write to a remote server without `--yes` aborts — exit 2, `prod write not confirmed`. It fires only *after* the stdin refusal clears, so fixing one can reveal the other.
+- A printed receipt is not persistence. Read the row back and match a string you wrote.
+
+One Go constant (`internal/cli/movement_doctrine.go`) feeds the `bp onramp agents-md` block, the `bp mcp serve` instructions and `bp task prime`'s lead line; `movement_doctrine_test.go` reds if a surface drops it. Repo-local mechanics (PR trailers, merge gates) stay out — that block lands in other people's repos — and live in [TASK-SYSTEM](TASK-SYSTEM.md).
 
 ## Pick your target
 
@@ -24,31 +36,31 @@ Every target below wires the same `bp mcp serve` tool catalog (curated task tool
 
 Three paths. Each ends with `bp` holding a valid server + token; verify with `bp whoami`.
 
-**Local, unattended** — a fresh dev server on this machine. Destructive: runs `mix ecto.reset` (wipes the dev DB).
+**Local, unattended** — a fresh dev server here. Destructive: `mix ecto.reset` wipes the dev DB.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
 bp setup --target local --yes
 ```
 
-Setup mints a `bp_admin_` token at execute time, prints it **once**, and persists it to `~/.config/barkpark/config.json` (mode `0600`). That token is your read/write/admin bearer for this server — store it.
+Setup mints a `bp_admin_` token at execute time, prints it **once**, and persists it to `~/.config/barkpark/config.json` (mode `0600`) — your read/write/admin bearer for this server.
 
-**Connect** — point `bp` at a server that already exists (yours or a teammate's). Non-destructive.
+**Connect** — point `bp` at an existing server (yours or a teammate's). Non-destructive.
 
 ```bash
 bp setup --target connect --server https://api.example.com --token "$TOKEN" --yes
 ```
 
-…or skip the config file entirely — the environment layer sits **above** `~/.config/barkpark/`:
+…or skip the config file — the environment layer sits **above** `~/.config/barkpark/`:
 
 ```bash
 export BARKPARK_API_URL=https://api.example.com
 export BARKPARK_API_TOKEN=bp_admin_...
 ```
 
-Recognized names, first set wins (canonical beats alias): server `BARKPARK_API_URL` → `BARKPARK_SERVER` → `BARKPARK_URL`; token `BARKPARK_API_TOKEN` → `BARKPARK_TOKEN`. Aliases: the Next.js template dialect (`templates/DEPLOYING.md`).
+First set wins (canonical beats alias): server `BARKPARK_API_URL` → `BARKPARK_SERVER` → `BARKPARK_URL`; token `BARKPARK_API_TOKEN` → `BARKPARK_TOKEN`. The aliases are the Next.js template dialect.
 
-**Cloud** — an agent on Barkpark Cloud logs into the control plane, reads its fleet, pulls a live instance's admin token, and connects to it:
+**Cloud** — log into the control plane, read the fleet, pull an instance's admin token, connect:
 
 ```bash
 BARKPARK_PASSWORD=... bp login --email you@example.com   # control-plane session
@@ -57,12 +69,12 @@ bp instance credentials <id> -o json                     # per-instance admin to
 bp setup --target connect --server <url> --token <admin_token> --yes
 ```
 
-Plainly, what the Cloud path can and can't do unattended:
+What the Cloud path can and can't do unattended:
 
-- The Cloud session token is **control-plane only** — it manages your fleet and never authenticates content writes. The per-instance `admin_token` from `instance credentials` is the one that does.
+- The Cloud session token is **control-plane only** — it never authenticates content writes. The per-instance `admin_token` from `instance credentials` is the one that does.
 - **2FA blocks unattended `bp login`** — a second factor can't be entered non-interactively.
-- **Provisioning a NEW hosted instance is browser-gated** (Stripe Checkout). `bp login` can only reach instances that already exist. To stand one up, see [Cloud Quickstart](CLOUD-QUICKSTART.md).
-- `instance credentials` can **404 (`no_admin_token`)** on legacy instances — the token is captured at provision time, so a pre-existing box may need a re-provision to store one.
+- **Provisioning a NEW hosted instance is browser-gated** (Stripe Checkout); `bp login` reaches only instances that already exist — [Cloud Quickstart](CLOUD-QUICKSTART.md).
+- `instance credentials` can **404 (`no_admin_token`)** on legacy instances: the token is captured at provision time, so a pre-existing box may need a re-provision.
 
 ## CREATE
 
@@ -80,22 +92,18 @@ cat > note.schema.json <<'JSON'
 ]}
 JSON
 bp schema apply --file note.schema.json
-# Richer types: `bp make schema note` prints a full annotated skeleton —
-# edit it down (its _comment keys explain each field), then apply.
+# Richer types: `bp make schema note` prints an annotated skeleton to edit down.
 
 # 2. A document of that type — `seed` fabricates a schema-valid draft.
 bp seed note --count 1
 bp doc ls note --perspective raw
 
 # 3. A task — a claimable, dependency-aware work item.
-# The publish WALL applies to `task` and `paper` docs (authoring-excellence): a
-# published one needs a `description` (≥20 chars) AND weighted `tags`
-# [{tag, strength 1–100, rationale}] whose every `tag` is already a registered
-# tag doc — else 422 `label_spine` (missing description/tags) or 422
-# `unknown_tag`. Strengths must be distinct (the max is the main tag); each
-# `rationale` is ≥20 chars. A FRESH instance registers NO tags, so register the
-# ones you'll use first — a tag is registered by publishing a `type:tag` doc
-# whose id is the tag string (tag docs are not walled):
+# The publish WALL applies to `task` and `paper` docs: a published one needs a
+# `description` (≥20 chars) AND weighted `tags` [{tag, strength 1–100 distinct,
+# rationale ≥20 chars}] whose every `tag` is already a registered tag doc — else
+# 422 `label_spine` or 422 `unknown_tag`. A FRESH instance registers NO tags;
+# register one by publishing a `type:tag` doc whose id IS the tag string:
 bp doc create tag --yes --set _id=docs --set title="Docs"
 bp doc publish tag docs --yes
 bp doc create tag --yes --set _id=search --set title="Search"
@@ -109,11 +117,9 @@ bp task create "Draft the launch note" --publish \
   --set 'acceptance_criteria:=[{"criterion":"note published","met":false,"evidence":""}]'
 bp task ready
 
-# 4. A paper — Barkpark's block document, read anywhere. Papers hit the SAME
-# wall, so the ingest payload carries a `description` and weighted `tags`
-# (`bp bulldocs publish --file` forwards the file's top-level `tags`/`description`
-# into the ingest params the wall reads). The tags must already be registered
-# (step 3 did that).
+# 4. A paper — Barkpark's block document. Papers hit the SAME wall, so the
+# payload carries `description` + weighted `tags` (`bulldocs publish --file`
+# forwards both into the ingest params). Tags must be registered — step 3 did it.
 cat > paper.json <<'JSON'
 {"slug":"hello",
  "description":"My first Barkpark paper, authored end-to-end by an agent.",
@@ -130,15 +136,15 @@ bp paper view hello
 
 ## MCP
 
-Every target with a local shell registers the same server: `bp mcp serve` (stdio) turns the capability manifest into a tool catalog the agent calls directly — claim, read the brief, close with epoch-CAS, no shell. The default `--tools tasks` ships eight curated task tools (task_ready · task_next · task_show · task_close · task_create · task_prime · task_stamp · task_pulse); `--tools all` is expert-only (Cursor hard-caps 40 tools vs ~107 manifest commands). The server **fails fast** if the target Barkpark has the Tasks plugin disabled — point it at one with Tasks enabled. Registration stanza per surface: each target doc above.
+Every target with a local shell registers the same server: `bp mcp serve` (stdio) turns the capability manifest into a tool catalog the agent calls directly — claim, read the brief, close with epoch-CAS, no shell. Its `initialize` reply carries the doctrine above as MCP **instructions**, so an MCP-only client is primed without reading this page. Default `--tools tasks` ships eight curated tools (task_ready · task_next · task_show · task_close · task_create · task_prime · task_stamp · task_pulse); `--tools all` is expert-only (Cursor hard-caps 40 tools vs ~107 commands). It **fails fast** if the target has the Tasks plugin disabled. Stanza per surface: each target doc above.
 
 ## One-step onramp — `bp onramp <target>`
 
-`bp onramp <target>` prints the exact config block(s) for one surface, where they belong, and how to verify — paste-by-hand by default (nothing is written). Targets: `cursor`, `claude-code`, `codex`, `cursor-cloud`, `windsurf`, `gemini-cli`, `copilot`, `zed` (`chatgpt` / `claude-ai` are remote — see [REMOTE.md](REMOTE.md)). `--server URL` bakes the API URL in; `--token TOKEN` bakes a literal token instead of the safe `${…}` env placeholder; `-o json` emits `{target, files:[{path,content}], verify}`.
+`bp onramp <target>` prints the exact config block(s) for one surface, where they belong, and how to verify — paste-by-hand by default, nothing written. Targets: `cursor`, `claude-code`, `codex`, `cursor-cloud`, `windsurf`, `gemini-cli`, `copilot`, `zed`, `agents-md` (`chatgpt` / `claude-ai` are remote — [REMOTE.md](REMOTE.md)). `--server URL` bakes the API URL in; `--token TOKEN` bakes a literal token instead of the safe `${…}` placeholder; `-o json` emits `{target, files:[{path,content}], verify}`.
 
 ### `--write` — merge it for you
 
-`bp onramp <target> --write` does the work: it merges **only** the `barkpark` entry into the target's config and touches nothing else. Every other MCP server and every unrelated top-level key survives verbatim — only the barkpark key is swapped (a JSON merge re-emits the file in canonical 2-space form, so unusual whitespace or key order is normalised; values are never altered, and a fresh `created` file is the doc stanza byte-for-byte). Codex's `~/.codex/config.toml` is merged as a textual **span splice** (no TOML library): the owned span is the `[mcp_servers.barkpark]` table plus every `[mcp_servers.barkpark.*]` sub-table; every byte outside it survives verbatim, and `--force` replaces the whole span with the canonical flat stanza. Writes are **atomic** (temp file + rename, so a crash never leaves a half-written config) and land at mode `0644` / dir `0755` — these are project-committed configs holding a `${env:}` placeholder, not secrets.
+`bp onramp <target> --write` merges **only** the `barkpark` entry: every other MCP server and unrelated key survives verbatim (JSON re-emits in canonical 2-space form — values are never altered; Codex's `config.toml` is a textual span splice over `[mcp_servers.barkpark]*`, no TOML library). Writes are **atomic** (temp + rename) at mode `0644` / dir `0755` — they hold a `${env:}` placeholder, not secrets.
 
 It is **idempotent** and honest per file:
 
@@ -149,11 +155,7 @@ It is **idempotent** and honest per file:
 | `unchanged` | the barkpark entry already matches — exit 0, nothing written |
 | `skipped` | a **different** barkpark entry is already present — left untouched; re-run with `--force` to overwrite it |
 
-Re-running `--write` is always safe: an already-correct config reports `unchanged` and is not rewritten. `--force` only changes the `skipped`→`updated` case; it still never touches a foreign server or an unrelated key.
-
-`--write -o json` emits one document, `{target, actions:[{path,action,note}]}`; human progress stays on stderr so stdout is a single parseable report.
-
-Add the global `--dry-run` to preview: `--write --dry-run` computes and reports the exact per-file actions (`created` / `updated` / `skipped` / `unchanged`) and writes **nothing** — not one byte, not even the parent directory. The JSON report carries `"dryRun": true`; the human report is marked `DRY RUN`. It is the honest doctor mode — re-run without `--dry-run` to apply.
+Re-running is always safe; `--force` only changes `skipped`→`updated`. `--write -o json` emits `{target, actions:[{path,action,note}]}` (progress on stderr, so stdout is one parseable report); `--write --dry-run` computes the same actions and writes **nothing** — not one byte, not even the parent directory.
 
 ```bash
 bp onramp cursor --write            # merge barkpark into .cursor/mcp.json
