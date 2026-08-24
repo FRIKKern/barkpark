@@ -469,9 +469,9 @@ defmodule BarkparkWeb.AuthController do
       :no_user ->
         NotificationWithhold.record("magic_link", :no_recipient_by_construction)
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
         NotificationWithhold.record("magic_link", :dispatch_crashed,
-          user_id: withheld_user_id(email),
+          user_id: Ecto.Changeset.get_field(changeset, :user_id),
           detail: "token_mint_failed"
         )
     end
@@ -765,16 +765,6 @@ defmodule BarkparkWeb.AuthController do
           user_id: user.id,
           detail: "token_mint_failed"
         )
-    end
-  end
-
-  # The user behind a withheld notification, looked up ONLY on the rare failure
-  # path. `build_login_token/1` reaches `{:error, _}` only after it already found
-  # a user, so this second read is both cheap and expected to hit.
-  defp withheld_user_id(email) do
-    case Accounts.get_user_by_email(email) do
-      %{id: id} -> id
-      _ -> nil
     end
   end
 
