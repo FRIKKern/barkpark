@@ -95,6 +95,21 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # @barkpark/core advertises edge/worker runtime support, and the two files
+      # that look like the proof of that claim were the two that never ran: `pnpm
+      # test` uses vitest.config.ts, which EXPLICITLY excludes
+      # tests/runtime.workerd.test.ts and tests/runtime.browser.test.ts, and the
+      # `test:workerd` / `test:browser` / `test:all` scripts appeared nowhere in
+      # .github/**, turbo.json or any Makefile. So the runtime claim was gated by
+      # nothing. These two steps are the gate. (The chromium install above already
+      # existed for another package's browser proof; test:browser now uses it too
+      # instead of it being paid for and half-used.)
+      - name: "Test — @barkpark/core under workerd (edge runtime proof)"
+        run: pnpm --filter @barkpark/core test:workerd
+
+      - name: "Test — @barkpark/core under a real browser"
+        run: pnpm --filter @barkpark/core test:browser
+
       - name: Lint
         run: pnpm lint
 
