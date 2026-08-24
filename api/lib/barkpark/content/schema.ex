@@ -596,12 +596,35 @@ defmodule Barkpark.Content.Schema do
   # crosses datasets; get_schema/3 orders dataset_id-first + limit 1 to resolve
   # the (rare) backfilled-vs-fixture overlap deterministically.
   defp scope_schema_to_dataset(query, dataset, opts) do
-    case Content.resolve_read_dataset_id(dataset, opts) do
+    case resolved_dataset_id(dataset, opts) do
       id when is_binary(id) ->
         where(query, [s], s.dataset_id == ^id or (is_nil(s.dataset_id) and s.dataset == ^dataset))
 
       _ ->
         where(query, [s], s.dataset == ^dataset)
+    end
+  end
+
+  # `resolve_read_dataset_id/2`, unless the CALLER already paid for it and hands
+  # the answer over via `:resolved_dataset_id`.
+  #
+  # Purely additive: no existing caller passes the key, so every one of them
+  # takes the `else` arm and is byte-identical. It exists for a caller that
+  # resolves the SAME `{project_id, dataset}` pair moments earlier in its own
+  # scope stack — `Query.get_documents_by_ids/3` and `count_documents_by_ids/3`,
+  # whose visibility clamp reads this module. Without it that pair resolved
+  # TWICE per batch read, and on a path that (by the barkpark-sknf gate) passes
+  # no `memoize: true`, the second resolve is a real extra `datasets` round-trip
+  # — measured as +1 statement on the anonymous `/papers/:slug` reader.
+  #
+  # `Keyword.has_key?`, never `||`: `resolve_read_dataset_id/2` returning nil is
+  # MEANINGFUL (it selects the legacy dataset-STRING path), so a supplied nil
+  # must be honoured as an answer rather than retried as a miss.
+  defp resolved_dataset_id(dataset, opts) do
+    if Keyword.has_key?(opts, :resolved_dataset_id) do
+      Keyword.get(opts, :resolved_dataset_id)
+    else
+      Content.resolve_read_dataset_id(dataset, opts)
     end
   end
 end

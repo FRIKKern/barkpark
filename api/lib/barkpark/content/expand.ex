@@ -146,13 +146,6 @@ defmodule Barkpark.Content.Expand do
     # non-owner_scoped ref (rows carry NULL owner_id, which the nil clause admits)
     # stays byte-identical; the ORIGINAL caller_context still drives the
     # `Envelope.render` redaction below.
-    #
-    # The batch read's SCHEMA-visibility clamp (`Query.restrict_to_visible_types/3`,
-    # task-38786b2edab15955) reads the same normalized `query_opts` key, so a
-    # render sentinel resolves to nil and is CLAMPED — a non-`%CallerContext{}`
-    # has not earned the private-type view. Fail-closed, and inert in practice:
-    # both production call sites (`query_controller.ex:112` and `:466`) pass a
-    # real `CallerContext.from_conn/1`.
     query_opts =
       case caller_context do
         %CallerContext{} -> opts

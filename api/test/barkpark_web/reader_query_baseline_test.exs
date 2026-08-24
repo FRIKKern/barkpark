@@ -61,24 +61,40 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   # reader's dead leg costs 1 statement instead of all 16. A priced
   # capability, not a silent regression — the next unexplained +1 still reds.
   #
-  # +2 dead (16→18) / +4 both (31→35): the schema-visibility clamp at the
+  # +1 dead (16→17) / +2 both (31→33): the schema-visibility clamp at the
   # batch-read seat (task-38786b2edab15955 — `?expand=` hydrated a reference
   # into a PRIVATE type with no visibility check, and Envelope.render only
-  # redacts FIELDS). `Query.restrict_to_visible_types/3` now guards
+  # redacts FIELDS). `Query.restrict_to_visible_types/4` guards
   # `get_documents_by_ids/3`, which the driven-tasks reverse view rides, so an
-  # unauthenticated reader pays the READ-TIME allowlist: +1 schema_definitions
-  # (the allowlist itself) and +1 datasets (its dataset resolution — this
-  # LiveView path passes no `memoize: true`, by the barkpark-sknf gate). The
-  # connected leg is a second full render, hence ×2 on both legs. Measured,
-  # not estimated: dead 18 (documents 6, datasets 4, schema_definitions 3,
-  # workspaces 2, content_edges 1, projects 1, task_edges 1); both 35.
+  # unauthenticated reader pays ONE read-time `schema_definitions` allowlist
+  # query. The connected leg is a second full render, hence ×2 on both legs.
   #
-  # CONSTANT, not fan-out — the property this harness really guards: the
-  # sibling N+1 slope test is UNCHANGED at 0.0 statements per additional citing
-  # task per leg (dead 18->18, both 35->35). A priced security capability, and
-  # the next unexplained +1 still reds.
-  @dead_leg_budget 18
-  @both_legs_budget 35
+  # THE MEASURED DELTA, per source, origin/main → clamped (dead leg):
+  #   documents 6→6, datasets 3→3, schema_definitions 2→3, workspaces 2→2,
+  #   content_edges 1→1, projects 1→1, task_edges 1→1.
+  # Only `schema_definitions` moves, and by exactly one. `documents` is FLAT —
+  # the clamp is not per-row.
+  #
+  # CONSTANT, not fan-out — the property this harness really guards: the sibling
+  # N+1 slope test is 0.0 statements per additional citing task per leg (dead
+  # 17->17, both 33->33). A per-document visibility lookup would scale there.
+  #
+  # THE OTHER STATEMENT WAS PAID BACK, NOT PINNED. The clamp first cost +2: the
+  # schema catalog re-resolved the SAME `{project_id, dataset}` pair that the
+  # row read had just resolved, and this path passes no `memoize: true` (the
+  # barkpark-sknf gate), so it was a real second `datasets` round-trip.
+  # `get_documents_by_ids/3` now resolves once and hands the answer to the
+  # clamp via `:resolved_dataset_id` — `datasets` is back at origin/main's 3.
+  #
+  # The remaining +1 is irreducible BY DESIGN: the allowlist is derived at READ
+  # TIME so a schema flipped to private drops out on the very next read. Folding
+  # it into the row query as a subquery would mean hand-rolling `public_schema?/1`
+  # AND `list_schemas/2`'s dataset_id-first dedup precedence in SQL — a second
+  # implementation of the exact rule this clamp exists to unify, and the shape
+  # this repo's duplicated-predicate findings keep recurring through. One
+  # statement is the honest price. The next unexplained +1 still reds.
+  @dead_leg_budget 17
+  @both_legs_budget 33
   @max_n_plus_one_slope 1.0
 
   setup do

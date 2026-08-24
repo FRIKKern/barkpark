@@ -350,16 +350,25 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   # True only for an authenticated principal OUTSIDE the public-read tier.
-  # Anything else — anonymous, nil, a non-CallerContext, any future principal —
-  # is false, so the allowlist applies (fail CLOSED).
-  #
-  # The predicate itself now lives in `Content.Schema.bypasses_visibility_gate?/1`
-  # (canonical slug `visibility-gate-tier`): the SAME tier test the corpus
-  # graph clamp and the batch document read (`Query.restrict_to_visible_types/3`,
-  # the seat `?expand=` walked through) read. One rule, one implementation — the
-  # hand-copied twin that used to live here is exactly how this family recurs.
-  defp bypasses_visibility_gate?(ctx),
-    do: Barkpark.Content.Schema.bypasses_visibility_gate?(ctx)
+  # Anything else — anonymous, nil, a bare map without `:principal_type`, any
+  # future principal — is false, so the allowlist applies (fail CLOSED).
+  defp bypasses_visibility_gate?(%{principal_type: p} = ctx) when p in [:api_token, :user],
+    do: not public_read_principal?(ctx)
+
+  defp bypasses_visibility_gate?(_), do: false
+
+  # MEMBERSHIP, never list equality — the SAME test as
+  # `BarkparkWeb.Plugs.PublicRead.public_read_token?/1` and
+  # `AnonPerspective.anon_pinned?/1`, read off the CallerContext's `:roles`
+  # (`CallerContext.from_token/1` stores the token's permission list there
+  # verbatim). `TokenController` allowlists `~w(public-read read)` and returns
+  # the caller's list VERBATIM and UNORDERED, so `["public-read", "read"]` is a
+  # real minted shape and a `roles == ["public-read"]` equality pin would be
+  # escapable by construction. A context whose `:roles` is absent or non-list
+  # falls through to `false` — absence of the key is not evidence of the tier,
+  # and over-clamping every principal would break member/preview reads.
+  defp public_read_principal?(%{roles: roles}) when is_list(roles), do: "public-read" in roles
+  defp public_read_principal?(_), do: false
 
   # The ALLOWLIST of schema type names an anonymous caller may search: schemas
   # in the caller's tenancy scope whose visibility is EXPLICITLY "public" —

@@ -1586,10 +1586,16 @@ defmodule Barkpark.Content.Query do
   def get_documents_by_ids(doc_ids, dataset, opts) when is_list(doc_ids) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
+    # Resolved ONCE and shared with the visibility clamp below, which scopes the
+    # schema catalog by the SAME `{project_id, dataset}` pair. Resolving it there
+    # too costs a second `datasets` round-trip on any path without `memoize: true`
+    # (LiveView, workers, retrievers — the barkpark-sknf gate). Sharing also makes
+    # the two scopes provably identical rather than coincidentally so.
+    dataset_id = Barkpark.Content.resolve_read_dataset_id(dataset, opts)
 
     Document
     |> where([d], d.doc_id in ^doc_ids)
-    |> scope_to_dataset(dataset, opts)
+    |> scope_to_resolved_dataset(dataset, dataset_id)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     # Row/ownership ACL (Phase 4). This batch read is TYPELESS (a page of search
     # hits may span many types), so it can't gate on `owner_scoped?/3` per type.
@@ -1601,7 +1607,7 @@ defmodule Barkpark.Content.Query do
     # non-owner's hydration, closing the leak through the search-expand path.
     |> scope_to_owner(Keyword.get(opts, :caller_context))
     |> maybe_scope_to_grants(opts)
-    |> restrict_to_visible_types(dataset, opts)
+    |> restrict_to_visible_types(dataset, opts, dataset_id)
     |> Repo.all()
     |> Map.new(fn d -> {d.doc_id, d} end)
   end
@@ -1624,14 +1630,15 @@ defmodule Barkpark.Content.Query do
   def count_documents_by_ids(doc_ids, dataset, opts) when is_list(doc_ids) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
+    dataset_id = Barkpark.Content.resolve_read_dataset_id(dataset, opts)
 
     Document
     |> where([d], d.doc_id in ^doc_ids)
-    |> scope_to_dataset(dataset, opts)
+    |> scope_to_resolved_dataset(dataset, dataset_id)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> scope_to_owner(Keyword.get(opts, :caller_context))
     |> maybe_scope_to_grants(opts)
-    |> restrict_to_visible_types(dataset, opts)
+    |> restrict_to_visible_types(dataset, opts, dataset_id)
     |> exclude(:order_by)
     |> Repo.aggregate(:count)
   end
@@ -1682,20 +1689,31 @@ defmodule Barkpark.Content.Query do
   # so a nil/malformed dataset would raise a FunctionClauseError — a 500 that
   # fires only for some inputs is itself a probe. A non-binary dataset is a
   # DENIAL (the empty allowlist) instead, never a crash oracle.
-  defp restrict_to_visible_types(query, dataset, opts) do
+  defp restrict_to_visible_types(query, dataset, opts, dataset_id) do
     cond do
       Schema.bypasses_visibility_gate?(Keyword.get(opts, :caller_context)) ->
         query
 
       is_binary(dataset) ->
-        where(query, [d], d.type in ^Schema.public_type_names(dataset, tenancy_opts(opts)))
+        where(
+          query,
+          [d],
+          d.type in ^Schema.public_type_names(dataset, tenancy_opts(opts, dataset_id))
+        )
 
       true ->
         where(query, [d], d.type in ^[])
     end
   end
 
-  defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
+  # The schema catalog is scoped by the same tenancy keys as the row read, plus
+  # the dataset resolution the caller ALREADY paid for — so the clamp costs ONE
+  # statement (the allowlist), not two.
+  defp tenancy_opts(opts, dataset_id) do
+    opts
+    |> Keyword.take([:workspace_id, :project_id])
+    |> Keyword.put(:resolved_dataset_id, dataset_id)
+  end
 
   @doc """
   Fetch a document with draft-first preference. Returns the draft if it
@@ -1732,13 +1750,21 @@ defmodule Barkpark.Content.Query do
   # Byte-identical to `Barkpark.Content`'s private `scope_to_dataset/3` (concern
   # K, not yet extracted). Borrows the public `resolve_read_dataset_id/2`
   # through the facade so behaviour stays unchanged until K moves out.
-  defp scope_to_dataset(query, dataset, opts) do
-    case Barkpark.Content.resolve_read_dataset_id(dataset, opts) do
-      id when is_binary(id) ->
-        where(query, [x], x.dataset_id == ^id or (is_nil(x.dataset_id) and x.dataset == ^dataset))
+  defp scope_to_dataset(query, dataset, opts),
+    do:
+      scope_to_resolved_dataset(
+        query,
+        dataset,
+        Barkpark.Content.resolve_read_dataset_id(dataset, opts)
+      )
 
-      _ ->
-        where(query, [x], x.dataset == ^dataset)
-    end
-  end
+  # The scoping clause with the resolution ALREADY DONE. Split out (not copied)
+  # so a caller that needs the resolved id for a second purpose can resolve once
+  # and pass it to both — see `get_documents_by_ids/3`. `scope_to_dataset/3`
+  # above is unchanged in behaviour: it is this function plus the resolve.
+  defp scope_to_resolved_dataset(query, dataset, id) when is_binary(id),
+    do: where(query, [x], x.dataset_id == ^id or (is_nil(x.dataset_id) and x.dataset == ^dataset))
+
+  defp scope_to_resolved_dataset(query, dataset, _id),
+    do: where(query, [x], x.dataset == ^dataset)
 end
