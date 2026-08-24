@@ -314,6 +314,95 @@ else
 fi
 echo
 
+# ── case 3c: THE ROOT-ANCHOR DOOR'S OTHER SHAPES ───────────────────────────
+# Case 3b proves the door exists. It does NOT prove the door can SEE — a door
+# that resolves one shape and silently drops five still emits its `-root` tag
+# at full count, so the ELIXIR_ESCAPE_IDIOM_MIN floor cannot notice, and the
+# script prints the same OK line it prints when the tree is genuinely clean.
+# That is the exact failure that made the root-anchor idiom invisible for weeks
+# in the first place, one level down: the earlier fix counted a new door, this
+# one counts what the door can see.
+#
+# Each block below was MEASURED BLIND before this case was written: a probe
+# file in api/test/ reading a repo-root path through the shape left `--check`
+# at rc=0 with the OK verdict. So each `no` here is a regression that has
+# actually happened, not a hypothetical.
+echo "case 3c: every root-anchor SHAPE the door claims to see actually reds"
+FX_SHAPE="$TMPROOT/rootshapes"
+make_fixture "$FX_SHAPE"
+mkdir -p "$FX_SHAPE/nowhere"
+: >"$FX_SHAPE/nowhere/anchored.json"
+
+shape_reds() {
+  # $1 = human label, $2 = fixture body
+  local label="$1" body="$2" out rc
+  printf '%s' "$body" >"$FX_SHAPE/api/test/barkpark/shape_test.exs"
+  out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_SHAPE" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+  rm -f "$FX_SHAPE/api/test/barkpark/shape_test.exs"
+  if [ "$rc" -ne 0 ] && has "$out" "UNCOVERED repo-root read: nowhere/anchored.json"; then
+    ok "$label"
+  else
+    no "$label — BLIND (rc=$rc): $out"
+  fi
+}
+
+# J2 — the LIST form. Every literal in the list is a path segment, so a reader
+# that takes only the first one resolves a directory nobody reads.
+shape_reds "Path.join([anchor, \"seg\", \"seg\"]) reds" '  @repo_root Path.expand("../../..", __DIR__)
+  @bad Path.join([@repo_root, "nowhere", "anchored.json"])
+'
+# J3 — the anchor as Path.expand's BASE rather than as Path.join's head.
+shape_reds "Path.expand(\"lit\", anchor) reds" '  @repo_root Path.expand("../../..", __DIR__)
+  @bad Path.expand("nowhere/anchored.json", @repo_root)
+'
+# J4 — plain string concatenation, no Path.* call at the read site at all.
+shape_reds "anchor <> \"/lit\" reds" '  @repo_root Path.expand("../../..", __DIR__)
+  @bad @repo_root <> "/nowhere/anchored.json"
+'
+# A2 — the ANCHOR ITSELF bound by the list form. This is how
+# api/test/barkpark/content/tombstone_fence_test.exs binds its root, so a
+# regression here re-blinds a shape the repo actually uses.
+shape_reds "an anchor bound by Path.join([__DIR__, \"..\"]) reds" '  @repo_root Path.join([__DIR__, "..", "..", ".."])
+  @bad Path.join(@repo_root, "nowhere/anchored.json")
+'
+# A2 + J2 together — both halves in their list form.
+shape_reds "list-bound anchor + list-form read reds" '  root = Path.join([__DIR__, "..", "..", ".."])
+  bad = Path.join([root, "nowhere", "anchored.json"])
+'
+
+# THE OVER-REPORT HALF. A widened door that reds on everything is not a gate,
+# it is a wall — and the cheapest way to make these cases pass is to red
+# unconditionally. Each shape must stay GREEN when the path IS declared.
+cat >"$FX_SHAPE/api/test/barkpark/shape_ok_test.exs" <<'EX'
+  @repo_root Path.join([__DIR__, "..", "..", ".."])
+  @a Path.join([@repo_root, "internal", "taskboard", "tokens_gen.go"])
+  @b Path.expand("internal/taskboard/tokens_gen.go", @repo_root)
+  @c @repo_root <> "/internal/taskboard/tokens_gen.go"
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_SHAPE" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "all four shapes stay GREEN on a DECLARED path — the door is not a wall"
+else
+  no "a declared read redded through one of the new shapes — over-report: $out"
+fi
+rm -f "$FX_SHAPE/api/test/barkpark/shape_ok_test.exs"
+
+# A read that resolves INSIDE api/ is not an escape and must never red, in any
+# shape — this is the tombstone_fence_test.exs shape verbatim, and it is the
+# one that would turn a green main red if the list form were resolved wrong.
+cat >"$FX_SHAPE/api/test/barkpark/shape_inside_test.exs" <<'EX'
+  root = Path.join([__DIR__, "..", ".."])
+  src = File.read!(Path.join(root, "lib/barkpark/anything.ex"))
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_SHAPE" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a list-bound anchor resolving INSIDE api/ stays green"
+else
+  no "an in-api read redded — the list anchor resolved to the wrong base: $out"
+fi
+rm -f "$FX_SHAPE/api/test/barkpark/shape_inside_test.exs"
+echo
+
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────
 # Same mutation, but inside a real git repo where the offending fixture is
 # present on disk and NOT tracked. A `git ls-files` enumeration reports clean
