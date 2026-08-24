@@ -9,7 +9,10 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
   import Plug.Conn
 
   alias BarkparkCloud.{Accounts, Registry, Repo}
+  alias BarkparkCloud.Registry.Vault
+  alias BarkparkCloud.StudioLinkFakeHttpClient
   alias BarkparkCloud.Web.Router
+  alias BarkparkCloud.Workers.AutoupdateRolloutWorker
 
   @opts Router.init([])
   @password "correct-horse-battery"
@@ -67,6 +70,41 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
   end
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
+
+  # ── task-0dd7578bc3d2bcbd fixtures: a LIVE box the arming probe can reach ──
+  @admin_token "instance-admin-token-plaintext"
+
+  defp live_behind(team, overrides \\ %{}) do
+    n = System.unique_integer([:positive])
+
+    barkpark_fixture(team)
+    |> Ecto.Changeset.change(
+      Map.merge(
+        %{
+          host: "203.0.113.#{rem(n, 250) + 1}",
+          url: "https://bp-#{n}.barkpark.cloud",
+          admin_token_encrypted: Vault.encrypt(@admin_token),
+          update_state: "behind",
+          update_checked_at: DateTime.utc_now(),
+          autoupdate_enabled: true,
+          autoupdate_paused: false
+        },
+        overrides
+      )
+    )
+    |> Repo.update!()
+  end
+
+  # GET /v1/admin/self-update as the box answers it, with the #12995
+  # `apply_enabled` SIBLING of `check` that `refresh_update_status/1` mirrors
+  # into `apply_arming`.
+  defp self_update_body(state, apply_enabled) do
+    Jason.encode!(%{
+      state: "idle",
+      apply_enabled: apply_enabled,
+      check: %{state: state, running_release: "v0.2.24", latest_release: "v0.3.0"}
+    })
+  end
 
   test "team admin sets policy → 200; row updated; blank pin normalized to nil" do
     {user, team} = user_with_team()
@@ -377,5 +415,177 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
     assert unmeasured["commit_distance"] == nil
     assert unmeasured["commit_ancestry"] == "unknown"
     assert unmeasured["commit_distance_checked_at"] == "2026-08-08T12:17:08.000000Z"
+  end
+
+  # ── task-0dd7578bc3d2bcbd: arm BEFORE resume, enforced ─────────────────────
+  #
+  # `autoupdate_paused` has no automatic clear — its only `false` writer is this
+  # route. Resuming an unarmed box therefore looks like a remedy and is not one:
+  # the rollout's next advance draws a 503 off the box's own `Runner.enabled?/0`
+  # and (since #13474) skips it, so the box reads UNPAUSED and still never
+  # updates. These pin the ordering, and the recovery it makes possible.
+  describe "arm-before-resume ordering" do
+    test "resuming a MEASURED-unarmed box is refused with the remedy named" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      bp = live_behind(team, %{autoupdate_paused: true, apply_arming: "unarmed"})
+
+      # The guard re-measures; the box still says one-click apply is off.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", false)}}
+      ])
+
+      conn = patch_autoupdate(bp.id, token, %{"autoupdate_paused" => false})
+
+      assert conn.status == 409
+      body = json_body(conn)
+      assert body["error"] == "instance_not_armed"
+      assert body["details"]["field"] == "autoupdate_paused"
+      assert body["details"]["apply_arming"] == "unarmed"
+      assert body["details"]["remedy"] =~ "BARKPARK_SELF_UPDATE_APPLY=1"
+
+      assert Registry.get_barkpark(bp.id).autoupdate_paused,
+             "the refusal must not half-apply — the box stays paused"
+    end
+
+    test "a STRING \"false\" is caught by the same cast, not waved through" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      bp = live_behind(team, %{autoupdate_paused: true, apply_arming: "unarmed"})
+
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", false)}}
+      ])
+
+      conn = patch_autoupdate(bp.id, token, %{"autoupdate_paused" => "false"})
+
+      assert conn.status == 409,
+             "reading the CHANGESET rather than the raw body is what closes this bypass"
+    end
+
+    test "ONLY the transition: an already-unpaused unarmed box may still be edited" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      bp = live_behind(team, %{autoupdate_paused: false, apply_arming: "unarmed"})
+
+      # ARMED SO THE MUTANT CANNOT HIDE. Program the probe to say "unarmed", so
+      # that a guard keyed on the steady state (`get_field`) instead of the
+      # transition (`get_change`) would actually reach a refusal here. Without
+      # this the probe is unprogrammed, errors, fails open, and the test would
+      # pass on a broken guard — a false certificate.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", false)}}
+      ])
+
+      conn = patch_autoupdate(bp.id, token, %{"pinned_release" => "v0.2.24"})
+
+      assert conn.status == 200,
+             "the guard fires on paused true->false, never on the steady state — " <>
+               "an unrelated policy edit must not be collateral"
+
+      assert Registry.get_barkpark(bp.id).pinned_release == "v0.2.24"
+    end
+
+    test "the guard RE-MEASURES: arm the box and resume works immediately" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Stored arming is STALE — the sweep last saw it unarmed up to an hour ago.
+      bp = live_behind(team, %{autoupdate_paused: true, apply_arming: "unarmed"})
+
+      # The operator has since armed and restarted it; the box now says so.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", true)}}
+      ])
+
+      conn = patch_autoupdate(bp.id, token, %{"autoupdate_paused" => false})
+
+      assert conn.status == 200,
+             "refusing on the stored value would block an operator who armed the box " <>
+               "thirty seconds ago until the next :17 sweep — this guard must not " <>
+               "become the latch it exists to remove"
+
+      fresh = Registry.get_barkpark(bp.id)
+      refute fresh.autoupdate_paused
+      assert fresh.apply_arming == "armed"
+    end
+
+    test "FAILS OPEN on an unprovable negative: an unreachable box may still be resumed" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+      bp = live_behind(team, %{autoupdate_paused: true, apply_arming: "unarmed"})
+
+      StudioLinkFakeHttpClient.program([{:error, :nxdomain}])
+
+      conn = patch_autoupdate(bp.id, token, %{"autoupdate_paused" => false})
+
+      assert conn.status == 200,
+             "refusing on a measurement we could not take would strand the operator " <>
+               "with no way forward — a NEW unclearable state, which is the defect " <>
+               "this row exists to remove"
+
+      refute Registry.get_barkpark(bp.id).autoupdate_paused
+    end
+  end
+
+  # ── THE RECOVERY PROOF ─────────────────────────────────────────────────────
+  #
+  # The defining property of this bug is a state the worker enters automatically
+  # and that no code path clears. A test that only proves the pause HAPPENS
+  # re-certifies the bug. So this drives a box into `autoupdate_paused` through
+  # the worker's own remaining machine-writer — the settle-grace containment in
+  # `settle_one/1`, which #13474 deliberately did NOT change — and then walks the
+  # intended recovery all the way back to eligibility.
+  describe "the latch can be left" do
+    test "paused by the worker -> armed -> resumed -> eligible again" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      stale = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+      bp = live_behind(team, %{autoupdate_triggered_at: stale})
+
+      # (1) THE MACHINE LATCHES IT. The wave never settled inside the grace, so
+      # the worker clears the marker and pauses the box for investigation.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", false)}}
+      ])
+
+      AutoupdateRolloutWorker.perform(%Oban.Job{})
+
+      latched = Registry.get_barkpark(bp.id)
+      assert latched.autoupdate_paused, "the worker latched it, with no human in the loop"
+      refute latched.autoupdate_triggered_at
+
+      # (2) IT IS OUT OF THE ROLLOUT, and nothing in the plane will bring it back.
+      refute Registry.next_autoupdate_candidate(),
+             "a paused box is not a candidate — this is the stuck state"
+
+      # (3) THE ORDERING IS ENFORCED. Resuming before arming is refused, so the
+      # operator cannot convert a visible stuck state into a silent one.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", false)}}
+      ])
+
+      assert patch_autoupdate(bp.id, token, %{"autoupdate_paused" => false}).status == 409
+      assert Registry.get_barkpark(bp.id).autoupdate_paused, "still latched"
+
+      # (4) THE OPERATOR ARMS THE BOX (BARKPARK_SELF_UPDATE_APPLY=1 + restart).
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", true)}}
+      ])
+
+      # (5) AND THE RESUME NOW LANDS.
+      assert patch_autoupdate(bp.id, token, %{"autoupdate_paused" => false}).status == 200
+
+      recovered = Registry.get_barkpark(bp.id)
+      refute recovered.autoupdate_paused, "THE LATCH IS CLEARED"
+      assert recovered.apply_arming == "armed"
+
+      # (6) AND THE BOX IS BACK IN THE ROLLOUT — the property that makes this a
+      # recovery rather than a flag flip.
+      assert %{id: id} = Registry.next_autoupdate_candidate()
+      assert id == bp.id, "eligible again, end to end"
+    end
   end
 end
