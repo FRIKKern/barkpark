@@ -223,8 +223,11 @@ defmodule Barkpark.Sites.DeployymlConnectorsPathfilterTest do
       # on somebody else's unrelated PR.
       ere = "^(api|internal|deploy|connectors|templates|scripts/connectors)/"
 
-      assign = "if echo \"$changed\" | grep -qE '#{ere}'; then instance=true; else instance=false; fi"
-      write = "if echo \"$changed\" | grep -qE '#{ere}'; then echo \"instance=true\" >> \"$GITHUB_OUTPUT\"; fi"
+      assign =
+        "if echo \"$changed\" | grep -qE '#{ere}'; then instance=true; else instance=false; fi"
+
+      write =
+        "if echo \"$changed\" | grep -qE '#{ere}'; then echo \"instance=true\" >> \"$GITHUB_OUTPUT\"; fi"
 
       assert instance_regex(assign) == ere
       assert instance_regex(write) == ere
@@ -232,7 +235,10 @@ defmodule Barkpark.Sites.DeployymlConnectorsPathfilterTest do
       # And the narrowness that makes it a DISPATCH pin: a bare assignment with
       # no grep — exactly the shape of the workflow_dispatch override's case arms
       # — must not be harvested as if it were the path filter.
-      refute Regex.match?(@instance_dispatch, "              both)     cp=true;  instance=true  ;;")
+      refute Regex.match?(
+               @instance_dispatch,
+               "              both)     cp=true;  instance=true  ;;"
+             )
     end
 
     test "the shell gate still carries scripts/connectors/** as a required path (both halves present)" do
