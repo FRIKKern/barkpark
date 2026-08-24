@@ -123,4 +123,38 @@ defmodule Barkpark.Accounts.UserNotifierTest do
       await_offload_drained(baseline, retries - 1)
     end
   end
+
+  describe "undeliverable configuration (no relay at all)" do
+    # The asymmetry this closes: the DownRelayAdapter block above already proved
+    # a configured-but-broken relay is logged. An instance that never set
+    # SMTP_HOST runs Swoosh.Adapters.Local, whose deliver/2 returns {:ok, _} —
+    # so the notifier took the success branch and produced NO log line at all.
+    # The transient failure was observable; the permanent one was not.
+    setup do
+      original = Application.get_env(:barkpark, Barkpark.Mailer)
+      Application.put_env(:barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Local)
+      Swoosh.Adapters.Local.Storage.Memory.delete_all()
+      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Mailer, original) end)
+      :ok
+    end
+
+    test "a send with no deliverable adapter logs that it was NOT delivered" do
+      log =
+        capture_log(fn ->
+          base = length(Task.Supervisor.children(Barkpark.TaskSupervisor))
+
+          assert {:ok, _email} =
+                   UserNotifier.deliver_magic_link("user@example.com", "https://x/auth/magic/tok")
+
+          await_offload_drained(base)
+          Logger.flush()
+        end)
+
+      assert log =~ "NOT DELIVERED"
+      assert log =~ "Your Barkpark sign-in link"
+      assert log =~ "SMTP_HOST"
+      # Same PII rule as the failure path: the type is logged, the person is not.
+      refute log =~ "user@example.com"
+    end
+  end
 end

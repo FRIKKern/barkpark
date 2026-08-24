@@ -86,10 +86,24 @@ defmodule Barkpark.Accounts.UserNotifier do
     # leaves a trail instead of vanishing silently. `start_child` is deliberate:
     # the result is never retrieved and one caller is a long-lived LiveView, so
     # fire-and-forget avoids leaking a reply/DOWN into its mailbox.
+    # `Mailer.deliver_checked/1`, not `Mailer.deliver/1`: under the compile-time
+    # default adapter (`Swoosh.Adapters.Local`) a raw deliver returns `{:ok, _}`
+    # for a message that was written to an in-memory mailbox and discarded, so
+    # this `case` used to take the success branch and log NOTHING. A relay that
+    # is configured but DOWN was loud; an instance with NO relay at all — the
+    # state every box is in until someone sets SMTP_HOST — was silent, which is
+    # the failure that lasts forever rather than minutes.
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-      case Mailer.deliver(email) do
-        {:ok, _meta} ->
+      case Mailer.deliver_checked(email) do
+        :ok ->
           :ok
+
+        {:error, {:not_deliverable, adapter, reason}} ->
+          Logger.warning(
+            "transactional email NOT DELIVERED (no mail relay configured): " <>
+              "subject=#{inspect(subject)} adapter=#{inspect(adapter)} reason=#{inspect(reason)} — " <>
+              "set SMTP_HOST to enable delivery (deploy/smtp.env.example)"
+          )
 
         {:error, reason} ->
           Logger.error(

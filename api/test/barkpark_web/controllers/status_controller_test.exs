@@ -108,4 +108,35 @@ defmodule BarkparkWeb.StatusControllerTest do
            |> post("/v1/status/incidents", Jason.encode!(%{title: "x", impact: "minor"}))
            |> json_response(401)
   end
+
+  describe "mail deliverability component" do
+    setup do
+      original = Application.get_env(:barkpark, Barkpark.Mailer)
+      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Mailer, original) end)
+      :ok
+    end
+
+    test "a node whose mailer discards every message reports mail degraded", %{conn: conn} do
+      # The queryable half of the fix. Password reset and magic-link sign-in
+      # answer 200 for anti-enumeration reasons, so an operator or an uptime
+      # monitor has nowhere else to see that identity mail is dead.
+      Application.put_env(:barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Local)
+
+      body = conn |> get("/status.json") |> json_response(200)
+      mail = Enum.find(body["components"], &(&1["name"] == "mail"))
+
+      assert mail, "the status payload must carry a mail component"
+      assert mail["status"] == "degraded"
+      refute body["status"] == "operational"
+    end
+
+    test "a node with a real relay reports mail operational", %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.SMTP)
+
+      body = conn |> get("/status.json") |> json_response(200)
+      mail = Enum.find(body["components"], &(&1["name"] == "mail"))
+
+      assert mail["status"] == "operational"
+    end
+  end
 end
