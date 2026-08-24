@@ -28,6 +28,20 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
     * cap 32 entries per sheet (oldest drop);
     * lazy TTL 1h, pruned on write (a stale entry may still replay until the
       next write to its key evicts it — bounded and harmless);
+    * KEY CARDINALITY, previously the one unbounded axis in this list. `@cap`
+      bounds the list INSIDE a key and `@ttl_ms` prunes entries INSIDE a key,
+      lazily and only on the next write TO THAT SAME KEY — so a sheet written
+      once left a permanent row holding up to 32 FULL reply maps, and
+      `grep -n delete replay_ring.ex` returned nothing: no key eviction, no
+      key-count cap, no sweeper. A key's list also never empties (`put/3`
+      always prepends after the reject), so the existing logic could not drop
+      a key even in principle. Any authenticated caller could mint rows one
+      sheet at a time and they lived until the BEAM restarted. A periodic
+      sweep now drops keys whose NEWEST entry is already past `@ttl_ms` — see
+      `sweep/1`. The sibling that solved this same hole for the undo stacks
+      (`Session.Ops.@undo_user_cap`) cites THIS module as its model for
+      bounding depth, and bounded key count on its own; the debt ran the other
+      way and went unpaid.
     * NODE-LOCAL: the table is a single-node ETS table (Barkpark is a
       single-node deploy); a BEAM restart clears it (the sessions die with it,
       so a fresh ring is correct);
@@ -38,9 +52,19 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
 
   use GenServer
 
+  require Logger
+
   @table :sheets_ops_replay
   @cap 32
   @ttl_ms 3_600_000
+
+  # The sweep cadence is DERIVED from the retention it enforces, not picked: a
+  # key becomes evictable exactly `@ttl_ms` after its last write, so worst-case
+  # residency is `@ttl_ms + one tick`. Four sweeps per TTL holds that at 1.25x
+  # the declared retention instead of the 2x a once-per-TTL tick would give, and
+  # costs one O(table) `select_delete` per interval — the same cost class as the
+  # per-write prune that already runs on every `put/3`.
+  @sweep_every_ms div(@ttl_ms, 4)
 
   @type key :: {String.t(), String.t()}
 
@@ -105,7 +129,65 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
     ArgumentError -> true
   end
 
-  # ── GenServer (table owner only) ─────────────────────────────────────────
+  @doc """
+  Drop every key whose NEWEST entry is already past `@ttl_ms`.
+
+  Entries are newest-first, so the head's timestamp is the key's last write: if
+  THAT is past the TTL then every entry under the key is, and the next `put/3`
+  to it would have rejected all of them anyway. Deleting the row is therefore
+  the same outcome the module's own per-write prune reaches — it just no longer
+  waits for a write that may never come.
+
+  Returns the number of keys dropped. One `select_delete` pass, projecting no
+  payload: the guard reads only `element(3, hd(list))`, so a table full of fat
+  reply maps is never copied out to be examined.
+  """
+  @spec sweep(integer()) :: non_neg_integer()
+  def sweep(now \\ System.monotonic_time(:millisecond)) do
+    cutoff = now - @ttl_ms
+
+    dropped =
+      :ets.select_delete(@table, [
+        {{:_, :"$1"}, [{:<, {:element, 3, {:hd, :"$1"}}, cutoff}], [true]}
+      ])
+
+    if dropped > 0, do: report_sweep(dropped, :ets.info(@table, :size))
+
+    dropped
+  rescue
+    ArgumentError -> 0
+  end
+
+  # Routine hygiene, so :info and once per sweep — never once per key, which
+  # would turn a bound into log spam and get it switched off. The CONSEQUENCE is
+  # in the line because it is not nothing: a dropped key means a retry carrying
+  # a request_id older than the TTL now RE-APPLIES its ops instead of replaying
+  # the cached reply. That is what the declared 1h retention always meant; the
+  # sweep is what makes it consistently true rather than dependent on whether
+  # some later write happened to touch the key.
+  defp report_sweep(dropped, remaining) do
+    Logger.info(
+      "Sheets ReplayRing swept #{dropped} key(s) whose newest cached reply was already " <>
+        "past the #{@ttl_ms}ms TTL; #{remaining} key(s) remain. A retry older than the TTL " <>
+        "re-applies rather than replays — the declared retention, now uniform."
+    )
+
+    :telemetry.execute(
+      [:barkpark, :sheets, :replay_ring, :keys_swept],
+      %{dropped: dropped, remaining: remaining, ttl_ms: @ttl_ms},
+      %{}
+    )
+  end
+
+  @doc false
+  @spec sweep_every_ms() :: pos_integer()
+  def sweep_every_ms, do: @sweep_every_ms
+
+  @doc false
+  @spec ttl_ms() :: pos_integer()
+  def ttl_ms, do: @ttl_ms
+
+  # ── GenServer (table owner + sweeper) ────────────────────────────────────
 
   @impl true
   def init(_opts) do
@@ -117,6 +199,19 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
       write_concurrency: true
     ])
 
+    schedule_sweep()
+
     {:ok, %{}}
   end
+
+  @impl true
+  def handle_info(:sweep, state) do
+    schedule_sweep()
+    sweep()
+    {:noreply, state}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  defp schedule_sweep, do: Process.send_after(self(), :sweep, @sweep_every_ms)
 end
