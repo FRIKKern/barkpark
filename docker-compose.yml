@@ -105,6 +105,8 @@ services:
       - MEDIA_WEBHOOK_SECRET
       - MEDIA_WEBHOOK_URL
       # Mail
+      - MAIL_FROM_ADDRESS
+      - MAIL_FROM_NAME
       - SMTP_HOST
       - SMTP_PASSWORD
       - SMTP_PORT

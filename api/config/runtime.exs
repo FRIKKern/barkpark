@@ -727,13 +727,11 @@ end
 # Barkpark.Mailer.from/0 raises on it, and Barkpark.Application.start/2 calls
 # from/0 at boot so the node REFUSES rather than emitting a wrong sender.
 mail_from_overrides =
-  Enum.reduce([{:from_address, "MAIL_FROM_ADDRESS"}, {:from_name, "MAIL_FROM_NAME"}], [], fn
-    {key, var}, acc ->
-      case System.get_env(var) do
-        nil -> acc
-        value -> [{key, value} | acc]
-      end
-  end)
+  [
+    {:from_address, System.get_env("MAIL_FROM_ADDRESS")},
+    {:from_name, System.get_env("MAIL_FROM_NAME")}
+  ]
+  |> Enum.reject(fn {_key, value} -> is_nil(value) end)
 
 if mail_from_overrides != [] do
   config :barkpark, :mail, mail_from_overrides
