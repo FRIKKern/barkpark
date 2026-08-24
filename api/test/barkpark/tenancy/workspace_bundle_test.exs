@@ -15,6 +15,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   alias Barkpark.Repo
   alias Barkpark.Tenancy.WorkspaceBundle
   alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog}
+  alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   # ── criterion 1: three enumerations derive LIVE from the catalog ─────────────
 
@@ -2092,6 +2093,111 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       shared_doc: a1.doc_id,
       only_a_doc: a3.doc_id
     }
+  end
+
+  # ── engine ⇄ janitor handshake (pds-w11-janitor-engine-handshake) ────────────
+
+  describe "the engine writes where the janitor sweeps, and marks liveness while it does" do
+    test "a REAL export lands in Janitor.spill_dir/0 and is a live-owned sweep candidate" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      # THE HANDSHAKE, end to end. Two modules built in parallel against a PROSE
+      # contract: the janitor sweeps a configured directory, the engine writes to
+      # one. Nothing proved they were the SAME directory — and a janitor pointed
+      # one level off sweeps an empty dir and reports a clean green forever while
+      # the spills pile up somewhere else.
+      {:ok, path} = WorkspaceBundle.export_to_file(ws_a.id)
+
+      try do
+        assert Path.dirname(path) == Janitor.spill_dir(),
+               "the engine wrote its bundle to #{Path.dirname(path)} but the janitor sweeps " <>
+                 "#{Janitor.spill_dir()} — the sweep would be a permanent no-op"
+
+        assert File.read!(path <> ".owner") == System.pid(),
+               "the sidecar must carry THIS os process's pid, or the liveness check is guessing"
+
+        # Age it past the threshold so the sweep genuinely WANTS it. Without
+        # this the assertion below is vacuous: a freshly written file fails the
+        # strictly-older-than cutoff and survives for a reason that has nothing
+        # to do with ownership.
+        File.touch!(path, System.os_time(:second) - 7200)
+
+        assert {:ok, guarded} = Janitor.sweep(dir: Path.dirname(path), max_age_seconds: 3600)
+
+        # THE LIVENESS GUARD on a real artifact. `own/1` had ZERO callers in
+        # api/lib before this slice, so this could not have been asserted at all:
+        # the sweep would have eaten a bundle this very process is still holding.
+        assert File.exists?(path),
+               "a live-owned bundle was reaped by the sweep — the export engine is not " <>
+                 "writing the ownership sidecar"
+
+        refute path in guarded.removed
+
+        assert guarded.skipped_live >= 1,
+               "the bundle survived, but not via the LIVENESS branch — skipped_live was 0, so " <>
+                 "something else spared it and this proves nothing about ownership"
+
+        # And the control that makes the line above mean something: drop the
+        # sidecar and the SAME sweep takes it. If this collected nothing, the
+        # survival above would prove only that the file was never a candidate.
+        Janitor.disown(path)
+
+        assert {:ok, unguarded} = Janitor.sweep(dir: Path.dirname(path), max_age_seconds: 3600)
+
+        refute File.exists?(path),
+               "an unowned, over-age bundle survived — then the sweep never had it in range " <>
+                 "and the guarded assertion above was vacuous"
+
+        assert path in unguarded.removed
+      after
+        File.rm(path)
+        Janitor.disown(path)
+      end
+    end
+
+    test "the caller that deletes the bundle is the one that disowns it — no sidecar is stranded" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      {:ok, path} = WorkspaceBundle.export_to_file(ws_a.id)
+      assert File.exists?(path <> ".owner")
+
+      File.rm(path)
+      Janitor.disown(path)
+
+      # A sidecar outliving its subject is litter the sweep is STRUCTURALLY
+      # unable to collect: `candidates/1` rejects `.owner` entries by design, so
+      # they are only ever removed alongside the file they name.
+      refute File.exists?(path <> ".owner"),
+             "the ownership sidecar outlived its bundle — the janitor can never collect it alone"
+    end
+
+    test "export/2 leaves NO owner sidecar behind — it deletes the tar, so it disowns it" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      # ORPHANS ONLY — a sidecar whose subject still exists belongs to a live
+      # export, possibly another test's. Counting every `.owner` would make this
+      # flake against concurrent work while proving nothing extra: the invariant
+      # is "no sidecar outlives its file", not "no sidecar exists". Diffed
+      # against a before-snapshot as well, so pre-existing debris cannot convict.
+      orphans = fn ->
+        Janitor.spill_dir()
+        |> Path.join("*.owner")
+        |> Path.wildcard()
+        |> Enum.reject(&File.exists?(String.replace_suffix(&1, ".owner", "")))
+        |> MapSet.new()
+      end
+
+      before = orphans.()
+
+      {:ok, _bundle} = WorkspaceBundle.export(ws_a.id)
+
+      leaked = MapSet.difference(orphans.(), before)
+
+      assert MapSet.size(leaked) == 0,
+             "export/2 deleted its tar but stranded #{MapSet.size(leaked)} ownership " <>
+               "sidecar(s) the janitor can never collect alone: " <>
+               "#{inspect(MapSet.to_list(leaked))}"
+    end
   end
 
   # ── bare-slug E3 fidelity fixture (PDS-D45/D74) ──────────────────────────────
