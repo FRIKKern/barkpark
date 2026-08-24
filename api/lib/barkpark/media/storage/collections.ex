@@ -18,7 +18,18 @@ defmodule Barkpark.Media.Storage.Collections do
   # writes and inner doc reads are dataset-keyed; the scope opts ride the
   # collection list/get reads so a workspace-B caller never sees workspace-A
   # collections (Wave 1.5 media-collections scope, Goal barkpark-qprk).
-  @scope_keys [:workspace_id, :project_id]
+  #
+  # `:grant_scoped` + `:caller_context` are here for task-2b7cbaf8265f6b4e.
+  # `Content.Query.get_document/4` DOES call `Scope.maybe_scope_to_grants/2`,
+  # but that gate reads its own flag off the opts it is handed: with the flag
+  # taken out by `scope_opts/1` it saw `grant_scoped: false` and no-opped, so a
+  # grant-derived caller resolved collections across the WHOLE workspace rather
+  # than their grant ladder. `Scope`'s "there is no private copy of the gate
+  # anywhere" is true and was beside the point — the one gate was being REACHED
+  # with the input that disables it. Both keys are absent on every member
+  # request (`ScopeHelpers.scope_opts/1` sets `:grant_scoped` only when
+  # `ResolveWorkspace` admitted a grantee), so a member's read is unchanged.
+  @scope_keys [:workspace_id, :project_id, :grant_scoped, :caller_context]
 
   @doc "List collection documents for a dataset (workspace-scoped via opts)."
   @spec list(String.t(), keyword()) :: [Document.t()]

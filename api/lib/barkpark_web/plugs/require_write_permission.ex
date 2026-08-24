@@ -21,9 +21,38 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
   arpss-w10-bl-readonly-member-creates-projects, which found and fixed a
   workspace-slug route with neither this plug nor ResolveWorkspace on its
   pipeline: `WorkspaceController.create_project/2`).
+
+  ## The GRANT arm (task-2b7cbaf8265f6b4e)
+
+  `permits?/2` is a membership test on the token's OWN `permissions[]` array.
+  It takes no workspace argument and reads no grant, so it cannot express "may
+  this caller write THIS workspace" — and because the token arm RETURNED on
+  success, the workspace-aware `account_write?/1` below it never ran for a
+  request that carried a write-capable token.
+
+  That mattered for exactly one population: the caller `ResolveWorkspace`
+  admitted through its GRANT arm. That arm admits a user who is explicitly NOT
+  a member on an ACTIVE grant, and it admits on `:read` alone — admission there
+  is read-only by construction. Nothing downstream re-tested the grant for
+  `:write`, so ANY write-capable token the caller legitimately held in ANY
+  OTHER workspace answered "yes" for this one. Run-proven over HTTP: a
+  non-member holding a `["read"]` grant minted a live public share token via
+  `POST /w/:ws/p/:proj/v1/media/:dataset/collections/:id/share`.
+
+  `grant_write?/1` decides that population where the capability actually lives:
+  `Tenancy.Auth.authorize/3` on the grant-bearing `CallerContext`, which folds
+  each grant through `Barkpark.Access.validate/3`. It is the SAME predicate the
+  LiveView write path already enforces (`BarkparkWeb.LiveScope`), so one
+  capability now has one answer on both layers instead of two.
+
+  The arm is keyed on `:grant_scoped_read`, which ONLY `ResolveWorkspace`'s
+  grant arm sets — a member, an anonymous-Default reader, a public-share
+  reader and every flat/unscoped route carry no such assign and keep their
+  decision byte-identical.
   """
 
   import Plug.Conn
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @doc """
@@ -38,19 +67,27 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
   def init(opts), do: opts
 
   def call(conn, _opts) do
-    # P5: a scoped-share edit token already proved its right to write THIS scope
-    # in RequireShareEditToken (opaque perm + live :edit-share + byte-exact
-    # scope). It deliberately holds no global :write perm, so let `share_writer`
-    # short-circuit the permits?/2 check. Set ONLY by RequireShareEditToken.
-    if conn.assigns[:share_writer] == true do
-      grant(conn)
-    else
-      with %{api_token: token} <- conn.assigns,
-           true <- TenancyAuth.permits?(token, :write) do
+    cond do
+      # P5: a scoped-share edit token already proved its right to write THIS
+      # scope in RequireShareEditToken (opaque perm + live :edit-share +
+      # byte-exact scope). It deliberately holds no global :write perm, so let
+      # `share_writer` short-circuit the permits?/2 check. Set ONLY by
+      # RequireShareEditToken.
+      conn.assigns[:share_writer] == true ->
         grant(conn)
-      else
-        _ -> account_write?(conn)
-      end
+
+      # GRANT-DERIVED admission — see the moduledoc. The token arm below is
+      # workspace-blind and MUST NOT speak for a caller who is here on a grant.
+      conn.assigns[:grant_scoped_read] == true ->
+        grant_write?(conn)
+
+      true ->
+        with %{api_token: token} <- conn.assigns,
+             true <- TenancyAuth.permits?(token, :write) do
+          grant(conn)
+        else
+          _ -> account_write?(conn)
+        end
     end
   end
 
@@ -95,6 +132,28 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
     |> put_status(env.status)
     |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
     |> halt()
+  end
+
+  # The GRANT arm (task-2b7cbaf8265f6b4e). The caller reached this workspace on
+  # an airdrop grant, not on membership, so the ONLY thing that can authorize a
+  # write here is a grant that CONFERS write. `authorize/3`'s CallerContext
+  # clause runs the membership check first (unchanged, and false by
+  # construction for this population) and then folds the ctx's ACTIVE grants
+  # through `Barkpark.Access.validate/3` — capability, scope ladder, expiry and
+  # live-grantor authority in one place, never reimplemented here.
+  #
+  # Fail-closed by construction: a missing caller_context, a missing workspace,
+  # or a grant set that does not confer :write all land on `forbidden/1`. The
+  # `:api_token` is deliberately NOT consulted — that it carries "write" is
+  # exactly the fact that used to answer for a workspace it says nothing about.
+  defp grant_write?(conn) do
+    with %CallerContext{} = ctx <- conn.assigns[:caller_context],
+         %{id: ws_id} when is_binary(ws_id) <- conn.assigns[:current_workspace],
+         :ok <- TenancyAuth.authorize(ctx, ws_id, :write) do
+      grant(conn)
+    else
+      _ -> forbidden(conn)
+    end
   end
 
   # The ACCOUNT arm (gfr-w1-account-session-bearer-gap). A `user_session`
