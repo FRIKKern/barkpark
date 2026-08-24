@@ -86,8 +86,30 @@ test("a malformed value degrades to no advice instead of NaN", () => {
 
 test("a hostile Retry-After is clamped, never obeyed", () => {
   // Without the ceiling, `Retry-After: 3600` pins a render for an hour.
-  assert.equal(parseRetryAfterMs("3600"), MAX_RETRY_AFTER_MS);
-  assert.equal(parseRetryAfterMs("999999999"), MAX_RETRY_AFTER_MS);
+  //
+  // PINNED TO LITERALS, DELIBERATELY. Asserting only that the parse equals
+  // MAX_RETRY_AFTER_MS makes this test agree with whatever the constant
+  // happens to say: raise the cap to an hour and
+  // `parseRetryAfterMs("3600") === MAX_RETRY_AFTER_MS` is STILL true, so the
+  // ceiling this test exists to defend could be deleted without reddening
+  // anything. Measured, not supposed — mutating the constant to 3_600_000 left
+  // all 18 tests in this file green before these three lines changed.
+  //
+  // templates/search-starter/lib/retry-after.test.ts — the FORK of this file —
+  // already carried an `assert.ok(MAX_RETRY_AFTER_MS < 90_000)` bound, and the
+  // port into web/ dropped it. That left web/ the weaker of the two despite
+  // being the tree with a real serverless deadline, which is the opposite of
+  // the intended direction.
+  assert.equal(parseRetryAfterMs("3600"), 20_000);
+  assert.equal(parseRetryAfterMs("999999999"), 20_000);
+  // The ceiling itself, pinned by VALUE rather than by reference to itself.
+  // Moving it should be a deliberate edit on this line, not a silent widening
+  // in the module that this file then rubber-stamps.
+  assert.equal(
+    MAX_RETRY_AFTER_MS,
+    20_000,
+    "the Retry-After ceiling moved; that is a deadline decision, so change it here on purpose",
+  );
 });
 
 /* ── retryDelayMs ─────────────────────────────────────────────────────────── */
