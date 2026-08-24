@@ -591,11 +591,52 @@ function gitConfigPairReason(pair) {
   return null;
 }
 
+// `git -c` GOT AN ALLOWLIST; `git --git-dir=` HANDS GIT A WHOLE CONFIG FILE.
+//
+// The block above allowlists `-c <key>=<value>` down to fourteen inert display
+// keys, because "git config has dozens of keys whose value is a command git
+// runs". `--git-dir` names a repository whose `config` file may set EVERY ONE OF
+// THEM, and nothing read it. Proven on the authoring host — no `-c` anywhere in
+// the command:
+//
+//     $ git -C $B/evilrepo config core.fsmonitor $B/evil/fsmon
+//     $ git --git-dir=$B/evilrepo/.git --work-tree=$B/evilrepo status --short
+//     $ cat /tmp/GRIP_E4_MARK
+//     PWNED-E4 fsmonitor argv=2 1787567592111742000
+//
+// `status` is on GIT_READ_VERBS, `core.fsmonitor` is a program git runs
+// automatically, and `screenCommand` returned ok. `GIT_DIR=` is already refused
+// by `envAssignmentReason`, by name — so this is once more the ENV spelling
+// screened and the FLAG spelling not, the pattern this file has now paid for
+// five times.
+//
+// `--exec-path` is refused ON PARITY AND DOCUMENTATION, NOT on an observed
+// execution, and the distinction is stated rather than implied: git(1)
+// documents it as the path git searches for its sub-programs and prepends to
+// PATH for the subprocesses it spawns, and `GIT_EXEC_PATH=` is refused by name
+// one layer up. It was TESTED here and did NOT execute a planted `git-log`
+// (git dispatches its builtins internally before consulting exec-path), so the
+// claim made is parity, and nothing stronger.
+//
+// `--work-tree` and `--namespace` are NOT refused: neither names a file git
+// reads settings from, and refusing them would be cry-wolf.
+//
+// REACH COST, MEASURED: 0 of the 651 frozen corpus commands use `--git-dir` or
+// `--exec-path` in any spelling.
+const GIT_CONFIG_SOURCE_FLAGS = new Map([
+  ["--git-dir", "names a REPOSITORY whose `config` the screen never reads — it may set core.fsmonitor, core.pager, alias.*, diff.external or any other key naming a PROGRAM git runs (proven: core.fsmonitor executed under an allowlisted `git status`)"],
+  ["--exec-path", "sets the directory git searches for its sub-programs and prepends to PATH for the subprocesses it spawns — the flag spelling of `GIT_EXEC_PATH=`, which `envAssignmentReason` already refuses by name (refused on PARITY and git(1), not on an observed execution)"],
+]);
+
 const gitRule = {
   check(rawArgv) {
-    // BEFORE the normaliser eats them: `-c` and `--config-env` carry the pair.
+    // BEFORE the normaliser eats them: `-c` and `--config-env` carry the pair,
+    // and the config-SOURCE flags carry a path. Both spellings for each, because
+    // comparing tokens exactly is how `--server=` walked past the loopback bound.
     for (let i = 1; i < rawArgv.length; i++) {
       const t = rawArgv[i];
+      const name = t.split("=")[0];
+      if (GIT_CONFIG_SOURCE_FLAGS.has(name)) return `git ${name} ${GIT_CONFIG_SOURCE_FLAGS.get(name)}`;
       const pair = t === "-c" || t === "--config-env" ? arg(rawArgv, i + 1) : /^--config-env=/.test(t) ? t.slice("--config-env=".length) : null;
       if (pair === null) continue;
       const why = gitConfigPairReason(pair);
@@ -620,6 +661,31 @@ const gitRule = {
     // how `--server=` walked past the loopback bound one rule down.
     const out = argv.find((t, i) => i > 0 && (t === "--output" || /^--output=/.test(t)));
     if (out) return `git ${out} WRITES git's output to a file rather than stdout`;
+    // `git grep -O <cmd>` RUNS <cmd>, and `grep` is on the read allowlist.
+    //
+    // The PROGRAM INDIRECTION block below closed `rg --pager`, `ag --pager` and
+    // `ack --pager` — "a flag whose VALUE is a PROGRAM the tool will run". git's
+    // own grep has the identical flag under a different name and it was never
+    // swept, because the sweep was organised by HEAD (`rg`, `ag`, `ack`) and git
+    // is filed under its sub-verb rule. Both spellings proven on the authoring
+    // host, each running a planted script with every matching file as argv:
+    //
+    //     git grep -O<cmd> -l screenCommand -- tooling/grip
+    //     git grep --open-files-in-pager=<cmd> -l screenCommand -- tooling/grip
+    //     $ cat /tmp/GRIP_E2_MARK
+    //     PWNED-E2 git-grep-O pager argv=tooling/grip/acceptance.mjs …
+    //
+    // The `-O` test is `[A-Za-z]*O` rather than an exact token because git's
+    // parse-options CLUSTERS: `-lO<cmd>` binds <cmd> to `O` exactly as `-so`
+    // bound curl's output file. Scoped to `grep`, because `-O` on `git diff` is
+    // `--orderfile`, which READS. `grep` is the only read verb whose `-O` runs
+    // anything, so this costs nothing elsewhere.
+    //
+    // REACH COST, MEASURED: 0 of the 651 frozen corpus commands use either.
+    if (verb === "grep") {
+      const pager = argv.find((t, i) => i > 0 && (/^-[A-Za-z]*O/.test(t) || /^--open-files-in-pager\b/.test(t)));
+      if (pager) return `git grep ${pager} runs an arbitrary COMMAND as the pager over every matching file (proven: it executed a planted script with the match list as argv)`;
+    }
     const guard = GIT_SUBVERB_GUARDS.get(verb);
     return guard ? guard(argv) : null;
   },
@@ -707,6 +773,24 @@ const CURL_FILE_TARGET_FLAGS = new Map([
   ["--trace-ascii", "the full protocol trace is written to that path"],
   ["--stderr", "curl's stderr is redirected into that path"],
   ["--etag-save", "the response ETag is written to that path"],
+  // THE SAME SWEEP, RUN AGAIN, FOUND THREE MORE. The block above closed `-D`,
+  // `-c` and the four long-flag traces by asking "which flags name a path curl
+  // WRITES?" and answering it from CURL_VALUE_LETTERS. That question is right and
+  // the answer was short, because three of curl's write targets are LONG FLAGS
+  // with no short letter at all, so they never appeared on the list the sweep
+  // was derived from. Each wrote a real file on the authoring host (curl 8.7.1),
+  // with `-o /dev/null` set so nothing else could:
+  //
+  //     curl -s -o /dev/null --libcurl <f> file:///etc/hosts   → 1687 bytes
+  //     curl -s -o /dev/null --alt-svc <f> https://example.com/ →  117 bytes
+  //     curl -s -o /dev/null --hsts    <f> https://example.com/ →  111 bytes
+  //
+  // `--alt-svc` and `--hsts` are read-write CACHE files: curl loads them at
+  // start and REWRITES them at exit, so pointing one at a real file truncates
+  // and replaces it.
+  ["--libcurl", "curl writes a libcurl C source file to that path"],
+  ["--hsts", "the HSTS cache is read AND REWRITTEN at that path on exit"],
+  ["--alt-svc", "the Alt-Svc cache is read AND REWRITTEN at that path on exit"],
 ]);
 
 const curlRule = {
@@ -723,7 +807,36 @@ const curlRule = {
         const dest = arg(argv, i + 1);
         if (dest !== "/dev/null") return `curl -o writes a file (${dest ?? "missing target"}); only \`-o /dev/null\` is admitted`;
       }
-      if (t === "--remote-name" || t === "--create-dirs" || t === "--output-dir" || t === "--remote-header-name") return `curl ${t} writes a file`;
+      // `--remote-name-all` is `-O` FOR EVERY URL and was absent from this list
+      // while its singular spelling `--remote-name` was on it — one suffix
+      // along, the same shape as findRule's missing `-fprint0`. Proven: `curl -s
+      // --remote-name-all https://example.com/index.html` wrote `index.html`
+      // into the working directory. Neither layer saw it: the layer-(c) regex
+      // for `-O` matches a SHORT cluster, not a long flag.
+      if (t === "--remote-name" || t === "--remote-name-all" || t === "--create-dirs" || t === "--output-dir" || t === "--remote-header-name") return `curl ${t} writes a file`;
+      // `-w`/`--write-out` IS A WRITE PRIMITIVE, and its value was EATEN.
+      //
+      // `w` is in CURL_VALUE_LETTERS, so the normaliser consumed its argument
+      // and no check ever read it — the exact failure mode the `-D`/`-c`/`-K`
+      // block above names, on a fourth letter. Since curl 8.3 the write-out
+      // format supports `%output{FILE}`, which REDIRECTS the rest of the format
+      // into that file. Proven on this host (curl 8.7.1), with `-o /dev/null` set:
+      //
+      //     curl -s -o /dev/null -w "%output{<f>}PWNED-D4" file:///etc/hosts
+      //     $ cat <f> → PWNED-D4
+      //
+      // A leading `@` makes the value a FORMAT FILE the screen never reads —
+      // which may itself carry `%output{…}`. Same ruling as `curl -K` and
+      // `sed -f`: the hazard is the file's POWER, not its unreadability.
+      //
+      // REACH COST, MEASURED: the corpus carries 12 `curl -w` rows and every one
+      // is a `%{http_code}`-style status format. None uses `%output{` or `@`, so
+      // all 12 stay admitted — this refuses the write, never the flag.
+      if (t === "-w" || t === "--write-out") {
+        const fmt = arg(argv, i + 1) ?? "";
+        if (fmt.includes("%output{")) return `curl ${t} ${fmt} uses %output{…}, which WRITES the rest of the format to that file`;
+        if (fmt.startsWith("@")) return `curl ${t} ${fmt} reads a FORMAT FILE the screen never sees — it may carry \`%output{…}\`, which writes a file`;
+      }
       // `-K`/`--config` reads a file of curl options the screen never sees, and
       // that file may carry EVERY option this rule refuses. Proven on this host:
       // a config containing `output = "/tmp/CURL_K_MARK"` wrote the response
@@ -972,8 +1085,25 @@ const ghRule = {
 // is what keeps `-cover` (a stdout summary, admitted) distinct from `-c`
 // (compile a test binary to disk, refused) and `-coverprofile=` (a file,
 // refused). Prefix matching would have collapsed all three.
+// `-exec` WAS ON THIS LIST AND ITS TWO SIBLINGS WERE NOT. `-exec` is refused as
+// "runs an arbitrary binary", and go has two more flags that do exactly that,
+// on the two verbs this rule ADMITS. Proven on the authoring host with a
+// throwaway module:
+//
+//     go test -toolexec=<cmd> ./...   → <cmd> ran 8 times, first with
+//                                       …/pkg/tool/darwin_arm64/compile, and
+//                                       `ok probe 0.143s` — the test still PASSED
+//     go vet  -vettool=<cmd>  ./...   → <cmd> ran, argv `-flags`
+//
+// `-toolexec` interposes on EVERY toolchain invocation and `-vettool` replaces
+// the vet binary itself; both take an arbitrary path and both were ADMITTED in
+// the `=` and the separate spelling. `-testlog` is the same sweep's file write:
+// `go test -testlog=<f>` writes <f>. Names, not prefixes, exactly as the block
+// above requires — `-test.v` and `-tags` must stay admitted.
+//
+// REACH COST, MEASURED: 0 of the 651 frozen corpus commands use any of the three.
 const GO_WRITE_FLAGS = new Set([
-  "c", "o", "exec",
+  "c", "o", "exec", "toolexec", "vettool", "testlog",
   "coverprofile", "cpuprofile", "memprofile", "blockprofile", "mutexprofile", "trace", "outputdir",
 ]);
 
@@ -1651,7 +1781,21 @@ export const ALLOWED_HEADS = new Map([
   // the PROGRAM INDIRECTION block above, where `rg --pre` is proven executing.
   ["rg", indirectionRule("rg", RG_INDIRECTION)],
   ["ag", indirectionRule("ag", new Map([["--pager", "runs an arbitrary COMMAND as the pager"]]))],
-  ["ack", indirectionRule("ack", new Map([["--pager", "runs an arbitrary COMMAND as the pager"]]))],
+  // `ack --ackrc=FILE` is `curl -K` for ack: a FILE OF ACK OPTIONS the screen
+  // never reads, and `--pager` — the very flag on the line above — is one of
+  // them, so the refusal one token to the left is reachable one indirection
+  // away. Refused on ack(1) and on parity with `curl -K` / `sed -f`, NOT on an
+  // observed execution: ack is not installed on the authoring host, and saying
+  // so is the same disclosure `tree -o` and SYSTEMCTL_VALUE_GLOBALS carry.
+  // Refusing it costs nothing either way — 0 corpus rows use `ack` at all.
+  //
+  // `ag --path-to-ignore FILE` was CHECKED and deliberately CLEARED, not
+  // skipped: that file holds ignore PATTERNS, not options and not a program —
+  // the same ruling the block below already makes for `grep -f`.
+  ["ack", indirectionRule("ack", new Map([
+    ["--pager", "runs an arbitrary COMMAND as the pager"],
+    ["--ackrc", "reads an OPTIONS FILE the screen never sees — it may carry `--pager=<cmd>`, which is refused one entry above"],
+  ]))],
   // `--compress-program` names a PROGRAM GNU sort forks for every temp-file
   // spill — the same shape as `rg --pre`, on a head already carrying a rule.
   ["sort", outputFlagRule("sort", SORT_VALUE_LETTERS, SORT_INDIRECTION)],
@@ -1855,8 +1999,34 @@ export function envAssignmentReason(name, value) {
   // stripped for the shape test, never for the expansion test above, which
   // must keep seeing the raw span.
   const bare = /^(["'])(.*)\1$/.test(value) ? value.slice(1, -1) : value;
-  if (ENV_PROGRAM_NAMES.has(name) && !ENV_PROGRAM_VALUE.test(bare)) {
-    return `${name}=${value} names a PROGRAM the toolchain executes; only a bare name or an absolute path is admitted (not a relative script)`;
+  if (ENV_PROGRAM_NAMES.has(name)) {
+    if (!ENV_PROGRAM_VALUE.test(bare)) {
+      return `${name}=${value} names a PROGRAM the toolchain executes; only a bare name or an absolute path under ${TRUSTED_BIN_DIRS.join(", ")} is admitted (not a relative script)`;
+    }
+    // "AN ABSOLUTE PATH" WAS THE WHOLE BOUND, AND IT BOUNDS NOTHING.
+    //
+    // `headPathReason` refuses `/tmp/evil/git` — an absolute path outside the
+    // system bin directories — as arbitrary code execution through the head
+    // allowlist. This function admitted `CC=/tmp/evil`, which is the IDENTICAL
+    // capability under an allowlisted `go test`/`mix test`: same primitive, two
+    // spellings, one screened. Proven on the authoring host with a cgo package:
+    //
+    //     $ CC=$B/evil/mycc go test -count=1 ./...
+    //     ok  	cgoprobe	0.133s
+    //     $ wc -l < /tmp/GRIP_B_MARK
+    //     31
+    //
+    // — the attacker-named program ran 31 times, and `go test` was ADMITTED.
+    //
+    // So an absolute value inherits `headPathReason`'s bound EXACTLY, resolution
+    // included, rather than a second hand-written one that can drift from it.
+    // REACH COST, MEASURED: the corpus carries 100 `CC=` rows and every one is
+    // `CC=clang` or `CC=/usr/bin/clang` — the two spellings the block above
+    // names. Both still admitted; corpus reach is unchanged.
+    const resolved = bare.startsWith("/") ? lexicalResolve(bare) : null;
+    if (resolved !== null && !TRUSTED_BIN_DIRS.some((d) => resolved.startsWith(d))) {
+      return `${name}=${value} names a PROGRAM the toolchain executes${resolved === bare ? "" : ` (it resolves to "${resolved}")`}, and it is not under ${TRUSTED_BIN_DIRS.join(", ")} — the same bound \`headPathReason\` puts on \`/tmp/evil/git\`, which is the identical capability spelled as a head`;
+    }
   }
   return null;
 }
@@ -1917,14 +2087,96 @@ const TRUSTED_BIN_DIRS = ["/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/lo
  * @param {string} head its basename, the name every rule below is keyed on
  * @returns {string|null} why a path-qualified head is refused, or null
  */
+// A `startsWith` PREFIX TEST IS NOT A CONTAINMENT TEST, and that was the whole
+// fix above, defeated by two dots.
+//
+// The block above admits an absolute path "under the system bin directories"
+// and implements it as `token.startsWith("/usr/bin/")`. `..` is an ordinary path
+// component, so a token may satisfy that prefix and then walk straight back out
+// of it. Executed on the authoring host, against the very script the block above
+// uses to demonstrate the hole it closed:
+//
+//     $ cat > $B/evil/git <<'X'
+//     #!/bin/sh
+//     echo "PWNED-A path-traversal-git argv=$*" > /tmp/GRIP_A_MARK
+//     echo "not git"
+//     X
+//     $ chmod +x $B/evil/git
+//     $ /usr/bin/../..$B/evil/git log -1
+//     not git
+//     $ cat /tmp/GRIP_A_MARK
+//     PWNED-A path-traversal-git argv=log -1
+//
+// `screenCommand("/usr/bin/../../…/evil/git log -1")` returned ok. So did
+// `/bin/../tmp/evil/cat /etc/passwd` and
+// `/usr/local/bin/../../../tmp/evil/curl <url>`. The refusal of `./git` and
+// `/tmp/evil/git` stood the whole time — this is the SAME capability spelled
+// through a directory the allowlist trusts, which is the pattern that has now
+// paid four times in this file (`-o` → `-so`, `GIT_PAGER=` → `git -c
+// core.pager=`, the ENV spelling → the FLAG spelling, and this).
+//
+// The fix RESOLVES `.` and `..` LEXICALLY — never touching the filesystem,
+// because a screen must not depend on what happens to exist — and prefix-tests
+// the RESOLVED path. Lexical rather than `realpath` is deliberate: `realpath`
+// follows symlinks, so it would consult a mutable filesystem three live cycles
+// share, and a token that resolves differently between the screen and the exec
+// is worse than either answer alone.
+//
+// Interior `//` is NOT collapsed, so `//usr/bin/git` stays REFUSED. POSIX leaves
+// a leading `//` implementation-defined, so collapsing it would be a WIDENING
+// justified by a guess — the wrong direction for this layer.
+
+/**
+ * Resolve `.` and `..` in a path token lexically. No filesystem access, no
+ * symlink resolution. A leading `..` that cannot be popped is PRESERVED, which
+ * keeps the token relative and therefore refused by the caller.
+ *
+ * @param {string} token
+ * @returns {string} the resolved token
+ */
+export function lexicalResolve(token) {
+  const s = String(token ?? "");
+  const absolute = s.startsWith("/");
+  const out = [];
+  for (const part of s.split("/")) {
+    if (part === ".") continue;
+    if (part === "..") {
+      const last = out[out.length - 1];
+      // Pop only a real name. At the root of an absolute path `..` IS the root
+      // and is dropped; in a relative path it must be PRESERVED, or
+      // `../../tmp/evil/git` would resolve to `tmp/evil/git` — still refused,
+      // but for a reason that no longer describes the token.
+      if (out.length && last !== ".." && last !== "") out.pop();
+      else if (!absolute) out.push("..");
+      continue;
+    }
+    out.push(part);
+  }
+  const joined = out.join("/");
+  return absolute && !joined.startsWith("/") ? `/${joined}` : joined;
+}
+
+/**
+ * @param {string} token argv[0] exactly as typed
+ * @param {string} head its basename, the name every rule below is keyed on
+ * @returns {string|null} why a path-qualified head is refused, or null
+ */
 export function headPathReason(token, head) {
   if (!token.includes("/")) return null;
   // A refused head stays refused by NAME however it is spelled; saying so here
   // keeps `/bin/bash` reading as "bash runs a script" rather than as a path
   // complaint, which is the more useful diagnosis.
   if (REFUSED_HEADS.has(head)) return null;
-  if (TRUSTED_BIN_DIRS.some((d) => token.startsWith(d))) return null;
-  return `"${token}" names a FILE, not the program "${head}" — a head is identified by its basename, so any path ending in an allowlisted name is admitted whatever is actually there (\`./git log\` ran an arbitrary script on the authoring host). Use the bare name, or an absolute path under ${TRUSTED_BIN_DIRS.join(", ")}`;
+  const resolved = lexicalResolve(token);
+  // The RESOLVED path must still name the same program. `/usr/bin/git/..`
+  // resolves to `/usr/bin`, whose basename is `bin`, not `git` — a token whose
+  // program name changes under resolution is one the screen cannot bound.
+  if (resolved.split("/").pop() !== head) {
+    return `"${token}" resolves to "${resolved}", which does not name the program "${head}" — a head whose program name changes under \`.\`/\`..\` resolution cannot be bounded`;
+  }
+  if (TRUSTED_BIN_DIRS.some((d) => resolved.startsWith(d))) return null;
+  const via = resolved === token ? "" : ` (it resolves to "${resolved}", which is not under a trusted bin directory)`;
+  return `"${token}" names a FILE, not the program "${head}"${via} — a head is identified by its basename, so any path ending in an allowlisted name is admitted whatever is actually there (\`./git log\` and \`/usr/bin/../../tmp/evil/git log\` each ran an arbitrary script on the authoring host). Use the bare name, or an absolute path under ${TRUSTED_BIN_DIRS.join(", ")}`;
 }
 
 /** Screen ONE pipeline segment. @returns {string|null} refusal reason or null */
@@ -2326,6 +2578,39 @@ export const DANGER_SET = [
   "curl --etag-save /tmp/etag https://example.com/",
   "curl -sSD /tmp/hdr.txt https://example.com/",
   "journalctl --update-catalog",
+  // ── tgw12-s2. SIX MORE BYPASSES, EACH EXECUTED OR WRITTEN ON THE AUTHORING
+  // HOST WHILE THE SHIPPED SCREEN RETURNED ok. They live here, not only in the
+  // test file, because DANGER_SET is what the selftest and the rerun.mjs
+  // comparison both measure against — a bypass named only in a test is a bypass
+  // the MEASUREMENT cannot see, which is the standing limitation the block
+  // above already states. Every one is the same pattern: a capability this
+  // screen ALREADY REFUSES, reachable by a SECOND SPELLING.
+  //
+  // (The first draft of this addition landed in REGRESSION_SET by mistake —
+  // both lists end on `];` and the neighbouring rows read alike. The selftest
+  // reported all ten as FALSE REFUSALS immediately, which is the named sets
+  // doing precisely the job the block above describes: measuring BOTH error
+  // directions so a wrong edit cannot pass as a right one.)
+  //
+  // 1. the trusted-bin PREFIX test is not a CONTAINMENT test — `..` walks out
+  "/usr/bin/../../tmp/evil/git log -1",
+  "/bin/../tmp/evil/cat /etc/passwd",
+  // 2. the ENV twin of that same bound: an absolute CC anywhere on the disk,
+  //    executed 31 times by cgo under an ADMITTED `go test`
+  "CC=/tmp/evil.sh go test ./...",
+  // 3. `-exec` was refused and its two siblings that also run a binary were not
+  "go test -toolexec=/tmp/evil ./...",
+  "go vet -vettool=/tmp/evil ./...",
+  // 4. three curl write targets with no SHORT letter, so the letter-derived
+  //    sweep that closed `-D`/`-c` could not see them
+  "curl -s -o /dev/null --libcurl /tmp/evil.c https://example.com/",
+  "curl -s --remote-name-all https://example.com/index.html",
+  "curl -s -o /dev/null -w %output{/tmp/evil}PWNED https://example.com/",
+  // 5. `-c` got a fourteen-key allowlist; `--git-dir=` hands git a WHOLE CONFIG
+  //    FILE, and core.fsmonitor ran under an allowlisted `git status`
+  "git --git-dir=/tmp/evil/.git --work-tree=/tmp/evil status --short",
+  // 6. the `--pager` sweep was organised by HEAD, and git's own grep has the flag
+  "git grep -O/tmp/evil.sh -l pattern",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -2434,6 +2719,41 @@ export const NEVER_CRY_WOLF_SET = [
   "curl -sS -D /dev/null https://example.com/",
   "curl -sS -c /dev/null https://example.com/",
   "curl -sS -b /tmp/jar.txt https://example.com/",
+  // ── tgw12-s2. THE MIRROR OF EACH BYPASS ABOVE. Every one of the six fixes
+  // narrows a check the corpus depends on, so each gets its honest twin here.
+  // Without these the whole slice could be "passed" by refusing more, which is
+  // the failure direction this set exists to catch.
+  //
+  // Lexical `.`/`..` resolution must ADMIT a path that stays inside a trusted
+  // bin directory after resolving — refusing these would be the wrong fix.
+  "/usr/bin/../bin/git log -1",
+  "/usr/bin/./git log -1",
+  // The two `CC=` spellings the corpus actually uses — 100 rows between them.
+  "CC=clang go test ./...",
+  "CC=/usr/bin/clang go test ./...",
+  // go's OTHER `-tool`/`-test`-prefixed flags are names, not prefixes: these
+  // read, and name-equality is what keeps them distinct from `-toolexec`.
+  "go test -tags integration ./...",
+  "go test -test.v -run TestFoo ./...",
+  // curl's `-w` is refused for `%output{` and `@file` ONLY. The 12 corpus rows
+  // are status formats and every one must stay admitted.
+  "curl -s -o /dev/null -w %{http_code} https://x/",
+  "curl -s -w %{time_total} https://x/",
+  // The trace/cache flags target the WRITE, so /dev/null is admitted for the
+  // three new ones exactly as it already is for `-D` and `-c`.
+  "curl -sS -o /dev/null --hsts /dev/null https://example.com/",
+  "curl -sS -o /dev/null --alt-svc /dev/null https://example.com/",
+  // `--git-dir` is refused; `--work-tree` and `--namespace` name no config file
+  // and are NOT, or the fix would be crying wolf on the honest half.
+  "git --work-tree /some/tree status --short",
+  "git --namespace foo log -1",
+  // `-O` is refused on `git grep` ONLY. `git diff -O<file>` is `--orderfile`,
+  // which READS, and the ordinary `git grep` reads must be untouched.
+  "git grep -n screenCommand -- tooling/grip",
+  "git grep -l --heading pattern",
+  "git diff -O/tmp/orderfile HEAD~1",
+  // `ack --ackrc` is refused; ack's ordinary reads are not.
+  "ack -n pattern lib/",
 ];
 
 /**

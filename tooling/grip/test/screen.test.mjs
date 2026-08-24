@@ -35,7 +35,7 @@ import {
   writeShapeReason, runNamedSets,
   doubleQuoteExpansionReason, envAssignmentReason, screenSedScript,
   ALLOWED_HEADS, REFUSED_HEADS, HOST_BOUND, BP_WRITE_COMMANDS, headPathReason,
-  DANGER_SET, REGRESSION_SET, NEVER_CRY_WOLF_SET,
+  DANGER_SET, REGRESSION_SET, NEVER_CRY_WOLF_SET, lexicalResolve,
 } from "../screen.mjs";
 
 const SCREEN_MJS = fileURLToPath(new URL("../screen.mjs", import.meta.url));
@@ -2168,5 +2168,357 @@ test("curl's value LETTERS that write a file were eaten, never examined", () => 
   // each, exactly as it already is for `-o`, and `-b` READS a cookie file.
   for (const cmd of ["curl -sS -D /dev/null https://example.com/", "curl -sS -c /dev/null https://example.com/", "curl -sS -b /tmp/jar.txt https://example.com/"]) {
     assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// tgw12-s2. SIX BYPASSES, EACH THE SECOND SPELLING OF A REFUSAL THAT ALREADY
+//           STOOD
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The productive question in this module has never been "what else is
+// dangerous?" — it is "what ELSE SPELLS THE THING WE ALREADY REFUSE?". Four
+// fixes shipped on that question before this one (`-o` → `-so`, `GIT_PAGER=` →
+// `git -c core.pager=`, `PATH=` → `./git`, the ENV spelling → the FLAG
+// spelling). Six more answers below, every one executed or written on the
+// authoring host while `screenCommand` returned ok:
+//
+//   #  refusal that already stood        second spelling that walked past it
+//   ─  ────────────────────────────────  ──────────────────────────────────────
+//   1  `/tmp/evil/git log`               `/usr/bin/../../tmp/evil/git log`
+//   2  `/tmp/evil/git` as a HEAD         `CC=/tmp/evil.sh` as an ENV prefix
+//   3  `go test -exec=<cmd>`             `-toolexec=<cmd>`, `go vet -vettool=`
+//   4  `curl -D <f>` / `-o <f>` / `-O`   `--libcurl`, `--hsts`, `--alt-svc`,
+//                                        `--remote-name-all`, `-w %output{}`
+//   5  `git -c core.fsmonitor=<cmd>`     `git --git-dir=<repo with that config>`
+//   6  `rg --pager` / `ack --pager`      `git grep -O<cmd>`
+//
+// Every fix is a TIGHTENING, so every one is paired with its HONEST MIRROR: a
+// narrowing slice can otherwise be "passed" by refusing more, which is the
+// failure direction the named sets exist to catch. Corpus reach is UNCHANGED at
+// 257 — measured, and asserted at the end of this block.
+
+test("tgw12-s2 #1 — a trusted-bin PREFIX test is not a CONTAINMENT test", () => {
+  // PROVEN ON THE AUTHORING HOST. A planted script at <B>/evil/git, reached
+  // through /usr/bin, ran and wrote /tmp/GRIP_A_MARK carrying its own argv:
+  //     $ /usr/bin/../..<B>/evil/git log -1
+  //     not git
+  //     $ cat /tmp/GRIP_A_MARK
+  //     PWNED-A path-traversal-git argv=log -1
+  const escapes = [
+    "/usr/bin/../../tmp/evil/git log -1",
+    "/usr/bin/./../../tmp/evil/git log -1",
+    "/bin/../tmp/evil/cat /etc/passwd",
+    "/usr/local/bin/../../../tmp/evil/curl https://example.com/",
+    "/opt/homebrew/bin/../../../tmp/evil/jq . x.json",
+  ];
+  for (const cmd of escapes) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE a head that walks OUT of a trusted bin dir: ${cmd}`);
+    assert.match(r.reason, /not under a trusted bin directory|names a FILE/, `and diagnose it as a path escape — got: ${r.reason}`);
+  }
+  // THE MIRROR. Resolution must not refuse a path that stays inside.
+  for (const cmd of ["/usr/bin/git log -1", "/usr/bin/../bin/git log -1", "/usr/bin/./git log -1", "/bin/ls -la"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT a path that resolves INSIDE a trusted bin dir: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+  // MUTATION PROOF, on the predicate itself rather than on a description of it.
+  // `headPathReason` is what changed, so the PRE-FIX predicate is reconstructed
+  // here and asserted to DISAGREE on exactly the escaping rows. Revert the
+  // resolution and leave the bare `startsWith`, and this assertion fails.
+  const TRUSTED = ["/bin/", "/sbin/", "/usr/bin/", "/usr/sbin/", "/usr/local/bin/", "/opt/homebrew/bin/"];
+  const preFix = (token) => (TRUSTED.some((d) => token.startsWith(d)) ? null : "refused");
+  for (const token of ["/usr/bin/../../tmp/evil/git", "/bin/../tmp/evil/cat", "/usr/local/bin/../../../tmp/evil/curl"]) {
+    const head = token.split("/").pop();
+    assert.equal(preFix(token), null, `the PRE-FIX predicate must ADMIT ${token} — otherwise this test proves nothing`);
+    assert.ok(headPathReason(token, head), `the SHIPPED predicate must REFUSE ${token}`);
+  }
+  // …and must still agree with it on the rows it always got right.
+  for (const token of ["/usr/bin/git", "/bin/ls"]) {
+    assert.equal(preFix(token), null);
+    assert.equal(headPathReason(token, token.split("/").pop()), null, `${token} must stay admitted`);
+  }
+});
+
+test("tgw12-s2 #1b — lexicalResolve resolves WITHOUT touching the filesystem", () => {
+  // Table-driven, so the resolver is pinned independently of its caller. It must
+  // not consult the disk: every path below is one that does not exist, and the
+  // answers must still be exact. Lexical rather than `realpath` is the design —
+  // `realpath` follows symlinks on a filesystem three live cycles share.
+  const cases = [
+    ["/usr/bin/../../tmp/evil/git", "/tmp/evil/git"],
+    ["/usr/bin/./git", "/usr/bin/git"],
+    ["/usr/bin/../bin/git", "/usr/bin/git"],
+    ["/bin/../tmp/evil/cat", "/tmp/evil/cat"],
+    ["/usr/bin/git", "/usr/bin/git"],
+    ["./git", "git"],
+    ["tooling/grip/ls", "tooling/grip/ls"],
+    // a relative `..` is PRESERVED — collapsing it would turn a relative path
+    // into a DIFFERENT relative path and mis-describe the token in the reason
+    ["../../tmp/evil/git", "../../tmp/evil/git"],
+    // `..` at the root of an ABSOLUTE path is the root itself
+    ["/../tmp/evil/git", "/tmp/evil/git"],
+    ["/usr/bin/git/..", "/usr/bin"],
+    // interior `//` is NOT collapsed — POSIX leaves a leading `//`
+    // implementation-defined, so collapsing it would be a WIDENING on a guess
+    ["//usr/bin/git", "//usr/bin/git"],
+  ];
+  for (const [input, want] of cases) {
+    assert.equal(lexicalResolve(input), want, `lexicalResolve(${input})`);
+  }
+  // The consequence of the last row, asserted rather than left implied.
+  assert.equal(screenCommand("//usr/bin/git log -1").ok, false, "a leading // is refused, fail-closed");
+  // A token whose program NAME changes under resolution cannot be bounded.
+  assert.ok(headPathReason("/usr/bin/git/..", "git"), "resolution that changes the basename must refuse");
+});
+
+test("tgw12-s2 #2 — the ENV spelling of a program path inherits headPathReason's bound", () => {
+  // PROVEN: `CC=<B>/evil/mycc go test -count=1 ./...` on a cgo package printed
+  // `ok cgoprobe 0.133s` while the planted CC ran 31 times (/tmp/GRIP_B_MARK).
+  // `go test` is ADMITTED, so that is arbitrary execution under an allowlisted
+  // head — the identical capability `headPathReason` refuses as `/tmp/evil/git`.
+  // "An absolute path" was the whole bound, and it bounds nothing.
+  for (const cmd of ["CC=/tmp/evil.sh go test ./...", "CC=/tmp/evil go test ./...", "CXX=/opt/evil/g++ go test ./...", "CC=/usr/bin/../../tmp/evil go test ./..."]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE an absolute program path outside the trusted bin dirs: ${cmd}`);
+    assert.match(r.reason, /names a PROGRAM the toolchain executes/, `and name why — got: ${r.reason}`);
+  }
+  // THE MIRROR, and it is the entire reach cost of this fix: the corpus carries
+  // 100 `CC=` rows and every one is one of these two spellings.
+  for (const cmd of ["CC=clang go test ./...", "CC=/usr/bin/clang go test ./...", 'CC="/usr/bin/clang" go test ./...', "CC=/usr/bin/clang MIX_ENV=test mix test --seed 111"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT the corpus spelling: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+  // The relative-script refusal that already stood must still stand.
+  assert.equal(screenCommand("CC=./evil.sh go test ./...").ok, false);
+  // MUTATION PROOF on the exported predicate. The PRE-FIX rule was "any absolute
+  // path", reconstructed here; it must DISAGREE on exactly the rows above.
+  const PRE_FIX_VALUE = /^(\/[\w.+-]+)+$|^[\w.+-]+$/;
+  for (const value of ["/tmp/evil.sh", "/tmp/evil", "/opt/evil/g++"]) {
+    assert.ok(PRE_FIX_VALUE.test(value), `the PRE-FIX shape test must ACCEPT ${value} — otherwise this proves nothing`);
+    assert.ok(envAssignmentReason("CC", value), `the SHIPPED rule must REFUSE CC=${value}`);
+  }
+  for (const value of ["clang", "/usr/bin/clang"]) {
+    assert.ok(PRE_FIX_VALUE.test(value));
+    assert.equal(envAssignmentReason("CC", value), null, `CC=${value} must stay admitted`);
+  }
+});
+
+test("tgw12-s2 #3 — go's two OTHER flags that run an arbitrary binary", () => {
+  // PROVEN. `go test -toolexec=<cmd> ./...` ran <cmd> EIGHT times (first argv
+  // `…/pkg/tool/darwin_arm64/compile`) and still reported `ok probe 0.143s`;
+  // `go vet -vettool=<cmd> ./...` ran <cmd> with argv `-flags`. `-exec` was on
+  // GO_WRITE_FLAGS the whole time — these are the same capability under two more
+  // names, in BOTH the `=` and the separate spelling. `-testlog` is the same
+  // sweep's file write.
+  for (const cmd of [
+    "go test -toolexec=/tmp/evil ./...",
+    "go test -toolexec /tmp/evil ./...",
+    "go vet -vettool=/tmp/evil ./...",
+    "go vet -vettool /tmp/evil ./...",
+    "go test -testlog=/tmp/evil.log ./...",
+  ]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, /writes a file or runs an arbitrary binary/, `got: ${r.reason}`);
+  }
+  // THE MIRROR — these are NAMES, not prefixes. `-tags`/`-test.v`/`-trimpath`
+  // share a prefix with a refused flag and must stay admitted, the same
+  // distinction GO_WRITE_FLAGS already turns on for `-c` versus `-cover`.
+  for (const cmd of ["go test -tags integration ./...", "go test -test.v -run TestFoo ./...", "go test -cover ./...", "go test -trimpath ./...", "go vet ./..."]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+  // MUTATION PROOF: the pre-fix set, reconstructed, MISSES all three.
+  const PRE_FIX = new Set(["c", "o", "exec", "coverprofile", "cpuprofile", "memprofile", "blockprofile", "mutexprofile", "trace", "outputdir"]);
+  for (const name of ["toolexec", "vettool", "testlog"]) {
+    assert.equal(PRE_FIX.has(name), false, `the PRE-FIX set must MISS -${name} — otherwise this proves nothing`);
+    assert.equal(screenCommand(`go test -${name}=/tmp/evil ./...`).ok, false, `the SHIPPED rule must REFUSE -${name}`);
+  }
+});
+
+test("tgw12-s2 #4 — curl's write targets with no short letter, and %output{}", () => {
+  // PROVEN on curl 8.7.1, each with `-o /dev/null` set so nothing else could
+  // write: `--libcurl` produced 1687 bytes, `--alt-svc` 117, `--hsts` 111,
+  // `--remote-name-all` wrote `index.html` into the working directory, and
+  // `-w "%output{<f>}PWNED-D4"` wrote <f> containing PWNED-D4.
+  //
+  // WHY ALL FIVE WERE MISSED AT ONCE — the finding, rather than the count. The
+  // sweep that closed `-D`/`-c`/`-K` derived its candidates from
+  // CURL_VALUE_LETTERS, the SHORT letters whose value the normaliser eats. Three
+  // of curl's write targets have no short letter at all and were structurally
+  // invisible to that method; `--remote-name-all` is `-O`'s long plural, which
+  // the layer-(c) short-cluster regex cannot match; and `-w` WAS on the letter
+  // list, eaten and never examined — the very failure mode that block names, on
+  // a fourth letter.
+  for (const cmd of [
+    "curl -s -o /dev/null --libcurl /tmp/evil.c https://example.com/",
+    "curl -s -o /dev/null --libcurl=/tmp/evil.c https://example.com/",
+    "curl -s -o /dev/null --hsts /tmp/evil.hsts https://example.com/",
+    "curl -s -o /dev/null --alt-svc /tmp/evil.alt https://example.com/",
+    "curl -s --remote-name-all https://example.com/index.html",
+    "curl -s -o /dev/null -w %output{/tmp/evil}PWNED https://example.com/",
+    "curl -s -o /dev/null --write-out %output{/tmp/evil}PWNED https://example.com/",
+    // a FORMAT FILE the screen never reads may itself carry `%output{…}` — the
+    // same ruling as `curl -K` and `sed -f`
+    "curl -s -o /dev/null -w @/tmp/evil.fmt https://example.com/",
+  ]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, /WRITES a file|writes a file|%output|FORMAT FILE/, `and name the write — got: ${r.reason}`);
+  }
+  // THE MIRROR, and it is the measured reach cost: the corpus carries 12
+  // `curl -w` rows and every one is a status format. All 12 stay admitted, and
+  // /dev/null stays admitted for the three new file targets exactly as it
+  // already is for `-D` and `-c` — the guard targets the WRITE, never the flag.
+  for (const cmd of [
+    "curl -s -o /dev/null -w %{http_code} https://x/",
+    "curl -s -w %{time_total} https://x/",
+    "curl -sS -o /dev/null --hsts /dev/null https://example.com/",
+    "curl -sS -o /dev/null --alt-svc /dev/null https://example.com/",
+    "curl -sS -o /dev/null --libcurl /dev/null https://example.com/",
+    "curl -sS https://example.com/",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+  // MUTATION PROOF: the pre-fix flag sets, reconstructed, MISS every one.
+  const PRE_FIX_TARGETS = new Set(["-D", "--dump-header", "-c", "--cookie-jar", "--trace", "--trace-ascii", "--stderr", "--etag-save"]);
+  const PRE_FIX_NAMED = new Set(["--remote-name", "--create-dirs", "--output-dir", "--remote-header-name"]);
+  for (const flag of ["--libcurl", "--hsts", "--alt-svc"]) {
+    assert.equal(PRE_FIX_TARGETS.has(flag), false, `the PRE-FIX target set must MISS ${flag}`);
+  }
+  assert.equal(PRE_FIX_NAMED.has("--remote-name-all"), false, "the PRE-FIX named set must MISS --remote-name-all");
+  assert.equal(PRE_FIX_NAMED.has("-w"), false, "-w was never on any write list — its value was EATEN by the normaliser");
+});
+
+test("tgw12-s2 #5 — `git --git-dir=` hands git a config file the `-c` allowlist screens key by key", () => {
+  // PROVEN, with no `-c` anywhere in the command:
+  //     $ git -C <evilrepo> config core.fsmonitor <evil/fsmon>
+  //     $ git --git-dir=<evilrepo>/.git --work-tree=<evilrepo> status --short
+  //     $ cat /tmp/GRIP_E4_MARK
+  //     PWNED-E4 fsmonitor argv=2 1787567592111742000
+  //
+  // `status` is on GIT_READ_VERBS and `screenCommand` returned ok. The `-c`
+  // allowlist screens FOURTEEN inert keys precisely because "git config has
+  // dozens of keys whose value is a command git runs" — and `--git-dir` supplies
+  // a FILE that may set every one of them. `GIT_DIR=` is already refused by
+  // name, so this is once more the ENV spelling screened and the FLAG spelling
+  // not.
+  for (const cmd of [
+    "git --git-dir=/tmp/evil/.git --work-tree=/tmp/evil status --short",
+    "git --git-dir /tmp/evil/.git status",
+    "git --git-dir=/tmp/evil/.git log -1",
+    // REFUSED ON PARITY AND DOCUMENTATION, NOT ON AN OBSERVED EXECUTION, and the
+    // distinction is stated rather than implied: `--exec-path` was TESTED here
+    // and did NOT run a planted `git-log`, because git dispatches its builtins
+    // before consulting exec-path. git(1) documents it as the directory git
+    // searches for sub-programs and prepends to PATH for the subprocesses it
+    // spawns, and `GIT_EXEC_PATH=` is refused by name one layer up. The claim
+    // this row makes is parity, and nothing stronger.
+    "git --exec-path=/tmp/evil log -1",
+    "git --exec-path /tmp/evil log -1",
+  ]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, /config.*never reads|prepends to PATH/, `and name the indirection — got: ${r.reason}`);
+  }
+  // THE MIRROR — the honest half of the same option region. Neither
+  // `--work-tree` nor `--namespace` names a file git reads settings from, and
+  // refusing them would be cry-wolf on flags that merely accompany the one that
+  // matters.
+  for (const cmd of ["git --work-tree /some/tree status --short", "git --namespace foo log -1", "git -c core.pager=cat log", "git -C /some/path log -1"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("tgw12-s2 #6 — the `--pager` sweep was organised by HEAD, and git's own grep has the flag", () => {
+  // PROVEN, both spellings, each executing a planted script with the full match
+  // list as argv (/tmp/GRIP_E2_MARK):
+  //     git grep -O<cmd> -l screenCommand -- tooling/grip
+  //     git grep --open-files-in-pager=<cmd> -l screenCommand -- tooling/grip
+  //
+  // `rg --pager`, `ag --pager` and `ack --pager` were all closed as "a flag whose
+  // VALUE is a PROGRAM the tool will run". That sweep enumerated HEADS, and git
+  // is filed under a sub-verb rule, so its identical flag was never reached.
+  for (const cmd of [
+    "git grep -O/tmp/evil.sh -l pattern",
+    "git grep -O /tmp/evil.sh pattern",
+    "git grep --open-files-in-pager=/tmp/evil.sh pattern",
+    "git grep --open-files-in-pager /tmp/evil.sh pattern",
+    // CLUSTERED — git's parse-options binds the value to the last letter, the
+    // same way `-so` bound curl's output file
+    "git grep -lO/tmp/evil.sh pattern",
+  ]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(r.reason, /runs an arbitrary COMMAND as the pager/, `got: ${r.reason}`);
+  }
+  // THE MIRROR. Scoped to `grep`, because `-O<file>` on `git diff` is
+  // `--orderfile`, which READS — refusing that would be cry-wolf — and the
+  // ordinary `git grep` reads must be untouched.
+  for (const cmd of ["git grep -n screenCommand -- tooling/grip", "git grep -l --heading pattern", "git grep -i -E 'foo|bar' -- api/", "git diff -O/tmp/orderfile HEAD~1"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+  // `ack --ackrc` is the same shape one head over, refused on ack(1) and on
+  // parity with `curl -K`. ack is NOT installed on the authoring host, so this
+  // row rests on documentation exactly as `tree -o` does. Stated, not implied.
+  assert.equal(screenCommand("ack --ackrc=/tmp/evil.ackrc pattern").ok, false, "ack --ackrc reads an options file that may carry --pager");
+  assert.equal(screenCommand("ack -n pattern lib/").ok, true, "ack's ordinary reads stay admitted");
+});
+
+test("tgw12-s2 — the six fixes cost the frozen corpus NOTHING, and that is MEASURED", () => {
+  // A tightening slice can always be "passed" by refusing more. The reach test
+  // near the top of this file pins the absolute number; this one states the
+  // DELTA of THIS slice, so a later reader can tell which wave a move belongs to
+  // without re-deriving it.
+  const corpus = JSON.parse(readFileSync(CORPUS, "utf8"));
+  const commands = corpus.proofs.map((p) => p?.command).filter((c) => typeof c === "string" && c.trim());
+  assert.equal(screenAll(commands).admitted, 257, "tgw12-s2 is a PURE tightening: it must not move corpus reach in either direction");
+
+  // …and the REASON it costs nothing is that the corpus contains not one row of
+  // any shape the six fixes newly refuse. Re-derived here rather than
+  // remembered, so it cannot go stale against a regenerated corpus.
+  const shapes = [
+    // Anchored to a HEAD position — start of the command, or just after a list
+    // operator. The loose form `(^|\s)` matched an ARGUMENT and reported a
+    // finding that was not one: `npm run build && git diff --stat --
+    // ../../priv/static/assets/…` is an ordinary relative path in a pathspec,
+    // and fix #1 does not touch arguments. A shape assertion that fires on the
+    // wrong token position measures nothing. (Found only because this file was
+    // run by ABSOLUTE path: a relative `node --test tooling/grip/test/…` from a
+    // drifted cwd ran a PEER WORKTREE's copy and reported 70 passing tests for a
+    // file that has over a hundred. The count was plausible, and it was the
+    // wrong file.)
+    [/(?:^|[|;&]\s*)\S*\/\.\.\/\S*/, "a HEAD token that walks out of its directory"],
+    [/(^|\s)(CC|CXX)=(?!clang\b|\/usr\/bin\/clang\b)\S/, "a CC=/CXX= value other than the two the corpus uses"],
+    [/-(toolexec|vettool|testlog)\b/, "go's binary-running flags"],
+    [/--(libcurl|hsts|alt-svc|remote-name-all)\b/, "curl's long-flag write targets"],
+    [/%output\{/, "curl's %output{} write"],
+    [/--(git-dir|exec-path)\b/, "git's config-source flags"],
+    [/\bgit\s+grep\b[^|]*(\s-[A-Za-z]*O|--open-files-in-pager)/, "git grep's pager flag"],
+    [/(^|\s)ack\b/, "ack at all"],
+  ];
+  for (const [re, what] of shapes) {
+    const hits = commands.filter((c) => re.test(c));
+    assert.equal(hits.length, 0, `the corpus must contain no ${what} — found ${hits.length}: ${hits.slice(0, 2).join(" | ")}`);
+  }
+
+  // The named sets carry every one of the six, in BOTH directions. A bypass
+  // named only in a test is a bypass the selftest and the rerun.mjs comparison
+  // cannot SEE, which is the standing limitation DANGER_SET's own comment
+  // states — and the first draft of this slice put its ten rows in
+  // REGRESSION_SET by mistake, which the selftest reported instantly as ten
+  // FALSE REFUSALS. That is the named sets doing their job, and the reason the
+  // rows live there rather than only here.
+  const { falsePermissions, falseRefusals } = runNamedSets();
+  assert.deepEqual(falsePermissions, [], "no DANGER SET row may be admitted");
+  assert.deepEqual(falseRefusals, [], "no REGRESSION/CRY-WOLF row may be refused");
+  for (const cmd of [
+    "/usr/bin/../../tmp/evil/git log -1",
+    "CC=/tmp/evil.sh go test ./...",
+    "go test -toolexec=/tmp/evil ./...",
+    "go vet -vettool=/tmp/evil ./...",
+    "curl -s --remote-name-all https://example.com/index.html",
+    "git --git-dir=/tmp/evil/.git --work-tree=/tmp/evil status --short",
+    "git grep -O/tmp/evil.sh -l pattern",
+  ]) {
+    assert.ok(DANGER_SET.includes(cmd), `DANGER_SET must carry the proven bypass: ${cmd}`);
   }
 });
