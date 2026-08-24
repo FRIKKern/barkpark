@@ -94,6 +94,29 @@ defmodule Barkpark.Content.Document do
       :owner_id
     ])
     |> validate_required([:doc_id, :type])
+    # varchar(255) COLUMNS NEED A CHANGESET LENGTH GATE, OR POSTGRES ANSWERS 500.
+    # `doc_id`, `type`, `dataset` and `title` are all Ecto `:string` in migration
+    # 20260412090737_create_initial_tables — i.e. `character varying(255)`. With
+    # no `validate_length/3` a longer value reaches the insert and Postgres
+    # raises `Postgrex.Error ERROR 22001 (string_data_right_truncation)`, which
+    # the API returns as HTTP 500. The write is handled correctly (the
+    # transaction rolls back and nothing persists); the CLASSIFICATION is the
+    # defect. A 500 tells the caller to retry, which fails identically forever,
+    # and it books a client mistake against the server's error rate.
+    #
+    # All four are caller-supplied on the public write path: `_id` → doc_id,
+    # `_type` → type, the `:dataset` path segment, and `title`. `status` needs no
+    # length gate — `validate_inclusion` below already bounds it to six words —
+    # and `rev` is server-generated (32 hex chars).
+    #
+    # RED vs GREEN: document_varchar_length_test.exs drops each gate in turn and
+    # watches the matching arm red, and pins the raw-struct insert that PROVES
+    # the column limit is 255 and that an unguarded value raises rather than
+    # returning a changeset.
+    |> validate_length(:doc_id, max: 255)
+    |> validate_length(:type, max: 255)
+    |> validate_length(:dataset, max: 255)
+    |> validate_length(:title, max: 255)
     |> validate_inclusion(:status, ~w(draft published archived active planning completed))
     # W2 uniqueness flip: the row's identity leaf is now (doc_id, type,
     # dataset_id). The `dataset` STRING constraint is dropped at the DB level
