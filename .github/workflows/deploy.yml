@@ -97,8 +97,14 @@ jobs:
           if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates|scripts/connectors)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
       - name: Assert every on.push.paths entry has a deploy target
         run: bash scripts/check-deployyml-filters.sh
-      - name: Assert the control-plane smoke test can fail on a dead box
-        run: bash scripts/check-deploy-smoke.sh
+      - name: Assert neither deploy target can pass over a box that did not move
+        # --selftest FIRST, then the real assertion — the house pattern, and the
+        # one doc-gates.yml:460 already uses for this same script. deploy.yml ran
+        # only the bare form, so the run that is ABOUT TO DEPLOY took the gate's
+        # green on trust while never asking whether the gate could still lose.
+        run: |
+          bash scripts/check-deploy-smoke.sh --selftest
+          bash scripts/check-deploy-smoke.sh
 
   control-plane:
     needs: changes
@@ -171,6 +177,96 @@ jobs:
             "https://barkpark.cloud/v1/auth/login" || true)"
           echo "https://barkpark.cloud/v1/auth/login (bad creds) = $dbcode"
           test "$dbcode" = "401"
+      - name: Assert the control plane serves this commit or a descendant
+        # THE GATE EVERY STEP ABOVE IS MISSING. The smoke above proves the box is
+        # ALIVE; nothing proves it MOVED. A lost Caddy flip onto a still-live old
+        # slot, a superseded run, a coalesced no-op deploy — every one of them
+        # leaves '/' answering 200 and bad-creds login answering 401 while the box
+        # serves the previous commit, and the deploy exits 0. Measured, offline,
+        # against a fake box serving a commit 2 behind: both targets' smoke steps
+        # exited 0 and nothing ever asked what was being served.
+        #
+        # ANCESTOR, NOT EQUALITY (charter D359). cp-deploy.sh does
+        # `git pull --ff-only origin main` and exports BARKPARK_GIT_SHA from the
+        # resulting HEAD — the TIP AT PULL TIME, never this run's headSha. A run
+        # fired for one commit routinely delivers a DESCENDANT: docs-only merges
+        # match none of this workflow's paths and get no deploy run at all, so
+        # production legitimately serves a commit ahead of the one that triggered
+        # the run that delivered it. Live: compare 7f5f10b8d...572d51e13 answers
+        # `ahead` with ahead_by 10, behind_by 0. An equality gate would red ten
+        # healthy merges and teach the reader to ignore this step.
+        #
+        # THE ORACLE IS THE COMPARE API, NOT `git merge-base` (charter D360). This
+        # job's checkout is a bare actions/checkout@v4 (depth 1) and the served
+        # commit's object is simply absent — `git merge-base --is-ancestor` dies
+        # `fatal: Not a valid commit name`, rc 128, and an `if git merge-base` form
+        # then reports a CONFIGURATION failure as "the box is behind". `fetch-depth:
+        # 0` is not the fix either: a plain in-step `git fetch origin main` does not
+        # deepen a shallow clone. The API needs no checkout at all, its failure
+        # modes are HTTP-typed, and `permissions: contents: read` is already granted.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The settle window exists ONLY for transport. It EXPIRES INTO A FAILURE,
+          # and it is never spent on a clean verdict: a `behind` or `diverged`
+          # answer is retried ZERO times, because retrying a real regression only
+          # delays the red.
+          SETTLE_CAP_SECONDS=180
+          RETRY_SLEEP_SECONDS=10
+          deadline=$(( $(date +%s) + SETTLE_CAP_SECONDS ))
+          attempt=0
+          reason="(no attempt completed)"
+          while :; do
+            attempt=$((attempt + 1))
+            served=""
+            body=""
+            if ! body="$(curl -sS --max-time 15 https://barkpark.cloud/health 2>&1)"; then
+              reason="/health was unreachable: $(printf '%s' "$body" | head -c 200)"
+            else
+              # `-e` plus `// empty` is the NULL ARM: `jq -r '.git_sha'` prints the
+              # four-character string `null` for a null value, and that string would
+              # be handed to the oracle as if it were a commit. Here a null or an
+              # absent key both yield an EMPTY string and a non-zero jq exit.
+              served="$(printf '%s' "$body" | jq -er '.git_sha // empty' 2>/dev/null)" || served=""
+              if [ -z "$served" ]; then
+                echo "::error title=control plane: /health carries no git_sha::the box answered /health but the git_sha key is absent, null or empty. This step depends on the reader shipped in dr-w20-s1 (#10605); if that reader was removed or renamed, fix the reader — do not weaken this assertion. Body follows."
+                printf '%s\n' "$body" | head -c 600
+                exit 1
+              fi
+              case "$served" in
+                *[!0-9a-fA-F]*)
+                  echo "::error title=control plane: git_sha is not a commit::/health returned git_sha='$served', which is not hexadecimal. A non-sha value (e.g. the string 'unknown') must never be handed to the compare API, where it would surface as an opaque 404."
+                  exit 1
+                  ;;
+              esac
+              err="${RUNNER_TEMP:-/tmp}/cp-compare.err"
+              if status="$(gh api "repos/${{ github.repository }}/compare/${{ github.sha }}...${served}" --jq .status 2>"$err")"; then
+                echo "control plane serves $served; compare ${{ github.sha }}...$served = $status"
+                if printf '%s' "$status" | grep -qE '^(ahead|identical)$'; then
+                  echo "OK: the merged commit is an ancestor of (or identical to) what the box serves."
+                  exit 0
+                fi
+                echo "::error title=control plane did not move::https://barkpark.cloud/ serves $served, which is '$status' relative to the merged commit ${{ github.sha }}. The deploy reported success over a box that is NOT running this change. Do not re-run to clear this: re-running only re-asks the same question."
+                exit 1
+              fi
+              detail="$(head -c 400 "$err" 2>/dev/null || true)"
+              case "$detail" in
+                *"rate limit"*|*"secondary rate"*|*"HTTP 50"*|*"502"*|*"503"*|*"504"*|*"timeout"*|*"timed out"*|*"connection"*|*"EOF"*)
+                  reason="the compare oracle was unreachable: $detail"
+                  ;;
+                *)
+                  echo "::error title=the compare API refused the comparison::gh api compare ${{ github.sha }}...$served failed for a reason that is not transport. This is a real answer, not a blip: $detail"
+                  exit 1
+                  ;;
+              esac
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error title=served-commit assertion never got an answer::the ${SETTLE_CAP_SECONDS}s settle window expired after $attempt attempt(s) without a verdict. Last reason: $reason. An expired window is a FAILURE — an unanswerable question is not a pass."
+              exit 1
+            fi
+            echo "attempt $attempt: $reason — retrying in ${RETRY_SLEEP_SECONDS}s (cap ${SETTLE_CAP_SECONDS}s)"
+            sleep "$RETRY_SLEEP_SECONDS"
+          done
 
   instance:
     needs: changes
@@ -245,6 +341,83 @@ jobs:
           code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://guerrilla.barkpark.cloud/api/schemas")"
           echo "guerrilla /api/schemas = $code"
           test "$code" = "200"
+      - name: Assert the content instance serves this commit or a descendant
+        # The instance smoke above is `test "$code" = "200"` on /api/schemas. It
+        # cannot fail on a lost Caddy flip onto a live sibling slot, nor on
+        # instance-deploy.sh's coalesce branch, which exits 0 without moving the
+        # box. Same asymmetry the control-plane smoke had before this step, and
+        # the same remedy: ask the box what it is serving.
+        #
+        # The reader already exists and needs no credential: GET /status.json is
+        # public (router.ex:1777, pipe_through :api only) and has emitted `commit`
+        # since #6422. It is a NINE-character short sha — verified live, and the
+        # compare API accepts the short form verbatim:
+        #   gh api .../compare/3c7bba49e7...4d35c5ab0 --jq '.status,.ahead_by,.behind_by'
+        #   -> behind / 0 / 2
+        #
+        # ANCESTOR, NOT EQUALITY, for the same reason as the control plane:
+        # instance-deploy.sh pulls origin/main's TIP, so a run triggered by an
+        # older head delivers whatever main had reached by the time the box pulled.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Same contract as the control-plane assertion: the window is for
+          # transport only, it EXPIRES INTO A FAILURE, and a clean `behind` or
+          # `diverged` verdict is never retried.
+          SETTLE_CAP_SECONDS=180
+          RETRY_SLEEP_SECONDS=10
+          deadline=$(( $(date +%s) + SETTLE_CAP_SECONDS ))
+          attempt=0
+          reason="(no attempt completed)"
+          while :; do
+            attempt=$((attempt + 1))
+            served=""
+            body=""
+            if ! body="$(curl -sS --max-time 15 https://guerrilla.barkpark.cloud/status.json 2>&1)"; then
+              reason="/status.json was unreachable: $(printf '%s' "$body" | head -c 200)"
+            else
+              # NULL ARM, as above: `jq -r '.commit'` would print the literal
+              # four-character string `null` and hand it to the oracle.
+              served="$(printf '%s' "$body" | jq -er '.commit // empty' 2>/dev/null)" || served=""
+              if [ -z "$served" ]; then
+                echo "::error title=content instance: /status.json carries no commit::the box answered /status.json but the commit key is absent, null or empty. This step depends on the reader shipped in #6422; if that reader was removed or renamed, fix the reader — do not weaken this assertion. Body follows."
+                printf '%s\n' "$body" | head -c 600
+                exit 1
+              fi
+              case "$served" in
+                *[!0-9a-fA-F]*)
+                  echo "::error title=content instance: commit is not a commit::/status.json returned commit='$served', which is not hexadecimal. Barkpark.BuildInfo degrades to the literal string 'unknown' when it cannot derive a sha at compile time (build_info.ex), and that value must never be handed to the compare API, where it would surface as an opaque 404."
+                  exit 1
+                  ;;
+              esac
+              err="${RUNNER_TEMP:-/tmp}/instance-compare.err"
+              if status="$(gh api "repos/${{ github.repository }}/compare/${{ github.sha }}...${served}" --jq .status 2>"$err")"; then
+                echo "content instance serves $served; compare ${{ github.sha }}...$served = $status"
+                if printf '%s' "$status" | grep -qE '^(ahead|identical)$'; then
+                  echo "OK: the merged commit is an ancestor of (or identical to) what the box serves."
+                  exit 0
+                fi
+                echo "::error title=content instance did not move::https://guerrilla.barkpark.cloud/ serves $served, which is '$status' relative to the merged commit ${{ github.sha }}. The deploy reported success over a box that is NOT running this change. Do not re-run to clear this: re-running only re-asks the same question."
+                exit 1
+              fi
+              detail="$(head -c 400 "$err" 2>/dev/null || true)"
+              case "$detail" in
+                *"rate limit"*|*"secondary rate"*|*"HTTP 50"*|*"502"*|*"503"*|*"504"*|*"timeout"*|*"timed out"*|*"connection"*|*"EOF"*)
+                  reason="the compare oracle was unreachable: $detail"
+                  ;;
+                *)
+                  echo "::error title=the compare API refused the comparison::gh api compare ${{ github.sha }}...$served failed for a reason that is not transport. This is a real answer, not a blip: $detail"
+                  exit 1
+                  ;;
+              esac
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error title=served-commit assertion never got an answer::the ${SETTLE_CAP_SECONDS}s settle window expired after $attempt attempt(s) without a verdict. Last reason: $reason. An expired window is a FAILURE — an unanswerable question is not a pass."
+              exit 1
+            fi
+            echo "attempt $attempt: $reason — retrying in ${RETRY_SLEEP_SECONDS}s (cap ${SETTLE_CAP_SECONDS}s)"
+            sleep "$RETRY_SLEEP_SECONDS"
+          done
       - id: served
         name: Read the sha the content instance is serving AFTER this deploy
         # THE BOX ANSWERS FOR WHAT THE BOX SERVES (charter D481/D485). Over the

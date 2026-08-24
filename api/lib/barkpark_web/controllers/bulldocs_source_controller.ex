@@ -141,6 +141,10 @@ defmodule BarkparkWeb.BulldocsSourceController do
   # which has no Plug.Exception impl → a raw 500 instead of a 404. The dataset
   # is a scope selector with a documented default, so a malformed one fails soft
   # to that default (same guard shape as MetaController.show/2).
+  #
+  # The share gate is ALIGNED to this: `RequireShareScope.request_dataset/1`
+  # resolves the dataset the same way, so an anonymous share reader is checked
+  # against the dataset this function returns (task-4f26838232b5ece0).
   defp requested_dataset(params) do
     case Map.get(params, "dataset") do
       ds when is_binary(ds) -> ds

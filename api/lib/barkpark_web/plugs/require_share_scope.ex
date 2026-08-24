@@ -55,6 +55,12 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       treated as NOT shared — never granted, never raised.
     * **No grant on garbage.** A nil or non-binary slug param can never match a
       share, so the plug no-ops and the membership gate runs.
+    * **The guard reads the dataset the READ will read.** The dataset comes from
+      `request_dataset/1`, which resolves it exactly the way the controllers do
+      (path segment, else query string, else the default) — see that function.
+      Comparing a path-only dataset while the controller went on to derive a
+      query-string one is the "guard before derivation" split that let
+      `?dataset=` escape the share (task-4f26838232b5ece0).
 
   Pipeline placement: runs BEFORE `BarkparkWeb.Plugs.ResolveWorkspace` (and
   `ResolveProject`). It only ever ADDS assigns on the public-share path; it
@@ -93,9 +99,10 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
 
   @spec call(Plug.Conn.t(), %{surface: Sharing.Share.surface()}) :: Plug.Conn.t()
   def call(conn, %{surface: surface}) do
+    conn = fetch_query_params(conn)
     ws_slug = conn.path_params["workspace_slug"]
     project_slug = conn.path_params["project_slug"]
-    dataset = conn.path_params["dataset"] || @default_dataset
+    dataset = request_dataset(conn)
 
     # An AUTHENTICATED caller never takes the share grant: a verified token
     # (assigned by OptionalToken, which runs before this plug in every
@@ -164,11 +171,36 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       Sharing.access_for(ws_slug, project_slug, dataset) == :edit
   end
 
+  # ── The dataset the REQUEST actually resolves to ────────────────────────────
+  #
+  # NOT `path_params["dataset"]`. Three share-reachable routes carry NO
+  # `:dataset` path segment — `/w/:ws/p/:proj/papers/:slug/source`,
+  # `…/papers/:slug/email` and the `…/media` block — and their controllers
+  # derive the dataset from the MERGED params, i.e. from the QUERY STRING
+  # (`BulldocsSourceController.requested_dataset/1`,
+  # `BulldocsEmailController.requested_dataset/1`,
+  # `MediaController.index/2` + `render_file/2`). Reading only the path made
+  # this guard compare `"production"` while the controller went on to read
+  # `?dataset=staging`: a share minted for one dataset served another
+  # (task-4f26838232b5ece0). The guard must read the value the DERIVATION will
+  # read, or it is not guarding the read that happens.
+  #
+  # Precedence mirrors Phoenix exactly: on a `/d/:dataset/…` route the path
+  # segment wins the params merge, so it wins here too and a decoy
+  # `?dataset=` changes nothing. The `is_binary` clamp mirrors the same soft
+  # fail-to-default the paper controllers apply, so `?dataset[]=x` (which
+  # decodes to a list) resolves to the same value on both sides.
+  @spec request_dataset(Plug.Conn.t()) :: binary()
+  defp request_dataset(conn) do
+    case conn.path_params["dataset"] || conn.query_params["dataset"] do
+      ds when is_binary(ds) -> ds
+      _ -> @default_dataset
+    end
+  end
+
   # ── P4: item-token grant (?share=<token>) ──────────────────────────────────
 
   defp maybe_grant_item_token(conn, ws_slug, project_slug, dataset) do
-    conn = Plug.Conn.fetch_query_params(conn)
-
     with raw when is_binary(raw) and raw != "" <- conn.query_params["share"],
          # Item links are read capabilities — never an unsafe method.
          true <- conn.method in @safe_read_methods,
