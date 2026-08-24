@@ -456,7 +456,7 @@ defmodule Barkpark.Tasks.Dedup do
       )
 
     # `SET LOCAL` is a no-op outside a transaction, and @candidate_trgm_floor
-    # (0.1) sits below pg_trgm's 0.3 default — so without the txn the `%` net
+    # (0.2) sits below pg_trgm's 0.3 default — so without the txn the `%` net
     # would silently TIGHTEN to 0.3 and drop exactly the gray-zone near-duplicates
     # the advise band exists to catch. Same cliff, same remedy, as
     # Content.DedupWall. SET takes no bind params, so the floor is interpolated;
