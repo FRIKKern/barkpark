@@ -100,9 +100,11 @@ function writeBaseline(findings) {
 }
 
 // ── selftest ─────────────────────────────────────────────────────────────────
-// Three arms. The gate must be provably able to RED, provably able to stay
-// SILENT, and provably able to tell known from novel — an arm that cannot fire
-// is the same defect this gate was built to catch.
+// Four arms. The gate must be provably able to RED, provably able to stay
+// SILENT, provably able to tell known from novel, and provably still reading
+// files that plain `grep` goes blind on — an arm that cannot fire is the same
+// defect this gate was built to catch.
+
 // Derive the plant's target from the live corpus rather than hardcoding one.
 // A hardcoded `media.ex:99999` rots the day that file is renamed, and a
 // selftest whose target has vanished goes quietly vacuous — the exact failure
@@ -178,6 +180,31 @@ function selftest() {
     if (inBaseline.has(linerefKey({ ...fake, raw: "y.ex:2 something" }))) {
       fails.push("(c) KEY: changing the CITATION did not change the key — a re-pointed citation would ride the baseline");
     }
+
+    // (d) NUL-SAFE. A file containing a NUL byte is INVISIBLE to plain `grep`,
+    //     which treats it as binary and stays silent — on the tree this was
+    //     written against, `grep -c export apps/mobile/src/state/cache.ts`
+    //     printed nothing while `git grep -c` found 17. This sweep reads via
+    //     git ls-files + readFileSync and is immune, but that immunity is a
+    //     property worth pinning: a future refactor to `grep -r` would go
+    //     silently blind over exactly the files most likely to hide drift.
+    if (plant) {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          "  @blob \"pre\\u0000post\"\n" +
+          `  # \`${plant.symbol}\` is defined at (${plant.base}:${plant.beyond}).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const nul = linerefFindings([probeRel]);
+      if (nul.length === 0) {
+        fails.push(
+          "(d) NUL-SAFE: a probe containing a NUL byte produced NO finding — the reader has gone " +
+            "binary-blind (did the corpus or the file read switch to grep?)",
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -193,6 +220,7 @@ function selftest() {
   process.stdout.write("  ok: (a) bites on a planted stale lineref\n");
   process.stdout.write("  ok: (b) silent on a clean probe\n");
   process.stdout.write("  ok: (c) baseline key is line-insensitive and citation-sensitive\n");
+  process.stdout.write("  ok: (d) still reads a NUL-containing file that plain grep goes blind on\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
