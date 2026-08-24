@@ -134,11 +134,18 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
   # SIX `Registry.delete_barkpark/1` call sites — the exact count IS the ADD arm
   # — plus the one destructive billing verb, whose residue row is driven below.
   #
-  # CITED BY ROUTE, NOT BY LINE. This register used to name them as
-  # "router.ex 2242, 2465, 6368, 6394, 9155". router.ex is ~13k lines and grows
-  # constantly, so ANY insertion above a cited line silently invalidates every
-  # number below it — and the commit that raised this count to 6 is itself such
-  # an insertion. The route is the handle that survives.
+  # CITED BY ROUTE, NOT BY LINE. This register used to name the call sites as
+  # five bare line numbers in the cloud router — every one of them already stale
+  # in this tree. That file is ~13k lines and grows constantly, so ANY insertion
+  # above a cited line silently invalidates every number below it, and the commit
+  # that raised this count to 6 is itself such an insertion. The route is the
+  # handle that survives.
+  #
+  # The old numbers are deliberately NOT reproduced above, even as history: the
+  # lineref sweep reads a `<file>.ex <n>, <n>` shape as a LIVE citation, and a
+  # bare `router.ex` stem is ambiguous across this repo (the api router is a
+  # different, much shorter file), so quoting them makes the sweep resolve the
+  # wrong file and red on a comment that is only describing the past.
   #
   #   DELETE /v1/barkparks/:id ....................... 1 (inside Accounts.audit/2)
   #   DELETE /v1/fleet/supports/:id .................. 2 (residue row below)
