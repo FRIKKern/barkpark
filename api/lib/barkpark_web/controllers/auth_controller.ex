@@ -25,7 +25,7 @@ defmodule BarkparkWeb.AuthController do
   plug(BarkparkWeb.Plugs.RequireRecentMfa when action in [:mfa_disable])
 
   alias Barkpark.Accounts
-  alias Barkpark.Accounts.{UserNotifier, UserSession}
+  alias Barkpark.Accounts.{NotificationWithhold, UserNotifier, UserSession}
   alias Barkpark.Audit
   alias Barkpark.Auth
 
@@ -440,6 +440,12 @@ defmodule BarkparkWeb.AuthController do
     if user = Accounts.get_user_by_email(email) do
       {:ok, token} = Accounts.build_email_token(user, "reset")
       UserNotifier.deliver_reset(user.email, build_url("/auth/reset/", token))
+    else
+      # CONSENTED: no account behind this address, so there is nobody the reset
+      # was withheld FROM. Named rather than silent so the branch is greppable
+      # with every other withhold; records nothing, so a probe cannot amplify
+      # into writes and a probed address is never persisted.
+      NotificationWithhold.record("reset", :no_recipient_by_construction)
     end
 
     json(conn, %{ok: true})
@@ -452,12 +458,22 @@ defmodule BarkparkWeb.AuthController do
   identical to request-reset).
   """
   def request_magic_link(conn, %{"email" => email}) do
+    # `build_login_token/1` deliberately returns THREE shapes; a catch-all here
+    # used to collapse the last two into one silence, discarding the distinction
+    # the context module had just made. A stranger probing an address and a real
+    # user whose token mint failed are NOT the same event.
     case Accounts.build_login_token(email) do
       {:ok, token, user} ->
         UserNotifier.deliver_magic_link(user.email, build_url("/auth/magic/", token))
 
-      _ ->
-        :ok
+      :no_user ->
+        NotificationWithhold.record("magic_link", :no_recipient_by_construction)
+
+      {:error, _changeset} ->
+        NotificationWithhold.record("magic_link", :dispatch_crashed,
+          user_id: withheld_user_id(email),
+          detail: "token_mint_failed"
+        )
     end
 
     json(conn, %{ok: true})
@@ -723,6 +739,11 @@ defmodule BarkparkWeb.AuthController do
   defp notify_existing_account(email) do
     if user = Accounts.get_user_by_email(email) do
       UserNotifier.deliver_already_registered(user.email)
+    else
+      # Defensive: this helper only runs when the changeset said the address IS
+      # taken, so the account should exist. If it does not, there is nobody to
+      # notify — consented, and named rather than silent.
+      NotificationWithhold.record("already_registered", :no_recipient_by_construction)
     end
 
     :ok
@@ -733,8 +754,27 @@ defmodule BarkparkWeb.AuthController do
       {:ok, token} ->
         UserNotifier.deliver_confirmation(user.email, build_url("/auth/confirm/", token))
 
-      _ ->
-        :ok
+      {:error, _changeset} ->
+        # The account was just created and the caller is about to return a
+        # generic 201. Without this the registration succeeds, no confirmation
+        # email is ever sent, and nothing anywhere records it — the account is
+        # unconfirmable and the user was told it worked. Narrow (the reachable
+        # cause is assoc_constraint(:user), i.e. the row vanished mid-flight)
+        # but silent, which is the part that made it unfixable.
+        NotificationWithhold.record("confirmation", :dispatch_crashed,
+          user_id: user.id,
+          detail: "token_mint_failed"
+        )
+    end
+  end
+
+  # The user behind a withheld notification, looked up ONLY on the rare failure
+  # path. `build_login_token/1` reaches `{:error, _}` only after it already found
+  # a user, so this second read is both cheap and expected to hit.
+  defp withheld_user_id(email) do
+    case Accounts.get_user_by_email(email) do
+      %{id: id} -> id
+      _ -> nil
     end
   end
 
