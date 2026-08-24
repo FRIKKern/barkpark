@@ -194,6 +194,112 @@ test("coord() rejects null, undefined, NaN, and Infinity", () => {
   assert.equal(coord(Infinity), undefined);
 });
 
+/* ── coord(): a PARTIAL parse is a refusal, not a value ───────────────────── */
+/* The old implementation was `parseFloat`, which stops at the first character
+ * it cannot use and returns what it read so far. That makes a value it only
+ * partly understood indistinguishable from one it fully understood — the
+ * silent-wrongness shape, in a field whose whole job is to say where a place
+ * physically is. These are the inputs where the two implementations DIFFER;
+ * every one of them returned a plausible wrong number before. */
+
+test("coord() refuses a Norwegian decimal COMMA instead of reading 59 from it", () => {
+  // The live hazard: nb-NO writes decimals with a comma, geo.latitude arrives
+  // as free text, and parseFloat("59,9139") is 59 — the same place moved about
+  // 101 km south, with nothing anywhere saying so.
+  assert.equal(coord("59,9139"), undefined);
+  assert.equal(coord("10,75"), undefined);
+});
+
+test("coord() refuses a number with a trailing unit or any other tail", () => {
+  assert.equal(coord("59.9deg"), undefined);
+  assert.equal(coord("12abc"), undefined);
+  assert.equal(coord("59.9 10.7"), undefined); // both coordinates in one field
+});
+
+test("coord() refuses a hex literal — Number() would read 0x10 as 16", () => {
+  // The reason the guard is a numeric-literal test and not a bare Number():
+  // Number("0x10") is 16 and Number("") is 0, so Number alone trades one silent
+  // wrong answer for two others.
+  assert.equal(coord("0x10"), undefined);
+});
+
+test("coord() still accepts every shape a real coordinate takes", () => {
+  assert.equal(coord("59.9139"), 59.9139);
+  assert.equal(coord(" 59.9139 "), 59.9139); // surrounding whitespace is fine
+  assert.equal(coord("-10.75"), -10.75);
+  assert.equal(coord("+10.75"), 10.75);
+  assert.equal(coord("59"), 59);
+  assert.equal(coord("59."), 59);
+  assert.equal(coord(".5"), 0.5);
+  assert.equal(coord("5.99e1"), 59.9);
+});
+
+test("coord() refuses an exponent that overflows to Infinity", () => {
+  // A complete numeric literal, and still not a number we can place.
+  assert.equal(coord("1e999"), undefined);
+});
+
+/* ── normalizePlace(): out of range is the same class as (0,0) ────────────── */
+/* Web-Mercator's domain is the honest limit of "somewhere we can put on a map".
+ * The map does not FAIL on a latitude of 599 — places-map.tsx clamps latitude
+ * to +/-85.05 inside latToWorldY, so the pin silently lands in the Arctic, and
+ * fitToPlaces() takes min/max over EVERY place, so that one row drags the
+ * bounding box to the pole and collapses the shared landing map's zoom. One
+ * malformed document, every other pin unreadable. */
+
+test("normalizePlace returns null for a latitude outside +/-90", () => {
+  assert.equal(
+    normalizePlace({ _id: "p1", slug: "p", geo: { latitude: "599.1", longitude: "10.7" } }),
+    null,
+  );
+  assert.equal(
+    normalizePlace({ _id: "p1", slug: "p", geo: { latitude: "-91", longitude: "10.7" } }),
+    null,
+  );
+});
+
+test("normalizePlace returns null for a longitude outside +/-180", () => {
+  assert.equal(
+    normalizePlace({ _id: "p1", slug: "p", geo: { latitude: "59.9", longitude: "180.1" } }),
+    null,
+  );
+});
+
+test("normalizePlace keeps the exact edges of the domain — the guard is not off by one", () => {
+  // +/-90 and +/-180 are legal coordinates, so a guard that refused them would
+  // be a new silent data loss in place of the old silent wrongness.
+  const poles = normalizePlace({
+    _id: "p1",
+    slug: "p",
+    geo: { latitude: "90", longitude: "180" },
+  }) as Place;
+  assert.equal(poles.lat, 90);
+  assert.equal(poles.lng, 180);
+  const anti = normalizePlace({
+    _id: "p2",
+    slug: "q",
+    geo: { latitude: "-90", longitude: "-180" },
+  }) as Place;
+  assert.equal(anti.lat, -90);
+  assert.equal(anti.lng, -180);
+});
+
+test("normalizePlace DROPS a comma-decimal coordinate rather than pinning it 101 km away", () => {
+  // The end-to-end consequence of the coord() rule: the document does not reach
+  // the map at all. Dropping the place is the lesser harm — an absent entry is
+  // visibly absent, a confidently misplaced one sends a reader to the wrong
+  // town. This is the same ruling the (0,0) guard already made.
+  assert.equal(
+    normalizePlace({
+      _id: "p1",
+      slug: "bjorvika",
+      title: "Bjorvika",
+      geo: { latitude: "59,9139", longitude: "10,7522" },
+    }),
+    null,
+  );
+});
+
 /* ── str() ───────────────────────────────────────────────────────────────── */
 /* Newly reachable: `str()` decides ABSENT vs PRESENT for every optional field
  * on a Place, so its empty-string rule is what keeps an empty upstream value

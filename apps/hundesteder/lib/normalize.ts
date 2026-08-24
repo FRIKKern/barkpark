@@ -55,16 +55,55 @@ export function str(v: unknown): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
+/** A COMPLETE numeric literal, and nothing else. Optional sign, digits with an
+ * optional fractional part (or a bare fraction), optional exponent. */
+const NUMERIC_LITERAL = /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+
 /** Coerce a coordinate that arrives as a numeric string (or, defensively, a
- * number). Returns undefined when the value can't be read as a finite number. */
+ * number). Returns undefined when the value can't be read as a finite number.
+ *
+ * THE WHOLE STRING OR NOTHING. This used to be `parseFloat`, which stops at the
+ * first character it cannot use and returns what it read so far — so a value it
+ * only PARTIALLY understood came back looking exactly like a value it fully
+ * understood. Measured on the real function:
+ *
+ *     coord("59,9139")  ->  59        a Norwegian decimal COMMA: ~101 km south
+ *     coord("59.9deg")  ->  59.9      a stray unit, silently eaten
+ *     coord("12abc")    ->  12
+ *
+ * The comma is the one that matters, and it is not hypothetical: this is a
+ * Norwegian directory, nb-NO writes decimals with a comma, and `geo.latitude`
+ * arrives from upstream as a free-text STRING. An editor who types the number
+ * the way their locale spells it gets a place pinned about a hundred kilometres
+ * from where it is — no error, no warning, and a page that looks entirely
+ * normal. A wrong coordinate is worse than an absent one, because the reader
+ * acts on it.
+ *
+ * So the string is a complete numeric literal or it is refused, and a refused
+ * coordinate makes normalizePlace() return null — the same outcome the (0,0)
+ * guard already produces, for the same reason. `Number()` alone would not do:
+ * it reads "0x10" as 16 and "" as 0. */
 export function coord(v: unknown): number | undefined {
   if (typeof v === "number" && Number.isFinite(v)) return v;
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = parseFloat(v);
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  if (!NUMERIC_LITERAL.test(t)) return undefined;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : undefined; // "1e999" is a literal, but Infinity
 }
+
+/** Web-Mercator's domain — the honest limit of "somewhere we can put on a map".
+ *
+ * OUT OF RANGE IS THE SAME CLASS AS (0,0): not a real coordinate, and drawing it
+ * anyway is worse than dropping it. `components/places-map.tsx` CLAMPS latitude
+ * to +/-85.05 before projecting (`clampLat`, called inside `latToWorldY`), so a
+ * latitude of 599 does not fail — it silently becomes a pin in the Arctic. And
+ * `fitToPlaces()` takes min/max over EVERY place before choosing the zoom, so
+ * that single row drags the bounding box to the pole and collapses the landing
+ * map towards MIN_ZOOM: one malformed document, and every other pin on the
+ * shared surface becomes an unreadable dot. */
+const LAT_LIMIT = 90;
+const LNG_LIMIT = 180;
 
 /** Normalise one raw upstream `place` document into a `Place`, or null if it
  * lacks a usable coordinate (the map can only show what it can place, and the
@@ -82,6 +121,8 @@ export function normalizePlace(raw: unknown): Place | null {
   if (lat === undefined || lng === undefined) return null;
   // A literal (0,0) is an unset default, not a real place — drop it.
   if (lat === 0 && lng === 0) return null;
+  // Outside the projection's domain: also not a real place. See LAT_LIMIT.
+  if (Math.abs(lat) > LAT_LIMIT || Math.abs(lng) > LNG_LIMIT) return null;
 
   const id = str(r._id) ?? str(r.id) ?? str(r.slug);
   if (!id) return null;
