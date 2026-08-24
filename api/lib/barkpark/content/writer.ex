@@ -90,12 +90,14 @@ defmodule Barkpark.Content.Writer do
   write. Fires `:after_save` asynchronously after a successful write.
   """
   def create_document(type, attrs, dataset, opts \\ []) do
-    # [collide-refusal] Refuse the mixed shape BEFORE the envelope coercion —
-    # see `refuse_orphan_top_level_keys/1` for the full reasoning. All four
-    # create-family verbs (create / createOrReplace / createIfNotExists /
-    # replace) funnel through this one function, so the gate covers the family
-    # rather than one instance.
-    with :ok <- refuse_orphan_top_level_keys(attrs) do
+    # Two envelope/user-field NAME COLLISIONS, refused BEFORE the envelope
+    # coercion — [collide-refusal] for the mixed shape, [status-collision] for
+    # a flat `status` that cannot be a lifecycle value. See each function for
+    # its full reasoning. All four create-family verbs (create /
+    # createOrReplace / createIfNotExists / replace) funnel through this one
+    # function, so both gates cover the family rather than one instance.
+    with :ok <- refuse_orphan_top_level_keys(attrs),
+         :ok <- refuse_colliding_status(attrs) do
       do_create_document_from_attrs(type, attrs, dataset, opts)
     end
   end
@@ -1307,7 +1309,7 @@ defmodule Barkpark.Content.Writer do
         id = Map.get(attrs, "_id") || Map.get(attrs, "doc_id")
         title = Map.get(attrs, "title")
         status = Map.get(attrs, "status", "draft")
-        content = Map.drop(attrs, @reserved_in)
+        content = attrs |> Map.drop(@reserved_in) |> keep_own_content_field(attrs)
 
         %{
           "doc_id" => id,
@@ -1315,6 +1317,56 @@ defmodule Barkpark.Content.Writer do
           "status" => status,
           "content" => content
         }
+    end
+  end
+
+  # [own-content-field] gh-6291: a flat document's OWN field named `content`
+  # was dropped, silently, from its own content.
+  #
+  # `@reserved_in` is the flat branch's FOLD-EXCLUSION list, and it is wider
+  # than the set of keys this branch actually consumes. Audited key by key
+  # against what `Envelope.render/3` emits back (envelope.ex — its reserved set
+  # is the SEVEN `_`-prefixed keys, not these thirteen):
+  #
+  #   _id, doc_id            → consumed into `doc_id`, re-emitted as `_id`.
+  #   _type, type            → the route's `:type` wins; re-emitted as `_type`.
+  #   dataset                → the route's path segment wins.
+  #   _rev, rev              → server-generated; re-emitted as `_rev`.
+  #   _draft, _publishedId,
+  #   _createdAt, _updatedAt → derived on read; never caller data.
+  #   title                  → lifted to the column AND re-emitted by
+  #                            `render/3` as "title", so it ROUND-TRIPS. Not
+  #                            loss; do not "fix" it.
+  #   status                 → lifted to the column but NEVER re-emitted. That
+  #                            one is a real collision, handled by
+  #                            `refuse_colliding_status/1` below, not here.
+  #   content                → consumed by NOTHING on this branch. The branch is
+  #                            DEFINED by `content` not being a map, so there is
+  #                            no envelope to consume it. Dropping it was pure
+  #                            loss with no beneficiary.
+  #
+  # So `content` is folded back in, exactly like every other non-reserved key.
+  # WHY THIS IS NOT THE FOLD THE [collide-refusal] BLOCK FORBIDS: that refusal
+  # protects the CONTENT-PRESENT branch, where `Content.Mutations`'
+  # `incoming_content/1` sees only the nested map and is BLIND to flat siblings.
+  # Here there is no nested map — `incoming_content/1` resolves through this
+  # SAME function and therefore sees everything folded, which is precisely why
+  # mutate_controller_test's "the FLAT Sanity envelope is not an escape" passes.
+  # Folding one more key into a map the guard already reads adds no bypass.
+  #
+  # `@reserved_in` itself is left ALONE: `@collide_exempt` is derived from it,
+  # and on the mixed branch `content` IS the envelope key and must stay exempt
+  # there. The narrowing belongs to this branch only.
+  #
+  # An explicit `"content": null` is treated as "no value supplied" (the same
+  # reading `Map.get/2` gives it everywhere else here), so it is not folded —
+  # an internal caller that builds attrs with a nil content key keeps today's
+  # shape rather than gaining a `%{"content" => nil}` entry.
+  defp keep_own_content_field(folded, attrs) do
+    case Map.fetch(attrs, "content") do
+      {:ok, nil} -> folded
+      {:ok, value} -> Map.put(folded, "content", value)
+      :error -> folded
     end
   end
 
@@ -1412,6 +1464,70 @@ defmodule Barkpark.Content.Writer do
         "them for you. (A document whose own field is named `content` takes the " <>
         "legacy-envelope branch — rename that field or nest the whole document.)",
       fields: Enum.join(orphans, ", ")
+    )
+  end
+
+  # [status-collision] gh-6292: a flat document's OWN field named `status` is
+  # not storable, and the error the caller got never said so.
+  #
+  # `status` is the one member of `@reserved_in` that the flat branch CONSUMES
+  # without ever giving back: it is lifted into the lifecycle column, and
+  # `Envelope.render/3` does not re-emit it (its reserved set is the seven
+  # `_`-prefixed keys; `title` is re-emitted, `status` is not). So a caller
+  # whose document type has its own `status` field — an order, a subscription,
+  # a stock record — hits one of two outcomes, and BOTH are bad reports:
+  #
+  #   1. A value outside the lifecycle vocabulary (`"in_stock"`) reaches
+  #      `Document.changeset/2`'s `validate_inclusion` and comes back as
+  #      `status: ["is invalid"]`. True, and useless: it blames the caller's own
+  #      field without ever saying that the name is what collided, so there is
+  #      nothing to act on. THAT is what this refusal replaces — same 422
+  #      `validation_failed`, same `status` key, a message that names the
+  #      collision and the way out.
+  #
+  #   2. A value that HAPPENS to be in the vocabulary (`"archived"`,
+  #      `"completed"`, `"active"`) is accepted, rewrites the document's
+  #      LIFECYCLE state, and the caller's field is gone from content. Silent.
+  #      This refusal cannot catch that one: a flat `"status": "archived"` is
+  #      byte-identical whether the caller meant the envelope or their own
+  #      field, and refusing it would break the documented flat envelope
+  #      (writer_test pins `"status" => "published"` → the status column).
+  #      Resolving it needs a contract change (a `_status` envelope key, or
+  #      consulting the type's schema for a declared `status` field), which is
+  #      a different blast radius — filed, not smuggled in here.
+  #
+  # Guarded on the FLAT branch only: with a `content` map present, `status` is
+  # unambiguously the envelope's and the caller's own field lives inside the
+  # map, where nothing collides.
+  defp refuse_colliding_status(%{} = attrs) do
+    cond do
+      is_map(Map.get(attrs, "content")) -> :ok
+      not Map.has_key?(attrs, "status") -> :ok
+      Map.get(attrs, "status") in Document.statuses() -> :ok
+      true -> {:error, colliding_status_changeset(Map.get(attrs, "status"))}
+    end
+  end
+
+  defp refuse_colliding_status(_attrs), do: :ok
+
+  # Same envelope as the orphan-key refusal: `Content.Errors` already maps
+  # `{:error, %Ecto.Changeset{}}` to the canonical 422 `validation_failed`, and
+  # the error is keyed `:status` — the SAME key `validate_inclusion` would have
+  # used — so a machine consumer that already branches on `status` keeps
+  # working and only the human-readable message improves. No new error code, no
+  # OpenAPI regeneration.
+  defp colliding_status_changeset(value) do
+    %Document{}
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.add_error(
+      :status,
+      "%{value} is not a document lifecycle status (one of %{allowed}). In a FLAT " <>
+        "envelope the top-level `status` key is reserved for the document's lifecycle " <>
+        "and is never read back as content, so a field of your own named `status` " <>
+        "cannot be stored from this shape. Nest the whole document under a `content` " <>
+        "map — inside it, `status` is an ordinary field and collides with nothing.",
+      value: inspect(value),
+      allowed: Enum.join(Document.statuses(), ", ")
     )
   end
 
