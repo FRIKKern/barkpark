@@ -92,7 +92,10 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceRevokeTest do
       assert body["revoked_count"] == 0,
              "workspace A's admin revoked #{body["revoked_count"]} of workspace B's tokens"
 
-      assert {:ok, _} = Auth.verify_token(victim),
+      # `match?/2` rather than `assert {:ok, _} = ...`: the match form is a macro
+      # that IGNORES the message, so this explanation could never have printed on
+      # the one failure it exists for.
+      assert match?({:ok, _}, Auth.verify_token(victim)),
              "workspace B's app token was revoked by an admin who is a stranger to B"
     end
 
@@ -179,7 +182,7 @@ defmodule BarkparkWeb.AppTokenCrossWorkspaceRevokeTest do
       refute Jason.decode!(foreign.resp_body)["error"]["request_id"] ==
                Jason.decode!(missing.resp_body)["error"]["request_id"]
 
-      assert {:ok, _} = Auth.verify_token(victim),
+      assert match?({:ok, _}, Auth.verify_token(victim)),
              "workspace B's app token was revoked by row id from workspace A"
     end
 
