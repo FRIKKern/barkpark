@@ -99,8 +99,22 @@ func TestExitTaxonomy_ReasonKeyAndUnknownFallbacks(t *testing.T) {
 	if got := reasonKey("plain"); got != "plain" {
 		t.Errorf("reasonKey mangled a bare token: %q", got)
 	}
-	if _, known := lookupExit("criteria_unmet:1,2"); known {
-		t.Errorf("criteria_unmet is NOT in the table and must stay unknown")
+	// criteria_unmet USED to be pinned here as deliberately unknown. It is now
+	// in the table (exit 5) along with invalid_lifecycle, sentinel_worker_id
+	// and merge_gated_criterion — the four the D371 split missed. The pin is
+	// INVERTED rather than deleted so the family lookup that reaches them
+	// through reasonKey stays covered by the test that once denied it.
+	for _, token := range []string{
+		"criteria_unmet:1,2", "invalid_lifecycle:done",
+		"sentinel_worker_id:none", "merge_gated_criterion",
+	} {
+		e, known := lookupExit(token)
+		if !known {
+			t.Errorf("lookupExit(%q) is unknown — it must resolve through the table", token)
+		}
+		if e != exitValidation {
+			t.Errorf("lookupExit(%q) = %d, want exitValidation (%d)", token, e, exitValidation)
+		}
 	}
 	if got := exitForCode("some_code_nobody_maps"); got != exitGeneric {
 		t.Errorf("unknown coded error exit = %d, want exitGeneric (%d)", got, exitGeneric)
