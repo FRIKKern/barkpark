@@ -139,6 +139,44 @@ exit code for them. Proposed mappings:
 > top-level `validation_failed` → exit `5` and renders these violation codes in the
 > message body.
 
+## The table above is a WORKED SUBSET — `codeExit` is the authority
+
+The per-code table is hand-maintained and enumerates the codes worth explaining.
+It is **not** the full vocabulary, and treating it as one is what broke this
+contract once already: `internal/cli/errors.go` `codeExit` mirrored the table
+rather than the API, so every code the API grew after the table was written
+exited `1` (generic). Measured at the repair: **61 of the API's 81 public codes
+had no bucket** — `mfa_required` (a 401) was indistinguishable from a network
+timeout, and a script branching `if rc -eq 3; then bp login; fi` never fired.
+
+Two rules keep it closed:
+
+1. **`codeExit` must be a superset of `Barkpark.Content.Errors.known_codes/0`.**
+   `TestCodeExitCoversKnownAPICodes` (`internal/cli/errors_api_parity_test.go`)
+   parses the API source and fails when a code has neither a bucket nor a named
+   exclusion. Adding a public code to the API without touching the CLI now reds.
+2. **Bucket by the status the emitter actually returns**, never by the code's
+   name: `400` → `2`, `401`/`403` → `3`, `404` → `4`, `409`/`412` → `6`,
+   `402`/`413`/`422` → `5`, `429` → `7`, `5xx` → `8`. Two live codes read against
+   this rule — `source_not_found` answers **422** (not 404) and
+   `payload_too_large` answers **413** — and both follow the status, because
+   bucketing on the name is the guesswork the table exists to end.
+
+The "code, never status" rule at the top of `errors.go` is unchanged: the CLI
+still reads only `error.code` at runtime. The status is what the *maintainer*
+consults when choosing a bucket, once.
+
+### Deliberate non-members
+
+Five members of `known_codes/0` are excluded on purpose, listed with reasons in
+`codeExitNotWireBucketable`. `hollow_paper` and `structure` are never a
+top-level `error.code` at all — they are violation entries nested inside another
+response's body. `export_failed`, `invalid_mode` and `session_unavailable` are
+emitted by the API at **two different statuses** with opposite retryability
+(e.g. `export_failed` is `503` for a bundle export and `422` for a sheets
+export), so one exit code cannot be honest about both; they stay at `1`
+("unknown", which is true) until the API disambiguates them.
+
 ## Envelope-version note (does not change the table)
 
 The v2 envelope (opt-in via `Accept-Version: 2`) only reshapes the
