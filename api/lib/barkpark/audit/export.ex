@@ -287,17 +287,21 @@ defmodule Barkpark.Audit.Export do
   defp advance(%ExportSink{} = sink, max_id) do
     now = DateTime.utc_now()
 
-    from(s in ExportSink, where: s.id == ^sink.id)
-    |> Repo.update_all(
-      set: [
-        consecutive_failures: 0,
-        last_exported_id: max_id,
-        active: true,
-        auto_disabled_at: nil,
-        disable_reason: nil,
-        updated_at: now
-      ]
-    )
+    # Returns the row count rather than a bare `:ok`: a sink deleted mid-flush
+    # updates 0 rows, and destroying that outcome one frame below the caller
+    # would make the miss unreportable (pds-bl-sentinel-ok-returner-population).
+    {updated, _} =
+      from(s in ExportSink, where: s.id == ^sink.id)
+      |> Repo.update_all(
+        set: [
+          consecutive_failures: 0,
+          last_exported_id: max_id,
+          active: true,
+          auto_disabled_at: nil,
+          disable_reason: nil,
+          updated_at: now
+        ]
+      )
 
     if not sink.active do
       Logger.warning(
@@ -306,7 +310,7 @@ defmodule Barkpark.Audit.Export do
       )
     end
 
-    :ok
+    {:ok, updated}
   end
 
   # Atomic increment (single UPDATE ... RETURNING) so concurrent flushes of the
@@ -348,24 +352,27 @@ defmodule Barkpark.Audit.Export do
           "#{detail}. Audit events are NOT reaching this SIEM. A half-open probe retries " <>
           "in #{cooldown_seconds(count)}s; Barkpark.Audit.Export.sink_health/1 reports status."
       )
+
+      {:ok, :latched}
     else
       restart_cooldown(sink, count, detail, now)
     end
-
-    :ok
   end
 
   # The half-open probe failed. Push `auto_disabled_at` forward so the NEXT
   # probe waits out a longer cooldown — without this the stamp stays old, every
   # tick reads as due, and the "backoff" would retry once a minute forever.
   defp restart_cooldown(%ExportSink{} = sink, count, detail, now) do
-    from(s in ExportSink, where: s.id == ^sink.id and s.active == false)
-    |> Repo.update_all(set: [auto_disabled_at: now, disable_reason: detail, updated_at: now])
+    {restamped, _} =
+      from(s in ExportSink, where: s.id == ^sink.id and s.active == false)
+      |> Repo.update_all(set: [auto_disabled_at: now, disable_reason: detail, updated_at: now])
 
     Logger.info(
       "[#{@probe_failed_code}] audit export sink #{sink.id} (#{sink.name}) probe failed; " <>
         "next retry in #{cooldown_seconds(count)}s"
     )
+
+    {:ok, restamped}
   end
 
   # Bounded so a long transport error can't overflow the `disable_reason` column.
