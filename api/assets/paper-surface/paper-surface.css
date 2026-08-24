@@ -324,6 +324,25 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface h4, .bp-paper-surface h5, .bp-paper-surface h6 {
   font-family: var(--paper-font-serif);
   font-weight: var(--bp-heading-weight); color: var(--paper-ink);
+  /* A heading is the widest type on the page, so it runs out of line before
+     prose does: measured in headless Chromium at a 390px viewport, an h1 holding
+     a single unbreakable 23-character word already pushes the document wider
+     than the screen, while the same word in a `<p>` still fits. Ordinary words
+     reach that length in the languages this surface publishes in — Norwegian
+     and German compounds are single words by construction — so the reader who
+     hits it is not holding a malformed document, just a long noun.
+
+     `break-word`, NOT `anywhere`: only `anywhere` participates in min-content
+     sizing, which would let a shrink-to-fit ancestor collapse around a heading
+     that fits perfectly well today. `break-word` acts solely when a word has a
+     whole line to itself and still does not fit, so every layout that was not
+     already overflowing is untouched — verified by diffing every element's
+     rendered geometry at 1280px before and after.
+
+     Automatic hyphenation is deliberately NOT the answer here: `hyphens:
+     manual` is set on prose below as an explicit choice, and turning it on for
+     headings alone would hyphenate display type against that decision. */
+  overflow-wrap: break-word;
 }
 /* Heading margins are intentionally ZERO. The user controls vertical
    rhythm via block-level spacing (`.bp-paper-edit-block` gap) — baking
@@ -451,6 +470,14 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-role-eyebrow {
   font-family: var(--paper-font-serif); color: var(--paper-accent);
   letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em;
+  /* The eyebrow is the one role that needs this and the two larger roles below
+     do not, which reads backwards until you count what it adds per character:
+     `text-transform: uppercase` swaps every lowercase glyph for a wider capital
+     and `letter-spacing: 0.08em` then pays a gap after each one. Measured at a
+     320px viewport, a 30-character compound overflows the page as an eyebrow
+     while the same word set in the 1.28em ingress does not. Size is not what
+     runs a line out of room here; per-character cost is. */
+  overflow-wrap: break-word;
 }
 .bp-paper-surface .bp-role-byline {
   border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
