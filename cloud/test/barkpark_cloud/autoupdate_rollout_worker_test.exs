@@ -129,6 +129,97 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorkerTest do
     assert fresh.autoupdate_paused, "contained (paused) for investigation"
   end
 
+  # ── task-a207d875e61a2e02: the settle timer stops latching a box it could not read ──
+  #
+  # The pin ABOVE is the MEASURED case and it is deliberately unchanged: the box
+  # answered on its own admin route (a decoded 200) and its body still did not say
+  # `current`, so the wave really did fail to land. That box is ALSO still a
+  # candidate, so dropping its containment would let the rollout re-trigger it every
+  # grace window forever while the serial-of-1 gate blocked every box behind it.
+  # Containment stays exactly there — these cases prove the fix DISCRIMINATES rather
+  # than dropping the pause wholesale.
+  test "past grace but UNREACHABLE: the marker is cleared and the box is NOT paused" do
+    stale = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+    bp = live_behind(%{autoupdate_triggered_at: stale})
+
+    # The settle GET never lands. `refresh_update_status/1` takes its `{:error,
+    # :unreachable}` rung, writes `update_state: "unknown"`, and returns an error —
+    # so nothing here is evidence that the UPDATE failed. Applying an update restarts
+    # the BEAM, so a box is EXPECTED to be unreachable across part of its own settle
+    # window: this is the healthy-box shape, not the broken-box one.
+    StudioLinkFakeHttpClient.program([{:error, :nxdomain}])
+
+    tick()
+
+    fresh = reload(bp)
+
+    refute fresh.autoupdate_triggered_at,
+           "the marker MUST still be cleared — leaving it stamped holds the " <>
+             "serial-of-1 gate shut and freezes the whole fleet behind one unreachable box"
+
+    refute fresh.autoupdate_paused,
+           "a measurement we could not take must never write the flag whose only " <>
+             "`false` writer is a human PATCH"
+
+    assert fresh.update_state == "unknown",
+           "the failure IS recorded — by refresh_update_status/1, in a column a " <>
+             "later automatic pass re-measures"
+  end
+
+  test "the unreachable box re-enters the rollout by itself, with no human write" do
+    # THE NO-WEDGE CONTROL, and the reason the dropped pause needs no replacement
+    # flag. `next_autoupdate_candidate/1` requires `update_state == "behind"`, so an
+    # unreachable box is ALREADY out of the candidate set on "unknown" — and it comes
+    # back the moment it answers again. Nobody clears anything.
+    stale = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+    bp = live_behind(%{autoupdate_triggered_at: stale})
+
+    StudioLinkFakeHttpClient.program([{:error, :nxdomain}])
+    tick()
+
+    refute Registry.next_autoupdate_candidate(),
+           "while unreadable it is not a candidate — containment without a flag"
+
+    # The box comes back and answers honestly: still behind, so still work to do.
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: check_body("behind")}}])
+    {:ok, _} = Registry.refresh_update_status(reload(bp))
+
+    assert %{id: id} = Registry.next_autoupdate_candidate()
+    assert id == bp.id, "eligible again with no human in the loop"
+  end
+
+  test "a settle-latched box is DISTINGUISHABLE from one latched for being unarmed" do
+    # Criterion 3. The two machine-observed conditions must not collapse into one
+    # row shape, or an operator resuming a settle-latched box gets 409'd with advice
+    # about arming a box that is already armed.
+    stale = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+    settled_late = live_behind(%{autoupdate_triggered_at: stale})
+
+    # ARMED, and still behind after the grace → a measured failure to land.
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: armed_check_body("behind")}}])
+    tick()
+
+    latched = reload(settled_late)
+    assert latched.autoupdate_paused, "measured failure → contained"
+
+    assert latched.apply_arming == "armed",
+           "and it is on record as ARMED — so refuse_unarmed_resume/2 lets the " <>
+             "operator resume it, rather than 409'ing with an irrelevant remedy"
+
+    # The 503 box is the other condition: unarmed, and NOT paused.
+    unarmed = live_behind()
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 503, body: ~s({"error":{}})}}])
+    tick()
+
+    other = reload(unarmed)
+    assert other.apply_arming == "unarmed"
+    refute other.autoupdate_paused
+
+    refute {latched.autoupdate_paused, latched.apply_arming} ==
+             {other.autoupdate_paused, other.apply_arming},
+           "the two causes leave different rows"
+  end
+
   # ── task-0dd7578bc3d2bcbd: a 503 records, it does not latch ────────────────
   #
   # THESE REPLACE the pin that asserted `503 → autoupdate_paused`. That pin was
