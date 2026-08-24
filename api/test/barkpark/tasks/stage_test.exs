@@ -238,6 +238,72 @@ defmodule Barkpark.Tasks.StageTest do
       assert ev.document["staged"]["note"] == "why I parked it"
       assert ev.document["staged"]["note_key"] == "disposition_reason"
       assert is_binary(ev.document["staged"]["lapses_at"])
+      # Nothing was superseded here — the row carried no reason to begin with.
+      refute ev.document["staged"]["superseded_note"]
+    end
+
+    # A NOTE REPLACES, IT DOES NOT APPEND — and the replaced text must not
+    # vanish without a receipt. Measured on the live ledger before this arm
+    # existed: two stages on one row left only the second note (69 chars ->
+    # 58 chars), the first gone from the row with no trace in it. That is the
+    # intended shape of a field holding ONE reason for ONE disposition, and the
+    # wrong shape for how callers use it — cautions reading "do not execute this
+    # row as written" were written here and were erasable by the next agent to
+    # re-adjudicate. The row still holds one reason; the EVENT now carries the
+    # one it displaced.
+    test "task.staged carries the note it SUPERSEDED, so an overwrite leaves a receipt",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-supersede")
+      task = mk_task!(doc_id, scope)
+
+      assert stage(conn, doc_id, %{state: "considering", note: "FIRST: do not execute as written"}).status ==
+               200
+
+      assert stage(conn, doc_id, %{state: "researching", note: "SECOND: a different caution"}).status ==
+               200
+
+      # The row keeps ONE reason — the newest. That is unchanged and intended.
+      assert reload(task).content["disposition_reason"] == "SECOND: a different caution"
+
+      evs =
+        Repo.all(
+          from(e in MutationEvent,
+            where: e.doc_id == ^task.doc_id and e.mutation == "task.staged",
+            order_by: [asc: e.id]
+          )
+        )
+
+      assert length(evs) == 2
+      [first, second] = evs
+
+      # The first stage superseded nothing.
+      refute first.document["staged"]["superseded_note"]
+
+      # The second names BOTH texts, so one event answers "what did I overwrite".
+      assert second.document["staged"]["note"] == "SECOND: a different caution"
+      assert second.document["staged"]["superseded_note"] == "FIRST: do not execute as written"
+    end
+
+    # The control that gives the arm above its meaning: a stage that writes NO
+    # note supersedes nothing, so it must not report a supersession just because
+    # the row happened to carry a reason already. Without this, the field could
+    # be populated unconditionally and the arm above would still pass.
+    test "a stage without a note reports NO supersession even when a reason exists",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-supersede-control")
+      task = mk_task!(doc_id, scope, %{"disposition_reason" => "an existing reason"})
+
+      assert stage(conn, doc_id, %{state: "considering", worker: "cycle-9"}).status == 200
+
+      [ev] =
+        Repo.all(
+          from(e in MutationEvent,
+            where: e.doc_id == ^task.doc_id and e.mutation == "task.staged"
+          )
+        )
+
+      refute ev.document["staged"]["superseded_note"]
+      assert reload(task).content["disposition_reason"] == "an existing reason"
     end
   end
 
