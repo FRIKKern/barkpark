@@ -15,8 +15,6 @@ defmodule Barkpark.Access.GrantNotifier do
   require Logger
   alias Barkpark.Mailer
 
-  @from {"Barkpark", "no-reply@barkpark.cloud"}
-
   @doc """
   Send the grant-access link to `email`. `url` is the fully-formed
   `<base>/grant/<token>` claim link.
@@ -50,7 +48,7 @@ defmodule Barkpark.Access.GrantNotifier do
     mail =
       new()
       |> to(email)
-      |> from(@from)
+      |> from(Mailer.from())
       |> subject("You've been granted access on Barkpark")
       |> text_body(body)
 

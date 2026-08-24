@@ -650,9 +650,9 @@ end
 #
 # Env-driven only, no secrets in code. Shares the SMTP_* vocabulary with the cloud
 # control plane (cloud/config/runtime.exs) so one EnvironmentFile can drive both
-# apps behind the same postfix relay. The From address is owned by UserNotifier
-# (no-reply@barkpark.cloud, matching the DKIM-signed relay domain) and is
-# intentionally NOT overridden here.
+# apps behind the same postfix relay. The From identity is NOT set here — it is
+# independent of the transport (see the MAIL_FROM_* block below) so an operator
+# can set a sender without also declaring a relay.
 case System.get_env("SMTP_HOST") do
   relay when is_binary(relay) and relay != "" ->
     smtp_username = System.get_env("SMTP_USERNAME")
@@ -705,6 +705,38 @@ case System.get_env("SMTP_HOST") do
 
   _ ->
     :ok
+end
+
+# The transactional From identity (gh-9531). Barkpark.Mailer.from/0 reads
+# `config :barkpark, :mail` at CALL time; config.exs holds the historical
+# no-reply@barkpark.cloud / "Barkpark" default. It used to be a compile-time
+# `@from` module attribute inside each notifier, which a release BUILD freezes —
+# so a self-hoster pointing SMTP_HOST at their own relay could not change the
+# sender, and most relays reject (or the receiver DMARC-fails) a message whose
+# From is not the authenticated sender. Delivery is fire-and-forget through
+# Barkpark.TaskSupervisor, so those rejections were invisible: register /
+# request-reset still returned 200 and the mail was simply never delivered.
+#
+# Shares the MAIL_FROM_* vocabulary with the cloud control plane
+# (cloud/config/runtime.exs) so one EnvironmentFile drives both apps.
+#
+# Set only what is PRESENT in the environment: Config deep-merges keyword lists,
+# so setting MAIL_FROM_ADDRESS alone leaves the default from_name intact, and
+# setting NEITHER leaves config.exs untouched — zero behaviour change for every
+# existing deployment. A present-but-malformed value is NOT silently discarded:
+# Barkpark.Mailer.from/0 raises on it, and Barkpark.Application.start/2 calls
+# from/0 at boot so the node REFUSES rather than emitting a wrong sender.
+mail_from_overrides =
+  Enum.reduce([{:from_address, "MAIL_FROM_ADDRESS"}, {:from_name, "MAIL_FROM_NAME"}], [], fn
+    {key, var}, acc ->
+      case System.get_env(var) do
+        nil -> acc
+        value -> [{key, value} | acc]
+      end
+  end)
+
+if mail_from_overrides != [] do
+  config :barkpark, :mail, mail_from_overrides
 end
 
 # Trust boundary for x-forwarded-for on every IP-keyed rate bucket

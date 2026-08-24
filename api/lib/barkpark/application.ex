@@ -9,6 +9,18 @@ defmodule Barkpark.Application do
 
   @impl true
   def start(_type, _args) do
+    # gh-9531 FAIL-CLOSED: resolve the transactional From once, HERE, so a
+    # malformed MAIL_FROM_ADDRESS / MAIL_FROM_NAME refuses the node at boot.
+    # Barkpark.Mailer.from/0 raises on a bad value rather than falling back to
+    # the barkpark.cloud default — a silent fallback IS the gh-9531 defect in a
+    # new costume (the operator believes their sender is set while the box keeps
+    # emitting ours). Without this call the first observation of a typo would be
+    # a real user's password reset never arriving, because delivery is
+    # fire-and-forget through Barkpark.TaskSupervisor and nothing reads the
+    # result. Unset env keeps the config.exs default, so this is a no-op for
+    # every deployment that has not opted in.
+    _ = Barkpark.Mailer.from()
+
     # The /v1/graph admission-cap slot table, created HERE and nowhere else that
     # matters. It is a CONCURRENCY BOUND, not a cache: the rows are the slots
     # currently held, so the table must outlive every request that holds one.

@@ -71,6 +71,15 @@ config :mime, :extensions, %{"json" => "application/json"}
 config :swoosh, :api_client, false
 config :barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Local
 
+# The transactional From identity, read by `Barkpark.Mailer.from/0` at CALL time
+# (NOT a module attribute — gh-9531: an attribute is frozen at release BUILD, so
+# runtime.exs could never move it and a self-hoster on their own relay was stuck
+# sending as no-reply@barkpark.cloud, which most relays reject). runtime.exs
+# overrides each from MAIL_FROM_ADDRESS / MAIL_FROM_NAME. No secret here.
+config :barkpark, :mail,
+  from_address: "no-reply@barkpark.cloud",
+  from_name: "Barkpark"
+
 config :barkpark, :idempotency, ttl_seconds: 86_400
 
 config :barkpark, :rate_limits,
