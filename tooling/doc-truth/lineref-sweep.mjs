@@ -170,6 +170,74 @@ function deriveClipTarget() {
   return null;
 }
 
+// A basename with TWO tracked paths of clearly different lengths, plus a line
+// only the LONGER one has, and a real token near that line to serve as an
+// anchor. Derived from the live corpus so arms (h)/(i) test the tree rather
+// than a fixture; returns null when no such pair exists, and the arms then
+// declare themselves vacuous instead of passing silently.
+function deriveAmbiguousTarget() {
+  // THE ARM MUST BE ABLE TO BITE, WHICH CONSTRAINS THE PAIR HARD. The reverted
+  // resolver takes the FIRST tracked path whose basename matches — so a pair
+  // whose first match happens to be the right file proves nothing, and an arm
+  // built on one passes under the mutation. (Measured: the first draft picked
+  // api/config/dev.exs, which IS the first match, and both arms went green with
+  // the fix reverted.) So: require that first-match order lands on a file where
+  // the cited line is OUT OF RANGE, and that some OTHER candidate contains it.
+  // Then the old resolver must report "exceeds file length" and the new one
+  // must not.
+  const { present } = codeCommentCorpus();
+  const order = [];
+  try {
+    const out = execFileSync("git", ["ls-files"], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }).toString();
+    for (const l of out.split("\n")) if (l) order.push(l);
+  } catch { return null; }
+
+  const byBase = new Map();
+  for (const rel of order) {
+    const b = rel.split("/").pop();
+    if (!byBase.has(b)) byBase.set(b, []);
+    byBase.get(b).push(rel);
+  }
+  const inCorpus = new Set(present);
+
+  for (const [base, paths] of byBase) {
+    if (paths.length < 2) continue;
+    const first = paths[0];                       // what the reverted resolver picks
+    let firstLen = 0;
+    try { firstLen = readFileSync(join(ROOT, first), "utf8").split("\n").length; } catch { continue; }
+    for (const other of paths.slice(1)) {
+      if (!inCorpus.has(other)) continue;         // arm (i) cites it; keep it a real code file
+      let lines;
+      try { lines = readFileSync(join(ROOT, other), "utf8").split("\n"); } catch { continue; }
+      if (lines.length <= firstLen + 20) continue; // need a line the first match cannot have
+      for (let i = firstLen + 10; i < lines.length; i++) {
+        // SNAKE_CASE ONLY. linerefNeedles harvests quoted strings, dotted
+        // symbols and snake_case idents; a bare lowercase word is not a needle,
+        // so a probe anchored on one leaves NO anchor, verifyLineref exits
+        // "unverifiable" before the range check, and the arm passes vacuously.
+        const m = (lines[i] || "").match(/[a-z][a-z0-9]*_[a-z0-9_]{4,}/);
+        if (!m) continue;
+        // The needle must be a REAL anchor, not a word the citation itself
+        // supplies. A needle that appears in either candidate path is
+        // self-derived, verifyLineref discards it, and with no anchor left the
+        // verdict is "unverifiable" — which is silence, so the arm passes even
+        // with the fix reverted. That is how arm (h) shipped vacuous the first
+        // time: its only anchor was the stem.
+        const wordsInPaths = (first + " " + other).toLowerCase();
+        if (wordsInPaths.includes(m[0].toLowerCase())) continue;
+        if (base.toLowerCase().includes(m[0].toLowerCase())) continue;
+        return {
+          base,
+          long: other, short: first,
+          longLines: lines.length, shortLines: firstLen,
+          line: i + 1, needle: m[0],
+        };
+      }
+    }
+  }
+  return null;
+}
+
 // A file whose BASENAME contains an underscore — its stem is then harvested by
 // the snake_case needle rule, which is the whole precondition for the
 // false-positive class arm (g) pins. Returns {base, line} or null.
@@ -351,6 +419,65 @@ function selftest() {
         );
       }
     }
+
+    // (h) AMBIGUOUS STEM — a citation whose basename matches TWO tracked files
+    //     and whose line is valid in the SECOND must not be reported stale.
+    //     Before path-honoring, resolution was first-match: the sweep validated
+    //     the cited line against whichever file it happened to find first and
+    //     reported a correct citation as rot. Measured on this tree, 33 of 36
+    //     out-of-range findings were false positives of exactly this shape.
+    //
+    //     Chosen from the LIVE corpus, never planted: a basename with 2+ tracked
+    //     paths of clearly different lengths, cited at a line only the longer one
+    //     has. The arm is vacuous — and says so — if no such pair exists.
+    const amb = deriveAmbiguousTarget();
+    if (!amb) {
+      fails.push("(h) SETUP: no ambiguous basename with a long/short pair — the arm would be vacuous");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # ${amb.needle} is described at ${amb.base}:${amb.line}.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const ambFindings = linerefFindings([probeRel]);
+      if (ambFindings.length !== 0) {
+        fails.push(
+          `(h) AMBIGUOUS: a citation valid in ${amb.long} (${amb.longLines} lines) was reported ` +
+            `stale because the resolver bound \`${amb.base}\` to ${amb.short} (${amb.shortLines} lines): ` +
+            (ambFindings[0].evidence || ""),
+        );
+      }
+    }
+
+    // (i) EXPLICIT PATH — a citation that supplies a directory-qualified path
+    //     whose BASENAME also exists elsewhere must bind to the path it names.
+    //     This is the half arm (h) cannot cover: those citations are not
+    //     ambiguous at all, so "report ambiguity" is the wrong verdict for them
+    //     — the path already disambiguates. 10 of the 33 measured false
+    //     positives were this shape, including
+    //     `cloud/lib/barkpark_cloud/accounts.ex:2186` checked against
+    //     api/lib/barkpark/accounts.ex (943 lines) and reported out of range.
+    if (!amb) {
+      fails.push("(i) SETUP: shares (h)'s corpus pair and it was unavailable");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # ${amb.needle} is described at ${amb.long}:${amb.line}.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const pathFindings = linerefFindings([probeRel]);
+      if (pathFindings.length !== 0) {
+        fails.push(
+          `(i) EXPLICIT PATH: the citation named ${amb.long}:${amb.line} outright and was still ` +
+            `resolved by basename to ${amb.short} — an explicit path must never fall back to ` +
+            "basename matching: " + (pathFindings[0].evidence || ""),
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -370,6 +497,8 @@ function selftest() {
   process.stdout.write("  ok: (e) bites on an exhaustive claim over a window one line too narrow\n");
   process.stdout.write("  ok: (f) silent on the SAME run cited whole — (e) reds on narrowness, not on ranges\n");
   process.stdout.write("  ok: (g) silent on a CORRECT bare `<file>:<line>` — the filename stem is not an anchor\n");
+  process.stdout.write("  ok: (h) silent on an AMBIGUOUS stem whose line is valid in another candidate\n");
+  process.stdout.write("  ok: (i) an EXPLICIT path binds to the file it names, never to a basename twin\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
