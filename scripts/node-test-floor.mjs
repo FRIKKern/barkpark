@@ -82,6 +82,19 @@ if (typeof globSync !== "function") {
   fail(`node ${process.version} has no fs.globSync — this runner needs node >= 22`);
 }
 
+// This runner OWNS the reporter: it parses TAP to count what each file actually
+// registered, so a caller-supplied reporter would silently take over stdout and
+// leave the count unreadable. That case fails closed (an unreadable count is
+// treated as a failure, never a pass) — but failing closed on a caller's
+// reasonable-looking flag is a bad way to learn this, so say it up front.
+const clash = nodeArgs.find((a) => a === "--test-reporter" || a.startsWith("--test-reporter="));
+if (clash) {
+  fail(
+    `${clash} cannot be forwarded — this runner sets its own TAP reporter in order to count the tests each file\n` +
+      `  registered. Drop the flag: the per-file TAP output is printed verbatim, and the summary line reports the totals.`,
+  );
+}
+
 // ------------------------------------------------------------------ collection
 // Expanded pattern by pattern, so a pattern that matches nothing is named even
 // when its siblings matched plenty. That is defect 2 above.
