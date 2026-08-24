@@ -27,6 +27,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.OnixEdit.Export
+  alias BarkparkWeb.ErrorResponse
 
   @content_type "application/onix+xml"
 
@@ -52,25 +53,26 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
         |> send_resp(200, iodata)
 
       {:error, {:xsd_invalid, reasons}} ->
-        conn
-        |> put_status(500)
-        |> json(%{error: %{type: "xsd_invalid", reasons: reasons}})
+        ErrorResponse.emit_custom(
+          conn,
+          500,
+          "xsd_invalid",
+          "the rendered ONIX did not validate against the 3.0 schema",
+          %{reasons: reasons}
+        )
 
       # A valid-but-unseeded (or non-string) ONIX codelist code. The document
       # is structurally fine — it just references a code our export maps don't
       # cover — so this is the caller's problem, not a server fault: 422 with a
       # structured body naming the offending codelist + code, never a bare 500.
       {:error, {:invalid_code, detail}} ->
-        conn
-        |> put_status(422)
-        |> json(%{
-          error: %{
-            type: "invalid_onix_code",
-            codelist: detail["codelist"],
-            code: detail["code"],
-            message: detail["message"]
-          }
-        })
+        ErrorResponse.emit_custom(
+          conn,
+          422,
+          "invalid_onix_code",
+          detail["message"] || "the document references an ONIX code this export cannot map",
+          %{codelist: detail["codelist"], onix_code: detail["code"]}
+        )
     end
   end
 
@@ -111,8 +113,6 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   end
 
   defp send_404(conn) do
-    conn
-    |> put_status(404)
-    |> json(%{error: %{type: "not_found", message: "document not found"}})
+    ErrorResponse.emit(conn, {:error, :not_found})
   end
 end

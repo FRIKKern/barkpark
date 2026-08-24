@@ -103,7 +103,10 @@ defmodule BarkparkWeb.SocialControllerTest do
       |> get("/v1/auth/social/google/callback?state=s1")
       |> json_response(400)
 
-    assert body["error"] == "code and state are required"
+    # §9 envelope, not the bare string this used to answer.
+    assert body["error"]["code"] == "malformed"
+    assert body["error"]["message"] == "code and state are required"
+    assert is_binary(body["error"]["request_id"])
   end
 
   test "start for an unconfigured provider is 404", %{conn: conn} do

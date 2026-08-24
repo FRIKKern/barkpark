@@ -7,6 +7,7 @@ defmodule BarkparkWeb.SsoRoutingController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Sso.Domains
+  alias BarkparkWeb.ErrorResponse
 
   def route(conn, %{"email" => email}) when is_binary(email) do
     case Domains.route_for_email(email) do
@@ -22,5 +23,6 @@ defmodule BarkparkWeb.SsoRoutingController do
     end
   end
 
-  def route(conn, _), do: conn |> put_status(400) |> json(%{error: "email is required"})
+  def route(conn, _),
+    do: ErrorResponse.emit_custom(conn, 400, "malformed", "email is required")
 end

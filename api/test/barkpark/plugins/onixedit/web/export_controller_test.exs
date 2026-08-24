@@ -106,7 +106,10 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
       resp = admin_get(conn, "/v1/plugins/onixedit/export/#{@dataset}/#{@post_id}.onix")
       assert resp.status == 404
       payload = Jason.decode!(resp.resp_body)
-      assert get_in(payload, ["error", "type"]) == "not_found"
+      # §9 names the discriminator `code`, never `type` — and the envelope now
+      # carries the request_id that makes the refusal correlatable to the logs.
+      assert get_in(payload, ["error", "code"]) == "not_found"
+      assert is_binary(get_in(payload, ["error", "request_id"]))
     end
   end
 
@@ -134,14 +137,18 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
       :ok
     end
 
-    test "422 with invalid_onix_code type + offending codelist/code", %{conn: conn} do
+    test "422 with invalid_onix_code code + offending codelist/code in details", %{conn: conn} do
       resp = admin_get(conn, "/v1/plugins/onixedit/export/#{@dataset}/#{@bad_book_id}.onix")
 
       assert resp.status == 422
       payload = Jason.decode!(resp.resp_body)
-      assert get_in(payload, ["error", "type"]) == "invalid_onix_code"
-      assert get_in(payload, ["error", "codelist"]) == "product_form"
-      assert get_in(payload, ["error", "code"]) == "ZZ"
+      assert get_in(payload, ["error", "code"]) == "invalid_onix_code"
+      # The offending codelist + value moved under `details`, and the ONIX code
+      # is `details.onix_code` — `error.code` is the ERROR code now, so the two
+      # meanings of "code" no longer collide in one envelope.
+      assert get_in(payload, ["error", "details", "codelist"]) == "product_form"
+      assert get_in(payload, ["error", "details", "onix_code"]) == "ZZ"
+      assert is_binary(get_in(payload, ["error", "request_id"]))
     end
   end
 
@@ -295,7 +302,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
           500 ->
             payload = Jason.decode!(resp.resp_body)
 
-            assert get_in(payload, ["error", "type"]) == "xsd_invalid",
+            assert get_in(payload, ["error", "code"]) == "xsd_invalid",
                    "expected the in-scope lookup's 500 to be the xsd_invalid envelope, got #{inspect(payload)}"
 
           other ->
