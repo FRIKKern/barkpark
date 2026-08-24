@@ -3,20 +3,42 @@
 import { useCallback, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GraphView } from "@/components/graph-view";
+import { SiteProvenance } from "@/components/site-provenance";
 import type { GraphNode, GraphEdge } from "@/lib/graph";
+import type { BuildIdentity, CorpusProvenance } from "@/lib/provenance";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
+
+/** Everything the caption needs that is NOT already in `nodes`/`edges`: the
+ * deploy markers and the parts of the corpus read that survive as flags rather
+ * than as nodes. The COUNTS are deliberately absent — they are derived below
+ * from the very node array this component renders, so the number on screen can
+ * never disagree with the graph on screen. */
+export interface LandingProvenance {
+  /** Deploy markers with the "dev"/"unknown" sentinels resolved to null. */
+  build: BuildIdentity;
+  /** Whether an API base URL was configured at all (`lib/bp-env`). */
+  apiConfigured: boolean;
+  /** Upstream status when the corpus could NOT be read; null on success. */
+  upstreamStatus: number | null;
+  /** `graph <status>: <message>` on failure, null on success. */
+  upstreamReason: string | null;
+}
 
 export interface GraphLandingProps {
   nodes: GraphNode[];
   edges: GraphEdge[];
   rootId?: string | null;
-  /** The server cut the node list at its graph budget (`truncated` on the
-   * upstream payload — see `lib/graph.ts`). Drives the honest showing-N line
-   * below; absent/false claims nothing. */
+  /** The server cut the corpus at a ceiling (`truncated` on the upstream
+   * payload — see `lib/graph.ts`). Drives the "At least N" line below; absent
+   * or false claims nothing. */
   truncated?: boolean;
-  /** Upstream `truncation_reason` (e.g. "node_budget") — surfaced for devtools
-   * via a title attribute, never as user copy. */
+  /** Upstream `truncation_reason` ("per_type_cap", "node_budget", …). Rendered
+   * as VISIBLE text, never as a tooltip — see below. */
   truncationReason?: string | null;
+  /** Build + connection truth for the provenance line. Omitted → no provenance
+   * surface at all, which is the honest degradation: this component must never
+   * invent a state it was not told about. */
+  provenance?: LandingProvenance;
 }
 
 /**
@@ -36,6 +58,16 @@ export interface GraphLandingProps {
  * its search box, suppressed here via `externalSearch` (the finder owns
  * search). This caption is the host's ONE overlay and lives bottom-left — the
  * only free corner. Never move it onto a renderer-owned corner.
+ *
+ * WHAT THE CAPTION SAYS, and why it is not just a number: the corpus count used
+ * to render as a bare "N documents" whether or not the server had cut it, with
+ * the cut described as "Showing the first N — the full corpus is larger" and
+ * the upstream reason parked in a `title=` attribute no touch, keyboard or
+ * screen-reader user ever reaches. That copy describes a PREFIX cut; the cut
+ * that actually fires on the live corpus is a per-TYPE cap, under which nothing
+ * is "the first" of anything. The count, the ceiling, the build and the
+ * connection state now all come from `lib/provenance` (pure, unit-pinned), and
+ * the counts specifically are derived from THIS component's own `nodes` array.
  */
 export function GraphLanding({
   nodes,
@@ -43,6 +75,7 @@ export function GraphLanding({
   rootId = null,
   truncated = false,
   truncationReason = null,
+  provenance,
 }: GraphLandingProps) {
   const router = useRouter();
   const sp = useSearchParams();
@@ -52,10 +85,25 @@ export function GraphLanding({
   const { matches } = useGraphMatches();
 
   // Real documents only — phantoms are referenced-but-absent, not corpus size.
+  // The provenance line prints BOTH numbers rather than picking one, because
+  // they are different numbers and a caption that shows one owes the other.
   const docCount = useMemo(
     () => nodes.reduce((n, node) => (node.phantom ? n : n + 1), 0),
     [nodes],
   );
+
+  const corpus: CorpusProvenance | null = useMemo(() => {
+    if (!provenance) return null;
+    return {
+      nodeCount: nodes.length,
+      docCount,
+      truncated,
+      truncationReason,
+      upstreamStatus: provenance.upstreamStatus,
+      upstreamReason: provenance.upstreamReason,
+      apiConfigured: provenance.apiConfigured,
+    };
+  }, [provenance, nodes.length, docCount, truncated, truncationReason]);
 
   const onNodeClick = useCallback(
     (node: GraphNode) => {
@@ -87,22 +135,17 @@ export function GraphLanding({
           `bg-graph-canvas` token is retired from this surface. */}
       {/* Caption — the host's single overlay, bottom-left (see corner contract
           above). It sits above the canvas but lets pointer events through. */}
-      <div className="pointer-events-none absolute bottom-5 left-5 z-20 max-w-xs select-none">
+      <div className="pointer-events-none absolute bottom-5 left-5 z-20 max-w-sm select-none">
         <p className="text-xs font-medium leading-relaxed text-foreground/75">
           Barkpark document graph
         </p>
         <p className="mt-1 text-[0.7rem] leading-relaxed text-muted-text">
           {matches
             ? `${matches.length} ${matches.length === 1 ? "match" : "matches"} from your search · brightest = best · click to read`
-            : `${docCount.toLocaleString()} documents · search on the left to filter · click a node to read`}
+            : "Search on the left to filter · click a node to read"}
         </p>
-        {truncated ? (
-          <p
-            className="mt-1 text-[0.7rem] leading-relaxed text-muted-text"
-            title={truncationReason ?? undefined}
-          >
-            {`Showing the first ${docCount.toLocaleString()} — the full corpus is larger`}
-          </p>
+        {corpus && provenance ? (
+          <SiteProvenance build={provenance.build} corpus={corpus} />
         ) : null}
       </div>
 

@@ -1,11 +1,13 @@
 // Corpus-graph normalization — the PURE half of the Next edition's `lib/graph.ts`
 // (templates/search-starter), ported for the static bake: `graph.json.ts` runs
-// this at BUILD so the shipped asset is already the exact `{nodes, edges, rootId}`
-// shape `public/bp-graph.js` renders — the island does zero client-side massaging
+// this at BUILD so the shipped asset is already the exact
+// `{nodes, edges, rootId, truncated, truncationReason}` shape `public/bp-graph.js`
+// renders and `GraphPane` captions — the island does zero client-side massaging
 // and inherits the same alias tolerance (id/node_id, doc_id/document_id, …) and
 // the same root selection (highest degree, "barkpark" preferred) as the original
 // landing. Keep the two in lockstep. React-free + dep-free: unit-tested by
 // `graph-normalize.test.ts` via `node --test`.
+import type { BuildIdentity } from './provenance.ts'
 
 /** A graph node, exactly as `window.BarkparkGraphRenderer` expects it. */
 export interface GraphNode {
@@ -27,11 +29,36 @@ export interface GraphEdge {
   weight?: number
 }
 
-/** The landing's full payload: nodes, edges, and the chosen accent root. */
+/** The landing's full payload: nodes, edges, the chosen accent root, and
+ * whether the server cut the corpus on its way here. */
 export interface CorpusGraph {
   nodes: GraphNode[]
   edges: GraphEdge[]
   rootId: string | null
+  /**
+   * The server cut the corpus at a ceiling — the graph shown is a SUBSET, and
+   * any caption must say so. Covers both server ceilings (the whole-graph node
+   * budget and the 1000-docs-per-type cap), so `false` really means "complete".
+   *
+   * This field used to stop at the normalizer: `CorpusGraph` was
+   * `{nodes, edges, rootId}` and `normalizeCorpusGraph` destructured only
+   * `{nodes, edges}`, so the flag never reached the baked `graph.json` bytes —
+   * which made a runtime fix impossible without re-baking, and left the static
+   * edition presenting a capped count as if it were the corpus size. It is
+   * carried end to end now: normalizer → `src/pages/graph.json.ts` → the asset
+   * → `GraphPane`'s caption.
+   */
+  truncated: boolean
+  /** Upstream `truncation_reason` ("node_budget", "per_type_cap",
+   * "per_type_cap+node_budget"), null when the server named none. */
+  truncationReason: string | null
+}
+
+/** The exact JSON `src/pages/graph.json.ts` bakes and `GraphPane` fetches: the
+ * corpus plus the identity of the build that baked it, so the pane can state
+ * which build produced what it is drawing without a second request. */
+export interface BakedCorpus extends CorpusGraph {
+  build: BuildIdentity
 }
 
 const PREFERRED_ROOT = 'barkpark'
@@ -101,6 +128,30 @@ export function computeRootId(nodes: GraphNode[], edges: GraphEdge[]): string | 
   return best
 }
 
+/**
+ * The D67 gate, in one place: a `truncation_reason` is only a reason if the
+ * server also said `truncated: true`. A reason on its own is an upstream shape
+ * drift, and honouring it would let the pane announce a cut that never
+ * happened. Strictly `=== true` so a drifted/absent flag degrades to the safe
+ * "no claim" state rather than to a truthy string.
+ */
+export function readTruncation(raw: unknown): {
+  truncated: boolean
+  truncationReason: string | null
+} {
+  const u = (raw && typeof raw === 'object' ? raw : {}) as {
+    truncated?: unknown
+    truncation_reason?: unknown
+    truncationReason?: unknown
+  }
+  const truncated = u.truncated === true
+  if (!truncated) return { truncated: false, truncationReason: null }
+  return {
+    truncated: true,
+    truncationReason: str(u.truncation_reason) ?? str(u.truncationReason) ?? null,
+  }
+}
+
 /** Normalise a raw `/v1/graph` upstream payload into the renderer-ready shape. */
 export function normalizeCorpusGraph(raw: unknown): CorpusGraph {
   const u = (raw && typeof raw === 'object' ? raw : {}) as {
@@ -113,7 +164,7 @@ export function normalizeCorpusGraph(raw: unknown): CorpusGraph {
   const edges = (u.edges ?? [])
     .map(normalizeEdge)
     .filter((e): e is GraphEdge => e !== null && present.has(e.from_id) && present.has(e.to_id))
-  return { nodes, edges, rootId: computeRootId(nodes, edges) }
+  return { nodes, edges, rootId: computeRootId(nodes, edges), ...readTruncation(raw) }
 }
 
 /**
@@ -126,6 +177,11 @@ export function normalizeCorpusGraph(raw: unknown): CorpusGraph {
  * stays visible as corpus context (edges intact, phantom styling) but neither
  * `bp-graph.js` nor GraphPane will navigate it. The root is re-chosen from the
  * still-navigable nodes so the accent anchor is always a clickable document.
+ *
+ * Truncation rides through untouched: phantoming is a LOCAL navigability
+ * decision and says nothing about whether the server cut the corpus, so
+ * dropping the flag here would silently turn a capped graph into one the pane
+ * reports as complete.
  */
 export function markNonNavigable(g: CorpusGraph, navigableTypes: string[]): CorpusGraph {
   const ok = new Set(navigableTypes)
@@ -133,5 +189,11 @@ export function markNonNavigable(g: CorpusGraph, navigableTypes: string[]): Corp
   const navigable = nodes.filter((n) => !n.phantom)
   const rootId =
     navigable.length > 0 ? computeRootId(navigable, g.edges) : computeRootId(nodes, g.edges)
-  return { nodes, edges: g.edges, rootId }
+  return {
+    nodes,
+    edges: g.edges,
+    rootId,
+    truncated: g.truncated,
+    truncationReason: g.truncationReason,
+  }
 }
