@@ -33,6 +33,21 @@ on:
   pull_request:
     paths:
       - "templates/**"
+      # THE SOURCE SIDE OF THE DRIFT check-vendor-blocks.mjs EXISTS TO CATCH.
+      # The gate derives its expected block-type set by reading
+      # js/packages/react/src/blocks/registry.ts and every emitter map that
+      # file spreads in (./core, ./dataviz, ./forms, ./chat, ./table, ./sheet,
+      # ./taskboard, ./math — all siblings in that directory), then asserts the
+      # vendored templates/*/vendor/barkpark-react.tgz paints all of them.
+      # Registering a new block type there is EXACTLY the edit that makes the
+      # frozen tarballs stale — and until this entry existed, that edit matched
+      # NO pattern in this list, so the gate never ran on it. MEASURED: a diff
+      # touching only registry.ts fired architecture, js-tests, mobile,
+      # twoslash, typedoc, doc-gates and pr-task-gate, and NOT this workflow;
+      # the gate that owns the invariant was the one workflow blind to it. A
+      # gate that never fires on the change it guards reports green forever and
+      # is indistinguishable from one that ran and found nothing.
+      - "js/packages/react/src/blocks/**"
       - "scripts/check-vendor-blocks.mjs"
       - "scripts/templates-literal-check.sh"
       - "tooling/doc-truth/verify-bp-commands.mjs"
