@@ -166,12 +166,17 @@ globs_to_ere() {
 # target. The line is keyed on the assignment it guards (`cp=true` /
 # `instance=true`), so a renamed output breaks LOUDLY here instead of silently
 # selecting the other host's filter.
+#
+# THE TAIL IS awk NR==1 AND NOT head -1. head exits after the first line and
+# SIGPIPEs sed; with set -o pipefail that dead writer becomes this pipeline's
+# status, so the extractor reports failure on a filter it read perfectly well.
+# awk reads to EOF and prints only the first line: same answer, no broken pipe.
 extract_target_ere() {
   local yml="$1" target="$2"
   awk -v want="${target}=true" '
     /^  [a-zA-Z0-9_-]+:/ { job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job) }
     job == "changes" && index($0, want) > 0
-  ' "$yml" | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'\$//" | head -1
+  ' "$yml" | { grep -oE "grep -qE '[^']+'" || true; } | sed -E "s/^grep -qE '//; s/'\$//" | awk 'NR==1'
 }
 
 RELEVANT_ERE=""
@@ -218,7 +223,16 @@ commit_is_relevant() {
   else
     files="$(git -C "$GIT_DIR_ARG" show --pretty=format: --name-only "$sha")" || return 2
   fi
-  printf '%s\n' "$files" | grep -qE "$RELEVANT_ERE"
+  # A HERESTRING, NEVER A PIPE. `grep -q` exits the instant it matches, and with
+  # `set -o pipefail` the writer's SIGPIPE (141) becomes the pipeline's status —
+  # so a commit that IS relevant answers 141, and the caller below reads any
+  # non-zero-non-2 as "not relevant". That is a stranded commit silently
+  # classed as nothing-to-deploy: a FALSE GREEN, in the one gate whose entire
+  # purpose is to stop a silent green over stale production. Measured on this
+  # machine at load average 119-161, where the identical construct in the
+  # selftest failed 10 runs out of 10 with the matching text present all along.
+  # `<<<` has no writer process, so there is no pipe to break.
+  grep -qE "$RELEVANT_ERE" <<<"$files"
 }
 
 # ── git helpers ──────────────────────────────────────────────────────────────
@@ -417,7 +431,11 @@ mode_converged() {
     [ -n "$sha" ] || continue
     gap=$((gap + 1))
     relrc=0; commit_is_relevant "$sha" || relrc=$?
-    if [ "$relrc" -eq 2 ]; then
+    # 0 = relevant, 1 = not. ANYTHING ELSE is the tool failing, not an answer,
+    # and it must refuse rather than resolve to "not relevant" — the direction
+    # that would hide the strand. `-gt 1` and not `-eq 2` for exactly that
+    # reason: a signal death arrives as 128+n, never as 2.
+    if [ "$relrc" -gt 1 ]; then
       warn "HARNESS-UNAVAILABLE: git could not diff $sha against its parent."
       return 2
     fi
@@ -481,6 +499,14 @@ st_commit() {
   st_git "$repo" rev-parse HEAD
 }
 
+# NEVER `printf … | grep -q` IN HERE. `grep -q` exits on its first match and
+# closes the pipe; under this file's `set -o pipefail` the writer's SIGPIPE (141)
+# becomes the pipeline's status, so a SUCCESSFUL match reads as a failed
+# assertion. It is a race on how much the writer had left to write, so it passes
+# on an idle machine and fails on a loaded one — measured here at load average
+# 119, where 10/10 selftest runs reported 4-7 false failures whose expected text
+# was present in the captured output all along. Use `[[ $out == *"needle"* ]]`:
+# a builtin, no pipe, no second process, no race.
 selftest() {
   local rc=0 tmp
   tmp="$(mktemp -d)"
@@ -526,24 +552,24 @@ YML
   OWED_ALL="$(epoch_to_iso "$(( $(st_git "$repo" show -s --format=%ct "$D") + 1 ))")"
 
   # ── 1. THE RED-FIRST SPEC: the later-STARTED run carries the OLDER commit ──
-  echo "selftest 1/11: supersession must keep the DESCENDANT, not the run that started last"
+  echo "selftest 1/12: supersession must keep the DESCENDANT, not the run that started last"
   set +e
   out="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
         | "$0" survivor --repo "$repo" 2>&1)"
   set -e
-  if printf '%s' "$out" | grep -q "SURVIVOR (by ancestry): run 31000001"; then
+  if [[ "$out" == *"SURVIVOR (by ancestry): run 31000001"* ]]; then
     echo "  ok: kept run 31000001 (sha $B), the DESCENDANT"
   else
     echo "SELFTEST FAIL: ancestry did not pick the descendant" >&2; echo "$out" >&2; rc=1
   fi
-  if printf '%s' "$out" | grep -q "DIVERGENCE: the wall-clock rule would have kept run 31000002"; then
+  if [[ "$out" == *"DIVERGENCE: the wall-clock rule would have kept run 31000002"* ]]; then
     echo "  ok: and it NAMED the wall-clock rule's wrong answer (run 31000002, the older commit)"
   else
     echo "SELFTEST FAIL: the divergence was not reported — the bug would be invisible in the log" >&2; rc=1
   fi
 
   # The naive rule, run here so the spec shows it LOSING rather than asserting it does.
-  echo "selftest 2/11: the naive wall-clock rule gets this WRONG — that is the defect"
+  echo "selftest 2/12: the naive wall-clock rule gets this WRONG — that is the defect"
   naive="$(printf '%s\n' "31000001 $B 2026-07-19T18:56:00Z" "31000002 $A 2026-07-19T19:01:00Z" \
           | sort -k3 | tail -1 | awk '{print $1}')"
   if [ "$naive" = "31000002" ]; then
@@ -553,18 +579,18 @@ YML
   fi
 
   # ── 3. THE INCIDENT, as a convergence verdict ─────────────────────────────
-  echo "selftest 3/11: box on the OLDER commit while main carries a newer api change must be STRANDED"
+  echo "selftest 3/12: box on the OLDER commit while main carries a newer api change must be STRANDED"
   local c3=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c3=$?
   set -e
-  if [ "$c3" -eq 1 ] && printf '%s' "$out" | grep -q "^STRANDED:"; then
+  if [ "$c3" -eq 1 ] && [[ "$out" == *$'\n'"STRANDED:"* ]]; then
     echo "  ok: exit 1, and it names $B"
   else
     echo "SELFTEST FAIL: the incident shape did not red (rc=$c3)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 4/11: the same box, once it serves the newer commit, is CONVERGED"
+  echo "selftest 4/12: the same box, once it serves the newer commit, is CONVERGED"
   local c4=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c4=$?
@@ -573,30 +599,30 @@ YML
   else echo "SELFTEST FAIL: a current box read as stranded (rc=$c4)" >&2; echo "$out" >&2; rc=1; fi
 
   # ── 5. The docs-only tail: the row's own "4 later commits are docs/tooling" ─
-  echo "selftest 5/11: a docs-only tail past the box must NOT red (it deploys nothing)"
+  echo "selftest 5/12: a docs-only tail past the box must NOT red (it deploys nothing)"
   local c5=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$B" --tip "$D" --owed-before "$OWED_ALL" 2>&1)"; c5=$?
   set -e
-  if [ "$c5" -eq 0 ] && printf '%s' "$out" | grep -q "2 deploy-irrelevant"; then
+  if [ "$c5" -eq 0 ] && [[ "$out" == *"2 deploy-irrelevant"* ]]; then
     echo "  ok: exit 0, both docs commits classed irrelevant ($C, $D)"
   else
     echo "SELFTEST FAIL: a docs tail produced a false strand (rc=$c5)" >&2; echo "$out" >&2; rc=1
   fi
 
   # ── 6/7. The torn-read guard, and the NEGATIVE ARM that it did not blind ──
-  echo "selftest 6/11: a relevant commit too NEW to be owed must not red (the torn-read guard)"
+  echo "selftest 6/12: a relevant commit too NEW to be owed must not red (the torn-read guard)"
   local c6=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --grace-seconds 86400 2>&1)"; c6=$?
   set -e
-  if [ "$c6" -eq 0 ] && printf '%s' "$out" | grep -q "1 too new to be owed yet"; then
+  if [ "$c6" -eq 0 ] && [[ "$out" == *"1 too new to be owed yet"* ]]; then
     echo "  ok: exit 0 while B is inside the grace window — its own deploy may still be in flight"
   else
     echo "SELFTEST FAIL: the guard did not hold a too-new commit (rc=$c6)" >&2; echo "$out" >&2; rc=1
   fi
 
-  echo "selftest 7/11: NEGATIVE ARM — the guard must not blind the instrument"
+  echo "selftest 7/12: NEGATIVE ARM — the guard must not blind the instrument"
   # Same repo, same pair, cutoff moved past B's commit date: it is owed again.
   local c7=0 owed_at bct
   bct="$(st_git "$repo" show -s --format=%ct "$B")"
@@ -604,14 +630,14 @@ YML
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served "$A" --tip "$B" --owed-before "$owed_at" 2>&1)"; c7=$?
   set -e
-  if [ "$c7" -eq 1 ] && printf '%s' "$out" | grep -q "^STRANDED:"; then
+  if [ "$c7" -eq 1 ] && [[ "$out" == *$'\n'"STRANDED:"* ]]; then
     echo "  ok: a genuinely owed strand still reds — the grace traded no false positive for a false negative"
   else
     echo "SELFTEST FAIL: the owed cutoff swallowed a real strand (rc=$c7)" >&2; echo "$out" >&2; rc=1
   fi
 
   # ── 8. Diverged candidates have no safe survivor ──────────────────────────
-  echo "selftest 8/11: diverged candidates must REFUSE, never silently pick one"
+  echo "selftest 8/12: diverged candidates must REFUSE, never silently pick one"
   local c8=0
   st_git "$repo" checkout -q -b side "$A"
   E="$(st_commit "$repo" api/e.ex 'E: a divergent api change')"
@@ -620,14 +646,14 @@ YML
   out="$(printf '%s\n' "31000003 $B 2026-07-19T18:56:00Z" "31000004 $E 2026-07-19T19:01:00Z" \
         | "$0" survivor --repo "$repo" 2>&1)"; c8=$?
   set -e
-  if [ "$c8" -eq 1 ] && printf '%s' "$out" | grep -q "^NO SAFE SURVIVOR:"; then
+  if [ "$c8" -eq 1 ] && [[ "$out" == *$'\n'"NO SAFE SURVIVOR:"* ]]; then
     echo "  ok: exit 1 with a named refusal"
   else
     echo "SELFTEST FAIL: a diverged set was silently resolved (rc=$c8)" >&2; echo "$out" >&2; rc=1
   fi
 
   # ── 9. Cannot-look is never a pass ────────────────────────────────────────
-  echo "selftest 9/11: an unresolvable sha and an unreadable filter must exit 2, never 0"
+  echo "selftest 9/12: an unresolvable sha and an unreadable filter must exit 2, never 0"
   local c9a=0 c9b=0
   set +e
   "$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --served deadbeefdeadbeef --tip "$B" --owed-before "$OWED_ALL" >/dev/null 2>&1; c9a=$?
@@ -640,13 +666,13 @@ YML
   fi
 
   # ── 10. per-target relevance: an api commit is the instance's debt, not cp's ─
-  echo "selftest 10/11: an api-only commit must strand the INSTANCE and NOT the control plane"
+  echo "selftest 10/12: an api-only commit must strand the INSTANCE and NOT the control plane"
   local c10a=0 c10b=0
   set +e
   out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/wf/deploy.yml" --target instance \
          --served "$A" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c10a=$?
   set -e
-  if [ "$c10a" -eq 1 ] && printf '%s' "$out" | grep -q "^STRANDED:"; then
+  if [ "$c10a" -eq 1 ] && [[ "$out" == *$'\n'"STRANDED:"* ]]; then
     echo "  ok: instance reds (api/ is in its filter)"
   else
     echo "SELFTEST FAIL: the instance did not red on an api commit (rc=$c10a)" >&2; echo "$out" >&2; rc=1
@@ -662,7 +688,7 @@ YML
   fi
 
   # ── 11. the filter must come from the `changes` job and nowhere else ───────
-  echo "selftest 11/11: a decoy job's identical grep must not answer for a target"
+  echo "selftest 11/12: a decoy job's identical grep must not answer for a target"
   # The fixture's `decoy` job carries a filter matching api/, cloud/ AND docs/.
   # If the extractor were unscoped it would harvest that one, and the docs tail
   # of case 5 would start reading as a strand. Prove cp's filter is cloud-only.
@@ -682,6 +708,32 @@ YML
     echo "  ok: an unknown --target exits 2, never 0"
   else
     echo "SELFTEST FAIL: an unknown --target did not refuse (rc=$c11)" >&2; rc=1
+  fi
+
+  # ── 12. A BROKEN RELEVANCE TEST MUST REFUSE, NOT CALL EVERYTHING IRRELEVANT ─
+  echo "selftest 12/12: an unusable filter must REFUSE, never resolve to nothing-to-deploy"
+  # The direction matters more than the case. commit_is_relevant answers 0 for
+  # relevant and 1 for not; ANY other status is the tool failing, and the caller
+  # now treats >1 as a refusal rather than as "not relevant". Before that it read
+  # `-eq 2`, so a grep that died on a signal (128+n, never 2) landed in the
+  # not-relevant arm — a stranded commit classed as nothing-to-deploy, which is
+  # a FALSE GREEN in the one gate built to stop exactly that. An unparseable ERE
+  # is the reachable way to make grep exit non-0-non-1 on demand.
+  mkdir -p "$tmp/badwf"
+  sed 's#grep -qE .\^(api)/.#grep -qE '"'"'^(api['"'"'#' "$tmp/wf/deploy.yml" > "$tmp/badwf/deploy.yml"
+  local c12=0
+  set +e
+  out="$("$0" converged --repo "$repo" --deploy-yml "$tmp/badwf/deploy.yml" --target instance \
+         --served "$A" --tip "$B" --owed-before "$OWED_ALL" 2>&1)"; c12=$?
+  set -e
+  if [ "$c12" -eq 2 ]; then
+    echo "  ok: exit 2 (refused) on an unusable filter — never 0"
+  elif [ "$c12" -eq 0 ]; then
+    echo "SELFTEST FAIL: an unusable filter read CONVERGED — the false-green arm is back" >&2
+    echo "$out" >&2; rc=1
+  else
+    # A red is not the designed answer here, but it is not a false green either.
+    echo "  ok: exit $c12 — not a pass, which is the property under test"
   fi
 
   rm -rf "$tmp"
