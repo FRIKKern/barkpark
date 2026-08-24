@@ -472,10 +472,18 @@ jobs:
     # ALONE (lib/sobelow.ex:531-546 discards the type and the file:line into
     # underscored variables). So a row whose hash stops matching keeps LOOKING
     # like a reviewed waiver while waiving nothing, and the finding it covered
-    # is reported again — quietly, because the only job that reports it is
-    # advisory. Measured on the head this job was added to: #13886 inserted 23
-    # lines above router.ex:131 and orphaned all six Config.CSRF rows at once,
-    # while the staleness and overlap ratchets both stayed green.
+    # is reported again as if it were new.
+    #
+    # It IS reported — the advisory job renders a RED check run and says so.
+    # What is missing is not visibility but CONSEQUENCE: no gate reds, so
+    # nothing stops a merge, and on main that job's run is usually evicted from
+    # the concurrency queue before it renders at all. Say it that way rather
+    # than calling it hidden; `continue-on-error` is a documented decision with
+    # a written exit condition, not a concealment.
+    #
+    # Measured on the head this job was added to: #13886 inserted 23 lines
+    # above router.ex:131 and orphaned all six Config.CSRF rows at once, while
+    # the staleness and overlap ratchets both stayed green.
     #
     # NOT A WIDENING OF THE STALENESS RATCHET. That one checks rows carrying a
     # per-line function token and reports Config.* as SKIPPED — 34 of 41. This
