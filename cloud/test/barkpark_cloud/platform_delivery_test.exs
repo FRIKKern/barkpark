@@ -567,6 +567,41 @@ defmodule BarkparkCloud.PlatformDeliveryTest do
       refute conn.resp_body =~ @sha
     end
 
+    # THE REFUSAL crown-reconcile IS BUILT ON (task-f7decfcd5fa0eba8).
+    #
+    # The scheduled reconciler has no CROWN_API_TOKEN, so its on-box reader
+    # presents WORKER_TOKEN to this route, takes the 401, and falls back to
+    # reading the same rows out of the control plane's own postgres container.
+    # That fallback is the LEGITIMATE working path, and it is chosen by this
+    # refusal: `require_user_or_pat/2` resolves a session token or a PAT and
+    # nothing else, so the worker principal — neither of those — lands on
+    # `unauthorized/1`. A permanent, deterministic tier mismatch, by design.
+    #
+    # NOTHING PINNED IT UNTIL NOW, and the failure direction is the nasty one.
+    # Widen this route to accept the worker token and every test in this file
+    # still passes, while in production crown-reconcile silently stops using the
+    # postgres fallback and starts reading through the route — its own report
+    # would call that an IMPROVEMENT (`reader=route` instead of
+    # `postgres-container`) while it is a permission widening on a
+    # platform-scoped operational record that no tenant should reach.
+    #
+    # So this asserts the refusal itself, not the fallback: a green here is what
+    # entitles the reconciler to treat a 401 as expected rather than as a fault.
+    test "the WORKER token is REFUSED — the reconciler's postgres fallback rests on this" do
+      conn = call(:get, "/v1/deliveries?sha=#{@sha}", nil, @worker_token)
+
+      assert conn.status == 401,
+             "the worker principal must NOT reach the platform delivery reader: " <>
+               "crown-reconcile reads a 401 here as the documented tier mismatch and " <>
+               "falls back to the control plane's postgres container. If this route " <>
+               "starts answering the worker, that fallback silently stops being used " <>
+               "and a permission widening reads as a reader upgrade. Got " <>
+               "#{conn.status}."
+
+      # The refusal must also not leak the row it refused to serve.
+      refute conn.resp_body =~ @sha
+    end
+
     test "the bare list is a PINNED window, and ?limit= is clamped", %{user: user, team: team} do
       conn = call(:get, "/v1/deliveries?limit=9999", nil, pat(user, team, ["read"]))
 
