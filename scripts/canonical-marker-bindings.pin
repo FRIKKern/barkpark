@@ -8,6 +8,7 @@ connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler
 corpus-visible-schemas	visible_schemas
 doc-backlinks	reverse_referencers
+draft-published-id	published_id
 engine-error-vocabulary	error_values
 envelope-dek	active_dek
 error-response-emit	emit

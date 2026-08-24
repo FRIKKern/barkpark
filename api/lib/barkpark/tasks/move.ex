@@ -51,7 +51,7 @@ defmodule Barkpark.Tasks.Move do
       emit_broadcasts: 1
     ]
 
-  alias Barkpark.Content.{Document, Scope}
+  alias Barkpark.Content.{Document, DraftId, Scope}
   alias Barkpark.Repo
 
   @event_task_reparented "task.reparented"
@@ -250,5 +250,5 @@ defmodule Barkpark.Tasks.Move do
   defp same_parent?(_, nil), do: false
   defp same_parent?(a, b), do: strip(a) == strip(b)
 
-  defp strip(doc_id), do: String.replace_prefix(doc_id, "drafts.", "")
+  defp strip(doc_id), do: DraftId.published_id(doc_id)
 end
