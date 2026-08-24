@@ -24,6 +24,20 @@ defmodule Barkpark.Search.SurfaceConfig do
   # Only these four are settable from a caller PUT; surface + scope are server-set.
   @castable [:searchable_fields, :typo_policy, :zero_hit_strategy, :highlight_fields]
 
+  # The recovery strategies `Barkpark.Search.QueryPipeline` actually implements.
+  # Anything else used to be STORED and then behave like "none": `try_drop_tokens/5`
+  # and `try_typo_widen/5` both guard on the literal names, so a config saying
+  # `"aggressive"` returned 200, read back `"aggressive"`, and quietly disabled
+  # every recovery pass. A strategy the pipeline cannot run is refused here.
+  @zero_hit_strategies ~w(none drop_tokens typo_widen)
+
+  # The `typo_policy` keys a retriever actually reads. A key outside this set has
+  # no reader by definition, so accepting it means storing a knob that does
+  # nothing and echoing it back on the next GET as if it had taken — exactly
+  # what `min_len_2typo` did from the day it was introduced (48fe5985bf, May
+  # 2026) until this change dropped it from the defaults.
+  @typo_policy_keys ~w(enabled min_len_1typo similarity_threshold similarity_threshold_relaxed)
+
   @doc """
   Validated changeset for the caller-settable config fields.
 
@@ -40,6 +54,10 @@ defmodule Barkpark.Search.SurfaceConfig do
   def changeset(config, attrs) do
     config
     |> cast(attrs, @castable)
+    |> validate_inclusion(:zero_hit_strategy, @zero_hit_strategies,
+      message: "must be one of: " <> Enum.join(@zero_hit_strategies, ", ")
+    )
+    |> validate_typo_policy()
     # Defense in depth (constraints-are-truth): the DB carries TWO partial UNIQUE
     # indexes (charter D57) — `(surface, scope) WHERE workspace_id IS NULL`
     # (search_surface_config_surface_scope_idx, the global-default rows) and
@@ -55,5 +73,72 @@ defmodule Barkpark.Search.SurfaceConfig do
     |> unique_constraint([:workspace_id, :surface, :scope],
       name: :search_surface_config_workspace_surface_scope_idx
     )
+  end
+
+  # A `typo_policy` is only worth storing if every key in it reaches a reader
+  # and carries a value that reader can use. Both halves used to be unchecked:
+  # an unknown key was persisted and echoed back on the next GET (the caller's
+  # only feedback said their setting had taken), and a well-formed map with
+  # `"enabled" => "yes"` read as enabled because the reader compares against
+  # `false`. Refusing here is the one place a caller can still be told.
+  defp validate_typo_policy(changeset) do
+    validate_change(changeset, :typo_policy, fn :typo_policy, policy ->
+      case policy do
+        %{} = policy ->
+          Enum.flat_map(@typo_policy_keys, &key_errors(policy, &1)) ++ unknown_key_errors(policy)
+
+        _ ->
+          [typo_policy: "must be an object"]
+      end
+    end)
+  end
+
+  defp unknown_key_errors(policy) do
+    case policy |> Map.keys() |> Enum.map(&to_string/1) |> Enum.reject(&(&1 in @typo_policy_keys)) do
+      [] ->
+        []
+
+      unknown ->
+        [
+          typo_policy:
+            "has no reader for " <>
+              Enum.join(Enum.sort(unknown), ", ") <>
+              " (accepted keys: " <> Enum.join(@typo_policy_keys, ", ") <> ")"
+        ]
+    end
+  end
+
+  defp key_errors(policy, "enabled") do
+    case fetch_key(policy, "enabled") do
+      :absent -> []
+      {:ok, v} when is_boolean(v) -> []
+      {:ok, _} -> [typo_policy: "enabled must be a boolean"]
+    end
+  end
+
+  defp key_errors(policy, "min_len_1typo") do
+    case fetch_key(policy, "min_len_1typo") do
+      :absent -> []
+      {:ok, v} when is_integer(v) and v > 0 -> []
+      {:ok, _} -> [typo_policy: "min_len_1typo must be a positive integer"]
+    end
+  end
+
+  defp key_errors(policy, threshold) do
+    case fetch_key(policy, threshold) do
+      :absent -> []
+      {:ok, v} when is_number(v) and v >= 0 and v <= 1 -> []
+      {:ok, _} -> [typo_policy: threshold <> " must be a number between 0 and 1"]
+    end
+  end
+
+  defp fetch_key(policy, key) do
+    cond do
+      Map.has_key?(policy, key) -> {:ok, Map.get(policy, key)}
+      Map.has_key?(policy, String.to_existing_atom(key)) -> {:ok, Map.get(policy, String.to_existing_atom(key))}
+      true -> :absent
+    end
+  rescue
+    ArgumentError -> :absent
   end
 end

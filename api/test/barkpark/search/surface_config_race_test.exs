@@ -42,7 +42,7 @@ defmodule Barkpark.Search.SurfaceConfigRaceTest do
     scope = "race-ds-#{System.unique_integer([:positive])}"
 
     # Winner creates the first row for this brand-new (surface, scope).
-    assert {:ok, _} = SurfaceConfigs.upsert(surface, scope, %{"zeroHitStrategy" => "keep"})
+    assert {:ok, _} = SurfaceConfigs.upsert(surface, scope, %{"zeroHitStrategy" => "typo_widen"})
     assert count(surface, scope) == 1
 
     # Loser already passed get_by (saw nil) and now runs the real insert branch.

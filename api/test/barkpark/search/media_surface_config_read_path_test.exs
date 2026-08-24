@@ -45,7 +45,6 @@ defmodule Barkpark.Search.MediaSurfaceConfigReadPathTest do
   @tightened %{
     "enabled" => true,
     "min_len_1typo" => 5,
-    "min_len_2typo" => 9,
     "similarity_threshold" => 0.95,
     "similarity_threshold_relaxed" => 0.95
   }
