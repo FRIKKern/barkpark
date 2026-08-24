@@ -5,6 +5,42 @@ name: Deploy (production)
 # are build-before-swap + health-check + auto-rollback, so a bad build never takes
 # prod down. Runs AFTER merge — CI/merge-gates already vetted the change.
 on:
+  # ── THE MANUAL REPLAY PATH (task-0c3069135d1b4bfd) ─────────────────────────
+  #
+  # Until this existed, `push` was the ONLY trigger and a strand had no repair
+  # that did not involve waiting. Measured 2026-07-19: 10bfdfb40 (5 api/ files,
+  # PR #4438) had its deploy cancelled as superseded; the run that survived
+  # carried 93fd1e2d8, which does not contain it; and the four commits that
+  # followed were docs/tooling which CORRECTLY fail the path filter. So nothing
+  # was queued, nothing was red, and the only way to get that api change onto
+  # guerrilla was for an unrelated api/ merge to happen along and drag it. That
+  # is not a repair, it is a coincidence.
+  #
+  # Dispatch runs against a REF, so running it on `main` deploys main's tip —
+  # the newest relevant commit by construction, with no rerun of an old head and
+  # no dependence on which run won a wall-clock race. `targets` exists for the
+  # residual case the path diff cannot see: after a strand the last-successful
+  # anchor may already cover the missing paths, so `auto` would resolve to
+  # "nothing changed" on a box that is genuinely stale. `both` overrides it.
+  #
+  # It is AUTHENTICATED by construction: workflow_dispatch requires write access
+  # on the repository and the two deploy jobs keep `environment: production`, so
+  # this adds a trigger, never a permission.
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: "Which host(s) to deploy. auto = the usual path diff."
+        type: choice
+        default: auto
+        options:
+          - auto
+          - cp
+          - instance
+          - both
+      reason:
+        description: "Why this manual deploy is needed (recorded in the run log)"
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
@@ -56,6 +92,12 @@ jobs:
         name: Detect which targets changed
         env:
           GH_TOKEN: ${{ github.token }}
+          # Read as SHELL VARIABLES, never interpolated into the script body: a
+          # `${{ }}` expansion lands as raw text in the generated shell, so a
+          # dispatch input containing shell metacharacters would execute. Empty
+          # on a push event, which the `auto` arm below treats as "no override".
+          DISPATCH_TARGETS: ${{ inputs.targets }}
+          DISPATCH_REASON: ${{ inputs.reason }}
         run: |
           # Diff since the last SUCCESSFUL deploy of THIS workflow, not just the
           # previous push. GitHub keeps only one pending run per concurrency
@@ -82,7 +124,7 @@ jobs:
           # internal/cli/cloud), so an internal-only worker fix must roll the
           # CP or the stale binary keeps provisioning (bit us 2026-07-24: the
           # secrets-chain fix deployed guerrilla but left the CP worker broken).
-          if echo "$changed" | grep -qE '^(cloud|deploy|internal|cmd)/'; then echo "cp=true" >> "$GITHUB_OUTPUT"; else echo "cp=false" >> "$GITHUB_OUTPUT"; fi
+          if echo "$changed" | grep -qE '^(cloud|deploy|internal|cmd)/'; then cp=true; else cp=false; fi
           # connectors/ rides the content instance: instance-deploy.sh npm-installs
           # it and restarts barkpark-connectors behind the /connectors route.
           # templates/ rides it too (stw9, charter D57a): the box builds sites FROM
@@ -94,7 +136,29 @@ jobs:
           # installs the cloud-sandbox-runner from that tree (charter D275, W35).
           # The prefix is exact — scripts/connectors, not scripts — so a change
           # under scripts/other/ does not falsely flip instance=true.
-          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates|scripts/connectors)/'; then echo "instance=true" >> "$GITHUB_OUTPUT"; else echo "instance=false" >> "$GITHUB_OUTPUT"; fi
+          if echo "$changed" | grep -qE '^(api|internal|deploy|connectors|templates|scripts/connectors)/'; then instance=true; else instance=false; fi
+          # THE OVERRIDE, AND ONLY ON A DISPATCH. A push can never reach this —
+          # `github.event_name` is the trigger, not an input — so the automatic
+          # path is byte-for-byte what it was. `auto` deliberately falls through
+          # to the diff above rather than forcing both hosts: a dispatch that
+          # only wants the normal behaviour on main's tip must not turn into a
+          # full redeploy of two boxes.
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            case "${DISPATCH_TARGETS:-auto}" in
+              cp)       cp=true;  instance=false ;;
+              instance) cp=false; instance=true  ;;
+              both)     cp=true;  instance=true  ;;
+              auto|"")  : ;;
+              *)
+                echo "::error::unknown targets input '${DISPATCH_TARGETS}' — refusing rather than guessing which host to deploy"
+                exit 1
+                ;;
+            esac
+            printf 'MANUAL REPLAY: targets=%s reason=%s\n' "${DISPATCH_TARGETS:-auto}" "${DISPATCH_REASON:-<none>}"
+          fi
+          echo "dispatch: cp=$cp instance=$instance"
+          echo "cp=$cp" >> "$GITHUB_OUTPUT"
+          echo "instance=$instance" >> "$GITHUB_OUTPUT"
       - name: Assert every on.push.paths entry has a deploy target
         run: bash scripts/check-deployyml-filters.sh
       - name: Assert the control-plane smoke test can fail on a dead box
@@ -1089,4 +1153,248 @@ jobs:
             normal repair. This issue is idempotent per key (`deploy-recorder`):
             a continuing outage appends a comment rather than opening a new
             issue. CLOSE IT once a delivery records again.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  convergence:
+    # ── DOES THE BOX ACTUALLY SERVE THE NEWEST RELEVANT COMMIT? ──────────────
+    #
+    # Every other job in this file answers "did the thing I dispatched succeed".
+    # None of them answers "is production current", and those are different
+    # questions with different answers — which is the whole of
+    # task-0c3069135d1b4bfd. On 2026-07-19 every run was green, the ledger said
+    # success, and guerrilla was missing an api change that had been on main for
+    # hours. Nothing in this workflow could see it, because nothing compared the
+    # SERVED commit against main.
+    #
+    # THREE THINGS MAKE THIS HONEST RATHER THAN NOISY:
+    #
+    #   1. IT READS WHAT THE BOX SERVES, never `github.sha`. The trigger sha is
+    #      what STARTED a run; both deploy scripts pull origin/main's tip, so the
+    #      two differ routinely (measured on run 31306459823: head b977b16ad,
+    #      served a95bc7ca9). An assertion on the intended commit would certify a
+    #      deploy that never happened, which is the defect wearing a gate.
+    #
+    #   2. ONE SNAPSHOT OF MAIN, TAKEN ONCE, USED FOR BOTH LEGS. This is
+    #      task-7a85d1b5f471af8f's lesson borrowed rather than re-learned: that
+    #      row is crown-reconcile comparing a newer crown against an older run
+    #      list ~95s apart and calling a healthy row WRONG. Re-reading main per
+    #      leg would rebuild exactly that tear one axis over.
+    #
+    #   3. A COMMIT IS ONLY OWED ONCE ITS OWN DEPLOY COULD HAVE FINISHED. The
+    #      cutoff is when THIS run's deploy legs started; anything merged after
+    #      that is another run's debt, not evidence of a strand. Without it this
+    #      job would red on every merge that lands mid-deploy.
+    #
+    # RELEVANCE IS PER TARGET and is read out of the `changes` job's own filters
+    # (`--target cp|instance`), never copied: the control plane does not carry
+    # `api/**`, so judging it against the union would file a fabricated outage
+    # every time an api-only merge lands.
+    #
+    # THE CONTROL PLANE IS CHECKED EVEN WHEN ITS LEG SKIPPED, and that is the
+    # widening that catches the original incident. `/health` is public and
+    # anonymous, so the read costs nothing and needs no credential — and a box
+    # that nothing deployed is precisely the box this row is about. The content
+    # instance cannot be checked that way (its served sha is read over the SSH
+    # the instance job holds), so when that leg did not run this job says
+    # UNCHECKED out loud rather than counting silence as green.
+    #
+    # IT EXITS 0 NO MATTER WHAT — same law as record-delivery, and for the same
+    # reason: the `changes` job anchors its diff base to the last SUCCESSFUL run
+    # of this workflow, so a red here would freeze that anchor and make every
+    # later merge union a wider path set until both hosts redeploy on every
+    # merge. That is this epic's known outage mechanism. The scream lives in
+    # report-convergence-failure below.
+    name: Production serves the newest deploy-relevant main commit
+    needs: [changes, control-plane, instance]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      (needs.control-plane.result == 'success' || needs.instance.result == 'success')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    outputs:
+      converged: ${{ steps.check.outputs.converged }}
+      detail: ${{ steps.check.outputs.detail }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The range walks back to whatever the box is serving, which after a
+          # strand is arbitrarily far behind. A shallow clone makes every sha
+          # unresolvable, and this gate answers that with a refusal, not a pass.
+          fetch-depth: 0
+
+      - id: check
+        name: Compare what each box serves against one snapshot of main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CP_RESULT: ${{ needs.control-plane.result }}
+          INSTANCE_RESULT: ${{ needs.instance.result }}
+          INSTANCE_SERVED_SHA: ${{ needs.instance.outputs.served_sha }}
+        run: |
+          set +e
+          converged=true
+          detail=""
+
+          # ── ONE SNAPSHOT OF MAIN ─────────────────────────────────────────
+          git fetch --no-tags --quiet origin main
+          fetch_rc=$?
+          TIP="$(git rev-parse --verify --quiet FETCH_HEAD^{commit})"
+          if [ "$fetch_rc" -ne 0 ] || [ -z "$TIP" ]; then
+            echo "::warning::could not fetch origin/main — falling back to this run's own sha as the snapshot"
+            TIP="$GITHUB_SHA"
+          fi
+          echo "main snapshot (taken ONCE, used for both legs): $TIP"
+
+          # ── THE OWED CUTOFF: when this run's deploy legs began ────────────
+          # Anything merged after that instant belongs to another run. Read from
+          # the same two legs record-delivery names (charter D483). If the API
+          # does not answer, fall back to a generous grace window and SAY so —
+          # never to "everything is owed", which would red on a merge race.
+          # OWED_ARGS carries TWO words and is deliberately left unquoted at both
+          # call sites below. It is built only from this block — never from a
+          # box, an input or a payload — so there is nothing here for a split to
+          # smuggle; quoting it would pass "--owed-before X" as a single
+          # argument and the parser would refuse it as an unknown flag.
+          OWED_ARGS=""
+          started="$(gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.name == "control-plane" or .name == "instance") | .started_at] | map(select(. != null)) | sort | first // empty')"
+          if [ $? -eq 0 ] && [ -n "$started" ]; then
+            OWED_ARGS="--owed-before $started"
+            echo "owed cutoff: $started (the first deploy leg's start)"
+          else
+            OWED_ARGS="--grace-seconds 900"
+            echo "::warning::the Actions API did not answer — using a 900s grace window instead of the leg start"
+          fi
+
+          # ── THE CONTROL PLANE: always, because /health is public ──────────
+          echo "::group::control plane"
+          cp_sha=""
+          if body="$(curl -s --max-time 15 https://barkpark.cloud/health)"; then
+            cp_sha="$(printf '%s' "$body" | jq -r '.git_sha // empty')"
+          fi
+          if [ -z "$cp_sha" ]; then
+            echo "::warning::the control plane did not say what it serves — UNCHECKED, not green"
+            detail="${detail}control-plane: UNCHECKED (/health gave no git_sha). "
+          else
+            bash scripts/deploy-convergence-check.sh converged \
+              --label "control plane (barkpark.cloud)" --target cp \
+              --served "$cp_sha" --tip "$TIP" $OWED_ARGS
+            case $? in
+              0) detail="${detail}control-plane: converged. " ;;
+              1) converged=false
+                 detail="${detail}control-plane: STRANDED (serving ${cp_sha}). " ;;
+              *) echo "::warning::the control-plane comparison could not be made — UNCHECKED, not green"
+                 detail="${detail}control-plane: UNCHECKED (the comparison refused). " ;;
+            esac
+          fi
+          echo "::endgroup::"
+
+          # ── THE CONTENT INSTANCE: only when its leg reported a served sha ──
+          echo "::group::content instance"
+          if [ "$INSTANCE_RESULT" != "success" ]; then
+            echo "the instance leg did not run in this deploy (result=${INSTANCE_RESULT}) — UNCHECKED."
+            echo "Its served sha is readable only over the SSH that job holds, so silence here is"
+            echo "an absence of evidence and is reported as one, never as a green."
+            detail="${detail}instance: UNCHECKED (leg ${INSTANCE_RESULT}). "
+          elif [ -z "$INSTANCE_SERVED_SHA" ]; then
+            echo "::warning::the instance leg succeeded but reported no served sha — UNCHECKED, not green"
+            detail="${detail}instance: UNCHECKED (no served sha). "
+          else
+            bash scripts/deploy-convergence-check.sh converged \
+              --label "content instance (guerrilla)" --target instance \
+              --served "$INSTANCE_SERVED_SHA" --tip "$TIP" $OWED_ARGS
+            case $? in
+              0) detail="${detail}instance: converged. " ;;
+              1) converged=false
+                 detail="${detail}instance: STRANDED (serving ${INSTANCE_SERVED_SHA}). " ;;
+              *) echo "::warning::the instance comparison could not be made — UNCHECKED, not green"
+                 detail="${detail}instance: UNCHECKED (the comparison refused). " ;;
+            esac
+          fi
+          echo "::endgroup::"
+
+          echo "converged=${converged}" >> "$GITHUB_OUTPUT"
+          echo "detail=${detail}" >> "$GITHUB_OUTPUT"
+          echo "VERDICT: converged=${converged} — ${detail}"
+          # ALWAYS 0. The scream is report-convergence-failure's job, never this
+          # run's conclusion — see the job comment on the frozen diff anchor.
+          exit 0
+
+  report-convergence-failure:
+    # ── THE RED FOR A DEPLOY THAT SUCCEEDED AND DID NOT ARRIVE ───────────────
+    #
+    # Distinct from BOTH existing reporters, and the distinction is the point:
+    #
+    #   * `deploy-production` fires when a deploy job FAILED — prod is stale and
+    #     the run says so.
+    #   * `deploy-recorder`   fires when the deploy worked and the RECORD of it
+    #     did not land — prod is fine, the ledger is thin.
+    #   * `deploy-convergence` (this one) fires when every job in the run
+    #     SUCCEEDED and production is still missing a merged, deploy-relevant
+    #     commit. Nothing is red. That is the entire incident.
+    #
+    # A shared key would comment this onto an unrelated gate's issue, so it gets
+    # its own. `permissions:` stays JOB-LEVEL for the same security reason the
+    # other two reporters state: the deploy jobs hold DEPLOY_SSH_KEY and SSH into
+    # production as root, and widening the workflow-level block to carry
+    # `issues: write` would re-scope their tokens too.
+    #
+    # `always()` and the union trigger, mirroring report-recorder-failure: a
+    # convergence job that never reached its last step renders no verdict at all,
+    # and the loudest possible failure — the check did not run — must not be the
+    # one case that files nothing.
+    name: Report production that did not receive a merged change
+    needs: convergence
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      needs.convergence.result != 'skipped' &&
+      (needs.convergence.outputs.converged == 'false' ||
+      needs.convergence.result == 'failure' ||
+      needs.convergence.result == 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write # the ONLY reason this job carries a permissions block
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: File (or update) the CI failure issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: deploy-convergence
+          CI_FAILURE_DETAIL: |
+            **A deploy-relevant commit is on `main` and is NOT on the box.** Every
+            job in this run concluded successfully. Nothing is red. Production is
+            serving code that predates a merged change, and no further
+            path-triggered run is queued to carry it — a docs-only stretch after
+            the strand correctly triggers nothing, so this does NOT self-heal.
+
+            Verdict: ${{ needs.convergence.outputs.detail }}
+
+            Read the `convergence` job's log: it names the exact commit each box
+            is missing, when that commit merged, and which host's filter made it
+            relevant. `UNCHECKED` is not a finding — it means the comparison
+            could not be made (an unreadable `/health`, a leg that did not run, a
+            shallow clone) and it never counts as converged.
+
+            THE REPAIR, and it needs no unrelated merge to carry it: run
+            **Actions -> Deploy (production) -> Run workflow** against `main`,
+            with `targets: both` and a reason. Dispatch runs against a REF, so it
+            deploys main's tip rather than replaying whichever head won a
+            wall-clock race. `auto` is deliberately NOT enough here: after a
+            strand the last-successful-run anchor may already cover the missing
+            paths, so the path diff can resolve to "nothing changed" on a box
+            that is genuinely stale.
+
+            WHY THIS HAPPENS. GitHub resolves the `deploy-production` concurrency
+            group by wall clock, and wall clock is not commit ancestry: a run can
+            start later and still carry the older commit (a re-run of an old
+            workflow is the pure case). `cancel-in-progress: false` narrows this
+            but does not close it — only one run stays pending per group, so a
+            third push replaces the queued one. `scripts/deploy-convergence-check.sh
+            survivor` decides supersession the right way, by descendancy, and its
+            `--selftest` reproduces the 2026-07-19 shape.
+
+            This issue is idempotent per key (`deploy-convergence`): a continuing
+            gap appends a comment rather than opening a new issue. CLOSE IT once a
+            deploy lands the missing commit.
         run: bash scripts/file-ci-failure-issue.sh
