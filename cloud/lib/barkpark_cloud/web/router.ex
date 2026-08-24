@@ -7732,7 +7732,7 @@ defmodule BarkparkCloud.Web.Router do
           # unreachable from inside `:ok`, which is why the delete's own failure
           # needs this nested case rather than a fourth outer arm.
           case Registry.delete_site(site) do
-            {:ok, _} ->
+            {:ok, _, %{read_token: read_token}} ->
               _ =
                 Accounts.record_audit(%{
                   team_id: site.team_id,
@@ -7740,13 +7740,36 @@ defmodule BarkparkCloud.Web.Router do
                   action: "site.deleted",
                   target_type: "site",
                   target_id: site.id,
-                  metadata: %{slug: site.slug, kind: site.kind}
+                  # ssw8: the credential half of the teardown is RECORDED, not
+                  # assumed. `read_token` is the one fact about this delete that
+                  # nothing else in the system can reconstruct afterwards — the
+                  # row that named the token is gone by the time anyone asks.
+                  metadata: %{
+                    slug: site.slug,
+                    kind: site.kind,
+                    read_token: to_string(read_token)
+                  }
                 })
 
               push_event(site.team_id, "sites")
               push_event(site.team_id, "audit")
 
-              json(conn, 200, %{ok: true, status: "deleted", slug: site.slug})
+              # ssw8 — DO NOT CLAIM A CLEAN TEARDOWN THE BOX DID NOT CONFIRM.
+              # The delete succeeded either way (the CP row is the truth, and a
+              # box that is down must not make its sites undeletable), but the
+              # 200 states which of the two happened. On `:error` it also NAMES
+              # the leftover, because this response is the last place the pointer
+              # exists: the site row that carried the box, the workspace scope and
+              # the slug has just been deleted. `Mix.Tasks.BarkparkCloud.SiteReadTokens`
+              # is the sweep that finds it again if this line is missed.
+              body = %{
+                ok: true,
+                status: "deleted",
+                slug: site.slug,
+                read_token: read_token_status(read_token)
+              }
+
+              json(conn, 200, site_delete_token_warning(body, site, read_token))
 
             {:error, :foreign_key_constraint, constraint} ->
               json(conn, 500, %{
@@ -13336,7 +13359,13 @@ defmodule BarkparkCloud.Web.Router do
         {:ok, attrs}
 
       is_binary(ws) and is_binary(proj) and is_binary(ds) ->
-        case Registry.mint_public_read_token(bp, ws, proj, ds, "site-read-#{slug}") do
+        # The label comes from `Registry.site_read_token_label/1`, not a local
+        # literal: the revoke on delete and the orphan sweep find this credential
+        # BY that label (the CP never stores its box-side id), so a drift between
+        # mint and revoke would silently reopen the leak ssw8 closed.
+        label = Registry.site_read_token_label(slug)
+
+        case Registry.mint_public_read_token(bp, ws, proj, ds, label) do
           {:ok, token} -> {:ok, Map.put(attrs, :read_token, token)}
           {:error, reason} -> {:error, {:mint_failed, mint_failure_copy(bp, reason)}}
         end
@@ -13347,6 +13376,42 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp mint_site_read_token(_bp, attrs, _slug), do: {:ok, attrs}
+
+  # ssw8 — the DELETE's credential half, in the wire's own words.
+  #
+  #   "revoked"     — the box confirms no live token by this site's label remains
+  #   "none"        — the site had no content binding, so none was ever minted
+  #   "not_revoked" — the revoke could NOT be confirmed; assume the credential is live
+  #
+  # Three values, not a boolean, because "there was nothing to revoke" and "we
+  # could not revoke it" are opposite facts and a boolean would collapse one of
+  # them into the other.
+  defp read_token_status(:ok), do: "revoked"
+  defp read_token_status(:noop), do: "none"
+  defp read_token_status(_), do: "not_revoked"
+
+  # On an unconfirmed revoke, hand the caller the pointer the deleted row can no
+  # longer hold: which box, which workspace scope, which label. Without these
+  # three the credential is live AND unreachable — the state this row exists to
+  # prevent — because nothing else in the control plane records a site's box-side
+  # token identity. A confirmed (or absent) credential adds nothing.
+  defp site_delete_token_warning(body, _site, status) when status in [:ok, :noop], do: body
+
+  defp site_delete_token_warning(body, site, _status) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    box = if bp, do: bp.slug, else: "its instance"
+    scope = "#{site.bootstrap_workspace}/#{site.bootstrap_project}"
+
+    Map.put(
+      body,
+      :warning,
+      "the site is deleted, but its read token could not be revoked: #{box} did not confirm " <>
+        "the revoke. The credential #{Registry.site_read_token_label(site)} in workspace scope " <>
+        "#{scope} may still be LIVE and can still read published content. Revoke it on the box " <>
+        "(DELETE /w/#{site.bootstrap_workspace}/p/#{site.bootstrap_project}/v1/tokens/:id) or run " <>
+        "`mix barkpark_cloud.site_read_tokens #{box}` on the control plane to find and revoke it."
+    )
+  end
 
   # The instance's own words, in plain language. A mint failure is almost always
   # an instance-side fact (not live yet, no stored admin token, the token route is

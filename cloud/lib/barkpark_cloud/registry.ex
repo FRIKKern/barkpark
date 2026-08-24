@@ -797,14 +797,47 @@ defmodule BarkparkCloud.Registry do
   receiver that no longer resolves, until the box auto-disables them. A box that
   is down (or a webhook already gone) never blocks the delete: the CP row is the
   truth, and the by-name reconciler can reap the leftover later.
+
+  ssw8 (charter D40, deferred then and paid here): the site's public-read CONTENT
+  TOKEN is REVOKED on the box in the same breath, and for the same reason —
+  except a live credential is not merely noisy, it is an access grant that
+  outlives the thing it was minted for. Measured on guerrilla 2026-07-28: 18 live
+  `site-read-*` rows against 12 sites, six of them credentials for sites that no
+  longer exist. Every site ever spawned and deleted left one.
+
+  ORDER IS LOAD-BEARING. The revoke runs BEFORE `Repo.delete/1` because the site
+  row IS the pointer: `bootstrap_workspace`/`bootstrap_project` name the scope the
+  revoke route lives under and `slug` names the label. Delete first and the
+  credential is still live with nothing in this database left to find it by.
+
+  WHAT A FAILED REVOKE DOES. It does NOT block the delete — a box that is down
+  would otherwise make its sites undeletable, and the CP row is the truth. But it
+  is never SILENT either, which is the whole difference from the webhook above: a
+  webhook orphan is a failing delivery the box eventually disables by itself,
+  while a token orphan is a working credential nothing expires. So the outcome
+  travels back to the caller in the ok-tuple as a third element, and the router
+  turns `:error` into a 200 that says so and NAMES the leftover (box slug +
+  `site-read-<slug>` label) — the pointer the deleted row can no longer hold.
+
+  Returns `{:ok, site, %{read_token: :ok | :noop | :error}}`:
+
+    * `:ok`    — the box confirms no live token by this site's label remains
+                 (revoked now, or already gone / never minted)
+    * `:noop`  — this site has no content binding, so there is nothing to revoke
+    * `:error` — the revoke could not be CONFIRMED; assume the credential is live
   """
   @spec delete_site(Site.t()) ::
-          {:ok, Site.t()}
+          {:ok, Site.t(), %{read_token: :ok | :noop | :error}}
           | {:error, Ecto.Changeset.t()}
           | {:error, :foreign_key_constraint, String.t()}
   def delete_site(%Site{} = site) do
     _ = deregister_content_webhook(site)
-    Repo.delete(site)
+    read_token = revoke_site_read_token(site)
+
+    case Repo.delete(site) do
+      {:ok, deleted} -> {:ok, deleted, %{read_token: read_token}}
+      {:error, changeset} -> {:error, changeset}
+    end
   rescue
     # W70 S2 (D848/D856) — the INVERSE ORPHAN made typed. This is a bare
     # `Repo.delete` on a struct with no declared constraint, so a child FK that
@@ -5600,6 +5633,263 @@ defmodule BarkparkCloud.Registry do
 
   def reveal_site_read_token(%Site{read_token_encrypted: ciphertext}),
     do: Vault.decrypt(ciphertext)
+
+  ## ── The site read token's LIFECYCLE half (ssw8, charter D40) ───────────────
+  ##
+  ## `mint_public_read_token/5` above is the birth. Until this block there was no
+  ## death: `grep -n revoke registry.ex` hit only the agent-token and app-token
+  ## surfaces, and `delete_site/1` was exactly
+  ## `_ = deregister_content_webhook(site); Repo.delete(site)`. The measured cost
+  ## on guerrilla was six live `site-read-*` credentials for sites that no longer
+  ## exist — never-expiring public-read grants into a live dataset.
+  ##
+  ## The substrate needs no new box route. The instance already exposes, on the
+  ## SAME workspace-scoped block the mint uses:
+  ##
+  ##   GET    /w/:ws/p/:proj/v1/tokens       -> %{"tokens" => [%{"id","label","revoked_at",…}]}
+  ##   DELETE /w/:ws/p/:proj/v1/tokens/:id   -> revoke (idempotent, cross-tenant railed)
+  ##
+  ## and labels are DETERMINISTIC (`site-read-<slug>`), so a site's credential is
+  ## findable by label with no CP-side id mapping — which matters because the CP
+  ## stores only the ciphertext, never the token's box-side id.
+
+  @doc """
+  The box-side identity of a site's public-read content token: `site-read-<slug>`.
+
+  ONE definition. The mint (`POST /v1/sites` -> `mint_site_read_token/3`), the
+  revoke on delete, and the orphan sweep must agree byte-for-byte or the
+  find-by-label lookup silently misses — the same law `content_webhook_name/1`
+  states for webhooks, and for the same reason.
+  """
+  @spec site_read_token_label(Site.t() | String.t()) :: String.t()
+  def site_read_token_label(%Site{slug: slug}), do: site_read_token_label(slug)
+  def site_read_token_label(slug) when is_binary(slug), do: "site-read-#{slug}"
+
+  @doc """
+  Revoke `site`'s public-read content token on its box — the counterpart of the
+  mint at create, called by `delete_site/1` BEFORE the row (and with it the
+  pointer to what to revoke) is gone.
+
+    * `:noop`   — no content binding, so no credential was ever minted for it
+    * `:ok`     — the box confirms no LIVE token by this site's label remains
+    * `:error`  — the credential could NOT be confirmed dead; treat it as live
+
+  `:absent` from the lookup collapses to `:ok` on purpose: a label the box does
+  not list, or lists only as already-revoked, is a credential that cannot
+  authenticate — the outcome this function exists to produce. What must NEVER
+  collapse to `:ok` is `:unknown` (the box did not answer, or answered something
+  we cannot read), because "I could not look" is not "it is not there".
+  """
+  @spec revoke_site_read_token(Site.t()) :: :ok | :noop | :error
+  def revoke_site_read_token(%Site{} = site) do
+    with ws when is_binary(ws) and ws != "" <- site.bootstrap_workspace,
+         proj when is_binary(proj) and proj != "" <- site.bootstrap_project,
+         %Barkpark{} = barkpark <- get_barkpark(site.barkpark_id) do
+      label = site_read_token_label(site)
+
+      case find_workspace_token(barkpark, ws, proj, label) do
+        {:ok, id} ->
+          revoke_workspace_token(barkpark, ws, proj, id, label)
+
+        :absent ->
+          :ok
+
+        :unknown ->
+          Logger.warning(
+            "site read token revoke for site #{site.id}: could not read #{barkpark.slug}'s " <>
+              "token inventory for #{ws}/#{proj} — #{label} may still be live"
+          )
+
+          :error
+      end
+    else
+      _ -> :noop
+    end
+  end
+
+  @doc """
+  Revoke ONE workspace token on `barkpark` by its box-side id — the operator
+  action behind the orphan sweep below. `:ok` only on a 2xx from the box.
+
+  Deliberately NOT a bulk verb, and deliberately id-addressed: the sweep hands a
+  human a list, the human names the row. See
+  `Mix.Tasks.BarkparkCloud.SiteReadTokens`, which re-derives the orphan set at
+  revoke time and refuses any id that is not in it — so that tool can never kill
+  a LIVE site's credential.
+  """
+  @spec revoke_workspace_token(Barkpark.t(), String.t(), String.t(), String.t(), String.t()) ::
+          :ok | :error
+  def revoke_workspace_token(%Barkpark{} = barkpark, workspace, project, token_id, label \\ "") do
+    path =
+      "/w/#{URI.encode(workspace)}/p/#{URI.encode(project)}/v1/tokens/#{URI.encode(token_id)}"
+
+    case relay_admin(barkpark, :delete, path, nil) do
+      {:ok, status, _resp} when status in 200..299 ->
+        :ok
+
+      other ->
+        # A 404 is NOT read as "already gone". The box answers 404 both for a
+        # token that holds no seat here AND from a box whose build predates the
+        # revoke route entirely — and the second reading means the credential is
+        # very much alive. Calling that `:ok` would be the exact false green this
+        # row exists to remove.
+        Logger.warning(
+          "site read token revoke on #{barkpark.slug} did not take for #{label} " <>
+            "(#{workspace}/#{project}, id #{token_id}): #{inspect(other)}"
+        )
+
+        :error
+    end
+  end
+
+  @doc """
+  THE CLEANUP PATH: every LIVE `site-read-*` credential on `barkpark` whose site
+  no longer exists.
+
+  A fix that only revokes on future deletes leaves today's orphans live forever —
+  nothing on the box expires a `public-read` token and nothing in this repo ever
+  listed them. This is the read that finds them.
+
+  Method: collect every `(workspace, project)` pair this box is known to serve
+  content under (its own bootstrap scope plus every live site's), list each
+  scope's tokens, keep the ones that are LIVE (`revoked_at` null) and labelled
+  `site-read-<slug>`, and report those whose `<slug>` names no site on this box.
+
+  Returns `{:ok, orphans}` where each orphan is
+
+      %{barkpark_slug:, workspace:, project:, id:, label:, site_slug:,
+        inserted_at:, last_used_at:}
+
+  or `{:error, :no_scope}` when the box has no workspace/project to look under,
+  or `{:error, :unreadable}` when NO scope's inventory could be read — never an
+  empty list, because "I could not look" must not render as "there are none".
+
+  READ-ONLY BY CONSTRUCTION. It revokes nothing. Killing a live credential is an
+  owner decision (a slug that names no CP site could still be a hand-minted token
+  someone depends on), so this reports and `revoke_workspace_token/5` acts.
+  """
+  @spec orphan_site_read_tokens(Barkpark.t()) ::
+          {:ok, [map()]} | {:error, :no_scope | :unreadable}
+  def orphan_site_read_tokens(%Barkpark{} = barkpark) do
+    sites = list_sites(barkpark)
+    live_slugs = MapSet.new(sites, & &1.slug)
+
+    scopes =
+      [{barkpark.bootstrap_workspace, barkpark.bootstrap_project}]
+      |> Enum.concat(Enum.map(sites, &{&1.bootstrap_workspace, &1.bootstrap_project}))
+      |> Enum.filter(fn {ws, proj} ->
+        is_binary(ws) and ws != "" and is_binary(proj) and proj != ""
+      end)
+      |> Enum.uniq()
+
+    case scopes do
+      [] ->
+        {:error, :no_scope}
+
+      scopes ->
+        results =
+          Enum.map(scopes, fn {ws, proj} ->
+            {ws, proj, list_workspace_tokens(barkpark, ws, proj)}
+          end)
+
+        if Enum.all?(results, fn {_ws, _proj, r} -> r == :unknown end) do
+          {:error, :unreadable}
+        else
+          orphans =
+            for {ws, proj, {:ok, tokens}} <- results,
+                token <- tokens,
+                orphan = site_read_orphan(barkpark, ws, proj, token, live_slugs),
+                orphan != nil,
+                do: orphan
+
+          {:ok, orphans}
+        end
+    end
+  end
+
+  # One box token row -> an orphan record, or nil when it is not one. Three
+  # independent reasons a row is NOT an orphan, each of which has to be checked
+  # or the sweep reports a credential that is fine (and a human revokes it): it
+  # is already revoked; it is not a site-read label at all; its slug names a site
+  # that still exists.
+  defp site_read_orphan(%Barkpark{} = barkpark, ws, proj, token, live_slugs) when is_map(token) do
+    id = Map.get(token, "id")
+    label = Map.get(token, "label")
+
+    with true <- is_binary(id) and id != "",
+         true <- is_binary(label),
+         true <- is_nil(Map.get(token, "revoked_at")),
+         {:ok, slug} <- site_read_slug(label),
+         false <- MapSet.member?(live_slugs, slug) do
+      %{
+        barkpark_slug: barkpark.slug,
+        workspace: ws,
+        project: proj,
+        id: id,
+        label: label,
+        site_slug: slug,
+        inserted_at: Map.get(token, "inserted_at"),
+        last_used_at: Map.get(token, "last_used_at")
+      }
+    else
+      _ -> nil
+    end
+  end
+
+  defp site_read_orphan(_barkpark, _ws, _proj, _token, _live_slugs), do: nil
+
+  # The INVERSE of `site_read_token_label/1`. Anchored at the front and requiring
+  # a non-empty remainder, so a label that merely CONTAINS the prefix is not read
+  # as a site credential.
+  defp site_read_slug("site-read-" <> slug) when slug != "", do: {:ok, slug}
+  defp site_read_slug(_), do: :error
+
+  # Read `barkpark`'s token inventory for one workspace scope.
+  #
+  #   {:ok, tokens} — the box answered with a list (possibly empty)
+  #   :unknown      — the box did not answer, or answered something unreadable
+  #
+  # The two are DELIBERATELY distinct, for the same reason `find_content_webhook/3`
+  # separates them: every consumer here is one step away from a destructive write.
+  defp list_workspace_tokens(%Barkpark{} = barkpark, workspace, project) do
+    path = "/w/#{URI.encode(workspace)}/p/#{URI.encode(project)}/v1/tokens"
+
+    case relay_admin(barkpark, :get, path, nil) do
+      {:ok, status, %{"tokens" => tokens}} when status in 200..299 and is_list(tokens) ->
+        {:ok, tokens}
+
+      _ ->
+        :unknown
+    end
+  end
+
+  # Look one LABEL up in `barkpark`'s token inventory for a workspace scope.
+  #
+  #   {:ok, id}  — a LIVE (never-revoked) token carries this label
+  #   :absent    — the box answered with a list and no live token carries it
+  #   :unknown   — the inventory could not be read
+  #
+  # `revoked_at` is part of the predicate: an already-revoked row is not
+  # something to revoke again, and reporting it as `{:ok, id}` would turn a
+  # correctly-dead credential into a spurious box call whose 404 we would then
+  # (correctly) refuse to call success.
+  defp find_workspace_token(%Barkpark{} = barkpark, workspace, project, label) do
+    case list_workspace_tokens(barkpark, workspace, project) do
+      {:ok, tokens} ->
+        match =
+          Enum.find(tokens, fn t ->
+            is_map(t) and Map.get(t, "label") == label and is_nil(Map.get(t, "revoked_at"))
+          end)
+
+        case match do
+          %{"id" => id} when is_binary(id) and id != "" -> {:ok, id}
+          _ -> :absent
+        end
+
+      :unknown ->
+        :unknown
+    end
+  end
 
   @doc """
   site-spawner W6 (charter D51): persist the Cloudflare-in-front edge binding on
