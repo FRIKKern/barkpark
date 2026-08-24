@@ -131,10 +131,43 @@ defmodule BarkparkCloud.TerminalActResidueManifestTest do
 
   # ── THE POPULATION, HALF (b): the router's terminal call sites ────────────
   #
-  # Five `Registry.delete_barkpark/1` call sites (router.ex 2242, 2465, 6368,
-  # 6394, 9155) — the exact count IS the ADD arm — plus the one destructive
-  # billing verb, whose residue row is driven below.
-  @delete_barkpark_call_sites 5
+  # SIX `Registry.delete_barkpark/1` call sites — the exact count IS the ADD arm
+  # — plus the one destructive billing verb, whose residue row is driven below.
+  #
+  # CITED BY ROUTE, NOT BY LINE. This register used to name them as
+  # "router.ex 2242, 2465, 6368, 6394, 9155". router.ex is ~13k lines and grows
+  # constantly, so ANY insertion above a cited line silently invalidates every
+  # number below it — and the commit that raised this count to 6 is itself such
+  # an insertion. The route is the handle that survives.
+  #
+  #   DELETE /v1/barkparks/:id ....................... 1 (inside Accounts.audit/2)
+  #   DELETE /v1/fleet/supports/:id .................. 2 (residue row below)
+  #   POST /v1/internal/barkparks/:id/deprovision .... 2
+  #   the site domain-status reaper .................. 1
+  #
+  # RESIDUE ROW for the call site this count GAINED (5 → 6).
+  #
+  # DELETE /v1/fleet/supports/:id used to delete the row unconditionally — one
+  # terminal act, and the defect: a support owns a real box AND an
+  # `A <label>.barkpark.cloud` record, so dropping the row stranded both. The
+  # route now splits by lifecycle, and only TWO of its four arms are terminal
+  # HERE:
+  #
+  #   * `?mode=detach` — the caller asserts it already tore the box AND its A
+  #     record down itself. DESTROYS: the support row and its six cascade
+  #     children. SURVIVES: nothing the row pointed at — that is the caller's
+  #     assertion, and `bp cloud support remove` sends the mode ONLY on a run
+  #     whose own by-value zone sweep actually ran. TOLD: push_event(team, "fleet").
+  #   * non-live, nothing in flight — no box and no record exist, so the row IS
+  #     the whole resource. DESTROYS: the row + its cascade children.
+  #     SURVIVES: nothing. TOLD: push_event(team, "fleet").
+  #
+  # The other two arms are deliberately NOT terminal acts here, which is the
+  # point of the change: a LIVE support hands off to the deprovision worker,
+  # which deletes the row only AFTER the zone sweep succeeds — the row is the
+  # sole pointer to the record that must die — and an in-flight
+  # provision/resurrect is refused 409 rather than stranding a box being built.
+  @delete_barkpark_call_sites 6
   @billing_cancel_route {"post", "/v1/billing/cancel"}
 
   # The six tables whose FK to `barkparks` is ON DELETE CASCADE. The seventh FK
