@@ -21,6 +21,31 @@ type Context struct {
 	// BuildURL will prepend /w/:ws/p/:project. Prepending while false would point
 	// the CLI at a non-existent path and break every scoped command.
 	ScopedMirror bool
+
+	// WorkspaceExplicit / ProjectExplicit record whether the scope was STATED by
+	// the operator — via -w/-p, a BARKPARK_* var that is actually set, a repo
+	// .barkpark.json, or the saved config — or whether it merely fell through to
+	// the baked "default" floor. Resolve is the only thing that can know: by the
+	// time anyone reads ctx.Workspace, `-w default` and no -w at all are the same
+	// string. That is exactly why comparing the VALUE against "default" is not a
+	// substitute — a workspace legitimately NAMED `default` is real, and naming it
+	// explicitly has to keep working.
+	//
+	// Every read and every non-destructive write ignores these. The ambient floor
+	// is a deliberate convenience and it stays. They exist for the destroy-tier
+	// gate (cli/destroy_confirm.go), where a silent substitution is wrong even
+	// where it is currently harmless: the server's cross-tenant rail downgrades a
+	// misdirected revoke to a 404 only while `default` is an empty or unreachable
+	// workspace, and on a local instance `default` is THE real, populated one.
+	// "The server will catch it" is defence-in-depth reasoning resting on the last
+	// remaining layer.
+	//
+	// FALSE IS THE FAIL-CLOSED ZERO VALUE, deliberately. A Context built as a
+	// literal — a test, or a future caller that skips Resolve — reads as
+	// not-explicit, so a destroy refuses and asks for the scope rather than
+	// assuming one. Resolve sets them true when a layer above Defaults won.
+	WorkspaceExplicit bool
+	ProjectExplicit   bool
 }
 
 // ActiveContext is the persisted-context layer — the saved named target a user
@@ -85,6 +110,16 @@ const (
 // pass a Defaults built from DefaultDefaults and rely on flags/active-context to
 // override; the env fallbacks are the documented v1 floor.
 func Resolve(flags map[string]string, env apiclient.Config, active ActiveContext, defaults Defaults) Context {
+	// stated reports whether a layer ABOVE Defaults supplied the value — the only
+	// form of "the operator said so" that survives into the Context. It mirrors
+	// pick's precedence deliberately and sits directly above it: a provenance flag
+	// kept in a separate place from the value it describes is how the two drift.
+	stated := func(flagKey, envVal, activeVal string) bool {
+		if v, ok := flags[flagKey]; ok && v != "" {
+			return true
+		}
+		return envVal != "" || activeVal != ""
+	}
 	pick := func(flagKey, envVal, activeVal, defVal string) string {
 		if v, ok := flags[flagKey]; ok && v != "" {
 			return v
@@ -106,5 +141,8 @@ func Resolve(flags map[string]string, env apiclient.Config, active ActiveContext
 		Dataset:   pick(FlagDataset, env.Dataset, active.Dataset, defaults.Dataset),
 		// Output has no env field on apiclient.Config; flags > active > default.
 		Output: pick(FlagOutput, "", active.Output, defaults.Output),
+
+		WorkspaceExplicit: stated(FlagWorkspace, env.Workspace, active.Workspace),
+		ProjectExplicit:   stated(FlagProject, env.Project, active.Project),
 	}
 }

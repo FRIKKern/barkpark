@@ -142,6 +142,70 @@ func destroyRefArgs(cmd manifest.Command, tail []string) (map[string]string, boo
 	return argMap, true
 }
 
+// requireStatedScope refuses a destroy whose workspace/project was never stated
+// — it fell through to the baked "default" floor rather than coming from -w/-p,
+// a set BARKPARK_* var, a repo .barkpark.json, or the saved config.
+//
+// WHY THIS IS NOT PARANOIA. `bp token revoke <id>` with no -w silently resolves
+// to /w/default/p/default/... The server's cross-tenant rail then downgrades the
+// misfire to a 404 — but ONLY while `default` is empty or unreachable. On a
+// local instance `default` is THE real, populated workspace, which is precisely
+// the shape an operator develops against. So the mechanism that makes this
+// harmless is the last remaining layer, and it is the layer that varies by
+// environment. A silent substitution on a credential destroy is the wrong
+// default even where it currently costs nothing.
+//
+// SCOPED TO DESTROY-TIER, DELIBERATELY. Reads and non-destructive writes keep
+// the ambient floor untouched; `bp token ls` with no -w still works exactly as
+// before. Widening this to every scoped command would change behaviour shared
+// across the whole CLI to buy nothing — the asymmetry is what justifies it here.
+//
+// It is keyed on PROVENANCE, never on the value: ctx.Workspace == "default"
+// cannot tell `-w default` from no -w, and a workspace genuinely named `default`
+// is a real workspace whose owner must still be able to administer it. Say it
+// explicitly and the destroy proceeds.
+//
+// The check applies only to the placeholders the command's URL actually
+// consumes. A destroy-tier verb that self-scopes (its own path carries the
+// workspace) is unaffected, and a scope the URL never reads is not something to
+// refuse over.
+func requireStatedScope(ctx manifest.Context, cmd manifest.Command, target destroyTarget) (string, bool) {
+	var missing []string
+	if commandReadsPlaceholder(cmd, "workspace_slug", "workspace", "ws") && !ctx.WorkspaceExplicit {
+		missing = append(missing, "-w <workspace>")
+	}
+	if commandReadsPlaceholder(cmd, "project_slug", "project", "p") && !ctx.ProjectExplicit {
+		missing = append(missing, "-p <project>")
+	}
+	if len(missing) == 0 {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"refusing to destroy a %s without a stated scope — %s fell back to %q/%q, "+
+			"which is a real workspace on some instances. Name it: %s "+
+			"(or set BARKPARK_WORKSPACE/BARKPARK_PROJECT, or `bp use <server>`)",
+		target.kind, strings.Join(missing, " and "),
+		ctx.Workspace, ctx.Project, strings.Join(missing, " "),
+	), true
+}
+
+// commandReadsPlaceholder reports whether any of names appears as a
+// :placeholder in the URL the command will actually build — its flat
+// path_template PLUS the scoped_prefix, since the prefix is where
+// :workspace_slug lives for every command in the destroy registry.
+func commandReadsPlaceholder(cmd manifest.Command, names ...string) bool {
+	tmpl := cmd.HTTP.PathTemplate
+	if cmd.ScopedPrefix != nil {
+		tmpl = *cmd.ScopedPrefix + tmpl
+	}
+	for _, n := range names {
+		if strings.Contains(tmpl, ":"+n) {
+			return true
+		}
+	}
+	return false
+}
+
 // confirmDestroy gates one destroy-tier manifest command. It returns true to
 // proceed. The caller must abort without sending when it returns false.
 //
@@ -151,6 +215,15 @@ func confirmDestroy(out *writer, g globals, ctx manifest.Context, m *manifest.Ma
 	target, gated := destroyTargets[cmd.ID]
 	if !gated {
 		return true
+	}
+
+	// THE SCOPE MUST BE STATED, NOT INHERITED. Refuse before the preview: with no
+	// stated scope there is no defensible workspace to preview AGAINST, and
+	// reading an ambient one would put a credential inventory the operator never
+	// asked for on their screen.
+	if msg, refuse := requireStatedScope(ctx, cmd, target); refuse {
+		out.userErr("%s", msg)
+		return false
 	}
 
 	ref := args[target.argName]
