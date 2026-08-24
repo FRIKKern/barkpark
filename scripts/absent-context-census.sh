@@ -19,27 +19,84 @@
 # genuinely did not exist anywhere in the tree, and they are all this adds:
 #   1. an absence that carries a DATE and a CLASS, so "how long" and "why" are
 #      answerable without a human reading the Actions tab. The classes, and the
-#      DIFFERENT remedy each one implies:
-#        ZOMBIED         queued, attempt 1, jobs.total_count 0 — GitHub created
-#                        the run and never dispatched it. Re-dispatch.
-#        RERUN_DELETED   attempt >= 2 with no rendered check run. Re-run.
-#        NAME_NOT_IN_RUN the producing run COMPLETED and rendered no check run
-#                        under this name — a head predating the context, a
-#                        renamed job, a pruned aggregator. Rebase, or edit the
-#                        spec. Never re-dispatch; there is nothing to dispatch.
-#        NO_RUN          no run of the producing workflow on this head at all.
+#      DIFFERENT remedy each one implies.
+#
+#      SCREAMING — a standing absence with a remedy, reaches the exit code:
+#        ZOMBIED         not completed, jobs.total_count 0, and OLDER than
+#                        --stale-queue-hours. GitHub created the run and never
+#                        dispatched it. Re-dispatch. The age bound is
+#                        load-bearing: without it a sixty-second-old run scored
+#                        identically to the fifteen-day specimen this class was
+#                        written for, which is precisely what happened.
+#        RERUN_DELETED   attempt >= 2, run COMPLETED, no rendered check run.
+#                        Re-run. Completion is required — an unfinished re-run
+#                        is in flight, not deleted.
+#        NAME_NOT_IN_RUN the producing run COMPLETED on its first attempt and
+#                        rendered no check run under this name — a head
+#                        predating the context, a renamed job, a pruned
+#                        aggregator. Rebase, or edit the spec. Never
+#                        re-dispatch; there is nothing to dispatch.
+#        NO_RUN          no run of the producing workflow on this head at all,
+#                        and the pull request is not conflicted.
 #        UNCLASSIFIED(…) the census does not know, and says so rather than
-#                        picking the nearest label;
+#                        picking the nearest label. Fails closed at any age.
+#
+#      IN FLIGHT — self-resolving, printed and counted, NO exit code:
+#        DISPATCHED_PENDING  the producing run is still working and has
+#                            dispatched jobs; this job is behind an unmet
+#                            `needs:` and does not exist yet.
+#        UNDISPATCHED_YOUNG  jobs.total_count 0 but YOUNGER than the threshold —
+#                            a run GitHub has not populated yet, not a zombie.
+#        PR_CONFLICTED       no run because the merge commit cannot be computed
+#                            — a merge conflict, not a missing context.
 #   2. a repo-wide queued-run enumeration that is PAGINATED and
 #      SERVER-FILTERED, so it can report a queue older than the last page.
 #
-# THE PENDING CASE IS DELIBERATELY OUT OF SCOPE, and the omission is a ruling
-# rather than an oversight. A check run that IS rendered but has not concluded
-# is a live, self-resolving state and it is somebody else's subject. This
-# instrument's subject is a name that RENDERS NOWHERE — jobs.total_count is 0,
-# so there is no check run of any status to classify. The two populations are
-# disjoint by construction, and the harness pins that with a fixture whose only
-# anomaly is a rendered, unconcluded check run: it reports nothing.
+# THE PENDING CASE IS OUT OF SCOPE — AND THERE ARE THREE OF THEM, NOT TWO.
+#
+# This header used to say the pending population and the absent population were
+# "disjoint by construction". They are not, and the claim cost seventeen days.
+# There are THREE populations, and the original reasoning only ever saw two:
+#
+#   1. RENDERED AND CONCLUDED — the ordinary case.
+#   2. RENDERED, NOT CONCLUDED — a check run exists with status queued or
+#      in_progress. Live, self-resolving, somebody else's subject. This is the
+#      only pending case the first version considered, and it is correctly
+#      excluded by testing for the NAME rather than for its status.
+#   3. NOT RENDERED BECAUSE THE JOB DOES NOT EXIST YET. GitHub creates a job —
+#      and its check run — only once every one of its `needs:` has concluded.
+#      Until then the job is absent from `runs/<id>/jobs` entirely, so there is
+#      no check run of ANY status to find, and a name-presence test reads it as
+#      an absence. Every gate in this repository is a terminal aggregator behind
+#      a full `needs:` list, so population 3 is non-empty on every pull request
+#      for the whole first phase of its CI.
+#
+# Population 3 is indistinguishable from a genuinely missing context by the
+# check-run feed alone. It is separated HERE by asking the producing run whether
+# it is still working: status queued/waiting/pending/requested/in_progress with
+# jobs.total_count > 0 means the job is coming. That verdict is reported in the
+# in-flight column and carries no exit code.
+#
+# MEASURED, one run id, twenty minutes apart (run 32766664303, cloud.yml, PR
+# #14040, 2026-08-24): at 19:11Z jobs.total_count was 2 and `Cloud gate` was not
+# in the job list; at 19:31Z it was 5 and `Cloud gate` was present, queued. No
+# intervention — only time. The census called that an ABSENCE 71 times.
+#
+# THE HARNESS PINS ALL THREE. §3 carries a fixture for population 2 (a rendered
+# unconcluded check run reports nothing) and for population 3 (a producing run
+# still working, with the gate job not in its job list, reports nothing) — and
+# each is paired with the mutation that flips it to a SCREAM, so neither probe
+# is a green that can only pass.
+#
+# THE CONFLICTED HEAD. A pull request GitHub cannot compute a merge commit for
+# runs no `pull_request` workflow at all, so all four required contexts go
+# missing together. That is a merge conflict — already reported by GitHub's own
+# UI and by `mergeable` — and this census exists for things NOTHING ELSE
+# reports. It is classified PR_CONFLICTED and carried in the in-flight column.
+#
+# THE TWO LIMBS ARE REPORTED APART. The absence limb and the repo-wide queue
+# limb each state a verdict on their own line, whether or not the other fired,
+# because fusing them is how a true positive stayed invisible for seventeen days.
 #
 # THE QUEUE QUERY IS BUILT TO LOSE.
 # The comfortable form — `gh api repos/:o/:r/actions/runs --jq
@@ -53,8 +110,10 @@
 # two agree is not proof of health — it is a day when nothing old was queued.
 #
 # EXIT CODES
-#   0  every required context rendered on every head examined, and no queued run
-#      is older than the staleness threshold
+#   0  every required context is either rendered on every head examined, or its
+#      producing run is still working on it, and no queued run is older than the
+#      staleness threshold. In-flight rows may be non-zero at exit 0 — that is
+#      the point of the column.
 #   1  SCREAM — at least one required context is ABSENT from a head, and/or a
 #      queued run has been sitting past the threshold
 #   2  UNKNOWN — a feed could not be read, or a required context could not be
@@ -87,10 +146,17 @@ NOW_ISO=""
 STALE_QUEUE_HOURS=24
 SHAS=()
 
-# Report accumulators.
+# Report accumulators. ABSENT_ROWS and STALE_ROWS are the two SCREAMING limbs and
+# are counted apart on purpose — see THE TWO LIMBS ARE REPORTED APART in the
+# header. PENDING_ROWS is informational and never reaches an exit code.
 ABSENT_ROWS=0
 STALE_ROWS=0
 UNKNOWN_ROWS=0
+PENDING_ROWS=0
+
+# Informational rows are buffered, not printed inline, so the queue limb's
+# verdict is never pushed off the top of a log by in-flight noise.
+PENDING_REPORT=""
 
 say()  { echo "$*"; }
 warn() { echo "$*" >&2; }
@@ -146,6 +212,26 @@ age_hours() { # <iso8601-Z> -> hours to 1dp, or the literal "?"
   awk -v s="$h" 'BEGIN { printf "%.1f", s / 3600 }'
 }
 
+# True when <iso> is strictly older than <hours>.
+#
+# COMPARES SECONDS, NEVER age_hours' STRING. age_hours formats to one decimal
+# for the report, and reusing that here silently floors every age under six
+# minutes to "0.0" — so a threshold of 0 could never be exceeded and a newborn
+# run stayed calm no matter how the bar was set. Caught by §1.7, which is
+# exactly the probe that lowers the threshold to 0 to prove the guard is the
+# threshold and not the date literal.
+#
+# AN UNREADABLE TIMESTAMP IS TRUE, not false: the one caller is the ZOMBIED age
+# guard, and a date nobody could parse must not quietly demote a real zombie
+# into the calm column. A newborn run always has a parseable created_at.
+age_exceeds() { # <iso8601-Z> <hours> -> 0 when older
+  local then secs
+  then="$(iso_to_epoch "$1")" || return 0
+  secs=$(( NOW_EPOCH - then ))
+  [ "$secs" -lt 0 ] && secs=0
+  awk -v s="$secs" -v t="$2" 'BEGIN { exit !(s > t * 3600) }'
+}
+
 # ── the fetch layer ──────────────────────────────────────────────────────────
 # Every reader emits NDJSON of the objects the census cares about, so a fixture
 # is a REAL captured API payload and not a bespoke shape the live path never
@@ -178,16 +264,22 @@ fixture() { # <name> — path, or empty if absent
   echo "$FIXTURES/$1"
 }
 
-# Open PR heads: NDJSON of {number, sha, updated_at}.
+# Open PR heads: NDJSON of {number, sha, updated_at, mergeable}.
+#
+# `mergeable` is read because a CONFLICTING pull request runs no `pull_request`
+# workflow at all — GitHub cannot compute the merge commit — and so shows every
+# required context missing at once. A fixture captured before this field existed
+# yields "UNKNOWN", which classifies as NO_RUN exactly as it did before: the
+# absence of the field can only make the census LOUDER, never quieter.
 read_open_prs() {
   local f
   if [ -n "$FIXTURES" ]; then
     f="$(fixture prs.json)" || { warn "fixtures mode: missing prs.json"; return 1; }
-    jq -c '.[] | {number, sha: .headRefOid, updated_at: .updatedAt}' "$f"
+    jq -c '.[] | {number, sha: .headRefOid, updated_at: .updatedAt, mergeable: (.mergeable // "UNKNOWN")}' "$f"
   else
     gh pr list --repo "$REPO" --state open --limit 100 \
-      --json number,headRefOid,updatedAt 2>/dev/null \
-      | jq -c '.[] | {number, sha: .headRefOid, updated_at: .updatedAt}'
+      --json number,headRefOid,updatedAt,mergeable 2>/dev/null \
+      | jq -c '.[] | {number, sha: .headRefOid, updated_at: .updatedAt, mergeable: (.mergeable // "UNKNOWN")}'
   fi
 }
 
@@ -276,8 +368,9 @@ producing_workflow() { # <context> -> repo-relative workflow path, or empty
 }
 
 # ── the census, one head at a time ───────────────────────────────────────────
-census_head() { # <sha> <label>
-  local sha="$1" label="$2" checks runs names oldest_queued anchor anchor_label
+census_head() { # <sha> <label> <pr-updated-at> <mergeable>
+  local sha="$1" label="$2" mergeable="${4:-UNKNOWN}"
+  local checks runs names oldest_queued anchor anchor_label
 
   if ! checks="$(read_check_runs "$sha")"; then
     warn "UNKNOWN  $label $sha — the check-run feed could not be read; this head is NOT certified clean"
@@ -329,48 +422,117 @@ census_head() { # <sha> <label>
     newest="$(printf '%s\n' "$wfruns" | grep . | jq -sc 'sort_by(.created_at, .id) | last // empty' 2>/dev/null)"
 
     if [ -z "$newest" ] || [ "$newest" = "null" ]; then
-      class="NO_RUN"; rid="-"
+      # A pull request whose merge commit GitHub cannot compute runs NO
+      # `pull_request` workflow at all, so every required context is missing from
+      # it at once. That is a merge conflict — reported by GitHub's own UI on the
+      # pull request, and by `mergeable` on the API — wearing an absent-context
+      # label. It is not this instrument's subject; see THE CONFLICTED HEAD.
+      if [ "$mergeable" = "CONFLICTING" ]; then
+        class="PR_CONFLICTED"; rid="-"
+      else
+        class="NO_RUN"; rid="-"
+      fi
     else
       rid="$(jq -r '.id' <<<"$newest")"
       attempt="$(jq -r '.run_attempt // 1' <<<"$newest")"
       status="$(jq -r '.status // ""' <<<"$newest")"
-      if [ "$attempt" -ge 2 ] 2>/dev/null; then
-        class="RERUN_DELETED"
-      else
-        case "$status" in
-          queued|waiting|pending|requested)
-            jobs="$(read_jobs_count "$rid")"
-            if [ "$jobs" = "0" ]; then
+      # STATUS IS READ BEFORE ATTEMPT, and that order is itself a fix. A re-run
+      # that has not finished is in flight exactly like a first attempt that has
+      # not finished; branching on `run_attempt` first labelled it RERUN_DELETED
+      # while its jobs were still being created. RERUN_DELETED means a re-run
+      # that COMPLETED and rendered nothing, so it now lives in the `completed`
+      # arm, which is the only place that is knowable.
+      case "$status" in
+        queued|waiting|pending|requested|in_progress)
+          # THE POPULATION THIS ARM EXISTS FOR — and the reason this census was
+          # red on all 71 runs it had between 2026-08-07 and 2026-08-24,
+          # without ever once being green. GitHub does not CREATE a
+          # `needs:`-gated job,
+          # and renders no check run for it, until every one of its `needs:`
+          # has concluded. All three gates here are terminal aggregators
+          # (`Cloud gate` needs [changes, compile, test, path-escape]; Console
+          # and Elixir the same shape), so for the whole first phase of every
+          # pull request's CI those names render NOWHERE while their producing
+          # run is perfectly healthy.
+          #
+          # Measured on run 32766664303 (cloud.yml, PR #14040) 2026-08-24:
+          #   19:11Z  jobs.total_count=2  `Cloud gate` NOT in the job list
+          #   19:31Z  jobs.total_count=5  `Cloud gate` present, queued/null
+          # Same run id, twenty minutes, no intervention. Counting that as an
+          # ABSENCE is counting the passage of time.
+          #
+          # `in_progress` is named in this arm deliberately. It used to fall
+          # through to UNCLASSIFIED(status=in_progress) — the census saying it
+          # did not know, about a state it knows exactly.
+          jobs="$(read_jobs_count "$rid")"
+          if [ "$jobs" = "-1" ]; then
+            # Fail closed, at ANY age. A job count nobody managed to read is
+            # not evidence of health, and this is the one arm here that still
+            # screams.
+            class="UNCLASSIFIED(jobs-unreadable)"
+          elif [ "$jobs" = "0" ]; then
+            # Nothing dispatched. AGE is the entire discriminator, and dropping
+            # it is what let a sixty-second-old run score identically to the
+            # fifteen-day specimen this class was written for.
+            if age_exceeds "$(jq -r '.created_at // empty' <<<"$newest")" "$STALE_QUEUE_HOURS"; then
               class="ZOMBIED"
-            elif [ "$jobs" = "-1" ]; then
-              class="UNCLASSIFIED(jobs-unreadable)"
             else
-              class="DISPATCHED_PENDING"
+              class="UNDISPATCHED_YOUNG"
             fi
-            ;;
-          # The producing run RAN TO COMPLETION on this head and still rendered
-          # no check run under this name. Review fix: this used to read
-          # UNCLASSIFIED(status=completed), which is the class the census emits
-          # when it does not know — and it does know. It is the dominant live
-          # class (3 of the 10 rows the first real run found), so leaving it
-          # unnamed made the census's own headline illegible, which is the
-          # disease and not the cure. It means the job did not exist under this
-          # name in that run: a head that predates a required context, a renamed
-          # job, or an aggregator pruned out of the graph. Every one of those is
-          # a real deadlock whose remedy is a rebase or a spec edit, never a
-          # re-dispatch — which is exactly why it must not wear ZOMBIED's name.
-          completed) class="NAME_NOT_IN_RUN" ;;
-          *) class="UNCLASSIFIED(status=$status)" ;;
-        esac
-      fi
+          else
+            class="DISPATCHED_PENDING"
+          fi
+          ;;
+        # The producing run RAN TO COMPLETION on this head and still rendered
+        # no check run under this name. Review fix: this used to read
+        # UNCLASSIFIED(status=completed), which is the class the census emits
+        # when it does not know — and it does know. It is the dominant live
+        # class (3 of the 10 rows the first real run found), so leaving it
+        # unnamed made the census's own headline illegible, which is the
+        # disease and not the cure. It means the job did not exist under this
+        # name in that run: a head that predates a required context, a renamed
+        # job, or an aggregator pruned out of the graph. Every one of those is
+        # a real deadlock whose remedy is a rebase or a spec edit, never a
+        # re-dispatch — which is exactly why it must not wear ZOMBIED's name.
+        completed)
+          # A re-run that finished and still rendered nothing is a DELETED
+          # check run; a first attempt that did the same never had one. The
+          # remedies differ, so the names must.
+          if [ "$attempt" -ge 2 ] 2>/dev/null; then
+            class="RERUN_DELETED"
+          else
+            class="NAME_NOT_IN_RUN"
+          fi
+          ;;
+        *) class="UNCLASSIFIED(status=$status)" ;;
+      esac
     fi
 
-    say "ABSENT   $label  head $sha"
-    say "         context \"$ctx\" renders nowhere on this head"
-    say "         class   $class"
-    say "         age     $(age_hours "$anchor")h  (anchor: $anchor_label $anchor)"
-    say "         run     $rid  producer $wf"
-    ABSENT_ROWS=$((ABSENT_ROWS + 1))
+    # ── the split ────────────────────────────────────────────────────────────
+    # A class is either SELF-RESOLVING — the producing run is still working and
+    # the job simply does not exist yet — or it is a standing absence with a
+    # remedy. Only the second kind reaches an exit code. The first is printed,
+    # counted and visible, but it is weather, and a watch that screams at weather
+    # is a watch nobody reads. This is the whole of the over-report fix: nothing
+    # here is suppressed, it is REROUTED to a column that carries no verdict.
+    case "$class" in
+      DISPATCHED_PENDING|UNDISPATCHED_YOUNG|PR_CONFLICTED)
+        PENDING_REPORT="$PENDING_REPORT
+  pending  $label  head $sha
+           context \"$ctx\" has not been created yet on this head
+           class   $class
+           run     $rid  producer $wf"
+        PENDING_ROWS=$((PENDING_ROWS + 1))
+        ;;
+      *)
+        say "ABSENT   $label  head $sha"
+        say "         context \"$ctx\" renders nowhere on this head"
+        say "         class   $class"
+        say "         age     $(age_hours "$anchor")h  (anchor: $anchor_label $anchor)"
+        say "         run     $rid  producer $wf"
+        ABSENT_ROWS=$((ABSENT_ROWS + 1))
+        ;;
+    esac
   done <<EOF
 $(jq -r '.protection.required_status_checks.checks[].context' "$SPEC")
 EOF
@@ -405,7 +567,8 @@ else
     census_head \
       "$(jq -r '.sha' <<<"$row")" \
       "PR #$(jq -r '.number' <<<"$row")" \
-      "$(jq -r '.updated_at' <<<"$row")"
+      "$(jq -r '.updated_at' <<<"$row")" \
+      "$(jq -r '.mergeable // "UNKNOWN"' <<<"$row")"
   done <<<"$PRS"
 fi
 say "heads examined: $HEADS_SEEN"
@@ -449,7 +612,42 @@ else
 fi
 
 say ""
-say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS"
+
+# ── the in-flight column ─────────────────────────────────────────────────────
+# Printed, never screamed. A reader who wants to know why a context is not on a
+# head yet gets the whole list; a reader who wants to know whether anything is
+# WRONG reads the two verdict lines below and never has to scroll through this.
+if [ "$PENDING_ROWS" -gt 0 ]; then
+  say "in flight — NOT a finding, listed so the absence column stays honest"
+  printf '%s\n' "$PENDING_REPORT" | sed '/^$/d'
+  say ""
+fi
+
+# ── THE TWO LIMBS ARE REPORTED APART ─────────────────────────────────────────
+# They were fused into one exit code and one sentence, and the consequence was
+# measured: between 2026-08-07 and 2026-08-24 this census failed 71 of 71 runs.
+# The absence limb over-reported on every single one of them, and it drowned the
+# queue limb — which was RIGHT, and which had been naming seven undispatched runs
+# on a real main commit since the census's first day. Nobody acted on them for
+# seventeen days, because a watch that is red every time it runs is
+# indistinguishable from a watch that is broken.
+#
+# So each limb now states its own verdict on its own line, in full, whether or
+# not the other one fired. A reader grepping `VERDICT  queue limb` gets an
+# answer that the absence limb cannot suppress, dilute or push off the top of
+# the log — and that holds even if only half of this file ever lands.
+if [ "$ABSENT_ROWS" -gt 0 ]; then
+  say "VERDICT  absence limb : SCREAM — $ABSENT_ROWS required context(s) render nowhere on an open head and are not self-resolving"
+else
+  say "VERDICT  absence limb : clean — every required context is rendered, or its producing run is still working on it"
+fi
+if [ "$STALE_ROWS" -gt 0 ]; then
+  say "VERDICT  queue limb   : SCREAM — $STALE_ROWS queued run(s) older than ${STALE_QUEUE_HOURS}h, created and never dispatched"
+else
+  say "VERDICT  queue limb   : clean — no queued run is older than ${STALE_QUEUE_HOURS}h"
+fi
+say ""
+say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS"
 
 [ "$CONFIG_FAULT" = "1" ] && {
   warn "CONFIGURATION FAULT — this run's credential cannot read the Actions and check-run endpoints. A census with no authority is not a clean census."
