@@ -67,11 +67,23 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
   ## Scoping (fail closed)
 
   The plug SELF-GATES on `path_info`; the shared `:public_root` bucket's
-  siblings (sheets/quiz/finder/share) fall through untouched. The flat
-  spellings mirror `Papers.get_public_document/3` in ONE query: the Document
-  joined to the Default workspace by slug — NO project_id predicate (the
-  public reader scopes by workspace only), `status == "published"` only. No
-  row (including an unseeded Default workspace) leaves the conn untouched.
+  siblings (sheets/quiz/finder/share) fall through untouched. Both queries
+  below enforce the published perspective directly — `status == "published"`
+  AND `doc_id` is not `drafts.`-prefixed — rather than delegating to (or
+  merely resembling) another module's resolver: the prefix conjunct reuses
+  `DraftId.drafts_prefix()`, the SAME constant and `not like/2` idiom
+  `Barkpark.Content.Query.maybe_published_only/2` applies for every other
+  anonymous/public read (D5). A `drafts.`-prefixed row is never a valid
+  published read here even if its `status` column incoherently reads
+  "published" — which the write chokepoint (`Writer.create_document/4`,
+  `upsert_document/4`) already refuses to produce, so this clamp is
+  belt-and-braces on the read side, not the only thing standing between a
+  write bug and a leak.
+
+  The flat spellings additionally scope to the Default workspace by slug — NO
+  project_id predicate (the public reader scopes by workspace only). No row
+  (including an unseeded Default workspace, or a `drafts.`-prefixed row) ever
+  leaves the conn untouched.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -79,6 +91,7 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.DraftId
   alias Barkpark.EpicFleet
   alias Barkpark.Repo
   alias Barkpark.Tenancy.Workspace
@@ -111,13 +124,19 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
 
   def call(conn, _opts), do: conn
 
+  # Same published-perspective clamp as `default_public_paper/2` below —
+  # `status == "published"` AND `doc_id` not `drafts.`-prefixed. See the
+  # moduledoc's "Scoping (fail closed)" section.
   defp scoped_paper(workspace, project, slug) do
+    drafts_prefix = drafts_like_prefix()
+
     Repo.one(
       from document in Document,
         where:
           document.workspace_id == ^workspace.id and document.project_id == ^project.id and
             document.type == "paper" and document.dataset == "production" and
-            document.doc_id == ^slug and document.status == "published",
+            document.doc_id == ^slug and document.status == "published" and
+            not like(document.doc_id, ^drafts_prefix),
         select: %{
           released_revision_id: document.released_revision_id,
           content: document.content
@@ -125,9 +144,15 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
     )
   end
 
-  # Mirrors Papers.get_public_document/3 (Default-workspace pinning, fail
-  # closed) in ONE query — workspace scope only, no project_id predicate.
+  # Default-workspace pinning, fail closed — workspace scope only, no
+  # project_id predicate. Published-perspective clamp: `status == "published"`
+  # AND `doc_id` not `drafts.`-prefixed, reusing `DraftId.drafts_prefix()` and
+  # the same `not like/2` idiom `Content.Query.maybe_published_only/2` applies
+  # everywhere else on the anonymous/public read path (D5). See the
+  # moduledoc's "Scoping (fail closed)" section.
   defp default_public_paper(slug, dataset) do
+    drafts_prefix = drafts_like_prefix()
+
     Repo.one(
       from document in Document,
         join: workspace in Workspace,
@@ -135,13 +160,15 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeaders do
         where:
           workspace.slug == "default" and document.type == "paper" and
             document.dataset == ^dataset and document.doc_id == ^slug and
-            document.status == "published",
+            document.status == "published" and not like(document.doc_id, ^drafts_prefix),
         select: %{
           released_revision_id: document.released_revision_id,
           content: document.content
         }
     )
   end
+
+  defp drafts_like_prefix, do: DraftId.drafts_prefix() <> "%"
 
   defp respond(conn, nil), do: conn
 

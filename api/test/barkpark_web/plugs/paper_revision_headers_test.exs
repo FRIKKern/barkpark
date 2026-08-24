@@ -323,6 +323,111 @@ defmodule BarkparkWeb.Plugs.PaperRevisionHeadersTest do
     end
   end
 
+  # ── published-perspective clamp: a drafts.-id row bypassing the writer ────
+  #
+  # `Writer.create_document/4` / `upsert_document/4` coerce a caller-supplied
+  # `status: "published"` to `"draft"` the instant `doc_id` is `drafts.`-
+  # prefixed, and `Lifecycle.do_publish_document/4` writes `status:
+  # "published"` only onto the BARE `DraftId.published_id/1` row — so in
+  # every real write path this row can never exist. That write-side
+  # invariant is exactly why this plug was SAFE despite reading only
+  # `status == "published"` with no `drafts.` prefix conjunct. This suite
+  # bypasses the writer entirely (`Document.changeset/2` + `Repo.insert!`,
+  # same raw-insert shape `pin_released_revision!/1` below already uses) to
+  # construct the incoherent row directly and assert the READ SIDE refuses
+  # it on its own — not relying on the write invariant holding forever.
+  describe "published-perspective clamp: a drafts.-id row bypassing the writer" do
+    test "flat /papers/:slug: a drafts.-prefixed row with status \"published\" emits no etag or revision header",
+         %{ws: ws, project: project} do
+      leak = insert_bypassing_writer!(ws, project, "drafts.leak-flat")
+
+      conn =
+        Plug.Test.conn(:get, "/papers/drafts.leak-flat")
+        |> PaperRevisionHeaders.call([])
+
+      refute conn.halted
+      assert get_resp_header(conn, "etag") == []
+      assert get_resp_header(conn, "x-barkpark-paper-revision") == []
+      # `cache-control` is NOT asserted absent here — a bare `%Plug.Conn{}`
+      # carries `"max-age=0, private, must-revalidate"` as ITS OWN default
+      # (see `Plug.Conn` moduledoc), so this plug's own
+      # `put_resp_header("cache-control", …)` is indistinguishable from that
+      # default on a direct-call conn; the etag/revision absence above is the
+      # load-bearing assertion (matches the sibling "a draft paper leaves the
+      # conn untouched" test above, same reason).
+      # Guard the fixture itself: the row really exists at the drafts. id
+      # with an (incoherent) published status, or the refusal above is vacuous.
+      assert Repo.get!(Document, leak.id).status == "published"
+      assert Repo.get!(Document, leak.id).doc_id == "drafts.leak-flat"
+    end
+
+    test "dataset-prefixed /d/:dataset/papers/:slug: same clamp", %{ws: ws, project: project} do
+      insert_bypassing_writer!(ws, project, "drafts.leak-dataset")
+
+      conn =
+        Plug.Test.conn(:get, "/d/#{@dataset}/papers/drafts.leak-dataset")
+        |> PaperRevisionHeaders.call([])
+
+      refute conn.halted
+      assert get_resp_header(conn, "etag") == []
+    end
+
+    test "scoped /w/:ws/p/:project/papers/:slug: same clamp", %{ws: ws, project: project} do
+      insert_bypassing_writer!(ws, project, "drafts.leak-scoped")
+
+      conn =
+        Plug.Test.conn(:get, "/w/#{ws.slug}/p/#{project.slug}/papers/drafts.leak-scoped")
+        |> Plug.Conn.assign(:current_workspace, ws)
+        |> Plug.Conn.assign(:current_project, project)
+        |> PaperRevisionHeaders.call([])
+
+      refute conn.halted
+      assert get_resp_header(conn, "etag") == []
+    end
+
+    test "positive control: the same bypass at a BARE (non-prefixed) doc_id still emits the etag",
+         %{ws: ws, project: project} do
+      insert_bypassing_writer!(ws, project, "leak-control-bare")
+
+      conn =
+        Plug.Test.conn(:get, "/papers/leak-control-bare")
+        |> PaperRevisionHeaders.call([])
+
+      refute conn.halted
+      assert [_etag] = get_resp_header(conn, "etag")
+    end
+  end
+
+  # Bypasses `Writer.create_document/4` / `upsert_document/4` entirely — a raw
+  # `Document.changeset/2` + `Repo.insert!`, same shape as
+  # `pin_released_revision!/1` below — so the writer's `drafts.`-prefix ⇒
+  # coerce-status-to-draft invariant cannot intervene. This is the ONLY way to
+  # get a `drafts.`-prefixed row with `status: "published"` into the table;
+  # every real write path refuses to produce one (see the describe block's
+  # header comment).
+  defp insert_bypassing_writer!(ws, project, doc_id) do
+    %Document{}
+    |> Document.changeset(%{
+      "doc_id" => doc_id,
+      "type" => "paper",
+      "dataset" => @dataset,
+      "status" => "published",
+      "rev" => Barkpark.Content.Writer.generate_rev(),
+      "workspace_id" => ws.id,
+      "project_id" => project.id,
+      "content" => %{
+        "blocks" => [
+          %{
+            "id" => "b1",
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "DRAFT-ONLY-SECRET"}]
+          }
+        ]
+      }
+    })
+    |> Repo.insert!()
+  end
+
   defp pin_released_revision!(paper) do
     revision =
       %Revision{}
