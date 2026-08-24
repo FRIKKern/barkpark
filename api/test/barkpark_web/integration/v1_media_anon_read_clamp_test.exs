@@ -251,9 +251,25 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       # the reason the signing gate reuses that function instead of asking
       # `conn.assigns[:api_token] != nil` locally: the local spelling would
       # have refused this caller.
-      bytes = get(build_conn(), result["originalUrl"])
+      #
+      # THE SIGNATURE IS FETCHED AS THE MEMBER, NOT ANONYMOUSLY, and the
+      # difference is the point. A scoped URL carries the /w/:ws/p/:proj prefix,
+      # so its bytes are served by the SCOPED delivery route, where
+      # `ResolveWorkspace` membership-gates BEFORE `Access.delivery_ok?/3` ever
+      # sees the signature. An anonymous fetch of this URL is therefore refused
+      # by the TENANCY wall, not by the signature — asserting 200 there would
+      # have been asserting that a signature defeats tenancy, which is the
+      # opposite of what this PR wants to be true. Both halves are pinned below
+      # so a future reader cannot mistake one refusal for the other.
+      bytes = session.(build_conn()) |> get(result["originalUrl"])
       assert bytes.status == 200
       receipt("workspace-member account session (no bearer)", result["originalUrl"], bytes)
+
+      anon = get(build_conn(), result["originalUrl"])
+
+      assert anon.status == 403,
+             "a valid signature let an anonymous caller through the SCOPED delivery " <>
+               "route's membership gate — signature must not defeat tenancy: #{anon.status}"
     end
 
     test "the SCOPED twin refuses an anonymous signature too", %{conn: conn} do
