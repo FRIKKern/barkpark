@@ -157,6 +157,32 @@ export class CacheStore {
 
 /* ── drivers ────────────────────────────────────────────────────────────────── */
 
+/** The separator inside MemoryDriver's composite map keys.
+ *
+ * NUL is the right CHARACTER: it cannot occur in an instance id, a cache kind
+ * or a cache key, so one triple's key can never collide with a
+ * differently-split triple's — which matters because two of the three
+ * statements MemoryDriver emulates match a PREFIX of the key rather than all
+ * of it.
+ *
+ * It is written as the ESCAPE SEQUENCE below, and must never be re-spelled as
+ * a raw NUL BYTE in this file. A source file carrying a literal NUL is treated
+ * as BINARY by plain grep, which then answers NOTHING for symbols that are
+ * present. Measured on this very file at c72daa6fdf:
+ * `grep -c PAPER_CACHE_CAP apps/mobile/src/state/cache.ts` printed nothing and
+ * exited 1, while `git grep -c` on the same path found 4. It was the ONLY such
+ * file among the 180 tracked under apps/. `git grep` is immune, so the drift
+ * sweeps that read through git kept seeing it (tooling/doc-truth's lineref
+ * sweep pinned its own immunity in #13682) — but every ad-hoc `grep -rn` an
+ * agent or a human types over this tree skipped it in silence.
+ *
+ * The escape compiles to the identical character, so not one key byte changes;
+ * only the file stops being binary.
+ *
+ * `__tests__/sourceIsGreppable.test.ts` is the tripwire that keeps the whole
+ * of apps/mobile that way, not just this line. */
+const KEY_SEP = '\u0000'
+
 interface MemoryRow {
   schema_version: number
   payload: string
@@ -169,8 +195,21 @@ interface MemoryRow {
 class MemoryDriver implements SqlDriver {
   private rows = new Map<string, MemoryRow>()
 
+  /** The full row key. Byte-for-byte what it always was — `KEY_SEP` is the
+   * same character, written as an escape. */
   private static key(instanceId: SqlParam, kind: SqlParam, cacheKey: SqlParam): string {
-    return `${String(instanceId)} ${String(kind)} ${String(cacheKey)}`
+    return MemoryDriver.prefix(instanceId, kind) + String(cacheKey)
+  }
+
+  /** The SCOPED-DELETE prefix, and the ONE place the key grammar lives: a key
+   * is always `prefix(…leading parts) + rest`, so a prefix match can never
+   * drift out of agreement with the key it is meant to match. Both scoped
+   * DELETEs (SQL_EVICT on instance+kind, SQL_CLEAR_INSTANCE on instance) build
+   * theirs here rather than re-spelling the separator a third and fourth time.
+   * The trailing separator is what keeps the match on a WHOLE part: without it
+   * an instance id that is a prefix of another one would clear both. */
+  private static prefix(...parts: SqlParam[]): string {
+    return parts.map((p) => String(p) + KEY_SEP).join('')
   }
 
   exec(_sql: string): void {
@@ -188,12 +227,12 @@ class MemoryDriver implements SqlDriver {
         updated_at: typeof updatedAt === 'number' ? updatedAt : 0,
       })
     } else if (sql === SQL_EVICT) {
-      const prefix = `${String(params[0])} ${String(params[1])} `
+      const prefix = MemoryDriver.prefix(params[0] ?? null, params[1] ?? null)
       const group = [...this.rows.entries()].filter(([k]) => k.startsWith(prefix))
       group.sort((a, b) => b[1].updated_at - a[1].updated_at)
       for (const [k] of group.slice(PAPER_CACHE_CAP)) this.rows.delete(k)
     } else if (sql === SQL_CLEAR_INSTANCE) {
-      const prefix = `${String(params[0])} `
+      const prefix = MemoryDriver.prefix(params[0] ?? null)
       for (const k of this.rows.keys()) if (k.startsWith(prefix)) this.rows.delete(k)
     } else if (sql === SQL_DELETE_ROW) {
       this.rows.delete(MemoryDriver.key(params[0] ?? null, params[1] ?? null, params[2] ?? null))
