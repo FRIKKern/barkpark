@@ -10,10 +10,16 @@ lib/barkpark/media/delivery/search.ex	run_tags_facet_sql
 lib/barkpark/media/image_backend/magick.ex	run_bounded
 lib/barkpark/media/renditions.ex	generate
 lib/barkpark/plugins/bulldocs.ex	register_schemas
+lib/barkpark/plugins/frt.ex	load_schema!
 lib/barkpark/plugins/indx/persistence.ex	load
 lib/barkpark/plugins/media.ex	load_schema!
+lib/barkpark/plugins/onixedit.ex	book_raw_with_subschemas
 lib/barkpark/plugins/onixedit/export/validator.ex	bounded_xmllint
 lib/barkpark/plugins/onixedit/export/validator.ex	run_xmllint
+lib/barkpark/plugins/onixedit/schemas/contributor.ex	definition_map
+lib/barkpark/plugins/onixedit/schemas/text_content.ex	definition_map
+lib/barkpark/plugins/scaffy.ex	register_schemas
+lib/barkpark/plugins/sheets.ex	register_schemas
 lib/barkpark/plugins/sheets/web/export_controller.ex	delimited
 lib/barkpark/plugins/sheets/web/export_controller.ex	export_html
 lib/barkpark/plugins/sheets/web/export_controller.ex	export_xlsx

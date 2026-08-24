@@ -40,6 +40,11 @@ defmodule Barkpark.Plugins.OnixEdit.Schemas.TextContent do
   def json_path, do: Application.app_dir(:barkpark, @json_subpath)
 
   @doc "Raw decoded sub-schema map, ready to splice into book.json."
+  # Reachability: the only path read is `json_path/0` — an `Application.app_dir/2`
+  # result joined with a compile-time literal; no runtime input reaches it.
+  # Inline rather than a `.sobelow-skips` row: a baseline entry is pinned to a
+  # LINE and dies silently on any edit above the call.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec definition_map() :: map()
   def definition_map do
     json_path()
