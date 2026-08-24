@@ -339,7 +339,8 @@ func jsonMachineWriter(stdout, stderr *bytes.Buffer) *writer {
 func TestVercelQuickSetupJSONNoDeploy(t *testing.T) {
 	// Neutralise ambient BARKPARK_* so only the flag layer (g.server/g.token)
 	// resolves the context.
-	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN"} {
+	// axi-b4: derived from the shared dialect lists rather than typed.
+	for _, k := range append(append([]string{}, ServerEnvNames...), TokenEnvNames...) {
 		t.Setenv(k, "")
 	}
 

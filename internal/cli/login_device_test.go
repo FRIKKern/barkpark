@@ -764,9 +764,11 @@ func TestOfferOpenDeskSilentOnMachinePath(t *testing.T) {
 // token with no active content server is the one true "logged in but not
 // connected" state; a saved server, an env server, or no token all read false.
 func TestLoggedInWithoutServer(t *testing.T) {
-	// Neutralize any ambient server env so the config is the sole signal.
-	t.Setenv("BARKPARK_API_URL", "")
-	t.Setenv("BARKPARK_SERVER", "")
+	// Neutralize the ambient env so the config is the sole signal. axi-b4: this
+	// used to name two vars by hand and went stale the moment the dialect grew —
+	// LoggedInWithoutServer reads ServerEnvNames, so a developer exporting
+	// BARKPARK_URL made this suite assert against their own machine.
+	clearBarkparkEnv(t)
 
 	t.Run("cloud token, no server → true", func(t *testing.T) {
 		withTempConfigHome(t)

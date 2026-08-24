@@ -58,7 +58,9 @@ import (
 func supportEnvIsolate(t *testing.T) {
 	t.Helper()
 	withTempConfigHome(t)
-	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN", "BARKPARK_DNS_HCLOUD_TOKEN"} {
+	// axi-b4: the server/token names come from the shared dialect lists; the
+	// DNS token is this suite's own and stays literal.
+	for _, k := range append(append(append([]string{}, ServerEnvNames...), TokenEnvNames...), "BARKPARK_DNS_HCLOUD_TOKEN") {
 		t.Setenv(k, "")
 	}
 }

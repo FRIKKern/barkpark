@@ -152,9 +152,9 @@ func TestSetupProfileUnknownIsUsageError(t *testing.T) {
 // run; a saved config flips it; a set env var flips it too.
 func TestFirstRunDetection(t *testing.T) {
 	withTempConfigHome(t)
-	t.Setenv("BARKPARK_API_URL", "")
-	t.Setenv("BARKPARK_SERVER", "")
-	t.Setenv("BARKPARK_API_TOKEN", "")
+	// axi-b4: the WHOLE dialect, derived — FirstRun reads ServerEnvNames and
+	// TokenEnvNames, so a hand-written pair here leaves the newer names live.
+	clearBarkparkEnv(t)
 
 	if !FirstRun() {
 		t.Fatalf("empty config home + no env should be a first run")
@@ -178,10 +178,9 @@ func TestFirstRunDetection(t *testing.T) {
 // desk — this is the headline W3 fix — while an ordinary connected server
 // reports configured=true. Neither ever returns a non-OK exit.
 func TestFirstRunResult(t *testing.T) {
-	// Neutralize ambient server env so on-disk config is the sole signal.
-	t.Setenv("BARKPARK_API_URL", "")
-	t.Setenv("BARKPARK_SERVER", "")
-	t.Setenv("BARKPARK_API_TOKEN", "")
+	// Neutralize the ambient env so on-disk config is the sole signal (axi-b4:
+	// derived from the dialect lists, never a hand-written subset of them).
+	clearBarkparkEnv(t)
 
 	t.Run("cloud token, no server → (false, exitOK)", func(t *testing.T) {
 		withTempConfigHome(t)

@@ -69,18 +69,30 @@ type Config struct {
 	Timeout time.Duration
 }
 
+// firstEnv returns the value of the first name set to a non-empty string, or ""
+// when none is. Order IS the precedence.
+func firstEnv(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // ConfigFromEnv builds a Config from the BARKPARK_* environment variables,
 // applying the same defaults the TUI's main() used inline.
 func ConfigFromEnv() Config {
-	baseURL := os.Getenv("BARKPARK_API_URL")
-	if baseURL == "" {
-		baseURL = os.Getenv("BARKPARK_SERVER")
-	}
+	// axi-b4: the same alias chain internal/cli's envContext resolves through
+	// (ServerEnvNames / TokenEnvNames). Duplicated rather than imported because
+	// apiclient sits BELOW cli and must not depend upward; the cli-side test
+	// asserts the two chains agree, so a name added there reds here.
+	baseURL := firstEnv("BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_URL")
 	if baseURL == "" {
 		baseURL = "http://localhost:4000"
 	}
 
-	token := os.Getenv("BARKPARK_API_TOKEN")
+	token := firstEnv("BARKPARK_API_TOKEN", "BARKPARK_TOKEN")
 	if token == "" {
 		token = "barkpark-dev-token"
 	}

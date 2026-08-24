@@ -29,7 +29,11 @@ import (
 func workspaceEnvIsolate(t *testing.T) {
 	t.Helper()
 	withTempConfigHome(t)
-	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN"} {
+	// axi-b4: derived from the shared dialect lists — a hand-written copy here
+	// silently reads whatever the developer exported (measured: on a machine
+	// exporting BARKPARK_TOKEN, this suite resolved a live admin token in place
+	// of its own fixture).
+	for _, k := range append(append([]string{}, ServerEnvNames...), TokenEnvNames...) {
 		t.Setenv(k, "")
 	}
 }
