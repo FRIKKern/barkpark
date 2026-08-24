@@ -12,9 +12,13 @@ defmodule BarkparkWeb.StructureController do
   including plugin groups, with zero client logic per plugin.
 
   `content-types` (issue #8463) is the same generic-fallback fix applied to
-  the HOST side of that heuristic: a private, non-plugin-owned schema that
-  isn't marked `singleton: true` gets a real `:document_type_list` row there
-  instead of a dead Settings singleton.
+  the HOST side of that heuristic: a non-plugin-owned schema that no curated
+  group claimed and that isn't marked `singleton: true` gets a real
+  `:document_type_list` row there instead of a dead Settings singleton.
+  Placement keys on `singleton` ALONE — never on `visibility`, which is an
+  access control (Gyldendal #25); keying on it stranded every schema
+  registered without an explicit `visibility`, since that defaults to
+  `"public"`.
 
   Auth matches the schema index the TUI already calls (admin token on the
   same pipelines); response: `{"structure": <node>}` where a node is

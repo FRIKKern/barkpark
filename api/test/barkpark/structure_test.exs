@@ -317,7 +317,13 @@ defmodule Barkpark.StructureTest do
       end
     end
 
-    test "an empty private set produces neither a Settings nor a Content group" do
+    # NOTE: this used to read "an empty PRIVATE set…" and passed because the
+    # catch-alls only ever looked at private schemas. They no longer consult
+    # visibility at all (see the describe block below), so the reason it still
+    # holds is different and worth stating: `post` is CURATED by
+    # `build_content_group/1`, and a curated type is excluded from both
+    # catch-alls. Nothing else is registered, so both groups stay empty.
+    test "a dataset whose only schema is curated produces neither Settings nor Content" do
       dataset = "structure_test_no_private_at_all"
 
       insert_schema!(%{
@@ -333,6 +339,130 @@ defmodule Barkpark.StructureTest do
 
       assert settings_node(tree) == nil
       assert content_types_node(tree) == nil
+    end
+  end
+
+  # Gyldendal #25. `visibility` is an ACCESS control (who may read the type
+  # over the API). It was ALSO deciding desk placement, and the two jobs
+  # disagree: `SchemaDefinition.visibility` defaults to "public" and
+  # `SchemaController.upsert/2` injects no default, so a consumer POSTing to
+  # /v1/schemas/:dataset without a `visibility` key got "public" — which
+  # matched the hardcoded content group (post/page/project) not at all, nor
+  # the private-only catch-alls. …Rest is census-driven
+  # (`Analytics.type_census/2`), so with zero documents the type appeared
+  # NOWHERE. Placement now keys on `singleton` alone.
+  describe "desk placement does not consult visibility (Gyldendal #25)" do
+    test "a PUBLIC consumer type with zero documents gets a browsable Content row" do
+      dataset = "structure_test_public_zero_docs"
+
+      # No `visibility` key at all — exactly the POST /v1/schemas/:dataset
+      # body from the #8463 report, taking the column default "public".
+      insert_schema!(%{name: "recipe", title: "Recipes", dataset: dataset, fields: []})
+
+      tree = Structure.build(dataset)
+
+      content = content_types_node(tree)
+      assert %Node{title: "Content"} = content, "a public consumer type must have a home"
+
+      recipe = Enum.find(content.items, &(&1.type_name == "recipe"))
+      assert %Node{} = recipe
+      assert recipe.type == :document_type_list, "must be drillable, not a dead singleton"
+      assert recipe.title == "Recipes"
+    end
+
+    test "a PUBLIC schema with singleton: true reaches Settings instead of vanishing" do
+      dataset = "structure_test_public_singleton"
+
+      insert_schema!(%{
+        name: "siteConfig",
+        title: "Site Config",
+        singleton: true,
+        dataset: dataset,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      settings = settings_node(tree)
+      assert %Node{} = settings, "singleton: true must be honoured regardless of visibility"
+
+      config = Enum.find(settings.items, &(&1.type_name == "siteConfig"))
+      assert %Node{type: :document} = config, "a declared singleton is a single :document node"
+
+      # And it must NOT also appear in the generic Content bucket.
+      case content_types_node(tree) do
+        nil -> :ok
+        %Node{items: items} -> refute Enum.any?(items, &(&1.type_name == "siteConfig"))
+      end
+    end
+
+    test "a CURATED public type is not ALSO dumped into the generic Content bucket" do
+      dataset = "structure_test_curated_no_double_list"
+      seed_legacy(dataset)
+
+      # `paper` is public and curated by build_papers_group/1; post/page/project
+      # are public and curated by build_content_group/1. None may double-list.
+      insert_schema!(%{
+        name: "paper",
+        title: "Papers",
+        icon: "📰",
+        visibility: "public",
+        dataset: dataset,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      case content_types_node(tree) do
+        nil ->
+          :ok
+
+        %Node{items: items} ->
+          generic = Enum.map(items, & &1.type_name)
+
+          for curated <- ~w(paper post page project author category) do
+            refute curated in generic, "#{curated} is curated — it must not double-list"
+          end
+      end
+    end
+
+    test "a type that moved into Content is claimed, so it leaves …Rest" do
+      dataset = "structure_test_public_leaves_rest"
+
+      insert_schema!(%{name: "recipe", title: "Recipes", dataset: dataset, fields: []})
+      insert_docs!("recipe", dataset, 2)
+
+      tree = Structure.build(dataset)
+
+      content = content_types_node(tree)
+      assert %Node{} = content
+      assert Enum.any?(content.items, &(&1.type_name == "recipe"))
+
+      # Second-order effect of the fix, pinned deliberately: the type used to
+      # surface ONLY under …Rest once documents existed. Now it has a real
+      # home, so …Rest must not list it a second time.
+      case rest_node(tree) do
+        nil -> :ok
+        %Node{items: items} -> refute Enum.any?(items, &(&1.type_name == "recipe"))
+      end
+    end
+
+    test "a PRIVATE non-singleton type still lands in Content (no regression)" do
+      dataset = "structure_test_private_still_content"
+
+      insert_schema!(%{
+        name: "orderNote",
+        title: "Order Notes",
+        visibility: "private",
+        dataset: dataset,
+        fields: []
+      })
+
+      tree = Structure.build(dataset)
+
+      content = content_types_node(tree)
+      assert %Node{} = content
+      assert Enum.any?(content.items, &(&1.type_name == "orderNote"))
     end
   end
 
