@@ -29,10 +29,14 @@ package cloudclient
 //
 // THE PAIRING, established by reading the routes: SiteDeployment is decoded
 // from `{"deployment": …}` bodies (postSiteDeploy, SpawnSiteDeployment) which
-// the control plane fills from EITHER deployment_json/1 (router.ex:7838, 7866,
-// 8837, 9117, 13145) or its wrapper site_deployment_json/3 (12577), which is
-// deployment_json/1 plus :stages and :url. The union of both is what the
-// producer can send.
+// the control plane fills from EITHER deployment_json/1 or its wrapper
+// site_deployment_json/3, which is deployment_json/1 plus :stages and :url.
+// The union of both is what the producer can send. Both live in
+// cloud/lib/barkpark_cloud/web/router.ex — the path is spelled out because the
+// repo has TWO router.ex files (the other is api/lib/barkpark_web/router.ex,
+// a fifth the length), and a bare `router.ex:<line>` citation resolves to the
+// wrong one: lineref-sweep read these cloud line numbers against the api file
+// and reported them as exceeding its length.
 
 import (
 	"os"
