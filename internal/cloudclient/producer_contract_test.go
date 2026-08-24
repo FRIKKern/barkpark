@@ -29,10 +29,19 @@ package cloudclient
 //
 // THE PAIRING, established by reading the routes: SiteDeployment is decoded
 // from `{"deployment": …}` bodies (postSiteDeploy, SpawnSiteDeployment) which
-// the control plane fills from EITHER deployment_json/1 (router.ex:7838, 7866,
-// 8837, 9117, 13145) or its wrapper site_deployment_json/3 (12577), which is
-// deployment_json/1 plus :stages and :url. The union of both is what the
-// producer can send.
+// the control plane fills from EITHER `deployment_json/1` — at each of its call
+// sites that answers a deployment body — or its wrapper
+// `site_deployment_json/3`, which is `deployment_json/1` plus :stages and :url.
+// The union of both is what the producer can send. Both are private functions in
+// cloud/lib/barkpark_cloud/web/router.ex.
+//
+// ANCHORED BY SYMBOL, NOT BY LINE, and deliberately: this comment used to list
+// the call sites as `router.ex:7838, 7866, 8837, 9117, 13145` and `(12577)`.
+// That router is ~13k lines and grows constantly, so ANY insertion above a cited
+// line silently invalidated every number below it — and the lineref gate then
+// reported the drift against a DIFFERENT `router.ex` (the api one), which reads
+// as a defect in a file nobody touched. `grep -n 'defp deployment_json'` answers
+// the same question and cannot rot.
 
 import (
 	"os"
