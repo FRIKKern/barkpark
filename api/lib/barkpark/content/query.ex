@@ -21,7 +21,7 @@ defmodule Barkpark.Content.Query do
 
   import Ecto.Query
   alias Barkpark.Repo
-  alias Barkpark.Content.{Document, DraftId}
+  alias Barkpark.Content.{Document, DraftId, Schema}
 
   import Barkpark.Content.Scope,
     only: [
@@ -1601,6 +1601,7 @@ defmodule Barkpark.Content.Query do
     # non-owner's hydration, closing the leak through the search-expand path.
     |> scope_to_owner(Keyword.get(opts, :caller_context))
     |> maybe_scope_to_grants(opts)
+    |> restrict_to_visible_types(dataset, opts)
     |> Repo.all()
     |> Map.new(fn d -> {d.doc_id, d} end)
   end
@@ -1630,9 +1631,71 @@ defmodule Barkpark.Content.Query do
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> scope_to_owner(Keyword.get(opts, :caller_context))
     |> maybe_scope_to_grants(opts)
+    |> restrict_to_visible_types(dataset, opts)
     |> exclude(:order_by)
     |> Repo.aggregate(:count)
   end
+
+  # SCHEMA-VISIBILITY CLAMP — the second half of the tenancy stack above, and
+  # the seat every reference/id hydration in this codebase already passes
+  # through.
+  #
+  # NAMED FAILURE MODE it closes (task-38786b2edab15955): the query route gates
+  # on the REQUESTED type only (`query_controller.ex:23-24` / `:407-408` —
+  # `preview? or authed? or schema_public?`). `?expand=` then walks a reference
+  # into a DIFFERENT type and hydrates it here, and `Envelope.render/3` redacts
+  # on PER-FIELD attributes (`envelope.ex:325-334`) — it never reads the
+  # schema's TOP-LEVEL visibility. So `GET /v1/data/query/production/post?expand=featuredAsset`
+  # returned a full `mediaAsset` body to a caller whose DIRECT read of
+  # `/v1/data/query/production/mediaAsset` 404s on the same gate. The pairing
+  # ships in the seed data (`seeds/demo.ex:53-56`, `:110-113`). Same capability,
+  # two doors, one clamped.
+  #
+  # WHY HERE AND NOT IN `Expand`. Three callers reach this function, and expand
+  # is only one of them: the Indx retriever's hydration AND its reported total
+  # (task-2b6aa2ae3fc3962f — the indx index is filtered at WRITE time only, with
+  # no read-time backstop and no rebuild trigger on a public->private schema
+  # flip) and the task-expectation reverse view. Clamping inside `Expand` would
+  # fix one door and leave the shared function unclamped for the others.
+  #
+  # COUNT TOO, not just bodies: a total that includes private rows leaks their
+  # EXISTENCE even when the bodies are withheld — the shape a sibling lane
+  # proved live in search, where documents were withheld while the type facet
+  # still named the private type. Bodies and counts clamp in the SAME seat.
+  #
+  # ONE PREDICATE, not a third copy: the tier test is
+  # `Schema.bypasses_visibility_gate?/1` and the allowlist is
+  # `Schema.public_type_names/2` — the same two the anonymous search allowlist
+  # (`DocumentsRetriever.restrict_anonymous_to_public_types/3`) and the corpus
+  # graph clamp (`Schema.visible_schemas/2`) read. ALLOWLIST, not denylist: a
+  # type with no schema row is absent by construction (matching the query
+  # route's live 404 for a schemaless type), `visibility: nil` / any future
+  # value is NOT public, and an empty allowlist yields `d.type in []` ⇒ WHERE
+  # false ⇒ nothing (fail closed, never everything).
+  #
+  # INERT for the callers that were already correct: the Postgres search
+  # retriever clamps its own `base` upstream, so this clause is idempotent
+  # there; an authenticated non-public-read principal skips it entirely and
+  # pays no schema read at all.
+  #
+  # TOTAL over its inputs: `public_type_names/2` is guarded `when is_binary(dataset)`,
+  # so a nil/malformed dataset would raise a FunctionClauseError — a 500 that
+  # fires only for some inputs is itself a probe. A non-binary dataset is a
+  # DENIAL (the empty allowlist) instead, never a crash oracle.
+  defp restrict_to_visible_types(query, dataset, opts) do
+    cond do
+      Schema.bypasses_visibility_gate?(Keyword.get(opts, :caller_context)) ->
+        query
+
+      is_binary(dataset) ->
+        where(query, [d], d.type in ^Schema.public_type_names(dataset, tenancy_opts(opts)))
+
+      true ->
+        where(query, [d], d.type in ^[])
+    end
+  end
+
+  defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
 
   @doc """
   Fetch a document with draft-first preference. Returns the draft if it
