@@ -23,7 +23,7 @@
 //  A check that cannot open the artifact it certifies is not a check.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-//  THE FIVE BEATS
+//  THE SIX BEATS
 // ─────────────────────────────────────────────────────────────────────────────
 //    LAND    the finder loads: no search-error banner ([data-search-error],
 //            with a copy-text fallback), at least one [data-nav-result] row,
@@ -46,6 +46,24 @@
 //            fails here, which is the whole point.
 //    ENGINE  the keystroke leg again with an explicit `?engine=postgres`, so a
 //            regression that only breaks the non-default engine is still seen.
+//    PHONE   HIDDEN IS NOT UNDELIVERED. At a 390x844 viewport, ZERO requests
+//            match /bp-graph.js|graph.json/ — the corpus-graph renderer and its
+//            baked data are not merely invisible, they are not fetched. The
+//            flagship was measured shipping 576,990 B to a pane whose computed
+//            display was literally `none` (charter D79): CSS hid it, the portal
+//            mounted it anyway, and the mount effect appended the script. This
+//            beat is a PAIR — at 1440x900 the SAME page MUST request the
+//            renderer and MUST mount the pane, because "the phone fetches no
+//            graph" is also true of a graph that is dead at every width, and
+//            sealing that would be worse than the defect.
+//
+//            HONEST LIMIT: 390x844 here is CDP
+//            Emulation.setDeviceMetricsOverride — a real layout viewport, a
+//            real `mobile` flag and a real matchMedia result, driven the same
+//            way a CI beat must drive it. It is NOT a physical device: no
+//            device CPU, no device network, no real touch hardware. This beat
+//            proves what the page ASKS FOR at that width, which is exactly the
+//            claim it makes and nothing more.
 //
 //  Every beat reports PASS, FAIL or PENDING. PENDING means "could not be
 //  proven" — a prerequisite beat failed, so the assertion never ran. PENDING is
@@ -104,6 +122,11 @@
 //                perfectly, with NO websocket at all. A DOM-only harness passes
 //                it green. This fixture is what proves the transport assertion
 //                is load-bearing rather than decorative.
+//  Each fixture carries the graph landing too, rotten in OPPOSITE directions so
+//  BEAT 6's pairing is provable rather than asserted: /mute/ mounts the graph at
+//  EVERY width (the real D79 waterfall — its phone arm reds with a byte count),
+//  and /rot/ has no graph at ANY width (its phone arm is trivially green and the
+//  DESKTOP arm reds — the false seal, caught).
 //  The self-test asserts the harness reports ALL PASS on /good/ AND the exact
 //  expected FAIL/PENDING pattern on /rot/ and /mute/. A check whose red has
 //  never been demonstrated is not a check — so the red is demonstrated on every
@@ -176,8 +199,8 @@ const USAGE = `journey-smoke — browser proof of the search-starter journey
 
   --url <base>    the deployed site root, e.g. https://host/sites/search-ember/
   --strict        exit 1 unless every beat PASSED (report mode always exits 0)
-  --self-test     run the five beats against a local fixture, twice: a healthy
-                  site (expect all PASS) and a rotten one (expect the FAILs)
+  --self-test     run the six beats against local fixtures: a healthy site
+                  (expect all PASS) and two rotten ones (expect the FAILs)
   --query <q>     the query typed in the TYPE/ENGINE beats (default "search")
   --engine <e>    the explicit engine for the ENGINE beat (default "postgres")
   --json          emit a machine-readable result object after the report
@@ -270,6 +293,10 @@ class Page {
     this.wsCreated = [];
     this.framesSent = [];
     this.framesReceived = [];
+    /** requestId -> {url, bytes} for EVERY request this tab issued. BEAT 6
+     *  reads it; nothing else does. `bytes` is CDP's own encodedDataLength —
+     *  wire bytes, so a compressed asset reports what actually crossed. */
+    this.requests = new Map();
   }
 
   static async open(cdp) {
@@ -282,14 +309,63 @@ class Page {
     // lifecycle and every frame in both directions arrive as events here, with
     // no cooperation from (and no visibility to) the page's own JavaScript.
     await cdp.send("Network.enable", {}, sessionId);
-    cdp.on("Runtime.exceptionThrown", (p) => {
+    // EVERY listener is SESSION-FILTERED. CDP multiplexes all flattened
+    // sessions down one socket and Cdp.on fans an event out to every
+    // subscriber, so an unfiltered listener records the events of tabs it does
+    // not own. That was harmless while exactly one tab existed at a time; BEAT
+    // 6 opens a phone tab and a desktop tab against the SAME browser, and
+    // unfiltered recording would credit the desktop tab's bp-graph.js request
+    // to the phone tab and red a correct site. `mine` is the fix, applied to
+    // all of them rather than only the new ones — a rule with an exception is
+    // the exception waiting to be forgotten.
+    const mine = (fn) => (p, msg) => { if (msg?.sessionId === sessionId) fn(p); };
+    cdp.on("Runtime.exceptionThrown", mine((p) => {
       const d = p.exceptionDetails || {};
       page.exceptions.push(d.exception?.description || d.text || "(unknown exception)");
-    });
-    cdp.on("Network.webSocketCreated", (p) => page.wsCreated.push(p.url || ""));
-    cdp.on("Network.webSocketFrameSent", (p) => page.framesSent.push(p.response?.payloadData ?? ""));
-    cdp.on("Network.webSocketFrameReceived", (p) => page.framesReceived.push(p.response?.payloadData ?? ""));
+    }));
+    cdp.on("Network.webSocketCreated", mine((p) => page.wsCreated.push(p.url || "")));
+    cdp.on("Network.webSocketFrameSent", mine((p) => page.framesSent.push(p.response?.payloadData ?? "")));
+    cdp.on("Network.webSocketFrameReceived", mine((p) => page.framesReceived.push(p.response?.payloadData ?? "")));
+    cdp.on("Network.requestWillBeSent", mine((p) => page.requests.set(p.requestId, { url: p.request?.url || "", bytes: 0, declared: 0 })));
+    // TWO byte sources, because the primary one goes quietly to zero.
+    // encodedDataLength on loadingFinished is the true WIRE size and is what we
+    // prefer — but it is reported as 0 for a cache hit and, live-caught while
+    // building this beat, for some static servers' responses. A gauge whose
+    // number can silently become 0 is precisely the "instrument goes dark"
+    // failure this file exists to refuse, so Content-Length is kept as a
+    // declared-size fallback. The COUNT of requests never depends on either:
+    // an issued request is a fact even when its size is unknown.
+    cdp.on("Network.responseReceived", mine((p) => {
+      const r = page.requests.get(p.requestId);
+      if (!r) return;
+      const h = p.response?.headers || {};
+      const len = Number(h["content-length"] ?? h["Content-Length"] ?? 0);
+      if (Number.isFinite(len) && len > 0) r.declared = len;
+    }));
+    cdp.on("Network.loadingFinished", mine((p) => {
+      const r = page.requests.get(p.requestId);
+      if (r) r.bytes = p.encodedDataLength || 0;
+    }));
     return page;
+  }
+
+  /** Put this tab on a phone-sized viewport BEFORE it navigates.
+   *  HONEST LIMIT: this is CDP Emulation.setDeviceMetricsOverride — a real
+   *  layout viewport and a real `mobile` flag driving matchMedia, but NOT a
+   *  physical device (no real touch hardware, no device CPU/network). It is
+   *  the same mechanism a CI beat has available, which is what makes it the
+   *  right fidelity here; it is not a claim about a phone in a hand. */
+  async emulate({ width, height, mobile = false, scale = 1 }) {
+    await this.cdp.send(
+      "Emulation.setDeviceMetricsOverride",
+      { width, height, deviceScaleFactor: scale, mobile },
+      this.sid,
+    );
+  }
+
+  /** Every request this tab issued whose URL matches — with wire bytes. */
+  requestsMatching(re) {
+    return [...this.requests.values()].filter((r) => re.test(r.url));
   }
 
   async goto(url) {
@@ -476,6 +552,134 @@ const RESULT_SIGNATURE =
   `Array.from(document.querySelectorAll("[data-nav-result]")).slice(0,8)` +
   `.map(function(e){return (e.textContent||"").slice(0,60)}).join("|")`;
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  BEAT 6 · PHONE — hidden is not undelivered
+// ─────────────────────────────────────────────────────────────────────────────
+// THE DEFECT (search-template charter D79, observed in a real browser). The
+// Astro flagship hides the corpus-graph pane below `md` in CSS alone
+// (`#bp-graph-slot class="hidden … md:block"`). At a 390x844 emulation
+// `getComputedStyle('#bp-graph-slot').display` was literally `none` and
+// `matchMedia('(min-width: 768px)')` was false — and the page had STILL fetched
+// bp-graph.js (140,221 B) and graph.json (436,769 B): 576,990 B delivered to a
+// viewport that never displays a pixel of it. The React portal mounted GraphPane
+// into the hidden element and GraphPane's mount effect appended the renderer
+// <script> to document.head. `display: none` stops PAINT. It does not stop a
+// subtree that ran from downloading things.
+//
+// WHY IT NEEDS A BEAT AND NOT A GREP. There is no source pattern that
+// distinguishes "hidden and also not fetched" from "hidden but fetched anyway" —
+// the CSS class is identical in both worlds and the fetch is three modules away
+// in an effect. Only the wire can tell them apart, which is exactly this
+// harness's founding argument.
+//
+// MANDATORY PAIRING — WITHOUT IT THIS BEAT IS A FALSE SEAL. "The phone requests
+// no graph" is trivially true of a graph that is DEAD AT EVERY WIDTH. A phone-only
+// assertion would therefore ship GREEN over a totally broken landing, which is
+// the precise failure class this epic keeps correcting. So the beat is a PAIR:
+// the phone arm asserts ZERO graph requests at 390, and the desktop arm asserts
+// the SAME page DOES request the renderer and DOES mount the pane at 1440. The
+// beat can fail in both directions, and the self-test demonstrates both reds.
+//
+// ON THE PHONE ARM'S SETTLE. "Zero requests" is a claim that passes trivially if
+// you look too early — the renderer is appended by a mount effect, not by the
+// document parser. So the phone arm waits the FULL cap before reading, and the
+// desktop arm proves the cap is long enough by producing its own request inside
+// it. A cap that were too short would red the desktop arm, not silently green
+// the phone one.
+const GRAPH_ASSET = /bp-graph\.js|graph\.json/;
+const GRAPH_SLOT = "bp-graph-slot";
+const PHONE_VIEWPORT = { width: 390, height: 844, mobile: true, scale: 3 };
+const DESKTOP_VIEWPORT = { width: 1440, height: 900, mobile: false, scale: 1 };
+const GRAPH_SETTLE_CAP = 8000; // the renderer's mount effect has this long to fire
+
+/** How many elements the graph slot is carrying — the STRUCTURAL half of the
+ *  claim. Zero requests could in principle be a cache; an unmounted pane cannot
+ *  be. -1 means the page has no slot at all (a document page, or a landing whose
+ *  graph has been removed outright). */
+const SLOT_CHILDREN =
+  `(function(){var s=document.getElementById(${JSON.stringify(GRAPH_SLOT)});` +
+  `return s?s.children.length:-1;})()`;
+const MD_MATCHES = `window.matchMedia("(min-width: 768px)").matches`;
+
+/** Wire bytes when CDP reported them, else the server's declared
+ *  Content-Length, else 0 with the size honestly unknown. */
+const size = (r) => r.bytes || r.declared || 0;
+const bytes = (rows) => rows.reduce((a, r) => a + size(r), 0);
+const kb = (n) => `${n.toLocaleString()} B`;
+
+async function phoneBeat(cdp, base, ledger) {
+  // ── DESKTOP ARM FIRST, because it is the arm that calibrates the wait ──────
+  const desk = await Page.open(cdp);
+  await desk.emulate(DESKTOP_VIEWPORT);
+  await desk.goto(base);
+  // Wait for the POSITIVE signal rather than a flat sleep: the moment the
+  // renderer request exists, the cap has been shown to be sufficient.
+  const deadline = Date.now() + GRAPH_SETTLE_CAP;
+  while (Date.now() < deadline && desk.requestsMatching(/bp-graph\.js/).length === 0) await sleep(150);
+  await sleep(1200); // let the fetched renderer actually mount the pane
+  const deskGraph = desk.requestsMatching(GRAPH_ASSET);
+  const deskRenderer = desk.requestsMatching(/bp-graph\.js/);
+  const deskSlot = await desk.evaluate(SLOT_CHILDREN);
+  const deskMd = await desk.evaluate(MD_MATCHES);
+
+  // ── PHONE ARM ─────────────────────────────────────────────────────────────
+  const phone = await Page.open(cdp);
+  await phone.emulate(PHONE_VIEWPORT);
+  await phone.goto(base);
+  await sleep(GRAPH_SETTLE_CAP + 1200); // the FULL cap the desktop arm just validated
+  const phoneGraph = phone.requestsMatching(GRAPH_ASSET);
+  const phoneSlot = await phone.evaluate(SLOT_CHILDREN);
+  const phoneMd = await phone.evaluate(MD_MATCHES);
+  const phoneBytes = bytes(phoneGraph);
+
+  const list = (rows) =>
+    rows.map((r) => `${new URL(r.url).pathname} ${size(r) ? kb(size(r)) : "size unreported"}`).join(" + ") || "none";
+
+  const checks = [
+    check(
+      "390x844 · ZERO graph-asset requests",
+      phoneGraph.length === 0 ? PASS : FAIL,
+      phoneGraph.length === 0
+        ? `nothing matching /bp-graph.js|graph.json/ crossed the wire`
+        : `${phoneGraph.length} request(s), ${kb(phoneBytes)} DELIVERED TO A HIDDEN PANE: ${list(phoneGraph)}`,
+    ),
+    check(
+      "390x844 · the graph pane is not mounted",
+      phoneSlot === 0 || phoneSlot === -1 ? PASS : FAIL,
+      phoneSlot === -1
+        ? "no #bp-graph-slot on this page at all"
+        : phoneSlot === 0
+          ? "#bp-graph-slot is empty — the subtree never rendered, so its effects never ran"
+          : `#bp-graph-slot has ${phoneSlot} child(ren) — the pane MOUNTED into a hidden element`,
+    ),
+    // THE CONTROL. Without these two the beat is satisfied by a dead graph.
+    check(
+      "1440x900 · the renderer IS requested",
+      deskRenderer.length > 0 ? PASS : FAIL,
+      deskRenderer.length > 0
+        ? `${list(deskGraph)} (${kb(bytes(deskGraph))})`
+        : "no bp-graph.js at desktop width either — this beat would be sealing a DEAD graph",
+    ),
+    check(
+      "1440x900 · the graph pane mounts",
+      deskSlot > 0 ? PASS : FAIL,
+      deskSlot > 0 ? `#bp-graph-slot has ${deskSlot} child(ren)` : `slotChildren=${deskSlot}`,
+    ),
+    check(
+      "the two arms really were different viewports",
+      phoneMd === false && deskMd === true ? PASS : FAIL,
+      `matchMedia(min-width:768px): phone=${phoneMd} desktop=${deskMd}`,
+    ),
+  ];
+
+  ledger.add(
+    "PHONE",
+    rollup(checks),
+    `390x844 → ${kb(phoneBytes)} · 1440x900 → ${kb(bytes(deskGraph))}`,
+    checks,
+  );
+}
+
 async function runJourney(page, base, opts, ledger) {
   // ── BEAT 1 · LAND ──────────────────────────────────────────────────────────
   await page.goto(base);
@@ -551,6 +755,12 @@ async function runJourney(page, base, opts, ledger) {
     ? await typeLeg(page, opts.query, true, { engine: opts.engine })
     : [check(`engine=${opts.engine} lands with results`, FAIL, `no [data-nav-result] rows at ${engineUrl}`)];
   ledger.add("ENGINE", rollup(engineChecks), engineUrl, engineChecks);
+
+  // ── BEAT 6 · PHONE ─────────────────────────────────────────────────────────
+  // Its own tabs, at its own viewports — the five beats above run at the
+  // browser's default window and must not be perturbed by an emulation
+  // override, and the request ledger has to belong to exactly one viewport.
+  await phoneBeat(page.cdp, base, ledger);
 }
 
 /** The keystroke leg: focus, type, assert the DOM moved, and assert the SOCKET
@@ -708,14 +918,71 @@ function fixtureFinderPage({ mode, base }) {
           ws.send(JSON.stringify(["1", String(++seq), "search:default:default:production", "query", { q: e.target.value, seq: seq }]));
         });
       </script>`;
+  // THE SECOND BLIND SPOT (D79): the corpus-graph pane. `good` does it right —
+  // the pane is CSS-hidden below `md` AND its mount is gated on matchMedia, so
+  // a phone never asks for the renderer. The two rotten modes are rotten in
+  // OPPOSITE directions, which is what makes BEAT 6's pairing provable:
+  //   · `mute`  ships the REAL defect — CSS-hidden, mounted anyway, 140 KB +
+  //             437 KB fetched for a pane whose computed display is `none`.
+  //             It belongs on `mute` because it is the same species as mute's
+  //             dead socket: the DOM looks perfect and only the wire disagrees.
+  //   · `rot`   has NO graph at any width. A phone-only assertion passes this
+  //             site green — which is exactly the false seal the desktop arm
+  //             exists to catch.
+  const graph =
+    rotten
+      ? ""
+      : `<div id="bp-graph-slot" style="display:none"></div>
+      <style>@media (min-width: 768px){#bp-graph-slot{display:block !important}}</style>
+      <script>
+        function mountGraph() {
+          var slot = document.getElementById("bp-graph-slot");
+          var pane = document.createElement("div");
+          pane.setAttribute("data-graph-pane", "");
+          slot.appendChild(pane);
+          var s = document.createElement("script");
+          s.src = "${base}bp-graph.js";
+          document.head.appendChild(s);
+          // .text() matters: an un-consumed fetch body never reaches
+          // Network.loadingFinished, so the beat would count the request and
+          // report 0 bytes for it. The real GraphPane calls .json().
+          fetch("${base}graph.json").then(function (r) { return r.text(); });
+        }
+        ${
+          mode === "mute"
+            ? "/* THE DEFECT: mounts at every width — CSS hides it, the wire does not. */\n        setTimeout(mountGraph, 50);"
+            : "/* THE FIX: gate the MOUNT, not just the paint. */\n        if (window.matchMedia(\"(min-width: 768px)\").matches) setTimeout(mountGraph, 50);"
+        }
+      </script>`;
+  // THE VIEWPORT META IS LOAD-BEARING, not boilerplate. Under
+  // Emulation.setDeviceMetricsOverride with `mobile: true`, a page with NO
+  // viewport meta gets the legacy 980px fallback layout viewport — so
+  // `(min-width: 768px)` MATCHES at a 390px device width and the "phone" arm
+  // quietly becomes a second desktop arm. Live-caught building this beat: the
+  // fixture's own gate evaluated false during parse and true a second later.
+  // Every real page here ships this meta; the fixture must too.
   return `<!doctype html><meta charset="utf-8"><title>fixture finder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <body>
   <input id="finder-search" type="search" aria-label="Search documents">
   ${banner}
   <div id="results">${rows}</div>
+  ${graph}
   ${live}
 </body>`;
 }
+
+// Stand-ins for public/bp-graph.js (140,241 B) and the baked graph.json
+// (436,769 B on the production flagship). Padded to a few KB — enough that the
+// beat reports a real number, small enough that the self-test stays instant.
+const FIXTURE_RENDERER =
+  `window.BarkparkGraphRenderer=function(){return{destroy:function(){}}};\n` +
+  `/*${"renderer-padding".repeat(256)}*/\n`;
+const FIXTURE_GRAPH_JSON = JSON.stringify({
+  nodes: Array.from({ length: 120 }, (_, i) => ({ id: `n${i}`, doc_id: `n${i}`, type: "paper", title: `node ${i}` })),
+  edges: Array.from({ length: 240 }, (_, i) => ({ from_id: `n${i % 120}`, to_id: `n${(i + 7) % 120}` })),
+  rootId: "n0",
+});
 
 const FIXTURE_DETAIL = `<!doctype html><meta charset="utf-8"><title>fixture detail</title>
 <body><article class="bp-paper-surface"><h1>Mechanical spacing doctrine</h1>
@@ -733,6 +1000,11 @@ function startFixture() {
       if (!p.startsWith(prefix)) continue;
       const rest = p.slice(prefix.length);
       if (rest === "") return send(200, fixtureFinderPage({ mode, base: prefix }));
+      // The two assets BEAT 6 counts. Bodies are padded so the byte figure in
+      // the report is a real transferred size rather than a rounding artefact —
+      // the point of the beat is a NUMBER, so the fixture must produce one.
+      if (rest === "bp-graph.js") return send(200, FIXTURE_RENDERER, "text/javascript");
+      if (rest === "graph.json") return send(200, FIXTURE_GRAPH_JSON, "application/json");
       if (rest.startsWith("d/paper/")) return send(200, FIXTURE_DETAIL);
       // THE DEFECT UNDER TEST: the rotten site answers an unknown route with a
       // 200 carrying a not-found body — byte-for-byte the soft-404 that shipped.
@@ -890,9 +1162,14 @@ async function smokeOne(cdp, base, opts) {
 // proves the one defect a DOM-only harness is blind to — a finder that lands,
 // types and re-renders perfectly over a DEAD socket.
 const SELF_TEST_EXPECT = {
-  good: { LAND: PASS, TYPE: PASS, CLICK: PASS, E404: PASS, ENGINE: PASS },
-  rot: { LAND: FAIL, TYPE: PENDING, CLICK: PENDING, E404: FAIL, ENGINE: FAIL },
-  mute: { LAND: PASS, TYPE: FAIL, CLICK: PASS, E404: PASS, ENGINE: FAIL },
+  good: { LAND: PASS, TYPE: PASS, CLICK: PASS, E404: PASS, ENGINE: PASS, PHONE: PASS },
+  // rot has no graph at ANY width → the DESKTOP arm of BEAT 6 reds. This is the
+  // false-seal demonstration: rot's phone arm is perfectly green (it requests
+  // nothing, because there is nothing), and the beat still refuses it.
+  rot: { LAND: FAIL, TYPE: PENDING, CLICK: PENDING, E404: FAIL, ENGINE: FAIL, PHONE: FAIL },
+  // mute carries BOTH DOM-blind defects: the dead socket (TYPE/ENGINE) and the
+  // phone waterfall (PHONE). Its PHONE red is the phone-arm demonstration.
+  mute: { LAND: PASS, TYPE: FAIL, CLICK: PASS, E404: PASS, ENGINE: FAIL, PHONE: FAIL },
 };
 
 async function selfTest(opts) {
@@ -931,10 +1208,14 @@ async function selfTest(opts) {
     return 1;
   }
   process.stdout.write(
-    `\nSELF-TEST PASS — five beats green on /good/, the shipped defects caught on /rot/ (banner +\n` +
-      `  zero rows + soft-404), and the DOM-blind defect caught on /mute/ (lands, types, re-renders\n` +
-      `  perfectly over a DEAD socket → TYPE and ENGINE red). Every beat's RED is demonstrated, not\n` +
-      `  assumed. Transport: native fetch + native WebSocket, zero npm dependencies, no network.\n`,
+    `\nSELF-TEST PASS — six beats green on /good/, the shipped defects caught on /rot/ (banner +\n` +
+      `  zero rows + soft-404), and the DOM-blind defects caught on /mute/ (lands, types, re-renders\n` +
+      `  perfectly over a DEAD socket → TYPE and ENGINE red; ships the graph renderer to a 390px\n` +
+      `  viewport whose pane is display:none → PHONE red, with the wasted bytes named). BEAT 6's\n` +
+      `  OTHER red is proven too: /rot/ has no graph at any width, so its phone arm is trivially\n` +
+      `  green and the DESKTOP arm refuses it — a phone-only assertion would have sealed a dead\n` +
+      `  graph. Every beat's RED is demonstrated, not assumed. Transport: native fetch + native\n` +
+      `  WebSocket, zero npm dependencies, no network.\n`,
   );
   return 0;
 }
@@ -979,7 +1260,7 @@ async function main() {
   if (opts.json) process.stdout.write(JSON.stringify({ base, strict: opts.strict, beats: ledger.beats }, null, 2) + "\n");
 
   if (ledger.clean) {
-    process.stdout.write(`\nJOURNEY PASS — all five beats green.\n`);
+    process.stdout.write(`\nJOURNEY PASS — all six beats green.\n`);
     process.exit(0);
   }
   const summary =
