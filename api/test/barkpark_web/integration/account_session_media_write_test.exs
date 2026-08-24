@@ -145,6 +145,75 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
     end
   end
 
+  describe "PREMISE EXPERIMENT (task-a32e13e37527d261) — the write gate says yes, ensure_edit says no" do
+    test "an account-session member PATCHes an asset's metadata", %{
+      conn: conn,
+      ws: ws,
+      proj: proj
+    } do
+      {_u, conn} = account_session!(conn, ws, "member")
+
+      upload = scoped_upload(conn, ws, proj)
+      assert upload.status in [200, 201], "fixture upload failed: #{upload.resp_body}"
+      body = Jason.decode!(upload.resp_body)
+      file_id = body["result"]["id"]
+      assert is_binary(file_id), "no file id in #{upload.resp_body}"
+
+      patched =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> then(fn c -> elem(account_session!(c, ws, "member"), 1) end)
+        |> put_req_header("x-requested-with", "bp-media-picker")
+        |> patch("/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@ds}/#{file_id}", %{
+          "title" => "renamed by an account member"
+        })
+
+      IO.inspect({patched.status, String.slice(patched.resp_body, 0, 200)},
+        label: "ACCOUNT-SESSION PATCH"
+      )
+
+      cleanup(body)
+
+      assert patched.status == 200,
+             "the write gate admitted this member and ensure_edit refused: " <>
+               "#{patched.status} #{patched.resp_body}"
+    end
+  end
+
+  describe "actor_label attribution — the pipelines that keep it honest" do
+    # task-a32e13e37527d261, criterion 5. `actor_label/1` (in BOTH
+    # `V1.MediaController` and `Media.Storage.Access`) prefers the api_token's
+    # LABEL and has no :current_user arm — deliberately: `checkedOutBy` is
+    # user-visible and is compared for equality by `permission_set/2`, and what a
+    # human principal should be stamped as is a product decision nobody has made.
+    #
+    # It cannot misattribute TODAY only because the two callers of
+    # `actor_label/1` — checkout and undo_checkout — route on pipelines that do
+    # NOT carry `OptionalSessionToken`, so `:current_user` is never set there.
+    # Adding that plug to either would look like a harmless improvement and would
+    # start stamping a token's label onto a user's checkout lock.
+    #
+    # THIS TEST IS THE TRIPWIRE, not a behaviour assertion: it reads the router's
+    # own pipeline definition, so the day someone adds the plug it reds and sends
+    # them to the comment in access.ex instead of letting the attribution drift
+    # land silently.
+    test "neither :media_mutate nor :scoped_api carries OptionalSessionToken" do
+      source = File.read!("lib/barkpark_web/router.ex")
+
+      [{:media_mutate, ~r/pipeline :media_mutate do(.*?)\n  end/s}]
+      |> Enum.each(fn {name, re} ->
+        [_, body] = Regex.run(re, source)
+
+        refute body =~ "OptionalSessionToken",
+               "#{inspect(name)} gained OptionalSessionToken. checkout/undo_checkout route " <>
+                 "through it and call actor_label/1, which prefers a TOKEN's label — so a " <>
+                 "cookie-authenticated member's checkout would now be stamped with whatever " <>
+                 "token happened to ride along. Give actor_label/1 a :current_user arm " <>
+                 "(a product decision: email? display name? id?) before enabling this."
+      end)
+    end
+  end
+
   describe "the token-less principals reach admin?/1 without raising" do
     # REGRESSION. `require_write/1` gained an ACCOUNT ARM, so a principal with no
     # `:api_token` now reaches `undo_checkout`'s `admin?(conn)`. That helper called
