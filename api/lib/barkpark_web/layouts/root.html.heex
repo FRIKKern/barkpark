@@ -140,6 +140,32 @@
          shared with cloud/priv/static/app.css's --mono. */
       --font-mono: "IBM Plex Mono", "SF Mono", "Fira Code", ui-monospace, Menlo, monospace;
 
+      /* THE READING SERIF, for chrome that is PORTALED OUT of the paper surface.
+         The slash menu and the format bubble are appended to `document.body`
+         (slash-menu.js:283, format-bubble.js:203), so they are NOT descendants
+         of `.bp-paper-surface` and cannot inherit the `--paper-font-serif` that
+         paper-surface.css declares there. Both used to carry their own literal
+         `'Source Serif 4', Georgia, 'Times New Roman', serif` to compensate —
+         a DIFFERENT stack from the one the surface actually resolves, so the
+         format bubble's B and I glyphs were set in a different face from the
+         prose they format.
+
+         Declared here rather than back on the popups because the embedder
+         bundle already solves it exactly this way: styles.css's generated
+         mirror puts `--paper-font-serif` on `:root, :host`, so a body-portaled
+         popup inherits the ratified stack there. The Studio lacked that one
+         declaration, which is the whole of the divergence. This line is
+         BYTE-IDENTICAL to the bundle's, so the two surfaces agree by
+         construction; view_edit_parity_test.exs pins the pair.
+
+         The stack ORDER is NOT chosen here — it is owned by
+         au-w5-reading-typography (human-gated) and lives in design/tokens.json
+         `font.reading.stack`. `--tok-reading-font` is the ratified token; the
+         fallback repeats it verbatim for the body scope, which no
+         `.bp-paper-surface` rule reaches. Moving Source Serif 4 to the front is
+         that gate's one-line cutover, not this one's. */
+      --paper-font-serif: var(--tok-reading-font, "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, 'Source Serif 4', serif);
+
       --radius-sm: 6px;
       --radius: 8px;
       --radius-lg: 12px;
@@ -5173,7 +5199,6 @@
       --paper-accent-soft: rgba(162, 57, 37, 0.10);
       --paper-chrome-bg:   #fefdf9;
       --paper-chrome-border: rgba(31, 26, 20, 0.12);
-      --paper-font-serif:  'Source Serif 4', Georgia, 'Times New Roman', serif;
       --paper-font-sans:   var(--font);
       --paper-font-mono:   var(--font-mono);
 
@@ -5368,7 +5393,6 @@
       --paper-accent-soft: rgba(162, 57, 37, 0.10);
       --paper-chrome-bg:   #fefdf9;
       --paper-chrome-border: rgba(31, 26, 20, 0.12);
-      --paper-font-serif:  'Source Serif 4', Georgia, 'Times New Roman', serif;
       --paper-font-sans:   var(--font);
       --paper-font-mono:   var(--font-mono);
 
