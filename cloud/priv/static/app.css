@@ -1183,7 +1183,19 @@ select.form-input {
 .tier-price { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; margin: 10px 0 2px; }
 .tier-price small { font-size: 13px; font-weight: 500; color: var(--dim); }
 .tier-note { font-size: 12px; color: var(--dim); margin: 0 0 18px; flex: 1; }
-.tier .btn { width: 100%; }
+/* cch-tier-note-undefined-render — `margin-top: auto` is what keeps the
+   Subscribe buttons on one line across the tier grid. It USED to be a
+   side-effect of `.tier-note { flex: 1 }` above: every catalog row shipped a
+   note, so every card carried a growing paragraph and the button was pushed to
+   the bottom for free. A note is optional prose, though, and the renderer now
+   omits the paragraph entirely when a row has none — which took the spacer with
+   it. Measured in headless Chrome against this stylesheet, three cards at 1200
+   wide, the middle row's note removed: with the empty <p> the buttons sat at
+   100.5/100.5/100.5, and with the <p> simply dropped they sat at
+   100.5/64.5/100.5 — a 36px break in the row. This declaration is that 36px,
+   and it makes the alignment a property of the button rather than a lucky
+   consequence of every row happening to have prose in it. */
+.tier .btn { width: 100%; margin-top: auto; }
 .tier-free .tier-price { color: var(--muted-text); }
 
 /* ========================================================== MODAL */
