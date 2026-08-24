@@ -14,7 +14,7 @@
 ## Product goals
 - Goals: Make Barkpark shipping activity easy to scan, understand, browse, and trust; make every edition feel like a considered review of the period rather than generated Git output; give project managers, stakeholders, investors, contributors, and curious readers a shared understanding of momentum.
 - Non-goals: Marketing landing pages, raw commit mirrors, release-volume leaderboards, or a new Paper design system.
-- Success signals: A non-technical first-time reader can answer “What did Barkpark work on?” in under thirty seconds, identify the newest release, choose a day/week/month/year view, and reach source evidence without instruction.
+- Success signals: A non-technical first-time reader can answer “What did Barkpark work on?” in under thirty seconds, identify the newest release, choose a day/week/month/year view, and reach source evidence without instruction. On the Chronicle index, one latest story is visually dominant and one calm navigation choice follows it; no competing card or button obscures that path.
 
 ## Personas and jobs
 - Primary personas: Project managers tracking movement and risk; stakeholders and investors judging direction and momentum; Barkpark users following product progress; contributors checking what landed; operators auditing a release period.
@@ -42,14 +42,14 @@
 ## Visual language
 - Color: Existing evergreen Paper palette; semantic accents only for release categories and status.
 - Typography: Existing Paper editorial serif for narrative hierarchy and system sans/mono for metadata, labels, and evidence.
-- Spacing/layout rhythm: Preserve the measured 660px prose column, wide evidence band, 92px section beat, and structural rule hierarchy.
+- Spacing/layout rhythm: Preserve the measured 660px prose column, wide evidence band, 92px section beat, and structural rule hierarchy. The index uses no authored divider immediately before a section heading and no one-item grid; its open editorial groups should feel like a journal contents page, not stacked containers.
 - Shape/radius/elevation: Existing restrained Paper cards; no new shadows or decorative chrome.
 - Motion: None required for reading; existing theme controls only.
 - Imagery/iconography: Product screenshots may be added when real assets exist; do not invent decorative imagery. Use terse text labels rather than icon clutter.
 
 ## Components
-- Existing components to reuse: Eyebrow, heading, ingress, byline, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, expandable, and inline link.
-- New/changed components: No renderer component required. Chronicle uses a short plain-English opening, up to three source-linked work-theme cards, one progress-assessment callout, and one expandable technical record composed from existing blocks.
+- Existing components to reuse: Eyebrow, heading, ingress, byline, columns, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, expandable, and inline link.
+- New/changed components: No renderer component required. Chronicle editions use a short plain-English opening, up to three source-linked work-theme cards, one progress-assessment callout, and one expandable technical record. The Chronicle index uses an unboxed latest-story treatment, borderless two-column edition navigation, a plain monthly list, and one expandable shipping record. Reading links stay inline; large button actions are reserved for workflows rather than editorial navigation.
 - Variants and states: Day/week/month/year cards use distinct labels, not arbitrary colors; empty periods receive an explicit quiet-edition message and retain navigation.
 - Token/component ownership: `design/tokens.json` and `api/assets/paper-surface/paper-surface.css` remain canonical; Chronicle-specific composition lives in `scripts/chronicle-paper.py`.
 

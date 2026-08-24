@@ -97,8 +97,14 @@ class ChroniclePaperTest(unittest.TestCase):
         serialized_index = json.dumps(index)
         self.assertIn("/papers/barkpark-changelog-2026-w34", serialized_index)
         self.assertIn('"text": "What\\u2019s new in Barkpark"', serialized_index)
-        self.assertIn('"text": "Browse the changelog"', serialized_index)
-        self.assertIn('"type": "action"', serialized_index)
+        self.assertIn('"text": "Today in Barkpark"', serialized_index)
+        self.assertIn('"text": "Choose your view"', serialized_index)
+        self.assertIn('"type": "columns"', serialized_index)
+        self.assertIn('Read today\\u2019s edition \\u2192', serialized_index)
+        self.assertIn('"summary": "Shipping record and source evidence"', serialized_index)
+        self.assertNotIn('"type": "action"', serialized_index)
+        self.assertNotIn('"id": "auto:featured", "type": "section"', serialized_index)
+        self.assertNotIn("source-backed", serialized_index)
         self.assertIn("https://github.com/acme/project/pull/13", serialized_index)
 
     def test_backfills_active_months_and_builds_a_richer_month_archive(self):

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-editorial-15"
+RENDERER_VERSION = "chronicle-editorial-16"
 EDITORIAL_SCHEMA = "barkpark.chronicle-editorial.v2"
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -707,6 +707,59 @@ def archive_list(block_id: str, periods: list[Period], events: list[Event]) -> d
     return {"id": block_id, "type": "list", "ordered": False, "items": items}
 
 
+def index_archive_list(block_id: str, periods: list[Period]) -> dict[str, Any]:
+    """A reader-facing monthly contents list; implementation evidence stays collapsed."""
+    items = [
+        [link(period.title, f"/papers/{period.slug}")]
+        for period in reversed(periods)
+    ]
+    return {"id": block_id, "type": "list", "ordered": False, "items": items}
+
+
+def edition_columns(periods: dict[str, Period], latest_day: Period, current_week: list[Event]) -> dict[str, Any]:
+    """Borderless journal navigation: two balanced columns, four clear reading jobs."""
+    week_number = periods["week"].key.split("-W")[-1]
+    entries = [
+        (
+            "Day",
+            "The closest look at what changed most recently.",
+            "Read the latest day →",
+            latest_day.slug,
+        ),
+        (
+            "Week",
+            f"Week {week_number}, with {len(current_week):,} updates gathered into one direction.",
+            "Read this week →",
+            periods["week"].slug,
+        ),
+        (
+            "Month",
+            f"The larger themes taking shape across {periods['month'].title}.",
+            "Read the month →",
+            periods["month"].slug,
+        ),
+        (
+            "Year",
+            f"The full arc of {periods['year'].key}, organized into monthly chapters.",
+            "Explore the year →",
+            periods["year"].slug,
+        ),
+    ]
+    columns = []
+    for column_index in range(2):
+        children = []
+        for title_value, description, label, slug in entries[column_index * 2:(column_index + 1) * 2]:
+            children.extend(
+                [
+                    {"type": "heading", "level": 3, "text": title_value},
+                    {"type": "paragraph", "content": [text(description)]},
+                    {"type": "paragraph", "content": [link(label, f"/papers/{slug}")]},
+                ]
+            )
+        columns.append(children)
+    return {"id": "auto:periods", "type": "columns", "columns": columns}
+
+
 def linked_card_section(
     block_id: str,
     items: list[dict[str, str]],
@@ -974,133 +1027,64 @@ def index_payload(
     active_weeks = {event.occurred_at.date().isocalendar()[:2] for event in current_year}
     latest_day = periods_for(latest.occurred_at.date())["day"] if latest else periods["day"]
     current_day = events_in_period(events, periods["day"])
-    day_editorial = editorials.get("day") or deterministic_editorial(periods["day"], current_day)
-    edition_cards = []
-    edition_copy = {
-        "day": (
-            "Latest release",
-            latest_day,
-            day_editorial["plain_summary"],
-            "Read the latest notes",
-        ),
-        "week": (
-            "This week",
-            periods["week"],
-            f"Week {periods['week'].key.split('-W')[-1]} · {len(current_week):,} updates so far",
-            "Open the weekly roundup",
-        ),
-        "month": (
-            f"{periods['month'].title.split()[0]} roundup",
-            periods["month"],
-            "Highlights, release mix, and every source-backed change this month",
-            "Explore the month",
-        ),
-        "year": (
-            f"{periods['year'].key} archive",
-            periods["year"],
-            "The complete year in releases, organized month by month",
-            "Browse the year",
-        ),
-    }
-    for kind in ("day", "week", "month", "year"):
-        title_value, period, copy, label = edition_copy[kind]
-        edition_cards.append(
-            {
-                "title": title_value,
-                "text": copy,
-                "href": f"/papers/{period.slug}",
-                "label": label,
-                "tone": "ok" if kind == "day" else "info",
-            }
-        )
+    latest_selected = events_in_period(events, latest_day)
+    day_editorial = (
+        editorials.get("day")
+        if latest_day.key == periods["day"].key
+        else None
+    ) or deterministic_editorial(latest_day, latest_selected)
     all_digest = digest(events)
-    lead = day_editorial["plain_summary"]
     monthly = collections.Counter(event.occurred_at.month for event in current_year)
     first_active_month = min(monthly) if monthly else periods["month"].start.month
     month_bars = [
         {"label": dt.date(periods["year"].start.year, month, 1).strftime("%b"), "value": monthly[month]}
         for month in range(first_active_month, periods["month"].start.month + 1)
     ]
-    archive_cards = []
-    for month in reversed(month_archive):
-        selected = events_in_period(events, month)
-        month_product = sum(event.kind in PRODUCT_KINDS for event in selected)
-        month_areas = collections.Counter(event.area for event in selected)
-        lead_area = month_areas.most_common(1)[0][0] if month_areas else "quiet"
-        archive_cards.append(
-            {
-                "title": month.title,
-                "text": (
-                    f"{month_product:,} product {'update' if month_product == 1 else 'updates'} across "
-                    f"{len(month_areas):,} {'area' if len(month_areas) == 1 else 'areas'} · "
-                    f"{len(selected):,} source-backed {'change' if len(selected) == 1 else 'changes'}"
-                ),
-                "href": f"/papers/{month.slug}",
-                "label": f"Read {month.title}",
-                "tone": "info",
-            }
-        )
-    latest_card = [
-        {
-            "title": day_editorial["theme"],
-            "text": day_editorial["plain_summary"],
-            "href": f"/papers/{latest_day.slug}",
-            "label": "Read the release",
-            "tone": "ok",
-        }
-    ]
     blocks = [
-        {"id": "auto:masthead", "type": "eyebrow", "text": f"BARKPARK CHANGELOG · {periods['year'].key} · UPDATED CONTINUOUSLY"},
+        {"id": "auto:masthead", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {periods['year'].key}"},
         heading("auto:title", 1, "What’s new in Barkpark"),
-        {"id": "auto:ingress", "type": "ingress", "content": [text(lead)]},
-        paragraph("auto:dek", "Follow the latest release, catch up on a week, or explore the complete archive. Every note is generated from shipped work and linked to its source."),
-        {"id": "auto:byline", "type": "byline", "items": [f"Updated {periods['day'].title}", "Verified release history", "Day · week · month · year"]},
-        {
-            "id": "auto:pulse",
-            "type": "stats",
-            "items": [
-                {"value": f"{len(current_year):,}", "label": "updates shipped"},
-                {"value": f"{len(product):,}", "label": "product improvements"},
-                {"value": str(len(active_days)), "label": "shipping days"},
-                {"value": str(len(active_weeks)), "label": "weekly editions"},
-            ],
-        },
-        {
-            "id": "auto:today-review",
-            "type": "callout",
-            "tone": "info",
-            "title": "What we worked on today",
-            "content": [text(day_editorial["progress_assessment"])],
-        },
-        {"id": "auto:divider-featured", "type": "divider"},
-        heading("auto:featured-title", 2, "Latest release"),
-        paragraph("auto:featured-dek", "The newest shipped change, with the full daily edition one click away."),
-        linked_card_section("auto:featured", latest_card, tracks=1),
-        {"id": "auto:divider-editions", "type": "divider"},
-        heading("auto:editions-title", 2, "Browse the changelog"),
-        paragraph("auto:editions-dek", "Choose the level of detail that fits the moment—from one release day to the whole year."),
-        linked_card_section("auto:periods", edition_cards, tracks=2),
-        {"id": "auto:divider-archive", "type": "divider"},
+        {"id": "auto:ingress", "type": "ingress", "content": [text("A clear, human account of what we’ve been building—fresh enough for today, useful enough to keep.")]},
+        paragraph("auto:dek", "Start with the newest story, then step back to see the week, month, or year. The technical receipts are always there when you want them."),
+        {"id": "auto:byline", "type": "byline", "items": [f"Updated {periods['day'].title}", "Day · week · month · year"]},
+        heading("auto:featured-title", 2, "Today in Barkpark"),
+        {"id": "auto:featured-label", "type": "eyebrow", "text": f"LATEST DAILY EDITION · {latest_day.title.upper()}"},
+        heading("auto:featured-theme", 3, day_editorial["theme"]),
+        paragraph("auto:featured-summary", day_editorial["plain_summary"]),
+        paragraph("auto:featured-link", [link("Read today’s edition →", f"/papers/{latest_day.slug}")]),
+        heading("auto:editions-title", 2, "Choose your view"),
+        paragraph("auto:editions-dek", "A quick daily note, a weekly direction, a monthly review, or the whole story so far."),
+        edition_columns(periods, latest_day, current_week),
         heading("auto:archive-title", 2, "Release archive"),
-        paragraph("auto:archive-dek", "Every monthly roundup, newest first. Open any edition for highlights, categories, and the complete release log."),
-        linked_card_section("auto:month-archive", archive_cards, tracks=2),
-        {"id": "auto:divider-motion", "type": "divider"},
-        heading("auto:motion-title", 2, "Shipping activity"),
-        paragraph("auto:motion-dek", f"A month-by-month view of {periods['year'].key}. Volume shows cadence, not quality."),
-        {"id": "auto:motion", "type": "bar-chart", "title": "Updates by month", "bars": month_bars, "values": True},
-        heading("auto:areas-title", 2, "Product areas improved"),
-        area_cards("auto:areas", current_year, repo, limit=4),
-        {"id": "auto:divider-latest", "type": "divider"},
-        heading("auto:latest-title", 2, "Recently shipped"),
-        paragraph("auto:latest-dek", "The five newest changes, linked directly to the pull request or commit behind each release."),
-        event_lineage("auto:latest", events, repo),
+        paragraph("auto:archive-dek", "Monthly chapters, newest first. Each one tells the story before showing the record."),
+        index_archive_list("auto:month-archive", month_archive),
     ]
-    blocks.extend(
-        [
-            {"id": "auto:divider-provenance", "type": "divider"},
+    blocks.append({
+        "id": "auto:shipping-record",
+        "type": "expandable",
+        "summary": "Shipping record and source evidence",
+        "children": [
+            paragraph("auto:record-intro", "The live record behind this journal: release volume, active areas, and direct links to the newest shipped work."),
+            {
+                "id": "auto:pulse",
+                "type": "stats",
+                "items": [
+                    {"value": f"{len(current_year):,}", "label": "updates shipped"},
+                    {"value": f"{len(product):,}", "label": "product improvements"},
+                    {"value": str(len(active_days)), "label": "shipping days"},
+                    {"value": str(len(active_weeks)), "label": "weekly editions"},
+                ],
+            },
+            heading("auto:motion-title", 2, "Shipping activity"),
+            paragraph("auto:motion-dek", f"A month-by-month view of {periods['year'].key}. Volume shows cadence, not quality."),
+            {"id": "auto:motion", "type": "bar-chart", "title": "Updates by month", "bars": month_bars, "values": True},
+            heading("auto:areas-title", 2, "Product areas improved"),
+            area_cards("auto:areas", current_year, repo, limit=4),
+            heading("auto:latest-title", 2, "Recently shipped"),
+            paragraph("auto:latest-dek", "The five newest changes, linked directly to the pull request or commit behind each release."),
+            event_lineage("auto:latest", events, repo),
             paragraph("auto:provenance", f"Verified from {len(events):,} first-parent mainline changes · renderer {RENDERER_VERSION} · source digest {all_digest} · every edition has a stable Paper URL."),
-        ]
-    )
+        ],
+    })
     return {
         "_id": "barkpark-chronicle",
         "slug": "barkpark-chronicle",
