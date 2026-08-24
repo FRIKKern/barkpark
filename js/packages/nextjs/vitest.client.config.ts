@@ -5,7 +5,6 @@ export default defineConfig({
     name: 'client',
     environment: 'jsdom',
     include: ['tests/**/*.client.test.ts', 'tests/**/*.client.test.tsx'],
-    passWithNoTests: true,
     setupFiles: ['../../test-utils/vitest.setup.ts'],
     coverage: {
       provider: 'v8',

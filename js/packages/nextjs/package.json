@@ -116,9 +116,9 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/post-build-dts.mjs",
-    "test": "vitest run",
+    "test": "vitest run --project=server && vitest run --project=client",
     "test:server": "vitest run --project=server",
-    "test:client": "vitest run --project=client --passWithNoTests",
+    "test:client": "vitest run --project=client",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "size": "size-limit"

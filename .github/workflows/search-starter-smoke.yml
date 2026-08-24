@@ -102,9 +102,12 @@ jobs:
         with:
           node-version: "22"
 
+      # Through the floor, never bare `node --test`: a bare run whose glob
+      # matches nothing prints "# tests 0" and exits 0, so this job would go
+      # green having proven nothing at all.
       - name: Run the finder unit specs
         working-directory: templates/search-starter
-        run: node --test 'lib/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs 'lib/**/*.test.ts'
 
   live-journey:
     name: Journey smoke — live demo (report mode, never gates)
