@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -38,16 +39,31 @@ func (l *attachEventLog) all() []string {
 
 // recordingAttachDNS is the ordered-log DNS fake: it records each upsert (and
 // its exact Record) without any network. err, when set, fails the upsert.
+//
+// It models a ZONE, not just a call log: an upsert adds the record and a delete
+// removes it, so a test can ask the question that actually matters — "what A
+// records does the zone hold at the end?" — instead of only "was DeleteRecord
+// called?". The orphan hazard is a record that SURVIVES, so the assertion has to
+// read residue, not calls. deleteErr, when set, fails the delete.
 type recordingAttachDNS struct {
-	log     *attachEventLog
-	mu      sync.Mutex
-	upserts []cloud.Record
-	err     error
+	log       *attachEventLog
+	mu        sync.Mutex
+	upserts   []cloud.Record
+	deletes   []string // "<fqdn> <type>", in call order
+	zone      map[string]cloud.Record
+	err       error
+	deleteErr error
 }
 
 func (d *recordingAttachDNS) UpsertRecord(_ context.Context, rec cloud.Record) error {
 	d.mu.Lock()
 	d.upserts = append(d.upserts, rec)
+	if d.err == nil {
+		if d.zone == nil {
+			d.zone = map[string]cloud.Record{}
+		}
+		d.zone[cloud.Fqdn(rec.Name, rec.Zone)+" "+rec.Type] = rec
+	}
 	d.mu.Unlock()
 	if d.log != nil {
 		d.log.add("dns:upsert " + cloud.Fqdn(rec.Name, rec.Zone) + "→" + rec.Value)
@@ -55,9 +71,84 @@ func (d *recordingAttachDNS) UpsertRecord(_ context.Context, rec cloud.Record) e
 	return d.err
 }
 
-func (d *recordingAttachDNS) DeleteRecord(context.Context, string, string, string) error {
-	return nil
+func (d *recordingAttachDNS) DeleteRecord(_ context.Context, zone, name, typ string) error {
+	fqdn := cloud.Fqdn(name, zone)
+	d.mu.Lock()
+	d.deletes = append(d.deletes, fqdn+" "+typ)
+	if d.deleteErr == nil {
+		delete(d.zone, fqdn+" "+typ)
+	}
+	d.mu.Unlock()
+	if d.log != nil {
+		d.log.add("dns:delete " + fqdn + " " + typ)
+	}
+	return d.deleteErr
 }
+
+// aRecordsAt returns the fqdns of every A record the zone still holds pointing
+// at ip — the residue an orphan audit would find.
+func (d *recordingAttachDNS) aRecordsAt(ip string) []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var out []string
+	for key, rec := range d.zone {
+		if rec.Type == "A" && rec.Value == ip {
+			out = append(out, strings.TrimSuffix(key, " A"))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// stubAttachProvider is a CloudProvider whose box list a test controls, so the
+// attach path's liveness re-check can be driven against "the box is gone" and,
+// via onList, against the RACE — a deprovision that lands between the re-check
+// and the upsert.
+type stubAttachProvider struct {
+	mu      sync.Mutex
+	servers []cloud.Server
+	err     error
+	calls   int
+	// onList fires after each List call with the 1-based call count, letting a
+	// test mutate the fleet mid-flight.
+	onList func(call int)
+}
+
+func (p *stubAttachProvider) List(context.Context) ([]cloud.Server, error) {
+	p.mu.Lock()
+	p.calls++
+	call := p.calls
+	servers := append([]cloud.Server(nil), p.servers...)
+	err := p.err
+	hook := p.onList
+	p.mu.Unlock()
+	if hook != nil {
+		hook(call)
+	}
+	return servers, err
+}
+
+// removeServersAt drops every box holding ip — a deprovision, as the attach
+// worker would observe it.
+func (p *stubAttachProvider) removeServersAt(ip string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	kept := p.servers[:0]
+	for _, s := range p.servers {
+		if s.IP != ip {
+			kept = append(kept, s)
+		}
+	}
+	p.servers = kept
+}
+
+func (p *stubAttachProvider) Create(context.Context, cloud.ServerSpec) (cloud.Server, error) {
+	return cloud.Server{}, errBoom
+}
+func (p *stubAttachProvider) IP(context.Context, string) (string, error) { return "", errBoom }
+func (p *stubAttachProvider) Delete(context.Context, string) error       { return errBoom }
+
+var _ cloud.CloudProvider = (*stubAttachProvider)(nil)
 
 func (d *recordingAttachDNS) Resolve(context.Context, string) ([]string, error) { return nil, nil }
 
@@ -87,16 +178,29 @@ func (r *recordingAttachRunner) Run(_ context.Context, s cloud.CaddyStep) error 
 }
 
 // attachFakeSeams wires DefaultAttachDomain entirely from the recording fakes —
-// no real DNS, no real box.
+// no real DNS, no real box. The provider holds ONE live box at validAttachSpec's
+// IP, because the platform branch re-checks box liveness before it writes DNS:
+// seams with no Provider are a refusal, not a happy path.
 func attachFakeSeams() (Seams, *recordingAttachDNS, *recordingAttachRunner, *attachEventLog) {
+	seams, dns, runner, log, _ := attachFakeSeamsWithProvider()
+	return seams, dns, runner, log
+}
+
+// attachFakeSeamsWithProvider is attachFakeSeams plus a handle on the provider
+// stub, for the tests that drive the box out from under the job.
+func attachFakeSeamsWithProvider() (Seams, *recordingAttachDNS, *recordingAttachRunner, *attachEventLog, *stubAttachProvider) {
 	log := &attachEventLog{}
 	dns := &recordingAttachDNS{log: log}
 	runner := &recordingAttachRunner{log: log}
+	provider := &stubAttachProvider{
+		servers: []cloud.Server{{ID: "srv-1", Name: "bp-gyldendal", IP: validAttachSpec().IP}},
+	}
 	seams := Seams{
+		Provider:  provider,
 		DNS:       dns,
 		RunnerFor: func(string) cloud.StepRunner { return runner },
 	}
-	return seams, dns, runner, log
+	return seams, dns, runner, log, provider
 }
 
 // validAttachSpec is the pinned-contract claim payload the tests drive.
@@ -806,5 +910,190 @@ func TestAttachDomainPlatformPathSkipsResolutionGate(t *testing.T) {
 	}
 	if got := len(runner.steps); got != 4 {
 		t.Errorf("runner ran %d steps, want 4", got)
+	}
+}
+
+// ─── The orphaned-A-record class (task-c1014bb6c82298c2) ────────────────────
+//
+// Every orphan backstop in the fleet is keyed on a BOX: SweepOrphans lists boxes
+// labelled barkpark-orphaned=true and deletes each one AND its stranded DNS
+// record, and the deprovision teardown sweeps a box's records BY VALUE. Both
+// reach a record only THROUGH a box. A record written when the box is already
+// gone therefore carries no label and no owner, and is unreachable by
+// construction — invisible to everything except a zone-level audit.
+//
+// attach_domain is the path that can write one. Deprovision deletes the box
+// FIRST, so an attach job already CLAIMED when the teardown drains upserts its A
+// record AFTER the by-value sweep meant to prevent exactly this. The tests below
+// drive that ordering and assert on the ZONE's residue, not on call counts.
+
+// TestAttachDomainRefusesWhenTheBoxIsAlreadyGone is the simple half: the box was
+// deprovisioned before the worker got to the DNS write at all. The upsert is
+// idempotent and would "succeed" — which is the trap. It must not run.
+func TestAttachDomainRefusesWhenTheBoxIsAlreadyGone(t *testing.T) {
+	spec := validAttachSpec()
+	seams, dns, runner, _, provider := attachFakeSeamsWithProvider()
+	provider.removeServersAt(spec.IP) // the deprovision already ran
+
+	err := AttachDomainWith(context.Background(), seams, spec)
+	if err == nil {
+		t.Fatal("attach must FAIL when no box holds the IP — an idempotent upsert onto a freed address is an orphan, not a no-op")
+	}
+	if !strings.Contains(err.Error(), "no managed box holds") {
+		t.Errorf("error must name the missing box, got %q", err)
+	}
+	if len(dns.upserts) != 0 {
+		t.Errorf("refusal must precede EVERY side effect, got upserts %+v", dns.upserts)
+	}
+	if got := dns.aRecordsAt(spec.IP); len(got) != 0 {
+		t.Errorf("zone must hold no A record at the freed address, got %v", got)
+	}
+	if len(runner.steps) != 0 {
+		t.Errorf("no remote command may run against a box that is gone, got %d steps", len(runner.steps))
+	}
+}
+
+// TestAttachDomainDeprovisionedMidUpsertLeavesNoRecord drives the ORDERING the
+// row's acceptance names: attach claimed → deprovision succeeds (box deleted,
+// zone swept by value) → the attach worker runs its DNS write. The pre-check
+// alone cannot close this: the box is still live when it is consulted and gone a
+// moment later. What closes it is the edge AFTER the write — re-check, and
+// delete the record we just created. The assertion is the zone's residue.
+func TestAttachDomainDeprovisionedMidUpsertLeavesNoRecord(t *testing.T) {
+	spec := validAttachSpec()
+	seams, dns, _, log, provider := attachFakeSeamsWithProvider()
+
+	// The deprovision lands between the pre-check and the upsert: call 1 observes
+	// a live box, and the teardown drains the instant it has answered.
+	provider.onList = func(call int) {
+		if call == 1 {
+			provider.removeServersAt(spec.IP)
+		}
+	}
+
+	err := AttachDomainWith(context.Background(), seams, spec)
+
+	// The defect FIRST, so a red run prints the leaked record itself.
+	if got := dns.aRecordsAt(spec.IP); len(got) != 0 {
+		t.Errorf("ORPHAN: zone still holds %v at the freed address %s — the box is gone, so no box-keyed backstop (SweepOrphans, the by-value teardown sweep) can ever reach it", got, spec.IP)
+	}
+	if err == nil {
+		t.Fatal("attach must FAIL when the box is deprovisioned mid-write — a silent success leaves a record nothing can reach")
+	}
+	if len(dns.deletes) != 1 {
+		t.Errorf("the record written must be deleted again exactly once, got deletes %v", dns.deletes)
+	}
+	if provider.calls < 2 {
+		t.Errorf("liveness must be re-checked AFTER the upsert too, got %d List calls", provider.calls)
+	}
+	// The record has to be created before it can be cleaned up — pin the order so
+	// a future refactor cannot satisfy this test by never writing at all.
+	events := log.all()
+	var upsertAt, deleteAt = -1, -1
+	for i, e := range events {
+		if strings.HasPrefix(e, "dns:upsert") && upsertAt < 0 {
+			upsertAt = i
+		}
+		if strings.HasPrefix(e, "dns:delete") && deleteAt < 0 {
+			deleteAt = i
+		}
+	}
+	if upsertAt < 0 || deleteAt < 0 || deleteAt < upsertAt {
+		t.Errorf("expected an upsert then its delete, got %v", events)
+	}
+}
+
+// TestAttachDomainNamesTheOrphanWhenCleanupFails is the honesty edge. When the
+// record cannot be deleted again, the one thing that must NOT happen is a
+// generic failure: nothing else in the fleet can find this record, so the error
+// is the only artefact naming it. It must carry the FQDN and the address.
+func TestAttachDomainNamesTheOrphanWhenCleanupFails(t *testing.T) {
+	spec := validAttachSpec()
+	seams, dns, _, _, provider := attachFakeSeamsWithProvider()
+	dns.deleteErr = errBoom
+	provider.onList = func(call int) {
+		if call == 1 {
+			provider.removeServersAt(spec.IP)
+		}
+	}
+
+	err := AttachDomainWith(context.Background(), seams, spec)
+	if err == nil {
+		t.Fatal("a surviving orphan must fail the job")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "ORPHANED A RECORD") {
+		t.Errorf("error must announce the orphan in words an operator can grep, got %q", msg)
+	}
+	if !strings.Contains(msg, cloud.Fqdn(spec.DNSLabel, spec.DNSZone)) {
+		t.Errorf("error must name the FQDN %q — nothing else can find it, got %q", cloud.Fqdn(spec.DNSLabel, spec.DNSZone), msg)
+	}
+	if !strings.Contains(msg, spec.IP) {
+		t.Errorf("error must name the freed address %q, got %q", spec.IP, msg)
+	}
+}
+
+// TestAttachDomainLivenessCheckFailsClosed: an unreadable fleet is not a licence
+// to write DNS. Same posture the EXTERNAL branch already takes on a resolver
+// error ("refusing before any side effect").
+func TestAttachDomainLivenessCheckFailsClosed(t *testing.T) {
+	spec := validAttachSpec()
+	seams, dns, _, _, provider := attachFakeSeamsWithProvider()
+	provider.err = errBoom
+
+	err := AttachDomainWith(context.Background(), seams, spec)
+	if err == nil {
+		t.Fatal("a provider error must abort the attach, not proceed on assumption")
+	}
+	if !strings.Contains(err.Error(), "fail closed") {
+		t.Errorf("error must say it failed closed, got %q", err)
+	}
+	if len(dns.upserts) != 0 {
+		t.Errorf("no DNS write may happen when liveness is unknown, got %+v", dns.upserts)
+	}
+}
+
+// TestAttachDomainPlatformRequiresProvider pins the seam as MANDATORY on the
+// platform branch. A nil Provider used to mean "skip the check"; that is the
+// shape that lets the guard quietly stop existing in some wiring.
+func TestAttachDomainPlatformRequiresProvider(t *testing.T) {
+	spec := validAttachSpec()
+	seams, dns, _, _, _ := attachFakeSeamsWithProvider()
+	seams.Provider = nil
+
+	err := AttachDomainWith(context.Background(), seams, spec)
+	if err == nil {
+		t.Fatal("a platform attach with no CloudProvider must refuse — the liveness re-check is not optional")
+	}
+	if !strings.Contains(err.Error(), "CloudProvider") {
+		t.Errorf("error must name the missing seam, got %q", err)
+	}
+	if len(dns.upserts) != 0 {
+		t.Errorf("no DNS write without the guard, got %+v", dns.upserts)
+	}
+}
+
+// TestAttachDomainExternalPathNeedsNoProvider proves the widening did not reach
+// the EXTERNAL branch. A customer-owned FQDN gets no platform upsert at all, so
+// there is no record for us to orphan and no reason to demand a provider — its
+// own resolve gate is already the fail-closed moat.
+func TestAttachDomainExternalPathNeedsNoProvider(t *testing.T) {
+	spec := validAttachSpec()
+	spec.CustomHost = "barkpark.jarl.no"
+	spec.DNSLabel = ""
+	spec.DNSZone = ""
+
+	seams, dns, runner, _, _ := attachFakeSeamsWithProvider()
+	seams.Provider = nil
+	seams.LookupHost = func(context.Context, string) ([]string, error) { return []string{spec.IP}, nil }
+
+	if err := AttachDomainWith(context.Background(), seams, spec); err != nil {
+		t.Fatalf("external attach must not require a CloudProvider: %v", err)
+	}
+	if len(dns.upserts) != 0 {
+		t.Errorf("the external branch must never upsert platform DNS, got %+v", dns.upserts)
+	}
+	if len(runner.steps) == 0 {
+		t.Error("the external attach should still run its on-box steps")
 	}
 }
