@@ -144,7 +144,7 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
       assert Session.whereis("ops-too-many", @dataset) == nil
     end
 
-    test "503 session_unavailable when the session dies twice in the call window", %{conn: conn} do
+    test "503 session_restarting when the session dies twice in the call window", %{conn: conn} do
       create_sheet("ops-dead", %{})
       {:ok, _} = Session.apply_ops("ops-dead", @dataset, [set_cell("A1", 1)])
       pid = Session.whereis("ops-dead", @dataset)
@@ -165,7 +165,7 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
           Enum.each(partitions, &:sys.resume/1)
         end
 
-      assert json_response(conn, 503)["error"]["code"] == "session_unavailable"
+      assert json_response(conn, 503)["error"]["code"] == "session_restarting"
       assert get_resp_header(conn, "retry-after") == ["2"]
     end
   end

@@ -168,14 +168,26 @@ consults when choosing a bucket, once.
 
 ### Deliberate non-members
 
-Five members of `known_codes/0` are excluded on purpose, listed with reasons in
+Two members of `known_codes/0` are excluded on purpose, listed with reasons in
 `codeExitNotWireBucketable`. `hollow_paper` and `structure` are never a
 top-level `error.code` at all — they are violation entries nested inside another
-response's body. `export_failed`, `invalid_mode` and `session_unavailable` are
-emitted by the API at **two different statuses** with opposite retryability
-(e.g. `export_failed` is `503` for a bundle export and `422` for a sheets
-export), so one exit code cannot be honest about both; they stay at `1`
-("unknown", which is true) until the API disambiguates them.
+response's body.
+
+The other exclusion kind is now **empty**, and that is the point. `export_failed`,
+`invalid_mode` and `session_unavailable` were each emitted at **two different
+statuses** with opposite retryability, so no exit code could be honest about
+both arms — `8` would spin a retry wrapper forever on the permanent arm, `5`
+would abandon a recoverable one. The API has since split each into one code per
+arm, so all six carry a real bucket:
+
+| Retired token | Retryable arm | Permanent arm |
+|---|---|---|
+| `export_failed` | `export_transport_failed` — 503, exit 8 | `export_build_failed` — 422, exit 5 |
+| `session_unavailable` | `session_restarting` — 503 + `retry-after`, exit 8 | `session_start_failed` — 422, exit 5 |
+| `invalid_mode` | *(neither arm is retryable)* `invalid_import_mode` — 422, exit 5 | `invalid_deploy_mode` — 400, exit 5 |
+
+If this exclusion kind ever reappears, the fix belongs in the API — split the
+token — not in a new entry here.
 
 ## Envelope-version note (does not change the table)
 

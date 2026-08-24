@@ -258,7 +258,7 @@ defmodule BarkparkWeb.WorkspaceController do
   silently wrong bundle. The response content type is set UNCONDITIONALLY to
   `application/x-tar`; there is no Accept negotiation on this route.
 
-  A COPY that dies mid-dump answers 503 `export_failed` + a retry hint (PDS-D43),
+  A COPY that dies mid-dump answers 503 `export_transport_failed` + a retry hint (PDS-D43),
   never the old bare 500 `internal_error / unknown error`.
   """
   # @sobelow_skip — Traversal.SendFile is an accepted false positive here, on a
@@ -321,7 +321,7 @@ defmodule BarkparkWeb.WorkspaceController do
         |> put_status(:service_unavailable)
         |> json(%{
           error: %{
-            code: "export_failed",
+            code: "export_transport_failed",
             reason: reason,
             message: message,
             hint:
@@ -463,7 +463,7 @@ defmodule BarkparkWeb.WorkspaceController do
         |> put_status(:unprocessable_entity)
         |> json(%{
           error: %{
-            code: "invalid_mode",
+            code: "invalid_import_mode",
             message: "unknown import mode #{inspect(other)} (expected clean or merge)"
           }
         })

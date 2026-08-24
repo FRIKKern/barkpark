@@ -213,6 +213,18 @@ var codeExit = map[string]int{
 	"import_failed":             exitServer, // 500, workspace_controller.ex:575
 	"import_spill_write_failed": exitServer, // 507, workspace_controller.ex:1035
 	"insufficient_disk_space":   exitServer, // 507, workspace_controller.ex:1051
+
+	// THE THREE AMBIGUOUS TOKENS, SPLIT AT THE SOURCE. Each of these used to be
+	// one code answering two statuses with OPPOSITE retryability, which is why
+	// they sat in codeExitNotWireBucketable at exit 1 — no single exit could be
+	// honest about both arms. The API now mints one code per arm, so each token
+	// carries exactly one meaning and buckets cleanly.
+	"export_transport_failed": exitServer,     // 503, workspace_controller.ex (bundle export transport — RETRY)
+	"export_build_failed":     exitValidation, // 422, sheets/export_controller.ex (xlsx build — PERMANENT)
+	"invalid_import_mode":     exitValidation, // 422, workspace_controller.ex (bundle import mode)
+	"invalid_deploy_mode":     exitValidation, // 400, sites/deploy_request.ex (site deploy mode)
+	"session_restarting":      exitServer,     // 503 + retry-after, sheets/ops_controller.ex (crash loop — RETRY)
+	"session_start_failed":    exitValidation, // 422, sheets/ops_controller.ex (session could not start — PERMANENT)
 }
 
 // codeExitNotWireBucketable names the members of known_codes/0 that are
@@ -231,23 +243,22 @@ var codeExit = map[string]int{
 //     in known_codes/0 because a client must still recognise them INSIDE that
 //     list.
 //
-//  2. THE API ANSWERS TWO DIFFERENT STATUSES FOR ONE CODE. This is an API
-//     defect, not a CLI one, and it is precisely what the "code, never status"
-//     rule at the top of this file guards against — one token cannot mean two
-//     exits. Registering such a code would manufacture a false certainty:
-//     `export_failed` at 503 is retryable by design and at 422 is permanent,
-//     and a wrapper told "8, retry" would spin forever on the sheets arm while
-//     one told "5, give up" would abandon a recoverable bundle export. They
-//     stay on exitGeneric (1) until the API disambiguates them, which is filed
-//     separately. Silence here would have been the worse answer; exit 1 at
-//     least means "unknown", which is true.
+//  2. THE API ANSWERED TWO DIFFERENT STATUSES FOR ONE CODE. This kind is now
+//     EMPTY, and that is the point. `export_failed`, `invalid_mode` and
+//     `session_unavailable` each answered two statuses with opposite
+//     retryability, so no single exit could be honest about both arms — exit 8
+//     would spin a retry wrapper forever on the permanent arm, exit 5 would
+//     abandon a recoverable one. They were parked here at exitGeneric (1),
+//     which was at least true ("unknown"), while the fix was filed against the
+//     API. The API has since SPLIT each into one code per arm
+//     (export_transport_failed/export_build_failed,
+//     invalid_import_mode/invalid_deploy_mode,
+//     session_restarting/session_start_failed), so all six now live in codeExit
+//     above with a real bucket. If this kind ever reappears, the fix belongs in
+//     the API — splitting the token — not in a new entry here.
 var codeExitNotWireBucketable = map[string]string{
 	"hollow_paper": "never a top-level error.code — a violation map inside the paper structure list (bulldocs_ingest_controller.ex:163), returned under an outer 200 (dry-run validate) or 422 (create_wall)",
 	"structure":    "never a top-level error.code — structure_violation/1's fallback violation map (bulldocs_ingest_controller.ex:589-590), same outer-body story as hollow_paper",
-
-	"export_failed":       "AMBIGUOUS STATUS: 503 at workspace_controller.ex:319 (bundle export, deliberately retryable) vs 422 at sheets/export_controller.ex:142 (xlsx build, permanent). One code, two retryability contracts",
-	"invalid_mode":        "AMBIGUOUS STATUS: 422 at workspace_controller.ex:466 (bundle-import mode) vs 400 at sites/deploy_request.ex:199 (site-deploy mode). Two unrelated features share the token",
-	"session_unavailable": "AMBIGUOUS STATUS: 503 at sheets/ops_controller.ex:145 (crash loop, retry-after: 2) vs 422 at :154 (catch-all start failure). One code, two retryability contracts",
 }
 
 // reasonKey reduces a COMPOUND server reason token to its table key. The tasks

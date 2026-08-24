@@ -304,8 +304,8 @@ defmodule BarkparkWeb.SiteDeployControllerTest do
                |> json_response(400)
     end
 
-    test "400 invalid_mode", %{conn: conn} do
-      assert %{"error" => %{"code" => "invalid_mode"}} =
+    test "400 invalid_deploy_mode", %{conn: conn} do
+      assert %{"error" => %{"code" => "invalid_deploy_mode"}} =
                conn
                |> admin_conn()
                |> post("/v1/admin/site-deploy", body("ok", %{"mode" => "rm-rf"}))

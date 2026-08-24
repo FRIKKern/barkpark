@@ -9,7 +9,7 @@ Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
 A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
 
-**Flat alias.** Unprefixed `/v1/*` content routes resolve to `Default`/`Default`.
+**Flat alias.** Unprefixed `/v1/*` routes resolve to `Default`/`Default`.
 
 ## 2. Base URL & Authentication
 
@@ -17,11 +17,11 @@ A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Docum
 Base URL: http://<host>:4000
 ```
 
-Private endpoints need `Authorization: Bearer <token>`. Dev token: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + configured defaults + Barkpark Cloud origins.
+Private endpoints need `Authorization: Bearer <token>`. Dev: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + configured defaults + Cloud origins.
 
 **Tenancy.** Path workspace/project are authoritative and must match the token: unknown → `404`, non-member → `403`. Binding/write gates: `docs/auth.md`.
 
-Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any token · **[admin]** = admin.
+Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any · **[admin]** = admin.
 
 **Discovery.** OpenAPI 3.1 of `/v1`: `GET /v1/openapi.json` (public, manifest-generated).
 
@@ -61,7 +61,7 @@ Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?f
 
 ### 5a. Reference Expansion
 
-`?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — single refs and `arrayOf`-of-reference lists, values plain id strings or `{_ref: id}`. **Depth 1** only — nested refs and missing targets stay raw (expanded = map, raw = string).
+`?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced document — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested refs and missing targets stay raw (expanded = map, raw = string).
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
@@ -69,7 +69,7 @@ Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
 
-Tags — `GET /v1/data/tags/:dataset` (`?type=`, default `paper,task`): per-tag per-type published counts → `{result:{tags:[{tag,counts,total}],count}}`; `/tags/:dataset/:tag`: docs ranked by that tag's strength (legacy flat last) → `result.documents:[{doc_id,type,title,strength,rationale,main_tag_match}]`. Anon 404.
+Tags — `GET /v1/data/tags/:dataset` (`?type=`, default `paper,task`): per-tag per-type published counts → `{result:{tags:[{tag,counts,total}],count}}`; `/tags/:dataset/:tag`: docs by tag strength (legacy flat last) → `result.documents:[{doc_id,type,title,strength,rationale,main_tag_match}]`. Anon 404.
 
 Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts, one aggregate → `{ok,dataset,perspective:"published",counts:{<type>:N}}` (frozen, not `result`-wrapped). Anon 404. Published-only; other `?perspective` → 400 (§4).
 
@@ -100,7 +100,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes both `<id>` and `drafts.<id>` if they exist. Requires `type` (else `400 malformed`); honors `ifRevisionID`.
 
-**Success response:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings:[{code,severity,message}]` (e.g. `label_norm`); paper-ingest 200 carries it too.
+**Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish may add non-blocking `warnings:[{code,severity,message}]` (e.g. `label_norm`); paper-ingest 200 carries it too.
 
 Failures: §9.
 
@@ -145,7 +145,7 @@ A **`bptk_` key IS an identity**: minted per outsider, who files/reads tickets w
 
 Body `{"ops":[…]}` (`?dataset=`, default `production`); the `BARKPARK_INGEST_TOKEN` shared secret also authorizes. Ops apply INDIVIDUALLY, not atomically — a refused op lands in the 200's `errors` as `{index,code,message}`. Full grammar: the `Barkpark.Plugins.Sheets.Session` moduledoc.
 
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a pure row permutation of the rect (formulas move verbatim, undo = the inverse permutation). Refusals: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
+**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a pure row permutation of the rect (formulas move verbatim; undo = the inverse). Refusals: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
 
 **Filtering** is per-viewer view-state in Studio + the `/sheets` reader (sorting is an edit mutation). Deliberately NO filter wire endpoint; adding one is a regression.
 
@@ -159,9 +159,9 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task`/`duplicate_of` 409 · `schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422; `playground_expired` 403. BPML sync create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (BPML slug attr ≠ URL slug).
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task`/`duplicate_of` 409 · `schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422 · `playground_expired` 403. BPML create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug).
 
-Endpoint-specific: ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint`/`bpml`/`bpml_unavailable`/`bpml_unprintable`/`unknown_format`/`hollow_paper`/`structure` · sessions `missing_slug`/`invalid_kind`/`invalid_conversation`/`conflict_retry` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · deploy `build_id_mismatch`/`deploy_runner_unavailable` · grants `invalid_grant`/`unprocessable` · Chat hosts `invalid_enrollment`/`invalid_state_report` · step-up `mfa_required`/`mfa_enrolment_required` · import/export `bundle_import_disabled`/`invalid_mode`/`workspace_slug_conflict`/`blob_path_conflict`/`import_constraint_violation`/`import_failed`/`export_failed`/`import_body_read_failed`/`import_body_too_large`/`import_spill_write_failed`/`insufficient_disk_space` · chat `runtime_capacity`/`runtime_unavailable`/`chat_unsupported`/`chat_create_failed`. Source `known_codes/0`.
+Endpoint-specific: ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint`/`bpml`/`bpml_unavailable`/`bpml_unprintable`/`unknown_format`/`hollow_paper`/`structure` · sessions `missing_slug`/`invalid_kind`/`invalid_conversation`/`conflict_retry` · sheets `malformed_ops`/`batch_too_large`/`session_restarting`/`session_start_failed`/`invalid_request_id` · media `share_expired` · deploy `build_id_mismatch`/`deploy_runner_unavailable`/`invalid_deploy_mode` · grants `invalid_grant`/`unprocessable` · chat hosts `invalid_enrollment`/`invalid_state_report` · step-up `mfa_required`/`mfa_enrolment_required` · import/export `bundle_import_disabled`/`invalid_import_mode`/`workspace_slug_conflict`/`blob_path_conflict`/`import_constraint_violation`/`import_failed`/`export_transport_failed`/`export_build_failed`/`import_body_read_failed`/`import_body_too_large`/`import_spill_write_failed`/`insufficient_disk_space` · chat `runtime_capacity`/`runtime_unavailable`/`chat_unsupported`/`chat_create_failed`. Source `known_codes/0`.
 
 ## 10. Legacy `/api/*` Routes
 
