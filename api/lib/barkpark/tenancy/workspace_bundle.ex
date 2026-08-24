@@ -206,6 +206,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.WorkspaceBundle.{Archive, Catalog, ExportScopeError, InvalidBundleError}
+  alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
@@ -254,7 +255,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         try do
           {:ok, File.read!(path)}
         after
+          # This function is the one that DELETES the tar, so it is the one that
+          # disowns it. `pack/3` deliberately leaves the sidecar in place on
+          # success because it hands the path onward; `export_to_file/2`'s
+          # callers inherit that same duty (see `Archive.pack/3` @doc).
           File.rm(path)
+          Janitor.disown(path)
         end
 
       {:error, _} = error ->
@@ -367,13 +373,27 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   def import_bundle_file(bundle_path, opts \\ []) when is_binary(bundle_path) do
     mode = import_mode!(opts)
     grant = grant_admin_to!(opts)
-    dir = Path.join(Path.dirname(bundle_path), "members-#{System.unique_integer([:positive])}")
+    # NAMED WITH THE JANITOR'S PREFIX, and that is a fix, not a formality
+    # (pds-w11-janitor-engine-handshake). This directory used to be
+    # `members-<int>`, while the janitor's candidate glob is exactly three fixed
+    # prefixes — `bp-ws-bundle-`, `bp-ws-spill-`, `bp-ws-import-`. `members-`
+    # matched none of them, so the promise four lines up in this very doc —
+    # "a SIGKILL that outruns both is collected by `Janitor` via the
+    # `bp-ws-import-` prefix" — was FALSE: a kill mid-import stranded a
+    # multi-GB extraction directory the sweep could never see, permanently.
+    # Observed in the wild, not theorised: two such directories survived
+    # crashed runs in a shared spill dir and were still there long enough to
+    # break an unrelated test's assertion about that directory being empty.
+    dir = Archive.scratch_path(Path.dirname(bundle_path))
+
+    Janitor.own(dir)
 
     try do
       {manifest, paths} = Archive.unpack_to_dir(bundle_path, dir)
       import_unpacked(manifest, Map.new(paths, fn {t, p} -> {t, {:file, p}} end), mode, grant)
     after
       File.rm_rf(dir)
+      Janitor.disown(dir)
     end
   end
 
@@ -703,6 +723,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     spills =
       Map.new(specs, fn {table, _partition, _kind} -> {table, Archive.spill_path(dir, table)} end)
 
+    # Claim every spill UP FRONT, for the same reason the paths are computed up
+    # front: the window the liveness sidecar has to cover starts before the
+    # first COPY, not when a file happens to appear. Owning a path whose file is
+    # never written is harmless — the `after` clause disowns all of them, and a
+    # sidecar with no subject is skipped by the sweep either way.
+    #
+    # Until this call existed, `Janitor.own/1` had ZERO callers in `api/lib`
+    # (only its own unit test), so the liveness guard protected nothing on a
+    # real box and the derived mtime cutoff was the only thing standing between
+    # a boot-time sweep and a live concurrent export.
+    Enum.each(Map.values(spills), &Janitor.own/1)
+
     try do
       {members, files} =
         Enum.reduce(specs, {[], %{}}, fn {table, partition, kind}, {members, files} ->
@@ -753,6 +785,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       # Belt and braces: `Archive.pack/3` already deletes each spill the moment
       # it is added, so on the happy path every one of these is a no-op enoent.
       Enum.each(Map.values(spills), &File.rm/1)
+      # And the sidecars with them. Best-effort on both sides — this runs on the
+      # failure path too, where the point is to leave nothing claimed by a pid
+      # that is about to stop existing.
+      Enum.each(Map.values(spills), &Janitor.disown/1)
     end
   end
 

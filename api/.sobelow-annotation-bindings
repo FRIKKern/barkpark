@@ -85,6 +85,7 @@ lib/barkpark/tenancy/workspace_bundle.ex	merge_upsert
 lib/barkpark/tenancy/workspace_bundle.ex	release_member
 lib/barkpark/tenancy/workspace_bundle.ex	restore_member_fks!
 lib/barkpark/tenancy/workspace_bundle.ex	run_copy_out
+lib/barkpark/tenancy/workspace_bundle/archive.ex	discard_scratch_dir
 lib/barkpark/tenancy/workspace_bundle/archive.ex	extract_to_dir!
 lib/barkpark/tenancy/workspace_bundle/archive.ex	free_space
 lib/barkpark/tenancy/workspace_bundle/archive.ex	open_scratch_dir!

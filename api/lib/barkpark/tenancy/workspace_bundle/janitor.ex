@@ -94,6 +94,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
 
   require Logger
 
+  alias Barkpark.Tenancy.WorkspaceBundle.Archive
+
   @bundle_prefix "bp-ws-bundle-"
   @spill_prefix "bp-ws-spill-"
   @scratch_prefix "bp-ws-import-"
@@ -145,12 +147,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Janitor do
   """
   @spec spill_dir() :: String.t()
   def spill_dir do
-    case Application.get_env(:barkpark, :bundle_spill_dir) do
-      dir when is_binary(dir) and dir != "" ->
-        dir
-
-      _ ->
-        Path.join(default_data_dir(), "bundle-spill")
+    # ONE resolution site, `Archive.spill_dir_config/0` — not a second copy of
+    # the same atom. Two modules spelling one key in two places is agreement by
+    # coincidence: it survives until someone renames one of them, and then the
+    # sweep goes quiet instead of going red (pds-w11-janitor-engine-handshake).
+    # The FALLBACK stays here rather than in the shared resolver, because it is
+    # this caller's policy and not the engine's: the janitor is a boot-time
+    # `restart: :temporary` task and must never be what breaks a boot, whereas
+    # an export with nowhere to spill must fail loudly. If the key really is
+    # unset the engine raises before writing anything, so there is nothing here
+    # for the janitor to miss — this branch keeps the sweep harmless, it is not
+    # a second opinion about where spills live.
+    case Archive.spill_dir_config() do
+      {:ok, dir} -> dir
+      :error -> Path.join(default_data_dir(), "bundle-spill")
     end
   end
 
