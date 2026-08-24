@@ -145,6 +145,12 @@ defmodule Barkpark.Plugins.Frt do
   # Reads <stem>.json from the schemas dir and decodes it to a string-keyed
   # map. Raises loudly (File.read! / Jason.decode!) if the file is missing or
   # not valid JSON — we want that surfaced at first use, not at request time.
+  # Reachability: the only path read is the runtime-resolved schemas dir joined
+  # with a compile-time literal filename — no runtime input reaches `File.read!/1`.
+  # Inline rather than a `.sobelow-skips` row on purpose: a baseline entry is
+  # pinned to a LINE, so any edit above the call silently kills the waiver and the
+  # finding returns as new. The annotation binds by AST adjacency and survives moves.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec load_schema!(String.t()) :: map()
   defp load_schema!(file) do
     schemas_dir()

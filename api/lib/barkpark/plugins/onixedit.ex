@@ -447,6 +447,12 @@ defmodule Barkpark.Plugins.OnixEdit do
   # `Contributor.definition_map/0` / `TextContent.definition_map/0`. Both
   # sources are `Jason.decode!`'d JSON, so the keys are already strings — no
   # atom/string normalisation is needed (decision recorded in the task brief).
+  # Reachability: the only path read is the runtime-resolved schemas dir joined
+  # with a compile-time literal filename — no runtime input reaches `File.read!/1`.
+  # Inline rather than a `.sobelow-skips` row on purpose: a baseline entry is
+  # pinned to a LINE, so any edit above the call silently kills the waiver and the
+  # finding returns as new. The annotation binds by AST adjacency and survives moves.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec book_raw_with_subschemas() :: map()
   defp book_raw_with_subschemas do
     path = Path.join(schemas_dir(), "book.json")
