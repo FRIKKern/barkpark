@@ -46,6 +46,7 @@ url-scoped-build	ScopedURL
 user-auth	register_user
 uuid-guarded-fetch	uuid_or_nil
 valueref-resolve	resolve_values_in_blocks
+visibility-gate-tier	bypasses_visibility_gate?
 visibility-redaction	render
 whatsapp-24h-window	decideWhatsappWindow
 whatsapp-install-key	whatsappInstallKey
