@@ -1826,6 +1826,20 @@ func renderMinimal(out *writer, payload []byte) {
 			}
 		}
 	}
+	// An outcome-bearing receipt is printed BEFORE the generic id/rev harvest,
+	// because that harvest cannot see an outcome: it collects ids and a rev, and
+	// prints a bare "ok" when it finds neither. On the writes whose body reports
+	// what actually happened, that is the difference between a receipt and a
+	// lie. The rev still prints below it — a doc delete's rev is worth keeping.
+	if m, isMap := v.(map[string]any); isMap {
+		if line := outcomeReceiptLine(m); line != "" {
+			out.outf("%s", line)
+			if rev := findRev(v); rev != "" {
+				out.outf("rev: %s", rev)
+			}
+			return
+		}
+	}
 	ids := collectIDs(v)
 	rev := findRev(v)
 	if rev != "" {
@@ -1837,6 +1851,143 @@ func renderMinimal(out *writer, payload []byte) {
 	if rev == "" && len(ids) == 0 {
 		out.outf("ok")
 	}
+}
+
+// outcomeKeys are the receipt fields that name WHAT A WRITE DID, in the order
+// they are consulted. The API uses each of them in three different value
+// shapes, and the shape decides how the line reads: a NUMBER is a tally
+// (`share rm` -> {"removed": 2}), a STRING is the thing itself (`schema delete`
+// -> {"deleted": "Post"}), an OBJECT is the row that was affected (`token
+// revoke` -> {"revoked": {id, label, revoked_at}}).
+var outcomeKeys = []string{
+	"removed", "deleted", "revoked", "updated", "purged",
+	"affected", "applied", "cleared", "pruned",
+}
+
+// receiptIdentKeys are the fields that identify a row inside an outcome object,
+// most specific first. It is deliberately wider than collectIDs' list: that one
+// is tuned for document and list rows, and the admin receipts key their subject
+// differently — a removed workspace seat carries principal_id/identity and no
+// "id" at all, which is why `bp workspace member-rm` printed a bare "ok".
+var receiptIdentKeys = []string{
+	"_id", "doc_id", "id", "principal_id", "identity", "email",
+	"label", "name", "slug", "scope",
+}
+
+// failedStatuses are the verdict tokens that mean the operation a receipt
+// describes did NOT succeed, even though the HTTP call did.
+var failedStatuses = map[string]bool{
+	"failed": true, "failure": true, "error": true, "dead": true, "refused": true,
+}
+
+// outcomeReceiptLine renders the one line that says what a write actually did,
+// or "" when the payload carries no such field and the generic id/rev receipt
+// is the right answer.
+//
+// renderMinimal harvests ids and a rev and prints "ok" when it finds neither,
+// so a field that reports the OUTCOME is invisible to it. Measured against the
+// server's real bodies, eight receipts lost the only field that said what
+// happened — and three of them printed a different identifier in its place,
+// which reads as confirmation of something that did not occur:
+//
+//	verb                 server said              printed        now
+//	share rm             removed: 0               id: <scope>    removed: 0 (<scope>)
+//	share rm             removed: 2               id: <scope>    removed: 2 (<scope>)
+//	media delete         deleted: <asset id>      ok             deleted: <asset id>
+//	webhook delete       deleted: <id>            id: <name>     deleted: <id>
+//	schema delete        deleted: <name>          id: <row uuid> deleted: <name>
+//	doc delete           deleted: <doc id>        rev: <rev>     deleted: <doc id> + rev
+//	workspace member-rm  removed: {seat}          ok             removed: <identity>
+//	token revoke         revoked: {id,label,…}    ok             revoked: <id>
+//	webhook test-send    delivery.status: failed  ok             delivery: failed: …
+//
+// Two are worth naming. `share rm` printed a BYTE-IDENTICAL receipt for "two
+// shares revoked" and "nothing was revoked", both at exit 0 — on a revocation
+// verb, that is the failure mode that matters: you walk away believing access
+// is gone. And `bp token revoke`, the verb you reach for when a credential has
+// leaked, answered "ok" without ever echoing the revoked_at the server returned.
+//
+// `bp webhook test-send` is the odd one: the controller returns HTTP 200 with
+// the delivery VERDICT in the body by design (webhook_controller.test_send/2
+// says so), so an endpoint that refused the connection produced a 200, and the
+// nested verdict was invisible to the top-level id harvest. A command whose
+// whole purpose is to tell you whether an endpoint works answered "ok" for one
+// that had just failed.
+//
+// NOTE ON THE EXIT CODE, deliberately unchanged: a failed test delivery still
+// exits 0. The exit ladder is keyed on the error envelope's `code` and this is
+// a 2xx, so renumbering it is a change to the contract spine rather than a
+// rendering fix, and it belongs to whoever owns that table. This removes the
+// false statement; it does not touch the ladder.
+func outcomeReceiptLine(m map[string]any) string {
+	// A DOCUMENT is not a receipt. Envelope.render (api) flattens a document's
+	// content fields to the top level, so `bp doc get <type> <id> -q` can hand
+	// this function a payload whose own author-controlled field happens to be
+	// called `updated` or `removed` — and a numeric one would then be printed as
+	// this write's outcome, replacing the id the -q receipt exists to give. The
+	// "_id" guard is the same one envelopeRows uses in table.go, for the same
+	// reason: only a wrapper envelope is a receipt.
+	if _, isDoc := m["_id"]; isDoc {
+		return ""
+	}
+
+	for _, k := range outcomeKeys {
+		switch val := m[k].(type) {
+		case float64:
+			// A tally. The scope rides along because it is what the caller asked
+			// about, and `removed: 0` alone does not say 0 of what.
+			if scope, ok := m["scope"].(string); ok && scope != "" {
+				return fmt.Sprintf("%s: %d (%s)", k, int64(val), scope)
+			}
+			return fmt.Sprintf("%s: %d", k, int64(val))
+		case string:
+			if val != "" {
+				return fmt.Sprintf("%s: %s", k, val)
+			}
+		case map[string]any:
+			// The affected row. Falls through to the old receipt when the object
+			// carries nothing that identifies it — never replace a receipt with a
+			// worse one.
+			if id := receiptIdent(val); id != "" {
+				return fmt.Sprintf("%s: %s", k, id)
+			}
+		}
+	}
+
+	// A nested verdict object one level down, carrying a string "status". Only a
+	// FAILING status is surfaced: a succeeding one is already consistent with
+	// what the caller was told, and hijacking that receipt would trade
+	// information for noise.
+	for _, k := range sortedKeys(m) {
+		obj, isObj := m[k].(map[string]any)
+		if !isObj {
+			continue
+		}
+		status, _ := obj["status"].(string)
+		if status == "" || !failedStatuses[strings.ToLower(status)] {
+			continue
+		}
+		line := fmt.Sprintf("%s: %s", k, status)
+		if code, ok := obj["last_status_code"].(float64); ok {
+			line += fmt.Sprintf(" (HTTP %d)", int64(code))
+		}
+		if txt, ok := obj["last_error_text"].(string); ok && txt != "" {
+			line += ": " + txt
+		}
+		return line
+	}
+	return ""
+}
+
+// receiptIdent returns the field that identifies the row an outcome object
+// describes, or "" when the object carries none.
+func receiptIdent(obj map[string]any) string {
+	for _, k := range receiptIdentKeys {
+		if s, ok := obj[k].(string); ok && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // docReceiptLine renders the one-line minimal receipt for a single returned
