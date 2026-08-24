@@ -65,8 +65,10 @@ func TestWriteReceiptsCarryTheirOutcome(t *testing.T) {
 			want:    []string{"deleted: Post"},
 		},
 		{
-			// The rev is still worth keeping on a doc delete, so it prints below.
-			verb:    "doc delete",
+			// NOT a bp verb: `bp doc delete` rides the mutate envelope. This is
+			// legacy_controller's flat delete body, kept because the rev must
+			// still print beneath the outcome line when a payload carries both.
+			verb:    "legacy flat delete (no bp verb produces this)",
 			payload: `{"deleted":"post-1","type":"post","rev":"r1"}`,
 			before:  "rev: r1",
 			want:    []string{"deleted: post-1", "rev: r1"},

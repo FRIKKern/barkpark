@@ -1886,9 +1886,9 @@ var failedStatuses = map[string]bool{
 //
 // renderMinimal harvests ids and a rev and prints "ok" when it finds neither,
 // so a field that reports the OUTCOME is invisible to it. Measured against the
-// server's real bodies, eight receipts lost the only field that said what
-// happened — and three of them printed a different identifier in its place,
-// which reads as confirmation of something that did not occur:
+// server's real bodies, eight receipts across SEVEN bp verbs lost the only
+// field that said what happened — and three printed a different identifier in
+// its place, which reads as confirmation of something that did not occur:
 //
 //	verb                 server said              printed        now
 //	share rm             removed: 0               id: <scope>    removed: 0 (<scope>)
@@ -1896,10 +1896,16 @@ var failedStatuses = map[string]bool{
 //	media delete         deleted: <asset id>      ok             deleted: <asset id>
 //	webhook delete       deleted: <id>            id: <name>     deleted: <id>
 //	schema delete        deleted: <name>          id: <row uuid> deleted: <name>
-//	doc delete           deleted: <doc id>        rev: <rev>     deleted: <doc id> + rev
-//	workspace member-rm  removed: {seat}          ok             removed: <identity>
+//	workspace member-rm  removed: {seat}          ok             removed: <principal>
 //	token revoke         revoked: {id,label,…}    ok             revoked: <id>
 //	webhook test-send    delivery.status: failed  ok             delivery: failed: …
+//
+// `bp doc delete` is deliberately NOT in that list, though an earlier draft of
+// this comment claimed it: doc.delete rides POST /v1/data/mutate/:dataset with
+// mutation_op "delete" and gets the mutate envelope, not the flat
+// {deleted, type, rev} body legacy_controller returns. That flat shape is still
+// rendered correctly below — the rev prints beneath the outcome line — but no
+// bp verb produces it today, so it is COVERED, not FIXED.
 //
 // Two are worth naming. `share rm` printed a BYTE-IDENTICAL receipt for "two
 // shares revoked" and "nothing was revoked", both at exit 0 — on a revocation
