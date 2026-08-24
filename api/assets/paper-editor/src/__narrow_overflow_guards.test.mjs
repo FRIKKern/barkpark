@@ -47,12 +47,35 @@
 // Everything else in the sheet was audited and found ALREADY SAFE by one of:
 // nowrap paired with its own ellipsis clamp, nesting inside an established
 // `overflow-x: auto` scroll container (`.bp-table`, `.bp-duel__table`,
-// `.bp-heat__scroll`, `.bp-pipe-scroll`, `.bp-chart__scroll`, `.bp-diff`/
-// `.bp-filetree`), or an existing overflow-wrap/word-break guard already on
-// the rule. The rendered 390px no-horizontal-scroll assertion this task also
-// calls for (every PortableDoc golden fixture through headless Chromium)
-// needs `js/packages/react/tests/fixtures/pd-golden/` and a browser harness —
-// outside api/assets, left to that lane; this file is the source-level half.
+// `.bp-pipe-scroll`, `.bp-chart__scroll`, `.bp-diff`/`.bp-filetree`), or an
+// existing overflow-wrap/word-break guard already on the rule.
+//
+// TWO CORRECTIONS TO THE PARAGRAPH ABOVE, both from measuring what it asserted.
+//
+// 1. `.bp-heat__scroll` used to appear in that list of scroll containers. It is
+//    real, but it belongs to the CALENDAR heat only: `heat_calendar_html/2`
+//    emits `.bp-heat--cal > .bp-heat__scroll`, while the plain `heatmap_html/1`
+//    emits `.bp-heat > .bp-heat__grid` with no scroll wrapper at all, and its
+//    row-label track is `auto` — it grows to the widest author label. So the
+//    plain heatmap was never covered by the reason given for it. The VERDICT
+//    still holds — measured, a plain heatmap needs a 45-character row label
+//    before the page scrolls, where plain prose gives way at 22 — but it held
+//    for a different reason than the one written down, and a reason that is not
+//    the real one is how the next audit skips the block.
+//
+// 2. The rendered 390px assertion was recorded here as needing a harness
+//    "outside api/assets, left to that lane". It does not: __narrow_render.mjs
+//    sits beside this file, reads the same pd-golden corpus, and drives real
+//    headless Chromium. What it needed was the reader's container geometry
+//    (max-width + gutter), which lives in root.html.heex rather than in
+//    paper-surface.css — that is a transcription, not a fence problem.
+//
+// THE LIMIT OF THIS FILE, stated plainly. Every assertion below greps a
+// declaration out of the stylesheet. That catches a deleted declaration and
+// nothing else: it cannot see a block nobody has thought about, and it cannot
+// tell whether the page actually scrolls. Of the ~341 `.bp-*` classes this
+// sheet styles, 117 are rendered by no pd-golden fixture at all, so silence
+// about them is not evidence. __narrow_render.mjs is the half that measures.
 //
 // Run: node src/__narrow_overflow_guards.test.mjs   (or: npm test)
 

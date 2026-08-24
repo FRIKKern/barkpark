@@ -11,17 +11,29 @@ name: paper-editor
 #   2. stale committed bundle             -> rebuild + git diff --exit-code
 # The freshness check is deterministic: `npm ci` pins esbuild via the
 # lockfile, and esbuild's minified output is reproducible per version.
+#
+# WHY paper-surface/** IS A TRIGGER PATH. Several suites under src/ do not test
+# the editor at all — they read api/assets/paper-surface/paper-surface.css and
+# assert things about the reading surface (the narrow-viewport wrap guards, for
+# one). While this workflow triggered only on paper-editor/**, those gates could
+# never see the file they gate: a change to paper-surface.css alone ran the
+# Elixir suite (elixir.yml has no path filter) but not one of them, so a
+# regression to the very declarations they pin would ship green. A gate whose
+# subject cannot trigger it is not a gate.
 
 on:
   push:
     branches: [main]
     paths:
       - "api/assets/paper-editor/**"
+      # the reading surface several src/ suites assert against — see the header
+      - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
       - "api/assets/paper-editor/**"
+      - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
       - ".github/workflows/paper-editor.yml"
 
