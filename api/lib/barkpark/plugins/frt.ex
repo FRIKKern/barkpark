@@ -52,7 +52,18 @@ defmodule Barkpark.Plugins.Frt do
   alias Barkpark.Content.SchemaDefinition
 
   @plugin_name "frt"
-  @schemas_dir Path.expand("../../../priv/plugins/frt/schemas", __DIR__)
+  # Resolved at RUNTIME, deliberately not frozen into an attribute.
+  # `Application.app_dir/2` finds priv under BOTH deploy models: the source-tree
+  # one (Barkpark compiles + runs in place under /opt/barkpark, where Mix
+  # symlinks _build/<env>/lib/barkpark/priv at ./priv) and an OTP release, where
+  # priv lives at lib/barkpark-<vsn>/priv. The previous
+  # `Path.expand("../../../priv/...", __DIR__)` attribute served only the first:
+  # it froze the BUILD machine's absolute path, so every released build raised
+  # File.Error enoent here and this plugin's schemas never registered.
+  # Precedent: the plugin loader already resolves priv this way — see
+  # registry/discovery.ex default_paths/0.
+  @schemas_subdir "priv/plugins/frt/schemas"
+  defp schemas_dir, do: Application.app_dir(:barkpark, @schemas_subdir)
 
   # Snake-cased file stem → registered schema `name`. Single source of truth
   # for both `register_schemas/1` (which file to load) and the manifest. Kept
@@ -136,7 +147,7 @@ defmodule Barkpark.Plugins.Frt do
   # not valid JSON — we want that surfaced at first use, not at request time.
   @spec load_schema!(String.t()) :: map()
   defp load_schema!(file) do
-    @schemas_dir
+    schemas_dir()
     |> Path.join(file <> ".json")
     |> File.read!()
     |> Jason.decode!()

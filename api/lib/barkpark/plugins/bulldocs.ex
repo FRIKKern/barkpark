@@ -42,12 +42,18 @@ defmodule Barkpark.Plugins.Bulldocs do
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.PortableDoc.BodyWalk
 
-  # Compile-time absolute path to this plugin's bundled schema JSON. Matches the
-  # source-tree prod deploy model (Barkpark compiles + runs in place under
-  # /opt/barkpark), mirroring how the OnixEdit plugin resolves its schemas dir.
-  # (Named without the module prefix on purpose: the plugins-off regression bar
-  # greps lib/ for cross-plugin module references by full name.)
-  @schemas_dir Path.expand("../../../priv/plugins/bulldocs/schemas", __DIR__)
+  # Resolved at RUNTIME, deliberately not frozen into an attribute.
+  # `Application.app_dir/2` finds priv under BOTH deploy models: the source-tree
+  # one (Barkpark compiles + runs in place under /opt/barkpark, where Mix
+  # symlinks _build/<env>/lib/barkpark/priv at ./priv) and an OTP release, where
+  # priv lives at lib/barkpark-<vsn>/priv. The previous
+  # `Path.expand("../../../priv/...", __DIR__)` attribute served only the first:
+  # it froze the BUILD machine's absolute path, so every released build raised
+  # File.Error enoent here and this plugin's schemas never registered.
+  # Precedent: the plugin loader already resolves priv this way — see
+  # registry/discovery.ex default_paths/0.
+  @schemas_subdir "priv/plugins/bulldocs/schemas"
+  defp schemas_dir, do: Application.app_dir(:barkpark, @schemas_subdir)
 
   @doc """
   Declares the `paper` document type. The shape mirrors the legacy seed/
@@ -138,7 +144,7 @@ defmodule Barkpark.Plugins.Bulldocs do
   end
 
   @impl Barkpark.Plugin
-  # Reachability: the only path read is `@schemas_dir` joined with one of three
+  # Reachability: the only path read is `schemas_dir()` joined with one of three
   # compile-time literal filenames — no runtime input reaches `File.read!/1`.
   # sobelow_skip ["Traversal.FileModule"]
   def register_schemas(_opts) do
@@ -153,7 +159,7 @@ defmodule Barkpark.Plugins.Bulldocs do
     # the exposure the wall's curation exists to gate).
     for file <- ["paper.json", "form_response.json", "session.json"] do
       raw =
-        @schemas_dir
+        schemas_dir()
         |> Path.join(file)
         |> File.read!()
         |> Jason.decode!()

@@ -25,7 +25,18 @@ defmodule Barkpark.Plugins.Media do
   alias Barkpark.Plugins.Media.{Assets, Codelists}
 
   @plugin_name "media"
-  @schemas_dir Path.expand("../../../priv/plugins/media/schemas", __DIR__)
+  # Resolved at RUNTIME, deliberately not frozen into an attribute.
+  # `Application.app_dir/2` finds priv under BOTH deploy models: the source-tree
+  # one (Barkpark compiles + runs in place under /opt/barkpark, where Mix
+  # symlinks _build/<env>/lib/barkpark/priv at ./priv) and an OTP release, where
+  # priv lives at lib/barkpark-<vsn>/priv. The previous
+  # `Path.expand("../../../priv/...", __DIR__)` attribute served only the first:
+  # it froze the BUILD machine's absolute path, so every released build raised
+  # File.Error enoent here and this plugin's schemas never registered.
+  # Precedent: the plugin loader already resolves priv this way — see
+  # registry/discovery.ex default_paths/0.
+  @schemas_subdir "priv/plugins/media/schemas"
+  defp schemas_dir, do: Application.app_dir(:barkpark, @schemas_subdir)
 
   @doc "Plugin discriminator name (D20)."
   @spec plugin_name() :: String.t()
@@ -103,7 +114,7 @@ defmodule Barkpark.Plugins.Media do
     end
   end
 
-  # Reachability: the only path read is the compile-time `@schemas_dir` joined
+  # Reachability: the only path read is the runtime-resolved `schemas_dir()` joined
   # with one of two literal filenames passed by `register_schemas/1` — no
   # runtime input reaches `File.read!/1`. Same shape (and same waiver) as
   # `Barkpark.Plugins.Bulldocs.register_schemas/1`. This replaces the
@@ -115,7 +126,7 @@ defmodule Barkpark.Plugins.Media do
   # sobelow_skip ["Traversal.FileModule"]
   @spec load_schema!(String.t()) :: SchemaDefinition.t()
   defp load_schema!(filename) do
-    path = Path.join(@schemas_dir, filename)
+    path = Path.join(schemas_dir(), filename)
 
     raw =
       path

@@ -66,7 +66,18 @@ defmodule Barkpark.Plugins.Sheets do
   alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: SheetCore
 
-  @schemas_dir Path.expand("../../../priv/plugins/sheets/schemas", __DIR__)
+  # Resolved at RUNTIME, deliberately not frozen into an attribute.
+  # `Application.app_dir/2` finds priv under BOTH deploy models: the source-tree
+  # one (Barkpark compiles + runs in place under /opt/barkpark, where Mix
+  # symlinks _build/<env>/lib/barkpark/priv at ./priv) and an OTP release, where
+  # priv lives at lib/barkpark-<vsn>/priv. The previous
+  # `Path.expand("../../../priv/...", __DIR__)` attribute served only the first:
+  # it froze the BUILD machine's absolute path, so every released build raised
+  # File.Error enoent here and this plugin's schemas never registered.
+  # Precedent: the plugin loader already resolves priv this way — see
+  # registry/discovery.ex default_paths/0.
+  @schemas_subdir "priv/plugins/sheets/schemas"
+  defp schemas_dir, do: Application.app_dir(:barkpark, @schemas_subdir)
 
   @cell_cap 50_000
   @merge_area_cap 10_000
@@ -102,13 +113,14 @@ defmodule Barkpark.Plugins.Sheets do
 
   @doc """
   Declares the `sheet` document type. Reads `priv/plugins/sheets/schemas/sheet.json`
-  at compile time and upserts via Bootstrap on every boot — idempotent on
+  at runtime (resolved via `schemas_dir/0`, which works in a release as well as
+  the source tree) and upserts via Bootstrap on every boot — idempotent on
   `(name, dataset)`, matching the bulldocs pattern.
   """
   @impl Barkpark.Plugin
   def register_schemas(_opts) do
     raw =
-      @schemas_dir
+      schemas_dir()
       |> Path.join("sheet.json")
       |> File.read!()
       |> Jason.decode!()
