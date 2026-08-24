@@ -609,7 +609,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       assert Registry.get_barkpark(support_b.id) != nil
     end
 
-    test "Registry.active_support_provision_job?/1 sees the kind a support gets" do
+    test "Registry.active_provision_job_any_kind?/1 sees the kind a support gets" do
       {_u, team, _token} = user_with_role("owner")
       main = live_main_fixture(team)
 
@@ -621,14 +621,51 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
           token_id: "t"
         })
 
-      refute Registry.active_support_provision_job?(support)
+      refute Registry.active_provision_job_any_kind?(support)
       {:ok, _} = Registry.enqueue_support_provision_job(support)
-      assert Registry.active_support_provision_job?(support)
+      assert Registry.active_provision_job_any_kind?(support)
 
       # The pre-existing predicate only ever knew kind "provision", which a
-      # support is NEVER enqueued under — that blind spot is why the guard above
-      # needed its own function rather than a reuse.
+      # support is NEVER enqueued under — that blind spot is why the guards
+      # needed a kind-agnostic function rather than a reuse.
       refute Registry.active_provision_job?(support)
+    end
+
+    test "a support mid-provision is refused by DELETE /v1/barkparks/:id too" do
+      # That route matches on team alone — no fleet_role filter — so a support
+      # row reaches it, and its in-flight guard used to be blind to the only kind
+      # a support ever has. The row would have been deleted while the worker was
+      # still about to publish its A record.
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "ViaBarkparks",
+          slug: "via-barkparks",
+          parent_id: main.id,
+          token_id: "t"
+        })
+
+      {:ok, _job} = Registry.enqueue_support_provision_job(support)
+
+      conn = call(:delete, "/v1/barkparks/#{support.id}", nil, token)
+
+      assert conn.status == 409
+      assert decode(conn)["error"] == "provisioning_in_progress"
+      assert Registry.get_barkpark(support.id) != nil
+    end
+
+    test "a MAIN mid-provision is still refused — the widening broke nothing" do
+      {_u, team, token} = user_with_role("owner")
+      main = main_fixture(team)
+      {:ok, _job} = Registry.enqueue_provision_job(main)
+
+      conn = call(:delete, "/v1/barkparks/#{main.id}", nil, token)
+
+      assert conn.status == 409
+      assert decode(conn)["error"] == "provisioning_in_progress"
+      assert Registry.get_barkpark(main.id) != nil
     end
   end
 
