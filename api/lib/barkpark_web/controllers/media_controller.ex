@@ -81,7 +81,15 @@ defmodule BarkparkWeb.MediaController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
-  @doc "List all media files."
+  @doc """
+  List all media files.
+
+  `dataset` is QUERY-STRING sourced here — the scoped `/w/:ws/p/:proj/media`
+  routes carry no `:dataset` path segment. `RequireShareScope.request_dataset/1`
+  resolves it the same way, so a `:media` share is checked against the dataset
+  this action actually lists; before task-4f26838232b5ece0 the guard compared
+  `"production"` while `?dataset=` listed another dataset's library.
+  """
   def index(conn, params) do
     dataset = Map.get(params, "dataset", "production")
     mime_filter = Map.get(params, "type")
@@ -471,6 +479,11 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
+  # `dataset` here selects which dataset's asset doc is looked up for the
+  # `assetDocId` field, and it is QUERY-STRING sourced on the dataset-less
+  # scoped media routes — so `show/2` reads it too, not just `index/2`.
+  # `RequireShareScope.request_dataset/1` is aligned to this read
+  # (task-4f26838232b5ece0).
   defp render_file(file, conn) do
     dataset = Map.get(conn.params, "dataset", file.dataset)
 

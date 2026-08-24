@@ -32,6 +32,36 @@
 #      EXACTLY 401 — so 5xx (500 storm) and 000 (dead box / dead pool) fail.
 #   3. That probe uses an invalid address on the reserved .example TLD, so no
 #      credential and no authentication is introduced by the gate itself.
+#   4. BOTH deploy jobs assert the SERVED COMMIT — that what the box answers with
+#      is the merged commit or a descendant of it. Every probe above proves the
+#      box is ALIVE; none proves it MOVED. Measured offline against a fake box
+#      serving a commit two behind, with '/' at 200, bad-creds login at 401 and
+#      /api/schemas at 200: both jobs' smoke steps exited 0 and nothing ever
+#      asked what was being served. A green deploy that deployed nothing is the
+#      most expensive lie this system can tell, because the ledger, the crown and
+#      the next deploy's diff base all trust it.
+#
+# WHY THE SERVED-COMMIT ARMS USE A DIFFERENT EXTRACTOR
+#
+# extract_cp_smoke is pinned to the step literally named `Smoke test`, and that
+# scoping is load-bearing for assertions 1-3 (selftest 4 proves a trailing step
+# cannot answer for them). It is exactly wrong for assertion 4: the served-commit
+# check is a NEW step, so a name-pinned extractor matches zero of its lines and
+# the guard certifies an invariant it never looked at. Mutation-proved on this
+# very file before the arms below existed — a deploy.yml carrying a full
+# `- name: Assert serving sha` step scored `OK[...]` at rc 0.
+#
+# So assertion 4 reads the WHOLE job and asserts against the union, in two views:
+#
+#   extract_job_lines  every line of the job, YAML/shell comments stripped — a
+#                      comment must never satisfy a gate.
+#   logic_view         the above, minus BARE `echo`/`printf` lines (a line that
+#                      pipes into something is logic, not a log line) — so the
+#                      deploy job cannot satisfy its own gate with a log line,
+#                      the D344 lesson that selftest 4 encodes for the smoke.
+#
+# A name-pinned second extractor was rejected outright: it just goes blind again
+# on the next rename, which is the defect being fixed, not a smaller version of it.
 #
 # `--selftest` PROVES the tripwire on temp copies (plants nothing in the tree):
 # the real file passes, a copy with 404 re-added FAILS, a copy with the login
@@ -154,6 +184,120 @@ extract_cp_smoke() {
   ' "$1"
 }
 
+# Every line of one job. Job boundaries are the 2-space keys under `jobs:` — the
+# same rule extract_cp_smoke uses, so the two agree on where a job ends.
+extract_job_lines() {
+  awk -v want="$2" '
+    /^  [a-zA-Z0-9_-]+:/ {
+      job = $0; sub(/^  /, "", job); sub(/:.*$/, "", job)
+    }
+    job == want { print }
+  ' "$1" | grep -v '^[[:space:]]*#' || true
+}
+
+# The logic half: drop BARE echo/printf lines. A line that pipes into a test
+# (`printf ... | grep -qE ...`) is logic and stays; a bare `echo "::error ..."`
+# is a log line and goes. Without this, a step could satisfy every structural
+# arm below by printing the strings it is supposed to execute.
+logic_view() {
+  grep -vE '^[[:space:]]*(echo|printf)([[:space:]]|$)[^|]*$' || true
+}
+
+# ── the served-commit arms ───────────────────────────────────────────────────
+
+# check_served_assertion <yml> <label> <job> <url-fragment> <jq-key> <reader-cite>
+# Returns the number of broken invariants on stdout is NOT used; it echoes
+# diagnostics and returns non-zero count via the caller's accumulator.
+check_served_assertion() {
+  local yml="$1" label="$2" job="$3" url="$4" key="$5" cite="$6"
+  local all logic failures=0
+
+  all="$(extract_job_lines "$yml" "$job")"
+  if [ -z "$all" ]; then
+    echo "  DRIFT    job '$job' not found in $label — the extractor is broken, or the job was renamed" >&2
+    return 1
+  fi
+  logic="$(printf '%s\n' "$all" | logic_view)"
+
+  # a) the oracle is called, with the MERGED commit as the base and the SERVED
+  #    commit as the head. Keyed on `compare/` — the `prev`/`served` recorder
+  #    steps already read a sha and already run jq, so presence of a sha read is
+  #    NOT evidence that anything is asserted about it.
+  if ! printf '%s\n' "$logic" | grep -q 'compare/${{ github.sha }}\.\.\.'; then
+    echo "  DRIFT    $job: no 'compare/\${{ github.sha }}...<served>' call — nothing asks the oracle whether the box moved" >&2
+    echo "           (reading a sha is not asserting one: the recorder steps in this job already read it)" >&2
+    failures=$((failures + 1))
+  fi
+
+  # b) the ANCESTOR verdict set, verbatim. Equality is refused: cp-deploy.sh and
+  #    instance-deploy.sh both pull origin/main's TIP, so a run fired for one
+  #    commit routinely delivers a DESCENDANT (7f5f10b8d...572d51e13 = ahead 10,
+  #    behind 0). An equality gate reds healthy merges and gets ignored.
+  if ! printf '%s\n' "$logic" | grep -qF "'^(ahead|identical)$'"; then
+    echo "  DRIFT    $job: the compare verdict is not matched against '^(ahead|identical)\$'" >&2
+    failures=$((failures + 1))
+  fi
+
+  # c) NO equality comparison against the merged sha.
+  if printf '%s\n' "$logic" | grep -qE '(\[\[?|test)[^|]*\$\{\{ github\.sha \}\}|==[[:space:]]*"?\$\{\{ github\.sha \}\}|\$served"?[[:space:]]*=='; then
+    echo "  DRIFT    $job: an EQUALITY comparison against \${{ github.sha }} is back — the ancestor rule was the fix, not an approximation" >&2
+    failures=$((failures + 1))
+  fi
+
+  # d) NULL ARM. `jq -r '.k'` prints the literal four-character string `null` for
+  #    a null value and would hand it to the oracle as if it were a commit:
+  #      $ echo '{"git_sha":null}' | jq -r '.git_sha'
+  #      null
+  #    `-e` plus `// empty` turns both a null and an absent key into an EMPTY
+  #    string at a non-zero exit, which the step then reports as a missing key.
+  #
+  #    ONE literal, not two loose halves: the control-plane job's `prev` recorder
+  #    step already contains `jq -r '.git_sha // empty'` (no -e), so a `jq -er`
+  #    arm and a `// empty` arm checked SEPARATELY are both satisfiable by a step
+  #    that asserts nothing — the sibling-answers-for-the-broken-one shape this
+  #    file exists to refuse.
+  if ! printf '%s\n' "$logic" | grep -qF "jq -er '$key // empty'"; then
+    echo "  DRIFT    $job: the served sha is not read as exactly \"jq -er '$key // empty'\" — a null or absent key would reach the oracle as the four-character string 'null'" >&2
+    echo "           (a nearby recorder step's 'jq -r $key // empty' does NOT count: no -e, and it asserts nothing)" >&2
+    failures=$((failures + 1))
+  fi
+
+  # e) the reader it depends on is NAMED, so a missing key sends the reader
+  #    onward instead of surfacing as a bare comparison failure. This one arm
+  #    reads the message text, so it uses the comment-stripped view, not `logic`.
+  if ! printf '%s\n' "$all" | grep -qF "$cite"; then
+    echo "  DRIFT    $job: the missing-key failure does not name the reader it depends on ($cite)" >&2
+    failures=$((failures + 1))
+  fi
+
+  # f) the source it reads.
+  if ! printf '%s\n' "$logic" | grep -qF "$url"; then
+    echo "  DRIFT    $job: nothing reads $url" >&2
+    failures=$((failures + 1))
+  fi
+
+  # g) a BOUNDED settle window that EXPIRES INTO A FAILURE, with the cap stated
+  #    in the code. A window with no cap is a hang; a window that expires into a
+  #    pass is the blindness with extra steps.
+  if ! printf '%s\n' "$logic" | grep -qE 'SETTLE_CAP_SECONDS=[0-9]+'; then
+    echo "  DRIFT    $job: no SETTLE_CAP_SECONDS=<n> — the settle window has no stated cap" >&2
+    failures=$((failures + 1))
+  fi
+  if ! printf '%s\n' "$logic" | grep -q 'deadline'; then
+    echo "  DRIFT    $job: the settle window never compares against a deadline" >&2
+    failures=$((failures + 1))
+  fi
+  if ! printf '%s\n' "$all" | grep -qF 'settle window expired'; then
+    echo "  DRIFT    $job: expiry does not announce itself as a failure — an unanswerable question must not be a pass" >&2
+    failures=$((failures + 1))
+  fi
+
+  if [ "$failures" -eq 0 ]; then
+    echo "  ok       $job asserts the SERVED commit (ancestor rule, null-armed, bounded window)"
+  fi
+  return "$failures"
+}
+
 # ── the check ────────────────────────────────────────────────────────────────
 
 check_file() {
@@ -220,14 +364,28 @@ check_file() {
     failures=$((failures + 1))
   fi
 
+  # 4. BOTH jobs assert the SERVED COMMIT. Everything above proves the box is
+  #    alive; only this proves it moved.
+  local served_rc=0
+  check_served_assertion "$yml" "$label" "control-plane" \
+    "https://barkpark.cloud/health" ".git_sha" "#10605" || served_rc=$?
+  failures=$((failures + served_rc))
+  served_rc=0
+  check_served_assertion "$yml" "$label" "instance" \
+    "https://guerrilla.barkpark.cloud/status.json" ".commit" "#6422" || served_rc=$?
+  failures=$((failures + served_rc))
+
   if [ "$failures" -gt 0 ]; then
-    echo "FAIL[$label]: $failures control-plane smoke invariant(s) broken." >&2
+    echo "FAIL[$label]: $failures deploy-gate invariant(s) broken." >&2
     echo "Fix: the smoke step must reject 404 on '/' AND require a bad-creds POST to" >&2
-    echo "/v1/auth/login to answer exactly 401, mirroring deploy/cp-deploy.sh:129-141." >&2
+    echo "/v1/auth/login to answer exactly 401, mirroring deploy/cp-deploy.sh:129-141;" >&2
+    echo "AND both deploy jobs must assert that what the box SERVES is the merged" >&2
+    echo "commit or a descendant of it, via the GitHub compare API under the ancestor" >&2
+    echo "rule. A box that never moved passes every other gate in this workflow." >&2
     return 1
   fi
 
-  echo "OK[$label]: the control-plane smoke can fail on a DB-dead box."
+  echo "OK[$label]: the control-plane smoke can fail on a DB-dead box, and neither target can exit 0 over a box that did not move."
   return 0
 }
 
@@ -243,14 +401,14 @@ selftest() {
   local real="$REPO_ROOT/$DEPLOY_YML_DEFAULT"
   local rc=0
 
-  echo "selftest 1/5: the real workflow passes"
+  echo "selftest 1/10: the real workflow passes"
   if ! check_file "$real" "real"; then
     echo "SELFTEST FAIL: the real deploy.yml does not pass" >&2
     rc=1
   fi
 
   echo
-  echo "selftest 2/5: re-adding 404 to the accept-list must FAIL (the original bug)"
+  echo "selftest 2/10: re-adding 404 to the accept-list must FAIL (the original bug)"
   sed "s/\^(200|301|302)\\\$/^(200|301|302|404)\$/" "$real" > "$tmp/mutated404.yml"
   if cmp -s "$real" "$tmp/mutated404.yml"; then
     echo "SELFTEST FAIL: the mutation changed nothing — the accept-list no longer looks as expected" >&2
@@ -263,7 +421,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 3/5: deleting the DB (login) probe must FAIL"
+  echo "selftest 3/10: deleting the DB (login) probe must FAIL"
   awk '
     /dbcode="\$\(curl/ { drop = 1 }
     !drop { print }
@@ -280,7 +438,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 4/5: an UNNAMED trailing step must not be absorbed into the smoke"
+  echo "selftest 4/10: an UNNAMED trailing step must not be absorbed into the smoke"
   # The disarm shape, verbatim: the probe is deleted from the smoke and its
   # strings reappear in a later, unnamed `- run:` step of the same job — where
   # they assert nothing. Before the step boundary became `- ` this read
@@ -308,7 +466,7 @@ selftest() {
   fi
 
   echo
-  echo "selftest 5/5: the YAML arm must PASS the real workflow and FAIL an unparseable one"
+  echo "selftest 5/10: the YAML arm must PASS the real workflow and FAIL an unparseable one"
   # The measured shape, verbatim: a heredoc body written at two spaces inside a
   # `run: |` block. Two spaces is LESS than the block scalar's content indent, so
   # the scalar ends there and the line is parsed as a YAML key with no ':'.
@@ -337,6 +495,120 @@ YML
     rc=1
   else
     echo "  ok: a 2-space heredoc body inside 'run: |' reds the arm AND the whole gate"
+  fi
+
+  # ── the served-commit arms ─────────────────────────────────────────────────
+  #
+  # Every one of these is a plant that a real edit could ship. The arms are worth
+  # nothing until each has been SEEN to red: this file's own history is the
+  # argument — its name-pinned extractor scored OK at rc 0 over a deploy.yml
+  # carrying a complete, correct served-sha step, because the step had a new name.
+
+  echo
+  echo "selftest 6/10: DELETING both served-commit assertions must FAIL"
+  awk '
+    /^      - name: Assert the (control plane|content instance) serves this commit/ { drop = 1; next }
+    drop && (/^      - / || /^  [a-zA-Z0-9_-]+:/) { drop = 0 }
+    !drop { print }
+  ' "$real" > "$tmp/nosha.yml"
+  if cmp -s "$real" "$tmp/nosha.yml"; then
+    echo "SELFTEST FAIL: the deletion changed nothing — the assertion steps no longer look as expected" >&2
+    rc=1
+  elif check_file "$tmp/nosha.yml" "nosha" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: a workflow with NO served-commit assertion read GREEN — this is the whole defect" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds when neither job asks what the box is serving"
+  fi
+
+  echo
+  echo "selftest 7/10: WEAKENING the null arm (jq -er '.k // empty' -> jq -r '.k') must FAIL"
+  # `jq -r '.git_sha'` prints the literal four-character string `null` for a null
+  # value, and that string would be handed to the compare API as if it were a
+  # commit. D343's six boxes read `update_state: current` at 4/227/592/886/2,468
+  # commits behind — unearned green of exactly this shape.
+  sed -E "s|jq -er '(\.[a-z_]+) // empty'|jq -r '\1'|g" "$real" > "$tmp/nullpass.yml"
+  if cmp -s "$real" "$tmp/nullpass.yml"; then
+    echo "SELFTEST FAIL: the weakening changed nothing — the null arm no longer looks as expected" >&2
+    rc=1
+  elif check_file "$tmp/nullpass.yml" "nullpass" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: a workflow that would hand the string 'null' to the oracle read GREEN" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds when a null or absent key would reach the oracle"
+  fi
+
+  echo
+  echo "selftest 8/10: re-introducing an EQUALITY comparison must FAIL"
+  # Equality was refuted by run (charter D359): both deploy scripts pull
+  # origin/main's TIP, so a run fired for one commit routinely delivers a
+  # DESCENDANT. compare 7f5f10b8d...572d51e13 = ahead, ahead_by 10, behind_by 0.
+  awk '
+    /grep -qE .\^\(ahead\|identical\)\$.; then$/ {
+      match($0, /^ */); ind = substr($0, 1, RLENGTH)
+      print ind "if test \"$served\" = \"${{ github.sha }}\"; then"
+      next
+    }
+    { print }
+  ' "$real" > "$tmp/equality.yml"
+  if cmp -s "$real" "$tmp/equality.yml"; then
+    echo "SELFTEST FAIL: the equality plant changed nothing — the ancestor test no longer looks as expected" >&2
+    rc=1
+  elif check_file "$tmp/equality.yml" "equality" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: an equality gate read GREEN — it would red ten healthy merges and get ignored" >&2
+    rc=1
+  else
+    echo "  ok: the gate reds when the ancestor rule is downgraded to equality"
+  fi
+
+  echo
+  echo "selftest 9/10: MOVING the assertion OUT of the job it guards must FAIL"
+  # The step is lifted out of control-plane, renamed, and re-planted in `changes`
+  # — where it runs BEFORE the deploy and answers for nothing. A gate scoped to
+  # the job it guards must red on this; a gate scoped to a step NAME cannot see
+  # it at all, which is how this file previously certified an absent invariant.
+  awk -v out="$tmp/cpstep.txt" '
+    /^      - name: Assert the control plane serves this commit/ { grab = 1; print > out; next }
+    grab && (/^      - / || /^  [a-zA-Z0-9_-]+:/) { grab = 0 }
+    grab { print > out; next }
+    { print }
+  ' "$real" > "$tmp/nocp.yml"
+  sed -i.bak 's/Assert the control plane serves this commit or a descendant/Verify serving sha/' "$tmp/cpstep.txt"
+  awk -v inc="$tmp/cpstep.txt" '
+    /^      - name: Assert neither deploy target can pass/ {
+      while ((getline line < inc) > 0) print line
+      close(inc)
+    }
+    { print }
+  ' "$tmp/nocp.yml" > "$tmp/moved.yml"
+  if ! grep -q 'Verify serving sha' "$tmp/moved.yml"; then
+    echo "SELFTEST FAIL: the move planted nothing" >&2
+    rc=1
+  elif ! grep -q 'compare/' "$tmp/moved.yml"; then
+    echo "SELFTEST FAIL: the move lost the assertion body — this would red for the wrong reason" >&2
+    rc=1
+  elif check_file "$tmp/moved.yml" "moved" >/dev/null 2>&1; then
+    echo "SELFTEST FAIL: the assertion answered for a job it does not run in — the gate is scope-blind" >&2
+    rc=1
+  else
+    echo "  ok: an assertion outside the control-plane job does not answer for the control-plane job"
+  fi
+
+  echo
+  echo "selftest 10/10: RENAMING the assertion step IN PLACE must still PASS"
+  # The positive control, and the reason the served-commit arms read the whole
+  # job instead of a step name. This exact shape — a correct assertion under a
+  # name the extractor did not know — is what scored OK at rc 0 before the arms
+  # existed. A gate that reds on a rename teaches people to delete the gate.
+  sed 's/- name: Assert the control plane serves this commit or a descendant/- name: Verify the box actually moved/' "$real" > "$tmp/renamed.yml"
+  if cmp -s "$real" "$tmp/renamed.yml"; then
+    echo "SELFTEST FAIL: the rename changed nothing — the step name no longer looks as expected" >&2
+    rc=1
+  elif check_file "$tmp/renamed.yml" "renamed" >/dev/null 2>&1; then
+    echo "  ok: a renamed-but-present assertion still passes (the arms are not name-pinned)"
+  else
+    echo "SELFTEST FAIL: renaming the step reds the gate — the served-commit arms went name-pinned again" >&2
+    rc=1
   fi
 
   rm -rf "$tmp"

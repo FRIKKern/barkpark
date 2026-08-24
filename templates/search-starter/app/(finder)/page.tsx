@@ -1,8 +1,11 @@
 import { DesktopOnly } from "@/components/desktop-only";
 import { GraphLanding } from "@/components/graph-landing";
+import type { LandingProvenance } from "@/components/graph-landing";
 import { MapLanding } from "@/components/map-landing";
+import { API_URL_CONFIGURED } from "@/lib/bp-env";
 import { corpusStatusMarker, fetchCorpusGraph } from "@/lib/graph";
 import { fetchListings } from "@/lib/listings";
+import { buildIdentity } from "@/lib/markers";
 
 /**
  * The "/" right pane — the landing shown before any document is opened. It is
@@ -92,6 +95,22 @@ async function GraphFinderLanding() {
   // legible, so the recorded failure_reason names the cause, not the symptom.
   const corpusStatus = corpusStatusMarker(graph, docId);
 
+  // The HUMAN half of the same truth. Everything here is READ, never assumed:
+  // `buildIdentity()` is the boot env with the HEALTH sentinels resolved to
+  // null (so an undeployed build reads as a state, not as a build named "dev"),
+  // `API_URL_CONFIGURED` is whether anyone actually pointed this site at a
+  // corpus, and the upstream status/reason are the ones `fetchCorpusGraph`
+  // carried out of its catch — which is what lets the landing say "could not
+  // read the corpus" where an empty canvas used to imply "there is nothing
+  // here". The COUNTS are not passed: <GraphLanding> derives them from the same
+  // node array it renders, so the number and the picture cannot disagree.
+  const provenance: LandingProvenance = {
+    build: buildIdentity(),
+    apiConfigured: API_URL_CONFIGURED,
+    upstreamStatus: graph.upstreamStatus,
+    upstreamReason: graph.upstreamReason,
+  };
+
   return (
     <>
       <meta name="bp-doc-id" content={docId} />
@@ -115,6 +134,7 @@ async function GraphFinderLanding() {
             rootId={rootId}
             truncated={truncated}
             truncationReason={truncationReason}
+            provenance={provenance}
           />
         </DesktopOnly>
       </div>

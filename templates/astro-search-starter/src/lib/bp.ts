@@ -1,6 +1,7 @@
 // Build-time Barkpark content link (static target: every read happens at
 // `astro build`; the deployed site carries NO token). Same env contract as
 // every adapter (templates/DEPLOYING.md).
+import type { BuildIdentity } from './provenance.ts'
 import { createClient, type BarkparkClient } from '@barkpark/core'
 import { collectCorpus } from './paginate'
 
@@ -23,6 +24,25 @@ export const env = {
   buildId: (process.env.BARKPARK_BUILD_ID || '').trim() || 'dev',
   contentRev: (process.env.BARKPARK_CONTENT_REV || '').trim() || 'unknown',
   siteBase: (process.env.BARKPARK_SITE_BASE || '').trim() || '/',
+}
+
+/**
+ * The SAME two build markers `env` reads above, but with UNSET reported as
+ * `null` instead of collapsed onto the "dev"/"unknown" sentinels.
+ *
+ * Two readers, two contracts, and they genuinely differ. The deploy gate greps
+ * `content="…"` out of the served HTML (Base.astro emits `env.buildId` /
+ * `env.contentRev`) and asserts NON-EMPTY, so those must always carry a string.
+ * A HUMAN reading the page needs the opposite: a caption that says `build dev`
+ * reads as a build NAMED dev. This is that distinction, baked into graph.json
+ * (src/pages/graph.json.ts) and rendered by `lib/provenance.buildIdentityLine`.
+ *
+ * Deliberately NOT a change to `env`: those values are an interface the deploy
+ * engine reads back with `sed`.
+ */
+export const buildIdentity: BuildIdentity = {
+  buildId: (process.env.BARKPARK_BUILD_ID || '').trim() || null,
+  contentRev: (process.env.BARKPARK_CONTENT_REV || '').trim() || null,
 }
 
 export function bp(): BarkparkClient {
