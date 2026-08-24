@@ -904,13 +904,22 @@ func (e apiError) hint() string {
 		return "re-run with -v for field errors; check required/pattern fields"
 	case "rev_mismatch", "precondition_failed", "conflict":
 		return "re-fetch the doc to get the current _rev, then retry"
-	case "fenced_off", "stale_claim", "claimed_has_worker", "already_claimed":
-		// fenced_off now covers more than a plain epoch bump: a blocker landing on
-		// (or a move of) your claimed task, or a swept+reclaimed lease, all bump the
-		// epoch. Name the wider cause, and point at the lease-RENEWAL recovery (a
-		// re-claim under YOUR OWN worker id mints a fresh epoch) rather than a
-		// generic `task next`.
-		return "your claim epoch is stale (lease swept or a blocker/move fenced you) — re-claim under your worker id, then retry"
+	case "fenced_off":
+		// SPLIT from the claim-race codes below, because the usual cause is
+		// neither a sweep nor a blocker: `bp task pulse` INCREMENTS the epoch
+		// (measured 1→2→3→4 across four pulses), so the obvious loop — claim,
+		// pulse while you work, close on the epoch the CLAIM printed — fences
+		// you with your own heartbeat. The old copy named only "lease swept or
+		// a blocker/move", so a caller fenced by their own pulse went hunting a
+		// cause that had not happened. Name the common one first, and give the
+		// recovery that always works: re-read the epoch rather than reusing a
+		// remembered one. See docs/contracts/roster-reading.md, Trap 7.
+		return "your claim epoch is stale — most often your own `bp task pulse` bumped it (a re-claim, a swept lease, or a blocker/move on the task do too); re-read `claim.epoch` and retry with that, never the epoch the claim printed"
+	case "stale_claim", "claimed_has_worker", "already_claimed":
+		// The claim-race codes: the epoch moved because someone else acted on
+		// the row, so the recovery is a re-claim under YOUR OWN worker id
+		// (which mints a fresh epoch) rather than a generic `task next`.
+		return "your claim epoch is stale (lease swept, or another worker claimed it) — re-claim under your worker id, then retry"
 	case "not_ready":
 		// not_ready is NOT a stale-epoch case: the targeted claim hit a task held by
 		// ANOTHER worker, or one that is done/cancelled/blocked-by-deps. The fix is

@@ -3056,3 +3056,29 @@ func TestApplyQueryRepeatableFilterEmitsListForm(t *testing.T) {
 		t.Errorf("a non-repeatable flag must not switch to the list form; got %q", gotNonRep)
 	}
 }
+
+// The fenced_off hint used to name only "lease swept or a blocker/move fenced
+// you" — and in the common case NEITHER has happened. `bp task pulse`
+// INCREMENTS the claim epoch (measured live 2026-08-24: 3 → 4 across a single
+// pulse), so a worker that heartbeats while it works is fenced by its OWN pulse
+// and the old copy sent it hunting a cause that did not exist. The trap is
+// written up in docs/contracts/roster-reading.md, Trap 7.
+func TestFencedOffHintNamesThePulse(t *testing.T) {
+	h := (apiError{code: "fenced_off"}).hint()
+	if !strings.Contains(h, "pulse") {
+		t.Errorf("fenced_off hint = %q, want it to name `bp task pulse` — the usual cause", h)
+	}
+	if strings.Contains(h, "blocker/move fenced you") {
+		t.Errorf("fenced_off hint still carries the misleading copy: %q", h)
+	}
+	// The claim-race codes keep their own copy on purpose: their epoch moved
+	// because someone ELSE acted on the row, so blaming the caller's own pulse
+	// would be exactly as wrong as the copy this test retires.
+	race := (apiError{code: "stale_claim"}).hint()
+	if race == h {
+		t.Errorf("stale_claim shares the fenced_off hint %q — the causes differ", race)
+	}
+	if strings.Contains(race, "pulse") {
+		t.Errorf("stale_claim hint = %q, must not blame the caller's own pulse", race)
+	}
+}
