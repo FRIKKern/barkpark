@@ -94,6 +94,15 @@ defmodule BarkparkWeb.BulldocsEmailController do
   # raises Ecto.Query.CastError, which has no Plug.Exception impl → a raw 500.
   # A dataset is a SCOPE SELECTOR with a documented default, so a malformed one
   # fails soft to that default (same guard shape as MetaController.show/2).
+  #
+  # The share gate is ALIGNED to this: `RequireShareScope.request_dataset/1`
+  # resolves the dataset the same way (path segment, else query string, else
+  # the default, same `is_binary` soft-fail), so the value compared against the
+  # share / item link is the value this function returns. Until
+  # task-4f26838232b5ece0 the guard read the PATH only and always compared
+  # `"production"` here, and `?dataset=other` read a dataset that was never
+  # shared. Changing the precedence below without changing that function
+  # reopens the escape.
   defp requested_dataset(params) do
     case Map.get(params, "dataset") do
       ds when is_binary(ds) -> ds
