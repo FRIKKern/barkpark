@@ -406,7 +406,10 @@ defmodule BarkparkWeb.BulldocsBpmlApiTest do
         %{
           "id" => "t1",
           "type" => "table",
-          "head" => [%{"content" => [%{"type" => "text", "value" => "Claim"}]}],
+          # A cell with NO readable body. (A `%{"content" => inline_nodes}` cell
+          # is spellable and now PRINTS — refusing what the kernel can spell is
+          # a narrower loss, not honesty.)
+          "head" => [%{"tone" => "warn"}],
           "rows" => [[[%{"type" => "text", "value" => "a"}]]]
         }
       ])

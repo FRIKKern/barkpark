@@ -550,9 +550,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
     blocks = get_in(paper.content || %{}, ["blocks"]) || []
 
     bpml =
-      Barkpark.PortableDoc.Bpml.print_paper(
-        Barkpark.Content.Papers.bpml_paper_map(paper, blocks)
-      )
+      Barkpark.PortableDoc.Bpml.print_paper(Barkpark.Content.Papers.bpml_paper_map(paper, blocks))
 
     {bpml, nil}
   rescue

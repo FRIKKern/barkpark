@@ -103,7 +103,12 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
   end
 
   describe "kind: :head_cell (the silent-loss path)" do
-    test "a head-cell map without a binary \"text\" refuses instead of printing an empty cell" do
+    # SUPERSEDED shape: a `%{"content" => inline_nodes}` head cell used to refuse
+    # here, because the alternative at the time was printing an EMPTY cell. It
+    # is spellable — the nodes are an ordinary inline list — so it now PRINTS.
+    # Refusing a body the kernel can spell is not honesty, it is just a
+    # narrower loss: the author cannot pull the paper at all.
+    test "a %{\"content\" => inline_nodes} head cell PRINTS (it is spellable)" do
       blocks = [
         %{
           "id" => "t1",
@@ -113,10 +118,24 @@ defmodule Barkpark.PortableDoc.BpmlUnprintableTest do
         }
       ]
 
+      assert Bpml.print_blocks(blocks) =~ "<th>Claim</th>"
+    end
+
+    # The refusal core survives: a head cell carrying NO readable body at all
+    # still raises kind :head_cell rather than printing an empty <th>.
+    test "a head-cell map with no readable body still refuses" do
+      blocks = [
+        %{
+          "id" => "t1",
+          "type" => "table",
+          "head" => [%{"tone" => "warn"}],
+          "rows" => [[[%{"type" => "text", "value" => "a"}]]]
+        }
+      ]
+
       e = refusal(blocks)
 
       assert e.kind == :head_cell
-      assert Exception.message(e) =~ "inline-node list"
     end
 
     test "the LEGACY %{\"text\" => binary} head cell still prints — no regression" do

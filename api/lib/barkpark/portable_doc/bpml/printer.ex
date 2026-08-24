@@ -64,6 +64,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
         alias_get(b, ["items", "content"]) || [],
         &"#{pad(d + 1)}<item>#{byline_item(&1)}</item>"
       )
+
     wrap("byline", attr_str(b, ["id"]), items, d)
   end
 
@@ -213,6 +214,13 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # string cell) used to print "" — a silent cell loss; it now refuses.
   defp head_cell(cells) when is_list(cells), do: inline(cells)
   defp head_cell(%{"text" => text}) when is_binary(text), do: esc(text)
+  # The header-row ALIAS keys (`header`/`headers`/`columns`) carry their cells
+  # in two further dict shapes — `%{"header" => binary}` (371 cells) and
+  # `%{"content" => inline_nodes}` (298). Both spell losslessly, so they are
+  # read rather than refused; the parser returns the canonical inline-node
+  # list, so the second print is byte-stable.
+  defp head_cell(%{"header" => text}) when is_binary(text), do: esc(text)
+  defp head_cell(%{"content" => content}) when is_list(content), do: inline(content)
   # A bare-string head cell (census: 6 papers, formerly a silent 500) — a legacy
   # untyped cell. Escaped verbatim; canonicalized to an inline-node list on read.
   defp head_cell(s) when is_binary(s), do: esc(s)
