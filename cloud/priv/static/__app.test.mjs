@@ -23745,3 +23745,31 @@ test("gr-blk-a2fwire: disable rides the danger confirm modal — DELETE fires on
     assert.equal(plainRequest(h.requests[0]).method, "DELETE");
   } finally { h.cleanup(); }
 });
+
+test("task-0dd7578bc3d2bcbd: an operator resuming an UNARMED box reads the remedy, not the code", () => {
+  // The control plane 409s `instance_not_armed` on PATCH
+  // /v1/barkparks/:id/autoupdate when the box has not armed one-click apply.
+  // Without a curated entry the slug reaches the toast through the key.replace
+  // fallback as the bare words "instance not armed" — a refusal the operator
+  // cannot act on, which defeats the point of refusing at all.
+  assert.equal(typeof hooks.friendly, "function", "friendly() is hook-exported, so this can fail");
+
+  const body = hooks.friendly({ error: "instance_not_armed" }, "Couldn't update autoupdate settings.");
+
+  // THE REMEDY IS THE LOAD-BEARING HALF. The person clicked Resume; telling them
+  // only that we refused leaves them with a paused box and no next step.
+  assert.match(body, /BARKPARK_SELF_UPDATE_APPLY=1/,
+    "the copy must name the literal env var — paraphrasing costs the reader the one string they can act on");
+  assert.match(body, /restart/i, "arming without a restart does not take effect — the BEAM reads it at boot");
+  assert.match(body, /then resume/i, "the ORDER is the whole instruction: arm, THEN resume");
+
+  // …and it must beat the caller's fallback, which is written for a validation
+  // failure and would send the person to re-check a form they filled in correctly.
+  assert.notEqual(body, "Couldn't update autoupdate settings.",
+    "the curated entry wins over the caller fallback — otherwise the remedy never renders");
+
+  // The raw slug must never be what a person reads.
+  assert.equal(body.includes("instance_not_armed"), false);
+  assert.doesNotMatch(body, /^instance not armed/i,
+    "the key.replace fallback shape — proof the curated entry is the one resolving");
+});

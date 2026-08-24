@@ -3957,68 +3957,154 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
-            # OC24 (transactional): a policy governing unattended production
-            # deploys changes ONLY with its record — the policy write and the
-            # barkpark.autoupdate_changed row share one transaction (the
-            # barkpark.deleted prior art), and the metadata carries the NEW
-            # settings as persisted (never client input).
-            audit_attrs = %{
-              team_id: team.id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "barkpark.autoupdate_changed",
-              target_type: "barkpark",
-              target_id: bp.id
-            }
-
-            set_result =
-              Accounts.audit(
-                audit_attrs,
-                fn -> Registry.set_autoupdate(bp, conn.body_params) end,
-                fn updated ->
-                  %{
-                    metadata: %{
-                      enabled: updated.autoupdate_enabled,
-                      paused: updated.autoupdate_paused,
-                      pinned_release: updated.pinned_release
-                    }
-                  }
-                end
-              )
-
-            case set_result do
-              {:ok, updated} ->
-                push_event(team.id, "fleet")
-                push_event(team.id, "audit")
-
-                json(conn, 200, %{
-                  ok: true,
-                  autoupdate: %{
-                    enabled: updated.autoupdate_enabled,
-                    paused: updated.autoupdate_paused,
-                    pinned_release: updated.pinned_release,
-                    channel: updated.channel
+            case refuse_unarmed_resume(bp, conn.body_params) do
+              {:refuse, arming_checked_at} ->
+                json(conn, 409, %{
+                  error: "instance_not_armed",
+                  details: %{
+                    field: "autoupdate_paused",
+                    apply_arming: "unarmed",
+                    apply_arming_checked_at: arming_checked_at,
+                    remedy:
+                      "Set BARKPARK_SELF_UPDATE_APPLY=1 on the instance and restart it, " <>
+                        "then resume. The instance reports one-click apply is off, so the " <>
+                        "rollout cannot land a release on it while it is unpaused."
                   }
                 })
 
-              {:error, %Ecto.Changeset{} = cs} ->
-                # cch-w62-bl — ONE envelope shape for the whole route. The 404
-                # arms are flat, and this arm used to be the route's lone nested
-                # `%{error: %{code: "invalid"}}` — one route, two shapes, and a
-                # validation refusal that reached the console details-blind: the
-                # wave-37 per-field ladder reads `details` off the TOP level, so
-                # the changeset's own answer (which field, what rule) was thrown
-                # away and a permanent refusal rendered as a generic. Flat
-                # `error` + `details` is the shape ~100 sibling 422 emitters
-                # already use, and both consumers of this route read it today:
-                # `friendly()` (app.js) keys flat strings natively, and the Go
-                # CLI's `decodeRouteErrorCode` tries object-then-string. The
-                # envelope-shape census pins this route all-flat.
-                json(conn, 422, %{error: "invalid", details: errors(cs)})
+              :allow ->
+                set_autoupdate_with_audit(conn, team, bp)
             end
 
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # THE ARM-BEFORE-RESUME ORDERING, ENFORCED (task-0dd7578bc3d2bcbd).
+  #
+  # Resuming an unarmed box does not achieve what the operator is asking for.
+  # The rollout's next advance onto it draws a 503 `feature_not_configured` off
+  # the box's own `Runner.enabled?/0`; since #13474 that no longer re-latches
+  # `autoupdate_paused` (it records `apply_arming: "unarmed"` and the candidate
+  # query skips the box), so the box does not FLAP — but it does silently never
+  # update, which is a stuck state wearing a healthy-looking flag. The operator
+  # asked for "resume autoupdate" and would have got "unpaused and still never
+  # updating", with nothing on this route saying so.
+  #
+  # So the ordering is refused-with-a-reason rather than documented: arm, THEN
+  # resume.
+  #
+  # ONLY THE TRANSITION, never the steady state. `get_change/2` returns a value
+  # only when it DIFFERS from what is stored, so this fires exactly on
+  # `paused: true -> false`. An admin editing `pinned_release` on a box that is
+  # already unpaused changes nothing here and is not refused, and reading the
+  # CHANGESET rather than the raw body means a string `"false"` is caught by the
+  # same cast Ecto would have applied.
+  #
+  # IT RE-MEASURES BEFORE IT REFUSES, and that is the load-bearing part. The
+  # stored `apply_arming` is up to an hour old (the `UpdateStatusWorker` sweep
+  # runs at :17), so refusing on it would block an operator who armed the box
+  # thirty seconds ago until the next sweep — turning this guard into the very
+  # thing it exists to remove. One live probe makes arm-then-resume work
+  # immediately.
+  #
+  # AND IT FAILS OPEN ON AN UNPROVABLE NEGATIVE. If the probe cannot reach the
+  # box (unreachable, not live, no admin token, 404, bad shape) the stored value
+  # is left untouched and the resume is ALLOWED. Refusing on a measurement we
+  # could not take would strand an operator with no way forward — a new
+  # unclearable state, which is the defect this whole row is about. Allowing is
+  # safe precisely because the 503 branch no longer latches: a box that is in
+  # fact unarmed gets recorded and skipped on the next advance, not paused.
+  defp refuse_unarmed_resume(%Barkpark{} = bp, body_params) do
+    resuming? =
+      bp
+      |> Barkpark.autoupdate_changeset(body_params)
+      |> Ecto.Changeset.get_change(:autoupdate_paused) == false
+
+    if resuming? do
+      # The RETURN VALUE is the discriminator, not a re-read. `{:ok, _}` is
+      # emitted by exactly one path — a decoded 200, i.e. the box answered and we
+      # read its body. Every failure rung answers `{:error, reason}` and leaves
+      # the arming columns exactly as it found them, so a re-read after an
+      # unreachable box would hand back the STALE "unarmed" and refuse on a
+      # measurement that was never taken. That distinction is the whole fail-open.
+      #
+      # A `nil` arming inside a decoded 200 is a real measurement too — a
+      # pre-#12995 box that carries no `apply_enabled` key — and it ALLOWS,
+      # matching `next_autoupdate_candidate/1`, which treats unmeasured as
+      # eligible. Only the literal word "unarmed" refuses.
+      case Registry.refresh_update_status(bp) do
+        {:ok, %Barkpark{apply_arming: "unarmed"} = fresh} ->
+          {:refuse, fresh.apply_arming_checked_at}
+
+        _ ->
+          :allow
+      end
+    else
+      :allow
+    end
+  end
+
+  defp set_autoupdate_with_audit(conn, team, bp) do
+    # OC24 (transactional): a policy governing unattended production
+    # deploys changes ONLY with its record — the policy write and the
+    # barkpark.autoupdate_changed row share one transaction (the
+    # barkpark.deleted prior art), and the metadata carries the NEW
+    # settings as persisted (never client input).
+    audit_attrs = %{
+      team_id: team.id,
+      actor_user_id: conn.assigns.current_user.id,
+      action: "barkpark.autoupdate_changed",
+      target_type: "barkpark",
+      target_id: bp.id
+    }
+
+    set_result =
+      Accounts.audit(
+        audit_attrs,
+        fn -> Registry.set_autoupdate(bp, conn.body_params) end,
+        fn updated ->
+          %{
+            metadata: %{
+              enabled: updated.autoupdate_enabled,
+              paused: updated.autoupdate_paused,
+              pinned_release: updated.pinned_release
+            }
+          }
+        end
+      )
+
+    case set_result do
+      {:ok, updated} ->
+        push_event(team.id, "fleet")
+        push_event(team.id, "audit")
+
+        json(conn, 200, %{
+          ok: true,
+          autoupdate: %{
+            enabled: updated.autoupdate_enabled,
+            paused: updated.autoupdate_paused,
+            pinned_release: updated.pinned_release,
+            channel: updated.channel
+          }
+        })
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        # cch-w62-bl — ONE envelope shape for the whole route. The 404
+        # arms are flat, and this arm used to be the route's lone nested
+        # `%{error: %{code: "invalid"}}` — one route, two shapes, and a
+        # validation refusal that reached the console details-blind: the
+        # wave-37 per-field ladder reads `details` off the TOP level, so
+        # the changeset's own answer (which field, what rule) was thrown
+        # away and a permanent refusal rendered as a generic. Flat
+        # `error` + `details` is the shape ~100 sibling 422 emitters
+        # already use, and both consumers of this route read it today:
+        # `friendly()` (app.js) keys flat strings natively, and the Go
+        # CLI's `decodeRouteErrorCode` tries object-then-string. The
+        # envelope-shape census pins this route all-flat.
+        json(conn, 422, %{error: "invalid", details: errors(cs)})
     end
   end
 
@@ -10752,9 +10838,13 @@ defmodule BarkparkCloud.Web.Router do
   # secrets — every field is an observable operational label.
   #
   # `apply_arming` is the ARMING ROSTER this route exists to carry: `"unarmed"`
-  # names a box whose one-click apply is off, so the rollout's next advance onto
-  # it 503s and pauses it permanently (only an admin PATCH clears that pause).
-  # It is emitted RAW and three-valued — `null` means NOT MEASURED, never
+  # names a box whose one-click apply is off. SINCE #13474 that no longer means
+  # "the rollout will pause it permanently": the candidate query DISQUALIFIES a
+  # measured-unarmed box, so the rollout never advances onto it and never draws
+  # the 503 that used to latch `autoupdate_paused` (a flag no code path clears).
+  # The word now means SKIPPED, and the box re-enters on its own the moment the
+  # hourly sweep reads it armed — so this roster is a retro-arm worklist, not a
+  # damage report. It is emitted RAW and three-valued — `null` means NOT MEASURED, never
   # "armed" and never "unarmed" — and the console's arming derivations whitelist
   # the two words rather than testing truthiness, so an unmeasured box can never
   # be rendered onto the worklist. `apply_arming_checked_at` rides with it

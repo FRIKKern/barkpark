@@ -194,6 +194,18 @@
     not_live: "The instance isn't live yet — wait for provisioning to finish.",
     no_admin_token: "No stored credentials for this instance — it may need a re-provision.",
     instance_unreachable: "Couldn't reach the instance — try again in a moment.",
+    // task-0dd7578bc3d2bcbd — the 409 on PATCH /v1/barkparks/:id/autoupdate when
+    // an operator resumes a box that has NOT armed one-click apply. THE COPY
+    // CARRIES THE REMEDY, because the refusal is otherwise unactionable: the
+    // person clicked Resume, and "we refused" without "here is what to do" leaves
+    // them with a paused box and no next step — which is the same dead end the
+    // whole arm-before-resume change exists to remove.
+    //
+    // It names the env var verbatim. That is the literal thing to set on the
+    // instance, so paraphrasing it ("enable self-update") would cost the reader
+    // the one string they can act on. It also says WHY, so a person who resumes
+    // anyway understands they would get an unpaused box that still never updates.
+    instance_not_armed: "This instance hasn't armed one-click apply, so resuming autoupdate wouldn't let a release land on it. Set BARKPARK_SELF_UPDATE_APPLY=1 on the instance and restart it, then resume.",
     network_error: "Network error — is the control plane running?",
     // GR19: the two billing truths the SPA used to garble. limit_reached is the
     // launch-time quota ceiling (registry.ex); billing_not_configured is the
