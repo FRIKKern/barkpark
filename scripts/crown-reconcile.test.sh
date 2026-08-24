@@ -19,6 +19,24 @@
 #         comparison would have waved it through — this case is the
 #         one that keeps the repaired WRONG axis able to LOSE)
 #   (c3) NO RUN ID AT ALL: the head-sha comparison is the fallback    → 0 and 1
+#   (w) THE TORN READ: the run list and the crown are sampled MINUTES
+#       apart, and a row written inside that gap was called WRONG.
+#       Each arm forces the two sides apart on purpose and watches the
+#       verdict move — and every exclusion is held down by a negative
+#       arm proving a REAL orphan still reds with the gap present:
+#         (w1) run-keyed, CLOCK-FREE: one field — the run's status on
+#              the page — flips cancelled to in_progress       → 1, then 0
+#         (w2) time-keyed: the SAME fixture, red when the script does
+#              not know the two sides were sampled apart and green
+#              when it does — the gap is the only difference   → 1, then 0
+#         (w3) a row written BEFORE the watermark is still WRONG → exit 1
+#         (w4) a ghost run id BELOW the page maximum is still WRONG,
+#              so being recent is never on its own an excuse     → exit 1
+#         (w5) a row with NO run id: excluded after the watermark,
+#              still WRONG before it                             → 0, then 1
+#         (w6) a TRUNCATED page cannot manufacture a ghost: the same
+#              row is rc 2 UNJUDGEABLE on a filled page and rc 1
+#              WRONG on a page that saw the whole window         → 2, then 1
 #   (d) WINDOW EMPTY: nothing to compare is never a green            → exit 2
 #   (u) QUIET WINDOW: an empty window on a VERIFIED crown — serving
 #       sha recorded, re-ask list PRESENT-EMPTY, zero in-window rows —
@@ -151,6 +169,43 @@ with_inflight() { # <name> <in-flight-sha> <in-flight-created> <sha:created>...
   jq --arg sha "$isha" --arg created "$icreated" \
     '.workflow_runs += [{id: 9001, head_sha: $sha, conclusion: null, status: "in_progress", created_at: $created}]' \
     "$base" > "$out" 2>/dev/null
+  fixture_ok "$out"
+  echo "$out"
+}
+
+# runs_json fixes status=completed / conclusion=success for every row, which
+# cannot express the shape the torn read is made of: a run that was mid-flight,
+# or had not been created at all, WHEN THE RUN LIST WAS SAMPLED. This appends
+# one run with every field stated, so a probe can mutate exactly one of them.
+runs_add() { # <name> <base-json> <id> <sha> <status> <conclusion|null> <created>
+  local out="$TMP/$1.json"
+  jq --argjson id "$3" --arg sha "$4" --arg st "$5" --arg cc "$6" --arg cr "$7" \
+    '.workflow_runs += [{id: $id, head_sha: $sha, status: $st,
+                         conclusion: (if $cc == "null" then null else $cc end),
+                         created_at: $cr}]' "$2" > "$out" 2>/dev/null
+  fixture_ok "$out"
+  echo "$out"
+}
+
+# A page that FILLED — 100 rows — without reaching the window start, which is
+# what the live reconciler reads on a busy day. Two real delivering runs plus
+# enough in-flight filler to hit the cap, with ids offset so a row can name a
+# run BELOW the page minimum: the shape a run that fell off the page produces.
+runs_filled() { # <name> <first-id> <shaA:created> <shaB:created> <filler-sha> <filler-created>
+  local out="$TMP/$1.json" base="$2" fsha="$5" fcreated="$6"
+  local a="${3%%:*}" acr="${3#*:}" b="${4%%:*}" bcr="${4#*:}"
+  {
+    printf '{"workflow_runs":['
+    printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$base" "$a" "$acr"
+    printf ',{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s"}' "$((base + 1))" "$b" "$bcr"
+    local i=2
+    while [ "$i" -lt 100 ]; do
+      printf ',{"id":%d,"head_sha":"%s","conclusion":null,"status":"in_progress","created_at":"%s"}' \
+        "$((base + i))" "$fsha" "$fcreated"
+      i=$((i + 1))
+    done
+    printf ']}'
+  } > "$out"
   fixture_ok "$out"
   echo "$out"
 }
@@ -407,6 +462,305 @@ CROWN_NORUNID_BAD="$(crown_json crown-norunid-bad \
 run_cr 1 "a row with no run id and a sha no run delivered is still WRONG" \
   --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_NORUNID_BAD" --health-fixture "$HEALTH_BASE"
 saw "no delivering run id" "it says the row stated no run and was judged on its sha"
+
+section "(w) THE TORN READ — the two sides are sampled MINUTES apart"
+# THE DEFECT, IN ONE SENTENCE. fetch_runs takes the run page at T0; the jobs API
+# is then asked once per examined run (65 runs on the live window, so minutes);
+# the crown page is read at T1. A row written between T0 and T1 names a run that
+# was NOT YET TERMINAL at T0, so `.conclusion == "success"` could not have
+# matched it, so the row had no alibi it could possibly have had — and the
+# verdict called it WRONG. Live: run 32726853411 printed `behind=0/65` (nothing
+# was lost) beside `wrong=2/100`, both rows the SAME sha, delivered by runs
+# 32726835915 and 32726853417 — ids ADJACENT to the reconciler's own.
+#
+# Every probe below FORCES that gap rather than hoping for it, which is the
+# whole point: a "1 of 100 WRONG" reproduced without forcing the two sides apart
+# does not distinguish a torn read from a real miss.
+TEAR_T0="2026-08-09T11:00:00Z"   # the instant the run list was sampled
+TEAR_T1="2026-08-09T11:30:00Z"   # the row lands 30 minutes later, still inside the window
+# NOW is 12:00 — the crown read. So the fixtures below are literally a NEWER
+# crown compared against an OLDER run list.
+
+section "(w0) THE LIVE FAILURE, REPLAYED FROM THE ACTIONS API"
+# Not a shape LIKE the live one — the live one, with the real ids, the real
+# shas and the real instants, every value read back out of the Actions API on
+# 2026-08-24 and pasted here. Run 32726853411 (crown-reconcile, push, main
+# 4d35c5ab08) printed:
+#
+#     WRONG: 2 of 100 crown row(s) examined (2.0%) ...
+#         4d35c5ab08... delivered by run 32726835915, which is not a delivering run
+#         4d35c5ab08... delivered by run 32726853417, which is not a delivering run
+#     VERDICT: NOT reconciled — behind=0/65 ... wrong=2/100 ...
+#
+# THE TIMELINE, verbatim from the API, is the whole diagnosis:
+#
+#     12:23:24Z  deploy 32726835915 STARTS   (13s before the reconciler)
+#     12:23:37Z  deploy 32726853417 STARTS   (the SAME second as the reconciler)
+#     12:23:37Z  crown-reconcile 32726853411 STARTS, and samples its run list
+#                — BOTH deploy runs are in_progress, so NEITHER can match
+#                  `.conclusion == "success"`
+#     12:29:38Z  deploy 32726835915 completes, success
+#     12:31:18Z  deploy 32726853417 completes, success
+#     12:32:59Z  the reconciler concludes, having read the crown ~9 MINUTES
+#                after it froze the run side, and accuses both their rows
+#
+# `behind=0/65` is the proof nothing was lost: not one delivering run was
+# missing a row. Both accused runs concluded SUCCESS. Both rows are correct.
+# The COMPARISON was torn, and the run-keyed arm below is clock-free, so this
+# replay never touches a timestamp to clear it.
+LIVE_NOW="2026-08-24T12:32:59Z"          # when the verdict concluded
+LIVE_SHA="4d35c5ab08ebf6f749baad913c0de4058afa5a4f"
+LIVE_SHA2="c47ced9291264e75149a7adbda46ce1532d947c3"
+LIVE_PRIOR="f74939277c283668f461a92989820bcecb05733b"
+RUNS_LIVE="$TMP/runs-live.json"
+printf '%s' '{"workflow_runs":[
+  {"id":32726853417,"head_sha":"'"$LIVE_SHA"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:37Z"},
+  {"id":32726835915,"head_sha":"'"$LIVE_SHA2"'","status":"in_progress","conclusion":null,"created_at":"2026-08-24T12:23:24Z"},
+  {"id":32723174205,"head_sha":"'"$LIVE_PRIOR"'","status":"completed","conclusion":"success","created_at":"2026-08-24T11:41:52Z"}]}' \
+  > "$RUNS_LIVE"
+fixture_ok "$RUNS_LIVE"
+JOBS_LIVE="$(jobs_json jobs-live "32723174205:success")"
+# The rows the two in-flight deploys wrote. BOTH name $LIVE_SHA — the sha the
+# BOX WAS SERVING — which is the carried=false shape #11203 established, so the
+# head-sha fallback could never have alibied them either.
+CROWN_LIVE="$(crown_json crown-live \
+  "$(row "$LIVE_PRIOR" cp false "2026-08-24T11:51:00Z" 32723174205)" \
+  "$(row "$LIVE_SHA" cp false "2026-08-24T12:29:38Z" 32726835915)" \
+  "$(row "$LIVE_SHA" instance false "2026-08-24T12:31:18Z" 32726853417)")"
+HEALTH_LIVE="$(health_json health-live "$LIVE_PRIOR" "2026-08-24T11:51:00Z")"
+
+live_probe() { # <expected-rc> <label> [extra args…]
+  local want="$1" label="$2"; shift 2
+  local out rc
+  CR_N=$((CR_N + 1))
+  seed_state "$TMP/state-live-$CR_N.txt"
+  out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+    CROWN_STATE_FILE="$TMP/state-live-$CR_N.txt" \
+    bash "$CR" --now "$LIVE_NOW" \
+      --runs-fixture "$RUNS_LIVE" --jobs-fixture "$JOBS_LIVE" \
+      --crown-fixture "$CROWN_LIVE" --health-fixture "$HEALTH_LIVE" "$@" 2>&1)"
+  rc=$?
+  printf '%s\n' "$out" > "$TMP/last.out"
+  if [ "$rc" = "$want" ]; then ok "$label → exit $rc"; else
+    bad "$label → exit $rc, wanted $want"
+    printf '%s\n' "$out" | sed 's/^/       | /' >&2
+  fi
+}
+
+live_probe 0 "the live tear, replayed against the repaired comparison"
+saw "WRITTEN-IN-FLIGHT: 2 of 3" "both accused rows are excluded, and the count is the live wrong=2"
+saw "run 32726835915" "it names the first run the live verdict accused"
+saw "run 32726853417" "it names the second run the live verdict accused"
+saw "no clock was consulted" "the live shape is cleared CLOCK-FREE — the page said both runs were running"
+not_saw "WRONG:" "the reconciler no longer accuses its own concurrent writers"
+not_saw "BEHIND:" "behind stays 0, exactly as the live run measured it"
+
+# NON-VACUITY. The replay must be a DIFFERENCE, not a fixture that was always
+# going to pass: flip ONLY the two runs' status to completed/cancelled — every
+# other byte identical — and the live WRONG=2 comes straight back.
+RUNS_LIVE_TERM="$TMP/runs-live-terminal.json"
+jq '.workflow_runs |= map(if .status == "in_progress"
+      then .status = "completed" | .conclusion = "cancelled" else . end)' \
+  "$RUNS_LIVE" > "$RUNS_LIVE_TERM" 2>/dev/null
+fixture_ok "$RUNS_LIVE_TERM"
+CR_N=$((CR_N + 1))
+seed_state "$TMP/state-live-term.txt"
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$TMP/state-live-term.txt" \
+  bash "$CR" --now "$LIVE_NOW" --runs-fixture "$RUNS_LIVE_TERM" --jobs-fixture "$JOBS_LIVE" \
+    --crown-fixture "$CROWN_LIVE" --health-fixture "$HEALTH_LIVE" 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "1" ]; then
+  ok "the SAME live fixture with both runs TERMINAL and non-delivering → exit 1"
+else
+  bad "the terminal-run arm of the live replay → exit $rc, wanted 1"
+  printf '%s\n' "$out" | sed 's/^/       | /' >&2
+fi
+saw "WRONG: 2 of 3" "the live accusation returns the instant the runs are terminal — the replay is a difference, not a default"
+
+section "(w1) run-keyed and CLOCK-FREE — one field moves the verdict"
+# The strongest form available: the run IS on the page, its row IS in the crown,
+# and the ONLY difference between the red and the green is the run's `status` at
+# the moment the page was sampled. No clock, no flag, no window.
+RUNS_W1_DEAD="$(runs_add runs-w1-dead "$RUNS_BASE" 3 "$SHA_C" completed cancelled "$IN2")"
+RUNS_W1_LIVE="$(runs_add runs-w1-live "$RUNS_BASE" 3 "$SHA_C" in_progress null "$IN2")"
+CROWN_W1="$(crown_json crown-w1 \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$TEAR_T1" 3)")"
+run_cr 1 "run 3 is TERMINAL and cancelled — its row has a real orphan's shape" \
+  --runs-fixture "$RUNS_W1_DEAD" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1" --health-fixture "$HEALTH_BASE"
+saw "WRONG: 1 of 4" "a row whose run finished WITHOUT delivering is still accused"
+not_saw "WRITTEN-IN-FLIGHT: " "a terminal run is never excused as in-flight"
+
+run_cr 0 "the SAME row, and run 3 was still in_progress when the page was sampled" \
+  --runs-fixture "$RUNS_W1_LIVE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1" --health-fixture "$HEALTH_BASE"
+saw "WRITTEN-IN-FLIGHT: 1 of 4" "the tear is EXCLUDED and printed with its own count, not graced into silence"
+saw "no clock was consulted" "the run-keyed arm says out loud that it read the page, not a timestamp"
+not_saw "WRONG:" "the reconciler stops accusing its own concurrent writer"
+saw "written-in-flight=1/4" "the green carries the exclusion as a verdict field, so it cannot hide inside RECONCILED"
+
+section "(w1b) THE EXCLUSION IS CAPPED — a HUNG run stops being an alibi"
+# Arm (i) defers for as long as GitHub reports the run non-terminal, which is
+# the unbounded shape dr-w34 already caught on the SERVING axis. The cap is the
+# SAME measured constant, read back out of the script rather than re-typed here,
+# so a later widening reds this probe instead of silently buying more amnesty.
+CAP="$(sed -n 's/^SERVING_INFLIGHT_CAP_SECONDS=\([0-9]*\).*/\1/p' "$CR" | head -1)"
+case "${CAP:-}" in
+  ''|*[!0-9]*) bad "SERVING_INFLIGHT_CAP_SECONDS could not be read back out of the script — the probe below would be vacuous" ;;
+  *) ok "the in-flight cap is derived from the script's own constant (${CAP}s), not re-typed" ;;
+esac
+# The row is 4h old — comfortably past the 3h cap — and its run has been
+# in_progress that entire time. IN1 is 2h20m before NOW, so a row stamped at the
+# window's own start (12h before NOW) is unambiguously expired.
+HUNG_AT="2026-08-09T04:00:00Z"
+RUNS_W1B="$(runs_add runs-w1b "$RUNS_BASE" 3 "$SHA_C" in_progress null "$HUNG_AT")"
+CROWN_W1B="$(crown_json crown-w1b \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$HUNG_AT" 3)")"
+run_cr 1 "run 3 has been in_progress for the whole 8h this row has existed" \
+  --runs-fixture "$RUNS_W1B" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W1B" --health-fixture "$HEALTH_BASE"
+saw "WRITTEN-IN-FLIGHT-EXPIRED: 1 crown row(s)" "a hung run is named and its deferral is ended, not renewed"
+saw "WRONG: 1 of 4" "and the row is ACCUSED — the exclusion cannot be held open forever"
+not_saw "WRITTEN-IN-FLIGHT: " "an expired row is never also reported as still deferred"
+
+section "(w2) time-keyed — the SAME fixture, red without the gap and green with it"
+# The run is not on the page AT ALL: id 9001 is above every id there, which is a
+# statement about EXISTENCE, because Actions allocates run ids in creation order.
+# `--runlist-at` is the harness telling the script when the run list was taken.
+# WITHOUT it the watermark is `now`, nothing can be newer than now, and the
+# script behaves exactly as it did before this fix — that red IS the pre-fix
+# world, reproduced on the same bytes.
+CROWN_W2="$(crown_json crown-w2 \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$TEAR_T1" 9001)")"
+run_cr 1 "the gap is WIDE and the script is not told about it — the torn read, reproduced" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W2" --health-fixture "$HEALTH_BASE"
+saw "run 9001, which is not a delivering run" "the pre-fix verdict names a run that is fine and a row that is fine"
+
+run_cr 0 "the gap is STILL WIDE, and the script now knows the run list was sampled at $TEAR_T0" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W2" --health-fixture "$HEALTH_BASE" \
+  --runlist-at "$TEAR_T0"
+saw "WRITTEN-IN-FLIGHT: 1 of 4" "a consistent comparison excludes the row instead of accusing it"
+saw "it did not exist when the run list was taken" "the time-keyed arm states BOTH halves of its case"
+not_saw "WRONG:" "no tolerance was widened — the two sides were made consistent"
+
+section "(w3) NEGATIVE ARM — a row written BEFORE the watermark is still WRONG"
+# The same ghost run id, the same declared gap. Only the row's own write instant
+# moves, from inside the gap to before it. A fix that traded a false positive for
+# a false negative would go green here.
+CROWN_W3="$(crown_json crown-w3 \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1" 9001)")"
+run_cr 1 "a genuinely orphaned row, written well before the run list was sampled" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W3" --health-fixture "$HEALTH_BASE" \
+  --runlist-at "$TEAR_T0"
+saw "WRONG: 1 of 4" "the instrument still loses on a real miss with the gap fully declared"
+not_saw "WRITTEN-IN-FLIGHT: " "an old row is never excused by a watermark that postdates it"
+
+section "(w4) NEGATIVE ARM — being RECENT is not on its own an excuse"
+# The row is written inside the gap, but its run id (9) sits BELOW the page
+# maximum (50), so the page could have carried that run and did not. Time alone
+# must never excuse a row; the run-existence half is required and is missing.
+RUNS_W4="$(runs_add runs-w4 "$RUNS_BASE" 50 "$SHA_D" in_progress null "$IN2")"
+CROWN_W4="$(crown_json crown-w4 \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$TEAR_T1" 9)")"
+run_cr 1 "a fresh row naming run 9, which the page's id range 1..50 says should have been there" \
+  --runs-fixture "$RUNS_W4" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W4" --health-fixture "$HEALTH_BASE" \
+  --runlist-at "$TEAR_T0"
+saw "WRONG: 1 of 4" "recency without an existence signal is refused — the clock never excuses alone"
+
+section "(w5) a row with NO run id — excluded after the watermark, WRONG before it"
+# The legacy shape. It states no run, so the head-sha fallback judges it; but a
+# row written after the run list was sampled has no alibi source either way, and
+# the pair below is what keeps that exclusion from becoming a blanket one.
+CROWN_W5_NEW="$(crown_json crown-w5-new \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$TEAR_T1" omit)")"
+run_cr 0 "no run id, written inside the gap" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W5_NEW" --health-fixture "$HEALTH_BASE" \
+  --runlist-at "$TEAR_T0"
+saw "WRITTEN-IN-FLIGHT: 1 of 4" "a legacy row written inside the gap is excluded, not accused"
+
+CROWN_W5_OLD="$(crown_json crown-w5-old \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1" omit)")"
+run_cr 1 "the same legacy row, written before the gap" \
+  --runs-fixture "$RUNS_BASE" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W5_OLD" --health-fixture "$HEALTH_BASE" \
+  --runlist-at "$TEAR_T0"
+saw "no delivering run id" "the head-sha fallback still loses on an old legacy row"
+
+section "(w6) a TRUNCATED page must not manufacture a ghost"
+# The run page is ONE page of 100 and the live reconciler regularly fills it
+# without reaching the window start. A row naming a run BELOW the page minimum
+# names a run that FELL OFF the page — indistinguishable from one that never
+# existed. Accusing it is a false red the truncation itself produced.
+RUNS_W6_FULL="$(runs_filled runs-w6-full 500 "$SHA_A:$IN1" "$SHA_B:$IN2" "$SHA_D" "$IN2")"
+RUNS_W6_THIN="$(runs_json runs-w6-thin "$SHA_A:$IN1" "$SHA_B:$IN2")"
+JOBS_W6="$(jobs_json jobs-w6 "500:success" "501:success" "1:success" "2:success")"
+CROWN_W6="$(crown_json crown-w6 \
+  "$(row "$SHA_A" cp false "$IN1" 500)" \
+  "$(row "$SHA_A" instance false "$IN1" 500)" \
+  "$(row "$SHA_B" instance false "$IN2" 501)" \
+  "$(row "$SHA_C" cp false "$IN1" 400)")"
+run_cr 2 "the page FILLED without reaching the window start, and the row names run 400 below its minimum" \
+  --runs-fixture "$RUNS_W6_FULL" --jobs-fixture "$JOBS_W6" --crown-fixture "$CROWN_W6" --health-fixture "$HEALTH_BASE"
+saw "TRUNCATED-UNJUDGEABLE: 1 crown row(s)" "a run that fell off a bounded page is named unjudgeable, not accused"
+not_saw "WRONG:" "truncation cannot manufacture a ghost"
+saw "TRUNCATION RESIDUAL" "the OTHER direction — a BEHIND run that fell off the page — is stated, not left to the plus sign"
+
+# ONE DIFFERENCE: the same crown row, judged against a page that saw the whole
+# window. Now run 400 really is absent rather than merely unseen.
+CROWN_W6_THIN="$(crown_json crown-w6-thin \
+  "$(row "$SHA_A" cp false "$IN1" 1)" \
+  "$(row "$SHA_A" instance false "$IN1" 1)" \
+  "$(row "$SHA_B" instance false "$IN2" 2)" \
+  "$(row "$SHA_C" cp false "$IN1" 400)")"
+run_cr 1 "the same row against a page that is NOT truncated" \
+  --runs-fixture "$RUNS_W6_THIN" --jobs-fixture "$JOBS_BASE" --crown-fixture "$CROWN_W6_THIN" --health-fixture "$HEALTH_BASE"
+saw "WRONG: 1 of 4" "an unseen run and an absent run are told apart by whether the page was bounded"
+
+section "(w7) the FIRST SIGHTING'S axis is untouched, and the gap dial is fixtures-only"
+# The earlier sighting (task-7aa685d254609ad1) lives on SERVING-UNRECORDED. A fix
+# on the torn-read axis must not move it, so the base fixture is re-read for all
+# three of the counters that row recorded as clean.
+run_cr 0 "the unmutated window, re-read after the watermark landed" $(base_args)
+not_saw "SERVING-UNRECORDED" "the serving axis did not move"
+not_saw "GRACED-UNRECORDED" "the graced axis did not move"
+not_saw "BEHIND:" "the behind axis did not move"
+not_saw "WRITTEN-IN-FLIGHT: " "a window with no tear reports no exclusions"
+saw "written-in-flight=0/" "and the green states the exclusion count as ZERO rather than omitting the field"
+saw "WATERMARK: the run list was sampled at" "every run states when its run side was frozen"
+
+# The gap dial must never be reachable on a live run: an operator who could pin
+# the watermark by hand would hold a tolerance, which is exactly what this fix
+# refuses to be.
+out="$(env -u CROWN_API_TOKEN -u CP_HOST -u DEPLOY_SSH_KEY PATH="$SANDBOX_PATH" \
+  CROWN_STATE_FILE="$TMP/state-runlist-live.txt" \
+  bash "$CR" --now "$NOW" --runlist-at "$TEAR_T0" 2>&1)"
+rc=$?
+printf '%s\n' "$out" > "$TMP/last.out"
+if [ "$rc" = "3" ]; then
+  ok "--runlist-at on a live run is a CONFIGURATION fault (exit 3), not a dial"
+else
+  bad "--runlist-at was accepted on a live run (exit $rc) — the gap would be pinnable by hand"
+fi
+saw "FIXTURE-ONLY handle" "and it says why it refused"
 
 section "(d) MUTATION: the window is empty — nothing compared is never a green"
 RUNS_OLD="$(runs_json runs-old "$SHA_A:$OUT" "$SHA_B:$OUT")"
@@ -1343,6 +1697,38 @@ if [ "$(grep -c '^  UNREADABLE=1$' "$CR")" = "1" ]; then
 else
   bad "UNREADABLE=1 appears outside reason() — that site's silence would print as unnamed"
   grep -n 'UNREADABLE=1' "$CR" >&2
+fi
+
+section "(q2) the WATERMARK is STATED in the script, not only implemented"
+# The exclusion above is the only place this verdict declines to judge a row it
+# can see. A rule like that must be readable without reverse-engineering a
+# while-loop, and it must not be quietly relaxed into a tolerance later.
+for phrase in "THE TWO SIDES ARE SAMPLED APART IN TIME" "A TOLERANCE WAS THE WRONG FIX" \
+              "WRITTEN-IN-FLIGHT" "clock-free" "MAX_RUN_ID" \
+              "THE OTHER SIDE IS ALREADY CONSISTENT" \
+              "TRUNCATION CANNOT BE ALLOWED TO MANUFACTURE A GHOST" \
+              "A HUNG RUN IS NOT AN ALIBI, AND THE EXCLUSION IS CAPPED"; do
+  if grep -qF "$phrase" "$CR"; then ok "the header states: $phrase"; else bad "the header never states '$phrase' — the watermark would be undocumented"; fi
+done
+# The two live sightings are the evidence for the diagnosis, and a header that
+# loses them loses the reason this class is excluded at all.
+for evid in "31339252774" "32726853411" "32726835915" "32726853417"; do
+  if grep -qF "$evid" "$CR"; then ok "the header keeps the measured run id $evid"; else bad "the header dropped run $evid — the diagnosis loses its evidence"; fi
+done
+# The gap dial must be reachable ONLY from a fixture run. A live caller that
+# could pin the watermark holds a tolerance, which is what this fix refuses.
+if grep -qF 'RUNLIST_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]' "$CR"; then
+  ok "--runlist-at is guarded to fixture mode in the script itself"
+else
+  bad "--runlist-at is no longer fenced to fixture mode — a live run could pin its own watermark"
+fi
+# The watermark must be taken FROM THE RUN LIST'S OWN INSTANT, not from `now`
+# further down: an assignment that drifted below the jobs-API leg would restore
+# the tear while every probe above still passed.
+if [ "$(awk '/^fetch_runs$/ {f=NR} /^RUNLIST_ISO=/ {print NR - f; exit}' "$CR")" -lt 20 ]; then
+  ok "the watermark is taken within a few lines of fetch_runs, where the run side is actually frozen"
+else
+  bad "the watermark assignment drifted away from fetch_runs — it would no longer name the instant the run list was sampled"
 fi
 
 section "(l) no jq call takes a payload as an argv word (charter D486)"

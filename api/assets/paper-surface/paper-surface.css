@@ -324,6 +324,25 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface h4, .bp-paper-surface h5, .bp-paper-surface h6 {
   font-family: var(--paper-font-serif);
   font-weight: var(--bp-heading-weight); color: var(--paper-ink);
+  /* A heading is the widest type on the page, so it runs out of line before
+     prose does: measured in headless Chromium at a 390px viewport, an h1 holding
+     a single unbreakable 23-character word already pushes the document wider
+     than the screen, while the same word in a `<p>` still fits. Ordinary words
+     reach that length in the languages this surface publishes in — Norwegian
+     and German compounds are single words by construction — so the reader who
+     hits it is not holding a malformed document, just a long noun.
+
+     `break-word`, NOT `anywhere`: only `anywhere` participates in min-content
+     sizing, which would let a shrink-to-fit ancestor collapse around a heading
+     that fits perfectly well today. `break-word` acts solely when a word has a
+     whole line to itself and still does not fit, so every layout that was not
+     already overflowing is untouched — verified by diffing every element's
+     rendered geometry at 1280px before and after.
+
+     Automatic hyphenation is deliberately NOT the answer here: `hyphens:
+     manual` is set on prose below as an explicit choice, and turning it on for
+     headings alone would hyphenate display type against that decision. */
+  overflow-wrap: break-word;
 }
 /* Heading margins are intentionally ZERO. The user controls vertical
    rhythm via block-level spacing (`.bp-paper-edit-block` gap) — baking
@@ -451,6 +470,14 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface .bp-role-eyebrow {
   font-family: var(--paper-font-serif); color: var(--paper-accent);
   letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em;
+  /* The eyebrow is the one role that needs this and the two larger roles below
+     do not, which reads backwards until you count what it adds per character:
+     `text-transform: uppercase` swaps every lowercase glyph for a wider capital
+     and `letter-spacing: 0.08em` then pays a gap after each one. Measured at a
+     320px viewport, a 30-character compound overflows the page as an eyebrow
+     while the same word set in the 1.28em ingress does not. Size is not what
+     runs a line out of room here; per-character cost is. */
+  overflow-wrap: break-word;
 }
 .bp-paper-surface .bp-role-byline {
   border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem;
@@ -1142,7 +1169,19 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   border: 1px solid var(--paper-chrome-border); border-radius: 12px; padding: 1.1rem 1.2rem; margin: 1.6rem 0;
 }
-.bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); }
+/* The task title is free-form author text set at 1.15rem bold — the largest
+   type inside the detail card, and the only one of the card-title family that
+   outgrows prose. Measured at a 320px viewport, a single 30-character compound
+   noun puts the document 4px past the screen while the same word in a `<p>`
+   still fits; `.bp-card__t` (0.9rem) and `.bp-tasks__title` (1.05rem) are
+   measured clean at the same width and are deliberately left alone.
+
+   Four pixels is a horizontal scrollbar on the whole page, which is why it is
+   worth a declaration: the cost of the overflow is not proportional to its
+   size. `break-word` rather than `anywhere` — the title never sizes its own
+   box, so the declaration that cannot participate in min-content sizing is the
+   one that cannot move a layout. */
+.bp-paper-surface .bp-tdetail__title { font-family: var(--paper-font-serif); font-weight: 700; font-size: 1.15rem; color: var(--paper-ink); overflow-wrap: break-word; }
 .bp-paper-surface .bp-tdetail__meta { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.55rem; font-family: var(--paper-font-mono); font-size: 0.8rem; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-tdetail__stamp { font-family: var(--paper-font-mono); font-size: 0.72rem; color: var(--paper-ink-faint); margin-top: 0.4rem; }
 .bp-paper-surface .bp-tdetail__timeline { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-top: 0.8rem; padding: 0.6rem 0; border-top: 1px solid var(--paper-rule); border-bottom: 1px solid var(--paper-rule); font-size: 0.76rem; color: var(--paper-ink-soft); }
@@ -1337,8 +1376,41 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
 
 .bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
-.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; }
-.bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; }
+/* THE VALUE MUST BE ABLE TO BREAK, AND `anywhere` IS THE ONLY THING THAT WORKS.
+   `.bp-stat__v` is the largest type in the sheet — 1.7rem mono — and it sits in
+   a cell that is far narrower than a phone screen. The `.bp-stats` grid below
+   is `repeat(auto-fit, minmax(140px, 1fr))`, so at a 390px viewport the reading
+   column (358px of content) makes exactly two ~179px tracks. Measured in
+   headless Chromium: a value of twelve characters with no break opportunity
+   fills that track and pushes the DOCUMENT past the viewport, and from there
+   every extra character costs another ~16px of sideways page scroll.
+
+   Twelve characters is not an exotic input, it is a formatted number. Neither
+   `$1,234,567.89` nor `1 234 567,89` offers a single break opportunity —
+   comma, period and the U+202F narrow no-break space used for digit grouping
+   all refuse one — and a stats row formats every cell the same way, so the
+   second cell is already at the screen edge when it starts. A stat block whose
+   job is to show a large figure could not show a large figure on a phone.
+
+   `anywhere`, not `break-word`: `.bp-stat` is `inline-flex`, i.e. shrink-to-fit,
+   and outside the grid it sizes itself from its content's intrinsic width.
+   `break-word` never reports a smaller intrinsic width, so it fixes the grid
+   case and leaves the standalone stat exactly as broken — measured, both arms.
+   Only `anywhere` participates in min-content sizing, which is precisely the
+   property needed here and precisely the property that makes it the wrong
+   choice for the headings elsewhere in this sheet.
+
+   Wrapping a number is not lovely. Truncating one is a lie, and `overflow:
+   hidden; text-overflow: ellipsis` — the clamp the nowrap labels in this sheet
+   use — would present a shortened figure as if it were the whole figure. A
+   number that wraps is still readable; a number silently missing its last
+   digits is not. */
+.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+/* The label is prose in a 179px track. `break-word` is enough here — the label
+   never sizes its own box (the grid track does), so the min-content behaviour
+   `.bp-stat__v` needs is not required, and the weaker declaration is the one
+   that cannot move a layout. */
+.bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; overflow-wrap: break-word; }
 .bp-paper-surface .bp-stat__bar { height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin-bottom: 4px; }
 .bp-paper-surface .bp-stat__bar i { display: block; height: 100%; border-radius: 3px; background: var(--paper-accent); }
 .bp-paper-surface .bp-stat__spark { width: 100%; height: 26px; margin-top: 4px; }

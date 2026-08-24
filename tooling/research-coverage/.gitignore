@@ -3,3 +3,6 @@ coverage-report.json
 batch-count.txt
 batches/
 results/
+research-ledger.json.lock
+.research-ledger.json.tmp.*
+.coverage-report.json.tmp.*

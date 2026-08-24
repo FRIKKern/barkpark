@@ -1,6 +1,8 @@
 defmodule Barkpark.Audit.ExportTest do
   use Barkpark.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Barkpark.Audit
   alias Barkpark.Audit.{Event, Export, ExportSink}
   alias Barkpark.Repo
@@ -141,6 +143,198 @@ defmodule Barkpark.Audit.ExportTest do
       assert disabled.active == false
       assert disabled.consecutive_failures >= 15
       assert disabled.auto_disabled_at
+    end
+  end
+
+  # -- The latch has an EXIT -------------------------------------------------
+  #
+  # Before this suite, `active` had exactly two writers -- the INSERT default and
+  # the auto-disable -- so a 15-minute receiver outage ended a customer's audit
+  # trail ingestion PERMANENTLY and SILENTLY. These tests pin both halves of the
+  # remedy: the latch is loud exactly once, and it opens again by itself.
+
+  # Drive a sink all the way to auto-disabled. Returns the reloaded row.
+  defp latch!(name \\ "latchy") do
+    emit!(@ws)
+    FakeHTTP.start(true)
+    Application.put_env(:barkpark, :webhook_http_adapter, FakeHTTP)
+    {:ok, sink} = Export.create_sink(%{name: name, url: "https://down.example.com"})
+
+    for _ <- 1..15, do: Export.flush_sink(Repo.get(ExportSink, sink.id))
+
+    disabled = Repo.get(ExportSink, sink.id)
+    assert disabled.active == false, "fixture failed to latch the sink"
+    disabled
+  end
+
+  # Pretend the cooldown already elapsed by backdating the latch stamp.
+  defp backdate(sink, seconds) do
+    Repo.update!(
+      Ecto.Changeset.change(sink,
+        auto_disabled_at: DateTime.add(DateTime.utc_now(), -seconds, :second)
+      )
+    )
+  end
+
+  describe "half-open retry -- the automatic exit" do
+    test "an auto-disabled sink is excluded until its cooldown elapses, then probed again" do
+      sink = latch!("cooldown")
+
+      # Still inside the cooldown: the flusher must NOT touch it.
+      refute Enum.any?(Export.list_flush_candidates(), &(&1.id == sink.id))
+      assert Export.flush() == []
+
+      # Cooldown elapsed -> it rejoins the candidate set as a half-open probe.
+      sink = backdate(sink, 3600)
+      assert Enum.any?(Export.list_flush_candidates(), &(&1.id == sink.id))
+    end
+
+    test "a successful probe re-enables the sink and events flow again" do
+      sink = latch!("recovers")
+
+      # The receiver comes back up. `FakeHTTP.start/1` also RESETS the call log,
+      # so every call counted below belongs to the recovery, not the outage.
+      FakeHTTP.start(false)
+      Application.put_env(:barkpark, :webhook_http_adapter, FakeHTTP)
+      backdate(sink, 3600)
+
+      # The ordinary once-a-minute tick -- no human verb anywhere -- heals it.
+      assert [{:ok, {:shipped, n}}] = Export.flush()
+      assert n >= 1
+
+      healed = Repo.get(ExportSink, sink.id)
+      assert healed.active == true, "the latch has no automatic exit"
+      assert healed.consecutive_failures == 0
+      assert healed.auto_disabled_at == nil
+      assert healed.disable_reason == nil
+      assert healed.last_exported_id > sink.last_exported_id
+
+      # Events genuinely reached the SIEM, not just a flag flip.
+      assert [{url, _body, _headers}] = FakeHTTP.calls()
+      assert url == "https://down.example.com"
+
+      # And it keeps shipping on subsequent ticks.
+      emit!(@ws)
+      assert [{:ok, {:shipped, again}}] = Export.flush()
+      assert again >= 1
+    end
+
+    test "a failed probe backs off instead of retrying every tick" do
+      sink = latch!("backoff")
+      sink = backdate(sink, 3600)
+
+      assert [{:error, _}] = Export.flush()
+
+      after_probe = Repo.get(ExportSink, sink.id)
+      assert after_probe.active == false
+      # The streak grew AND the cooldown clock restarted...
+      assert after_probe.consecutive_failures > sink.consecutive_failures
+      assert DateTime.compare(after_probe.auto_disabled_at, sink.auto_disabled_at) == :gt
+      # ...so the very next tick does not probe again.
+      assert Export.flush() == []
+    end
+  end
+
+  describe "the disabled interval leaves a person-facing trace" do
+    test "the auto-disable logs a stable code exactly ONCE per latch, not once per failure" do
+      emit!(@ws)
+      FakeHTTP.start(true)
+      Application.put_env(:barkpark, :webhook_http_adapter, FakeHTTP)
+      {:ok, sink} = Export.create_sink(%{name: "loud", url: "https://down.example.com"})
+
+      log =
+        capture_log(fn ->
+          # 20 failing flushes -- 5 of them past the threshold.
+          for _ <- 1..20, do: Export.flush_sink(Repo.get(ExportSink, sink.id))
+        end)
+
+      assert log =~ "audit_export_sink_auto_disabled",
+             "the SIEM went dark with no operator-visible signal"
+
+      # One line per DARK INTERVAL. The 5 post-threshold failures must not each
+      # re-announce the latch, or the signal drowns in its own repetition.
+      latch_errors =
+        for line <- String.split(log, "\n"),
+            line =~ "[error]",
+            line =~ "audit_export_sink_auto_disabled",
+            do: line
+
+      assert length(latch_errors) == 1
+
+      assert Repo.get(ExportSink, sink.id).disable_reason =~ "auto-disabled after"
+    end
+
+    test "the recovery is announced too, so the incident can be closed" do
+      sink = latch!("announced")
+      FakeHTTP.start(false)
+      Application.put_env(:barkpark, :webhook_http_adapter, FakeHTTP)
+      backdate(sink, 3600)
+
+      log = capture_log(fn -> Export.flush() end)
+      assert log =~ "audit_export_sink_recovered"
+    end
+
+    test "sink_health/1 renders the dark sink as queryable status" do
+      sink = latch!("visible")
+
+      health = Enum.find(Export.sink_health(), &(&1.id == sink.id))
+
+      assert health.status == :auto_disabled
+      assert health.disable_reason =~ "auto-disabled after"
+      assert health.consecutive_failures >= 15
+      assert is_integer(health.dark_for_seconds)
+      assert %DateTime{} = health.next_retry_at
+
+      {:ok, _} = Export.reenable_sink(Repo.get(ExportSink, sink.id))
+      assert Enum.find(Export.sink_health(), &(&1.id == sink.id)).status == :healthy
+    end
+  end
+
+  describe "reenable_sink/1 -- the manual exit" do
+    test "restores a latched sink to a clean shippable state and events flow again" do
+      sink = latch!("manual")
+
+      {:ok, cleared} = Export.reenable_sink(sink)
+
+      assert cleared.active == true
+      assert cleared.consecutive_failures == 0
+      assert cleared.auto_disabled_at == nil
+      assert cleared.disable_reason == nil
+
+      FakeHTTP.start(false)
+      Application.put_env(:barkpark, :webhook_http_adapter, FakeHTTP)
+      emit!(@ws)
+      assert [{:ok, {:shipped, _}}] = Export.flush()
+    end
+
+    test "is idempotent on an already-active sink and clears an in-progress streak" do
+      emit!(@ws)
+      FakeHTTP.start(true)
+      Application.put_env(:barkpark, :webhook_http_adapter, FakeHTTP)
+      {:ok, sink} = Export.create_sink(%{name: "streaky", url: "https://down.example.com"})
+
+      for _ <- 1..3, do: Export.flush_sink(Repo.get(ExportSink, sink.id))
+      assert Repo.get(ExportSink, sink.id).consecutive_failures == 3
+
+      {:ok, cleared} = Export.reenable_sink(Repo.get(ExportSink, sink.id))
+      assert cleared.active == true
+      assert cleared.consecutive_failures == 0
+    end
+  end
+
+  describe "candidate selection" do
+    test "a sink a PERSON disabled is never probed -- only the automatic latch auto-exits" do
+      {:ok, sink} =
+        Export.create_sink(%{name: "off", url: "https://off.example.com", active: false})
+
+      assert sink.active == false
+      assert sink.auto_disabled_at == nil
+
+      refute Enum.any?(Export.list_flush_candidates(), &(&1.id == sink.id))
+
+      # Even long after any conceivable cooldown.
+      future = DateTime.add(DateTime.utc_now(), 86_400, :second)
+      refute Enum.any?(Export.list_flush_candidates(future), &(&1.id == sink.id))
     end
   end
 

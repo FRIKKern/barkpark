@@ -95,13 +95,31 @@ defmodule BarkparkWeb.AppTokenController do
       canonical 404 whatever the reason (nonexistent and foreign join one
       not-found oracle). Idempotent: re-revoking an already-revoked token is
       another 200.
-    * `{"email": email}` — logout-everywhere: revoke every LIVE
-      `app:<email>`-labelled token. 200 `{"revoked_count": n}` (0 included).
+    * `{"email": email}` — logout-everywhere WITHIN THE WORKSPACES THE BEARER
+      ADMINISTERS: revoke every LIVE `app:<email>`-labelled token bound to one
+      of them. 200 `{"revoked_count": n}` (0 included).
 
   Tokens carrying `admin` are never revocable through this path (422) — the
   stored custody credential cannot be killed by a label collision or a smuggled
   body. Rate-bucketed per IP (D7 idiom). Non-admin bearers get the same generic
   unauthorized as an invalid token (the mint's oracle discipline).
+
+  ## "logout-everywhere" MEANS EVERYWHERE THE CALLER GOVERNS
+  (task-ea8cae3258ea4bd3)
+
+  The email arm used to select instance-wide, and the gate above it —
+  `Auth.has_permission?(bearer, "admin")` — reads `token.permissions` and no
+  workspace at all. An admin of workspace A therefore logged workspace B's
+  users out of every phone session, knowing only an email address. The
+  narrowing lives in `Auth.revoke_app_tokens_for_email/2`, which now takes the
+  bearer and keeps only rows in workspaces where it is an ADMIN MEMBER.
+
+  The BY-RAW arm above is deliberately NOT narrowed, and the asymmetry is the
+  point: possession of the plaintext secret is itself the authorization there,
+  exactly as in `delete_current/2`, and the Cloud control plane's relayed
+  single-device logout (`Registry.revoke_app_token/3` with `{:token, raw}`)
+  depends on it. A selector the caller can guess (an email) and a selector the
+  caller must already hold (the secret) are different powers.
   """
   def delete(conn, params) do
     bearer = conn.assigns.api_token
@@ -148,17 +166,27 @@ defmodule BarkparkWeb.AppTokenController do
   `?email=` filter can never match, which is the whole defect — while the
   instance's user list stays unenumerable.
 
-  ## INTERIM, pending a ruling
+  ## THE REDACTION IS NOW THE SETTLED POSTURE, NOT AN INTERIM ONE
 
-  This is a POSTURE, not a design claim. `task-ea8cae3258ea4bd3` is open on
-  exactly this surface: whether an admin token in one workspace should reach
-  another workspace's app tokens at all. Cross-workspace REVOCATION already
-  crosses today (`revoke_app_tokens_for_email/1` has no workspace predicate);
-  cross-workspace ENUMERATION arrived with this route, and shipping it
-  unredacted while that row is unsettled would answer the question by merge.
+  This paragraph used to read "INTERIM, pending a ruling", and cited
+  cross-workspace REVOCATION as something that "already crosses today". That
+  second half is NO LONGER TRUE and is corrected rather than left standing:
+  `task-ea8cae3258ea4bd3` was answered WORKSPACE-SCOPED, and both write
+  selectors on this controller now confine to workspaces the bearer
+  administers (`Auth.revoke_app_tokens_for_email/2`,
+  `Auth.revoke_app_token_by_id/2`). Redacting the label was therefore the
+  correct posture all along — there is nothing here to unwind.
 
-  If the owner rules the admin gate is legitimately instance-wide, unredacting
-  is a one-line change in `app_token_json/2` with a recorded justification.
+  ## WHAT THIS READ PATH STILL DOES NOT DO, stated so it is not over-read
+
+  `index/2` is NOT scoped. An admin of workspace A still sees every app token
+  row on the instance — `id`, `workspace_id`, `permissions`, `dataset`, dates —
+  with the label withheld. That is now a strictly weaker disclosure than it was
+  (an id from another workspace no longer revokes anything: the by-id arm 404s
+  it), but it is still a cross-workspace read, and closing it is a separate
+  change with a real question attached — whether an operator running
+  `GET /app-tokens` to audit their instance should see rows they cannot act on.
+  Filed rather than widened into the revoke fix: `task-aa07355fa8a53355`.
 
   Non-admin bearers get the same generic unauthorized as an invalid token, the
   mint's oracle discipline.
@@ -190,8 +218,17 @@ defmodule BarkparkWeb.AppTokenController do
   re-revoking an already-revoked row is another 200, matching the by-raw arm.
 
   Unlike the by-raw and by-email arms this does NOT 422 an `admin`-permissioned
-  token — see `Auth.revoke_app_token_by_id/1` for why an explicit row id is not
+  token — see `Auth.revoke_app_token_by_id/2` for why an explicit row id is not
   the collision this rule was written against.
+
+  ## The id must name a row the bearer administers (task-ea8cae3258ea4bd3)
+
+  A FOREIGN row id joins the same not-found oracle as a missing one and a
+  non-castable one: all three reach the single `ErrorResponse.emit(conn,
+  {:error, :not_found})` call site below, byte-identical. Without that, this
+  arm was the shorter path to the same cross-tenant harm as the email arm —
+  `index/2` hands an admin every id on the instance, and this route does not
+  even spare `admin`-permissioned rows.
   """
   def delete_by_id(conn, %{"id" => id}) do
     cond do
@@ -202,7 +239,7 @@ defmodule BarkparkWeb.AppTokenController do
         ErrorResponse.emit(conn, {:error, :unauthorized})
 
       true ->
-        case Auth.revoke_app_token_by_id(id) do
+        case Auth.revoke_app_token_by_id(id, conn.assigns.api_token) do
           # THE RECEIPT, and it describes the STORE rather than the request
           # (jf-backlog-apptoken-revoke-upstream). `revoke_token/1` returns the
           # UPDATED row, so `revoked_at` is the timestamp the write actually
@@ -318,7 +355,9 @@ defmodule BarkparkWeb.AppTokenController do
         unprocessable(conn, "email must be a non-empty string")
 
       trimmed ->
-        json(conn, %{revoked_count: Auth.revoke_app_tokens_for_email(trimmed)})
+        json(conn, %{
+          revoked_count: Auth.revoke_app_tokens_for_email(trimmed, conn.assigns.api_token)
+        })
     end
   end
 

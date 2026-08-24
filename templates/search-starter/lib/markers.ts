@@ -59,6 +59,43 @@ export function siteMarkers(env: NodeJS.ProcessEnv = process.env): SiteMarkers {
   };
 }
 
+/* ── build identity: the same env, read for a HUMAN ───────────────────────── */
+
+/**
+ * Which build this is, with UNSET reported as `null` instead of collapsed onto
+ * the "dev"/"unknown" sentinels `siteMarkers()` uses.
+ *
+ * Two readers, two contracts, and they genuinely differ. The deploy gate greps
+ * `content="…"` out of the served HTML and asserts it is NON-EMPTY, so the
+ * markers must always carry a string — hence the sentinels above, which stay
+ * exactly as they are. A HUMAN reading the page needs the opposite: a line that
+ * says `build dev` reads as a build NAMED dev, so the provenance surface has to
+ * tell "no build id was stamped" from "the build id is the string dev". This
+ * function is that distinction; `lib/provenance.buildIdentityLine` turns it
+ * into the sentence.
+ *
+ * Deliberately NOT a refactor of `siteMarkers()`: the marker values are an
+ * interface the deploy engine reads back with `sed`, and the shell self-test's
+ * fixture hard-codes them. Changing them to satisfy a copy requirement would
+ * break a gate in order to fix a sentence.
+ */
+export interface BuildIdentity {
+  /** `BARKPARK_BUILD_ID` / `BUILD_ID`, or null when neither was set. */
+  buildId: string | null;
+  /** `BARKPARK_CONTENT_REV` / `CONTENT_REV`, or null when neither was set. */
+  contentRev: string | null;
+}
+
+export function buildIdentity(
+  env: NodeJS.ProcessEnv = process.env,
+): BuildIdentity {
+  return {
+    buildId: env.BARKPARK_BUILD_ID?.trim() || env.BUILD_ID?.trim() || null,
+    contentRev:
+      env.BARKPARK_CONTENT_REV?.trim() || env.CONTENT_REV?.trim() || null,
+  };
+}
+
 /* ── bp-corpus-status: the cause-truth marker ─────────────────────────────── */
 
 /**

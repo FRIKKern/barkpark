@@ -320,6 +320,113 @@
 # TRANSPORT: no JSON payload is ever handed to jq as an argv word. Linux caps a
 # single argv string at 131,072 bytes independently of ARG_MAX and a run listing
 # crosses it. Every list travels by `--slurpfile` or stdin (charter D486).
+#
+# THE TWO SIDES ARE SAMPLED APART IN TIME, SO THEY NEEDED A WATERMARK
+# (task-7a85d1b5f471af8f).
+#
+# This verdict compares TWO SNAPSHOTS OF TWO DIFFERENT SYSTEMS, and it used to
+# compare them as if they were simultaneous. They never are:
+#
+#   T0  fetch_runs() takes ONE page of deploy.yml runs.
+#   ..  run_delivers() asks the jobs API once per examined run — 65 runs on a
+#       live window, so this leg alone is minutes, not seconds.
+#   T1  crown_read() takes the row page.
+#
+# A row written between T0 and T1 names a `delivering_run_id` that was NOT YET
+# TERMINAL when the run list was taken — the run was mid-flight, or had not been
+# created at all — so it structurally CANNOT be in a delivering set built from
+# `.conclusion == "success"`. The row is fine, the run is fine, and the verdict
+# called it WRONG. The reconciler was accusing its own concurrent writers.
+#
+# MEASURED TWICE, ON TWO DIFFERENT AXES:
+#
+#   * run 31339252774 (main 45e2611552): deploy run 31339172372 ran 22:21:09 to
+#     22:24:42; this script snapshotted its run list at 22:23:04 WHILE that
+#     deploy was in progress; the row was written 22:24:39 naming that run; the
+#     verdict concluded 22:25:21 `wrong=1/100`. The two sides were ~95s apart.
+#   * run 32726853411 (main 4d35c5ab08): `behind=0/65` — NOT ONE delivering run
+#     was missing a row, so nothing was lost — while `wrong=2/100` named the
+#     SAME sha twice, delivered by runs 32726835915 and 32726853417, both
+#     numerically ADJACENT to the reconciler's own run id. Two runs that started
+#     alongside this one, and the window closed before their rows existed.
+#
+# A TOLERANCE WAS THE WRONG FIX, AND IS REFUSED. Gracing "recent" rows, or
+# widening the wide window, hides a torn read AND the real corruption that wears
+# the same output. The comparison is made CONSISTENT instead, by taking a
+# WATERMARK — the state of the run list at the instant it was sampled — and
+# judging a row only if its writer was already TERMINAL at that instant:
+#
+#   RUNLIST_EPOCH   the wall clock the instant fetch_runs() returned.
+#   NONTERMINAL     every run id on that page whose `status != "completed"`.
+#                   Read from the page, not inferred: we SAW these running.
+#   MAX_RUN_ID      the largest deploy.yml run id on the page. Actions run ids
+#                   are allocated in creation order, so an id above this one did
+#                   not exist when we looked. This handle is CLOCK-FREE.
+#
+# A row is WRITTEN-IN-FLIGHT — excluded from BOTH sides, printed in its own
+# class with its own count, exactly like PREDATES-WRITER — when either holds:
+#
+#   (i)  run-keyed, and clock-free: its `delivering_run_id` is on the page with
+#        a non-terminal status. No clock is consulted; the page says the run was
+#        still running. This alone is sufficient.
+#   (ii) time-keyed, and therefore CORROBORATED: the row's own `first_seen_at`
+#        is at or after RUNLIST_EPOCH (less SERVING_SKEW_EPSILON_SECONDS, the
+#        same measured host-jitter epsilon the serving arm uses) AND the row
+#        either names no run at all or names a run id ABOVE MAX_RUN_ID. Time
+#        alone is never enough — a clock disagreement must not excuse a row.
+#
+# THE OTHER SIDE IS ALREADY CONSISTENT, and it is stated rather than assumed: a
+# non-terminal run is excluded from the delivering set by the `.conclusion ==
+# "success"` filter that builds it, from the same page, at the same instant. So
+# the exclusion is symmetric by construction. BEHIND is torn in the SAFE
+# direction and stays as it is: it reads the crown FRESH, per sha, AFTER the run
+# list, so its rows can only be MORE complete than the snapshot — a run whose
+# row lands during the gap is found, not accused.
+#
+# THIS IS A DEFERRAL AND IT LEAVES NO DEBT BEHIND ON PURPOSE (contrast D511).
+# The serving grace needs a persistent re-ask list because it reads only what
+# the box serves RIGHT NOW, so a deferred accusation becomes unmakeable the
+# moment the box moves on. This one does not: the row is still in the crown, and
+# on the next run — six hours later, or the next push — the run is terminal and
+# is judged NORMALLY. A run that was cancelled, or failed, or never delivered,
+# is then on the page as `completed` with a non-success conclusion, is not in
+# the delivering set, and its row is WRONG. Excluding it here costs ONE run of
+# latency and forgives nothing. Putting it on the re-ask list would be worse
+# than useless: that list is keyed on "a sha with NO row", and this row EXISTS —
+# it would retire clean on its first re-ask and launder the accusation.
+#
+# A HUNG RUN IS NOT AN ALIBI, AND THE EXCLUSION IS CAPPED (dr-w34, restated).
+#
+# Arm (i) defers for as long as GitHub reports the run non-terminal, and that is
+# exactly the unbounded shape the SERVING arm was already caught in
+# (dr-w34-fu-inflight-deferral-is-unbounded). So it carries the SAME cap, the
+# same measured constant, charged the same way: SERVING_INFLIGHT_CAP_SECONDS,
+# derived from the observed maximum deploy duration and not from a feeling. A
+# row whose writing run has been non-terminal for longer than that is ACCUSED —
+# printed as WRITTEN-IN-FLIGHT-EXPIRED beside the WRONG that follows it, naming
+# the hung run — rather than deferred a third and fourth time.
+#
+# Arm (ii) needs no cap and it is worth saying why rather than leaving it to
+# look like an oversight: it only fires on a row written at or after the
+# watermark, so the row it excuses is at most one run's own duration old, by
+# construction. There is no window there to grow.
+#
+# TRUNCATION CANNOT BE ALLOWED TO MANUFACTURE A GHOST (task-7a85d1b5f471af8f).
+#
+# The run page is ONE page of 100 and it is regularly truncated — the live run
+# above printed "the 100-run page filled without reaching the window start". A
+# truncated page produces false verdicts in BOTH directions, and only one of
+# them was expressible before:
+#
+#   * FALSE RED: a row whose delivering run fell off the BOTTOM of the page has
+#     no alibi source, and read WRONG. That is not a ghost, it is a run we could
+#     not see. A row naming a run id BELOW the page's minimum, on a page that is
+#     known truncated, is now an UNREADABLE condition by name (rc 2, which still
+#     pages) instead of an accusation — "could not judge" is the true statement.
+#   * FALSE CLEAN: a genuinely BEHIND run that fell off the page is never
+#     examined at all, so it cannot be counted. The population already prints as
+#     `N+` for exactly this reason; the residual is now SAID beside it rather
+#     than left for a reader to infer from a plus sign.
 
 set -uo pipefail
 
@@ -395,6 +502,14 @@ CROWN_FIXTURE=""
 HEALTH_FIXTURE=""
 COMMITS_FIXTURE=""
 NOW_OVERRIDE=""
+# THE GAP BETWEEN THE TWO SAMPLES, PINNED — FIXTURES ONLY, AND REFUSED LIVE.
+# The whole defect is that the run list and the crown are read at different
+# instants, so a harness has to be able to WIDEN that gap on demand: `--now` is
+# the crown-read instant, and this is the run-list instant. It is a TEST handle
+# and nothing else — accepting it on a live run would hand an operator a dial
+# that excuses rows by hand, which is the tolerance this fix exists to refuse.
+# Live runs always take the watermark from the real clock, at the real instant.
+RUNLIST_AT_OVERRIDE=""
 
 WORK="$(mktemp -d 2>/dev/null || mktemp -d -t crown-reconcile)"
 cleanup() { rm -rf "$WORK"; }
@@ -417,6 +532,7 @@ while [ $# -gt 0 ]; do
     --health-fixture) HEALTH_FIXTURE="${2:-}"; shift 2 ;;
     --commits-fixture) COMMITS_FIXTURE="${2:-}"; shift 2 ;;
     --now) NOW_OVERRIDE="${2:-}"; shift 2 ;;
+    --runlist-at) RUNLIST_AT_OVERRIDE="${2:-}"; shift 2 ;;
     --state-file) STATE_FILE="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) warn "unknown flag: $1"; exit 3 ;;
@@ -431,6 +547,11 @@ case "$ROW_LIMIT" in ''|*[!0-9]*) warn "CONFIG: --limit must be a whole number, 
 
 FIXTURE_MODE=0
 [ -n "$RUNS_FIXTURE" ] && FIXTURE_MODE=1
+
+if [ -n "$RUNLIST_AT_OVERRIDE" ] && [ "$FIXTURE_MODE" != "1" ]; then
+  warn "CONFIG: --runlist-at is a FIXTURE-ONLY handle for widening the gap between the run-list sample and the crown sample. A live run takes its watermark from the real clock at the real instant, and must not be handed one; pinning it by hand would be a tolerance, not a consistent read."
+  exit 3
+fi
 
 # ── clocks ───────────────────────────────────────────────────────────────────
 epoch_of() { # <iso8601> -> seconds, or empty
@@ -834,6 +955,26 @@ state_load
 
 fetch_runs
 rc=$?
+# ── THE WATERMARK ───────────────────────────────────────────────────────────
+# Taken HERE, one statement after the run page landed, because that is the
+# instant the run side of this comparison was frozen. Everything below — the
+# jobs API leg, and then the crown read — happens strictly after it, and the
+# gap is the defect. A live run reads the real clock; a pinned `--now` run has
+# no gap by construction (the watermark IS now, so nothing can be newer than
+# it), which is exactly the pre-fix behaviour every existing probe measures.
+if [ -n "$RUNLIST_AT_OVERRIDE" ]; then
+  RUNLIST_EPOCH="$(epoch_of "$RUNLIST_AT_OVERRIDE")" || { warn "CONFIG: --runlist-at is not an ISO-8601 instant: $RUNLIST_AT_OVERRIDE"; exit 3; }
+elif [ -n "$NOW_OVERRIDE" ]; then
+  RUNLIST_EPOCH="$NOW_EPOCH"
+else
+  RUNLIST_EPOCH="$(date -u +%s)"
+fi
+RUNLIST_ISO="$(iso_of "$RUNLIST_EPOCH")"
+# The same measured host-jitter epsilon the serving arm derives, reused rather
+# than re-invented: two machines' clocks disagree by seconds, and a row must
+# never be excluded because of that alone — signal (ii) also demands a run id
+# above the page's maximum, so the clock is corroboration, never the whole case.
+WATERMARK_FLOOR=$((RUNLIST_EPOCH - SERVING_SKEW_EPSILON_SECONDS))
 [ "$rc" = "3" ] && exit 3
 if [ "$rc" != "0" ]; then
   say ""
@@ -871,6 +1012,20 @@ else
   FLOOR=""
 fi
 
+# THE WATERMARK'S TWO CLOCK-FREE HANDLES, read off the SAME page at the SAME
+# instant as everything else. `status` is the run's state as of the sample —
+# anything but `completed` is a run we watched running — and Actions allocates
+# run ids in creation order, so an id above the page maximum names a run that
+# did not exist when we looked. Neither handle consults a clock.
+: > "$WORK/nonterminal-runs.txt"
+jq -r '.workflow_runs[]? | select((.status // "") != "completed") | .id | tostring' \
+  "$WORK/runs-raw.json" > "$WORK/nonterminal-runs.txt" 2>/dev/null
+MAX_RUN_ID="$(jq -r '[.workflow_runs[]?.id] | max // 0' "$WORK/runs-raw.json" 2>/dev/null || echo 0)"
+MIN_RUN_ID="$(jq -r '[.workflow_runs[]?.id] | min // 0' "$WORK/runs-raw.json" 2>/dev/null || echo 0)"
+case "${MAX_RUN_ID:-}" in ''|*[!0-9]*) MAX_RUN_ID=0 ;; esac
+case "${MIN_RUN_ID:-}" in ''|*[!0-9]*) MIN_RUN_ID=0 ;; esac
+NONTERMINAL_RUNS="$(awk 'NF' "$WORK/nonterminal-runs.txt" | wc -l | tr -d ' ')"
+
 # Which of those actually delivered?
 : > "$WORK/delivering.txt"
 JOBS_UNREADABLE=0
@@ -904,6 +1059,10 @@ done < <(jq -r '.wide[] | "\(.id) \(.sha)"' "$WORK/runs.json")
 
 say ""
 say "POPULATION: ${SUCCESS_COUNT}${FLOOR} successful deploy.yml run(s) on main in the window; ${DELIVERING} of them DELIVERED (a control-plane or instance leg concluded success), ${NONDELIVERING} delivered nothing (both legs skipped — docs-only merges), ${JOBS_UNREADABLE} unreadable."
+say "WATERMARK: the run list was sampled at ${RUNLIST_ISO} and the crown is read after it — ${NONTERMINAL_RUNS} run(s) on the page were NON-TERMINAL at that instant, page run ids span ${MIN_RUN_ID}..${MAX_RUN_ID}. A row written by a run that was not terminal then is excluded from BOTH sides as WRITTEN-IN-FLIGHT rather than accused, and is judged normally by the next run."
+if [ "$FLOOR" = "+" ]; then
+  say "  TRUNCATION RESIDUAL, stated rather than left to the plus sign: the 100-run page did not reach the window start, so runs older than id ${MIN_RUN_ID} were never examined. A delivering run that fell off the page CANNOT be counted BEHIND by this run — the BEHIND denominator above is a floor, and its silence is a blind spot, not a clean reading."
+fi
 
 # ── BEHIND: a delivering run whose head sha the crown has no row for ─────────
 BEHIND=0
@@ -942,6 +1101,18 @@ RECONCILABLE=$((DELIVERING - PREDATES))
 WRONG=0
 UNCLASSIFIED=0
 ROWS_EXAMINED=0
+# Rows the run-list snapshot cannot speak for. NOT a tolerance and NOT silence:
+# each is printed by name with the evidence that put it here, subtracted from
+# the WRONG denominator so the rate stays over a population that was actually
+# judged, and judged normally by the very next run.
+INFLIGHT_ROWS=0
+# Rows whose writing run has been non-terminal past the measured cap. A hung run
+# stops being an alibi: these are ACCUSED, not deferred again.
+INFLIGHT_EXPIRED=0
+# Rows a TRUNCATED page makes unjudgeable — their delivering run is older than
+# the oldest run we could see, so it can be neither found nor ruled out. These
+# go through reason(), so they land in rc 2 and still page.
+TRUNC_UNJUDGED=0
 # The quiescence count, for the QUIET WINDOW arm below (charter D597). Distinct
 # from ROWS_EXAMINED on purpose: an in-window row seen down the no-alibi branch
 # was COUNTED but never CLASSIFIED — there is no alibi source to judge it
@@ -953,6 +1124,8 @@ QUIET_ROWS_READ=0
 # reason() call would silently tolerate nothing, or everything.
 NOALIBI_REASON="no delivering run in the widened window — the reverse direction has no alibi source and was NOT checked"
 : > "$WORK/wrong.txt"
+: > "$WORK/inflight.txt"
+: > "$WORK/inflight-expired.txt"
 sort -u "$WORK/wide-shas.txt" > "$WORK/wide-shas-sorted.txt"
 sort -u "$WORK/wide-runs.txt" > "$WORK/wide-runs-sorted.txt"
 WIDE_SHAS="$(awk 'NF' "$WORK/wide-shas-sorted.txt" | wc -l | tr -d ' ')"
@@ -984,8 +1157,9 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
     ROWS_EXAMINED="$(jq 'length' "$WORK/recent-window.json")"
     QUIET_ROWS="$ROWS_EXAMINED"
     QUIET_ROWS_READ=1
-    while IFS=' ' read -r sha carried run; do
+    while IFS=' ' read -r sha carried run rowat; do
       [ -n "$sha" ] || continue
+      case "${rowat:-}" in ''|*[!0-9]*) rowat=0 ;; esac
       if [ "$carried" = "true" ]; then
         continue
       elif [ "$carried" = "null" ]; then
@@ -1002,13 +1176,74 @@ elif crown_read "limit=$ROW_LIMIT" "$WORK/recent.json"; then
       else
         grep -qx "$sha" "$WORK/wide-shas-sorted.txt" && continue
       fi
+      # ── THE WATERMARK, BEFORE ANY ACCUSATION ────────────────────────────
+      # No alibi was found — but "no alibi" is only an accusation if the run
+      # list could have carried one. These two arms are the cases where it
+      # structurally could not, and each is a FACT READ OFF THE PAGE, never a
+      # window widened around an inconvenient row.
+      #
+      # (i) RUN-KEYED, CLOCK-FREE. The page says this run was still going when
+      # we sampled it, so `.conclusion == "success"` could not have matched it
+      # no matter what the run eventually does. Sufficient on its own.
+      if [ "$run" != "-" ] && grep -qx "$run" "$WORK/nonterminal-runs.txt"; then
+        # …CAPPED. A run that has been in_progress longer than the measured
+        # deploy maximum is hung, and a hung run is not an alibi — it is
+        # deferring the accusation with no end to the deferral. Charged against
+        # the ROW's own first-seen instant, so one row gets one window and never
+        # a fresh one per run, exactly as the serving grace is charged.
+        _inflight_age=$((NOW_EPOCH - rowat))
+        if [ "$_inflight_age" -gt "$SERVING_INFLIGHT_CAP_SECONDS" ]; then
+          INFLIGHT_EXPIRED=$((INFLIGHT_EXPIRED + 1))
+          printf '%s %s %s\n' "$sha" "$run" "$_inflight_age" >> "$WORK/inflight-expired.txt"
+        else
+          INFLIGHT_ROWS=$((INFLIGHT_ROWS + 1))
+          printf '%s %s in-flight\n' "$sha" "$run" >> "$WORK/inflight.txt"
+          continue
+        fi
+      fi
+      # (ii) TIME-KEYED, AND CORROBORATED. The row was written at or after the
+      # watermark AND its writer did not exist on the page at all — either it
+      # names no run, or it names an id above the page maximum, which Actions'
+      # creation-ordered ids make a statement about EXISTENCE, not about
+      # membership. Time alone never excuses a row: a clock that disagrees must
+      # not be able to forgive one, so both halves are required.
+      if [ "$rowat" -ge "$WATERMARK_FLOOR" ]; then
+        _newer_run=0
+        case "$run" in
+          -) _newer_run=1 ;;
+          ''|*[!0-9]*) _newer_run=0 ;;
+          *) [ "$MAX_RUN_ID" -gt 0 ] && [ "$run" -gt "$MAX_RUN_ID" ] && _newer_run=1 ;;
+        esac
+        if [ "$_newer_run" = "1" ]; then
+          INFLIGHT_ROWS=$((INFLIGHT_ROWS + 1))
+          printf '%s %s written-after-the-watermark\n' "$sha" "$run" >> "$WORK/inflight.txt"
+          continue
+        fi
+      fi
+      # ── A TRUNCATED PAGE CANNOT MANUFACTURE A GHOST ─────────────────────
+      # The page is bounded at 100 runs. When it filled without reaching the
+      # window start, a row naming a run id BELOW the page minimum names a run
+      # that FELL OFF THE PAGE — indistinguishable from one that never existed.
+      # Accusing it is a false red the truncation itself produced. This is an
+      # UNREADABLE condition by name (rc 2, which still pages), never a WRONG
+      # and never a silence.
+      if [ "$FLOOR" = "+" ] && [ "$MIN_RUN_ID" -gt 0 ]; then
+        case "$run" in
+          ''|-|*[!0-9]*) ;;
+          *) if [ "$run" -lt "$MIN_RUN_ID" ]; then
+               TRUNC_UNJUDGED=$((TRUNC_UNJUDGED + 1))
+               reason "row $sha: its delivering run $run is OLDER than the oldest run on the TRUNCATED 100-run page (minimum id $MIN_RUN_ID) — the run it names fell off the page, so it can be neither alibied nor accused, and is NOT counted clean"
+               continue
+             fi ;;
+        esac
+      fi
       WRONG=$((WRONG + 1))
       printf '%s %s\n' "$sha" "$run" >> "$WORK/wrong.txt"
       # `.carried // "null"` would be WRONG here: jq's `//` treats `false` as
       # empty, so every honestly-measured `carried: false` row would report as
       # unmeasured — the comforting direction. Presence is asked for explicitly,
       # and `delivering_run_id` is read the same way for the same reason.
-    done < <(jq -r '.[] | "\(.sha) \(if has("carried") and .carried != null then (.carried | tostring) else "null" end) \(if has("delivering_run_id") and .delivering_run_id != null and ((.delivering_run_id | tostring) != "") then (.delivering_run_id | tostring) else "-" end)"' "$WORK/recent-window.json" | sort -u)
+    done < <(jq -r '.[] | "\(.sha) \(if has("carried") and .carried != null then (.carried | tostring) else "null" end) \(if has("delivering_run_id") and .delivering_run_id != null and ((.delivering_run_id | tostring) != "") then (.delivering_run_id | tostring) else "-" end) \(.at // 0)"' "$WORK/recent-window.json" | sort -u)
   else
     reason "the recent-row page did not parse — the reverse direction was NOT checked"
   fi
@@ -1180,14 +1415,43 @@ if [ "$PREDATES" -gt 0 ]; then
   done < "$WORK/predates.txt"
   say ""
 fi
+if [ "$INFLIGHT_ROWS" -gt 0 ]; then
+  say "WRITTEN-IN-FLIGHT: ${INFLIGHT_ROWS} of ${ROWS_EXAMINED} crown row(s) in the window were written by a run that was NOT TERMINAL when the run list was sampled (${RUNLIST_ISO}) — the two sides of this comparison are taken minutes apart, and a row that appeared inside that gap has no alibi it could possibly have had. They are EXCLUDED FROM BOTH SIDES and printed here rather than graced away; the next run sees a terminal run and judges them normally, and a run that never delivered is WRONG then:"
+  while IFS=' ' read -r sha run why; do
+    [ -n "$sha" ] || continue
+    case "$why" in
+      in-flight) say "    ${sha}  (run ${run}) — that run was on the page as NON-TERMINAL at the watermark; no clock was consulted" ;;
+      *) say "    ${sha}  (run ${run}) — written at or after the watermark, by a run above the page maximum id ${MAX_RUN_ID}: it did not exist when the run list was taken" ;;
+    esac
+  done < "$WORK/inflight.txt"
+  say ""
+fi
+if [ "$INFLIGHT_EXPIRED" -gt 0 ]; then
+  say "WRITTEN-IN-FLIGHT-EXPIRED: ${INFLIGHT_EXPIRED} crown row(s) name a run that is STILL non-terminal, and whose row has been waiting past the ${SERVING_INFLIGHT_CAP_SECONDS}s cap (charged against the row's own first-seen instant). A hung run is not an alibi, so these are ACCUSED below rather than deferred again:"
+  while IFS=' ' read -r sha run age; do
+    [ -n "$sha" ] || continue
+    say "    ${sha}  (run ${run}) — that run has reported non-terminal for the ${age}s this row has existed"
+  done < "$WORK/inflight-expired.txt"
+  say ""
+fi
+if [ "$TRUNC_UNJUDGED" -gt 0 ]; then
+  say "TRUNCATED-UNJUDGEABLE: ${TRUNC_UNJUDGED} crown row(s) name a delivering run older than the oldest run on the truncated page (minimum id ${MIN_RUN_ID}). A run that fell off a bounded page is not a ghost, so they are an UNREADABLE condition by name — counted in neither direction, never counted clean, and this run exits 2."
+  say ""
+fi
 if [ "$BEHIND" -gt 0 ]; then
   say "BEHIND: ${BEHIND} of ${RECONCILABLE} delivering run(s) examined ($(pct "$BEHIND" "$RECONCILABLE")) delivered a sha the crown has NO row for:"
   while IFS=' ' read -r sha id; do
     say "    ${sha}  (run ${id}) — delivered, never recorded"
   done < "$WORK/behind.txt"
 fi
+# The WRONG rate is a rate over the rows this run actually JUDGED. Rows the
+# watermark excluded, and rows a truncated page made unjudgeable, are printed
+# above with their own counts — an exemption has to be a denominator a reader
+# can subtract, never a quieter one.
+JUDGED_ROWS=$((ROWS_EXAMINED - INFLIGHT_ROWS - TRUNC_UNJUDGED))
+[ "$JUDGED_ROWS" -lt 0 ] && JUDGED_ROWS=0
 if [ "$WRONG" -gt 0 ]; then
-  say "WRONG: ${WRONG} of ${ROWS_EXAMINED} crown row(s) examined ($(pct "$WRONG" "$ROWS_EXAMINED")) were written by no delivering run:"
+  say "WRONG: ${WRONG} of ${JUDGED_ROWS} crown row(s) examined ($(pct "$WRONG" "$JUDGED_ROWS")) were written by no delivering run:"
   while IFS=' ' read -r sha run; do
     if [ "${run:--}" = "-" ]; then
       say "    ${sha} — recorded with no delivering run id, and no delivering run has that head sha"
@@ -1214,7 +1478,7 @@ fi
 
 if [ "$BEHIND" -gt 0 ] || [ "$WRONG" -gt 0 ] || [ "$SERVING_RED" -gt 0 ] || [ "$GRACED_RED" -gt 0 ]; then
   say ""
-  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${ROWS_EXAMINED} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
+  say "VERDICT: NOT reconciled — behind=${BEHIND}/${RECONCILABLE} delivering runs, wrong=${WRONG}/${JUDGED_ROWS} rows, serving-unrecorded=${SERVING_RED}, graced-unrecorded=${GRACED_RED}, predates-writer=${PREDATES}/${DELIVERING}, written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED}, written-in-flight-expired=${INFLIGHT_EXPIRED}, truncated-unjudgeable=${TRUNC_UNJUDGED}, reader=$(reader_answered), re-ask-list=${STATE_STATE}."
   exit 1
 fi
 
@@ -1394,5 +1658,5 @@ if [ "$DEFERRED" != "0" ]; then
 fi
 
 say ""
-say "RECONCILED: all ${RECONCILABLE} delivering run(s) in the window have their row, all ${ROWS_EXAMINED} row(s) in the window have their run, the serving sha ${SERVING_SHA:-<not checked>} is recorded, and no earlier grace is still owed a row — read by $(reader_answered), against a re-ask list that was ${STATE_STATE} with ${STATE_LOADED} entry(ies)."
+say "RECONCILED: all ${RECONCILABLE} delivering run(s) in the window have their row, all ${JUDGED_ROWS} judged row(s) in the window have their run, the serving sha ${SERVING_SHA:-<not checked>} is recorded, and no earlier grace is still owed a row — read by $(reader_answered), against a re-ask list that was ${STATE_STATE} with ${STATE_LOADED} entry(ies). written-in-flight=${INFLIGHT_ROWS}/${ROWS_EXAMINED} row(s) were excluded from BOTH sides because their writer was not terminal at the watermark ${RUNLIST_ISO}; this green does NOT extend to them, and the next run judges them."
 exit 0

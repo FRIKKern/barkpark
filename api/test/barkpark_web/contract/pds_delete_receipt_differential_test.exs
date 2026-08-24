@@ -39,7 +39,7 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
       the IDENTICAL one-line repair applied to `share_controller.ex:141` here.
     * `app_token_controller.ex:164` (admin revoke-by-raw) — OUT OF SCOPE,
       REPAIRABLE. Same callee, same discarded row. Its `:184` sibling already
-      obeys the law (`%{revoked_count: Auth.revoke_app_tokens_for_email/1}`).
+      obeys the law (`%{revoked_count: Auth.revoke_app_tokens_for_email/2}`).
     * `plugin_settings_controller.ex:53` (update) — OUT OF SCOPE, REPAIRABLE.
       `Settings.put/3` returns `{:ok, _rec}`; the row is discarded for a literal.
     * `plugin_settings_controller.ex:65` (delete) — OUT OF SCOPE, NEEDS CALLEE

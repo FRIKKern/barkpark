@@ -19,6 +19,7 @@ import { createPortal } from 'react-dom'
 import { Finder } from '../finder/finder'
 import { FinderErrorBoundary } from './FinderErrorBoundary'
 import GraphPane from './GraphPane'
+import { useIsDesktop } from './use-is-desktop'
 import { HoveredDocProvider } from '../finder/lib/hovered-doc-context'
 import { FinderNavProvider } from '../finder/lib/finder-nav-context'
 import { shapeFindResponse, emptyParsed } from '../finder/lib/find-shape'
@@ -285,6 +286,12 @@ function useGraphSlot(): HTMLElement | null {
 
 export default function FinderIsland() {
   const slot = useGraphSlot()
+  // D79 — the slot says WHICH PAGE this is; the width says whether the graph
+  // may MOUNT. Two separate facts, deliberately kept apart: `railClass` below
+  // still reads `slot` alone, because on a phone the landing rail must stay
+  // `w-full` (gating the rail on width would hide the finder itself, which is
+  // the entire page). Only the PORTAL is width-gated.
+  const isDesktop = useIsDesktop()
   // The 0ms head-start seed + first-paint browse are baked into a static
   // `search-seed.json` by the seed slice; fetch it at runtime and degrade
   // gracefully when it is absent (D40) — the finder still works, just without
@@ -344,8 +351,16 @@ export default function FinderIsland() {
       <HoveredDocProvider>
         <FinderNavProvider>
           <aside className={`h-screen ${railClass}`}>{finder}</aside>
-          {/* The graph: same React tree (bridge intact), page-owned DOM. */}
-          {slot ? createPortal(<GraphPane />, slot) : null}
+          {/* The graph: same React tree (bridge intact), page-owned DOM —
+              and, below `md`, NOT MOUNTED AT ALL. index.astro hides the slot
+              with `hidden md:block`, but CSS `display: none` does not stop
+              GraphPane's mount effect from appending <script src=bp-graph.js>
+              (140 KB) and fetching graph.json (437 KB): measured at 390x844,
+              576,990 B arrived for a pane whose computed display was `none`.
+              Not mounting it is what stops the download. On a resize across
+              768px the gate mounts/unmounts and GraphPane's own cleanup tears
+              the renderer down. */}
+          {slot && isDesktop ? createPortal(<GraphPane />, slot) : null}
         </FinderNavProvider>
       </HoveredDocProvider>
     </FinderErrorBoundary>

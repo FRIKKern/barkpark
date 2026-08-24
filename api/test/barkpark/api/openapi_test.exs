@@ -243,4 +243,70 @@ defmodule Barkpark.Api.OpenApiTest do
   test "spec/0 builds without raising (admin superset)" do
     assert %{"openapi" => "3.1.0"} = OpenApi.spec()
   end
+
+  # ── Regeneration discipline (task-openapi-drift-chronic) ──────────────────
+  #
+  # The CI drift gate (.github/workflows/elixir.yml, "OpenAPI drift check")
+  # only reports that the committed bytes differ. These asserts are why that is
+  # a fair demand rather than mystery noise:
+  #
+  #   * generation is byte-DETERMINISTIC, so a reported diff is always the
+  #     author's own change and never run-to-run jitter — "just regenerate and
+  #     commit" is a winnable instruction;
+  #   * the two edit shapes that historically drifted `main` — adding a plugin
+  #     route, and changing one command's help text — each provably MOVE the
+  #     artifact bytes, so the gate cannot be satisfied by luck.
+  #
+  # If the determinism assert ever fails, the NONDETERMINISM is the bug. Fix
+  # the ordering/timestamp source in the generator; do not relax the gate.
+
+  @regen_command "cd api && mix barkpark.openapi"
+
+  # Byte-for-byte what `Mix.Tasks.Barkpark.Openapi` writes to docs/openapi.json.
+  # Kept in step with that task: same encoder, same pretty flag, same trailing
+  # newline. A divergence here would make these asserts prove the wrong thing.
+  defp artifact_bytes(spec), do: Jason.encode!(spec, pretty: true) <> "\n"
+
+  test "generation is byte-deterministic: two builds of one tree encode identically" do
+    assert artifact_bytes(OpenApi.spec()) == artifact_bytes(OpenApi.spec()),
+           "docs/openapi.json generation is NOT deterministic — `#{@regen_command}` " <>
+             "produces different bytes on consecutive runs of an unchanged tree, so " <>
+             "the CI drift gate is unwinnable. Find the nondeterministic source " <>
+             "(map/registry ordering, a timestamp, an absolute path) and fix it."
+  end
+
+  test "adding a route moves the artifact bytes (the drift gate has teeth)", %{
+    manifest: manifest
+  } do
+    [seed | _] = manifest["commands"]
+
+    added =
+      seed
+      |> Map.put("id", "drifttest.probe")
+      |> Map.put("noun", "drifttest")
+      |> Map.put("verb", "probe")
+      |> Map.put("http", %{"method" => "GET", "path_template" => "/v1/drifttest/probe"})
+      |> Map.delete("scoped_prefix")
+
+    mutated = Map.put(manifest, "commands", manifest["commands"] ++ [added])
+
+    assert Map.has_key?(OpenApi.spec(mutated)["paths"], "/v1/drifttest/probe"),
+           "a manifest command did not reach the descriptor at all"
+
+    refute artifact_bytes(OpenApi.spec(mutated)) == artifact_bytes(OpenApi.spec(manifest)),
+           "adding a route left docs/openapi.json byte-identical — the drift gate " <>
+             "would happily let an undocumented public route merge"
+  end
+
+  test "editing a command's help text moves the artifact bytes (the drift gate has teeth)",
+       %{manifest: manifest} do
+    [seed | rest] = manifest["commands"]
+    edited = Map.put(seed, "summary", Map.get(seed, "summary", "") <> " (edited)")
+    mutated = Map.put(manifest, "commands", [edited | rest])
+
+    refute artifact_bytes(OpenApi.spec(mutated)) == artifact_bytes(OpenApi.spec(manifest)),
+           "a one-word command-summary edit left docs/openapi.json byte-identical — " <>
+             "this is the exact edit shape that drifted main on 2026-07-13, so the " <>
+             "gate must be able to see it"
+  end
 end

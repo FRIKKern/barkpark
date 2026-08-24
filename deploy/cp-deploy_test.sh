@@ -11,6 +11,13 @@
 #   1) cp-deploy.sh statically contains the pin (stable front + daemon-reload).
 #   2) the exact sed rewrite the script uses turns a localhost:4100 (or :4101, or
 #      an =-separated) control-url into https://barkpark.cloud, idempotently.
+#   3) EVERY status-code classification in the script accepts only 2xx/3xx, and
+#      the real script aborts/reverts when a probe answers 404.
+#
+# HOUSE RULE for this file: an assertion extracted from the script must cover
+# EVERY occurrence, never `head -1`. Two defects of that shape have already been
+# paid for here (the daemon-reload grep, the health-class grep) — each stayed
+# green because a second, untouched occurrence answered for the broken one.
 # Run: bash deploy/cp-deploy_test.sh
 set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -56,6 +63,11 @@ PIN_SED_EXPR="${PIN_SED_EXPR//\$\{PROV_CONTROL_URL\}/$PROV_CONTROL_URL}"
 # survives being re-evaluated. Same idiom as code_is_healthy below.
 pin_expr_ok() { [ -n "$PIN_SED_EXPR" ] && case "$PIN_SED_EXPR" in 's#--control-url'*) return 0 ;; *) return 1 ;; esac; }
 check "extracted the script's own control-url sed expression" "pin_expr_ok"
+# head -1 above is only safe while there IS exactly one. A second control-url
+# rewrite (a copy, a second unit) would be replayed by nothing — the same
+# hide-behind-a-sibling shape as the two defects this file has already paid for.
+one_pin_sed() { [ "$(grep -c -- 'sed -i -E "s#--control-url' "$SCRIPT")" = 1 ]; }
+check "exactly one control-url rewrite exists in the script (head -1 hides no sibling)" "one_pin_sed"
 # Runs the SCRIPT's expression, but writes via a temp instead of `-i` so the test
 # is portable to BSD sed (macOS) as well as GNU sed (the box).
 rewrite() {
@@ -93,20 +105,36 @@ echo "cp-deploy slot health-check status codes (pds-bl-w49)"
 # EXACT status-code class the script classifies as healthy, so a regression
 # (404 sneaking back in, or 200/301/302 sneaking OUT) fails here too — not just
 # a hardcoded string match.
-HEALTH_LINE="$(grep -n '200|301|302' "$SCRIPT" | head -1)"
-HEALTH_LINE="${HEALTH_LINE#*:}"
-HEALTH_RE="${HEALTH_LINE#*"grep -qE '^("}"
-HEALTH_RE="${HEALTH_RE%%")\$'"*}"
-check "found the health-check regex class in the script" "[ -n '$HEALTH_RE' ]"
-
+# EVERY occurrence, never `head -1`. cp-deploy.sh classifies an HTTP code in TWO
+# places — the pre-flip boot probe and the post-flip PUBLIC probe — and the old
+# `grep '200|301|302' | head -1` read only the first. Proven: widening ONLY the
+# post-flip class to accept 404 (the pre-flip one left clean) kept this harness
+# at ALL PASS, rc=0. Identical shape to the daemon-reload defect above: a second,
+# untouched occurrence answered for the broken one. Enumerating also means a
+# third probe added later is covered without touching this file.
 code_is_healthy() { echo "$1" | grep -qE "^(${HEALTH_RE})\$"; }  # replays the script's EXACT classification
-
-check "200 (OK) classified healthy"                     "code_is_healthy 200"
-check "301 (redirect) classified healthy"                "code_is_healthy 301"
-check "302 (redirect) classified healthy"                "code_is_healthy 302"
-check "404 (not found) NOT healthy — the fixed defect"   "! code_is_healthy 404"
-check "500 (server error) NOT healthy"                    "! code_is_healthy 500"
-check "000 (curl failure / connection refused) NOT healthy" "! code_is_healthy 000"
+n_health=0
+while IFS= read -r hl; do
+  [ -n "$hl" ] || continue
+  n_health=$((n_health + 1))
+  lineno="${hl%%:*}"
+  body="${hl#*:}"
+  HEALTH_RE="${body#*"grep -qE '^("}"
+  HEALTH_RE="${HEALTH_RE%%")\$'"*}"
+  check "line $lineno: extracted the health-check regex class" "[ -n '$HEALTH_RE' ]"
+  check "line $lineno: 200 (OK) classified healthy"                     "code_is_healthy 200"
+  check "line $lineno: 301 (redirect) classified healthy"                "code_is_healthy 301"
+  check "line $lineno: 302 (redirect) classified healthy"                "code_is_healthy 302"
+  check "line $lineno: 404 (not found) NOT healthy — the fixed defect"   "! code_is_healthy 404"
+  check "line $lineno: 500 (server error) NOT healthy"                    "! code_is_healthy 500"
+  check "line $lineno: 000 (curl failure / connection refused) NOT healthy" "! code_is_healthy 000"
+done <<EOF
+$(grep -n 'echo "\$code" | grep -qE' "$SCRIPT")
+EOF
+# Both probes must still BE there. Deleting one entirely would otherwise leave
+# the survivor passing and this section silently half as strong.
+check "both HTTP-code classifications are present (pre-flip boot + post-flip public)" \
+  "[ '$n_health' -ge 2 ]"
 
 
 # ===========================================================================
@@ -333,6 +361,28 @@ check "collided ports: refusal names the reason" "grep -q 'the port Caddy alread
 check "collided ports: nothing was built"        "! grep -q 'compose.*build' '$DOCKERLOG'"
 check "collided ports: Caddy untouched"          "[ \"\$(upstream)\" = 'localhost:4100' ]"
 check "collided ports: the live container survives" "[ -f '$DSTATE/running.4100' ]"
+
+# ---- Case 6: the PRE-FLIP boot probe answers 404 -> refused before any flip
+# The static replay above proves the CLASS excludes 404; this proves the script
+# ACTS on it. A container that boots and serves nothing but 404s (crashed app,
+# wrong port, static server up with the SPA missing) must never reach the flip.
+setup_flip localhost:4100
+rc="$(run_flip HEALTH_CODE=404)"
+check "boot probe 404: exit 14 (not 0)"          "[ '$rc' = '14' ]"
+check "boot probe 404: named UNHEALTHY in the log" "grep -q 'UNHEALTHY' '$FTMP/out.log'"
+check "boot probe 404: Caddy never moved"        "[ \"\$(upstream)\" = 'localhost:4100' ]"
+check "boot probe 404: the live blue slot survives" "[ -f '$DSTATE/running.4100' ]"
+
+# ---- Case 7: the POST-FLIP public probe answers 404 -> flip REVERTED
+# This is the case the `head -1` extraction could not see: widening ONLY the
+# post-flip class to accept 404 left the whole harness green. Driving the real
+# script makes that regression fail here regardless of how the check is spelled.
+setup_flip localhost:4100
+rc="$(run_flip PUBLIC_HEALTH_CODE=404)"
+check "public probe 404: exit 14 (not 0)"        "[ '$rc' = '14' ]"
+check "public probe 404: named in the log"       "grep -q 'post-flip public health check FAILED' '$FTMP/out.log'"
+check "public probe 404: Caddy flipped BACK to :4100" "[ \"\$(upstream)\" = 'localhost:4100' ]"
+check "public probe 404: the LIVE blue slot was NEVER stopped" "[ -f '$DSTATE/running.4100' ]"
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi
 exit "$fails"
