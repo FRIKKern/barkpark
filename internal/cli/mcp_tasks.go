@@ -814,6 +814,15 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 		"draft":            draftID,
 		"status":           docStatus,
 		"lifecycle_status": body["lifecycle_status"],
+		// pds-bl-task-create-draft-at-rc0 — the agent-facing twin of the CLI
+		// receipt. An MCP caller reads JSON only, so the remedy has to BE a
+		// field: `status: "draft"` beside `lifecycle_status: "open"` was read
+		// as a filed task by the first real user of the birth-fence regime.
+		"on_board": docStatus == "published",
+	}
+	if docStatus != "published" {
+		receipt["publish_command"] = taskPublishCommand(bareID)
+		receipt["not_on_board"] = "a draft is invisible to task_ready and cannot be claimed — publish it with publish_command, or pass publish:true to task_create"
 	}
 	if warnings := warningsFrom(warnBody); len(warnings) > 0 {
 		receipt["warnings"] = warnings

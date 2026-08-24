@@ -212,15 +212,26 @@ func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord) int {
 		}
 	}
 
+	onBoard := rec.hasDraft && !rec.draft
+
 	if out.machineOut() {
 		receipt := map[string]any{
 			"id":               bareID,
 			"draft":            draftID,
 			"status":           status,
 			"lifecycle_status": nil,
+			// pds-bl-task-create-draft-at-rc0 — THE FIELD A SCRIPT CAN BRANCH ON.
+			// `status` already said "draft", and it was still misread, because
+			// `lifecycle_status: "open"` sits beside it and "open" is the BOARD's
+			// word for ready. on_board answers the only question a caller of a
+			// verb named "create the task" is actually asking.
+			"on_board": onBoard,
 		}
 		if rec.lifecycle != "" {
 			receipt["lifecycle_status"] = rec.lifecycle
+		}
+		if !onBoard {
+			receipt["publish_command"] = taskPublishCommand(bareID)
 		}
 		out.renderJSON(receipt)
 		return exitOK
@@ -235,7 +246,52 @@ func renderTaskCreated(out *writer, draftID string, rec taskCreateRecord) int {
 		bornText = rec.lifecycle
 	}
 	out.outf("created task %s (%s, lifecycle %s)", bareID, statusText, bornText)
+	// pds-bl-task-create-draft-at-rc0 — A TRUE LINE THAT CARRIED NO REMEDY.
+	// The line above always said "draft" and it was still trusted, which is the
+	// whole finding: it states a fact and never says what the fact COSTS. A row
+	// left as a draft is on nobody's board — `bp task ready` cannot return it
+	// and no worker can claim it — and the receipt named neither that
+	// consequence nor the one command that fixes it. The `lifecycle open`
+	// half-sentence beside it actively pulls the other way, because "open" is
+	// the BOARD's word for ready.
+	//
+	// A LABEL, NOT A REFUSAL, AND NOT A SILENT PUBLISH. `--yes` is the shared
+	// prod-write global every write verb takes ("skip the prod confirmation");
+	// teaching it to publish here would make its meaning verb-dependent
+	// everywhere else. And create-then-patch-then-publish is a supported,
+	// used workflow — it is the only way to file a row that needs registered
+	// weighted tags to clear the publish wall — so a non-zero exit would red
+	// every script that does the right thing. The row's own criterion allows
+	// exactly this: refuse, OR label at a non-success shape.
+	for _, line := range taskDraftRemedyLines(bareID, onBoard) {
+		out.outf("%s", line)
+	}
 	return exitOK
+}
+
+// taskPublishCommand is the ONE command that puts a created draft on the board.
+// It is `bp doc publish`, not `bp task publish`: `task` has no publish verb
+// (ls, ready, prime, events, get, claim, close, release, stamp, next, move,
+// stage, pulse), so a remedy naming a `bp task publish` would send the reader
+// to a usage error. Derived here once so the CLI receipt, the JSON receipt and
+// the MCP receipt cannot drift on what they tell people to run.
+func taskPublishCommand(bareID string) string {
+	return "bp doc publish task " + bareID + " --yes"
+}
+
+// taskDraftRemedyLines is what a receipt owes a person when the row it just
+// reported is NOT on the board: what the state costs, and how to leave it.
+// Empty when the row IS on the board — a remedy for a problem the caller does
+// not have is noise.
+func taskDraftRemedyLines(bareID string, onBoard bool) []string {
+	if onBoard {
+		return nil
+	}
+	return []string{
+		"  NOT ON THE BOARD — a draft is invisible to `bp task ready` and cannot be claimed.",
+		"  publish it:  " + taskPublishCommand(bareID),
+		"  or create it published next time:  bp task create --publish …",
+	}
 }
 
 // ensureTaskPortableBrief makes a TUI-readable PortableDoc brief an invariant
