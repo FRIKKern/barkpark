@@ -220,11 +220,23 @@ defmodule Barkpark.Content.Query do
   #   * `_createdAt`/`_updatedAt` — comparison ops only. String ops on a
   #     timestamp column are REFUSED rather than widened: `contains` on a
   #     timestamp is a category error, not a missing feature.
+  #   * `type`/`_type` — the LAST member of this class to be found
+  #     (task-20c081f70cb8d85e), and the only one that had NO clause at all
+  #     rather than a partial set. `type` is a promoted column
+  #     (`documents.type`, NOT NULL by construction) that every response echoes
+  #     back as `_type`, so `filter[_type][eq]=post` reads like the most
+  #     ordinary query there is — and BOTH spellings fell to the generic JSONB
+  #     arm, read `content->>'type'`, and returned 0 rows at 200 OK for every
+  #     value including the correct one. Same op set as `doc_id`/`_id`:
+  #     comparison ops are a category error on a type name, and `is` could only
+  #     ever mean "no rows" on a NOT NULL column.
   @column_field_ops %{
     "title" => ~w(eq neq in nin contains startsWith endsWith gt gte lt lte is has hasStrong),
     "status" => ~w(eq neq in nin contains startsWith endsWith is),
     "doc_id" => ~w(eq neq in nin contains startsWith endsWith),
     "_id" => ~w(eq neq in nin contains startsWith endsWith),
+    "type" => ~w(eq neq in nin contains startsWith endsWith),
+    "_type" => ~w(eq neq in nin contains startsWith endsWith),
     "_createdAt" => ~w(eq neq gt gte lt lte),
     "_updatedAt" => ~w(eq neq gt gte lt lte)
   }
@@ -495,6 +507,46 @@ defmodule Barkpark.Content.Query do
   # `_id` op to the doc_id column — `.eq('_id', x)` / `.in('_id', ids)` now work
   # (batch-fetch a known id-list in one request) instead of silently matching none.
   defp apply_field_op(query, "_id", op, v), do: apply_field_op(query, "doc_id", op, v)
+
+  # `type` operators — the last promoted column with NO clause at all, so BOTH
+  # its spellings read `content->>'type'` and could only ever return 0 rows at
+  # 200 OK (task-20c081f70cb8d85e). Measured on the unpatched tree, on a route
+  # where every row matches: `filter[_type][eq]=post` -> 0 of 3. Worse than a
+  # missing feature — a board audit reading that zero writes down "absent" for
+  # a type that is fully present.
+  #
+  # WHY PROMOTING THE BARE SPELLING IS SAFE, and not the judgement call it looks
+  # like: `type` is on `Barkpark.Content.Writer`'s `@reserved_in` list
+  # (writer.ex:1291) and `Map.drop`ped from `content` on EVERY write
+  # (writer.ex:1310), alongside `doc_id`, `title` and `status`. No document can
+  # carry a `type` content key — verified by writing one and reading the row
+  # back: `%{"_id" => "p1", "title" => "X", "type" => "park", "mood" => "sunny"}`
+  # stores `content == %{"mood" => "sunny"}`. So there is no schemaless caller
+  # whose working JSONB filter this could break; the only thing bare `type`
+  # could match before was nothing at all.
+  defp apply_field_op(query, "type", "eq", v), do: where(query, [d], d.type == ^v)
+
+  defp apply_field_op(query, "type", "neq", v), do: where(query, [d], d.type != ^v)
+
+  defp apply_field_op(query, "type", "in", vs) when is_list(vs),
+    do: where(query, [d], d.type in ^vs)
+
+  defp apply_field_op(query, "type", "nin", vs) when is_list(vs),
+    do: where(query, [d], d.type not in ^vs)
+
+  defp apply_field_op(query, "type", "contains", v),
+    do: where(query, [d], ilike(d.type, ^like_contains(v)))
+
+  defp apply_field_op(query, "type", "startsWith", v),
+    do: where(query, [d], ilike(d.type, ^like_starts_with(v)))
+
+  defp apply_field_op(query, "type", "endsWith", v),
+    do: where(query, [d], ilike(d.type, ^like_ends_with(v)))
+
+  # `_type` is the spelling clients SEE in every response body, so filtering
+  # should use that same name — the exact argument the `_id` -> `doc_id` alias
+  # above makes, for the sibling column.
+  defp apply_field_op(query, "_type", op, v), do: apply_field_op(query, "type", op, v)
 
   defp apply_field_op(query, field, "eq", v) do
     if nested_path?(field) do
