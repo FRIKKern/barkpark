@@ -190,6 +190,22 @@ defmodule Barkpark.Plugins.Sheets do
     ]
   end
 
+  @doc """
+  The `bp` CLI manifest surface for this plugin — see `Barkpark.Plugins.Sheets.CLI`.
+
+  Delegated through `Code.ensure_loaded?/1` (the Tickets / OnixEdit idiom) so the
+  plugin still compiles and boots in a worktree where only one of the two slices
+  has landed. Every HTTP route `register_routes/1` mounts above now carries a
+  command; the `:public_root` LiveView reader deliberately does not — it is an
+  HTML page for a browser, not a JSON verb.
+  """
+  @impl Barkpark.Plugin
+  def cli_commands do
+    if Code.ensure_loaded?(Barkpark.Plugins.Sheets.CLI),
+      do: Barkpark.Plugins.Sheets.CLI.commands(),
+      else: []
+  end
+
   # before_save: reject a sheet document whose cells or merges are
   # structurally malformed — a `cells` that is not a map, a non-A1 cell key,
   # a cell descriptor that is not a map, a cell ref or merge corner beyond

@@ -1378,6 +1378,23 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # The collection's own metadata read. `media.collections` (list) and
+      # `media.collection-assets` (its contents) were both declared while the
+      # single-collection GET between them was not — a family that shipped with
+      # its middle missing.
+      core_cmd(
+        "media.collection",
+        "media",
+        "collection",
+        "Fetch one media collection's metadata by id.",
+        "GET",
+        "/v1/media/:dataset/collections/:id",
+        "none",
+        args: [arg("id", true, "string", "Collection id.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "media.collection-assets",
         "media",
@@ -1621,6 +1638,26 @@ defmodule Barkpark.Plugins.Capabilities do
         ],
         writes: true,
         default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # The read side of the share pair: `media.share-collection` mints the
+      # token and `media.revoke-share` kills it, but nothing declared the route
+      # that REDEEMS one — so the operator could mint a link and had no way to
+      # check what a recipient would see. Tier "none" because the route rides
+      # the soft-auth `:api` pipeline: the token IS the credential.
+      core_cmd(
+        "media.share-view",
+        "media",
+        "share-view",
+        "Read a media collection through the public share token that `media share-collection` minted.",
+        "GET",
+        "/v1/media/:dataset/share/:token",
+        "none",
+        args: [
+          arg("token", true, "string", "Share token returned by `media share-collection`.")
+        ],
+        writes: false,
+        default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
@@ -2487,6 +2524,30 @@ defmodule Barkpark.Plugins.Capabilities do
       # /v1/graph/* routes sit behind the `[:api, :require_token]` pipeline —
       # bearer-gated, NOT admin. No scoped_prefix — these are global
       # content-graph reads, not scoped to a single doc prefix.
+      # The whole-corpus derivation `/v1/graph` backs the Web finder's landing
+      # graph. `graph.show`/`tasks`/`orphans`/`dangling` were declared and this
+      # root was not, so the one call that returns the ENTIRE graph had no verb.
+      # Same `read` tier as its four siblings — one `[:api, :require_token]`
+      # scope mounts all five.
+      core_cmd(
+        "graph.corpus",
+        "graph",
+        "corpus",
+        "Derive the whole-corpus content graph — every node and edge under the published lens.",
+        "GET",
+        "/v1/graph",
+        "read",
+        flags: [
+          flag("dataset", "string", "Dataset to scope to (default production)."),
+          flag(
+            "types",
+            "string",
+            "Comma-separated document types to include (default: every type in the dataset)."
+          )
+        ],
+        writes: false,
+        default_output: "json"
+      ),
       core_cmd(
         "graph.show",
         "graph",
