@@ -1,5 +1,10 @@
 #!/bin/bash
-# Pre-commit hook: fail fast on unformatted Elixir code.
+# Pre-commit hook: two local checks.
+#
+#   1. BLOCKING — fail fast on unformatted Elixir code.
+#   2. ADVISORY — remind you to regenerate docs/openapi.json when you stage a
+#      file the OpenAPI generator reads (task-openapi-drift-chronic). Never
+#      exits non-zero; its own comment block below says why.
 #
 # Why: PR #58 + PR #59 were "mix format pass" hotfixes — unformatted code
 # slipped through because the format check in elixir.yml lives inside the
@@ -10,10 +15,57 @@
 # Install: `make hooks` (sets core.hooksPath to .githooks).
 # Bypass:  `git commit --no-verify` (use sparingly; CI will still gate).
 #
-# Scope: only staged *.ex / *.exs files. If none, hook is a no-op and adds
-# zero latency to non-Elixir commits.
+# Scope: the format check reads only staged *.ex / *.exs files. If none, that
+# half is a no-op and adds zero latency to non-Elixir commits. Both checks are
+# pure `git diff --cached` + `mix format`; neither compiles or touches a DB.
 
 set -e
+
+# ── OpenAPI descriptor reminder (task-openapi-drift-chronic) ────────────────
+#
+# docs/openapi.json is GENERATED from the capabilities manifest. Forgetting to
+# regenerate it is the single most common way a green-looking commit reds the
+# `OpenAPI drift check` on every open PR — it happened twice in one afternoon
+# on 2026-07-13.
+#
+# This check is a REMINDER, not a gate, and it is deliberately heuristic: a
+# real answer needs `mix barkpark.openapi`, which boots the app and needs the
+# database — far too slow for a pre-commit hook. So it asks only the cheap
+# question: did you stage a file the generator READS, without staging its
+# output? CI still holds the line byte-for-byte.
+#
+# It does NOT exit non-zero. A false positive that trained everyone to reach
+# for `--no-verify` would cost more than the drift it prevents.
+
+# The files whose contents actually reach docs/openapi.json: the generator, the
+# core command/noun registry, the error-code table behind the Error enum, and
+# the plugin modules that declare cli_commands.
+MANIFEST_SOURCES=$(git diff --cached --name-only --diff-filter=ACM -- \
+  'api/lib/barkpark/api/openapi.ex' \
+  'api/lib/barkpark/plugins/capabilities.ex' \
+  'api/lib/barkpark/content/errors.ex' \
+  'api/lib/barkpark/plugins/*.ex' \
+  'api/lib/barkpark/plugins/*/cli.ex')
+
+if [ -n "$MANIFEST_SOURCES" ]; then
+  if [ -z "$(git diff --cached --name-only -- docs/openapi.json)" ]; then
+    echo ""
+    echo "[pre-commit] NOTE — you staged a source of docs/openapi.json:"
+    echo "$MANIFEST_SOURCES" | sed 's|^|             |'
+    echo ""
+    echo "             ...but docs/openapi.json is NOT staged. If this edit"
+    echo "             added a route, renamed one, or changed a command's"
+    echo "             summary/args, the descriptor is now stale and CI's"
+    echo "             'OpenAPI drift check' will red every open PR."
+    echo ""
+    echo "             Regenerate (from the repo root):"
+    echo "                 cd api && mix barkpark.openapi && cd .. && git add docs/openapi.json"
+    echo ""
+    echo "             Harmless internal edit? Ignore this — the commit is"
+    echo "             proceeding, and CI is the authority either way."
+    echo ""
+  fi
+fi
 
 # Gather staged Elixir files (added/copied/modified, NUL-separated).
 # Filter out deletions so we don't try to format files that no longer exist.

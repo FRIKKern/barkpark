@@ -546,54 +546,14 @@ jobs:
         working-directory: .
 
       - name: Compile (dev, --warnings-as-errors)
+        id: build
         run: mix compile --warnings-as-errors
 
       - name: DB setup
+        id: db
         run: |
           mix ecto.create
           mix ecto.migrate
-
-      - name: OpenAPI drift check (docs/openapi.json must match the manifest)
-        # Regenerates the spec from the live capabilities manifest and fails if
-        # the checked-in docs/openapi.json is stale — the "the doc never drifts
-        # from the routes" guarantee. `git add -N` first so an accidentally
-        # untracked artifact is caught too (a new file is invisible to
-        # `git diff --exit-code`, which is how the drift gate can pass
-        # vacuously). Runs from the repo root because the artifact lives at
-        # docs/openapi.json (one level above api/).
-        run: |
-          mix barkpark.openapi
-          cd ..
-          git add -N docs/openapi.json
-          git diff --exit-code docs/openapi.json \
-            || (echo "::error::docs/openapi.json is stale — run 'cd api && mix barkpark.openapi' and commit" && exit 1)
-
-      - name: Paper-component golden-parity freshness (3 mirrors must match the emitter)
-        # Same drift-gate shape as the OpenAPI check above, for the cross-surface
-        # PAPER-COMPONENT parity spine (Unified Aesthetic W5.c). Regenerates the
-        # structural-projection fixtures from the View emitter + shared status
-        # manifest and fails if ANY of the three committed mirrors drifted:
-        #   api/test/support/fixtures/*.golden.json
-        #   web/__tests__/fixtures/*.golden.json
-        #   internal/pdrender/testdata/*.golden.json
-        # A `Render.Components` emitter or design/status-manifest.json glyph/role
-        # edit that shipped WITHOUT a regen reds HERE (byte-level), complementing the
-        # term-level freshness + realization asserts in
-        # test/barkpark/portable_doc/render/component_golden_parity_test.exs. The gen
-        # writes byte-identically to all three trees; `git add -N` first so a
-        # brand-new untracked mirror is caught too. Runs from the repo root — the web
-        # + internal/pdrender mirrors live one level above api/.
-        run: |
-          mix barkpark.paper_components.gen_golden_parity
-          cd ..
-          git add -N 'api/test/support/fixtures/*.golden.json' \
-                     'web/__tests__/fixtures/*.golden.json' \
-                     'internal/pdrender/testdata/*.golden.json'
-          git diff --exit-code -- \
-            'api/test/support/fixtures/*.golden.json' \
-            'web/__tests__/fixtures/*.golden.json' \
-            'internal/pdrender/testdata/*.golden.json' \
-            || (echo "::error::paper-component golden fixtures are stale — run 'cd api && mix barkpark.paper_components.gen_golden_parity' and commit all three mirrors" && exit 1)
 
       - name: Test
         # CI-BLOCKING GATES ride this default `mix test` — no separate/advisory
@@ -620,6 +580,87 @@ jobs:
         # docs/spec/bokbasen-api-contract.md "How to test" for details.
         # Do NOT add a CI job that requires real Bokbasen credentials.
         run: mix test
+
+      - name: OpenAPI drift check (docs/openapi.json must match the manifest)
+        # Regenerates the spec from the live capabilities manifest and fails if
+        # the checked-in docs/openapi.json is stale — the "the doc never drifts
+        # from the routes" guarantee. `git add -N` first so an accidentally
+        # untracked artifact is caught too (a new file is invisible to
+        # `git diff --exit-code`, which is how the drift gate can pass
+        # vacuously). Runs from the repo root because the artifact lives at
+        # docs/openapi.json (one level above api/).
+        #
+        # GATE ORDER — task-openapi-drift-chronic. This step used to sit BEFORE
+        # `mix test`. One stale byte on main therefore aborted the job before a
+        # single test executed: every open PR reported ZERO substantive test
+        # results, and a generated-file nit masked real failures. It now runs
+        # AFTER `mix test`, and its `if:` deliberately ignores the TEST result
+        # while still requiring a usable build — so a red suite and a stale
+        # descriptor are reported INDEPENDENTLY and neither hides the other,
+        # but a broken compile does not cascade into a bogus "stale artifact"
+        # red that says nothing true. The gate is unchanged in strength — only
+        # its position moved. Do NOT move it back above `mix test`.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        run: |
+          mix barkpark.openapi
+          cd ..
+          git add -N docs/openapi.json
+          if git diff --exit-code docs/openapi.json; then
+            exit 0
+          fi
+          echo ""
+          echo "================================================================"
+          echo "docs/openapi.json is STALE."
+          echo ""
+          echo "The diff printed above is what YOUR change did to the public API"
+          echo "surface but never committed. It is not noise, and it is not"
+          echo "someone else's drift: generation is byte-deterministic (proved by"
+          echo "the determinism test in api/test/barkpark/api/openapi_test.exs),"
+          echo "so the same tree always produces the same bytes. Read the diff --"
+          echo "it is your own descriptor change."
+          echo ""
+          echo "Fix it from the repo root, in one line:"
+          echo ""
+          echo "    cd api && mix barkpark.openapi && cd .. && git add docs/openapi.json"
+          echo ""
+          echo "Then commit (or amend) and push. Regenerating is PART OF the"
+          echo "change, not a follow-up PR."
+          echo "================================================================"
+          echo "::error file=docs/openapi.json,title=OpenAPI descriptor is stale::Run 'cd api && mix barkpark.openapi' from the repo root and commit docs/openapi.json. The exact diff is printed in this step's log."
+          exit 1
+
+      - name: Paper-component golden-parity freshness (3 mirrors must match the emitter)
+        # Same drift-gate shape as the OpenAPI check above, for the cross-surface
+        # PAPER-COMPONENT parity spine (Unified Aesthetic W5.c). Regenerates the
+        # structural-projection fixtures from the View emitter + shared status
+        # manifest and fails if ANY of the three committed mirrors drifted:
+        #   api/test/support/fixtures/*.golden.json
+        #   web/__tests__/fixtures/*.golden.json
+        #   internal/pdrender/testdata/*.golden.json
+        # A `Render.Components` emitter or design/status-manifest.json glyph/role
+        # edit that shipped WITHOUT a regen reds HERE (byte-level), complementing the
+        # term-level freshness + realization asserts in
+        # test/barkpark/portable_doc/render/component_golden_parity_test.exs. The gen
+        # writes byte-identically to all three trees; `git add -N` first so a
+        # brand-new untracked mirror is caught too. Runs from the repo root — the web
+        # + internal/pdrender mirrors live one level above api/.
+        #
+        # Same gate-order fix as the OpenAPI step above
+        # (task-openapi-drift-chronic): runs AFTER `mix test`, on the same
+        # build-succeeded-but-ignore-the-test-result condition, so a red suite
+        # does not hide stale fixtures.
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        run: |
+          mix barkpark.paper_components.gen_golden_parity
+          cd ..
+          git add -N 'api/test/support/fixtures/*.golden.json' \
+                     'web/__tests__/fixtures/*.golden.json' \
+                     'internal/pdrender/testdata/*.golden.json'
+          git diff --exit-code -- \
+            'api/test/support/fixtures/*.golden.json' \
+            'web/__tests__/fixtures/*.golden.json' \
+            'internal/pdrender/testdata/*.golden.json' \
+            || (echo "::error::paper-component golden fixtures are stale — run 'cd api && mix barkpark.paper_components.gen_golden_parity' and commit all three mirrors" && exit 1)
 
       - name: Plugins-off boot invariant (boot_test — separate step, NOT in `mix test`)
         # Goal barkpark-G1 / authoring-excellence ae-boot-gate-ci. The
@@ -648,6 +689,13 @@ jobs:
         #
         # Budget: ~30-60s (local wall 30.75s / 13.3s ExUnit sync; CI runners
         # slower). Measured job-step duration is recorded in the PR body.
+        #
+        # Guarded like the two freshness gates above (task-openapi-drift-chronic):
+        # this is SUBSTANTIVE test evidence, and a stale generated artifact must
+        # never be able to suppress it. Unguarded, a one-byte docs/openapi.json
+        # drift would skip the boot bar entirely — a fresh instance of the exact
+        # failure mode that left this bar red on main for weeks (see above).
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
 
   mix-prod-compile:
