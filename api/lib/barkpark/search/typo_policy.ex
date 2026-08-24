@@ -80,7 +80,8 @@ defmodule Barkpark.Search.TypoPolicy do
   recovery pass, `similarity_threshold` otherwise.
   """
   @spec threshold(map(), boolean()) :: float()
-  def threshold(config, true), do: get_threshold(config, "similarity_threshold_relaxed", @default_threshold_relaxed)
+  def threshold(config, true),
+    do: get_threshold(config, "similarity_threshold_relaxed", @default_threshold_relaxed)
 
   def threshold(config, _), do: get_threshold(config, "similarity_threshold", @default_threshold)
 
