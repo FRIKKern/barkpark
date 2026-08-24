@@ -13,7 +13,14 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["src/**", "tests/**", "vitest.config.ts", "vitest.browser.config.ts"],
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "vitest.config.ts",
+        "vitest.browser.config.ts",
+        "vitest.workerd.config.ts",
+        "wrangler.toml"
+      ],
       "outputs": ["coverage/**"]
     },
     "lint": {
