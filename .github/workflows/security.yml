@@ -408,6 +408,13 @@ jobs:
       - name: Every baseline entry still points at a construct of its own type
         run: bash api/scripts/sobelow-baseline-staleness-check.sh
 
+  # spec-authority: advisory-ok — same standing as the job above, for the same
+  # reason. The `(blocking)` token is inside the JOB name, which IS this job's
+  # rendered check-run context, and that context carries a committed exclusion
+  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
+  # The token means "blocking WITHIN this workflow, unlike the advisory sobelow
+  # job" — it does not claim branch protection, which `Security gate` does not
+  # carry. Renaming this job would silently invalidate that ledger row.
   sobelow-baseline-fingerprint:
     name: Sobelow baseline rows still hash to their own fingerprint (blocking)
     # BLOCKING, and in ITS OWN job for one reason: it needs the BEAM, and the
