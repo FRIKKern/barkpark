@@ -503,9 +503,13 @@ defmodule Barkpark.Media.Delivery.Search do
     # BUG 2 fix: the raw-SQL tag-facet aggregation previously filtered on
     # `m.dataset = $2` ONLY — no tenant scope — so it leaked tag counts across
     # every workspace sharing the `dataset` STRING. Mirror the Ecto
-    # `scope_to_workspace/3` envelope here: bind workspace_id (and project_id
-    # when present) as parameters $3.. ahead of the dynamic filters. Same
-    # nil-means-unscoped back-compat as Content.Scope.
+    # `scope_to_workspace_or_global/3` envelope here — that is the helper the
+    # Ecto results path calls (`build_query/2`), and the one whose nil arm is an
+    # EXPLICIT global read. Bind workspace_id (and project_id when present) as
+    # parameters $3.. ahead of the dynamic filters. Same nil-means-unscoped
+    # back-compat as Content.Scope's `_or_global`. Do NOT read this as the
+    # fail-closed `scope_to_workspace/3`: that one turns a nil workspace into
+    # `where: false`, which is the opposite of what these fragments emit.
     #
     # The tags themselves come from the JOINED `documents d`, so `m`-scope alone
     # is not enough: a workspace-B document that references THIS workspace's
@@ -547,7 +551,10 @@ defmodule Barkpark.Media.Delivery.Search do
   # `doc_scope_sql` scopes the JOINED `documents d` (null-tolerant, mirroring
   # `join_scope_workspace/3`). Both clauses reuse the same bound params, so a
   # nil workspace_id is the unscoped back-compat path (no clauses emitted),
-  # matching Barkpark.Content.Scope.scope_to_workspace/3.
+  # matching Barkpark.Content.Scope.scope_to_workspace_or_global/3 — NOT the
+  # fail-closed `scope_to_workspace/3`, whose nil arm is `where: false`. The
+  # name matters here precisely because a reader auditing this raw SQL for
+  # fail-closedness would otherwise be told it has a property it does not.
   defp scope_fragments(opts, start_idx) do
     # `m.workspace_id` / `m.project_id` are :binary_id (uuid) columns. Raw
     # Postgrex needs the 16-byte binary, not the UUID string — the Ecto path
