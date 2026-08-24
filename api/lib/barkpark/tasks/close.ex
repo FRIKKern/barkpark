@@ -883,8 +883,9 @@ defmodule Barkpark.Tasks.Close do
   # claims about the world:
   #   * "close"       — a close carried a `landed` map. NOTHING was observed;
   #     `verified: false`. The actor is recorded twice on purpose:
-  #     `asserted_worker` is the client-supplied `worker_id` (close.ex:26-31 —
-  #     not authorization, a caller can claim to be anyone) and
+  #     `asserted_worker` is the client-supplied `worker_id` (see the
+  #     "NONE OF THIS IS AUTHORIZATION" note in this module's header — not
+  #     authorization, a caller can claim to be anyone) and
   #     `authenticated_token_id` is the api_token the server actually
   #     authenticated (nil for internal callers). A record that named only the
   #     first would carry the fabricator's chosen name and nothing else.
@@ -967,7 +968,8 @@ defmodule Barkpark.Tasks.Close do
   #
   # It used to read "auto: lead-closed on merge by <worker> (epoch <n>) — landed
   # <what>", which asserted TWO things nothing on this path observed: that the
-  # closer is a LEAD (`worker_id` is a client-supplied body param — close.ex:26-31)
+  # closer is a LEAD (`worker_id` is a client-supplied body param — see the
+  # "NONE OF THIS IS AUTHORIZATION" note in this module's header)
   # and that a MERGE happened (no GitHub call runs here, and none may: this
   # executes under `pg_advisory_xact_lock`, where a network round-trip converts a
   # fabrication bug into an availability bug). A scratch worker paid a gate citing
