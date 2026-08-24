@@ -114,11 +114,13 @@ The refusal then misdirects:
 
 ```
 bp: fenced_off
-  hint: your claim epoch is stale (lease swept or a blocker/move fenced you)
+  hint: your claim epoch is stale — most often your own `bp task pulse` bumped it …
 ```
 
-Neither happened — **your own heartbeat fenced you**, and the hint sends you hunting
-a cause that does not exist.
+The hint used to name only *lease swept or a blocker/move* — neither of which had
+happened; **your own heartbeat fenced you**, and it sent you hunting a cause that did
+not exist. The copy now names the pulse first. The trap itself is unchanged: the
+epoch you read still goes stale as you write.
 
 > **Fix:** re-read `doc.claim.epoch` before stamping, or carry forward the epoch your
 > *most recent* write printed — never the claim's.
