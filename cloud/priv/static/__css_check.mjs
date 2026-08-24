@@ -1343,8 +1343,57 @@ function runContrast(errs) {
 // is compliant — its indicator is that border, and the translucent shadow is a
 // decorative halo around it (.fleet-row[data-id]:focus-visible and
 // .site-row[data-id]:focus-visible are exactly this shape and must stay green).
-// A rule that paints no band at all is out of scope: it is styling something
-// else on focus and inherits the shared ring block.
+// task-5acf9b5ad30f9a74 — THE TWO GAPS WAVE 7 NAMED, AND WHAT DRIVING THEM FOUND.
+//
+// GAP 2 IS NOT THEORETICAL. The sentence above used to end "A rule that paints
+// no band at all is out of scope: it is styling something else on focus and
+// inherits the shared ring block." That is TRUE of a rule that leaves the
+// indicator alone, and FALSE of one that turns it OFF. `origin/main` carried
+// exactly one of the second kind and E12 skipped it by construction:
+//
+//   app.css  .team-search input:focus { outline: none; border-color: rgba(var(--cc-line-rgb), 0.28); }
+//
+// The `outline` is `none`, so no band was found; `if (!band) continue` retired
+// the rule before the alpha test could look at anything. MEASURED IN HEADLESS
+// CHROME under `Emulation.setFocusEmulationEnabled`, keyboard-focused
+// (`:focus-visible` matches): `outline-style: none`, `box-shadow: none`,
+// `border-color: rgba(20,30,48,0.28)`. The sole indicator is a border moving
+// from alpha 0.12 to alpha 0.28 — 1.824:1 light and 2.510:1 dark against the
+// `--cc-modal` it sits on, and 1.433:1 / 1.782:1 against its own resting
+// border. The element is NOT in the shared ring block's class list (that list
+// is explicit and `.team-search input` is not on it) and carries no
+// `.form-input`, so nothing else paints a ring for it.
+//
+// THE ARITHMETIC CEILING EXTENDS. This file's header quotes alpha 0.15 ceiling
+// 1.617:1 and alpha 0.20 ceiling 1.918:1; the same sweep gives alpha 0.28 a
+// ceiling of 2.532:1 (best case: white tint on a grey-29 backdrop) — still
+// under the 3:1 floor over ANY opaque backdrop, with ANY accent.
+//
+// SO THE PREDICATE SPLITS. A focus rule that paints no band is out of scope
+// ONLY while it leaves the UA's own indicator standing. One that ALSO declares
+// `outline: none | 0` has removed the only indicator there was, and inherits
+// nothing unless its own subject appears in a rule that DOES paint a band —
+// the "add your class here rather than re-rolling the ring" contract the shared
+// block states in prose, now checked.
+//
+// GAP 1 IS REAL COVERAGE OVER AN EMPTY POPULATION, AND SAYS SO. E12 scanned
+// app.css alone; styleguide.html's inline <style> chrome was unchecked. Driven:
+// that block declares ZERO `:focus` rules today, so extending the scan finds
+// nothing and is a forward guard, not a fix. It is built anyway (the styleguide
+// is the living spec and a ring authored there would have been invisible to
+// every gate) and its emptiness is PRINTED, so a reader can tell a clean scan
+// from an absent one.
+//
+// THE MEMBERSHIP TEST IS EXACT-SUBJECT, WHICH IS CONSERVATIVE ON PURPOSE. It
+// cannot see that `.a .b:focus` would be covered by a band-painting `.form-input`
+// rule if the element also carried that class — CSS text does not know what the
+// DOM composes. A rule in that position is a FALSE POSITIVE and belongs in
+// ALLOW_BANDLESS_FOCUS with a written reason, exactly like every other
+// allowlist in this file. It is empty today: the one member of the population
+// was a real defect and was fixed rather than allowed.
+const ALLOW_BANDLESS_FOCUS = [
+  // { selector: ".x:focus", why: "…" },
+];
 
 /** Substitute var() in an arbitrary declaration value until it is literal. */
 function resolveLiteralValue(value, map) {
@@ -1392,38 +1441,139 @@ function minAlphaAcrossThemes(atom) {
   return min;
 }
 
+/** The rule subject: the selector with its focus pseudo-classes removed. */
+function focusSubjectsOf(selector) {
+  return selector
+    .split(",")
+    .map((sel) => sel.replace(/::?focus(-visible|-within)?\b/g, "").replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Every focus rule across the sources E12 owns. `styleguide.html`'s inline
+ * <style> is scanned at its real line numbers — the offset is the block's own
+ * start, so a finding there is clickable rather than relative to a substring
+ * nobody can find.
+ */
+function focusRuleSources() {
+  const out = [{ file: "app.css", text: css, lineBase: 0 }];
+  for (const m of styleguideRaw.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)) {
+    const open = m[0].indexOf(">") + 1;
+    out.push({
+      file: "styleguide.html",
+      text: stripCssComments(m[1]),
+      lineBase: lineOf(styleguideRaw, m.index + open) - 1,
+    });
+  }
+  return out;
+}
+
+/** Every focus rule in every owned source, parsed once. */
+function allFocusRules() {
+  const rules = [];
+  for (const src of focusRuleSources()) {
+    for (const m of src.text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      const selector = m[1].trim();
+      if (!/:focus\b|:focus-visible\b/.test(selector)) continue;
+      // THE SELECTOR'S OWN LINE, not the match's. `([^{}]+)\{` starts matching
+      // at the character after the PREVIOUS rule's `}`, so `m.index` sits on
+      // whatever blank lines separate the two — measured 2 lines early on a
+      // styleguide probe (reported 202 for a rule on 204). A finding a reader
+      // cannot click is a finding they re-derive by hand.
+      const lead = m[1].length - m[1].trimStart().length;
+      rules.push({ selector, body: m[2], file: src.file, line: src.lineBase + lineOf(src.text, m.index + lead) });
+    }
+  }
+  return rules;
+}
+
+/** Declarations of a rule body, last-wins as in the cascade. */
+function declsOf(body) {
+  const decls = {};
+  for (const d of body.split(";")) {
+    const i = d.indexOf(":");
+    if (i < 0) continue;
+    const prop = d.slice(0, i).trim().toLowerCase();
+    if (prop.startsWith("--")) continue;
+    decls[prop] = d.slice(i + 1).trim();
+  }
+  return decls;
+}
+
+/** The indicator band of a rule: outermost box-shadow layer, else the outline colour. */
+function bandOf(decls) {
+  const shadow = decls["box-shadow"];
+  if (shadow && !/^none\b/i.test(shadow)) {
+    const layers = splitLayers(shadow);
+    const atom = colorAtomOf(layers[layers.length - 1]);
+    if (atom) return { band: atom, prop: "box-shadow" };
+  }
+  const outline = decls["outline"] || decls["outline-color"];
+  if (outline && !/^(none|0)\b/i.test(outline)) {
+    const atom = colorAtomOf(outline);
+    if (atom) return { band: atom, prop: decls["outline-color"] ? "outline-color" : "outline" };
+  }
+  return { band: null, prop: null };
+}
+
+/** How many focus rules E12 examined, by file — printed so an empty scan is visible. */
+export function focusScanCensus() {
+  const byFile = {};
+  for (const src of focusRuleSources()) byFile[src.file] = byFile[src.file] || 0;
+  for (const r of allFocusRules()) byFile[r.file] = (byFile[r.file] || 0) + 1;
+  return byFile;
+}
+
 export function focusIndicatorErrors() {
   const errs = [];
-  for (const m of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    const selector = m[1].trim();
-    if (!/:focus\b|:focus-visible\b/.test(selector)) continue;
-    const body = m[2];
+  const rules = allFocusRules();
+  // The subjects that DO paint a band — the membership set the suppression arm
+  // below asks about. Built across every owned source, so a styleguide rule can
+  // legitimately inherit an app.css ring and vice versa.
+  const banded = new Set();
+  for (const r of rules) {
+    if (bandOf(declsOf(r.body)).band) for (const sub of focusSubjectsOf(r.selector)) banded.add(sub);
+  }
+  const allowed = new Set(ALLOW_BANDLESS_FOCUS.map((a) => a.selector.replace(/\s+/g, " ").trim()));
 
-    const decls = {};
-    for (const d of body.split(";")) {
-      const i = d.indexOf(":");
-      if (i < 0) continue;
-      const prop = d.slice(0, i).trim().toLowerCase();
-      if (prop.startsWith("--")) continue;
-      decls[prop] = d.slice(i + 1).trim(); // last declaration wins, as in the cascade
-    }
+  for (const m of rules) {
+    const selector = m.selector;
+    const body = m.body;
 
-    // The band: the outermost box-shadow layer, else the outline colour.
-    let band = null, bandProp = null;
-    const shadow = decls["box-shadow"];
-    if (shadow && !/^none\b/i.test(shadow)) {
-      const layers = splitLayers(shadow);
-      band = colorAtomOf(layers[layers.length - 1]);
-      bandProp = "box-shadow";
-    }
+    const decls = declsOf(body);
+    const { band, prop: bandProp } = bandOf(decls);
+
     if (!band) {
-      const outline = decls["outline"] || decls["outline-color"];
-      if (outline && !/^(none|0)\b/i.test(outline)) {
-        band = colorAtomOf(outline);
-        bandProp = decls["outline-color"] ? "outline-color" : "outline";
-      }
+      // E12b — THE SUPPRESSION ARM. No band of its own is fine while the UA's
+      // indicator is left standing. `outline: none | 0` removes it, and then
+      // the rule owes a replacement or a membership in one.
+      const off = String(decls["outline"] || decls["outline-style"] || decls["outline-width"] || "");
+      if (!/^(none|0)(\b|px|$)/i.test(off.trim())) continue;
+      const key = selector.replace(/\s+/g, " ").trim();
+      if (allowed.has(key)) continue;
+      const subs = focusSubjectsOf(selector);
+      if (subs.some((sub) => banded.has(sub))) continue; // the same subject paints one elsewhere
+      // The best replacement it DOES offer, so the message names the real number
+      // rather than only the absence.
+      const replacement = ["border-color", "border"]
+        .map((prop) => (decls[prop] ? { prop, atom: colorAtomOf(decls[prop]) } : null))
+        .find((x) => x && x.atom);
+      const ra = replacement ? minAlphaAcrossThemes(replacement.atom) : null;
+      errs.push(
+        `E12 ${m.file}:${m.line}  focus rule ${JSON.stringify(key)} turns the indicator OFF ` +
+          `(outline: ${off.trim()}) and paints no band of its own` +
+          (replacement
+            ? `; its only replacement is ${replacement.prop}: ${replacement.atom}, which resolves to alpha ` +
+              `${ra} — a translucent border is an ARITHMETIC ceiling below the 3:1 SC 1.4.11 floor over any ` +
+              `opaque backdrop (alpha 0.28 ceils at 2.53:1)`
+            : ` and offers no replacement at all`) +
+          `. Nothing else paints a band for ${JSON.stringify(subs.join(", "))}: it is not in the shared ring ` +
+          `block's class list. Add the subject to that block, or paint the house ring here ` +
+          `(the .form-input:focus shape — opaque border-color: var(--ring) plus a decorative halo). ` +
+          `If the subject really does inherit a band this text cannot see, add it to ALLOW_BANDLESS_FOCUS with a reason`,
+      );
+      continue;
     }
-    if (!band) continue; // paints no indicator band — inherits the shared ring
 
     const alpha = minAlphaAcrossThemes(band);
     if (alpha === null || alpha >= 1) continue;
@@ -1439,7 +1589,7 @@ export function focusIndicatorErrors() {
     if (escape) continue;
 
     errs.push(
-      `E12 app.css:${lineOf(css, m.index)}  focus rule ${JSON.stringify(selector.replace(/\s+/g, " "))} paints its ` +
+      `E12 ${m.file}:${m.line}  focus rule ${JSON.stringify(selector.replace(/\s+/g, " "))} paints its ` +
         `SOLE indicator band from ${band} (${bandProp}), which resolves to alpha ${alpha} — ` +
         `a translucent band can never reach the 3:1 SC 1.4.11 floor over an opaque backdrop ` +
         `(alpha 0.15 ceils at 1.62:1). Point the band at an OPAQUE token (--ring), or give the ` +
@@ -1619,6 +1769,12 @@ runContrast(errors);
 // which token each focus RULE actually consumes, so the ratchet cannot be
 // walked away from (measured: 19 rules at 1.19–1.52:1 with E5 green).
 for (const e of focusIndicatorErrors()) errors.push(e);
+// task-5acf9b5ad30f9a74 — AN EMPTY SCAN IS NOT A CLEAN SCAN. E12 now reads
+// styleguide.html's inline <style> as well as app.css. That block declares ZERO
+// focus rules today, so the extension finds nothing; printing the per-file
+// count is what lets a reader tell "checked and clean" from "never looked",
+// and what will red-flag the day the living spec grows a ring nobody gates.
+
 
 // E9 — parse-completeness: declarations a comment mis-close swallowed (#4251).
 for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
@@ -1766,6 +1922,18 @@ if (process.env.CSS_CHECK_VERBOSE) {
     );
   }
 }
+
+// task-5acf9b5ad30f9a74 — AN EMPTY SCAN IS NOT A CLEAN SCAN. E12 now reads
+// styleguide.html's inline <style> as well as app.css. That block declares ZERO
+// focus rules today, so the extension finds nothing and is a FORWARD guard;
+// printing the per-file count is what lets a reader tell "checked and clean"
+// from "never looked", and what makes the day the living spec grows a ring
+// nobody gates visible in the log.
+console.log(
+  `\nE12 focus rules scanned: ` +
+    Object.entries(focusScanCensus()).map(([f, n]) => `${f} ${n}`).join(", ") +
+    ` — a 0 is COVERAGE, not yield: the file declares no focus rule at all`,
+);
 
 // E14 inventory: the copies the scan actually SAW, with their true line
 // numbers. Printed unconditionally so a scan degrading to fewer copies is
