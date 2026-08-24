@@ -173,7 +173,11 @@ census() {
   local path count arow acount averdict
   while IFS="$(printf '\t')" read -r path count; do
     [ -z "$path" ] && continue
-    arow="$(printf '%s\n' "$allow" | awk -v p="$path" '$1 == p { print; exit }')"
+    # The herestring belongs INSIDE the substitution. Outside the `)"` it
+    # redirects the ASSIGNMENT, which is a no-op, and awk silently reads the
+    # enclosing while-loop's stdin instead — the same shape as the bug this
+    # commit fixes: no error, wrong answer.
+    arow="$(awk -v p="$path" '$1 == p { print; exit }' <<<"$allow")"
     if [ -z "$arow" ]; then
       fail "UNADJUDICATED run-level reader: $path ($count run-level reference(s)).
       It reaches a workflow-run feed and reads a conclusion off it, and nobody has said

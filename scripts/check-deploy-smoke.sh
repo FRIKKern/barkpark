@@ -223,7 +223,7 @@ check_served_assertion() {
   #    commit as the head. Keyed on `compare/` — the `prev`/`served` recorder
   #    steps already read a sha and already run jq, so presence of a sha read is
   #    NOT evidence that anything is asserted about it.
-  if ! printf '%s\n' "$logic" | grep -q 'compare/${{ github.sha }}\.\.\.'; then
+  if ! grep -q 'compare/${{ github.sha }}\.\.\.' <<<"$logic"; then
     echo "  DRIFT    $job: no 'compare/\${{ github.sha }}...<served>' call — nothing asks the oracle whether the box moved" >&2
     echo "           (reading a sha is not asserting one: the recorder steps in this job already read it)" >&2
     failures=$((failures + 1))
@@ -233,13 +233,13 @@ check_served_assertion() {
   #    instance-deploy.sh both pull origin/main's TIP, so a run fired for one
   #    commit routinely delivers a DESCENDANT (7f5f10b8d...572d51e13 = ahead 10,
   #    behind 0). An equality gate reds healthy merges and gets ignored.
-  if ! printf '%s\n' "$logic" | grep -qF "'^(ahead|identical)$'"; then
+  if ! grep -qF "'^(ahead|identical)$'" <<<"$logic"; then
     echo "  DRIFT    $job: the compare verdict is not matched against '^(ahead|identical)\$'" >&2
     failures=$((failures + 1))
   fi
 
   # c) NO equality comparison against the merged sha.
-  if printf '%s\n' "$logic" | grep -qE '(\[\[?|test)[^|]*\$\{\{ github\.sha \}\}|==[[:space:]]*"?\$\{\{ github\.sha \}\}|\$served"?[[:space:]]*=='; then
+  if grep -qE '(\[\[?|test)[^|]*\$\{\{ github\.sha \}\}|==[[:space:]]*"?\$\{\{ github\.sha \}\}|\$served"?[[:space:]]*==' <<<"$logic"; then
     echo "  DRIFT    $job: an EQUALITY comparison against \${{ github.sha }} is back — the ancestor rule was the fix, not an approximation" >&2
     failures=$((failures + 1))
   fi
@@ -256,7 +256,7 @@ check_served_assertion() {
   #    arm and a `// empty` arm checked SEPARATELY are both satisfiable by a step
   #    that asserts nothing — the sibling-answers-for-the-broken-one shape this
   #    file exists to refuse.
-  if ! printf '%s\n' "$logic" | grep -qF "jq -er '$key // empty'"; then
+  if ! grep -qF "jq -er '$key // empty'" <<<"$logic"; then
     echo "  DRIFT    $job: the served sha is not read as exactly \"jq -er '$key // empty'\" — a null or absent key would reach the oracle as the four-character string 'null'" >&2
     echo "           (a nearby recorder step's 'jq -r $key // empty' does NOT count: no -e, and it asserts nothing)" >&2
     failures=$((failures + 1))
@@ -265,13 +265,13 @@ check_served_assertion() {
   # e) the reader it depends on is NAMED, so a missing key sends the reader
   #    onward instead of surfacing as a bare comparison failure. This one arm
   #    reads the message text, so it uses the comment-stripped view, not `logic`.
-  if ! printf '%s\n' "$all" | grep -qF "$cite"; then
+  if ! grep -qF "$cite" <<<"$all"; then
     echo "  DRIFT    $job: the missing-key failure does not name the reader it depends on ($cite)" >&2
     failures=$((failures + 1))
   fi
 
   # f) the source it reads.
-  if ! printf '%s\n' "$logic" | grep -qF "$url"; then
+  if ! grep -qF "$url" <<<"$logic"; then
     echo "  DRIFT    $job: nothing reads $url" >&2
     failures=$((failures + 1))
   fi
@@ -279,15 +279,15 @@ check_served_assertion() {
   # g) a BOUNDED settle window that EXPIRES INTO A FAILURE, with the cap stated
   #    in the code. A window with no cap is a hang; a window that expires into a
   #    pass is the blindness with extra steps.
-  if ! printf '%s\n' "$logic" | grep -qE 'SETTLE_CAP_SECONDS=[0-9]+'; then
+  if ! grep -qE 'SETTLE_CAP_SECONDS=[0-9]+' <<<"$logic"; then
     echo "  DRIFT    $job: no SETTLE_CAP_SECONDS=<n> — the settle window has no stated cap" >&2
     failures=$((failures + 1))
   fi
-  if ! printf '%s\n' "$logic" | grep -q 'deadline'; then
+  if ! grep -q 'deadline' <<<"$logic"; then
     echo "  DRIFT    $job: the settle window never compares against a deadline" >&2
     failures=$((failures + 1))
   fi
-  if ! printf '%s\n' "$all" | grep -qF 'settle window expired'; then
+  if ! grep -qF 'settle window expired' <<<"$all"; then
     echo "  DRIFT    $job: expiry does not announce itself as a failure — an unanswerable question must not be a pass" >&2
     failures=$((failures + 1))
   fi
@@ -332,7 +332,7 @@ check_file() {
 
   # 1. the '/' accept-list must exist, and must not accept 404.
   local accept
-  accept="$(printf '%s\n' "$step" | grep -oE "grep -qE '\^\([0-9|]+\)\\\$'" | head -n1 || true)"
+  accept="$(grep -oE "grep -qE '\^\([0-9|]+\)\\\$'" <<<"$step" | awk 'NR==1' || true)"
   if [ -z "$accept" ]; then
     echo "FAIL[$label]: no HTTP accept-list regex (grep -qE '^(...)\$') in the control-plane smoke — the extractor is broken, or the probe was rewritten" >&2
     failures=$((failures + 1))
@@ -346,11 +346,11 @@ check_file() {
   fi
 
   # 2. a DB-touching login probe asserting EXACTLY 401.
-  if ! printf '%s\n' "$step" | grep -q '/v1/auth/login'; then
+  if ! grep -q '/v1/auth/login' <<<"$step"; then
     echo "  DRIFT    no /v1/auth/login probe in the control-plane smoke — nothing in this gate touches the DB" >&2
     echo "           (mirror deploy/cp-deploy.sh:129-141: bad-creds login must answer 401)" >&2
     failures=$((failures + 1))
-  elif ! printf '%s\n' "$step" | grep -qE '=[[:space:]]*"?401"?[[:space:]]*$'; then
+  elif ! grep -qE '=[[:space:]]*"?401"?[[:space:]]*$' <<<"$step"; then
     echo "  DRIFT    the login probe does not assert EXACTLY 401 — 5xx/000 could pass" >&2
     failures=$((failures + 1))
   else
@@ -358,8 +358,8 @@ check_file() {
   fi
 
   # 3. no credential smuggled in: the probe address is deliberately invalid.
-  if printf '%s\n' "$step" | grep -q '/v1/auth/login' \
-     && ! printf '%s\n' "$step" | grep -q '@invalid\.example'; then
+  if grep -q '/v1/auth/login' <<<"$step" \
+     && ! grep -q '@invalid\.example' <<<"$step"; then
     echo "  DRIFT    the login probe does not use an invalid .example address — a deploy gate must introduce no credential" >&2
     failures=$((failures + 1))
   fi
