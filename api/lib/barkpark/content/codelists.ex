@@ -140,7 +140,8 @@ defmodule Barkpark.Content.Codelists do
 
     Repo.transaction(fn ->
       codelist = upsert_codelist!(plugin_name, list_id, issue, name, description)
-      replace_values!(codelist, values)
+      written = replace_values!(codelist, values)
+      assert_payload_written!(list_id, values, written)
       codelist
     end)
   end
@@ -353,6 +354,13 @@ defmodule Barkpark.Content.Codelists do
   # Postgres' 65_535 limit with headroom for the wider translation row.
   @insert_chunk 2_000
 
+  # Returns the row counts Postgres reported writing, as
+  # `%{values: n, translations: m}`. It does NOT return a bare `:ok`: a
+  # sentinel here would destroy the write's outcome one frame below its
+  # caller, and this writer has three distinguishable outcomes — raised and
+  # lost, raised and landed, and (the one no error code reports) SUCCEEDED
+  # and lost. `register/3` reads the counts back and rolls the transaction
+  # back on disagreement.
   defp replace_values!(%Codelist{id: codelist_id}, values) do
     # Cascading FK deletes translations along with values.
     Repo.delete_all(from v in Value, where: v.codelist_id == ^codelist_id)
@@ -366,8 +374,42 @@ defmodule Barkpark.Content.Codelists do
     # per statement, so the parents must already be on disk. Within the value
     # list, the depth-first order below guarantees a parent precedes its
     # children, satisfying the self-referencing `parent_id` FK too.
-    insert_all_chunked!(Value, Enum.reverse(value_rows))
-    insert_all_chunked!(Translation, Enum.reverse(translation_rows))
+    %{
+      values: insert_all_chunked!(Value, Enum.reverse(value_rows)),
+      translations: insert_all_chunked!(Translation, Enum.reverse(translation_rows))
+    }
+  end
+
+  # The SECOND instrument, and deliberately not a restatement of the first.
+  # `insert_all_chunked!/2` compares what Postgres wrote against what the
+  # flattening pass handed it; this compares the persisted totals against an
+  # INDEPENDENT recount of the caller's own payload. A bug that dropped a
+  # node inside `flatten_values/5` would satisfy the inner check — every row
+  # handed over was written — and only this one catches it.
+  #
+  # Raising inside `Repo.transaction` rolls the whole registration back, so
+  # the failure mode is a codelist that stays at its previous state, never a
+  # published truncation.
+  defp assert_payload_written!(list_id, values, written) do
+    {expected_values, expected_translations} = payload_totals(values)
+
+    if {expected_values, expected_translations} != {written.values, written.translations} do
+      raise "codelist #{list_id}: registration persisted #{written.values} value(s) and " <>
+              "#{written.translations} translation(s), but the payload carried " <>
+              "#{expected_values} and #{expected_translations} — rolling back rather than " <>
+              "publishing a truncated codelist"
+    end
+
+    :ok
+  end
+
+  defp payload_totals(values) do
+    Enum.reduce(values, {0, 0}, fn value, {value_count, translation_count} ->
+      {child_values, child_translations} = payload_totals(Map.get(value, :children, []))
+
+      {value_count + 1 + child_values,
+       translation_count + length(Map.get(value, :translations, [])) + child_translations}
+    end)
   end
 
   # Depth-first pre-order walk — the exact visit order the per-row writer
@@ -416,14 +458,28 @@ defmodule Barkpark.Content.Codelists do
     end)
   end
 
-  defp insert_all_chunked!(_schema, []), do: :ok
-
+  # Returns the number of rows Postgres reported writing. With the default
+  # `on_conflict: :raise` an `insert_all` either writes every row it was
+  # handed or raises, so a short count is an anomaly no error code would
+  # surface — the "succeeded and lost" outcome. Raise on it rather than hand
+  # the caller a number it has no reason to distrust.
   defp insert_all_chunked!(schema, rows) do
-    rows
-    |> Enum.chunk_every(@insert_chunk)
-    |> Enum.each(&Repo.insert_all(schema, &1))
+    intended = length(rows)
 
-    :ok
+    written =
+      rows
+      |> Enum.chunk_every(@insert_chunk)
+      |> Enum.reduce(0, fn chunk, acc ->
+        {count, nil} = Repo.insert_all(schema, chunk)
+        acc + count
+      end)
+
+    if written != intended do
+      raise "codelist bulk write lost rows: handed #{intended} #{inspect(schema)} row(s), " <>
+              "Postgres reported writing #{written}"
+    end
+
+    written
   end
 
   defp latest_codelist_id(plugin_name, list_id) do
