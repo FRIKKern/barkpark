@@ -332,6 +332,32 @@ func topLevelHelpStrings(body []byte) []string {
 	return hs
 }
 
+// refuseWithRemedy emits ONE refusal on whichever channel the caller's output
+// shape uses, and — this is the whole point — carries the remedy on BOTH.
+//
+// renderErrorEnvelope only carries `hint` for -o json/yaml; it returns false for
+// `table` and `minimal`, and every caller then printed `msg` alone. So the
+// reader law's own refusals — the --all walk (wave 27), the paginated default
+// page (wave 28) and the 93 write verbs (wave 29) — each computed a precise,
+// hand-written remedy and then dropped it for exactly the audience that reads
+// human output. A person at a terminal saw "unreadable list page: HTTP 200 …"
+// and no word about what to do; only a piped `-o json` consumer ever got
+// "Retry, then check the server URL and that the API is up."
+//
+// The human shape is byte-for-byte the one renderError already uses for a
+// classified API error (`out.userErr(msg)` then `  hint: …`) and the one
+// seed_cmd.go:95 hand-rolled, so this unifies three spellings into one and
+// leaves the machine envelope untouched.
+func refuseWithRemedy(out *writer, code, msg, hint string) {
+	if renderErrorEnvelope(out, code, msg, "", hint) {
+		return
+	}
+	out.userErr("%s", msg)
+	if hint != "" {
+		out.errf("  hint: %s", hint)
+	}
+}
+
 // unreadableListPageHint is the one wording both list-page refusals share —
 // the --all walk (runPaginatedAll) and the DEFAULT single page
 // (refuseUnreadableDefaultPage). It names the transport, not the query,
@@ -384,9 +410,7 @@ func refuseUnreadableDefaultPage(out *writer, cmd manifest.Command, status int, 
 		"unreadable list page: HTTP %d carried no known list envelope (%d bytes): %s",
 		status, len(respBody), bodyPreview(respBody),
 	)
-	if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
-		out.userErr("%s", msg)
-	}
+	refuseWithRemedy(out, "unreadable_list_page", msg, unreadableListPageHint)
 	return exitGeneric, true
 }
 
@@ -451,9 +475,7 @@ func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody 
 		"unreadable write receipt: HTTP %d %s (%d bytes): %s",
 		status, reason, len(respBody), bodyPreview(respBody),
 	)
-	if !renderErrorEnvelope(out, "unreadable_write_receipt", msg, "", unreadableWriteReceiptHint) {
-		out.userErr("%s", msg)
-	}
+	refuseWithRemedy(out, "unreadable_write_receipt", msg, unreadableWriteReceiptHint)
 	return exitGeneric, true
 }
 
@@ -591,17 +613,7 @@ func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBo
 		"unreadable read: HTTP %d %s (%d bytes): %s",
 		status, reason, len(respBody), bodyPreview(respBody),
 	)
-	if !renderErrorEnvelope(out, "unreadable_read", msg, "", hint) {
-		out.userErr("%s", msg)
-		// renderErrorEnvelope carries `hint` ONLY on -o json/yaml; it returns
-		// false for table and minimal, which is the shape a HUMAN reads. Its
-		// ~60 call sites therefore drop the remedy for exactly the audience
-		// that needs it — every wave-27/28/29 refusal included. This screen
-		// prints it on the human channel too, in the house `  hint: …` form
-		// (seed_cmd.go:97, tinker_cmd.go:241). Doing the same for the sibling
-		// refusals is a separate change, filed rather than smuggled in here.
-		out.errf("  hint: %s", hint)
-	}
+	refuseWithRemedy(out, "unreadable_read", msg, hint)
 	return exitGeneric, true
 }
 
@@ -1957,9 +1969,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 				"unreadable list page at offset %d: HTTP %d carried no known list envelope (%d bytes): %s",
 				offset, status, len(respBody), bodyPreview(respBody),
 			)
-			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
-				out.userErr("%s", msg)
-			}
+			refuseWithRemedy(out, "unreadable_list_page", msg, unreadableListPageHint)
 			return exitGeneric
 		}
 		if key == "" {
