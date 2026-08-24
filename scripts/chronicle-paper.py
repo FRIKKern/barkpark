@@ -49,6 +49,19 @@ FORBIDDEN_MAIN_PATH_LANGUAGE = re.compile(
     r"rollbacks?)\b|--|[a-z]+_[a-z]+|/[a-z0-9]",
     re.IGNORECASE,
 )
+FORBIDDEN_VAGUE_HEADLINE = re.compile(
+    r"^(?:opening|making|building|improving|polishing)\b|"
+    r"^(?:useful progress|steady progress|a steadier product|more useful ways to work|"
+    r"moving things forward|small changes, big impact|under the hood)\b|"
+    r"\b(?:gains?|gets?|receives?|finds?) (?:a )?(?:distinct identity|clearer experience|"
+    r"better experience|fresh look|new look)$",
+    re.IGNORECASE,
+)
+FORBIDDEN_VAGUE_SUMMARY_OPENING = re.compile(
+    r"^(?:this|today['’]s|the (?:day|week|month|year|period))\s+"
+    r"(?:work\s+)?(?:was|focused|mixed|centered)\b",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -395,17 +408,23 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
             "outcome": "The result is a more capable, more dependable place to work.",
             "source_refs": [event.sha[:10] for event in reversed(selected[-3:])],
         })
+    latest_product = next(
+        (event for event in reversed(selected) if event.kind in PRODUCT_KINDS),
+        selected[-1],
+    )
+    theme = concrete_fallback_headline(latest_product)
+    latest_changes = [event.title for event in reversed(selected) if event.kind in PRODUCT_KINDS][:3]
+    if not latest_changes:
+        latest_changes = [event.title for event in reversed(selected[-3:])]
+    change_list = "; ".join(latest_changes)
     if feature_heavy:
-        theme = "Opening up new possibilities"
-        summary = "This period was mostly about expanding what Barkpark can do. New capabilities arrived alongside the practical finishing work that helps them feel at home."
+        summary = f"The shipped changes include {change_list}. These additions led the period, alongside the finishing work needed to make them dependable."
         assessment = "This was a forward-motion period: visible additions led the work, with enough supporting care to keep them useful in practice."
     elif fix_heavy:
-        theme = "Making everyday work smoother"
-        summary = "This period was mostly about reliability, not flashy new features. We made confusing moments clearer, results more trustworthy, and everyday work a little less fussy."
+        summary = f"The shipped fixes include {change_list}. Reliability led the period, with the emphasis on making failures clearer and results easier to trust."
         assessment = "This was a care-and-repair period. The progress is quieter, but it leaves Barkpark steadier and easier to rely on."
     else:
-        theme = "Useful progress, carefully made"
-        summary = "This period mixed new possibilities with the care needed to make them dependable. The common thread was making Barkpark easier to understand and nicer to use."
+        summary = f"The shipped changes include {change_list}. New capabilities and repair work moved together rather than telling two separate stories."
         assessment = "This was balanced progress: some visible movement, some behind-the-scenes care, and a product that is better for both."
     return {
         "theme": theme,
@@ -414,6 +433,32 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
         "progress_assessment": assessment,
         "mode": "deterministic",
     }
+
+
+def concrete_fallback_headline(event: Event) -> str:
+    """Prefer a precise shipped-change headline when editorial synthesis is unavailable."""
+    title_value = event.title.lower()
+    if any(word in title_value for word in ("chronicle", "changelog", "journal", "edition")):
+        if "index" in title_value:
+            return "Chronicle index becomes easier to browse"
+        if any(word in title_value for word in ("reader", "review", "write-up")):
+            return "Chronicle editions lead with the story"
+        if any(word in title_value for word in ("publish", "archive", "backfill")):
+            return "Chronicle archive stays current"
+        return "Chronicle editions become easier to tell apart"
+    if "task" in title_value and any(word in title_value for word in ("restore", "list", "view", "visible")):
+        return "Tasks return to view"
+    if "paper" in title_value and any(word in title_value for word in ("overflow", "narrow", "mobile", "width")):
+        return "Papers now fit smaller screens"
+    if any(word in title_value for word in ("pagination", "truncat", "complete result")):
+        return "Lists now show the full picture"
+    if any(word in title_value for word in ("error", "fail", "refusal", "diagnosis")):
+        return "Failures now explain what happened"
+    if any(word in title_value for word in ("access", "auth", "token", "permission")):
+        return "Access rules close unsafe paths"
+    if any(word in title_value for word in ("deploy", "rollout", "release gate")):
+        return "Release checks catch failed rollouts"
+    return sentence_case(event.title)
 
 
 def validate_editorial(raw: Any, period: Period, selected: list[Event]) -> dict[str, Any]:
@@ -428,17 +473,26 @@ def validate_editorial(raw: Any, period: Period, selected: list[Event]) -> dict[
         refs = theme.get("source_refs") if isinstance(theme, dict) else None
         if not isinstance(refs, list) or not refs or not set(refs) <= valid_refs:
             raise ValueError("every work theme must cite supplied sources")
+        title_value = clean_editorial_text(theme.get("title"), limit=64)
+        if FORBIDDEN_VAGUE_HEADLINE.search(title_value):
+            raise ValueError("editorial headline must name a subject and a concrete change")
         work_themes.append(
             {
-                "title": clean_editorial_text(theme.get("title"), limit=64),
+                "title": title_value,
                 "explanation": clean_editorial_text(theme.get("explanation"), limit=300),
                 "outcome": clean_editorial_text(theme.get("outcome"), limit=180),
                 "source_refs": refs[:3],
             }
         )
+    theme = clean_editorial_text(raw.get("theme"), limit=80)
+    plain_summary = clean_editorial_text(raw.get("plain_summary"), limit=360)
+    if FORBIDDEN_VAGUE_HEADLINE.search(theme):
+        raise ValueError("editorial headline must name a subject and a concrete change")
+    if FORBIDDEN_VAGUE_SUMMARY_OPENING.search(plain_summary):
+        raise ValueError("editorial summary must lead with what changed")
     result = {
-        "theme": clean_editorial_text(raw.get("theme"), limit=80),
-        "plain_summary": clean_editorial_text(raw.get("plain_summary"), limit=360),
+        "theme": theme,
+        "plain_summary": plain_summary,
         "work_themes": work_themes,
         "progress_assessment": clean_editorial_text(raw.get("progress_assessment"), limit=300),
         "mode": "ai",
@@ -469,7 +523,7 @@ question: “What did Barkpark work on?” Write for an intelligent friend who d
 not work in software.
 
 Write with warm, light editorial judgment and confident restraint. Group the work
-into human themes; do not paraphrase a list of commits. One gentle turn of phrase
+into concrete product movements; do not paraphrase a list of commits. One gentle turn of phrase
 is welcome, but never force a joke. Do not use hype. Do not invent or
 imply metrics, customers, revenue, adoption, dates, deadlines, security guarantees,
 or future promises. Use no digits anywhere in prose. Never name internal components,
@@ -485,6 +539,22 @@ Do not create separate audience viewpoints.
 Respect each packet's period status. Never describe an in-progress week, month, or
 year as closed, complete, ending, or finished; write “to date” when the distinction matters.
 
+The `theme` is a NEWS HEADLINE, not a mood or a decorative slogan. It must begin
+with the product, surface, or capability that changed, then state the change or
+reader-visible result. A reader must learn something factual from the headline
+alone. Never begin a headline with Opening, Making, Building, Improving, or
+Polishing. Never write “Opening new possibilities,” “Useful progress,” “Making
+work smoother,” “Building momentum,” “A steadier product,” or any equivalent.
+Bad: “Opening up new possibilities.” Good: “Chronicle editions get unique titles
+and fact-checked reviews.” Bad: “Making work smoother.” Good: “Task lists return to the terminal.”
+Bad: “Useful progress.” Good: “Paper links now show live project context.”
+Apply the same subject-plus-change rule to every work-theme title.
+
+The first sentence of `plain_summary` must name the most important actual changes.
+Do not begin with “This period was about,” “Today’s work focused on,” or another
+sentence that describes the act of working instead of its result. The second
+sentence explains what a reader can now see, do, or trust that they could not before.
+
 Return only JSON with this exact outer shape, with one edition object for every
 kind supplied in the source packets:
 {"schema":"barkpark.chronicle-editorial.v2","editions":{"day":{"theme":"","plain_summary":"","work_themes":[{"title":"","explanation":"","outcome":"","source_refs":["exact supplied ref"]}],"progress_assessment":""}}}
@@ -494,7 +564,8 @@ must answer the reader's question in two or three short sentences. The progress
 assessment must say honestly whether this was feature work, care-and-repair work,
 balanced work, or a quiet period. Scale the judgment: day is immediate effect, week
 is direction, month is durable progress, year is the arc. Longer periods still get no
-more than three themes. Keep the theme under six words, summary under fifty words,
+more than three themes. Keep the theme under twelve words and use the extra room
+for facts, never decoration. Keep the summary under fifty words,
 each explanation under thirty-five words, each outcome under twenty words, and the
 assessment under forty words.
 

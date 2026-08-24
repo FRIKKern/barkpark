@@ -267,6 +267,44 @@ class ChroniclePaperTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "implementation jargon"):
             chronicle.validate_editorial(raw, period, selected)
 
+    def test_editorial_validation_rejects_headlines_and_summaries_without_an_argument(self):
+        events = self.read_fixture_events()
+        period = chronicle.periods_for(dt.date(2026, 8, 23))["week"]
+        selected = chronicle.events_in_period(events, period)
+        ref = chronicle.representative_events(selected)[0].sha[:10]
+        raw = {
+            "theme": "Opening up new possibilities",
+            "plain_summary": "Task lists returned to view, and Chronicle editions became easier to scan. Readers can now see the work and understand its story.",
+            "work_themes": [{
+                "title": "Tasks return to view",
+                "explanation": "Available work is visible again instead of disappearing.",
+                "outcome": "People can see what needs attention.",
+                "source_refs": [ref],
+            }],
+            "progress_assessment": "This was a care-and-repair week with visible results.",
+        }
+        with self.assertRaisesRegex(ValueError, "name a subject"):
+            chronicle.validate_editorial(raw, period, selected)
+
+        raw["theme"] = "Chronicle editions gain distinct identity"
+        with self.assertRaisesRegex(ValueError, "name a subject"):
+            chronicle.validate_editorial(raw, period, selected)
+
+        raw["theme"] = "Task lists return to the terminal"
+        raw["plain_summary"] = "Today's work focused on making task lists easier to find. Readers can now see what needs attention."
+        with self.assertRaisesRegex(ValueError, "lead with what changed"):
+            chronicle.validate_editorial(raw, period, selected)
+
+    def test_deterministic_editorial_uses_a_concrete_shipped_change_headline(self):
+        events = self.read_fixture_events()
+        period = chronicle.periods_for(dt.date(2026, 8, 18))["day"]
+        editorial = chronicle.deterministic_editorial(
+            period,
+            chronicle.events_in_period(events, period),
+        )
+        self.assertEqual("Tasks return to view", editorial["theme"])
+        self.assertIn("restore tasks", editorial["plain_summary"])
+
     def test_editorial_generation_falls_back_without_blocking_the_archive(self):
         events = self.read_fixture_events()
         periods = chronicle.periods_for(dt.date(2026, 8, 23))
