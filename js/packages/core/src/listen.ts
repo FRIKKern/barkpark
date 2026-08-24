@@ -81,10 +81,16 @@ export interface ListenOptions {
    */
   idleTimeoutMs?: number
   /**
-   * Called when a frame's `data:` payload does not parse as JSON and is skipped.
+   * Called when a frame's `data:` payload is unusable and the frame is skipped —
+   * either it does not parse as JSON, or it parses to something that is not a
+   * JSON object (`null`, a number, a string, an array). Both are skipped for the
+   * same reason and reported on this one channel; the second used to collapse to
+   * an empty payload and yield a FABRICATED `welcome` event instead.
+   *
    * The frame is a lost event: the stream continues (one corrupt frame must not
    * kill a live subscription), but the loss is no longer invisible. `raw` is the
-   * joined `data:` text as received, `err` the JSON.parse failure.
+   * joined `data:` text as received, `err` the `JSON.parse` failure or the
+   * `TypeError` naming the type that arrived.
    *
    * Purely observational — throwing from it is not a supported way to stop the
    * stream, and a throw here is swallowed so a logging callback cannot take down
@@ -141,13 +147,15 @@ export function createListenHandle<T = BarkparkDocument>(
       },
     )
   }
+  // `Number.isFinite` used to sit between these two conjuncts and can never
+  // change the answer: per spec `Number.isInteger` is already false for NaN,
+  // Infinity and -Infinity, so the finite check was dead. Dropped -- the NaN and
+  // Infinity cases this guard exists for are still rejected by isInteger alone
+  // (its tests still pass), and it pays for the payload-shape guard below, which
+  // core's gzipped cap otherwise had no room for.
   if (
     opts?.reconnectBaseMs !== undefined &&
-    !(
-      Number.isInteger(opts.reconnectBaseMs) &&
-      Number.isFinite(opts.reconnectBaseMs) &&
-      opts.reconnectBaseMs > 0
-    )
+    !(Number.isInteger(opts.reconnectBaseMs) && opts.reconnectBaseMs > 0)
   ) {
     throw new BarkparkValidationError('listen: reconnectBaseMs must be a positive integer', {
       field: 'reconnectBaseMs',
@@ -334,8 +342,27 @@ export function createListenHandle<T = BarkparkDocument>(
                   const joined = parsed.dataLines.join('\n')
                   let payload: Record<string, unknown>
                   try {
-                    const v = JSON.parse(joined)
-                    payload = v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+                    const v: unknown = JSON.parse(joined)
+                    // [malformed-frame-silent, second half] A frame whose data
+                    // PARSES but is not a JSON object (`null`, `42`, `"str"`,
+                    // `[…]`) used to collapse to `{}` right here — and an empty
+                    // payload is not dropped, it is BUILT: buildListenEvent maps
+                    // an unknown event name to 'welcome' and a missing eventId to
+                    // '', so the iterator yielded a synthetic
+                    // `{ eventId: '', type: 'welcome' }` the server never sent.
+                    // Worse than the throwing case it sat next to: that one lost
+                    // an event, this one INVENTED one, and a consumer keying on
+                    // `type === 'welcome'` to reset its cursor would act on it.
+                    // Throwing routes it to the same onDroppedFrame channel the
+                    // unparseable case uses — one skip rule, one report channel.
+                    // The message stays a constant: `onDroppedFrame` already
+                    // receives the raw text, so naming the type here would buy
+                    // nothing the caller cannot see — and core is at its gzipped
+                    // cap (js/CLAUDE.md "Bundle budget").
+                    if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+                      throw new TypeError('SSE data is not a JSON object')
+                    }
+                    payload = v as Record<string, unknown>
                   } catch (parseErr) {
                     // [malformed-frame-silent] Malformed data — skip this frame,
                     // do not crash (killing a live subscription over one corrupt
