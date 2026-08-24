@@ -944,6 +944,8 @@ type supportRemoveRun struct {
 	dnsZone     string            // zone derived from the CP row's url host
 	dnsIP       string            // the box IP the sweep + census match A-record VALUES against
 	dnsSkip     string            // non-empty ⇔ why the DNS leg was skipped (printed honestly, never reported clean)
+	dnsSwept    bool              // true ⇔ the by-value sweep RAN AND RETURNED CLEANLY — the only thing that earns ?mode=detach
+	cpHandedOff map[string]string // CP row id → the status the control plane reported when it took the teardown over (202)
 }
 
 func runCloudSupportRemove(out *writer, g globals, args []string) int {
@@ -1283,6 +1285,10 @@ func (r *supportRemoveRun) stepDNS() (int, bool) {
 		r.out.errf("⚠ dns: sweep failed: %s%s — continuing; the census below is the truth", err, got)
 		return exitOK, false
 	}
+	// The sweep RAN and came back without error — the only evidence that earns
+	// `?mode=detach` on the control-plane row below. A skipped or failed sweep
+	// deliberately leaves this false so the CP tears the record down instead.
+	r.dnsSwept = true
 	r.done("dns", supportDNSNarration(zone, ip, deleted))
 	return exitOK, false
 }
@@ -1311,15 +1317,40 @@ func (r *supportRemoveRun) stepRoster() (int, bool) {
 // stepCPRow deletes the control-plane row(s) LAST (PDF-D68): only after the
 // token, box, and roster row are gone may the sole durable token-id holder go —
 // a crash before this point leaves a re-run everything it needs to converge.
+//
+// task-688ebffc4b0aa50a — WHICH removal this asks the control plane for depends
+// on whether THIS run can prove the A record is already gone. The CP route now
+// refuses to drop a live support's row on its own, because that row is the only
+// thing left naming the record to delete; it enqueues a deprovision job instead
+// and lets the worker sweep. That is the right default and a wrong fit HERE on
+// the runs where stepDNS already swept the zone by value: the record is gone, so
+// `?mode=detach` says so and the row goes now (the census still re-reads both).
+// When the sweep was SKIPPED or FAILED the mode is omitted ON PURPOSE — the CLI
+// has no proof, so the control plane keeps the pointer and the worker (which
+// holds a DNS credential the local compute token may not have) finishes the job.
 func (r *supportRemoveRun) stepCPRow() (int, bool) {
 	for _, row := range r.rows {
-		r.state("cp-row", fmt.Sprintf("deleting control-plane row %s — LAST (sole durable holder of the token id)", row.ID))
-		status, resp, err := supportMainJSON(http.MethodDelete, r.cpBase+"/v1/fleet/supports/"+url.PathEscape(row.ID), r.cpToken, nil)
+		mode := ""
+		why := "the control plane decides (this run did not prove the A record is gone)"
+		if r.dnsSwept {
+			mode, why = "?mode=detach", "detach — this run swept the zone by value, so the row names nothing that is still live"
+		}
+		r.state("cp-row", fmt.Sprintf("deleting control-plane row %s — LAST (sole durable holder of the token id); %s", row.ID, why))
+		status, resp, err := supportMainJSON(http.MethodDelete, r.cpBase+"/v1/fleet/supports/"+url.PathEscape(row.ID)+mode, r.cpToken, nil)
 		if err != nil {
 			return r.fail("cp-row", "cannot reach the control plane: "+err.Error(),
 				fmt.Sprintf("control-plane row %s still registered (token already revoked, box gone)", row.ID), exitGeneric)
 		}
 		switch {
+		case status == http.StatusAccepted:
+			// The CP took the teardown over: the row SURVIVES until its worker
+			// reports the box + DNS gone. Not a failure and not a removal —
+			// record it so the census names it for what it is.
+			if r.cpHandedOff == nil {
+				r.cpHandedOff = map[string]string{}
+			}
+			r.cpHandedOff[row.ID] = "deprovisioning"
+			r.out.errf("⚠ cp-row: the control plane answered 202 — it kept row %s and enqueued a deprovision job so ITS worker tears the box and the A record down (this run could not prove the record was gone). The row is expected to survive the census below; re-run once the job drains", row.ID)
 		case status >= 200 && status < 300:
 			r.done("cp-row", row.ID+" removed")
 		case status == http.StatusNotFound:
@@ -1369,6 +1400,10 @@ func (r *supportRemoveRun) census() int {
 	} else {
 		for _, row := range rows {
 			if row.FleetRole == "support" && row.Name == r.name {
+				if st, ok := r.cpHandedOff[row.ID]; ok {
+					residue = append(residue, fmt.Sprintf("control-plane row %s still registered — %s: the control plane kept it on purpose and its worker is tearing the box + A record down; re-run once that job drains", row.ID, st))
+					continue
+				}
 				residue = append(residue, fmt.Sprintf("control-plane row %s still registered", row.ID))
 			}
 		}
