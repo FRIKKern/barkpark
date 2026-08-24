@@ -470,6 +470,12 @@ const CENSUS: Record<string, Record<string, number>> = {
     'scale.xs.fontSize': 2,
     'scale.xs.lineHeight': 1,
   },
+  'papers/portabledoc/blocks/paper-links.tsx': {
+    'scale.lg': 1,
+    'scale.md': 1,
+    'scale.micro': 1,
+    'scale.sm': 1,
+  },
   'papers/portabledoc/blocks/sheet.tsx': {
     'scale.base': 1,
     'scale.sm': 1,

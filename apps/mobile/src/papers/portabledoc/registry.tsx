@@ -23,6 +23,7 @@ import { coreProseRenderers } from './blocks/core-prose'
 import { datavizRenderers } from './blocks/dataviz'
 import { formsRenderers } from './blocks/forms'
 import { mathRenderers } from './blocks/math'
+import { paperLinkRenderers } from './blocks/paper-links'
 import { sheetRenderers } from './blocks/sheet'
 import { tableRenderers } from './blocks/table'
 import { taskboardRenderers } from './blocks/taskboard'
@@ -75,6 +76,7 @@ export const BLOCK_RENDERERS: Record<string, Render> = {
   ...datavizRenderers,
   ...formsRenderers,
   ...mathRenderers,
+  ...paperLinkRenderers,
   ...sheetRenderers,
   ...tableRenderers,
   ...taskboardRenderers,

@@ -12,7 +12,7 @@
 // exact plain text `toPlainText([golden.input])` must produce for that type,
 // derived from the SAME frozen `pd-golden` fixtures (never re-authoring them).
 //
-// PARTITION (20 prose / 28 textless = 48). Every one of the 48 grammar types
+// Every grammar type appears in exactly one of the two maps below.
 // appears in EXACTLY ONE of the two maps below; the test fails if any golden
 // type is in neither (silent-drop ≠ intentional-skip) or in both.
 
@@ -79,6 +79,8 @@ export const PROSE_GOLDEN: Record<string, string> = {
   // grown (pbw-stier-tabs): each tab's label + its nested blocks' prose, the
   // `steps` precedent (a tab is a titled panel, same shape as a step)
   tabs: 'macOS\n\nbrew install barkpark\n\nLinux\n\ncurl -fsSL install.sh | sh',
+  'paper-links':
+    'Continue reading\n\nPapers with useful context for this change.\n\nPaper authoring excellence\n\nA practical guide to publishing clear, useful Papers.\n\nSee the principles behind this example.',
 }
 
 /**
