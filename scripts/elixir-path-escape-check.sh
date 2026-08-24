@@ -186,20 +186,72 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 #     bases documented under HOW AN ESCAPE IS RESOLVED above. Tagged `-dir`
 #     (the `Path.expand("../x", __DIR__)` idiom) / `-cwd` (the `mix test` cwd
 #     idiom, `File.read!("../x")`). Dropping either base blinds that half.
-#   * the ROOT ANCHOR — the anchor+`Path.join` scan in list_escapes. Tagged
-#     `-root`. THIS COMMENT SAID "THE FOUR DOORS" AND WAS WRONG: for weeks the
-#     root-anchor idiom was a FIFTH door nobody counted, and it hid four live
-#     undeclared reads while `--check` exited 0. The floor table below is the
-#     inventory that now makes a sixth door impossible to add silently.
+#   * the ROOT ANCHOR — the anchor+`Path.join` scan in list_escapes, in THREE
+#     join forms, tagged separately: `-root` (`Path.join(a, "lit")`),
+#     `-rootpipe` (`a |> Path.join("lit")`) and `-rootlist`
+#     (`Path.join([a, "lit"])`). THIS COMMENT SAID "THE FOUR DOORS" AND WAS
+#     WRONG: for weeks the root-anchor idiom was a FIFTH door nobody counted,
+#     and it hid four live undeclared reads while `--check` exited 0. It was
+#     then WRONG A SECOND TIME in a subtler way — the door was added with only
+#     its single-`Path.join` form, so the pipe and list forms of the SAME idiom
+#     stayed invisible while the tag reported healthy. Hence one tag per form:
+#     a door that reports at full strength while seeing one of three shapes is
+#     the fault this table exists to make impossible, not a smaller version of
+#     it. The floor table below is the inventory that keeps a further form or
+#     door from being added silently.
 # So one door going to zero reds ON ITS OWN, which is the property an aggregate
 # count structurally cannot have.
 #
-# RESIDUE — the census is a LOWER BOUND, and saying so is the point. Shapes the
-# scanner still cannot see, and which therefore may hide further undeclared
-# reads: an INTERPOLATED anchor (`Path.expand("../#{x}", __DIR__)`), the LIST
-# form `Path.join([root, a, b])`, and execution-cwd reads via
-# `System.cmd(…, cd: root)` (api/test/barkpark/pds_door_census_test.exs uses
-# that last one — a separate class this door does not close). Filed, not fixed.
+# RESIDUE — the census is a LOWER BOUND, and saying so is the point.
+#
+# THE SPLIT, MEASURED rather than asserted. A 14-shape probe matrix was planted
+# in api/test — one file per Elixir idiom, each reading the undeclared repo-root
+# file CLAUDE.md, so a shape the scanner SEES reds and a shape it MISSES stays
+# silent — and run against the scanner as it stood on origin/main. Result:
+#
+#     credited:  5 door tags, each reported at full strength, plus a RESIDUE
+#                note naming exactly 3 known-blind shapes -> reads as 5 of 8
+#     detected:  4 of the 14 shapes cleanly
+#
+# Nine shapes were invisible, and SIX of those nine were not named anywhere —
+# the residue note undercounted its own blindness by a factor of three. That is
+# the same fault as the door count itself: the number of checks a scanner runs
+# is not the number of shapes it can see.
+#
+# Two of the nine are now closed — the pipe form `<anchor> |> Path.join("lit")`
+# and the list form `Path.join([<anchor>, "lit", …])`, both live idioms in
+# api/lib + api/test, each with its own tag and its own harness case (3c).
+# Closing them surfaced NO new undeclared read on a clean tree: measured, the
+# census stayed at 36 and the OK line stayed true. The value is prospective —
+# the next `deploy/**` read written in pipe form is now caught the day it lands
+# instead of after it has hidden a skipped suite for weeks.
+#
+# STILL BLIND, seven shapes, each of which may hide an undeclared read today:
+#   1. INTERPOLATED anchor      `Path.expand("../#{x}", __DIR__)`
+#   2. EXECUTION CWD            `System.cmd(…, cd: root)` — a separate class;
+#                               api/test/barkpark/pds_door_census_test.exs and
+#                               pds_elixir_census_test.exs both use it
+#   3. CONCATENATED literal     `Path.join(@root, "CLAUDE" <> ".md")`
+#   4. NON-__DIR__ BASE         `Path.expand("lit", @root)` / `Path.absname(
+#                               "lit", @root)` — the anchor is the 2nd arg, so
+#                               no `"../…"` literal appears at all
+#   5. SIGIL literal            `~s(../../../x)`, `~S`, charlists — every grep
+#                               here requires a double quote
+#   6. MULTI-LINE join          a `Path.join(` whose anchor and literal sit on
+#                               the FOLLOWING lines — every grep here is
+#                               line-based, so it matches nothing; live in
+#                               api/lib today (tickets/attachments.ex:253,
+#                               onixedit/export/validator.ex:93)
+#   7. CHAINED anchor           `@sub Path.join(@root, "docs")` then
+#                               `Path.join(@sub, "lit")` — this one is a
+#                               PRECISION fault, not a blindness: the scanner
+#                               resolves the intermediate `docs` and never the
+#                               file, which can red on a declared read
+#
+# Shapes 3-7 are the newly-named ones. FILED, not fixed — do not read this list
+# as a to-do that someone is on; read it as the honest boundary of what the OK
+# line above means. The OK line asserts that every read THIS SCANNER CAN SEE is
+# dispatched on. It does not assert that every read exists in the census.
 #
 # Bounds are LOWER BOUNDS, never equalities. An exact pin taxes every slice that
 # ADDS a read (the lesson filed as `pds-bl-census-exact-pins-tax-growth`, and
@@ -227,11 +279,33 @@ ELIXIR_ESCAPE_EXEMPT='scripts/claude-pinned-version.txt	read only by claude_chat
 # It is a CONSTANT on purpose. An env-var override would be a one-line CI
 # bypass of the only check that can tell "clean" from "blind", and the harness
 # asserts that setting ELIXIR_ESCAPE_IDIOM_MIN changes nothing.
+#
+# THE TWO FLOOR-0 ROWS ARE NOT DEAD WEIGHT, and they are not a laundered
+# baseline. `test-rootpipe` and `test-rootlist` are the two join forms added
+# alongside `test-root`; both are LIVE IDIOMS in api/lib + api/test, but no
+# current call site of either resolves OUTSIDE api/, so their measured
+# population on a clean tree is 0. A floor of 0 is the only honest number: a
+# positive floor would red every clean checkout (the `lib-root` reasoning
+# above), while OMITTING the rows makes the inventory check fire "idiom has no
+# floor" the moment either form first matches — which reds for the SCANNER
+# instead of naming the escape, masking the very finding the door exists to
+# report. Measured: with the rows absent, a planted pipe-form escape produced
+# `::error:: idiom 'test-rootpipe' has no entry` and never printed the
+# UNCOVERED line at all.
+#
+# What a floor of 0 does NOT buy is blindness detection: with population 0
+# there is nothing to shrink from, so deleting the pipe grep would not red this
+# table. That protection lives in the HARNESS instead — a fixture per form in
+# scripts/elixir-path-escape-check.test.sh, where disarming a form's grep reds
+# the matching case. When either form's live population rises above 0, raise
+# its floor to ~50% of the measured population and say so here.
 ELIXIR_ESCAPE_IDIOM_MIN='test-cwd	8
 test-dir	8
 lib-cwd	5
 lib-dir	5
-test-root	2'
+test-root	2
+test-rootpipe	0
+test-rootlist	0'
 
 # ELIXIR_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
@@ -378,33 +452,62 @@ list_escapes() {
       alit="${a#*\"}"
       alit="${alit%%\"*}"
       adir="$(norm_path "$d/$alit")"
-      # `Path.join(<anchor>, "literal")` only. The LIST form
-      # `Path.join([root, a, b])`, an interpolated anchor, and
-      # `System.cmd(…, cd: root)` are NOT matched — see the RESIDUE note at
-      # ELIXIR_ESCAPE_IDIOM_MIN. This census is a LOWER BOUND.
-      joins="$(grep -Eoh 'Path\.join\(@?'"$name"',[[:space:]]*"[^"]*"\)' "$REPO_ROOT/$f" || true)"
-      while IFS= read -r j; do
-        [ -n "$j" ] || continue
-        jlit="${j#*\"}"
-        jlit="${jlit%%\"*}"
-        jlit="${jlit%%\#\{*}"
-        case "$jlit" in
-          *'*'*)
-            jlit="${jlit%%\**}"
-            jlit="${jlit%/}"
+      # THREE JOIN FORMS, each grepped and TAGGED SEPARATELY:
+      #   `-root`     `Path.join(<anchor>, "lit")`
+      #   `-rootpipe` `<anchor> |> Path.join("lit")`
+      #   `-rootlist` `Path.join([<anchor>, "lit", …])`
+      #
+      # They are three tags and not one on purpose. Folding them into a single
+      # `-root` count would rebuild the exact fault this door was added to fix:
+      # an aggregate cannot tell "one form went blind" from "the repo retired a
+      # few reads", so deleting the pipe grep would leave `test-root` merrily
+      # above its floor. THE NUMBER OF CHECKS A DOOR RUNS IS NOT THE NUMBER OF
+      # SHAPES IT SEES — one tag per shape is what makes the floor table an
+      # honest inventory rather than a count of doors.
+      #
+      # MEASURED, not guessed: the pipe and list forms were found live in
+      # api/lib + api/test by the 14-shape probe matrix recorded under RESIDUE.
+      # The single-`Path.join` form alone saw 4 of those 14 shapes cleanly.
+      #
+      # The list form keeps only the FIRST literal segment of
+      # `Path.join([root, "a", "b"])`. That is deliberate and conservative: the
+      # prefix is what the existence filter can confirm, and it matches how the
+      # wildcard trim below already degrades a glob to its static prefix.
+      for form in root rootpipe rootlist; do
+        case "$form" in
+          root)
+            joins="$(grep -Eoh 'Path\.join\(@?'"$name"',[[:space:]]*"[^"]*"' "$REPO_ROOT/$f" || true)"
+            ;;
+          rootpipe)
+            joins="$(grep -Eoh '@?'"$name"'[[:space:]]*\|>[[:space:]]*Path\.join\("[^"]*"' "$REPO_ROOT/$f" || true)"
+            ;;
+          rootlist)
+            joins="$(grep -Eoh 'Path\.join\(\[[[:space:]]*@?'"$name"',[[:space:]]*"[^"]*"' "$REPO_ROOT/$f" || true)"
             ;;
         esac
-        [ -n "$jlit" ] || continue
-        resolved="$(norm_path "$adir/$jlit")"
-        [ -n "$resolved" ] || continue
-        # inside api/ is not an escape
-        case "$resolved" in api | api/*) continue ;; esac
-        # Only reads that can actually happen.
-        [ -e "$REPO_ROOT/$resolved" ] || continue
-        printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$tree-root"
-      done <<EOF
+        while IFS= read -r j; do
+          [ -n "$j" ] || continue
+          jlit="${j#*\"}"
+          jlit="${jlit%%\"*}"
+          jlit="${jlit%%\#\{*}"
+          case "$jlit" in
+            *'*'*)
+              jlit="${jlit%%\**}"
+              jlit="${jlit%/}"
+              ;;
+          esac
+          [ -n "$jlit" ] || continue
+          resolved="$(norm_path "$adir/$jlit")"
+          [ -n "$resolved" ] || continue
+          # inside api/ is not an escape
+          case "$resolved" in api | api/*) continue ;; esac
+          # Only reads that can actually happen.
+          [ -e "$REPO_ROOT/$resolved" ] || continue
+          printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$tree-$form"
+        done <<EOF
 $joins
 EOF
+      done
     done <<EOF
 $anchors
 EOF
