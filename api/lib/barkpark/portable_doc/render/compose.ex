@@ -489,6 +489,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, poster, style)}
   end
 
+  # A curated set of related Papers. Authored refs remain useful in pure/email
+  # rendering; the public reader injects fresh published metadata under the
+  # transient `_paper_links` key before composition.
+  def compose_block(%{"type" => "paper-links"} = b, style) do
+    %{"kind" => "_raw", "html" => paper_links_html(b, style)}
+  end
+
   # generic `figure` — wraps a child block + caption. Cheap and clean: compose
   # the child through the normal path, then wrap it in the same figure chrome
   # as `diagram` (caption only, no mermaid). Article mode gets the card; email
@@ -2526,6 +2533,137 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp block_to_html(_, _), do: ""
+
+  defp paper_links_html(block, style) do
+    resolved = Map.get(block, "_paper_links", %{})
+    reasons = Map.get(block, "reasons", %{})
+
+    cards =
+      block
+      |> Map.get("refs", [])
+      |> List.wrap()
+      |> Enum.map(&paper_link_ref(&1, resolved, reasons))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map_join(&paper_link_card(&1, style))
+
+    if cards == "" do
+      ""
+    else
+      title = nonblank(Map.get(block, "title")) || "Explore the work"
+      description = nonblank(Map.get(block, "description"))
+
+      intro =
+        if description,
+          do:
+            ~s|<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">#{Util.escape_html(description)}</p>|,
+          else: ""
+
+      ~s|<section data-paper-links aria-label="#{Util.escape_attr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
+        ~s|<header style="margin:0 0 1.15rem"><h2 style="margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)">#{Util.escape_html(title)}</h2>#{intro}</header>| <>
+        ~s(<div style="display:grid;gap:0.85rem">#{cards}</div></section>)
+    end
+  end
+
+  defp paper_link_ref(slug, resolved, reasons) when is_binary(slug) do
+    paper_link_ref(%{"slug" => slug}, resolved, reasons)
+  end
+
+  defp paper_link_ref(ref, resolved, reasons) when is_map(ref) do
+    slug = nonblank(Map.get(ref, "slug") || Map.get(ref, :slug))
+
+    if slug do
+      live = Map.get(resolved, slug, %{})
+
+      %{
+        slug: slug,
+        title: live_value(live, :title) || nonblank(Map.get(ref, "title")) || slug,
+        description: live_value(live, :description) || nonblank(Map.get(ref, "description")),
+        reason:
+          nonblank(Map.get(ref, "reason")) ||
+            nonblank(Map.get(reasons, slug)),
+        event_type: live_value(live, :event_type),
+        rev: live_value(live, :rev),
+        updated_at: live_value(live, :updated_at)
+      }
+    end
+  end
+
+  defp paper_link_ref(_, _, _), do: nil
+
+  defp paper_link_card(ref, style) do
+    href = Util.escape_attr("/papers/" <> ref.slug)
+    description = paper_link_description(ref.description)
+    reason = paper_link_reason(ref.reason, ref.description)
+    metadata = paper_link_metadata(ref)
+
+    card_style =
+      case style do
+        :article ->
+          "display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #dde7e2);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none"
+
+        _ ->
+          "display:block;padding:14px 16px;border:1px solid #dde7e2;border-radius:8px;color:#17332d;text-decoration:none"
+      end
+
+    ~s(<a data-paper-link-card href="#{href}" style="#{card_style}">) <>
+      ~s|<strong style="display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)">#{Util.escape_html(ref.title)}</strong>| <>
+      description <>
+      reason <>
+      metadata <>
+      ~s(</a>)
+  end
+
+  defp paper_link_description(copy) do
+    if copy,
+      do:
+        ~s|<span style="display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55">#{Util.escape_html(copy)}</span>|,
+      else: ""
+  end
+
+  defp paper_link_reason(reason, description) do
+    if reason && normalized_copy(reason) != normalized_copy(description),
+      do:
+        ~s|<span style="display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"><strong>Why it matters:</strong> #{Util.escape_html(reason)}</span>|,
+      else: ""
+  end
+
+  defp normalized_copy(nil), do: nil
+
+  defp normalized_copy(copy) do
+    copy
+    |> String.trim()
+    |> String.trim_trailing(".")
+    |> String.downcase()
+  end
+
+  defp paper_link_metadata(ref) do
+    [ref.event_type, ref.rev && "rev #{ref.rev}", ref.updated_at]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 == ""))
+    |> case do
+      [] ->
+        ""
+
+      parts ->
+        ~s|<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.72rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(Enum.join(parts, " · "))}</span>|
+    end
+  end
+
+  defp live_value(map, key) when is_map(map),
+    do: nonblank(Map.get(map, key) || Map.get(map, Atom.to_string(key)))
+
+  defp live_value(_, _), do: nil
+
+  defp nonblank(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp nonblank(value) when is_integer(value), do: to_string(value)
+  defp nonblank(_), do: nil
 
   # Children of a container block: `children` (preferred) or `blocks`.
   defp container_children(b), do: Map.get(b, "children") || Map.get(b, "blocks") || []

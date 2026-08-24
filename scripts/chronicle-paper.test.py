@@ -49,6 +49,16 @@ class ChroniclePaperTest(unittest.TestCase):
         env["GIT_COMMITTER_DATE"] = timestamp
         self.git("commit", "-m", subject, env=env)
 
+    def commit_file(self, timestamp, subject, relative_path, content="evidence"):
+        target = self.repo / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+        self.git("add", relative_path)
+        env = os.environ.copy()
+        env["GIT_AUTHOR_DATE"] = timestamp
+        env["GIT_COMMITTER_DATE"] = timestamp
+        self.git("commit", "-m", subject, env=env)
+
     def run_script(self, *args, check=True):
         return subprocess.run(
             ["python3", str(SCRIPT), *args], cwd=self.repo, text=True,
@@ -88,6 +98,8 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn('"text": "What we worked on"', serialized)
         self.assertIn('"text": "How this period moved"', serialized)
         self.assertIn('"type": "expandable"', serialized)
+        self.assertIn('"type": "paper-links"', serialized)
+        self.assertIn("task-components-editable-demo", serialized)
         self.assertIn('"summary": "Technical record and source evidence"', serialized)
         self.assertNotIn('"text": "Why this matters"', serialized)
         week_h1 = next(block for block in week["blocks"] if block["id"] == "auto:title")
@@ -138,7 +150,7 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertEqual(1, read_events.call_count)
         self.assertIn("month:2026-07", payloads)
 
-    def test_full_history_builds_every_active_period_and_hierarchical_links(self):
+    def test_full_history_builds_every_calendar_period_and_links_every_paper_from_index(self):
         events = self.read_fixture_events()
         with mock.patch.object(chronicle, "read_events", return_value=events) as read_events:
             payloads = chronicle.build(
@@ -150,23 +162,15 @@ class ChroniclePaperTest(unittest.TestCase):
 
         self.assertEqual(1, read_events.call_count)
         by_slug = {payload["slug"]: payload for payload in payloads.values()}
-        self.assertEqual(10, len(by_slug))
+        # 24 calendar days + four ISO weeks + two months + one year + index.
+        self.assertEqual(32, len(by_slug))
         self.assertEqual(len(payloads), len(by_slug))
-        self.assertEqual(
-            {
-                "barkpark-chronicle",
-                "barkpark-changelog-2026",
-                "barkpark-changelog-2026-07",
-                "barkpark-changelog-2026-08",
-                "barkpark-changelog-2026-w31",
-                "barkpark-changelog-2026-w34",
-                "barkpark-changelog-2026-07-31",
-                "barkpark-changelog-2026-08-17",
-                "barkpark-changelog-2026-08-18",
-                "barkpark-changelog-2026-08-23",
-            },
-            set(by_slug),
-        )
+        self.assertIn("barkpark-changelog-2026-08-01", by_slug)
+        self.assertIn("barkpark-changelog-2026-w32", by_slug)
+        self.assertIn("barkpark-changelog-2026-w33", by_slug)
+        quiet = by_slug["barkpark-changelog-2026-08-01"]
+        self.assertIn("A quiet day", quiet["title"])
+        self.assertIn("Nothing new shipped", json.dumps(quiet))
         self.assertTrue(
             all(
                 payload.get("dedup_bypass") is True
@@ -182,7 +186,7 @@ class ChroniclePaperTest(unittest.TestCase):
 
         august_json = json.dumps(by_slug["barkpark-changelog-2026-08"])
         self.assertIn("Weekly dispatches", august_json)
-        self.assertIn("Daily shiplogs", august_json)
+        self.assertIn("Daily editions", august_json)
         self.assertIn("/papers/barkpark-changelog-2026-w34", august_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-17", august_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-23", august_json)
@@ -191,6 +195,11 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("/papers/barkpark-changelog-2026-08-17", week_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-18", week_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-23", week_json)
+
+        index_json = json.dumps(by_slug["barkpark-chronicle"])
+        for slug in by_slug:
+            if slug != "barkpark-chronicle":
+                self.assertIn(f"/papers/{slug}", index_json, slug)
 
     def test_full_history_cli_writes_one_file_per_unique_paper(self):
         output_dir = self.repo / "chronicle"
@@ -201,7 +210,75 @@ class ChroniclePaperTest(unittest.TestCase):
             "--full-history",
             "--output-dir", str(output_dir),
         )
-        self.assertEqual(10, len(list(output_dir.glob("*.json"))))
+        self.assertEqual(32, len(list(output_dir.glob("*.json"))))
+
+    def test_changed_visual_evidence_becomes_a_commit_pinned_figure(self):
+        self.commit_file(
+            "2026-08-24T10:00:00Z",
+            "feat(tasks): show claimed work beside ready work (#14)",
+            "docs/evidence/tasks-board.png",
+        )
+        events = self.read_fixture_events()
+        event = events[-1]
+        self.assertIn("docs/evidence/tasks-board.png", event.paths)
+        period = chronicle.periods_for(dt.date(2026, 8, 24))["day"]
+        payload = chronicle.period_payload(
+            period,
+            [event],
+            chronicle.periods_for(period.start),
+            "acme/project",
+        )
+        figures = [block for block in payload["blocks"] if block.get("type") == "figure"]
+        self.assertEqual(1, len(figures))
+        image = figures[0]["child"]
+        self.assertEqual("image", image["type"])
+        self.assertIn(f"/acme/project/{event.sha}/docs/evidence/tasks-board.png", image["src"])
+        self.assertNotIn("tasks-board.png", image["alt"])
+
+    def test_no_visual_block_is_invented_when_a_period_has_no_media(self):
+        events = self.read_fixture_events()
+        period = chronicle.periods_for(dt.date(2026, 8, 18))["day"]
+        payload = chronicle.period_payload(
+            period,
+            chronicle.events_in_period(events, period),
+            chronicle.periods_for(period.start),
+            "acme/project",
+        )
+        self.assertFalse(any(block.get("type") in {"figure", "asciicast"} for block in payload["blocks"]))
+
+    def test_related_papers_are_real_refs_with_authored_fallback_copy(self):
+        event = chronicle.Event(
+            dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc),
+            "c" * 40,
+            "feat(tasks): show claimed work on the task board",
+        )
+        period = chronicle.periods_for(dt.date(2026, 8, 24))["day"]
+        block = chronicle.related_paper_block(
+            period,
+            [event],
+            chronicle.load_related_papers(),
+        )
+        self.assertEqual("paper-links", block["type"])
+        self.assertEqual("task-components-editable-demo", block["refs"][0]["slug"])
+        self.assertTrue(block["refs"][0]["title"])
+        self.assertTrue(block["refs"][0]["reason"])
+
+    def test_curated_cast_is_attached_only_to_the_commit_that_introduced_it(self):
+        event = chronicle.Event(
+            dt.datetime(2026, 8, 12, tzinfo=dt.timezone.utc),
+            "b" * 40,
+            "feat(papers): show the premium paper guide",
+            ("tooling/paper-excellence/twin/payload.json",),
+        )
+        period = chronicle.periods_for(dt.date(2026, 8, 12))["day"]
+        blocks = chronicle.evidence_blocks(period, [event], "acme/project")
+        casts = [block for block in blocks if block.get("type") == "asciicast"]
+        self.assertEqual(1, len(casts))
+        self.assertEqual(
+            "https://guerrilla.barkpark.cloud/media/files/2026/08/arch-3c4075aa.cast",
+            casts[0]["src"],
+        )
+        self.assertEqual(event.sha[:10], casts[0]["source_ref"])
 
     def test_utc_boundaries_and_iso_week_are_independent_of_month(self):
         periods = chronicle.periods_for(dt.date(2026, 1, 1))
@@ -303,7 +380,7 @@ class ChroniclePaperTest(unittest.TestCase):
             chronicle.events_in_period(events, period),
         )
         self.assertEqual("Tasks return to view", editorial["theme"])
-        self.assertIn("restore tasks", editorial["plain_summary"])
+        self.assertIn("Tasks return to view", editorial["plain_summary"])
         forbidden = (
             "Opening up new possibilities",
             "Useful progress, carefully made",
@@ -330,7 +407,7 @@ class ChroniclePaperTest(unittest.TestCase):
         )
         self.assertLessEqual(len(payload["title"]), 255)
         self.assertTrue(payload["title"].endswith("— 24 August 2026"))
-        self.assertIn("…", payload["title"])
+        self.assertNotIn("specific reader-visible change", payload["title"])
 
     def test_editorial_generation_falls_back_without_blocking_the_archive(self):
         events = self.read_fixture_events()
@@ -387,6 +464,19 @@ class ChroniclePaperTest(unittest.TestCase):
             with mock.patch.object(chronicle.json, "load", return_value={"result": {"source_doc": payload["source_doc"]}}):
                 chronicle.publish([payload], "https://example.test", "secret")
         self.assertEqual(1, urlopen.call_count)
+
+    def test_publish_can_preserve_an_existing_historical_editorial(self):
+        payload = {"slug": "old-day", "source_doc": "new-generated-copy"}
+        with mock.patch.object(chronicle, "current_source_doc", return_value="human-reviewed-copy"):
+            with mock.patch.object(chronicle.urllib.request, "urlopen") as urlopen:
+                result = chronicle.publish_one(
+                    payload,
+                    "https://example.test",
+                    "secret",
+                    missing_only=True,
+                )
+        self.assertEqual("preserved /papers/old-day", result)
+        urlopen.assert_not_called()
 
     def test_parallel_publish_keeps_the_chronicle_index_last(self):
         payloads = [

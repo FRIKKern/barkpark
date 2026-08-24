@@ -436,8 +436,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
       # ...and NO aggregate "K you cannot see" count: the Used-by list carries
       # EXACTLY the one visible row.
-      [used_by_section] = Regex.run(~r/<section class="bp-paper-usedby".*?<\/section>/s, html)
-      assert length(String.split(used_by_section, "<li", trim: true)) == 2
+      [used_by_section] =
+        Regex.run(~r/<section[^>]*class="[^"]*bp-paper-usedby[^"]*".*?<\/section>/s, html)
+
+      assert length(Regex.scan(~r/class="bp-paper-card"/, used_by_section)) == 1
     end
   end
 

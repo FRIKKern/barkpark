@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-editorial-16"
+RENDERER_VERSION = "chronicle-editorial-17"
 EDITORIAL_SCHEMA = "barkpark.chronicle-editorial.v2"
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -29,6 +29,7 @@ EDITORIAL_MODEL = "claude-sonnet-4-6"
 LEDGER_PREVIEW_LIMIT = 24
 DEFAULT_HISTORY_MONTHS = 18
 DEFAULT_REPO = "FRIKKern/barkpark"
+RELATED_PAPERS_PATH = pathlib.Path(__file__).resolve().parent.parent / "changelog" / "related-papers.json"
 CONVENTIONAL = re.compile(
     r"^(?P<kind>feat|fix|perf|revert|docs|test|ci|build|chore|refactor|style)"
     r"(?:\((?P<scope>[^)]+)\))?(?:!)?:\s*(?P<title>.+)$",
@@ -69,6 +70,7 @@ class Event:
     occurred_at: dt.datetime
     sha: str
     subject: str
+    paths: tuple[str, ...] = ()
 
     @property
     def match(self) -> re.Match[str] | None:
@@ -128,17 +130,27 @@ def heading(block_id: str, level: int, value: str) -> dict[str, Any]:
 
 def read_events(ref: str) -> list[Event]:
     raw = subprocess.run(
-        ["git", "log", "--first-parent", "-z", "--format=%cI%x1f%H%x1f%s", ref],
+        [
+            "git", "log", "--first-parent", "--name-only", "-z",
+            "--format=%x1e%cI%x1f%H%x1f%s", ref,
+        ],
         check=True,
         stdout=subprocess.PIPE,
     ).stdout
     events: list[Event] = []
-    for record in raw.split(b"\0"):
+    for record in raw.split(b"\x1e"):
         if not record:
             continue
-        stamp, sha, subject = record.decode("utf-8", errors="replace").split("\x1f", 2)
+        parts = record.split(b"\0")
+        header = parts[0].decode("utf-8", errors="replace")
+        stamp, sha, subject = header.split("\x1f", 2)
+        paths = tuple(
+            value.decode("utf-8", errors="replace").lstrip("\n")
+            for value in parts[1:]
+            if value.strip(b"\n")
+        )
         occurred_at = dt.datetime.fromisoformat(stamp).astimezone(dt.timezone.utc)
-        events.append(Event(occurred_at, sha, subject))
+        events.append(Event(occurred_at, sha, subject, paths))
     return list(reversed(events))
 
 
@@ -215,19 +227,20 @@ def historical_months(events: list[Event], through: dt.date, limit: int) -> list
 
 
 def historical_periods(events: list[Event], through: dt.date) -> dict[str, list[Period]]:
-    """Return every active day, ISO week, month, and year through ``through``."""
+    """Return every calendar day and containing period through ``through``."""
     periods: dict[str, dict[str, Period]] = {
         "day": {},
         "week": {},
         "month": {},
         "year": {},
     }
-    for event in events:
-        event_day = event.occurred_at.date()
-        if event_day > through:
-            continue
-        for kind, period in periods_for(event_day).items():
+    eligible_days = [event.occurred_at.date() for event in events if event.occurred_at.date() <= through]
+    first_day = min(eligible_days, default=through)
+    cursor = first_day
+    while cursor <= through:
+        for kind, period in periods_for(cursor).items():
             periods[kind][period.key] = period
+        cursor += dt.timedelta(days=1)
     return {
         kind: [by_key[key] for key in sorted(by_key)]
         for kind, by_key in periods.items()
@@ -246,6 +259,109 @@ def event_url(event: Event, repo: str) -> str:
     if event.pr_number:
         return f"https://github.com/{repo}/pull/{event.pr_number}"
     return f"https://github.com/{repo}/commit/{event.sha}"
+
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
+CAST_EXTENSIONS = {".cast"}
+MEDIA_LIMITS = {
+    "day": (1, 1),
+    "week": (2, 1),
+    "month": (3, 1),
+    "year": (4, 1),
+}
+CURATED_CASTS_BY_PATH = {
+    "tooling/paper-excellence/twin/payload.json": (
+        "https://guerrilla.barkpark.cloud/media/files/2026/08/arch-3c4075aa.cast",
+        "https://guerrilla.barkpark.cloud/media/files/2026/08/race-97b047b6.cast",
+    ),
+}
+
+
+def artifact_url(event: Event, path: str, repo: str) -> str:
+    if path.startswith(("https://", "http://", "/")):
+        return path
+    encoded = "/".join(urllib.parse.quote(part, safe="") for part in path.split("/"))
+    return f"https://raw.githubusercontent.com/{repo}/{event.sha}/{encoded}"
+
+
+def artifact_candidates(selected: list[Event]) -> list[tuple[Event, str, str]]:
+    """Return real media changed by this period, strongest reader evidence first."""
+    ranked: list[tuple[int, dt.datetime, Event, str, str]] = []
+    seen: set[str] = set()
+    for event in reversed(selected):
+        paths = list(event.paths)
+        for changed_path in event.paths:
+            paths.extend(CURATED_CASTS_BY_PATH.get(changed_path, ()))
+        for path in paths:
+            extension = pathlib.PurePosixPath(path).suffix.lower()
+            kind = "image" if extension in IMAGE_EXTENSIONS else "asciicast" if extension in CAST_EXTENSIONS else None
+            if kind is None:
+                continue
+            lowered = path.lower()
+            if any(part in lowered for part in ("node_modules/", "vendor/", "fixtures/")):
+                continue
+            identity = re.sub(r"(?:[-_](?:dark|light|mobile|desktop|768|1440|2x))+(?=\.)", "", lowered)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            score = 0
+            if any(part in lowered for part in ("docs/evidence/", "evidence/shots/", "design/")):
+                score += 8
+            if any(word in lowered for word in ("after", "final", "complete", "hero", "overview")):
+                score += 4
+            if any(word in lowered for word in ("baseline", "diff", "failure", "thumbnail")):
+                score -= 5
+            ranked.append((score, event.occurred_at, event, path, kind))
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return [(event, path, kind) for _score, _stamp, event, path, kind in ranked]
+
+
+def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[dict[str, Any]]:
+    image_limit, cast_limit = MEDIA_LIMITS[period.kind]
+    images = 0
+    casts = 0
+    blocks: list[dict[str, Any]] = []
+    for event, path, kind in artifact_candidates(selected):
+        if kind == "image" and images >= image_limit:
+            continue
+        if kind == "asciicast" and casts >= cast_limit:
+            continue
+        headline = concrete_fallback_headline(event)
+        source = artifact_url(event, path, repo)
+        if not blocks:
+            blocks.extend([
+                {"id": "auto:divider-evidence", "type": "divider"},
+                heading("auto:evidence-title", 2, "See the change" if period.kind == "day" else "Moments from this edition"),
+                paragraph("auto:evidence-dek", "Real product evidence from the work in this edition."),
+            ])
+        number = images + casts + 1
+        caption = f"{headline}. Shown from the change that shipped it."
+        if kind == "image":
+            images += 1
+            blocks.append({
+                "id": f"auto:evidence-{number}",
+                "type": "figure",
+                "caption": caption,
+                "source_ref": event.sha[:10],
+                "child": {
+                    "type": "image",
+                    "src": source,
+                    "alt": f"Barkpark showing the result: {headline.lower()}",
+                },
+            })
+        else:
+            casts += 1
+            blocks.append({
+                "id": f"auto:evidence-{number}",
+                "type": "asciicast",
+                "src": source,
+                "caption": caption,
+                "poster": "npt:0:08",
+                "source_ref": event.sha[:10],
+            })
+        if images >= image_limit and casts >= cast_limit:
+            break
+    return blocks
 
 
 def digest(events: Iterable[Event]) -> str:
@@ -347,6 +463,7 @@ def editorial_source_packet(period: Period, selected: list[Event]) -> dict[str, 
     areas = collections.Counter(event.area for event in selected)
     kinds = collections.Counter(event.kind for event in selected)
     return {
+        "edition_id": f"{period.kind}:{period.key}",
         "kind": period.kind,
         "key": period.key,
         "label": period.title,
@@ -401,8 +518,11 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
         matches = [event for event in remaining if any(needle in event.title.lower() for needle in needles)]
         if not matches:
             continue
+        story_title = concrete_fallback_headline(matches[0])
+        if any(item["title"] == story_title for item in work_themes):
+            continue
         work_themes.append({
-            "title": concrete_fallback_headline(matches[0]),
+            "title": story_title,
             "explanation": explanation,
             "outcome": outcome,
             "source_refs": [event.sha[:10] for event in matches[:3]],
@@ -427,19 +547,30 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
         selected[-1],
     )
     theme = concrete_fallback_headline(latest_product)
-    latest_changes = [event.title for event in reversed(selected) if event.kind in PRODUCT_KINDS][:3]
+    latest_changes = []
+    for event in reversed(selected):
+        if event.kind not in PRODUCT_KINDS:
+            continue
+        headline = concrete_fallback_headline(event)
+        if headline not in latest_changes:
+            latest_changes.append(headline)
+        if len(latest_changes) == 3:
+            break
     if not latest_changes:
-        latest_changes = [event.title for event in reversed(selected[-3:])]
+        for event in reversed(selected[-3:]):
+            headline = concrete_fallback_headline(event)
+            if headline not in latest_changes:
+                latest_changes.append(headline)
     change_list = "; ".join(latest_changes)
     if feature_heavy:
-        summary = f"The shipped changes include {change_list}. These additions led the period, alongside the finishing work needed to make them dependable."
-        assessment = "This was a forward-motion period: visible additions led the work, with enough supporting care to keep them useful in practice."
+        summary = f"{change_list}. Those visible additions led the period, alongside the finishing work needed to make them dependable."
+        assessment = f"{theme} was the clearest step forward. Supporting work helped it hold up in everyday use."
     elif fix_heavy:
-        summary = f"The shipped fixes include {change_list}. Reliability led the period, with the emphasis on making failures clearer and results easier to trust."
-        assessment = "This was a care-and-repair period. The progress is quieter, but it leaves Barkpark steadier and easier to rely on."
+        summary = f"{change_list}. Care and repair led the period, making confusing moments clearer and results easier to trust."
+        assessment = f"{theme} was the defining repair. It leaves the surrounding work calmer and more dependable."
     else:
-        summary = f"The shipped changes include {change_list}. New capabilities and repair work moved together rather than telling two separate stories."
-        assessment = "This was balanced progress: some visible movement, some behind-the-scenes care, and a product that is better for both."
+        summary = f"{change_list}. New capability and repair work moved together instead of telling two separate stories."
+        assessment = f"{theme} best captures the period. The rest of the work helped that change feel complete rather than isolated."
     return {
         "theme": theme,
         "plain_summary": summary,
@@ -462,17 +593,131 @@ def concrete_fallback_headline(event: Event) -> str:
         return "Chronicle editions become easier to tell apart"
     if "task" in title_value and any(word in title_value for word in ("restore", "list", "view", "visible")):
         return "Tasks return to view"
+    if "task" in title_value and any(word in title_value for word in ("claim", "ready", "board", "queue")):
+        return "Task boards show who is working on what"
+    if "typed export" in title_value:
+        return "Barkpark data travels safely into more tools"
     if "paper" in title_value and any(word in title_value for word in ("overflow", "narrow", "mobile", "width")):
         return "Papers now fit smaller screens"
     if any(word in title_value for word in ("pagination", "truncat", "complete result")):
         return "Lists now show the full picture"
+    area_headline = product_area_headline(event.area, title_value)
+    if area_headline is not None:
+        return area_headline
+    candidate = source_headline_candidate(event.title)
+    if candidate is not None:
+        return candidate
     if any(word in title_value for word in ("error", "fail", "refusal", "diagnosis")):
         return "Failures now explain what happened"
     if any(word in title_value for word in ("access", "auth", "token", "permission")):
         return "Access rules close unsafe paths"
     if any(word in title_value for word in ("deploy", "rollout", "release gate")):
         return "Release checks catch failed rollouts"
-    return sentence_case(event.title)
+    if event.kind == "docs" and "chronicle" in title_value:
+        return "Chronicle gets a readable guide"
+    surface = {
+        "tui": "The terminal",
+        "cli": "The terminal",
+        "tasks": "Tasks",
+        "task": "Tasks",
+        "papers": "Papers",
+        "paper": "Papers",
+        "studio": "Studio",
+        "media": "Media",
+        "cloud": "Barkpark Cloud",
+        "auth": "Sign-in",
+        "web": "The web reader",
+        "mobile": "The mobile workspace",
+    }.get(event.area.lower(), "Barkpark")
+    if event.kind == "fix":
+        return f"{surface} handles a previously broken path"
+    if event.kind == "perf":
+        return f"{surface} responds more quickly"
+    if event.kind == "feat":
+        return f"{surface} supports a new everyday action"
+    if event.kind in {"docs", "test", "ci", "build", "chore", "refactor", "style"}:
+        return f"{surface} becomes easier to understand and maintain"
+    return f"{surface} records a concrete product change"
+
+
+def product_area_headline(area: str, title_value: str) -> str | None:
+    area = area.lower()
+    if area in {"paper", "papers", "paper-excellence", "portabledoc", "portable-doc", "pds", "render", "bulldocs"}:
+        if any(word in title_value for word in ("edit", "author", "canvas")):
+            return "Papers become easier to edit"
+        if any(word in title_value for word in ("email", "tui", "terminal", "parity", "render")):
+            return "Papers keep their shape wherever they are read"
+        if any(word in title_value for word in ("image", "video", "media", "cast", "figure")):
+            return "Papers bring visual proof into the story"
+        if any(word in title_value for word in ("link", "reference", "backlink", "mention")):
+            return "Paper links carry useful context"
+        if any(word in title_value for word in ("reader", "layout", "spacing", "type", "font", "sheet", "edge")):
+            return "Papers read more like finished publications"
+        return "Papers tell richer stories with less visual noise"
+    if area in {"cloud", "cloud-console", "console", "site-deploy", "deploy-reliability"}:
+        if any(word in title_value for word in ("deploy", "release", "rollout")):
+            return "Barkpark Cloud makes releases easier to trust"
+        return "Barkpark Cloud makes site status easier to understand"
+    if area in {"studio", "structure", "desk"}:
+        if "chat" in title_value:
+            return "Studio chat gets closer to the work"
+        return "Studio makes projects easier to navigate"
+    if area in {"cli", "tui", "terminal"}:
+        if "task" in title_value:
+            return "The terminal keeps task work visible"
+        return "The terminal explains everyday work more clearly"
+    if area in {"task", "tasks", "taskboard", "taskboard-drive"}:
+        return "Task boards make ownership and progress visible"
+    if area in {"workflow", "workflows", "epic", "epic-cycle", "harness", "runtime"}:
+        return "Long-running work becomes easier to start and follow"
+    if area in {"errors", "error", "recovery", "sync", "listen"}:
+        return "Failures explain what happened and how to recover"
+    if area in {"auth", "access", "sessions"}:
+        return "Sign-in and access rules become easier to trust"
+    return None
+
+
+def source_headline_candidate(value: str) -> str | None:
+    """Keep a source title's useful subject while translating its implementation terms."""
+    cleaned = value
+    replacements = (
+        (r"\bTUI\b|\bCLI\b", "terminal"),
+        (r"\bAPI\b", "connections"),
+        (r"\bSSE\b|\bWebSockets?\b|\bPubSub\b", "live updates"),
+        (r"\bschemas?\b", "content structure"),
+        (r"\bpagination\b|\bpaginate[sd]?\b", "complete listing"),
+        (r"\brender(?:er|ing|ed)?\b", "display"),
+        (r"\bdeploy(?:ment|ments|ed|ing)?\b", "release"),
+        (r"\bauth(?:entication)?\b", "access"),
+        (r"\bcallbacks?\b", "responses"),
+        (r"\brequest IDs?\b", "request details"),
+        (r"\bretr(?:y|ies|ied|ying)\b", "recovery"),
+        (r"\bmainline\b", "shipped"),
+        (r"\bmanifest\b", "capability list"),
+    )
+    for pattern, replacement in replacements:
+        cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"`[^`]+`", "", cleaned)
+    cleaned = re.sub(r"\([^)]*(?:D|W|PR|#)\s*\d+[^)]*\)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:D|W)\d+(?:[-–]\w+)*\b", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"--[a-z][a-z-]*", "", cleaned)
+    cleaned = cleaned.replace("_", " ")
+    cleaned = " ".join(cleaned.split()).strip(" -—:;,.")
+    if not 12 <= len(cleaned) <= 88:
+        return None
+    if any(character.isdigit() for character in cleaned):
+        return None
+    candidate = sentence_case(cleaned)
+    implementation_language = re.compile(
+        r"\b(?:deep[- ]investigation|launch clause|chokepoint|dialect|tripwire|runbook|"
+        r"scriptpath|derived host|token budget|fixture|payload|worktree|codepath|callsite)\b",
+        re.IGNORECASE,
+    )
+    if implementation_language.search(candidate):
+        return None
+    if FORBIDDEN_MAIN_PATH_LANGUAGE.search(candidate) or FORBIDDEN_VAGUE_HEADLINE.search(candidate):
+        return None
+    return candidate
 
 
 def validate_editorial(raw: Any, period: Period, selected: list[Event]) -> dict[str, Any]:
@@ -570,8 +815,8 @@ sentence that describes the act of working instead of its result. The second
 sentence explains what a reader can now see, do, or trust that they could not before.
 
 Return only JSON with this exact outer shape, with one edition object for every
-kind supplied in the source packets:
-{"schema":"barkpark.chronicle-editorial.v2","editions":{"day":{"theme":"","plain_summary":"","work_themes":[{"title":"","explanation":"","outcome":"","source_refs":["exact supplied ref"]}],"progress_assessment":""}}}
+`edition_id` supplied in the source packets:
+{"schema":"barkpark.chronicle-editorial.v2","editions":{"day:YYYY-MM-DD":{"theme":"","plain_summary":"","work_themes":[{"title":"","explanation":"","outcome":"","source_refs":["exact supplied ref"]}],"progress_assessment":""}}}
 Each supplied edition needs one to three distinct work themes, and every theme must
 cite one to three exact refs from that edition's supplied sources. The plain summary
 must answer the reader's question in two or three short sentences. The progress
@@ -681,9 +926,46 @@ def generate_current_editorials(
     valid: dict[str, dict[str, Any]] = {}
     for kind in active_kinds:
         try:
-            valid[kind] = validate_editorial(raw[kind], periods[kind], selected_by_kind[kind])
+            edition_id = f"{kind}:{periods[kind].key}"
+            valid[kind] = validate_editorial(
+                raw.get(edition_id, raw.get(kind)),
+                periods[kind],
+                selected_by_kind[kind],
+            )
         except (KeyError, ValueError) as exc:
             print(f"chronicle-paper: {kind} editorial fell back safely: {exc}", file=sys.stderr)
+    return valid
+
+
+def generate_archive_editorials(
+    events: list[Event], archive: dict[str, list[Period]], provider: str, batch_size: int = 8
+) -> dict[str, dict[str, Any]]:
+    """Write the complete active archive in bounded batches; quiet editions stay factual."""
+    valid: dict[str, dict[str, Any]] = {}
+    # Same-scale periods do not overlap, which keeps source references unambiguous.
+    for kind in EDITORIAL_KINDS:
+        editions = [
+            (period, events_in_period(events, period))
+            for period in archive[kind]
+        ]
+        editions = [(period, selected) for period, selected in editions if selected]
+        for offset in range(0, len(editions), batch_size):
+            batch = editions[offset:offset + batch_size]
+            packets = [editorial_source_packet(period, selected) for period, selected in batch]
+            try:
+                raw = request_editorials(packets, provider)
+            except (KeyError, ValueError, RuntimeError, subprocess.SubprocessError, urllib.error.URLError) as exc:
+                print(
+                    f"chronicle-paper: archive editorial batch fell back safely ({type(exc).__name__})",
+                    file=sys.stderr,
+                )
+                continue
+            for period, selected in batch:
+                edition_id = f"{period.kind}:{period.key}"
+                try:
+                    valid[edition_id] = validate_editorial(raw[edition_id], period, selected)
+                except (KeyError, ValueError) as exc:
+                    print(f"chronicle-paper: {edition_id} editorial fell back safely: {exc}", file=sys.stderr)
     return valid
 
 
@@ -783,12 +1065,8 @@ def archive_list(block_id: str, periods: list[Period], events: list[Event]) -> d
     items = []
     for period in periods:
         count = len(events_in_period(events, period))
-        items.append(
-            [
-                link(period.title, f"/papers/{period.slug}"),
-                text(f" · {count:,} verified mainline changes"),
-            ]
-        )
+        note = "quiet edition" if count == 0 else f"{count:,} change" if count == 1 else f"{count:,} changes"
+        items.append([link(period.title, f"/papers/{period.slug}"), text(f" · {note}")])
     return {"id": block_id, "type": "list", "ordered": False, "items": items}
 
 
@@ -799,6 +1077,42 @@ def index_archive_list(block_id: str, periods: list[Period]) -> dict[str, Any]:
         for period in reversed(periods)
     ]
     return {"id": block_id, "type": "list", "ordered": False, "items": items}
+
+
+def complete_archive_blocks(
+    archive: dict[str, list[Period]],
+    events: list[Event],
+) -> list[dict[str, Any]]:
+    """One calm front door to every generated edition, grouped by month."""
+    children: list[dict[str, Any]] = [
+        paragraph(
+            "auto:complete-intro",
+            "Open any day, week, month, or year. Quiet days remain here too, so gaps mean rest—not missing history.",
+        ),
+        heading("auto:complete-years-title", 3, "Years"),
+        archive_list("auto:complete-years", list(reversed(archive["year"])), events),
+    ]
+    for month in reversed(archive["month"]):
+        suffix = month.key
+        weeks = [week for week in archive["week"] if week.start < month.end and week.end > month.start]
+        days = [day for day in archive["day"] if month.start <= day.start < month.end]
+        children.extend([
+            heading(f"auto:complete-{suffix}-title", 3, month.title),
+            paragraph(
+                f"auto:complete-{suffix}-month",
+                [text("Month · "), link("Read the monthly edition", f"/papers/{month.slug}")],
+            ),
+            heading(f"auto:complete-{suffix}-weeks-title", 4, "Weeks"),
+            archive_list(f"auto:complete-{suffix}-weeks", weeks, events),
+            heading(f"auto:complete-{suffix}-days-title", 4, "Days"),
+            archive_list(f"auto:complete-{suffix}-days", days, events),
+        ])
+    return [{
+        "id": "auto:complete-archive",
+        "type": "expandable",
+        "summary": "Browse every edition",
+        "children": children,
+    }]
 
 
 def edition_columns(periods: dict[str, Period], latest_day: Period, current_week: list[Event]) -> dict[str, Any]:
@@ -884,6 +1198,57 @@ def linked_card_section(
     }
 
 
+def load_related_papers(path: pathlib.Path = RELATED_PAPERS_PATH) -> list[dict[str, Any]]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot load related Paper catalog {path}: {exc}") from exc
+    if not isinstance(value, list):
+        raise RuntimeError(f"related Paper catalog must be a list: {path}")
+    return value
+
+
+def related_paper_block(
+    period: Period,
+    selected: list[Event],
+    catalog: list[dict[str, Any]],
+    *,
+    block_id: str = "auto:related-papers",
+) -> dict[str, Any] | None:
+    if not selected:
+        return None
+    haystack = " ".join(
+        " ".join([event.area, event.title, *event.paths])
+        for event in selected
+    ).lower()
+    ranked = []
+    for index, item in enumerate(catalog):
+        keywords = [str(keyword).lower() for keyword in item.get("keywords", [])]
+        score = sum(haystack.count(keyword) for keyword in keywords)
+        if score:
+            ranked.append((score, -index, item))
+    ranked.sort(reverse=True, key=lambda item: (item[0], item[1]))
+    limit = {"day": 2, "week": 3, "month": 4, "year": 6}[period.kind]
+    refs = [
+        {
+            "slug": item["slug"],
+            "title": item.get("title", item["slug"]),
+            "description": item.get("reason", "A related Barkpark Paper."),
+            "reason": item.get("reason"),
+        }
+        for _score, _index, item in ranked[:limit]
+    ]
+    if not refs:
+        return None
+    return {
+        "id": block_id,
+        "type": "paper-links",
+        "title": "Worth opening next",
+        "description": "A few real Papers that add useful context to this edition.",
+        "refs": refs,
+    }
+
+
 def editorial_story_section(
     block_id: str,
     stories: list[dict[str, Any]],
@@ -933,20 +1298,19 @@ def child_archive_blocks(
     sections: list[tuple[str, str, list[Period]]] = []
     if period.kind == "year":
         children = [child for child in archive["month"] if period.start <= child.start < period.end]
-        sections.append(("Monthly chapters", "Every active month in this annual volume.", children))
+        sections.append(("Monthly chapters", "Every month in this annual volume, including the quiet ones.", children))
     elif period.kind == "month":
-        week_keys = {periods_for(event.occurred_at.date())["week"].key for event in selected}
-        weeks = [child for child in archive["week"] if child.key in week_keys]
+        weeks = [child for child in archive["week"] if child.start < period.end and child.end > period.start]
         days = [child for child in archive["day"] if period.start <= child.start < period.end]
         sections.extend(
             [
-                ("Weekly dispatches", "ISO-week views touching this month, including boundary weeks.", weeks),
-                ("Daily shiplogs", "Every active mainline day in this monthly chapter.", days),
+                ("Weekly dispatches", "Every weekly view touching this month, including boundary weeks.", weeks),
+                ("Daily editions", "Every calendar day in this monthly chapter.", days),
             ]
         )
     elif period.kind == "week":
         days = [child for child in archive["day"] if period.start <= child.start < period.end]
-        sections.append(("Daily shiplogs", "Every active mainline day in this weekly dispatch.", days))
+        sections.append(("Daily editions", "Every calendar day in this weekly dispatch.", days))
 
     blocks: list[dict[str, Any]] = []
     for index, (title_value, description, children) in enumerate(sections):
@@ -973,6 +1337,7 @@ def period_payload(
     events: list[Event] | None = None,
     archive: dict[str, list[Period]] | None = None,
     editorial: dict[str, Any] | None = None,
+    related_papers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     editorial = editorial or deterministic_editorial(period, selected)
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
@@ -1003,6 +1368,9 @@ def period_payload(
         {"id": "auto:ingress", "type": "ingress", "content": [text(editorial["plain_summary"])]},
         paragraph("auto:dek", "A short, human account comes first, so you can understand the work without knowing the machinery behind it. The detailed receipts are tucked neatly underneath."),
         {"id": "auto:byline", "type": "byline", "items": [date_range, f"Through {through_date.strftime('%d %B %Y').lstrip('0')}"]},
+    ])
+    blocks.extend(evidence_blocks(period, selected, repo))
+    blocks.extend([
         {"id": "auto:divider-work", "type": "divider"},
         heading("auto:work-title", 2, "What we worked on"),
         editorial_story_section("auto:work-themes", editorial["work_themes"], selected, repo)
@@ -1016,8 +1384,13 @@ def period_payload(
             "title": "The short version",
             "content": [text(editorial["progress_assessment"])],
         },
-        {"id": "auto:divider-record", "type": "divider"},
     ])
+    related = related_paper_block(period, selected, related_papers or [])
+    if related is not None:
+        blocks.append(related)
+    if events is not None and archive is not None:
+        blocks.extend(child_archive_blocks(period, selected, events, archive))
+    blocks.append({"id": "auto:divider-record", "type": "divider"})
     technical_record: list[dict[str, Any]] = [
         paragraph("auto:record-intro", "The detailed record behind this edition: counts, categories, source links, and the complete release trail."),
         {
@@ -1044,8 +1417,6 @@ def period_payload(
             heading("auto:product-title", 2, "Product updates"),
             event_lineage("auto:product-signals", product_signals, repo, limit=8),
         ])
-    if events is not None and archive is not None:
-        technical_record.extend(child_archive_blocks(period, selected, events, archive))
     technical_record.append(heading("auto:ledger-title", 2, "Complete release log"))
     if selected:
         items = []
@@ -1103,6 +1474,8 @@ def index_payload(
     repo: str,
     month_archive: list[Period],
     editorials: dict[str, dict[str, Any]] | None = None,
+    archive: dict[str, list[Period]] | None = None,
+    related_papers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     editorials = editorials or {}
     latest = events[-1] if events else None
@@ -1116,9 +1489,9 @@ def index_payload(
     current_day = events_in_period(events, periods["day"])
     latest_selected = events_in_period(events, latest_day)
     day_editorial = (
-        editorials.get("day")
+        editorials.get(f"day:{latest_day.key}", editorials.get("day"))
         if latest_day.key == periods["day"].key
-        else None
+        else editorials.get(f"day:{latest_day.key}")
     ) or deterministic_editorial(latest_day, latest_selected)
     all_digest = digest(events)
     monthly = collections.Counter(event.occurred_at.month for event in current_year)
@@ -1138,13 +1511,27 @@ def index_payload(
         heading("auto:featured-theme", 3, day_editorial["theme"]),
         paragraph("auto:featured-summary", day_editorial["plain_summary"]),
         paragraph("auto:featured-link", [link("Read today’s edition →", f"/papers/{latest_day.slug}")]),
+    ]
+    interesting = related_paper_block(
+        periods["month"],
+        events_in_period(events, periods["month"]),
+        related_papers or [],
+        block_id="auto:interesting-papers",
+    )
+    if interesting is not None:
+        interesting["title"] = "Interesting Papers right now"
+        interesting["description"] = "Deeper reads connected to the work moving through Barkpark this month."
+        blocks.append(interesting)
+    blocks.extend([
         heading("auto:editions-title", 2, "Choose your view"),
         paragraph("auto:editions-dek", "A quick daily note, a weekly direction, a monthly review, or the whole story so far."),
         edition_columns(periods, latest_day, current_week),
         heading("auto:archive-title", 2, "Release archive"),
         paragraph("auto:archive-dek", "Monthly chapters, newest first. Each one tells the story before showing the record."),
         index_archive_list("auto:month-archive", month_archive),
-    ]
+    ])
+    if archive is not None:
+        blocks.extend(complete_archive_blocks(archive, events))
     blocks.append({
         "id": "auto:shipping-record",
         "type": "expandable",
@@ -1197,9 +1584,11 @@ def build(
     *,
     events: list[Event] | None = None,
     editorials: dict[str, dict[str, Any]] | None = None,
+    related_papers: list[dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     events = events_through(events if events is not None else read_events(ref), day)
     editorials = editorials or {}
+    related_papers = load_related_papers() if related_papers is None else related_papers
     periods = periods_for(day)
     complete_archive = historical_periods(events, day)
     month_archive = (
@@ -1215,7 +1604,8 @@ def build(
             repo,
             events=events,
             archive=complete_archive if full_history else None,
-            editorial=editorials.get(kind),
+            editorial=editorials.get(f"{kind}:{period.key}", editorials.get(kind)),
+            related_papers=related_papers,
         )
         for kind, period in periods.items()
     }
@@ -1238,8 +1628,18 @@ def build(
                 repo,
                 events=events,
                 archive=complete_archive if full_history else None,
+                editorial=editorials.get(f"{kind}:{historical.key}"),
+                related_papers=related_papers,
             )
-    payloads["index"] = index_payload(periods, events, repo, month_archive, editorials)
+    payloads["index"] = index_payload(
+        periods,
+        events,
+        repo,
+        month_archive,
+        editorials,
+        complete_archive if full_history else None,
+        related_papers,
+    )
     return payloads
 
 
@@ -1256,10 +1656,15 @@ def current_source_doc(api_url: str, slug: str) -> str | None:
     return result.get("source_doc") if isinstance(result, dict) else None
 
 
-def publish_one(payload: dict[str, Any], api_url: str, token: str) -> str:
+def publish_one(
+    payload: dict[str, Any], api_url: str, token: str, *, missing_only: bool = False
+) -> str:
     try:
         endpoint = api_url.rstrip("/") + "/v1/plugins/bulldocs/papers"
-        if current_source_doc(api_url, payload["slug"]) == payload["source_doc"]:
+        current = current_source_doc(api_url, payload["slug"])
+        if missing_only and current is not None:
+            return f"preserved /papers/{payload['slug']}"
+        if current == payload["source_doc"]:
             return f"unchanged /papers/{payload['slug']}"
         request = urllib.request.Request(
             endpoint,
@@ -1282,12 +1687,25 @@ def publish(
     api_url: str,
     token: str,
     workers: int = 6,
+    update_slugs: set[str] | None = None,
 ) -> None:
     ordered = list(payloads)
     indexes = [payload for payload in ordered if payload["slug"] == "barkpark-chronicle"]
     editions = [payload for payload in ordered if payload["slug"] != "barkpark-chronicle"]
     with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [executor.submit(publish_one, payload, api_url, token) for payload in editions]
+        if update_slugs is None:
+            futures = [executor.submit(publish_one, payload, api_url, token) for payload in editions]
+        else:
+            futures = [
+                executor.submit(
+                    publish_one,
+                    payload,
+                    api_url,
+                    token,
+                    missing_only=payload["slug"] not in update_slugs,
+                )
+                for payload in editions
+            ]
         for future in concurrent.futures.as_completed(futures):
             print(future.result(), file=sys.stderr)
     for payload in indexes:
@@ -1326,7 +1744,17 @@ def main() -> int:
         default="off",
         help="add one AI editorial pass to the current day/week/month/year family",
     )
+    parser.add_argument(
+        "--editorial-all",
+        action="store_true",
+        help="with --full-history, write every active historical edition in bounded editorial batches",
+    )
     parser.add_argument("--publish", action="store_true")
+    parser.add_argument(
+        "--preserve-history",
+        action="store_true",
+        help="publish missing historical editions while updating only the current family and index",
+    )
     parser.add_argument(
         "--publish-workers",
         type=int,
@@ -1343,11 +1771,20 @@ def main() -> int:
             raise RuntimeError("--publish-workers must be one or greater")
         events = events_through(read_events(args.ref), args.date)
         periods = periods_for(args.date)
-        editorials = (
-            generate_current_editorials(events, periods, args.editorial_provider)
-            if args.editorial_provider != "off"
-            else {}
-        )
+        if args.editorial_all and not args.full_history:
+            raise RuntimeError("--editorial-all requires --full-history")
+        if args.editorial_all and args.editorial_provider == "off":
+            raise RuntimeError("--editorial-all requires --editorial-provider")
+        if args.editorial_all:
+            editorials = generate_archive_editorials(
+                events,
+                historical_periods(events, args.date),
+                args.editorial_provider,
+            )
+        elif args.editorial_provider != "off":
+            editorials = generate_current_editorials(events, periods, args.editorial_provider)
+        else:
+            editorials = {}
         payloads = build(
             args.date,
             args.ref,
@@ -1372,7 +1809,11 @@ def main() -> int:
             token = os.environ.get("BARKPARK_INGEST_TOKEN")
             if not token:
                 raise RuntimeError("--publish requires BARKPARK_INGEST_TOKEN")
-            publish(selected, args.api_url, token, args.publish_workers)
+            update_slugs = None
+            if args.preserve_history:
+                update_slugs = {period.slug for period in periods.values()}
+                update_slugs.add("barkpark-chronicle")
+            publish(selected, args.api_url, token, args.publish_workers, update_slugs)
     except (RuntimeError, subprocess.CalledProcessError, urllib.error.URLError) as exc:
         print(f"chronicle-paper: {exc}", file=sys.stderr)
         return 1

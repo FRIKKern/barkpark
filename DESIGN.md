@@ -4,7 +4,7 @@
 - Status: Active
 - Last refreshed: 2026-08-24
 - Primary product surfaces: Public Paper reader, Barkpark Chronicle index, Chronicle day/week/month/year editions, Studio Paper editor, email and TUI Paper views.
-- Evidence reviewed: `api/assets/paper-surface/paper-surface.css`, `api/lib/barkpark_web/controllers/scoped_paper_html/show.html.heex`, `tooling/paper-excellence/rig/README.md`, the committed Paper Excellence screenshot panel, and a fresh eight-viewport render of `barkpark-chronicle`.
+- Evidence reviewed: `api/assets/paper-surface/paper-surface.css`, the PortableDoc image/figure/asciicast renderers, the live Paper relation resolver, `docs/evidence/**`, `tooling/paper-excellence/evidence/**`, the committed Paper Excellence screenshot panel, and fresh multi-viewport Chronicle renders.
 
 ## Brand
 - Personality: Precise, calm, crafted, optimistic, and technically credible.
@@ -14,7 +14,7 @@
 ## Product goals
 - Goals: Make Barkpark shipping activity easy to scan, understand, browse, and trust; make every edition feel like a considered review of the period rather than generated Git output; give project managers, stakeholders, investors, contributors, and curious readers a shared understanding of momentum.
 - Non-goals: Marketing landing pages, raw commit mirrors, release-volume leaderboards, or a new Paper design system.
-- Success signals: A non-technical first-time reader can answer “What did Barkpark work on?” in under thirty seconds, identify the newest release, choose a day/week/month/year view, and reach source evidence without instruction. On the Chronicle index, one latest story is visually dominant and one calm navigation choice follows it; no competing card or button obscures that path.
+- Success signals: A non-technical first-time reader can answer “What did Barkpark work on?” in under thirty seconds, see a real example of the change when one exists, choose any calendar day/week/month/year, open a genuinely relevant Paper, and reach source evidence without instruction.
 
 ## Personas and jobs
 - Primary personas: Project managers tracking movement and risk; stakeholders and investors judging direction and momentum; Barkpark users following product progress; contributors checking what landed; operators auditing a release period.
@@ -24,7 +24,7 @@
 ## Information architecture
 - Primary navigation: Chronicle index → current day/week/month/year editions → adjacent editions and source evidence.
 - Core routes/screens: `/papers/barkpark-chronicle`, `/papers/barkpark-changelog-YYYY-MM-DD`, `/papers/barkpark-changelog-YYYY-wWW`, `/papers/barkpark-changelog-YYYY-MM`, `/papers/barkpark-changelog-YYYY`.
-- Content hierarchy: Branded edition → plain-English answer to “What did we work on?” → at most three work themes → one progress assessment → collapsed technical record and archive.
+- Content hierarchy: Branded edition → plain-English answer → real visual proof when available → at most three work themes → one progress assessment → “worth opening next” Paper cards → visible calendar archive → collapsed technical record.
 
 ## Design principles
 - Lead with reader value: Describe the shipped outcome before its repository mechanics.
@@ -45,12 +45,12 @@
 - Spacing/layout rhythm: Preserve the measured 660px prose column, wide evidence band, 92px section beat, and structural rule hierarchy. The index uses no authored divider immediately before a section heading and no one-item grid; its open editorial groups should feel like a journal contents page, not stacked containers.
 - Shape/radius/elevation: Existing restrained Paper cards; no new shadows or decorative chrome.
 - Motion: None required for reading; existing theme controls only.
-- Imagery/iconography: Product screenshots may be added when real assets exist; do not invent decorative imagery. Use terse text labels rather than icon clutter.
+- Imagery/iconography: Screenshots and asciicasts are evidence, never decoration. Each artifact must come from a commit inside the edition, explain what the reader is seeing, and be omitted when no honest visual exists. Prefer one representative over light/dark/mobile duplicates. Never autoplay.
 
 ## Components
 - Existing components to reuse: Eyebrow, heading, ingress, byline, columns, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, expandable, and inline link.
-- New/changed components: No renderer component required. Chronicle editions use a short plain-English opening, up to three source-linked work-theme cards, one progress-assessment callout, and one expandable technical record. The Chronicle index uses an unboxed latest-story treatment, borderless two-column edition navigation, a plain monthly list, and one expandable shipping record. Reading links stay inline; large button actions are reserved for workflows rather than editorial navigation.
-- Variants and states: Day/week/month/year cards use distinct labels, not arbitrary colors; empty periods receive an explicit quiet-edition message and retain navigation.
+- New/changed components: Chronicle uses native `figure(image)` and `asciicast` blocks for proof. A `paper-links` block carries authored Paper refs and editorial reasons; the reader resolves current published title, summary, type, revision, and update time into premium cards, while email/TUI retain honest authored links. The index keeps an unboxed latest story, borderless edition navigation, a monthly list, and one expandable complete calendar.
+- Variants and states: Day uses at most one screenshot or cast; week at most two screenshots and one cast; month three and one; year four and one. Empty periods receive an explicit quiet-edition message and retain navigation.
 - Token/component ownership: `design/tokens.json` and `api/assets/paper-surface/paper-surface.css` remain canonical; Chronicle-specific composition lives in `scripts/chronicle-paper.py`.
 
 ## Accessibility
@@ -66,12 +66,12 @@
 - Touch/hover differences: Actions remain fully legible without hover and meet the renderer's existing tap-target behavior.
 
 ## Interaction states
-- Loading: Server-rendered Paper body remains meaningful before enhancement.
+- Loading: Server-rendered Paper body and authored related-Paper fallbacks remain meaningful before live detail resolution.
 - Empty: Quiet editions state that no mainline changes landed and still link to adjacent periods.
 - Error: Publish failures name the exact slug and HTTP response; no partially successful batch is reported as complete.
 - Success: The index publishes last, after all editions, and becomes the stable confirmation surface.
 - Disabled: Not applicable to the read-only Chronicle.
-- Offline/slow network: Core text and links are server-rendered; no remote media is required for the reading path.
+- Offline/slow network: Core text and links are server-rendered. Media is optional evidence, and related cards preserve their authored links when live resolution is unavailable.
 
 ## Content voice
 - Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.
@@ -85,17 +85,16 @@
 - Authorship: An AI editorial pass may synthesize the verified event packet. It receives bounded source records and aggregate facts, returns strict structured JSON, and is rejected unless every work theme cites supplied commit identifiers, every headline passes the subject-plus-change gate, and all visible copy passes the main-path language gate.
 - Grounding: Numeric facts are rendered deterministically outside model prose. Model prose must not introduce numbers, customer claims, financial claims, adoption claims, security guarantees, dates, deadlines, or unshipped promises.
 - Fallback: If editorial generation is unavailable or invalid, every edition still receives the same narrative sections from a deterministic, source-grounded editor. Generation and publishing fail soft; evidence never disappears.
-- Freshness: The scheduled publisher generates editorial copy only for the current day, week, month, and year. Historical editions remain stable at their last published review; full-history generation remains available for verification and deliberate backfills.
+- Freshness: Scheduled publishing generates the complete calendar, updates the current family and index, creates missing historical editions, and preserves existing historical reviews. Deliberate full-archive editorial runs may refresh all active editions.
 - Reader trust: The progress assessment distinguishes feature work, reliability work, and quiet periods without spin. The complete programmatic record remains inside one clearly labeled expandable section below the editorial layer.
 
 ## Implementation constraints
 - Framework/styling system: Phoenix/LiveView public reader with PortableDoc block composition and the canonical Paper stylesheet.
 - Design-token constraints: Reuse existing generated tokens and Paper component CSS; no new token family for Chronicle MVP.
-- Performance constraints: One Git history scan; one bounded editorial request for the current edition family; bounded publish concurrency; no client-side data dependency for core content.
+- Performance constraints: One Git history scan including changed paths; bounded editorial batches; bounded publish concurrency; batched related-Paper resolution; no client-side dependency for core content.
 - Compatibility constraints: Generated blocks must render in reader, Studio, email, and TUI; stable Paper URLs and source documents remain deterministic.
 - Test/screenshot expectations: Generator tests, structure/quality audit, design checks, and hermetic light/dark screenshots at 360/768/1280/1920.
 
 ## Open questions
-- [ ] Decide whether future product screenshots should be captured automatically per release or curated manually / product owner / affects media-rich release cards.
-- [ ] Decide whether literally quiet calendar days deserve public editions or only navigation placeholders / product owner / affects archive completeness and volume.
 - [ ] Decide whether a human editor should be able to lock or amend an AI-written review without losing automatic source updates / product owner / affects protected editorial overlays.
+- [ ] Decide which product moments deserve a deliberately recorded cast when no committed recording exists / product owner / affects future media coverage, never archive completeness.

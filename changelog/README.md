@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: chronicle-paper-generator | budget: 700tok -->
 # Barkpark Chronicle
 
-The Chronicle is Barkpark's living changelog rendered as native Papers. One first-parent Git scan projects the selected UTC date into the index plus every active daily, ISO-weekly, monthly, and annual edition:
+The Chronicle is Barkpark's living changelog rendered as native Papers. One first-parent Git scan projects the selected UTC date into the index plus every calendar day, ISO week, month, and year since the first recorded change. Quiet days are explicit Papers, never missing pages.
 
 - `/papers/barkpark-chronicle`
 - `/papers/barkpark-changelog-YYYY-MM-DD`
@@ -34,12 +34,9 @@ python3 scripts/chronicle-paper.py --ref HEAD --history-months 0 \
   --editorial-provider claude --output-dir /tmp/barkpark-chronicle-editorial
 ```
 
-The editorial pass is additive. Git remains the system of record and always
-produces the dates, counts, navigation, archive, source links, and complete
-ledger. One bounded model request turns the current day/week/month/year family
-into a branded progress review: a theme, period assessment, source-cited
-progress stories, audience impact, an honest watchlist, and the next signal to
-look for. Every model story must cite supplied commit references; prose that
+For a deliberate full-archive rewrite, add `--full-history --editorial-all`. Active periods are reviewed in bounded batches; quiet periods keep deterministic copy.
+
+The editorial pass is additive. Git remains the system of record for dates, counts, navigation, media evidence, links, and the complete ledger. The review turns an active period into a concrete headline, plain summary, up to three source-cited stories, and an honest assessment. Every model story must cite supplied commit references; prose that
 introduces unsupported numeric, customer, financial, adoption, deadline, or
 guarantee claims is rejected. Invalid or unavailable model output falls back to
 a deterministic review without blocking the changelog.
@@ -52,8 +49,7 @@ BARKPARK_INGEST_TOKEN=… python3 scripts/chronicle-paper.py --ref HEAD --full-h
 
 `BARKPARK_API_URL` optionally selects another Barkpark API; it defaults to `https://guerrilla.barkpark.cloud`.
 
-The daily GitHub workflow verifies the full archive, then publishes the current
-day/week/month/year family and index when `BARKPARK_INGEST_TOKEN` exists. With
+The daily GitHub workflow verifies and publishes the complete archive when `BARKPARK_INGEST_TOKEN` exists. It updates the current family and index, creates missing history, and preserves existing historical reviews. With
 `ANTHROPIC_API_KEY`, the family receives one source-grounded editorial pass;
 without it, publishing continues with the deterministic review. Historical
 editions remain stable at their last published review instead of being
@@ -63,7 +59,7 @@ manual dispatch may select another date. Generation filters the ledger through
 that date so a backdated index cannot leak later work. Before each POST, the publisher compares the
 deterministic `source_doc`, so an unchanged edition costs one read and no write.
 
-Every annual Paper links its months; every month links its touching weeks and active days; every week links its active days. Monthly chapters also add weekly cadence, six leading areas, eight product-facing signals, ten fresh events, and a 40-entry source ledger. The index links every month newest-first.
+Every annual Paper links its months; every month links its touching weeks and every day; every week links its days. The index contains a complete calendar, so every generated Paper is reachable from the front door. Changed screenshot and cast assets become native `figure` or `asciicast` evidence with commit provenance; editions without real media stay text-only. `paper-links` recommendations resolve current published Paper details in the reader and retain useful fallback links in email and TUI.
 
 Because Chronicle editions form repeated editorial series, every period payload persists `dedup_bypass: true`. Its non-overlapping calendar key and Git digest are the stronger identity boundary, while the flag leaves an explicit audit trail for the near-duplicate exemption.
 
