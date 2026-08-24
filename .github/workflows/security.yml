@@ -208,11 +208,21 @@ jobs:
           # skip: a census that does not count it as UNSCANNED is blind to the
           # dominant mechanism.
           #
-          # And note the last row: a run can conclude `success` while a job
-          # inside it concluded `failure`, so `gh run list --json conclusion`
-          # cannot answer this question at all — only `actions/runs/<id>/jobs`
-          # can. Main's green is an artifact of what was never scanned, and of a
-          # run conclusion that hides its own job's failure.
+          # The last row is a MEASUREMENT trap, not a defect, and the two must
+          # not be collapsed. A run concludes `success` while the sobelow job
+          # inside it concluded `failure` because that job carries
+          # `continue-on-error: true` — documented at the top of this file with
+          # a written exit condition (task-c9d6d29cc0059d2a: regenerate the
+          # baseline in CI or remediate the real findings, then flip to
+          # blocking) and recorded as an S2 ADVISORY exclusion in
+          # .github/required-checks.json. It is behaving as designed, and the
+          # check run itself is RED and visible.
+          #
+          # What the trap costs is only this: `gh run list --json conclusion`
+          # cannot see it, so a census built on run conclusions undercounts.
+          # Use `actions/runs/<id>/jobs`. Pairing this row with the 12 above as
+          # if both were damage inflates the finding — the UNSCANNED 12 are the
+          # whole of it, and they are severe alone.
           api=false
           while IFS= read -r f; do
             [ -n "$f" ] || continue
