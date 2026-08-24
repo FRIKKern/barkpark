@@ -1412,6 +1412,23 @@ defmodule BarkparkCloud.Registry do
   @spec active_provision_job?(Barkpark.t() | binary()) :: boolean()
   def active_provision_job?(barkpark), do: active_job_of_kind?(barkpark_id(barkpark), "provision")
 
+  @doc """
+  True when `barkpark` has a PROVISION_SUPPORT job still in flight (pending or
+  claimed) — the same guard as `active_provision_job?/1`, for the kind a SUPPORT
+  actually gets (task-688ebffc4b0aa50a).
+
+  A support is never enqueued under kind `"provision"` (PDF-D83 gives it
+  `"provision_support"`), so `active_provision_job?/1` answers `false` for every
+  support and cannot gate `DELETE /v1/fleet/supports/:id`. That gap is not
+  cosmetic: a support provision publishes an `A <label>.barkpark.cloud` record as
+  well as a box, so a row deleted mid-provision strands a dangling A record —
+  pointing at an address Hetzner will later reassign — with nothing left in the
+  control plane that names it.
+  """
+  @spec active_support_provision_job?(Barkpark.t() | binary()) :: boolean()
+  def active_support_provision_job?(barkpark),
+    do: active_job_of_kind?(barkpark_id(barkpark), "provision_support")
+
   defp active_job_of_kind?(barkpark_id, kind) do
     from(j in ProvisionJob,
       where:

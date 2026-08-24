@@ -91,6 +91,33 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
     |> Repo.update!()
   end
 
+  # A LIVE support: the shape `provision_support` leaves behind (PDF-D83) — a
+  # real box (`host`) and the public identity that box was given (`url`, whose
+  # label IS the A record the worker published). Both are load-bearing for
+  # task-688ebffc4b0aa50a: `host` is what makes the row LIVE, and `url` is the
+  # only thing that still names the record to delete.
+  defp live_support_fixture(team, main, attrs \\ %{}) do
+    n = System.unique_integer([:positive])
+
+    {:ok, support} =
+      Registry.register_support_barkpark(
+        team,
+        Enum.into(attrs, %{
+          name: "Live #{n}",
+          slug: "live-#{n}",
+          parent_id: main.id,
+          token_id: "t"
+        })
+      )
+
+    support
+    |> Ecto.Changeset.change(
+      url: "https://live-#{n}.barkpark.cloud",
+      host: "203.0.113.#{rem(n, 200) + 10}"
+    )
+    |> Repo.update!()
+  end
+
   # A support row already bound under a fresh in-team main, plus the team's user
   # holding `role`. Returns {user, team, support} — the credential-gating tests
   # mint their own PAT / session off the returned user + team.
@@ -415,6 +442,193 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       {_u, _team, token} = user_with_role("owner")
       assert call(:delete, "/v1/fleet/supports/#{Ecto.UUID.generate()}", nil, token).status == 404
       assert call(:delete, "/v1/fleet/supports/not-a-uuid", nil, token).status == 404
+    end
+  end
+
+  ## DELETE /v1/fleet/supports/:id — the DNS A record must die WITH the support
+  ##
+  ## task-688ebffc4b0aa50a. A provisioned support owns a real box AND an
+  ## `A <label>.barkpark.cloud` record pointing at it. Deleting the row alone
+  ## left that record dangling at an address Hetzner will later reassign — the
+  ## abandoned hostname then resolves to a stranger's machine. The removal must
+  ## therefore keep the row until the record is gone, because the row is the only
+  ## thing that still names the record.
+
+  describe "DELETE /v1/fleet/supports/:id — live support tears its DNS record down" do
+    test "a LIVE support is NOT row-deleted: 202, row kept, one deprovision job enqueued" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}", nil, token)
+
+      assert conn.status == 202
+      assert decode(conn)["status"] == "deprovisioning"
+
+      # THE POINT: the row survives the request. It is the sole pointer to the
+      # record — dropping it here would lose the name while the record stayed up.
+      assert Registry.get_barkpark(support.id) != nil
+
+      job = Repo.get_by(ProvisionJob, barkpark_id: support.id, kind: "deprovision")
+      assert job != nil
+      assert job.status == "pending"
+    end
+
+    test "the enqueued teardown names the A record: claim payload carries the label + zone" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      assert call(:delete, "/v1/fleet/supports/#{support.id}", nil, token).status == 202
+
+      claim = call(:post, "/v1/internal/deprovision-jobs/claim", %{}, @worker_token)
+      assert claim.status == 200
+      body = decode(claim)
+
+      # The worker is handed the box IP and the record's label + zone — enough to
+      # delete the server and sweep the zone. A row deleted at request time would
+      # have made this payload underivable.
+      assert body["ip"] == support.host
+      assert body["dns_label"] == Barkpark.subdomain_from_url(support)
+      assert body["dns_zone"] == Barkpark.base_domain()
+      refute body["dns_label"] in [nil, ""]
+    end
+
+    test "the row is dropped only AFTER the worker reports the box + record gone" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      assert call(:delete, "/v1/fleet/supports/#{support.id}", nil, token).status == 202
+      assert Registry.get_barkpark(support.id) != nil
+
+      claim = decode(call(:post, "/v1/internal/deprovision-jobs/claim", %{}, @worker_token))
+
+      done =
+        call(
+          :post,
+          "/v1/internal/deprovision-jobs/#{claim["job_id"]}/succeed",
+          %{"claim_token" => claim["claim_token"]},
+          @worker_token
+        )
+
+      assert done.status in [200, 204]
+      assert Registry.get_barkpark(support.id) == nil
+    end
+
+    test "a FAILED teardown keeps the row — never unreachable AND live" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      assert call(:delete, "/v1/fleet/supports/#{support.id}", nil, token).status == 202
+      claim = decode(call(:post, "/v1/internal/deprovision-jobs/claim", %{}, @worker_token))
+
+      failed =
+        call(
+          :post,
+          "/v1/internal/deprovision-jobs/#{claim["job_id"]}/fail",
+          %{"error" => "dns: sweep failed", "claim_token" => claim["claim_token"]},
+          @worker_token
+        )
+
+      assert failed.status in [200, 204]
+      # The record may still be up, so the row that names it MUST still be here.
+      assert Registry.get_barkpark(support.id) != nil
+    end
+
+    test "re-running the removal is safe: 202 again, still exactly one teardown job" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      assert call(:delete, "/v1/fleet/supports/#{support.id}", nil, token).status == 202
+      assert call(:delete, "/v1/fleet/supports/#{support.id}", nil, token).status == 202
+
+      jobs = Repo.all(from(j in ProvisionJob, where: j.barkpark_id == ^support.id))
+      assert length(jobs) == 1
+    end
+
+    test "a support still PROVISIONING is refused 409 — the record has no name yet" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "InFlight",
+          slug: "in-flight",
+          parent_id: main.id,
+          token_id: "t"
+        })
+
+      {:ok, _job} = Registry.enqueue_support_provision_job(support)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}", nil, token)
+
+      assert conn.status == 409
+      assert decode(conn)["error"] == "provisioning_in_progress"
+      # Deleting now would let the worker publish an A record nothing can see.
+      assert Registry.get_barkpark(support.id) != nil
+    end
+
+    test "?mode=detach drops the row now — for a caller that already swept the zone" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}?mode=detach", nil, token)
+
+      assert conn.status == 200
+      assert decode(conn)["status"] == "removed"
+      assert decode(conn)["mode"] == "detach"
+      assert Registry.get_barkpark(support.id) == nil
+      # Detach is registry-only: it must NOT also enqueue a teardown.
+      assert Repo.all(from(j in ProvisionJob, where: j.barkpark_id == ^support.id)) == []
+    end
+
+    test "an unrecognised mode is NOT detach — the safe path still wins" do
+      {_u, team, token} = user_with_role("owner")
+      main = live_main_fixture(team)
+      support = live_support_fixture(team, main)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support.id}?mode=yolo", nil, token)
+
+      assert conn.status == 202
+      assert Registry.get_barkpark(support.id) != nil
+    end
+
+    test "detach is still team-scoped: a wrong-team support is 404, row untouched" do
+      {_u_a, _team_a, token_a} = user_with_role("owner")
+      team_b = team_fixture()
+      main_b = live_main_fixture(team_b)
+      support_b = live_support_fixture(team_b, main_b)
+
+      conn = call(:delete, "/v1/fleet/supports/#{support_b.id}?mode=detach", nil, token_a)
+
+      assert conn.status == 404
+      assert Registry.get_barkpark(support_b.id) != nil
+    end
+
+    test "Registry.active_support_provision_job?/1 sees the kind a support gets" do
+      {_u, team, _token} = user_with_role("owner")
+      main = live_main_fixture(team)
+
+      {:ok, support} =
+        Registry.register_support_barkpark(team, %{
+          name: "Kinds",
+          slug: "kinds",
+          parent_id: main.id,
+          token_id: "t"
+        })
+
+      refute Registry.active_support_provision_job?(support)
+      {:ok, _} = Registry.enqueue_support_provision_job(support)
+      assert Registry.active_support_provision_job?(support)
+
+      # The pre-existing predicate only ever knew kind "provision", which a
+      # support is NEVER enqueued under — that blind spot is why the guard above
+      # needed its own function rather than a reuse.
+      refute Registry.active_provision_job?(support)
     end
   end
 

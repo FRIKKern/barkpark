@@ -76,7 +76,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
       POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
       POST    /v1/fleet/supports   admin(d)  register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
-      DELETE  /v1/fleet/supports/:id admin(d)  unbind + delete a SUPPORT fleet row (PDF-D61; same disjunction as the POST; mains refused 409)
+      DELETE  /v1/fleet/supports/:id admin(d)  remove a SUPPORT fleet row (PDF-D61; live box -> deprovision job 202 so its A record dies WITH it; ?mode=detach = row only; mains refused 409)
       POST    /v1/barkparks/:id/agent-key admin(d)  paste-a-key delivery to a LIVE support box (PDF-D94; key rides memory only, never stored)
       GET     /v1/barkparks/:id/agent-key admin(d)  latest push_agent_key job status (status/error only — the row never held the key)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
@@ -2487,16 +2487,57 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # DELETE /v1/fleet/supports/:id → 200 {ok:true, status:"removed"} — unbind +
-  # delete a SUPPORT fleet row (Personal Dev Fleet Wave C, PDF-D61). Team-scoped:
-  # a wrong-team / unknown / malformed id is the same 404 (no existence leak).
-  # ONLY a support row is removable here — a main (or an ungrouped legacy row) is
-  # refused 409, so this endpoint can never tear down the developer's home base.
+  # DELETE /v1/fleet/supports/:id — remove a SUPPORT fleet row (Personal Dev
+  # Fleet Wave C, PDF-D61). Team-scoped: a wrong-team / unknown / malformed id is
+  # the same 404 (no existence leak). ONLY a support row is removable here — a
+  # main (or an ungrouped legacy row) is refused 409, so this endpoint can never
+  # tear down the developer's home base.
   # Credential-aware, the SAME family as POST /v1/fleet/supports and go-live: a
   # credential that can BIND can UNBIND — a PAT must carry the `deploy` ability;
   # a session must be team-admin (owner/admin). Anon 401. The no-team case falls
   # through to the downstream 404 (POST's is 422 — the asymmetry is left for
   # backlog pdf-bl-cp-no-team-status-mismatch, deliberately not normalized here).
+  #
+  # task-688ebffc4b0aa50a — THE LIVE/NON-LIVE DISJUNCTION, the same one
+  # `DELETE /v1/barkparks/:id` above already makes, and for the same reason.
+  # A `mode: "provision"` support (PDF-D83) is not a bookkeeping row: the worker
+  # gave it a real Hetzner box AND an `A <label>.barkpark.cloud` record pointing
+  # at that box (`provision_support`'s secure step). Deleting the row alone
+  # stranded BOTH — a billed box nothing can see, and a dangling A record whose
+  # address Hetzner will eventually reassign to a stranger, at which point the
+  # abandoned hostname resolves to someone else's machine (subdomain takeover).
+  #
+  #   * LIVE (host set) → enqueue a DEPROVISION job, 202 {status:"deprovisioning"}.
+  #     The Go worker deletes the server and sweeps the box's A records BY VALUE
+  #     (`DeprovisionWith` → `WarmPool.DeprovisionByIP`), and ONLY THEN does
+  #     `succeed_deprovision_job/1` delete the row. That ordering is the point:
+  #     the row is the sole pointer to what to delete (the claim payload derives
+  #     `dns_label`/`dns_zone` from `url` at claim time), so dropping it first
+  #     would lose the record's name while the record stayed live. If the DNS
+  #     sweep fails the worker reports /fail, the row SURVIVES, and the operator
+  #     can re-run — never a state where the record is unreachable AND live.
+  #     Re-running a remove is safe: a second DELETE dedups onto the in-flight job
+  #     and answers 202 again (`:already_deprovisioning`), never a second teardown.
+  #   * PROVISIONING (host nil, a `provision_support` job in flight) → 409.
+  #     Deleting now would let the worker bring up a box — and publish an A
+  #     record — that the control plane can no longer see; the support-job succeed
+  #     path no-ops on the missing row, so both leak with nothing left to name them.
+  #   * NON-LIVE, nothing in flight (register-only bind, or a failed provision
+  #     that already tore its own box down) → delete the row now, 200
+  #     {status:"removed"} — the historical behaviour, and the only arm where
+  #     there is no box and no record to lose.
+  #
+  # `?mode=detach` deletes the ROW ONLY (200 {status:"removed", mode:"detach"})
+  # even when host is set — the same escape hatch, and the same words, as
+  # `POST /v1/internal/barkparks/:id/deprovision`'s detach mode. It exists for a
+  # caller that tore the box and its DNS down ITSELF and can prove it:
+  # `bp cloud support remove` deletes the server and sweeps the zone by value
+  # before it ever reaches this route, and passes `mode=detach` ONLY on the runs
+  # where that sweep actually happened. On a run where the sweep was SKIPPED (no
+  # dedicated DNS credential — the fleet compute token sees zero zones) the CLI
+  # omits the mode on purpose, so this route takes the deprovision path and the
+  # worker — which does hold a DNS credential — sweeps instead. Detach is the
+  # caller ASSERTING the record is already gone; it is never the default.
   delete "/v1/fleet/supports/:id" do
     conn = Auth.require_user_or_pat(conn, [])
 
@@ -2525,13 +2566,45 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid, fleet_role: "support"} = support when tid == team.id ->
-            case Registry.delete_barkpark(support) do
-              {:ok, _} ->
-                push_event(team.id, "fleet")
-                json(conn, 200, %{ok: true, status: "removed"})
+            cond do
+              # The caller tore box + DNS down itself and says so (see above).
+              fleet_support_detach?(conn) ->
+                case Registry.delete_barkpark(support) do
+                  {:ok, _} ->
+                    push_event(team.id, "fleet")
+                    json(conn, 200, %{ok: true, status: "removed", mode: "detach"})
 
-              {:error, %Ecto.Changeset{} = cs} ->
-                json(conn, 422, %{error: "invalid", details: errors(cs)})
+                  {:error, %Ecto.Changeset{} = cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
+
+              # Live box — tear the real server AND its A record down (deprovision
+              # job). The row is deleted by the worker's succeed callback, never
+              # here: it is the only thing that still names the record to delete.
+              is_binary(support.host) and support.host != "" ->
+                deprovision_live_barkpark(conn, team, support)
+
+              # Not live YET, but a provision_support job is in flight — refuse
+              # until it lands (then it is a live-box deprovision) or fails (then
+              # it is a clean non-live remove).
+              Registry.active_support_provision_job?(support) ->
+                json(conn, 409, %{
+                  error: "provisioning_in_progress",
+                  detail:
+                    "This support is still provisioning. Try removing it once it's up or has failed."
+                })
+
+              # Non-live, nothing in flight: no box, no record — the row IS the
+              # whole resource, so removing it strands nothing.
+              true ->
+                case Registry.delete_barkpark(support) do
+                  {:ok, _} ->
+                    push_event(team.id, "fleet")
+                    json(conn, 200, %{ok: true, status: "removed"})
+
+                  {:error, %Ecto.Changeset{} = cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
             end
 
           # Exists in-team but is a main / ungrouped — NOT a support. Refuse: this
@@ -13815,6 +13888,17 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp safe_get_job(id), do: Repo.get_by_uuid(BarkparkCloud.Registry.ProvisionJob, id)
+
+  # `?mode=detach` on DELETE /v1/fleet/supports/:id — registry-only removal, for
+  # a caller that already tore the box and its DNS record down (task-688ebffc4b0aa50a).
+  # Read from the QUERY STRING, not a body: a DELETE body is not reliably sent by
+  # every client (the Go CLI's own delete helper sends none), so a mode that only
+  # arrived in a body would silently degrade to the default — which here means an
+  # unexpected 202 rather than a leak, but a silent shape change either way.
+  defp fleet_support_detach?(conn) do
+    conn = Plug.Conn.fetch_query_params(conn)
+    conn.query_params["mode"] == "detach"
+  end
 
   defp deprovision_live_barkpark(conn, team, bp) do
     case Registry.enqueue_deprovision_job(bp) do

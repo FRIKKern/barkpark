@@ -335,7 +335,20 @@ type supportCPRecorder struct {
 	registerBody   string           // non-2xx body override (e.g. `{"error":"no_team"}`)
 	deleteStatus   int              // 0 => 200
 	honestDelete   bool             // DELETE /v1/fleet/supports/:id actually drops the row
+	deleteQueries  []string         // the RAW query string of every DELETE /v1/fleet/supports/:id
 	log            *supportCallLog
+}
+
+// deleteQuery returns the raw query string of the nth (0-based) support DELETE,
+// or "" when fewer were made. `?mode=detach` is the CLI ASSERTING it already
+// swept the zone, so which runs send it is a behaviour worth pinning.
+func (c *supportCPRecorder) deleteQuery(n int) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if n >= len(c.deleteQueries) {
+		return ""
+	}
+	return c.deleteQueries[n]
 }
 
 func newSupportCPRecorder() *supportCPRecorder {
@@ -387,11 +400,17 @@ func (c *supportCPRecorder) serve(t *testing.T) *httptest.Server {
 			}
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/v1/fleet/supports/"):
 			id := strings.TrimPrefix(r.URL.Path, "/v1/fleet/supports/")
+			c.mu.Lock()
+			c.deleteQueries = append(c.deleteQueries, r.URL.RawQuery)
+			c.mu.Unlock()
 			status := c.deleteStatus
 			if status == 0 {
 				status = http.StatusOK
 			}
-			if status < 300 && c.honestDelete {
+			// 202 is the control plane KEEPING the row while its worker tears the
+			// box + A record down, so an honest fake must not drop it (the real
+			// route deletes the row from the worker's succeed callback instead).
+			if status < 300 && status != http.StatusAccepted && c.honestDelete {
 				c.mu.Lock()
 				kept := c.rows[:0]
 				for _, row := range c.rows {
@@ -403,9 +422,12 @@ func (c *supportCPRecorder) serve(t *testing.T) *httptest.Server {
 				c.mu.Unlock()
 			}
 			w.WriteHeader(status)
-			if status < 300 {
+			switch {
+			case status == http.StatusAccepted:
+				_, _ = w.Write([]byte(`{"ok":true,"status":"deprovisioning"}`))
+			case status < 300:
 				_, _ = w.Write([]byte(`{"ok":true,"status":"removed"}`))
-			} else {
+			default:
 				_, _ = w.Write([]byte(`{"error":"not_found"}`))
 			}
 		default:
@@ -1638,6 +1660,73 @@ func TestCloudSupportRemoveDNSSweepByValue(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "dns verified by value") {
 		t.Fatalf("the census must report the dns leg verified by value\nstdout:\n%s", stdout)
+	}
+}
+
+// TestCloudSupportRemoveDetachOnlyWhenTheZoneWasSwept (task-688ebffc4b0aa50a):
+// the control-plane row DELETE now carries `?mode=detach` — "I already tore the
+// A record down, drop the row" — and it must carry that ONLY on the runs where
+// this command can actually say so. The CP's default is to KEEP a live support's
+// row and enqueue a teardown, precisely because that row is the last thing that
+// names the record; a detach asserted on a run that never swept would throw the
+// name away and leave the record standing, which is the whole bug.
+func TestCloudSupportRemoveDetachOnlyWhenTheZoneWasSwept(t *testing.T) {
+	t.Run("the sweep ran: detach is asserted", func(t *testing.T) {
+		_, srv, cp, _, _, _ := supportRemoveWiring(t)
+
+		stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex", "--dns-token", "dns-proj-tok")
+		if code != exitOK {
+			t.Fatalf("want exit 0, got %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "dns verified by value") {
+			t.Fatalf("precondition: this run must have swept the zone\nstdout:\n%s", stdout)
+		}
+		if got := cp.deleteQuery(0); got != "mode=detach" {
+			t.Fatalf("a swept run must assert detach on the CP row delete, got query %q", got)
+		}
+	})
+
+	t.Run("the sweep was SKIPPED: no detach, the control plane decides", func(t *testing.T) {
+		_, srv, cp, _, _, _ := supportRemoveWiring(t)
+		// Strip the row's url: dnsTarget() can derive no zone/label, so stepDNS
+		// SKIPS — this run has no idea whether a record survives.
+		cp.mu.Lock()
+		for _, row := range cp.rows {
+			delete(row, "url")
+		}
+		cp.mu.Unlock()
+
+		stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex", "--dns-token", "dns-proj-tok")
+		_ = code
+		all := stdout + stderr
+		if !strings.Contains(all, "SKIPPED") {
+			t.Fatalf("precondition: the dns leg must have skipped\noutput:\n%s", all)
+		}
+		if got := cp.deleteQuery(0); got != "" {
+			t.Fatalf("a run that never swept must NOT claim detach, got query %q", got)
+		}
+	})
+}
+
+// TestCloudSupportRemoveCPHandoffIsNamedNotSwallowed (task-688ebffc4b0aa50a):
+// when the control plane answers 202 it KEPT the row on purpose and enqueued a
+// deprovision job so its own worker tears the box + A record down. That is
+// neither a failure nor a removal, and the census must say which — a bare
+// "still registered" would read as a leak and a silent ✓ would be a lie.
+func TestCloudSupportRemoveCPHandoffIsNamedNotSwallowed(t *testing.T) {
+	_, srv, cp, _, _, _ := supportRemoveWiring(t)
+	cp.deleteStatus = http.StatusAccepted
+
+	stdout, stderr, code := runSupport(t, globals{server: srv.URL, token: "op-tok"}, "remove", "hex", "--dns-token", "dns-proj-tok")
+	all := stdout + stderr
+	if code == exitOK {
+		t.Fatalf("a surviving CP row must not exit 0\noutput:\n%s", all)
+	}
+	if !strings.Contains(all, "202") || !strings.Contains(all, "deprovision job") {
+		t.Fatalf("the 202 hand-off must be narrated at the cp-row step\noutput:\n%s", all)
+	}
+	if !strings.Contains(all, "the control plane kept it on purpose") {
+		t.Fatalf("the census must name WHY the row survived, not just that it did\noutput:\n%s", all)
 	}
 }
 
