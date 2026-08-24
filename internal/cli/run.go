@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -165,11 +166,11 @@ func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string]
 // body, never rendering. A multipart upload rides the streaming transfer client
 // (no wall-clock Timeout — a large/slow media body must not be killed at 30s);
 // every other request keeps the 30s doRequest client, byte-identical.
-func sendManifestRequest(req *manifestRequest) (int, []byte, error) {
+func sendManifestRequest(req *manifestRequest) (int, []byte, string, error) {
 	if req.stream != nil {
-		return doRequestStream(req.method, req.url, req.headers, req.stream, -1)
+		return doRequestStreamCT(req.method, req.url, req.headers, req.stream, -1)
 	}
-	return doRequest(req.method, req.url, req.headers, req.body)
+	return doRequestCT(req.method, req.url, req.headers, req.body)
 }
 
 // execManifestCommand is the headless dispatch primitive: it resolves tail into
@@ -184,7 +185,8 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 	if derr != nil {
 		return 0, nil, derr
 	}
-	return sendManifestRequest(req)
+	status, respBody, _, err := sendManifestRequest(req)
+	return status, respBody, err
 }
 
 // runCommand executes one manifest command for the CLI: it resolves the request
@@ -255,7 +257,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return runPaginatedAll(out, cmd, req.url, req.headers)
 	}
 
-	status, respBody, err := sendManifestRequest(req)
+	status, respBody, respCT, err := sendManifestRequest(req)
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 			out.userErr("request failed: %v", err)
@@ -269,7 +271,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if code, handled := screenWriteReceipt(out, cmd, status, respBody); handled {
 			return code
 		}
-		if code, handled := screenUnpaginatedRead(out, cmd, status, respBody); handled {
+		if code, handled := screenUnpaginatedRead(out, cmd, status, respBody, respCT); handled {
 			return code
 		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
@@ -603,14 +605,21 @@ const unreadableReadContradictionHint = "the SERVER contradicted itself — a su
 //     non-JSON;
 //   - an error envelope on a 2xx — the server contradicting itself.
 //
-// The non-JSON class is deliberately restricted to an HTML document rather than
-// "does not parse as JSON", because onixedit.export is a REAL non-paginated
-// read that streams ONIX 3.0 XML through this same dispatch (plugins/onixedit/
-// cli.ex:34) and a blanket JSON demand would red an honest export. Separating
-// a plaintext gateway error from a legitimate text payload needs the response
-// Content-Type, which sendManifestRequest does not carry today; that remainder
-// is filed, not silently folded in here.
-func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+// THE NON-JSON CLASS IS DECIDED BY THE CONTENT-TYPE, NOT BY A PARSE ATTEMPT.
+// A blanket "does not parse as JSON" would red onixedit.export, a REAL
+// non-paginated read that streams ONIX 3.0 XML through this same dispatch
+// (plugins/onixedit/cli.ex:34). The header is the honest discriminator: a
+// server that DECLARES application/json and then sends bytes that are not JSON
+// is contradicting itself, and that is a transport lie whoever sent it. A
+// server that declares text/xml and sends XML is telling the truth.
+//
+// This closes the measured hole a load-balancer banner walked through: HTTP
+// 200, `upstream connect error`, 23 bytes, rendered as the answer at exit 0 in
+// all four output shapes. It is screened now only when the response also
+// claims to be JSON — a bare gateway that declares text/plain or nothing at
+// all still passes, because this function cannot tell that from an honest
+// plaintext payload without inventing a rule the manifest does not state.
+func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBody []byte, contentType string) (int, bool) {
 	if cmd.Writes || cmd.Paginated {
 		return 0, false
 	}
@@ -620,6 +629,10 @@ func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBo
 	}
 
 	reason, contradiction := unreadableReadBody(respBody)
+	if reason == "" && declaredJSONThatIsNotJSON(contentType, respBody) {
+		reason = "declared Content-Type " + contentType +
+			" and sent bytes that are not JSON — a transport lie, not an answer"
+	}
 	if reason == "" {
 		return 0, false
 	}
@@ -645,6 +658,29 @@ func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBo
 // including `{}`, `[]`, `null`, every scalar, non-HTML non-JSON bytes, and any
 // object regardless of its keys. That is the point: a read has honest empty
 // answers, and an allowlist of recognised shapes here would red them.
+// declaredJSONThatIsNotJSON reports the one class the body alone cannot name:
+// the server SAID application/json and then did not send JSON. A gateway that
+// interposes its own plaintext banner keeps the upstream's declared type often
+// enough that this catches it, while onixedit.export (application/xml) and any
+// other honestly-typed payload are never touched.
+//
+// An EMPTY body is not judged here — unreadableReadBody already owns that case
+// with a better sentence, and double-naming it would produce two reasons for
+// one fault.
+func declaredJSONThatIsNotJSON(contentType string, body []byte) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	if mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json") {
+		return false
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return false
+	}
+	return json.Unmarshal(body, new(any)) != nil
+}
+
 func unreadableReadBody(body []byte) (string, bool) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
@@ -1471,9 +1507,23 @@ func newTransferClient() *http.Client {
 // leaves it unknown (chunked). It performs NO retries — required, since a pipe
 // body cannot be replayed.
 func doRequestStream(method, rawURL string, headers map[string]string, body io.Reader, contentLength int64) (int, []byte, error) {
+	status, respBody, _, err := doRequestStreamCT(method, rawURL, headers, body, contentLength)
+	return status, respBody, err
+}
+
+// doRequestStreamCT is doRequestStream plus the response Content-Type. The
+// header is the ONLY thing that separates a plaintext gateway banner from an
+// honest non-JSON payload, and dropping it is why a load-balancer's "upstream
+// connect error" at HTTP 200 used to render as the answer at exit 0.
+//
+// Added ALONGSIDE doRequestStream rather than replacing it so no existing
+// caller has to change: the three-value form stays the signature every current
+// call site compiles against, and only the manifest dispatch reaches for the
+// fourth value.
+func doRequestStreamCT(method, rawURL string, headers map[string]string, body io.Reader, contentLength int64) (int, []byte, string, error) {
 	req, err := http.NewRequest(method, rawURL, body)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	if contentLength >= 0 {
 		req.ContentLength = contentLength
@@ -1483,25 +1533,38 @@ func doRequestStream(method, rawURL string, headers map[string]string, body io.R
 	}
 	resp, err := newTransferClient().Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
+	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
-		return resp.StatusCode, nil, err
+		return resp.StatusCode, nil, ct, err
 	}
-	return resp.StatusCode, respBody, nil
+	return resp.StatusCode, respBody, ct, nil
 }
 
-// doRequest performs the HTTP call and returns status + body.
+// doRequest performs the HTTP call and returns status + body. It is the
+// three-value form 30 call sites across seed/migrate/paper/vercel/tinker/
+// scaffy/builtins compile against; it discards the Content-Type that
+// doRequestCT reads, so none of them had to change when the screen started
+// needing the header.
 func doRequest(method, rawURL string, headers map[string]string, body []byte) (int, []byte, error) {
+	status, respBody, _, err := doRequestCT(method, rawURL, headers, body)
+	return status, respBody, err
+}
+
+// doRequestCT is doRequest plus the response Content-Type — the discriminator
+// screenUnpaginatedRead needs to tell a plaintext gateway banner from an
+// honest non-JSON payload like onixedit.export's ONIX 3.0 XML.
+func doRequestCT(method, rawURL string, headers map[string]string, body []byte) (int, []byte, string, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
 	req, err := http.NewRequest(method, rawURL, rdr)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -1509,14 +1572,15 @@ func doRequest(method, rawURL string, headers map[string]string, body []byte) (i
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: checkRedirect}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
+	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
-		return resp.StatusCode, nil, err
+		return resp.StatusCode, nil, ct, err
 	}
-	return resp.StatusCode, respBody, nil
+	return resp.StatusCode, respBody, ct, nil
 }
 
 // maxResponseBytes caps how much of an HTTP response body the generic request

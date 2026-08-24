@@ -80,7 +80,7 @@ func TestScreenUnpaginatedReadRefusesAndCarriesTheRemedy(t *testing.T) {
 	t.Run("transport class names the transport", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		out := newWriter(&stdout, &stderr)
-		code, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, []byte(`<html><body>502</body></html>`))
+		code, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, []byte(`<html><body>502</body></html>`), "")
 		if !handled || code != exitGeneric {
 			t.Fatalf("handled=%v code=%d, want true/%d", handled, code, exitGeneric)
 		}
@@ -95,7 +95,7 @@ func TestScreenUnpaginatedReadRefusesAndCarriesTheRemedy(t *testing.T) {
 	t.Run("contradiction class does NOT advise a retry", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		out := newWriter(&stdout, &stderr)
-		code, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, []byte(`{"ok":false,"error":{"code":"internal"}}`))
+		code, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, []byte(`{"ok":false,"error":{"code":"internal"}}`), "")
 		if !handled || code != exitGeneric {
 			t.Fatalf("handled=%v code=%d, want true/%d", handled, code, exitGeneric)
 		}
@@ -111,7 +111,7 @@ func TestScreenUnpaginatedReadRefusesAndCarriesTheRemedy(t *testing.T) {
 	t.Run("204 with an empty body is an honest no-content read", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		out := newWriter(&stdout, &stderr)
-		if _, handled := screenUnpaginatedRead(out, cmd, http.StatusNoContent, nil); handled {
+		if _, handled := screenUnpaginatedRead(out, cmd, http.StatusNoContent, nil, ""); handled {
 			t.Fatalf("204 + empty body was refused; the server DECLARED no content")
 		}
 		if stdout.Len() != 0 || stderr.Len() != 0 {
@@ -136,7 +136,7 @@ func TestScreenUnpaginatedReadLeavesItsSiblingsAlone(t *testing.T) {
 	t.Run("a paginated read belongs to refuseUnreadableDefaultPage", func(t *testing.T) {
 		var stdout, stderr bytes.Buffer
 		out := newWriter(&stdout, &stderr)
-		if _, handled := screenUnpaginatedRead(out, paginatedReadCommand(50), http.StatusOK, poison); handled {
+		if _, handled := screenUnpaginatedRead(out, paginatedReadCommand(50), http.StatusOK, poison, ""); handled {
 			t.Fatalf("handled a PAGINATED read — refuseUnreadableDefaultPage owns it")
 		}
 		if stdout.Len() != 0 || stderr.Len() != 0 {
@@ -149,7 +149,7 @@ func TestScreenUnpaginatedReadLeavesItsSiblingsAlone(t *testing.T) {
 		out := newWriter(&stdout, &stderr)
 		cmd := nonPaginatedReadCommand()
 		cmd.Writes = true
-		if _, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, poison); handled {
+		if _, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, poison, ""); handled {
 			t.Fatalf("handled a WRITE — screenWriteReceipt owns it")
 		}
 		if stdout.Len() != 0 || stderr.Len() != 0 {
@@ -206,7 +206,7 @@ func TestScreenUnpaginatedReadKeysOnlyOnWritesAndPaginated(t *testing.T) {
 	} {
 		var stdout, stderr bytes.Buffer
 		out := newWriter(&stdout, &stderr)
-		code, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, []byte(`<html><body>502 Bad Gateway</body></html>`))
+		code, handled := screenUnpaginatedRead(out, cmd, http.StatusOK, []byte(`<html><body>502 Bad Gateway</body></html>`), "")
 		if !handled || code != exitGeneric {
 			t.Fatalf("%s: handled=%v code=%d, want true/%d", cmd.ID, handled, code, exitGeneric)
 		}

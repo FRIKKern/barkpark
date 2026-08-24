@@ -758,7 +758,8 @@ func execTaskNextWithPolicy(g globals, ctx manifest.Context, m *manifest.Manifes
 		req.body = encoded
 		req.headers["Content-Type"] = "application/json"
 	}
-	return sendManifestRequest(req)
+	status, respBody, _, err := sendManifestRequest(req)
+	return status, respBody, err
 }
 
 // mcpBoolPtr returns a pointer to b — for the SDK's *bool annotation fields
