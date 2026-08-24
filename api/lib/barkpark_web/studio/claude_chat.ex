@@ -1556,12 +1556,28 @@ defmodule BarkparkWeb.Studio.ClaudeChat do
     @impl true
     def terminate(_reason, %{port: port} = state) when is_port(port) do
       # Closing the Port closes the subprocess's stdin; the CLI exits on EOF.
-      if port in Port.list(), do: Port.close(port)
+      #
+      # RESCUE THE CLOSE ALONE, AND DROP THE MEMBERSHIP CHECK
+      # (task-2f44ed9d10be629f). The old shape was
+      # `if port in Port.list(), do: Port.close(port)` under a single rescue
+      # arm wrapping the WHOLE body — a check-then-act whose window widens
+      # under runner load. When the port died inside that window
+      # `Port.close/1` raised badarg, and the whole-body rescue swallowed the
+      # raise AND skipped both cleanups below: the stderr capture (charter
+      # D54) and the mcp config + token (charter D63) outlived the session,
+      # reding whichever unrelated PR happened to be running. The membership
+      # test bought nothing — the raise has to be handled either way — so the
+      # check is gone and the rescue is confined to the close. Cleanup now
+      # runs on every teardown path, raised or not.
+      try do
+        Port.close(port)
+      rescue
+        _ -> :ok
+      end
+
       cleanup_stderr(state)
       cleanup_mcp(state)
       :ok
-    rescue
-      _ -> :ok
     end
 
     def terminate(_reason, state) do

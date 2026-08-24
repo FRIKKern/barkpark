@@ -834,6 +834,57 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute File.exists?(path)
     end
 
+    # ── cleanup survives a raising close (task-2f44ed9d10be629f) ─────────────
+    #
+    # terminate/2 used to run `if port in Port.list(), do: Port.close(port)`
+    # under ONE rescue arm wrapping the whole body. That is a check-then-act:
+    # when the port died between the membership test and the close — a window
+    # that widens under runner load — `Port.close/1` raised badarg, the
+    # whole-body rescue swallowed it, AND the two cleanups after it never ran.
+    # The stderr capture (charter D54) and the mcp config (charter D63) then
+    # outlived the session and reddened whichever unrelated PR was running.
+    #
+    # An ALREADY-CLOSED port reproduces the raced port exactly: `Port.close/1`
+    # answers the identical ArgumentError badarg. No clock, no sleep, no
+    # lottery — the raise is the condition, so the test states the condition.
+    # MUTATION, measured: put the rescue back around the whole body and this
+    # reds on the stderr assertion. MEASURED CAVEAT, recorded so nobody reads
+    # more into this test than it says: the LITERAL pre-fix shape (whole-body
+    # rescue AND the `port in Port.list()` check) passes this test, because
+    # its own check suppresses the close on a dead port. That is the point —
+    # the membership test never prevented the leak, it only made the leak
+    # unreachable by any deterministic test, which is why the only symptom
+    # was a load-correlated flake on unrelated PRs. Dropping the check is
+    # what converts an untestable race into the always-exercised path below.
+    test "terminate cleans up stderr and mcp config even when the port close raises" do
+      stderr_path = Path.join(System.tmp_dir!(), "barkpark-portclose-#{System.unique_integer([:positive])}.stderr")
+      mcp_path = Path.join(System.tmp_dir!(), "barkpark-portclose-#{System.unique_integer([:positive])}.mcp.json")
+      File.write!(stderr_path, "captured stderr\n")
+      File.write!(mcp_path, "{}")
+      on_exit(fn -> File.rm(stderr_path); File.rm(mcp_path) end)
+
+      port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
+      Port.close(port)
+
+      # Precondition: this port is the raising kind, and the old membership
+      # check would have skipped the close entirely.
+      refute port in Port.list()
+      assert_raise ArgumentError, fn -> Port.close(port) end
+
+      assert :ok =
+               ClaudeChat.Session.terminate(:normal, %{
+                 port: port,
+                 stderr_path: stderr_path,
+                 mcp_config_path: mcp_path
+               })
+
+      refute File.exists?(stderr_path),
+             "the stderr capture outlived a teardown whose port close raised (charter D54)"
+
+      refute File.exists?(mcp_path),
+             "the mcp config outlived a teardown whose port close raised (charter D63)"
+    end
+
     # Bounded poll (10ms x rounds) for the capture file's creation.
     defp await_file(_path, 0), do: false
 
