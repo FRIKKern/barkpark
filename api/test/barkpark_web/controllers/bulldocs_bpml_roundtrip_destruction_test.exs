@@ -65,22 +65,39 @@ defmodule BarkparkWeb.BulldocsBpmlRoundtripDestructionTest do
   # Every body below is a SENTINEL: if it is absent from the stored blocks after
   # the push, the loop destroyed content the author never touched.
   @alias_blocks [
-    %{"id" => "h1", "type" => "heading", "level" => 2,
-      "content" => [%{"type" => "text", "value" => "HEADING_SENTINEL"}]},
+    %{
+      "id" => "h1",
+      "type" => "heading",
+      "level" => 2,
+      "content" => [%{"type" => "text", "value" => "HEADING_SENTINEL"}]
+    },
     %{"id" => "p1", "type" => "paragraph", "text" => "PARAGRAPH_SENTINEL"},
     %{"id" => "i1", "type" => "ingress", "text" => "INGRESS_SENTINEL"},
     %{"id" => "q1", "type" => "pullquote", "text" => "PULLQUOTE_SENTINEL"},
-    %{"id" => "e1", "type" => "eyebrow",
-      "content" => [%{"type" => "text", "value" => "EYEBROW_SENTINEL"}]},
+    %{
+      "id" => "e1",
+      "type" => "eyebrow",
+      "content" => [%{"type" => "text", "value" => "EYEBROW_SENTINEL"}]
+    },
     %{"id" => "c1", "type" => "code", "code" => "CODE_SENTINEL"},
-    %{"id" => "t1", "type" => "table", "header" => ["TABLE_HEAD_SENTINEL"],
-      "rows" => [[[%{"type" => "text", "value" => "TABLE_CELL_SENTINEL"}]]]},
+    %{
+      "id" => "t1",
+      "type" => "table",
+      "header" => ["TABLE_HEAD_SENTINEL"],
+      "rows" => [[[%{"type" => "text", "value" => "TABLE_CELL_SENTINEL"}]]]
+    },
     %{"id" => "x1", "type" => "expandable", "title" => "EXPANDABLE_SENTINEL", "blocks" => []},
-    %{"id" => "s1", "type" => "section",
+    %{
+      "id" => "s1",
+      "type" => "section",
       "children" => [
-        %{"id" => "s1a", "type" => "paragraph",
-          "content" => [%{"type" => "text", "value" => "SECTION_CHILD_SENTINEL"}]}
-      ]}
+        %{
+          "id" => "s1a",
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "SECTION_CHILD_SENTINEL"}]
+        }
+      ]
+    }
   ]
 
   @sentinels [
