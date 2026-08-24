@@ -2327,6 +2327,60 @@ func TestBuildBodyMediaMultipart(t *testing.T) {
 	}
 }
 
+// TestBuildBodyFileArgMultipartOnNonMediaRoute is the regression pin for
+// task-c005183551c279c0: mediaUploadFileArg used to test whether the route
+// PATH TEXT contained the substring "/media" as a proxy for "this command
+// uploads a file" — so a manifest-declared file-typed arg on any other route
+// (e.g. a plugin's own ingest endpoint) fell through to the JSON body path and
+// shipped the file's PATH STRING as a JSON value instead of the file's BYTES
+// as multipart/form-data. The server then answers "multipart field \"file\" is
+// required" because it received `{"file":"/abs/path/x.csv"}`, not a file part.
+//
+// The predicate must key off the declared arg's `type: "file"` (what
+// media.upload itself declares — see capabilities.ex `arg("file", true,
+// "file", …)`), not off spelling in the URL. This command's route
+// (/v1/plugins/sheets/import) contains no "/media" substring at all, so it
+// is the sharpest possible non-media POST-with-a-file-arg fixture.
+func TestBuildBodyFileArgMultipartOnNonMediaRoute(t *testing.T) {
+	cmd := manifest.Command{
+		ID: "sheets.import", Noun: "sheets", Verb: "import", Writes: true,
+		HTTP: manifest.HTTP{Method: "POST", PathTemplate: "/v1/plugins/sheets/import"},
+		Args: []manifest.Arg{
+			{Name: "file", Required: true, Type: "file"},
+		},
+	}
+
+	dir := t.TempDir()
+	fp := filepath.Join(dir, "demo.csv")
+	if err := os.WriteFile(fp, []byte("a,b\n1,2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	rawBody, stream, ct, err := buildBody(cmd, map[string][]string{}, map[string]string{"file": fp})
+	if err != nil {
+		t.Fatalf("buildBody: %v", err)
+	}
+	if rawBody != nil {
+		t.Fatalf("file-typed arg on a non-media route sent a JSON body (%s), want a multipart stream", rawBody)
+	}
+	if stream == nil {
+		t.Fatal("file-typed arg on a non-media route did not produce a streaming multipart body")
+	}
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		t.Fatalf("read multipart stream: %v", err)
+	}
+	if !strings.HasPrefix(ct, "multipart/form-data; boundary=") {
+		t.Errorf("content type = %q, want multipart/form-data", ct)
+	}
+	if !bytes.Contains(body, []byte(`name="file"`)) {
+		t.Errorf("multipart body missing file field: %s", body)
+	}
+	if !bytes.Contains(body, []byte("a,b\n1,2")) {
+		t.Errorf("multipart body missing file contents")
+	}
+}
+
 // TestClassifyTaskNotFound covers the regression: a tasks {"ok":false,
 // "reason":"not_found","message":"task not found"} response must map to exit 4
 // (not found), NOT the blanket exit 2 the ok-false branch used to apply.
