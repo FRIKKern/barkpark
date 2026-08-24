@@ -8,8 +8,6 @@ defmodule Barkpark.Accounts.UserNotifier do
   require Logger
   alias Barkpark.Mailer
 
-  @from {"Barkpark", "no-reply@barkpark.cloud"}
-
   @doc "Send the email-verification link."
   def deliver_confirmation(email, url) do
     deliver(email, "Confirm your Barkpark email", """
@@ -67,7 +65,7 @@ defmodule Barkpark.Accounts.UserNotifier do
     email =
       new()
       |> to(to)
-      |> from(@from)
+      |> from(Mailer.from())
       |> subject(subject)
       |> text_body(body)
 
