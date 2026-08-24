@@ -97,8 +97,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("stats", attr_str(b, ["id"]), items, d)
   end
 
-  # The notes grid — the browser twin ships at compose.ex:1099 (notes_html), the
-  # TUI leg at pdrender notesRenderer; this is the BPML leg. Each item is a
+  # The notes grid — the browser twin ships at
+  # components.ex:Barkpark.PortableDoc.Render.Components.notes_html/1, the TUI
+  # leg at pdrender notesRenderer; this is the BPML leg. Each item is a
   # `<note>` carrying its body in the `text` key (the legacy `notes` vocab; a
   # `body` key would render every note EMPTY). Item shapes and their handling
   # mirror the head-cell/inline tolerance rules: a dict item spells its attrs +
