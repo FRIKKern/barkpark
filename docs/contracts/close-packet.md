@@ -45,6 +45,17 @@ a finished row *in place*. Verified — `lifecycle_status` stays `done` and the 
 attribution (`claim.closed_by`, `claim.closed_at`) is untouched. It does not
 resurrect the row into `bp task ready`, which reopening to `open` would.
 
+## Fix it while you still can
+
+**Stamp as you prove, not after.** While the row is `in_progress` and you hold the
+claim, a re-stamp **overwrites** that criterion's evidence — measured, 711 bytes
+replaced by 28, prior text gone, not appended. So a mis-filed criterion is fixable
+*there*. After close it is not: stamping refuses outright (above).
+
+Criterion **text** is builder-immutable throughout — a correction belongs in the
+evidence or an attempt note, never a reword. Most people assume the whole record
+freezes at close and so never fix the mistakes they still could.
+
 ## What to do with what you could not prove
 
 Leave it `met:false` and say why. `--set criteria_override="<why it is done anyway>"`
