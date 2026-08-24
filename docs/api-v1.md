@@ -29,7 +29,7 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 Every response wraps its payload under `result`, plus four outer metadata keys: `schemaHash` (hex digest of the dataset's schema; changes when any schema changes) · `etag` (`If-None-Match` fingerprint → 304) · `ms` (server ms, int) · `syncTags` (string[] cache-tag hints for ISR revalidation, e.g. `bp:ds:production:type:post`).
 
-`result` is `{count, offset, limit, perspective, documents:[...]}` for queries (§4), the document envelope object for single docs (§5).
+`result` is `{count, offset, limit, perspective, hasMore, documents:[...]}` for queries (§4) — plus `nextOffset` when `hasMore` and the next page is inside the offset ceiling — the document envelope object for single docs (§5).
 
 **Document envelope keys** (inside `result` for a single doc; each `result.documents[]` element for queries): `_id` full id, `drafts.` prefix when draft · `_type` schema name · `_rev` 32-char hex, changes on every write · `_draft` bool, `_id` starts with `drafts.` · `_publishedId` id with `drafts.` stripped · `_createdAt`/`_updatedAt` ISO 8601 UTC, `Z` suffix (all strings but `_draft`).
 
@@ -54,6 +54,8 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
 **Response:** `result` + outer keys per §3; `count` = page rows.
+
+`hasMore` (bool, always present) is the truncation signal: `true` means at least one row exists past this page. It is exact and costs one extra row, not a `COUNT` — unlike `total`, which needs `?count=true`. `nextOffset` accompanies a `true` `hasMore` (omitted past the 100 000 offset ceiling, where a further read cannot advance). **Do not infer truncation from `count == limit`** — that is precisely the ambiguous case: a type holding exactly `limit` rows and one holding a million produce the same `count`.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 

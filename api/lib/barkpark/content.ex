@@ -91,6 +91,17 @@ defmodule Barkpark.Content do
   def collect_all_documents(type, dataset, opts \\ []),
     do: Query.collect_all_documents(type, dataset, opts)
 
+  @doc """
+  One page plus an exact `has_more` — `{documents, has_more}`. The page is what
+  `list_documents/3` would return; `has_more` says whether any row exists past
+  it, so a caller can tell an EXHAUSTED page from a TRUNCATED one (a bare list
+  cannot). Costs one extra row, not a `COUNT`. See
+  `Content.Query.list_documents_page/3`.
+  """
+  @spec list_documents_page(String.t(), String.t(), keyword()) :: {[struct()], boolean()}
+  def list_documents_page(type, dataset, opts \\ []),
+    do: Query.list_documents_page(type, dataset, opts)
+
   @doc "Total documents matching a typed/filtered query (paginator total). See `Content.Query.count_documents/3`."
   def count_documents(type, dataset, opts \\ []),
     do: Query.count_documents(type, dataset, opts)

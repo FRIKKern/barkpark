@@ -30,6 +30,11 @@ defmodule Barkpark.Content.Query do
       maybe_scope_to_grants: 2
     ]
 
+  # The public page bounds, named so `list_documents/3`, `list_documents_page/3`
+  # and the HTTP layer that echoes them back cannot drift apart.
+  @max_limit 1000
+  @max_offset 100_000
+
   @doc """
   List documents by type and dataset.
 
@@ -54,10 +59,49 @@ defmodule Barkpark.Content.Query do
   filter via `Barkpark.Content.Scope.scope_to_workspace/3`.
   """
   def list_documents(type, dataset, opts \\ []) do
+    limit = opts |> Keyword.get(:limit, 100) |> min(@max_limit) |> max(1)
+
+    run_page(type, dataset, opts, limit)
+  end
+
+  @doc """
+  One page of `list_documents/3`, plus an EXACT answer to "is there more?".
+
+  Returns `{documents, has_more}`. `documents` is the same page
+  `list_documents/3` returns for the same opts; `has_more` is `true` when at
+  least one further row exists past this page.
+
+  WHY IT EXISTS. `list_documents/3` returns a bare list, so an exhausted page
+  and a truncated one are indistinguishable — a caller reading `count == limit`
+  cannot tell a type holding exactly `limit` rows from one holding a million.
+  Since the default page is 100 rows, every type past 100 documents silently
+  truncated for every consumer that did not know to ask for a separate count.
+
+  HOW. It reads `limit + 1` rows and reports whether the extra one
+  materialised, then drops it. That is an exact answer for the price of one
+  extra row — no `COUNT` over the filtered set (`count_documents/3` remains the
+  right call when the caller wants the actual total, which is strictly more
+  expensive). The probe reads `limit + 1` through the internal path
+  deliberately, so a caller can still ask for the full @max_limit page and get
+  a truthful `has_more` — clamping the probe would pin `has_more` to false at
+  exactly the page size where truncation is most likely.
+  """
+  @spec list_documents_page(String.t(), String.t(), keyword()) :: {[struct()], boolean()}
+  def list_documents_page(type, dataset, opts \\ []) do
+    limit = opts |> Keyword.get(:limit, 100) |> min(@max_limit) |> max(1)
+
+    rows = run_page(type, dataset, opts, limit + 1)
+
+    {Enum.take(rows, limit), length(rows) > limit}
+  end
+
+  # The shared body of `list_documents/3` and `list_documents_page/3`. `limit`
+  # arrives ALREADY resolved so the probe read can exceed the public @max_limit
+  # by exactly one row; every other bound is applied here.
+  defp run_page(type, dataset, opts, limit) do
     perspective = Keyword.get(opts, :perspective, :raw)
     filter_map = Keyword.get(opts, :filter_map, %{})
-    limit = opts |> Keyword.get(:limit, 100) |> min(1000) |> max(1)
-    offset = opts |> Keyword.get(:offset, 0) |> max(0) |> min(100_000)
+    offset = opts |> Keyword.get(:offset, 0) |> max(0) |> min(@max_offset)
     order = Keyword.get(opts, :order, :updated_at_desc)
 
     base = base_query(type, dataset, filter_map, opts)
@@ -109,22 +153,21 @@ defmodule Barkpark.Content.Query do
   """
   @spec collect_all_documents(String.t(), String.t(), keyword()) :: {[struct()], nil | :cap}
   def collect_all_documents(type, dataset, opts \\ []) do
-    {page_size, opts} = Keyword.pop(opts, :page_size, 1000)
+    {page_size, opts} = Keyword.pop(opts, :page_size, @max_limit)
     {max_pages, opts} = Keyword.pop(opts, :max_pages, 1000)
 
-    page_size = page_size |> min(1000) |> max(1)
+    page_size = page_size |> min(@max_limit) |> max(1)
     list_opts = Keyword.drop(opts, [:limit, :offset])
 
     collect_pages(type, dataset, list_opts, page_size, max_pages, 0, 0, [])
   end
 
-  # `list_documents/3` CLAMPS `:offset` to @offset_max (it does not error and it
+  # `list_documents/3` CLAMPS `:offset` to @max_offset (it does not error and it
   # does not return an empty page), so a walk that marched past the cap would
   # re-read the SAME page forever — full every time, so never short-circuiting —
   # and hand the caller duplicates. Stop at the cap instead and label it `:cap`:
   # ~101k rows is the real server ceiling for an offset walk, and a caller that
   # hits it must know its corpus is a prefix.
-  @offset_max 100_000
 
   defp collect_pages(_type, _dataset, _opts, _page_size, max_pages, page, _offset, acc)
        when page >= max_pages do
@@ -140,7 +183,7 @@ defmodule Barkpark.Content.Query do
       # Short page — the honest end of the corpus.
       length(batch) < page_size -> {finish(acc), nil}
       # The next read would be clamped back onto a page we have already taken.
-      next_offset > @offset_max -> {finish(acc), :cap}
+      next_offset > @max_offset -> {finish(acc), :cap}
       # RAW advance: never advance by a post-filtered count.
       true -> collect_pages(type, dataset, opts, page_size, max_pages, page + 1, next_offset, acc)
     end
