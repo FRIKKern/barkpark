@@ -57,16 +57,23 @@ defmodule Barkpark.Content.Query do
 
   The workspace/project filter is applied IN ADDITION TO the dataset-string
   filter via `Barkpark.Content.Scope.scope_to_workspace_or_global/3` — the
-  function this actually calls. A real workspace id narrows by equality, and a
-  request-borne empty scope (`:shared_only`, the `ScopeHelpers.scope_opts/1`
-  sentinel) narrows to the shared `workspace_id IS NULL` layer, because the
-  `_or_global` catch-all delegates to `scope_to_workspace/3`, which owns both
-  of those arms.
+  function this actually calls. A real workspace id narrows by equality, and an
+  empty scope from an HTTP conn (`:shared_only`, the
+  `ScopeHelpers.scope_opts/1` sentinel) narrows to the shared
+  `workspace_id IS NULL` layer, because the `_or_global` catch-all delegates to
+  `scope_to_workspace/3`, which owns both of those arms.
 
   The `nil` arm is the one that differs and the reason the name matters: on
   `_or_global` a nil `:workspace_id` is an EXPLICIT global read (every tenant),
   NOT the fail-closed `where: false` of `scope_to_workspace/3` — which is
   exactly the back-compat the `nil = unscoped` note above describes.
+
+  The sentinel covers LESS than its name suggests: `ScopeHelpers.scope_opts/1`
+  picks its mode by carrier (scope_helpers.ex:62-68), so a `%Plug.Conn{}` gets
+  `:shared_only` but a `%Phoenix.LiveView.Socket{}` / `%Phoenix.Socket{}` gets
+  `:legacy`, which OMITS the key (:134) and lands on the nil arm above. A
+  socket-borne read is therefore NOT covered by the sentinel and must be
+  cleared on its own.
   """
   def list_documents(type, dataset, opts \\ []) do
     limit = opts |> Keyword.get(:limit, 100) |> min(@max_limit) |> max(1)
@@ -1151,16 +1158,23 @@ defmodule Barkpark.Content.Query do
 
   The workspace/project filter is applied IN ADDITION TO the dataset-string
   filter via `Barkpark.Content.Scope.scope_to_workspace_or_global/3` — the
-  function this actually calls. A real workspace id narrows by equality, and a
-  request-borne empty scope (`:shared_only`, the `ScopeHelpers.scope_opts/1`
-  sentinel) narrows to the shared `workspace_id IS NULL` layer, because the
-  `_or_global` catch-all delegates to `scope_to_workspace/3`, which owns both
-  of those arms.
+  function this actually calls. A real workspace id narrows by equality, and an
+  empty scope from an HTTP conn (`:shared_only`, the
+  `ScopeHelpers.scope_opts/1` sentinel) narrows to the shared
+  `workspace_id IS NULL` layer, because the `_or_global` catch-all delegates to
+  `scope_to_workspace/3`, which owns both of those arms.
 
   The `nil` arm is the one that differs and the reason the name matters: on
   `_or_global` a nil `:workspace_id` is an EXPLICIT global read (every tenant),
   NOT the fail-closed `where: false` of `scope_to_workspace/3` — which is
   exactly the back-compat the `nil = unscoped` note above describes.
+
+  The sentinel covers LESS than its name suggests: `ScopeHelpers.scope_opts/1`
+  picks its mode by carrier (scope_helpers.ex:62-68), so a `%Plug.Conn{}` gets
+  `:shared_only` but a `%Phoenix.LiveView.Socket{}` / `%Phoenix.Socket{}` gets
+  `:legacy`, which OMITS the key (:134) and lands on the nil arm above. A
+  socket-borne read is therefore NOT covered by the sentinel and must be
+  cleared on its own.
   """
   def get_document(doc_id, type, dataset, opts \\ [])
 

@@ -447,16 +447,23 @@ defmodule Barkpark.Media do
   The workspace/project filter is applied via
   `Barkpark.Content.Scope.scope_to_workspace_or_global/3` — the function this
   actually calls. A get scoped to workspace B returns `{:error, :not_found}`
-  for a blob owned by workspace A, and a request-borne empty scope
+  for a blob owned by workspace A, and an empty scope from an HTTP conn
   (`:shared_only`, the `ScopeHelpers.scope_opts/1` sentinel) narrows to the
   shared `workspace_id IS NULL` layer, because the `_or_global` catch-all
   delegates to `scope_to_workspace/3`, which owns both of those arms.
 
   The `nil` arm is the one that differs and the reason the name matters: on
   `_or_global` a nil `:workspace_id` is an EXPLICIT global read (every tenant),
-  NOT the fail-closed `where: false` of `scope_to_workspace/3`. Only an
-  internal caller that omits the key can reach it — an HTTP request carries the
-  sentinel instead.
+  NOT the fail-closed `where: false` of `scope_to_workspace/3`.
+
+  Who can reach that nil arm, stated precisely — the sentinel covers LESS than
+  its name suggests. `ScopeHelpers.scope_opts/1` picks its mode by carrier
+  (scope_helpers.ex:62-68): a `%Plug.Conn{}` gets `:sentinel` and therefore
+  `:shared_only`, but a `%Phoenix.LiveView.Socket{}` or `%Phoenix.Socket{}`
+  gets `:legacy`, which OMITS the key entirely (:134). That exclusion is
+  deliberate and documented there. So the nil arm is reachable by an internal
+  caller that omits the key AND by a socket-borne read — never by an HTTP
+  request. Do not clear a socket-reached path on the sentinel's guarantee.
   """
   def get_file(id, opts \\ []) do
     workspace_id = Keyword.get(opts, :workspace_id)
