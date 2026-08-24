@@ -411,7 +411,12 @@ defmodule BarkparkCloud.Sites.ContentPublishReceiverTest do
         "/v1/webhooks/production/#{hook_id}" => {:ok, %{status: 200, body: "{}"}}
       })
 
-      assert {:ok, _} = Registry.delete_site(site)
+      # ssw8 widened the ok-tuple: the delete also revokes the site's read token
+      # and reports that outcome as a third element. This site's token inventory
+      # is unprogrammed here, so the fake's path default (an empty body) makes the
+      # inventory unreadable and the revoke honestly `:error` — irrelevant to the
+      # WEBHOOK claim below, which is what this test is for.
+      assert {:ok, _, %{read_token: _}} = Registry.delete_site(site)
 
       assert Enum.any?(StudioLinkFakeHttpClient.requests(), fn r ->
                r.method == :delete and
