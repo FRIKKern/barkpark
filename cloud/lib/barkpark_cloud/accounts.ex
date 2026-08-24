@@ -1297,13 +1297,36 @@ defmodule BarkparkCloud.Accounts do
   @doc """
   Change `user`'s password after verifying `current_password` (timing-safe via
   the same Bcrypt path as login). On success, in ONE transaction: writes the new
-  hash AND revokes every OTHER session + every agent token the user can reach —
-  the "change password ⇒ sign out everywhere" guarantee (Coolify's
-  DeletesUserSessions, DeletesUserSessions.php:31-37, done as an explicit context
-  step rather than a model `updated` hook).
+  hash AND revokes every OTHER session the user holds — the "change password ⇒
+  sign out everywhere" guarantee (Coolify's DeletesUserSessions,
+  DeletesUserSessions.php:31-37, done as an explicit context step rather than a
+  model `updated` hook).
 
   `opts[:keep]` is the acting browser's plaintext token — kept alive through the
   bulk revoke so the in-flight request never invalidates its own auth mid-call.
+
+  SCOPE — USER-held credentials ONLY, never MACHINE credentials. This path used
+  to also call `Registry.revoke_all_agent_tokens_for_user/1`, killing the agent
+  token of every box owned by every team the user belonged to (a ROLE-BLIND join;
+  the lowest-privilege member rotating their own password disarmed boxes they
+  could not otherwise touch). That was removed, and the function with it, because
+  it was a one-way state with no exit: the ONLY minter of an agent token is
+  `Registry.mint_agent_token/3` via `put_agent_token/2` inside a provision or
+  resurrect claim, every one of them behind `Auth.require_worker` — so the only
+  way back was to re-provision the box.
+
+  It also mitigated nothing. An agent-token plaintext is emitted at exactly one
+  place to exactly one audience (a holder of the platform WORKER_TOKEN); no
+  user-authenticated route ever returns one. An attacker holding this user's
+  password never had the agent token, so revoking it took nothing from them. The
+  Coolify control this was modelled on revokes USER-HELD API tokens scoped to a
+  team; the analogy broke when it was mapped onto machine credentials the user
+  never possesses. Sessions and PATs — which the user DOES hold, and which they
+  can re-mint themselves — are still revoked here, which is the real guarantee.
+
+  To kill ONE box's machine credential after a genuine box compromise, use
+  `Registry.revoke_agent_token/1` and read its docstring first: the revoke is
+  unrecoverable without a re-provision.
   Returns `{:ok, %User{}}`, `{:error, :invalid_current_password}`, or
   `{:error, %Ecto.Changeset{}}` (a weak new password).
   """
@@ -1315,8 +1338,7 @@ defmodule BarkparkCloud.Accounts do
       Repo.transaction(fn ->
         with {:ok, updated} <-
                user |> User.password_changeset(%{password: new_password}) |> Repo.update(),
-             {:ok, _n} <- revoke_all_user_sessions(user, except: opts[:keep]),
-             :ok <- BarkparkCloud.Registry.revoke_all_agent_tokens_for_user(user) do
+             {:ok, _n} <- revoke_all_user_sessions(user, except: opts[:keep]) do
           updated
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -1380,8 +1402,10 @@ defmodule BarkparkCloud.Accounts do
   @doc """
   Complete a password reset: verify `raw_token` (a live, single-use `reset`
   token), set `new_password`, and — in ONE transaction — CONSUME every reset link
-  the user holds AND revoke every session + agent token (a credential reset signs
-  the user out everywhere, exactly like `update_user_password/4`).
+  the user holds AND revoke every session (a credential reset signs the user out
+  everywhere, exactly like `update_user_password/4` — and, exactly like it,
+  touches no MACHINE credential; see that docstring for why the agent-token
+  revoke was removed from both paths).
 
   The token row is locked `FOR UPDATE` then stamped revoked, so a double-submit or
   a replay of the same link finds it already consumed and fails closed. Unlike
@@ -1417,8 +1441,7 @@ defmodule BarkparkCloud.Accounts do
            # Single-use: consume THIS link and any sibling links for the user, so
            # a second outstanding reset email cannot be replayed afterwards.
            _ <- revoke_reset_tokens(uid, DateTime.truncate(now, :microsecond)),
-           {:ok, _n} <- revoke_all_user_sessions(user),
-           :ok <- BarkparkCloud.Registry.revoke_all_agent_tokens_for_user(user) do
+           {:ok, _n} <- revoke_all_user_sessions(user) do
         updated
       else
         {:error, reason} -> Repo.rollback(reason)
