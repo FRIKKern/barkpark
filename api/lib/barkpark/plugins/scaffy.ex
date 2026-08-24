@@ -45,12 +45,18 @@ defmodule Barkpark.Plugins.Scaffy do
 
   alias Barkpark.Content.SchemaDefinition
 
-  # Compile-time absolute path to this plugin's bundled schema JSON. Matches the
-  # source-tree prod deploy model (Barkpark compiles + runs in place under
-  # /opt/barkpark), mirroring how Bulldocs resolves its schemas dir. (Named
-  # without the module prefix on purpose: the plugins-off regression bar greps
-  # lib/ for cross-plugin module references by full name.)
-  @schemas_dir Path.expand("../../../priv/plugins/scaffy/schemas", __DIR__)
+  # Resolved at RUNTIME, deliberately not frozen into an attribute.
+  # `Application.app_dir/2` finds priv under BOTH deploy models: the source-tree
+  # one (Barkpark compiles + runs in place under /opt/barkpark, where Mix
+  # symlinks _build/<env>/lib/barkpark/priv at ./priv) and an OTP release, where
+  # priv lives at lib/barkpark-<vsn>/priv. The previous
+  # `Path.expand("../../../priv/...", __DIR__)` attribute served only the first:
+  # it froze the BUILD machine's absolute path, so every released build raised
+  # File.Error enoent here and this plugin's schemas never registered.
+  # Precedent: the plugin loader already resolves priv this way — see
+  # registry/discovery.ex default_paths/0.
+  @schemas_subdir "priv/plugins/scaffy/schemas"
+  defp schemas_dir, do: Application.app_dir(:barkpark, @schemas_subdir)
 
   @doc """
   Declares the `command` document type from `schemas/command.json`. Public
@@ -60,7 +66,7 @@ defmodule Barkpark.Plugins.Scaffy do
   @impl Barkpark.Plugin
   def register_schemas(_opts) do
     raw =
-      @schemas_dir
+      schemas_dir()
       |> Path.join("command.json")
       |> File.read!()
       |> Jason.decode!()

@@ -29,12 +29,18 @@ defmodule Barkpark.Plugins.OnixEdit.Schemas.Contributor do
   alias Barkpark.Content.SchemaDefinition
 
   @plugin_name "onixedit"
-  @json_path Path.expand(
-               "../../../../../priv/plugins/onixedit/schemas/contributor.json",
-               __DIR__
-             )
+  # Resolved at RUNTIME. `Application.app_dir/2` finds priv inside an OTP
+  # release (lib/barkpark-<vsn>/priv) as well as in the source-tree deploy
+  # model. The previous `Path.expand(..., __DIR__)` attribute froze the BUILD
+  # machine's path, so `definition_map/0` — called at runtime from
+  # `fetch_subschema_fields/1` — raised File.Error enoent in every release.
+  @json_subpath "priv/plugins/onixedit/schemas/contributor.json"
 
-  @external_resource @json_path
+  # Kept so edits to the JSON still recompile this module.
+  @external_resource Path.expand(
+                       "../../../../../priv/plugins/onixedit/schemas/contributor.json",
+                       __DIR__
+                     )
 
   @doc "Plugin discriminator (D20) — every codelist ref under this module uses it."
   @spec plugin_name() :: String.t()
@@ -42,7 +48,7 @@ defmodule Barkpark.Plugins.OnixEdit.Schemas.Contributor do
 
   @doc "Absolute path to the JSON sub-schema file. Useful for diagnostics."
   @spec json_path() :: String.t()
-  def json_path, do: @json_path
+  def json_path, do: Application.app_dir(:barkpark, @json_subpath)
 
   @doc """
   Returns the raw decoded sub-schema map, suitable for splicing into the
@@ -50,7 +56,7 @@ defmodule Barkpark.Plugins.OnixEdit.Schemas.Contributor do
   """
   @spec definition_map() :: map()
   def definition_map do
-    @json_path
+    json_path()
     |> File.read!()
     |> Jason.decode!()
   end

@@ -50,7 +50,18 @@ defmodule Barkpark.Plugins.OnixEdit do
   alias Barkpark.Plugins.OnixEdit.SyncEntries
 
   @plugin_name "onixedit"
-  @schemas_dir Path.expand("../../../priv/plugins/onixedit/schemas", __DIR__)
+  # Resolved at RUNTIME, deliberately not frozen into an attribute.
+  # `Application.app_dir/2` finds priv under BOTH deploy models: the source-tree
+  # one (Barkpark compiles + runs in place under /opt/barkpark, where Mix
+  # symlinks _build/<env>/lib/barkpark/priv at ./priv) and an OTP release, where
+  # priv lives at lib/barkpark-<vsn>/priv. The previous
+  # `Path.expand("../../../priv/...", __DIR__)` attribute served only the first:
+  # it froze the BUILD machine's absolute path, so every released build raised
+  # File.Error enoent here and this plugin's schemas never registered.
+  # Precedent: the plugin loader already resolves priv this way — see
+  # registry/discovery.ex default_paths/0.
+  @schemas_subdir "priv/plugins/onixedit/schemas"
+  defp schemas_dir, do: Application.app_dir(:barkpark, @schemas_subdir)
 
   @doc """
   Returns the plugin's discriminator name (D20).
@@ -438,7 +449,7 @@ defmodule Barkpark.Plugins.OnixEdit do
   # atom/string normalisation is needed (decision recorded in the task brief).
   @spec book_raw_with_subschemas() :: map()
   defp book_raw_with_subschemas do
-    path = Path.join(@schemas_dir, "book.json")
+    path = Path.join(schemas_dir(), "book.json")
 
     path
     |> File.read!()
