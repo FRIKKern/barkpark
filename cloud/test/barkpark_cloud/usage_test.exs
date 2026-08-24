@@ -47,7 +47,7 @@ defmodule BarkparkCloud.UsageTest do
         req_per_s: 8,
         p95_ms: 40,
         backup: %{ok: true, detail: "2h ago"},
-        checks: %{pass: 3, total: 3, failing: []},
+        checks: %{pass: 3, skipped: 0, total: 3, failing: []},
         dirty_tree: false,
         reported_at: "2026-07-03T10:00:00Z"
       },

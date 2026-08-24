@@ -101,51 +101,164 @@ type HealthGate struct {
 // healthGateTimeout is the per-probe HTTP timeout when HealthGate.Timeout is 0.
 const healthGateTimeout = 8 * time.Second
 
+// CheckStatus is the outcome of one check, and it has THREE values on purpose.
+// "I could not check this" is not "this is broken", and it is not "this is
+// fine" either — a probe that did not run has no evidence to vote with, so it
+// abstains. Collapsing that third state into either of the other two produces a
+// lying instrument: fold it into CheckFail and the gate cries wolf until nobody
+// reads it; fold it into CheckPass and the report claims it verified a
+// condition it never looked at. BOTH mistakes have shipped on this gate — the
+// second one is what StubsOptional does today — which is why the state is now
+// spelled out rather than implied by a bool.
+type CheckStatus string
+
+const (
+	// CheckPass — the probe ran and the condition held.
+	CheckPass CheckStatus = "pass"
+	// CheckFail — the probe ran and the condition did NOT hold. This is the
+	// only status that makes a gate report not-ready.
+	CheckFail CheckStatus = "fail"
+	// CheckSkip — the probe did not run, so this check has no opinion. It is
+	// counted and rendered separately and it never votes: a skip cannot make a
+	// gate red, and it is never added to a "N checks passed" total.
+	CheckSkip CheckStatus = "skip"
+)
+
 // CheckResult is the outcome of one named check.
+//
+// Pass is retained as the WIRE-COMPATIBLE two-state projection for readers that
+// predate Status (the Cloud control plane's Telemetry.summarize_checks reads
+// `pass`). Its value under every status is exactly what this gate emitted
+// before Status existed, so no existing consumer's roll-up moves on the day
+// this ships; Status is the honest channel a reader opts into. Never derive a
+// verdict from Pass inside this package — read Status through Effective.
 type CheckResult struct {
-	Name   string `json:"name"`
-	Pass   bool   `json:"pass"`
-	Detail string `json:"detail"`
+	Name string `json:"name"`
+	Pass bool   `json:"pass"`
+	// Status is the three-valued outcome, omitted from the wire when empty so a
+	// zero-value CheckResult built by an older caller round-trips unchanged and
+	// is read through Effective's two-state fallback.
+	Status CheckStatus `json:"status,omitempty"`
+	Detail string      `json:"detail"`
+}
+
+// passCheck, failCheck and skipCheck are the ONLY ways this package builds a
+// CheckResult. They exist so Status can never be silently left unset: the
+// previous positional-literal shape let a new probe forget the field and
+// inherit whatever the zero value happened to mean.
+func passCheck(name, detail string) CheckResult {
+	return CheckResult{Name: name, Pass: true, Status: CheckPass, Detail: detail}
+}
+
+func failCheck(name, detail string) CheckResult {
+	return CheckResult{Name: name, Pass: false, Status: CheckFail, Detail: detail}
+}
+
+// skipCheck records an abstention. Pass is true ONLY to preserve the exact
+// bytes older readers already receive for this case — an optional unwired stub
+// has reported `pass:true` since StubsOptional landed. It is not a claim that
+// anything was verified, and every reader inside this package routes through
+// Effective, which reports CheckSkip.
+func skipCheck(name, detail string) CheckResult {
+	return CheckResult{Name: name, Pass: true, Status: CheckSkip, Detail: detail}
+}
+
+// Effective returns the check's status, defaulting an unset Status to the old
+// two-state reading of Pass. A CheckResult built outside this package (a test
+// literal, a caller compiled against the previous struct) therefore keeps its
+// original meaning instead of silently becoming a skip — an abstention has to
+// be asserted, never inferred from a missing field.
+func (c CheckResult) Effective() CheckStatus {
+	if c.Status != "" {
+		return c.Status
+	}
+	if c.Pass {
+		return CheckPass
+	}
+	return CheckFail
 }
 
 // HealthReport is the structured result of a full gate run: every check's
-// outcome plus an OK roll-up that is true iff EVERY check passed.
+// outcome plus an OK roll-up that is true iff no check FAILED. Skipped checks
+// do not move OK — they were never evidence in either direction.
 type HealthReport struct {
 	BaseURL string        `json:"base_url"`
 	OK      bool          `json:"ok"`
 	Checks  []CheckResult `json:"checks"`
 }
 
-// Failures returns the names of the checks that did not pass, in order.
+// Failures returns the names of the checks that ran and did not hold, in order.
+// A skipped check is NOT a failure and never appears here.
 func (r HealthReport) Failures() []string {
 	var f []string
 	for _, c := range r.Checks {
-		if !c.Pass {
+		if c.Effective() == CheckFail {
 			f = append(f, c.Name)
 		}
 	}
 	return f
 }
 
-// String renders the report as a human-scannable block: one line per check
-// with a PASS/FAIL marker and the detail, then a final roll-up line. It is
-// used implicitly via fmt's Stringer interface by test %s/%v format verbs
+// Skipped returns the names of the checks that did not run, in order. It is the
+// counterpart to Failures and exists so an operator reading a GREEN gate can
+// still see what it declined to look at — a readiness claim is only as good as
+// the list of things actually probed.
+func (r HealthReport) Skipped() []string {
+	var s []string
+	for _, c := range r.Checks {
+		if c.Effective() == CheckSkip {
+			s = append(s, c.Name)
+		}
+	}
+	return s
+}
+
+// Passed returns the names of the checks that ran and held, in order.
+func (r HealthReport) Passed() []string {
+	var p []string
+	for _, c := range r.Checks {
+		if c.Effective() == CheckPass {
+			p = append(p, c.Name)
+		}
+	}
+	return p
+}
+
+// String renders the report as a human-scannable block: one line per check with
+// a PASS/FAIL/SKIP marker and the detail, then a final roll-up line. It is used
+// implicitly via fmt's Stringer interface by test %s/%v format verbs
 // (healthgate_test.go) — a live caller, so it stays.
+//
+// The roll-up never says "all N checks passed" when any check was skipped: N
+// would include probes that never ran, and that exact sentence is what turned
+// an unwired stub into a verified condition.
 func (r HealthReport) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "health gate — %s\n", r.BaseURL)
 	for _, c := range r.Checks {
-		mark := "PASS"
-		if !c.Pass {
-			mark = "FAIL"
+		mark := "FAIL"
+		switch c.Effective() {
+		case CheckPass:
+			mark = "PASS"
+		case CheckSkip:
+			mark = "SKIP"
 		}
 		fmt.Fprintf(&b, "  [%s] %s — %s\n", mark, c.Name, c.Detail)
 	}
+	skipped := r.Skipped()
 	if r.OK {
-		fmt.Fprintf(&b, "  => READY (all %d checks passed)\n", len(r.Checks))
+		if len(skipped) == 0 {
+			fmt.Fprintf(&b, "  => READY (all %d checks passed)\n", len(r.Checks))
+		} else {
+			fmt.Fprintf(&b, "  => READY (%d passed, %d NOT CHECKED: %s)\n",
+				len(r.Passed()), len(skipped), strings.Join(skipped, ", "))
+		}
 	} else {
 		fmt.Fprintf(&b, "  => NOT READY (%d/%d failed: %s)\n",
 			len(r.Failures()), len(r.Checks), strings.Join(r.Failures(), ", "))
+		if len(skipped) > 0 {
+			fmt.Fprintf(&b, "  => %d NOT CHECKED: %s\n", len(skipped), strings.Join(skipped, ", "))
+		}
 	}
 	return b.String()
 }
@@ -153,9 +266,11 @@ func (r HealthReport) String() string {
 // RunHealthGate runs the 7-check gate against base and returns the report. The
 // returned error is non-nil iff NOT every check passed — so a caller can both
 // inspect the structured report AND treat the gate as a hard pass/fail with a
-// single `if err != nil`. opts may leave the stub-probe URLs ("") to skip
-// checks 5-7; a skipped check counts as a FAIL (a gate that cannot prove
-// readiness is not ready).
+// single `if err != nil`. opts may leave the stub-probe URLs ("") — an unwired
+// stub is a FAIL by default (wiring it is required before go-live), and with
+// StubsOptional it is a SKIP: it does not fail the gate, and it is not counted
+// as a passing check either. Read HealthReport.Skipped to see what a green gate
+// declined to probe.
 func RunHealthGate(base, token string, opts HealthGate) (HealthReport, error) {
 	g := opts
 	g.BaseURL = strings.TrimRight(base, "/")
@@ -190,9 +305,12 @@ func RunHealthGate(base, token string, opts HealthGate) (HealthReport, error) {
 		BaseURL: g.BaseURL,
 		Checks:  checks,
 	}
+	// A gate is red only when a check RAN and did not hold. A skipped check
+	// carries no evidence, so it cannot make the gate red — and it is equally
+	// barred from the "passed" total that String and the doctor render.
 	report.OK = true
 	for _, c := range report.Checks {
-		if !c.Pass {
+		if c.Effective() == CheckFail {
 			report.OK = false
 		}
 	}
@@ -247,13 +365,13 @@ func (g HealthGate) checkCapabilities() CheckResult {
 	const name = "capabilities"
 	resp, err := g.httpClient().Get(g.BaseURL + "/v1/capabilities")
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("GET /v1/capabilities: %v", err)}
+		return failCheck(name, fmt.Sprintf("GET /v1/capabilities: %v", err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return CheckResult{name, false, fmt.Sprintf("GET /v1/capabilities returned %d, want 200", resp.StatusCode)}
+		return failCheck(name, fmt.Sprintf("GET /v1/capabilities returned %d, want 200", resp.StatusCode))
 	}
-	return CheckResult{name, true, "GET /v1/capabilities returned 200 (API up)"}
+	return passCheck(name, "GET /v1/capabilities returned 200 (API up)")
 }
 
 // CheckStudio is the exported wrapper over checkStudio so the Go provisioner's
@@ -277,13 +395,13 @@ func (g HealthGate) checkStudio() CheckResult {
 	for hop := 0; hop <= 3; hop++ {
 		resp, err := g.httpClient().Get(url)
 		if err != nil {
-			return CheckResult{name, false, fmt.Sprintf("GET %s: %v", url, err)}
+			return failCheck(name, fmt.Sprintf("GET %s: %v", url, err))
 		}
 		resp.Body.Close()
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			loc := resp.Header.Get("Location")
 			if loc == "" {
-				return CheckResult{name, false, fmt.Sprintf("GET %s returned %d with no Location", url, resp.StatusCode)}
+				return failCheck(name, fmt.Sprintf("GET %s returned %d with no Location", url, resp.StatusCode))
 			}
 			if strings.HasPrefix(loc, "/") {
 				loc = g.BaseURL + loc
@@ -292,11 +410,11 @@ func (g HealthGate) checkStudio() CheckResult {
 			continue
 		}
 		if resp.StatusCode >= 500 {
-			return CheckResult{name, false, fmt.Sprintf("GET %s returned %d (Studio's session pipeline is broken)", url, resp.StatusCode)}
+			return failCheck(name, fmt.Sprintf("GET %s returned %d (Studio's session pipeline is broken)", url, resp.StatusCode))
 		}
-		return CheckResult{name, true, fmt.Sprintf("GET %s returned %d (Studio renders through the scoped path)", url, resp.StatusCode)}
+		return passCheck(name, fmt.Sprintf("GET %s returned %d (Studio renders through the scoped path)", url, resp.StatusCode))
 	}
-	return CheckResult{name, false, "GET /studio: redirect chain exceeded 3 hops without rendering"}
+	return failCheck(name, "GET /studio: redirect chain exceeded 3 hops without rendering")
 }
 
 // checkWebsocket (3): the LiveView footgun. Send the EXACT websocket-upgrade
@@ -309,7 +427,7 @@ func (g HealthGate) checkWebsocket() CheckResult {
 	const name = "websocket-not-403"
 	req, err := http.NewRequest("GET", g.BaseURL+"/live/websocket", nil)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("build request: %v", err)}
+		return failCheck(name, fmt.Sprintf("build request: %v", err))
 	}
 	// Exactly the headers the Makefile websocket probe sends.
 	origin := g.BaseURL
@@ -324,13 +442,13 @@ func (g HealthGate) checkWebsocket() CheckResult {
 
 	resp, err := g.httpClient().Do(req)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("GET /live/websocket: %v", err)}
+		return failCheck(name, fmt.Sprintf("GET /live/websocket: %v", err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusForbidden {
-		return CheckResult{name, false, "GET /live/websocket returned 403 — check_origin/PHX_HOST drift; Studio is click-dead (see docs/ops/studio-nav-bug-2026-04-19.md)"}
+		return failCheck(name, "GET /live/websocket returned 403 — check_origin/PHX_HOST drift; Studio is click-dead (see docs/ops/studio-nav-bug-2026-04-19.md)")
 	}
-	return CheckResult{name, true, fmt.Sprintf("GET /live/websocket returned %d (not 403 — origin accepted)", resp.StatusCode)}
+	return passCheck(name, fmt.Sprintf("GET /live/websocket returned %d (not 403 — origin accepted)", resp.StatusCode))
 }
 
 // checkTLS (4): for an https BaseURL, the cert chain must verify against the
@@ -341,10 +459,10 @@ func (g HealthGate) checkTLS() CheckResult {
 	const name = "tls"
 	u, err := url.Parse(g.BaseURL)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("parse base URL: %v", err)}
+		return failCheck(name, fmt.Sprintf("parse base URL: %v", err))
 	}
 	if u.Scheme != "https" {
-		return CheckResult{name, true, "base URL is http — no TLS to verify"}
+		return passCheck(name, "base URL is http — no TLS to verify")
 	}
 	// A real GET with default (verifying) TLS: a cert error surfaces as a
 	// transport error here. We do NOT set InsecureSkipVerify — that is the whole
@@ -352,12 +470,12 @@ func (g HealthGate) checkTLS() CheckResult {
 	resp, err := g.httpClient().Get(g.BaseURL + "/v1/capabilities")
 	if err != nil {
 		if strings.Contains(err.Error(), "x509") || strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "tls") {
-			return CheckResult{name, false, fmt.Sprintf("TLS verification failed: %v", err)}
+			return failCheck(name, fmt.Sprintf("TLS verification failed: %v", err))
 		}
-		return CheckResult{name, false, fmt.Sprintf("TLS probe could not connect: %v", err)}
+		return failCheck(name, fmt.Sprintf("TLS probe could not connect: %v", err))
 	}
 	defer resp.Body.Close()
-	return CheckResult{name, true, fmt.Sprintf("TLS cert for %s verified", u.Host)}
+	return passCheck(name, fmt.Sprintf("TLS cert for %s verified", u.Host))
 }
 
 // checkPostgres (5): proves the DB answers by reading through the API. The
@@ -368,22 +486,22 @@ func (g HealthGate) checkTLS() CheckResult {
 func (g HealthGate) checkPostgres() CheckResult {
 	const name = "postgres-via-api"
 	if g.PostgresProbeURL == "" {
-		return CheckResult{name, false, "skipped — no Postgres probe URL configured (treated as not-ready)"}
+		return failCheck(name, "no Postgres probe URL configured and no BaseURL to derive one from (treated as not-ready)")
 	}
 	req, err := http.NewRequest("GET", g.PostgresProbeURL, nil)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("build request: %v", err)}
+		return failCheck(name, fmt.Sprintf("build request: %v", err))
 	}
 	if g.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+g.Token)
 	}
 	resp, err := g.httpClient().Do(req)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("query probe: %v", err)}
+		return failCheck(name, fmt.Sprintf("query probe: %v", err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return CheckResult{name, false, fmt.Sprintf("query probe returned %d, want 200 (DB read failed)", resp.StatusCode)}
+		return failCheck(name, fmt.Sprintf("query probe returned %d, want 200 (DB read failed)", resp.StatusCode))
 	}
 	if g.RequireDatabaseStatusOperational {
 		var status struct {
@@ -393,19 +511,19 @@ func (g HealthGate) checkPostgres() CheckResult {
 			} `json:"components"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-			return CheckResult{name, false, fmt.Sprintf("status probe returned malformed JSON: %v", err)}
+			return failCheck(name, fmt.Sprintf("status probe returned malformed JSON: %v", err))
 		}
 		for _, component := range status.Components {
 			if component.Name == "database" {
 				if component.Status == "operational" {
-					return CheckResult{name, true, "public status database component is operational"}
+					return passCheck(name, "public status database component is operational")
 				}
-				return CheckResult{name, false, fmt.Sprintf("public status database component is %q, want operational", component.Status)}
+				return failCheck(name, fmt.Sprintf("public status database component is %q, want operational", component.Status))
 			}
 		}
-		return CheckResult{name, false, "public status response has no database component"}
+		return failCheck(name, "public status response has no database component")
 	}
-	return CheckResult{name, true, "scoped query read returned 200 (Postgres reachable via API)"}
+	return passCheck(name, "scoped query read returned 200 (Postgres reachable via API)")
 }
 
 // checkAgentConnected (6): STUB PROBE. The agent-status endpoint does not exist
@@ -433,21 +551,21 @@ func (g HealthGate) checkCloudSites() CheckResult {
 	const name = "cloud-sites"
 	req, err := http.NewRequest("GET", g.CloudSitesURL, nil)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("build request: %v", err)}
+		return failCheck(name, fmt.Sprintf("build request: %v", err))
 	}
 	if g.CloudSitesToken != "" {
 		req.Header.Set("Authorization", "Bearer "+g.CloudSitesToken)
 	}
 	resp, err := g.httpClient().Do(req)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("GET /v1/sites: %v", err)}
+		return failCheck(name, fmt.Sprintf("GET /v1/sites: %v", err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusUnauthorized {
-		return CheckResult{name, false, "GET /v1/sites returned 401 — saved Cloud token rejected; run `bp login` to refresh"}
+		return failCheck(name, "GET /v1/sites returned 401 — saved Cloud token rejected; run `bp login` to refresh")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return CheckResult{name, false, fmt.Sprintf("GET /v1/sites returned %d, want 200", resp.StatusCode)}
+		return failCheck(name, fmt.Sprintf("GET /v1/sites returned %d, want 200", resp.StatusCode))
 	}
 	// Decode just the slug + current_deployment_id off each row — enough to
 	// count sites and flag the ones with no live deployment.
@@ -459,7 +577,7 @@ func (g HealthGate) checkCloudSites() CheckResult {
 	}
 	dec := json.NewDecoder(resp.Body)
 	if err := dec.Decode(&env); err != nil {
-		return CheckResult{name, false, fmt.Sprintf("decode /v1/sites response: %v", err)}
+		return failCheck(name, fmt.Sprintf("decode /v1/sites response: %v", err))
 	}
 	count := len(env.Sites)
 	var noLive []string
@@ -469,37 +587,50 @@ func (g HealthGate) checkCloudSites() CheckResult {
 		}
 	}
 	if len(noLive) > 0 {
-		return CheckResult{name, true,
+		return passCheck(name,
 			fmt.Sprintf("%d site(s) registered; %d with no live deployment yet: %s",
-				count, len(noLive), strings.Join(noLive, ", "))}
+				count, len(noLive), strings.Join(noLive, ", ")))
 	}
-	return CheckResult{name, true, fmt.Sprintf("%d site(s) registered; all have a live deployment", count)}
+	return passCheck(name, fmt.Sprintf("%d site(s) registered; all have a live deployment", count))
 }
 
 // stubProbe is the shared body for checks 6-7: GET probeURL with the token and
-// pass on 200. An empty probeURL marks the check skipped (and thus not-ready),
-// since a gate that cannot prove the condition is not ready.
+// pass on 200.
+//
+// An empty probeURL means the probe DID NOT RUN, and the two ways of saying so
+// are deliberately different states, not different wordings:
+//
+//   - StubsOptional — the caller has declared this condition out of scope for
+//     now (agent + backup endpoints are cloud-9/10 and not deployed yet), so the
+//     check ABSTAINS: CheckSkip. It does not fail the gate, and — the part that
+//     was wrong before — it is not counted as a passing check either. Reporting
+//     "all 7 checks passed" when two of them were never probed is a claim to
+//     have verified an agent connection and a backup schedule that nothing
+//     looked at.
+//   - otherwise — wiring this probe is REQUIRED before go-live and it is
+//     missing. That is a real, actionable failure of the operator's contract,
+//     not an abstention, so it stays CheckFail.
 func (g HealthGate) stubProbe(name, probeURL, what string) CheckResult {
 	if probeURL == "" {
 		if g.StubsOptional {
-			return CheckResult{name, true, fmt.Sprintf("skipped — no probe URL for %s (optional in v1; agent/backup are cloud-9/10)", what)}
+			return skipCheck(name, fmt.Sprintf("NOT CHECKED — no probe URL for %s (optional in v1; agent/backup are cloud-9/10). This check did not run and is not evidence of readiness.", what))
 		}
-		return CheckResult{name, false, fmt.Sprintf("skipped — no probe URL for %s (treated as not-ready)", what)}
+		return failCheck(name, fmt.Sprintf("no probe URL for %s and wiring it is required (treated as not-ready)", what))
 	}
 	req, err := http.NewRequest("GET", probeURL, nil)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("build request: %v", err)}
+		return failCheck(name, fmt.Sprintf("build request: %v", err))
 	}
 	if g.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+g.Token)
 	}
 	resp, err := g.httpClient().Do(req)
 	if err != nil {
-		return CheckResult{name, false, fmt.Sprintf("%s probe: %v", what, err)}
+		return failCheck(name, fmt.Sprintf("%s probe: %v", what, err))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return CheckResult{name, false, fmt.Sprintf("%s returned %d, want 200", what, resp.StatusCode)}
+		return failCheck(name, fmt.Sprintf("%s returned %d, want 200", what, resp.StatusCode))
 	}
-	return CheckResult{name, true, fmt.Sprintf("%s returned 200", what)}
+	return passCheck(name, fmt.Sprintf("%s returned 200", what))
 }

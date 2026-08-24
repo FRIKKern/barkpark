@@ -76,7 +76,7 @@ defmodule BarkparkCloud.MetricsTest do
       assert Map.keys(env.series) |> Enum.sort() == @series_keys
       assert env.series == empty_series()
       assert env.beat == %{last_seen_at: nil, age_seconds: nil, status: "absent"}
-      assert env.service_health == %{pass: 0, total: 0, failing: []}
+      assert env.service_health == %{pass: 0, skipped: 0, total: 0, failing: []}
 
       # A never-phoned-home box still destructures `latest` — all-absent, never
       # a zeroed database or a swap reading nobody took. `load15`/`cores`/`mem`/
@@ -319,7 +319,7 @@ defmodule BarkparkCloud.MetricsTest do
       older = health(120, %{"health_checks" => [%{"name" => "x", "pass" => true}]})
 
       env = build([newest, older])
-      assert env.service_health == %{pass: 1, total: 2, failing: ["tls"]}
+      assert env.service_health == %{pass: 1, skipped: 0, total: 2, failing: ["tls"]}
     end
   end
 
@@ -346,7 +346,7 @@ defmodule BarkparkCloud.MetricsTest do
       assert [%{value: nil}] = env.series.load
       # A payload-less beat still counts as a live beat + empty service health.
       assert env.beat.status == "live"
-      assert env.service_health == %{pass: 0, total: 0, failing: []}
+      assert env.service_health == %{pass: 0, skipped: 0, total: 0, failing: []}
     end
 
     test "an empty / garbage event list yields the fixed all-absent envelope" do

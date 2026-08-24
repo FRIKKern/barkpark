@@ -8,8 +8,8 @@ defmodule BarkparkCloud.TelemetryTest do
     * a PARTIAL payload (missing disk) fills the gap with `nil`, keeps the rest
     * an ABSENT / empty / garbage payload yields the all-absent envelope and
       NEVER raises (the totality guarantee)
-    * `health_checks` rolls up to correct {pass, total, failing}, including the
-      some-failing case
+    * `health_checks` rolls up to correct {pass, skipped, total, failing},
+      including the some-failing case and the three-state `status` field
     * a full `%AgentEvent{}` stamps `reported_at` from its `inserted_at`
     * a REAL stored beat (captured verbatim from the control plane, not a
       hand-built map) folds into the envelope — see `real_guerrilla_beat/0`
@@ -74,7 +74,7 @@ defmodule BarkparkCloud.TelemetryTest do
                req_per_s: 12,
                p95_ms: 140,
                backup: %{ok: true, detail: "daily backup 2h ago"},
-               checks: %{pass: 3, total: 3, failing: []},
+               checks: %{pass: 3, skipped: 0, total: 3, failing: []},
                dirty_tree: false,
                reported_at: nil
              }
@@ -89,7 +89,7 @@ defmodule BarkparkCloud.TelemetryTest do
       assert env.disk == %{used_pct: nil}
       assert env.db_size == 123_456_789
       assert env.backup == %{ok: true, detail: "daily backup 2h ago"}
-      assert env.checks == %{pass: 3, total: 3, failing: []}
+      assert env.checks == %{pass: 3, skipped: 0, total: 3, failing: []}
       assert env.dirty_tree == false
     end
 
@@ -134,7 +134,7 @@ defmodule BarkparkCloud.TelemetryTest do
                req_per_s: nil,
                p95_ms: nil,
                backup: %{ok: nil, detail: nil},
-               checks: %{pass: 0, total: 0, failing: []},
+               checks: %{pass: 0, skipped: 0, total: 0, failing: []},
                dirty_tree: nil,
                reported_at: nil
              }
@@ -186,7 +186,7 @@ defmodule BarkparkCloud.TelemetryTest do
                req_per_s: nil,
                p95_ms: nil,
                backup: %{ok: nil, detail: nil},
-               checks: %{pass: 0, total: 0, failing: []},
+               checks: %{pass: 0, skipped: 0, total: 0, failing: []},
                dirty_tree: nil,
                reported_at: nil
              }
@@ -206,6 +206,7 @@ defmodule BarkparkCloud.TelemetryTest do
 
       assert Telemetry.normalize(payload).checks == %{
                pass: 2,
+               skipped: 0,
                total: 4,
                failing: ["tls", "postgres"]
              }
@@ -214,6 +215,7 @@ defmodule BarkparkCloud.TelemetryTest do
     test "an empty checks list rolls up to zero, empty failing" do
       assert Telemetry.normalize(%{"health_checks" => []}).checks == %{
                pass: 0,
+               skipped: 0,
                total: 0,
                failing: []
              }
@@ -248,6 +250,7 @@ defmodule BarkparkCloud.TelemetryTest do
 
       assert Telemetry.normalize(payload).checks == %{
                pass: 2,
+               skipped: 0,
                total: 3,
                failing: ["conflict-fail"]
              }
@@ -263,9 +266,126 @@ defmodule BarkparkCloud.TelemetryTest do
 
       assert Telemetry.normalize(payload).checks == %{
                pass: 1,
+               skipped: 0,
                total: 2,
                failing: ["b"]
              }
+    end
+
+    test "a \"skip\" status is counted apart from pass AND from failing" do
+      # The point of the third bucket. Counted as passing, this roll-up would
+      # claim the gate verified an agent connection and a backup schedule that
+      # nothing probed; counted as failing, a correctly-configured box would
+      # read as broken — which is how every online instance once reported down.
+      payload = %{
+        "health_checks" => [
+          %{"name" => "capabilities", "pass" => true, "status" => "pass"},
+          %{"name" => "tls", "pass" => true, "status" => "pass"},
+          %{"name" => "agent-connected-stub", "pass" => true, "status" => "skip"},
+          %{"name" => "backup-scheduled-stub", "pass" => true, "status" => "skip"}
+        ]
+      }
+
+      assert Telemetry.normalize(payload).checks == %{
+               pass: 2,
+               skipped: 2,
+               total: 4,
+               failing: []
+             }
+    end
+
+    test "a skip never rescues a genuine failure" do
+      # The negative arm at the control-plane layer: skips must not be able to
+      # empty the failing list. If they could, no box could ever read broken.
+      payload = %{
+        "health_checks" => [
+          %{"name" => "capabilities", "pass" => true, "status" => "pass"},
+          %{"name" => "websocket", "pass" => false, "status" => "fail"},
+          %{"name" => "agent-connected-stub", "pass" => true, "status" => "skip"}
+        ]
+      }
+
+      assert Telemetry.normalize(payload).checks == %{
+               pass: 1,
+               skipped: 1,
+               total: 3,
+               failing: ["websocket"]
+             }
+    end
+
+    test "an explicit status overrules the legacy pass bool it ships beside" do
+      # A skip carries `pass: true` on the wire ONLY so agents and control
+      # planes can be deployed in either order. Once a reader understands
+      # `status`, the bool must stop deciding.
+      payload = %{
+        "health_checks" => [
+          %{"name" => "skipped-but-pass-true", "pass" => true, "status" => "skip"},
+          %{"name" => "failed-but-pass-true", "pass" => true, "status" => "fail"}
+        ]
+      }
+
+      assert Telemetry.normalize(payload).checks == %{
+               pass: 0,
+               skipped: 1,
+               total: 2,
+               failing: ["failed-but-pass-true"]
+             }
+    end
+
+    test "an unrecognised status degrades to the pass bool, never to a skip" do
+      # Version skew in the other direction: a status string this control plane
+      # does not know must not silently excuse a check from the count. Letting
+      # an unknown word mean "abstain" would make every future gate value a
+      # blind spot.
+      payload = %{
+        "health_checks" => [
+          %{"name" => "future-a", "pass" => true, "status" => "degraded"},
+          %{"name" => "future-b", "pass" => false, "status" => "degraded"}
+        ]
+      }
+
+      assert Telemetry.normalize(payload).checks == %{
+               pass: 1,
+               skipped: 0,
+               total: 2,
+               failing: ["future-b"]
+             }
+    end
+
+    test "an old agent with no status field keeps its exact previous roll-up" do
+      # The deploy-order guarantee: this control plane ships before every box
+      # has the new agent, so a status-less payload must be byte-for-byte the
+      # roll-up it produced yesterday, with the new bucket simply empty.
+      payload = %{
+        "health_checks" => [
+          %{"name" => "capabilities", "pass" => true},
+          %{"name" => "agent-connected-stub", "pass" => true},
+          %{"name" => "websocket", "pass" => false}
+        ]
+      }
+
+      assert Telemetry.normalize(payload).checks == %{
+               pass: 2,
+               skipped: 0,
+               total: 3,
+               failing: ["websocket"]
+             }
+    end
+
+    test "the three buckets always partition total" do
+      payload = %{
+        "health_checks" => [
+          %{"name" => "a", "pass" => true, "status" => "pass"},
+          %{"name" => "b", "pass" => false, "status" => "fail"},
+          %{"name" => "c", "pass" => true, "status" => "skip"},
+          %{"name" => "d", "pass" => true},
+          %{"name" => "e"}
+        ]
+      }
+
+      c = Telemetry.normalize(payload).checks
+      assert c.pass + c.skipped + length(c.failing) == c.total
+      assert c.total == 5
     end
   end
 
@@ -363,7 +483,7 @@ defmodule BarkparkCloud.TelemetryTest do
       assert env.reported_at == "2026-07-03T12:00:00.000000Z"
       # payload still normalizes exactly as the bare-map path.
       assert env.disk == %{used_pct: 42}
-      assert env.checks == %{pass: 3, total: 3, failing: []}
+      assert env.checks == %{pass: 3, skipped: 0, total: 3, failing: []}
     end
 
     test "an event with a nil payload normalizes to all-absent, still stamping reported_at" do
@@ -372,7 +492,7 @@ defmodule BarkparkCloud.TelemetryTest do
       env = Telemetry.normalize(event)
 
       assert env.db_size == nil
-      assert env.checks == %{pass: 0, total: 0, failing: []}
+      assert env.checks == %{pass: 0, skipped: 0, total: 0, failing: []}
       assert env.reported_at == "2026-07-03T12:00:00.000000Z"
     end
 

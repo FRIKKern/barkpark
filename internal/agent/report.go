@@ -160,7 +160,16 @@ type Report struct {
 
 	// HealthStatus rolls the health-gate up to the registry's enum
 	// (up/down/unknown): "up" iff the gate's OK is true, "down" when the gate
-	// ran but failed, "unknown" when no gate probe was wired (test/offline).
+	// ran and a check FAILED, "unknown" when no gate probe was wired
+	// (test/offline).
+	//
+	// A check the gate SKIPPED does not move this field in either direction —
+	// it is not evidence. That is deliberate and load-bearing: when an unwired
+	// optional stub counted as a failure, every online instance in the fleet
+	// reported "down" and the dashboard stopped being read
+	// (azh-agent-healthgate-down-finding). The skips still ride in Health, per
+	// check, with status "skip", so the control plane can count what was NOT
+	// checked apart from what passed instead of inferring it from this enum.
 	HealthStatus string `json:"health_status"`
 
 	// DiskUsedPercent is the root-filesystem usage from the injected disk probe
@@ -312,6 +321,11 @@ type Report struct {
 	// Health carries the per-check results of the health gate (websocket-not-403
 	// / TLS / capabilities / studio / postgres-via-api …) so the control plane
 	// can record the granular event stream, not just the roll-up.
+	//
+	// Each entry carries a three-valued `status` (pass/fail/skip) beside the
+	// legacy `pass` bool. Read `status`: a skipped check ships `pass:true` only
+	// so an old control plane's roll-up does not move on the day a new agent
+	// deploys, and it is NOT a claim that anything was verified.
 	Health []setup.CheckResult `json:"health_checks"`
 }
 
