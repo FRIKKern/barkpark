@@ -1222,7 +1222,7 @@ jobs:
           node cloud/priv/static/__preview__/fixtures/ready-host-paint/proof.mjs || rc=$?
           case "$rc" in
             0) echo "Rendered-host floor: the defect reproduces on demand, the settle repairs it, and every hole it exists for still refuses." ;;
-            2) echo "::error title=Floor proof REFUSED::No browser (exit 2). An ENVIRONMENT refusal — NO claim is being made about the floor."; exit 1 ;;
+            2) echo "::error title=Floor proof REFUSED::The proof REFUSED TO MEASURE (exit 2) — no browser, or a direction whose precondition could not be established (an already-painted host, a selector matching zero nodes, an arming class that starts no animation). The reason is printed above. NO claim is being made about the floor either way, which is why this is red rather than green: a proof that judged nothing must never read as a pass."; exit 1 ;;
             1) echo "::error title=Floor proof FAILED::The rendered-host floor behaved wrongly (exit 1). The failing DIRECTION is named above. If direction 1 failed, the guard can no longer refuse an unpainted host and every green below is worthless; if direction 4, 5 or 6 failed, the settle has been widened into a blanket wait that greens invisible screens."; exit 1 ;;
             *) echo "::error title=Floor proof UNINTERPRETABLE::proof.mjs exited ${rc}, outside its vocabulary (0/1/2). Cannot tell, therefore red."; exit 1 ;;
           esac
