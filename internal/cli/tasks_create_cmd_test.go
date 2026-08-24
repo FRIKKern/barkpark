@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -328,5 +329,157 @@ func TestEnsureTaskPortableBriefPreservesExplicitBrief(t *testing.T) {
 	ensureTaskPortableBrief(body)
 	if !reflect.DeepEqual(body["brief"], explicit) {
 		t.Fatalf("explicit brief was replaced: %#v", body["brief"])
+	}
+}
+
+// ── pds-bl-task-create-draft-at-rc0 ──────────────────────────────────────────
+//
+// THE DEFECT, reproduced live against guerrilla before this was written:
+//
+//	$ bp task create --yes --title "…"          rc=0
+//	{"draft":"drafts.task-9f3aa…","id":"task-9f3aa…","lifecycle_status":"open","status":"draft"}
+//	$ bp task create --yes -o table --title "…" rc=0
+//	created task task-42b4b… (draft, lifecycle open)
+//
+// and the row was NOT on the board. ONE HALF OF THE FILED ROW IS REFUTED by
+// that second line: the human receipt DOES print the field carrying the truth
+// ("draft"), and it was trusted anyway. So the defect is not a missing fact —
+// it is a TRUE LINE WITH NO REMEDY. It never says what "draft" costs (the row
+// is invisible to `bp task ready` and cannot be claimed) nor the one command
+// that fixes it, while `lifecycle open` sits beside it and "open" is the
+// BOARD's word for ready.
+//
+// These tests pin the remedy on all three surfaces and are written so that
+// deleting it reds them.
+
+func TestTaskCreateHumanReceiptCarriesItsRemedy(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-9")
+	defer ts.Close()
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	got := so.String()
+	// The FACT is still there — this must not become a receipt that hides the state.
+	if !strings.Contains(got, "draft") {
+		t.Errorf("the receipt no longer names the draft state:\n%s", got)
+	}
+	// THE CONSEQUENCE, in the words a person uses for it.
+	if !strings.Contains(got, "NOT ON THE BOARD") {
+		t.Errorf("the receipt does not say what the draft state COSTS — a builder who trusts it files a task the board never shows:\n%s", got)
+	}
+	if !strings.Contains(got, "bp task ready") {
+		t.Errorf("the receipt does not name the command that will fail to show this row:\n%s", got)
+	}
+	// THE REMEDY, exact and runnable.
+	if !strings.Contains(got, "bp doc publish task task-9 --yes") {
+		t.Errorf("the receipt does not carry the one command that puts the row on the board:\n%s", got)
+	}
+	// And the way to avoid the state entirely next time.
+	if !strings.Contains(got, "--publish") {
+		t.Errorf("the receipt does not mention creating it published instead:\n%s", got)
+	}
+}
+
+// THE REMEDY IS WITHHELD WHEN IT DOES NOT APPLY. A remedy printed under a
+// published row is noise, and noise is how a real remedy stops being read.
+func TestTaskCreatePublishedReceiptCarriesNoRemedy(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-9")
+	defer ts.Close()
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task", "--publish"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	got := so.String()
+	if !strings.Contains(got, "published") {
+		t.Fatalf("the --publish receipt does not report published:\n%s", got)
+	}
+	if strings.Contains(got, "NOT ON THE BOARD") || strings.Contains(got, "bp doc publish") {
+		t.Errorf("a published row was told how to publish itself:\n%s", got)
+	}
+}
+
+// THE MACHINE RECEIPT GETS A FIELD, NOT A SENTENCE. `status` already said
+// "draft" and was misread; a caller branching in code needs one boolean that
+// answers the question the verb's NAME made them ask.
+func TestTaskCreateJSONReceiptCarriesOnBoardAndRemedy(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-9")
+	defer ts.Close()
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+
+	for _, tc := range []struct {
+		name        string
+		tail        []string
+		wantOnBoard bool
+	}{
+		{"draft", []string{"a task"}, false},
+		{"published", []string{"a task", "--publish"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var so, se bytes.Buffer
+			w := &writer{stdout: &so, stderr: &se, output: "json"}
+			if code := runTaskCreate(w, globals{yes: true}, ctx, tc.tail); code != exitOK {
+				t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+			}
+			var receipt struct {
+				OnBoard        *bool  `json:"on_board"`
+				PublishCommand string `json:"publish_command"`
+				Status         string `json:"status"`
+			}
+			if err := json.Unmarshal(so.Bytes(), &receipt); err != nil {
+				t.Fatalf("receipt did not parse: %v (%q)", err, so.String())
+			}
+			if receipt.OnBoard == nil {
+				t.Fatalf("receipt carries no on_board field — a script still has to infer the board state from `status` beside a `lifecycle_status` that says \"open\": %s", so.String())
+			}
+			if *receipt.OnBoard != tc.wantOnBoard {
+				t.Errorf("on_board = %v, want %v (status %q)", *receipt.OnBoard, tc.wantOnBoard, receipt.Status)
+			}
+			if tc.wantOnBoard && receipt.PublishCommand != "" {
+				t.Errorf("a published row carries publish_command %q", receipt.PublishCommand)
+			}
+			if !tc.wantOnBoard && receipt.PublishCommand != "bp doc publish task task-9 --yes" {
+				t.Errorf("publish_command = %q, want the runnable command", receipt.PublishCommand)
+			}
+		})
+	}
+}
+
+// THE REMEDY NAMES A COMMAND THAT EXISTS — the failure mode a handoff pointing
+// at a nonexistent path has already cost this repo once. `bp task` has no
+// `publish` verb (the server manifest declares only the lifecycle/read verbs,
+// and cli.go intercepts exactly frontier / lint / create / next --frontier), so
+// a remedy reading "bp task publish …" would send every reader to a usage
+// error. The command this prints was RUN, not reasoned about: `bp doc publish
+// task <id> --yes` is what put task-e72560e947dba4e6 on the board while this
+// row was being built.
+//
+// HONEST LIMIT, stated rather than faked: `doc publish` is a MANIFEST verb
+// resolved from GET /v1/capabilities, so no offline unit test can confirm the
+// server still routes it — an earlier draft of this test grepped cli.go for it
+// and failed, because it was never there to find. What IS checkable offline is
+// the half that would actually rot: if someone ever adds a `bp task publish`
+// intercept, this receipt should point at that friendlier verb instead, and
+// this test reds to say so.
+func TestTaskPublishCommandNamesARealVerb(t *testing.T) {
+	got := taskPublishCommand("task-9")
+	if strings.HasPrefix(got, "bp task publish") {
+		t.Fatalf("the remedy names `bp task publish`, which is not a verb: %q", got)
+	}
+	if got != "bp doc publish task task-9 --yes" {
+		t.Fatalf("taskPublishCommand = %q", got)
+	}
+	src, err := os.ReadFile("cli.go")
+	if err != nil {
+		t.Fatalf("cannot read cli.go to check the task intercepts: %v", err)
+	}
+	if strings.Contains(string(src), `if verb == "publish" {`) {
+		t.Error("`bp task publish` now exists — point taskPublishCommand at it, so the remedy names the verb closest to what the reader just ran")
 	}
 }
