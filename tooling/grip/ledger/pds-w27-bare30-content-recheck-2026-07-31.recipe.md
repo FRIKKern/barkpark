@@ -11,9 +11,13 @@ checkout may sit on a foreign commit and may not carry
 
 ```bash
 cd /Volumes/SATECHI/github/barkpark && git fetch origin main -q
-git show origin/main:scripts/pds-ledger-census.sh > /tmp/c.sh
-cd /tmp && bash c.sh --json --assert-round-done --anchor-from-paper pds-wave-27-2026-07-31 > /tmp/census.json 2>&1
-python3 -c "import json;s=open('/tmp/census.json').read();d,_=json.JSONDecoder().raw_decode(s);print('\n'.join(d['live_bare']))"
+# A DEDICATED scratch dir, never a bare `cd /tmp`: the census reads code relative
+# to its CWD, and /tmp is the most polluted directory on the host — the shadowing
+# hazard pds-w28-census-isolation fixed.
+work=$(mktemp -d)
+git show origin/main:scripts/pds-ledger-census.sh > "$work/c.sh"
+cd "$work" && bash c.sh --json --assert-round-done --anchor-from-paper pds-wave-27-2026-07-31 > census.json 2>&1
+python3 -c "import json;s=open('census.json').read();d,_=json.JSONDecoder().raw_decode(s);print('\n'.join(d['live_bare']))"
 ```
 
 Observed 2026-07-31: `live_bare` = 30, `live_bare_residue` = 0, clause 3 FAIL at

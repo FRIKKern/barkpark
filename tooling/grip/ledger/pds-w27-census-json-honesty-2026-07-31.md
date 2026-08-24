@@ -1,13 +1,26 @@
 # pds-w27 — the certificate's machine mode is unpipeable exactly when it certifies
 
 Re-derivation recipes for the wave-27 `json-honesty-certificate` verification.
-Every command below was run 2026-07-31; the census is read from `origin/main`
-because the primary checkout does not carry `scripts/pds-ledger-census.sh`.
+Every command below was run 2026-07-31. The census is read from `origin/main` so
+the recipe pins one known revision rather than whatever a checkout happens to be
+on. (An earlier version of this line claimed the primary checkout "does not
+carry `scripts/pds-ledger-census.sh`" — that has not been true since the script
+was committed; `git ls-tree origin/main scripts/pds-ledger-census.sh` resolves.)
+
+> **The census self-test now runs in CI** — `.github/workflows/shell-harnesses.yml`,
+> job `pds-harnesses`, step `pds-ledger-census ordering + response-shape matrix`,
+> triggered on any change to `scripts/pds-ledger-census*.sh`. Re-running the recipe
+> below by hand is no longer how the instrument is kept honest
+> (pds-bl-census-runs-in-no-ci-gate).
 
 ## 1. THE DEFECT — `--json --assert-round-done` is not valid JSON
 
 ```bash
-cd /tmp && git -C <repo> show origin/main:scripts/pds-ledger-census.sh > c.sh
+# A DEDICATED scratch dir, never a bare `cd /tmp`: /tmp is the most
+# scratch-file-polluted directory on the host, and the census reads code
+# relative to its CWD — the shadowing hazard pds-w28-census-isolation fixed.
+work=$(mktemp -d) && cd "$work"
+git -C <repo> show origin/main:scripts/pds-ledger-census.sh > c.sh
 bash c.sh --json --assert-round-done --anchor-from-paper pds-wave-27-2026-07-31 > c.out 2>c.err
 echo rc=$?          # 1
 jq -e . c.out; echo jq_rc=$?   # 5 — parse error: Invalid numeric literal

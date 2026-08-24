@@ -3,9 +3,19 @@
 Verifier `round-done-reachability`, 2026-07-31. Every number below is re-derived by
 running these commands; none is quoted from a Paper or a charter line.
 
+> **The census self-test now runs in CI** — `.github/workflows/shell-harnesses.yml`,
+> job `pds-harnesses`, step `pds-ledger-census ordering + response-shape matrix`,
+> triggered on any change to `scripts/pds-ledger-census*.sh`. Re-running the recipe
+> below by hand is no longer how the instrument is kept honest
+> (pds-bl-census-runs-in-no-ci-gate).
+
 ## 1. The certifying run (TRUE exit code — never pipe it to `tail`)
 
-    cd /tmp && git -C <repo> show origin/main:scripts/pds-ledger-census.sh > c.sh
+    # A DEDICATED scratch dir, never a bare `cd /tmp`: /tmp is the most
+    # scratch-file-polluted directory on the host, and the census reads code
+    # relative to its CWD — the shadowing hazard pds-w28-census-isolation fixed.
+    work=$(mktemp -d) && cd "$work"
+    git -C <repo> show origin/main:scripts/pds-ledger-census.sh > c.sh
     bash c.sh --assert-round-done --anchor-from-paper pds-wave-27-2026-07-31 > cen27.txt 2>&1; echo "REAL_RC=$?"
     tail -22 cen27.txt
 
