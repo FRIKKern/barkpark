@@ -107,6 +107,19 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
 
   defp ids(result), do: Enum.map(result["assets"] || result["hits"] || [], & &1["id"])
 
+  # A green positive control is silent, and a silent positive control is
+  # indistinguishable from one that was never run — which is exactly how a
+  # security fix quietly becomes a denial of service against its own users.
+  # These two tests exist to prove an AUTHORISED caller still receives a working
+  # credential, so they print what they received. Two lines per run, and the run
+  # output is the receipt.
+  defp receipt(who, url, bytes) do
+    IO.puts(
+      "\n  [positive control] #{who}: signed=#{signed?(url)} bytes=#{bytes.status} " <>
+        "(#{byte_size(bytes.resp_body)}B)\n    #{url}"
+    )
+  end
+
   describe "the signing switch is a principal test, not a query param" do
     test "ANONYMOUS appendRequestSecret must not mint a delivery signature for a token asset",
          %{conn: conn} do
@@ -165,7 +178,14 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
              "an authorised read token lost its signature: #{result["originalUrl"]}"
 
       assert result["visibility"] == "token"
-      assert get(build_conn(), result["originalUrl"]).status == 200
+
+      # READ-only permission is the weakest credential that should still work.
+      # `Access.authenticated?/1` is authentication, not authorization, so a
+      # read token must clear it exactly as an admin token does — if this ever
+      # reddens, the gate has quietly become a permission check.
+      bytes = get(build_conn(), result["originalUrl"])
+      assert bytes.status == 200
+      receipt("read-only api token", result["originalUrl"], bytes)
     end
 
     test "POSITIVE CONTROL: a workspace-MEMBER account session receives a working signed URL on the scoped twin",
@@ -225,6 +245,15 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
 
       assert signed?(result["originalUrl"]),
              "a workspace member lost their signature: #{result["originalUrl"]}"
+
+      # The member holds NO bearer token — only a `user_session`. This is the
+      # principal `Access.authenticated?/1`'s account arm exists to admit, and
+      # the reason the signing gate reuses that function instead of asking
+      # `conn.assigns[:api_token] != nil` locally: the local spelling would
+      # have refused this caller.
+      bytes = get(build_conn(), result["originalUrl"])
+      assert bytes.status == 200
+      receipt("workspace-member account session (no bearer)", result["originalUrl"], bytes)
     end
 
     test "the SCOPED twin refuses an anonymous signature too", %{conn: conn} do
@@ -247,9 +276,16 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       test "ANONYMOUS show must not disclose blob metadata for a #{vis} asset", %{conn: conn} do
         %{"id" => id, "filename" => filename} = asset_with_visibility(conn, unquote(vis))
 
-        assert {:refused, status} = anon_show(id),
-               "an anonymous caller read #{unquote(vis)} blob metadata (filename #{filename})"
+        outcome = anon_show(id)
 
+        # Bound first, then asserted on a boolean — `assert pattern = expr, msg`
+        # discards the message, and this message is the whole finding: it names
+        # the field that leaked.
+        assert match?({:refused, _}, outcome),
+               "an anonymous caller read #{unquote(vis)} blob metadata " <>
+                 "(filename #{filename}): #{inspect(outcome, limit: 6)}"
+
+        {:refused, status} = outcome
         assert status in [401, 403, 404]
       end
 
