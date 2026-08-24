@@ -218,7 +218,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
 
   defp run_rebuild_scoped(scope, types, args, ws) do
     list_opts =
-      [perspective: :published, limit: 1000]
+      [perspective: :published, page_size: page_size(args), max_pages: max_pages(args)]
       |> maybe_put(:workspace_id, ws)
       |> maybe_put(:project_id, Map.get(args, "project_id"))
 
@@ -228,18 +228,41 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
       |> maybe_put(:project_id, Map.get(args, "project_id"))
       |> maybe_put(:require_workspace, require_workspace?(ws))
 
-    docs =
+    # WALK THE WHOLE CORPUS, and say so when we could not. This used to be a
+    # single `list_documents(limit: 1000)` per type — but `list_documents/3`
+    # CLAMPS :limit to 1000 and returns a bare list, so a scope holding more
+    # than 1000 published docs of a type was rebuilt from a 1000-row PREFIX.
+    # `rebuild_scope/3` deletes outbound edges only for docs IN the corpus it
+    # is handed, so every doc past the cap kept its pre-rebuild edges FOREVER
+    # while the log below reported a clean rebuild. `rebuild_scope`'s own
+    # transaction budget is sized for "the largest measured corpus (~4k docs)"
+    # — 4x the cap — so the capped read was never the intended contract.
+    {docs, truncated} =
       types
-      |> Enum.flat_map(fn type ->
-        content_mod(args).list_documents(type, scope, list_opts)
+      |> Enum.map_reduce(nil, fn type, trunc_acc ->
+        {page, trunc} = content_mod(args).collect_all_documents(type, scope, list_opts)
+        {page, trunc_acc || trunc}
       end)
-      |> hydrate_task_edges()
+      |> then(fn {per_type, trunc} ->
+        {per_type |> Enum.concat() |> hydrate_task_edges(), trunc}
+      end)
 
     case projector_mod(args).rebuild_scope(scope, docs, project_opts) do
       {:ok, %{added: added, deleted: deleted}} ->
+        # A bounded walk that stopped at its cap rebuilt a PREFIX. Never let
+        # that pass as a clean rebuild — docs past the walk keep stale edges.
+        if truncated == :cap do
+          Logger.warning(
+            "EdgeProjector.ProjectorWorker: scope=#{scope} corpus walk hit its page cap — " <>
+              "the rebuild covered #{length(docs)} docs but the corpus is LARGER. Docs beyond " <>
+              "the walk keep their pre-rebuild edges; this scope is INCOMPLETE."
+          )
+        end
+
         Logger.info(
           "EdgeProjector.ProjectorWorker: rebuilt scope=#{scope} " <>
-            "added=#{added} deleted=#{deleted}"
+            "docs=#{length(docs)} added=#{added} deleted=#{deleted} " <>
+            "truncated=#{truncated == :cap}"
         )
 
         :ok
@@ -423,6 +446,31 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
       mod when is_binary(mod) -> String.to_existing_atom("Elixir." <> mod)
       mod when is_atom(mod) and not is_nil(mod) -> mod
       _ -> Projector
+    end
+  end
+
+  # Test-only override of the corpus WALK page size (mirrors `content_mod/1`
+  # and `Indx.IndexerWorker`'s `list_limit/1`). Prod never sets it, so the walk
+  # pages at the server's own 1000-row cap. Tests set a small page size to
+  # exercise the multi-page walk — and its truncation arm — without seeding a
+  # thousand documents.
+  defp page_size(args) do
+    case Map.get(args, "page_size") do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 1000
+    end
+  end
+
+  # Test-only override of the walk's page bound, so the `:cap` arm (the walk
+  # stopped before the corpus ran out) is reachable without a million rows.
+  # The default 50 pages = 50,000 docs: twelve times the largest corpus
+  # `Projector.rebuild_scope/3`'s docs measure (~4k), fifty times the cap this
+  # replaces, and still inside the 60s rebuild transaction budget. Past that a
+  # `:cap` warning beats an opaque transaction timeout.
+  defp max_pages(args) do
+    case Map.get(args, "max_pages") do
+      n when is_integer(n) and n > 0 -> n
+      _ -> 50
     end
   end
 

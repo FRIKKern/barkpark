@@ -69,6 +69,86 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  Walk EVERY document matching the query, paging past the 1000-row `:limit`
+  cap that `list_documents/3` clamps to, and say out loud when the walk was
+  cut short.
+
+  `list_documents/3` clamps `:limit` to 1000 and returns a BARE LIST, so a
+  caller holding 1000 rows cannot tell "that is the whole corpus" from "there
+  are 3,000 more". Every corpus-walker that must see the WHOLE corpus — a
+  rebuild, a backfill, an export, a graph fold — needs this instead.
+
+  Returns `{documents, truncated}`:
+
+    - `{docs, nil}`  — the walk terminated on a SHORT page: the corpus is
+                       exhausted and `docs` is all of it.
+    - `{docs, :cap}` — every page came back full and `:max_pages` stopped the
+                       loop. `docs` is a PREFIX of the corpus, honestly
+                       labelled; the caller must not report it as complete.
+
+  Options are `list_documents/3`'s, plus:
+
+    - `:page_size` — rows per page (default 1000, the server cap).
+    - `:max_pages` — bound on the walk (default 1000 pages = 1M rows). The
+                     loop is bounded on purpose: an unbounded walk over a
+                     corpus that grows during the walk cannot terminate.
+
+  THE LAW (mirrors `web/lib/paginate.ts` `collectAllPages`, the canonical
+  remedy on the JS side — same shape, deliberately):
+
+    - request pages of `page_size` rows, advancing `offset` by the RAW page
+      length, so the cursor never stalls;
+    - a SHORT page (fewer than `page_size` rows) terminates the walk — that is
+      the honest end of the corpus;
+    - the walk is BOUNDED by `max_pages`; if every page comes back full the cap
+      stops the loop and `:cap` says so, rather than a silent prefix.
+
+  Paging is sound to page over: both `list_linear/5` and
+  `list_with_drafts_merged/4` append `asc: d.id` as a final unique tiebreaker,
+  so the sort is TOTAL and LIMIT/OFFSET pages neither skip nor duplicate rows.
+  """
+  @spec collect_all_documents(String.t(), String.t(), keyword()) :: {[struct()], nil | :cap}
+  def collect_all_documents(type, dataset, opts \\ []) do
+    {page_size, opts} = Keyword.pop(opts, :page_size, 1000)
+    {max_pages, opts} = Keyword.pop(opts, :max_pages, 1000)
+
+    page_size = page_size |> min(1000) |> max(1)
+    list_opts = Keyword.drop(opts, [:limit, :offset])
+
+    collect_pages(type, dataset, list_opts, page_size, max_pages, 0, 0, [])
+  end
+
+  # `list_documents/3` CLAMPS `:offset` to @offset_max (it does not error and it
+  # does not return an empty page), so a walk that marched past the cap would
+  # re-read the SAME page forever — full every time, so never short-circuiting —
+  # and hand the caller duplicates. Stop at the cap instead and label it `:cap`:
+  # ~101k rows is the real server ceiling for an offset walk, and a caller that
+  # hits it must know its corpus is a prefix.
+  @offset_max 100_000
+
+  defp collect_pages(_type, _dataset, _opts, _page_size, max_pages, page, _offset, acc)
+       when page >= max_pages do
+    {finish(acc), :cap}
+  end
+
+  defp collect_pages(type, dataset, opts, page_size, max_pages, page, offset, acc) do
+    batch = list_documents(type, dataset, opts ++ [limit: page_size, offset: offset])
+    acc = [batch | acc]
+    next_offset = offset + length(batch)
+
+    cond do
+      # Short page — the honest end of the corpus.
+      length(batch) < page_size -> {finish(acc), nil}
+      # The next read would be clamped back onto a page we have already taken.
+      next_offset > @offset_max -> {finish(acc), :cap}
+      # RAW advance: never advance by a post-filtered count.
+      true -> collect_pages(type, dataset, opts, page_size, max_pages, page + 1, next_offset, acc)
+    end
+  end
+
+  defp finish(acc), do: acc |> Enum.reverse() |> Enum.concat()
+
+  @doc """
   Count documents matching the same type / scope / filter / perspective as
   `list_documents`, ignoring `limit`/`offset` — the total a paginator needs.
   For `:drafts` the draft/published twins are merged (counted once), matching

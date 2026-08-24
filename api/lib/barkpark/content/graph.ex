@@ -64,6 +64,17 @@ defmodule Barkpark.Content.Graph do
   """
 
   import Ecto.Query
+
+  require Logger
+
+  # The drafts fold holds the whole corpus in memory to build its adjacency
+  # indexes, so the walk is bounded on purpose: 20 pages = 20,000 documents per
+  # type, twenty times the 1000-row cap this replaces, and small enough that a
+  # runaway dataset warns instead of exhausting the node. Overridable per call
+  # via :corpus_page_size / :corpus_max_pages.
+  @corpus_page_size 1000
+  @corpus_max_pages 20
+
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.Content.{Document, Edge, Scope}
@@ -271,21 +282,42 @@ defmodule Barkpark.Content.Graph do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
-    docs =
+    # WALK THE WHOLE DRAFTS CORPUS. This was `list_documents(limit: 1000)`, and
+    # `list_documents/3` CLAMPS :limit to 1000 and returns a bare list — so a
+    # dataset with more than 1000 drafts of a type built its adjacency index
+    # from a PREFIX. That is worse here than a short list: `corpus_slugs` below
+    # is derived from `docs`, and the dangling pass treats a target absent from
+    # that set as a PHANTOM reference. A truncated corpus therefore does not
+    # merely hide edges — it INVENTS dangling ones for real, resolvable targets
+    # that happened to fall past the cap.
+    {docs, truncated} =
       if is_binary(dataset) and dataset != "" do
         dataset
         |> Content.list_schemas(opts)
-        |> Enum.flat_map(fn schema ->
-          Content.list_documents(schema.name, dataset,
-            perspective: :drafts,
-            limit: 1000,
-            workspace_id: workspace_id,
-            project_id: project_id
-          )
+        |> Enum.map_reduce(nil, fn schema, trunc_acc ->
+          {page, trunc} =
+            Content.collect_all_documents(schema.name, dataset,
+              perspective: :drafts,
+              page_size: Keyword.get(opts, :corpus_page_size, @corpus_page_size),
+              max_pages: Keyword.get(opts, :corpus_max_pages, @corpus_max_pages),
+              workspace_id: workspace_id,
+              project_id: project_id
+            )
+
+          {page, trunc_acc || trunc}
         end)
+        |> then(fn {per_type, trunc} -> {Enum.concat(per_type), trunc} end)
       else
-        []
+        {[], nil}
       end
+
+    if truncated == :cap do
+      Logger.warning(
+        "Content.Graph: drafts corpus walk for dataset=#{dataset} hit its page bound at " <>
+          "#{length(docs)} docs — the index is built from a PREFIX, so edges to documents " <>
+          "beyond the walk render as DANGLING even though their targets exist."
+      )
+    end
 
     # Corpus slug set for the plugin-edge dangling pass (see
     # drafts_edges_for_doc/3). Scope-safe by construction: `docs` came from the

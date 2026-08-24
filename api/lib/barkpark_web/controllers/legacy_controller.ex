@@ -14,6 +14,13 @@ defmodule BarkparkWeb.LegacyController do
 
   @dataset "production"
 
+  # The legacy list serves up to 10_000 documents — the number this route has
+  # always PASSED as `:limit`, and never actually received (see `index/2`).
+  # Ten pages of the server's 1000-row page cap is that same ceiling, now
+  # honestly reached and honestly reported.
+  @list_page_size 1000
+  @list_max_pages 10
+
   def index(conn, %{"type" => type} = params) do
     # `bin/1` collapses a non-binary `?filter[]=x` / `?filter[k]=v` to nil
     # BEFORE parse_legacy_filter's `String.split/2` — which would otherwise
@@ -48,18 +55,35 @@ defmodule BarkparkWeb.LegacyController do
           # list arm alone while the show/2 arm stays clamped.
           perspective = if AnonPerspective.anon_pinned?(conn), do: :published, else: :raw
 
-          documents =
-            Content.list_documents(
+          # THE CAP THIS ROUTE NEVER GOT. It asked `list_documents/3` for
+          # `limit: 10_000` — but that function CLAMPS :limit to 1000, so the
+          # request was silently answered with a 1000-row PREFIX and the
+          # response then reported `count: length(documents)` = 1000 as though
+          # 1000 were the total. A client with 4,000 documents of a type was
+          # told, in the API's own words, that it had exactly 1000.
+          #
+          # WALK instead, bounded to the same @list_ceiling this route always
+          # meant to serve, and SAY SO when the ceiling cut the corpus short:
+          # `truncated` is the signal the old shape could not carry, and
+          # `count` is now the number of documents actually in `documents`
+          # (which, when `truncated` is false, IS the corpus total).
+          {documents, walk} =
+            Content.collect_all_documents(
               type,
               @dataset,
-              [perspective: perspective, filter_map: filter_map, limit: 10_000] ++
-                scope_opts(conn)
+              [
+                perspective: perspective,
+                filter_map: filter_map,
+                page_size: @list_page_size,
+                max_pages: @list_max_pages
+              ] ++ scope_opts(conn)
             )
 
           json(conn, %{
             type: type,
             documents: Enum.map(documents, &render_legacy_doc(&1, schema, caller_context)),
-            count: length(documents)
+            count: length(documents),
+            truncated: walk == :cap
           })
 
         field ->
