@@ -10,5 +10,8 @@
     "**/*.lock", "**/package-lock.json", "**/pnpm-lock.yaml", "**/go.sum"
   ],
 
-  "batchSize": 10
+  "batchSize": 10,
+
+  "_provenance": "Keys accepted off an agent RESULT and copied verbatim onto the ledger entry, ON TOP OF ledger-io.mjs's DEFAULT_PROVENANCE_KEYS. This list may only ADD: transport keys (path) and canonical aliases (criticality, what_breaks_if_wrong) are refused no matter what is listed here, because a blind spread of the result is what leaked them next to the canonical whatBreaks in the first place.",
+  "provenanceKeys": []
 }
