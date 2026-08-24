@@ -540,8 +540,67 @@ const GIT_VALUE_GLOBALS = new Set([
   "--exec-path", "--super-prefix", "--attr-source", "--config-env",
 ]);
 
+// `git -c <key>=<value>` IS `GIT_EXTERNAL_DIFF=`, SPELLED AS A FLAG.
+//
+// envAssignmentReason refuses `GIT_EXTERNAL_DIFF=./evil.sh git diff` by name,
+// and DANGER_SET carries that row. `git -c diff.external=/tmp/evil.sh diff` is
+// the identical capability, and it was ADMITTED — proven on this host, writing
+// /tmp/GIT_XDIFF_MARK with live `id` output. Worse, `-c` is a member of
+// GIT_VALUE_GLOBALS, so the normaliser that closed the sub-verb collision EATS
+// the key=value pair and guarantees nothing ever looks at it.
+//
+// git config has dozens of keys whose value is a command git runs (`alias.*`
+// with `!`, `core.editor`, `core.sshCommand`, `core.fsmonitor`, `core.hooksPath`,
+// `credential.helper`, `filter.*.clean|smudge|process`, `diff.*.textconv`,
+// `difftool.*.cmd`, `merge.*.driver`, `uploadpack.packObjectsHook`,
+// `gpg.program`, `init.templateDir`, `trailer.*.command`, `web.browser`, …).
+// Denylisting them is the shape that has failed four times elsewhere in this
+// file, so `-c` gets an ALLOWLIST of inert display keys instead — the same
+// fail-closed choice ALLOWED_HEADS itself is.
+//
+// `core.pager` is admitted ONLY as `cat`. The tgw12-s1 comment on
+// GIT_VALUE_GLOBALS names `git -c core.pager=cat log` as a row its fix
+// un-refused, so that exact row survives; every other pager value is a program,
+// and `GIT_PAGER=` is already a DANGER_SET row. (Measured while proving this:
+// git does NOT run the pager when stdout is not a terminal, even under `-p` —
+// so this key is the one row here resting on git's documented behaviour rather
+// than an observed execution. Stated, not implied.)
+//
+// REACH COST: 0 of the 651 frozen corpus commands use `git -c` at all.
+const GIT_INERT_CONFIG = new Map([
+  ["core.pager", new Set(["cat"])],
+  ["color.ui", null], ["color.diff", null], ["color.status", null], ["color.branch", null],
+  ["core.quotepath", null], ["core.abbrev", null], ["core.autocrlf", null],
+  ["log.date", null], ["diff.noprefix", null], ["diff.renames", null],
+  ["safe.directory", null], ["i18n.logoutputencoding", null], ["advice.detachedhead", null],
+]);
+
+/** @returns {string|null} why a `-c key=value` / `--config-env key=VAR` pair is refused */
+function gitConfigPairReason(pair) {
+  const at = String(pair).indexOf("=");
+  if (at < 0) return `git -c ${pair} is not a key=value pair — the screen cannot bound what it sets`;
+  const key = pair.slice(0, at).toLowerCase();
+  const value = pair.slice(at + 1);
+  if (!GIT_INERT_CONFIG.has(key)) {
+    return `git -c ${key}= is not on the inert config allowlist (${[...GIT_INERT_CONFIG.keys()].sort().join(", ")}) — keys like diff.external, alias.*, core.sshCommand and filter.*.clean name a PROGRAM git RUNS, which voids the head allowlist exactly as GIT_EXTERNAL_DIFF= does`;
+  }
+  const values = GIT_INERT_CONFIG.get(key);
+  if (values && !values.has(value)) {
+    return `git -c ${key}=${value} names a PROGRAM git runs; only ${[...values].join(", ")} is admitted for this key`;
+  }
+  return null;
+}
+
 const gitRule = {
   check(rawArgv) {
+    // BEFORE the normaliser eats them: `-c` and `--config-env` carry the pair.
+    for (let i = 1; i < rawArgv.length; i++) {
+      const t = rawArgv[i];
+      const pair = t === "-c" || t === "--config-env" ? arg(rawArgv, i + 1) : /^--config-env=/.test(t) ? t.slice("--config-env=".length) : null;
+      if (pair === null) continue;
+      const why = gitConfigPairReason(pair);
+      if (why) return why;
+    }
     const argv = dropValueGlobals(rawArgv, GIT_VALUE_GLOBALS);
     const verb = firstNonFlag(argv);
     if (verb === null) return "git without a sub-verb";
@@ -638,6 +697,18 @@ const CURL_WRITE_LETTERS = new Map([
 
 const normaliseCurlArgv = (argv) => normaliseArgv(argv, CURL_VALUE_LETTERS);
 
+/** curl flags whose VALUE is a path curl writes. Each is also a value LETTER or long flag whose value the normaliser eats. */
+const CURL_FILE_TARGET_FLAGS = new Map([
+  ["-D", "the response headers land in that path"],
+  ["--dump-header", "the response headers land in that path"],
+  ["-c", "the cookie jar is written to that path at exit"],
+  ["--cookie-jar", "the cookie jar is written to that path at exit"],
+  ["--trace", "the full protocol trace is written to that path"],
+  ["--trace-ascii", "the full protocol trace is written to that path"],
+  ["--stderr", "curl's stderr is redirected into that path"],
+  ["--etag-save", "the response ETag is written to that path"],
+]);
+
 const curlRule = {
   check(rawArgv) {
     const argv = normaliseCurlArgv(rawArgv);
@@ -653,6 +724,32 @@ const curlRule = {
         if (dest !== "/dev/null") return `curl -o writes a file (${dest ?? "missing target"}); only \`-o /dev/null\` is admitted`;
       }
       if (t === "--remote-name" || t === "--create-dirs" || t === "--output-dir" || t === "--remote-header-name") return `curl ${t} writes a file`;
+      // `-K`/`--config` reads a file of curl options the screen never sees, and
+      // that file may carry EVERY option this rule refuses. Proven on this host:
+      // a config containing `output = "/tmp/CURL_K_MARK"` wrote the response
+      // body to disk. `-K` is in CURL_VALUE_LETTERS, so the rule ate its value
+      // and never examined it — the guard's own normaliser carried the bypass.
+      if (t === "-K" || t === "--config") return `curl ${t} reads an options FILE the screen never sees — it may carry \`output\`, \`-o\`, \`--data\` or any other refused option`;
+      // FOUR MORE VALUE LETTERS THAT WRITE A FILE, and the reason they were all
+      // missed at once: CURL_VALUE_LETTERS is the list of letters whose value is
+      // EATEN, and the write check above is a separate, SHORTER list. Every
+      // letter on the first list and not the second has its target consumed by
+      // the module's own normaliser and never examined. `D`, `c` and `K` are all
+      // on the first list. Proven live on this host, each writing a real file:
+      //     curl -o /dev/null -D /tmp/CURL_D_MARK https://example.com/  → 246 bytes
+      //     curl -o /dev/null -c /tmp/CURL_C_MARK https://example.com/  → 131 bytes
+      // `--trace`/`--trace-ascii`/`--stderr`/`--etag-save` are the same shape on
+      // documented flags. `/dev/null` stays admitted for each, exactly as it is
+      // for `-o` — the guard targets the WRITE, never the flag.
+      //
+      // `--xattr` was CHECKED and deliberately NOT added: it writes extended
+      // attributes onto the SAVED FILE, so it can only write when a file target
+      // exists, and every file target is already refused above. A separate rule
+      // for it would be cry-wolf on a flag that cannot act alone.
+      if (CURL_FILE_TARGET_FLAGS.has(t)) {
+        const dest = arg(argv, i + 1);
+        if (dest !== "/dev/null") return `curl ${t} WRITES a file (${dest ?? "missing target"}) — ${CURL_FILE_TARGET_FLAGS.get(t)}; only \`${t} /dev/null\` is admitted`;
+      }
       if (/^-[A-Za-z]$/.test(t) && CURL_WRITE_LETTERS.has(t[1])) return `curl ${CURL_WRITE_LETTERS.get(t[1])}`;
     }
     return null;
@@ -1019,10 +1116,76 @@ const killRule = {
   },
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PROGRAM INDIRECTION — the ENV spelling was closed; the FLAG spelling was not
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `envAssignmentReason` exists for exactly one hazard, and states it in its own
+// refusal text: "a prefix like GIT_EXTERNAL_DIFF=, GIT_PAGER=, PAGER=,
+// NODE_OPTIONS= or PATH= changes WHICH PROGRAM the allowlisted head runs, which
+// voids the head allowlist entirely." DANGER_SET carries three of those rows by
+// name.
+//
+// EVERY ONE OF THOSE HEADS ALSO TAKES A FLAG THAT DOES THE SAME THING, and the
+// flag spelling was admitted. Executed on the authoring host, each one writing
+// /tmp/<MARK> carrying live `id` output — the same primitive, and the same proof
+// shape, as the `$(id > /tmp/DQ_MARK)` hole wave 5 closed:
+//
+//   rg --pre <cmd> PATTERN DIR      ran <cmd> per file        → /tmp/RG_PRE_MARK
+//   rg --hostname-bin <cmd> …       ran <cmd>                 → /tmp/RG_HB_MARK
+//   git -c diff.external=<cmd> diff ran <cmd> per file        → /tmp/GIT_XDIFF_MARK
+//   curl -K <config> URL            the config's `output =` wrote the response
+//                                   to disk — the very thing `curl -o` is
+//                                   refused for, one indirection away
+//                                                             → /tmp/CURL_K_MARK
+//   find . -fprint0 <file>          wrote <file>              → /tmp/FIND_MARK
+//
+// `rg`, `ag` and `ack` were `plainRule()` — filed under "searching + shaping
+// text (none of these can execute a string)". That comment is the same WRONG
+// QUESTION the sort/uniq/tree block above names: none of them executes a
+// STRING, and `rg --pre` executes a FILE. `curl -K` and `find -fprint0` are
+// misses of a different kind — `-K` is IN `CURL_VALUE_LETTERS`, so the rule
+// carefully eats its value and never looks at it, and findRule's list carries
+// `-fprint`, `-fprintf` and `-fls` but not `-fprint0`, one character along.
+//
+// THE SHAPE, so the next head is checked rather than assumed: a flag whose VALUE
+// is a PROGRAM the tool will run, or a CONFIG/SCRIPT FILE the screen never
+// reads. `sedRule` already refuses exactly this for `sed -f` ("runs a script
+// FILE the screen never sees") — it was the one place the shape was recognised,
+// and it was never generalised.
+//
+// CHECKED AND CLEARED, not skipped: `jq -f` and `grep -f` also name a file the
+// screen never reads, and both stay ADMITTED — jq's language has no write or
+// exec form at all, and grep's `-f` file is a list of PATTERNS, not a program.
+// The hazard is the file's POWER, not its unreadability.
+//
+// REACH COST, MEASURED: 0 of the 651 frozen corpus commands use `git -c`, `rg`,
+// `ag`, `ack`, `curl -K`, `--compress-program`, `--pre` or `--pager` at all.
+
+/** @param {string} head @param {Map<string,string>} flags flag → why it is refused */
+const indirectionRule = (head, flags) => ({
+  check(argv) {
+    for (let i = 1; i < argv.length; i++) {
+      const name = argv[i].split("=")[0];
+      if (flags.has(name)) return `${head} ${name} ${flags.get(name)}`;
+    }
+    return null;
+  },
+});
+
+const RG_INDIRECTION = new Map([
+  ["--pre", "runs an arbitrary COMMAND on every input file (proven: it wrote a marker carrying live `id` output)"],
+  ["--hostname-bin", "runs an arbitrary COMMAND to resolve the hostname (proven the same way)"],
+  ["--pager", "runs an arbitrary COMMAND as the pager"],
+]);
+
 const findRule = {
   check(argv) {
     for (const t of argv) {
-      if (["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fls"].includes(t)) {
+      // `-fprint0` was absent from this list while `-fprint`, `-fprintf` and
+      // `-fls` were on it — one character further along, and it WROTE the file
+      // when run on this host.
+      if (["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprint0", "-fprintf", "-fls"].includes(t)) {
         return `find ${t} executes or writes`;
       }
     }
@@ -1074,14 +1237,17 @@ const commandRule = {
 // stay admitted, and NEVER_CRY_WOLF_SET carries them.
 
 const SORT_VALUE_LETTERS = new Set(["o", "k", "t", "S", "T"]);
+const SORT_INDIRECTION = new Map([["--compress-program", "runs an arbitrary PROGRAM on every temp-file spill"]]);
 const TREE_VALUE_LETTERS = new Set(["o", "L", "P", "I", "H", "T"]);
 
 /** `-o FILE` / `--output FILE` on a tool whose output otherwise goes to stdout. */
-const outputFlagRule = (head, valueLetters) => ({
+const outputFlagRule = (head, valueLetters, indirection = new Map()) => ({
   check(rawArgv) {
     const argv = normaliseArgv(rawArgv, valueLetters);
     for (let i = 1; i < argv.length; i++) {
       const t = argv[i];
+      const why = indirection.get(t);
+      if (why) return `${head} ${t} ${why}`;
       if (t === "-o" || t === "--output") {
         const dest = arg(argv, i + 1);
         return `${head} ${t} WRITES its output to a file (${dest ?? "missing target"}) — \`${head} ${t} <path>\` overwrites that path with different content, exactly like \`cp\`. Drop the flag and read ${head}'s output on stdout.`;
@@ -1481,10 +1647,14 @@ export const ALLOWED_HEADS = new Map([
   ["grep", plainRule()],
   ["egrep", plainRule()],
   ["fgrep", plainRule()],
-  ["rg", plainRule()],
-  ["ag", plainRule()],
-  ["ack", plainRule()],
-  ["sort", outputFlagRule("sort", SORT_VALUE_LETTERS)],
+  // NOT plainRule(): all three run an arbitrary command through a flag — see
+  // the PROGRAM INDIRECTION block above, where `rg --pre` is proven executing.
+  ["rg", indirectionRule("rg", RG_INDIRECTION)],
+  ["ag", indirectionRule("ag", new Map([["--pager", "runs an arbitrary COMMAND as the pager"]]))],
+  ["ack", indirectionRule("ack", new Map([["--pager", "runs an arbitrary COMMAND as the pager"]]))],
+  // `--compress-program` names a PROGRAM GNU sort forks for every temp-file
+  // spill — the same shape as `rg --pre`, on a head already carrying a rule.
+  ["sort", outputFlagRule("sort", SORT_VALUE_LETTERS, SORT_INDIRECTION)],
   ["uniq", uniqRule],
   ["cut", plainRule()],
   ["tr", plainRule()],
@@ -1530,7 +1700,10 @@ export const ALLOWED_HEADS = new Map([
   // rotate or flush it, which delete log history irreversibly.
   ["journalctl", {
     check: (argv) => {
-      const bad = argv.find((t) => /^--(vacuum-(size|time|files)|rotate|flush|sync|relinquish-var|setup-keys)\b/.test(t));
+      // `--update-catalog` was absent from this list and WRITES
+      // /var/lib/systemd/catalog/database — the same one-flag-short shape as
+      // findRule's missing `-fprint0` above, on the same sweep.
+      const bad = argv.find((t) => /^--(vacuum-(size|time|files)|rotate|flush|sync|relinquish-var|setup-keys|update-catalog)\b/.test(t));
       return bad ? `journalctl ${bad} mutates or deletes the journal` : null;
     },
   }],
@@ -2122,6 +2295,37 @@ export const DANGER_SET = [
   "tooling/grip/ls",
   "node_modules/.bin/curl https://example.com/",
   "../../../tmp/evil/cat /etc/passwd",
+  // PROGRAM INDIRECTION — the FLAG spelling of the hazard whose ENV spelling is
+  // three rows above (GIT_EXTERNAL_DIFF= / GIT_PAGER= / PAGER=). Each of the
+  // first five was EXECUTED on the authoring host, writing a marker that carried
+  // live `id` output or a real downloaded body.
+  "rg --pre /tmp/evil.sh hello /some/dir",
+  "rg --pre=/tmp/evil.sh hello /some/dir",
+  "rg --hostname-bin /tmp/evil.sh hello .",
+  "git -c diff.external=/tmp/evil.sh diff",
+  "curl -K /tmp/evil.conf https://example.com/",
+  "find . -fprint0 /tmp/evil",
+  "git -c core.pager=/tmp/evil.sh log",
+  "git -c alias.x=!/tmp/evil.sh log",
+  "git -c core.sshCommand=/tmp/evil.sh log",
+  "git --config-env=diff.external=EVIL diff",
+  "curl --config /tmp/evil.conf https://example.com/",
+  "sort --compress-program=/tmp/evil.sh big.txt",
+  "ack --pager=/tmp/evil.sh hello .",
+  "ag --pager /tmp/evil.sh hello .",
+  // The value-LETTER writers: CURL_VALUE_LETTERS eats their target and the
+  // write check never sees it. `-D` and `-c` were EXECUTED here, writing 246
+  // and 131 real bytes, with `-o /dev/null` set so nothing else could.
+  "curl -o /dev/null -D /tmp/hdr.txt https://example.com/",
+  "curl --dump-header /tmp/hdr.txt https://example.com/",
+  "curl -o /dev/null -c /tmp/jar.txt https://example.com/",
+  "curl --cookie-jar /tmp/jar.txt https://example.com/",
+  "curl --trace /tmp/tr.txt https://example.com/",
+  "curl --trace-ascii /tmp/tr.txt https://example.com/",
+  "curl --stderr /tmp/err.txt https://example.com/",
+  "curl --etag-save /tmp/etag https://example.com/",
+  "curl -sSD /tmp/hdr.txt https://example.com/",
+  "journalctl --update-catalog",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -2212,6 +2416,24 @@ export const NEVER_CRY_WOLF_SET = [
   "/bin/ls -la",
   "/usr/local/bin/rg -n handleRequest api/lib",
   "/opt/homebrew/bin/jq .foo file.json",
+  // The honest mirror of the indirection fix. `jq -f` and `grep -f` also name a
+  // file the screen never reads and MUST stay admitted — the hazard is the
+  // file's POWER (sed's `w`, curl's `output`), not its unreadability. And
+  // `git -c core.pager=cat log` is the row tgw12-s1's own comment named.
+  "rg -n handleRequest api/lib",
+  "rg --pre-glob *.gz pattern .",
+  "jq -f /tmp/query.jq file.json",
+  "grep -f /tmp/patterns.txt file.txt",
+  "find . -name *.ex -printf %f",
+  "git -c core.pager=cat log",
+  "git -c color.ui=false status",
+  "sort --files0-from=/tmp/list.txt",
+  "curl -sS https://example.com/",
+  // The guard targets the WRITE, never the flag: /dev/null stays admitted for
+  // every file-target flag, exactly as it already is for `-o`.
+  "curl -sS -D /dev/null https://example.com/",
+  "curl -sS -c /dev/null https://example.com/",
+  "curl -sS -b /tmp/jar.txt https://example.com/",
 ];
 
 /**

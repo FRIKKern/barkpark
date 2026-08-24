@@ -2001,3 +2001,172 @@ test("the head-path shapes are carried by the SHIPPED named sets, not only by th
   assert.deepEqual(falsePermissions, [], "a false PERMISSION is an execution");
   assert.deepEqual(falseRefusals, [], "a false REFUSAL is how the screen gets routed around");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROGRAM INDIRECTION — the ENV spelling was closed, the FLAG spelling was not
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `envAssignmentReason` states the hazard in its own refusal text: a prefix like
+// `GIT_EXTERNAL_DIFF=` or `PAGER=` "changes WHICH PROGRAM the allowlisted head
+// runs, which voids the head allowlist entirely", and DANGER_SET carries three
+// such rows. Every one of those heads ALSO takes a FLAG that does the same
+// thing, and the flag spelling was admitted.
+//
+// EXECUTED on the authoring host, each writing a marker carrying live `id`
+// output — the same primitive and the same proof shape as wave 5's
+// `grep -n "$(id > /tmp/DQ_MARK)" .`:
+//
+//   rg --pre <cmd> PATTERN DIR       → /tmp/RG_PRE_MARK    (ran <cmd> per file)
+//   rg --hostname-bin <cmd> …        → /tmp/RG_HB_MARK
+//   git -c diff.external=<cmd> diff  → /tmp/GIT_XDIFF_MARK
+//   find . -fprint0 <file>           → wrote <file>, 73 bytes
+//   curl -K <config> URL             → /tmp/CURL_K_MARK, the response body on
+//                                      disk, via the config's `output =` — the
+//                                      exact thing `curl -o` is refused for
+//
+// `rg`/`ag`/`ack` were `plainRule()`, filed under "none of these can execute a
+// string" — the same WRONG QUESTION the sort/uniq/tree block names: none of them
+// executes a STRING, and `rg --pre` executes a FILE. `curl -K` and `git -c` are
+// worse than misses: BOTH flags are members of the value-eating sets this
+// module added to fix an earlier bug, so the normaliser guarantees their value
+// is consumed and never examined. `find -fprint0` sat one character from three
+// listed siblings.
+//
+// ONE PLACE ALREADY HAD IT RIGHT and was never generalised: `sed -f` refuses
+// with "runs a script FILE the screen never sees".
+
+test("PROGRAM INDIRECTION: a flag whose value is a program or a config file is REFUSED", () => {
+  const refused = [
+    "rg --pre /tmp/evil.sh hello /some/dir",
+    "rg --pre=/tmp/evil.sh hello /some/dir",
+    "rg --hostname-bin /tmp/evil.sh hello .",
+    "ag --pager /tmp/evil.sh hello .",
+    "ack --pager=/tmp/evil.sh hello .",
+    "sort --compress-program=/tmp/evil.sh big.txt",
+    "sort --compress-program /tmp/evil.sh big.txt",
+    "curl -K /tmp/evil.conf https://example.com/",
+    "curl --config /tmp/evil.conf https://example.com/",
+    "find . -fprint0 /tmp/evil",
+    "git -c diff.external=/tmp/evil.sh diff",
+    "git -c core.sshCommand=/tmp/evil.sh log",
+    "git -c alias.x=!/tmp/evil.sh log",
+    "git -c core.pager=/tmp/evil.sh log",
+    "git --config-env=diff.external=EVIL diff",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the indirection: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("the indirection guard does NOT refuse a file whose POWER is harmless", () => {
+  // The hazard is what the named file CAN DO, not that the screen cannot read
+  // it. jq's language has no write or exec form; grep's `-f` file is patterns.
+  // Refusing those would be the cry-wolf this module is measured against.
+  const admitted = [
+    "rg -n handleRequest api/lib",
+    "rg --pre-glob *.gz pattern .",
+    "jq -f /tmp/query.jq file.json",
+    "grep -f /tmp/patterns.txt file.txt",
+    "find . -name *.ex -printf %f",
+    "sort --files0-from=/tmp/list.txt",
+    "sort -u -k2,2 file.txt",
+    "curl -sS https://example.com/",
+    // The row tgw12-s1's own comment names as a reach win, preserved exactly.
+    "git -c core.pager=cat log",
+    "git -c color.ui=false status",
+  ];
+  for (const cmd of admitted) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, true, `MUST ADMIT: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("`git -c` is the FLAG spelling of a DANGER_SET env row, and both are refused", () => {
+  // The pair is the point: the module already refuses the env spelling by name.
+  // A guard that closes one spelling of a capability and not the other has not
+  // closed the capability.
+  const pairs = [
+    ["GIT_EXTERNAL_DIFF=./evil.sh git diff HEAD~1", "git -c diff.external=./evil.sh diff HEAD~1"],
+    ["GIT_PAGER=./evil.sh git log -1", "git -c core.pager=./evil.sh log -1"],
+  ];
+  for (const [envSpelling, flagSpelling] of pairs) {
+    assert.ok(DANGER_SET.includes(envSpelling), `DANGER_SET must still carry the env spelling: ${envSpelling}`);
+    assert.equal(screenCommand(envSpelling).ok, false, `env spelling refused: ${envSpelling}`);
+    assert.equal(screenCommand(flagSpelling).ok, false, `and the FLAG spelling of the same capability: ${flagSpelling}`);
+  }
+});
+
+test("MUTATION PROOF: restoring plainRule / the pre-fix flag lists re-admits every row", () => {
+  // (a) rg as the bare plainRule() it was registered as.
+  const saved = ALLOWED_HEADS.get("rg");
+  try {
+    ALLOWED_HEADS.set("rg", { check: () => null });
+    assert.equal(screenCommand("rg --pre /tmp/evil.sh hello .").ok, true, "the pre-fix rg rule ADMITTED arbitrary command execution");
+  } finally {
+    ALLOWED_HEADS.set("rg", saved);
+  }
+  assert.equal(screenCommand("rg --pre /tmp/evil.sh hello .").ok, false, "restored, and refused");
+
+  // (b) findRule's pre-fix list — `-fprint0` absent, its three siblings present.
+  const stale = ["-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fprintf", "-fls"];
+  const argv = "find . -fprint0 /tmp/evil".split(/\s+/);
+  assert.ok(!argv.some((t) => stale.includes(t)), "the pre-fix list did not name -fprint0, so the command was ADMITTED");
+  assert.equal(screenCommand("find . -fprint0 /tmp/evil").ok, false, "and the shipped list refuses it");
+
+  // (c) curl: the pre-fix rule looked for a WRITE TOKEN and there is none —
+  // `-K` was a value-taking letter, so its value was eaten and never examined,
+  // and the file it names carries the `output` the rule would have refused.
+  const PRE_FIX_CURL = ["-o", "--output", "-X", "--request", "-O", "-J", "-d", "--data", "-F", "--form", "-T", "--upload-file", "--remote-name", "--create-dirs", "--output-dir"];
+  const curlArgv = "curl -K /tmp/evil.conf https://example.com/".split(/\s+/);
+  assert.ok(!curlArgv.some((t) => PRE_FIX_CURL.includes(t)), "the pre-fix curl rule saw no write token at all, so it ADMITTED");
+  assert.equal(screenCommand("curl -K /tmp/evil.conf https://example.com/").ok, false, "and it is refused now");
+});
+
+test("the indirection shapes are carried by the SHIPPED named sets, not only by this file", () => {
+  const danger = DANGER_SET.join("\n");
+  for (const needle of ["rg --pre", "rg --hostname-bin", "git -c diff.external=", "curl -K", "find . -fprint0", "--compress-program", "ack --pager", "ag --pager", "--config-env="]) {
+    assert.ok(danger.includes(needle), `DANGER_SET must carry the ${needle} shape`);
+  }
+  const wolf = NEVER_CRY_WOLF_SET.join("\n");
+  for (const needle of ["jq -f", "grep -f", "git -c core.pager=cat", "--pre-glob", "-printf"]) {
+    assert.ok(wolf.includes(needle), `NEVER_CRY_WOLF_SET must carry the honest mirror ${needle}`);
+  }
+  const { falsePermissions, falseRefusals } = runNamedSets();
+  assert.deepEqual(falsePermissions, [], "a false PERMISSION is an execution");
+  assert.deepEqual(falseRefusals, [], "a false REFUSAL is how the screen gets routed around");
+});
+
+test("curl's value LETTERS that write a file were eaten, never examined", () => {
+  // The two lists had drifted: CURL_VALUE_LETTERS names the letters whose value
+  // is CONSUMED, and the write check names a shorter set. Every letter on the
+  // first and not the second had its target eaten by the module's own
+  // normaliser. Executed on this host with `-o /dev/null` set so nothing else
+  // could write: `-D` produced 246 real bytes and `-c` produced 131.
+  const refused = [
+    "curl -o /dev/null -D /tmp/hdr.txt https://example.com/",
+    "curl --dump-header /tmp/hdr.txt https://example.com/",
+    "curl -o /dev/null -c /tmp/jar.txt https://example.com/",
+    "curl --cookie-jar /tmp/jar.txt https://example.com/",
+    "curl --trace /tmp/tr.txt https://example.com/",
+    "curl --trace-ascii /tmp/tr.txt https://example.com/",
+    "curl --stderr /tmp/err.txt https://example.com/",
+    "curl --etag-save /tmp/etag https://example.com/",
+    // clustered, the spelling that defeated `-o` before it defeated these
+    "curl -sSD /tmp/hdr.txt https://example.com/",
+    "curl -sSc /tmp/jar.txt https://example.com/",
+    // Same sweep, same shape as findRule's missing `-fprint0`: journalctl's
+    // mutation list carried six flags and not `--update-catalog`, which writes
+    // /var/lib/systemd/catalog/database.
+    "journalctl --update-catalog",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the eaten write target: ${cmd} → ${r.reason}`);
+  }
+  // The guard targets the WRITE, never the flag — /dev/null stays admitted for
+  // each, exactly as it already is for `-o`, and `-b` READS a cookie file.
+  for (const cmd of ["curl -sS -D /dev/null https://example.com/", "curl -sS -c /dev/null https://example.com/", "curl -sS -b /tmp/jar.txt https://example.com/"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+});
