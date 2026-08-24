@@ -29,10 +29,15 @@ defmodule BarkparkWeb.InteractionReceiptTest do
   ONES, and they are the only ones cited here — a correction the wave-47
   reviewer made after re-walking the enclosing `scope` blocks:
 
-    * `router.ex:1655` `post("/search/:dataset/interaction", …)` inside
-      `scope "/v1/data"` (`:1651`) → `pipe_through([:api, :api_grant_read])`
-    * `router.ex:2111` `post("/:dataset/search/interaction", …)` inside
-      `scope "/v1/media"` (`:2107`) → `pipe_through(:api)`
+    * `post("/search/:dataset/interaction", SearchController, …)` inside the
+      `scope "/v1/data"` whose `pipe_through` is `[:api, :api_grant_read]`
+    * `post("/:dataset/search/interaction", V1.MediaController, …)` inside the
+      `scope "/v1/media"` whose `pipe_through` is `:api`
+
+  Both are cited by SYMBOL rather than by `router.ex:<line>`. The line anchors
+  they used to carry were already pointing at unrelated blocks and only passed
+  the lineref sweep on a weak word match; a 38-line insertion elsewhere in the
+  router moved the coincidence away and the gate caught it.
 
   Neither pipeline carries `:require_token`, `:require_write` or
   `:require_admin`; `:api` authenticates through `Plugs.OptionalToken`, so an
