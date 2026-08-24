@@ -153,8 +153,16 @@ defmodule Mix.Tasks.Frt.Export do
 
   # List every PUBLISHED document in `dataset`, across all registered types.
   # Types are enumerated via the schema catalogue (Content.list_schemas/2);
-  # each type is then queried published-perspective with a high row cap so a
-  # large collection is not truncated by the default 100-row limit.
+  # each type is then WALKED published-perspective, paging past the server's
+  # row cap.
+  #
+  # This used to pass `limit: 1000` with a comment claiming "a high row cap so
+  # a large collection is not truncated". That was false: `list_documents/3`
+  # CLAMPS :limit to 1000, so 1000 was the CEILING, not a generous headroom —
+  # any type with more than 1000 published documents was silently dropped from
+  # the export FILE, which is the artifact an operator then restores from.
+  # `Mix.raise` on a truncated walk: a half-corpus export must never be written
+  # to disk looking like a whole one.
   defp list_published_docs(dataset, ws_id, project_id) do
     scope = [workspace_id: ws_id, project_id: project_id]
 
@@ -162,11 +170,21 @@ defmodule Mix.Tasks.Frt.Export do
     |> Content.list_schemas(scope)
     |> Enum.map(& &1.name)
     |> Enum.flat_map(fn type ->
-      Content.list_documents(
-        type,
-        dataset,
-        scope ++ [perspective: :published, limit: 1000]
-      )
+      case Content.collect_all_documents(
+             type,
+             dataset,
+             scope ++ [perspective: :published]
+           ) do
+        {docs, nil} ->
+          docs
+
+        {docs, :cap} ->
+          Mix.raise(
+            "frt.export: the corpus walk for type #{type} in dataset #{dataset} hit its page " <>
+              "bound at #{length(docs)} documents — the collection is LARGER than the walk. " <>
+              "Refusing to write a partial export that would read as complete."
+          )
+      end
     end)
   end
 

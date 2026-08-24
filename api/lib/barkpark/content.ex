@@ -78,6 +78,19 @@ defmodule Barkpark.Content do
   def list_documents(type, dataset, opts \\ []),
     do: Query.list_documents(type, dataset, opts)
 
+  @doc """
+  Walk EVERY document matching the query, paging past `list_documents/3`'s
+  1000-row cap, and return `{documents, truncated}` where `truncated` is `nil`
+  (corpus exhausted) or `:cap` (the bounded walk stopped early — the list is a
+  PREFIX). Any caller that must see the WHOLE corpus — rebuild, backfill,
+  export, graph fold — uses this instead of a capped `list_documents/3`, which
+  cannot tell a full corpus from a truncated one. See
+  `Content.Query.collect_all_documents/3`.
+  """
+  @spec collect_all_documents(String.t(), String.t(), keyword()) :: {[struct()], nil | :cap}
+  def collect_all_documents(type, dataset, opts \\ []),
+    do: Query.collect_all_documents(type, dataset, opts)
+
   @doc "Total documents matching a typed/filtered query (paginator total). See `Content.Query.count_documents/3`."
   def count_documents(type, dataset, opts \\ []),
     do: Query.count_documents(type, dataset, opts)

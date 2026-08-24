@@ -45,13 +45,21 @@ defmodule Barkpark.EdgeProjector.Backfill do
   alias Barkpark.Tenancy
 
   @default_types ["paper"]
-  @corpus_limit 1000
+  # Rows per page of the corpus WALK (the server clamps a page to 1000), and the
+  # bound on how many pages one scope sweep takes before it reports `:cap`.
+  # 50 pages = 50,000 docs — twelve times the largest corpus `Projector`'s own
+  # docs measure (~4k) and fifty times the cap this replaces, while still
+  # bounding the in-memory fold and the 60s rebuild transaction. A scope past
+  # that gets a `:cap` warning, never a silent prefix.
+  @corpus_page_size 1000
+  @corpus_max_pages 50
 
   @type scope_result :: %{
           dataset: String.t(),
           workspace_id: String.t() | nil,
           status: :dry_run | :rebuilt | :skipped_nil_workspace_multi_tenant | :error,
           docs: non_neg_integer(),
+          truncated: boolean(),
           edges: non_neg_integer(),
           added: non_neg_integer(),
           deleted: non_neg_integer(),
@@ -147,26 +155,55 @@ defmodule Barkpark.EdgeProjector.Backfill do
 
   defp do_sweep(dataset, ws, types, dry_run?) do
     list_opts =
-      [perspective: :published, limit: @corpus_limit]
+      [perspective: :published, page_size: @corpus_page_size, max_pages: @corpus_max_pages]
       |> maybe_put(:workspace_id, ws)
 
     project_opts =
       [dataset: dataset]
       |> maybe_put(:workspace_id, ws)
 
-    docs =
+    # WALK THE WHOLE CORPUS. This was `list_documents(limit: @corpus_limit)`,
+    # and `list_documents/3` CLAMPS :limit to 1000 and returns a bare list — so
+    # a scope with more than 1000 published docs of a type was swept from a
+    # 1000-row PREFIX and `scope_result`'s `docs:` reported the CAP as though it
+    # were the corpus size. `collect_all_documents/3` pages past the cap and
+    # says `:cap` when its own bound stopped it, so a prefix can never again be
+    # reported as a complete sweep.
+    {docs, truncated} =
       types
-      |> Enum.flat_map(fn type -> Content.list_documents(type, dataset, list_opts) end)
-      |> Enum.map(&hydrate_task_edges/1)
+      |> Enum.map_reduce(nil, fn type, trunc_acc ->
+        {page, trunc} = Content.collect_all_documents(type, dataset, list_opts)
+        {page, trunc_acc || trunc}
+      end)
+      |> then(fn {per_type, trunc} ->
+        {per_type |> Enum.concat() |> Enum.map(&hydrate_task_edges/1), trunc}
+      end)
+
+    if truncated == :cap do
+      Logger.warning(
+        "EdgeProjector.Backfill: dataset=#{dataset} workspace=#{inspect(ws)} corpus walk hit " <>
+          "its page cap at #{length(docs)} docs — the corpus is LARGER and this sweep is a " <>
+          "PREFIX. Docs beyond the walk keep their pre-sweep edges."
+      )
+    end
 
     if dry_run? do
       {:ok, %{edges: edges}} = Projector.project(dataset, docs, project_opts)
 
-      scope_result(dataset, ws, :dry_run, docs: length(docs), edges: length(edges))
+      scope_result(dataset, ws, :dry_run,
+        docs: length(docs),
+        edges: length(edges),
+        truncated: truncated == :cap
+      )
     else
       case Projector.rebuild_scope(dataset, docs, project_opts) do
         {:ok, %{added: added, deleted: deleted}} ->
-          scope_result(dataset, ws, :rebuilt, docs: length(docs), added: added, deleted: deleted)
+          scope_result(dataset, ws, :rebuilt,
+            docs: length(docs),
+            added: added,
+            deleted: deleted,
+            truncated: truncated == :cap
+          )
 
         {:error, reason} ->
           Logger.error(
@@ -194,12 +231,21 @@ defmodule Barkpark.EdgeProjector.Backfill do
       edges: Keyword.get(extra, :edges, 0),
       added: Keyword.get(extra, :added, 0),
       deleted: Keyword.get(extra, :deleted, 0),
+      # TRUE when the corpus walk stopped at its page bound, so `docs` is a
+      # PREFIX of the scope, not its size. A reader that ignores this field
+      # reads a capped sweep as a complete one — the defect this retires.
+      truncated: Keyword.get(extra, :truncated, false),
       error: Keyword.get(extra, :error)
     }
   end
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  # A truncated scope must never render as a bare doc count — that number is a
+  # PREFIX, and reading it as the corpus size is the whole defect.
+  defp truncated_note(%{truncated: true}), do: " (TRUNCATED — corpus is larger)"
+  defp truncated_note(_), do: ""
 
   @doc """
   Log a one-line summary plus a per-scope line. Pure (no DB) — the `run/1`
@@ -215,7 +261,7 @@ defmodule Barkpark.EdgeProjector.Backfill do
     if stats.dry_run do
       Enum.each(stats.results, fn r ->
         emit.(
-          "    • #{r.dataset} (ws #{r.workspace_id || "-"}) — #{r.docs} doc(s), " <>
+          "    • #{r.dataset} (ws #{r.workspace_id || "-"}) — #{r.docs} doc(s)#{truncated_note(r)}, " <>
             "#{r.edges} projected edge(s)"
         )
       end)
@@ -227,9 +273,18 @@ defmodule Barkpark.EdgeProjector.Backfill do
       Enum.each(stats.results, fn r ->
         emit.(
           "    • #{r.dataset} (ws #{r.workspace_id || "-"}) — #{r.status}: " <>
-            "#{r.docs} doc(s), +#{r.added}/-#{r.deleted}"
+            "#{r.docs} doc(s)#{truncated_note(r)}, +#{r.added}/-#{r.deleted}"
         )
       end)
+    end
+
+    truncated = Enum.count(stats.results, &Map.get(&1, :truncated, false))
+
+    if truncated > 0 do
+      emit.(
+        "  !! #{truncated} scope(s) TRUNCATED — the corpus walk hit its page bound, so the " <>
+          "doc counts above are PREFIXES and those scopes were only partially swept"
+      )
     end
 
     if stats.skipped > 0 do

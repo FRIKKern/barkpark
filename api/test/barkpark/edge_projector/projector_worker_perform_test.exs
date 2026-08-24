@@ -29,7 +29,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
   defmodule FakeContentNotFound do
     @moduledoc false
     def get_document(_id, _type, _scope), do: {:error, :not_found}
-    def list_documents(_type, _scope, _opts), do: []
+    def collect_all_documents(_type, _scope, _opts), do: {[], nil}
   end
 
   # ── Fake seam: content module that always returns a minimal doc ──
@@ -38,7 +38,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
     def get_document(id, _type, _scope),
       do: {:ok, %{"doc_id" => id, "dataset" => "test", "_type" => "post"}}
 
-    def list_documents(_type, _scope, _opts), do: []
+    def collect_all_documents(_type, _scope, _opts), do: {[], nil}
   end
 
   # ── Fake seam: projector module that records calls + returns success ──
