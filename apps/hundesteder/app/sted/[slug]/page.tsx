@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { fetchPlaces, fetchPlaceBySlug } from "@/lib/places";
+import { addressLines } from "@/lib/address";
 import { categoryLabel, iconPath } from "@/lib/categories";
 import { PlacesMap } from "@/components/places-map";
 
@@ -27,13 +28,6 @@ export async function generateMetadata({
   };
 }
 
-function formatAddress(place: Awaited<ReturnType<typeof fetchPlaceBySlug>>) {
-  if (!place?.address) return null;
-  const { street, postalCode, country } = place.address;
-  const lineTwo = [postalCode, place.city].filter(Boolean).join(" ");
-  return { street, lineTwo: lineTwo || undefined, country };
-}
-
 export default async function PlaceDetailPage({
   params,
 }: {
@@ -43,7 +37,7 @@ export default async function PlaceDetailPage({
   const place = await fetchPlaceBySlug(slug);
   if (!place) notFound();
 
-  const address = formatAddress(place);
+  const address = addressLines(place);
 
   return (
     <article className="container detail">
@@ -96,13 +90,12 @@ export default async function PlaceDetailPage({
             <div className="info-row">
               <span className="info-row__label">Adresse</span>
               <span className="info-row__value">
-                {address.street ? (
-                  <>
-                    {address.street}
-                    <br />
-                  </>
-                ) : null}
-                {address.lineTwo ?? place.city}
+                {address.map((l, i) => (
+                  <span key={l}>
+                    {i > 0 ? <br /> : null}
+                    {l}
+                  </span>
+                ))}
               </span>
             </div>
           ) : place.city ? (
