@@ -42,7 +42,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
 
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Accounts, Auth, Media, Tenancy}
+  alias Barkpark.{Accounts, Auth, Content, Media, Tenancy}
   alias Barkpark.Plugins.Media.Assets
 
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
@@ -428,6 +428,76 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
         |> ids()
 
       assert private["id"] in listed
+    end
+
+    # The collection-assets door is a SEPARATE query builder
+    # (`Collections.assets/3` -> `collection_search_opts/3` -> `Media.search_files/2`)
+    # reached through a SEPARATE, forked `render_opts/4`. Fixing the
+    # `/v1/media/:ds` family would not have touched it, and its take-list drops
+    # any option not explicitly named — so a clamp that compiles here can still
+    # enforce nothing. This test is what distinguishes those two outcomes.
+    test "ANONYMOUS collection assets are clamped, and unsigned", %{
+      conn: conn,
+      public: public,
+      token: token,
+      private: private
+    } do
+      col_id = "anonclamp-col-#{System.unique_integer([:positive])}"
+
+      {:ok, collection} =
+        Content.upsert_document(
+          "mediaCollection",
+          %{
+            "doc_id" => col_id,
+            "title" => "Anon clamp",
+            "content" => %{"kind" => "folder", "slug" => col_id}
+          },
+          @ds,
+          source: :api
+        )
+
+      on_exit(fn -> Content.delete_document(col_id, "mediaCollection", @ds) end)
+
+      for a <- [public, token, private] do
+        conn
+        |> admin()
+        |> post(~p"/v1/media/#{@ds}/collections/#{collection.doc_id}/members", %{
+          "assetId" => a["id"]
+        })
+        |> json_response(200)
+      end
+
+      path = "/v1/media/#{@ds}/collections/#{collection.doc_id}/assets"
+
+      anon =
+        build_conn()
+        |> get("#{path}?limit=500&appendRequestSecret=true")
+        |> json_response(200)
+        |> Map.fetch!("result")
+
+      listed = ids(anon)
+
+      assert public["id"] in listed, "the public asset vanished from the anonymous collection"
+      refute token["id"] in listed, "a token asset leaked through the collection door"
+      refute private["id"] in listed, "a private asset leaked through the collection door"
+
+      for hit <- anon["hits"] || [] do
+        refute signed?(hit["originalUrl"]),
+               "the collection door minted an anonymous signature: #{hit["originalUrl"]}"
+      end
+
+      authorised =
+        conn
+        |> read_token()
+        |> get(~p"/v1/media/#{@ds}/collections/#{collection.doc_id}/assets?limit=500")
+        |> json_response(200)
+        |> Map.fetch!("result")
+        |> ids()
+
+      for a <- [public, token, private] do
+        assert a["id"] in authorised,
+               "an authorised caller lost asset #{a["id"]} from the collection"
+      end
     end
 
     test "ANONYMOUS legacy /media index omits token and private assets",
