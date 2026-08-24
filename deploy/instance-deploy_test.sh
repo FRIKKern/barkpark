@@ -73,7 +73,23 @@ $body"
   fi
 }
 
-command -v caddy >/dev/null 2>&1 || { echo "SKIP: caddy binary required (real validation)"; exit 0; }
+# Same shape as the Node engine's outer skip: without caddy NOT ONE case below
+# runs, and this used to exit 0 — which every caller reads as "the instance
+# deploy harness passed", including the CI step that runs it bare. The blue/green
+# proofs this file owns (the post-flip public gate, the fail-closed rollback, the
+# slot-sha ordering) are exactly the ones nobody would notice going missing.
+# CI installs caddy in a dedicated step and asserts a version floor, so this
+# should never fire there — but "should never fire" is not a reason to exit 0
+# when it does. CI=true makes the harness self-defending under any workflow,
+# including one that does not set the REQUIRE flag.
+if ! command -v caddy >/dev/null 2>&1; then
+  if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ] || [ "${CI:-}" = "true" ]; then
+    echo "1 FAILURE(S): this harness is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1 or CI=true) but the caddy binary is missing from PATH — every case below needs REAL caddy validation, so none of them ran; a harness that ran nothing must not exit 0"
+    exit 1
+  fi
+  echo "SKIP: caddy binary required (real validation) — nothing was proven, so this run reports no verdict"
+  exit 0
+fi
 
 make_fakes() {
   local dir="$1"; mkdir -p "$dir"

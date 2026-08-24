@@ -650,8 +650,35 @@ ensure_node_link() {
 # rollback), no real systemd/caddy/network.
 # ===========================================================================
 if [ "$MODE" = selftest ]; then
+  # This is the OUTERMOST skip in the file, and it used to be the only one that
+  # claimed success on the way out: `[selftest] PASS`, exit 0, with every check
+  # below it — the HEALTH gate, the blue/green flip, the purge, teardown, the
+  # whole engine — never run. Two consumers read that as a green:
+  #
+  #   * CI (.github/workflows/deploy-harnesses.yml) sets
+  #     BARKPARK_SELFTEST_REQUIRE_E2E=1 on this exact step, expressly so a block
+  #     that skips itself cannot still print PASS. Two INNER blocks honour that
+  #     flag; this outer one never consulted it, so the flag it was set for was
+  #     bypassed by the largest skip in the file.
+  #   * `bp cloud site preflight` (internal/cli/cloud_site_preflight.go)
+  #     parses this output. Its gate is documented as "strict AND non-vacuous —
+  #     an unparseable run is a FAIL, not a silent pass", and it is: a bare
+  #     `[selftest] PASS` with no `N/M checks passed` count sets Terminal=PASS,
+  #     Fails=0 and clears the engine floor on zero evidence.
+  #
+  # So: where the run is REQUIRED (CI sets the flag; CI also sets CI=true, which
+  # makes this self-defending under any workflow that forgets the flag) a missing
+  # toolchain is a hard, terminal FAILED — emitted in the `FAILED (k)` shape the
+  # CLI parser recognises as terminal. Elsewhere it stays an honest local skip,
+  # but it no longer claims PASS: a run that proved nothing must not print the
+  # word, and the preflight's own no-summary branch then reports it truthfully.
   if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-    echo "[selftest] SKIP — needs python3 + curl (the fake slot http server)"; echo "[selftest] PASS"; exit 0
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ] || [ "${CI:-}" = "true" ]; then
+      echo "[selftest] FAILED (1) - the Node engine self-test is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1 or CI=true) but python3 and/or curl are missing from PATH — install them on this runner; without them the fake slot http server cannot start and NOT ONE check below runs, and a harness that ran nothing must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP — needs python3 + curl (the fake slot http server); nothing was proven, so this run reports no verdict"
+    exit 0
   fi
 
   TESTS=0; FAILS=0
