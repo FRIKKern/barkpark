@@ -62,6 +62,8 @@ interface MockClient {
   calls: {
     txCreate: Array<Record<string, unknown>>
     txDelete: Array<[string, string]>
+    /** (id, type) handed to client.patch() — `type` is required by the server. */
+    patchTarget: Array<[string, string]>
     patchSet: Array<Record<string, unknown>>
     patchSetIfMissing: Array<Record<string, unknown>>
     patchUnset: string[][]
@@ -89,6 +91,7 @@ function makeClient(
   const calls: MockClient['calls'] = {
     txCreate: [],
     txDelete: [],
+    patchTarget: [],
     patchSet: [],
     patchSetIfMissing: [],
     patchUnset: [],
@@ -192,7 +195,8 @@ function makeClient(
     docs() {
       throw new Error('not used')
     },
-    patch() {
+    patch(id: string, type: string) {
+      calls.patchTarget.push([id, type])
       return patchBuilder
     },
     transaction() {
@@ -363,10 +367,14 @@ describe('defineActions', () => {
       const { client, calls } = makeClient()
       const actions = defineActions({ client })
 
-      const result = await actions.patchDoc('p1', {
+      const result = await actions.patchDoc('p1', 'post', {
         set: { title: 'new' },
         ifMatch: 'rev-abc',
       })
+
+      // The server dispatches a patch op on (id, type) and 400s without `type`
+      // (api-v1.md §6), so patchDoc must forward it to the builder.
+      expect(calls.patchTarget).toEqual([['p1', 'post']])
 
       expect(result.id).toBe('p1')
       expect(calls.patchSet).toEqual([{ title: 'new' }])
@@ -379,7 +387,7 @@ describe('defineActions', () => {
       const { client, calls } = makeClient()
       const actions = defineActions({ client })
 
-      await actions.patchDoc('p1', {
+      await actions.patchDoc('p1', 'post', {
         set: { title: 'new' },
         setIfMissing: { views: 0 },
         unset: ['legacy'],
@@ -402,7 +410,7 @@ describe('defineActions', () => {
       const { client, calls } = makeClient()
       const actions = defineActions({ client })
 
-      await actions.patchDoc('p1', { inc: { views: 1 } })
+      await actions.patchDoc('p1', 'post', { inc: { views: 1 } })
 
       expect(calls.patchSet).toEqual([])
       expect(calls.patchInc).toEqual([{ views: 1 }])
@@ -418,7 +426,7 @@ describe('defineActions', () => {
       const actions = defineActions({ client })
 
       await expect(
-        actions.patchDoc('p1', { set: { title: 'x' }, ifMatch: 'rev-old' }),
+        actions.patchDoc('p1', 'post', { set: { title: 'x' }, ifMatch: 'rev-old' }),
       ).rejects.toBe(conflict)
       expect(revalidateTag).not.toHaveBeenCalled()
     })

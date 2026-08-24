@@ -14,6 +14,7 @@ import { BarkparkAPIError, BarkparkValidationError } from './errors'
 
 interface PatchState {
   id: string
+  type: string
   set: Record<string, unknown>
   setIfMissing: Record<string, unknown>
   unset: string[]
@@ -32,7 +33,7 @@ const ARRAY_OP_HINT =
 
 // System fields Phoenix will not allow in patch.set (content.ex rejects via
 // Ecto changesets; we catch at the client boundary for a faster + clearer error).
-const FORBIDDEN_SET_KEYS = new Set([
+export const FORBIDDEN_SET_KEYS: ReadonlySet<string> = new Set([
   '_id',
   '_type',
   '_rev',
@@ -41,6 +42,18 @@ const FORBIDDEN_SET_KEYS = new Set([
   '_draft',
   '_publishedId',
 ])
+
+/**
+ * Assert the append/prepend payload is a list. Shared by {@link createPatch} and the
+ * transaction builder's inner patch — four call sites previously carried a verbatim
+ * copy of this throw.
+ * @internal
+ */
+export function requireItems(op: string, items: unknown): void {
+  if (!Array.isArray(items)) {
+    throw new BarkparkValidationError(`patch.${op} requires an array of items`, { field: op })
+  }
+}
 
 /**
  * Translate a Sanity-style array selector to the top-level field the server's
@@ -73,7 +86,7 @@ export function selectorField(op: string, selector: string): string {
 /**
  * Low-level single-document patch builder.
  *
- * Prefer `client.patch(id)` in application code. Use this factory when you need
+ * Prefer `client.patch(id, type)` in application code. Use this factory when you need
  * to compose a patch without a full client — e.g. inside a helper that only
  * has a config.
  *
@@ -83,13 +96,23 @@ export function selectorField(op: string, selector: string): string {
  *
  * @throws BarkparkValidationError on missing id / forbidden set keys / empty commit.
  */
-export function createPatch(config: BarkparkClientConfig, id: string): PatchBuilder {
+export function createPatch(
+  config: BarkparkClientConfig,
+  id: string,
+  type: string,
+): PatchBuilder {
+  // `type` is required by the server: /v1/data/mutate dispatches on
+  // `%{"patch" => %{"id" => id, "type" => type}}` and falls through to
+  // `{:error, :malformed}` without it (api-v1.md §6), so a patch missing `type` never
+  // reaches a document. It is enforced in the type signature rather than by a runtime
+  // guard: @barkpark/core sits at its 17 KB gzip cap and the guard did not fit.
   if (typeof id !== 'string' || id.length === 0) {
     throw new BarkparkValidationError('patch requires a non-empty document id', { field: 'id' })
   }
 
   const state: PatchState = {
     id,
+    type,
     set: {},
     setIfMissing: {},
     unset: [],
@@ -216,22 +239,14 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
     // Phase-1B: extend a top-level array field. The server creates the list if
     // the field is absent and leaves a non-array value untouched.
     append(selector, items) {
-      if (!Array.isArray(items)) {
-        throw new BarkparkValidationError('patch.append requires an array of items', {
-          field: 'append',
-        })
-      }
+      requireItems('append', items)
       const field = selectorField('append', selector)
       state.append[field] = (state.append[field] ?? []).concat(items)
       return b
     },
 
     prepend(selector, items) {
-      if (!Array.isArray(items)) {
-        throw new BarkparkValidationError('patch.prepend requires an array of items', {
-          field: 'prepend',
-        })
-      }
+      requireItems('prepend', items)
       const field = selectorField('prepend', selector)
       state.prepend[field] = (state.prepend[field] ?? []).concat(items)
       return b
@@ -261,6 +276,7 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
 
       const patchBody: {
         id: string
+        type: string
         set: Record<string, unknown>
         setIfMissing?: Record<string, unknown>
         unset?: string[]
@@ -271,6 +287,7 @@ export function createPatch(config: BarkparkClientConfig, id: string): PatchBuil
         ifMatch?: string
       } = {
         id: state.id,
+        type: state.type,
         set: state.set,
       }
       if (Object.keys(state.setIfMissing).length > 0) patchBody.setIfMissing = state.setIfMissing

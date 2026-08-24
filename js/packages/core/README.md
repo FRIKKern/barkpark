@@ -159,18 +159,19 @@ for await (const doc of bp.exportDataset({ type: 'post' })) { /* … */ } // omi
 await bp.create({ _type: 'post', title: 'New' })
 await bp.createOrReplace({ _id: 'p1', _type: 'post', title: 'Upsert' })
 await bp.createIfNotExists({ _id: 'p1', _type: 'post', title: 'Once' })
-await bp.patch('p1').set({ title: 'Updated' }).commit()
-await bp.patch('p1').unset(['subtitle', 'draftNote']).commit() // remove content keys
-await bp.patch('p1').inc({ views: 1 }).dec({ stock: 2 }).commit() // numeric deltas
-await bp.patch('p1').setIfMissing({ slug: 'auto' }).commit() // set only if the key is absent
-await bp.patch('p1').append('tags', ['featured']).prepend('log', ['first']).commit() // array append/prepend
+// patch takes (id, type) — the server dispatches a patch op on both:
+await bp.patch('p1', 'post').set({ title: 'Updated' }).commit()
+await bp.patch('p1', 'post').unset(['subtitle', 'draftNote']).commit() // remove content keys
+await bp.patch('p1', 'post').inc({ views: 1 }).dec({ stock: 2 }).commit() // numeric deltas
+await bp.patch('p1', 'post').setIfMissing({ slug: 'auto' }).commit() // set only if the key is absent
+await bp.patch('p1', 'post').append('tags', ['featured']).prepend('log', ['first']).commit() // array append/prepend
 await bp.delete('p2', 'post')
 
 // …or batch many mutations atomically (the same patch ops work inside a transaction):
 await bp
   .transaction()
   .create({ _type: 'post', title: 'New' })
-  .patch('p2', (p) => p.set({ featured: true }))
+  .patch('p2', 'post', (p) => p.set({ featured: true }))
   .commit()
 
 await bp.publish('p1', 'post')

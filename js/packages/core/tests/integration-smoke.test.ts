@@ -31,9 +31,9 @@ const BASE_CONFIG: BarkparkClientConfig = {
 
 describe('integration smoke (public barrel)', () => {
   it('full lifecycle via createClient: doc → docs → patch → publish', async () => {
-    // Override `patch` mutation handler — client.patch(id) omits `type`, but the
-    // shared default handler requires it. Override with a spy that just returns
-    // an update MutateResult for whichever id the client sends.
+    // Spy handler for the mutate endpoint. It echoes the `type` the client sent back
+    // as the document's `_type`, so the lifecycle assertion below fails if the patch
+    // op ever loses `type` again (the server dispatches on it — api-v1.md §6).
     server.use(
       http.post(`${TEST_BASE_URL}/v1/data/mutate/:dataset`, async ({ request }) => {
         const body = (await request.json()) as {
@@ -41,7 +41,8 @@ describe('integration smoke (public barrel)', () => {
         }
         const m = body.mutations[0] as Record<string, unknown> | undefined
         if (m && 'patch' in m) {
-          const p = m['patch'] as { id: string; set: Record<string, unknown> }
+          const p = m['patch'] as { id: string; type: string; set: Record<string, unknown> }
+          expect(p.type).toBe('post')
           const env: MutateEnvelope = {
             transactionId: TEST_TX_ID,
             results: [
@@ -50,7 +51,7 @@ describe('integration smoke (public barrel)', () => {
                 operation: 'update',
                 document: {
                   _id: p.id,
-                  _type: 'post',
+                  _type: p.type,
                   _rev: 'deadbeefdeadbeefdeadbeefdeadbeef',
                   _draft: false,
                   _publishedId: p.id,
@@ -105,7 +106,7 @@ describe('integration smoke (public barrel)', () => {
     expect(docs.length).toBeGreaterThan(0)
 
     // patch (override spy returns update)
-    const patchRes = await client.patch('p1').set({ title: 'barrel-smoke' }).commit()
+    const patchRes = await client.patch('p1', 'post').set({ title: 'barrel-smoke' }).commit()
     expect(patchRes.operation).toBe('update')
     expect(patchRes.id).toBe('p1')
 

@@ -989,7 +989,7 @@ export interface CommitOptions {
   timeoutMs?: number // per-call override
 }
 
-/** Fluent single-document patch builder. Obtain via `client.patch(id)` or {@link createPatch}. */
+/** Fluent single-document patch builder. Obtain via `client.patch(id, type)` or {@link createPatch}. */
 export interface PatchBuilder {
   /** Merge shallow field updates into the patch. System fields (_id, _rev, …) are rejected. */
   set(fields: Record<string, unknown>): PatchBuilder
@@ -1150,9 +1150,12 @@ export interface TransactionBuilder {
   /** Append a `createIfNotExists` op — creates the document only if `_id` is free (no-op otherwise).
    *  Only `_id` + `_type` are required; the server assigns `_rev` and the timestamps. */
   createIfNotExists(doc: Partial<BarkparkDocument> & { _id: string; _type: string }): TransactionBuilder
-  /** Append a `patch` op. Call `.set()` on the inner builder; do NOT call its `.commit()`. */
+  /** Append a `patch` op. `type` is the document's `_type` — the server requires it to
+   *  dispatch the op (api-v1.md §6). Call `.set()` on the inner builder; do NOT call its
+   *  `.commit()`. */
   patch(
     id: string,
+    type: string,
     build: (p: PatchBuilder) => PatchBuilder,
     opts?: { ifMatch?: string },
   ): TransactionBuilder
@@ -1333,8 +1336,9 @@ export interface BarkparkClient {
   ): Promise<Webhook>
   /** Delete a webhook by id (`DELETE /v1/webhooks/:dataset/:id`). Returns `{ deleted }`. */
   deleteWebhook(id: string, opts?: { signal?: AbortSignal }): Promise<{ deleted: string }>
-  /** Open a single-doc patch builder. */
-  patch(id: string): PatchBuilder
+  /** Open a single-doc patch builder. `type` is the document's `_type`, which the server
+   *  requires on every patch op (api-v1.md §6). */
+  patch(id: string, type: string): PatchBuilder
   /** Open a multi-op transaction builder. */
   transaction(): TransactionBuilder
   /** Create one document — convenience for `transaction().create(doc).commit(opts)`.

@@ -177,7 +177,7 @@ describe('transaction', () => {
     const { config, calls } = makeSpyConfig()
     await createTransaction(config)
       .create({ _type: 'post', title: 'fresh' })
-      .patch('p1', (b) => b.set({ title: 'changed' }))
+      .patch('p1', 'post', (b) => b.set({ title: 'changed' }))
       .publish('p1', 'post')
       .commit()
     expect(calls).toHaveLength(1)
@@ -196,7 +196,7 @@ describe('transaction', () => {
   it('patch with ifMatch propagates to body', async () => {
     const { config, calls } = makeSpyConfig()
     await createTransaction(config)
-      .patch('p1', (b) => b.set({ title: 'x' }), { ifMatch: 'rev-abc' })
+      .patch('p1', 'post', (b) => b.set({ title: 'x' }), { ifMatch: 'rev-abc' })
       .commit()
     const body = calls[0]!.body as {
       mutations: Array<{ patch: { id: string; set: Record<string, unknown>; ifMatch?: string } }>
@@ -215,7 +215,7 @@ describe('transaction', () => {
   it('transaction patch carries setIfMissing / unset / inc / dec ops (Phase-1B)', async () => {
     const { config, calls } = makeSpyConfig()
     await createTransaction(config)
-      .patch('p1', (b) =>
+      .patch('p1', 'post', (b) =>
         b
           .set({ title: 'New' })
           .setIfMissing({ lang: 'en' })
@@ -236,7 +236,7 @@ describe('transaction', () => {
   it('transaction patch with only inc (no set) is valid', async () => {
     const { config, calls } = makeSpyConfig()
     await createTransaction(config)
-      .patch('p1', (b) => b.inc({ views: 1 }))
+      .patch('p1', 'post', (b) => b.inc({ views: 1 }))
       .commit()
     const patch = (calls[0]!.body as { mutations: Array<{ patch: Record<string, unknown> }> })
       .mutations[0]!.patch
@@ -247,7 +247,7 @@ describe('transaction', () => {
   it('transaction patch carries append / prepend ops (selector→field; Phase-1B)', async () => {
     const { config, calls } = makeSpyConfig()
     await createTransaction(config)
-      .patch('p1', (b) => b.append('tags[-1]', ['a']).prepend('tags', ['z']))
+      .patch('p1', 'post', (b) => b.append('tags[-1]', ['a']).prepend('tags', ['z']))
       .commit()
     const patch = (calls[0]!.body as { mutations: Array<{ patch: Record<string, unknown> }> })
       .mutations[0]!.patch
@@ -258,14 +258,14 @@ describe('transaction', () => {
   it('patch.set blocks reserved _-fields', () => {
     const { config } = makeSpyConfig()
     expect(() =>
-      createTransaction(config).patch('p1', (b) => b.set({ _rev: 'r1' } as any)),
+      createTransaction(config).patch('p1', 'post', (b) => b.set({ _rev: 'r1' } as any)),
     ).toThrow(BarkparkValidationError)
   })
 
   it('patch rejects an empty document id (parity with createPatch + sibling ops)', () => {
     const { config } = makeSpyConfig()
     expect(() =>
-      createTransaction(config).patch('', (p) => p.set({ title: 'x' })),
+      createTransaction(config).patch('', 'post', (p) => p.set({ title: 'x' })),
     ).toThrow(BarkparkValidationError)
   })
 })
@@ -509,7 +509,7 @@ describe('fetchRawDoc', () => {
 
     const { config: patchConfig } = makeSpyConfig(noResults)
     await expect(
-      createClient(patchConfig).patch('p1').set({ title: 'x' }).commit(),
+      createClient(patchConfig).patch('p1', 'post').set({ title: 'x' }).commit(),
     ).rejects.toBeInstanceOf(BarkparkAPIError)
   })
 })

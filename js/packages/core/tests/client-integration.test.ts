@@ -106,7 +106,7 @@ describe('BarkparkClient integration', () => {
       .create({ _type: 'post', _id: 'drafts.tx-new', title: 'Made by tx' } as Partial<BarkparkDocument> & {
         _type: string
       })
-      .patch('p1', (p) => p.set({ title: 'Patched via tx' }))
+      .patch('p1', 'post', (p) => p.set({ title: 'Patched via tx' }))
       .commit()
     expect((seenBody as { mutations: unknown[] }).mutations.length).toBe(2)
     expect(env.results.length).toBe(2)
@@ -144,7 +144,7 @@ describe('BarkparkClient integration', () => {
       }),
     )
     const c = createClient(baseConfig)
-    const result = await c.patch('p1').set({ title: 'patched' }).commit({ retry: true, idempotencyKey: 'fixed-key-123' })
+    const result = await c.patch('p1', 'post').set({ title: 'patched' }).commit({ retry: true, idempotencyKey: 'fixed-key-123' })
     expect(result.operation).toBe('update')
     expect(seenIdempotency).toBe('fixed-key-123')
   })
