@@ -21,6 +21,7 @@ package main
 // the moment both landed — green separately, broken together.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -317,5 +318,104 @@ func TestSha8RendersAMissingSideAsADash(t *testing.T) {
 	}
 	if got := sha8("abc"); got != "abc" {
 		t.Fatalf("a short digest must pass through, got %q", got)
+	}
+}
+
+// ── run(): the --out emitter, and the filename contract repair.sh depends on ──
+
+// THE CROSS-COMPONENT CONTRACT NOTHING ELSE CHECKS. scaffy/seed/repair.sh
+// resolves each drifted command's payload as "$PAYLOAD_DIR/$id.json". That
+// filename is produced HERE, and no test on either side pins the agreement — a
+// rename in run() would surface only as repair.sh refusing every id with "has
+// no derived payload", at the moment of an actual production repair.
+func TestRunEmitsOneFilePerIDUsingTheNameRepairResolves(t *testing.T) {
+	dir := stageCorpusCopies(t, "add-oban-worker.scaffy", "add-plugin.scaffy")
+	out := filepath.Join(t.TempDir(), "payloads")
+
+	if err := run(dir, out); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	payloads, err := deriveAll(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != len(payloads) {
+		t.Fatalf("expected %d emitted files, got %d", len(payloads), len(entries))
+	}
+	for _, p := range payloads {
+		// Exactly the path repair.sh builds.
+		want := filepath.Join(out, p.ID+".json")
+		if _, err := os.Stat(want); err != nil {
+			t.Fatalf("repair.sh resolves $PAYLOAD_DIR/$id.json; %s is missing: %v", want, err)
+		}
+	}
+}
+
+// A local filesystem path must never reach production content. payload.File
+// carries `json:"-"` for exactly this reason, and the repair arm posts the
+// emitted body VERBATIM inside createOrReplace — so a leak here would be
+// published, not merely written to disk.
+func TestRunDoesNotEmitTheLocalFilePath(t *testing.T) {
+	dir := stageCorpusCopies(t, "add-oban-worker.scaffy")
+	out := filepath.Join(t.TempDir(), "payloads")
+	if err := run(dir, out); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(out, "barkpark--oban-worker--cron.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("emitted payload is not valid JSON: %v", err)
+	}
+	for _, banned := range []string{"File", "file", "-"} {
+		if _, present := body[banned]; present {
+			t.Fatalf("emitted payload carries %q — a local path must never reach published content:\n%s", banned, raw)
+		}
+	}
+	if strings.Contains(string(raw), ".scaffy") {
+		// The SOURCE legitimately contains the file's text, but the path itself
+		// should not appear as a value outside it; catch an accidental re-add.
+		if strings.Contains(string(raw), dir) {
+			t.Fatalf("emitted payload leaks the staging directory path %q", dir)
+		}
+	}
+
+	// The nine body fields the document model needs must all be present.
+	for _, k := range []string{"_id", "title", "description", "concept", "variant", "domain", "direction", "tags", "source"} {
+		if _, ok := body[k]; !ok {
+			t.Errorf("emitted payload is missing %q", k)
+		}
+	}
+}
+
+func TestRunCreatesTheOutputDirectory(t *testing.T) {
+	dir := stageCorpusCopies(t, "add-oban-worker.scaffy")
+	out := filepath.Join(t.TempDir(), "deep", "nested", "payloads")
+	if err := run(dir, out); err != nil {
+		t.Fatalf("run must create its output directory: %v", err)
+	}
+	if _, err := os.Stat(out); err != nil {
+		t.Fatalf("output directory not created: %v", err)
+	}
+}
+
+// A refusal upstream must emit NOTHING. A partial emit would leave a stale,
+// inconsistent payload set that a later repair would happily post.
+func TestRunEmitsNothingWhenDerivationRefuses(t *testing.T) {
+	empty := t.TempDir()
+	out := filepath.Join(t.TempDir(), "payloads")
+	if err := run(empty, out); err == nil {
+		t.Fatal("run over an empty corpus MUST error")
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Fatal("run must not create an output directory when derivation refused — a partial emit is worse than none")
 	}
 }
