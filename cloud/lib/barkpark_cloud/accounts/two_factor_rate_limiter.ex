@@ -14,9 +14,22 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
   user id being checked, so it bounds how many rows ONE user accrues — to one,
   or transiently two while a straddling caller's older window sits beside a
   newer one, collapsing back to one on that user's next forward call — and
-  nothing more. There is no periodic prune, so rows for users who never return
-  again stay until `reset/0`. A full token-bucket / `Hammer` dependency would be
-  overkill for one route.
+  nothing more. A full token-bucket / `Hammer` dependency would be overkill for
+  one route.
+
+  THE PER-KEY SWEEP IS NOT A BOUND ON THE TABLE, only on one key. A user who
+  challenges once and never returns leaves a row nothing reclaims. Keyed on an
+  authenticated user id this is bounded by the user table rather than by a
+  caller's imagination — a far slower leak than the sibling
+  `DeviceAuth.RateLimiter`'s attacker-chosen `"poll:"` key space, which is what
+  acpc-bl-poll-key-unbounded-ets-growth measured at ~13 GB/day. It is the SAME
+  defect at a smaller scale, so it takes the SAME fix rather than waiting to
+  become one: `maybe_prune/1` sweeps every user's elapsed rows, at most once per
+  window, elected by an atomic `insert_new/2` claim so exactly one caller per
+  window pays the scan. The sibling module carries the full reasoning — why the
+  sweep is in-band (Oban is this plane's only scheduler, and ETS is per-node so
+  a job could not reach another node's table anyway), why it is claimed, and why
+  the `{:__prune__, window}` marker cannot collide with a real key.
 
   `check/1` is the only mutation: it bumps the current window's counter and
   returns `:ok` while at or under the limit, `{:error, {:rate_limited,
@@ -36,6 +49,9 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
   @table __MODULE__
   @limit 5
   @window_ms 60_000
+  # See `DeviceAuth.RateLimiter` — below this the global sweep is not worth the
+  # `insert_new` it costs.
+  @prune_floor 256
 
   @doc false
   def start_link(_opts), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -61,10 +77,34 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
       {{{user_id, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
     ])
 
+    maybe_prune(window)
+
     # update_counter is atomic; the default {key, 0} seeds a fresh window.
     count = :ets.update_counter(@table, {user_id, window}, {2, 1}, {{user_id, window}, 0})
 
     if count > @limit, do: {:error, {:rate_limited, retry_after(window, now_ms)}}, else: :ok
+  end
+
+  # THE GLOBAL SWEEP, at most once per window — the twin of
+  # `DeviceAuth.RateLimiter.maybe_prune/1`, deliberately duplicated rather than
+  # shared: the two limiters own SEPARATE tables on purpose (the key shapes
+  # differ), and a shared module would exist only to hold six lines while adding
+  # a dependency between two modules that currently have none.
+  #
+  # `:ets.info(:size)` is O(1), so a small table pays one integer compare.
+  # Above the floor, the atomic `insert_new/2` elects one caller per window to
+  # pay the scan. The guard deletes only STRICTLY earlier windows, so a
+  # concurrent caller's current counter is never reset and handed a fresh budget
+  # — the same reason the per-key sweep above is `<` and not `/=`.
+  defp maybe_prune(window) do
+    if :ets.info(@table, :size) > @prune_floor and
+         :ets.insert_new(@table, {{:__prune__, window}, 0}) do
+      :ets.select_delete(@table, [
+        {{{:_, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
+      ])
+    end
+
+    :ok
   end
 
   # Whole seconds until the fixed window rolls over and the budget refills.
