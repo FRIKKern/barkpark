@@ -1925,6 +1925,54 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--muted-text);
   margin-top: 4px;
   word-break: break-word;
+  /* cch-deploy-detail-render-has-no-cap — THE ONLY BOUND THIS CAPTION HAS.
+     `deployments.detail` was widened from varchar(255) to :text (cch-w34-s5),
+     which left the shared 2 KB `validate_console_line/1` as the last thing
+     between a worker token and this box. D251: the effective cap is
+     min(validator, column, every downstream derivation) — and every derivation
+     after the store had none. `FailureCopy.humanize/1` and `scrub/1` classify
+     and redact, they do not measure (no String.slice, no String.length, no @max
+     anywhere in failure_copy.ex); app.js emits `esc(d.detail)` whole; and this
+     rule was the ONLY `.deploy-detail` rule in the stylesheet, with no
+     max-height, no overflow and — until now — zero `line-clamp` hits repo-wide.
+
+     THE DEFECT IS VERTICAL, WHICH IS WHY THE SIBLING'S REMEDY IS WRONG HERE.
+     `.status-pill-detail` (:3498) was fixed with `overflow-wrap: anywhere`
+     because ITS defect was token shape and a length cap inverted it. This
+     caption already carries `word-break`, so 2,000 characters never drag the
+     page sideways — measured, both themes, 320/390/620/900/1024/1440: zero
+     page overflow at every width. They grow DOWNWARD instead, and pushed the
+     rest of the rail off the screen: 81 line-boxes / 1458px at 320, 67 / 1206
+     at 390, and 67 / 1206 again at 900 (the detail-grid's sidebar mounts there
+     and takes the main column back down), against a kind builder caption of
+     1-3 lines in the same paint.
+
+     SIX LINES, AND THE NUMBER IS DERIVED FROM THE PRODUCER, NOT PICKED. The
+     only writer of this field in the fleet is `buildConsole.caption`
+     (internal/builder/console.go), whose longest format is
+     "Starting your build (<ref>)…" — 63 characters over the 40-char SHA a
+     builder actually carries, which paints 3 lines at 320 and 1 from 620 up.
+     Six leaves that whole at every width with room to spare, while taking the
+     2 KB case from 1458px to 108px. Its ADVERSARIAL ceiling — a varchar(255)
+     git_ref — is 278 characters, which does not fit in six lines on a phone;
+     that is stated rather than fitted, because the wrap boundary is a property
+     of the string and not of this rule.
+
+     line-clamp AND NOT max-height: the clamp is what makes the browser paint
+     the ellipsis, so the cut is VISIBLE AS A CUT. A bare max-height + overflow
+     hidden bounds the same pixels and reads as the whole caption — the
+     unknown-collapsed-into-determinate shape this epic exists to kill. The
+     STORE is untouched: every one of the 2,000 characters is still in the DOM
+     and still in the row, so ops read the full capture.
+
+     overflow-guard.mjs's W34-deploy-detail-render-bound leg READS the number
+     out of this declaration and measures against it in a real browser. Reverting
+     these five lines reds it with the pre-fix numbers above. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+  line-clamp: 6;
+  overflow: hidden;
   animation: new-detail-in 0.28s ease;
 }
 

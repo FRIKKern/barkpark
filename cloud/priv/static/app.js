@@ -13838,7 +13838,22 @@
   // dwb-19: the LIVE sub-caption under a deployment's status pill — the build-side
   // twin of the /new step caption. Shown only while the deploy is ACTIVE (a
   // terminal row shows its failure_reason / final state instead), muted + smaller
-  // with the same fade/translate on change. data-cap re-mounts on change.
+  // with the same fade/translate on change.
+  //
+  // cch-deploy-detail-render-has-no-cap — data-cap CARRIES THE LENGTH, NOT THE
+  // CAPTION. It used to be `esc(d.detail)`, i.e. a SECOND FULL COPY of the
+  // caption in the DOM beside the text node, and since `deployments.detail`
+  // became a :text column bounded only by the shared 2 KB validator, that is
+  // 2 KB written twice per row. Its documented job — "re-mounts on change" — is
+  // already done by the wholesale innerHTML rebuild every render performs: this
+  // tree has no morph step, so the element is a new node on every paint and the
+  // fade replays regardless of any attribute. And nothing READS it: `git grep
+  // data-cap` over app.css, app.js and __app.test.mjs finds no selector, no
+  // script and no assertion on `.deploy-detail`'s copy (the only readers are the
+  // /new step caption's own tests, on a different class). The length is kept
+  // because it is the one thing a screenshot of the DOM cannot recover once the
+  // box is clamped — how much caption is behind the ellipsis.
+  function deployDetailCap(s) { return String(s == null ? "" : s).length; }
   function deployDetailHtml(d, st) {
     // dwb-18: pre-claim (queued, no console) → an honest "waiting for a builder"
     // caption instead of a dark spinner console. Prefer the server's own
@@ -13857,10 +13872,10 @@
     if (!deployIsActive(st)) {
       if (!deployIsRefusal(d, st) || !d.detail ||
           deployDetailEchoesCopy(d.detail, deployRefusalCopy(d))) return "";
-      return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
+      return '<div class="deploy-detail" data-cap="' + deployDetailCap(d.detail) + '">' + esc(d.detail) + "</div>";
     }
     if (!d.detail) return "";
-    return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
+    return '<div class="deploy-detail" data-cap="' + deployDetailCap(d.detail) + '">' + esc(d.detail) + "</div>";
   }
 
   // ------------------------------------------- rollback / redeploy (D7 + D25)

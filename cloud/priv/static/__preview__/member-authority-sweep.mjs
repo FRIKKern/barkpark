@@ -344,7 +344,14 @@ const PIN_MEMBER_SCENARIOS = 10;
 // this sweep, not by adding one: its actor is an OPERATOR, so the member slice
 // above is unmoved and PIN_MEMBER_SCENARIOS stays at 10 — bumping it to match
 // would red this sweep on actor-set instead.
-const PIN_TOTAL_SCENARIOS = 115;
+// 115 -> 116: cch-deploy-detail-render-has-no-cap added `deploy-detail-cruel`
+// (the deploy sub-caption at its 2 KB store cap, beside the ordinary builder
+// caption that is its control — the fixture overflow-guard.mjs's
+// W34-deploy-detail-render-bound leg measures). RE-DERIVED by running this
+// sweep and reading the number it PRINTED, not by adding one. Its actor is the
+// same owner `me("Acme Inc", …)` every site-detail scenario carries, so the
+// member slice is unmoved and PIN_MEMBER_SCENARIOS stays at 10.
+const PIN_TOTAL_SCENARIOS = 116;
 // FLOOR, not an equality: an added control must not force a table churn, but a
 // corpus that suddenly enumerates almost nothing is vacuous and reds. 66 today.
 const FLOOR_CONTROLS = 60;

@@ -871,6 +871,111 @@ const depRailFailedKind = deployment({
   ],
 });
 
+// ── cch-deploy-detail-render-has-no-cap: THE LIVE SUB-CAPTION, AT ITS STORE CAP
+//
+// `.deploy-detail` is the only caption on the deploy rail with NO render bound,
+// and no scenario in this file has ever carried one longer than "building". The
+// three constants below are its three lengths, each DERIVED from the producer
+// that can actually emit it — so the fixture reds when a producer moves instead
+// of quietly stopping being cruel.
+//
+// (1) THE STORE CAP — what the column will accept. `set_deployment_detail/2`
+//     (cloud/lib/barkpark_cloud/registry.ex) runs the detail through the SHARED
+//     `validate_console_line/1`, whose only bound is `@max_console_line_chars`.
+//     Since cch-w34-s5 widened `deployments.detail` from varchar(255) to :text,
+//     that attribute is the LAST bound before the DOM. `__app.test.mjs` reads
+//     the number out of registry.ex and reds when it moves — that test, not
+//     this comment, is what keeps the fixture honest.
+export const DEPLOY_DETAIL_STORE_CAP = 2000;
+// (2) THE SHIPPED PRODUCER'S WORST CASE. `buildConsole.caption` is the ONLY
+//     writer of this field in the fleet (internal/builder/console.go:175 ->
+//     reportDetail -> POST /v1/builder/deployments/:id/detail), and its longest
+//     format is `"Starting your build (%s)…"` over `git_ref`
+//     (internal/builder/builder.go:141). `git_ref` is varchar(255), so a
+//     builder's ceiling is the format's own 23 characters plus 255. It is
+//     REPORTED, never pinned: it is what an ADVERSARIAL ref would cost, and the
+//     bound chosen below is measured against it rather than fitted to it.
+export const DEPLOY_DETAIL_BUILDER_MAX =
+  "Starting your build (".length + 255 + ")…".length;
+// (3) THE KIND CONTROL — the same caption with the ref a builder actually
+//     carries: a 40-character SHA. This is the longest string a person sees on
+//     an ordinary day, and a remedy that buys the cruel caption by shredding
+//     THIS one reds on it.
+export const DEPLOY_DETAIL_KIND =
+  "Starting your build (7f31c0d5ba9e4c218d63a07f5e1b8c94a2d60f3b)…";
+// (4) THE CRUEL CAPTION. Reaching the store cap needs a direct worker-token
+//     POST — no shipped producer emits 2 KB — and the shape such a POST takes
+//     is a build log the poster newline-squeezed into ONE line: a Next
+//     module-resolution failure plus its import trace, which is exactly what
+//     `emit()`'s tab/newline collapse does to a multi-line error one surface
+//     over. Word-broken prose, not one unbreakable token: the token-shape
+//     defect is `.status-pill-detail`'s (app.css:3498) and this caption already
+//     carries `word-break`, so LENGTH is the only thing left to bound and the
+//     fixture must not smuggle in the other defect to make its point.
+const deployDetailCruelFrames = [
+  "./src/app/(marketing)/pricing/page.tsx",
+  "./src/components/design-system/PricingTable/index.tsx",
+  "./src/components/design-system/PricingTable/PlanCard.tsx",
+  "./src/lib/tokens/resolve.ts",
+];
+const deployDetailCruelStem =
+  "Building your site… npm ERR! Error: Cannot find module " +
+  "'/opt/barkpark/sites/acme-web/releases/20260802T094118Z-9c1f2ab/.next/standalone/" +
+  "node_modules/@acme/design-system/dist/tokens/index.js' imported from " +
+  "/opt/barkpark/sites/acme-web. Import trace for requested module: " +
+  Array.from({ length: 40 }, (_, i) => deployDetailCruelFrames[i % 4] + " ").join("");
+// Normalised by the SAME collapse `emit()` performs, then cut at the STORE cap
+// rather than the shell's — this caption never passed through the shell.
+export const DEPLOY_DETAIL_CRUEL = railEmitDetail(deployDetailCruelStem, DEPLOY_DETAIL_STORE_CAP);
+// The stem must OVERFLOW the cap, or the "at its store cap" fixture is a
+// shorter string wearing the cap's name and every number this scenario
+// produces is about a caption nobody capped.
+if (DEPLOY_DETAIL_CRUEL.length !== DEPLOY_DETAIL_STORE_CAP) {
+  throw new Error(
+    "cruel deploy detail is " + DEPLOY_DETAIL_CRUEL.length + " chars, must be exactly the store cap " +
+    DEPLOY_DETAIL_STORE_CAP + " — lengthen deployDetailCruelStem; a stem that fits under the cap makes " +
+    "this scenario a statement about a caption the store never had to cut",
+  );
+}
+// The CRUEL row: mid-build, so `deployIsActive` keeps the live sub-caption on
+// screen (a terminal row shows its failure panel instead — a different branch
+// of deployDetailHtml). Nothing else about it is unusual; the caption is.
+const depDetailCruel = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000e1",
+  site_id: IDS.siteWeb,
+  status: "building",
+  git_ref: "7f31c0d5ba9e4c218d63a07f5e1b8c94a2d60f3b",
+  branch: "main",
+  trigger: "manual",
+  detail: DEPLOY_DETAIL_CRUEL,
+  inserted_at: tMinus(90),
+  updated_at: tMinus(2),
+  console: [
+    { line: "cloning acme/web @ 7f31c0d", at: tMinus(90) },
+    { line: "npm ci — installing 214 packages", at: tMinus(60) },
+  ],
+});
+// The KIND row, in the SAME paint: an ordinary caption on an ordinary build.
+// It is a SECOND building row rather than a queued one on purpose — the
+// pre-claim branch renders a different caption through a different code path,
+// so a control there would not be under the same rule as the cruel row.
+const depDetailKind = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000e2",
+  site_id: IDS.siteWeb,
+  status: "building",
+  git_ref: "aa10ff2c4b7e8d6a1f0925c3b8e7d6c5b4a39281",
+  branch: "release/2026-08",
+  trigger: "manual",
+  detail: DEPLOY_DETAIL_KIND,
+  inserted_at: tMinus(140),
+  updated_at: tMinus(20),
+  console: [{ line: "cloning acme/web @ aa10ff2", at: tMinus(140) }],
+});
+const deployDetailCruelDeployments = [depDetailCruel, depDetailKind, depCurrent, depPrior];
+const deployDetailCruelSite = Object.assign({}, webSite, {
+  current_deployment_id: IDS.depCurrent,
+});
+
 // ── invitations (GET /v1/invitations/:token preview + POST accept) ──────────
 // Preview envelope from router.ex: {team:{name,slug}, email, role, expires_at}.
 // The accept POST answers 200 {team_id} | 404 invalid_or_expired | 403
@@ -3727,6 +3832,24 @@ export const SCENARIOS = {
       deployments: siteStatesDeployments,
       previews: siteStatesPreviews,
       siteDomainStatus: siteStatesDomains,
+    },
+  },
+
+  // ── cch-deploy-detail-render-has-no-cap: the live sub-caption at its store cap
+  // Two builds in one paint, both mid-flight: the cruel 2 KB caption and the
+  // ordinary one a builder actually emits. The point of the screen is the
+  // VERTICAL room the first one takes and the second one must keep.
+  "deploy-detail-cruel": {
+    label: "Deploy sub-caption at the store cap — 2 KB of build narration under the status pill, beside an ordinary one",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [deployDetailCruelSite, blogSite],
+      audit: [],
+      deployments: deployDetailCruelDeployments,
     },
   },
 
