@@ -78,6 +78,16 @@ defmodule Barkpark.Content.Document do
     timestamps(type: :utc_datetime_usec)
   end
 
+  # The lifecycle statuses the `status` column accepts. Exposed as a function
+  # because `Content.Writer` needs the SAME list to tell an envelope lifecycle
+  # value apart from a user field that merely happens to be named `status` —
+  # see `refuse_colliding_status/1` there. Duplicating the literal would drift:
+  # adding a status here without updating the writer would make the writer
+  # refuse a value this changeset accepts.
+  @statuses ~w(draft published archived active planning completed)
+
+  def statuses, do: @statuses
+
   def changeset(document, attrs) do
     document
     |> cast(attrs, [
@@ -117,7 +127,7 @@ defmodule Barkpark.Content.Document do
     |> validate_length(:type, max: 255)
     |> validate_length(:dataset, max: 255)
     |> validate_length(:title, max: 255)
-    |> validate_inclusion(:status, ~w(draft published archived active planning completed))
+    |> validate_inclusion(:status, @statuses)
     # W2 uniqueness flip: the row's identity leaf is now (doc_id, type,
     # dataset_id). The `dataset` STRING constraint is dropped at the DB level
     # (see migration 20260527134000); naming the flipped index here keeps the

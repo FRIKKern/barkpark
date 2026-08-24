@@ -223,16 +223,21 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert doc.content == %{"body" => "hi"}
     end
 
-    # MEASURED, not assumed: a SCALAR `content` takes the FLAT branch
-    # (`from_envelope/1` guards on `is_map`), so the refusal correctly stays
-    # quiet and the siblings fold. But `"content"` is itself a member of
-    # `@reserved_in`, so the flat branch's `Map.drop(@reserved_in)` DISCARDS
-    # the scalar value — a narrower sibling of #3 that this slice does NOT
-    # fix (fixing it means changing what `from_envelope/1` folds, a different
-    # question). Pinned here so the loss is a recorded fact rather than a
-    # surprise; filed as gfr-w1-flat-scalar-content-key-drop on the wave ledger.
-    test "a SCALAR content field takes the flat branch — siblings fold, the scalar is dropped",
-         %{conn: conn} do
+    # [own-content-field] gh-6291, WAS a silent loss, now FIXED. A SCALAR
+    # `content` takes the FLAT branch (`from_envelope/1` guards on `is_map`),
+    # so the mixed-shape refusal correctly stays quiet and the siblings fold —
+    # but that branch's `Map.drop(@reserved_in)` used to DISCARD the scalar
+    # too, because `"content"` is a member of `@reserved_in`. It was consumed
+    # by nothing on that branch: pure loss. The flat branch now folds the
+    # caller's own `content` field like every other non-reserved key.
+    #
+    # RED BEFORE / GREEN AFTER: on origin/main this test reads
+    #   code:  assert doc.content["content"] == "just text"
+    #   left:  nil
+    #   right: "just text"
+    # which IS the reported defect. Its predecessor asserted `== nil` and
+    # pinned the loss as a known gap; that assertion is what this replaces.
+    test "a flat document's OWN scalar content field survives the write", %{conn: conn} do
       resp =
         mutate(conn, [
           %{
@@ -248,9 +253,107 @@ defmodule BarkparkWeb.MutateControllerTest do
 
       assert resp.status == 200
       {:ok, doc} = Content.get_document("drafts.collide-scalar-ok", "post", "test")
+      # The siblings still fold, exactly as before.
       assert doc.content["slug"] == "the-slug"
-      # KNOWN GAP, not an endorsement — see the comment above.
-      assert doc.content["content"] == nil
+      # ...and the caller's own field is no longer thrown away.
+      assert doc.content["content"] == "just text"
+
+      # ROUND-TRIP, not just storage: the field has to come back OUT too, or
+      # storing it would be a private victory. `Envelope.render/3` is the single
+      # read chokepoint every read surface threads through.
+      rendered = Barkpark.Content.Envelope.render(doc, nil, :internal)
+      assert rendered["content"] == "just text"
+      assert rendered["slug"] == "the-slug"
+    end
+
+    # [status-collision] gh-6292. Unlike `content`, a flat `status` IS consumed
+    # (it is lifted into the lifecycle column) and is never re-emitted by
+    # `Envelope.render/3` — so a caller's own `status` field cannot be stored
+    # from this shape at all. What it used to get back was
+    # `status: ["is invalid"]` from `Document.changeset/2`'s inclusion check:
+    # true, and useless. The refusal now names the collision and the way out.
+    test "a flat document's own status field is refused with the collision named",
+         %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-status-refused",
+              "_type" => "post",
+              "title" => "Stock record",
+              "status" => "in_stock",
+              "slug" => "the-slug"
+            }
+          }
+        ])
+
+      assert resp.status == 422
+      body = Jason.decode!(resp.resp_body)
+      assert [message] = body["error"]["details"]["status"]
+      # It names the offending value, the vocabulary it is not in, and the fix.
+      assert message =~ ~s("in_stock")
+      assert message =~ "lifecycle"
+      assert message =~ "content"
+      # ...and nothing was written.
+      assert {:error, :not_found} =
+               Content.get_document("drafts.collide-status-refused", "post", "test")
+    end
+
+    # THE REGRESSION GUARD for the refusal above: the documented flat envelope
+    # still works. `status` here is the envelope's lifecycle key, and the write
+    # lands.
+    test "the flat envelope's own lifecycle status still lands", %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-status-envelope",
+              "_type" => "post",
+              "title" => "Envelope status",
+              "status" => "draft",
+              "slug" => "the-slug"
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.collide-status-envelope", "post", "test")
+      assert doc.status == "draft"
+      assert doc.content["slug"] == "the-slug"
+      # It is the LIFECYCLE key, so it is not folded into content.
+      refute Map.has_key?(doc.content, "status")
+    end
+
+    # MEASURED, and pinned as a RECORDED FACT rather than an endorsement — the
+    # same discipline the scalar-content gap got before it was fixed. A flat
+    # `status` whose value HAPPENS to be a lifecycle word is byte-identical
+    # whether the caller meant the envelope or their own field, so the refusal
+    # cannot fire: the value rewrites the document's lifecycle state while the
+    # caller's field vanishes. Closing it needs a contract change (a `_status`
+    # envelope key, or consulting the type's schema for a declared `status`
+    # field), which is a different blast radius. Filed as
+    # gfr-w1-flat-status-enum-valid-collision.
+    test "KNOWN RESIDUE: an enum-VALID status collision is still ambiguous and still lands",
+         %{conn: conn} do
+      resp =
+        mutate(conn, [
+          %{
+            "create" => %{
+              "_id" => "collide-status-residue",
+              "_type" => "post",
+              "title" => "Archived order",
+              "status" => "archived",
+              "slug" => "the-slug"
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.collide-status-residue", "post", "test")
+      # The caller's "archived" became the DOCUMENT's lifecycle state...
+      assert doc.status == "archived"
+      # ...and their own field is not in content. This is the residue.
+      refute Map.has_key?(doc.content, "status")
     end
   end
 

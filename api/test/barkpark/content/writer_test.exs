@@ -142,6 +142,43 @@ defmodule Barkpark.Content.WriterTest do
       result = Writer.from_envelope(attrs)
       assert result["status"] == "draft"
     end
+
+    # [own-content-field] gh-6291. On the FLAT branch `content` is consumed by
+    # nothing — the branch is DEFINED by `content` not being a map — so
+    # excluding it from the fold was pure loss. RED on origin/main:
+    #   left: nil   right: "just text"
+    test "a flat document's OWN scalar content field is folded, not dropped" do
+      attrs = %{"_id" => "own-1", "title" => "T", "content" => "just text", "slug" => "s"}
+      result = Writer.from_envelope(attrs)
+      assert result["content"]["content"] == "just text"
+      assert result["content"]["slug"] == "s"
+    end
+
+    test "a LIST content field is folded too — is_map/1 is the branch test, not is_binary/1" do
+      attrs = %{"_id" => "own-2", "content" => ["a", "b"], "slug" => "s"}
+      result = Writer.from_envelope(attrs)
+      assert result["content"]["content"] == ["a", "b"]
+      assert result["content"]["slug"] == "s"
+    end
+
+    test "an explicit null content is read as no-value and is NOT folded" do
+      # Same reading `Map.get/2` gives a nil everywhere else here. Keeps the
+      # stored shape identical for an internal caller that builds attrs with a
+      # nil content key, rather than gaining a %{"content" => nil} entry.
+      attrs = %{"_id" => "own-3", "content" => nil, "slug" => "s"}
+      result = Writer.from_envelope(attrs)
+      refute Map.has_key?(result["content"], "content")
+      assert result["content"]["slug"] == "s"
+    end
+
+    test "the legacy branch is untouched — a content MAP still passes through whole" do
+      # The fold narrowing is scoped to the flat branch. `@reserved_in` itself
+      # is unchanged, so `@collide_exempt` still exempts `content` on the
+      # content-present branch and the mixed-shape refusal is unaffected.
+      attrs = %{"doc_id" => "legacy-1", "title" => "T", "content" => %{"body" => "hi"}}
+      result = Writer.from_envelope(attrs)
+      assert result["content"] == %{"body" => "hi"}
+    end
   end
 
   # ── [collide-refusal] the mixed shape is REFUSED, never silently stripped ─
@@ -240,11 +277,67 @@ defmodule Barkpark.Content.WriterTest do
     test "a SCALAR content field is not the legacy-envelope shape and is not refused" do
       # `from_envelope/1` branches on `is_map(content)`, so a string `content`
       # takes the FLAT branch and its siblings fold — there is no mixed shape
-      # and nothing for this refusal to say. (The scalar value itself is then
-      # dropped by the flat branch's own `Map.drop(@reserved_in)` — a narrower
-      # sibling defect, measured and pinned in mutate_controller_test.exs, out
-      # of this slice's scope.)
+      # and nothing for this refusal to say. (The scalar value itself USED to
+      # be dropped by that branch's own `Map.drop(@reserved_in)`. That was
+      # gh-6291 and it is fixed — see the `from_envelope/1` fold tests above
+      # and the round-trip proof in mutate_controller_test.exs.)
       attrs = %{"_id" => "scalar-1", "title" => "T", "content" => "just text", "slug" => "s"}
+
+      assert :passed_the_guard == guard_verdict(attrs)
+    end
+  end
+
+  # ── [status-collision] gh-6292: the OTHER half of the same collision ──────
+  #
+  # `status` is the one `@reserved_in` member the flat branch CONSUMES without
+  # giving back: lifted to the lifecycle column, never re-emitted by
+  # `Envelope.render/3`. A caller's own `status` field therefore cannot be
+  # stored from the flat shape, and the error they used to get —
+  # `status: ["is invalid"]` from `Document.changeset/2` — never said why.
+  #
+  # These are unit-level: the refusal is a clause of `create_document/4` and
+  # fires before any Repo access, so no sandbox is needed. The HTTP proof (422,
+  # the envelope, nothing written) lives in mutate_controller_test.exs.
+  describe "create_document/4 status collision refusal" do
+    test "a flat status outside the lifecycle vocabulary is refused, naming the collision" do
+      attrs = %{"_id" => "st-1", "title" => "T", "status" => "in_stock", "slug" => "s"}
+
+      assert {:error, %Ecto.Changeset{} = cs} = Writer.create_document("post", attrs, "test")
+      assert [{:status, {msg, opts}}] = cs.errors
+      assert opts[:value] == ~s("in_stock")
+      assert msg =~ "lifecycle"
+      assert msg =~ "content"
+    end
+
+    test "a NON-BINARY status collides too — a localized status map is not a lifecycle value" do
+      attrs = %{"_id" => "st-2", "title" => "T", "status" => %{"nb" => "på lager"}}
+
+      assert {:error, %Ecto.Changeset{errors: [{:status, _}]}} =
+               Writer.create_document("post", attrs, "test")
+    end
+
+    test "every lifecycle status is accepted — the refusal reads Document.statuses/0" do
+      # Keyed on the SAME list `Document.changeset/2` validates against, so the
+      # refusal can never reject a value the changeset would have accepted.
+      for status <- Barkpark.Content.Document.statuses() do
+        attrs = %{"_id" => "st-ok-#{status}", "title" => "T", "status" => status}
+        assert :passed_the_guard == guard_verdict(attrs), "refused lifecycle status #{status}"
+      end
+    end
+
+    test "a payload with NO status key is not refused" do
+      attrs = %{"_id" => "st-3", "title" => "T", "slug" => "s"}
+      assert :passed_the_guard == guard_verdict(attrs)
+    end
+
+    test "with a content MAP present, status is unambiguously the envelope's and is not refused" do
+      # The caller's own `status` lives inside the map, where nothing collides.
+      attrs = %{
+        "_id" => "st-4",
+        "title" => "T",
+        "status" => "draft",
+        "content" => %{"status" => "in_stock"}
+      }
 
       assert :passed_the_guard == guard_verdict(attrs)
     end
