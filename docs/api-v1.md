@@ -27,7 +27,7 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 ## 3. Document Envelope
 
-Payload under `result`, plus four outer keys: `schemaHash` (hex digest of the dataset schema; changes with any) · `etag` (`If-None-Match` → 304) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
+Payload under `result`, plus four outer keys: `schemaHash` (hex digest of the dataset schema) · `etag` (change token; the HTTP `ETag`/304 ride an anonymous, UNSHAPED read only — a token or `?fields=`/`?expand=` withdraws both; `Vary: Authorization` always) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
@@ -51,7 +51,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
-| `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
+| `expand` | — | `true` (all refs) \| `field1,field2` (named refs). §5a. |
 
 **Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` = next offset when more.
 

@@ -17,7 +17,8 @@ defmodule BarkparkWeb.CapabilitiesController do
 
   alias Barkpark.Plugins.Capabilities
 
-  import Plug.Conn, only: [get_req_header: 2, put_resp_header: 3, send_resp: 3]
+  import Plug.Conn,
+    only: [get_req_header: 2, get_resp_header: 2, put_resp_header: 3, send_resp: 3]
 
   def index(conn, params) do
     caller_tier = Capabilities.tier_for_token(conn.assigns[:api_token])
@@ -66,13 +67,49 @@ defmodule BarkparkWeb.CapabilitiesController do
 
     etag = manifest["etag"]
 
-    conn = put_resp_header(conn, "etag", etag)
+    conn =
+      conn
+      |> put_vary_authorization()
+      |> put_resp_header("etag", etag)
 
     if etag_matches?(conn, etag) do
       send_resp(conn, 304, "")
     else
       json(conn, manifest)
     end
+  end
+
+  # This body is TIER-KEYED: `Capabilities.project/2` filters commands and nouns
+  # by the caller's tier and overwrites `auth_tier`, and `etag_for/1` hashes the
+  # PROJECTED body — so the ETag itself is already representation-correct (an
+  # anon manifest and an admin manifest cannot collide). What was missing is the
+  # instruction to the cache: the response is a function of the Authorization
+  # header, so a shared cache keying on URL alone would hand one tier's manifest
+  # to another. `private` (Plug's default) is the only thing standing between
+  # that today, and managed CDN policies are documented to cache through it.
+  #
+  # Direction: adding Vary strictly NARROWS what a cache may reuse — it costs
+  # cacheability, it cannot grant it (charter D1/D6).
+  #
+  # Merged, never overwritten: prod responses already carry `accept-encoding`
+  # in this header from a hop outside this app, and dropping it would break
+  # encoding negotiation. See QueryController.put_vary_authorization/1 for the
+  # converse risk (an outside hop that SETS rather than APPENDS) and the
+  # post-deploy check that settles it.
+  defp put_vary_authorization(conn) do
+    existing =
+      conn
+      |> get_resp_header("vary")
+      |> Enum.flat_map(&String.split(&1, ","))
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    merged =
+      if Enum.any?(existing, &(String.downcase(&1) == "authorization")),
+        do: existing,
+        else: existing ++ ["authorization"]
+
+    put_resp_header(conn, "vary", Enum.join(merged, ", "))
   end
 
   # Honor If-None-Match. The header may carry a comma-separated list of

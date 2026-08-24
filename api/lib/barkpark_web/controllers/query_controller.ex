@@ -571,24 +571,123 @@ defmodule BarkparkWeb.QueryController do
     [workspace_id: ws_id, project_id: Keyword.get(opts, :project_id)]
   end
 
+  # Query params that RESHAPE the body without moving the `(dataset, type,
+  # _id:_rev)` tuple the ETag is folded from. `?fields=` projects (and
+  # `project_fields/2` deliberately keeps every `_`-prefixed system key, so
+  # `_id`/`_rev` survive the projection untouched); `?expand=` hydrates nested
+  # references; `?resolve=tasks` swaps query blocks for snapshots. None of the
+  # three reaches `list_etag/3` or `doc_etag/1`.
+  @shaping_params ~w(fields expand resolve)
+
+  # PRESENCE, not parsed effect — deliberate. `?expand=false` and `?fields=,,`
+  # both parse to "no shaping", so keying on the parsed spec would keep the ETag
+  # for them. Presence is chosen anyway for two reasons: it costs only a 304 on
+  # a request nobody sends, and it cannot DRIFT — re-deriving the parse here
+  # would fork `parse_expand/1` and `parse_fields/1`, and the day one of those
+  # grows a value this copy does not know, the fork fails OPEN and hands back a
+  # validator for a shaped body. A blank/absent param is still treated as
+  # unshaped, which is the one case that matters for the anonymous fast path.
+
+  # An ETag is a promise about a REPRESENTATION (RFC 9110 §8.8.1: a strong
+  # validator must change whenever the representation changes). Two axes break
+  # that promise here, so both suppress the header:
+  #
+  #   * SHAPING — proven live against prod: `/v1/data/doc/production/task/<id>`
+  #     and the same URL with `?fields=title` returned the identical strong ETag
+  #     `"b75c68f1…"` over a 10,174-byte and a 630-byte body, and replaying the
+  #     first ETag against the `?fields=` URL answered 304. The server told the
+  #     caller its full document was a valid answer to a projected request.
+  #
+  #   * PRINCIPAL — `Envelope.render/3` decides FIELD visibility from the
+  #     `CallerContext` (an admin token sets `is_admin: true` and sees `private`
+  #     / `readable_by` fields). The ETag folds only ids and revs, so the same
+  #     validator spans an admin's body and an anonymous one. The ids/revs DO
+  #     distinguish which documents each caller may see; it is which FIELDS of
+  #     them get rendered that the validator is blind to.
+  #
+  # Direction, per charter D1: this only ever WITHDRAWS a validator. It removes
+  # cacheability, never grants it — a request that used to 304 now gets a full
+  # 200, which is a cost, never a stale or cross-principal body.
+  defp conditional_safe?(conn) do
+    unshaped? = Enum.all?(@shaping_params, fn p -> blank?(Map.get(conn.params, p)) end)
+    unshaped? and anonymous_principal?(conn)
+  end
+
+  defp blank?(nil), do: true
+  defp blank?(v) when is_binary(v), do: String.trim(v) == ""
+  defp blank?(_), do: false
+
+  # Anonymous means no bound principal at all: no token resolved by
+  # OptionalToken/RequireToken, and no richer context installed by
+  # RequireUserSession. Mirrors `CallerContext.from_conn/1`'s resolution order
+  # so the two can never disagree about who is asking.
+  defp anonymous_principal?(conn) do
+    is_nil(Map.get(conn.assigns, :api_token)) and
+      case Map.get(conn.assigns, :caller_context) do
+        nil -> true
+        %CallerContext{principal_type: :anonymous} -> true
+        _ -> false
+      end
+  end
+
+  # `Vary: Authorization` rides EVERY query response, including the ones that
+  # keep their ETag: the body's field set is a function of the Authorization
+  # header, so a shared cache must key on it.
+  #
+  # MERGED, never overwritten. Two `vary` writers are already known: DatasetCors
+  # sets `Origin` in-app, and prod responses arrive carrying `accept-encoding`
+  # from a hop OUTSIDE this app (nothing in api/lib writes it) — so a bare put
+  # here would drop a directive this code cannot see. The reverse case is the
+  # one tests cannot catch: if that outside hop SETS rather than APPENDS, it
+  # drops ours instead, and only a post-deploy curl can tell. That check is the
+  # slice's D2/D13 L1 transcript: assert prod `vary` carries BOTH tokens.
+  defp put_vary_authorization(conn) do
+    existing =
+      conn
+      |> get_resp_header("vary")
+      |> Enum.flat_map(&String.split(&1, ","))
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    merged =
+      if Enum.any?(existing, &(String.downcase(&1) == "authorization")) do
+        existing
+      else
+        existing ++ ["authorization"]
+      end
+
+    put_resp_header(conn, "vary", Enum.join(merged, ", "))
+  end
+
   defp respond(conn, inner, dataset, sync_tags, etag, t0) do
     elapsed_ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     conn =
       conn
-      |> put_resp_header("etag", ~s("#{etag}"))
+      |> put_vary_authorization()
       |> maybe_vendor_content_type()
 
-    case get_req_header(conn, "if-none-match") do
-      [hv | _] ->
-        if etag_matches?(hv, etag) do
-          conn |> send_resp(304, "") |> halt()
-        else
-          respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
-        end
+    if conditional_safe?(conn) do
+      conn = put_resp_header(conn, "etag", ~s("#{etag}"))
 
-      _ ->
-        respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
+      case get_req_header(conn, "if-none-match") do
+        [hv | _] ->
+          if etag_matches?(hv, etag) do
+            conn |> send_resp(304, "") |> halt()
+          else
+            respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
+          end
+
+        _ ->
+          respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
+      end
+    else
+      # No header, and therefore no 304 branch: a validator we would refuse to
+      # honor must not be advertised either. The envelope's own `etag` field is
+      # UNCHANGED — it is the SDK's change-detection token, not a cache
+      # validator (the SDK never sends If-None-Match; see
+      # js/packages/nextjs/src/server/core.ts:418), so consumers keep working.
+      respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
     end
   end
 
