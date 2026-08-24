@@ -2,10 +2,18 @@
 // Guards the shape the renderer depends on: the baked graph.json must be the
 // normalized {nodes, edges, rootId} (alias-tolerant, orphan-edge-free, root =
 // highest degree with "barkpark" preferred) — the same behaviour as the Next
-// edition's lib/graph.ts, so the two landings render the same graph.
+// edition's lib/graph.ts, so the two landings render the same graph — PLUS the
+// truncation truth (truncated + truncationReason), which the normalizer used to
+// drop on the floor: the flag never reached the baked bytes, so the static
+// edition could only ever present a capped corpus as if it were complete.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { normalizeCorpusGraph, computeRootId, markNonNavigable } from './graph-normalize.ts'
+import {
+  normalizeCorpusGraph,
+  computeRootId,
+  markNonNavigable,
+  readTruncation,
+} from './graph-normalize.ts'
 
 test('normalizes aliased upstream fields into the renderer shape', () => {
   const g = normalizeCorpusGraph({
@@ -52,9 +60,49 @@ test('rootId is the highest-degree node, with "barkpark" winning outright', () =
 })
 
 test('a garbage upstream degrades to an empty graph, never a throw', () => {
-  assert.deepEqual(normalizeCorpusGraph(null), { nodes: [], edges: [], rootId: null })
-  assert.deepEqual(normalizeCorpusGraph('nope'), { nodes: [], edges: [], rootId: null })
-  assert.deepEqual(normalizeCorpusGraph({}), { nodes: [], edges: [], rootId: null })
+  const empty = { nodes: [], edges: [], rootId: null, truncated: false, truncationReason: null }
+  assert.deepEqual(normalizeCorpusGraph(null), empty)
+  assert.deepEqual(normalizeCorpusGraph('nope'), empty)
+  assert.deepEqual(normalizeCorpusGraph({}), empty)
+})
+
+/* ── truncation, end to end into the baked bytes ────────────────────────── */
+
+test('truncation reaches the normalized payload instead of stopping at the normalizer', () => {
+  const g = normalizeCorpusGraph({
+    nodes: [{ id: 'a', type: 'paper', title: 'A' }],
+    edges: [],
+    truncated: true,
+    truncation_reason: 'per_type_cap',
+  })
+  assert.equal(g.truncated, true)
+  assert.equal(g.truncationReason, 'per_type_cap')
+  // And it survives JSON — this IS what graph.json.ts ships.
+  const baked = JSON.parse(JSON.stringify(g))
+  assert.equal(baked.truncated, true)
+  assert.equal(baked.truncationReason, 'per_type_cap')
+})
+
+test('D67: a reason without truncated:true is DISCARDED, not honoured', () => {
+  assert.deepEqual(readTruncation({ truncation_reason: 'per_type_cap' }), {
+    truncated: false,
+    truncationReason: null,
+  })
+  // A truthy-but-not-true flag is a shape drift, not a cut.
+  assert.deepEqual(readTruncation({ truncated: 'true', truncation_reason: 'node_budget' }), {
+    truncated: false,
+    truncationReason: null,
+  })
+  const g = normalizeCorpusGraph({ nodes: [], edges: [], truncation_reason: 'node_budget' })
+  assert.equal(g.truncated, false)
+  assert.equal(g.truncationReason, null)
+})
+
+test('a cut with no named reason stays a cut', () => {
+  assert.deepEqual(readTruncation({ truncated: true }), {
+    truncated: true,
+    truncationReason: null,
+  })
 })
 
 test('markNonNavigable phantoms non-built types, keeps edges, re-roots on a navigable node', () => {
@@ -79,4 +127,19 @@ test('markNonNavigable phantoms non-built types, keeps edges, re-roots on a navi
   assert.equal(g.nodes.find((n) => n.id === 'ghost')?.phantom, true, 'upstream phantom preserved')
   assert.equal(g.edges.length, 2, 'edges untouched — phantoms keep their context lines')
   assert.equal(g.rootId, 'p1', 'root re-chosen from navigable nodes only')
+})
+
+test('markNonNavigable does not launder a capped corpus into a complete one', () => {
+  const base = normalizeCorpusGraph({
+    nodes: [
+      { id: 'p1', type: 'paper', title: 'P1' },
+      { id: 't1', type: 'task', title: 'T1' },
+    ],
+    edges: [],
+    truncated: true,
+    truncation_reason: 'per_type_cap',
+  })
+  const g = markNonNavigable(base, ['paper'])
+  assert.equal(g.truncated, true)
+  assert.equal(g.truncationReason, 'per_type_cap')
 })

@@ -362,7 +362,9 @@ defmodule Barkpark.StructureTest do
       tree = Structure.build(dataset)
 
       content = content_types_node(tree)
-      assert %Node{title: "Content"} = content, "a public consumer type must have a home"
+
+      assert match?(%Node{title: "Content"}, content),
+             "a public consumer type must have a home; got: #{inspect(content)}"
 
       recipe = Enum.find(content.items, &(&1.type_name == "recipe"))
       assert %Node{} = recipe
@@ -384,10 +386,15 @@ defmodule Barkpark.StructureTest do
       tree = Structure.build(dataset)
 
       settings = settings_node(tree)
-      assert %Node{} = settings, "singleton: true must be honoured regardless of visibility"
+
+      assert match?(%Node{}, settings),
+             "singleton: true must be honoured regardless of visibility; " <>
+               "got: #{inspect(settings)}"
 
       config = Enum.find(settings.items, &(&1.type_name == "siteConfig"))
-      assert %Node{type: :document} = config, "a declared singleton is a single :document node"
+
+      assert match?(%Node{type: :document}, config),
+             "a declared singleton is a single :document node; got: #{inspect(config)}"
 
       # And it must NOT also appear in the generic Content bucket.
       case content_types_node(tree) do

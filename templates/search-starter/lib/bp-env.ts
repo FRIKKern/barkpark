@@ -46,6 +46,30 @@ export function resolveApiUrl(env: Env): string {
 }
 
 /**
+ * Whether a corpus link was configured AT ALL — i.e. whether `resolveApiUrl`
+ * returned something someone asked for, or silently fell through to
+ * `DEFAULT_API_URL`.
+ *
+ * The fallback above is a genuine dev convenience and stays. But it is also the
+ * reason a cold build with no env at all still exits 0 and still serves a 200:
+ * the reads go to `http://localhost:4000`, nothing answers, and every corpus
+ * read degrades to an empty graph. To a visitor that is byte-indistinguishable
+ * from a site whose corpus is genuinely empty.
+ *
+ * So the fact is EXPORTED rather than swallowed. `lib/provenance` uses it to
+ * separate "no corpus link is configured" from "the configured host refused" —
+ * two different faults with two different fixes, which a single "could not
+ * connect" would have flattened into one.
+ */
+export function isApiUrlConfigured(env: Env): boolean {
+  return Boolean(
+    env.BARKPARK_API_URL ??
+      env.NEXT_PUBLIC_BARKPARK_API_URL ??
+      env.NEXT_PUBLIC_API_URL,
+  );
+}
+
+/**
  * Server-only read token. Canonical `BARKPARK_TOKEN` wins; the legacy
  * `BARKPARK_READ_TOKEN` is the fallback. Never `NEXT_PUBLIC_`, so it never
  * reaches the browser.
@@ -56,6 +80,9 @@ export function resolveReadToken(env: Env): string | undefined {
 
 /** Resolved API base URL for this process. */
 export const PUBLIC_API_URL = resolveApiUrl(process.env);
+
+/** Whether this process was given an API base URL at all (see above). */
+export const API_URL_CONFIGURED = isApiUrlConfigured(process.env);
 
 /** Resolved server-only read token for this process (undefined → anonymous). */
 export const READ_TOKEN = resolveReadToken(process.env);
