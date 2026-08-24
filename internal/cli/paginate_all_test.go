@@ -246,17 +246,23 @@ func TestRunPaginatedAll_RefusesUnreadablePageMidPagination(t *testing.T) {
 //
 //	task.ls / task.ready → tasks_controller.ex:83        %{ok: true, docs: …}
 //	doc.ls / doc.query   → query_controller.ex:90        documents: rendered
-//	media.ls             → v1/media_controller.ex:254    assets: assets
+//	media.ls             → v1/media_controller.ex:298    assets: assets
+//	media.search         → v1/media_controller.ex:90     hits: hits
+//	media.collections    → v1/media_collections_controller.ex:32  collections: …
+//	media.collection-assets → v1/media_collections_controller.ex:69 hits: hits
 //	search.query         → search/hit_envelope.ex:71     documents: …
 //	ticket.inbox         → tickets_controller.ex:93,169  tickets: rows
 var paginatedEnvelopeKeys = map[string]string{
-	"task.ls":      "docs",
-	"task.ready":   "docs",
-	"doc.ls":       "documents",
-	"doc.query":    "documents",
-	"media.ls":     "assets",
-	"search.query": "documents",
-	"ticket.inbox": "tickets",
+	"task.ls":                 "docs",
+	"task.ready":              "docs",
+	"doc.ls":                  "documents",
+	"doc.query":               "documents",
+	"media.ls":                "assets",
+	"media.search":            "hits",
+	"media.collections":       "collections",
+	"media.collection-assets": "hits",
+	"search.query":            "documents",
+	"ticket.inbox":            "tickets",
 }
 
 // TestPaginatedCommandsUseKnownEnvelopeKeys is the companion guard to the
