@@ -23,6 +23,8 @@ defmodule Barkpark.RateLimiter do
   believed.
   """
 
+  require Logger
+
   @table :barkpark_rate_limiter
 
   @default_capacity 200
@@ -85,6 +87,42 @@ defmodule Barkpark.RateLimiter do
   # not per request.
   @max_entries 10_000
   @stale_after_ms 3_600_000
+
+  # @max_entries USED TO BE A TRIGGER, NOT A CEILING — and the widen above made
+  # that worse, not better.
+  #
+  # The sweep's only predicate is "idle >= @stale_after_ms". Under a flood of
+  # FRESH keys every row is younger than the cutoff, so `select_delete` matches
+  # NOTHING and the table grew without any upper bound at all. Its floor is
+  # "distinct keys seen in the last @stale_after_ms" — one hour, now that the
+  # window has been widened 12x — and nothing capped that number.
+  #
+  # The escape hatch a normal reader reaches for is closed by construction:
+  # @stale_after_ms is pinned by the correctness invariant documented above (it
+  # must track the SLOWEST caller's full-refill window, or the sweep re-grants a
+  # budget the client never earned). It can never be shortened to make the sweep
+  # free more rows. So the sweep's yield is a property of the TRAFFIC, and a
+  # ceiling has to hold independently of it.
+  #
+  # THE VECTOR IS UNAUTHENTICATED. `client_ip/1` keys buckets for anonymous
+  # paths (auth_write_rate_limit, bulldocs_form_controller, pulse_controller
+  # read and write). A caller holding a single IPv6 /64 mints a fresh key per
+  # request; the sibling key shapes ({:ticket, key_id, class}, pulse channel)
+  # are config- or DB-bounded, so IP cardinality is the live one.
+  #
+  # After the sweep runs, whatever it could not free is taken from the LEAST
+  # RECENTLY USED buckets until the table is back under @max_entries. Evicting a
+  # bucket that is NOT stale hands that client a fresh allowance — the limiter
+  # admits requests it should have denied — so unlike the stale sweep this is
+  # never silent: see `report_ceiling/3`.
+  #
+  # @evict_headroom is DERIVED, not picked: the trim costs one O(n) projection,
+  # one O(n log n) sort and one O(n) delete, and leaving this many free slots
+  # amortises all of it over at least that many subsequent cold-key inserts. At
+  # a tenth of @max_entries that is ~1,000 inserts per trim, keeping the added
+  # per-insert cost in the same order as the full scan the module already
+  # measured at ~512us median on a 12k-row table.
+  @evict_headroom div(@max_entries, 10)
 
   # Bounded retry budget for the lock-free debit below. Not a caller option:
   # the bound is a property of the commit protocol, not of any call site.
@@ -307,10 +345,62 @@ defmodule Barkpark.RateLimiter do
   # naturally throttled. The cutoff, not this scan, is what makes the delete
   # safe: see @stale_after_ms above for the census it has to track.
   defp maybe_prune(now_ms) do
-    if :ets.info(@table, :size) > @max_entries do
+    size = :ets.info(@table, :size)
+
+    if size > @max_entries do
       cutoff = now_ms - @stale_after_ms
-      :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:<, :"$1", cutoff}], [true]}])
+      freed = :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:<, :"$1", cutoff}], [true]}])
+
+      enforce_ceiling(size - freed)
     end
+
+    :ok
+  end
+
+  # The stale sweep is allowed to free nothing. This is what makes @max_entries a
+  # CEILING anyway: evict the least recently used buckets down to
+  # @max_entries - @evict_headroom.
+  defp enforce_ceiling(size) when size <= @max_entries, do: :ok
+
+  defp enforce_ceiling(size) do
+    over = size - (@max_entries - @evict_headroom)
+
+    # One O(size) projection of just the timestamp column — the rows themselves
+    # are never copied — and the `over`-th smallest is the eviction cutoff.
+    cutoff =
+      @table
+      |> :ets.select([{{:_, :_, :"$1"}, [], [:"$1"]}])
+      |> Enum.sort()
+      |> Enum.at(over - 1)
+
+    evicted = :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:"=<", :"$1", cutoff}], [true]}])
+
+    report_ceiling(evicted, size, :ets.info(@table, :size))
+  end
+
+  # A NON-STALE bucket that gets evicted is a rate-limit RESET: that client's
+  # next request is admitted against a full bucket it did not earn. The stale
+  # sweep is silent because dropping a fully-refilled bucket is behaviour-
+  # identical to keeping it; this is not, so it says so every time it fires,
+  # naming what it freed and what the table did. `remaining` is read back rather
+  # than computed, because timestamp ties mean `<=` can take more rows than the
+  # `over` it was aiming at — the ceiling still holds, but the count is a
+  # measurement, not a prediction.
+  defp report_ceiling(evicted, size_before, remaining) do
+    Logger.warning(
+      "RateLimiter CEILING EVICTION: the stale sweep left #{size_before} rows over the " <>
+        "#{@max_entries} bound, so #{evicted} least-recently-used bucket(s) were evicted " <>
+        "(#{remaining} remain). Any evicted bucket that was NOT idle past " <>
+        "#{@stale_after_ms}ms has been reset to full — those clients are admitted against " <>
+        "an allowance they did not earn. This means key cardinality is outrunning the " <>
+        "table bound; do not raise @max_entries without looking at what is minting keys."
+    )
+
+    :telemetry.execute(
+      [:barkpark, :rate_limiter, :ceiling_evicted],
+      %{evicted: evicted, size_before: size_before, remaining: remaining, limit: @max_entries},
+      %{}
+    )
 
     :ok
   end
