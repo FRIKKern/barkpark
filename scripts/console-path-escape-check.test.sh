@@ -1679,6 +1679,38 @@ css_copy() {
 css_copy_denies() {
   if has "$REFOUT" "$1"; then no "$2 (the banner still says it)"; else ok "$2"; fi
 }
+# ── THE DEFECT BANNER'S COPY, PINNED THE SAME WAY — AND WHY IT WAS NOT ──────
+# The REFUSED banner above got its copy pinned in both directions. The DEFECT
+# banner never did: `css_rc "a real parity miss" 1 1 "title=CSSOM parity DEFECT"`
+# asserts only the TITLE, so the body could say anything at all and stay green.
+# That asymmetry is not a footnote — it is the reason the body was able to
+# promise "See the diff above" for THREE causes when only one prints a diff.
+# A banner nobody pins is a banner that drifts, and the drift is invisible
+# precisely because the title still matches.
+#
+# Driven at rc=1 through the same stub, so these read the REAL step body.
+# `|| true`: the step body EXITS 1 on a defect, and this file runs under `set -e`.
+DEFOUT="$(STUB_RC=1 PATH="$STUBBIN:$PATH" bash --noprofile --norc "$CSS" 2>&1 || true)"
+def_copy() {
+  if has "$DEFOUT" "$1"; then ok "$2"; else no "$2 (the banner never says it)"; fi
+}
+def_copy_denies() {
+  if has "$DEFOUT" "$1"; then no "$2 (the banner still says it)"; else ok "$2"; fi
+}
+def_copy        "THREE causes"               "the defect banner names a cause SET, not one cause"
+def_copy        "ZERO style rules parsed"    "…and names the cause that prints NO diff"
+def_copy        "UNREADABLE stylesheet"      "…and names the other cause that prints no diff"
+def_copy        "this is not a refusal"      "…and still separates itself from the REFUSED arm"
+def_copy_denies "See the diff above."        "…and no longer promises a diff for every cause"
+def_copy_denies "rules the browser dropped or rewrote" \
+                                             "…and no longer names one cause's mechanism as all three"
+# The DEFECT arm must not have drifted into sounding like a refusal — D101's
+# line (bring-up refuses, everything after it is a claim about the stylesheet)
+# is NOT re-litigated here, and this arm proves the wording change did not do it
+# by accident.
+def_copy_denies "REFUSED TO MEASURE"         "…and does not describe a measured defect as a refusal"
+def_copy_denies "NO claim is being made"     "…and does not disclaim the claim it is making"
+
 css_copy        "SIX causes"                "the refusal banner names a cause SET, not one cause"
 css_copy        "cssom-heads.baseline"      "…and names the committed sidecar among them"
 css_copy        "do NOT assume the environment" "…and tells the reader not to assume the runner"
