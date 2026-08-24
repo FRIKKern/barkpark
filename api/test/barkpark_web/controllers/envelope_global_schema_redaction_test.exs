@@ -35,6 +35,10 @@ defmodule BarkparkWeb.EnvelopeGlobalSchemaRedactionTest do
   @admin_token "gsr-admin-#{@uniq}"
   @reader_token "gsr-reader-#{@uniq}"
 
+  # The legacy twin's type. LegacyController reads `production` ONLY, so this
+  # fixture lives there rather than in a per-test dataset.
+  @legacy_type "gsrlegacy#{@uniq}"
+
   setup do
     ws = Tenancy.get_default_workspace()
     project = Tenancy.get_default_project()
@@ -107,6 +111,40 @@ defmodule BarkparkWeb.EnvelopeGlobalSchemaRedactionTest do
 
     {:ok, _} = Content.publish_document("gsr-n-1", "gsrnone", @ds_none, scope)
 
+    # ── Scenario B, LEGACY TWIN (task-9b51772bc9fd8ec4). `LegacyController` is
+    #    pinned to `@dataset "production"` (legacy_controller.ex:15), so the
+    #    per-test datasets above are unreachable on `/api/documents/:type` and a
+    #    fixture in `production` is the only way to exercise that twin. Same
+    #    shape as the global fixture: a workspace_id: nil schema declaring a
+    #    NON-encrypted private "ssn", and a published document carrying it.
+    Repo.insert!(%SchemaDefinition{
+      name: @legacy_type,
+      title: "Legacy Global Report",
+      visibility: "public",
+      dataset: @prod,
+      workspace_id: nil,
+      project_id: nil,
+      dataset_id: nil,
+      fields: [
+        %{"name" => "name", "type" => "string"},
+        %{"name" => "ssn", "type" => "string", "private" => true, "encrypted" => false}
+      ]
+    })
+
+    {:ok, _} =
+      Content.create_document(
+        @legacy_type,
+        %{
+          "_id" => "gsr-legacy-1",
+          "title" => "LEG",
+          "content" => %{"name" => "lex", "ssn" => "LEAK-LEGACY"}
+        },
+        @prod,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document("gsr-legacy-1", @legacy_type, @prod, scope)
+
     {:ok, _} = Auth.create_token(@admin_token, "gsr admin", @prod, ["admin"])
     {:ok, _} = Auth.create_token(@reader_token, "gsr reader", @prod, ["read", "write"])
 
@@ -123,6 +161,18 @@ defmodule BarkparkWeb.EnvelopeGlobalSchemaRedactionTest do
       |> json_response(200)
 
     Enum.find(body["result"]["documents"], &(&1["_id"] == id))
+  end
+
+  # The legacy twin's list route. Its wire shape nests surviving content fields
+  # under "values" (legacy_controller.render_legacy_doc/3), so callers assert on
+  # doc["values"]["ssn"] rather than doc["ssn"].
+  defp legacy_doc(conn, type, id) do
+    body =
+      conn
+      |> get("/api/documents/#{type}")
+      |> json_response(200)
+
+    Enum.find(body["documents"], &(&1["id"] == id))
   end
 
   describe "global (workspace_id: nil) schema redaction on /v1/data/query" do
@@ -145,6 +195,47 @@ defmodule BarkparkWeb.EnvelopeGlobalSchemaRedactionTest do
          %{conn: conn} do
       resp = get(conn, "/v1/data/query/#{@ds_global}/gsrglobal")
       assert resp.status == 404
+    end
+  end
+
+  describe "the LEGACY twin — /api/documents/:type (task-9b51772bc9fd8ec4)" do
+    # THE DUPLICATED-RENDER-PATH HAZARD. `query_controller.fetch_schema/3` was
+    # given the global-schema fallback; `legacy_controller.fetch_schema/2` was
+    # not. Same schema, same document, same token — one twin redacted and the
+    # other served the private field. Reachable with an ordinary `read`-tier
+    # token, the lowest credential in the system.
+    test "non-admin reader does NOT see the global schema's private field", %{conn: conn} do
+      doc = legacy_doc(bearer(conn, @reader_token), @legacy_type, "gsr-legacy-1")
+
+      assert get_in(doc, ["values", "name"]) == "lex"
+
+      refute Map.has_key?(doc["values"] || %{}, "ssn"),
+             "the legacy render path served a globally-declared private field: #{inspect(doc)}"
+    end
+
+    test "admin DOES see it — redaction stays caller-scoped on this twin too",
+         %{conn: conn} do
+      doc = legacy_doc(bearer(conn, @admin_token), @legacy_type, "gsr-legacy-1")
+
+      assert get_in(doc, ["values", "ssn"]) == "LEAK-LEGACY"
+    end
+
+    # THE PARITY PIN. Identical input to both twins must produce identical
+    # visibility of `ssn`, so the divergence cannot silently reopen: whichever
+    # twin regresses, this reds.
+    test "both twins agree on `ssn` for the SAME schema, document and token",
+         %{conn: conn} do
+      legacy = legacy_doc(bearer(conn, @reader_token), @legacy_type, "gsr-legacy-1")
+      queried = query_doc(bearer(conn, @reader_token), @prod, @legacy_type, "gsr-legacy-1")
+
+      legacy_has = Map.has_key?(legacy["values"] || %{}, "ssn")
+      query_has = Map.has_key?(queried || %{}, "ssn")
+
+      assert legacy_has == query_has,
+             "render twins diverged on a private field — legacy shows it: #{legacy_has}, " <>
+               "query shows it: #{query_has}"
+
+      refute legacy_has, "both twins leaked the private field"
     end
   end
 
