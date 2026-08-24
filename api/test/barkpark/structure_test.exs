@@ -397,7 +397,6 @@ defmodule Barkpark.StructureTest do
 
       assert match?(%Node{}, settings),
              "singleton: true must be honoured regardless of visibility; " <>
-
                "got: #{inspect(settings)}"
 
       config = Enum.find(settings.items, &(&1.type_name == "siteConfig"))
