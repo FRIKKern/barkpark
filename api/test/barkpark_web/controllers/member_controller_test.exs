@@ -32,6 +32,11 @@ defmodule BarkparkWeb.MemberControllerTest do
 
   @dataset "production"
 
+  # A denial of the CREDENTIAL, either shape. The scoped read pipeline resolves
+  # bearers softly, so a rejected token continues as anonymous and is refused on
+  # membership (403) rather than on authentication (401).
+  @denials [401, 403]
+
   setup do
     %{ws: ws, project: project, admin_raw: admin_raw} = workspace_with_admin("a")
 
@@ -403,6 +408,64 @@ defmodule BarkparkWeb.MemberControllerTest do
       assert req(admin_raw)
              |> delete("#{base(ws, project)}/tokens/not-a-uuid")
              |> json_response(404)
+    end
+
+    # ssw8 — THE REVOKE IS ONLY REAL IF THE CREDENTIAL STOPS WORKING.
+    #
+    # Every other test in this block asserts a COLUMN: `revoked_at` is stamped,
+    # or it is not. That is one inference short of the fact a credential-hygiene
+    # fix depends on. The control plane's site-delete path
+    # (`BarkparkCloud.Registry.revoke_site_read_token/1`) drives exactly the pair
+    # exercised here — the scoped mint `POST /w/:ws/p/:proj/v1/tokens` that
+    # `mint_public_read_token/5` calls, then the scoped revoke
+    # `DELETE /w/:ws/p/:proj/v1/tokens/:id` — so this is the box-side half of
+    # "delete a site, its read token no longer authenticates".
+    #
+    # The oracle is the AUTH outcome (401), not the body: what a `public-read`
+    # token is allowed to SEE is `Plugs.PublicRead`'s business and varies with
+    # schema visibility, while "this bearer is no longer a credential" does not.
+    # The before-assertion is not decoration — without it a route that 401s for
+    # some unrelated reason would make the after-assertion vacuously green.
+    test "a revoked site-read token STOPS AUTHENTICATING on the scoped read its site builds with",
+         %{ws: ws, project: project, admin_raw: admin_raw} do
+      minted =
+        req(admin_raw)
+        |> post(
+          "#{base(ws, project)}/tokens",
+          Jason.encode!(%{
+            label: "site-read-proof-#{System.unique_integer([:positive])}",
+            permissions: ["public-read"],
+            dataset: @dataset
+          })
+        )
+        |> json_response(201)
+
+      raw = minted["token"]
+      read_path = "#{base(ws, project)}/data/query/#{@dataset}/post"
+
+      before_status = req(raw) |> get(read_path) |> Map.fetch!(:status)
+
+      refute before_status in @denials,
+             "the freshly minted token must be ACCEPTED as a credential before the revoke, or " <>
+               "the assertion below proves nothing (got #{before_status})"
+
+      assert req(admin_raw)
+             |> delete("#{base(ws, project)}/tokens/#{minted["id"]}")
+             |> json_response(200)
+
+      after_conn = req(raw) |> get(read_path)
+
+      assert after_conn.status in @denials,
+             "a revoked site-read token must no longer reach this workspace's content — this is " <>
+               "the whole point of revoking it when its site is deleted (got #{after_conn.status})"
+
+      # WHY 403 AND NOT 401, stated so nobody "corrects" the assertion into a
+      # 401-only one and reds it: the scoped read pipeline resolves the bearer
+      # SOFTLY (`Plugs.OptionalToken`). A revoked token is simply not assigned,
+      # so the request continues as ANONYMOUS and `ResolveWorkspace` refuses it
+      # on membership. Either shape is a denial of the credential, which is the
+      # fact being pinned; the exact code is that pipeline's business.
+      assert Jason.decode!(after_conn.resp_body)["error"]["code"] in ~w(unauthorized forbidden)
     end
   end
 
