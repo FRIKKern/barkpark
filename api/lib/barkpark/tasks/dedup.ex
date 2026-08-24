@@ -52,6 +52,20 @@ defmodule Barkpark.Tasks.Dedup do
       `bp` CLI abandons a request at 30 s while the server keeps executing it
       (measured up to 61 s); the rest of the write path is still unbounded, which
       is tracked as `pds-bl-cli-budget-window`.
+
+      **That budget was never the whole cost, and saying it was is what let this
+      module starve the fleet for weeks.** `@query_timeout_ms` bounds `Repo.all/2`.
+      It does not bound `Similarity.assess/3`, the pure-Elixir scoring loop that
+      runs after the rows come back — and once the corpus reached the candidate
+      cap that loop WAS the cost: ~6.2 s of CPU, on the request, under no budget,
+      measured 2026-08-24. A gated `bp task create` took 9.2–14.3 s against
+      production while the same create with `dedup_bypass` took 0.18–0.47 s. The
+      remedy is not another timeout — a timeout there would only convert a slow
+      create into a refused one. It is to stop handing the scorer thousands of
+      rows: `fetch_candidates/2` now pre-filters candidates with a trgm net
+      modelled on `Content.DedupWall`'s (at its own measured floor — the two
+      corpora do not share one), and that function's comment states exactly what
+      the net can miss.
   """
   import Ecto.Query, only: [from: 2]
 
@@ -92,7 +106,59 @@ defmodule Barkpark.Tasks.Dedup do
   # the scan now DETECTS its own truncation (see `fetch_candidates/2`) and says
   # so — a warning naming rows-returned and the limit, a telemetry event, and a
   # `scan` note on any duplicate payload it does manage to produce.
-  @candidate_limit 5000
+  #
+  # THE VALUE MOVES NOW, because the ORDERING under it finally changed. 5,000 was
+  # untouchable while the keep was alphabetical: any cut of an id-sorted list
+  # drops an arbitrary — and, as measured above, a systematically biased — slice,
+  # so the only safe cap was one nothing reached. The trgm pre-filter below sorts
+  # candidates by DESCENDING TITLE SIMILARITY before the cap applies, so the rows
+  # this number discards are now the ones LEAST like the new task. That inverts
+  # the trade: 500-most-similar is a strictly better candidate set than
+  # 5,000-alphabetically-first, and it is the cap `Content.DedupWall` already
+  # runs on this same table, so the two dedup surfaces keep one calibrated
+  # vocabulary.
+  #
+  # It is also what makes the gate affordable. MEASURED 2026-08-24 with the real
+  # `Similarity.assess/3` over the real exported corpus (6,329 eligible rows):
+  # N=500 -> 89 ms, N=1000 -> 811 ms, N=2000 -> 1,966 ms, N=5000 -> 6,217 ms.
+  # That loop runs AFTER `Repo.all/2` has returned, so `@query_timeout_ms` never
+  # bounded a millisecond of it — see `fetch_candidates/2`.
+  #
+  # In practice this cap is now a SAFETY NET, not the working limit: at
+  # `@candidate_trgm_floor` the net admits single-digit candidate counts on the
+  # measured corpus, so 500 is reached only by something pathological — which is
+  # exactly the state the truncation tripwire should be reporting.
+  @candidate_limit 500
+
+  # Trgm net for the candidate FETCH only: over-fetch here, then let the precise
+  # token-Jaccard in `Similarity.assess/3` score it down.
+  #
+  # IT IS 0.2, NOT `Content.DedupWall`'s 0.1, AND THE DIVERGENCE IS MEASURED.
+  # Copying the sibling wall's floor was the first thing tried and it does not
+  # survive contact with this corpus — the two surfaces read different tables'
+  # worth of text, so one number cannot serve both. Rows admitted out of the 6,329
+  # real exported task rows (2026-08-24), three probe titles:
+  #
+  #     floor   short/typical   long/real   generic
+  #     0.10          1,467       1,887        501
+  #     0.20              8           9         11
+  #     0.30              0           0          0
+  #
+  # At 0.1 the net admits 23–30% of the backlog. That is not a pre-filter; it
+  # would hand the scorer ~1,500 rows, bind the 500 cap on EVERY create, and fire
+  # the truncation warning forever — trading a slow gate for a noisy one. The
+  # distribution is sharply bimodal, so 0.2 sits in the empty valley between the
+  # signal and the noise rather than on a slope.
+  #
+  # And it keeps the signal. Probed with the exact title of an existing row, that
+  # row ranks #1 at similarity 1.000 while the runner-up scores 0.322 and third
+  # place 0.248 — a real near-duplicate is nowhere near this floor. The 0.30 row
+  # reading zero is not a warning sign: these probes have no duplicate in the
+  # corpus, and answering "no candidates" is the correct result for them.
+  #
+  # It is still BELOW pg_trgm's 0.3 default, so the fetch must run inside a
+  # transaction that sets the threshold first (see `fetch_rows/6`).
+  @candidate_trgm_floor 0.2
 
   # The truncation tripwire: ask for ONE row more than the cap. If that extra row
   # comes back, the eligible corpus has outgrown @candidate_limit and this scan is
@@ -142,6 +208,11 @@ defmodule Barkpark.Tasks.Dedup do
   defp gate(new_task, content, dataset, opts) do
     distinct =
       string_list(Map.get(content, "distinct_from") || Map.get(content, :distinct_from))
+
+    # The new task's title IS the trgm probe. Passed as an opt rather than a
+    # positional argument so a caller that already set `:probe_title` (tests
+    # driving the empty-probe fallback) keeps control of it.
+    opts = Keyword.put_new(opts, :probe_title, String.trim("#{new_task.title}"))
 
     case fetch_candidates(dataset, opts) do
       {:degraded, reason} ->
@@ -250,42 +321,64 @@ defmodule Barkpark.Tasks.Dedup do
   #     scored identically, so the twin only ever bought a duplicate entry in
   #     `similar` and a second scoring pass. A task that exists ONLY as a draft
   #     still has exactly one row and is still detected.
+  #   * **NEW: a trgm pre-filter on the title, so the scorer sees hundreds of
+  #     candidates instead of thousands.** This one DOES narrow, and the
+  #     narrowing is stated below rather than left to be discovered.
   #
-  # So: no duplicate that was caught before goes uncaught now. Only the cost and
-  # the double-reporting are gone.
+  # ## Why the pre-filter had to exist (the cost was never in the query)
+  #
+  # `@query_timeout_ms` bounds `Repo.all/2` and nothing else. The scoring loop
+  # that consumes these rows — `Similarity.assess/3`, pure Elixir — runs AFTER
+  # the query returns, on the request's own scheduler, under no budget at all.
+  # Once the corpus reached the old 5,000-row cap that loop became the entire
+  # cost of a task birth.
+  #
+  # MEASURED 2026-08-24 against guerrilla `production`, draft-only `bp task
+  # create`, 5 runs each arm:
+  #
+  #     content.dedup_bypass: true   ->  0.18 – 0.47 s   (gate skipped)
+  #     the same create, gated       ->  9.2  – 14.3 s
+  #
+  # ~98% of a task birth was this gate, and ~6.2 s of it was the scoring loop
+  # (bench numbers at `@candidate_limit`). The failure mode that produced was
+  # NOT this module's honest 503: the request burned ten seconds of CPU and then
+  # still had to check out a SECOND connection for the INSERT, which under fleet
+  # load is dropped from the pool queue. That `DBConnection.ConnectionError` is
+  # raised OUTSIDE this function, so the `rescue`/`catch` below never see it and
+  # the caller gets `internal_error / "unknown error (DBConnection.ConnectionError)"`
+  # — precisely the lie the moduledoc above says this module exists to kill. A
+  # gate cannot report honestly about a failure it causes downstream of itself.
+  #
+  # ## What the trgm net can now MISS, said plainly
+  #
+  # The `%` operator matches on the TITLE only, because `documents_title_trgm_idx`
+  # (GIN, migration 20260526181000) is a title index — the same index and the
+  # same operator `Content.DedupWall` runs on this table. But `Similarity` scores
+  # title AND description as one combined token bag. So a candidate whose title
+  # is trigram-dissimilar to the new title, yet whose DESCRIPTION overlaps enough
+  # to have crossed 0.55, is no longer fetched and no longer refused.
+  #
+  # That is a real loss, and it is still the better trade, because it REPLACES a
+  # worse one. The old scan did not see the whole corpus either: `LIMIT` applied
+  # after a `DISTINCT ON` keyed on ascending canonical id, so it read the
+  # alphabetically-first 5,000 and nothing after — 2,064 ids (29.2%) invisible,
+  # including 100% of the `task-*` ids `bp task create` mints by default. The
+  # rows dropped then were chosen by ALPHABET. The rows dropped now are chosen by
+  # DISSIMILARITY, which is the one criterion actually correlated with not being
+  # a duplicate — and every id in the corpus is now reachable, because the index
+  # is consulted over all of it instead of a sorted prefix.
+  #
+  # An empty probe title cannot be allowed to silently match nothing (that would
+  # be a fail-OPEN gate wearing a green light), so it falls back to the
+  # unfiltered scan — see `fetch_rows/6`.
   defp fetch_candidates(dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
     limit = Keyword.get(opts, :dedup_candidate_limit, @candidate_limit)
+    probe_title = Keyword.get(opts, :probe_title) || ""
 
-    query =
-      from(d in Document,
-        as: :doc,
-        where: d.type == "task",
-        where: fragment("?->>'kind'", d.content) == "task",
-        # Cancelled/abandoned work must never block a legitimate re-attempt
-        # (acceptance criterion 4). Done tasks stay in — a match against a done
-        # task is a real "already landed" signal.
-        where: fragment("COALESCE(?->>'lifecycle_status', '')", d.content) != "cancelled",
-        distinct: [asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
-        # Second key: `false` sorts before `true`, so the PUBLISHED row of a twin
-        # pair wins the DISTINCT ON.
-        order_by: [asc: fragment("? LIKE 'drafts.%'", d.doc_id)],
-        select: %{
-          doc_id: d.doc_id,
-          title: d.title,
-          description: fragment("?->>'description'", d.content),
-          labels: fragment("?->'labels'", d.content),
-          parent: fragment("?->>'parent_id'", d.content),
-          lifecycle: fragment("?->>'lifecycle_status'", d.content)
-        },
-        limit: ^(limit + @candidate_probe)
-      )
-      |> maybe_filter_dataset(dataset)
-      |> Scope.scope_to_workspace(workspace_id, project_id)
-
-    rows = Repo.all(query, timeout: timeout)
+    rows = fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title)
 
     # The probe row is the ONLY thing that distinguishes "the backlog happens to
     # be exactly `limit` rows" from "the backlog is larger than this scan saw".
@@ -327,15 +420,164 @@ defmodule Barkpark.Tasks.Dedup do
   # NO-duplicate branch answers a bare `:ok`, which has no room for the caveat,
   # and widening that return shape reaches both `Content.Writer` call sites.
   # That is filed, not hidden.
+  # ── the two fetch shapes ───────────────────────────────────────────────────
+  #
+  # A BLANK PROBE TITLE FALLS BACK TO THE UNFILTERED SCAN. `similarity(x, '')` is
+  # 0 for every row, so `? % ?` against an empty probe matches NOTHING — the scan
+  # would return zero candidates, `Similarity.assess/3` would find no refusals,
+  # and the create would sail through reporting a duplicate check it never
+  # performed. That is the fail-open shape this module exists to refuse, so the
+  # empty case keeps the old whole-corpus behaviour (slow, but honest) instead.
+  # `check_new_task/5` already short-circuits when title AND description are both
+  # blank; this covers the title-blank-description-present remainder.
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, "") do
+    base_query(dataset, workspace_id, project_id)
+    |> limited(limit)
+    |> Repo.all(timeout: timeout)
+  end
+
+  defp fetch_rows(dataset, workspace_id, project_id, timeout, limit, probe_title) do
+    inner =
+      dataset
+      |> base_query(workspace_id, project_id)
+      |> trgm_filtered(probe_title)
+
+    # TWO STAGES, and they cannot collapse into one. `DISTINCT ON` requires its
+    # expression to lead the `ORDER BY`, so a single query can be ordered by
+    # canonical id (to collapse twins) or by similarity (to make the cap keep the
+    # right rows) — never both. The subquery collapses twins over the whole
+    # trgm-matched set; the outer query then ranks the survivors by similarity
+    # and applies the cap. Ordering the cap is the entire reason the cap is now
+    # safe to lower.
+    query =
+      from(c in Ecto.Query.subquery(inner),
+        order_by: [desc: c.sim, asc: c.doc_id],
+        limit: ^(limit + @candidate_probe)
+      )
+
+    # `SET LOCAL` is a no-op outside a transaction, and @candidate_trgm_floor
+    # (0.1) sits below pg_trgm's 0.3 default — so without the txn the `%` net
+    # would silently TIGHTEN to 0.3 and drop exactly the gray-zone near-duplicates
+    # the advise band exists to catch. Same cliff, same remedy, as
+    # Content.DedupWall. SET takes no bind params, so the floor is interpolated;
+    # the module attribute stays the single source of truth.
+    case Repo.transaction(
+           fn ->
+             Repo.query!(
+               "SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}",
+               [],
+               timeout: timeout
+             )
+
+             Repo.all(query, timeout: timeout)
+           end,
+           timeout: timeout
+         ) do
+      {:ok, rows} ->
+        rows
+
+      # A rolled-back txn is a DEGRADED scan, not an empty corpus. Raising here
+      # routes it into the `rescue` in `fetch_candidates/2`, which is what turns
+      # it into the named 503 — matching `{:ok, _}` alone would have shaped this
+      # as a MatchError with a message naming the wrong failure.
+      {:error, reason} ->
+        raise "dedup candidate transaction rolled back: #{inspect(reason)}"
+    end
+  rescue
+    # FRESH-INSTALL FALLBACK, and ONLY this error. `pg_trgm` is optional —
+    # `Application.check_pg_trgm/0` warns rather than crashes when it is absent,
+    # so a legitimate Barkpark can be running without the `%` operator or
+    # `similarity()`. On such a box every statement here fails with SQLSTATE
+    # 42883, and without this clause that would turn into `{:degraded, …}` and
+    # REFUSE every single task create — a fresh install unable to file its first
+    # task, caused by a performance fix.
+    #
+    # The fallback is narrow on purpose. It matches the missing-function code and
+    # nothing else, so a timeout, a pool death or any other Postgres error still
+    # degrades LOUD into the named 503. Widening this to a bare `rescue` would
+    # rebuild the silent fail-open this module was written to kill: an unfiltered
+    # retry after a REAL failure would answer "no duplicate" from an empty set.
+    e in Postgrex.Error ->
+      if trgm_unavailable?(e) do
+        Logger.warning(
+          "Tasks.Dedup: pg_trgm is unavailable, falling back to the UNFILTERED backlog " <>
+            "scan. Detection is unaffected; the scan is slow and the candidate cap is " <>
+            "alphabetical again. Run `CREATE EXTENSION IF NOT EXISTS pg_trgm;` to restore " <>
+            "the pre-filter."
+        )
+
+        fetch_rows(dataset, workspace_id, project_id, timeout, limit, "")
+      else
+        reraise e, __STACKTRACE__
+      end
+  end
+
+  defp trgm_unavailable?(%Postgrex.Error{postgres: %{code: code}}),
+    do: code in [:undefined_function, :undefined_object, :undefined_table]
+
+  defp trgm_unavailable?(_), do: false
+
+  defp base_query(dataset, workspace_id, project_id) do
+    from(d in Document,
+      as: :doc,
+      where: d.type == "task",
+      where: fragment("?->>'kind'", d.content) == "task",
+      # Cancelled/abandoned work must never block a legitimate re-attempt
+      # (acceptance criterion 4). Done tasks stay in — a match against a done
+      # task is a real "already landed" signal.
+      where: fragment("COALESCE(?->>'lifecycle_status', '')", d.content) != "cancelled",
+      distinct: [asc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)],
+      # Second key: `false` sorts before `true`, so the PUBLISHED row of a twin
+      # pair wins the DISTINCT ON.
+      order_by: [asc: fragment("? LIKE 'drafts.%'", d.doc_id)],
+      select: %{
+        doc_id: d.doc_id,
+        title: d.title,
+        description: fragment("?->>'description'", d.content),
+        labels: fragment("?->'labels'", d.content),
+        parent: fragment("?->>'parent_id'", d.content),
+        lifecycle: fragment("?->>'lifecycle_status'", d.content)
+      }
+    )
+    |> maybe_filter_dataset(dataset)
+    |> Scope.scope_to_workspace(workspace_id, project_id)
+  end
+
+  # `? % ?` (not `similarity(?, ?) > x`) is the form that CAN use the GIN
+  # `documents_title_trgm_idx`; the `similarity()` form can only seq-scan. Said
+  # honestly, though: at this table size the planner still picks a seq scan, and
+  # measured on the real corpus the pre-filtered query is not cheaper than the
+  # unfiltered one — both make one pass over the same rows. THE SQL IS NOT WHERE
+  # THE WIN IS, and this comment used to imply otherwise.
+  #
+  # The win is that the scorer's input shrinks. `Similarity.assess/3` is linear in
+  # the candidate count and unbounded by any timeout: 6,217 ms at 5,000 rows,
+  # 89 ms at 500. Bounding what reaches it is the whole fix; the operator choice
+  # only keeps the index reachable for when the corpus makes it worth planning.
+  # The score is also SELECTed so the outer query can rank by it without
+  # recomputing.
+  defp trgm_filtered(query, probe_title) do
+    from([doc: d] in query,
+      where: fragment("? % ?", d.title, ^probe_title),
+      select_merge: %{sim: fragment("similarity(?, ?)", d.title, ^probe_title)}
+    )
+  end
+
+  defp limited(query, limit), do: from(d in query, limit: ^(limit + @candidate_probe))
+
   defp report_scan(false, _returned, _limit, _dataset), do: :ok
 
   defp report_scan(true, returned, limit, dataset) do
     Logger.warning(
-      "Tasks.Dedup scan TRUNCATED: returned #{returned} of a larger eligible corpus at " <>
+      "Tasks.Dedup scan TRUNCATED: returned #{returned} of a larger candidate set at " <>
         "limit #{limit} (dataset=#{inspect(dataset)}). The duplicate check ran over a " <>
-        "PARTIAL backlog — an :ok from this scan means 'no duplicate among the " <>
-        "#{returned} rows scanned', not 'no duplicate'. Raising the limit re-arms this " <>
-        "quietly; the corpus needs a pre-filter."
+        "PARTIAL candidate set — an :ok from this scan means 'no duplicate among the " <>
+        "#{returned} rows scanned', not 'no duplicate'. This now means something " <>
+        "DIFFERENT and much rarer than it used to: the rows kept are the #{limit} MOST " <>
+        "TITLE-SIMILAR, not the alphabetically-first, so a bind here says the new title " <>
+        "trigram-matches more than #{limit} existing tasks — a generic title, or a " <>
+        "corpus that has outgrown the floor. Tighten @candidate_trgm_floor before you " <>
+        "raise the limit."
     )
 
     :telemetry.execute(

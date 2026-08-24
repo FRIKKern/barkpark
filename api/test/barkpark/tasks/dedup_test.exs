@@ -274,6 +274,14 @@ defmodule Barkpark.Tasks.DedupTest do
   # These tests drive the SAME condition at fixture scale through the production
   # code path, using the `:dedup_candidate_limit` override as the mutation lever:
   # a limit below the fixture corpus reproduces the live truncation exactly.
+  #
+  # WHAT CHANGED UNDER THEM. The cap no longer decides WHO gets checked by
+  # alphabet. Candidates are trgm-pre-filtered and ranked by descending title
+  # similarity before the limit applies, so a bind now drops the LEAST similar
+  # rows rather than the alphabetically-last ones, and the 29.2% hole above is
+  # closed — the index is consulted over the whole corpus instead of a sorted
+  # prefix. The tests below therefore assert the cap's ORDERING, not just that it
+  # announces itself.
   defp check_with_limit(doc_id, title, content, scope, limit) do
     Barkpark.Tasks.Dedup.check_new_task(
       "task",
@@ -290,8 +298,29 @@ defmodule Barkpark.Tasks.DedupTest do
       # near-duplicate of the probe and sorts LAST under the scan's
       # `DISTINCT ON (canonical doc_id) ASC` key — the same construction that put
       # every live `task-*` id past the cut on guerrilla.
-      {:ok, _} = create_task("a-filler-one", "seed the release notes generator", scope, %{})
-      {:ok, _} = create_task("b-filler-two", "wire up the sitemap exporter", scope, %{})
+      #
+      # The filler titles deliberately SHARE WORDS with the probe ("rate
+      # limiting …"), so they clear the trgm net and stay in the candidate set.
+      # Unrelated filler would simply be pre-filtered away, and a cap test whose
+      # filler never reaches the cap proves nothing about which rows the cap
+      # keeps. They stay well under the refuse threshold: the probe's scored
+      # tokens are {rate, limiting, mutate, controller} and each filler drowns
+      # the two it shares in six it does not.
+      {:ok, _} =
+        create_task(
+          "a-filler-one",
+          "rate limiting for the release notes generator and sitemap export pipeline",
+          scope,
+          %{}
+        )
+
+      {:ok, _} =
+        create_task(
+          "b-filler-two",
+          "rate limiting on the onix codelist validator and bokbasen delivery job",
+          scope,
+          %{}
+        )
 
       {:ok, _} =
         create_task("z-dupe", @rate_limit, scope, %{"description" => @rate_limit_desc})
@@ -299,17 +328,34 @@ defmodule Barkpark.Tasks.DedupTest do
       :ok
     end
 
-    # CRITERION 0 — the silent lie, proven live rather than argued. The cap binds,
-    # the duplicate is on the far side of it, and the gate answers `:ok`: a create
-    # told "not a duplicate" on a backlog it only partially scanned.
-    test "a duplicate PAST the cap is not detected — the scan is partial", %{scope: scope} do
+    # THIS TEST USED TO ASSERT THE DEFECT, AND NOW ASSERTS ITS REPAIR.
+    #
+    # Its previous form was `a duplicate PAST the cap is not detected — the scan
+    # is partial`: with the keep ordered by ascending canonical doc_id, a cap of
+    # 2 kept `a-filler-one` and `b-filler-two` and dropped `z-dupe`, so the gate
+    # answered a confident `:ok` about a backlog it had only partly read. That
+    # was the live shape on guerrilla — 2,064 ids (29.2%) past the cut, including
+    # 100% of the `task-*` ids `bp task create` mints by default.
+    #
+    # The trgm pre-filter ranks candidates by DESCENDING TITLE SIMILARITY before
+    # the cap applies, so the rows a bind discards are now the LEAST similar
+    # rather than the alphabetically-last. `z-dupe` is the most similar row in
+    # the corpus, so it survives even the tightest possible cap. Alphabet no
+    # longer decides who gets checked.
+    test "the cap keeps the MOST SIMILAR row, not the alphabetically-first", %{scope: scope} do
       probe = %{"kind" => "task", "description" => @rate_limit_desc}
 
-      assert :ok = check_with_limit("probe-truncated", @rate_limit, probe, scope, 2)
+      # A cap of ONE. Under the old ascending-doc_id keep this window could only
+      # ever hold `a-filler-one`; the duplicate sorted last and was unreachable.
+      assert {:error, {:duplicate_task, payload}} =
+               check_with_limit("probe-tightest-cap", @rate_limit, probe, scope, 1)
 
-      # THE CONTROL. Same corpus, same probe, cap lifted clear of it: the very
-      # same duplicate IS caught. So the `:ok` above is truncation, not a
-      # difference of opinion about similarity.
+      assert Enum.any?(payload.similar, &(&1.id == "z-dupe")),
+             "the single kept candidate must be the near-duplicate, not the alphabetic first"
+
+      # THE CONTROL. Same corpus, same probe, cap lifted clear of everything: the
+      # verdict is the same, so the refusal above is the ordering working, not a
+      # lucky accident of a one-row window.
       assert {:error, {:duplicate_task, _}} =
                check_with_limit("probe-complete", @rate_limit, probe, scope, 50)
     end
@@ -328,8 +374,12 @@ defmodule Barkpark.Tasks.DedupTest do
       assert log =~ "limit 2"
       # The consequence, not just the counts: an `:ok` here is a narrower claim
       # than the one the caller would otherwise read it as.
-      assert log =~ "PARTIAL backlog"
+      assert log =~ "PARTIAL candidate set"
       assert log =~ "not 'no duplicate'"
+      # The warning must say what a bind MEANS now — most-title-similar kept, not
+      # alphabetically-first — because the remedy changed with the ordering.
+      assert log =~ "MOST"
+      assert log =~ "@candidate_trgm_floor"
     end
 
     test "the truncation is COUNTABLE — telemetry carries returned and limit", %{scope: scope} do
@@ -416,6 +466,140 @@ defmodule Barkpark.Tasks.DedupTest do
 
       assert Enum.any?(payload.similar, &(&1.id == "z-dupe"))
       assert payload.scan.truncated == false
+    end
+  end
+
+  # ── the trgm candidate pre-filter ────────────────────────────────────────────
+  #
+  # WHY THIS EXISTS. `@query_timeout_ms` bounds `Repo.all/2` and nothing else, so
+  # the pure-Elixir scoring loop that consumes the fetched rows ran under no
+  # budget at all. MEASURED 2026-08-24 against guerrilla `production`: a gated
+  # draft-only `bp task create` took 9.2–14.3 s while the same create carrying
+  # `dedup_bypass` took 0.18–0.47 s — the gate was ~98% of a task birth — and
+  # `Similarity.assess/3` benched at 6,217 ms over 5,000 real rows vs 89 ms over
+  # 500. The remedy is to stop handing the scorer thousands of rows.
+  #
+  # Cost is not what these tests assert. Wall-clock on a shared host measures the
+  # load, not the code (the same reason `similarity_test.exs` counts tokenize
+  # events instead of milliseconds). What is asserted here is the MECHANISM that
+  # produces the cost reduction — that unrelated rows never enter the candidate
+  # set — plus, in both directions, that detection survived it.
+  describe "trgm candidate pre-filter" do
+    test "an unrelated task never enters the candidate set", %{scope: scope} do
+      {:ok, _} =
+        create_task("dupe-target", @rate_limit, scope, %{"description" => @rate_limit_desc})
+
+      # Ten rows with no lexical relationship to the probe whatsoever. Before the
+      # pre-filter every one of them was fetched, shaped and scored on every
+      # single create; that is the work the live corpus had 7,000 of.
+      #
+      # Each carries its OWN subject rather than a numbered suffix: digits are
+      # dropped as sub-3-character tokens, so "… delivery 1" and "… delivery 2"
+      # tokenize IDENTICALLY, and the second would be refused as a duplicate of
+      # the first before it ever reached the corpus.
+      for subject <- ~w(
+            bokbasen onixedit sheets webhooks presence
+            scaffold codelist thumbnails changelog telemetry
+          ) do
+        {:ok, _} = create_task("unrelated-#{subject}", "audit the #{subject} surface", scope, %{})
+      end
+
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("probe-prefilter", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc
+               })
+
+      # The scan population is the assertion. 11 eligible rows exist; the scan
+      # must have scored FAR fewer, and must still have found the one that
+      # matters. An off-by-a-little here is fine — an unfiltered scan would read
+      # all 11.
+      assert payload.scan.candidates_scanned < 11,
+             "the pre-filter did not engage: #{payload.scan.candidates_scanned} of 11 rows scanned"
+
+      assert Enum.any?(payload.similar, &(&1.id == "dupe-target"))
+    end
+
+    # ARM A of the mutation proof. The pre-filter must not become a hole: a
+    # genuine near-duplicate still has to be REFUSED through the new query.
+    test "a genuine near-duplicate is still REFUSED through the pre-filtered query", %{
+      scope: scope
+    } do
+      {:ok, _} =
+        create_task("prefilter-incumbent", @rate_limit, scope, %{
+          "description" => @rate_limit_desc,
+          "parent_id" => "epic-a"
+        })
+
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("prefilter-newcomer", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc,
+                 "parent_id" => "epic-b"
+               })
+
+      assert [%{id: "prefilter-incumbent"} | _] = payload.similar
+    end
+
+    # ARM B. A pre-filter that refused everything would pass arm A and still be
+    # worthless, so the non-duplicate has to keep sailing through.
+    test "a genuinely distinct task still PASSES the pre-filtered query", %{scope: scope} do
+      {:ok, _} =
+        create_task("prefilter-other", @rate_limit, scope, %{"description" => @rate_limit_desc})
+
+      assert {:ok, _} =
+               create_task(
+                 "prefilter-distinct",
+                 "render onix codelist 153 in the bokbasen export",
+                 scope,
+                 %{"description" => "map audience codes onto the ONIX 3.0 codelist"}
+               )
+    end
+
+    # THE FAIL-OPEN GUARD. `similarity(x, '')` is 0 for every row, so `? % ?`
+    # against an empty probe matches NOTHING — the scan would return an empty
+    # candidate set, find no refusals, and report a clean bill of health on a
+    # check it never ran. That is the exact silent-pass shape this module exists
+    # to refuse, so a blank title falls back to the unfiltered scan.
+    #
+    # DRIVEN THROUGH `check_new_task/5` DIRECTLY, and through a planted row, for
+    # the same reason the object-shaped-labels test below is: the authoring
+    # quality gate refuses a blank title ("task title is required") before
+    # `Content.create_document/4` ever reaches the dedup seam, so the write path
+    # cannot construct this case. Anything calling the gate without that gate in
+    # front of it — another plugin, an internal caller, a future write path —
+    # still can, and for those the empty probe would match nothing and hand back
+    # a clean bill of health it never computed.
+    test "a BLANK title falls back to the full scan instead of matching nothing", %{scope: scope} do
+      Barkpark.Repo.insert!(%Barkpark.Content.Document{
+        doc_id: "blank-title-incumbent",
+        type: "task",
+        dataset: @dataset,
+        status: "published",
+        rev: Ecto.UUID.generate(),
+        title: "",
+        workspace_id: Keyword.fetch!(scope, :workspace_id),
+        project_id: Keyword.fetch!(scope, :project_id),
+        content: %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "description" => @rate_limit_desc
+        }
+      })
+
+      assert {:error, {:duplicate_task, payload}} =
+               Barkpark.Tasks.Dedup.check_new_task(
+                 "task",
+                 %{
+                   "doc_id" => "blank-title-newcomer",
+                   "title" => "",
+                   "content" => %{"kind" => "task", "description" => @rate_limit_desc}
+                 },
+                 @dataset,
+                 nil,
+                 scope
+               )
+
+      assert Enum.any?(payload.similar, &(&1.id == "blank-title-incumbent")),
+             "an empty trgm probe must fall back to the full scan, not match nothing"
     end
   end
 
@@ -568,6 +752,19 @@ defmodule Barkpark.Tasks.DedupTest do
   # The row is planted with a direct `Repo.insert!` ON PURPOSE: the write path
   # would coerce it, and the whole point is a row that arrived through a
   # non-`bp` path (a migration, a restore, a hand-written INSERT).
+  #
+  # THE TITLE IS LOAD-BEARING, and it was not before. The candidate scan now
+  # trgm-pre-filters on the title, so a planted row titled "poisoned backlog row"
+  # would simply never be FETCHED when the probe below files "an unrelated new
+  # task" — and every assertion in this describe block would pass without the
+  # poison ever reaching the scan. A totality test that never sees the malformed
+  # row proves nothing. So the planted title deliberately shares the probe's
+  # opening words (trgm match -> the row IS scanned) while its scored tokens stay
+  # far apart: the probe tokenizes to {unrelated} once stopwords go, against
+  # {unrelated, poisoned, label, set} here, for a Jaccard of 0.25 — under the
+  # 0.30 advise floor, so the create is still allowed on the merits.
+  @poison_probe_title "an unrelated new task"
+
   defp plant_poisoned_row!(doc_id, labels, scope) do
     Barkpark.Repo.insert!(%Barkpark.Content.Document{
       doc_id: doc_id,
@@ -575,7 +772,7 @@ defmodule Barkpark.Tasks.DedupTest do
       dataset: @dataset,
       status: "published",
       rev: Ecto.UUID.generate(),
-      title: "poisoned backlog row",
+      title: @poison_probe_title <> " with a poisoned label set",
       workspace_id: Keyword.fetch!(scope, :workspace_id),
       project_id: Keyword.fetch!(scope, :project_id),
       content: %{
@@ -607,10 +804,24 @@ defmodule Barkpark.Tasks.DedupTest do
         # {:error, {:dedup_unavailable, "... the backlog scan failed
         # (Protocol.UndefinedError) ..."}} — for EVERY caller, on every create,
         # regardless of what the caller sent.
-        assert {:ok, _} =
-                 create_task("clean-#{:erlang.phash2(@label)}", "an unrelated new task", scope, %{
-                   "description" => "nothing like the poisoned row"
-                 })
+        # NON-VACUITY. The assertion that matters is not just "the create
+        # succeeded" — it is "the create succeeded WITH the poisoned row in the
+        # candidate set". The malformed-labels warning naming this doc_id is the
+        # proof the scan reached it; without that, a pre-filter that dropped the
+        # row would look identical to a gate that survived it.
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert {:ok, _} =
+                     create_task(
+                       "clean-#{:erlang.phash2(@label)}",
+                       @poison_probe_title,
+                       scope,
+                       %{"description" => "nothing like the poisoned row"}
+                     )
+          end)
+
+        assert log =~ "poison-#{:erlang.phash2(@label)}",
+               "the poisoned row never entered the candidate set — this test is vacuous"
       end
     end
 
@@ -622,7 +833,7 @@ defmodule Barkpark.Tasks.DedupTest do
           plant_poisoned_row!("poison-reported", [%{"tag" => "pds"}], scope)
 
           assert {:ok, _} =
-                   create_task("clean-reported", "an unrelated new task", scope, %{
+                   create_task("clean-reported", @poison_probe_title, scope, %{
                      "description" => "nothing like the poisoned row"
                    })
         end)
