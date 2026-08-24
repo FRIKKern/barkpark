@@ -60,6 +60,17 @@ defmodule Barkpark.Plugins.Github.Intake do
        wave-1 outbox reader (`source != "github"`) excludes it — no OUTBOUND echo
        of an inbound birth.
 
+    4b. **The acknowledgement criterion (born, not remembered).** The birth attrs
+       carry exactly ONE `acceptance_criteria` entry —
+       `Github.Acknowledgement.criterion/2`, flagged `"ack_gate" => true` — which
+       names the comment a maintainer still owes the reporter. Before this, an
+       intake was born with NO criteria key at all, and an empty criteria list
+       reads to every audit as fully proven: measured 2026-08-24, 9 of the 11
+       intaken rows carried zero criteria and 8 reporters had heard nothing but
+       the gate-5 backlink, the oldest 29 days old. The criterion is what
+       `Tasks.Close` reads to refuse a `done`/`cancelled` close that would leave
+       the reporter with silence.
+
     5. **Backlink comment (best-effort).** After a genuine BIRTH only (never a
        re-delivery no-op, a drop, or an ignore) post a "tracked internally"
        comment via the injectable `:comment_fun` seam (default
@@ -98,7 +109,7 @@ defmodule Barkpark.Plugins.Github.Intake do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Plugins.Github.{Client, Settings}
+  alias Barkpark.Plugins.Github.{Acknowledgement, Client, Settings}
 
   @task_type "task"
   @default_dataset "production"
@@ -341,6 +352,14 @@ defmodule Barkpark.Plugins.Github.Intake do
         "lifecycle_status" => "open",
         "disposition" => "open",
         "disposition_reason" => intake_disposition_reason(number, issue, payload),
+        # BORN WITH THE ONE OBLIGATION IT OWES, not with an empty list. Every
+        # intake before this carried NO `acceptance_criteria` key at all, and an
+        # empty criteria list reads to every audit as fully proven — so eight
+        # outsider reports sat in a blind spot where nothing could see that the
+        # reporter had never been answered (`Github.Acknowledgement` carries the
+        # 2026-08-24 measurement). The row now states the obligation itself, and
+        # `Tasks.Close` refuses a `done`/`cancelled` close while it is unmet.
+        "acceptance_criteria" => [Acknowledgement.criterion(issue_repo(payload), number)],
         "github" => %{
           "repo" => issue_repo(payload),
           "issue" => number,

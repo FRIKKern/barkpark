@@ -18,7 +18,7 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.MutationEvent
-  alias Barkpark.Plugins.Github.{Intake, Link, Outbox}
+  alias Barkpark.Plugins.Github.{Acknowledgement, Intake, Link, Outbox}
 
   @dataset "production"
 
@@ -208,6 +208,31 @@ defmodule Barkpark.Plugins.Github.IntakeTest do
       {:ok, :born, doc} = Intake.ingest(payload, opts(scope))
 
       assert doc.content["github"]["repo"] == "someone/forked"
+    end
+
+    test "is born carrying the acknowledgement criterion, unmet and FLAGGED",
+         %{scope: scope} do
+      # Before this, an intake was born with NO acceptance_criteria key at all —
+      # and an empty criteria list reads to every audit as fully proven, which is
+      # how nine outsider reports went unanswered with nothing able to see it.
+      {:ok, :born, doc} = Intake.ingest(opened_payload(14), opts(scope))
+
+      assert [criterion] = doc.content["acceptance_criteria"]
+      assert criterion["ack_gate"] == true
+      assert criterion["met"] == false
+      assert criterion["evidence"] == ""
+      # Names a place the reader can go and check, like the disposition reason.
+      assert criterion["criterion"] =~ "FRIKKern/barkpark#14"
+      refute Acknowledgement.acknowledged?(doc.content)
+    end
+
+    test "the birth criterion names the repo the issue actually lives in",
+         %{scope: scope} do
+      payload = opened_payload(15, %{"repository" => %{"full_name" => "someone/forked"}})
+      {:ok, :born, doc} = Intake.ingest(payload, opts(scope))
+
+      assert doc.content["acceptance_criteria"] |> hd() |> Map.get("criterion") =~
+               "someone/forked#15"
     end
   end
 

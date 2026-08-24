@@ -18,6 +18,7 @@ github-adopt	adopt
 github-inbound-intake	ingest
 github-mirror-reconcile	reconcile
 github-projects-sync	sync
+github-reporter-acknowledgement	criterion
 heat-quantile-bin	HeatQuantileBins
 http-redirect-policy	CheckRedirect
 instance-content-bootstrap	Run
