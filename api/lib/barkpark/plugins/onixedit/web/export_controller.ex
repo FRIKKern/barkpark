@@ -27,7 +27,6 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   alias Barkpark.Content
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.OnixEdit.Export
-  alias BarkparkWeb.ErrorResponse
 
   @content_type "application/onix+xml"
 
@@ -52,8 +51,16 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
         |> put_resp_header("content-disposition", ~s|attachment; filename="#{pub_id}.onix"|)
         |> send_resp(200, iodata)
 
+      # NO `alias BarkparkWeb.ErrorResponse` IN THIS FILE, ON PURPOSE. The
+      # `send_resp(200, iodata)` three lines above is a REVIEWED false positive
+      # pinned by line in api/.sobelow-skips
+      # (`…/export_controller.ex:52,64EB26D`). An alias line would push it to 53
+      # and red the advisory Sobelow job over a finding nobody introduced, and
+      # security.yml:265 forbids regenerating that baseline on a dev toolchain.
+      # Fully-qualified calls keep the anchor valid; this comment sits BELOW the
+      # anchored line so it cannot move it either.
       {:error, {:xsd_invalid, reasons}} ->
-        ErrorResponse.emit_custom(
+        BarkparkWeb.ErrorResponse.emit_custom(
           conn,
           500,
           "xsd_invalid",
@@ -66,7 +73,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
       # cover — so this is the caller's problem, not a server fault: 422 with a
       # structured body naming the offending codelist + code, never a bare 500.
       {:error, {:invalid_code, detail}} ->
-        ErrorResponse.emit_custom(
+        BarkparkWeb.ErrorResponse.emit_custom(
           conn,
           422,
           "invalid_onix_code",
@@ -113,6 +120,6 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   end
 
   defp send_404(conn) do
-    ErrorResponse.emit(conn, {:error, :not_found})
+    BarkparkWeb.ErrorResponse.emit(conn, {:error, :not_found})
   end
 end

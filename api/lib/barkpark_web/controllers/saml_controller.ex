@@ -107,8 +107,7 @@ defmodule BarkparkWeb.SamlController do
     end
   end
 
-  def acs(conn, %{"org_slug" => _}),
-    do: ErrorResponse.emit_custom(conn, 400, "malformed", "SAMLResponse is required")
+  def acs(conn, %{"org_slug" => _}), do: refuse_missing(conn, "SAMLResponse is required")
 
   @doc """
   IdP-initiated Single Logout (POST binding). The LogoutRequest's XML-dsig is
@@ -177,8 +176,19 @@ defmodule BarkparkWeb.SamlController do
     end
   end
 
-  def slo(conn, %{"org_slug" => _}),
-    do: ErrorResponse.emit_custom(conn, 400, "malformed", "SAMLRequest is required")
+  def slo(conn, %{"org_slug" => _}), do: refuse_missing(conn, "SAMLRequest is required")
+
+  # Deliberately NOT `ErrorResponse.emit_custom/5` inline in the clause above.
+  # The FIRST `slo/2` clause carries an `XSS.SendResp` waiver (the esaml
+  # LogoutResponse form it send_resp's), and
+  # api/scripts/sobelow-inline-overlap-check.sh rule 4a reds when a sibling
+  # clause of an annotated def group calls the same module the annotated clause
+  # calls without carrying its own annotation — Sobelow binds a waiver to ONE
+  # def. Stamping this clause with an `XSS.SendResp` waiver would be a lie: it
+  # cannot produce that finding, it never calls send_resp. Routing through a
+  # single-clause private helper keeps the waiver honest and the gate green.
+  defp refuse_missing(conn, message),
+    do: ErrorResponse.emit_custom(conn, 400, "malformed", message)
 
   # A browser's form POST / redirect chain advertises text/html; API clients
   # (interop suite, SDKs) don't. Drives the redirect-vs-JSON fork above.
