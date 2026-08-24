@@ -4623,6 +4623,74 @@ defmodule BarkparkCloud.Registry do
   def pause_autoupdate(%Barkpark{} = bp), do: set_autoupdate(bp, %{autoupdate_paused: true})
 
   @doc """
+  Record — from the rollout's OWN 503 — that this box has not armed one-click
+  apply, so `next_autoupdate_candidate/1` stops picking it.
+
+  THIS IS THE NON-LATCHING TWIN OF `pause_autoupdate/1`, and the difference is
+  the whole reason it exists. `autoupdate_paused` is a POLICY flag whose only
+  `false` writer is a human PATCH; writing it from a machine-observed 503 turns
+  a recoverable box condition into a permanent, human-gated one. `apply_arming`
+  is a MEASUREMENT, and the hourly `UpdateStatusWorker` sweep re-measures it: the
+  moment the operator sets `BARKPARK_SELF_UPDATE_APPLY=1` and restarts the box,
+  its admin route answers `apply_enabled: true`, `refresh_update_status/1` writes
+  `"armed"`, and the box re-enters the candidate set with nobody clearing
+  anything.
+
+  The 503 is an authoritative reading of the SAME fact the arming probe reads —
+  the box's `Runner.enabled?/0`, which is what its one-click-apply handler
+  decides its `feature_not_configured` 503 from — so writing `"unarmed"` here is
+  a measurement, not an inference. It carries `apply_arming_checked_at` for the
+  same reason the probe does: an operator needs to know WHEN the fact was last
+  established, and this writer establishes it off a POST rather than the GET.
+
+  Deliberately writes ONLY the two arming columns — it must not touch
+  `update_state` (the box's `behind` verdict is unchanged by its refusal to
+  apply) and it must not touch any autoupdate policy column.
+  """
+  @spec record_apply_unarmed(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
+  def record_apply_unarmed(%Barkpark{} = bp) do
+    bp
+    |> Barkpark.update_status_changeset(%{
+      apply_arming: "unarmed",
+      apply_arming_checked_at: DateTime.utc_now()
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  The RETRO-ARM WORKLIST: every box that autoupdate is supposed to reach and that
+  has been MEASURED unarmed. Slug order (stable, so an operator can diff two runs).
+
+  This is the pre-bless readiness read. Blessing a release while this list is
+  non-empty means the rollout will walk straight into a 503 on each named box —
+  which before `record_apply_unarmed/1` latched them off autoupdate for good, and
+  which even now means the release simply cannot land there until somebody arms
+  them. A caller that gates a bless on this SHOULD refuse, or at minimum name
+  every row, rather than reporting a count.
+
+  MEASURED-unarmed ONLY. A `nil` (unmeasured) box is NOT on this list — it may
+  well be armed, and padding a readiness refusal with boxes nobody has asked
+  would make the list unactionable, which is worse than no list.
+
+  `autoupdate_paused` is deliberately NOT filtered out. A box already paused is
+  the WORST case, not an excluded one: it is both unarmed and latched off, so it
+  needs the arming AND the human resume, and an operator reading this list to
+  prepare a bless must see it.
+  """
+  @spec unarmed_autoupdate_boxes() :: [Barkpark.t()]
+  def unarmed_autoupdate_boxes do
+    from(b in Barkpark,
+      where: not is_nil(b.host) and b.host != "",
+      where: b.suspended == false,
+      where: b.autoupdate_enabled == true,
+      where: is_nil(b.pinned_release),
+      where: b.apply_arming == "unarmed",
+      order_by: [asc: b.slug]
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Instances with a self-update currently IN FLIGHT — the rollout worker stamped
   `autoupdate_triggered_at` and is waiting for them to settle `current`. The
   staged rollout refuses to start a new instance while this list is non-empty
@@ -4640,12 +4708,37 @@ defmodule BarkparkCloud.Registry do
   @doc """
   The NEXT instance eligible for an autoupdate, or nil. Eligible = live (`host`
   set) · not billing-suspended · reporting `behind` · `autoupdate_enabled` · not
-  paused · not pinned · not already in flight. Oldest-behind first (a stable,
-  fair order), so the rollout drains the most-stale instances first.
+  paused · not pinned · not already in flight · not MEASURED-unarmed. Oldest-behind
+  first (a stable, fair order), so the rollout drains the most-stale instances
+  first.
 
   With a `channel` ("prod" | "staging") the pick is confined to that channel —
   the canary-gated rollout (isu-w5.2) advances staging boxes before prod. With
   the default `nil`, the pick spans all channels.
+
+  THE ARMING DISQUALIFICATION, AND WHY IT IS A DISQUALIFICATION AND NOT A PAUSE.
+  A box whose `apply_arming` reads `"unarmed"` will answer the rollout's trigger
+  POST with a 503 — that is the same `Runner.enabled?/0` false the arming probe
+  already measured. Before this clause the worker's only answer to that 503 was
+  `pause_autoupdate/1`, a flag NO code path clears (its sole `false` writer is a
+  human PATCH on `/v1/barkparks/:id/autoupdate`), so a fleet-wide rollout against
+  unarmed boxes latched every one of them off autoupdate permanently.
+
+  The clause cannot simply be dropped from the 503 branch, because
+  `order_by: update_checked_at` would re-pick the same unarmed box every tick
+  forever and nothing else would ever advance. DISQUALIFYING it here is what
+  makes a non-pausing 503 branch safe: the box leaves the candidate set without
+  any flag a human must later clear, and it RE-ENTERS on its own the moment the
+  hourly `UpdateStatusWorker` sweep reads `apply_enabled: true` off its admin
+  route and `refresh_update_status/1` writes `apply_arming: "armed"` back. Entry
+  and exit are both automatic; that is the whole point.
+
+  `nil` IS NOT `"unarmed"`. The unmeasured third state (a pre-#12995 box, or one
+  no sweep has read yet) stays ELIGIBLE — those boxes may well be armed, and
+  disqualifying them would wedge the rollout for exactly the fleet this feature
+  was built to serve. Note the explicit `is_nil/1` arm: SQL's `!=` is NULL, not
+  true, on a NULL column, so `b.apply_arming != "unarmed"` ALONE would silently
+  exclude every unmeasured box — the wedge this clause exists to avoid.
   """
   @spec next_autoupdate_candidate(nil | binary()) :: Barkpark.t() | nil
   def next_autoupdate_candidate(channel \\ nil) do
@@ -4658,6 +4751,7 @@ defmodule BarkparkCloud.Registry do
         where: b.autoupdate_paused == false,
         where: is_nil(b.pinned_release),
         where: is_nil(b.autoupdate_triggered_at),
+        where: is_nil(b.apply_arming) or b.apply_arming != "unarmed",
         order_by: [asc: b.update_checked_at],
         limit: 1
       )
