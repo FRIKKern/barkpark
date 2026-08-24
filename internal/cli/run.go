@@ -206,10 +206,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
 	g.view = resolveView(out, g, cmd)
 
-	// Say so when --limit/--offset cannot leave the client for this command.
+	// REFUSE when a pagination knob cannot leave the client for this command.
 	// applyQuery is writer-less (it is shared with the headless MCP dispatch),
-	// so the notice belongs here — the same seam resolveView uses above.
-	warnDroppedPagination(out, g, cmd)
+	// so the check belongs here — the same seam resolveView uses above — and
+	// it runs BEFORE buildManifestRequest, so a refused invocation sends
+	// nothing and reads nothing.
+	if code, refused := refuseDroppedKnobs(out, g, cmd); refused {
+		return code
+	}
 
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
@@ -2383,24 +2387,43 @@ func mustResult(inner []byte) []byte {
 // or credential in the workspace, which is exactly where a silent truncation
 // (or a silent NON-truncation the caller believes is a page) misleads most.
 //
-// This warns rather than refuses on purpose: the request is still correct and
-// still answers the question, and refusing would break every existing script
-// that passes a harmless global. stderr keeps stdout parseable.
+// THIS REFUSES. It used to warn, and the reversal is deliberate and owned —
+// see the note below, because the code must not carry a rationale it no longer
+// follows.
 //
-// --all WAS THE ONE KNOB STILL DROPPED IN TOTAL SILENCE, and it is the flag
-// agents pass most reflexively. Measured against the live manifest before this
-// change (bp doc get post p1 --dry-run, both channels captured):
+// THE OLD RATIONALE, VERBATIM, SO THE REVERSAL IS LEGIBLE: "This warns rather
+// than refuses on purpose: the request is still correct and still answers the
+// question, and refusing would break every existing script that passes a
+// harmless global." That reasoning rested on a caller population that could be
+// enumerated. It cannot: a repo-wide sweep finds ZERO
+// `bp … --all/--limit/--offset` invocations in scripts/ or .github/, and the
+// callers that actually pass these flags are AGENTS, which live outside this
+// repo entirely. An enumeration that returns zero because it cannot see the
+// callers is not evidence of safety.
+//
+// So the register flips to the #13620 precedent — refuse a knob you cannot
+// honour — on the ground that a flag honoured in APPEARANCE and discarded in
+// FACT is the same class of defect as every other silent drop: the caller
+// believes it asked for something it did not get, and nothing on any channel
+// contradicts them. A refusal is loud and recoverable; a silent drop is
+// neither. THIS IS A BEHAVIOUR BREAK for any caller that sprinkles --all across
+// mixed verbs, and it is meant to be trivially reversible: delete the two
+// `refused` returns and restore out.errf to get the notice back.
+//
+// WHAT WAS ACTUALLY SILENT, measured against the live manifest before the
+// change (bp doc get post p1 --dry-run, BOTH channels captured — capturing
+// stdout alone is what made all three look silent):
 //
 //	--limit 7    stderr: note: --limit ignored — `doc get` does not accept …
 //	--offset 5   stderr: note: --offset ignored — `doc get` does not accept …
 //	--all        stderr: (nothing)
 //
-// It is honoured by exactly one branch of runCommand — `cmd.Paginated && g.all
-// && !cmd.Writes` — so a paginated WRITE swallows it too, not just the
+// --all is honoured by exactly one branch of runCommand — `cmd.Paginated &&
+// g.all && !cmd.Writes` — so a paginated WRITE swallows it too, not just the
 // non-paginated reads the limit/offset arm covers. Hence the separate
-// condition: this arm is keyed on how --all is actually consumed, not on
+// condition: that arm is keyed on how --all is actually CONSUMED, not on
 // cmd.Paginated alone.
-func warnDroppedPagination(out *writer, g globals, cmd manifest.Command) {
+func refuseDroppedKnobs(out *writer, g globals, cmd manifest.Command) (int, bool) {
 	// --all rides only the paginated-READ walk; a write or a non-paginated
 	// command drops it.
 	if g.all && (!cmd.Paginated || cmd.Writes) {
@@ -2408,14 +2431,14 @@ func warnDroppedPagination(out *writer, g globals, cmd manifest.Command) {
 		if cmd.Writes {
 			what = "is a write, and a write is never paginated"
 		}
-		out.errf(
-			"note: --all ignored — `%s %s` %s; the answer below is a single result, not a walked collection",
+		return useError(out, "usage", fmt.Sprintf(
+			"--all cannot be honoured: `%s %s` %s. Nothing was sent. Re-run without --all — the answer is a single result, not a walked collection.",
 			cmd.Noun, cmd.Verb, what,
-		)
+		), exitUsage), true
 	}
 
 	if cmd.Paginated {
-		return
+		return 0, false
 	}
 	var dropped []string
 	if g.limitSet && !commandDeclaresFlag(cmd, "limit") {
@@ -2425,12 +2448,12 @@ func warnDroppedPagination(out *writer, g globals, cmd manifest.Command) {
 		dropped = append(dropped, "--offset")
 	}
 	if len(dropped) == 0 {
-		return
+		return 0, false
 	}
-	out.errf(
-		"note: %s ignored — `%s %s` does not accept pagination; the answer below is the server's full result, not a page",
-		strings.Join(dropped, " and "), cmd.Noun, cmd.Verb,
-	)
+	return useError(out, "usage", fmt.Sprintf(
+		"%s cannot be honoured: `%s %s` does not accept pagination. Nothing was sent. Re-run without %s — the answer is the server's full result, not a page.",
+		strings.Join(dropped, " and "), cmd.Noun, cmd.Verb, strings.Join(dropped, " or "),
+	), exitUsage), true
 }
 
 // confirmProdWrite prompts on stderr and reads a [y/N] answer from stdin.
