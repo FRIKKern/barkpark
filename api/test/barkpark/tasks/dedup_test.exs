@@ -264,6 +264,161 @@ defmodule Barkpark.Tasks.DedupTest do
     |> Barkpark.Repo.insert!()
   end
 
+  # ── the candidate cap can no longer bind silently ──────────────────────────
+  #
+  # `@candidate_limit` bounds the backlog scan. On 2026-08-24 the eligible corpus
+  # (7,064 distinct canonical ids) CROSSED that cap, so 2,064 ids — 29.2% — were
+  # invisible to every dedup scan and the gate still answered `:ok`, reporting a
+  # duplicate check it had only partly run.
+  #
+  # These tests drive the SAME condition at fixture scale through the production
+  # code path, using the `:dedup_candidate_limit` override as the mutation lever:
+  # a limit below the fixture corpus reproduces the live truncation exactly.
+  defp check_with_limit(doc_id, title, content, scope, limit) do
+    Barkpark.Tasks.Dedup.check_new_task(
+      "task",
+      %{"doc_id" => doc_id, "title" => title, "content" => content},
+      @dataset,
+      nil,
+      Keyword.put(scope, :dedup_candidate_limit, limit)
+    )
+  end
+
+  describe "candidate cap truncation" do
+    setup %{scope: scope} do
+      # Three eligible rows. `a-…` and `b-…` are filler; `z-dupe` is a REAL
+      # near-duplicate of the probe and sorts LAST under the scan's
+      # `DISTINCT ON (canonical doc_id) ASC` key — the same construction that put
+      # every live `task-*` id past the cut on guerrilla.
+      {:ok, _} = create_task("a-filler-one", "seed the release notes generator", scope, %{})
+      {:ok, _} = create_task("b-filler-two", "wire up the sitemap exporter", scope, %{})
+
+      {:ok, _} =
+        create_task("z-dupe", @rate_limit, scope, %{"description" => @rate_limit_desc})
+
+      :ok
+    end
+
+    # CRITERION 0 — the silent lie, proven live rather than argued. The cap binds,
+    # the duplicate is on the far side of it, and the gate answers `:ok`: a create
+    # told "not a duplicate" on a backlog it only partially scanned.
+    test "a duplicate PAST the cap is not detected — the scan is partial", %{scope: scope} do
+      probe = %{"kind" => "task", "description" => @rate_limit_desc}
+
+      assert :ok = check_with_limit("probe-truncated", @rate_limit, probe, scope, 2)
+
+      # THE CONTROL. Same corpus, same probe, cap lifted clear of it: the very
+      # same duplicate IS caught. So the `:ok` above is truncation, not a
+      # difference of opinion about similarity.
+      assert {:error, {:duplicate_task, _}} =
+               check_with_limit("probe-complete", @rate_limit, probe, scope, 50)
+    end
+
+    # CRITERION 1 — when the cap binds, the gate SAYS SO, by name, carrying both
+    # rows-returned and the limit. A bound nobody can observe engaging is the
+    # defect, not the number.
+    test "the truncated scan WARNS with rows-returned and the limit", %{scope: scope} do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          check_with_limit("probe-warn", @rate_limit, %{"kind" => "task"}, scope, 2)
+        end)
+
+      assert log =~ "Tasks.Dedup scan TRUNCATED"
+      assert log =~ "returned 2"
+      assert log =~ "limit 2"
+      # The consequence, not just the counts: an `:ok` here is a narrower claim
+      # than the one the caller would otherwise read it as.
+      assert log =~ "PARTIAL backlog"
+      assert log =~ "not 'no duplicate'"
+    end
+
+    test "the truncation is COUNTABLE — telemetry carries returned and limit", %{scope: scope} do
+      handler = "dedup-truncation-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :telemetry.attach(
+        handler,
+        [:barkpark, :tasks, :dedup, :scan_truncated],
+        fn _event, measurements, metadata, _ ->
+          send(test_pid, {:truncated, measurements, metadata})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler) end)
+
+      check_with_limit("probe-telemetry", @rate_limit, %{"kind" => "task"}, scope, 2)
+
+      assert_received {:truncated, %{returned: 2, limit: 2}, %{dataset: @dataset}}
+    end
+
+    # A scan that fit does NOT cry wolf. The probe row is the whole discriminator
+    # between "the backlog is exactly `limit` rows" and "the backlog is bigger".
+    test "a scan that FITS is silent and reports truncated: false", %{scope: scope} do
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert {:error, {:duplicate_task, payload}} =
+                   check_with_limit(
+                     "probe-fits",
+                     @rate_limit,
+                     %{"kind" => "task", "description" => @rate_limit_desc},
+                     scope,
+                     3
+                   )
+
+          # Exactly `limit` eligible rows exist. Without the +1 probe row this
+          # case is indistinguishable from a truncation, and a naive
+          # `length == limit` check would false-alarm on every one of them.
+          assert payload.scan == %{
+                   truncated: false,
+                   candidates_scanned: 3,
+                   candidate_limit: 3
+                 }
+        end)
+
+      refute log =~ "Tasks.Dedup scan TRUNCATED"
+    end
+
+    # CRITERION 1, third channel — the ANSWER states the population it was
+    # computed over, so a duplicate payload produced under a bound scan is not
+    # mistaken for one produced over the whole backlog.
+    test "the duplicate payload carries the scan population", %{scope: scope} do
+      # A duplicate that sorts INSIDE the truncated window, so the scan both
+      # binds AND still produces a verdict. (`dedup_bypass` is only how this row
+      # gets filed past the gate it is a fixture for — it plays no part in the
+      # scan that follows.)
+      {:ok, _} =
+        create_task("a-real-dupe", @rate_limit, scope, %{
+          "description" => @rate_limit_desc,
+          "dedup_bypass" => true
+        })
+
+      assert {:error, {:duplicate_task, payload}} =
+               check_with_limit(
+                 "probe-payload",
+                 @rate_limit,
+                 %{"kind" => "task", "description" => @rate_limit_desc},
+                 scope,
+                 2
+               )
+
+      assert payload.scan == %{truncated: true, candidates_scanned: 2, candidate_limit: 2}
+    end
+
+    # CRITERION 4 — the tripwire is not paid for with a detection hole. The rows
+    # the scan DOES fetch are scored exactly as before; only the extra probe row
+    # is new, and it is dropped before scoring.
+    test "no detection regression: an in-range duplicate is still refused", %{scope: scope} do
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("probe-default-limit", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc
+               })
+
+      assert Enum.any?(payload.similar, &(&1.id == "z-dupe"))
+      assert payload.scan.truncated == false
+    end
+  end
+
   describe "candidate projection + twin collapse" do
     test "a draft/published TWIN pair is scored and reported ONCE, not twice", %{scope: scope} do
       {:ok, draft} =

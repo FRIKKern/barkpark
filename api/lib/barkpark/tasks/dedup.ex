@@ -69,7 +69,37 @@ defmodule Barkpark.Tasks.Dedup do
   # (tier-2); until then the cost is held down by projecting the candidate row
   # (below) instead of hauling full content JSONB, and by tokenizing the new task
   # once (Similarity.probe/1).
+  #
+  # RE-MEASURED 2026-08-24 (`bp export --type task`, guerrilla `production`,
+  # the scan's own WHERE: kind == "task" AND lifecycle_status != "cancelled"):
+  # 7,754 exported rows (602 of them draft twins) -> 7,220 eligible ->
+  # **7,064 distinct canonical ids**. The corpus is no longer "inside one order
+  # of magnitude of" the cap — it has CROSSED it. 2,064 ids (29.2%) sit past the
+  # LIMIT and were invisible to every dedup scan, on every create.
+  #
+  # And the invisible set is not a random 29.2%. `LIMIT` applies AFTER
+  # `DISTINCT ON`, whose ordering key is the canonical doc_id ASCENDING, so the
+  # scan sees the alphabetically-first 5,000 ids and nothing after. The 2026-08-24
+  # cut falls inside the `scaffy-w4-*` family, which means **all 1,093 `task-*`
+  # ids — the shape `bp task create` mints whenever the author supplies no slug —
+  # were 100% unscanned**, along with every `spd-*`, `stw*`, `tgw*` and `ssw*` row.
+  # An id-prefix convention adopted late in the alphabet is invisible by
+  # construction, permanently and reproducibly.
+  #
+  # THE VALUE IS DELIBERATELY UNCHANGED. Raising it re-arms the same trap a few
+  # thousand rows later, just as quietly; the defect was never the number, it was
+  # that the number could bind without anyone finding out. What changed is that
+  # the scan now DETECTS its own truncation (see `fetch_candidates/2`) and says
+  # so — a warning naming rows-returned and the limit, a telemetry event, and a
+  # `scan` note on any duplicate payload it does manage to produce.
   @candidate_limit 5000
+
+  # The truncation tripwire: ask for ONE row more than the cap. If that extra row
+  # comes back, the eligible corpus has outgrown @candidate_limit and this scan is
+  # PARTIAL. It costs a single row, needs no second `COUNT` query against a corpus
+  # this size, and cannot be wrong — `length(rows) > limit` is the same fact the
+  # database used to decide to stop.
+  @candidate_probe 1
 
   # The dedup scan gets its OWN budget, well inside the request's 15 s DB
   # checkout. Without it the scan raced that budget and the FOLLOW-UP insert was
@@ -117,7 +147,7 @@ defmodule Barkpark.Tasks.Dedup do
       {:degraded, reason} ->
         {:error, {:dedup_unavailable, degraded_message(reason)}}
 
-      {:ok, candidates} ->
+      {:ok, candidates, scan} ->
         assessment =
           Similarity.assess(new_task, candidates, distinct_from: distinct)
 
@@ -141,7 +171,8 @@ defmodule Barkpark.Tasks.Dedup do
                   "this task looks like an existing one — claim/extend it, or pass " <>
                     "distinct_from: [\"<id>\"] to confirm it is different",
                 similar: Enum.map(refuse, &present/1),
-                advise: Enum.map(remaining_advise, &present/1)
+                advise: Enum.map(remaining_advise, &present/1),
+                scan: scan
               }}}
         end
     end
@@ -203,7 +234,8 @@ defmodule Barkpark.Tasks.Dedup do
 
   # ── candidate fetch ────────────────────────────────────────────────────────
 
-  # `{:ok, candidates}` or `{:degraded, reason}` — NEVER a silently-empty list.
+  # `{:ok, candidates, scan_report}` or `{:degraded, reason}` — never a silently
+  # EMPTY candidate set, and never a silently TRUNCATED one either.
   #
   # WHAT THIS QUERY CHANGED, said out loud (no silent narrowing):
   #
@@ -225,6 +257,7 @@ defmodule Barkpark.Tasks.Dedup do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
+    limit = Keyword.get(opts, :dedup_candidate_limit, @candidate_limit)
 
     query =
       from(d in Document,
@@ -247,12 +280,23 @@ defmodule Barkpark.Tasks.Dedup do
           parent: fragment("?->>'parent_id'", d.content),
           lifecycle: fragment("?->>'lifecycle_status'", d.content)
         },
-        limit: @candidate_limit
+        limit: ^(limit + @candidate_probe)
       )
       |> maybe_filter_dataset(dataset)
       |> Scope.scope_to_workspace(workspace_id, project_id)
 
-    {:ok, query |> Repo.all(timeout: timeout) |> to_tasks()}
+    rows = Repo.all(query, timeout: timeout)
+
+    # The probe row is the ONLY thing that distinguishes "the backlog happens to
+    # be exactly `limit` rows" from "the backlog is larger than this scan saw".
+    # It is dropped before scoring either way, so detection over the rows we DID
+    # fetch is byte-identical to before.
+    {kept, truncated?} =
+      if length(rows) > limit, do: {Enum.take(rows, limit), true}, else: {rows, false}
+
+    report_scan(truncated?, length(kept), limit, dataset)
+
+    {:ok, to_tasks(kept), scan_report(truncated?, length(kept), limit)}
   rescue
     e ->
       Logger.warning("Tasks.Dedup degraded: candidate fetch failed: #{inspect(e)}")
@@ -261,6 +305,48 @@ defmodule Barkpark.Tasks.Dedup do
     :exit, reason ->
       Logger.warning("Tasks.Dedup degraded: candidate fetch exited: #{inspect(reason)}")
       {:degraded, "the backlog scan was cut off by the database"}
+  end
+
+  # ── the cap CANNOT bind silently ───────────────────────────────────────────
+  #
+  # Three channels, because a bound that engages with nobody watching is the
+  # defect this module exists to kill:
+  #
+  #   1. a `Logger.warning` naming rows-returned, the limit and the CONSEQUENCE
+  #      (an `:ok` from this scan means "no duplicate among the rows I saw", not
+  #      "no duplicate"),
+  #   2. a `:telemetry` event so the bind is COUNTABLE over time rather than
+  #      rediscovered by an audit twenty-three days late, and
+  #   3. a `scan` note carried on the duplicate payload itself, so the answer a
+  #      caller receives states the population it was computed over.
+  #
+  # What this deliberately does NOT do is refuse the create. The corpus is
+  # already past the cap, so refusing on truncation would brick every task birth
+  # on the ledger — trading a silent wrong answer for a total outage. The
+  # remaining honest gap is stated out loud rather than papered over: the
+  # NO-duplicate branch answers a bare `:ok`, which has no room for the caveat,
+  # and widening that return shape reaches both `Content.Writer` call sites.
+  # That is filed, not hidden.
+  defp report_scan(false, _returned, _limit, _dataset), do: :ok
+
+  defp report_scan(true, returned, limit, dataset) do
+    Logger.warning(
+      "Tasks.Dedup scan TRUNCATED: returned #{returned} of a larger eligible corpus at " <>
+        "limit #{limit} (dataset=#{inspect(dataset)}). The duplicate check ran over a " <>
+        "PARTIAL backlog — an :ok from this scan means 'no duplicate among the " <>
+        "#{returned} rows scanned', not 'no duplicate'. Raising the limit re-arms this " <>
+        "quietly; the corpus needs a pre-filter."
+    )
+
+    :telemetry.execute(
+      [:barkpark, :tasks, :dedup, :scan_truncated],
+      %{returned: returned, limit: limit},
+      %{dataset: dataset}
+    )
+  end
+
+  defp scan_report(truncated?, returned, limit) do
+    %{truncated: truncated?, candidates_scanned: returned, candidate_limit: limit}
   end
 
   defp reason_phrase(%DBConnection.ConnectionError{}, timeout),
