@@ -218,13 +218,33 @@ defmodule Barkpark.Content.Papers.EpicQuality do
 
   defp meaningful?(_block), do: false
 
-  defp empty_paragraph?(%{"type" => "paragraph"} = block) do
-    content = Map.get(block, "content")
-    text = Map.get(block, "text")
-    content in [nil, []] and not (is_binary(text) and String.trim(text) != "")
-  end
+  @doc """
+  Is this block a paragraph carrying no visible text - an authored spacer?
 
-  defp empty_paragraph?(_block), do: false
+  The predicate reads FLATTENED text (`plain_text/1`, whose `@text_keys`
+  already include `value`), never the presence of one particular key. The
+  previous key-shape test - `content in [nil, []]` and a blank `text` -
+  contradicted `meaningful?/1` inside this same module and misfired in BOTH
+  directions:
+
+    * FALSE REJECT - `%{"type" => "paragraph", "value" => <prose>}` is the
+      documented ingest dialect, and it is live: `felix-pristine-wave-14`
+      carries three such leaves of 633-841 characters nested under paragraph
+      `content`. The key-shape test read all three as empty and would 422
+      that paper on `empty_paragraph_spacer` alone the moment it took the
+      canonical tag.
+    * LAUNDERED SPACER - `%{"type" => "paragraph", "content" => [%{"type" =>
+      "text", "value" => ""}]}` renders blank but sailed through, because the
+      content list was merely non-EMPTY. Only the literal `content: []` was
+      ever caught, so any spacer holding an inline leaf passed the wall.
+
+  Public so the advisory mirror (`AuthoringWall`) shares this one owner
+  instead of re-deriving it - the same reason `nested_keys/0` is public.
+  """
+  @spec empty_paragraph?(term()) :: boolean()
+  def empty_paragraph?(%{"type" => "paragraph"} = block), do: plain_text(block) == ""
+
+  def empty_paragraph?(_block), do: false
 
   defp empty_step_body?(%{"type" => "steps", "steps" => steps}) when is_list(steps) do
     Enum.any?(steps, fn

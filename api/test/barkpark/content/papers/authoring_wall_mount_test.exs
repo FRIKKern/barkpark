@@ -215,6 +215,55 @@ defmodule Barkpark.Content.Papers.AuthoringWallMountTest do
       refute paper_row(slug)
     end
 
+    test "a canonical Epic birth using a LAUNDERED spacer (an empty inline leaf) is still rejected and writes nothing" do
+      slug = fresh_slug("wall-epic-laundered")
+
+      attrs =
+        epic_attrs(
+          slug,
+          epic_blocks("Laundered-gap Epic") ++
+            [
+              %{
+                "id" => "blank-layout",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "   "}]
+              }
+            ]
+        )
+
+      assert {:error, {:invalid_epic_paper_quality, details}} = Content.upsert_paper(attrs)
+
+      assert details["failures"] == ["empty_paragraph_spacer"]
+      refute paper_row(slug)
+    end
+
+    test "a canonical Epic birth whose prose rides the value key PUBLISHES - the wall reads text, not key shape" do
+      slug = fresh_slug("wall-epic-value")
+
+      attrs =
+        epic_attrs(
+          slug,
+          epic_blocks("Value-keyed Epic") ++
+            [
+              %{
+                "id" => "value-leaf",
+                "type" => "paragraph",
+                "content" => [
+                  %{
+                    "type" => "paragraph",
+                    "value" =>
+                      "A4 (media /meta) CONFIRMED LIVE: anonymous GET /media/:id/meta returned a private asset's filename, path and size to an unauthenticated caller - the live felix-pristine-wave-14 leaf shape."
+                  }
+                ]
+              }
+            ]
+        )
+
+      assert {:ok, doc} = Content.upsert_paper(attrs)
+      assert doc.status == "published"
+      assert doc.content["main_tag"] == "epic-cycle-wave-paper"
+    end
+
     test "a reference-shaped canonical Epic birth clears the shared wall" do
       slug = fresh_slug("wall-epic-ok")
 
