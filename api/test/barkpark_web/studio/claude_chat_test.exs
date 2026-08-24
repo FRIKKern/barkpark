@@ -857,11 +857,25 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     # was a load-correlated flake on unrelated PRs. Dropping the check is
     # what converts an untestable race into the always-exercised path below.
     test "terminate cleans up stderr and mcp config even when the port close raises" do
-      stderr_path = Path.join(System.tmp_dir!(), "barkpark-portclose-#{System.unique_integer([:positive])}.stderr")
-      mcp_path = Path.join(System.tmp_dir!(), "barkpark-portclose-#{System.unique_integer([:positive])}.mcp.json")
+      stderr_path =
+        Path.join(
+          System.tmp_dir!(),
+          "barkpark-portclose-#{System.unique_integer([:positive])}.stderr"
+        )
+
+      mcp_path =
+        Path.join(
+          System.tmp_dir!(),
+          "barkpark-portclose-#{System.unique_integer([:positive])}.mcp.json"
+        )
+
       File.write!(stderr_path, "captured stderr\n")
       File.write!(mcp_path, "{}")
-      on_exit(fn -> File.rm(stderr_path); File.rm(mcp_path) end)
+
+      on_exit(fn ->
+        File.rm(stderr_path)
+        File.rm(mcp_path)
+      end)
 
       port = Port.open({:spawn_executable, "/bin/cat"}, [:binary])
       Port.close(port)
