@@ -99,13 +99,19 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 		t.Fatalf("parse fixture manifest: %v", err)
 	}
 	h.m = m
+	// The operator STATED this scope (-w acme -p site). Spelling that out is not
+	// ceremony: false is the fail-closed zero value, so a Context literal that
+	// omits these reads as "scope never stated" and every destroy below refuses.
+	// See TestDestroyRefusesAmbientScope, which is that case on purpose.
 	h.ctx = manifest.Context{
-		Server:    h.server.URL,
-		Token:     "tok",
-		Workspace: "acme",
-		Project:   "site",
-		Dataset:   "production",
-		Output:    "json",
+		Server:            h.server.URL,
+		Token:             "tok",
+		Workspace:         "acme",
+		Project:           "site",
+		Dataset:           "production",
+		Output:            "json",
+		WorkspaceExplicit: true,
+		ProjectExplicit:   true,
 	}
 	return h
 }
@@ -427,5 +433,159 @@ func TestDescribeDestroyRowKeepsUndeclaredFields(t *testing.T) {
 	}
 	if strings.Index(got, "aaa_new") > strings.Index(got, "zzz_new") {
 		t.Errorf("undeclared fields are not sorted, so the line is unstable: %q", got)
+	}
+}
+
+// ── The scope must be STATED, not inherited ────────────────────────────────
+//
+// `bp token revoke <id>` with no -w resolved to /w/default/p/default/... and
+// sent the DELETE there. The server's cross-tenant rail turns that into a 404
+// — but only while `default` is empty or unreachable. On a local instance
+// `default` is THE real, populated workspace, which is exactly the shape an
+// operator develops against, so the mechanism making the misfire harmless is
+// the last remaining layer AND the layer that varies by environment.
+
+// ambient returns the harness context as it looks when the operator stated no
+// scope at all: the values are the baked floor, and provenance says so.
+func (h *destroyHarness) ambient() manifest.Context {
+	c := h.ctx
+	c.Workspace, c.Project = "default", "default"
+	c.WorkspaceExplicit, c.ProjectExplicit = false, false
+	return c
+}
+
+func TestDestroyRefusesAmbientScope(t *testing.T) {
+	for _, verb := range []struct{ noun, verb, arg, path string }{
+		{"token", "revoke", "ac8ff595-deff-4c51-b251-0d05e8414184",
+			"DELETE /w/default/p/default/v1/tokens/ac8ff595-deff-4c51-b251-0d05e8414184"},
+		{"workspace", "member-rm", "pelle@jarl.no",
+			"DELETE /w/default/p/default/v1/members/pelle@jarl.no"},
+	} {
+		t.Run(verb.noun+" "+verb.verb, func(t *testing.T) {
+			h := newDestroyHarness(t)
+			h.ctx = h.ambient()
+			forceNonTTY(t)
+
+			code, _, stderr := h.runDestroy(globals{}, verb.noun, verb.verb, verb.arg)
+
+			if code == exitOK {
+				t.Errorf("exit = %d (ok) — a destroy with an unstated scope must not succeed", code)
+			}
+			if h.sent(verb.path) {
+				t.Error("the DELETE went to the ambient workspace — the scope gate did not hold")
+			}
+			// It must refuse BEFORE the preview: with no defensible workspace
+			// there is nothing to preview against, and reading an ambient
+			// inventory would put credentials on screen nobody asked for.
+			if len(h.seen) != 0 {
+				t.Errorf("refusal still made %d requests (%v), want none", len(h.seen), h.seen)
+			}
+			for _, want := range []string{"-w <workspace>", "-p <project>"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("refusal does not name %q — it must say how to proceed:\n%s", want, stderr)
+				}
+			}
+		})
+	}
+}
+
+// --yes must NOT buy past an unstated scope. --yes answers "do you mean it?";
+// it cannot answer "which workspace?", because the operator was never asked.
+func TestAmbientScopeRefusalSurvivesYes(t *testing.T) {
+	h := newDestroyHarness(t)
+	h.ctx = h.ambient()
+	forceNonTTY(t)
+
+	code, _, stderr := h.runDestroy(globals{yes: true}, "token", "revoke", "ac8ff595-deff-4c51-b251-0d05e8414184")
+
+	if code == exitOK {
+		t.Errorf("exit = %d — --yes bought past an unstated scope", code)
+	}
+	if len(h.seen) != 0 {
+		t.Errorf("--yes sent %d requests (%v) with no stated scope, want none", len(h.seen), h.seen)
+	}
+	if !strings.Contains(stderr, "stated scope") {
+		t.Errorf("refusal did not name the reason:\n%s", stderr)
+	}
+}
+
+// PROVENANCE, NOT VALUE. A workspace genuinely NAMED `default` is a real
+// workspace, and naming it explicitly must keep working — that is the case a
+// `ctx.Workspace == "default"` check would have broken, and the reason the
+// provenance flags exist at all.
+func TestExplicitlyNamedDefaultWorkspaceIsAllowed(t *testing.T) {
+	h := newDestroyHarness(t)
+	h.ctx.Workspace, h.ctx.Project = "default", "default"
+	h.ctx.WorkspaceExplicit, h.ctx.ProjectExplicit = true, true
+	forceNonTTY(t)
+
+	_, _, stderr := h.runDestroy(globals{yes: true}, "token", "revoke", "ac8ff595-deff-4c51-b251-0d05e8414184")
+
+	if strings.Contains(stderr, "stated scope") {
+		t.Errorf("`-w default` was refused as if it were the ambient floor:\n%s", stderr)
+	}
+	if !h.sent("DELETE /w/default/p/default/v1/tokens/ac8ff595-deff-4c51-b251-0d05e8414184") {
+		t.Errorf("an explicitly-named `default` workspace was blocked; requests: %v", h.seen)
+	}
+}
+
+// One half stated and the other not: name only the half that is missing.
+func TestPartialScopeNamesOnlyTheMissingHalf(t *testing.T) {
+	h := newDestroyHarness(t)
+	h.ctx.ProjectExplicit = false // -w given, -p omitted
+	forceNonTTY(t)
+
+	_, _, stderr := h.runDestroy(globals{}, "token", "revoke", "ac8ff595-deff-4c51-b251-0d05e8414184")
+
+	if !strings.Contains(stderr, "-p <project>") {
+		t.Errorf("the missing half was not named:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "-w <workspace>") {
+		t.Errorf("a scope that WAS stated was reported missing:\n%s", stderr)
+	}
+}
+
+// The gate costs non-destroy verbs nothing: a read with no stated scope keeps
+// the ambient floor exactly as before. This is the blast-radius pin — if it
+// ever reds, the change stopped being destroy-tier-only.
+func TestAmbientScopeStillFineForReads(t *testing.T) {
+	h := newDestroyHarness(t)
+	h.ctx = h.ambient()
+	forceNonTTY(t)
+
+	code, stdout, stderr := h.runDestroy(globals{}, "token", "ls")
+
+	if code != exitOK {
+		t.Errorf("exit = %d — a READ with an unstated scope must still work, want %d", code, exitOK)
+	}
+	if strings.Contains(stderr, "stated scope") {
+		t.Errorf("the scope gate fired on a read:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "ci-deploy") {
+		t.Errorf("the read did not answer:\n%s", stdout)
+	}
+}
+
+// commandReadsPlaceholder must look at the URL the command actually BUILDS —
+// the scoped_prefix plus the flat template — since :workspace_slug lives in the
+// prefix for every command in the registry. Reading only the flat template
+// would find nothing and silently disarm the whole gate.
+func TestCommandReadsPlaceholderSeesTheScopedPrefix(t *testing.T) {
+	prefix := "/w/:workspace_slug/p/:project_slug"
+	scoped := manifest.Command{
+		HTTP:         manifest.HTTP{Method: "DELETE", PathTemplate: "/v1/tokens/:id"},
+		ScopedPrefix: &prefix,
+	}
+	if !commandReadsPlaceholder(scoped, "workspace_slug", "workspace", "ws") {
+		t.Error("did not see :workspace_slug in the scoped_prefix — the gate would be dead")
+	}
+	if !commandReadsPlaceholder(scoped, "project_slug", "project", "p") {
+		t.Error("did not see :project_slug in the scoped_prefix")
+	}
+
+	// A command with no prefix and no scope placeholder reads neither.
+	flat := manifest.Command{HTTP: manifest.HTTP{Method: "DELETE", PathTemplate: "/v1/thing/:id"}}
+	if commandReadsPlaceholder(flat, "workspace_slug", "workspace", "ws") {
+		t.Error("claimed a flat command reads a workspace placeholder it does not have")
 	}
 }
