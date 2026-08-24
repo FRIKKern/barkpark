@@ -222,7 +222,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
     end
   end
 
-  describe "GET /w/:ws/p/:project/papers/:slug — 'Related papers' backlinks section" do
+  describe "GET /w/:ws/p/:project/papers/:slug — related Paper cards" do
     test "renders the section listing a paper that references this one", %{
       conn: conn,
       ws: ws,
