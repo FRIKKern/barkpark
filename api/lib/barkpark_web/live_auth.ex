@@ -181,7 +181,8 @@ defmodule BarkparkWeb.LiveAuth do
   # every `:admin`/`:ops`/`:scoped_admin` Studio mount 500'd in the Docker image
   # while both `mix phx.server` paths — local dev AND the Hetzner systemd prod
   # box, which runs `mix phx.server`, not a release — never saw it. That split
-  # is why it survived nine months. `BarkparkWeb.ReleaseSafetyTripwireTest`
+  # is why it went unseen from 827a3e90f0 (2026-05-25) until an outsider running
+  # the container image reported it on 2026-07-31. `ReleaseSafetyTripwireTest`
   # now fails on any runtime `Mix.*` call from a release-reachable module.
   defp dev_browser_token_fallback do
     case Application.get_env(:barkpark, :dev_browser_token) do
