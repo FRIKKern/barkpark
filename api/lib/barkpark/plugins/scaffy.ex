@@ -64,6 +64,12 @@ defmodule Barkpark.Plugins.Scaffy do
   `(name, dataset)`, so re-registration on every boot never drifts the row.
   """
   @impl Barkpark.Plugin
+  # Reachability: the only path read is the runtime-resolved schemas dir joined
+  # with a compile-time literal filename — no runtime input reaches `File.read!/1`.
+  # Inline rather than a `.sobelow-skips` row on purpose: a baseline entry is
+  # pinned to a LINE, so any edit above the call silently kills the waiver and the
+  # finding returns as new. The annotation binds by AST adjacency and survives moves.
+  # sobelow_skip ["Traversal.FileModule"]
   def register_schemas(_opts) do
     raw =
       schemas_dir()

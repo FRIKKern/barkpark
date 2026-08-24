@@ -4,17 +4,13 @@ DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/content/validation.ex:109
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/tickets/attachments.ex:259,31F6FE7
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/sync/pusher.ex:210,104F576
 Traversal.FileModule: Directory Traversal in `File.rm_rf`,lib/barkpark/media/renditions.ex:107,3D69773
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit/schemas/text_content.ex:46,BE7461
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/epic_fleet/benchmark.ex:960,78E6342
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:252,21E5CDB
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/discovery.ex:211,65F4F64
 XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
 XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/onixedit/web/export_controller.ex:52,64EB26D
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/frt.ex:152,27062B7
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit.ex:455,1DC373
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/codelists/editeur.ex:298,227D73E
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:131,7FE4923
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/sheets.ex:125,289B54A
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/studio_chat/runtime.ex:554,49C06AE
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/onixedit/export.ex:261,7022E71
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/tickets/attachments.ex:288,6BE392C
@@ -25,7 +21,6 @@ Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/m
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:326,55E81A1
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:245,2428CAE
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/media/probe.ex:27,2C782D6
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit/schemas/contributor.ex:60,4A2769F
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:295,3CA05A1
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/epic_fleet/benchmark.ex:233,7E9FD64
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:650,11C327D
@@ -40,7 +35,6 @@ Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/search/go
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:142,F7AE3D
 Config.HTTPS: HTTPS Not Enabled,config/prod.exs:0,2B5C077
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/registry/boot_collectors.ex:158,B1A314
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/scaffy.ex:71,2F9DAD3
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:252,2F231DA
 Traversal.FileModule: Directory Traversal in `File.stream!`,lib/barkpark/codelists/editeur.ex:122,107C442
 XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:95,ADA708
