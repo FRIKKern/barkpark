@@ -59,10 +59,11 @@ defmodule BarkparkWeb.Plugs.RequireShareEditToken do
 
   @spec call(Plug.Conn.t(), %{surface: Sharing.Share.surface()}) :: Plug.Conn.t()
   def call(conn, %{surface: surface}) do
+    conn = fetch_query_params(conn)
     token = conn.assigns[:api_token]
     ws = conn.path_params["workspace_slug"]
     proj = conn.path_params["project_slug"]
-    dataset = conn.path_params["dataset"] || @default_dataset
+    dataset = request_dataset(conn)
 
     if grant?(token, surface, ws, proj, dataset) do
       grant_if_resolvable(conn, ws, proj, dataset)
@@ -86,6 +87,24 @@ defmodule BarkparkWeb.Plugs.RequireShareEditToken do
       token.share_scope == "#{ws}/#{proj}/#{dataset}" and
       Sharing.shared?(ws, proj, dataset, surface) and
       Sharing.access_for(ws, proj, dataset) == :edit
+  end
+
+  # The dataset the REQUEST actually resolves to — read the same way
+  # `BarkparkWeb.Plugs.RequireShareScope.request_dataset/1` reads it, and for
+  # the same reason: a guard that reads the PATH while the controller derives
+  # from the MERGED params (path over query string) is checking a value the
+  # request never uses. Every route currently on the two `:scoped_*_mutate`
+  # pipelines carries a `:dataset` path segment, so this is byte-identical
+  # today; it exists so that adding a dataset-LESS write route to those
+  # pipelines cannot silently reopen task-4f26838232b5ece0 on the write side.
+  # Path wins the merge in Phoenix, so it wins here — a decoy `?dataset=` on
+  # `/v1/data/mutate/:dataset` never moves the `share_scope` comparison.
+  @spec request_dataset(Plug.Conn.t()) :: binary()
+  defp request_dataset(conn) do
+    case conn.path_params["dataset"] || conn.query_params["dataset"] do
+      ds when is_binary(ds) -> ds
+      _ -> @default_dataset
+    end
   end
 
   defp grant_if_resolvable(conn, ws, proj, _dataset) do
