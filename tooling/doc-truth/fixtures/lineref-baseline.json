@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-24T08:04:22.051Z",
+  "generatedAt": "2026-08-24T08:35:09.841Z",
   "note": "Frozen pre-existing stale linerefs. Keyed <doc>|<raw> — NO line number, so an insertion above a comment does not re-key its entry. Shrinking this file is always welcome; growing it requires a human deciding the new citation is acceptable.",
   "entries": [
     {
@@ -189,98 +189,6 @@
     {
       "doc": "api/lib/barkpark/content/query.ex",
       "raw": "writer.ex:1291) and `"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "app_token_controller.ex:48,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "auth_controller.ex:238)"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "auth.ex:325) and the one"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "fleet_support_token_controller.ex:33,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "media.ex:436, `"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "media.ex:603) rejects — a per-segment allowlist that"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "media.ex:654) runs the client filename through `Path.basename/2`, which"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "media.ex:91, the"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "playground_controller.ex:134,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "token_controller.ex:30,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "workspace_bundle.ex:1013) COPYs the manifest-named"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/local.ex",
-      "raw": "workspace_bundle/catalog.ex:98) — straight into the real table with"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "app_token_controller.ex:48,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "auth_controller.ex:238)"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "auth.ex:325) and the one"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "fleet_support_token_controller.ex:33,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "media_controller.ex:316 (`read_body length:/read_length: 100_000_000`)."
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "media.ex:436, `"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "media.ex:654) runs the client filename through `Path.basename/2`, which"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "playground_controller.ex:134,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "token_controller.ex:30,"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "workspace_bundle.ex:1013) COPYs the manifest-named"
-    },
-    {
-      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
-      "raw": "workspace_bundle/catalog.ex:98) — straight into the real table with"
     },
     {
       "doc": "api/lib/barkpark/media/delivery/search.ex",
