@@ -84,8 +84,18 @@ defmodule BarkparkWeb.QueryController do
         {:error, {:forbidden_field, field}}
 
       true ->
-        docs =
-          Content.list_documents(
+        # TRUNCATION SIGNAL. `list_documents_page/3` reads one row past the page
+        # and reports whether it materialised, so `hasMore` is an EXACT answer
+        # for the price of one row — no COUNT. Without it an exhausted page and
+        # a truncated one were byte-identical: `count`, `limit` and `offset` read
+        # the same whether the type holds exactly `limit` rows or a million,
+        # `total` appeared only if the caller knew to pass ?count=true, and the
+        # default page is 100 — so every type past 100 documents silently
+        # truncated for every consumer that did not know the trick.
+        # `/v1/media/:dataset/search` has carried hasMore all along; this brings
+        # the document query path to the same contract.
+        {docs, has_more} =
+          Content.list_documents_page(
             type,
             dataset,
             [
@@ -114,8 +124,10 @@ defmodule BarkparkWeb.QueryController do
             documents: rendered,
             count: length(docs),
             limit: limit,
-            offset: offset
+            offset: offset,
+            hasMore: has_more
           }
+          |> maybe_put_next_offset(has_more, limit, offset)
           |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
 
         etag = list_etag(dataset, type, rendered)
@@ -873,6 +885,19 @@ defmodule BarkparkWeb.QueryController do
 
   # Adds the total matching count (the paginator total) only when `?count=true` —
   # it's a second DB query (COUNT over the filtered set), so it stays opt-in.
+  # The offset that reads the NEXT page, present only when one exists — so a
+  # caller never has to re-derive it, and never derives one for a page with no
+  # successor. Withheld past the 100_000 offset ceiling, where
+  # `Content.Query.list_documents/3` clamps and a further read would re-serve
+  # this same page rather than advance.
+  defp maybe_put_next_offset(inner, false, _limit, _offset), do: inner
+
+  defp maybe_put_next_offset(inner, true, limit, offset) do
+    next = offset + limit
+
+    if next > 100_000, do: inner, else: Map.put(inner, :nextOffset, next)
+  end
+
   defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, filter_map) do
     total =
       Content.count_documents(
