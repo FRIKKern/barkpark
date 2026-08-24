@@ -14,6 +14,7 @@
     // failing on main since the pagination fix (#13316) added
     // `../lib/paginate.ts`, unseen because apps/hundesteder has no CI job at
     // all (filed separately).
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "module": "esnext",
     "moduleResolution": "bundler",
