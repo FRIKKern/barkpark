@@ -4,6 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Listing } from "@/lib/listings-data";
 import type { GraphMatch } from "@/lib/hovered-doc-context";
 import { canvas } from "@/lib/tokens.gen";
+import {
+  TILE_SUBDOMAINS,
+  tileUrlTemplate,
+  tilesAllowedByCsp,
+  tilesEnabled,
+} from "@/lib/map-tiles";
 
 /** Compose an alpha variant of an emitted `hsl(H S% L%)` token for Canvas2D
  *  (`hsl(H S% L% / a)`), so no fixed rgba/hex literal lives in this file. */
@@ -41,13 +47,28 @@ const HIT_RADIUS = 15;
 const MARKER = canvas.primary; // evergreen brand — the product-primary map pin
 const MARKER_DIM = canvas.mutedText; // muted — a pin filtered out by the search
 
-const TILE_URL =
-  process.env.NEXT_PUBLIC_MAP_TILE_URL ||
-  "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const TILES_ENABLED = process.env.NEXT_PUBLIC_MAP_TILES !== "off";
+// Tile config comes from `lib/map-tiles.ts`, which `lib/csp.ts` reads too — the
+// policy's `img-src` is built from these exact values, so a host this component
+// fetches and a host the browser will allow cannot drift apart. See that
+// module's header for the defect that made a shared seam necessary.
+const TILE_URL = tileUrlTemplate();
+const TILES_ENABLED = tilesEnabled();
 /** OSM's tile policy requires visible attribution — shown when tiles are on. */
 const SHOWS_OSM_ATTRIBUTION =
   TILES_ENABLED && TILE_URL.includes("openstreetmap.org");
+
+/**
+ * Tiles are configured, but the CSP will block every one of them.
+ *
+ * This is the exact state that shipped: `img-src` named no tile host, so the
+ * browser refused each request, this map fell back to its graticule (which it
+ * does deliberately and quietly), and the only trace was a console CSP
+ * violation nobody was looking for. `tilesAllowedByCsp()` evaluates the SAME
+ * predicate `lib/csp.ts` gates the directive on, so if the two ever disagree
+ * again — the map mounted outside the landing the policy widens for, say — the
+ * component says so instead of drawing a blank basemap.
+ */
+const TILES_WILL_BE_BLOCKED = TILES_ENABLED && !tilesAllowedByCsp();
 
 /* ── Web-Mercator projection (lng/lat ⇄ world pixels at integer zoom z) ──── */
 
@@ -101,6 +122,21 @@ export function ListingsMap({
 }: ListingsMapProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Say it out loud when the basemap is about to be blocked by our own policy.
+  // Once per mount, not per tile: a blocked map issues one of these per visible
+  // tile per pan, which would bury the line it is trying to make visible.
+  useEffect(() => {
+    if (!TILES_WILL_BE_BLOCKED) return;
+    console.warn(
+      `[listings-map] BASEMAP TILES WILL BE BLOCKED BY THIS APP'S OWN CSP — ` +
+        `requesting ${TILE_URL} but img-src does not allow its origin, so the ` +
+        `map will draw pins over an empty graticule. lib/csp.ts adds the tile ` +
+        `origin only when NEXT_PUBLIC_FINDER_LANDING=map; set it, set ` +
+        `NEXT_PUBLIC_MAP_TILES=off to drop tiles deliberately, or widen ` +
+        `mapLandingActive() in lib/map-tiles.ts if this map now mounts elsewhere.`,
+    );
+  }, []);
 
   // View + frame state live in refs so panning/zooming never re-renders React.
   const viewRef = useRef<View>({ lng: 10.5, lat: 64.5, zoom: 3.4 });
@@ -163,7 +199,10 @@ export function ListingsMap({
       const url = TILE_URL.replace("{z}", String(z))
         .replace("{x}", String(x))
         .replace("{y}", String(y))
-        .replace("{s}", "abc"[(x + y) % 3]);
+        // The alphabet is shared with `lib/map-tiles.ts`, which expands the same
+        // `{s}` into the origins `img-src` allows — indexing a literal here is
+        // how the fetched host and the allowed host would drift apart again.
+        .replace("{s}", TILE_SUBDOMAINS[(x + y) % TILE_SUBDOMAINS.length]);
       // Redraw when a tile lands so the basemap fills in progressively.
       img.onload = () => scheduleDraw();
       // On error tombstone briefly (no per-frame refetch), then evict so a
