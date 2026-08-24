@@ -341,6 +341,22 @@ jobs:
     # Elixir than CI's 1.18.1. Formatting passes must only ever happen in a
     # deliberate session pinned to the prod Elixir version; until then this
     # job stays visible as a drift signal, not a blocker.
+    #
+    # IT RUNS THE SAME INSTRUMENT A DEVELOPER RUNS (scripts/format-check.sh,
+    # format-gate-is-elixir-version-contaminated). `mix format --check-formatted`
+    # reds for THREE reasons — formatting, Elixir version, and unfetched deps —
+    # and until that script existed all three exited non-zero identically. That
+    # is how this repo published an unformatted count of "1", corrected it to
+    # "91", corrected it to "92", and was wrong all three times: every figure
+    # came from a local 1.19.x formatter describing a population this job never
+    # evaluates (measured 2026-07-20: 1.18.1 saw ONE unformatted file, 1.19.5
+    # saw 97, and the two sets overlapped in ZERO).
+    #
+    # Using one script on both sides is what makes local and CI answer the SAME
+    # question. Here the version check is a tautology — the matrix below IS what
+    # the script reads — and that is the point: it PRINTS the version it judged
+    # under, so no future reader has to re-derive which formatter produced the
+    # verdict, and a matrix bump can never silently change the answer.
     name: Format (mix format --check-formatted, advisory)
     continue-on-error: true
     needs: changes
@@ -374,8 +390,15 @@ jobs:
       - name: Fetch deps (required by .formatter.exs import_deps)
         run: mix deps.get
 
-      - name: mix format --check-formatted
-        run: mix format --check-formatted
+      # Proves the guard's own refusals can still fire. It drives temp trees, so
+      # it needs no toolchain swap and makes no claim about this tree.
+      - name: The format guard must be able to refuse
+        working-directory: .
+        run: bash scripts/format-check.sh --selftest
+
+      - name: mix format --check-formatted (via the version-aware guard)
+        working-directory: .
+        run: bash scripts/format-check.sh
 
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
