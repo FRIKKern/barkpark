@@ -87,6 +87,19 @@ defmodule BarkparkCloud.Cloudflare do
     do: client().upsert_dns_record(token, zone_id, record)
 
   @doc """
+  Delete the DNS `record_id` in `zone_id`, authenticating with the per-team
+  `token` threaded in (D52 — never global config). The orphan-cleanup verb: a
+  record upserted at a box origin that is deprovisioned mid-write has NO other
+  path to deletion — Cloudflare zones are per-team accounts, so there is no
+  fleet-wide, box-keyed sweep that could ever reach one the way `SweepOrphans`
+  reaches a Hetzner-zone record.
+  """
+  @spec delete_dns_record(Client.token(), Client.zone_id(), String.t()) ::
+          {:ok, %{deleted: true}} | {:error, term}
+  def delete_dns_record(token, zone_id, record_id),
+    do: client().delete_dns_record(token, zone_id, record_id)
+
+  @doc """
   Flip the DNS record `record_id` in `zone_id` to proxied (orange cloud),
   authenticating with the per-team `token` threaded in (D52).
   """

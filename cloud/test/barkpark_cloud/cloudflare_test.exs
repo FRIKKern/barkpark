@@ -106,6 +106,64 @@ defmodule BarkparkCloud.CloudflareTest do
     end
   end
 
+  describe "Fake.delete_dns_record/3 — the orphan-cleanup verb" do
+    test "removes the record (and its proxy flip) from the zone, and logs the delete" do
+      rec = %{type: "A", name: "gone.example.com", content: "203.0.113.9", proxied: true}
+      {:ok, %{record_id: id}} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
+      {:ok, %{proxied: true}} = Cloudflare.ensure_zone_proxied("cf_tok", "zone1", id)
+
+      assert [%{record_id: ^id} | _] = Fake.records()
+      assert [%{record_id: ^id}] = Fake.proxied()
+
+      assert {:ok, %{deleted: true}} = Cloudflare.delete_dns_record("cf_tok", "zone1", id)
+
+      # This is the zone-modeling assertion the orphan test depends on: a
+      # delete REMOVES the record, so "does the zone still hold this?" reads
+      # true after the fix. A call-log fake could never tell that difference.
+      refute Enum.any?(Fake.records(), &(&1.record_id == id))
+      assert Fake.proxied() == []
+      assert [%{zone_id: "zone1", record_id: ^id}] = Fake.deletes()
+    end
+
+    test "a fail- zone id is rejected and nothing is removed" do
+      rec = %{type: "A", name: "x.example.com", content: "203.0.113.1"}
+      {:ok, %{record_id: id}} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
+
+      assert {:error, :delete_failed} = Cloudflare.delete_dns_record("cf_tok", "fail-zone", id)
+      assert [%{record_id: ^id} | _] = Fake.records()
+    end
+
+    test "a fail- token is rejected as an invalid credential (fail-closed)" do
+      rec = %{type: "A", name: "x.example.com", content: "203.0.113.1"}
+      {:ok, %{record_id: id}} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
+
+      assert {:error, :invalid_token} = Cloudflare.delete_dns_record("fail-token", "zone1", id)
+      assert [%{record_id: ^id} | _] = Fake.records()
+    end
+  end
+
+  describe "Fake.on_upsert/1 — the orphan-race seam" do
+    test "fires exactly once, right after the write, before upsert_dns_record returns" do
+      test = self()
+      Fake.on_upsert(fn -> send(test, :hook_fired) end)
+
+      rec = %{type: "A", name: "race.example.com", content: "203.0.113.9"}
+      assert {:ok, _} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
+
+      assert_received :hook_fired
+      # The write landed BEFORE the hook ran, so a hook that reads Fake.records
+      # sees its own write — exactly what a test simulating a concurrent
+      # teardown needs (delete the resource the write just outlived).
+      assert [%{name: "race.example.com"} | _] = Fake.records()
+    end
+
+    test "a nil hook is inert" do
+      Fake.on_upsert(nil)
+      rec = %{type: "A", name: "quiet.example.com", content: "203.0.113.9"}
+      assert {:ok, _} = Cloudflare.upsert_dns_record("cf_tok", "zone1", rec)
+    end
+  end
+
   describe "Fake.ensure_zone_proxied/3 (D52 token threaded as an argument)" do
     test "flips a record to proxied and records it" do
       assert {:ok, %{proxied: true}} = Cloudflare.ensure_zone_proxied("cf_tok", "zone1", "rec_1")
@@ -189,6 +247,13 @@ defmodule BarkparkCloud.CloudflareTest do
       assert Jason.decode!(req.body)["proxied"] == false
     end
 
+    test "delete_dns_record_request DELETEs the record, no body" do
+      req = Real.delete_dns_record_request("cf_x", "zone1", "rec_9")
+      assert req.method == :delete
+      assert req.url == "https://api.cloudflare.com/client/v4/zones/zone1/dns_records/rec_9"
+      assert req.body == ""
+    end
+
     test "ensure_zone_proxied_request PATCHes proxied:true on the record" do
       req = Real.ensure_zone_proxied_request("cf_x", "zone1", "rec_9")
       assert req.method == :patch
@@ -227,6 +292,8 @@ defmodule BarkparkCloud.CloudflareTest do
       assert {:error, :not_configured} = Real.upsert_dns_record(nil, "zone1", rec)
       assert {:error, :not_configured} = Real.ensure_zone_proxied("", "zone1", "rec_1")
       assert {:error, :not_configured} = Real.ensure_zone_proxied(nil, "zone1", "rec_1")
+      assert {:error, :not_configured} = Real.delete_dns_record("", "zone1", "rec_1")
+      assert {:error, :not_configured} = Real.delete_dns_record(nil, "zone1", "rec_1")
     end
 
     test "create_origin_ca_cert still fails closed on an unset config token" do
@@ -300,6 +367,18 @@ defmodule BarkparkCloud.CloudflareTest do
                Real.ensure_zone_proxied("cf_arg_token", "zone1", "rec_9")
 
       assert_received {:cf_req, %{method: :patch, url: url, headers: headers}}
+      assert url == "https://api.cloudflare.com/client/v4/zones/zone1/dns_records/rec_9"
+      assert {"Authorization", "Bearer cf_arg_token"} in headers
+    end
+
+    test "delete_dns_record threads the ARG token and DELETEs the record" do
+      put_cf_config(
+        http_client: stub_http_client({:ok, %{status: 200, body: ~s({"result":{"id":"rec_9"}})}})
+      )
+
+      assert {:ok, %{deleted: true}} = Real.delete_dns_record("cf_arg_token", "zone1", "rec_9")
+
+      assert_received {:cf_req, %{method: :delete, url: url, headers: headers}}
       assert url == "https://api.cloudflare.com/client/v4/zones/zone1/dns_records/rec_9"
       assert {"Authorization", "Bearer cf_arg_token"} in headers
     end

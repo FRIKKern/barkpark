@@ -12974,10 +12974,31 @@ defmodule BarkparkCloud.Web.Router do
              "the instance hosting this site has no address yet — wait for it to finish provisioning before pointing a domain at it"
          })}
 
+      # BEFORE the write: refuse when the box read above is already stale — the
+      # same fail-closed discipline the Go worker's platform-DNS branch uses
+      # (cch orphan-fix, #14039). Narrow on its own (the box can still vanish a
+      # moment later, in the network round trip below), but cheap, so it stays.
+      not box_still_holds_origin?(site.barkpark_id, origin) ->
+        {:halt,
+         json(conn, 409, %{
+           error: "instance_not_live",
+           detail:
+             "the instance backing this site was deprovisioned while this request was in flight; refusing to point DNS at a freed address (fail closed)"
+         })}
+
       true ->
         # Point the domain at the box origin (A record), flip it PROXIED (orange
         # cloud), and only THEN persist the binding — the token + zone_id are
         # THREADED as arguments (D52), never global config.
+        #
+        # AFTER the upsert (and the proxy flip), `orphan_guard/5` re-reads the
+        # box and DELETES the record just written if it went away underneath
+        # us. This is the half the pre-check above cannot cover: deprovision
+        # can land in the gap the two Cloudflare HTTP round trips stand for,
+        # same as the Go sibling's window between its pre-check and its DNS
+        # write. Cloudflare zones are per-team BYOA — there is no
+        # `SweepOrphans` equivalent that could ever reach this record another
+        # way, so this re-check is the ONLY thing that ever will.
         with {:ok, %{record_id: record_id}} <-
                Cloudflare.upsert_dns_record(token, zone_id, %{
                  type: "A",
@@ -12986,6 +13007,7 @@ defmodule BarkparkCloud.Web.Router do
                  proxied: true
                }),
              {:ok, %{proxied: true}} <- Cloudflare.ensure_zone_proxied(token, zone_id, record_id),
+             :ok <- orphan_guard(token, zone_id, record_id, site.barkpark_id, origin, domain),
              {:ok, bound_site} <-
                Registry.set_cf_binding(site, %{
                  serving_mode: "cf_proxied",
@@ -13006,6 +13028,34 @@ defmodule BarkparkCloud.Web.Router do
 
           {:cont, bound_site}
         else
+          {:error, {:orphan_cleaned, cleaned_domain}} ->
+            Logger.error(
+              "cloudflare_bind_orphan_cleaned: #{cleaned_domain} deprovisioned mid-write, the A record just written was deleted again"
+            )
+
+            {:halt,
+             json(conn, 409, %{
+               error: "instance_not_live",
+               detail:
+                 "the instance backing this site was deprovisioned while the A record was being written — #{cleaned_domain} has been deleted again (fail closed)"
+             })}
+
+          {:error, {:orphan_cleanup_failed, orphan_domain, orphan_ip, reason}} ->
+            # The loudest thing this process will ever say about this record:
+            # no other artefact anywhere will ever name it again.
+            Logger.error(
+              "cloudflare_bind_ORPHANED_RECORD: #{orphan_domain} -> #{orphan_ip} the box was deprovisioned mid-write and deleting the record again failed: #{inspect(reason)}"
+            )
+
+            {:halt,
+             json(conn, 502, %{
+               error: "cloudflare_orphan_cleanup_failed",
+               detail:
+                 "ORPHANED A RECORD #{orphan_domain} -> #{orphan_ip}: the instance was " <>
+                   "deprovisioned mid-write and deleting the record again failed. Delete it " <>
+                   "by hand in Cloudflare — nothing else can reach a record whose box is gone."
+             })}
+
           {:error, reason} ->
             # Belt: the FULL raw provider body stays server-side for operators;
             # the client gets only the bounded, status-keyed `cloudflare_reason/1`
@@ -13018,6 +13068,39 @@ defmodule BarkparkCloud.Web.Router do
                detail: cloudflare_reason(reason)
              })}
         end
+    end
+  end
+
+  # Does a managed box still hold `origin`? Reads `Registry.get_barkpark/1`
+  # FRESH (never a struct fetched earlier in the request) so a deprovision that
+  # lands mid-request is seen. A deprovision success DELETES the barkpark row
+  # (`Registry.succeed_deprovision_job/2`, cascade removes its sites), and a
+  # re-provision-in-place would change `host` on the SAME row — either one
+  # means "not live any more", exactly like the Go worker's `boxHoldsIP` reads
+  # the fleet by VALUE (the IP), never by a name/id that can go stale.
+  defp box_still_holds_origin?(barkpark_id, origin) do
+    case Registry.get_barkpark(barkpark_id) do
+      %Barkpark{host: ^origin} -> true
+      _ -> false
+    end
+  end
+
+  # The orphan edge. Re-checks liveness AFTER the write and, if the box went
+  # away underneath us, deletes the record just created — the money edge a
+  # pre-check cannot cover, mirroring `AttachDomainWith`'s post-upsert
+  # liveness re-check + `DeleteRecord` call on the Go worker side (cch
+  # orphan-fix, #14039). Returns `:ok` when the box is still live,
+  # `{:error, {:orphan_cleaned, domain}}` when the cleanup delete succeeded, or
+  # `{:error, {:orphan_cleanup_failed, domain, ip, reason}}` when it did not —
+  # that last shape carries the only artefact that will ever name this record.
+  defp orphan_guard(token, zone_id, record_id, barkpark_id, origin, domain) do
+    if box_still_holds_origin?(barkpark_id, origin) do
+      :ok
+    else
+      case Cloudflare.delete_dns_record(token, zone_id, record_id) do
+        {:ok, _} -> {:error, {:orphan_cleaned, domain}}
+        {:error, reason} -> {:error, {:orphan_cleanup_failed, domain, origin, reason}}
+      end
     end
   end
 
