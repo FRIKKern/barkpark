@@ -19,12 +19,31 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacksTest do
 
   alias Barkpark.Plugins.Registry
   alias Barkpark.Plugins.Registry.PluginCallbacks
+  alias Barkpark.Plugins.RunStatus
 
   # ── Fake plugin modules ──────────────────────────────────────────────────
 
   defmodule SeederPlugin do
     def codelist_seeders do
       [fn -> :persistent_term.put({__MODULE__, :ran}, true) end]
+    end
+  end
+
+  # A seeder that never RAISES and reports its outcome by RETURN VALUE. This
+  # is the documented contract of both OnixEdit seeders
+  # (`Barkpark.Codelists.EDItEUR.seed_bundled/1` + `seed_thema/1` both say
+  # "Never raises" and hand back `{:error, reason}`), so a boot-time seed
+  # failure reaches `invoke_seeder/2` as a return value, never as an
+  # exception.
+  defmodule ReturnsErrorSeederPlugin do
+    def codelist_seeders do
+      [fn -> {:error, {:raised, "Thema seed raised — ERROR 57014 (query_canceled)"}} end]
+    end
+  end
+
+  defmodule ReturnsOkTupleSeederPlugin do
+    def codelist_seeders do
+      [fn -> {:ok, 9187} end]
     end
   end
 
@@ -71,6 +90,33 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacksTest do
     test "also reachable via the Registry delegate" do
       assert {:error, :unknown_plugin} =
                Registry.run_codelist_seeders_by_name("no-such-plugin-cb-test")
+    end
+
+    test "a seeder that REPORTS failure by return value is recorded as an error" do
+      name = "seeder-returns-error-#{System.unique_integer([:positive])}"
+      :ok = Registry.register(ReturnsErrorSeederPlugin, %{"plugin_name" => name})
+
+      assert :ok = PluginCallbacks.run_codelist_seeders_by_name(name)
+
+      assert %{seed: %{result: {:error, [{:raised, msg}]}}} = RunStatus.get(name)
+      assert msg =~ "query_canceled"
+    end
+
+    test "a seeder returning {:ok, count} is still recorded as a success" do
+      name = "seeder-returns-ok-#{System.unique_integer([:positive])}"
+      :ok = Registry.register(ReturnsOkTupleSeederPlugin, %{"plugin_name" => name})
+
+      assert :ok = PluginCallbacks.run_codelist_seeders_by_name(name)
+      assert %{seed: %{result: {:ok, 1}}} = RunStatus.get(name)
+    end
+
+    test "a seeder returning bare :ok is still recorded as a success" do
+      :persistent_term.erase({SeederPlugin, :ran})
+      name = "seeder-returns-bare-ok-#{System.unique_integer([:positive])}"
+      :ok = Registry.register(SeederPlugin, %{"plugin_name" => name})
+
+      assert :ok = PluginCallbacks.run_codelist_seeders_by_name(name)
+      assert %{seed: %{result: {:ok, 1}}} = RunStatus.get(name)
     end
   end
 
