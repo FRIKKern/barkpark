@@ -5,7 +5,7 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
 
   ## The gap, and why strictness could not have caught it
 
-  `Auth.revoke_app_tokens_for_email/1` matches `label == "app:" <> email`
+  `Auth.revoke_app_tokens_for_email/2` matches `label == "app:" <> email`
   EXACTLY (auth.ex), and the mint's optional `label` REPLACES that default
   (`AppTokenController.fetch_label/2`). Nothing malformed happens: the mint
   succeeds, the revoke succeeds, and it reports `revoked_count: 0` — an honest
@@ -214,7 +214,7 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
 
     test "a NON-app token (kind != \"api\") is invisible to this door", %{admin: admin} do
       # The `kind == "api"` scope had NO failing test until this one: deleting it
-      # from `revoke_app_token_by_id/1` left the suite green, which is the
+      # from `revoke_app_token_by_id/2` left the suite green, which is the
       # unproven-guard shape. A low-trust `kind: "ticket"` key must answer the
       # same not_found as a missing row — the app-token surface cannot reach a
       # ticket credential through an id it happens to learn.

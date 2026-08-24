@@ -260,17 +260,55 @@ defmodule Barkpark.Auth do
   end
 
   @doc """
-  Revoke every LIVE `app:<email>`-labelled api token — the "logout everywhere"
-  half of the app-token revoke path (mob-w2-app-token-revoke). Instance-wide by
-  label on purpose: the app-token mint labels every phone token `app:<email>`
-  whatever workspace it is bound to, and a logout must kill them all. Tokens
-  carrying `admin` are excluded fail-safe — a label collision must never let a
-  member-reachable proxy revoke the stored custody credential. Returns the
-  revoke count (0 is a fine, idempotent answer); each revoke goes through
-  `revoke_token/1`, so every one is individually audited.
+  Revoke every LIVE `app:<email>`-labelled api token THE ACTOR MAY ADMINISTER —
+  the "logout everywhere" half of the app-token revoke path
+  (mob-w2-app-token-revoke). Tokens carrying `admin` are excluded fail-safe: a
+  label collision must never let a member-reachable proxy revoke the stored
+  custody credential. Returns the revoke count (0 is a fine, idempotent
+  answer); each revoke goes through `revoke_token/1`, so every one is
+  individually audited.
+
+  ## `actor` IS REQUIRED, AND THE ARITY IS THE POINT (task-ea8cae3258ea4bd3)
+
+  This used to be `revoke_app_tokens_for_email/1` and its selection set was
+  "every live app token for this email, ON THE INSTANCE". Three predicates —
+  label, `kind`, not-already-revoked — and none of them tenancy. The only gate
+  above it is `has_permission?(bearer, "admin")`, a flat membership test over
+  `token.permissions` that reads no workspace at all, so an admin token in
+  workspace A, knowing nothing but an email address, logged workspace B's users
+  out of every phone session they held. Repeatable, and the route's rate
+  limiter slows that without scoping it.
+
+  The constraint lives HERE, in the query layer, and `actor` has no default —
+  the unscoped form is no longer spellable. A controller-side narrowing would
+  have left the next caller of this function holding the same instance-wide
+  weapon, and this module is exactly where a "revoke tokens by label" helper
+  gets reached for again.
+
+  The predicate is `Tenancy.Auth.workspace_admin?/2`, never
+  `Tenancy.Auth.authorize/3`: authorize/3's api_token arm is `member? AND the
+  token's GLOBAL permissions[]`, so a global-admin token holding a plain
+  `member` row in workspace B would PASS `authorize(tok, B, :admin)` while
+  `workspace_admin?(tok, B)` denies. It is also NOT `actor.workspace_id ==
+  token.workspace_id` — the predicate #12404 proposed and arpss-w8 rejected,
+  because that denies an admin who legitimately holds admin seats in several
+  workspaces. Same predicate, same reasoning, as `ShareLinkController`.
+
+  A row with a NULL `workspace_id` is administrable by nobody and is skipped.
+  That is fail-closed rather than a fallback, and it strands nothing in
+  practice: `AppTokenController.resolve_workspace/1` 422s a mint that cannot
+  resolve a workspace, so an app token with no workspace cannot be minted
+  through this surface in the first place.
+
+  Denial SHAPE, per the law in `BarkparkWeb.ShareLinkController`: the caller
+  named an email, not a workspace, so there is no target to 403 about. Foreign
+  rows are simply absent from the set and the count reports what actually
+  happened — a 403 here would confirm that the address holds a live token
+  somewhere on the instance, which is the disclosure the route already refuses
+  to make.
   """
-  @spec revoke_app_tokens_for_email(String.t()) :: non_neg_integer()
-  def revoke_app_tokens_for_email(email) when is_binary(email) do
+  @spec revoke_app_tokens_for_email(String.t(), ApiToken.t()) :: non_neg_integer()
+  def revoke_app_tokens_for_email(email, %ApiToken{} = actor) when is_binary(email) do
     label = "app:" <> email
 
     ApiToken
@@ -279,12 +317,22 @@ defmodule Barkpark.Auth do
     |> where([t], is_nil(t.revoked_at))
     |> Repo.all()
     |> Enum.reject(&("admin" in (&1.permissions || [])))
+    |> Enum.filter(&administrable_by?(&1, actor))
     |> Enum.reduce(0, fn token, acc ->
       case revoke_token(token) do
         {:ok, _} -> acc + 1
         _ -> acc
       end
     end)
+  end
+
+  # The ONE tenancy predicate both app-token revoke selectors share, so the
+  # by-email and by-id arms cannot drift apart. A NULL workspace_id denies:
+  # `workspace_admin?/2` reaches `membership/3`, whose `is_binary(workspace_id)`
+  # guard fails, and lands on that function's terminal `nil` — a deny, never a
+  # raise.
+  defp administrable_by?(%ApiToken{workspace_id: ws_id}, %ApiToken{} = actor) do
+    TenancyAuth.workspace_admin?(actor, ws_id)
   end
 
   @doc """
@@ -294,7 +342,7 @@ defmodule Barkpark.Auth do
 
   ## Why enumeration had to exist (jf-backlog-apptoken-revoke-upstream)
 
-  `revoke_app_tokens_for_email/1` matches `label == "app:" <> email` EXACTLY,
+  `revoke_app_tokens_for_email/2` matches `label == "app:" <> email` EXACTLY,
   and the mint's optional `label` REPLACES that default
   (`AppTokenController.fetch_label/2`). So a custom-labelled app token was
   unreachable by email — and with no list route and no revoke-by-id ROUTE, it
@@ -334,16 +382,35 @@ defmodule Barkpark.Auth do
 
   ## Admin-permissioned tokens ARE revocable here, unlike the email path
 
-  `revoke_app_tokens_for_email/1` rejects `admin` rows, and the controller's
+  `revoke_app_tokens_for_email/2` rejects `admin` rows, and the controller's
   by-raw arm 422s them. That rule exists for a stated reason — a custody
   credential "cannot be killed by a label collision or a smuggled body". An
   explicit row id is neither: it names one row, chosen by an admin bearer, with
   no collision surface. Carrying the rejection over would leave the WORST case
   of this gap — a custom-labelled admin app token — permanently unrevocable,
   which is the defect, not a protection against it.
+
+  ## `actor` IS REQUIRED — this arm is the by-email hole's twin
+  (task-ea8cae3258ea4bd3)
+
+  This was `revoke_app_token_by_id/1`: a bare `Repo.get/2` under the same
+  permission-only `has_permission?(bearer, "admin")` gate, i.e. any admin token
+  in any workspace could revoke ANY app token on the instance — and unlike the
+  email arm it does not even exclude `admin`-permissioned rows, by the
+  deliberate reasoning above. `GET /v1/auth/app-tokens` enumerates every id
+  instance-wide, so scoping only the email arm would have left a two-request
+  bypass through this same controller. Both selectors take the constraint, from
+  the same private predicate, so neither can be tightened without the other.
+
+  Denial SHAPE, per the law in `BarkparkWeb.ShareLinkController`: an opaque row
+  id belonging to a foreign tenant answers `{:error, :not_found}` — the SAME
+  return value, reaching the SAME emitter, as a missing row and a non-castable
+  id. Not a 403: distinguishing "exists but not yours" from "does not exist"
+  turns a revoke route into an existence oracle over every credential on the
+  instance.
   """
-  @spec revoke_app_token_by_id(binary()) :: {:ok, ApiToken.t()} | {:error, atom()}
-  def revoke_app_token_by_id(token_id) when is_binary(token_id) do
+  @spec revoke_app_token_by_id(binary(), ApiToken.t()) :: {:ok, ApiToken.t()} | {:error, atom()}
+  def revoke_app_token_by_id(token_id, %ApiToken{} = actor) when is_binary(token_id) do
     # Same UUID cast guard as revoke_token/1: the id column is :binary_id, so a
     # non-UUID would raise Ecto.CastError -> 500 instead of a clean not_found.
     case Repo.uuid_or_nil(token_id) do
@@ -352,8 +419,13 @@ defmodule Barkpark.Auth do
 
       uuid ->
         case Repo.get(ApiToken, uuid) do
-          %ApiToken{kind: "api"} = token -> revoke_token(token)
-          _ -> {:error, :not_found}
+          %ApiToken{kind: "api"} = token ->
+            if administrable_by?(token, actor),
+              do: revoke_token(token),
+              else: {:error, :not_found}
+
+          _ ->
+            {:error, :not_found}
         end
     end
   end
