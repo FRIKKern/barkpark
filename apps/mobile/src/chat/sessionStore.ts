@@ -331,9 +331,28 @@ export class ChatSessionStore {
    * Optimism is the right default here because the write is cheap and its
    * truth is re-asserted for free — every turn-boundary tail refetch overwrites
    * `choices` from the server row, so a rejected PATCH self-corrects within one
-   * turn without a poll of its own. A failure still surfaces honestly as a
-   * transportError AND rolls the field back immediately, so a dead write never
-   * leaves the sheet claiming a choice the server refused. */
+   * turn without a poll of its own. A failure surfaces honestly as a
+   * transportError AND rolls the field back, so a dead write never leaves the
+   * sheet claiming a choice the server refused.
+   *
+   * THE ROLLBACK IS FENCED ON THE FIELD IT WROTE, and it did not used to be.
+   * The handler captured `before` at call time and wrote `before[key]` into the
+   * CURRENT snapshot, so a slow failure could overwrite a NEWER choice the
+   * server had already accepted: tap `plan` (call A captures 'acceptEdits'),
+   * tap `default` a second later (call B succeeds, server now holds 'default'),
+   * then A's PATCH times out — A's catch writes 'acceptEdits', a value neither
+   * the user nor the server ever chose, and raises an error naming a write the
+   * user had already replaced. Every other async closure in this class fences on
+   * `gen !== this.startGen`; this one checked only `this.stopped`.
+   *
+   * The fence is a per-field compare-and-swap rather than a generation, because
+   * the unit at risk is the FIELD: two writes to different keys never conflict,
+   * and a generation counter would make them. If `choices[key]` is no longer the
+   * value THIS call wrote, a later write owns the field and this failure is not
+   * entitled to touch it — nor to raise an error about it, because the value the
+   * user is looking at came from that later write, and its own failure (if any)
+   * reports itself. A stale error next to a correct value reads as a bug in the
+   * value. */
   setChoice(key: keyof SessionChoices, value: string): void {
     if (key === 'provider') return // provider is server truth, never a client write
     const before = this.snapshot.choices
@@ -343,7 +362,9 @@ export class ChatSessionStore {
     patchChatSession(this.connection, this.sessionId, { [field]: value }).catch(
       (err: unknown) => {
         if (this.stopped) return
-        // Roll back to the value the server still holds, then say so.
+        // SUPERSEDED: a later setChoice moved this field on. That write owns it.
+        if (this.snapshot.choices[key] !== value) return
+        // Still ours — roll back to the value the server still holds, then say so.
         this.set({
           choices: { ...this.snapshot.choices, [key]: before[key] },
           transportError: `could not set ${field} — ${message(err)}`,
