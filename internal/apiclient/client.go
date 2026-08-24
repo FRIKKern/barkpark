@@ -1069,10 +1069,39 @@ type taskEnvelope struct {
 // TaskConflict is one holder in a resource_conflict envelope: the task + worker
 // currently holding some of the file resources a resources-declaring claim
 // requested, and which of them overlap. Surfaced verbatim on skip.
+//
+// THE WIRE KEY IS `doc_id`, NOT `task`. Measured against guerrilla:
+//
+//	{"ok":false,"reason":"resource_conflict",
+//	 "conflicts":[{"worker":"build-lane-j","doc_id":"task-4b338…","resources":["internal/cli/run.go"]}]}
+//
+// api/lib/barkpark/tasks/claim.ex builds each conflict as
+// `%{doc_id: did, worker: …, resources: …}` and has never sent `task`. This
+// struct declared ONLY `json:"task"`, so Task was empty on every real response
+// and holderText rendered a leading blank where the holder's row id belongs —
+// the one token a builder needs to go ask the holder. The repo's own fixtures
+// spelled it `"task"`, so the suite was green against a body the server does
+// not send.
+//
+// Both keys are declared: DocID is what the server sends, Task is kept so a
+// hand-written fixture or an older/other emitter using that spelling still
+// decodes. Read them through HolderID, never directly.
 type TaskConflict struct {
+	DocID     string   `json:"doc_id"`
 	Task      string   `json:"task"`
 	Worker    string   `json:"worker"`
 	Resources []string `json:"resources"`
+}
+
+// HolderID is the conflicting row's id, preferring the wire spelling the server
+// actually sends (`doc_id`) and falling back to the legacy `task` key. Every
+// renderer must go through this — reading .Task directly is what produced the
+// blank holder.
+func (c TaskConflict) HolderID() string {
+	if c.DocID != "" {
+		return c.DocID
+	}
+	return c.Task
 }
 
 // TaskNotice is one advisory rail-awareness notice a claim/close 2xx envelope

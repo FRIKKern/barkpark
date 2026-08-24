@@ -40,6 +40,16 @@ type writer struct {
 	// unused on the pinned ANSI16 floor).
 	colorProfile pdrender.Profile
 	renderer     *lipgloss.Renderer
+
+	// lastErrorCode is the `code` of the most recent API refusal handleResponse
+	// classified, "" while nothing has failed. It exists for the client-side
+	// wrappers that add a diagnosis on top of a failed manifest dispatch
+	// (runTaskClaim): those get only an exit code back, and exit 6 covers SIX
+	// distinct task-contention reasons whose explanations are not
+	// interchangeable — a resource_conflict says nothing about the target row's
+	// own claim, so the claim-state read-back must not speak for it.
+	// Per-invocation, never a package global: one writer per bp run.
+	lastErrorCode string
 }
 
 func newWriter(stdout, stderr io.Writer) *writer {

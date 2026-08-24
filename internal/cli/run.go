@@ -251,6 +251,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if code, handled := screenWriteReceipt(out, cmd, status, respBody); handled {
 			return code
 		}
+		if code, handled := screenUnpaginatedRead(out, cmd, status, respBody); handled {
+			return code
+		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
 		emitHelpHints(out, respBody)
 	}
@@ -329,6 +332,32 @@ func topLevelHelpStrings(body []byte) []string {
 	return hs
 }
 
+// refuseWithRemedy emits ONE refusal on whichever channel the caller's output
+// shape uses, and — this is the whole point — carries the remedy on BOTH.
+//
+// renderErrorEnvelope only carries `hint` for -o json/yaml; it returns false for
+// `table` and `minimal`, and every caller then printed `msg` alone. So the
+// reader law's own refusals — the --all walk (wave 27), the paginated default
+// page (wave 28) and the 93 write verbs (wave 29) — each computed a precise,
+// hand-written remedy and then dropped it for exactly the audience that reads
+// human output. A person at a terminal saw "unreadable list page: HTTP 200 …"
+// and no word about what to do; only a piped `-o json` consumer ever got
+// "Retry, then check the server URL and that the API is up."
+//
+// The human shape is byte-for-byte the one renderError already uses for a
+// classified API error (`out.userErr(msg)` then `  hint: …`) and the one
+// seed_cmd.go:95 hand-rolled, so this unifies three spellings into one and
+// leaves the machine envelope untouched.
+func refuseWithRemedy(out *writer, code, msg, hint string) {
+	if renderErrorEnvelope(out, code, msg, "", hint) {
+		return
+	}
+	out.userErr("%s", msg)
+	if hint != "" {
+		out.errf("  hint: %s", hint)
+	}
+}
+
 // unreadableListPageHint is the one wording both list-page refusals share —
 // the --all walk (runPaginatedAll) and the DEFAULT single page
 // (refuseUnreadableDefaultPage). It names the transport, not the query,
@@ -381,9 +410,7 @@ func refuseUnreadableDefaultPage(out *writer, cmd manifest.Command, status int, 
 		"unreadable list page: HTTP %d carried no known list envelope (%d bytes): %s",
 		status, len(respBody), bodyPreview(respBody),
 	)
-	if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
-		out.userErr("%s", msg)
-	}
+	refuseWithRemedy(out, "unreadable_list_page", msg, unreadableListPageHint)
 	return exitGeneric, true
 }
 
@@ -448,9 +475,7 @@ func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody 
 		"unreadable write receipt: HTTP %d %s (%d bytes): %s",
 		status, reason, len(respBody), bodyPreview(respBody),
 	)
-	if !renderErrorEnvelope(out, "unreadable_write_receipt", msg, "", unreadableWriteReceiptHint) {
-		out.userErr("%s", msg)
-	}
+	refuseWithRemedy(out, "unreadable_write_receipt", msg, unreadableWriteReceiptHint)
 	return exitGeneric, true
 }
 
@@ -516,6 +541,152 @@ func errorEnvelopeOn2xx(m map[string]any) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// unreadableReadHint is the wording the non-paginated read refusal carries for
+// the transport classes. Same register as its list and write siblings: name the
+// transport, because that is what a 200 saying nothing always means on a read.
+const unreadableReadHint = "the transport, not the query: a proxy/gateway page or a truncated response. Retry, then check the server URL and that the API is up."
+
+// unreadableReadContradictionHint is for the ONE class that is not a transport
+// fault: the server returned a success status carrying its own failure
+// envelope. Retrying is the wrong advice there — the error is the answer, and
+// the remedy is to read it.
+const unreadableReadContradictionHint = "the SERVER contradicted itself — a success status carrying a failure envelope. The error above is the real outcome; do not treat this call as having succeeded, and report the status/body pair if it recurs."
+
+// screenUnpaginatedRead is the THIRD hole in the PDS reader law, and the one
+// left open by construction. Waves 27 and 28 fenced the `--all` walk and the
+// paginated DEFAULT page; wave 29 fenced the 93 write verbs. All three are
+// gated on `cmd.Paginated` or `cmd.Writes`, so the 52 commands that are
+// NEITHER — every non-paginated read on the live manifest: doc.get,
+// doc.related, doc.history, task.get, task.prime, task.events, media.search,
+// media.suggest, schema.get, secret.get, auth.me, graph.*, … — sat outside
+// every screen.
+//
+// MEASURED against a fake API serving HTTP 200 (bp doc get post p1, all four
+// output shapes, 28 runs): every single one exited 0. `-o table` over `{}`
+// printed ZERO BYTES on both channels — read by a human as "no data", not as
+// "it broke". `-o minimal` printed the literal word `ok` over `{}`, `null`,
+// `{"result":null}` and `[]`. An HTML 502 proxy page was echoed verbatim in all
+// four shapes. And an ERROR ENVELOPE arriving on a 200 was printed as the
+// SUCCESS body — `-o minimal` rendered it as `not ok`, at rc=0.
+//
+// THE DISCRIMINATOR IS NARROWER THAN THE WRITE SIDE, DELIBERATELY. A write has
+// no honest empty receipt, so unreadableWriteReceipt refuses `{}` and `[]`. A
+// READ does: an empty object from data.counts on a fresh dataset, and an empty
+// array from media.collections on an empty library, are correct answers. Only
+// bodies that carry no statement AT ALL are refused:
+//
+//   - an empty body on a status that did not declare one (no 204/205);
+//   - an HTML DOCUMENT, which on an API read is always an interposed
+//     proxy/gateway page;
+//   - a `{"result": …}` envelope the server declared and then filled with
+//     non-JSON;
+//   - an error envelope on a 2xx — the server contradicting itself.
+//
+// The non-JSON class is deliberately restricted to an HTML document rather than
+// "does not parse as JSON", because onixedit.export is a REAL non-paginated
+// read that streams ONIX 3.0 XML through this same dispatch (plugins/onixedit/
+// cli.ex:34) and a blanket JSON demand would red an honest export. Separating
+// a plaintext gateway error from a legitimate text payload needs the response
+// Content-Type, which sendManifestRequest does not carry today; that remainder
+// is filed, not silently folded in here.
+func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+	if cmd.Writes || cmd.Paginated {
+		return 0, false
+	}
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(respBody)) == 0 {
+		return 0, false
+	}
+
+	reason, contradiction := unreadableReadBody(respBody)
+	if reason == "" {
+		return 0, false
+	}
+
+	hint := unreadableReadHint
+	if contradiction {
+		hint = unreadableReadContradictionHint
+	}
+	msg := fmt.Sprintf(
+		"unreadable read: HTTP %d %s (%d bytes): %s",
+		status, reason, len(respBody), bodyPreview(respBody),
+	)
+	refuseWithRemedy(out, "unreadable_read", msg, hint)
+	return exitGeneric, true
+}
+
+// unreadableReadBody names WHY a 2xx read body carries no statement, or "" when
+// it is an answer worth rendering. The second return distinguishes the ONE
+// non-transport class (a failure envelope on a success status) so the refusal
+// can carry the right remedy instead of advising a retry that cannot help.
+//
+// Everything not listed in screenUnpaginatedRead's doc comment PASSES —
+// including `{}`, `[]`, `null`, every scalar, non-HTML non-JSON bytes, and any
+// object regardless of its keys. That is the point: a read has honest empty
+// answers, and an allowlist of recognised shapes here would red them.
+func unreadableReadBody(body []byte) (string, bool) {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return "returned an empty body without declaring one (no 204/205 no-content status)", false
+	}
+	if isHTMLDocument(trimmed) {
+		return "carried an HTML document, not an API response", false
+	}
+	if json.Unmarshal(body, new(any)) != nil {
+		// Non-JSON that is not an HTML document: onixedit.export's ONIX XML
+		// lives here, and so does a plaintext gateway error. Telling them apart
+		// needs the response Content-Type. Pass rather than guess.
+		return "", false
+	}
+	// unwrapResult returns the body unchanged when there is no `result` key, so
+	// this ONE check covers both spellings of the envelope — `{"ok":false,
+	// "error":…}` bare and nested under `result`.
+	var payload any
+	if json.Unmarshal(unwrapResult(body), &payload) != nil {
+		return `carried a {"result": …} envelope whose payload is not JSON`, false
+	}
+	if m, ok := payload.(map[string]any); ok {
+		if code, isErr := errorEnvelopeOn2xx(m); isErr {
+			return fmt.Sprintf("carried an ERROR envelope (%s) on a success status", code), true
+		}
+	}
+	return "", false
+}
+
+// isHTMLDocument reports whether b opens as an HTML document — a `<!doctype
+// html>` or `<html` root, optionally behind an XML declaration (XHTML). It is
+// NOT "looks like markup": ONIX 3.0 opens `<?xml …?><ONIXMessage`, which must
+// keep passing, so the check demands the html root specifically.
+func isHTMLDocument(b []byte) bool {
+	s := bytes.TrimSpace(b)
+	if bytes.HasPrefix(s, []byte("<?xml")) {
+		if end := bytes.Index(s, []byte("?>")); end >= 0 {
+			s = bytes.TrimSpace(s[end+2:])
+		}
+	}
+	if len(s) > 512 {
+		s = s[:512]
+	}
+	lower := bytes.ToLower(s)
+	if bytes.HasPrefix(lower, []byte("<!doctype html")) {
+		return true
+	}
+	// `<html` needs a TAG BOUNDARY after it, or `<htmlish>` — a perfectly good
+	// element name in someone's XML vocabulary — reads as a proxy page.
+	if !bytes.HasPrefix(lower, []byte("<html")) {
+		return false
+	}
+	rest := lower[len("<html"):]
+	if len(rest) == 0 {
+		return true
+	}
+	switch rest[0] {
+	case '>', '/', ' ', '\t', '\r', '\n':
+		return true
+	}
+	return false
 }
 
 // warnIfDefaultPageMayBeTruncated keeps the normal single-page path honest: a
@@ -1387,6 +1558,13 @@ func handleResponse(out *writer, cmd manifest.Command, status int, respBody []by
 		return exitOK
 	}
 	ae := classifyError(status, respBody)
+	// Record WHICH refusal this was, for the client-side wrappers that layer a
+	// second read on top of a failed dispatch (runTaskClaim). They only get an
+	// exit code back from runCommand, and exit 6 covers the whole task
+	// claim/close contention row of the exit table — six different reasons whose
+	// diagnoses are not interchangeable. Per-invocation state on the writer, not
+	// a package global: one writer per bp run.
+	out.lastErrorCode = ae.code
 	renderError(out, ae)
 	return ae.exit
 }
@@ -1791,9 +1969,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 				"unreadable list page at offset %d: HTTP %d carried no known list envelope (%d bytes): %s",
 				offset, status, len(respBody), bodyPreview(respBody),
 			)
-			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
-				out.userErr("%s", msg)
-			}
+			refuseWithRemedy(out, "unreadable_list_page", msg, unreadableListPageHint)
 			return exitGeneric
 		}
 		if key == "" {

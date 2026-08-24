@@ -315,9 +315,12 @@ func runScaffyFmt(out *writer, args []string) int {
 		formatted, ferr := scaffy.Format(src)
 		if ferr != nil {
 			msg := fmt.Sprintf("scaffy fmt: %s: %v", f, ferr)
-			if !renderErrorEnvelope(out, "validation", msg, "", "run `bp scaffy validate` for the full findings") {
-				out.userErr("%s", msg)
-			}
+			// refuseWithRemedy, not a bare userErr: this refusal's whole remedy
+			// is the follow-up command, and the human shape used to print the
+			// parse error with no word about `bp scaffy validate`. (The two
+			// sibling refusals below already show their per-finding hints
+			// inline, so they keep their own rendering.)
+			refuseWithRemedy(out, "validation", msg, "run `bp scaffy validate` for the full findings")
 			return exitValidation
 		}
 		if bytes.Equal(formatted, src) {
