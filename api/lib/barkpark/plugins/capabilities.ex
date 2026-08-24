@@ -1278,8 +1278,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("q", false, "string", "Search query (optional — omit for a filter-only browse).")
         ],
         flags: [
-          flag("limit", "int", "Max hits to return."),
-          flag("offset", "int", "Hits to skip (paginate with --limit)."),
+          flag("limit", "int", "Max hits to return.", default: 50),
+          flag("offset", "int", "Hits to skip (paginate with --limit).", default: 0),
           flag("cursor", "string", "Keyset cursor from a prior result's nextCursor."),
           flag("type", "string", "Filter by MIME type (e.g. image/png)."),
           flag("kind", "string", "Filter by asset kind (image/video/…)."),
@@ -1289,6 +1289,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag("sort", "string", "Sort order (default created-desc)."),
           flag("facets", "string", "Comma-separated facet dimensions to compute.")
         ],
+        paginated: true,
         writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -1338,6 +1339,11 @@ defmodule Barkpark.Plugins.Capabilities do
         "GET",
         "/v1/media/:dataset/collections",
         "none",
+        flags: [
+          flag("limit", "int", "Max collections to return.", default: 200),
+          flag("offset", "int", "Collections to skip.", default: 0)
+        ],
+        paginated: true,
         writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -1351,6 +1357,11 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/media/:dataset/collections/:id/assets",
         "none",
         args: [arg("id", true, "string", "Collection id.")],
+        flags: [
+          flag("limit", "int", "Max assets to return.", default: 50),
+          flag("offset", "int", "Assets to skip.", default: 0)
+        ],
+        paginated: true,
         writes: false,
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

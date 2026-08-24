@@ -2072,6 +2072,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Max collections to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Collections to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -3073,6 +3091,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "Max assets to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Assets to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -3616,6 +3652,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Max collections to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Collections to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
@@ -9354,6 +9408,24 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "Max assets to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Assets to skip.",
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "type": "integer"
             }
           }
         ],
