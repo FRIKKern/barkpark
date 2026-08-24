@@ -861,4 +861,78 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
       end
     end
   end
+
+  # ── 10. THE READING SERIF, for chrome portaled OUT of the surface ───────────
+  # The slash menu and the format bubble are appended to `document.body`
+  # (slash-menu.js:283, format-bubble.js:203), so they are NOT descendants of
+  # `.bp-paper-surface` and cannot inherit the `--paper-font-serif` declared
+  # there. Each surface therefore needs its OWN document-root declaration, and
+  # for a while only the bundle had one: styles.css's generated mirror puts the
+  # token on `:root, :host`, while root.html.heex instead gave the two popups a
+  # private `'Source Serif 4', Georgia, 'Times New Roman', serif`. That is a
+  # DIFFERENT stack from the one the reader resolves, and it was live — measured
+  # in headless Chromium via CDP CSS.getPlatformFontsForNode, the format
+  # bubble's B and I glyphs painted in Georgia while the prose they format
+  # painted in Iowan Old Style.
+  #
+  # It never moved a `ch` figure — `.bp-paper-surface` resolves its own token,
+  # and its px-per-ch measured 10.0000 before and after — so this is a typography
+  # parity bug, not a layout one (spd-b37). The guard exists because the two
+  # declarations are hand-kept copies in different files with no other link.
+  #
+  # The stack ORDER is deliberately NOT asserted here: it is owned by
+  # au-w5-reading-typography (human-gated) and lives in design/tokens.json
+  # `font.reading.stack`. This pins that the two documents AGREE, whatever that
+  # gate later ratifies — so the eventual Source-Serif-first cutover changes one
+  # token and this test keeps holding.
+  @serif_token "--paper-font-serif"
+
+  defp root_serif_declarations(css) do
+    ~r/--paper-font-serif:\s*([^;]+);/
+    |> Regex.scan(css)
+    |> Enum.map(fn [_, value] -> String.trim(value) end)
+  end
+
+  test "the Studio and the bundle declare ONE reading-serif stack, byte-identical" do
+    studio = root_serif_declarations(edit_css())
+    bundle = root_serif_declarations(bundle_css())
+
+    # distrust-vacuous-green: a rename that empties BOTH sides would make the
+    # equality below trivially true, so require each side to actually declare it.
+    assert studio != [],
+           "root.html.heex declares #{@serif_token} nowhere — the Studio's " <>
+             "body-portaled popups (slash menu, format bubble) would inherit no " <>
+             "reading serif at all. A selector or token rename likely broke this."
+
+    assert bundle != [],
+           "api/assets/paper-editor/src/styles.css declares #{@serif_token} nowhere — " <>
+             "the embedder bundle's popups would inherit no reading serif."
+
+    assert length(Enum.uniq(studio)) == 1,
+           "root.html.heex declares #{@serif_token} with MORE THAN ONE value: " <>
+             "#{inspect(Enum.uniq(studio))}. A second, private stack for portaled " <>
+             "chrome is exactly the divergence spd-b37 removed — declare it once at :root."
+
+    assert length(Enum.uniq(bundle)) == 1,
+           "styles.css declares #{@serif_token} with more than one value: " <>
+             "#{inspect(Enum.uniq(bundle))}."
+
+    [studio_value] = Enum.uniq(studio)
+    [bundle_value] = Enum.uniq(bundle)
+
+    assert studio_value == bundle_value,
+           """
+           Reading-serif drift between the Studio shell and the embedder bundle.
+           These are two hand-kept copies of ONE stack; nothing but this test
+           links them, and when they last diverged the format bubble's B and I
+           glyphs rendered in a different face from the prose they format.
+
+             root.html.heex (:root)          #{inspect(studio_value)}
+             styles.css     (:root, :host)   #{inspect(bundle_value)}
+
+           Align them byte-for-byte. If the stack ORDER itself is what changed,
+           that belongs in design/tokens.json `font.reading.stack` behind the
+           au-w5-reading-typography gate, and then BOTH sides carry it.
+           """
+  end
 end
