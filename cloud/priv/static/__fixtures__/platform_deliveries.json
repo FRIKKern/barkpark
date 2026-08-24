@@ -41,13 +41,45 @@
     "not_null": ["sha", "delivering_run_id", "first_seen_at", "recorded_at", "target"]
   },
 
+  "producer_reachability": {
+    "law": "NULLABLE IS NOT THE SAME QUESTION AS WRITABLE, and this file conflated the two. `null_clocks` above says which keys MAY be null on a live row. This block says something stricter and entirely separate: whether ANY producer in the tree can emit a NON-NULL value for a key at all. A key that is nullable-AND-writable has two reachable states, and a fixture may demonstrate both. A key that is nullable-and-UNREACHABLE has exactly ONE reachable state, and a scenario showing it populated is teaching a shape the wire has never carried and cannot carry. Both kinds belong in this file - the CLI renders both - but a reader test must never mistake the second kind for evidence about production.",
+
+    "producer": "There is exactly ONE producer of platform_deliveries rows: the `record-delivery` job in .github/workflows/deploy.yml, added by #11167. Before that nothing called the writer at all and the table's only row had been hand-posted by a human. Its payload is a single jq map literal. Re-derive this block by grepping `queued_pickup_seconds` in that file rather than trusting line numbers, which drift on every edit - charter D484 still cites `deploy.yml:622` and the map has since moved.",
+
+    "writable": [
+      "build_seconds",
+      "carried",
+      "delivering_run_id",
+      "first_seen_at",
+      "merged_at",
+      "previous_sha",
+      "queued_seconds",
+      "queued_self_seconds",
+      "recorded_at",
+      "serving_since",
+      "sha",
+      "target",
+      "transition"
+    ],
+
+    "unreachable": ["queued_pickup_seconds", "queued_stall_seconds"],
+
+    "unreachable_law": "These TWO are hard-coded `null` JSON literals in the producer's payload map - not computed-then-nulled, not conditionally omitted, but written as the literal token `null` on every row of every batch. NO code path in this repository can put a non-null value in either column. They are CORRECTLY null, and filling them is REFUSED by charter D484: D430 defines `pickup` as THE RESIDUAL of a three-term partition and NEVER as a threshold - precisely so a regime shift in GitHub's pickup latency can never silently reclassify as stall - while the third term (`stall`) needs a repo-wide cross-workflow query the recorder does not make. A residual of an incomplete partition is not a measurement: on a real sample the gap between a job's created and started was 3s while the residual computed 4s. Redefining pickup as `job.started - job.created` INVERTS D430's partition and is a charter amendment wearing a null-fill.",
+
+    "not_a_defect_to_fix_here": "Do NOT 'fix' this by filling the columns - D484 refuses it by name. Do NOT delete them either: they render in the CLI's three-way wait split in internal/cli/cloud_deliveries_cmd.go, and dropping them would blind the reader to the very partition D430 defined. The columns stay, the nulls stay, and this fixture's job is to stop implying otherwise.",
+
+    "verified": "2026-08-24, both ends re-derived rather than quoted. PRODUCER, on origin/main: the payload map carries `queued_self_seconds: $self, queued_pickup_seconds: null, queued_stall_seconds: null`, and the step's own comment states the ruling verbatim - 'queued_pickup_seconds and queued_stall_seconds stay NULL, both by ruling and by honesty'. WIRE, from the live control plane: three rows for sha d4d228c132f1c2c5d5091815b2daa3b5ab99cbb1 read with `bp cloud deliveries <sha>`, and every one carries queued_pickup_seconds null and queued_stall_seconds null while queued_self_seconds reads 362 on two rows and 0 on the third. That 0 is a MEASURED zero, not an absent one, which is exactly the distinction this block exists to keep legible.",
+
+    "reader_tests_that_can_only_pass_synthetically": "IDENTIFIED, NOT REPAIRED HERE - internal/cli/ sits outside this change's fence, so this is documentation and a handoff rather than a fix. The queue-split render test in internal/cli/cloud_deliveries_cmd_test.go asserts the FULLY-METERED render `self 6s / stall 5s / pickup 3s` off `fully_clocked`, and the PARTIAL render `self 120s / stall UNMETERED / pickup 30s` off `two_rows_one_sha` row 2. BOTH assert a non-null `queued_pickup_seconds`, so BOTH exercise render paths production can never reach. They are worth KEEPING - the CLI must still render those shapes correctly if the ruling ever changes, and an unrendered branch rots - but neither is evidence about the wire. The deeper hole was the other way round: until `producer_shape_self_only` below was added, NO scenario carried the shape every live row actually has, so the two unreachable paths were thoroughly tested while the single reachable one was not tested at all."
+  },
+
   "envelope_key_set": ["count", "deliveries", "limit", "scope", "sha"],
   "envelope_note": "`sha` on the envelope is the control plane's own normalised filter and is NULL when the caller named none, so it is a pointer on the Go side; `scope` is the literal population name and `count` is len(deliveries) for THIS page, not the size of the table.",
 
   "scenarios": {
     "fully_clocked": {
       "why": "The clocked-in-full render: every one of the seven nullable clocks present, and `carried` MEASURED false, so the run is this sha's own and the seconds are this sha's own. Built on the FIRST and only real row the crown has ever held (sha 2e38228…, recorded 2026-08-08T12:23:21Z, read back through a PAT against https://barkpark.cloud/v1/deliveries).",
-      "synthetic": "PARTLY. sha, delivering_run_id, target, carried, queued_seconds (14), build_seconds (216) and all four datetimes are the LIVE prod row verbatim. The three queue-split values (self 6 · stall 5 · pickup 3) are FABRICATED: that row was written before #10942 added the columns, so the real row carries null for all three and could not exercise a fully-metered split. They are chosen to sum to the real queued_seconds — 6+5+3=14 — because the split is a decomposition of that same wait, and a fixture whose buckets contradicted its own total would teach a reader the wrong arithmetic. `previous_sha` and `transition` are FABRICATED for the same reason: the live row predates #11078 and carries null for both, so it could not exercise a graded move. The previous_sha is guerrilla's real then-green slot commit (b97663730, the pair charter D437's rollback probe was measured on) padded to 40 hex, and the verdict is `forward` — the ordinary case, so that the ROLLBACK render has its own scenario and the two can never mask each other.",
+      "synthetic": "PARTLY, AND ONE PART IS UNREACHABLE RATHER THAN MERELY ABSENT - see `producer_reachability` above. sha, delivering_run_id, target, carried, queued_seconds (14), build_seconds (216) and all four datetimes are the LIVE prod row verbatim. The three queue-split values (self 6 · stall 5 · pickup 3) are FABRICATED, but NOT all for the same reason, and this file used to imply they were. `queued_self_seconds` IS writable and production writes it - live rows carry 362 and a measured 0 - so its 6 here is synthetic only because THIS row predates #10942. `queued_pickup_seconds` and `queued_stall_seconds` differ in KIND: no producer in the tree can EVER write them, so 3 and 5 are not values production has yet to emit, they are values production cannot emit. Read this scenario as a RENDER exercise for the three-way split, never as evidence of a shape the wire carries. The three are chosen to sum to the real queued_seconds — 6+5+3=14 — because the split is a decomposition of that same wait, and a fixture whose buckets contradicted its own total would teach a reader the wrong arithmetic. Note the tension with `producer_shape_self_only` below, and keep both: a FABRICATED full split sums to its total by construction, while a REAL row's split cannot sum to anything, because two of its three terms are unwritable. A reader must survive both. `previous_sha` and `transition` are FABRICATED for the same reason: the live row predates #11078 and carries null for both, so it could not exercise a graded move. The previous_sha is guerrilla's real then-green slot commit (b97663730, the pair charter D437's rollback probe was measured on) padded to 40 hex, and the verdict is `forward` — the ordinary case, so that the ROLLBACK render has its own scenario and the two can never mask each other.",
       "status": 200,
       "body": {
         "deliveries": [
@@ -71,6 +103,37 @@
         ],
         "count": 1,
         "sha": "2e38228b0048901b166d915d222cfc47f6f470d6",
+        "limit": 50,
+        "scope": "platform"
+      }
+    },
+
+    "producer_shape_self_only": {
+      "why": "THE SHAPE EVERY LIVE ROW ACTUALLY HAS, and until this scenario was added the file did not contain it once. The producer writes `queued_self_seconds` and hard-codes `queued_pickup_seconds` and `queued_stall_seconds` to null on every row (`producer_reachability` above), so a real row carries EXACTLY ONE of the three buckets. Every other 200 scenario here shows two or three buckets populated - shapes the wire cannot carry - which left the single reachable shape as the one render path with no coverage at all. THE SPLIT DOES NOT ADD UP HERE, AND THAT IS THE POINT: queued_seconds is 465 while queued_self_seconds is 362, so 103 seconds of real, measured waiting sit in NO bucket. A reader that treats the three buckets as a partition of the total will either lose those 103s silently or, worse, coalesce the two nulls to 0 and report that the whole 465s wait was 362s of self-inflicted queueing plus nothing - a confident, wrong attribution of where a deploy's time went. The only honest render is three buckets of which two say UNMETERED, beside a total that is larger than their sum, with no arithmetic implied between them.",
+      "synthetic": "NO - observed live. Read from the control plane on 2026-08-24 with `bp cloud deliveries d4d228c132f1c2c5d5091815b2daa3b5ab99cbb1`, which returned three rows for that sha; this is the `cp` row of delivering run 32720126732, verbatim, all fifteen keys unedited. It is the FIRST scenario in this file built on a row the current recorder wrote by itself rather than on the one hand-posted row from 2026-08-08 that every other scenario descends from. The `carried: false` here is a MEASURED false from a producer that computes it, not the schema default that D422 removed.",
+      "status": 200,
+      "body": {
+        "deliveries": [
+          {
+            "sha": "d4d228c132f1c2c5d5091815b2daa3b5ab99cbb1",
+            "delivering_run_id": "32720126732",
+            "first_seen_at": "2026-08-24T11:16:22.000000Z",
+            "merged_at": "2026-08-24T11:06:10.000000Z",
+            "queued_seconds": 465,
+            "queued_self_seconds": 362,
+            "queued_pickup_seconds": null,
+            "queued_stall_seconds": null,
+            "build_seconds": 106,
+            "serving_since": "2026-08-24T11:15:02.794875Z",
+            "target": "cp",
+            "carried": false,
+            "previous_sha": "e965c06958d7105abc97e3fca097013af55e3ce4",
+            "transition": "forward",
+            "recorded_at": "2026-08-24T11:16:26.923527Z"
+          }
+        ],
+        "count": 1,
+        "sha": "d4d228c132f1c2c5d5091815b2daa3b5ab99cbb1",
         "limit": 50,
         "scope": "platform"
       }
@@ -109,7 +172,7 @@
 
     "carried": {
       "why": "carried=true: ~36.7% of merged shas over the 8-day window (charter D429, measured at n=300) are delivered by a LATER sha's run rather than by one of their own, because 110 of 110 cancelled runs carry zero jobs. The queue and build clocks on this row measure THAT run, not this sha's, and a render that prints them silently attributes another commit's timings to this one.",
-      "synthetic": "YES — fabricated. The sha is not a real commit; the run id and clocks are copied from the live row above to make the point that IDENTICAL seconds mean something different once carried is true.",
+      "synthetic": "YES — fabricated. The sha is not a real commit; the run id and clocks are copied from the live row above to make the point that IDENTICAL seconds mean something different once carried is true. That copy brings the unreachable pair with it: `queued_pickup_seconds` 3 and `queued_stall_seconds` 5 are values NO producer in the tree can write (`producer_reachability` above). This scenario is about ATTRIBUTION; its populated split is render-only scaffolding and is not a production shape.",
       "status": 200,
       "body": {
         "deliveries": [
@@ -140,7 +203,7 @@
 
     "carried_unrecorded": {
       "why": "THE THIRD STATE, and the reason this file moved. `carried` is null: the writer did not know whether this run belonged to this sha, and the schema keeps NO DEFAULT (charter D422) so that ignorance survives to the wire instead of being recorded as a measured `false`. Every clock on this row is PRESENT and healthy — which is exactly what makes it dangerous. A Go `bool` decoder turns the null into false and the reader prints 'run 31255918184 · target cp · this sha's OWN run': a fully confident attribution of 14s of queue and 216s of build to a commit that may never have owned them, with nothing on screen a human could doubt. The only honest render is a THIRD state that says UNRECORDED and says that the OWNERSHIP of these seconds — not the seconds themselves — is unknown. This is the row the mutation test uses: narrow Carried back to a plain bool and this scenario, and only this scenario, reds.",
-      "synthetic": "YES — fabricated, and it is the shape the CURRENT writer produces most often: nothing on main writes `carried` at all yet (the recorder job does not exist), so every row an ad-hoc POST puts in the table today carries null here.",
+      "synthetic": "YES — fabricated. THIS LABEL WAS STALE AND IS NOW CORRECTED: it used to read 'nothing on main writes `carried` at all yet (the recorder job does not exist)'. The recorder job HAS existed since #11167 and it DOES write `carried` - every live row read on 2026-08-24 carries a measured `false`. A null `carried` is therefore no longer the common case; it is the genuinely-unmeasured case the recorder emits only when it could not establish the range, which is rarer and more dangerous precisely because it is rare. The clocks are copied from the live row above and so carry the unreachable `queued_pickup_seconds` 3 / `queued_stall_seconds` 5 pair (`producer_reachability` above); this scenario is about the third state of `carried`, not about the split.",
       "status": 200,
       "body": {
         "deliveries": [
@@ -184,7 +247,7 @@
 
     "two_rows_one_sha": {
       "why": "REVIEW ADDITION. The row identity is (sha, delivering_run_id, target), so ONE sha routinely has SEVERAL rows — the normal post-merge shape is the cp leg and the instance leg of the same merge, and a carried sha can additionally be re-delivered by a later run. Every other scenario here carries 0 or 1 rows, so the multi-row path (row ordering, the blank line between blocks, one carried row beside one that is not) never executed. That is the most likely place for an ugly-but-not-wrong render, and it is the DEFAULT outcome of the recorder slice 8 ships. It also carries the ONLY PARTIAL split in this file: row 2 has self and pickup measured and stall NULL, which is the shape a reader does arithmetic on without noticing — two buckets present reads as 'the third was about zero', and pickup being the residual makes that reading actively wrong.",
-      "synthetic": "YES — fabricated. Both rows are modelled on the live cp row's clocks; the second row's run id, its 940s build and its partial split are invented to exercise the partial-split and per-row-attribution paths. The transitions are invented too, and they differ on purpose: row 1 is `forward` and row 2 is `unknown` — the writer TRIED to grade the instance leg's move and could not decide, which is the one state a null cannot express and the reason `transition` is a word rather than a boolean (charter D437 rejected a `rolled_back` bool for exactly this).",
+      "synthetic": "YES — fabricated, and BOTH rows carry unreachable buckets. Both are modelled on the live cp row's clocks; the second row's run id, its 940s build and its partial split are invented to exercise the partial-split and per-row-attribution paths. That partial split (self 120 / pickup 30 / stall null) is UNREACHABLE for the same reason row 1's full split is: a non-null `queued_pickup_seconds` cannot be produced by anything in this tree (`producer_reachability` above). The PARTIAL render path is worth keeping under test, but this row is its only source and that source is synthetic. The transitions are invented too, and they differ on purpose: row 1 is `forward` and row 2 is `unknown` — the writer TRIED to grade the instance leg's move and could not decide, which is the one state a null cannot express and the reason `transition` is a word rather than a boolean (charter D437 rejected a `rolled_back` bool for exactly this).",
       "status": 200,
       "body": {
         "deliveries": [
@@ -232,7 +295,7 @@
 
     "rollback_verdict": {
       "why": "THE ROLLBACK, and the reason this file moved again. `transition` is the one field the crown gained so that a deploy which moved the platform BACKWARDS would stop reading like an ordinary one — and from #11078 until dr-w27-s2 it never reached a human: to_json/1 emitted it, cloudclient.PlatformDelivery declared no field for it, json.Unmarshal dropped it in silence, and this row rendered BYTE-IDENTICALLY to the fully_clocked row above. Every clock here is present and healthy, exactly as in the row it must not be confused with; the ONLY difference is the verdict. That is what makes it the mutation row: delete the transition line from the renderer and this scenario, and only this scenario, reds.",
-      "synthetic": "YES — fabricated, but the SHAPE is a real event: guerrilla's own slot pair on 2026-08-08 was a genuine two-commit rollback (green b97663730 -> idle c0e43440b), and it is the pair charter D437's `git rev-list --count --left-right` primitive was measured on. The two shas here are those commits padded to 40 hex; the clocks are the live cp row's.",
+      "synthetic": "YES — fabricated, but the SHAPE is a real event: guerrilla's own slot pair on 2026-08-08 was a genuine two-commit rollback (green b97663730 -> idle c0e43440b), and it is the pair charter D437's `git rev-list --count --left-right` primitive was measured on. The two shas here are those commits padded to 40 hex; the clocks are the live cp row's, which drags the unreachable `queued_pickup_seconds` 3 / `queued_stall_seconds` 5 pair along with them (`producer_reachability` above). The ROLLBACK VERDICT this scenario exists to pin is fully reachable - `transition` and `previous_sha` are both writable and production writes them - so only the split buckets here are render-only.",
       "status": 200,
       "body": {
         "deliveries": [
