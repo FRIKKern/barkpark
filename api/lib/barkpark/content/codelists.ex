@@ -140,7 +140,8 @@ defmodule Barkpark.Content.Codelists do
 
     Repo.transaction(fn ->
       codelist = upsert_codelist!(plugin_name, list_id, issue, name, description)
-      replace_values!(codelist, values)
+      written = replace_values!(codelist, values)
+      assert_payload_written!(list_id, values, written)
       codelist
     end)
   end
@@ -324,42 +325,161 @@ defmodule Barkpark.Content.Codelists do
     end
   end
 
+  # ── Bulk value writer ────────────────────────────────────────────────────
+  #
+  # `register/3` runs the ENTIRE payload inside one `Repo.transaction`, so
+  # the statement count is a correctness property, not a tuning knob. The
+  # original writer issued one `Repo.insert!` per value AND one per
+  # translation: the bundled Thema snapshot (9187 codes, a label each) cost
+  # ~18,400 round trips under a single connection deadline. On 2026-08-19 a
+  # loaded host overran that deadline and Postgres cancelled the write
+  # (`ERROR 57014 (query_canceled)`) — the transaction rolled back, boot
+  # carried on, and the registry was left with the codelist ABSENT while the
+  # server served 200s. `codelists_bulk_write_test.exs` reproduces the same
+  # disconnect with a 1200-row payload.
+  #
+  # Both tables use `:binary_id` primary keys, so ids are generated here and
+  # the whole tree — parents and children alike — goes out in one flat pass
+  # with `parent_id` already resolved. No per-level returning round trip.
+  #
+  # Trade-off, recorded deliberately: `insert_all/2` bypasses the changesets,
+  # so a nil `:code` now surfaces as a Postgres NOT NULL violation and a
+  # duplicate code as a unique violation, where the per-row writer raised
+  # `Ecto.InvalidChangesetError`. Both still raise inside the transaction and
+  # both still roll the whole registration back; only the exception struct
+  # differs. `Map.fetch!/2` on `:code`, `:language`, and `:label` is kept
+  # verbatim, so a payload missing a required key still fails before any SQL.
+
+  # 8 columns per value row; 2_000 rows is 16_000 bind parameters, well under
+  # Postgres' 65_535 limit with headroom for the wider translation row.
+  @insert_chunk 2_000
+
+  # Returns the row counts Postgres reported writing, as
+  # `%{values: n, translations: m}`. It does NOT return a bare `:ok`: a
+  # sentinel here would destroy the write's outcome one frame below its
+  # caller, and this writer has three distinguishable outcomes — raised and
+  # lost, raised and landed, and (the one no error code reports) SUCCEEDED
+  # and lost. `register/3` reads the counts back and rolls the transaction
+  # back on disagreement.
   defp replace_values!(%Codelist{id: codelist_id}, values) do
     # Cascading FK deletes translations along with values.
     Repo.delete_all(from v in Value, where: v.codelist_id == ^codelist_id)
-    Enum.each(values, &insert_value!(&1, codelist_id, nil))
+
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+    {value_rows, translation_rows} =
+      flatten_values(values, codelist_id, nil, now, {[], []})
+
+    # Values before translations: the FK on `codelist_value_id` is checked
+    # per statement, so the parents must already be on disk. Within the value
+    # list, the depth-first order below guarantees a parent precedes its
+    # children, satisfying the self-referencing `parent_id` FK too.
+    %{
+      values: insert_all_chunked!(Value, Enum.reverse(value_rows)),
+      translations: insert_all_chunked!(Translation, Enum.reverse(translation_rows))
+    }
   end
 
-  defp insert_value!(input, codelist_id, parent_id) do
-    code = Map.fetch!(input, :code)
-    position = Map.get(input, :position)
-    metadata = Map.get(input, :metadata)
-    translations = Map.get(input, :translations, [])
-    children = Map.get(input, :children, [])
+  # The SECOND instrument, and deliberately not a restatement of the first.
+  # `insert_all_chunked!/2` compares what Postgres wrote against what the
+  # flattening pass handed it; this compares the persisted totals against an
+  # INDEPENDENT recount of the caller's own payload. A bug that dropped a
+  # node inside `flatten_values/5` would satisfy the inner check — every row
+  # handed over was written — and only this one catches it.
+  #
+  # Raising inside `Repo.transaction` rolls the whole registration back, so
+  # the failure mode is a codelist that stays at its previous state, never a
+  # published truncation.
+  defp assert_payload_written!(list_id, values, written) do
+    {expected_values, expected_translations} = payload_totals(values)
 
-    value =
-      %Value{}
-      |> Value.changeset(%{
+    if {expected_values, expected_translations} != {written.values, written.translations} do
+      raise "codelist #{list_id}: registration persisted #{written.values} value(s) and " <>
+              "#{written.translations} translation(s), but the payload carried " <>
+              "#{expected_values} and #{expected_translations} — rolling back rather than " <>
+              "publishing a truncated codelist"
+    end
+
+    :ok
+  end
+
+  defp payload_totals(values) do
+    Enum.reduce(values, {0, 0}, fn value, {value_count, translation_count} ->
+      {child_values, child_translations} = payload_totals(Map.get(value, :children, []))
+
+      {value_count + 1 + child_values,
+       translation_count + length(Map.get(value, :translations, [])) + child_translations}
+    end)
+  end
+
+  # Depth-first pre-order walk — the exact visit order the per-row writer
+  # produced — accumulating REVERSED lists so each step is a prepend. The
+  # caller reverses once.
+  defp flatten_values(inputs, codelist_id, parent_id, now, acc) do
+    Enum.reduce(inputs, acc, fn input, {values, translations} ->
+      id = Ecto.UUID.generate()
+
+      value_row = %{
+        id: id,
         codelist_id: codelist_id,
         parent_id: parent_id,
-        code: code,
-        position: position,
-        metadata: metadata
-      })
-      |> Repo.insert!()
+        code: Map.fetch!(input, :code),
+        position: Map.get(input, :position),
+        metadata: Map.get(input, :metadata),
+        inserted_at: now,
+        updated_at: now
+      }
 
-    Enum.each(translations, fn t ->
-      %Translation{}
-      |> Translation.changeset(%{
-        codelist_value_id: value.id,
-        language: Map.fetch!(t, :language),
-        label: Map.fetch!(t, :label),
-        description: Map.get(t, :description)
-      })
-      |> Repo.insert!()
+      translations =
+        input
+        |> Map.get(:translations, [])
+        |> Enum.reduce(translations, fn t, acc ->
+          [
+            %{
+              id: Ecto.UUID.generate(),
+              codelist_value_id: id,
+              language: Map.fetch!(t, :language),
+              label: Map.fetch!(t, :label),
+              description: Map.get(t, :description),
+              inserted_at: now,
+              updated_at: now
+            }
+            | acc
+          ]
+        end)
+
+      flatten_values(
+        Map.get(input, :children, []),
+        codelist_id,
+        id,
+        now,
+        {[value_row | values], translations}
+      )
     end)
+  end
 
-    Enum.each(children, &insert_value!(&1, codelist_id, value.id))
+  # Returns the number of rows Postgres reported writing. With the default
+  # `on_conflict: :raise` an `insert_all` either writes every row it was
+  # handed or raises, so a short count is an anomaly no error code would
+  # surface — the "succeeded and lost" outcome. Raise on it rather than hand
+  # the caller a number it has no reason to distrust.
+  defp insert_all_chunked!(schema, rows) do
+    intended = length(rows)
+
+    written =
+      rows
+      |> Enum.chunk_every(@insert_chunk)
+      |> Enum.reduce(0, fn chunk, acc ->
+        {count, nil} = Repo.insert_all(schema, chunk)
+        acc + count
+      end)
+
+    if written != intended do
+      raise "codelist bulk write lost rows: handed #{intended} #{inspect(schema)} row(s), " <>
+              "Postgres reported writing #{written}"
+    end
+
+    written
   end
 
   defp latest_codelist_id(plugin_name, list_id) do
