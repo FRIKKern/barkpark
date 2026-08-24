@@ -27,13 +27,13 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 ## 3. Document Envelope
 
-Every response wraps its payload under `result`, plus four outer metadata keys: `schemaHash` (hex digest of the dataset's schema; changes when any schema changes) · `etag` (`If-None-Match` fingerprint → 304) · `ms` (server ms, int) · `syncTags` (string[] cache-tag hints for ISR revalidation, e.g. `bp:ds:production:type:post`).
+Payload under `result`, plus four outer keys: `schemaHash` (hex digest of the dataset schema; changes with any) · `etag` (`If-None-Match` → 304) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
-`result` is `{count, offset, limit, perspective, hasMore, documents:[...]}` for queries (§4) — plus `nextOffset` when `hasMore` and the next page is inside the offset ceiling — the document envelope object for single docs (§5).
+`result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
-**Document envelope keys** (inside `result` for a single doc; each `result.documents[]` element for queries): `_id` full id, `drafts.` prefix when draft · `_type` schema name · `_rev` 32-char hex, changes on every write · `_draft` bool, `_id` starts with `drafts.` · `_publishedId` id with `drafts.` stripped · `_createdAt`/`_updatedAt` ISO 8601 UTC, `Z` suffix (all strings but `_draft`).
+**Document envelope keys** (in `result` for a single doc; each `result.documents[]` for queries): `_id` full id, `drafts.` prefix when draft · `_type` schema name · `_rev` 32-char hex, changes on every write · `_draft` bool · `_publishedId` `_id` minus `drafts.` · `_createdAt`/`_updatedAt` ISO 8601 UTC `Z` (all strings but `_draft`).
 
-Other keys = stored content plus `title`; user fields can't shadow reserved keys (dropped on write).
+Other keys = stored content plus `title`; user fields can't shadow reserved keys—dropped on write.
 
 ## 4. `GET /w/:workspace_slug/p/:project_slug/v1/data/query/:dataset/:type` [public]
 
@@ -53,9 +53,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). Depth 1. |
 
-**Response:** `result` + outer keys per §3; `count` = page rows.
-
-`hasMore` (bool, always present) is the truncation signal: `true` means at least one row exists past this page. It is exact and costs one extra row, not a `COUNT` — unlike `total`, which needs `?count=true`. `nextOffset` accompanies a `true` `hasMore` (omitted past the 100 000 offset ceiling, where a further read cannot advance). **Do not infer truncation from `count == limit`** — that is precisely the ambiguous case: a type holding exactly `limit` rows and one holding a million produce the same `count`.
+**Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` = next offset when more.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
@@ -67,7 +65,7 @@ Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?f
 
 ### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
 
-Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered (out-of-tenant/hidden omitted).
+Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
 
@@ -93,7 +91,7 @@ A batch of mutations, applied atomically (any failure rolls back the batch). Bod
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the existing doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`:
 
@@ -114,7 +112,7 @@ SSE stream of document mutations, scoped to the resolved workspace + project.
 
 **First frame** on connect: `event: welcome` / `data: {"type":"welcome"}`.
 
-**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data` fields: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (rev *before*, `null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
+**Mutation frame** — SSE lines `id: <n>` / `event: mutation` / `data: <json>`; `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags` (outer format). **Keepalive:** `: keepalive` every 30 s idle.
 
 **Shed frame:** a stalled consumer gets ONE `event: overloaded` / `data: {"type":"overloaded","reason":"slow_consumer"}`, then the stream closes — reconnect with `Last-Event-ID`. (Chat never sheds.)
 
@@ -141,7 +139,7 @@ A **`bptk_` key IS an identity**: minted per outsider, who files/reads tickets w
 
 **Auth.** A `bptk_` key is refused by every non-ticket route (tier `"none"` in `/v1/capabilities`). **Paused** → `403` `key paused` (reversible); **revoked** → `401` (as no token); **rotate** = new secret, same identity row.
 
-**Attachments** (submitter-only): MIME from magic bytes (client header ignored), allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → `404`. **Write limits** per key (reads exempt): create 10/hr, message 60/hr, attachment 30/hr; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** + `quickstart` curls.
+**Attachments** (submitter-only): MIME from magic bytes (client header ignored); allowlist `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → `404`. **Write limits**/key (reads exempt): create 10/hr, message 60/hr, attachment 30/hr; over → `429` + `Retry-After` (§9). **Mint** returns the raw key **once** + `quickstart` curls.
 
 ## 8b. Sheets plugin — `POST /v1/plugins/sheets/:slug/ops` [admin]
 
@@ -161,7 +159,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Core: `not_found` 404 (doc/schema/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `schema_unknown` 404 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task`/`duplicate_of` 409 · `schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422; `playground_expired` 403. BPML sync create-on-push: `create_wall` 422 (publish wall refused the create; violations in `details`) · `slug_mismatch` 422 (BPML slug attr ≠ URL slug).
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `rev_mismatch` 409 · `webhook_not_found`/`event_not_found` 404 · `duplicate_task`/`duplicate_of` 409 · `schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · media `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422; `playground_expired` 403. BPML sync create-on-push: `create_wall` 422 (publish wall refused; violations in `details`) · `slug_mismatch` 422 (BPML slug attr ≠ URL slug).
 
 Endpoint-specific: ingest `invalid_paper`/`invalid_text`/`malformed_op`/`invalid_op`/`malformed_proposal`/`invalid_proposal`/`missing_source`/`source_not_found`/`constraint`/`bpml`/`bpml_unavailable`/`bpml_unprintable`/`unknown_format`/`hollow_paper`/`structure` · sessions `missing_slug`/`invalid_kind`/`invalid_conversation`/`conflict_retry` · sheets `malformed_ops`/`batch_too_large`/`session_unavailable`/`invalid_request_id` · media `share_expired` · deploy `build_id_mismatch`/`deploy_runner_unavailable` · grants `invalid_grant`/`unprocessable` · Chat hosts `invalid_enrollment`/`invalid_state_report` · step-up `mfa_required`/`mfa_enrolment_required` · import/export `bundle_import_disabled`/`invalid_mode`/`workspace_slug_conflict`/`blob_path_conflict`/`import_constraint_violation`/`import_failed`/`export_failed`/`import_body_read_failed`/`import_body_too_large`/`import_spill_write_failed`/`insufficient_disk_space` · chat `runtime_capacity`/`runtime_unavailable`/`chat_unsupported`/`chat_create_failed`. Source `known_codes/0`.
 
