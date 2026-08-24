@@ -68,6 +68,7 @@ import { fileURLToPath } from "node:url";
 
 import { SETTLE_CAP_MS, assertReadyHostsPaint, paintProbeJs, readySelectorsFrom } from "../../ready-host-paint.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "../../bringup-retry.mjs";
+import { createExitVocabulary } from "../../exit-vocabulary.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -89,13 +90,36 @@ function findChrome() {
   return null;
 }
 
+// THE EXIT VOCABULARY, IMPORTED RATHER THAN RE-DECIDED.
+//
+// This file used to spell its own refusals — `process.stderr.write("!! PROOF
+// (exit 2): …"); process.exit(2)` — at four sites, and so did every sibling
+// instrument, each with its own wording and its own idea of which faults were
+// refusals. overflow-guard.mjs had the rule written down correctly and nowhere
+// else, which is exactly why cssom-parity.mjs could quote the reasoning three
+// lines above two throws that break it. exit-vocabulary.mjs is that rule as a
+// function call: refuse() makes NO claim, defect() accuses the subject, and
+// settle() sorts an unexpected throw toward "I did not measure" rather than
+// toward an accusation. It also drains stdout before exiting, which a hand-
+// rolled `write(); exit()` does not — on a pipe that can truncate the refusal
+// and leave a bare exit code with no cause.
+//
+// `teardown` closes the CDP socket, so no refusal path can leave one open. `ws`
+// is assigned later; the closure reads it at call time, so an early refusal
+// (no Chrome) tears down nothing and a late one tears down the socket.
+let ws = null;
+const vocab = createExitVocabulary({
+  instrument: "PROOF",
+  subject: "the rendered-host floor (ready-host-paint.mjs)",
+  teardown: async () => { try { if (ws) ws.close(); } catch { /* already gone */ } },
+});
+
 // A missing browser is an ENVIRONMENTAL refusal (exit 2), never a failed proof
 // (exit 1) — the same discrimination overflow-guard.mjs makes, for the same
 // reason: exit 1 here must mean "the floor behaved wrongly".
 const chromeBin = findChrome();
 if (!chromeBin) {
-  process.stderr.write("!! PROOF (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
-  process.exit(2);
+  await vocab.refuse("no Chrome/Chromium found. Set CHROME=/path/to/chrome.");
 }
 
 const profiles = [];
@@ -126,10 +150,7 @@ const brought = await bringUpChrome({
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
   },
   log: (l) => process.stderr.write(l),
-}).catch((e) => {
-  process.stderr.write(`!! PROOF (exit 2): Chrome never came up — ${e.message}\n`);
-  process.exit(2);
-});
+}).catch((e) => vocab.refuse(`Chrome never came up — ${e.message}`));
 
 const chrome = brought.child;
 process.once("exit", () => {
@@ -139,7 +160,9 @@ process.once("exit", () => {
 
 const version = await (await fetch(`http://127.0.0.1:${brought.devPort}/json/version`)).json();
 process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
-const ws = new WebSocket(version.webSocketDebuggerUrl);
+// Assigned into the `ws` declared above, so the vocabulary's teardown can close
+// it on any refusal from here on without every exit site remembering to.
+ws = new WebSocket(version.webSocketDebuggerUrl);
 await new Promise((res, rej) => {
   ws.addEventListener("open", res, { once: true });
   ws.addEventListener("error", () => rej(new Error("CDP connect failed")), { once: true });
@@ -273,14 +296,12 @@ function requireArmedState(where, run) {
               ? "no animation was running at the first probe — the arming class did not start one"
               : null;
   if (!why) return;
-  process.stderr.write(
-    `!! PROOF (exit 2): ${where} could not be put into the state under test — ${why}.\n` +
+  return vocab.refuse(
+    `${where} could not be put into the state under test — ${why}.\n` +
     `   measured at the floor's OWN first probe: ${JSON.stringify(row)}\n` +
-    `   NO CLAIM is being made about the floor. The arming class must start the animation in the same\n` +
-    `   evaluate that reads it; if that stopped being true, fix the fixture, not the cap.\n`,
+    `   The arming class must start the animation in the same evaluate that reads it;\n` +
+    `   if that stopped being true, fix the fixture, not the cap.`,
   );
-  ws.close();
-  process.exit(2);
 }
 
 // The class that turns animating-triggered.html's inert host into an entering
@@ -413,14 +434,13 @@ EXPECT("and printed no settle line — nothing was animating to wait for", d4.li
 
 const failed = results.filter((r) => !r.pass);
 process.stdout.write(`\n${results.length - failed.length}/${results.length} checks passed\n`);
+// A FAILED DIRECTION IS A MEASURED DEFECT, and it is the ONLY exit 1 this file
+// has: the floor was exercised and behaved wrongly. Every other way out is a
+// refusal, which is the asymmetry exit-vocabulary.mjs exists to keep.
 if (failed.length) {
-  process.stderr.write(`\n!! PROOF FAILED — ${failed.map((f) => f.name).join("; ")}\n`);
-  ws.close();
-  process.exit(1);
+  await vocab.defect(`the floor behaved wrongly in: ${failed.map((f) => f.name).join("; ")}`);
 }
-process.stdout.write(
-  "PROOF OK — the defect reproduces on demand, the settle repairs it, and the display:none hole\n" +
-  "the floor exists for still refuses on the first pass with no settle budget spent.\n",
+await vocab.pass(
+  "the defect reproduces on demand, the settle repairs it, and the display:none hole\n" +
+  "the floor exists for still refuses on the first pass with no settle budget spent.",
 );
-ws.close();
-process.exit(0);
