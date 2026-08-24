@@ -39,6 +39,13 @@ func renderTable(out *writer, payload []byte) {
 			renderKV(out, obj)
 			return
 		}
+		// Backstop for a wrapper envelope whose row key nobody added to
+		// listEnvelopeKeys. Without it the rows reach renderKV, which hands the
+		// whole array to cellString and truncates it to 60 display cells — a
+		// line that LOOKS like output and carries almost none of the data.
+		if unknownListEnvelope(out, t) {
+			return
+		}
 		renderKV(out, t)
 	case []any:
 		renderRows(out, t, nil)
@@ -73,10 +80,22 @@ func renderTable(out *writer, payload []byte) {
 // under "keys"; without them those tables collapse into a single crammed cell.
 // ("keys" is safe to claim: the only other "keys" payload, the sites env-set
 // receipt, goes through emitStructured and never reaches this renderer.)
+//
+// The tenancy/credential admin verbs were the drift this list kept losing to:
+// workspace.member-ls carries "members", token.ls "tokens", access.ls /
+// access.mine "grants", and webhook.deliveries "deliveries". token.ls is the
+// costly one — it is the ONLY way to see which credentials can reach a
+// workspace and which are still unrevoked, and on a live instance with ~100
+// tokens it printed a single 60-cell cell ending in "...", so neither the ids
+// `token revoke` needs nor the revoked_at the verb exists to report were
+// visible. The keys are listed here, but the real backstop is
+// unknownListEnvelope below: this list can drift again, and the next verb to
+// arrive must not have to wait for someone to notice.
 var listEnvelopeKeys = []string{
 	"documents", "docs", "assets", "collections", "hits", "backlinks", "related",
 	"revisions", "workspaces", "projects", "schemas", "webhooks", "plugins",
 	"shares", "secrets", "tickets", "keys", "tags",
+	"members", "tokens", "grants", "deliveries",
 }
 
 // envelopeRows finds the row list of a list-envelope payload, trying the known
@@ -99,6 +118,76 @@ func envelopeRows(m map[string]any) ([]any, bool) {
 		}
 	}
 	return nil, false
+}
+
+// unknownListEnvelope renders a wrapper envelope that carries rows under a key
+// listEnvelopeKeys does not know, and reports whether it did.
+//
+// It exists because that list is a hand-maintained mirror of the API's list
+// envelopes, and a hand-maintained mirror drifts: four keys (members, tokens,
+// grants, deliveries) had accumulated behind it, and `bp token ls` — the only
+// way to enumerate the credentials that can reach a workspace — answered a
+// ~100-token live inventory with one truncated cell and exit 0. Naming the four
+// keys fixes those four verbs; this fixes the NEXT one, which is the failure
+// that actually recurs.
+//
+// Scope is deliberately narrow. It only ever fires for a map that reached
+// renderKV — so after envelopeRows and singleObjectEnvelope have both declined
+// — and it refuses a single document outright (the "_id" guard below, the same
+// one envelopeRows uses). That refusal is what keeps it off the
+// content-collidable ground the listEnvelopeKeys comment warns about:
+// Envelope.render (api) flattens a document's content fields to the top level,
+// so a doc.get payload can carry array-valued fields of its own; those still
+// render as today's key/value lines, not as hijacked tables.
+//
+// Sibling context is preserved rather than dropped: workspace.dataset-ls
+// returns {workspace:…, project:…, datasets:[…]}, and printing only the
+// datasets table would silently withhold which workspace they belong to. The
+// non-row keys render first as key/value lines, then each row array follows
+// under its own labelled heading.
+func unknownListEnvelope(out *writer, m map[string]any) bool {
+	// A single document is never a list envelope — its array-valued content
+	// fields are the document, not rows about it.
+	if _, isDoc := m["_id"]; isDoc {
+		return false
+	}
+	var rowKeys []string
+	rest := make(map[string]any, len(m))
+	for _, k := range sortedKeys(m) {
+		if arr, isArr := m[k].([]any); isArr && containsObject(arr) {
+			rowKeys = append(rowKeys, k)
+			continue
+		}
+		rest[k] = m[k]
+	}
+	if len(rowKeys) == 0 {
+		return false
+	}
+	if len(rest) > 0 {
+		renderKV(out, rest)
+	}
+	for _, k := range rowKeys {
+		out.outf("")
+		out.outf("%s:", k)
+		// meta is nil: the count line belongs to a known list envelope, whose
+		// count/total live beside the rows. An unknown envelope has no such
+		// contract, so claiming a count here would be inventing one.
+		renderRows(out, m[k].([]any), nil)
+	}
+	return true
+}
+
+// containsObject reports whether a JSON array holds at least one object, i.e.
+// whether it has columns to tabulate. A bare scalar array ({"datasets":
+// ["production","staging"]}) reads fine as a single key/value line and is left
+// alone — promoting it to a one-column table would be noise, not information.
+func containsObject(arr []any) bool {
+	for _, v := range arr {
+		if _, ok := v.(map[string]any); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // singleObjectEnvelopeKeys are the keys a single-object GET nests its object
