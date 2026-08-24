@@ -21,6 +21,7 @@ import {
   type SearchEngine,
   type SortId,
 } from "@/lib/find";
+import { readResultWindow } from "@/lib/result-window";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 import { useFinderNav } from "@/lib/finder-nav-context";
 import { useLiveSearch } from "@/lib/use-live-search";
@@ -977,6 +978,21 @@ export function Finder({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [master, matchKey, setMatches]);
 
+  // The honest reading of what the header may claim. The engine caps what it
+  // RETURNS at MAX_HITS but computes `total` and the facet buckets over the
+  // FULL match set (documents_retriever.ex's count_and_facets/1 says so in
+  // as many words), while the facet filter and the sort below run CLIENT-SIDE
+  // over the rows in hand — so on a corpus past the window those two numbers
+  // describe different sets. `readResultWindow` owns that rule; see
+  // `lib/result-window.ts` for why printing `12 of 1200` here was a lie.
+  const resultWindow = readResultWindow({
+    total: data?.total ?? 0,
+    fetched: hits.length,
+    visible: visibleHits.length,
+    facetActive: facetCount > 0,
+    reordered: sort !== "relevance",
+  });
+
   // Indx coverage boundary — only meaningful over the unfiltered,
   // relevance-ordered result set of a real query (not browse/recovery).
   const boundary =
@@ -1232,6 +1248,21 @@ export function Finder({
           results.
         </section>
       ) : null}
+      {/* The facet filter and the sort run CLIENT-SIDE over the rows the engine
+          returned, while the facet counts and `total` are computed over the
+          FULL match set. Past the working set those describe different sets, so
+          say which one the list on screen is a view of. A `title` alone would
+          hide this from keyboard and screen-reader users, so it is also a real
+          line — and it renders ONLY when both conditions hold (see
+          `lib/result-window.ts`), never on a complete window. */}
+      {resultWindow.caveat ? (
+        <p
+          data-window-caveat
+          className="text-[0.8rem] leading-snug text-zinc-500 dark:text-zinc-400"
+        >
+          {resultWindow.caveat}
+        </p>
+      ) : null}
       {/* Recovery/fuzzy-widen is now a compact pill in the engine row above
           (no banner block → no layout shift). */}
 
@@ -1337,7 +1368,14 @@ export function Finder({
               <span className="font-medium text-zinc-500 dark:text-zinc-400">
                 {data?.engineUsed === "postgres" ? "Postgres" : "Indx"}
               </span>{" "}
-              across the {q ? "matches" : "dataset"}.
+              across the {q ? "matches" : "dataset"}
+              {/* The counts really are dataset-wide, but selecting a bucket
+                  filters only the rows the engine returned. Saying the first
+                  half without the second is what made a 1200-count chip look
+                  like it would show 1200 rows. */}
+              {resultWindow.windowTruncated
+                ? `, but selecting one filters the ${hits.length} returned here.`
+                : "."}
             </p>
           ) : null}
         </aside>
@@ -1354,12 +1392,12 @@ export function Finder({
             ) : (
               <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
                 {!data?.error ? (
-                  <span className="shrink-0">
-                    {visibleHits.length}
-                    {data && data.total > hits.length
-                      ? ` of ${data.total}`
-                      : ""}{" "}
-                    {visibleHits.length === 1 ? "result" : "results"}
+                  <span
+                    className="shrink-0"
+                    {...(resultWindow.caveat ? { title: resultWindow.caveat } : {})}
+                  >
+                    {resultWindow.countLabel}{" "}
+                    {resultWindow.plural ? "results" : "result"}
                   </span>
                 ) : null}
                 {data?.engineUsed ? (
