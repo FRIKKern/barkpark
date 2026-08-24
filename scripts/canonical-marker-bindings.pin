@@ -18,6 +18,7 @@ github-adopt	adopt
 github-inbound-intake	ingest
 github-mirror-reconcile	reconcile
 github-projects-sync	sync
+github-reporter-acknowledgement	criterion
 heat-quantile-bin	HeatQuantileBins
 http-redirect-policy	CheckRedirect
 instance-content-bootstrap	Run
@@ -46,6 +47,7 @@ url-scoped-build	ScopedURL
 user-auth	register_user
 uuid-guarded-fetch	uuid_or_nil
 valueref-resolve	resolve_values_in_blocks
+visibility-gate-tier	bypasses_visibility_gate?
 visibility-redaction	render
 whatsapp-24h-window	decideWhatsappWindow
 whatsapp-install-key	whatsappInstallKey

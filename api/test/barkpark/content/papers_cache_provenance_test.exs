@@ -218,8 +218,10 @@ defmodule Barkpark.Content.PapersCacheProvenanceTest do
       refute render(blocks, opts) == body_html,
              "the rename must move the render, or this test proves nothing"
 
-      assert {:blocks, ^blocks} = Papers.reader_source(paper, @dataset, []),
-             "external referent drift is not divergence and must not 422"
+      source = Papers.reader_source(paper, @dataset, [])
+
+      assert match?({:blocks, ^blocks}, source),
+             "external referent drift is not divergence and must not 422; got: #{inspect(source)}"
 
       # NOT a frozen label (charter D10): the served blocks re-resolve live, so
       # the consumer emits the CURRENT title. A frozen label would make the

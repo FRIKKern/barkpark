@@ -149,6 +149,63 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
       </div>
 
       <section style="margin:1.6rem 0;">
+        <h2 style="font-size:0.95rem; letter-spacing:0.03em; text-transform:uppercase; opacity:0.6;">
+          Reporters waiting
+        </h2>
+        <p style="margin:0 0 0.6rem;">
+          <small style="opacity:0.6;">
+            <code>gh-&lt;num&gt;</code> tasks born from an OUTSIDER's issue whose acknowledgement
+            criterion is not stamped met. They can see nothing but their issue, where the
+            bridge already promised them updates. This reads the ledger only — it cannot
+            see a comment nobody recorded, so post the outcome <em>and</em> stamp the criterion.
+          </small>
+        </p>
+
+        <div :if={@health.unacknowledged.total == 0} data-role="github-unacked-empty">
+          <p><em>Every intaken issue has been answered.</em></p>
+        </div>
+
+        <div :if={@health.unacknowledged.total > 0}>
+          <div data-role="github-unacked-counts"
+               style="display:flex; flex-wrap:wrap; gap:1.6rem; margin-bottom:1rem; font-variant-numeric:tabular-nums;">
+            <span data-role="github-unacked-closed">
+              closed with no answer: <strong><%= @health.unacknowledged.closed %></strong>
+            </span>
+            <span>still open: <strong><%= @health.unacknowledged.open %></strong></span>
+            <span style="opacity:0.7;">
+              no criterion at all: <strong><%= @health.unacknowledged.no_criterion %></strong>
+            </span>
+            <span style="opacity:0.7;">total: <strong><%= @health.unacknowledged.total %></strong></span>
+          </div>
+
+          <div style="overflow-x:auto;">
+            <table style="width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums;">
+              <thead>
+                <tr style="text-align:left; opacity:0.6; font-size:0.85rem;">
+                  <th style="padding:0.35rem 0.7rem;">issue</th>
+                  <th style="padding:0.35rem 0.7rem;">task</th>
+                  <th style="padding:0.35rem 0.7rem;">bridge state</th>
+                  <th style="padding:0.35rem 0.7rem;">lifecycle</th>
+                  <th style="padding:0.35rem 0.7rem;">waiting since</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={row <- @health.unacknowledged.rows}
+                    data-role="github-unacked-row" data-doc-id={row.doc_id}
+                    style="border-top:1px solid var(--border);">
+                  <td style="padding:0.35rem 0.7rem;"><%= unacked_issue_ref(row) %></td>
+                  <td style="padding:0.35rem 0.7rem;"><%= row.doc_id %></td>
+                  <td style="padding:0.35rem 0.7rem;"><%= row.state || "—" %></td>
+                  <td style="padding:0.35rem 0.7rem;"><%= row.lifecycle_status || "—" %></td>
+                  <td style="padding:0.35rem 0.7rem;"><%= fmt(row.created_at) %></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section style="margin:1.6rem 0;">
         <h2 style="font-size:0.95rem; letter-spacing:0.03em; text-transform:uppercase; opacity:0.6;">Datasets</h2>
         <p data-role="github-lag-caption" style="margin:0 0 0.6rem;">
           <small style="opacity:0.6;">
@@ -297,6 +354,16 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
   # stays crash-safe; the `loading: true` render clause paints a skeleton and
   # never reads these values. `db_ok`/`active` default false — a placeholder
   # never claims a healthy DB it has not probed.
+  # `repo#num` when both are known, `#num` when the row predates a repo stamp,
+  # and an em dash when there is nothing honest to print. Same shape as
+  # `issue_ref/1` for conflict rows; kept separate because a census row and a
+  # conflict row are different structs and a shared helper would have to guess.
+  defp unacked_issue_ref(%{repo: repo, issue: issue}) when is_binary(repo) and not is_nil(issue),
+    do: "#{repo}##{issue}"
+
+  defp unacked_issue_ref(%{issue: issue}) when not is_nil(issue), do: "##{issue}"
+  defp unacked_issue_ref(_row), do: "—"
+
   defp blank_health do
     %{
       active: false,
@@ -304,7 +371,8 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
       repo: nil,
       conflicts: %{out_of_band_edit: 0, detached: 0, dedup_refused: 0, total: 0, open: []},
       datasets: [],
-      queue: %{available: 0, scheduled: 0, executing: 0, retryable: 0, total: 0}
+      queue: %{available: 0, scheduled: 0, executing: 0, retryable: 0, total: 0},
+      unacknowledged: %{total: 0, closed: 0, open: 0, no_criterion: 0, rows: []}
     }
   end
 
