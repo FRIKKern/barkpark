@@ -18,10 +18,7 @@ defmodule BarkparkWeb.SessionIssuer do
   @spec issue(Plug.Conn.t(), Accounts.User.t(), keyword()) :: Plug.Conn.t()
   def issue(conn, user, opts \\ []) do
     {:ok, token} =
-      Accounts.create_user_session_token(
-        user,
-        [ip_address: client_ip(conn), user_agent: user_agent(conn)] ++ opts
-      )
+      Accounts.create_user_session_token(user, actor_opts(conn) ++ opts)
 
     audit_session_mint(user, opts)
 
@@ -144,7 +141,33 @@ defmodule BarkparkWeb.SessionIssuer do
     _, _ -> :ok
   end
 
-  defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
+  @doc """
+  The actor-identity opts EVERY session mint stamps on its row.
+
+  One definition for all six mint sites (this module, both arms of
+  `SessionController`, and the OIDC / SAML / social callbacks). Each of them
+  used to carry its own byte-identical `user_agent/1` next to its own
+  `client_ip/1` — and the `client_ip/1` copies all read `conn.remote_ip`
+  directly, which behind the co-located Caddy is ALWAYS the loopback hop. Every
+  `user_sessions.ip_address` therefore recorded the proxy, identical for every
+  user on the box, while looking entirely valid.
+
+  The address now comes from `Barkpark.RateLimiter.client_ip_with_source/1` —
+  the canonical `rate-limit-client-ip` resolver — which walks
+  `x-forwarded-for` RIGHT-to-left past trusted hops and falls back to the
+  verified peer. Crucially it does NOT read the header's leftmost value: that
+  would replace a useless-but-honest address with a FORGEABLE one, and a
+  forgeable audit trail is worse than a uniform one, because it gets believed.
+
+  `ip_source` records which of the two the row holds, so a reader can tell a
+  derived client address from a raw peer.
+  """
+  @spec actor_opts(Plug.Conn.t()) :: keyword()
+  def actor_opts(conn) do
+    {ip, source} = Barkpark.RateLimiter.client_ip_with_source(conn)
+
+    [ip_address: ip, ip_source: Atom.to_string(source), user_agent: user_agent(conn)]
+  end
 
   defp user_agent(conn) do
     case get_req_header(conn, "user-agent") do
