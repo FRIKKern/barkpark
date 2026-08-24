@@ -35,7 +35,9 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
 
   test "the manifest is non-empty and carries the flag this guard measures" do
     cmds = commands()
-    assert length(cmds) > 50, "manifest scanned #{length(cmds)} commands — too few to be the real one"
+
+    assert length(cmds) > 50,
+           "manifest scanned #{length(cmds)} commands — too few to be the real one"
 
     assert Enum.all?(cmds, &is_map_key(&1, "paginated")),
            "every command must carry a `paginated` bit for this guard to mean anything"
