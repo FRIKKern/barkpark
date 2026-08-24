@@ -9,7 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test --test-reporter=spec --import ./__tests__/support/stub-server-only.mjs __tests__/*.test.ts"
+    "test": "node ../scripts/node-test-floor.mjs --import ./__tests__/support/stub-server-only.mjs -- '__tests__/*.test.ts'"
   },
   "dependencies": {
     "@barkpark/core": "file:../js/packages/core",

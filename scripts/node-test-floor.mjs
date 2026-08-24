@@ -2,6 +2,14 @@
 // A `node --test` runner that CANNOT pass on emptiness.
 //
 //   node scripts/node-test-floor.mjs 'lib/**/*.test.ts' [more patterns...]
+//   node scripts/node-test-floor.mjs --import ./setup.mjs -- '__tests__/*.test.ts'
+//
+// Everything before a `--` is forwarded to node verbatim; everything after it
+// (or all of it, when there is no `--`) is a glob pattern. The separator is
+// required rather than inferred, because a flag's VALUE does not start with a
+// dash — `--import ./setup.mjs` would otherwise leave `./setup.mjs` looking
+// exactly like a pattern, and mis-reading it as one is how a runner ends up
+// gating the wrong file set.
 //
 // Drop-in replacement for `node --test '<glob>'` in a CI step. Dependency-free
 // and node-builtin only, so the dep-free jobs that use it stay dep-free.
@@ -34,10 +42,17 @@
 // sources, a concern this generic runner has no business knowing about.
 
 import { appendFileSync, globSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { availableParallelism } from "node:os";
 import { relative, resolve } from "node:path";
+import { promisify } from "node:util";
 
-const patterns = process.argv.slice(2);
+const run = promisify(execFile);
+
+const argv = process.argv.slice(2);
+const sep = argv.indexOf("--");
+const nodeArgs = sep === -1 ? [] : argv.slice(0, sep);
+const patterns = sep === -1 ? argv : argv.slice(sep + 1);
 
 /**
  * Echo one line onto the GitHub Actions job summary when running in CI. The
@@ -110,36 +125,62 @@ const realTests = (out, filePath) =>
     .map((m) => /** @type {RegExpExecArray} */ (m)[1])
     .filter((name) => name !== filePath && name !== relative(process.cwd(), filePath));
 
-// One process per file, so the zero-test floor is per file: a single aggregate
-// `# tests` would hide an empty file behind its siblings' counts.
-for (const file of files) {
-  const shown = relative(process.cwd(), file);
-  const run = spawnSync(
-    process.execPath,
-    ["--test", "--test-reporter=tap", "--test-reporter-destination=stdout", file],
-    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
-  );
-  const out = run.stdout ?? "";
-  process.stdout.write(out);
-  process.stderr.write(run.stderr ?? "");
+// One process PER FILE, so the zero-test floor is per file: a single aggregate
+// `# tests` would hide an empty file behind its siblings' counts. That costs a
+// process spawn each, so the files run CONCURRENTLY — on web/'s 55 files the
+// sequential form took 27s against the old gate's 9s, which is a real tax on a
+// gate that runs on every PR. Pooled, it lands back in the same range.
+const limit = Math.max(1, availableParallelism());
+/** @type {{shown: string, status: number, out: string, err: string}[]} */
+const results = new Array(files.length);
+let next = 0;
 
-  const tests = tally(out, "tests");
-  if (tests === null) fail(`${shown}: no test count in the runner output — an unreadable result is a failure, never a pass`);
-  if (run.status !== 0) fail(`${shown}: node --test exited ${run.status}`);
-  if (realTests(out, file).length < 1) {
+async function worker() {
+  while (next < files.length) {
+    const i = next++;
+    const file = files[i];
+    const args = [...nodeArgs, "--test", "--test-reporter=tap", "--test-reporter-destination=stdout", file];
+    try {
+      const { stdout, stderr } = await run(process.execPath, args, { maxBuffer: 64 * 1024 * 1024 });
+      results[i] = { shown: relative(process.cwd(), file), status: 0, out: stdout, err: stderr };
+    } catch (e) {
+      // execFile rejects on a non-zero exit; the output is still on the error.
+      const err = /** @type {{code?: number, stdout?: string, stderr?: string}} */ (e);
+      results[i] = {
+        shown: relative(process.cwd(), file),
+        status: typeof err.code === "number" ? err.code : 1,
+        out: err.stdout ?? "",
+        err: err.stderr ?? String(e),
+      };
+    }
+  }
+}
+
+await Promise.all(Array.from({ length: Math.min(limit, files.length) }, worker));
+
+// Evaluated in FILE order, so the report is deterministic regardless of which
+// worker finished first.
+for (const r of results) {
+  process.stdout.write(r.out);
+  process.stderr.write(r.err);
+
+  const tests = tally(r.out, "tests");
+  if (tests === null) fail(`${r.shown}: no test count in the runner output — an unreadable result is a failure, never a pass`);
+  if (r.status !== 0) fail(`${r.shown}: node --test exited ${r.status}`);
+  if (realTests(r.out, resolve(r.shown)).length < 1) {
     fail(
-      `${shown}: registered 0 tests (node reported "# tests ${tests}", which counts the FILE, not a test) — ` +
+      `${r.shown}: registered 0 tests (node reported "# tests ${tests}", which counts the FILE, not a test) — ` +
         `a test file that asserts nothing is a hole in the suite, not a pass`,
     );
   }
 
   totalTests += tests;
-  totalPass += tally(out, "pass") ?? 0;
-  totalFail += tally(out, "fail") ?? 0;
+  totalPass += tally(r.out, "pass") ?? 0;
+  totalFail += tally(r.out, "fail") ?? 0;
 }
 
 if (totalFail > 0) fail(`${totalFail} failing test(s)`);
 
-const summary = `node-test floor: ran ${totalTests} tests from ${files.length} files (pass ${totalPass}, fail ${totalFail}) for ${patterns.join(" ")}`;
+const summary = `node-test floor: ran ${totalTests} tests from ${files.length} files (pass ${totalPass}, fail ${totalFail}) for ${patterns.join(" ")}${nodeArgs.length ? ` [node ${nodeArgs.join(" ")}]` : ""}`;
 console.log(`\n${summary}`);
 summarize(summary);
