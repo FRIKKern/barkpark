@@ -167,10 +167,15 @@ defmodule Barkpark.StructureTest do
       # …Rest tells the truth: book docs still exist, so they surface there with
       # an honest count and a drillable list (the book schema is in scope).
       rest = rest_node(tree)
-      assert %Node{} = rest, "expected a …Rest node when unplaced doc types exist"
+
+      assert match?(%Node{}, rest),
+             "expected a …Rest node when unplaced doc types exist; got: #{inspect(rest)}"
 
       book_rest = Enum.find(rest.items, &(&1.type_name == "book"))
-      assert %Node{} = book_rest, "book docs must surface under …Rest, never silently hidden"
+
+      assert match?(%Node{}, book_rest),
+             "book docs must surface under …Rest, never silently hidden; got: #{inspect(book_rest)}"
+
       assert book_rest.type == :document_type_list, "book has a schema → drillable"
       assert book_rest.title == "book (2)"
     end
@@ -235,7 +240,10 @@ defmodule Barkpark.StructureTest do
       assert %Node{title: "Content"} = content
 
       feedback = Enum.find(content.items, &(&1.type_name == "customerFeedback"))
-      assert %Node{} = feedback, "expected the generic type to surface under Content"
+
+      assert match?(%Node{}, feedback),
+             "expected the generic type to surface under Content; got: #{inspect(feedback)}"
+
       assert feedback.type == :document_type_list, "must be drillable, not a dead singleton"
       assert feedback.title == "Customer Feedback"
 
@@ -500,7 +508,9 @@ defmodule Barkpark.StructureTest do
           n.type == :document_type_list and n.id == "paper"
         end)
 
-      assert %Node{} = paper_node, "expected a paper doc-type-list node in top-level items"
+      assert match?(%Node{}, paper_node),
+             "expected a paper doc-type-list node in top-level items; got: #{inspect(paper_node)}"
+
       assert paper_node.type_name == "paper"
       assert paper_node.title == "Papers"
       assert paper_node.visibility == :public
@@ -686,7 +696,8 @@ defmodule Barkpark.StructureTest do
       book_top =
         Enum.find(tree.items, fn n -> n.type == :document_type_list and n.id == "book" end)
 
-      assert %Node{} = book_top, "promoting OnixEdit to main surfaces book top-level"
+      assert match?(%Node{}, book_top),
+             "promoting OnixEdit to main surfaces book top-level; got: #{inspect(book_top)}"
 
       # Claimed by the placed node → not double-listed under …Rest.
       case rest_node(tree) do
@@ -720,8 +731,8 @@ defmodule Barkpark.StructureTest do
 
       plugins = plugins_node(tree)
 
-      assert %Node{type: :list} = plugins,
-             "expected a Plugins tier node when a :plugins plugin is enabled"
+      assert match?(%Node{type: :list}, plugins),
+             "expected a Plugins tier node when a :plugins plugin is enabled; got: #{inspect(plugins)}"
 
       assert plugins.title == "Plugins"
 
@@ -765,7 +776,9 @@ defmodule Barkpark.StructureTest do
       # seed_legacy/1 always seeds host private singletons, so the Settings
       # group MUST exist — a nil here would make the leak refute vacuous.
       settings = settings_node(tree)
-      assert %Node{} = settings, "host private singletons must produce a Settings group"
+
+      assert match?(%Node{}, settings),
+             "host private singletons must produce a Settings group; got: #{inspect(settings)}"
 
       refute "ticket" in Enum.map(settings.items, & &1.type_name),
              "a plugin-owned private type must not surface as a Settings singleton"
@@ -806,7 +819,9 @@ defmodule Barkpark.StructureTest do
       # singletons, so the Settings group MUST exist — a nil here would make
       # the double-list refute vacuous.
       settings = settings_node(tree)
-      assert %Node{} = settings, "host private singletons must produce a Settings group"
+
+      assert match?(%Node{}, settings),
+             "host private singletons must produce a Settings group; got: #{inspect(settings)}"
 
       refute "sheet" in Enum.map(settings.items, & &1.type_name),
              "a plugin-owned private type must not double-list under Settings"
@@ -824,7 +839,10 @@ defmodule Barkpark.StructureTest do
       assert %Node{} = rest
 
       ghost = Enum.find(rest.items, &(&1.type_name == "ghostType"))
-      assert %Node{} = ghost, "orphaned types are NEVER silently hidden"
+
+      assert match?(%Node{}, ghost),
+             "orphaned types are NEVER silently hidden; got: #{inspect(ghost)}"
+
       assert ghost.type == :document, "no schema → plain, non-drillable node"
       assert ghost.title == "ghostType (5)"
     end
