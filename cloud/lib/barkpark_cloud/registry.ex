@@ -1413,26 +1413,34 @@ defmodule BarkparkCloud.Registry do
   def active_provision_job?(barkpark), do: active_job_of_kind?(barkpark_id(barkpark), "provision")
 
   @doc """
-  True when `barkpark` has a PROVISION_SUPPORT job still in flight (pending or
-  claimed) — the same guard as `active_provision_job?/1`, for the kind a SUPPORT
-  actually gets (task-688ebffc4b0aa50a).
+  True when `barkpark` has a provision of EITHER kind still in flight (pending or
+  claimed) — `"provision"` for a main, `"provision_support"` for a support
+  (task-688ebffc4b0aa50a). This is the predicate every "refuse to delete the row
+  mid-provision" guard wants, and `active_provision_job?/1` is not it.
 
   A support is never enqueued under kind `"provision"` (PDF-D83 gives it
-  `"provision_support"`), so `active_provision_job?/1` answers `false` for every
-  support and cannot gate `DELETE /v1/fleet/supports/:id`. That gap is not
-  cosmetic: a support provision publishes an `A <label>.barkpark.cloud` record as
-  well as a box, so a row deleted mid-provision strands a dangling A record —
-  pointing at an address Hetzner will later reassign — with nothing left in the
-  control plane that names it.
-  """
-  @spec active_support_provision_job?(Barkpark.t() | binary()) :: boolean()
-  def active_support_provision_job?(barkpark),
-    do: active_job_of_kind?(barkpark_id(barkpark), "provision_support")
+  `"provision_support"`), so the kind-specific predicate answers `false` for
+  every support — and BOTH of its guard call sites accept support rows:
+  `DELETE /v1/barkparks/:id` matches on team alone with no `fleet_role` filter,
+  and `POST /v1/internal/barkparks/:id/deprovision` takes any row at all. So the
+  guard was blind to supports at every surface that used it.
 
-  defp active_job_of_kind?(barkpark_id, kind) do
+  The gap is not cosmetic. A support provision publishes an
+  `A <label>.barkpark.cloud` record as well as a box, so a row deleted
+  mid-provision strands a dangling A record — pointing at an address Hetzner will
+  later reassign to someone else — with nothing left in the control plane that
+  names it, and no deprovision job that could sweep it.
+  """
+  @spec active_provision_job_any_kind?(Barkpark.t() | binary()) :: boolean()
+  def active_provision_job_any_kind?(barkpark),
+    do: active_job_of_kinds?(barkpark_id(barkpark), ["provision", "provision_support"])
+
+  defp active_job_of_kind?(barkpark_id, kind), do: active_job_of_kinds?(barkpark_id, [kind])
+
+  defp active_job_of_kinds?(barkpark_id, kinds) do
     from(j in ProvisionJob,
       where:
-        j.barkpark_id == ^barkpark_id and j.kind == ^kind and
+        j.barkpark_id == ^barkpark_id and j.kind in ^kinds and
           j.status in ["pending", "claimed"],
       limit: 1,
       select: 1

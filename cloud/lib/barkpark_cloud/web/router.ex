@@ -2277,10 +2277,14 @@ defmodule BarkparkCloud.Web.Router do
 
               # Not live YET, but a provision is in flight: deleting the row now
               # would let the worker bring a box up the control plane can't see
-              # (succeed_job no-ops on the missing row) — a stranded billed box.
+              # (succeed_job no-ops on the missing row) — a stranded billed box,
+              # and for a support an orphan A record too. EITHER KIND counts: this
+              # route matches on team alone, so a SUPPORT row (kind
+              # "provision_support") reaches it, and the kind-specific predicate
+              # answered false for every one of them (task-688ebffc4b0aa50a).
               # Refuse until the provision lands (then it's a live-box deprovision)
               # or fails (then it's a clean non-live remove).
-              Registry.active_provision_job?(bp) ->
+              Registry.active_provision_job_any_kind?(bp) ->
                 json(conn, 409, %{
                   error: "provisioning_in_progress",
                   detail:
@@ -2587,7 +2591,7 @@ defmodule BarkparkCloud.Web.Router do
               # Not live YET, but a provision_support job is in flight — refuse
               # until it lands (then it is a live-box deprovision) or fails (then
               # it is a clean non-live remove).
-              Registry.active_support_provision_job?(support) ->
+              Registry.active_provision_job_any_kind?(support) ->
                 json(conn, 409, %{
                   error: "provisioning_in_progress",
                   detail:
@@ -7210,7 +7214,9 @@ defmodule BarkparkCloud.Web.Router do
                   json(conn, 422, %{error: "invalid", details: errors(cs)})
               end
 
-            Registry.active_provision_job?(bp) ->
+            # EITHER KIND — this internal route takes any row, supports included
+            # (task-688ebffc4b0aa50a); see active_provision_job_any_kind?/1.
+            Registry.active_provision_job_any_kind?(bp) ->
               json(conn, 409, %{error: "provisioning_in_progress"})
 
             true ->
