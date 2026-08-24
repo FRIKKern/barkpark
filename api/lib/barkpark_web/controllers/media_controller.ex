@@ -245,7 +245,12 @@ defmodule BarkparkWeb.MediaController do
   #     `MediaFile.serve_content_type/1` (dangerous svg/html/xml/js collapse to a
   #     non-executable octet-stream) AND paired with `nosniff` + an `attachment`
   #     disposition for dangerous types — the stored-XSS vector is defused here.
-  # sobelow_skip ["Traversal.SendFile", "XSS.ContentType"]
+  #   * Traversal.FileModule (File.stat/1): the byte-range answer needs the
+  #     blob's SIZE to clamp the range and fill `content-range`. It stats the
+  #     same server-derived `full_path` the send_file argument uses — never a
+  #     request segment — and an unreadable stat degrades to the whole-file
+  #     200 rather than guessing a size.
+  # sobelow_skip ["Traversal.SendFile", "XSS.ContentType", "Traversal.FileModule"]
   defp maybe_send_file(conn, full_path, mime) do
     conn =
       conn
