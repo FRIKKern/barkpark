@@ -10,8 +10,11 @@ defmodule BarkparkWeb.ReleaseSafetyTripwireTest do
 
       ** (UndefinedFunctionError) function Mix.env/0 is undefined
          (module Mix is not available)
-          lib/barkpark_web/live_auth.ex:163: LiveAuth.dev_browser_token_fallback/0
-          lib/barkpark_web/live_auth.ex:174: LiveAuth.authorize/4
+          live_auth.ex: LiveAuth.dev_browser_token_fallback/0
+          live_auth.ex: LiveAuth.authorize/4
+
+  (Line numbers deliberately omitted from that trace: this very fix shifts them,
+  and a line anchor in a comment is the thing that rots. Symbols instead.)
 
   `authorize/4` calls it unconditionally, so EVERY `:admin`/`:ops` Studio mount
   500'd — the settings panes rendered and then went click-dead. It survived
