@@ -339,7 +339,7 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
       # a half-rendered page would be vacuous).
       html = conn |> get("/papers/#{slug}") |> html_response(200)
       assert html =~ "Metering target"
-      assert html =~ "Linked mentions"
+      assert html =~ "Related papers"
       assert html =~ "Driven tasks"
       assert html =~ "Collect crawler samples"
 
