@@ -85,9 +85,22 @@ func validateExternalAttachHost(host string) error {
 // AttachDomainFunc points a custom host at one live box for a claimed
 // attach-domain job: DNS A record → BARKPARK_EXTRA_ORIGINS merge + Caddy vhost
 // on the box → caddy reload + app restart. Injected like DeprovisionFunc so the
-// worker stays transport-only and tests drive it against fakes. It is naturally
-// IDEMPOTENT (DNS upsert, guarded env merge, guarded vhost append), so a re-run
-// after a dropped succeed-report is a safe no-op — no orphan edge to guard.
+// worker stays transport-only and tests drive it against fakes.
+//
+// IT HAS AN ORPHAN EDGE, and idempotence is not the property that decides it.
+// Every step here IS idempotent (DNS upsert, guarded env merge, guarded vhost
+// append), which is why this doc used to conclude "a re-run after a dropped
+// succeed-report is a safe no-op — no orphan edge to guard." That reasoning
+// answers "is re-running SAFE?" The orphan hazard asks a different question:
+// "should this have run AT ALL?" An A-record upsert is perfectly idempotent and
+// perfectly WRONG once the box is gone — re-running it a hundred times leaves
+// exactly one record pointing at an address the provider will reassign to a
+// stranger. Deprovision deletes the box FIRST, so a job still claimed when the
+// teardown drains writes its record AFTER the by-value sweep that exists to
+// prevent it; the record then has no box, and every orphan backstop in the fleet
+// is keyed on a box (SweepOrphans selects barkpark-orphaned=true and cleans that
+// box's DNS), so nothing can reach it. AttachDomainWith therefore guards the
+// platform-DNS write with a box-liveness re-check before AND after the upsert.
 type AttachDomainFunc func(ctx context.Context, spec AttachDomainSpec) error
 
 // validateAttachDomainSpec is the fail-closed gate every attach-domain job
@@ -250,9 +263,11 @@ func attachDomainSteps(spec AttachDomainSpec, envFile, caddyfilePath string) []c
 //  1. DEFENSIVE validation (validateAttachDomainSpec) — a hostile/inconsistent
 //     claim payload aborts before ANY side effect.
 //  2. DNS, split by host kind (V2):
-//     - PLATFORM host: upsert the A record <dns_label>.<dns_zone> → ip
-//     (create-or-replace, idempotent) — we own the zone, pointing it IS the
-//     attach.
+//     - PLATFORM host: re-check that a managed box still holds spec.ip, upsert
+//     the A record <dns_label>.<dns_zone> → ip (create-or-replace,
+//     idempotent) — we own the zone, pointing it IS the attach — then re-check
+//     LIVENESS AGAIN and delete the record if the box vanished mid-write.
+//     Fail-closed on both, exactly like the external branch's resolve gate.
 //     - EXTERNAL host: NO platform upsert (the customer owns DNS). Instead,
 //     re-verify via the system resolver that the FQDN ALREADY resolves to
 //     the box — the ownership moat, enforced worker-side too because the
@@ -264,9 +279,17 @@ func attachDomainSteps(spec AttachDomainSpec, envFile, caddyfilePath string) []c
 //     StepRunner seam, each step idempotent.
 //
 // A step failure aborts the remainder and fails the job. A platform DNS record
-// already upserted when a later step fails is ACCEPTABLE residue: it points the
-// host at the box the instance already lives on, and the retry's upsert is a
-// no-op.
+// already upserted when a LATER (SSH) step fails is acceptable residue — but
+// only because of the gate above, and the reason is worth stating precisely,
+// because the previous version of this comment got it wrong. It is NOT
+// acceptable "because the upsert is idempotent": idempotence answers "is
+// re-running safe?", and the orphan hazard asks "should this have run at all?".
+// It is acceptable because the record points at a box we verified is LIVE, so it
+// is reachable by both box-keyed backstops — the deprovision teardown's
+// by-value sweep, and SweepOrphans via the barkpark-orphaned label — and a retry
+// re-points it. Strip the liveness gate and the same residue becomes an
+// unreachable orphan: an A record whose box is gone carries no label and no
+// owner, so nothing but a zone-level audit can ever find it.
 func AttachDomainWith(ctx context.Context, seams Seams, spec AttachDomainSpec) error {
 	if err := validateAttachDomainSpec(spec); err != nil {
 		return err
@@ -290,9 +313,47 @@ func AttachDomainWith(ctx context.Context, seams Seams, spec AttachDomainSpec) e
 		if seams.DNS == nil {
 			return fmt.Errorf("provisioner: a DNSProvider must be set to attach a platform-zone domain")
 		}
+		if seams.Provider == nil {
+			return fmt.Errorf("provisioner: a CloudProvider must be set to attach a platform-zone domain — the box-liveness re-check is not optional")
+		}
+
+		// BEFORE the write: deprovision deletes the BOX first and only then sweeps
+		// its records by value, so a job still claimed when a teardown drains would
+		// otherwise publish its record AFTER the sweep meant to prevent it. Refuse
+		// to point the zone at an address no box holds any more.
+		live, err := boxHoldsIP(ctx, seams.Provider, spec.IP)
+		if err != nil {
+			return fmt.Errorf("attach-domain %s: box liveness re-check: %w — refusing before any side effect (fail closed)", spec.CustomHost, err)
+		}
+		if !live {
+			return fmt.Errorf("attach-domain %s: no managed box holds %s any more — the instance was deprovisioned while this job was in flight; refusing to point DNS at a freed address (fail closed)", spec.CustomHost, spec.IP)
+		}
+
 		rec := cloud.Record{Zone: spec.DNSZone, Name: spec.DNSLabel, Type: "A", Value: spec.IP}
 		if err := seams.DNS.UpsertRecord(ctx, rec); err != nil {
 			return fmt.Errorf("attach-domain %s: dns upsert: %w", spec.CustomHost, err)
+		}
+
+		// AFTER the write: the orphan edge, and the half the pre-check cannot
+		// cover. The box is live when consulted and can be gone a moment later —
+		// the deprovision job may already be CLAIMED, past every control-plane
+		// refusal. So re-read liveness and, if the box went away underneath us,
+		// delete the record we just created. This is the money-edge discipline
+		// ProvisionWith already uses for a box the control plane never learned
+		// about, with DeleteRecord as the verb instead of provider.Delete.
+		stillLive, rerr := boxHoldsIP(ctx, seams.Provider, spec.IP)
+		if rerr != nil {
+			return fmt.Errorf("attach-domain %s: wrote the A record but could not re-confirm a box still holds %s: %w — failing the job so the record is reviewed rather than assumed good", spec.CustomHost, spec.IP, rerr)
+		}
+		if !stillLive {
+			fqdn := cloud.Fqdn(spec.DNSLabel, spec.DNSZone)
+			if derr := seams.DNS.DeleteRecord(ctx, spec.DNSZone, spec.DNSLabel, "A"); derr != nil {
+				// The loudest thing this process will ever say: no box-keyed
+				// backstop can reach this record, so this error is the ONLY
+				// artefact naming it. Carry the FQDN and the address.
+				return fmt.Errorf("attach-domain %s: ORPHANED A RECORD %s → %s: the box was deprovisioned mid-write and deleting the record again failed: %w — delete it by hand; no box-keyed backstop can reach a record whose box is gone", spec.CustomHost, fqdn, spec.IP, derr)
+			}
+			return fmt.Errorf("attach-domain %s: the box at %s was deprovisioned while the A record was being written — %s has been deleted again (fail closed)", spec.CustomHost, spec.IP, fqdn)
 		}
 	}
 
@@ -309,6 +370,29 @@ func AttachDomainWith(ctx context.Context, seams Seams, spec AttachDomainSpec) e
 		}
 	}
 	return nil
+}
+
+// boxHoldsIP reports whether ANY managed box in the fleet still holds ip. It is
+// the attach path's liveness gate, and it reads the fleet by IP because that is
+// the only handle an attach-domain claim carries — the payload names the address
+// (spec.ip), never the server name, so provider.IP(name) is not available here.
+//
+// It deliberately uses only the CORE CloudProvider contract (List), so every
+// provider satisfies it and no optional capability can be missing at the moment
+// the guard is needed. An error is never read as "absent": the callers fail
+// closed on it, because "the fleet is unreadable" and "the box is gone" must not
+// collapse into the same answer.
+func boxHoldsIP(ctx context.Context, p cloud.CloudProvider, ip string) (bool, error) {
+	servers, err := p.List(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range servers {
+		if s.IP == ip {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // containsAddr reports whether want is among the RESOLVED addresses, compared
