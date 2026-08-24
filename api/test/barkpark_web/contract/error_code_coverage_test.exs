@@ -76,7 +76,18 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                    "merge_reconcile_failed",
                    # github-adopt operational bridge — `bp github adopt`.
                    "adopt_failed",
-                   "not_intake"
+                   "not_intake",
+                   # ONIX export — GET /v1/plugins/onixedit/export/:dataset/:id,
+                   # mounted on the host's :require_admin pipeline and answering
+                   # application/onix+xml, not the JSON content contract. Both
+                   # codes previously rode an `error.type` key instead of
+                   # `error.code`, so this guard could not see them AT ALL (its
+                   # scan reads `code:` literals); routing them through
+                   # ErrorResponse is what surfaced them here. Promote both into
+                   # known_codes/0 the day the ONIX export joins the public SDK
+                   # surface — that also needs a §9 line in docs/api-v1.md.
+                   "xsd_invalid",
+                   "invalid_onix_code"
                  ])
 
   # `code:` / `"code" =>` string literals that are NOT error codes but live

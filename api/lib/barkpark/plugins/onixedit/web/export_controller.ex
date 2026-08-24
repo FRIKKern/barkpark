@@ -51,26 +51,35 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
         |> put_resp_header("content-disposition", ~s|attachment; filename="#{pub_id}.onix"|)
         |> send_resp(200, iodata)
 
+      # NO `alias BarkparkWeb.ErrorResponse` IN THIS FILE, ON PURPOSE. The
+      # `send_resp(200, iodata)` three lines above is a REVIEWED false positive
+      # pinned by line in api/.sobelow-skips
+      # (`…/export_controller.ex:52,64EB26D`). An alias line would push it to 53
+      # and red the advisory Sobelow job over a finding nobody introduced, and
+      # security.yml:265 forbids regenerating that baseline on a dev toolchain.
+      # Fully-qualified calls keep the anchor valid; this comment sits BELOW the
+      # anchored line so it cannot move it either.
       {:error, {:xsd_invalid, reasons}} ->
-        conn
-        |> put_status(500)
-        |> json(%{error: %{type: "xsd_invalid", reasons: reasons}})
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          500,
+          "xsd_invalid",
+          "the rendered ONIX did not validate against the 3.0 schema",
+          %{reasons: reasons}
+        )
 
       # A valid-but-unseeded (or non-string) ONIX codelist code. The document
       # is structurally fine — it just references a code our export maps don't
       # cover — so this is the caller's problem, not a server fault: 422 with a
       # structured body naming the offending codelist + code, never a bare 500.
       {:error, {:invalid_code, detail}} ->
-        conn
-        |> put_status(422)
-        |> json(%{
-          error: %{
-            type: "invalid_onix_code",
-            codelist: detail["codelist"],
-            code: detail["code"],
-            message: detail["message"]
-          }
-        })
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          422,
+          "invalid_onix_code",
+          detail["message"] || "the document references an ONIX code this export cannot map",
+          %{codelist: detail["codelist"], onix_code: detail["code"]}
+        )
     end
   end
 
@@ -111,8 +120,6 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportController do
   end
 
   defp send_404(conn) do
-    conn
-    |> put_status(404)
-    |> json(%{error: %{type: "not_found", message: "document not found"}})
+    BarkparkWeb.ErrorResponse.emit(conn, {:error, :not_found})
   end
 end

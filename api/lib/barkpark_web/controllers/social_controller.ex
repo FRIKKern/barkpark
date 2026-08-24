@@ -12,12 +12,13 @@ defmodule BarkparkWeb.SocialController do
   alias Barkpark.Accounts
   alias Barkpark.Sso
   alias Barkpark.Sso.Social
+  alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
 
   def start(conn, %{"provider" => name}) do
     case Social.provider(name) do
       nil ->
-        conn |> put_status(404) |> json(%{error: "provider not enabled"})
+        ErrorResponse.emit_custom(conn, 404, "not_found", "provider not enabled")
 
       p ->
         state = Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)
@@ -40,11 +41,11 @@ defmodule BarkparkWeb.SocialController do
     cond do
       is_nil(p) ->
         Sso.record_login_failure("social:#{name}", nil, :provider_not_enabled)
-        conn |> put_status(404) |> json(%{error: "provider not enabled"})
+        ErrorResponse.emit_custom(conn, 404, "not_found", "provider not enabled")
 
       state != get_session(conn, :social_state) ->
         Sso.record_login_failure("social:#{name}", nil, :state_mismatch)
-        conn |> put_status(400) |> json(%{error: "state mismatch"})
+        ErrorResponse.emit_custom(conn, 400, "malformed", "state mismatch")
 
       true ->
         case Social.handle_callback(p, code, callback_uri(name)) do
@@ -74,15 +75,23 @@ defmodule BarkparkWeb.SocialController do
           {:error, reason} ->
             # Failed exchange lands on the audit trail (era-w8).
             Sso.record_login_failure("social:#{name}", nil, reason)
-            conn |> put_status(401) |> json(%{error: "social_failed", detail: to_string(reason)})
+
+            ErrorResponse.emit_custom(conn, 401, "unauthorized", "social callback rejected", %{
+              reason: to_string(reason)
+            })
         end
     end
   end
 
   def callback(conn, %{"provider" => _} = params) do
     case params do
-      %{"error" => err} -> conn |> put_status(401) |> json(%{error: "social_error", detail: err})
-      _ -> conn |> put_status(400) |> json(%{error: "code and state are required"})
+      %{"error" => err} ->
+        ErrorResponse.emit_custom(conn, 401, "unauthorized", "the provider returned an error", %{
+          reason: to_string(err)
+        })
+
+      _ ->
+        ErrorResponse.emit_custom(conn, 400, "malformed", "code and state are required")
     end
   end
 

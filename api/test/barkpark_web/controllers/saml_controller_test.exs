@@ -286,7 +286,11 @@ defmodule BarkparkWeb.SamlControllerTest do
     setup_conn(i.cert_pem)
 
     body = conn |> post("/v1/auth/saml/#{@slug}/acs", %{}) |> json_response(400)
-    assert body["error"] == "SAMLResponse is required"
+    # §9 envelope, not the bare string this used to answer: a client branches on
+    # `code`, and `request_id` is what correlates the refusal to the log line.
+    assert body["error"]["code"] == "malformed"
+    assert body["error"]["message"] == "SAMLResponse is required"
+    assert is_binary(body["error"]["request_id"])
   end
 
   test "POST SLO with no SAMLRequest at all is still 400", %{conn: conn} do
@@ -294,7 +298,9 @@ defmodule BarkparkWeb.SamlControllerTest do
     setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
 
     body = conn |> post("/v1/auth/saml/#{@slug}/slo", %{}) |> json_response(400)
-    assert body["error"] == "SAMLRequest is required"
+    assert body["error"]["code"] == "malformed"
+    assert body["error"]["message"] == "SAMLRequest is required"
+    assert is_binary(body["error"]["request_id"])
   end
 
   describe "Single Logout" do

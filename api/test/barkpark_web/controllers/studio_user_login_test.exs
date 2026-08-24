@@ -245,10 +245,15 @@ defmodule BarkparkWeb.StudioUserLoginTest do
 
   describe "SSO callback content negotiation" do
     test "a non-HTML caller keeps the JSON contract on OIDC errors", %{conn: conn} do
-      # No connection for the org — the JSON error arm must be unchanged for
-      # API-shaped callers (the Keycloak interop suite depends on it).
+      # No connection for the org — the JSON error arm must stay JSON for
+      # API-shaped callers. It is the ENVELOPE that is the contract, not a bare
+      # string: idp_interop/keycloak_interop_test.exs already asserts
+      # body["error"]["code"], so the envelope is what interop actually depends
+      # on. (This comment previously claimed the opposite and was stale.)
       resp = get(conn, "/v1/auth/oidc/no-such-org/callback", %{code: "x", state: "y"})
-      assert json_response(resp, 404)["error"] =~ "no OIDC connection"
+      body = json_response(resp, 404)
+      assert body["error"]["message"] =~ "no OIDC connection"
+      assert body["error"]["code"] == "not_found"
     end
   end
 end

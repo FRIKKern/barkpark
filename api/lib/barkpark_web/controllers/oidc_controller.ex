@@ -13,12 +13,18 @@ defmodule BarkparkWeb.OidcController do
   alias Barkpark.Accounts
   alias Barkpark.Sso
   alias Barkpark.Sso.Oidc
+  alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
 
   def start(conn, %{"org_slug" => slug}) do
     case Oidc.connection_for_org_slug(slug) do
       nil ->
-        conn |> put_status(404) |> json(%{error: "no OIDC connection for this organization"})
+        ErrorResponse.emit_custom(
+          conn,
+          404,
+          "not_found",
+          "no OIDC connection for this organization"
+        )
 
       c ->
         p = Oidc.new_auth_params()
@@ -44,11 +50,17 @@ defmodule BarkparkWeb.OidcController do
     cond do
       is_nil(c) ->
         Sso.record_login_failure("oidc", slug, :no_connection)
-        conn |> put_status(404) |> json(%{error: "no OIDC connection for this organization"})
+
+        ErrorResponse.emit_custom(
+          conn,
+          404,
+          "not_found",
+          "no OIDC connection for this organization"
+        )
 
       state != get_session(conn, :oidc_state) ->
         Sso.record_login_failure("oidc", slug, :state_mismatch)
-        conn |> put_status(400) |> json(%{error: "state mismatch"})
+        ErrorResponse.emit_custom(conn, 400, "malformed", "state mismatch")
 
       true ->
         opts = [
@@ -93,15 +105,23 @@ defmodule BarkparkWeb.OidcController do
             # Failed token exchange / claim validation lands on the audit
             # trail (era-w8) — only successes audited before.
             Sso.record_login_failure("oidc", slug, reason)
-            conn |> put_status(401) |> json(%{error: "oidc_failed", detail: to_string(reason)})
+
+            ErrorResponse.emit_custom(conn, 401, "unauthorized", "OIDC callback rejected", %{
+              reason: to_string(reason)
+            })
         end
     end
   end
 
   def callback(conn, %{"org_slug" => _} = params) do
     case params do
-      %{"error" => err} -> conn |> put_status(401) |> json(%{error: "oidc_error", detail: err})
-      _ -> conn |> put_status(400) |> json(%{error: "code and state are required"})
+      %{"error" => err} ->
+        ErrorResponse.emit_custom(conn, 401, "unauthorized", "the IdP returned an error", %{
+          reason: to_string(err)
+        })
+
+      _ ->
+        ErrorResponse.emit_custom(conn, 400, "malformed", "code and state are required")
     end
   end
 

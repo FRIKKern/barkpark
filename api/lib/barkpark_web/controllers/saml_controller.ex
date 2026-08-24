@@ -15,12 +15,21 @@ defmodule BarkparkWeb.SamlController do
 
   alias Barkpark.{Accounts, Audit, Sso}
   alias Barkpark.Sso.Saml
+  alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
 
   def start(conn, %{"org_slug" => slug}) do
     case Saml.connection_for_org_slug(slug) do
-      nil -> conn |> put_status(404) |> json(%{error: "no SAML connection for this organization"})
-      c -> redirect(conn, external: Saml.authn_redirect_url(c, slug))
+      nil ->
+        ErrorResponse.emit_custom(
+          conn,
+          404,
+          "not_found",
+          "no SAML connection for this organization"
+        )
+
+      c ->
+        redirect(conn, external: Saml.authn_redirect_url(c, slug))
     end
   end
 
@@ -77,20 +86,28 @@ defmodule BarkparkWeb.SamlController do
       # expired assertion used to leave no trace; only successes audited.
       :no_conn ->
         Sso.record_login_failure("saml", slug, :no_connection)
-        conn |> put_status(404) |> json(%{error: "no SAML connection for this organization"})
+
+        ErrorResponse.emit_custom(
+          conn,
+          404,
+          "not_found",
+          "no SAML connection for this organization"
+        )
 
       :error ->
         Sso.record_login_failure("saml", slug, :invalid_base64)
-        conn |> put_status(400) |> json(%{error: "SAMLResponse is not valid base64"})
+        ErrorResponse.emit_custom(conn, 400, "malformed", "SAMLResponse is not valid base64")
 
       {:error, reason} ->
         Sso.record_login_failure("saml", slug, reason)
-        conn |> put_status(401) |> json(%{error: "saml_failed", detail: inspect(reason)})
+
+        ErrorResponse.emit_custom(conn, 401, "unauthorized", "SAML assertion rejected", %{
+          reason: inspect(reason)
+        })
     end
   end
 
-  def acs(conn, %{"org_slug" => _}),
-    do: conn |> put_status(400) |> json(%{error: "SAMLResponse is required"})
+  def acs(conn, %{"org_slug" => _}), do: refuse_missing(conn, "SAMLResponse is required")
 
   @doc """
   IdP-initiated Single Logout (POST binding). The LogoutRequest's XML-dsig is
@@ -142,18 +159,36 @@ defmodule BarkparkWeb.SamlController do
       |> send_resp(200, Saml.logout_response_html(c, slug, nonce))
     else
       :no_conn ->
-        conn |> put_status(404) |> json(%{error: "no SAML connection for this organization"})
+        ErrorResponse.emit_custom(
+          conn,
+          404,
+          "not_found",
+          "no SAML connection for this organization"
+        )
 
       :error ->
-        conn |> put_status(400) |> json(%{error: "SAMLRequest is not valid base64"})
+        ErrorResponse.emit_custom(conn, 400, "malformed", "SAMLRequest is not valid base64")
 
       {:error, reason} ->
-        conn |> put_status(401) |> json(%{error: "slo_failed", detail: inspect(reason)})
+        ErrorResponse.emit_custom(conn, 401, "unauthorized", "SAML LogoutRequest rejected", %{
+          reason: inspect(reason)
+        })
     end
   end
 
-  def slo(conn, %{"org_slug" => _}),
-    do: conn |> put_status(400) |> json(%{error: "SAMLRequest is required"})
+  def slo(conn, %{"org_slug" => _}), do: refuse_missing(conn, "SAMLRequest is required")
+
+  # Deliberately NOT `ErrorResponse.emit_custom/5` inline in the clause above.
+  # The FIRST `slo/2` clause carries an `XSS.SendResp` waiver (the esaml
+  # LogoutResponse form it send_resp's), and
+  # api/scripts/sobelow-inline-overlap-check.sh rule 4a reds when a sibling
+  # clause of an annotated def group calls the same module the annotated clause
+  # calls without carrying its own annotation — Sobelow binds a waiver to ONE
+  # def. Stamping this clause with an `XSS.SendResp` waiver would be a lie: it
+  # cannot produce that finding, it never calls send_resp. Routing through a
+  # single-clause private helper keeps the waiver honest and the gate green.
+  defp refuse_missing(conn, message),
+    do: ErrorResponse.emit_custom(conn, 400, "malformed", message)
 
   # A browser's form POST / redirect chain advertises text/html; API clients
   # (interop suite, SDKs) don't. Drives the redirect-vs-JSON fork above.
