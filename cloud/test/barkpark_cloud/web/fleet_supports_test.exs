@@ -609,7 +609,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       assert Registry.get_barkpark(support_b.id) != nil
     end
 
-    test "Registry.active_provision_job_any_kind?/1 sees the kind a support gets" do
+    test "Registry.active_job_blocking_delete?/1 sees the kind a support gets" do
       {_u, team, _token} = user_with_role("owner")
       main = live_main_fixture(team)
 
@@ -621,14 +621,64 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
           token_id: "t"
         })
 
-      refute Registry.active_provision_job_any_kind?(support)
+      refute Registry.active_job_blocking_delete?(support)
       {:ok, _} = Registry.enqueue_support_provision_job(support)
-      assert Registry.active_provision_job_any_kind?(support)
+      assert Registry.active_job_blocking_delete?(support)
 
       # The pre-existing predicate only ever knew kind "provision", which a
       # support is NEVER enqueued under — that blind spot is why the guards
       # needed a kind-agnostic function rather than a reuse.
       refute Registry.active_provision_job?(support)
+    end
+
+    test "the blocking set is a DENYLIST: resurrect blocks, so a new kind would too" do
+      # The SECOND miss of the same shape, and the reason the set is inverted.
+      # `resurrect` recreates a machine as a provision (ProvisionJob's moduledoc),
+      # so a row deleted while one is in flight strands exactly what a
+      # mid-provision delete strands — and an allowlist of
+      # ["provision", "provision_support"] sailed straight past it.
+      {_u, team, _token} = user_with_role("owner")
+      main = main_fixture(team)
+
+      refute Registry.active_job_blocking_delete?(main)
+      {:ok, _} = Registry.enqueue_resurrect_job(main, "bundle-ref-1")
+      assert Registry.active_job_blocking_delete?(main)
+    end
+
+    test "attach_domain blocks too — its worker writes an A record" do
+      {_u, team, _token} = user_with_role("owner")
+      main = live_main_fixture(team)
+
+      refute Registry.active_job_blocking_delete?(main)
+      {:ok, _} = Registry.enqueue_attach_domain_job(main)
+      assert Registry.active_job_blocking_delete?(main)
+    end
+
+    test "the two EXCLUSIONS are deliberate, not forgotten" do
+      # A denylist is only honest if its exclusions are pinned. `deprovision` must
+      # NOT block (it IS the teardown — blocking would refuse the cleanup), and
+      # `push_agent_key` must NOT block (it creates nothing, so it strands nothing).
+      {_u, team, _token} = user_with_role("owner")
+
+      tearing_down = live_main_fixture(team)
+      {:ok, _} = Registry.enqueue_deprovision_job(tearing_down)
+      refute Registry.active_job_blocking_delete?(tearing_down)
+
+      keyed = live_main_fixture(team)
+      {:ok, _} = Registry.enqueue_agent_key_push_job(keyed)
+      refute Registry.active_job_blocking_delete?(keyed)
+    end
+
+    test "a resurrect in flight is refused by DELETE /v1/barkparks/:id" do
+      {_u, team, token} = user_with_role("owner")
+      main = main_fixture(team)
+      {:ok, _} = Registry.enqueue_resurrect_job(main, "bundle-ref-2")
+
+      conn = call(:delete, "/v1/barkparks/#{main.id}", nil, token)
+
+      assert conn.status == 409
+      assert decode(conn)["error"] == "provisioning_in_progress"
+      assert Registry.get_barkpark(main.id) != nil
     end
 
     test "a support mid-provision is refused by DELETE /v1/barkparks/:id too" do

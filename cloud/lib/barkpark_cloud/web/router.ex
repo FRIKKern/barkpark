@@ -2278,13 +2278,15 @@ defmodule BarkparkCloud.Web.Router do
               # Not live YET, but a provision is in flight: deleting the row now
               # would let the worker bring a box up the control plane can't see
               # (succeed_job no-ops on the missing row) — a stranded billed box,
-              # and for a support an orphan A record too. EITHER KIND counts: this
-              # route matches on team alone, so a SUPPORT row (kind
-              # "provision_support") reaches it, and the kind-specific predicate
-              # answered false for every one of them (task-688ebffc4b0aa50a).
-              # Refuse until the provision lands (then it's a live-box deprovision)
+              # and for a support an orphan A record too. ANY BLOCKING KIND
+              # counts, not a named list: this route matches on team alone, so a
+              # SUPPORT row (kind "provision_support") reaches it, and a
+              # `resurrect` can be in flight here too (task-688ebffc4b0aa50a).
+              # See active_job_blocking_delete?/1 — the set is a DENYLIST, so a
+              # newly added kind is covered by default rather than silently missed.
+              # Refuse until the job lands (then it's a live-box deprovision)
               # or fails (then it's a clean non-live remove).
-              Registry.active_provision_job_any_kind?(bp) ->
+              Registry.active_job_blocking_delete?(bp) ->
                 json(conn, 409, %{
                   error: "provisioning_in_progress",
                   detail:
@@ -2588,10 +2590,11 @@ defmodule BarkparkCloud.Web.Router do
               is_binary(support.host) and support.host != "" ->
                 deprovision_live_barkpark(conn, team, support)
 
-              # Not live YET, but a provision_support job is in flight — refuse
+              # Not live YET, but a job that would build or restore this box is
+              # in flight (a provision_support here, or a resurrect) — refuse
               # until it lands (then it is a live-box deprovision) or fails (then
               # it is a clean non-live remove).
-              Registry.active_provision_job_any_kind?(support) ->
+              Registry.active_job_blocking_delete?(support) ->
                 json(conn, 409, %{
                   error: "provisioning_in_progress",
                   detail:
@@ -7214,9 +7217,10 @@ defmodule BarkparkCloud.Web.Router do
                   json(conn, 422, %{error: "invalid", details: errors(cs)})
               end
 
-            # EITHER KIND — this internal route takes any row, supports included
-            # (task-688ebffc4b0aa50a); see active_provision_job_any_kind?/1.
-            Registry.active_provision_job_any_kind?(bp) ->
+            # ANY BLOCKING KIND — this internal route takes any row, supports
+            # included, and a resurrect can be in flight (task-688ebffc4b0aa50a);
+            # see active_job_blocking_delete?/1.
+            Registry.active_job_blocking_delete?(bp) ->
               json(conn, 409, %{error: "provisioning_in_progress"})
 
             true ->
