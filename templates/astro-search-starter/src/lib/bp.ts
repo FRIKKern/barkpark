@@ -2,6 +2,7 @@
 // `astro build`; the deployed site carries NO token). Same env contract as
 // every adapter (templates/DEPLOYING.md).
 import { createClient, type BarkparkClient } from '@barkpark/core'
+import { collectCorpus } from './paginate'
 
 const API_VERSION = '2026-04-01'
 
@@ -46,10 +47,26 @@ export interface DocRow {
   [k: string]: unknown
 }
 
-/** Every published doc of the featured type — the corpus the site is built from. */
+/** Every published doc of the featured type — the corpus the site is built
+ * from, walked page by page.
+ *
+ * PAGINATED (task-669e7706cb86cb3a): this was ONE `.limit(500).find()` call
+ * with no offset loop, so a corpus past 500 docs of the featured type was
+ * silently truncated — the finder's baked seed missed those docs AND
+ * `getStaticPaths` generated no page for them, a live 404 under a green build.
+ * The walk itself lives in `./paginate.ts` so the real loop is under test
+ * (that module imports nothing; this one cannot be imported dep-free). */
 export async function allDocs(): Promise<DocRow[]> {
-  const rows = await bp().docs(env.docType).order('_updatedAt:desc').limit(500).find()
-  return (rows || []) as DocRow[]
+  const { rows } = await collectCorpus<DocRow>(async (limit, offset) => {
+    const batch = await bp()
+      .docs(env.docType)
+      .order('_updatedAt:desc')
+      .limit(limit)
+      .offset(offset)
+      .find()
+    return (batch || []) as DocRow[]
+  })
+  return rows
 }
 
 /** Pull a human message out of an API `{error: string | {message,code}}` body,
