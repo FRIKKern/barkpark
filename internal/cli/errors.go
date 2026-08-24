@@ -113,6 +113,141 @@ var codeExit = map[string]int{
 	"illegal_transition":          exitValidation,
 	"rate_limited":                exitRateLimit,
 	"internal_error":              exitServer,
+
+	// ── The API-parity backfill (task-2a774c5536503306) ───────────────────
+	//
+	// The "code, never status" rule above is safe ONLY while this table is a
+	// SUPERSET of what the API can emit. It was not: measured against
+	// `Barkpark.Content.Errors.known_codes/0` (api/lib/barkpark/content/
+	// errors.ex — the union of @hints keys and @public_inline_codes), 61 of its
+	// 81 codes were absent here, so exitForCode fell to exitGeneric (1) for
+	// each. The JS SDK got them right, because js/packages/core/src/
+	// transport.ts classifies on `status === X || code === '…'` with the status
+	// as PRIMARY discriminator. One response, two layers, two answers.
+	//
+	// The remedy is the TABLE, not the reader: each code below is bucketed by
+	// the HTTP status the API actually returns for it, verified at its emitter.
+	// TestCodeExitCoversKnownAPICodes now fails when known_codes/0 gains a
+	// member neither registered here nor listed in codeExitNotWireBucketable,
+	// so this drift cannot silently reopen.
+
+	// 401/403 → auth. The credential (or the second factor) is the problem.
+	"mfa_required":           exitAuth, // 401, require_recent_mfa.ex:57
+	"invalid_enrollment":     exitAuth, // 401, chat_host_controller.ex:112
+	"mfa_enrolment_required": exitAuth, // 403, require_org_mfa_enrolment.ex:73
+	"workspace_suspended":    exitAuth, // 403, errors.ex:348
+	"bundle_import_disabled": exitAuth, // 403, workspace_controller.ex:450
+
+	// 404 → not-found.
+	"webhook_not_found": exitNotFound, // 404, webhook_controller.ex:288
+	"event_not_found":   exitNotFound, // 404, webhook_controller.ex:280
+	"build_id_mismatch": exitNotFound, // 404, site_deploy_controller.ex:323
+
+	// 400 → usage, the same bucket `malformed` and `invalid_filter` already
+	// occupy: the REQUEST as framed is wrong, not the document in it.
+	"unsupported_if_match_for_batch": exitUsage, // 400, errors.ex:402
+	"import_body_read_failed":        exitUsage, // 400, workspace_controller.ex:1011
+	"unknown_format":                 exitUsage, // 400, bulldocs_source_controller.ex:28
+
+	// 422/413/402 → validation. Never retryable AS SENT — the distinction that
+	// matters to a wrapper, and the one exit 1 destroyed by folding these in
+	// with network timeouts.
+	//
+	// Two of these carry a name/status tension worth stating rather than
+	// quietly "fixing": `source_not_found` sounds like a 404 but the API
+	// answers 422 (bulldocs_ingest_controller.ex:1478 — the referenced doc did
+	// not resolve, nothing was written), and `payload_too_large` is a 413.
+	// Both are bucketed by the status their emitter actually returns, because
+	// bucketing on the NAME is exactly the guesswork this table exists to end.
+	"label_spine":                exitValidation, // 422, errors.ex:561
+	"unknown_tag":                exitValidation, // 422, errors.ex:620
+	"invalid_paper_structure":    exitValidation, // 422, errors.ex:569
+	"invalid_epic_paper_quality": exitValidation, // 422, errors.ex:577
+	"unsupported_media_type":     exitValidation, // 422, errors.ex:724
+	"chat_unsupported":           exitValidation, // 422, chat_controller.ex:948
+	"unprocessable":              exitValidation, // 422, search_controller.ex:527
+	"batch_too_large":            exitValidation, // 422, sheets/ops_controller.ex:131
+	"invalid_request_id":         exitValidation, // 422, sheets/ops_controller.ex:87
+	"malformed_ops":              exitValidation, // 422, sheets/ops_controller.ex:100
+	"invalid_grant":              exitValidation, // 422, access_controller.ex:189
+	"invalid_state_report":       exitValidation, // 422, chat_host_controller.ex:95
+	"bpml":                       exitValidation, // 422, bulldocs_ingest_controller.ex:237
+	"bpml_unavailable":           exitValidation, // 422, bulldocs_source_controller.ex:77
+	"bpml_unprintable":           exitValidation, // 422, bulldocs_ingest_controller.ex:273
+	"constraint":                 exitValidation, // 422, bulldocs_ingest_controller.ex:354
+	"create_wall":                exitValidation, // 422, bulldocs_ingest_controller.ex:432
+	"invalid_conversation":       exitValidation, // 422, bulldocs_ingest_controller.ex:1151
+	"invalid_kind":               exitValidation, // 422, bulldocs_ingest_controller.ex:1102
+	"invalid_proposal":           exitValidation, // 422, bulldocs_ingest_controller.ex:1493
+	"malformed_proposal":         exitValidation, // 422, bulldocs_ingest_controller.ex:1438
+	"invalid_text":               exitValidation, // 422, bulldocs_ingest_controller.ex:1635
+	"missing_slug":               exitValidation, // 422, bulldocs_ingest_controller.ex:938
+	"missing_source":             exitValidation, // 422, bulldocs_ingest_controller.ex:1446
+	"slug_mismatch":              exitValidation, // 422, bulldocs_ingest_controller.ex:401
+	"source_not_found":           exitValidation, // 422, bulldocs_ingest_controller.ex:1478
+	"payload_too_large":          exitValidation, // 413, errors.ex:736
+	"import_body_too_large":      exitValidation, // 413, workspace_controller.ex:992
+	// 402. There is no payment/quota bucket in the 0-8 scheme, and inventing
+	// one would redefine the published table. 5 is the honest neighbour: it
+	// says "not retryable as sent", which is the fact a wrapper needs.
+	"quota_exceeded": exitValidation, // 402, errors.ex:359
+
+	// 409 → conflict. The world moved, or already holds this — re-read/retry.
+	"duplicate_task":              exitConflict, // 409, errors.ex:589
+	"duplicate_of":                exitConflict, // 409, errors.ex:604
+	"idempotency_key_in_use":      exitConflict, // 409, errors.ex:515
+	"schema_has_documents":        exitConflict, // 409, errors.ex:696
+	"conflict_retry":              exitConflict, // 409, bulldocs_ingest_controller.ex:1117
+	"workspace_slug_conflict":     exitConflict, // 409, workspace_controller.ex:513
+	"import_constraint_violation": exitConflict, // 409, workspace_controller.ex:651
+	"blob_path_conflict":          exitConflict, // 409, workspace_controller.ex:592
+
+	// 5xx → server. The box failed, not the request: the ONE class where a
+	// retry is the right reflex, and the class exit 1 made indistinguishable
+	// from a permanently-refused payload.
+	"storage_unavailable":       exitServer, // 503, errors.ex:712
+	"runtime_unavailable":       exitServer, // 503, chat_controller.ex:943
+	"runtime_capacity":          exitServer, // 503, chat_controller.ex:934
+	"chat_create_failed":        exitServer, // 503, chat_controller.ex:146
+	"deploy_runner_unavailable": exitServer, // 503, site_deploy_controller.ex:299
+	"import_failed":             exitServer, // 500, workspace_controller.ex:575
+	"import_spill_write_failed": exitServer, // 507, workspace_controller.ex:1035
+	"insufficient_disk_space":   exitServer, // 507, workspace_controller.ex:1051
+}
+
+// codeExitNotWireBucketable names the members of known_codes/0 that are
+// DELIBERATELY absent from codeExit, each with the reason. It exists so the
+// parity gate can tell "considered and excluded, here is why" apart from
+// "nobody noticed" — the whole failure mode this row retired. Adding a code
+// here instead of to codeExit is a decision that must be argued in review, not
+// a way to silence the gate.
+//
+// TWO KINDS live here, and they are not the same problem:
+//
+//  1. NEVER A TOP-LEVEL `error.code`. These are violation-list entries nested
+//     inside another response's body (`paper_structure_violations` /
+//     `structure_violation`), so classifyError never sees them in `error.code`
+//     and an exit mapping for them would be dead weight. They are legitimately
+//     in known_codes/0 because a client must still recognise them INSIDE that
+//     list.
+//
+//  2. THE API ANSWERS TWO DIFFERENT STATUSES FOR ONE CODE. This is an API
+//     defect, not a CLI one, and it is precisely what the "code, never status"
+//     rule at the top of this file guards against — one token cannot mean two
+//     exits. Registering such a code would manufacture a false certainty:
+//     `export_failed` at 503 is retryable by design and at 422 is permanent,
+//     and a wrapper told "8, retry" would spin forever on the sheets arm while
+//     one told "5, give up" would abandon a recoverable bundle export. They
+//     stay on exitGeneric (1) until the API disambiguates them, which is filed
+//     separately. Silence here would have been the worse answer; exit 1 at
+//     least means "unknown", which is true.
+var codeExitNotWireBucketable = map[string]string{
+	"hollow_paper": "never a top-level error.code — a violation map inside the paper structure list (bulldocs_ingest_controller.ex:163), returned under an outer 200 (dry-run validate) or 422 (create_wall)",
+	"structure":    "never a top-level error.code — structure_violation/1's fallback violation map (bulldocs_ingest_controller.ex:589-590), same outer-body story as hollow_paper",
+
+	"export_failed":       "AMBIGUOUS STATUS: 503 at workspace_controller.ex:319 (bundle export, deliberately retryable) vs 422 at sheets/export_controller.ex:142 (xlsx build, permanent). One code, two retryability contracts",
+	"invalid_mode":        "AMBIGUOUS STATUS: 422 at workspace_controller.ex:466 (bundle-import mode) vs 400 at sites/deploy_request.ex:199 (site-deploy mode). Two unrelated features share the token",
+	"session_unavailable": "AMBIGUOUS STATUS: 503 at sheets/ops_controller.ex:145 (crash loop, retry-after: 2) vs 422 at :154 (catch-all start failure). One code, two retryability contracts",
 }
 
 // reasonKey reduces a COMPOUND server reason token to its table key. The tasks
