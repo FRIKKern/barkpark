@@ -109,7 +109,8 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	// Build the request body for writes. Declared non-path args seed the JSON
 	// object; --set merges over them; mutation commands merge a --file JSON
 	// object before --set, while other commands use --file as the whole body; a
-	// file-typed arg on a media route is sent as multipart/form-data instead.
+	// a POST-bound, declared file-typed arg is sent as multipart/form-data
+	// instead (whatever the route is spelled).
 	body, stream, contentType, err := buildBodyWithStdinOwnership(cmd, cmdFlags, argMap, ownsProcessStdin)
 	if err != nil {
 		return nil, &dispatchError{msg: err.Error(), withUsage: false}
@@ -1121,8 +1122,9 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 //     workspace.project-create `name` -> {"name":"…"}.
 //  3. --set k=v pairs, merged last so repeated --set values win per key.
 //
-// A file-typed arg on a media route is special-cased FIRST: it ships as
-// multipart/form-data with the file under the "file" form field, not as JSON —
+// A POST-bound, declared file-typed arg is special-cased FIRST, regardless of
+// route: it ships as multipart/form-data with the file under the "file" form
+// field, not as JSON —
 // and as a streaming io.Reader (returned in stream, with body nil) so a large
 // upload is neither buffered whole in memory nor killed by the 30s wall-clock.
 // Reads return nil; a write with no body source sends an empty JSON object so a
@@ -1141,8 +1143,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		return nil, nil, "", nil
 	}
 
-	// Media upload (or any file-typed arg on a POST media route): multipart,
-	// streamed via io.Pipe so it rides doRequestStream's transfer client.
+	// Media upload (or any POST command with a declared file-typed arg):
+	// multipart, streamed via io.Pipe so it rides doRequestStream's transfer
+	// client.
 	if path, ok := mediaUploadFileArg(cmd, args); ok {
 		r, ct, err := buildMultipartFile(path)
 		return nil, r, ct, err
@@ -1416,17 +1419,23 @@ func stdinHasRedirectedInput() bool {
 	return n > 0
 }
 
-// mediaUploadFileArg returns the bound file path when cmd has a file-typed
-// declared arg AND posts to a media route — the signal that the payload must be
-// sent as multipart/form-data rather than JSON. The route check keeps the
-// multipart path narrow (only media uploads), so a future file-typed arg on a
-// non-media route still goes through the JSON path unless the manifest opts it
-// in via a media path.
+// mediaUploadFileArg returns the bound file path when cmd has a POST-bound,
+// file-typed DECLARED ARG — the signal that the payload must be sent as
+// multipart/form-data rather than JSON. This used to also require the route's
+// path_template to contain the substring "/media", which stood in for "this
+// command uploads a file" instead of reading the manifest's own declaration
+// of that fact. A plugin's own ingest route (e.g. a sheets or bulldocs import
+// endpoint spelled without "/media" anywhere) has a legitimate file-typed arg
+// too, and fell through to the JSON path: the file's PATH STRING got shipped
+// as a JSON value ({"file":"/abs/path"}) instead of the file's BYTES as a
+// multipart part, and the server answered "multipart field \"file\" is
+// required". The manifest's own `type: "file"` on a declared ARG (as opposed
+// to a `--file` FLAG — see commandHasFileFlag — which reads a local JSON
+// payload off disk and is not this at all) is the authoritative signal by
+// itself; the route text was never load-bearing beyond restating what the one
+// existing holder (media.upload) already declares structurally.
 func mediaUploadFileArg(cmd manifest.Command, args map[string]string) (string, bool) {
 	if cmd.HTTP.Method != "POST" {
-		return "", false
-	}
-	if !strings.Contains(cmd.HTTP.PathTemplate, "/media") {
 		return "", false
 	}
 	for _, a := range cmd.Args {
