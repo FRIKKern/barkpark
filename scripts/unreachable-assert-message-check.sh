@@ -170,7 +170,7 @@ end
 EX
   out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline" \
         bash "$0" 2>&1 || true)"
-  if printf '%s' "$out" | grep -q "bad_test.exs"; then
+  if grep -q "bad_test.exs" <<<"$out"; then
     arm "ok" "(a) a NEW defective site reds, naming bad_test.exs"
   else
     arm "FAIL" "(a) a new defective site did NOT red — the gate is asleep"
@@ -195,7 +195,7 @@ EX
   awk '/^#/{print; next} {printf "%d %s\n", $1 + 4, $2}' "$TMP/baseline2" > "$TMP/baseline3"
   out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline3" \
         bash "$0" 2>&1 || true)"
-  if printf '%s' "$out" | grep -qi "lower the baseline\|ratchet"; then
+  if grep -qi "lower the baseline\|ratchet" <<<"$out"; then
     arm "ok" "(c) a FIXED site reds until the baseline is lowered — the ratchet cannot rust"
   else
     arm "FAIL" "(c) a fallen count did not demand the baseline be lowered — the ratchet goes stale"
@@ -205,7 +205,7 @@ EX
   printf 'defmodule Broken do\n  test "x" do\n    assert (((\n' > "$TMP/test/broken_test.exs"
   out="$(UNREACHABLE_ASSERT_SCANDIR="$TMP/test" UNREACHABLE_ASSERT_BASELINE="$TMP/baseline2" \
         bash "$0" 2>&1 || true)"
-  if printf '%s' "$out" | grep -q "broken_test.exs"; then
+  if grep -q "broken_test.exs" <<<"$out"; then
     arm "ok" "(d) an unparseable file REFUSES by name — never a silent skip"
   else
     arm "FAIL" "(d) an unparseable file was skipped silently — the scanner reports a tree it never read"
