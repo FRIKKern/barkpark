@@ -342,8 +342,9 @@ export class ChatSessionStore {
    * tap `default` a second later (call B succeeds, server now holds 'default'),
    * then A's PATCH times out — A's catch writes 'acceptEdits', a value neither
    * the user nor the server ever chose, and raises an error naming a write the
-   * user had already replaced. Every other async closure in this class fences on
-   * `gen !== this.startGen`; this one checked only `this.stopped`.
+   * user had already replaced. start()'s own three closures fence on
+   * `gen !== this.startGen`; this one checked only `this.stopped` — and so, it
+   * turned out, did all five inside run() (fenced since; see the note there).
    *
    * The fence is a per-field compare-and-swap rather than a generation, because
    * the unit at risk is the FIELD: two writes to different keys never conflict,
@@ -384,6 +385,31 @@ export class ChatSessionStore {
   }
 
   private run(eff: ChatEffect): void {
+    // THE START THIS EFFECT BELONGS TO. stop() cancels the STREAM (the
+    // AbortController) and nothing else — an in-flight POST or turn-boundary
+    // GET keeps running, and the very next start() clears `stopped`, so a
+    // callback from a superseded start lands on the LIVE store instead of
+    // being dropped. `stopped` alone is therefore not a fence; it is a pause
+    // that the thing it is fencing outlives.
+    //
+    // THE DISTINCTION THIS DRAWS, and it is not cosmetic. REDUCER state
+    // survives a restart — the store keeps its ChatState across stop()/start()
+    // — so a superseded settle, answer or send-failure still describes rows the
+    // live view is painting, and each of those events carries a fence of its
+    // own (eff.gen for the tail, requestId for an answer, the echo's content
+    // for a failed send). Those must still be DISPATCHED: dropping them would
+    // leave a permanent in-flight badge, or an echo painted as delivered that
+    // nothing will ever retire.
+    //
+    // What must NOT survive is the SNAPSHOT chrome a dead start writes with no
+    // fence of its own — the picker `choices` and the `transportError` banner.
+    // A superseded refetch overwriting `choices` is setChoice's bug through
+    // another door: it reverts a pick the server has already accepted. And a
+    // banner about an action taken before the restart is the same stale error
+    // beside a correct value that setChoice's note argues against.
+    const gen = this.startGen
+    const superseded = (): boolean => this.stopped || gen !== this.startGen
+
     switch (eff.type) {
       case 'fetchTail':
         getChatSession(this.connection, this.sessionId, eff.sinceSeq)
@@ -391,7 +417,10 @@ export class ChatSessionStore {
             // The turn-boundary refetch re-asserts server truth over the
             // optimistic picker writes — the same "the server settles it"
             // discipline the TUI's ctrl+p flip already runs on.
-            if (!this.stopped) this.set({ choices: choicesFrom(this.snapshot.choices, session) })
+            // Only for the start that asked: a fetch issued before a restart
+            // carries the PRE-restart choices, and writing them here would
+            // revert a pick made (and accepted) after it.
+            if (!superseded()) this.set({ choices: choicesFrom(this.snapshot.choices, session) })
             this.dispatch({ type: 'tailFetched', gen: eff.gen, session })
           })
           .catch((err: unknown) =>
@@ -401,7 +430,10 @@ export class ChatSessionStore {
       case 'sendMessage':
         sendChatMessage(this.connection, this.sessionId, eff.content).catch((err: unknown) => {
           if (this.stopped) return
-          this.set({ transportError: `send failed — ${message(err)}` })
+          // The banner is this view's chrome, so a superseded start does not get
+          // to raise one; the echo badge below is reducer state the live view is
+          // still painting, so it lands either way.
+          if (!superseded()) this.set({ transportError: `send failed — ${message(err)}` })
           // The banner alone is not enough: the optimistic echo is still
           // painted as a delivered message and nothing else will ever retire it
           // (no persisted row exists for a POST the server refused). Tell the
@@ -411,7 +443,7 @@ export class ChatSessionStore {
         break
       case 'interruptTurn':
         interruptChat(this.connection, this.sessionId).catch((err: unknown) => {
-          if (!this.stopped) this.set({ transportError: `interrupt failed — ${message(err)}` })
+          if (!superseded()) this.set({ transportError: `interrupt failed — ${message(err)}` })
         })
         break
       case 'answerCard':
