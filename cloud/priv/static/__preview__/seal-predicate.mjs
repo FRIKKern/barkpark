@@ -431,6 +431,39 @@ function q(params) {
     throw new Infra(`response is not JSON (HTTP ${status}; ${body.slice(0, 60).replace(/\s+/g, ' ')})`, 'LEDGER-UNREADABLE');
   return parsed;
 }
+
+// THE LEDGER'S OWN COUNT, from the ledger's own endpoint. `q()` above talks to
+// `/v1/data/query`, which is PUBLISHED-ONLY (see the perspective paragraph in
+// `fetchRoster`); this talks to `/v1/tasks/:id`, which is the task layer's own view and
+// COUNTS DRAFT CHILDREN. Two endpoints is the point: one number cannot disagree with
+// itself, and the disagreement is the only signal a published-only reader has that a
+// draft child exists at all.
+//
+// Same status discipline as `q()` deliberately — a cross-check that fails soft is worse
+// than no cross-check, because it converts "I could not verify" into "verified".
+function qTasks(id) {
+  const a = ['-sG', `${SERVER}/v1/tasks/${encodeURIComponent(id)}`, '-w', '\n%{http_code}'];
+  a.push('-H', `Authorization: Bearer ${TOKEN}`);
+  let raw;
+  try { raw = execFileSync('curl', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+  catch (e) { throw new Infra(`curl failed reaching /v1/tasks/${id}: ${String(e.message).slice(0, 90)}`, 'LEDGER-UNREACHABLE'); }
+  const trimmed = raw.replace(/\s+$/, '');
+  const cut = trimmed.lastIndexOf('\n');
+  const status = cut === -1 ? '000' : trimmed.slice(cut + 1).trim();
+  const body = cut === -1 ? trimmed : trimmed.slice(0, cut);
+  let parsed = null;
+  try { parsed = JSON.parse(body); } catch { parsed = null; }
+  if (!/^2\d\d$/.test(status)) {
+    const err = (parsed && (parsed.error || parsed)) || {};
+    throw new Infra(
+      `the ledger answered HTTP ${status} for /v1/tasks/${id} — error.code=${err.code || '(none named)'} request_id=${(parsed && (parsed.request_id || err.request_id)) || '(none returned)'} message=${String(err.message || '').slice(0, 90) || '(none)'}. `
+      + 'This is the DRAFT CROSS-CHECK read. Without it the roster walk cannot tell a complete population from one with invisible draft children, so nothing is asserted about clause (a).',
+      'DRAFT-CROSSCHECK-UNREADABLE');
+  }
+  if (parsed === null)
+    throw new Infra(`/v1/tasks/${id} response is not JSON (HTTP ${status}; ${body.slice(0, 60).replace(/\s+/g, ' ')})`, 'DRAFT-CROSSCHECK-UNREADABLE');
+  return parsed;
+}
 // NEVER bare ?parent_id= — proven at Decide to silently return 500 unfiltered rows.
 //
 // AND NEVER AN UNCHECKED PAGE. `result.count` is the PAGE SIZE, not a total. Waves 29–63
@@ -487,6 +520,7 @@ const fetchRoster = (parentId) => {
   let total = null;
   let prevFirstId = null;
   let highWater = '';
+  let lastPerspective = null;
   for (let page = 1; ; page += 1) {
     if (page > ROSTER_MAX_PAGES)
       throw new Infra(
@@ -503,6 +537,7 @@ const fetchRoster = (parentId) => {
     const docs = result.documents;
     if (!Array.isArray(docs)) throw new Infra(`the roster of ${parentId} is not an array of documents`, 'ROSTER-NOT-AN-ARRAY');
     if (typeof result.total === 'number') total = result.total;
+    if (typeof result.perspective === 'string') lastPerspective = result.perspective;
 
     // THE WINDOW MUST MOVE. A full page whose first id repeats the previous page's is an
     // `offset` the server ignored, and the walk would read page 1 forever.
@@ -554,6 +589,75 @@ const fetchRoster = (parentId) => {
     throw new Infra(
       `the roster of ${parentId} came back SHORT — ${rows.length} unique rows paginated against a server-reported total of ${total} (${total - rows.length} missing). The population shifted underneath the walk, so this is a roster this program could not read whole and clause (a) would report orphans=0 over the part of it that survived. Nothing is asserted about clause (a).`,
       'ROSTER-INCOMPLETE');
+
+  // ── THE READ IS PUBLISHED-ONLY, AND UNTIL NOW IT NEVER SAID SO ──────────────────────
+  //
+  // `/v1/data/query` answers from the PUBLISHED perspective and there is no parameter that
+  // changes it. Measured against the live ledger on 2026-08-24, three requests differing
+  // only in one parameter:
+  //
+  //   …?filter[parent_id]=task-fb4fb869490b4213&limit=1&count=true
+  //       -> {total:348, perspective:"published"}
+  //   …&perspective=drafts                  -> {total:348, perspective:"published"}
+  //   …&zzz_not_a_real_param=1              -> {total:348, perspective:"published"}
+  //
+  // `perspective=drafts` and a parameter that does not exist produce BYTE-IDENTICAL
+  // results. The endpoint does not refuse an unknown perspective, it drops it — the same
+  // silent-drop this file already records for `filter[]` and for `order`. So a draft child
+  // is not merely absent from this read; it is unreachable THROUGH this read, and asking
+  // harder cannot help.
+  //
+  // WHY THAT IS A SEAL DEFECT AND NOT A CURIOSITY. The one thing clause (a) certifies is
+  // that no live row remains. A draft child is a live row: `bp task claim` works on it,
+  // `bp task get` returns it, it carries acceptance criteria and a lifecycle_status. It is
+  // simply invisible to THIS query. Measured the same day on the same parent:
+  // `/v1/tasks/task-fb4fb869490b4213` reports child_count 349 while this walk reads 348,
+  // and the missing row is `drafts.dr-w34-bl-5658-blocks-its-own-routing-fix`, OPEN. The
+  // instrument that certifies "no residue remains" could not see a row that remains.
+  //
+  // This is the same class as every other refusal in this walk — a read the program could
+  // not perform, reported as a clean result — and it gets the same treatment: REFUSE, and
+  // name the number that disagrees. The predicate does not need to SEE drafts to be
+  // honest; it needs to stop claiming completeness over a population it knows is partial.
+  //
+  // TWO NUMBERS, NOT ONE, and the second comes from a different endpoint on purpose. The
+  // delta is draft children, but it is NOT necessarily draft-ONLY rows: a `drafts.<id>`
+  // TWIN of a row this walk already counted also adds one to child_count. The refusal says
+  // so rather than guessing, because the two cases have opposite remedies and one of them
+  // is destructive — publishing a stale twin overwrites the published row's criteria and
+  // can silently un-stamp a met one. Resolve twins individually, published-wins.
+  const perspective = lastPerspective;
+  if (perspective !== null && perspective !== 'published')
+    throw new Infra(
+      `the roster of ${parentId} came back under perspective "${perspective}", not "published". Every draft-visibility conclusion in this walk — including the cross-check immediately below — is derived from the published-only behaviour measured on 2026-08-24, so a different perspective means this program no longer knows what it just read. Re-derive the cross-check against the new perspective before trusting clause (a). Nothing is asserted about clause (a).`,
+      'ROSTER-PERSPECTIVE-CHANGED');
+
+  const ledgerCount = (() => {
+    const parsedTask = qTasks(parentId);
+    const doc = parsedTask.doc || parsedTask;
+    const n = parsedTask.child_count !== undefined ? parsedTask.child_count : doc.child_count;
+    if (typeof n !== 'number')
+      throw new Infra(
+        `/v1/tasks/${parentId} returned no numeric child_count, so the published-only roster of ${rows.length} rows cannot be compared against the ledger's own count and a draft child would be invisible with nothing to reveal it. Nothing is asserted about clause (a).`,
+        'DRAFT-CROSSCHECK-UNREADABLE');
+    return n;
+  })();
+
+  if (ledgerCount > rows.length) {
+    const delta = ledgerCount - rows.length;
+    throw new Infra(
+      `the roster of ${parentId} is PUBLISHED-ONLY and the ledger disagrees — this walk read ${rows.length} published rows, `
+      + `and /v1/tasks/${parentId} reports child_count ${ledgerCount}. ${delta} child${delta === 1 ? '' : 'ren'} `
+      + `${delta === 1 ? 'is' : 'are'} invisible to /v1/data/query, which answers from the published perspective and drops `
+      + `\`perspective=drafts\` silently (measured 2026-08-24: identical to passing a parameter that does not exist). `
+      + `Each invisible row is EITHER a draft-only child — which may be OPEN, may carry unmet criteria, and would make `
+      + `clause (a) certify "no residue" over a row that is still live — OR a \`drafts.<id>\` TWIN of a row already counted `
+      + `here. The two have opposite remedies and one is destructive: publishing a stale twin overwrites the published `
+      + `row's criteria and can un-stamp a met one, so resolve twins INDIVIDUALLY, published-wins. `
+      + `To find them: \`bp task get ${parentId}\` lists .children including drafts; diff those ids against this walk. `
+      + `Nothing is asserted about clause (a).`,
+      'ROSTER-DRAFT-BLIND');
+  }
   return rows;
 };
 // THE OTHER HALF OF THE SAME DISEASE, and the one wave 64 left standing. The roster read
