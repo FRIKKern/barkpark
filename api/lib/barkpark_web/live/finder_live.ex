@@ -50,10 +50,20 @@ defmodule BarkparkWeb.FinderLive do
       |> assign(
         page_title: "Search — Barkpark",
         dataset: dataset,
+        # `q`/`hits`/`hit_count` are seeded empty and then OWNED by
+        # `handle_params/3`, which runs immediately after mount on both the dead
+        # and the connected render. That is what makes `/finder?q=foo` a real
+        # address (defect 1) — it renders its results server-side, so it is
+        # bookmarkable, reloadable, back-button-restorable and crawlable.
         q: "",
         hits: [],
         hit_count: 0,
+        # The graph's node total INCLUDES phantoms — dangling edge TARGETS with
+        # no document row behind them. `data-rev` below wants that number (it is
+        # the payload's change token); the human-readable line does NOT, which is
+        # why the two are separate assigns (defect 3).
         node_count: 0,
+        document_count: 0,
         graph_nodes: "[]",
         graph_edges: "[]",
         graph_root: "",
@@ -83,12 +93,14 @@ defmodule BarkparkWeb.FinderLive do
   @impl true
   def handle_async(
         :graph_corpus,
-        {:ok, {nodes_json, edges_json, root, node_count, truncated, truncation_reason}},
+        {:ok,
+         {nodes_json, edges_json, root, node_count, document_count, truncated, truncation_reason}},
         socket
       ) do
     {:noreply,
      assign(socket,
        node_count: node_count,
+       document_count: document_count,
        graph_nodes: nodes_json,
        graph_edges: edges_json,
        graph_root: root,
@@ -105,11 +117,49 @@ defmodule BarkparkWeb.FinderLive do
     {:noreply, socket}
   end
 
+  # THE URL IS THE STATE (defect 1). `handle_params/3` runs after mount on the
+  # dead render AND after every `push_patch`, so it is the ONE place the search
+  # executes: a typed query, a reload, a pasted link and the back button all take
+  # the same path and produce the same page. Before this, `q` was hard-set to ""
+  # at mount with no `handle_params/3` anywhere in the module, so `/finder?q=foo`
+  # rendered an empty finder.
+  #
+  # The search DOES run on the dead render, unlike the graph derivation above
+  # which is deliberately skipped there: one bounded `search_documents/3` call is
+  # what makes the URL addressable, whereas the corpus walk is seconds.
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, run_search(socket, params["q"])}
+  end
+
   @impl true
   def handle_event("search", %{"q" => q}, socket) do
-    case String.trim(to_string(q)) do
+    query = String.trim(to_string(q))
+
+    # `replace: true`: the input is `phx-debounce="150"`, so a typed word emits
+    # several events. Pushing history for each would make the back button walk
+    # backwards one debounce-window at a time instead of leaving the finder.
+    {:noreply, push_patch(socket, to: finder_path(socket.assigns.dataset, query), replace: true)}
+  end
+
+  defp finder_path(dataset, query) do
+    params =
+      []
+      |> then(fn p -> if query == "", do: p, else: [{"q", query} | p] end)
+      |> then(fn p ->
+        if dataset == @default_dataset, do: p, else: [{"dataset", dataset} | p]
+      end)
+
+    case params do
+      [] -> ~p"/finder"
+      params -> ~p"/finder?#{params}"
+    end
+  end
+
+  defp run_search(socket, raw) do
+    case String.trim(to_string(raw || "")) do
       "" ->
-        {:noreply, assign(socket, q: "", hits: [], hit_count: 0)}
+        assign(socket, q: "", hits: [], hit_count: 0)
 
       query ->
         # Thread the socket's REAL caller context (search-template W10 / D62)
@@ -133,7 +183,7 @@ defmodule BarkparkWeb.FinderLive do
             caller_context: caller_context
           )
 
-        {:noreply, assign(socket, q: query, hits: Enum.map(docs, &hit/1), hit_count: count)}
+        assign(socket, q: query, hits: Enum.map(docs, &hit/1), hit_count: count)
     end
   end
 
@@ -170,15 +220,19 @@ defmodule BarkparkWeb.FinderLive do
         </form>
         <ol :if={@hits != []} class="bp-finder-hits">
           <li :for={hit <- @hits}>
-            <.link navigate={hit.href}>
+            <.link :if={hit.href} navigate={hit.href}>
               <strong>{hit.title}</strong>
               <span class="bp-finder-type">{hit.type}</span>
             </.link>
+            <div :if={is_nil(hit.href)} class="bp-finder-hit-inert" data-test-id="finder-hit-inert">
+              <strong>{hit.title}</strong>
+              <span class="bp-finder-type">{hit.type}</span>
+            </div>
           </li>
         </ol>
         <p class="bp-finder-count">
-          {@node_count} documents · live search served by Phoenix · {if @q != "",
-            do: "#{@hit_count} hits",
+          {@document_count} documents · live search served by Phoenix · {if @q != "",
+            do: hit_summary(@hit_count, length(@hits)),
             else: "type to search"}<span :if={@graph_truncated}> · graph truncated ({@graph_truncation_reason})</span>
         </p>
       </section>
@@ -195,6 +249,7 @@ defmodule BarkparkWeb.FinderLive do
       .bp-finder-hits li { padding: 8px 4px; border-bottom: 1px solid rgba(128,128,128,.18); }
       .bp-finder-hits a { color: inherit; text-decoration: none; display: flex; justify-content: space-between; gap: 12px; }
       .bp-finder-hits a:hover strong { text-decoration: underline; }
+      .bp-finder-hit-inert { display: flex; justify-content: space-between; gap: 12px; opacity: .72; cursor: default; }
       .bp-finder-type { opacity: .5; font-size: .85em; }
       .bp-finder-count { margin-top: 16px; font-size: 12.5px; opacity: .55; }
     </style>
@@ -202,6 +257,13 @@ defmodule BarkparkWeb.FinderLive do
   end
 
   # ── internals ──────────────────────────────────────────────────────────────
+
+  # The engine returns the FULL total while the page renders at most `@hit_limit`
+  # rows and offers no pagination — so "437 hits" beside 12 rows read as a
+  # rendering bug. Say which is which. Under the limit the wording is unchanged,
+  # which is what the existing spec pins.
+  defp hit_summary(total, shown) when total > shown, do: "showing #{shown} of #{total} hits"
+  defp hit_summary(total, _shown), do: "#{total} hits"
 
   defp sanitize_dataset(raw) do
     case to_string(raw || "") do
@@ -215,16 +277,22 @@ defmodule BarkparkWeb.FinderLive do
 
   defp hit(doc) do
     id = Content.published_id(doc.doc_id)
-    title = doc.title || id
 
-    href =
-      case doc.type do
-        "paper" -> ~p"/papers/#{id}"
-        _other -> ~p"/finder"
-      end
-
-    %{title: title, type: doc.type, href: href}
+    %{title: doc.title || id, type: doc.type, href: public_href(doc.type, id)}
   end
+
+  # `paper` is the ONLY type with a public reader — `live("/papers/:slug",
+  # BulldocsLive)` (router.ex:2442). Every other type used to resolve to
+  # `~p"/finder"`: a link back to the page the reader is already standing on, so
+  # a task/sheet/session hit rendered as a control that did nothing (defect 2).
+  #
+  # There is no public surface to send those types to, and inventing one is not
+  # this row's job. So the honest answer is NO link: `nil` here, and the template
+  # renders the row's title and type as plain text. A hit that cannot be opened
+  # says so by not looking openable — strictly better than a click that reloads
+  # the finder and looks like a bug.
+  defp public_href("paper", id), do: ~p"/papers/#{id}"
+  defp public_href(_type, _id), do: nil
 
   # The flat /v1/graph twin (TasksController.graph_corpus/2), derived at mount
   # and inlined for the hook — published perspective, real + phantom nodes,
@@ -322,6 +390,15 @@ defmodule BarkparkWeb.FinderLive do
         {false, false} -> nil
       end
 
-    {Jason.encode!(nodes), Jason.encode!(edges), root || "", length(nodes), truncated, reason}
+    # THE COUNT SPLIT (defect 3). `nodes` is `real_nodes ++ phantom_nodes`, and a
+    # phantom is a dangling edge TARGET — an id some document references that no
+    # document row backs. Rendering `length(nodes)` as "N documents" counted
+    # those, while the truncation notice beside it was scrupulously honest, so
+    # the surface contradicted itself. `data-rev` still wants the node total (it
+    # is the payload's change token); the human line wants the document total.
+    document_count = Enum.count(nodes, &(not &1.phantom))
+
+    {Jason.encode!(nodes), Jason.encode!(edges), root || "", length(nodes), document_count,
+     truncated, reason}
   end
 end
