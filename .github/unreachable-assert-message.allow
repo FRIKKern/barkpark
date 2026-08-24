@@ -41,7 +41,6 @@
 1 api/test/barkpark/sites/deploy_runner_stage_names_test.exs
 2 api/test/barkpark/sites/deployyml_connectors_pathfilter_test.exs
 3 api/test/barkpark/sites/prebuilt_artifact_test.exs
-12 api/test/barkpark/structure_test.exs
 3 api/test/barkpark/studio_chat/stream_segments_test.exs
 1 api/test/barkpark/tasks_schema_dossier_test.exs
 1 api/test/barkpark/tasks/close_test.exs
