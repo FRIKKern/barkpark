@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -253,6 +254,230 @@ func TestBackfillDidNotMoveExistingBuckets(t *testing.T) {
 	} {
 		if got := exitForCode(code); got != want {
 			t.Errorf("exitForCode(%q) = %d, want %d — a pre-existing bucket MOVED", code, got, want)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// THE COMPLETENESS ARM (pds-w33-bl-publish-wall-codes-exit-1).
+//
+// TestCodeExitAgreesWithSDKClassification above is an ENUMERATED table, and an
+// enumerated table drifts — that is the same failure this whole file exists to
+// end, one level up. It was already drifting: it covered seven of the eight
+// publish-wall codes and silently omitted `quota_exceeded`, so setting that
+// code to exitServer (8) — the RETRY bucket, on a 402 that no retry can ever
+// clear — passed the entire suite green. Coverage caught nothing because the
+// code still HAD a bucket; only its value was wrong, and nothing asserted the
+// value.
+//
+// This test derives the expected value instead of listing it. The authority is
+// the same one the rest of the file uses: the API's own source. errors.ex
+// states each code's HTTP status as a literal, and docs/cli/error-exit-table.md
+// fixes the mapping from status to bucket ("Bucket by the status the emitter
+// actually returns, never by the code's name: 400 → 2, 401/403 → 3, 404 → 4,
+// 409/412 → 6, 402/413/422 → 5, 429 → 7, 5xx → 8"). Composing the two yields
+// the contracted exit code for every code whose status is readable, with no
+// hand-kept list to fall behind.
+//
+// It is deliberately NOT total: only the codes `Errors.build/1` emits carry a
+// status literal here (29 of the 84 in known_codes/0). The rest are
+// @public_inline_codes, emitted by controllers whose status lives at the call
+// site. Those stay covered by the enumerated table and by the coverage gate.
+// This arm makes the derivable majority self-proving and says plainly which
+// codes it does not reach, rather than looking total and being partial.
+
+// apiStatusRe and apiCodeRe read `code: "x"` / `status: 404` literals out of
+// the Elixir source. `build/1` writes them either on one line
+// (`%{code: "not_found", message: …, status: 404}`) or spread over a multi-line
+// map, so the scan below handles both.
+var (
+	apiCodeRe   = regexp.MustCompile(`code: "([a-z0-9_]+)"`)
+	apiStatusRe = regexp.MustCompile(`status: (\d+)`)
+)
+
+// apiCodeStatuses maps each code errors.ex emits to the HTTP status it emits it
+// with. A code seen at TWO different statuses is a hard failure, not a silent
+// pick: the doc's own ruling is that such a token must be SPLIT in the API
+// (export_failed → export_transport_failed/export_build_failed, and two more),
+// because no single exit code can be honest about both arms.
+func apiCodeStatuses(t *testing.T) map[string]int {
+	t.Helper()
+	raw, err := os.ReadFile(apiErrorsSourcePath(t))
+	if err != nil {
+		t.Fatalf("read errors.ex: %v", err)
+	}
+	lines := strings.Split(string(raw), "\n")
+
+	seen := map[string]map[int]bool{}
+	for i, line := range lines {
+		for _, m := range apiCodeRe.FindAllStringSubmatch(line, -1) {
+			code := m[1]
+			status := 0
+			if sm := apiStatusRe.FindStringSubmatch(line); sm != nil {
+				status, _ = strconv.Atoi(sm[1])
+			} else {
+				// Multi-line map literal: scan forward to this entry's status,
+				// stopping at the next `code:` so we never borrow a sibling's.
+				for j := i + 1; j < len(lines) && j < i+8; j++ {
+					if apiCodeRe.MatchString(lines[j]) {
+						break
+					}
+					if sm := apiStatusRe.FindStringSubmatch(lines[j]); sm != nil {
+						status, _ = strconv.Atoi(sm[1])
+						break
+					}
+				}
+			}
+			if status == 0 {
+				continue
+			}
+			if seen[code] == nil {
+				seen[code] = map[int]bool{}
+			}
+			seen[code][status] = true
+		}
+	}
+
+	out := map[string]int{}
+	for code, statuses := range seen {
+		if len(statuses) > 1 {
+			var got []int
+			for s := range statuses {
+				got = append(got, s)
+			}
+			sort.Ints(got)
+			t.Errorf("errors.ex emits %q at %v — one code, two statuses, two "+
+				"retryability contracts. No exit code can be honest about both "+
+				"(8 spins a retry wrapper forever on the permanent arm; 5 abandons "+
+				"a recoverable one). SPLIT THE TOKEN in the API, one code per arm, "+
+				"the way export_failed and session_unavailable were split — do not "+
+				"pick a winner here.", code, got)
+			continue
+		}
+		for s := range statuses {
+			out[code] = s
+		}
+	}
+
+	// PLAUSIBILITY FLOOR, same reasoning as knownAPICodes: a parser that stops
+	// matching would hand the loop below an EMPTY map and green it while
+	// measuring nothing. 29 codes carried a status literal when this landed.
+	if len(out) < 20 {
+		t.Fatalf("parsed only %d code→status pairs from errors.ex — the PARSE is "+
+			"broken, not the API. Check the `code:`/`status:` literal shapes in "+
+			"api/lib/barkpark/content/errors.ex", len(out))
+	}
+	return out
+}
+
+// statusBucket is docs/cli/error-exit-table.md's contracted status→exit rule,
+// transcribed. It is the MAINTAINER's rule for choosing a bucket once; the CLI
+// itself still reads only error.code at runtime, never the status.
+func statusBucket(status int) (int, bool) {
+	switch {
+	case status >= 500:
+		return exitServer, true
+	case status == 400:
+		return exitUsage, true
+	case status == 401, status == 403:
+		return exitAuth, true
+	case status == 404, status == 410:
+		return exitNotFound, true
+	case status == 409, status == 412:
+		return exitConflict, true
+	case status == 402, status == 413, status == 422:
+		return exitValidation, true
+	case status == 429:
+		return exitRateLimit, true
+	}
+	return 0, false
+}
+
+// codeExitStatusRuleExceptions: codes whose contracted exit DELIBERATELY differs
+// from what their status implies, each with the reason the doc gives. An entry
+// here is a decision on the record, not a way to silence the gate — the test
+// requires a non-empty reason, and asserts the exception's value just as
+// strictly as it asserts the rule.
+var codeExitStatusRuleExceptions = map[string]struct {
+	exit   int
+	reason string
+}{
+	"forbidden_field": {
+		exit: exitAuth,
+		reason: "422 on the wire but semantically an authorization failure — the caller " +
+			"filtered or ordered over a field its token may not read. docs/cli/error-exit-table.md " +
+			"lists it at exit 3 explicitly, noting it 'keys on code, not the 422': the remedy is a " +
+			"different token, not a different payload, so the validation bucket would send a " +
+			"script to fix the wrong thing.",
+	},
+}
+
+// THE GATE: for every API code whose status errors.ex states, the CLI's exit
+// code must be the one the doc's status rule contracts — or a NAMED exception.
+// This is what the enumerated table could not do: it proves the value for every
+// derivable code, including ones nobody remembered to list.
+func TestCodeExitMatchesAPIStatusBucket(t *testing.T) {
+	known := knownAPICodes(t)
+	statuses := apiCodeStatuses(t)
+
+	checked := 0
+	for code, status := range statuses {
+		if !known[code] {
+			// Emitted internally but not part of the public vocabulary; the
+			// coverage gate does not require a bucket for it either.
+			continue
+		}
+		if _, excluded := codeExitNotWireBucketable[code]; excluded {
+			continue
+		}
+
+		want, ok := statusBucket(status)
+		if !ok {
+			t.Errorf("errors.ex emits %q at HTTP %d, which docs/cli/error-exit-table.md's "+
+				"status rule does not cover. Extend statusBucket AND the doc together — "+
+				"an uncovered status is a contract hole, not a test gap.", code, status)
+			continue
+		}
+
+		why := "its emitter answers " + strconv.Itoa(status)
+		if exc, isException := codeExitStatusRuleExceptions[code]; isException {
+			if strings.TrimSpace(exc.reason) == "" {
+				t.Errorf("codeExitStatusRuleExceptions[%q] has an empty reason — an "+
+					"unexplained exception is exactly the drift this gate exists to catch", code)
+			}
+			want = exc.exit
+			why = "it is a NAMED exception to the status rule: " + exc.reason
+		}
+
+		if got := exitForCode(code); got != want {
+			t.Errorf("exitForCode(%q) = %d, want %d — %s.\n\n"+
+				"Fix the bucket in codeExit (internal/cli/errors.go), or — if the "+
+				"difference is deliberate — add %q to codeExitStatusRuleExceptions WITH "+
+				"the reason. Do not edit this test to match the code.",
+				code, got, want, why, code)
+		}
+		checked++
+	}
+
+	// A second floor: the loop above must actually have asserted something. If
+	// known_codes and the status scan ever stop overlapping, `checked` collapses
+	// to 0 and every assertion becomes unreachable — green, and worthless.
+	if checked < 20 {
+		t.Errorf("only %d codes were value-checked (expected ~29) — known_codes/0 and the "+
+			"errors.ex status literals have stopped overlapping, so this gate is no longer "+
+			"measuring the thing it claims to measure", checked)
+	}
+}
+
+// An exception must be a real, still-derivable code. A stale entry silences the
+// rule for a token that no longer needs silencing — and would keep silencing it
+// if the name were ever reused for something the rule SHOULD govern.
+func TestCodeExitStatusExceptionsAreLive(t *testing.T) {
+	statuses := apiCodeStatuses(t)
+	for code := range codeExitStatusRuleExceptions {
+		if _, ok := statuses[code]; !ok {
+			t.Errorf("codeExitStatusRuleExceptions has %q but errors.ex no longer states a "+
+				"status for it — delete the stale exception", code)
 		}
 	}
 }
