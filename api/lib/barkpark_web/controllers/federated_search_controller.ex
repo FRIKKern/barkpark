@@ -7,6 +7,7 @@ defmodule BarkparkWeb.FederatedSearchController do
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
   alias Barkpark.Media
+  alias Barkpark.Media.Storage.Access
   alias Barkpark.Search.HitEnvelope
   alias Barkpark.Search.Intelligence
   alias BarkparkWeb.AnonPerspective
@@ -34,7 +35,7 @@ defmodule BarkparkWeb.FederatedSearchController do
       surfaces
       |> Enum.map(fn surface ->
         Task.async(fn ->
-          search_surface(surface, dataset, q, limit, params, scope, perspective)
+          search_surface(surface, dataset, q, limit, params, scope, perspective, conn)
         end)
       end)
       |> Enum.map(&Task.await(&1, 30_000))
@@ -157,7 +158,7 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("documents", dataset, q, limit, params, scope, perspective) do
+  defp search_surface("documents", dataset, q, limit, params, scope, perspective, _conn) do
     type = bin(params["type"])
 
     opts =
@@ -180,14 +181,14 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface("media", dataset, q, limit, params, scope, _perspective) do
+  defp search_surface("media", dataset, q, limit, params, scope, _perspective, conn) do
     opts =
       [
         q: q,
         limit: limit,
         offset: 0,
         sort: params["sort"] || "relevance"
-      ] ++ scope
+      ] ++ scope ++ visibility_clamp_opts(conn)
 
     {files, total, _facets, meta} = Media.search_files(dataset, opts)
 
@@ -201,8 +202,23 @@ defmodule BarkparkWeb.FederatedSearchController do
     }
   end
 
-  defp search_surface(surface, _dataset, _q, _limit, _params, _scope, _perspective) do
+  defp search_surface(surface, _dataset, _q, _limit, _params, _scope, _perspective, _conn) do
     %{surface: surface, hits: [], total: 0, meta: %{}}
+  end
+
+  # Query-level visibility ceiling for the media surface (task-0fcec595765a7b00).
+  # `GET /v1/search/:dataset` rides `:api`/`:scoped_api`, neither of which halts
+  # an anonymous caller, and `@default_surfaces` fires the media surface on a
+  # bare GET. `Media.search_files/2` renders every hit through
+  # `AssetResponse.render(file, doc, include_urls: true)` — filename/path/size
+  # for `private`/`token` assets included — and a listing query can't answer
+  # 403 per row, so the ceiling has to ride into the query itself
+  # (`Delivery.Search.build_query/2`'s `:visibility_clamp` opt). Same principal
+  # test the legacy `/media` siblings gate `Access.allowed?/4` reads with —
+  # reusing `Access.authenticated?/1` keeps the account-member arm (a
+  # workspace-member session with no bearer) admitted, not just a bearer token.
+  defp visibility_clamp_opts(conn) do
+    if Access.authenticated?(conn), do: [], else: [visibility_clamp: :public]
   end
 
   # Per-type schema resolver memoised by `Envelope.render_many_by_type` across

@@ -165,6 +165,7 @@ defmodule Barkpark.Media.Delivery.Search do
     |> maybe_filter_tags(selections["tags"])
     |> maybe_filter_visibility(Keyword.get(opts, :visibility))
     |> maybe_filter_visibility(selections["visibility"])
+    |> maybe_clamp_visibility(Keyword.get(opts, :visibility_clamp))
   end
 
   # Pre-scoped Document subquery the search LEFT-JOINs against. Without scope on
@@ -922,6 +923,26 @@ defmodule Barkpark.Media.Delivery.Search do
 
   defp maybe_filter_visibility(query, visibility) when is_binary(visibility) do
     where(query, [_m, d], fragment("?->>? = ?", d.content, "bp_visibility", ^visibility))
+  end
+
+  # Query-level ceiling for an UNAUTHENTICATED caller — the counterpart to
+  # `maybe_filter_visibility/2` above, which filters to a CALLER-CHOSEN
+  # visibility value and is no defense (an anonymous caller simply omits it).
+  # `:visibility_clamp, :public` restricts every row (both the count query and
+  # the page query, since both run through `build_query/2`) to assets whose
+  # linked `mediaAsset` doc is absent (no doc → `Access.visibility(nil) ==
+  # "public"`) or carries no/`"public"` `bp_visibility`. `nil` — the default —
+  # is a no-op, so every existing caller that never threads `:visibility_clamp`
+  # is byte-identical (task-0fcec595765a7b00).
+  defp maybe_clamp_visibility(query, nil), do: query
+
+  defp maybe_clamp_visibility(query, :public) do
+    where(
+      query,
+      [_m, d],
+      is_nil(d.content) or
+        fragment("COALESCE(?->>?, 'public') = 'public'", d.content, "bp_visibility")
+    )
   end
 
   defp maybe_filter_mime(query, nil), do: query
