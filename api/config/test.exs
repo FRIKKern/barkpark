@@ -45,6 +45,18 @@ config :barkpark, Barkpark.Repo,
   # so a transient spike QUEUES instead of dropping. This never masks a real hang
   # (that still hits :timeout above / ExUnit's 60s) — it only stops declaring a
   # busy-but-healthy pool dead. Ecto's own remedy #4 for this exact error.
+  #
+  # DOES NOT TRANSFER TO PROD: api/config/runtime.exs deliberately does NOT carry
+  # these two keys (Ecto defaults 50ms/1000ms apply there), and that is a decision,
+  # not an oversight — see the note above `repo_opts` in runtime.exs for the full
+  # reasoning and the open tasks (`jpf-bl-guerrilla-db-probe-arm`,
+  # `jpf-bl-oban-pool-partition`) that own the production pool fix. Short version:
+  # this remedy suits a healthy-but-transiently-busy CI pool where nothing is
+  # actually starved for long; guerrilla prod's failures come from a structurally
+  # oversubscribed pool (Oban + HTTP sharing POOL_SIZE=10) with jobs holding
+  # connections 12-38s, well past even this widened target — widening the queue
+  # window there would make overloaded requests wait longer before failing instead
+  # of fixing the oversubscription.
   queue_target: 5_000,
   queue_interval: 30_000
 
