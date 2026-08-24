@@ -673,9 +673,89 @@ const BP_WRITE_VERBS = new Set([
 // token, so the server flag is bounded to loopback.
 const LOOPBACK_URL = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?(\/|$)/i;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// BP'S WRITE SET WAS HAND-WRITTEN, AND BP PUBLISHES ITS OWN
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// BP_WRITE_VERBS above is 26 verbs somebody typed out. `bp capabilities -o json`
+// is the CLI's own machine-readable manifest, and every command in it carries a
+// `writes` boolean — the server's own answer to the exact question this rule
+// asks. Diffed:
+//
+//     156 bp commands, 97 of them declared WRITING, 80 distinct verbs
+//     64 of those 80 verbs were absent from the hand-written set
+//     62 writing commands were ADMITTED by the shipped screen
+//
+// Not obscure ones. `bp doc mutate` is a raw ledger write; `bp secret
+// scoped-set` writes a SECRET; `bp auth mfa-disable` and `bp auth reset` are
+// account takeovers; `bp access grant`/`revoke`, `bp token revoke`, `bp doc
+// unpublish`, `bp doc discard-draft`, `bp doc restore-revision`, `bp cycle
+// seal`, `bp media upload` — all admitted by a rule whose entire job is to stop
+// a census re-running history from mutating the ledger.
+//
+// A HAND-WRITTEN LIST OF ANOTHER PROGRAM'S VERBS IS THE DEFECT, not its length.
+// So the set is DERIVED and committed as
+// tooling/grip/fixtures/bp-write-commands.json, with the regeneration command in
+// its own `note` field, and test/screen.test.mjs asserts the source below covers
+// every pair in it — a `bp` release that adds a writing command reds the suite
+// instead of silently widening what the census may run.
+//
+// WHY PAIRS AND NOT BARE VERBS. BP_WRITE_VERBS is scanned over EVERY token, and
+// bp's writing verbs include `open`, `log`, `move`, `stage`, `touch`, `result`,
+// `release`, `reset` and `settings` — words that appear as ordinary ARGUMENTS in
+// honest reads (`bp task ready --status open`). Scanning those flat would be the
+// cry-wolf this module is measured against. The manifest gives the noun too, so
+// the pair `<noun> <verb>` is matched at the two positions bp's own grammar puts
+// them, after the value-taking globals are dropped. The flat BP_WRITE_VERBS scan
+// SURVIVES underneath as the second layer, unchanged.
+//
+// MEASURED COST: exactly one admitted corpus row is newly refused —
+// `bp task move <a> <b> --dry-run`. `bp task move` writes; the screen does not
+// get to trust a flag to make a write verb safe, for the same reason it does not
+// trust `--dry-run` anywhere else.
+
+/** bp's value-taking globals — dropped so `bp -s <url> doc mutate` lands noun/verb correctly. */
+const BP_VALUE_GLOBALS = new Set([
+  "-s", "--server", "-d", "--dataset", "-o", "--output", "--token", "--set", "--file",
+  "--manifest", "--limit", "--offset", "--criterion", "--criterion-text", "--evidence", "--now",
+]);
+
+/**
+ * DERIVED from `bp capabilities -o json` — see the fixture's `note` for the
+ * exact command. Do not hand-edit: regenerate, and the test will confirm.
+ */
+export const BP_WRITE_COMMANDS = new Set([
+  "access claim", "access grant", "access revoke", "auth login", "auth logout",
+  "auth mfa-disable", "auth mfa-enroll", "auth mfa-verify", "auth register",
+  "auth request-reset", "auth reset", "auth verify-email", "bulldocs intent-processed",
+  "bulldocs patch", "bulldocs propose", "bulldocs publish", "chat approve", "chat archive",
+  "chat create-session", "chat interrupt", "chat send-message", "chat unarchive",
+  "chat update-session", "cycle assign", "cycle open", "cycle promote", "cycle quarantine",
+  "cycle release-gate-activate", "cycle release-gate-open", "cycle release-paper-stage",
+  "cycle result", "cycle rollback", "cycle seal", "doc create", "doc create-if-not-exists",
+  "doc create-or-replace", "doc delete", "doc discard-draft", "doc mutate", "doc patch",
+  "doc publish", "doc restore-revision", "doc unpublish", "fleet beat", "github adopt",
+  "media add-member", "media checkout", "media delete", "media remove-member",
+  "media revoke-share", "media share-collection", "media undo-checkout", "media update",
+  "media upload", "plugin settings", "schema apply", "schema delete", "secret rm",
+  "secret scoped-rm", "secret scoped-set", "secret set", "session link-task", "session log",
+  "session open", "session publish", "session touch", "share add", "share rm", "task claim",
+  "task close", "task move", "task next", "task pulse", "task release", "task stage",
+  "task stamp", "ticket answer", "ticket close", "ticket-key mint", "ticket-key pause",
+  "ticket-key revoke", "ticket-key rotate", "ticket-key unpause", "token create", "token revoke",
+  "webhook create", "webhook delete", "webhook reenable", "webhook replay", "webhook rotate",
+  "webhook test-send", "webhook update", "workspace create", "workspace member-add",
+  "workspace member-rm", "workspace member-role", "workspace project-create",
+]);
+
 const bpRule = {
-  check(argv) {
-    for (let i = 1; i < argv.length; i++) {
+  check(rawArgv) {
+    // The original flat scan runs FIRST and is unchanged, so every refusal it
+    // already diagnosed keeps its exact wording (screen.test.mjs asserts on
+    // several of those strings by name). The manifest-derived pair check below
+    // only reaches commands this loop had nothing to say about.
+    for (let i = 1; i < rawArgv.length; i++) {
+      const argv = rawArgv;
       const t = argv[i];
       const bare = t.replace(/^--?/, "");
       if (BP_WRITE_VERBS.has(bare)) return `bp write verb "${bare}" mutates the ledger or writes a file`;
@@ -688,6 +768,17 @@ const bpRule = {
       if (t === "-s" || t === "--server" || /^--server=/.test(t)) {
         const url = t.startsWith("--server=") ? t.slice("--server=".length) : arg(argv, i + 1);
         if (!url || !LOOPBACK_URL.test(url)) return `bp -s ${url ?? "(missing)"} points at a non-loopback server`;
+      }
+    }
+    // THEN the manifest-derived `<noun> <verb>` pair, at the two positions bp's
+    // own grammar puts them, with the value-taking globals dropped first so
+    // `bp -s <url> doc mutate` still lands on `doc mutate`.
+    const argv = dropValueGlobals(rawArgv, BP_VALUE_GLOBALS);
+    const noun = firstNonFlag(argv);
+    if (noun !== null) {
+      const verb = firstNonFlag(argv, argv.indexOf(noun) + 1);
+      if (verb !== null && BP_WRITE_COMMANDS.has(`${noun} ${verb}`)) {
+        return `bp ${noun} ${verb} is declared WRITING by bp's own capabilities manifest`;
       }
     }
     return null;
@@ -1933,6 +2024,24 @@ export const DANGER_SET = [
   "systemctl --image status restart barkpark.service",
   "systemctl -qH status restart barkpark.service",
   "launchctl -w list unload /Library/LaunchDaemons/foo.plist",
+  // bp's OWN capabilities manifest declares these WRITING, and the screen
+  // admitted every one of them. Not obscure: a raw ledger mutate, a secret
+  // write, two account takeovers, an access grant and an unpublish.
+  "bp doc mutate task task-abc --set x=1",
+  "bp secret scoped-set workspace/default API_KEY",
+  "bp auth mfa-disable someone@example.com",
+  "bp auth reset someone@example.com newpass",
+  "bp access grant workspace default someone@example.com",
+  "bp access revoke grant-abc",
+  "bp doc unpublish task task-abc",
+  "bp doc discard-draft task task-abc",
+  "bp doc restore-revision task task-abc",
+  "bp media upload /tmp/payload.bin",
+  "bp cycle seal a b c d e f g h i",
+  "bp token revoke tok-abc",
+  "bp webhook replay wh-abc",
+  "bp session log my-session --kind push",
+  "bp -s http://localhost:4000 doc mutate task task-abc",
 ];
 
 /** Must stay ADMITTED. Refusing these is the gate punishing honest work. */
@@ -2007,6 +2116,15 @@ export const NEVER_CRY_WOLF_SET = [
   "systemctl --no-pager status barkpark.service",
   "systemctl -p ActiveState show barkpark.service",
   "launchctl list",
+  // The cry-wolf mirror: bp's writing VERBS include `open`, `log`, `move` and
+  // `stage` — ordinary words in an honest read's ARGUMENTS. Matching the
+  // `<noun> <verb>` PAIR at bp's own grammar positions is what keeps these
+  // admitted, and a flat scan of those verbs is what would not.
+  "bp task ready --status open",
+  "bp doc query task --filter lifecycle_status=open",
+  "bp task get task-abc",
+  "bp capabilities -o json",
+  "bp search grip screen release",
 ];
 
 /**

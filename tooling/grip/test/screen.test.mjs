@@ -34,7 +34,7 @@ import {
   hostBoundReason, maskQuotedSpans, metacharacterReason, splitSegments, tokenize,
   writeShapeReason, runNamedSets,
   doubleQuoteExpansionReason, envAssignmentReason, screenSedScript,
-  ALLOWED_HEADS, REFUSED_HEADS, HOST_BOUND,
+  ALLOWED_HEADS, REFUSED_HEADS, HOST_BOUND, BP_WRITE_COMMANDS,
   DANGER_SET, REGRESSION_SET, NEVER_CRY_WOLF_SET,
 } from "../screen.mjs";
 
@@ -637,8 +637,21 @@ const WAVE5_REACH = 254; // wave 5: +16 admitted, -2 refused; every one named be
 // FALSELY REFUSED before (their `-C` path read as the verb). Pure widening on the
 // corpus — no row is newly refused — and all four are named member-by-member in
 // the "value-taking-global collision" test below.
-const SCREEN_REACH = 258; // 254 + 4 false-refusal fixes; every one named below
-const COLLISION_FIX_REACH = SCREEN_REACH - WAVE5_REACH; // 4
+// The two deltas since wave 5 are INDEPENDENT and are now stated that way. They
+// were coupled — `COLLISION_FIX_REACH = SCREEN_REACH - WAVE5_REACH` — which
+// silently mis-stated the collision fix as +3 the moment a second, unrelated
+// tightening moved the total. A derived constant that changes meaning when
+// something else moves is the same staleness this file's own preamble forbids.
+const COLLISION_FIX_REACH = 4; // tgw12-s1: four `git -C <path> <read-verb>` rows, named member-by-member below
+const BP_MANIFEST_TIGHTENING = [
+  // The ONE corpus row the manifest-derived bp write set newly refuses. Named
+  // rather than absorbed into the count, exactly as the two env-prefix rows
+  // below are: `bp task move` is declared WRITING by bp's own capabilities
+  // manifest, and the screen does not get to trust `--dry-run` to make a write
+  // verb safe — it trusts no other flag that way either.
+  "bp task move legendary-quality-takeover-review-remediation legendary-quality-takeover-root --dry-run -o json",
+];
+const SCREEN_REACH = WAVE5_REACH + COLLISION_FIX_REACH - BP_MANIFEST_TIGHTENING.length; // 254 + 4 - 1 = 257
 
 test("census reach is RE-MEASURED and its delta is accounted for, member by member", () => {
   const corpus = JSON.parse(readFileSync(fileURLToPath(new URL("../fixtures/evidence-corpus.json", import.meta.url)), "utf8"));
@@ -653,11 +666,22 @@ test("census reach is RE-MEASURED and its delta is accounted for, member by memb
       `                        whose grep PATTERN names guerrilla and two prod IPs)\n` +
       `  WAVE 5 TIGHTENINGS  -2  both environment-assignment prefixes, both correctly refused (asserted individually below)\n` +
       `  tgw12-s1 WIDENINGS  +${COLLISION_FIX_REACH}  four \`git -C <path> <read-verb>\` rows the value-global collision falsely refused\n` +
-      `                        (the eaten \`-C\` path read as the sub-verb); named member-by-member in the collision test`,
+      `                        (the eaten \`-C\` path read as the sub-verb); named member-by-member in the collision test\n` +
+      `  bp-manifest TIGHTENING  -${BP_MANIFEST_TIGHTENING.length}  \`bp task move … --dry-run\`, declared WRITING by bp's own capabilities\n` +
+      `                        manifest; named individually below rather than absorbed into the count`,
   );
 
   assert.equal(r.admitted, SCREEN_REACH, "the screen's admission over the frozen corpus — re-derive and re-state, never re-baseline silently");
   assert.ok(r.admitted > WAVE4_REACH, "the widenings must RAISE reach, not merely hold it");
+
+  // The whole delta from tgw12-s1's 258 is accounted for by ONE named row.
+  for (const cmd of BP_MANIFEST_TIGHTENING) {
+    assert.ok(commands.includes(cmd), `the named tightening must be a row the corpus actually contains: ${cmd}`);
+    const v = screenCommand(cmd);
+    assert.equal(v.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.match(v.reason, /declared WRITING by bp's own capabilities manifest/, `and name why — got: ${v.reason}`);
+  }
+  assert.equal(r.admitted, 258 - BP_MANIFEST_TIGHTENING.length, "258 minus the named rows, and nothing else moved");
 });
 
 test("every corpus row the tightenings newly REFUSE is named and justified", () => {
@@ -1765,5 +1789,98 @@ test("the fourth-wave shapes are carried by the SHIPPED named sets, not only by 
   const wolf = NEVER_CRY_WOLF_SET.join("\n");
   for (const needle of ["docker -D ps", "docker -c myctx ps", "pnpm --dir /some/dir ls", "npm --tag latest view", "systemctl -p ActiveState show", "launchctl list"]) {
     assert.ok(wolf.includes(needle), `NEVER_CRY_WOLF_SET must carry the honest mirror ${needle}`);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BP PUBLISHES ITS OWN WRITE SET, AND THE RULE HAND-WROTE ONE INSTEAD
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `bp capabilities -o json` carries a `writes` boolean per command — the
+// server's own answer to the exact question bpRule asks. Diffed against the 26
+// verbs somebody typed into BP_WRITE_VERBS:
+//
+//     156 bp commands, 97 declared WRITING, 80 distinct verbs
+//     64 of those 80 verbs absent from the hand-written set
+//     62 writing commands ADMITTED by the shipped screen
+//
+// `bp doc mutate` is a raw ledger write. `bp secret scoped-set` writes a SECRET.
+// `bp auth mfa-disable` and `bp auth reset` are account takeovers. All admitted
+// by the one rule whose stated job is to stop a census re-running history from
+// mutating the ledger.
+//
+// The defect is the HAND-WRITING, not the length, so the set is derived into
+// tooling/grip/fixtures/bp-write-commands.json and the first test below is what
+// makes a future `bp` release RED rather than silently widening the census.
+//
+// PAIRS, NOT BARE VERBS, and that is load-bearing: bp's writing verbs include
+// `open`, `log`, `move`, `stage`, `touch`, `result`, `release`, `reset` and
+// `settings`, all of which appear as ordinary ARGUMENTS in honest reads. A flat
+// scan of those would be cry-wolf; the manifest supplies the noun, so the pair
+// is matched where bp's own grammar puts it.
+
+const BP_FIXTURE = new URL("../fixtures/bp-write-commands.json", import.meta.url);
+
+test("every WRITING bp command in the derived fixture is covered by the shipped set", () => {
+  const fx = JSON.parse(readFileSync(BP_FIXTURE, "utf8"));
+  assert.ok(fx.pairs.length >= 90, `the fixture must carry bp's real write surface, got ${fx.pairs.length}`);
+  const missing = fx.pairs.filter((p) => !BP_WRITE_COMMANDS.has(p));
+  assert.deepEqual(missing, [], "regenerate BP_WRITE_COMMANDS from the fixture — see its own `note` field for the command");
+  // …and nothing was invented on the way in. The set may not exceed the manifest.
+  const invented = [...BP_WRITE_COMMANDS].filter((p) => !fx.pairs.includes(p));
+  assert.deepEqual(invented, [], "BP_WRITE_COMMANDS must be DERIVED, not hand-extended");
+});
+
+test("the bp writing commands the screen used to ADMIT are refused", () => {
+  const fx = JSON.parse(readFileSync(BP_FIXTURE, "utf8"));
+  const admitted = fx.pairs.filter((pair) => screenCommand(`bp ${pair} arg1 arg2`).ok);
+  assert.deepEqual(admitted, [], "no command bp itself declares WRITING may be admitted");
+  // Named individually too, because a count over a fixture is not a diagnosis.
+  for (const cmd of [
+    "bp doc mutate task task-abc --set x=1",
+    "bp secret scoped-set workspace/default API_KEY",
+    "bp auth mfa-disable someone@example.com",
+    "bp access grant workspace default someone@example.com",
+    "bp doc unpublish task task-abc",
+    "bp media upload /tmp/payload.bin",
+    // the value-global spelling: `-s <url>` must not displace the noun/verb pair
+    "bp -s http://localhost:4000 doc mutate task task-abc",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, false, `MUST REFUSE: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("matching PAIRS rather than bare verbs is what keeps the honest reads admitted", () => {
+  // Every one of these carries a bp WRITING VERB as an ordinary argument.
+  for (const cmd of [
+    "bp task ready --status open",
+    "bp doc query task --filter lifecycle_status=open",
+    "bp task get task-abc",
+    "bp capabilities -o json",
+    "bp search grip screen release",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT the honest read: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+  // And the control that makes the previous line mean something: the words ARE
+  // writing verbs in bp's manifest, so a flat scan really would have refused.
+  const fx = JSON.parse(readFileSync(BP_FIXTURE, "utf8"));
+  const bareVerbs = new Set(fx.pairs.map((p) => p.split(" ")[1]));
+  for (const word of ["open", "release", "get"]) {
+    if (word === "get") assert.ok(!bareVerbs.has(word), "`get` is a READ verb — the control needs a read for contrast");
+    else assert.ok(bareVerbs.has(word), `"${word}" is a bp WRITING verb, which is why a flat scan would cry wolf`);
+  }
+});
+
+test("MUTATION PROOF: the pre-fix hand-written verb list re-admits the ledger writes", () => {
+  // The shipped 26-verb list, reproduced, with the flat all-token scan it used.
+  const HAND_WRITTEN = new Set([
+    "create", "publish", "patch", "delete", "close", "claim", "stamp", "pulse", "set", "update",
+    "rm", "add", "import", "apply", "deploy", "login", "logout", "init", "run", "next", "reopen",
+    "export", "restore", "sync", "install", "uninstall",
+  ]);
+  const preFix = (cmd) => !cmd.split(/\s+/).slice(1).some((t) => HAND_WRITTEN.has(t.replace(/^--?/, "")));
+  for (const cmd of ["bp doc mutate task task-abc", "bp secret scoped-set a b", "bp auth mfa-disable u", "bp access grant a b c", "bp doc unpublish task task-abc"]) {
+    assert.ok(preFix(cmd), `the hand-written list ADMITTED this ledger write: ${cmd}`);
+    assert.equal(screenCommand(cmd).ok, false, `and the derived set refuses it: ${cmd}`);
   }
 });
