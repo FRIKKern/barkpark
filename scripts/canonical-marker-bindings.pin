@@ -1,11 +1,10 @@
-api-client-new	New
 audit-emit	emit
 chat-stable-boundary	advance
 chat-stable-segments	advance
 cloud-provider-seam	DetectCapabilities
 codelist-lookup	lookup
 connector-credential-sealing	createCredentialCipher
-connector-tenant-routing	function
+connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler
 corpus-visible-schemas	visible_schemas
 doc-backlinks	reverse_referencers
@@ -51,4 +50,3 @@ whatsapp-24h-window	decideWhatsappWindow
 whatsapp-install-key	whatsappInstallKey
 workspace-admin-authority	workspace_admin?
 workspace-bundle	export
-zero-check	IsZero

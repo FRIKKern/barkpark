@@ -104,6 +104,10 @@ st_case() {
   local name="$1" want="$2" needle="$3" mutate="$4" out rc fix
   fix="$(mktemp -d)"
   st_fixture "$fix"
+  # Cleared BEFORE the snippet runs, never after: the mutation is eval'd in THIS
+  # shell, so an arm that supplies its own pin (`export CANON_PIN=...`) would
+  # otherwise judge every later arm against it too.
+  unset CANON_PIN
   # shellcheck disable=SC2034  # $FIX is consumed by the eval'd mutation snippet
   FIX="$fix"; eval "$mutate"
   set +e
@@ -200,6 +204,18 @@ if [ "$MODE" = selftest ]; then
     printf -- "# @canonical capability:fixture-vendored\n  defp v_fn, do: :ok\n" > "$FIX/node_modules/vendor/dep.ex"'
   st_case "marker in an unscanned extension is not scanned" 0 "docs-anchors-check: PASS" '
     printf -- "# @canonical capability:fixture-unscanned\n  defp u_fn, do: :ok\n" > "$FIX/api/lib/x.rb"'
+  # A marker inside a TEST is fixture data, never an implementation. `defp` here
+  # is deliberate: if the exclusion ever regresses, this arm reds on the
+  # public-entry rule instead of passing quietly.
+  st_case "marker in a test file is not scanned" 0 "§8 scanned 0 @canonical marker(s)" '
+    printf -- "# @canonical capability:fixture-in-test\n  defp t_fn, do: :ok\n" > "$FIX/api/lib/x_test.exs"
+    printf -- "// @canonical capability:fixture-in-gotest\nfunc TFn() {}\n" > "$FIX/api/lib/x_test.go"'
+  # §8b EXTRACTOR. Under the single-pass strip this pinned the literal token
+  # `function`, so the supplied pin below would MISMATCH and the arm would red.
+  st_case "8b pin reaches the identifier past 'export async function'" 0 "§8b all 1 marker pairing(s) match the pin" '
+    printf -- "// @canonical capability:fixture-async\nexport async function fixtureAsyncFn(a) { return a; }\n" > "$FIX/api/lib/y.ts"
+    printf -- "fixture-async\tfixtureAsyncFn\n" > "$FIX/pin"
+    export CANON_PIN="$FIX/pin"'
 
   echo ""
   if [ "$ST_FAIL" -ne 0 ]; then
@@ -629,8 +645,21 @@ fi
 # report of zero markers here is a fact about the repo rather than a fact about
 # the scanner — and §8 states the count out loud so the number is visible.
 
+# TEST FILES ARE EXCLUDED, and that is a correctness rule, not a speed one. A
+# test can only ever CONTAIN a marker as fixture data — `internal/scaffy/
+# insertbefore_test.go` asserts the rendered output of the
+# `scaffy/commands/add-canonical-marker.scaffy` command, so its `want := ...`
+# raw string carried `capability:api-client-new` and `capability:zero-check`.
+# Those are not implementations, yet under (a) they HELD both slugs repo-wide:
+# marking the true owner — `internal/apiclient/client.go`'s `func New(cfg
+# Config) *Client`, the very target the command's own EXAMPLES name — would have
+# red as "a copy-paste that kept the marker". The guard was defending the
+# squatter against the owner. A test is never a canonical implementation, so the
+# index does not read one.
 CANON_INCLUDES=(--include='*.ex' --include='*.exs' --include='*.go'
-  --include='*.ts' --include='*.tsx')
+  --include='*.ts' --include='*.tsx'
+  --exclude='*_test.go' --exclude='*_test.exs' --exclude='*_test.ts'
+  --exclude='*.test.ts' --exclude='*.test.tsx')
 
 # Every `@canonical capability:` hit under $1, as file:line:text. The ONE reader
 # both invariants and the control go through, so a control that passes is a
@@ -666,9 +695,19 @@ canon_scan() {
       # the NAME is what turns that into a comparison. `|| true` throughout: this
       # file runs under `set -euo pipefail`, and a grep that matches nothing must
       # yield an empty symbol, not kill the scan.
+      # The modifier strip LOOPS (`:a` … `ta`). A single pass stopped after ONE
+      # keyword, so `export async function resolveTenantForEvent(` reduced to the
+      # literal token `function` — which is what the pin recorded for
+      # connector-tenant-routing. A pairing whose symbol is a language keyword
+      # pins nothing: the rename this section exists to catch still matches it,
+      # and every `export async function` marker collapses onto the same token.
+      # Looping walks the whole modifier run (`export default async function foo`
+      # -> `foo`) and leaves every already-correct shape byte-identical.
       sym=$(sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null \
         | grep -m1 -E '^[[:space:]]*(def |func |export )' 2>/dev/null \
-        | sed -E 's/^[[:space:]]*(def|func|export)[[:space:]]+//; s/^(async|function|const|let|var|class|default)[[:space:]]+//; s/[^A-Za-z0-9_?!].*$//' || true)
+        | sed -E -e 's/^[[:space:]]*(def|func|export)[[:space:]]+//' \
+                 -e ':a' -e 's/^(async|function|const|let|var|class|default)[[:space:]]+//' -e 'ta' \
+                 -e 's/[^A-Za-z0-9_?!].*$//' || true)
       [ -n "$sym" ] && echo "PAIR $slug $sym"
     else
       echo "PRIVATE $cf:$cl $slug"
