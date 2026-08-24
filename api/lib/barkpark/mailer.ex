@@ -27,8 +27,20 @@ defmodule Barkpark.Mailer do
   """
   use Swoosh.Mailer, otp_app: :barkpark
 
+  require Logger
+
   @default_from_address "no-reply@barkpark.cloud"
   @default_from_name "Barkpark"
+
+  # Adapters that ACCEPT a message and return `{:ok, _}` without it ever leaving
+  # the box. `Swoosh.Adapters.Local.deliver/2` pushes into an in-memory mailbox
+  # and returns `{:ok, %{id: id}}`; `Swoosh.Adapters.Test` hands the email to the
+  # `$callers` chain and likewise returns `{:ok, _}`. Neither reports a failure
+  # the caller could observe — which is precisely why they need naming here.
+  @non_delivering %{
+    Swoosh.Adapters.Local => :local_mailbox,
+    Swoosh.Adapters.Test => :test_capture
+  }
 
   @doc """
   The `{name, address}` From for every transactional email, read at CALL time so
@@ -117,5 +129,136 @@ defmodule Barkpark.Mailer do
     raise ArgumentError,
           "invalid transactional mail From name: #{inspect(other)} — " <>
             "must be a string (MAIL_FROM_NAME)"
+  end
+
+  @doc """
+  What this node's mail configuration can actually do, as
+  `%{adapter:, deliverable?:, reason:}`.
+
+  `deliverable?` is the strict truth: `false` for any adapter in
+  `@non_delivering` and for an unconfigured mailer. `reason` is one of
+  `:ok | :local_mailbox | :test_capture | :unconfigured`.
+
+  This is the ONE place the question "can this box send mail off-box?" is
+  answered — the boot banner, the send path and the `/status.json` `mail`
+  component all read it, so they can never disagree.
+  """
+  @spec deliverability() :: %{adapter: module() | nil, deliverable?: boolean(), reason: atom()}
+  def deliverability do
+    case Application.get_env(:barkpark, __MODULE__, [])[:adapter] do
+      nil ->
+        %{adapter: nil, deliverable?: false, reason: :unconfigured}
+
+      mod ->
+        case Map.fetch(@non_delivering, mod) do
+          {:ok, reason} -> %{adapter: mod, deliverable?: false, reason: reason}
+          :error -> %{adapter: mod, deliverable?: true, reason: :ok}
+        end
+    end
+  end
+
+  @doc """
+  Whether this configuration accepts transactional mail and drops it where a
+  REAL person was expecting it — the operational predicate behind the boot
+  banner, the per-send warning and the `mail` health component.
+
+  Deliberately NARROWER than `not deliverability().deliverable?`:
+  `Swoosh.Adapters.Test` is excluded. That adapter only exists under
+  `MIX_ENV=test`, where the "recipient" is the assertion itself and nothing was
+  withheld from anyone. Counting it would emit a warning on every email in the
+  suite and on the health probe of every test run — noise that teaches people to
+  ignore the one line that matters. `Swoosh.Adapters.Local` is NOT excluded: it
+  is the compile-time default in `config/config.exs`, so it is what a real
+  instance runs until someone sets `SMTP_HOST`, and it is the configuration this
+  function exists to expose.
+  """
+  @spec drops_mail?() :: boolean()
+  def drops_mail? do
+    discards?(deliverability().reason)
+  end
+
+  # The ONE spelling of "this reason means a real person's mail is dropped".
+  # `drops_mail?/0` and `deliver_checked/1` both route through it: when each
+  # carried its own copy, the send path could start disagreeing with the boot
+  # banner and the health probe without a single test noticing.
+  defp discards?(reason), do: reason in [:local_mailbox, :unconfigured]
+
+  @doc """
+  Deliver `email` and report the outcome HONESTLY.
+
+  `Swoosh.Mailer.deliver/1` returns `{:ok, _}` under `Swoosh.Adapters.Local`,
+  so every caller that pattern-matched `{:ok, _}` treated "written to an
+  in-memory mailbox and discarded" as a successful send. That is the silent
+  withhold this function closes: when `drops_mail?/0` is true the return is
+  `{:error, {:not_deliverable, adapter, reason}}` even though the adapter said
+  `:ok`.
+
+  The message is STILL handed to the configured adapter first. The dev mailbox
+  at `/dev/mailbox` is how a developer reads this mail, and refusing to write it
+  would replace one silent drop with another. What changes is the CLAIM, not the
+  wire: nothing downstream may call this a delivery.
+  """
+  @spec deliver_checked(Swoosh.Email.t()) :: :ok | {:error, term()}
+  def deliver_checked(%Swoosh.Email{} = email) do
+    # Read the verdict ONCE: `deliverability/0` reads live application env, so
+    # consulting it again after the deliver could answer a different question
+    # than the one whose result we are about to label.
+    case deliverability() do
+      %{adapter: nil, reason: reason} ->
+        # Nothing to hand the message to. `Swoosh.Mailer.deliver/1` RAISES on a
+        # nil adapter, so attempting it here would turn a reportable
+        # misconfiguration into a crash inside the offload task.
+        {:error, {:not_deliverable, nil, reason}}
+
+      %{adapter: adapter, reason: reason} ->
+        result = deliver(email)
+
+        cond do
+          discards?(reason) ->
+            {:error, {:not_deliverable, adapter, reason}}
+
+          match?({:ok, _}, result) ->
+            :ok
+
+          true ->
+            result
+        end
+    end
+  end
+
+  @doc """
+  Log the undeliverable-mail banner once at boot when this node cannot send.
+
+  WARNS, it does not raise. An instance with no relay is a legitimate
+  configuration — every `mix phx.server` on a laptop is one — so refusing the
+  node would make the honest signal unshippable. The counterpart is that the
+  condition is never merely implicit: it is stated at boot, restated on every
+  send that hits it, and queryable at `/status.json` as a degraded `mail`
+  component. Contrast `from/0`, which DOES raise: a malformed
+  `MAIL_FROM_ADDRESS` is always a typo, never a deployment style.
+
+  Returns the deliverability map so a caller can assert on it.
+  """
+  @spec warn_if_undeliverable() :: map()
+  def warn_if_undeliverable do
+    status = deliverability()
+
+    if drops_mail?() do
+      Logger.warning("""
+      MAIL IS NOT DELIVERABLE — this node accepts transactional email and discards it.
+
+        adapter: #{inspect(status.adapter)} (#{status.reason})
+
+      Magic-link sign-in, password reset, email verification and access-grant
+      invitations will be ACCEPTED and never sent. The HTTP responses stay 200 by
+      design (anti-enumeration), so nothing else will tell you this.
+
+      Set SMTP_HOST (plus SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD as your relay
+      requires) to enable delivery — see deploy/smtp.env.example. Ignore this if
+      the box is not meant to send mail.
+      """)
+    end
+
+    status
   end
 end

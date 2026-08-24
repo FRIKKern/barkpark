@@ -27,7 +27,8 @@ defmodule Barkpark.Status do
     components = [
       check(:database, &database_ok?/0),
       check(:migrations, &migrations_current?/0),
-      check(:plugins, &plugins_ok?/0)
+      check(:plugins, &plugins_ok?/0),
+      check(:mail, &mail_deliverable?/0)
     ]
 
     incidents = open_incidents()
@@ -60,6 +61,17 @@ defmodule Barkpark.Status do
 
   defp plugins_ok? do
     is_list(Barkpark.Plugins.Registry.all())
+  end
+
+  # A node whose mailer discards every message is NOT operational: password
+  # reset and magic-link sign-in are down, and because those endpoints answer
+  # 200 for anti-enumeration reasons, this probe is the only place a human or an
+  # uptime monitor can see it. `drops_mail?/0` deliberately does not count the
+  # test-capture adapter, so this stays green under MIX_ENV=test rather than
+  # dyeing every suite degraded. Reports `:degraded`, never an outage tone — the
+  # rest of the API is genuinely serving.
+  defp mail_deliverable? do
+    not Barkpark.Mailer.drops_mail?()
   end
 
   # Worst component status wins.

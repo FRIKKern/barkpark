@@ -56,10 +56,20 @@ defmodule Barkpark.Access.GrantNotifier do
     # log (reason only, never the recipient PII) rides INSIDE the task. `start_child`
     # is deliberate — the caller is a long-lived LiveView and never retrieves the
     # result, so fire-and-forget keeps a reply/DOWN out of its mailbox.
+    # See `Barkpark.Mailer.deliver_checked/1` — a raw deliver under the default
+    # `Swoosh.Adapters.Local` returns `{:ok, _}` for a message that never left
+    # the box, so the grantee's ONLY copy of the claim link vanished with no log.
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
-      case Mailer.deliver(mail) do
-        {:ok, _meta} ->
+      case Mailer.deliver_checked(mail) do
+        :ok ->
           :ok
+
+        {:error, {:not_deliverable, adapter, reason}} ->
+          Logger.warning(
+            "airdrop grant email NOT DELIVERED (no mail relay configured): " <>
+              "adapter=#{inspect(adapter)} reason=#{inspect(reason)} — " <>
+              "set SMTP_HOST to enable delivery (deploy/smtp.env.example)"
+          )
 
         {:error, reason} ->
           Logger.error("airdrop grant email delivery failed: reason=#{inspect(reason)}")
