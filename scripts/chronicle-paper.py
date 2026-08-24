@@ -279,6 +279,16 @@ def sentence_case(value: str) -> str:
     return value[:1].upper() + value[1:] if value else value
 
 
+def edition_display_title(theme: str, suffix: str, limit: int = 255) -> str:
+    """Fit generated edition titles to the persisted Paper title contract."""
+    separator = " — "
+    available = limit - len(separator) - len(suffix)
+    if len(theme) > available:
+        boundary = theme.rfind(" ", 0, available - 1)
+        theme = theme[: boundary if boundary > available // 2 else available - 1].rstrip(" ,;:—-") + "…"
+    return f"{theme}{separator}{suffix}"
+
+
 def clean_editorial_text(value: Any, *, limit: int) -> str:
     if not isinstance(value, str):
         raise ValueError("editorial text must be a string")
@@ -967,13 +977,15 @@ def period_payload(
     editorial = editorial or deterministic_editorial(period, selected)
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in selected)
+    suffixes = {
+        "day": period.start.strftime("%d %B %Y").lstrip("0"),
+        "week": f"Week {period.key.split('-W')[-1]}",
+        "month": period.title,
+        "year": f"Barkpark in {period.title}",
+    }
     display_titles = {
-        "day": f"{editorial['theme']} — {period.start.strftime('%d %B %Y').lstrip('0')}",
-        "week": (
-            f"{editorial['theme']} — Week {period.key.split('-W')[-1]}"
-        ),
-        "month": f"{editorial['theme']} — {period.title}",
-        "year": f"{editorial['theme']} — Barkpark in {period.title}",
+        kind: edition_display_title(editorial["theme"], suffix)
+        for kind, suffix in suffixes.items()
     }
     date_range = f"{period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}"
     through_date = selected[-1].occurred_at.date() if selected else min(

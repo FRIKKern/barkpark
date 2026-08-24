@@ -315,6 +315,23 @@ class ChroniclePaperTest(unittest.TestCase):
         visible_titles = [editorial["theme"], *[item["title"] for item in editorial["work_themes"]]]
         self.assertTrue(all(title not in forbidden for title in visible_titles))
 
+    def test_generated_paper_title_caps_long_source_subjects_at_the_schema_limit(self):
+        period = chronicle.periods_for(dt.date(2026, 8, 24))["day"]
+        event = chronicle.Event(
+            dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc),
+            "a" * 40,
+            "feat(surface): " + "specific reader-visible change " * 20,
+        )
+        payload = chronicle.period_payload(
+            period,
+            [event],
+            chronicle.periods_for(period.start),
+            "acme/project",
+        )
+        self.assertLessEqual(len(payload["title"]), 255)
+        self.assertTrue(payload["title"].endswith("— 24 August 2026"))
+        self.assertIn("…", payload["title"])
+
     def test_editorial_generation_falls_back_without_blocking_the_archive(self):
         events = self.read_fixture_events()
         periods = chronicle.periods_for(dt.date(2026, 8, 23))
