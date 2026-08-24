@@ -685,8 +685,8 @@ defmodule BarkparkWeb.QueryController do
       # No header, and therefore no 304 branch: a validator we would refuse to
       # honor must not be advertised either. The envelope's own `etag` field is
       # UNCHANGED — it is the SDK's change-detection token, not a cache
-      # validator (the SDK never sends If-None-Match; see
-      # js/packages/nextjs/src/server/core.ts:418), so consumers keep working.
+      # validator (the SDK never sends If-None-Match itself — see runFetch in
+      # js/packages/nextjs/src/server/core.ts), so consumers keep working.
       respond_json(conn, inner, sync_tags, etag, elapsed_ms, dataset)
     end
   end
