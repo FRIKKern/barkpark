@@ -17,11 +17,16 @@ import {
   typeLabel,
   type FindHit,
   type FindResponse,
-  type PopularQuery,
   type SearchEngine,
   type SortId,
 } from "@/lib/find";
 import { readResultWindow } from "@/lib/result-window";
+import {
+  readSuggestions,
+  suggestionsNotice,
+  suggestionsUnreachable,
+  type SuggestionsReading,
+} from "@/lib/suggestions";
 import { useHoveredDoc, useGraphMatches } from "@/lib/hovered-doc-context";
 import { useFinderNav } from "@/lib/finder-nav-context";
 import { useLiveSearch } from "@/lib/use-live-search";
@@ -686,14 +691,35 @@ export function Finder({
   const prerendered = result?.key === reqKey && result.prerendered === true;
 
   // Popular past queries (search-intelligence) — shown when the box is empty.
-  const [popular, setPopular] = useState<PopularQuery[]>([]);
+  //
+  // `/api/find?suggest=1` answers with a RECEIPT: `error` is null when the
+  // upstream really said "no popular queries yet" and carries the reason when
+  // nothing answered. This used to read the body through a type that did not
+  // declare `error` and swallow every failure with `.catch(() => {})`, which
+  // put the two empties back to being the same bytes — the exact thing the
+  // route computes that field to prevent. `lib/suggestions.ts` owns the reading
+  // and the wording; the chips stay a decoration (no user-facing banner: the
+  // route answers 200 here on purpose), but the failure now leaves a trace.
+  const [suggestions, setSuggestions] = useState<SuggestionsReading>({
+    popular: [],
+    error: null,
+  });
+  const popular = suggestions.popular;
   useEffect(() => {
+    let live = true;
     fetch("/api/find?suggest=1")
       .then((r) => r.json())
-      .then((d: { popular?: PopularQuery[] }) =>
-        setPopular((d.popular ?? []).filter((p) => p.query).slice(0, 6)),
-      )
-      .catch(() => {});
+      .then((d: unknown) => readSuggestions(d))
+      .catch((err: unknown) => suggestionsUnreachable(err))
+      .then((reading: SuggestionsReading) => {
+        if (!live) return;
+        setSuggestions(reading);
+        const notice = suggestionsNotice(reading);
+        if (notice) console.warn(notice);
+      });
+    return () => {
+      live = false;
+    };
   }, []);
 
   const hits = useMemo(() => data?.hits ?? [], [data]);
