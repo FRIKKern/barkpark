@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/httpx"
 )
 
 // DefaultTimeout is the per-request HTTP timeout when Config.Timeout is zero.
@@ -196,8 +198,12 @@ func New(cfg Config) *Client {
 		Project:     cfg.Project,
 		Dataset:     cfg.Dataset,
 		Perspective: cfg.Perspective,
-		client:      &http.Client{Timeout: timeout, Transport: rt},
-		retry:       rt,
+		// httpx.CheckRedirect for the same reason the retry lives here: ONE owner.
+		// Go's default policy rewrites a redirected POST into a bodyless GET, so
+		// every typed write on this client could silently become a read that
+		// reported the redirect target's 200 as success.
+		client: &http.Client{Timeout: timeout, Transport: rt, CheckRedirect: httpx.CheckRedirect},
+		retry:  rt,
 	}
 }
 

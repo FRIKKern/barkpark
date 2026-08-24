@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/httpx"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/mattn/go-isatty"
 )
@@ -1198,6 +1199,18 @@ func buildMultipartFile(path string) (io.Reader, string, error) {
 	return pr, mw.FormDataContentType(), nil
 }
 
+// checkRedirect and maxRedirects come from internal/httpx, the single owner of
+// bp's redirect policy: a WRITE is never followed, a READ is (capped at
+// maxRedirects hops). Installed on BOTH generic request clients here — the 30s
+// doRequest client and the header-timeout-only transfer client — so no bp call
+// path can quietly fall back to Go's default policy, which downgrades a POST to
+// a bodyless GET and reported the redirect target's 200 as a successful write.
+// See httpx.CheckRedirect for the full reasoning and the reconciliation with the
+// five ErrUseLastResponse probe sites elsewhere in internal/.
+const maxRedirects = httpx.MaxRedirects
+
+var checkRedirect = httpx.CheckRedirect
+
 // transferResponseHeaderTimeout bounds only the wait for a response's headers on
 // the streaming transfer client (media upload, upgrade download) — NOT the
 // transfer body's wall-clock. A var, not a const, so tests can shrink it.
@@ -1212,6 +1225,7 @@ var transferResponseHeaderTimeout = 60 * time.Second
 // takes effect.
 func newTransferClient() *http.Client {
 	return &http.Client{
+		CheckRedirect: checkRedirect,
 		Transport: &http.Transport{
 			Proxy: http.ProxyFromEnvironment,
 			DialContext: (&net.Dialer{
@@ -1266,7 +1280,7 @@ func doRequest(method, rawURL string, headers map[string]string, body []byte) (i
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: checkRedirect}
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
