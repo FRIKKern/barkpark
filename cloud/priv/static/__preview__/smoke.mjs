@@ -21,7 +21,13 @@ import vm from "node:vm";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { SCENARIOS, SCENARIO_NAMES, route, RAIL_FAIL_CRUEL_DETAIL as SCEN_RAIL_CRUEL_DETAIL } from "./scenarios.mjs";
+import {
+  SCENARIOS, SCENARIO_NAMES, route,
+  RAIL_FAIL_CRUEL_DETAIL as SCEN_RAIL_CRUEL_DETAIL,
+  DEPLOY_DETAIL_CRUEL as SCEN_DEPLOY_DETAIL_CRUEL,
+  DEPLOY_DETAIL_KIND as SCEN_DEPLOY_DETAIL_KIND,
+  DEPLOY_DETAIL_STORE_CAP as SCEN_DEPLOY_DETAIL_STORE_CAP,
+} from "./scenarios.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
@@ -1073,6 +1079,45 @@ const EXPECTATIONS = {
     container: "site-body",
     includes: ["dep-pill dep-building", "dep-current", ">Redeploy<", ">Roll back to this<"],
   },
+  // cch-deploy-detail-render-has-no-cap: the live sub-caption at its STORE cap.
+  // The first scenario in this harness to carry a `.deploy-detail` longer than
+  // the word "building" — before it, no instrument here had ever rendered the
+  // one caption on the deploy rail with no render bound. Two building rows in
+  // one paint: the 2 KB caption under measurement and the ordinary builder
+  // caption that is its control. The GEOMETRY is overflow-guard.mjs's
+  // W34-deploy-detail-render-bound leg; this entry asserts only that both rows
+  // reach the DOM, because a leg measuring a screen that rendered one of them
+  // would be half green by construction.
+  "deploy-detail-cruel": {
+    what: "the 2 KB live sub-caption under the status pill, beside an ordinary builder caption",
+    container: "site-body",
+    check(reg) {
+      const body = (reg.get("site-body") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#site-body rendered empty");
+      const captions = countMatches(body, 'class="deploy-detail"');
+      assert.equal(captions, 2, `both building rows render a .deploy-detail (got ${captions})`);
+      // The caption's own bytes, not a transcription: read off the fixture's
+      // constants. The CRUEL slice stops at 55 characters on purpose — the
+      // module path after it carries apostrophes that app.js html-escapes, and
+      // an assertion that has to re-implement esc() is asserting its own copy
+      // of the renderer rather than the renderer.
+      assert.ok(body.includes(SCEN_DEPLOY_DETAIL_KIND), "the ordinary builder caption renders verbatim");
+      assert.ok(
+        body.includes(SCEN_DEPLOY_DETAIL_CRUEL.slice(0, 55)),
+        "the cruel caption renders — its opening 55 characters are in the DOM",
+      );
+      // The STORE is what the DOM carries: all of it. A renderer that starts
+      // cutting the caption in JS would pass every geometry assertion in the
+      // guard and silently take the capture away from ops.
+      const m = body.match(/class="deploy-detail" data-cap="(\d+)"/);
+      assert.ok(m, "the cruel caption's data-cap carries a NUMBER (the caption's length), not a second copy of the caption");
+      assert.equal(
+        Number(m[1]), SCEN_DEPLOY_DETAIL_STORE_CAP,
+        "data-cap reports the caption's full stored length — the render bound is on DISPLAY only",
+      );
+    },
+  },
+
   // RETRY: renders the rollback skeleton; the transient-500 → "Try again"
   // (retry recovery) morph is click-driven (covered by the vm unit tests).
   "promote-retry": {

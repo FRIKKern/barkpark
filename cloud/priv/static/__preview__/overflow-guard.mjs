@@ -218,6 +218,7 @@ const DEFECTS = [
   "W26-cred-sheet-exits",
   "W26-new-ready-and-launch-bounded",
   "W14-site-detail-phone-band",
+  "W34-deploy-detail-render-bound",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -7500,6 +7501,232 @@ async function main() {
         );
       }
     }
+
+    // ── W34-deploy-detail-render-bound ────────────────────────────────────────
+    //
+    // THE ONE CAPTION ON THE DEPLOY RAIL WITH NO RENDER BOUND. cch-w34-s5
+    // widened `deployments.detail` from varchar(255) to :text, which left the
+    // shared 2 KB `validate_console_line/1` as the only thing between a worker
+    // token and the DOM. D251 rules the effective cap is min(validator, column,
+    // every downstream derivation) — and every derivation after the store had
+    // NONE: `FailureCopy.humanize/1`/`scrub/1` carry no length bound (grep for
+    // String.slice / String.length / any @max in failure_copy.ex: nothing),
+    // app.js emits `esc(d.detail)` whole, and `.deploy-detail` (app.css) was
+    // font-size + colour + word-break + an animation, with no max-height, no
+    // overflow and no line-clamp anywhere in the stylesheet.
+    //
+    // WHY A BROWSER AND NOT A SOURCE REGEX: the sibling `.status-pill-detail`
+    // (app.css) proved the general lesson the hard way — its defect was TOKEN
+    // SHAPE, and a length cap was the WRONG remedy. Here it is the opposite:
+    // `.deploy-detail` already carries `word-break`, so a 2 KB caption does not
+    // drag the page sideways at all. It grows DOWNWARD, and the only instrument
+    // that can see that is one that measures painted boxes.
+    //
+    // THE BOUND IS IN LINE-BOXES, DERIVED, NEVER IN PIXELS. Every assertion
+    // below divides the measured height by the element's OWN computed
+    // line-height, so a type-scale change moves the pixels and not the verdict.
+    //
+    // FIVE INVARIANTS PER CELL, and three of them exist to catch a remedy
+    // rather than the defect:
+    //   (a) the CRUEL caption paints at most DETAIL_MAX_LINES line-boxes;
+    //   (b) it is CLIPPED (scrollHeight > clientHeight) — proof the bound is
+    //       actually engaging on this fixture rather than the caption having
+    //       quietly stopped being long;
+    //   (c) the clip is DISCLOSED — computed `-webkit-line-clamp` is a number,
+    //       which is what makes the browser paint the ellipsis. A silent
+    //       `max-height` + `overflow:hidden` reads as the whole caption and is
+    //       refused here by name;
+    //   (d) the KIND control — the longest caption the shipped builder actually
+    //       emits — is NOT clipped at any width. A clamp tight enough to buy
+    //       the cruel caption by shredding an ordinary one reds here;
+    //   (e) the STORE is untouched: the DOM still carries all
+    //       DEPLOY_DETAIL_STORE_CAP characters, so ops read the full capture in
+    //       the row while the rail stays legible. The bound is on DISPLAY only.
+    // Plus (f): `data-cap` must not carry a second copy of a long caption —
+    // nothing in this tree reads it (`git grep data-cap` over app.css, app.js
+    // and the tests: the only readers are the /new step caption's own tests),
+    // so a 2 KB attribute beside a 2 KB text node is pure DOM weight.
+    //
+    // WIDTHS: the rail's column is the thing that decides how many lines 2,000
+    // characters become, so the sweep runs the phone band and the desktop band.
+    // Narrow is where the defect is worst (a ~250px column turns the caption
+    // into ~90 lines) and wide is where a remedy is most likely to be too
+    // tight.
+    if (requested.includes("W34-deploy-detail-render-bound")) {
+      const D = "W34-deploy-detail-render-bound";
+      const DD_WIDTHS = [320, 390, 620, 900, 1024, 1440];
+      const {
+        SCENARIOS, DEPLOY_DETAIL_CRUEL, DEPLOY_DETAIL_KIND, DEPLOY_DETAIL_STORE_CAP,
+        DEPLOY_DETAIL_BUILDER_MAX,
+      } = await import("./scenarios.mjs");
+      // THE NUMBER LIVES IN THE STYLESHEET, and this leg READS it rather than
+      // restating it — two copies of a bound drift, and the copy in the
+      // instrument always wins the argument while the copy in the product is
+      // what a person sees. The CEILING below is this leg's own assertion: a
+      // clamp looser than it is not a bound, it is a longer wall.
+      const DETAIL_CLAMP_CEILING = 8;
+      const ddRule = fs.readFileSync(path.join(ROOT, "app.css"), "utf8").match(/\n\.deploy-detail \{([\s\S]*?)\n\}/);
+      if (!ddRule) {
+        return die(`${D}: no \`.deploy-detail\` rule found in app.css — the selector this leg measures was renamed, and a run against the new name would have measured nothing`);
+      }
+      const ddClamp = ddRule[1].match(/-webkit-line-clamp:\s*(\d+)/);
+      // ABSENT is the DEFECTIVE tree, and it must MEASURE rather than refuse:
+      // a refusal here would report "I could not look" for the exact state this
+      // leg exists to catch. It falls back to the ceiling so the pre-fix run
+      // prints how far past a bound the caption actually paints.
+      const DETAIL_MAX_LINES = ddClamp ? Number(ddClamp[1]) : DETAIL_CLAMP_CEILING;
+      if (DETAIL_MAX_LINES > DETAIL_CLAMP_CEILING) {
+        return die(`${D}: .deploy-detail declares -webkit-line-clamp: ${DETAIL_MAX_LINES}, looser than this leg's ceiling of ${DETAIL_CLAMP_CEILING}. A clamp that loose is not a bound — either the ceiling moves in this file with the measurement that justifies it, or the rule does`);
+      }
+      const sc = SCENARIOS["deploy-detail-cruel"];
+      // The route is DERIVED from the fixture. A transcribed uuid rots into
+      // "the sites list rendered instead" and the leg measures a screen that
+      // has no deploy rail on it at all.
+      if (!sc || !sc.deepLink || !sc.data || !Array.isArray(sc.data.deployments)) {
+        return die(`${D}: SCENARIOS["deploy-detail-cruel"] no longer carries a deepLink and a deployments list — the deploy rail cannot be reached, so nothing was measured`);
+      }
+      // Both specimens must still be IN the fixture, and still be the lengths
+      // that make this leg mean anything. A cruel caption that shrank under the
+      // store cap makes (a)-(c) green by construction.
+      const cruelRow = sc.data.deployments.find((d) => d.detail === DEPLOY_DETAIL_CRUEL);
+      const kindRow = sc.data.deployments.find((d) => d.detail === DEPLOY_DETAIL_KIND);
+      if (!cruelRow || !kindRow) {
+        return die(`${D}: the fixture no longer carries BOTH an at-the-store-cap caption and an ordinary one — half of this leg would have measured nothing`);
+      }
+      if (DEPLOY_DETAIL_CRUEL.length !== DEPLOY_DETAIL_STORE_CAP) {
+        return die(`${D}: the cruel caption is ${DEPLOY_DETAIL_CRUEL.length} chars against a store cap of ${DEPLOY_DETAIL_STORE_CAP} — it is no longer the longest thing the column can hold, and every number below would understate the defect`);
+      }
+      process.stdout.write(
+        `\n${D} — deploy-detail-cruel x ${DD_WIDTHS.length} widths x 2 themes (${DD_WIDTHS.length * 2} cells; ` +
+        `EVERY .deploy-detail on the page, each against its OWN computed line-height). Cruel caption ` +
+        `${DEPLOY_DETAIL_CRUEL.length} chars (the store cap), KIND control ${DEPLOY_DETAIL_KIND.length} (the ` +
+        `shipped builder's real caption over a 40-char SHA; its ADVERSARIAL ceiling over a varchar(255) ref is ` +
+        `${DEPLOY_DETAIL_BUILDER_MAX} — reported, not pinned). lines= is measured height / line-height\n`,
+      );
+      let cells = 0, seen = 0, cruelSeen = 0, kindSeen = 0;
+      let worstLines = 0, worstAt = "", kindWorstLines = 0, pageOver = 0;
+      let capAttrWorst = 0;
+      for (const theme of ["light", "dark"]) {
+        // Enter WIDE — the deploy list mounts once, off the deployments fetch;
+        // entering narrow would measure a layout the mount never saw.
+        await setViewport(DD_WIDTHS[DD_WIDTHS.length - 1]);
+        await nav(
+          `${BASE}/?scen=deploy-detail-cruel&theme=${theme}${sc.deepLink}`,
+          // READINESS KEYS ON `.deploy-row`, NOT ON THE CAPTION, and that is a
+          // MEASUREMENT rather than a convenience: `.deploy-detail` carries
+          // `animation: new-detail-in` whose first keyframe is `opacity: 0`, so
+          // the rendered-host floor (checkOpacity: true) catches it mid-fade and
+          // refuses a screen that is painting perfectly well. The row is the
+          // caption's own parent, is not animated, and cannot exist without the
+          // deployments fetch having landed. The caption's absence is caught
+          // where it belongs — by this leg's own zero-box refusal below, which
+          // says which screen was empty instead of blaming a stylesheet.
+          `document.querySelector('.deploy-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+        );
+        const row = [];
+        for (const width of DD_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;` +
+            `var out={sw:d.scrollWidth,cw:d.clientWidth,boxes:[]};` +
+            // EVERY caption on the page, never a pinned one: querySelector
+            // singular cannot tell a rail that rendered nothing from a rail of
+            // bounded captions.
+            `[].slice.call(document.querySelectorAll('.deploy-detail')).forEach(function(e){` +
+            `  var cs=getComputedStyle(e);var r=e.getBoundingClientRect();` +
+            `  var lh=parseFloat(cs.lineHeight);` +
+            `  if(!isFinite(lh)||lh<=0){lh=parseFloat(cs.fontSize)*1.2;}` +
+            `  out.boxes.push({t:(e.textContent||''),len:(e.textContent||'').length,` +
+            `    h:+r.height.toFixed(2),lh:+lh.toFixed(2),lines:+(r.height/lh).toFixed(2),` +
+            `    sh:e.scrollHeight,ch:e.clientHeight,clamp:cs.webkitLineClamp||cs.getPropertyValue('-webkit-line-clamp')||'none',` +
+            `    ov:cs.overflow,cap:(e.getAttribute('data-cap')||'').length});` +
+            `});return out;})()`,
+          );
+          cells++;
+          if (m.sw > m.cw) {
+            pageOver++;
+            fail(D, `${theme}@${width}: documentElement.scrollWidth ${m.sw} > clientWidth ${m.cw} — the page drags sideways`);
+          }
+          // A rail with no captions on it is not a clean rail, it is an
+          // unmeasured one.
+          if (!m.boxes.length) {
+            fail(D, `${theme}@${width}: ZERO .deploy-detail elements on the page — the rail rendered nothing and this cell certified an empty screen`);
+            continue;
+          }
+          let cruel = null, kind = null;
+          for (const b of m.boxes) {
+            seen++;
+            if (b.t === DEPLOY_DETAIL_CRUEL) { cruel = b; cruelSeen++; }
+            else if (b.t === DEPLOY_DETAIL_KIND) { kind = b; kindSeen++; }
+          }
+          if (!cruel || !kind) {
+            fail(D, `${theme}@${width}: the paint carries ${cruel ? "" : "no cruel caption"}${!cruel && !kind ? " and " : ""}${kind ? "" : "no kind control"} — ${m.boxes.length} .deploy-detail box(es) rendered, none of them the specimen this leg exists to measure`);
+            continue;
+          }
+          // (a) BOUNDED.
+          if (cruel.lines > DETAIL_MAX_LINES + 0.1) {
+            fail(D, `${theme}@${width}: the ${DEPLOY_DETAIL_STORE_CAP}-char caption paints ${cruel.lines} line-boxes (${cruel.h}px at line-height ${cruel.lh}) — the bound is ${DETAIL_MAX_LINES}. The status pill's row is ${(cruel.h - DETAIL_MAX_LINES * cruel.lh).toFixed(2)}px taller than a legible rail allows`);
+          }
+          // (b) THE BOUND IS ENGAGING.
+          if (cruel.sh <= cruel.ch) {
+            fail(D, `${theme}@${width}: the cruel caption is NOT clipped (scrollHeight ${cruel.sh} <= clientHeight ${cruel.ch}) — ${DEPLOY_DETAIL_STORE_CAP} characters fit inside the bound, so this cell proves nothing about a bound`);
+          }
+          // (c) THE CUT IS DISCLOSED.
+          if (!/^\d+$/.test(String(cruel.clamp).trim())) {
+            fail(D, `${theme}@${width}: computed -webkit-line-clamp is "${cruel.clamp}" — there is NO disclosed cut. ${cruel.len} characters are in the DOM; whatever the box shows, its last visible line ends mid-sentence with nothing saying more follows. A bare max-height + overflow:hidden bounds the same pixels and reads as the whole caption. Clamp it, or offer an explicit expand`);
+          }
+          // (d) THE KIND CONTROL SURVIVES.
+          if (kind.sh > kind.ch) {
+            fail(D, `${theme}@${width}: the ORDINARY builder caption ("${DEPLOY_DETAIL_KIND}", ${DEPLOY_DETAIL_KIND.length} chars) is clipped too — scrollHeight ${kind.sh} > clientHeight ${kind.ch} at ${kind.lines} line-boxes. The bound bought the cruel caption by shredding the one a person reads every day`);
+          }
+          // (e) THE STORE IS UNTOUCHED.
+          if (cruel.len !== DEPLOY_DETAIL_STORE_CAP) {
+            fail(D, `${theme}@${width}: the DOM carries ${cruel.len} of ${DEPLOY_DETAIL_STORE_CAP} characters — the remedy CUT THE CAPTION instead of bounding its box, and ops can no longer read the capture the store holds`);
+          }
+          // (f) NO SECOND COPY IN AN ATTRIBUTE NOBODY READS.
+          if (cruel.cap >= DEPLOY_DETAIL_STORE_CAP) {
+            fail(D, `${theme}@${width}: data-cap carries ${cruel.cap} characters beside a ${cruel.len}-character text node — the caption is in the DOM twice and nothing in this tree reads the attribute`);
+          }
+          worstLines = Math.max(worstLines, cruel.lines);
+          if (worstLines === cruel.lines) worstAt = `${theme}@${width}`;
+          kindWorstLines = Math.max(kindWorstLines, kind.lines);
+          capAttrWorst = Math.max(capAttrWorst, cruel.cap);
+          row.push(`${width}:cruel ${cruel.lines}L ${cruel.h}px sh${cruel.sh}/ch${cruel.ch} clamp=${cruel.clamp} cap=${cruel.cap} | kind ${kind.lines}L sh${kind.sh}/ch${kind.ch}`);
+        }
+        process.stdout.write(`   deploy-detail/${theme}  ${row.join("  ")}\n`);
+      }
+
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${DD_WIDTHS.join("/")} in both themes — ${cruelSeen} cruel and ` +
+          `${kindSeen} kind captions measured out of ${seen} .deploy-detail boxes, ${pageOver} page(s) dragging. ` +
+          `The ${DEPLOY_DETAIL_STORE_CAP}-char caption paints at most ${worstLines} line-boxes (worst: ${worstAt}) ` +
+          `against a bound of ${DETAIL_MAX_LINES}, and is CLIPPED in every cell — the bound is engaging, not ` +
+          `decorative`,
+        );
+        okLine(
+          `THE CUT IS VISIBLE AND THE STORE IS WHOLE: computed -webkit-line-clamp is a number in every cell (which ` +
+          `is what paints the ellipsis — a bare max-height + overflow:hidden reads as the whole caption and is ` +
+          `refused by name here), while the DOM still carries all ${DEPLOY_DETAIL_STORE_CAP} characters. The bound ` +
+          `is on DISPLAY only: no server file is in this leg's diff and nothing truncates what ops read in the row`,
+        );
+        okLine(
+          `THE KIND CONTROL IS WHY THE BOUND IS ${DETAIL_MAX_LINES} AND NOT 2: the longest caption the shipped ` +
+          `builder emits ("Starting your build (<sha>)…", ${DEPLOY_DETAIL_KIND.length} chars) reaches ` +
+          `${kindWorstLines} line-boxes at ${DD_WIDTHS[0]} and is UNCLIPPED in all ${cells} cells. Its adversarial ` +
+          `ceiling over a varchar(255) git_ref is ${DEPLOY_DETAIL_BUILDER_MAX} chars — reported so a future tightening ` +
+          `is a decision somebody makes rather than one they discover, and deliberately NOT pinned, because the ` +
+          `wrap boundary is a property of the STRING and not of the CSS`,
+        );
+        okLine(
+          `data-cap carries at most ${capAttrWorst} characters beside the ${DEPLOY_DETAIL_STORE_CAP}-char caption. ` +
+          `It is asserted rather than deleted because the attribute is the only thing distinguishing the two ` +
+          `caption branches in a screenshot — but nothing in this tree READS it (its only readers are the /new step ` +
+          `caption's own tests), so a second full copy of the caption in the DOM was pure weight`,
+        );
+      }
+    }
+
   } catch (err) {
     // AUDITED (exit 2): the probe itself threw, so NOTHING was measured — an
     // incomplete run must never be reported as a measured overflow.

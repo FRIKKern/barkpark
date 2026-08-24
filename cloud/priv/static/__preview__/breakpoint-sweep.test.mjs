@@ -600,13 +600,13 @@ const census = scenarioReport({ scenarios: SCENARIOS });
 test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 115);
+  assert.equal(r.total, 116);
   assert.equal(r.cells, 27);
   assert.equal(r.distinctCovered, 26, "mixed-fleet is used twice — 27 cells cover 26 DISTINCT scenarios");
-  assert.equal(r.residue, 89, "89 is the RESIDUE, not the census");
+  assert.equal(r.residue, 90, "90 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 89, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 90, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

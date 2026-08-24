@@ -12919,6 +12919,93 @@ test("W4 deployRailHtml: renders the shared step component + a copyable live URL
 const DEPLOY_COMMON_SH = path.join(REPO_ROOT, "deploy/lib/site-deploy-common.sh");
 const DEPLOY_NODE_SH = path.join(REPO_ROOT, "deploy/site-deploy-node.sh");
 
+// ── cch-deploy-detail-render-has-no-cap: THE SUB-CAPTION'S BOUNDS, BOTH ENDS ──
+//
+// The STORE end is derived here from registry.ex, and the DISPLAY end from
+// app.css, because the whole finding was that those two numbers had never met:
+// cch-w34-s5 widened `deployments.detail` to :text, leaving the shared 2 KB
+// `validate_console_line/1` as the only bound, and the render derivation had
+// none at all. The geometry lives in overflow-guard.mjs
+// (W34-deploy-detail-render-bound); these are the text-side assertions that
+// keep its fixture and its remedy pointed at the real producers.
+test("cch-deploy-detail-render-has-no-cap: the caption fixture's cap is DERIVED from registry.ex, and reds when the store moves it", async () => {
+  const scen = await import("./__preview__/scenarios.mjs");
+  const registry = fs.readFileSync(path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/registry.ex"), "utf8");
+  // `set_deployment_detail/2` runs the detail through the SHARED
+  // `validate_console_line/1`, whose only bound is this attribute. Read IT, not
+  // a remembered number.
+  const attr = registry.match(/@max_console_line_chars\s+([\d_]+)/);
+  assert.ok(attr, "@max_console_line_chars is gone from registry.ex — the caption's store bound has lost its producer");
+  assert.equal(
+    scen.DEPLOY_DETAIL_STORE_CAP, Number(attr[1].replace(/_/g, "")),
+    "the fixture mirrors the store's cap; the store moved it, so move the fixture (and re-run the overflow guard) " +
+    "rather than editing this number to match",
+  );
+  // The cruel caption must land exactly ON the cap, which is what proves it is
+  // the longest thing the column can hold rather than a shorter string wearing
+  // the cap's name.
+  assert.equal(scen.DEPLOY_DETAIL_CRUEL.length, scen.DEPLOY_DETAIL_STORE_CAP,
+    "the cruel caption must be exactly the store cap");
+  // AND IT IS CRUEL BY LENGTH, NOT BY TOKEN SHAPE. That distinction is the
+  // whole reason this caption's remedy differs from `.status-pill-detail`'s:
+  // a fixture that smuggled in an unbreakable run would drag the page sideways
+  // and the leg would "prove" a bound that fixed a different defect.
+  const longest = Math.max(...scen.DEPLOY_DETAIL_CRUEL.split(/\s+/).map((w) => w.length));
+  assert.ok(longest < 200,
+    "the cruel caption's longest unbreakable run is " + longest + " chars — that is the TOKEN-SHAPE defect " +
+    "(`.status-pill-detail`'s, app.css), not this one, and it would make the vertical bound untestable");
+  // The KIND control is the SHIPPED producer's own caption, and it must stay
+  // the shipped producer's own caption. `buildConsole.caption` is the only
+  // writer of this field in the fleet.
+  const builderGo = fs.readFileSync(path.join(REPO_ROOT, "internal/builder/builder.go"), "utf8");
+  assert.ok(
+    builderGo.includes('con.caption("Starting your build (%s)…", refOrNone(d.GitRef))'),
+    "the builder's longest caption moved — the KIND control in scenarios.mjs is no longer the string a person " +
+    "actually sees, and the render bound was chosen to keep THAT string whole",
+  );
+  assert.equal(
+    scen.DEPLOY_DETAIL_KIND, "Starting your build (7f31c0d5ba9e4c218d63a07f5e1b8c94a2d60f3b)…",
+    "the KIND control is that format over the 40-char SHA a builder actually carries",
+  );
+});
+
+test("cch-deploy-detail-render-has-no-cap: the render bound is a DISCLOSED clamp on display only, never a cut in the renderer", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const rule = css.match(/\n\.deploy-detail \{([\s\S]*?)\n\}/);
+  assert.ok(rule, "the `.deploy-detail` rule is gone from app.css — the caption's only render bound went with it");
+  const clamp = rule[1].match(/-webkit-line-clamp:\s*(\d+)/);
+  // A CLAMP, not a max-height. The clamp is what makes the browser paint the
+  // ellipsis; a bare max-height + overflow:hidden bounds identical pixels and
+  // reads as the whole caption — a silent cut, which is the shape this epic
+  // exists to kill.
+  assert.ok(clamp, "`.deploy-detail` has no -webkit-line-clamp — a bound without one is a SILENT cut");
+  assert.ok(/overflow:\s*hidden/.test(rule[1]), "the clamp needs `overflow: hidden` to engage");
+  assert.ok(/display:\s*-webkit-box/.test(rule[1]), "-webkit-line-clamp only binds inside `display: -webkit-box`");
+  const lines = Number(clamp[1]);
+  // The floor is the KIND control's own worst case, MEASURED at 320 in the
+  // browser guard (3 line-boxes). A clamp at or below it shreds the caption a
+  // person reads every day.
+  assert.ok(lines > 3,
+    `-webkit-line-clamp: ${lines} is at or below the 3 line-boxes the shipped builder's own caption takes at 320 ` +
+    "— the bound would buy the 2 KB case by shredding the ordinary one",
+  );
+  // THE RENDERER STILL EMITS THE WHOLE CAPTION. The bound is on DISPLAY only,
+  // so the row a person opens still carries every character the store holds.
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = js.slice(js.indexOf("function deployDetailHtml(d, st)"), js.indexOf("// ------------------------------------------- rollback / redeploy"));
+  assert.ok(fn.length > 0, "deployDetailHtml is no longer where this assertion can find it");
+  assert.ok(!/\.slice\(|substring\(|String\.prototype/.test(fn),
+    "deployDetailHtml cuts the caption in JS — the bound must be on the BOX, not on the bytes, or ops lose the capture",
+  );
+  // And data-cap carries a LENGTH, never a second copy of the caption.
+  assert.ok(!/data-cap="' \+ esc\(d\.detail\)/.test(fn),
+    "data-cap is a second full copy of the caption in the DOM, and nothing in this tree reads it",
+  );
+  assert.ok(/data-cap="' \+ deployDetailCap\(d\.detail\)/.test(fn),
+    "data-cap should carry the caption's length — the one thing a clamped box cannot show",
+  );
+});
+
 test("cch-w25-s3: the rail fixture's cut is DERIVED from emit(), and reds when the producer moves it", async () => {
   const scen = await import("./__preview__/scenarios.mjs");
   const sh = fs.readFileSync(DEPLOY_COMMON_SH, "utf8");
