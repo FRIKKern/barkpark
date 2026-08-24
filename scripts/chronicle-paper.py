@@ -747,11 +747,11 @@ def index_payload(
     return {
         "_id": "barkpark-chronicle",
         "slug": "barkpark-chronicle",
-        "title": "What’s new in Barkpark · the complete changelog",
+        "title": "What’s new in Barkpark",
         "description": "Premium, source-linked Barkpark release notes across day, week, month, and year editions.",
         "style": "article",
         "event_type": "changelog.index",
-        "source_doc": f"git:first-parent:index:{all_digest}",
+        "source_doc": f"git:first-parent:index:{all_digest}:premium",
         "tags": [
             {"tag": "barkpark", "strength": 100, "rationale": "Canonical Barkpark product history."},
             {"tag": "docs", "strength": 90, "rationale": "The permanent front door to the project journal."},
