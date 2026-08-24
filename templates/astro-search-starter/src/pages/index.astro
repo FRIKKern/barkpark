@@ -45,7 +45,17 @@ const title = (process.env.BARKPARK_SITE_TITLE || 'Search everything.').trim()
     {/* The graph's landing slot. The island PORTALS the corpus graph in here,
         keeping it inside the finder's React tree (the context bridge) while its
         DOM belongs to this page — so a document page, which renders no slot,
-        simply has no graph. */}
+        simply has no graph.
+
+        `hidden … md:block` controls PAINT ONLY, and paint is only half the job:
+        hiding this box does NOT stop the graph it holds from downloading
+        (measured at 390x844 — display:none and 576,990 B on the wire, charter
+        D79). The MOUNT is gated separately, in FinderIsland via
+        `useIsDesktop()`. The breakpoint below and MD_QUERY in
+        src/components/use-is-desktop.ts must stay in lockstep: if they
+        disagree, one width paints an empty box and the other renders a graph
+        nobody can see. BEAT 6 · PHONE in tooling/search-smoke/journey-smoke.mjs
+        asserts both halves. */}
     <div id="bp-graph-slot" class="hidden min-w-0 flex-1 md:block"></div>
   </div>
 </Base>
