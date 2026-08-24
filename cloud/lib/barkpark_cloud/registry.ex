@@ -5207,6 +5207,37 @@ defmodule BarkparkCloud.Registry do
   plaintext. Stamps `revoked_at`; a revoked token never verifies again. Returns
   `{:ok, %AgentToken{}}`, or `{:error, :not_found}` when a plaintext matches no
   live token.
+
+  RULING (one-way-state census; template PR #13474 / #13551, the
+  `autoupdate_paused` latch): REVOKING AN AGENT TOKEN IS UNRECOVERABLE WITHOUT
+  RE-PROVISIONING THE BOX. Nothing in this repository clears `revoked_at` on an
+  `AgentToken` — the only way a box gets a live one is `mint_agent_token/3` via
+  `put_agent_token/2` inside a provision, resurrect, or support claim, and every
+  one of those routes sits behind `Auth.require_worker` (the shared platform
+  WORKER_TOKEN). There is no rotate route and no re-mint route at any auth level.
+  The recovery cannot be automated even in principle: the only channel able to
+  deliver a fresh token is the provision claim, and the box's own live channel is
+  authenticated by the very token being revoked. The box keeps retrying the dead
+  token forever, and after `AgentRetentionWorker`'s 30-day grace the row is
+  deleted, erasing the evidence.
+
+  So this is deliberately the ONLY agent-token revoker, and it is deliberately
+  SINGULAR. A bulk sibling — `revoke_all_agent_tokens_for_user/1`, wired into
+  `Accounts.update_user_password/4` and `reset_password_by_token/2` — used to
+  exist and was removed: a routine password rotation by ANY member of ANY team
+  (a role-blind join over `list_user_teams/1`) silently killed the agent token of
+  every box those teams owned, taking down the health beat, `/v1/agent/*` and
+  every `/v1/builder/*` route, with no surface saying why and no way back short
+  of a re-provision. It also protected nothing — an agent-token plaintext is
+  emitted to exactly one audience (a WORKER_TOKEN holder), never through a
+  user-authenticated route, so an attacker holding the user's password never had
+  it to lose.
+
+  Before wiring this function to ANY automatic trigger, answer the question that
+  matters for a one-way state: what clears it, and can that clearer run without a
+  human? Here the answer is "a re-provision, and no." Reach for it only for a
+  genuine single-box compromise, where destroying the box's credential is the
+  point and the re-provision is accepted cost.
   """
   @spec revoke_agent_token(AgentToken.t() | binary()) ::
           {:ok, AgentToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
@@ -5223,34 +5254,6 @@ defmodule BarkparkCloud.Registry do
       %AgentToken{} = token -> revoke_agent_token(token)
       nil -> {:error, :not_found}
     end
-  end
-
-  @doc """
-  Revoke every LIVE agent token across all Barkparks owned by any team `user`
-  belongs to — the control-plane half of "change password ⇒ kill machine creds
-  too" (Coolify's `RevokeUserTeamTokens::forUser`,
-  app/Actions/User/RevokeUserTeamTokens.php:20). Agent tokens belong to a
-  Barkpark, which belongs to a team; a user reaches them through their team
-  memberships, so we scope by `barkparks.team_id ∈ user's team ids`.
-
-  A password compromise should kill agent creds for EVERY team the user touches —
-  the safe default. (A tighter "only boxes this user solely owns" rule can narrow
-  the team set later.) Returns `:ok` (the count is irrelevant to the caller).
-  """
-  @spec revoke_all_agent_tokens_for_user(BarkparkCloud.Accounts.User.t() | binary()) :: :ok
-  def revoke_all_agent_tokens_for_user(user) do
-    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
-    team_ids = Enum.map(BarkparkCloud.Accounts.list_user_teams(user), & &1.id)
-
-    from(t in AgentToken,
-      join: b in Barkpark,
-      on: b.id == t.barkpark_id,
-      where: b.team_id in ^team_ids,
-      where: is_nil(t.revoked_at)
-    )
-    |> Repo.update_all(set: [revoked_at: now])
-
-    :ok
   end
 
   ## Sites — hosted websites running co-located with a Barkpark.

@@ -599,7 +599,30 @@ defmodule BarkparkCloud.AccountsTest do
       assert is_nil(Accounts.verify_user_session_token(other))
     end
 
-    test "success revokes the user's teams' agent tokens" do
+    # ONE-WAY STATE (template: PR #13474 / #13551, the `autoupdate_paused` latch).
+    # This test used to assert the OPPOSITE — that a password change also revoked
+    # the user's teams' agent tokens, "the control-plane half of the kill switch".
+    # It was inverted deliberately, and the inversion is the fix.
+    #
+    # Revoking an agent token is a state a box ENTERS automatically and can NEVER
+    # leave: nothing in the repository clears `revoked_at`, and the only minter
+    # (`mint_agent_token/3` via the provision/resurrect claim) sits behind
+    # `Auth.require_worker`. The recovery is not merely absent, it is impossible
+    # to automate — the only channel that can deliver a fresh token is the
+    # provision claim, and the box's own live channel is authenticated by the
+    # token being revoked. So the exit was "re-provision the box".
+    #
+    # And the entry was routine and role-blind: `list_user_teams/1` joins EVERY
+    # membership at ANY role, so the lowest-privilege member rotating their own
+    # password disarmed every box their teams owned — including boxes they could
+    # not otherwise touch — killing the health beat, `/v1/agent/*` and every
+    # `/v1/builder/*` route, with no surface saying why.
+    #
+    # It also protected nothing. An agent-token plaintext is emitted at exactly
+    # one place (`put_agent_token/2`) to exactly one audience (a holder of the
+    # platform WORKER_TOKEN); no user-authenticated route ever returns one. An
+    # attacker holding this user's password never had the agent token to lose.
+    test "success leaves the user's teams' agent tokens ALIVE (machine creds are not user creds)" do
       user = user_fixture(%{password: @valid_password})
       team = team_fixture()
       {:ok, _} = Accounts.add_member(team, user, "owner")
@@ -615,8 +638,33 @@ defmodule BarkparkCloud.AccountsTest do
 
       assert {:ok, _} = Accounts.update_user_password(user, @valid_password, @new_password)
 
-      # The control-plane half of the kill switch: agent creds are dead too.
-      assert is_nil(Registry.verify_agent_token(agent_plain))
+      # The box stays reachable: a routine password rotation must never strand a
+      # machine credential that only a re-provision could reissue.
+      assert Registry.verify_agent_token(agent_plain).id == bp.id
+    end
+
+    # The blast radius that made this urgent: a plain `member` — not an owner —
+    # of a team they do not administer. The revoke was scoped by
+    # `list_user_teams/1`, which is role-blind, so this user's password change
+    # reached a box they have no authority over.
+    test "a non-owner member's password change does not reach boxes they cannot administer" do
+      owner = user_fixture(%{password: @valid_password})
+      member = user_fixture(%{password: @valid_password})
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, owner, "owner")
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      {:ok, bp} =
+        Registry.register_barkpark(team, %{
+          name: "Owner Box",
+          slug: "box-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent_plain, _} = Registry.mint_agent_token(bp, "report")
+
+      assert {:ok, _} = Accounts.update_user_password(member, @valid_password, @new_password)
+
+      assert Registry.verify_agent_token(agent_plain).id == bp.id
     end
   end
 

@@ -8,6 +8,7 @@ defmodule BarkparkCloud.AccountsPasswordResetTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.{User, UserToken}
+  alias BarkparkCloud.Registry
   alias BarkparkCloud.Repo
 
   import Ecto.Query
@@ -125,6 +126,42 @@ defmodule BarkparkCloud.AccountsPasswordResetTest do
       assert {:error, :invalid_token} = Accounts.reset_password_by_token(raw, @new_password)
       # The old password still stands.
       assert %User{} = Accounts.get_user_by_email_and_password(user.email, @password)
+    end
+
+    # ONE-WAY STATE, and this is the sharper of the two entries: the reset route
+    # (`POST /v1/auth/reset`) is UNAUTHENTICATED — proving control of the mailbox
+    # IS the authentication. Until this was removed, anyone who could read a team
+    # member's email could permanently disarm the agent credential of every box
+    # that member's teams owned, with no way back short of re-provisioning each
+    # box. See the twin in accounts_test.exs ("machine creds are not user creds")
+    # for the full reasoning; the short version is that nothing anywhere clears
+    # an AgentToken's `revoked_at`, and the only minter sits behind
+    # `Auth.require_worker`.
+    test "does NOT revoke the user's teams' agent tokens (machine creds are not user creds)" do
+      user = user_fixture()
+
+      {:ok, team} =
+        Accounts.create_team(%{
+          name: "Team #{System.unique_integer([:positive])}",
+          slug: "team-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, _} = Accounts.add_member(team, user, "owner")
+
+      {:ok, bp} =
+        Registry.register_barkpark(team, %{
+          name: "Box",
+          slug: "box-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, agent_plain, _} = Registry.mint_agent_token(bp, "report")
+      assert Registry.verify_agent_token(agent_plain).id == bp.id
+
+      {:ok, {_u, raw}} = Accounts.request_password_reset(user.email)
+      assert {:ok, %User{}} = Accounts.reset_password_by_token(raw, @new_password)
+
+      # The reset signed the human out everywhere; the box stayed reachable.
+      assert Registry.verify_agent_token(agent_plain).id == bp.id
     end
   end
 end
