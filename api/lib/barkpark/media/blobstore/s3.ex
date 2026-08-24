@@ -74,9 +74,13 @@ defmodule Barkpark.Media.Blobstore.S3 do
 
   # The hard ceiling, in bytes, on the response body `download/2` will buffer
   # off the bucket. Tied to the 100 MB upload cap that bounds every
-  # legitimately-written object: the Plug body cap at endpoint.ex:155
-  # (`Plug.Parsers` `length: 100_000_000`) and the raw read at
-  # media_controller.ex:316 (`read_body length:/read_length: 100_000_000`).
+  # legitimately-written object: the `Plug.Parsers` body cap in
+  # `BarkparkWeb.Endpoint` (`length: 100_000_000`) and the raw
+  # `Plug.Conn.read_body/2` in `BarkparkWeb.MediaController`'s `put_blob/2`
+  # (`length:` and `read_length:` both `100_000_000`). That is the LEGACY
+  # controller, NOT `BarkparkWeb.V1.MediaController` — two files share the
+  # basename `media_controller.ex`, which is one more reason a bare
+  # `<basename>:<line>` pin is unsafe here.
   # Every bucket object was written through one of those two capped writers, so
   # a body OVER this cap did not come from a normal upload — it is an
   # out-of-band bucket writer or a redirect to a hostile origin. Req 0.6.3 has
@@ -97,38 +101,55 @@ defmodule Barkpark.Media.Blobstore.S3 do
   # CACHE (`Media.file_path/1`), not on the bucket — the bucket key is derived
   # from the same `relative_path` by `key_for/1`.
   #
+  # CITED BY SYMBOL, NOT BY LINE. This block used to carry twelve `file.ex:NNN`
+  # pins and NINE of them had drifted — `import_member/3` by 342 lines, and the
+  # router pin onto a comment reading "a `:media`-shared scope is public here",
+  # the OPPOSITE of the premise it was cited for. A reviewer
+  # re-validating these skips was walked to the wrong place. Symbols survive
+  # insertion and a `Module.func/arity` in backticks is a claim
+  # tooling/doc-truth actually verifies; a line number is verified by nobody.
+  # Grep the name. Every claim below was re-derived against origin/main and
+  # every one still HOLDS — only the pointers had rotted.
+  #
   # (1) Every UPLOAD path is server-generated. `Media.upload/3` is the ONLY
   #     changeset writer of `media_files.path` in `lib/` — `MediaFile.changeset/2`
-  #     has exactly one call site, media.ex:110, fed the attrs built at
-  #     media.ex:101 — and the value it writes is
+  #     has exactly one call site in `lib/`, inside `Media.upload/3`, fed the
+  #     attrs map built there — and the value it writes is
   #     `"<yyyy>/<mm>/" <> unique_filename(original_name)`. `unique_filename/1`
-  #     (media.ex:654) runs the client filename through `Path.basename/2`, which
-  #     discards every directory component, then slugs the base with
-  #     `~r/[^a-z0-9-]/`, so no separator and no `.` survives:
+  #     runs the client filename through `Path.basename/2`, which discards every
+  #     directory component, then slugs the base with `~r/[^a-z0-9-]/`, so no
+  #     separator survives; the only `.` that can is the one `Path.extname/1`
+  #     re-appends as the extension:
   #     `"../../../etc/passwd"` becomes `"passwd-<hex>"` and `".."` becomes
   #     `"-<hex>."`. A client-supplied filename cannot steer these calls out of
   #     `Media.upload_dir/0`.
   #
   # (2) The IMPORT path is admin-gated, and clause (1) does NOT cover it.
-  #     `import_member/3` (workspace_bundle.ex:1013) COPYs the manifest-named
-  #     tables verbatim — `media_files` is a copy-strategy bundle member
-  #     (workspace_bundle/catalog.ex:98) — straight into the real table with
-  #     `COPY … FROM STDIN`, past `MediaFile.changeset/2` entirely. So an admin
-  #     bundle CAN plant `../../..` in `media_files.path`, and that value reaches
-  #     `Media.file_path/1` and the calls below. What bounds it is
-  #     AUTHORIZATION, not sanitisation: the sole route is router.ex:2544-2548,
-  #     behind `pipe_through([:api, :require_admin])`, and no HTTP token mint
-  #     issues the `admin` permission — the mint allowlists cap at
-  #     `public-read`/`read`/`write`/`chat` (token_controller.ex:30,
-  #     app_token_controller.ex:48, playground_controller.ex:134,
-  #     fleet_support_token_controller.ex:33, auth.ex:325) and the one
-  #     HTTP-reachable personal-access-token mint (auth_controller.ex:238)
-  #     hardcodes `["read"]`. A caller who can plant that path already holds
-  #     admin and can already restore an arbitrary workspace.
+  #     `import_member/3` in `Barkpark.Tenancy.WorkspaceBundle` COPYs the
+  #     manifest-named tables verbatim — `media_files` is a copy-strategy bundle
+  #     member, pinned in `@pinned_e1` in
+  #     `Barkpark.Tenancy.WorkspaceBundle.Catalog` — straight into the real table
+  #     with `COPY … FROM STDIN`, past `MediaFile.changeset/2` entirely. So an
+  #     admin bundle CAN plant `../../..` in `media_files.path`, and that value
+  #     reaches `Media.file_path/1` and the calls below. What bounds it is
+  #     AUTHORIZATION, not sanitisation: the sole route is
+  #     `BarkparkWeb.WorkspaceController`'s `:import` action, mounted in the
+  #     router's `scope "/api"` that pipes through `[:api, :require_admin]`, and
+  #     no HTTP token mint issues the `admin` permission — the mint allowlists
+  #     cap at `public-read`/`read`/`write`/`chat` (`@allowed_permissions` in
+  #     `BarkparkWeb.TokenController`, `@app_token_permissions` in
+  #     `BarkparkWeb.AppTokenController`, the inline `["read", "write"]` in
+  #     `BarkparkWeb.PlaygroundController`, `@support_permissions` in
+  #     `BarkparkWeb.FleetSupportTokenController`, `@claude_session_permissions`
+  #     in `Barkpark.Auth`) and the one HTTP-reachable personal-access-token mint
+  #     — `BarkparkWeb.AuthController`, the sole caller of
+  #     `Auth.create_personal_access_token/3` outside `Barkpark.Auth` — hardcodes
+  #     `["read"]`. A caller who can plant that path already holds admin and can
+  #     already restore an arbitrary workspace.
 
   @impl true
-  # `source_path` is the `%Plug.Upload{path: …}` temp file chosen by Plug
-  # (media.ex:91, the only caller of this verb), never client text — so this
+  # `source_path` is the `%Plug.Upload{path: …}` temp file chosen by Plug —
+  # `Media.upload/3` is the only caller of this verb — never client text, so this
   # `File.read` is bounded independently of both clauses above.
   # sobelow_skip ["Traversal.FileModule"]
   def put_file(relative_path, source_path, opts) do
@@ -205,8 +226,9 @@ defmodule Barkpark.Media.Blobstore.S3 do
   @impl true
   # The `File.rm` drops the local CACHE copy at `Media.file_path/1` — see PATH
   # PROVENANCE above. Like the local backend's `delete/1` this verb is reached
-  # with a path read BACK off a `media_files` row (media.ex:436, `file.path`),
-  # so clause (2) is the operative clause here, not clause (1).
+  # with a path read BACK off a `media_files` row — `Media.delete_file/2` passes
+  # `file.path` to `Blobstore.delete/1` — so clause (2) is the operative clause
+  # here, not clause (1).
   # sobelow_skip ["Traversal.FileModule"]
   def delete(relative_path) do
     url =
@@ -277,8 +299,10 @@ defmodule Barkpark.Media.Blobstore.S3 do
   # ── internals ──────────────────────────────────────────────────────────────
 
   # `full_path` is `ensure_local/1`'s `Media.file_path/1` — see PATH PROVENANCE
-  # above; both callers (processing.ex:47, renditions.ex:120) pass `file.path`
-  # read back off a `media_files` row, so clause (2) is the operative clause.
+  # above; both callers of `Blobstore.ensure_local/1` — in
+  # `Barkpark.Media.Processing` and `Barkpark.Media.Renditions` — pass
+  # `file.path` read back off a `media_files` row, so clause (2) is the
+  # operative clause.
   # `tmp_path` only ever appends a server-generated
   # `".part-<System.unique_integer>"` suffix to that same `full_path`, so it
   # cannot reach a directory `full_path` could not.
