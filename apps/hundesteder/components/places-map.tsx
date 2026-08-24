@@ -699,6 +699,14 @@ export function PlacesMap({
         </div>
       ) : null}
 
+      {/* OSM's attribution requirement is the phrase "© OpenStreetMap
+          contributors", not the project's name alone: the map data is
+          copyright the CONTRIBUTORS, and the Foundation holds no copyright in
+          it. Crediting "© OpenStreetMap" names the wrong party — and it is the
+          only OSM credit anywhere on this site, so nothing else supplies the
+          missing word. The web twin this component was adapted from
+          (web/components/listings-map.tsx) has always rendered the full
+          phrase; only this copy lost it. */}
       {TILES_ENABLED ? (
         <div className={styles.attribution}>
           ©{" "}
@@ -708,7 +716,8 @@ export function PlacesMap({
             rel="noreferrer"
           >
             OpenStreetMap
-          </a>
+          </a>{" "}
+          contributors
         </div>
       ) : null}
     </div>
