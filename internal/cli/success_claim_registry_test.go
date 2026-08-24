@@ -482,6 +482,30 @@ func successClaimRegistry() []claimSite {
 			Backed:       stampStoredBacked(),
 			Contradicted: stampStoredContradicted(),
 		},
+		{
+			// pds-w26-close-pulse-readback. `bp task close` is the SEAL and was
+			// left printing whatever the manifest dispatch rendered — a close
+			// that half-landed exited 0. Its receipt now renders from the STORED
+			// lifecycle_status + criteria; the pair varies on the seal the store
+			// took, never on the one that was asked for.
+			Name: "renderCloseVerdict",
+			Render: func(out *writer, resp any) {
+				renderCloseVerdict(out, closeVerdictReq, resp.(taskboard.SealRow), closePulseReadbackPublished(), exitOK)
+			},
+			Backed:       closeStoredBacked(),
+			Contradicted: closeStoredContradicted(),
+		},
+		{
+			// pds-w26-close-pulse-readback. `bp task pulse` wrote the board's
+			// now-line and printed an epoch it never re-read. The pair varies on
+			// whether the store actually holds the now-line just written.
+			Name: "renderPulseVerdict",
+			Render: func(out *writer, resp any) {
+				renderPulseVerdict(out, pulseVerdictReq, resp.(taskboard.PulseRow), closePulseReadbackPublished(), exitOK)
+			},
+			Backed:       pulseStoredBacked(),
+			Contradicted: pulseStoredContradicted(),
+		},
 
 		// ── migrate_cmd.go / tasks_create_cmd.go — PDS wave 48's two A3 sites ───
 		{
@@ -838,8 +862,11 @@ var requiredEnrollments = []string{
 	"renderSiteRolledBack",
 	"renderSiteDeleted",
 	"renderSiteSettingsUpdated",
-	// PDS wave 26 — the ledger writer this epic's own evidence is made of.
+	// PDS wave 26 — the ledger writer this epic's own evidence is made of,
+	// and its two siblings on the same ledger (pds-w26-close-pulse-readback).
 	"renderStampVerdict",
+	"renderCloseVerdict",
+	"renderPulseVerdict",
 	// PDS wave 48 — the two receipts that asserted from the REQUEST.
 	"migrateTypeReceipt",
 	"renderTaskCreated",
@@ -892,6 +919,29 @@ var ledgerRows = []ledgerRow{
 			prev := stampVerdictReq
 			stampVerdictReq.index = prev.index + 7
 			return func() { stampVerdictReq = prev }
+		},
+	},
+	{
+		// The seal `bp task close` writes. Mutating the EXPECTED seal must move
+		// both halves: the contradicted half names it as what was asked for, and
+		// the backed half is only backed relative to it — a render that ignored
+		// the request would print identical bytes and fail here.
+		Name:     "renderCloseVerdict",
+		ReadBack: taskboard.SealRow{},
+		MutateRequest: func() func() {
+			prev := closeVerdictReq
+			closeVerdictReq.wantSeal = "cancelled"
+			return func() { closeVerdictReq = prev }
+		},
+	},
+	{
+		// The now-line `bp task pulse` writes.
+		Name:     "renderPulseVerdict",
+		ReadBack: taskboard.PulseRow{},
+		MutateRequest: func() func() {
+			prev := pulseVerdictReq
+			pulseVerdictReq.wantNow = prev.wantNow + " (perturbed)"
+			return func() { pulseVerdictReq = prev }
 		},
 	},
 }

@@ -227,6 +227,19 @@ var claimDispositions = []claimDisposition{
 	// ── tasks_stamp_cmd.go — the ledger row the store actually holds ────────
 	{Name: "renderStampVerdict", Identity: []string{"Criterion"}, Post: []string{"Met", "Evidence"}},
 
+	// ── tasks_close_pulse_cmd.go — stamp's two siblings on the same ledger ──
+	// close: the criteria tally is what the row carried going in, so it is the
+	// identity; the SEAL is the post-condition — an "open" where a "done" was
+	// asked for is precisely the close that did not land.
+	{Name: "renderCloseVerdict", Identity: []string{"Met", "Total"}, Post: []string{"LifecycleStatus"}},
+	// pulse: the lease it renewed is the identity (the same claim before and
+	// after); the now-line the board renders is the post-condition, and its
+	// absence is the pulse that never reached a reader.
+	// The axis is the PRESENCE of the now-line, not its text: the failure this
+	// read-back exists for is a pulse that renewed the lease and left the board
+	// with nothing to render.
+	{Name: "renderPulseVerdict", Identity: []string{"ClaimWorker", "ClaimEpoch"}, Post: []string{"Now@presence"}},
+
 	// ── migrate_cmd.go — the count is the LENGTH of what the server returned ─
 	// The transaction id is the thing the write cannot change about itself, so
 	// it is the identity; the post-condition is how many results came back, and
