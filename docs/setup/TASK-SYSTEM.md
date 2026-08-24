@@ -34,6 +34,8 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 
 ## Point an AI agent at it
 
+**Register the movement.** Every unit of work — build, research, plan, audit, spike — runs under a claimed task: if no row names it, create one and claim it FIRST, then work. Unregistered work is unrecoverable — a crashed session is rebuilt only from the ledger, and "what has been going on lately" is answerable only from task events. [AGENT-ONRAMPS](AGENT-ONRAMPS.md) carries the portable form every agent surface renders, and the three ways registration silently does not happen; in this repo it also gates merge ([merge-gates](../ops/merge-gates.md)).
+
 **1. Token.** Any bearer token works for the task endpoints (read tier); creating tasks uses the mutate endpoint (write tier). Dev default: `barkpark-dev-token`.
 
 **2. Discover.** One call teaches the whole surface:
@@ -106,7 +108,7 @@ bp task ready --all                    # aggregate pages; fail closed on repeat/
 bp task ls --limit 20                  # all tasks, goals included
 ```
 
-Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). A misspelt key is a 400 `invalid_filter` naming the supported set, never a silent empty page. Order: priority/creation/UUID; `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
+Filters: `kind`, `label`, `lifecycle_status`, `parent`, `parent_id`, `phase_id`, `type`, `limit`, plus `offset` on `ready` and `ls` (floor 0). **Never cap paging at a round number** — a run stopped at offset 3000 read its own cap as a natural end; the set held 7,652. A misspelt key is a 400 `invalid_filter` naming the supported set, never a silent empty page. Order: priority/creation/UUID; `ls` order is total (updated_at DESC; with `parent`, inserted_at ASC; id tiebreak), pages disjoint; `--all` returns `pagination_stalled` on a repeated/cyclic full page.
 
 **7. Watch the stream.** Both routes are in **What you get**. **Push:** SSE, `task.*`, no polling. **Pull:** `bp task events --since <id>` replays id-ASC, one page (≤500): `{ok, events:[{id,event,doc_id,rev,at}], cursor, has_more}`. `id` = the stable cursor (monotonic PK). Resume with the last `cursor` as `--since`; omit = from start, `has_more:true` → poll again. One `dataset` (default `production`), `type=task`.
 
@@ -146,7 +148,7 @@ A scattered board is a defect — make every new task fit the structure:
 2. **Goals are MISSIONS, named as the outcome a human wants** — e.g. *"Sheets reaches Excel parity"* — never after provenance/process (`loop`, `cleanup`, `misc`) or a label.
 3. **Group by ancestry** — tasks sharing a goal nest beneath it; the parent tree is the spine.
 4. **Labels** (`content.labels`): `proj:<mission>` (required), `phase:<goal|design|decision|build|verify>`, `kind:<deferred|low|…>`, plus gates `needs-human`/`decision`/`security`.
-5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. Decisions and goals may omit them. Merge-gated criteria need `merge_gate:true` — a `landed` close auto-flips only the flag; wording alone just warns.
+5. **Real work tasks carry `acceptance_criteria`** — 1–3 concrete, checkable conditions that define done. **State a CHECK TO RE-RUN, not a predicted state** — "X is intentionally in state Y" has a shelf life, nothing re-checks it, and a stamp outlives what it describes. Decisions and goals may omit them. Merge-gated criteria need `merge_gate:true` — a `landed` close auto-flips only the flag; wording alone just warns.
 6. **Blockers are explicit** — `blocks` edges keep a gated task out of "ready"; one waiting on a human carries `needs-human`/`decision`.
 
 ## Workspaces, projects, datasets — experiment without mess

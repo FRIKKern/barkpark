@@ -55,7 +55,13 @@ A PR targeting `main` must clear:
    not block merge**. It is on this list because a PR that trips it is broken,
    not because the merge button waits for it.
 
-7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. Enforces
+7. **`pr-task-gate` CI job** — `.github/workflows/pr-task-gate.yml`. **Claim the
+   row BEFORE you open the PR**: this gate reads the LEDGER, not the diff, so a
+   correct `Task:` trailer on a row that was never claimed FAILS. And no gate
+   here — this one included — ever opens `acceptance_criteria`, so a `met:true`
+   is worth exactly what the person who stamped it made it worth; a criterion
+   should therefore name a check a reader can RE-RUN, not a state someone once
+   observed. Enforces
    task-obsession layer 1: every PR must carry a `Task: <doc_id>` trailer in its
    description naming a task that is task-backed on the ledger-of-record
    (guerrilla). No task / task not found / task unowned → the check fails. The
@@ -276,6 +282,67 @@ is harmless:
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
 `.github/required-checks.json` — and reds if this page ever again describes a
 transitive upstream of a required aggregator as unable to stop a merge.
+
+### The required set governs the MERGE, not main's health afterwards
+
+**These are two different properties and nothing above distinguishes them.** The
+section you just read settles what can *stop a merge*. It says nothing about what
+*turns main red once the merge lands* — and it is not the same set.
+
+Reported 2026-08-24 by the lead running the merge automation: a PR was merged on
+the strength of four green required contexts **while a fifth, non-required check
+was failing**, and main stayed red for every lane until a follow-up landed. The
+merge was correct by the rule the automation applies. The rule is the gap.
+
+**The mechanism is the trigger block, not the required list.** A workflow with a
+`push:` arm re-runs against the merge commit, so a red one on the PR is a red one
+on main — required or not. Measured 2026-08-24 over the 55 workflows carrying an
+`on:` block:
+
+```bash
+# workflows that re-run on main after a merge — 41 of 55
+for f in .github/workflows/*.yml; do
+  awk '/^on:/{f=1} f{print} f&&/^[a-z]/&&!/^on:/{exit}' "$f" \
+    | grep -q '^  push:' && echo "$f"
+done | wc -l
+```
+
+- **41 carry a `push:` arm** (38 of them scoped to `branches: [main]`) — every one
+  runs again on the merge commit.
+- **36 of those 41 also run on `pull_request`.** These are the ones the incident
+  is about: you saw the red before merging, it had no merge authority, and it
+  moved onto main anyway.
+- **5 are push-only** — `cli-release`, `deploy`, `release-artifact`, `release`,
+  `scaffy-catalog-drift`. They can red main with **no pre-merge signal at all**,
+  because they never appear on a PR to be read.
+- **8 are `pull_request`-only and never run on main**: `pr-task-gate`,
+  `reland-check`, `architecture`, `twoslash`, `search-template-gates`,
+  `deploy-harnesses`, `weekly-changelog`, and `main-gate-watch` itself. A red
+  there **cannot** red main, because nothing re-runs it there.
+
+So the question to ask of a red check is never "is it required?" but
+**"does its workflow have a `push:` arm?"**
+
+**The worked example is a check this page already dissects.**
+`gofmt drift ceiling (blocking)` is documented above as having *no merge
+authority at all* — not required, not `needs:`-ed by any required aggregator,
+structurally ineligible to be required because it is paths-filtered. All true,
+and all about the merge. `go-format.yml` also carries `push: branches: [main]`,
+so a red drift ceiling **merges cleanly and then reds main**. "Cannot block a
+merge" and "cannot hurt you" are not the same sentence.
+
+**And the post-merge watcher does not cover this.** `main-gate-watch.yml` reads
+the required set **live from branch protection** and watches only those contexts
+on main's tip. A red NON-required context on main therefore has *no* watcher:
+main carries a red check while `main-gate-watch` stays green — correctly, since
+that context was never in its scope. The second scream is scoped to the first
+scream's list.
+
+**Operationally:** four required greens are a *merge* predicate, not a
+main-health predicate. Before merging — and especially from automation — read the
+full check list and treat any red whose workflow has a `push:` arm as a red you
+are about to move onto main. It is not blocked, and it will not be caught
+afterwards either.
 
 ### A green gate does not prove the branch was rebased
 

@@ -9,6 +9,8 @@ ships in the CLI (`bp mcp serve --http`); Claude.ai still needs OAuth**
 overview for CLI-capable agents (Claude Code, Codex, Cursor) lives in
 [Agent Onramps](AGENT-ONRAMPS.md).
 
+**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. The full doctrine, and the three ways a registration silently does not happen, is in [Agent Onramps](AGENT-ONRAMPS.md).
+
 Both paths need a **publicly reachable hosted instance** (a local
 `http://localhost:4000` Barkpark can't be reached from OpenAI or Anthropic
 infra) and a **scoped bearer token** — never an admin token ([Token

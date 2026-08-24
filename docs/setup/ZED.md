@@ -5,6 +5,8 @@ Give Zed's Agent Panel a real task board: lifecycle, priorities, and an atomic
 claim/close contract built for concurrent workers, wired in as first-class MCP
 tools ("context servers"). Two minutes, three steps.
 
+**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. The full doctrine, and the three ways a registration silently does not happen, is in [Agent Onramps](AGENT-ONRAMPS.md).
+
 See also: [Agent Onramps](AGENT-ONRAMPS.md) — the shared AUTH + CREATE journeys
 and the same onramp for every other agent surface.
 
