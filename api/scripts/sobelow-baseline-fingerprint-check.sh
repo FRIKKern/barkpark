@@ -27,8 +27,15 @@
 # SKIPPED and excludes them from its population — by its own design, and
 # correctly. This check owns EXACTLY that excluded set and nothing else:
 #
-#   staleness ratchet  ->  rows with a per-line function token   (34 of 41)
-#   this ratchet       ->  rows reconstructible from row data    ( 7 of 41)
+#   staleness ratchet  ->  rows with a per-line function token
+#   this ratchet       ->  rows reconstructible from row data
+#
+# DERIVE THE SPLIT, NEVER QUOTE IT — both checkers print their own counts, and a
+# number written here is stale the next time the baseline moves. (It was 34 + 7
+# of 41 on 2026-08-24, the same day a hardcoded "57 rows" elsewhere in this
+# subsystem was found to have been wrong for weeks.) Run both and add them up:
+#   bash api/scripts/sobelow-baseline-staleness-check.sh   | tail -2
+#   bash api/scripts/sobelow-baseline-fingerprint-check.sh | tail -1
 #
 # The two populations partition the baseline; neither is widened into the
 # other's territory. Run this checker on a baseline of only token-anchored rows
