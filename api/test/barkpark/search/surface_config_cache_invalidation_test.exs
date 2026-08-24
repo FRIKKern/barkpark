@@ -28,7 +28,6 @@ defmodule Barkpark.Search.SurfaceConfigCacheInvalidationTest do
     %{
       "enabled" => true,
       "min_len_1typo" => 5,
-      "min_len_2typo" => 9,
       "similarity_threshold" => 0.9,
       "similarity_threshold_relaxed" => 0.9
     }

@@ -71,17 +71,23 @@ defmodule Barkpark.Search.SurfaceConfigTest do
       assert cs.errors[:searchable_fields]
     end
 
+    # The values here are no longer arbitrary markers: `zero_hit_strategy` is
+    # validated against the strategies QueryPipeline implements, and every
+    # `typo_policy` key must be one a retriever reads. A config the pipeline
+    # cannot act on is refused rather than stored and echoed back.
     test "accepts well-typed values and casts them onto the changeset" do
+      policy = %{"enabled" => true, "min_len_1typo" => 5}
+
       cs =
         SurfaceConfig.changeset(%SurfaceConfig{}, %{
           searchable_fields: [%{"field" => "title", "weight" => 2}],
-          typo_policy: %{"mode" => "aggressive"},
-          zero_hit_strategy: "fallback",
+          typo_policy: policy,
+          zero_hit_strategy: "typo_widen",
           highlight_fields: ["title", "body"]
         })
 
       assert cs.valid?
-      assert Ecto.Changeset.get_change(cs, :typo_policy) == %{"mode" => "aggressive"}
+      assert Ecto.Changeset.get_change(cs, :typo_policy) == policy
       assert Ecto.Changeset.get_change(cs, :highlight_fields) == ["title", "body"]
     end
   end

@@ -132,11 +132,11 @@ defmodule Barkpark.Search.SurfaceConfigCrossTenantTest do
     conn
     |> recycle()
     |> as(token_b())
-    |> put("/v1/data/search/#{@scope}/settings", %{"zeroHitStrategy" => "keep"})
+    |> put("/v1/data/search/#{@scope}/settings", %{"zeroHitStrategy" => "none"})
     |> json_response(200)
 
     assert SurfaceConfigs.get("documents", @scope, ws_a.id)["zero_hit_strategy"] == "typo_widen"
-    assert SurfaceConfigs.get("documents", @scope, ws_b.id)["zero_hit_strategy"] == "keep"
+    assert SurfaceConfigs.get("documents", @scope, ws_b.id)["zero_hit_strategy"] == "none"
     # The global default row is untouched by either tenant's write.
     assert SurfaceConfigs.get("documents", @scope, nil)["zero_hit_strategy"] == "drop_tokens"
   end

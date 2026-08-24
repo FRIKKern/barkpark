@@ -55,7 +55,6 @@ defmodule Barkpark.Search.SurfaceConfigs do
     "typo_policy" => %{
       "enabled" => true,
       "min_len_1typo" => 5,
-      "min_len_2typo" => 9,
       "similarity_threshold" => 0.25,
       "similarity_threshold_relaxed" => 0.15
     },
@@ -77,7 +76,6 @@ defmodule Barkpark.Search.SurfaceConfigs do
     "typo_policy" => %{
       "enabled" => true,
       "min_len_1typo" => 5,
-      "min_len_2typo" => 9,
       "similarity_threshold" => 0.25,
       "similarity_threshold_relaxed" => 0.15
     },
