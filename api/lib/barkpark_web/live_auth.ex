@@ -159,9 +159,35 @@ defmodule BarkparkWeb.LiveAuth do
   # In dev, Studio gets the seeded token automatically — media upload and the
   # :admin/:ops gates all fall back to it — so the host never needs a separate
   # /login step. Production always requires POST /login.
+  #
+  # THE CONFIG KEY IS THE SWITCH, NOT `Mix.env()`. `:dev_browser_token` is set
+  # in exactly one place, `config/dev.exs` — never in config.exs, prod.exs,
+  # test.exs or runtime.exs. So test stays fail-closed (the anonymous-403
+  # contract tests depend on that) and a release never carries the key at all,
+  # because dev.exs is not loaded into one. This is the idiom the sibling
+  # conn-pipeline arm has always used:
+  # `BarkparkWeb.Plugs.OptionalSessionToken.token_from_dev_config/0` reads the
+  # key bare, with no env guard, and its moduledoc states the same reasoning.
+  #
+  # gh-8461 — DO NOT REINTRODUCE A RUNTIME `Mix.` CALL HERE. The previous
+  # `if Mix.env() == :dev` raised, in an OTP release:
+  #
+  #     ** (UndefinedFunctionError) function Mix.env/0 is undefined
+  #        (module Mix is not available)
+  #
+  # Mix is a build-time tool; `mix release` does not ship it (see
+  # `cloud/lib/barkpark_cloud/release.ex`, whose moduledoc says so outright).
+  # `authorize/4` and `scoped_admin_candidates/1` call this UNCONDITIONALLY, so
+  # every `:admin`/`:ops`/`:scoped_admin` Studio mount 500'd in the Docker image
+  # while both `mix phx.server` paths — local dev AND the Hetzner systemd prod
+  # box, which runs `mix phx.server`, not a release — never saw it. That split
+  # is why it went unseen from 827a3e90f0 (2026-05-25) until an outsider running
+  # the container image reported it on 2026-07-31. `ReleaseSafetyTripwireTest`
+  # now fails on any runtime `Mix.*` call from a release-reachable module.
   defp dev_browser_token_fallback do
-    if Mix.env() == :dev do
-      Application.get_env(:barkpark, :dev_browser_token)
+    case Application.get_env(:barkpark, :dev_browser_token) do
+      raw when is_binary(raw) and raw != "" -> raw
+      _ -> nil
     end
   end
 
