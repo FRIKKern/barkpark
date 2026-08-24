@@ -89,6 +89,15 @@ type State struct {
 	// touch Tail/TailGen (that would blank-flash the still-painted prior tail —
 	// the no-blank-flash invariant); the tail carries its generation with it.
 	TailGen int
+	// TailBytes is the UTF-8 byte length of the STREAMED text in Tail (the
+	// freeze notice is deliberately NOT counted), carried so the cap check is
+	// O(delta) rather than O(tail) — re-measuring a quarter-megabyte string on
+	// every delta is the second half of the same runaway-turn problem.
+	TailBytes int
+	// TailCapped is the freeze latch: once the tail breaches MaxTailBytes it
+	// stops growing. Released with the tail at the settle boundary, because the
+	// cap bounds ONE turn's preview, never the session.
+	TailCapped bool
 
 	// Rail is the decoded agents-rail (charter D47) hydrated from the session's
 	// rail_snapshot — task-keyed mission control that survives a surface switch
@@ -451,11 +460,7 @@ func reduceClaudeFrame(st State, data []byte) (State, []Effect) {
 	case frame.Type == "stream_event" &&
 		frame.Event.Type == "content_block_delta" &&
 		frame.Event.Delta.Type == "text_delta":
-		st.Tail += frame.Event.Delta.Text
-		// Stamp the tail with the generation it now belongs to (charter D77): the
-		// settle guard clears the tail only for a GET issued in THIS generation, so
-		// a stale prior-turn fetch can neither wipe nor duplicate this text.
-		st.TailGen = st.Gen
+		st = appendTail(st, frame.Event.Delta.Text)
 		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
 			st.Phase = TurnStreaming
 		}
@@ -524,14 +529,13 @@ func reduceRuntimeFrame(st State, data []byte) (State, []Effect) {
 		if err := json.Unmarshal(frame.Native, &native); err != nil || native.Params.Delta == "" {
 			return st, nil
 		}
-		st.Tail += native.Params.Delta
-		// Stamped with the current generation exactly as the claude lane stamps
-		// it (charter D77), so the settle guard sees the same shape on both lanes.
-		// Residual, recorded: Gen advances only on a claude system/init frame, so
-		// a codex turn keeps the generation it started in — the fence is inert
-		// there rather than wrong, and advancing it on runtime turn boundaries is
-		// a separate parity slice.
-		st.TailGen = st.Gen
+		// Stamped and CAPPED through the same accumulator the claude lane uses
+		// (charter D77), so the settle guard and the display cap see the same
+		// shape on both lanes. Residual, recorded: Gen advances only on a claude
+		// system/init frame, so a codex turn keeps the generation it started in —
+		// the fence is inert there rather than wrong, and advancing it on runtime
+		// turn boundaries is a separate parity slice.
+		st = appendTail(st, native.Params.Delta)
 		if st.Phase == TurnIdle || st.Phase == TurnWaiting {
 			st.Phase = TurnStreaming
 		}
@@ -621,9 +625,62 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 	// the old Phase==TurnIdle guard cleared on the wrong signal and let turn-1
 	// render twice while turn-2 deltas concatenated onto the stale tail.
 	if ev.Gen == st.TailGen {
+		// Clearing the tail also RELEASES the freeze latch — the cap bounds one
+		// turn's preview, never the session. Leaving it latched would silently
+		// cap every later turn in the session at zero bytes, which is a worse
+		// bug than the one the cap fixes.
 		st.Tail = ""
+		st.TailBytes = 0
+		st.TailCapped = false
 	}
 	return st, nil
+}
+
+// MaxTailBytes is the live tail's display cap in UTF-8 BYTES (charter D64's
+// number, the same constant apps/mobile/src/chat/reducer.ts exports as
+// MAX_TAIL_BYTES). The server does NOT enforce it for us: the LiveView caps its
+// own accumulator (chat_live.ex advance_streaming) but chat_controller forwards
+// raw frames, so every client bounds its own tail or a runaway turn grows an
+// unbounded string.
+const MaxTailBytes = 262144
+
+// TailCapNotice is what a frozen tail says — the same honest promise the web's
+// capped bubble makes (chat_live.ex `data-streaming-capped`) and the mobile
+// reducer's TAIL_CAP_NOTICE. It is appended INTO the tail because the tail is
+// the only text the transcript renders.
+const TailCapNotice = "\n\n— live preview truncated — the full response arrives on completion"
+
+// appendTail appends streamed text to the live tail — the ONE accumulator both
+// lanes share, so the D77 generation stamp and the display cap can never
+// diverge between providers.
+//
+// FREEZE semantics at MaxTailBytes (parity with apps/mobile appendTail and the
+// web's capped bubble): the tail stops growing, everything already shown is
+// KEPT, and one honest line says the preview was truncated. The stream is
+// neither closed nor shed — deltas keep arriving, the turn still settles, and
+// the settle refetch brings the full untruncated answer from Postgres.
+//
+// Go strings are already UTF-8, so len() IS the byte length the cap is stated
+// in; the mobile twin has to count code units by hand because JS strings are
+// UTF-16. Same number, same unit, different arithmetic.
+func appendTail(st State, text string) State {
+	// The generation stamp happens on EVERY delta, capped or not (charter D77):
+	// a frozen tail still belongs to this turn, and a settle GET from an older
+	// generation must still be told apart from one that owns it. Stamping only
+	// on the growing path would un-fence the tail the moment it froze.
+	st.TailGen = st.Gen
+	if st.TailCapped {
+		return st
+	}
+	bytes := st.TailBytes + len(text)
+	if bytes > MaxTailBytes {
+		st.Tail += TailCapNotice
+		st.TailCapped = true
+		return st
+	}
+	st.Tail += text
+	st.TailBytes = bytes
+	return st
 }
 
 // cardPending reports whether the row carrying request_id is still awaiting a
