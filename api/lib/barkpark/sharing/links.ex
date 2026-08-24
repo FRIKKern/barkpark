@@ -18,14 +18,37 @@ defmodule Barkpark.Sharing.Links do
   SHA256 is stored" wording that stood here was false, and believing it is what
   made the leak look harmless.
 
-  This context is storage + token mechanics only; the CONTROLLER owns existence
-  validation at mint, TENANCY CONFINEMENT on every admin action, and the
-  per-kind read/write dispatch at resolve.
+  THIS CONTEXT OWNS TWO INVARIANTS THAT ITS CALLERS USED TO RE-DERIVE, because
+  both doors onto the share surface (the HTTP controller and the Studio
+  LiveView handler) reach `create/1` and `revoke/1` and each held only half:
+
+    * `published_ref_id/1` — a link's `ref_id` is a PUBLISHED id. `create/1`
+      applies it unconditionally, so no caller can persist a `drafts.`-prefixed
+      ref. It used to live ONLY in `item_share.ex`'s first line, which meant the
+      HTTP mint never had it (`arpss-w8-bl-share-link-drafts-ref-id`). It
+      DELEGATES the rule to `Content.DraftId` rather than restating it.
+    * `workspace_admin?/2` + `revoke_scoped/2` — the tenancy predicate, keyed on
+      the LINK ROW's OWN `workspace_id`, never a caller-supplied scope. It used
+      to be mirrored as a private helper in BOTH call sites
+      (`arpss-w8-bl-links-context-boundary-predicate`).
+
+  The predicate accepts an already-extracted PRINCIPAL (`%ApiToken{}`,
+  `%User{}`, or a list to try in order) rather than a `%Plug.Conn{}` or a
+  `%Phoenix.LiveView.Socket{}` — that is what lets one function serve both
+  doors without this context learning about the web layer. Each call site
+  extracts its own principal; only the AUTHORIZATION lives here.
+
+  The CONTROLLER still owns existence validation at mint and the per-kind
+  read/write dispatch at resolve.
   """
   import Ecto.Query
 
+  alias Barkpark.Accounts.User
+  alias Barkpark.Auth.ApiToken
+  alias Barkpark.Content.DraftId
   alias Barkpark.Repo
   alias Barkpark.Sharing.ShareLink
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   # Cap the TTL at one year — mirrors Barkpark.Auth @share_token_max_ttl / the
   # share_controller "cap 1y" contract. A JSON-decoded bignum ttl would otherwise
@@ -36,6 +59,91 @@ defmodule Barkpark.Sharing.Links do
   @doc "Hash a raw link token for storage/lookup (SHA256, like ApiToken)."
   @spec hash_token(binary()) :: binary()
   def hash_token(raw), do: :crypto.hash(:sha256, raw) |> Base.encode16(case: :lower)
+
+  @doc """
+  Strip a `drafts.` prefix so a ref_id names the PUBLISHED document.
+
+  A share link is a PUBLIC, anonymous read surface, so its ref must never be a
+  draft id. This is the SHARE SURFACE's single call site for that rule:
+  `create/1` calls it on every write, `ShareLinkController` calls it before
+  validating existence (so the mint validates the id it will actually store) and
+  again when serving a row minted before this landed, and `ItemShare` calls it
+  instead of the inline `String.replace_prefix/3` it used to carry.
+
+  THE RULE ITSELF IS NOT REIMPLEMENTED HERE. It belongs to
+  `Barkpark.Content.DraftId` (the leaf that owns the `drafts.` convention, and
+  what `Content.published_id/1` delegates to); this function only adds the
+  TOTALITY the share surface needs. `DraftId.published_id/1` raises on a
+  non-binary, and `attrs` reaches `create/1` straight off a JSON body where
+  `ref_id` may be absent, nil or a number — so a non-binary is returned
+  UNCHANGED for the changeset's `validate_required` to reject as a 422, rather
+  than raising a 500 out of the context.
+  """
+  @spec published_ref_id(term()) :: term()
+  def published_ref_id(ref_id) when is_binary(ref_id), do: DraftId.published_id(ref_id)
+
+  def published_ref_id(ref_id), do: ref_id
+
+  @doc """
+  Is `principal` an ADMIN MEMBER of `workspace_id`?
+
+  `principal` is an already-extracted `%ApiToken{}` / `%User{}`, or a LIST of
+  candidates (a Studio socket can carry both an api_token session and a
+  logged-in account; either may legitimately hold the seat).
+
+  TOTALITY: bare `TenancyAuth.workspace_admin?/2` RAISES on most shapes that can
+  reach here — `FunctionClauseError` on a nil principal, an `%ApiToken{id: nil}`
+  or a nil workspace id, and `Ecto.Query.CastError` on `""` / any non-UUID
+  binary. Both sides are narrowed first and ANYTHING unmatched is a DENIAL: a
+  500 here would trade a leak for a crash oracle.
+
+  The predicate is `workspace_admin?/2` (the membership ROLE), NEVER
+  `TenancyAuth.authorize/3` — authorize/3's api_token arm ORs the token's GLOBAL
+  `permissions[]` with membership, so a plain `member` of workspace B holding
+  global `admin` perms would PASS it. That actor is exactly the attacker in the
+  committed cross-tenant tests, so swapping the call turns them RED.
+  """
+  @spec workspace_admin?(term(), term()) :: boolean()
+  def workspace_admin?(principal, workspace_id) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil -> false
+      ws_id -> principal_admin?(principal, ws_id)
+    end
+  end
+
+  defp principal_admin?(principals, ws_id) when is_list(principals),
+    do: Enum.any?(principals, &principal_admin?(&1, ws_id))
+
+  defp principal_admin?(%ApiToken{id: id} = token, ws_id) when is_binary(id),
+    do: TenancyAuth.workspace_admin?(token, ws_id)
+
+  defp principal_admin?(%User{id: id} = user, ws_id) when is_binary(id),
+    do: TenancyAuth.workspace_admin?(user, ws_id)
+
+  defp principal_admin?(_principal, _ws_id), do: false
+
+  @doc """
+  Revoke a link only when `principal` administers the link ROW's OWN workspace.
+
+  DENIAL SHAPE: a non-castable id, a missing row, a foreign row, and a row with
+  a nil `workspace_id` ALL collapse to the same `{:error, :not_found}`, so a
+  caller's 404 arm is ONE call site and a foreign row is byte-identical to a
+  missing one. No existence oracle, and no 500 from an uncast `:binary_id`.
+
+  `revoke/1` keeps its arity and its unauthorized behaviour: it has non-HTTP
+  callers with no actor to authorize. Anything reachable by a REQUEST should
+  call this instead.
+  """
+  @spec revoke_scoped(term(), term()) :: {:ok, ShareLink.t()} | {:error, :not_found}
+  def revoke_scoped(principal, id) do
+    with row_id when is_binary(row_id) <- Repo.uuid_or_nil(id),
+         %ShareLink{workspace_id: ws_id} <- Repo.get(ShareLink, row_id),
+         true <- workspace_admin?(principal, ws_id) do
+      revoke(row_id)
+    else
+      _ -> {:error, :not_found}
+    end
+  end
 
   @doc """
   Create an item link. `attrs` must carry `:workspace_id`, `:project_id`,
@@ -59,12 +167,16 @@ defmodule Barkpark.Sharing.Links do
           nil
       end
 
+    # THE CLAMP, applied at the boundary BOTH doors cross rather than at either
+    # of them: whichever key the caller used, the persisted ref names the
+    # published document. Patching only one door is the defect this repairs.
     row_attrs =
       attrs
       |> Map.drop([:ttl, "ttl"])
       |> Map.put(:token_hash, hash_token(raw))
       |> Map.put(:token, raw)
       |> Map.put(:expires_at, expires_at)
+      |> normalize_ref_id()
 
     %ShareLink{}
     |> ShareLink.changeset(row_attrs)
@@ -134,6 +246,17 @@ defmodule Barkpark.Sharing.Links do
     |> order_by([l], desc: l.inserted_at)
     |> Repo.all()
   end
+
+  # `attrs` reaches create/1 with either atom or string keys depending on the
+  # door, so both are normalised; a map carrying neither is left alone for the
+  # changeset to reject.
+  defp normalize_ref_id(%{ref_id: ref} = attrs),
+    do: Map.put(attrs, :ref_id, published_ref_id(ref))
+
+  defp normalize_ref_id(%{"ref_id" => ref} = attrs),
+    do: Map.put(attrs, "ref_id", published_ref_id(ref))
+
+  defp normalize_ref_id(attrs), do: attrs
 
   defp ref_type_filter(query, nil), do: where(query, [l], is_nil(l.ref_type))
   defp ref_type_filter(query, ref_type), do: where(query, [l], l.ref_type == ^ref_type)
