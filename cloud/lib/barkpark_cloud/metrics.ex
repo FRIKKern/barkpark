@@ -73,7 +73,12 @@ defmodule BarkparkCloud.Metrics do
           consumer_roots: [%{path: ..., status: ..., bytes: ..., top: [...] | nil, count: ...}] | nil,
           reported_at: String.t() | nil
         } | nil,
-        service_health: %{pass: non_neg_integer, total: non_neg_integer, failing: [String.t()]}
+        service_health: %{
+          pass: non_neg_integer,
+          skipped: non_neg_integer,
+          total: non_neg_integer,
+          failing: [String.t()]
+        }
       }
 
   `latest` carries the newest beat's SCALAR facts — the ones a trend line cannot
@@ -124,7 +129,7 @@ defmodule BarkparkCloud.Metrics do
     {:beam_swap, "beam_swap_bytes"}
   ]
 
-  @empty_service_health %{pass: 0, total: 0, failing: []}
+  @empty_service_health %{pass: 0, skipped: 0, total: 0, failing: []}
 
   # The all-absent `latest` block — the fixed shape a never-phoned-home box (and
   # a pre-upgrade agent that sends none of these keys) still destructures.

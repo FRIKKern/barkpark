@@ -154,7 +154,14 @@ defmodule BarkparkCloud.Web.RouterHealthTest do
       assert t["disk"] == %{"used_pct" => 42}
       assert t["db_size"] == 123_456_789
       assert t["backup"] == %{"ok" => true, "detail" => "daily backup 2h ago"}
-      assert t["checks"] == %{"pass" => 1, "total" => 2, "failing" => ["websocket"]}
+
+      assert t["checks"] == %{
+               "pass" => 1,
+               "skipped" => 0,
+               "total" => 2,
+               "failing" => ["websocket"]
+             }
+
       assert t["dirty_tree"] == false
       # reported_at is stamped from the event's inserted_at (RFC3339), never nil
       # for a real event.
