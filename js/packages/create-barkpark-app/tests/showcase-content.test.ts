@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { renderPortableDocument } from '@barkpark/react'
 import { showcaseContent } from '../templates/blog-starter/seeds/showcase-content'
 
-// The blog-starter's flagship post body is the FULL 49-type PortableDocument
+// The blog-starter's flagship post body is the FULL 64-type PortableDocument
 // grammar, concatenated from `@barkpark/react`'s pd-golden parity fixtures (one
 // source of truth — see scripts/gen-showcase-content.mjs). This proves the
 // migrated blog renders every canonical block type through the canonical
@@ -55,8 +55,8 @@ function classesOf(nodes: ShapeNode[]): string[] {
 
 const goldens = loadGoldens()
 
-describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => {
-  it('seeds exactly the 49 canonical block types, in sync with the pd-golden fixtures', () => {
+describe('blog-starter showcase seed (64-type PortableDocument grammar)', () => {
+  it('seeds exactly the 64 canonical block types, in sync with the pd-golden fixtures', () => {
     // Guards against drift between the generated seed and the parity fixtures.
     // scaffy:add-block-type Toc MARK:showcase-goldens-toc
     // scaffy:add-block-type Steps MARK:showcase-goldens-steps
@@ -69,7 +69,7 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-goldens-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-goldens-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-goldens-tabs
-    expect(goldens).toHaveLength(63)
+    expect(goldens).toHaveLength(64)
     const goldenTypes = goldens.map((g) => g.type).sort()
     const seedTypes = showcaseContent.map((b) => b.type).sort()
     expect(seedTypes).toEqual(goldenTypes)
@@ -84,10 +84,10 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-seedset-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-seedset-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-seedset-tabs
-    expect(new Set(seedTypes).size).toBe(63)
+    expect(new Set(seedTypes).size).toBe(64)
   })
 
-  it('renders all 49 distinct types through renderPortableDocument, each with its golden class-markers', () => {
+  it('renders all 64 distinct types through renderPortableDocument, each with its golden class-markers', () => {
     const byType = new Map(goldens.map((g) => [g.type, g]))
     const markersSeen = new Set<string>()
 
@@ -112,8 +112,8 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
         expect(html, `${block.type} missing class ${cls}`).toContain(cls)
       }
 
-      // Fingerprint the type by (root tag + its bp-classes) so the run proves 49
-      // DISTINCT renderings, not one repeated 49×.
+      // Fingerprint the type by (root tag + its bp-classes) so the run proves 64
+      // DISTINCT renderings, not one repeated 64×.
       markersSeen.add(`${block.type}:${rootTag}:${bpClasses.sort().join(',')}`)
     }
 
@@ -128,7 +128,7 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-markers-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-markers-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-markers-tabs
-    expect(markersSeen.size).toBe(63)
+    expect(markersSeen.size).toBe(64)
   })
 
   it('exposes the 3 media families (mermaid diagram / asciicast player / static image)', () => {

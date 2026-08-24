@@ -14,4 +14,18 @@ export const coreContainerCases: BlockCase[] = [
   { type: 'toc', block: { type: 'toc', items: [{ text: 'Outline', level: 1 }] } },
   // With an href — the field the renderer used to drop on the floor (mob-zb-s3).
   { type: 'action', block: { type: 'action', label: 'Open', href: 'https://example.com/board' } },
+  {
+    type: 'paper-links',
+    block: {
+      type: 'paper-links',
+      title: 'Continue reading',
+      refs: [
+        {
+          slug: 'paper-authoring-excellence',
+          title: 'Paper authoring excellence',
+          description: 'A practical guide to publishing clear, useful Papers.',
+        },
+      ],
+    },
+  },
 ]

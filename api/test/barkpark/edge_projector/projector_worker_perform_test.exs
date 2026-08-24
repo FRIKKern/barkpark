@@ -23,6 +23,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
   use Barkpark.DataCase, async: true
   use Oban.Testing, repo: Barkpark.Repo
 
+  alias Barkpark.Content
   alias Barkpark.EdgeProjector.ProjectorWorker
 
   # ── Fake seam: content module that returns :not_found for any get_document call ──
@@ -143,18 +144,34 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
   end
 
   describe "upsert op — success path via test-seam overrides" do
-    test "returns :ok when the content and projector seams both succeed" do
+    test "returns :ok and broadcasts the materialised relationship change" do
+      workspace_id = "ws-#{System.unique_integer([:positive])}"
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Content.paper_relations_topic(workspace_id, "production")
+      )
+
       assert :ok =
                perform_job(ProjectorWorker, %{
                  "op" => "upsert",
                  "scope" => "production",
                  "_id" => "real-doc",
                  "types" => ["post"],
+                 "workspace_id" => workspace_id,
                  "content" =>
                    "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeContentFound",
                  "projector" =>
                    "Barkpark.EdgeProjector.ProjectorWorkerPerformTest.FakeProjectorOk"
                })
+
+      assert_receive {:paper_relations_changed,
+                      %{
+                        doc_id: "real-doc",
+                        types: ["post"],
+                        workspace_id: ^workspace_id,
+                        dataset: "production"
+                      }}
     end
   end
 

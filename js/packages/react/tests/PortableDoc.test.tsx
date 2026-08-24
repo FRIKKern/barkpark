@@ -272,6 +272,15 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     marker: 'bp-button--primary',
   },
   {
+    type: 'paper-links',
+    block: {
+      type: 'paper-links',
+      title: 'Continue reading',
+      refs: [{ slug: 'paper-authoring-excellence', title: 'Paper authoring excellence' }],
+    },
+    marker: 'data-paper-link-card',
+  },
+  {
     type: 'diagram',
     block: { type: 'diagram', source: 'graph TD; A-->B', caption: 'Figure 2. d' },
     marker: 'class="mermaid"',
@@ -570,6 +579,37 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(renderToStaticMarkup(<PortableDoc value={null} />)).toContain('class="bp-paper-surface"')
   })
 
+  it('paper-links prefers resolved metadata while keeping authored editorial context', () => {
+    const html = renderPortableDocument([
+      {
+        type: 'paper-links',
+        title: 'Continue reading',
+        refs: [
+          {
+            slug: 'paper-authoring-excellence',
+            title: 'Authored fallback',
+            description: 'Authored summary.',
+            reason: 'See why the system reads clearly.',
+          },
+        ],
+        _paper_links: {
+          'paper-authoring-excellence': {
+            title: 'Live Paper title',
+            description: 'Freshly resolved summary.',
+            event_type: 'paper_updated',
+            rev: 7,
+          },
+        },
+      },
+    ])
+    expect(html).toContain('Live Paper title')
+    expect(html).toContain('Freshly resolved summary.')
+    expect(html).toContain('See why the system reads clearly.')
+    expect(html).toContain('paper_updated · rev 7')
+    expect(html).not.toContain('Authored fallback')
+    expect(html).not.toContain('Authored summary.')
+  })
+
   it('appends an extra className to the surface root', () => {
     const html = renderToStaticMarkup(<PortableDoc value={[]} className="prose" />)
     expect(html).toContain('class="bp-paper-surface prose"')
@@ -603,7 +643,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type CodeTabs MARK:js-count-code-tabs
     // scaffy:add-block-type Tabs MARK:js-count-tabs
     // + 1: field-number (B085) React emitter (pbw-fix-field-number-react).
-    expect(registered).toHaveLength(74)
+    expect(registered).toHaveLength(75)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {

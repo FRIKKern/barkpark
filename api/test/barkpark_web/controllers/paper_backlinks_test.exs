@@ -1,22 +1,21 @@
 defmodule BarkparkWeb.PaperBacklinksTest do
   @moduledoc """
-  `BarkparkWeb.PaperBacklinks.section_html/1` — the reader's "Linked mentions"
-  section render. Pure over the `Content.Graph.reverse_referencers/2` result
-  shape (inbound-edge maps, no DB): N referencers → a section listing the
-  linking titles; zero referencers → NO section (empty string). No context
-  snippets — the indexed engine returns none (the old scan's snippets were
-  dropped when the reader was repointed at the engine).
+  `BarkparkWeb.PaperBacklinks.section_html/1` — graph-backed related Paper cards.
   """
   use ExUnit.Case, async: true
 
   alias BarkparkWeb.PaperBacklinks
 
-  test "N referencers → a 'Linked mentions' section with linked titles" do
+  test "N referencers → rich related-Paper cards with real details" do
     referencers = [
       %{
         from_id: "uuid-alpha",
         from_doc_id: "p-alpha",
         title: "Alpha Paper",
+        description: "The weekly product and delivery brief.",
+        event_type: "weekly_review",
+        rev: "17",
+        updated_at: ~U[2026-08-23 07:00:00Z],
         type: "paper",
         kind: "references",
         via_field: "references",
@@ -35,7 +34,13 @@ defmodule BarkparkWeb.PaperBacklinksTest do
 
     html = PaperBacklinks.section_html(referencers)
 
-    assert html =~ "Linked mentions"
+    assert html =~ "Related papers"
+    assert html =~ "Live from Barkpark’s content graph"
+    assert html =~ ~s(data-live="true")
+    assert html =~ "The weekly product and delivery brief."
+    assert html =~ "Weekly review"
+    assert html =~ "Rev 17 · Updated 23 Aug 2026"
+    assert html =~ ~s(class="bp-paper-card")
     assert html =~ ~s(<section)
     # Linked titles point at /papers/<from_doc_id>.
     assert html =~ ~s(href="/papers/p-alpha")
@@ -84,16 +89,22 @@ defmodule BarkparkWeb.PaperBacklinksTest do
     ]
 
     html = PaperBacklinks.section_html(mixed)
-    assert html =~ "Linked mentions"
+    assert html =~ "Related papers"
     assert html =~ "Shown Paper"
     refute html =~ "Hidden"
+  end
+
+  test "keeps task referencers in the dedicated Driven tasks component" do
+    assert PaperBacklinks.section_html([
+             %{from_doc_id: "task-1", title: "Ship it", type: "task", kind: "references"}
+           ]) == ""
   end
 
   describe "'Used by' grouping — valueref-kind referencers (lvw-t3)" do
     # The body-walk extractor (#714) emits kind: "valueref" for docs whose body
     # inline-references a canonical value doc. The reader groups those under a
     # dedicated "Used by" section (the impact list), FIRST, leaving every other
-    # referencer in the historical "Linked mentions" section.
+    # referencer in the related-Papers section.
 
     defp valueref_ref(doc_id, title) do
       %{
@@ -107,7 +118,7 @@ defmodule BarkparkWeb.PaperBacklinksTest do
       }
     end
 
-    test "valueref referencers render under 'Used by'; others stay under 'Linked mentions'" do
+    test "valueref referencers render under 'Used by'; others stay under related Papers" do
       referencers = [
         valueref_ref("p-impact", "Impact Paper"),
         %{
@@ -126,15 +137,15 @@ defmodule BarkparkWeb.PaperBacklinksTest do
       # Both sections render; "Used by" comes FIRST. Split on the mentions
       # section's class: everything before it is the Used-by group.
       assert [used_by_html, mentions_html] =
-               String.split(html, ~s(class="bp-paper-backlinks"))
+               String.split(html, ~s(class="bp-paper-connections bp-paper-related"))
 
-      assert used_by_html =~ ~s(class="bp-paper-usedby")
+      assert used_by_html =~ "bp-paper-usedby"
       assert used_by_html =~ "Used by"
       assert used_by_html =~ "Impact Paper"
       assert used_by_html =~ ~s(href="/papers/p-impact")
       refute used_by_html =~ "Mention Paper"
 
-      assert mentions_html =~ "Linked mentions"
+      assert mentions_html =~ "Related papers"
       assert mentions_html =~ "Mention Paper"
       refute mentions_html =~ "Impact Paper"
     end
@@ -144,8 +155,8 @@ defmodule BarkparkWeb.PaperBacklinksTest do
 
       assert html =~ "Used by"
       assert html =~ "Only User"
-      refute html =~ "Linked mentions"
-      refute html =~ "bp-paper-backlinks"
+      refute html =~ "Related papers"
+      refute html =~ "bp-paper-related"
     end
 
     test "an all-unresolved valueref group leaves NO Used by markup (fail-closed, no stub)" do

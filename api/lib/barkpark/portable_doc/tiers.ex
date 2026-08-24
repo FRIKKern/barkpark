@@ -111,6 +111,7 @@ defmodule Barkpark.PortableDoc.Tiers do
   # (charter D35): the same self-contained rows for the three INTERACTIVE cards —
   # the block is the read-time VISUAL, its answerability rides the message envelope.
   @widget [
+    "paper-links",
     # scaffy:classify-block-type route MARK:tier-route--widget
     # `route` → :widget: one purposeful visualization over literal data (an
     # encoded polyline), the same family as chart/heatmap/gauge-list.

@@ -767,6 +767,98 @@ const action: Emit = (b) => {
   return `<a href="${href}" class="${cls}">${label}</a>`
 }
 
+/* paper-links (compose.ex paper_links_html) — authored refs render everywhere;
+ * `_paper_links` may carry transient live metadata injected by a reader. */
+
+interface PaperLinkRef {
+  slug: string
+  title: string
+  description: string
+  reason: string
+  eventType: string
+  rev: string
+  updatedAt: string
+}
+
+function nonblank(v: unknown): string {
+  return str(v).trim()
+}
+
+function paperLinkRef(
+  raw: unknown,
+  resolved: Record<string, unknown>,
+  reasons: Record<string, unknown>,
+): PaperLinkRef | undefined {
+  const ref = typeof raw === 'string' ? { slug: raw } : isMap(raw) ? raw : undefined
+  if (ref === undefined) return undefined
+  const slug = nonblank(ref.slug)
+  if (slug === '') return undefined
+  const live = isMap(resolved[slug]) ? resolved[slug] : {}
+
+  return {
+    slug,
+    title: nonblank(live.title) || nonblank(ref.title) || slug,
+    description: nonblank(live.description) || nonblank(ref.description),
+    reason: nonblank(ref.reason) || nonblank(reasons[slug]),
+    eventType: nonblank(live.event_type),
+    rev: nonblank(live.rev),
+    updatedAt: nonblank(live.updated_at),
+  }
+}
+
+function normalizedCopy(copy: string): string {
+  return copy.trim().replace(/\.+$/, '').toLowerCase()
+}
+
+function paperLinkCard(ref: PaperLinkRef): string {
+  const description =
+    ref.description === ''
+      ? ''
+      : `<span style="display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55">${escapeHtml(ref.description)}</span>`
+  const reason =
+    ref.reason !== '' && normalizedCopy(ref.reason) !== normalizedCopy(ref.description)
+      ? `<span style="display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"><strong>Why it matters:</strong> ${escapeHtml(ref.reason)}</span>`
+      : ''
+  const metadataParts = [ref.eventType, ref.rev === '' ? '' : `rev ${ref.rev}`, ref.updatedAt].filter(Boolean)
+  const metadata =
+    metadataParts.length === 0
+      ? ''
+      : `<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.72rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">${escapeHtml(metadataParts.join(' · '))}</span>`
+
+  return (
+    `<a data-paper-link-card href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #dde7e2);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none">` +
+    `<strong style="display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)">${escapeHtml(ref.title)}</strong>` +
+    description +
+    reason +
+    metadata +
+    `</a>`
+  )
+}
+
+const paperLinks: Emit = (b) => {
+  const resolved = isMap(b._paper_links) ? b._paper_links : {}
+  const reasons = isMap(b.reasons) ? b.reasons : {}
+  const cards = asList(b.refs)
+    .map((ref) => paperLinkRef(ref, resolved, reasons))
+    .filter((ref): ref is PaperLinkRef => ref !== undefined)
+    .map(paperLinkCard)
+    .join('')
+  if (cards === '') return ''
+
+  const title = nonblank(b.title) || 'Explore the work'
+  const description = nonblank(b.description)
+  const intro =
+    description === ''
+      ? ''
+      : `<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">${escapeHtml(description)}</p>`
+
+  return (
+    `<section data-paper-links aria-label="${escapeAttr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)">` +
+    `<header style="margin:0 0 1.15rem"><h2 style="margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)">${escapeHtml(title)}</h2>${intro}</header>` +
+    `<div style="display:grid;gap:0.85rem">${cards}</div></section>`
+  )
+}
+
 /* section (compose.ex section_grid_html / compose_section_stack) */
 
 function gridTracks(n: unknown): number {
@@ -1282,6 +1374,7 @@ export const coreEmitters: Record<string, Emit> = {
   diagram,
   asciicast,
   action,
+  'paper-links': paperLinks,
   section,
   columns,
   terminal,

@@ -247,6 +247,7 @@ defmodule Barkpark.PortableDoc.Render do
     block
     |> resolve_ref_title(opts)
     |> resolve_code_label(opts)
+    |> resolve_paper_links(opts)
     |> redact_encrypted_value()
     |> compose_block(style, theme)
     |> render_html(Map.put(opts, :doctype, false))
@@ -311,6 +312,17 @@ defmodule Barkpark.PortableDoc.Render do
   end
 
   defp resolve_code_label(block, _opts), do: block
+
+  # `paper-links` is useful in every renderer even when no database exists: its
+  # authored refs always render as ordinary `/papers/:slug` links. The public
+  # reader may additionally inject a `%{slug => metadata}` map under
+  # `:paper_links`; keep that read-time data transient so it never enters the
+  # stored block or body_html cache.
+  defp resolve_paper_links(%{"type" => "paper-links"} = block, opts) do
+    Map.put(block, "_paper_links", Map.get(opts, :paper_links, %{}))
+  end
+
+  defp resolve_paper_links(block, _opts), do: block
 
   @doc """
   Render a full portable-doc block list as a COMPLETE standalone HTML document

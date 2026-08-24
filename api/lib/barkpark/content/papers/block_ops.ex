@@ -414,6 +414,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # without tags never strips a labeled paper).
       |> maybe_put_paper("tags", attrs["tags"])
       |> maybe_put_paper("description", attrs["description"])
+      |> maybe_put_paper("dedup_bypass", attrs["dedup_bypass"])
       |> maybe_put_paper("reader_checks", attrs["reader_checks"])
       # Session-handoff Task 2 ("generalized upsert"): the fixed known-key
       # allowlist above stays PAPER-ONLY (byte-identical behavior). Sessions
@@ -2542,7 +2543,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   @blocks_doc_reserved_attrs ~w(
     slug dataset blocks workspace_id project_id template style
     source_doc goal_id event_type tags description body_html payload_html
-    branch bypass_wall events conversations
+    branch bypass_wall dedup_bypass events conversations
   )
 
   # Session-handoff Task 2 ("generalized upsert"): `write_encrypted_blocks_doc`'s

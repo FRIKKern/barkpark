@@ -430,6 +430,62 @@ describe('image src resolution (F2)', () => {
   })
 })
 
+/* ── related Paper cards ───────────────────────────────────────────────────── */
+
+describe('paper-links', () => {
+  const block = {
+    type: 'paper-links',
+    title: 'Continue reading',
+    description: 'Useful context for this change.',
+    refs: [
+      {
+        slug: 'paper-authoring-excellence',
+        title: 'Authored fallback title',
+        description: 'Authored fallback summary.',
+        reason: 'See how the writing system works.',
+      },
+    ],
+  }
+
+  it('renders authored details offline without pretending the link is tappable', () => {
+    const w = walk(renderBlockNative(block, { theme }, 0))
+    expect(w.text).toContain('Continue reading')
+    expect(w.text).toContain('Authored fallback title')
+    expect(w.text).toContain('Authored fallback summary.')
+    expect(w.text).toContain('See how the writing system works.')
+    expect(w.pressables).toBe(0)
+  })
+
+  it('prefers live metadata and becomes tappable when connected to a server', () => {
+    const w = walk(
+      renderBlockNative(
+        {
+          ...block,
+          _paper_links: {
+            'paper-authoring-excellence': {
+              title: 'Live Paper title',
+              description: 'Freshly resolved summary.',
+              event_type: 'paper_updated',
+              rev: 7,
+            },
+          },
+        },
+        { theme, serverBase: 'https://guerrilla.barkpark.cloud/' },
+        0,
+      ),
+    )
+    expect(w.text).toContain('Live Paper title')
+    expect(w.text).toContain('Freshly resolved summary.')
+    expect(w.text).toContain('paper updated · revision 7')
+    expect(w.text).not.toContain('Authored fallback summary.')
+    expect(w.pressables).toBe(1)
+  })
+
+  it('drops invalid refs and renders nothing when none remain', () => {
+    expect(renderBlockNative({ type: 'paper-links', refs: [{ slug: '../escape' }] }, { theme }, 0)).toBeNull()
+  })
+})
+
 /* ── honest states for data-driven blocks ───────────────────────────────────── */
 
 describe('data-driven honest states', () => {

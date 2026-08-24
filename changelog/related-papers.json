@@ -1,0 +1,68 @@
+[
+  {
+    "slug": "task-components-editable-demo",
+    "title": "Task components — now fully editable",
+    "keywords": ["task", "board", "queue", "claim", "ready", "tui"],
+    "reason": "See the task experience as a complete, editable product surface."
+  },
+  {
+    "slug": "gui-tui-parity-page",
+    "title": "The GUI ↔ TUI Parity Page",
+    "keywords": ["tui", "cli", "terminal", "parity", "task"],
+    "reason": "A visual account of how the same work stays coherent on the web and in the terminal."
+  },
+  {
+    "slug": "the-80-column-standard",
+    "title": "The 80-Column Standard",
+    "keywords": ["tui", "cli", "terminal", "width", "narrow", "paper", "render"],
+    "reason": "The principle behind keeping rich Papers useful in an ordinary terminal."
+  },
+  {
+    "slug": "view-vs-edit-parity",
+    "title": "View vs Edit — the real 1:1 parity test",
+    "keywords": ["paper", "reader", "editor", "studio", "portable", "render"],
+    "reason": "A side-by-side look at where Paper reading and editing genuinely match."
+  },
+  {
+    "slug": "ssp-visual-addendum",
+    "title": "The tiered desk, seen",
+    "keywords": ["studio", "structure", "desk", "workspace", "visual", "cloud"],
+    "reason": "Real product screenshots showing how Barkpark’s working desk took shape."
+  },
+  {
+    "slug": "viable-everywhere-strategy",
+    "title": "Viable Everywhere — reachable from every agent surface",
+    "keywords": ["mcp", "agent", "chat", "integration", "api", "sdk", "export"],
+    "reason": "The larger idea behind making Barkpark available wherever work already happens."
+  },
+  {
+    "slug": "wave-deck",
+    "title": "The Wave Deck — the epic cycle as an interactive experience",
+    "keywords": ["cycle", "wave", "agent", "workflow", "progress", "roadmap"],
+    "reason": "A richer way to follow long-running work without reading its machinery."
+  },
+  {
+    "slug": "terminal-mermaid-diagrams",
+    "title": "Diagrams that draw themselves in the terminal",
+    "keywords": ["diagram", "mermaid", "terminal", "tui", "render"],
+    "reason": "A playful demonstration of structured visuals surviving outside the browser."
+  },
+  {
+    "slug": "authoring-excellence-wave-2026-07-10",
+    "title": "Authoring Excellence — the wall",
+    "keywords": ["author", "editor", "tag", "paper", "quality", "duplicate"],
+    "reason": "The story of making authored work clearer before it reaches a reader."
+  },
+  {
+    "slug": "enterprise-ready-auth-wave-2026-07-10",
+    "title": "Enterprise-ready sign-in",
+    "keywords": ["auth", "access", "permission", "member", "security", "token", "session"],
+    "reason": "A plain account of the work behind safer sign-in and access."
+  },
+  {
+    "slug": "welcome",
+    "title": "Welcome to Barkpark",
+    "keywords": ["foundation", "docs", "guide", "onboarding", "paper"],
+    "reason": "The shortest route to understanding what a Barkpark Paper is for."
+  }
+]
