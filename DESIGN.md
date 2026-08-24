@@ -14,23 +14,25 @@
 ## Product goals
 - Goals: Make Barkpark shipping activity easy to scan, understand, browse, and trust; make every edition feel like a considered review of the period rather than generated Git output; give project managers, stakeholders, investors, contributors, and curious readers a shared understanding of momentum.
 - Non-goals: Marketing landing pages, raw commit mirrors, release-volume leaderboards, or a new Paper design system.
-- Success signals: A first-time reader can identify the newest release, understand what changed, choose a day/week/month/year view, and reach source evidence without instruction.
+- Success signals: A non-technical first-time reader can answer “What did Barkpark work on?” in under thirty seconds, identify the newest release, choose a day/week/month/year view, and reach source evidence without instruction.
 
 ## Personas and jobs
 - Primary personas: Project managers tracking movement and risk; stakeholders and investors judging direction and momentum; Barkpark users following product progress; contributors checking what landed; operators auditing a release period.
-- User jobs: Understand the period's story, see what materially moved forward, judge why it matters, identify uncertainty, browse prior releases, inspect evidence, and share a stable edition URL.
+- User jobs: Understand the period's story without knowing the codebase, see the few themes that materially moved forward, judge the period honestly, browse prior releases, inspect evidence when wanted, and share a stable edition URL.
 - Key contexts of use: Desktop reading, mobile scanning, linked release announcements, Studio editing, terminal/email parity.
 
 ## Information architecture
 - Primary navigation: Chronicle index → current day/week/month/year editions → adjacent editions and source evidence.
 - Core routes/screens: `/papers/barkpark-chronicle`, `/papers/barkpark-changelog-YYYY-MM-DD`, `/papers/barkpark-changelog-YYYY-wWW`, `/papers/barkpark-changelog-YYYY-MM`, `/papers/barkpark-changelog-YYYY`.
-- Content hierarchy: Branded edition → period in one sentence → editorial review → progress stories → audience impact → watchlist / next horizon → release shape → source-backed ledger → provenance.
+- Content hierarchy: Branded edition → plain-English answer to “What did we work on?” → at most three work themes → one progress assessment → collapsed technical record and archive.
 
 ## Design principles
 - Lead with reader value: Describe the shipped outcome before its repository mechanics.
 - Review, do not transcribe: Synthesize the period into a defensible point of view; counts and commit subjects are evidence, not the story.
 - Brand the period: Every edition earns a short editorial theme that makes the day, week, or month memorable without becoming promotional.
-- Translate across audiences: Explain product, operating, and business relevance in ordinary language; never require repository knowledge.
+- One story for everyone: Explain the work in ordinary language that a colleague, customer, or curious reader can share; do not repeat it through separate audience lenses.
+- Details are the backbone, not the face: Keep counts, categories, commit subjects, charts, and provenance complete but collapsed below the editorial reading path.
+- Lightness through restraint: Let one warm turn of phrase or moment of personality carry the edition; avoid both corporate solemnity and forced jokes.
 - Be candid about uncertainty: Separate shipped facts from interpretation, risks, and future signals. Never invent customers, revenue, adoption, deadlines, or promises.
 - Familiar at first glance: Use recognizable changelog conventions—release date, category, highlight, details, archive, source.
 - Evidence without noise: Keep Git provenance available and explicit, but subordinate it to the product story.
@@ -46,8 +48,8 @@
 - Imagery/iconography: Product screenshots may be added when real assets exist; do not invent decorative imagery. Use terse text labels rather than icon clutter.
 
 ## Components
-- Existing components to reuse: Eyebrow, heading, ingress, byline, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, and inline link.
-- New/changed components: No renderer component required. Chronicle gains an editorial theme, period review callout, source-linked progress-story cards, audience-lens cards, watchlist, and next-horizon section composed from existing blocks.
+- Existing components to reuse: Eyebrow, heading, ingress, byline, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, expandable, and inline link.
+- New/changed components: No renderer component required. Chronicle uses a short plain-English opening, up to three source-linked work-theme cards, one progress-assessment callout, and one expandable technical record composed from existing blocks.
 - Variants and states: Day/week/month/year cards use distinct labels, not arbitrary colors; empty periods receive an explicit quiet-edition message and retain navigation.
 - Token/component ownership: `design/tokens.json` and `api/assets/paper-surface/paper-surface.css` remain canonical; Chronicle-specific composition lives in `scripts/chronicle-paper.py`.
 
@@ -72,18 +74,19 @@
 - Offline/slow network: Core text and links are server-rendered; no remote media is required for the reading path.
 
 ## Content voice
-- Tone: Clear, reflective, specific, and human; closer to a thoughtful Linear, Stripe, or Vercel-style release review than an engineering ledger. Confident about shipped facts, restrained about interpretation.
-- Terminology: Prefer “shipped,” “release,” “improvement,” and “fix.” Reserve “first-parent,” “digest,” and “renderer” for provenance.
-- Microcopy rules: Lead with outcomes; use sentence case; keep labels under five words; avoid unexplained counts; never expose a commit subject as the page's primary promise without rewriting its conventional prefix; use “we” only for a grounded editorial interpretation, never as a substitute for evidence.
+- Tone: Clear, warm, specific, and lightly playful; closer to a beautifully edited product journal than an engineering report. Confident about shipped facts, restrained about interpretation, and comfortable saying that a period was mostly maintenance.
+- Terminology: Prefer ordinary phrases such as “clearer errors,” “more complete results,” “safer access,” and “easier day-to-day use.” Reserve counts, internal component names, code paths, protocols, fields, flags, commit language, “first-parent,” “digest,” and “renderer” for the technical record.
+- Microcopy rules: Answer “What did we work on?” before explaining how; use sentence case; keep labels under five words; use short sentences; group related changes into human themes; never expose a commit subject as the page's primary promise; never require the reader to translate implementation mechanics; use “we” only for grounded editorial interpretation.
+- Main-path language gate: Above the technical record, reject code identifiers, acronyms, endpoints, protocol names, internal product components, and implementation terms such as pagination, allowlists, callbacks, schemas, request IDs, read paths, rollout latches, and retry mechanics.
 
 ## Editorial system
-- Edition contract: `theme`, `standfirst`, `review`, two-to-four `progress_stories`, three audience lenses, `watchlist`, and `next_horizon`.
-- Scale: Daily editions explain what changed and the immediate effect; weekly editions connect changes into a direction of travel; monthly editions assess durable progress, operating posture, and the next strategic signal; annual editions describe the larger arc.
-- Authorship: An AI editorial pass may synthesize the verified event packet. It receives bounded source records and aggregate facts, returns strict structured JSON, and is rejected unless every progress story cites supplied commit identifiers.
+- Edition contract: `theme`, `plain_summary`, one-to-three `work_themes` with `explanation`, `outcome`, and source references, plus one `progress_assessment`.
+- Scale: Daily editions say plainly what kind of day it was and what changed; weekly editions connect work into a direction; monthly editions explain the durable themes; annual editions describe the larger arc. Longer periods do not earn more primary sections—only stronger synthesis.
+- Authorship: An AI editorial pass may synthesize the verified event packet. It receives bounded source records and aggregate facts, returns strict structured JSON, and is rejected unless every work theme cites supplied commit identifiers and passes the main-path language gate.
 - Grounding: Numeric facts are rendered deterministically outside model prose. Model prose must not introduce numbers, customer claims, financial claims, adoption claims, security guarantees, dates, deadlines, or unshipped promises.
 - Fallback: If editorial generation is unavailable or invalid, every edition still receives the same narrative sections from a deterministic, source-grounded editor. Generation and publishing fail soft; evidence never disappears.
 - Freshness: The scheduled publisher generates editorial copy only for the current day, week, month, and year. Historical editions remain stable at their last published review; full-history generation remains available for verification and deliberate backfills.
-- Reader trust: Interpretation is labeled as review or watchlist; the complete source ledger and provenance remain below the editorial layer.
+- Reader trust: The progress assessment distinguishes feature work, reliability work, and quiet periods without spin. The complete programmatic record remains inside one clearly labeled expandable section below the editorial layer.
 
 ## Implementation constraints
 - Framework/styling system: Phoenix/LiveView public reader with PortableDoc block composition and the canonical Paper stylesheet.

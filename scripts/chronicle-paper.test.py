@@ -85,14 +85,14 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("https://github.com/acme/project/pull/13", serialized)
         self.assertIn('"type": "bar-chart"', serialized)
         self.assertIn('"type": "lineage"', serialized)
-        self.assertIn('"text": "The week in review"', serialized)
-        self.assertIn('"text": "What moved forward"', serialized)
-        self.assertIn('"text": "Why this matters"', serialized)
-        self.assertIn('"title": "What we\\u2019re watching"', serialized)
-        self.assertIn('"text": "The next horizon"', serialized)
+        self.assertIn('"text": "What we worked on"', serialized)
+        self.assertIn('"text": "How this period moved"', serialized)
+        self.assertIn('"type": "expandable"', serialized)
+        self.assertIn('"summary": "Technical record and source evidence"', serialized)
+        self.assertNotIn('"text": "Why this matters"', serialized)
         week_h1 = next(block for block in week["blocks"] if block["id"] == "auto:title")
         self.assertEqual(week["title"], week_h1["text"])
-        self.assertRegex(week_h1["text"], r".* — Week 34 .* Dispatch w034-[a-f0-9]{4}-[a-f0-9]{4}")
+        self.assertRegex(week_h1["text"], r".* — Week 34$")
         index = by_slug["barkpark-chronicle"]
         serialized_index = json.dumps(index)
         self.assertIn("/papers/barkpark-changelog-2026-w34", serialized_index)
@@ -238,30 +238,27 @@ class ChroniclePaperTest(unittest.TestCase):
         refs = [event.sha[:10] for event in chronicle.representative_events(selected)]
         raw = {
             "theme": "Closing the quiet failure paths",
-            "standfirst": "The product became more dependable where incomplete states once looked complete.",
-            "review": "This was a week of making system truth easier to see and act on.",
-            "stories": [
-                {"title": "Tasks return to view", "narrative": "The task surface once again reflects the work that is actually available.", "source_refs": [refs[0]]},
-                {"title": "The record becomes legible", "narrative": "The Chronicle gives shipped work a durable narrative and its evidence a stable home.", "source_refs": [refs[-1]]},
+            "plain_summary": "This week was about making Barkpark easier to trust. Missing work returned to view, and the story of what changed became much clearer.",
+            "work_themes": [
+                {"title": "Work returns to view", "explanation": "Available work is visible again instead of disappearing without explanation.", "outcome": "People can see what needs their attention.", "source_refs": [refs[0]]},
+                {"title": "A clearer project story", "explanation": "Shipped work now has a readable account and a stable place to find it.", "outcome": "Progress is easier to follow and share.", "source_refs": [refs[-1]]},
             ],
-            "audiences": [
-                {"label": "For the team", "text": "Planning starts from a more trustworthy operating picture."},
-                {"label": "For stakeholders", "text": "Progress is visible as outcomes with evidence."},
-                {"label": "For readers", "text": "The practical changes are easier to understand."},
-            ],
-            "watchlist": "A broad repair week still needs follow-through in ordinary use.",
-            "next_horizon": "The next signal is whether reliability work creates a calmer product experience.",
+            "progress_assessment": "This was a care-and-repair week. The result is a calmer and more trustworthy picture of the work.",
         }
         editorial = chronicle.validate_editorial(raw, period, selected)
         self.assertEqual("ai", editorial["mode"])
 
-        raw["stories"][0]["source_refs"] = ["not-a-source"]
+        raw["work_themes"][0]["source_refs"] = ["not-a-source"]
         with self.assertRaisesRegex(ValueError, "cite supplied sources"):
             chronicle.validate_editorial(raw, period, selected)
 
-        raw["stories"][0]["source_refs"] = [refs[0]]
-        raw["review"] = "Revenue rose by 20 percent."
+        raw["work_themes"][0]["source_refs"] = [refs[0]]
+        raw["progress_assessment"] = "Revenue rose by 20 percent."
         with self.assertRaisesRegex(ValueError, "numeric claims"):
+            chronicle.validate_editorial(raw, period, selected)
+
+        raw["progress_assessment"] = "The pagination callback is now easier to retry."
+        with self.assertRaisesRegex(ValueError, "implementation jargon"):
             chronicle.validate_editorial(raw, period, selected)
 
     def test_editorial_generation_falls_back_without_blocking_the_archive(self):

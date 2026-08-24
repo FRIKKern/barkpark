@@ -21,8 +21,8 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-editorial-14"
-EDITORIAL_SCHEMA = "barkpark.chronicle-editorial.v1"
+RENDERER_VERSION = "chronicle-editorial-15"
+EDITORIAL_SCHEMA = "barkpark.chronicle-editorial.v2"
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
 EDITORIAL_MODEL = "claude-sonnet-4-6"
@@ -39,6 +39,14 @@ PRODUCT_KINDS = {"feat", "fix", "perf", "revert"}
 EDITORIAL_KINDS = ("day", "week", "month", "year")
 FORBIDDEN_EDITORIAL_CLAIMS = re.compile(
     r"\b(revenue|arr|mrr|profit)\b",
+    re.IGNORECASE,
+)
+FORBIDDEN_MAIN_PATH_LANGUAGE = re.compile(
+    r"\b(?:api|cli|sse|ets|pagination|allowlists?|callbacks?|schemas?|request ids?|"
+    r"read paths?|rollout latches?|retry(?:ability| mechanics?)?|manifests?|corpus|"
+    r"endpoints?|protocols?|mainline|source packets?|deduplicat\w*|diagnostics?|"
+    r"source-backed|evidence-backed|verified records?|codebases?|deploy(?:ment|ments|ed|ing)?|"
+    r"rollbacks?)\b|--|[a-z]+_[a-z]+|/[a-z0-9]",
     re.IGNORECASE,
 )
 
@@ -348,73 +356,62 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
     """A source-only editorial fallback with the same reader contract as AI copy."""
     if not selected:
         return {
-            "theme": f"A quiet {period.kind}, kept visible",
-            "standfirst": "No mainline work landed in this interval. The empty edition remains part of the record so silence is not mistaken for missing data.",
-            "review": "There is no shipped movement to interpret in this edition. That is a useful fact in its own right, and the surrounding archive provides the longer view.",
-            "stories": [],
-            "audiences": [
-                {"label": "For the team", "text": "The calendar stays complete and honest."},
-                {"label": "For stakeholders", "text": "No release claim is being manufactured from an empty interval."},
-                {"label": "For readers", "text": "Adjacent editions remain available for the latest substantive progress."},
-            ],
-            "watchlist": "The next edition should be judged on shipped evidence, not inferred activity.",
-            "next_horizon": "The Chronicle will resume its progress review when the mainline record moves again.",
+            "theme": f"A quiet {period.kind}",
+            "plain_summary": "Nothing new shipped in this period. We keep quiet editions visible so an empty page is never mistaken for a missing one.",
+            "work_themes": [],
+            "progress_assessment": "This was a pause, not a progress claim. The surrounding editions carry the latest substantive work.",
             "mode": "deterministic",
         }
 
-    areas = collections.Counter(event.area for event in selected)
-    lead_areas = [area for area, _count in areas.most_common(3)]
-    product = [event for event in selected if event.kind in PRODUCT_KINDS]
-    candidates = list(reversed(product or selected))
-    stories = []
-    used_areas: set[str] = set()
-    for event in candidates:
-        if event.area in used_areas and len(stories) < min(3, len(lead_areas)):
-            continue
-        effect = {
-            "feat": "This expands what Barkpark can do in everyday use.",
-            "fix": "This removes a failure path and makes the product more dependable.",
-            "perf": "This makes the experience faster or less wasteful under load.",
-            "revert": "This restores the safer known behavior while the direction is reconsidered.",
-        }.get(event.kind, "This strengthens the operating foundation behind the product.")
-        stories.append(
-            {
-                "title": sentence_case(event.title),
-                "narrative": effect,
-                "source_refs": [event.sha[:10]],
-            }
-        )
-        used_areas.add(event.area)
-        if len(stories) == 3:
-            break
-
-    area_phrase = ", ".join(sentence_case(area) for area in lead_areas[:-1])
-    if len(lead_areas) > 1:
-        area_phrase = f"{area_phrase} and {sentence_case(lead_areas[-1])}"
-    else:
-        area_phrase = sentence_case(lead_areas[0])
     fix_heavy = sum(event.kind == "fix" for event in selected) >= max(1, len(selected) // 2)
-    theme = (
-        f"Making {area_phrase} more dependable"
-        if fix_heavy
-        else f"Moving {area_phrase} forward"
-    )
+    feature_heavy = sum(event.kind == "feat" for event in selected) > sum(event.kind == "fix" for event in selected)
+    clusters = [
+        ("Clearer when things go wrong", "Errors and awkward states were made easier to understand and recover from.", "Less guesswork when something needs attention.", ("error", "fail", "status", "refus", "invalid")),
+        ("More complete results", "Work focused on returning the full picture instead of something partial or misleading.", "People can trust that what they see is the whole story.", ("page", "trunc", "partial", "complete", "result", "list")),
+        ("Safer everyday access", "Access rules and sensitive paths were tightened without adding friction to ordinary use.", "The product is more dependable around who can see and do what.", ("access", "auth", "token", "member", "permission", "security")),
+        ("A steadier product", "The less visible edges received the care they need to hold up during real use.", "Everyday work should feel calmer and more predictable.", ("bound", "limit", "buffer", "recover", "retry", "reliab")),
+        ("More useful ways to work", "New capabilities were added and connected to the rest of the product.", "There is more that people can accomplish without leaving Barkpark.", ("add", "introduc", "support", "enable", "create")),
+    ]
+    remaining = list(reversed(selected))
+    work_themes = []
+    for title_value, explanation, outcome, needles in clusters:
+        matches = [event for event in remaining if any(needle in event.title.lower() for needle in needles)]
+        if not matches:
+            continue
+        work_themes.append({
+            "title": title_value,
+            "explanation": explanation,
+            "outcome": outcome,
+            "source_refs": [event.sha[:10] for event in matches[:3]],
+        })
+        matched_shas = {event.sha for event in matches}
+        remaining = [event for event in remaining if event.sha not in matched_shas]
+        if len(work_themes) == 3:
+            break
+    if not work_themes:
+        work_themes.append({
+            "title": "Making Barkpark better",
+            "explanation": "This period was spent improving the product and tidying the rough edges around it.",
+            "outcome": "The result is a more capable, more dependable place to work.",
+            "source_refs": [event.sha[:10] for event in reversed(selected[-3:])],
+        })
+    if feature_heavy:
+        theme = "Opening up new possibilities"
+        summary = "This period was mostly about expanding what Barkpark can do. New capabilities arrived alongside the practical finishing work that helps them feel at home."
+        assessment = "This was a forward-motion period: visible additions led the work, with enough supporting care to keep them useful in practice."
+    elif fix_heavy:
+        theme = "Making everyday work smoother"
+        summary = "This period was mostly about reliability, not flashy new features. We made confusing moments clearer, results more trustworthy, and everyday work a little less fussy."
+        assessment = "This was a care-and-repair period. The progress is quieter, but it leaves Barkpark steadier and easier to rely on."
+    else:
+        theme = "Useful progress, carefully made"
+        summary = "This period mixed new possibilities with the care needed to make them dependable. The common thread was making Barkpark easier to understand and nicer to use."
+        assessment = "This was balanced progress: some visible movement, some behind-the-scenes care, and a product that is better for both."
     return {
         "theme": theme,
-        "standfirst": signal(period, selected) + " The important story is how those changes reduce friction and strengthen the product's operating footing.",
-        "review": (
-            "This was a reliability-led edition: the work concentrated on making failure visible, bounded, and recoverable."
-            if fix_heavy
-            else "This edition combined visible product movement with the supporting work needed to make it hold up in practice."
-        ),
-        "stories": stories,
-        "audiences": [
-            {"label": "For the team", "text": "Clearer boundaries and fewer silent failures make the next increment easier to operate."},
-            {"label": "For stakeholders", "text": "The period shows progress through shipped, inspectable changes rather than activity alone."},
-            {"label": "For readers", "text": "The practical result is a product that behaves more predictably in ordinary and difficult cases."},
-        ],
-        "watchlist": "Breadth can hide unfinished edges; the source ledger remains the test of what actually shipped.",
-        "next_horizon": "The next useful signal is whether this firmer foundation turns into simpler, more confident product use.",
+        "plain_summary": summary,
+        "work_themes": work_themes,
+        "progress_assessment": assessment,
         "mode": "deterministic",
     }
 
@@ -423,44 +420,36 @@ def validate_editorial(raw: Any, period: Period, selected: list[Event]) -> dict[
     if not isinstance(raw, dict):
         raise ValueError("editorial edition must be an object")
     valid_refs = {event.sha[:10] for event in representative_events(selected)}
-    stories_raw = raw.get("stories")
-    audiences_raw = raw.get("audiences")
-    if not isinstance(stories_raw, list) or not 2 <= len(stories_raw) <= 4:
-        raise ValueError("editorial edition needs 2–4 progress stories")
-    if not isinstance(audiences_raw, list) or len(audiences_raw) != 3:
-        raise ValueError("editorial edition needs exactly three audience lenses")
-    stories = []
-    for story in stories_raw:
-        refs = story.get("source_refs") if isinstance(story, dict) else None
+    themes_raw = raw.get("work_themes")
+    if not isinstance(themes_raw, list) or not 1 <= len(themes_raw) <= 3:
+        raise ValueError("editorial edition needs one to three work themes")
+    work_themes = []
+    for theme in themes_raw:
+        refs = theme.get("source_refs") if isinstance(theme, dict) else None
         if not isinstance(refs, list) or not refs or not set(refs) <= valid_refs:
-            raise ValueError("every progress story must cite supplied sources")
-        stories.append(
+            raise ValueError("every work theme must cite supplied sources")
+        work_themes.append(
             {
-                "title": clean_editorial_text(story.get("title"), limit=90),
-                "narrative": clean_editorial_text(story.get("narrative"), limit=520),
+                "title": clean_editorial_text(theme.get("title"), limit=64),
+                "explanation": clean_editorial_text(theme.get("explanation"), limit=300),
+                "outcome": clean_editorial_text(theme.get("outcome"), limit=180),
                 "source_refs": refs[:3],
             }
         )
-    audiences = [
-        {
-            "label": clean_editorial_text(item.get("label"), limit=32),
-            "text": clean_editorial_text(item.get("text"), limit=360),
-        }
-        for item in audiences_raw
-        if isinstance(item, dict)
-    ]
-    if len(audiences) != 3:
-        raise ValueError("invalid audience lens")
-    return {
+    result = {
         "theme": clean_editorial_text(raw.get("theme"), limit=80),
-        "standfirst": clean_editorial_text(raw.get("standfirst"), limit=520),
-        "review": clean_editorial_text(raw.get("review"), limit=800),
-        "stories": stories,
-        "audiences": audiences,
-        "watchlist": clean_editorial_text(raw.get("watchlist"), limit=520),
-        "next_horizon": clean_editorial_text(raw.get("next_horizon"), limit=520),
+        "plain_summary": clean_editorial_text(raw.get("plain_summary"), limit=360),
+        "work_themes": work_themes,
+        "progress_assessment": clean_editorial_text(raw.get("progress_assessment"), limit=300),
         "mode": "ai",
     }
+    visible_copy = " ".join([
+        result["theme"], result["plain_summary"], result["progress_assessment"],
+        *[f"{item['title']} {item['explanation']} {item['outcome']}" for item in work_themes],
+    ])
+    if FORBIDDEN_MAIN_PATH_LANGUAGE.search(visible_copy):
+        raise ValueError("editorial prose contains implementation jargon")
+    return result
 
 
 def editorial_prompt(packets: list[dict[str, Any]]) -> str:
@@ -474,27 +463,40 @@ def editorial_prompt(packets: list[dict[str, Any]]) -> str:
             source_catalog[source["ref"]] = source
     evidence = {"periods": compact_packets, "source_catalog": source_catalog}
     return """
-You are the editor of Barkpark Chronicle, a premium product progress publication.
-Turn the supplied verified Git evidence into an intelligent review that a project
-manager, stakeholder, investor, contributor, and ordinary reader can understand.
+You are the editor of Barkpark Chronicle, a premium, friendly product journal.
+Turn the supplied verified evidence into the simplest truthful answer to one
+question: “What did Barkpark work on?” Write for an intelligent friend who does
+not work in software.
 
-Write with calm editorial judgment. Explain the connective story and practical
-meaning; do not paraphrase a list of commits. Do not use hype. Do not invent or
+Write with warm, light editorial judgment and confident restraint. Group the work
+into human themes; do not paraphrase a list of commits. One gentle turn of phrase
+is welcome, but never force a joke. Do not use hype. Do not invent or
 imply metrics, customers, revenue, adoption, dates, deadlines, security guarantees,
-or future promises. Use no digits anywhere in prose. A watchlist is an honest
-uncertainty, not a defect claim. A next horizon is a signal to watch, not a roadmap.
+or future promises. Use no digits anywhere in prose. Never name internal components,
+code paths, endpoints, protocols, fields, flags, error codes, implementation
+mechanics, or repeat repository wording. Avoid software jargon including pagination,
+allowlists, callbacks, schemas, request IDs, read paths, rollout latches, and retries.
+Translate those details into outcomes such as clearer errors, more complete results,
+safer access, or easier everyday use. The verification system is the invisible
+backbone, not a subject to celebrate in the visible story. Do not use phrases such
+as source-backed, evidence-backed, verified records, deduplicated, diagnostics,
+codebase, deployment, or rollback.
+Do not create separate audience viewpoints.
 Respect each packet's period status. Never describe an in-progress week, month, or
 year as closed, complete, ending, or finished; write “to date” when the distinction matters.
 
 Return only JSON with this exact outer shape, with one edition object for every
 kind supplied in the source packets:
-{"schema":"barkpark.chronicle-editorial.v1","editions":{"day":{"theme":"","standfirst":"","review":"","stories":[{"title":"","narrative":"","source_refs":["exact supplied ref"]}],"audiences":[{"label":"For the team","text":""},{"label":"For stakeholders","text":""},{"label":"For readers","text":""}],"watchlist":"","next_horizon":""}}}
-Each supplied edition needs two to four distinct stories, and every story must cite one to
-three exact refs from that edition's supplied sources. Scale the judgment: day is
-immediate effect, week is direction, month is durable progress, year is the arc.
-Keep the theme under eight words, standfirst under forty-five words, review under
-eighty words, each story under fifty-five words, each audience lens under thirty-five
-words, and the watchlist and next horizon under forty-five words each.
+{"schema":"barkpark.chronicle-editorial.v2","editions":{"day":{"theme":"","plain_summary":"","work_themes":[{"title":"","explanation":"","outcome":"","source_refs":["exact supplied ref"]}],"progress_assessment":""}}}
+Each supplied edition needs one to three distinct work themes, and every theme must
+cite one to three exact refs from that edition's supplied sources. The plain summary
+must answer the reader's question in two or three short sentences. The progress
+assessment must say honestly whether this was feature work, care-and-repair work,
+balanced work, or a quiet period. Scale the judgment: day is immediate effect, week
+is direction, month is durable progress, year is the arc. Longer periods still get no
+more than three themes. Keep the theme under six words, summary under fifty words,
+each explanation under thirty-five words, each outcome under twenty words, and the
+assessment under forty words.
 
 Verified source packets:
 """.strip() + "\n" + json.dumps(evidence, ensure_ascii=False, separators=(",", ":"))
@@ -586,7 +588,10 @@ def generate_current_editorials(
     try:
         raw = request_editorials(packets, provider)
     except (KeyError, ValueError, RuntimeError, subprocess.SubprocessError, urllib.error.URLError) as exc:
-        print(f"chronicle-paper: editorial generation fell back safely: {exc}", file=sys.stderr)
+        print(
+            f"chronicle-paper: editorial generation fell back safely ({type(exc).__name__})",
+            file=sys.stderr,
+        )
         return {}
     valid: dict[str, dict[str, Any]] = {}
     for kind in active_kinds:
@@ -759,11 +764,14 @@ def editorial_story_section(
                 "tone": "ok" if primary.kind == "feat" else "info",
                 "slots": {
                     "title": [{"type": "heading", "level": 3, "text": story["title"]}],
-                    "body": [{"type": "paragraph", "content": [text(story["narrative"])]}],
+                    "body": [{
+                        "type": "paragraph",
+                        "content": [text(f"{story['explanation']} {story['outcome']}")],
+                    }],
                     "action": [
                         {
                             "type": "action",
-                            "label": "See the shipped work" if len(sources) > 1 else "View source",
+                            "label": "See what shipped",
                             "href": event_url(primary, repo),
                         }
                     ],
@@ -775,26 +783,6 @@ def editorial_story_section(
         "type": "section",
         "layout": {"mode": "grid", "tracks": 1},
         "blocks": cards,
-    }
-
-
-def editorial_audience_section(block_id: str, audiences: list[dict[str, str]]) -> dict[str, Any]:
-    return {
-        "id": block_id,
-        "type": "section",
-        "layout": {"mode": "grid", "tracks": 1},
-        "blocks": [
-            {
-                "id": f"{block_id}:card-{index + 1}",
-                "type": "card",
-                "tone": ("info", "ok", "info")[index],
-                "slots": {
-                    "title": [{"type": "heading", "level": 3, "text": item["label"]}],
-                    "body": [{"type": "paragraph", "content": [text(item["text"])]}],
-                },
-            }
-            for index, item in enumerate(audiences)
-        ],
     }
 
 
@@ -851,21 +839,13 @@ def period_payload(
     editorial = editorial or deterministic_editorial(period, selected)
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in selected)
-    folio_parts = edition_folio(period, selected).split("-")
     display_titles = {
-        "day": (
-            f"{editorial['theme']} — {period.start.strftime('%d %B %Y').lstrip('0')} · Edition "
-            f"{period.start.timetuple().tm_yday:03d}-{folio_parts[0]}-{folio_parts[1]}"
-        ),
+        "day": f"{editorial['theme']} — {period.start.strftime('%d %B %Y').lstrip('0')}",
         "week": (
-            f"{editorial['theme']} — Week {period.key.split('-W')[-1]} · {period.start.strftime('%d %b')}–"
-            f"{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')} · Dispatch "
-            f"w{period.start.isocalendar()[1]:03d}-{folio_parts[0]}-{folio_parts[1]}"
+            f"{editorial['theme']} — Week {period.key.split('-W')[-1]}"
         ),
-        "month": (
-            f"{editorial['theme']} — {period.title} · Volume {period.start.month:03d}-{folio_parts[0]}-{folio_parts[1]}"
-        ),
-        "year": f"{editorial['theme']} — Barkpark in {period.title} · Annual {period.title}-{folio_parts[0]}-{folio_parts[1]}",
+        "month": f"{editorial['theme']} — {period.title}",
+        "year": f"{editorial['theme']} — Barkpark in {period.title}",
     }
     date_range = f"{period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}"
     through_date = selected[-1].occurred_at.date() if selected else min(
@@ -877,77 +857,56 @@ def period_payload(
     sequence_limit = 10 if period.kind == "month" else 5
     ledger_limit = 40 if period.kind == "month" else LEDGER_PREVIEW_LIMIT
     blocks: list[dict[str, Any]] = navigation_blocks(periods, period.kind)
-    blocks.extend(
-        [
-            {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
-            heading("auto:title", 1, display_titles[period.kind]),
-            {"id": "auto:ingress", "type": "ingress", "content": [text(editorial["standfirst"])]},
-            paragraph("auto:dek", "A plain-language review of what moved, why it matters, and what the evidence suggests watching next."),
-            {"id": "auto:byline", "type": "byline", "items": [date_range, "Source-grounded review", f"Through {through_date.strftime('%d %B %Y').lstrip('0')}" ]},
-            {
-                "id": "auto:release-pulse",
-                "type": "stats",
-                "items": [
-                    {"value": str(len(selected)), "label": "mainline changes"},
-                    {"value": percentage(len(product), len(selected)), "label": "product-facing share"},
-                    {"value": str(len(areas)), "label": "areas touched"},
-                    {"value": dominant_kind, "label": "dominant change kind"},
-                ],
-            },
-            {"id": "auto:divider-review", "type": "divider"},
-            heading("auto:review-title", 2, f"The {period.kind} in review"),
-            {
-                "id": "auto:review",
-                "type": "callout",
-                "tone": "info",
-                "title": "Editorial read",
-                "content": [text(editorial["review"])],
-            },
-            heading("auto:progress-title", 2, "What moved forward"),
-            paragraph("auto:progress-dek", "The most consequential threads in the period, translated from implementation into practical progress."),
-            editorial_story_section("auto:progress-stories", editorial["stories"], selected, repo)
-            if editorial["stories"]
-            else paragraph("auto:progress-stories", "No shipped movement to review in this interval."),
-            heading("auto:audience-title", 2, "Why this matters"),
-            paragraph("auto:audience-dek", "The same progress, viewed from the people planning, backing, and using the product."),
-            editorial_audience_section("auto:audiences", editorial["audiences"]),
-            {
-                "id": "auto:watchlist",
-                "type": "callout",
-                "tone": "warn",
-                "title": "What we’re watching",
-                "content": [text(editorial["watchlist"])],
-            },
-            heading("auto:horizon-title", 2, "The next horizon"),
-            paragraph("auto:horizon", editorial["next_horizon"]),
-            {"id": "auto:divider-shape", "type": "divider"},
-            heading("auto:shape-title", 2, "The evidence behind the story"),
-            paragraph("auto:shape-dek", "The programmatic record keeps the editorial review honest: what shipped, where it landed, and how the period was distributed."),
-            change_profile("auto:change-profile", selected, f"Updates by category · {period.key}"),
-            area_cards("auto:areas", selected, repo, limit=area_limit),
-            {"id": "auto:divider-sequence", "type": "divider"},
-            heading("auto:sequence-title", 2, "Latest updates"),
-            paragraph("auto:sequence-dek", f"The {min(sequence_limit, len(selected))} newest changes in this edition, with source links."),
-            event_lineage("auto:sequence", selected, repo, limit=sequence_limit),
-            {"id": "auto:divider-ledger", "type": "divider"},
-            heading("auto:ledger-title", 2, "Complete release log"),
-        ]
-    )
+    blocks.extend([
+        {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
+        heading("auto:title", 1, display_titles[period.kind]),
+        {"id": "auto:ingress", "type": "ingress", "content": [text(editorial["plain_summary"])]},
+        paragraph("auto:dek", "A short, human account comes first, so you can understand the work without knowing the machinery behind it. The detailed receipts are tucked neatly underneath."),
+        {"id": "auto:byline", "type": "byline", "items": [date_range, f"Through {through_date.strftime('%d %B %Y').lstrip('0')}"]},
+        {"id": "auto:divider-work", "type": "divider"},
+        heading("auto:work-title", 2, "What we worked on"),
+        editorial_story_section("auto:work-themes", editorial["work_themes"], selected, repo)
+        if editorial["work_themes"]
+        else paragraph("auto:work-themes", "No new work landed in this interval."),
+        heading("auto:progress-title", 2, "How this period moved"),
+        {
+            "id": "auto:progress-assessment",
+            "type": "callout",
+            "tone": "info",
+            "title": "The short version",
+            "content": [text(editorial["progress_assessment"])],
+        },
+        {"id": "auto:divider-record", "type": "divider"},
+    ])
+    technical_record: list[dict[str, Any]] = [
+        paragraph("auto:record-intro", "The detailed record behind this edition: counts, categories, source links, and the complete release trail."),
+        {
+            "id": "auto:release-pulse",
+            "type": "stats",
+            "items": [
+                {"value": str(len(selected)), "label": "mainline changes"},
+                {"value": percentage(len(product), len(selected)), "label": "product-facing share"},
+                {"value": str(len(areas)), "label": "areas touched"},
+                {"value": dominant_kind, "label": "dominant change kind"},
+            ],
+        },
+        heading("auto:shape-title", 2, "Release shape"),
+        change_profile("auto:change-profile", selected, f"Updates by category · {period.key}"),
+        area_cards("auto:areas", selected, repo, limit=area_limit),
+        heading("auto:sequence-title", 2, "Latest updates"),
+        event_lineage("auto:sequence", selected, repo, limit=sequence_limit),
+    ]
     if period.kind == "month":
         product_signals = [event for event in selected if event.kind in PRODUCT_KINDS]
-        insertion = blocks.index(next(block for block in blocks if block["id"] == "auto:divider-sequence"))
-        blocks[insertion:insertion] = [
-            {"id": "auto:divider-cadence", "type": "divider"},
+        technical_record.extend([
             heading("auto:cadence-title", 2, "How the month unfolded"),
-            paragraph("auto:cadence-dek", "A week-by-week view of the month, useful for spotting shipping bursts and quieter stretches."),
             weekly_activity("auto:weekly-cadence", selected, period),
             heading("auto:product-title", 2, "Product updates"),
-            paragraph("auto:product-dek", "The newest features, fixes, performance improvements, and restorations from this month."),
             event_lineage("auto:product-signals", product_signals, repo, limit=8),
-        ]
+        ])
     if events is not None and archive is not None:
-        insertion = blocks.index(next(block for block in blocks if block["id"] == "auto:divider-ledger"))
-        blocks[insertion:insertion] = child_archive_blocks(period, selected, events, archive)
+        technical_record.extend(child_archive_blocks(period, selected, events, archive))
+    technical_record.append(heading("auto:ledger-title", 2, "Complete release log"))
     if selected:
         items = []
         for event in reversed(selected[-ledger_limit:]):
@@ -959,27 +918,28 @@ def period_payload(
                     text(f" · {event.area}"),
                 ]
             )
-        blocks.append({"id": "auto:ledger", "type": "list", "ordered": False, "items": items})
+        technical_record.append({"id": "auto:ledger", "type": "list", "ordered": False, "items": items})
         omitted = len(selected) - len(items)
         label = f"Open the complete source ledger ({len(selected):,} changes)"
         suffix = f"; {omitted:,} earlier changes are omitted from this reading view." if omitted else "."
-        blocks.append(paragraph("auto:ledger-source", [link(label, ledger_url(period, repo)), text(suffix)]))
+        technical_record.append(paragraph("auto:ledger-source", [link(label, ledger_url(period, repo)), text(suffix)]))
     else:
-        blocks.append(paragraph("auto:ledger", "No release activity was inferred or backfilled for this period."))
-    blocks.extend(
-        [
-            {"id": "auto:divider-provenance", "type": "divider"},
-            paragraph(
-                "auto:provenance",
-                f"Generated from first-parent Git history for {period.start.isoformat()} through {(period.end - dt.timedelta(days=1)).isoformat()} UTC · {editorial['mode']} editorial review · renderer {RENDERER_VERSION} · digest {digest(selected)}.",
-            ),
-        ]
-    )
+        technical_record.append(paragraph("auto:ledger", "No release activity was inferred or backfilled for this period."))
+    technical_record.append(paragraph(
+        "auto:provenance",
+        f"Generated from first-parent Git history for {period.start.isoformat()} through {(period.end - dt.timedelta(days=1)).isoformat()} UTC · edition {edition_folio(period, selected)} · {editorial['mode']} editorial review · renderer {RENDERER_VERSION} · digest {digest(selected)}.",
+    ))
+    blocks.append({
+        "id": "auto:technical-record",
+        "type": "expandable",
+        "summary": "Technical record and source evidence",
+        "children": technical_record,
+    })
     payload = {
         "_id": period.slug,
         "slug": period.slug,
         "title": display_titles[period.kind],
-        "description": f"A source-grounded review of Barkpark progress in {period.title}, with reader impact, watchpoints, and the complete release record.",
+        "description": f"A clear, source-grounded account of what Barkpark worked on in {period.title}.",
         "style": "article",
         "event_type": f"changelog.{period.kind}",
         "source_doc": f"git:first-parent:{period.kind}:{period.key}:{digest(selected)}:{editorial_digest(editorial)}",
@@ -1020,7 +980,7 @@ def index_payload(
         "day": (
             "Latest release",
             latest_day,
-            f"{latest_day.title} · {sentence_case(latest.title) if latest else 'No release yet'}",
+            day_editorial["plain_summary"],
             "Read the latest notes",
         ),
         "week": (
@@ -1054,7 +1014,7 @@ def index_payload(
             }
         )
     all_digest = digest(events)
-    lead = day_editorial["standfirst"]
+    lead = day_editorial["plain_summary"]
     monthly = collections.Counter(event.occurred_at.month for event in current_year)
     first_active_month = min(monthly) if monthly else periods["month"].start.month
     month_bars = [
@@ -1083,11 +1043,7 @@ def index_payload(
     latest_card = [
         {
             "title": day_editorial["theme"],
-            "text": (
-                f"Today’s editorial review · latest source: {sentence_case(latest.title)}"
-                if latest
-                else "No release has been recorded yet."
-            ),
+            "text": day_editorial["plain_summary"],
             "href": f"/papers/{latest_day.slug}",
             "label": "Read the release",
             "tone": "ok",
@@ -1113,8 +1069,8 @@ def index_payload(
             "id": "auto:today-review",
             "type": "callout",
             "tone": "info",
-            "title": "Today in review",
-            "content": [text(day_editorial["review"])],
+            "title": "What we worked on today",
+            "content": [text(day_editorial["progress_assessment"])],
         },
         {"id": "auto:divider-featured", "type": "divider"},
         heading("auto:featured-title", 2, "Latest release"),
