@@ -102,7 +102,7 @@ export function coord(v: unknown): number | undefined {
  * that single row drags the bounding box to the pole and collapses the landing
  * map towards MIN_ZOOM: one malformed document, and every other pin on the
  * shared surface becomes an unreadable dot. */
-const LAT_LIMIT = 900;
+const LAT_LIMIT = 90;
 const LNG_LIMIT = 180;
 
 /** Normalise one raw upstream `place` document into a `Place`, or null if it
