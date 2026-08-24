@@ -70,6 +70,25 @@ defmodule BarkparkWeb.ReleaseSafetyTripwireTest do
       "fenced by Code.ensure_loaded?/1 + function_exported?/3 + rescue; degrades to the bundled plugin path in a release"
   }
 
+  # Guards the guard. `:code.which/1` answers `:cover_compiled` under
+  # `mix test --cover` and `:non_existing` for a module it cannot place — both
+  # are skipped by `lib_modules/0`, so a degenerate scan would find zero
+  # offenders and report a PASS while proving nothing. CI runs a plain
+  # `mix test` today, but that is a fact about today. This test fails loudly
+  # instead of passing vacuously if the scan ever stops reaching the tree.
+  test "the scan actually reaches lib/ — it cannot pass by finding nothing" do
+    mods = lib_modules() |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+
+    assert MapSet.size(mods) > 500,
+           "only #{MapSet.size(mods)} module(s) scanned — the scan has degenerated " <>
+             "(cover-compiled? module list empty?) and any PASS below is vacuous"
+
+    # The two modules the sweep exists to reason about must both be in range:
+    # the one that carried the bug, and the one the allowlist exempts.
+    assert MapSet.member?(mods, BarkparkWeb.LiveAuth)
+    assert MapSet.member?(mods, Barkpark.Plugins.Registry.Discovery)
+  end
+
   test "no module compiled from lib/ makes a runtime call into Mix" do
     offenders =
       lib_modules()
