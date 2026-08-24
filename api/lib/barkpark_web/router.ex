@@ -37,6 +37,29 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
     plug(BarkparkWeb.Plugs.OptionalToken)
+    # A token that CARRIES a workspace binding outranks the Default fallback
+    # below (task-28c3f7f0987d6e85). Without this line the flat /v1/* alias
+    # answered every bearer with the seeded Default Workspace's data: a token
+    # minted into workspace B — correctly 403'd `not_a_member` on
+    # /w/default/p/default/v1/data/counts/production — read Default's whole
+    # census through the flat /v1/data/counts/production, and claimed, stamped
+    # and closed Default's tasks through the flat /v1/tasks/* family. The scoped
+    # surface was never wrong; the flat alias simply had no derivation step, so
+    # AssignDefaultScope's "nothing else set it" branch fired for EVERY caller.
+    #
+    # This is the same fix, in the same order, that `:flat_admin_api` (D45/D49,
+    # task-2b396416a680ff0b) and `:cycle_api` (B9) already carry, and the ORDER
+    # is the fix: DeriveWorkspaceFromToken is NO-OP-IF-SET, so placed after
+    # AssignDefaultScope it can never fire.
+    # `test/barkpark_web/flat_alias_tenancy_test.exs` pins the ordering by name,
+    # not by line.
+    #
+    # Nothing anonymous changes. OptionalToken assigns `:api_token` only when a
+    # bearer verified, and the plug is fail-soft on every other input (no token,
+    # a nil `workspace_id` on a pre-tenancy/global token, a workspace row that
+    # no longer exists) — each of those falls straight through to the Default
+    # fallback exactly as before.
+    plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     # Back-compat tenancy shim: flat routes (no /w/:ws/p/:project slugs in the
     # path) infer the seeded Default Workspace/Project so downstream code always
     # has a scope. No-op once a resolver has already set the assigns.
@@ -1297,8 +1320,21 @@ defmodule BarkparkWeb.Router do
   # would double-prefix it to `BarkparkWeb.BarkparkWeb.TasksController`. Same
   # no-alias rationale as the `:ingest` (`/v1/plugins`) and `:public_root` (`/`)
   # plugin wrappers.
+  #
+  # THE WRITE GATE (task-a87a3346b8ff736a). `RequireWriteForMutation` passes
+  # GET/HEAD/OPTIONS untouched and delegates every other method to
+  # `RequireWritePermission`. It is mounted as a bare plug — the same shape the
+  # legacy scopes far below use for `Plugs.LegacyDeprecation` — because a
+  # `pipeline` cannot be conditional on the METHOD, and the routes here are
+  # contributed by `register_routes/1` at compile time, so the router never
+  # names them and a per-route `:require_write` would leave the NEXT
+  # `{:post, …, auth: :token_root}` spec ungated by omission. Gating by method
+  # makes the default for this bucket CLOSED. Do NOT hoist it into
+  # `:require_token`: that pipeline also carries
+  # `DELETE /v1/auth/app-tokens/current`, where a read token revoking ITSELF is
+  # the correct behaviour.
   scope "/v1" do
-    pipe_through([:api, :require_token])
+    pipe_through([:api, :require_token, BarkparkWeb.Plugs.RequireWriteForMutation])
 
     plugin_routes(scope: :token_root)
   end

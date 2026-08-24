@@ -12,7 +12,8 @@ defmodule BarkparkWeb.FinderUrlStateTest do
 
   2. **DEAD SELF-LINKS.** Every non-`paper` type resolved to `~p"/finder"` — a
      link back to the page the reader is already on. `paper` is the only type
-     with a public reader (`live("/papers/:slug")`, router.ex:2442), so an
+     with a public reader (`live("/papers/:slug")` in router.ex — cited by
+     SYMBOL, not by line, because the line anchor rotted), so an
      unlinkable hit now renders as text instead of as a control that does
      nothing.
 
