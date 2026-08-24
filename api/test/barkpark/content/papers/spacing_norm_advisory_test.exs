@@ -197,4 +197,75 @@ defmodule Barkpark.Content.Papers.SpacingNormAdvisoryTest do
     assert warning, "expected a spacing_norm advisory for a blank-text paragraph"
     assert warning.message =~ "1 empty paragraph"
   end
+
+  test "a value-keyed prose paragraph draws NO spacing_norm advisory (the mirror moved with the gate)" do
+    warnings =
+      publish_article!(
+        "spacing-value-keyed",
+        [
+          %{"type" => "heading", "level" => 1, "text" => "Value-keyed prose paper"},
+          para("Honest top-level prose."),
+          %{
+            "type" => "paragraph",
+            "content" => [
+              %{
+                "type" => "paragraph",
+                "value" => "Real prose carried under the documented value key."
+              }
+            ]
+          }
+        ],
+        "Spacing norm value-keyed false positive"
+      )
+
+    assert spacing_warning(warnings) == nil,
+           "expected no spacing_norm advisory for value-keyed prose, got: #{inspect(warnings)}"
+  end
+
+  test "a spacer spelled as an empty inline leaf IS counted - non-empty content is not proof of prose" do
+    # `para("")` is this file's OWN helper: the laundering shape is exactly
+    # what the canonical paragraph builder emits for empty text.
+    warnings =
+      publish_article!(
+        "spacing-laundered",
+        [
+          %{"type" => "heading", "level" => 1, "text" => "Laundered spacer paper"},
+          para("Honest prose."),
+          para("")
+        ],
+        "Spacing norm laundered spacer"
+      )
+
+    warning = spacing_warning(warnings)
+    assert warning, "expected a spacing_norm advisory for a blank inline leaf"
+    assert warning.message =~ "1 empty paragraph"
+  end
+
+  test "a spacer nested inside a paragraph's OWN content is counted - the hard gate walks there too" do
+    # `content` is one of EpicQuality's @nested_keys, so `walk_maps/1` descends
+    # a paragraph's own content and refuses there. The mirror's paragraph
+    # clause used to return 0 without descending, so an author cleared the
+    # advisory and 422'd at the tagged gate - the exact drift the mirror exists
+    # to prevent.
+    warnings =
+      publish_article!(
+        "spacing-under-paragraph",
+        [
+          %{"type" => "heading", "level" => 1, "text" => "Spacer under a paragraph"},
+          para("Honest top-level prose."),
+          %{
+            "type" => "paragraph",
+            "content" => [
+              %{"type" => "text", "value" => "Prose in the outer paragraph."},
+              %{"type" => "paragraph", "content" => []}
+            ]
+          }
+        ],
+        "Spacing norm paragraph-descent blind spot"
+      )
+
+    warning = spacing_warning(warnings)
+    assert warning, "expected a spacing_norm advisory for a spacer under a paragraph"
+    assert warning.message =~ "1 empty paragraph"
+  end
 end
