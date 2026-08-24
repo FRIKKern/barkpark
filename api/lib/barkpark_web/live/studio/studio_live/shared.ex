@@ -405,6 +405,68 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           {:noreply,
            put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
 
+        # ── the four NON-WALL rejection shapes (ae-nonwall-rejection-render) ──
+        #
+        # Wave-11's census (charter D83a) proved these are the only real
+        # `{:error, reason}` shapes beyond the wall tuples that reach here. Each
+        # one degraded to the content-free "Action failed", which tells an author
+        # nothing about a situation every one of them can be recovered from.
+        # A REFUTED fifth: plugin exceptions cannot reach `do_action` — `Hooks.fire`
+        # coerces a raising `before_*` hook to `:ok`.
+
+        # 1. TOCTOU. `Content.get_document` found no draft
+        # (`lifecycle.ex:96-97`) — another tab discarded it, or published it out
+        # from under this one.
+        {:error, :not_found} ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             "That document is no longer there — it may have been discarded, or " <>
+               "already #{String.downcase(msg)} in another tab."
+           )}
+
+        # 2. The rev fence (`mutations.ex:151`, `lifecycle.ex:149`). The most
+        # plausible of the four and the most actionable: an autosave or a second
+        # tab bumped the rev between this pane's read and its write. The revs
+        # themselves are opaque to a person, so the flash spends its words on the
+        # remedy instead.
+        {:error, {:rev_mismatch, _revs}} ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             "The document changed since you loaded it — reload and retry."
+           )}
+
+        # 3. The task lifecycle gate (`lifecycle.ex:349/352/365`,
+        # `mutations.ex:451/565/723/784`). The payload is `%{field => [msg]}` and
+        # every `msg` is PRE-BUILT human prose naming the illegal transition or
+        # the stale-claim race — so it is rendered directly, not re-derived. NOTE
+        # the field is NOT always "lifecycle_status": "claim" and
+        # "acceptance_criteria" emit the same family.
+        {:error, {:invalid_task_content, errors}} when is_map(errors) ->
+          {:noreply, put_flash(socket, :error, format_field_errors(errors))}
+
+        # 4. A RAW changeset, from `Repo.rollback(cs)` on the published-row
+        # upsert (`lifecycle.ex:184-185`) — a concurrent tenant-scope delete
+        # (FK) or a double-publish unique race. It MUST NOT fall through to
+        # `format_wall_details/1`: a changeset IS a map, so `%{} = detail` would
+        # match it, find no field/rule/fix, and `inspect/1` the whole struct —
+        # dumping `:data` (the entire %Document{}, content included) into a
+        # flash. That is strictly worse than "Action failed". Hand-rolled via
+        # `traverse_errors/2` per charter D27; never `to_envelope`.
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             "#{msg} failed: " <>
+               (changeset
+                |> Ecto.Changeset.traverse_errors(&changeset_message/1)
+                |> format_field_errors())
+           )}
+
         {:error, _} ->
           {:noreply, put_flash(socket, :error, "Action failed")}
       end
@@ -412,6 +474,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       {:noreply, socket}
     end
   end
+
+  # `%{field => [message]}` → one flash line. Shared by the
+  # `invalid_task_content` family and the traversed changeset, because both
+  # arrive in exactly that shape. Field-prefixed so a multi-field rejection says
+  # WHICH field, and bounded so a changeset with many errors cannot fill the
+  # screen.
+  @max_error_fields 4
+
+  defp format_field_errors(errors) when is_map(errors) do
+    fields = errors |> Map.to_list() |> Enum.sort_by(&to_string(elem(&1, 0)))
+    shown = Enum.take(fields, @max_error_fields)
+
+    line =
+      Enum.map_join(shown, " · ", fn {field, messages} ->
+        "#{field}: #{messages |> List.wrap() |> Enum.join("; ")}"
+      end)
+
+    case length(fields) - length(shown) do
+      0 -> line
+      n -> line <> " (+#{n} more)"
+    end
+  end
+
+  # `traverse_errors/2` hands each error as `{message, opts}` with `%{count}`
+  # style placeholders still in the message. Interpolating them here keeps the
+  # whole render inside this module — no `to_envelope`, and nothing from the
+  # changeset's `:data` is ever read.
+  defp changeset_message({message, opts}) do
+    Enum.reduce(opts, message, fn {key, value}, acc ->
+      String.replace(acc, "%{#{key}}", to_string(inspect_scalar(value)))
+    end)
+  end
+
+  defp inspect_scalar(value) when is_binary(value) or is_number(value) or is_atom(value),
+    do: value
+
+  # A non-scalar option (a list of allowed values, say) is summarised rather
+  # than inspected in full — the same no-struct-internals rule as above.
+  defp inspect_scalar(value) when is_list(value),
+    do: Enum.map_join(value, ", ", &to_string(inspect_scalar(&1)))
+
+  defp inspect_scalar(_), do: "?"
 
   @doc """
   Render the publish wall's documentation-grade rejection details
