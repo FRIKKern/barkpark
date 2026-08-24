@@ -130,7 +130,7 @@ func TestNextFrontierLostRaceSkipsToNext(t *testing.T) {
 // skip line, then the loop claims the next pick.
 func TestNextFrontierResourceConflictNamesHolder(t *testing.T) {
 	srv := nextFrontierServer(t, map[string]claimReply{
-		"task-a": {status: http.StatusConflict, body: `{"ok":false,"reason":"resource_conflict","conflicts":[{"task":"task-z","worker":"worker-9","resources":["internal/cli/cli.go"]}]}`},
+		"task-a": {status: http.StatusConflict, body: `{"ok":false,"reason":"resource_conflict","conflicts":[{"doc_id":"task-z","worker":"worker-9","resources":["internal/cli/cli.go"]}]}`},
 		"task-b": {body: `{"ok":true,"doc":{"claim":{"epoch":2}}}`},
 	}, nil)
 

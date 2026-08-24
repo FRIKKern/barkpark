@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
 // apiError is the decoded outcome of a non-2xx (or error-shaped) API response.
@@ -387,7 +389,22 @@ func classifyError(status int, body []byte) apiError {
 		if m := bodyMessage(body); m != "" {
 			msg = m
 		}
-		return apiError{exit: exit, code: strErr.Reason, message: msg}
+		// The tasks 409 carries its remedy in a TOP-LEVEL `conflicts` array, a
+		// sibling of `reason` rather than a member of an `error` object, so the
+		// canonical branch above never sees it and this branch used to drop it.
+		// Measured against guerrilla — the server sent
+		//   {"ok":false,"reason":"resource_conflict",
+		//    "conflicts":[{"worker":"build-lane-j","doc_id":"task-4b338…",
+		//                  "resources":["internal/cli/run.go"]}]}
+		// and `bp task claim … -o json` printed
+		//   {"error":{"code":"resource_conflict","message":"resource_conflict"},"ok":false}
+		// while `-o table` printed the single word `resource_conflict`. The
+		// holder, the worker and the exact overlapping path — everything the
+		// caller needs to wait, renegotiate or narrow the fence — was thrown
+		// away by the client after the server had already computed it.
+		// docs/cli/error-exit-table.md:110 has promised "`resource_conflict`
+		// carries `conflicts[]` naming the holders" the whole time.
+		return apiError{exit: exit, code: strErr.Reason, message: msg, details: topLevelConflicts(body)}
 	}
 
 	// Message-only no-code envelope: default usage, downgrade to not-found when
@@ -590,8 +607,58 @@ func detailLinesForCode(code string, raw json.RawMessage) []string {
 		if lines := duplicateOfLines(d); lines != nil {
 			return lines
 		}
+	case "resource_conflict":
+		if lines := resourceConflictLines(d); lines != nil {
+			return lines
+		}
 	}
 	return detailLines(raw)
+}
+
+// maxConflictHolders bounds how many holders a resource_conflict prints, for the
+// same reason maxTagSuggestions exists: the fence scan is bounded by the caller's
+// tenancy, not by a small number.
+const maxConflictHolders = 10
+
+// resourceConflictLines renders the 409 resource_conflict payload
+// {conflicts:[{doc_id, worker, resources}]} as one line per HOLDER, pairing the
+// row id, the worker and the exact overlapping paths. The generic sorted
+// rendering would print the array as one compact-JSON blob under a `conflicts:`
+// key, which buries the three tokens the caller must act on — and the whole
+// point of this refusal is that the server already knows all three.
+//
+// It reads the holder id through apiclient.TaskConflict.HolderID, so the
+// `doc_id`-vs-`task` wire spelling is resolved in ONE place; a payload whose
+// shape is not the contracted one returns nil and falls back to detailLines,
+// exactly like its two publish-wall siblings.
+func resourceConflictLines(d json.RawMessage) []string {
+	var payload struct {
+		Conflicts []apiclient.TaskConflict `json:"conflicts"`
+	}
+	if err := json.Unmarshal(d, &payload); err != nil || len(payload.Conflicts) == 0 {
+		return nil
+	}
+	lines := make([]string, 0, len(payload.Conflicts)+1)
+	for i, c := range payload.Conflicts {
+		if i == maxConflictHolders {
+			lines = append(lines, fmt.Sprintf("… and %d more holder(s)", len(payload.Conflicts)-maxConflictHolders))
+			break
+		}
+		who := c.HolderID()
+		if who == "" {
+			who = "(holder id absent from the refusal)"
+		}
+		if c.Worker != "" {
+			who += " (worker " + c.Worker + ")"
+		}
+		if len(c.Resources) > 0 {
+			who += ": " + strings.Join(c.Resources, ", ")
+		} else {
+			who += ": an overlapping resource the refusal did not name"
+		}
+		lines = append(lines, "held by "+who)
+	}
+	return lines
 }
 
 // maxTagSuggestions bounds the per-name suggestion list unknown_tag prints —
@@ -733,6 +800,29 @@ func fetchSnapshotErr(out *writer, verb string, err error) int {
 	return exitGeneric
 }
 
+// topLevelConflicts lifts a non-empty top-level `conflicts` array out of an
+// {"ok":false,"reason":…} body and returns it as the `details` payload
+// {"conflicts":[…]}, so it reaches BOTH channels the envelope already has: the
+// machine one carries it verbatim (renderErrorEnvelopeDetailed) and the human
+// one renders it through detailLinesForCode. Returns nil when the key is absent
+// or empty, so every other reason's envelope stays byte-identical.
+//
+// Shape-keyed, never reason-keyed: any tasks refusal that names its holders the
+// same way inherits the rendering without a new case here.
+func topLevelConflicts(body []byte) json.RawMessage {
+	var env struct {
+		Conflicts []json.RawMessage `json:"conflicts"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil || len(env.Conflicts) == 0 {
+		return nil
+	}
+	wrapped, err := json.Marshal(map[string]any{"conflicts": env.Conflicts})
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(wrapped)
+}
+
 // bodyMessage extracts a top-level "message" string from an error body, used to
 // give the {"ok":false,"reason":…} shape a human one-liner (e.g. "task not
 // found") instead of the bare reason token. Returns "" when absent.
@@ -795,6 +885,12 @@ func (e apiError) hint() string {
 		return "the task isn't claimable — someone else holds it or it isn't ready; if YOU hold it, re-claim with your own worker id to renew the lease"
 	case "doc_changed_since_claim":
 		return "the task's brief changed since you claimed it — the 409 body names current_rev + changed_fields; re-read with `bp task get <id>`, reconcile, then close with `--set observed_rev=<current_rev>` (strict full-rev CAS, bypasses the digest fence). A plain re-read then close repeats the 409 — a same-worker re-read preserves the claim-time work digest"
+	case "resource_conflict":
+		// NOT a stale-lease case, and that distinction is the whole hint: a
+		// re-claim under your own worker id mints a fresh epoch and changes
+		// NOTHING here, because the fence is held by a DIFFERENT row's live
+		// claim. The holder lines above name the row, the worker and the paths.
+		return "another live claim fences one of your --resources paths (the holders are named above) — wait for it to close, narrow your --resources to paths nobody holds, or ask that worker to hand off. Re-claiming under your own worker id does NOT clear it"
 	case "rate_limited":
 		return "retry with backoff"
 	case "unauthorized":

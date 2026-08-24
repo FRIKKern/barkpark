@@ -166,7 +166,7 @@ func TestDispatchClaimSpawnsOnlyWinners(t *testing.T) {
 	captured := map[string]*capturedClaim{}
 	srv := nextFrontierServer(t, map[string]claimReply{
 		"task-a": {body: `{"ok":true,"doc":{"claim":{"epoch":5}}}`},
-		"task-b": {status: http.StatusConflict, body: `{"ok":false,"reason":"resource_conflict","conflicts":[{"task":"task-z","worker":"worker-9","resources":["internal/cli/cmux_dispatch.go"]}]}`},
+		"task-b": {status: http.StatusConflict, body: `{"ok":false,"reason":"resource_conflict","conflicts":[{"doc_id":"task-z","worker":"worker-9","resources":["internal/cli/cmux_dispatch.go"]}]}`},
 	}, captured)
 
 	var got []string
