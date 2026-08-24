@@ -1700,9 +1700,31 @@ const cannedLedger = (o) => 'function q(params) {\n'
   + '}\n'
   + 'function _unused_real_q(params) {';
 
+// THE CROSS-CHECK READ, CANNED — and canning it is not optional. `fetchRoster` now asks a
+// SECOND endpoint (`/v1/tasks/:id`) for the ledger's own `child_count`, because
+// `/v1/data/query` answers published-only and a draft child is unreachable through it.
+// This file is HERMETIC by contract (see the header: a sentinel `curl` shim proved at
+// wave 6 that no test reaches the network), so a stub for `q` alone would have let the
+// new read escape to the live ledger — which is exactly what it did the first time this
+// was written, reddening 8 tests that had nothing to do with drafts.
+//
+// The default `child_count` is the canned roster's OWN size, so every pre-existing test
+// describes a parent with NO draft children and the new refusal stays silent in all of
+// them. `childCount:` overrides it to open a gap on purpose.
+const cannedTasks = (o) => {
+  const rows = o.rows === Infinity ? 0 : Number(o.rows || 0);
+  const served = o.total === undefined || o.total === null ? rows : Number(o.total);
+  const n = o.childCount === undefined ? served : Number(o.childCount);
+  return 'function qTasks(id) {\n'
+    + '  return { doc: { child_count: ' + n + ' } };\n'
+    + '}\n'
+    + 'function _unused_real_qTasks(id) {';
+};
 const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
 const chain = (...fns) => (s) => fns.reduce((acc, f) => f(acc), s);
-const withLedger = (o) => (s) => must(s, 'function q(params) {', cannedLedger(o));
+const withLedger = (o) => (s) => must(
+  must(s, 'function q(params) {', cannedLedger(o)),
+  'function qTasks(id) {', cannedTasks(o));
 const withPageLimit = (n) => (s) => must(s, 'const ROSTER_PAGE_LIMIT = 500;', `const ROSTER_PAGE_LIMIT = ${n};`);
 const withMaxPages = (n) => (s) => must(s, 'const ROSTER_MAX_PAGES = 40;', `const ROSTER_MAX_PAGES = ${n};`);
 // READ ON THE CLAUSE-(a) LETTERS, NEVER ON THE EXIT CODE, in every control below. The
@@ -1808,7 +1830,16 @@ test('wave 64: a walk that comes back SHORT of the server\'s own total REFUSES (
   assert.match(refused.out, /came back SHORT — 5 unique rows paginated against a server-reported total of 9 \(4 missing\)/);
 
   // THE CONTROL — without the arm, clause (a) certifies 5 rows of a population of 9.
-  const counted = rosterRun(chain(short, (s) => must(s,
+  //
+  // `childCount: 5` ISOLATES THIS ARM, and the reason is worth stating because it is a
+  // real interaction and not a workaround. A ledger serving 5 rows while reporting a total
+  // of 9 ALSO describes a parent whose `child_count` exceeds its published roster, so with
+  // the default canned `child_count` (the reported total) the wave-66 draft arm fires here
+  // too — correctly, on the same 4-row gap, but from the other end. This control exists to
+  // prove that THIS refusal is load-bearing, so the draft arm is given nothing to catch:
+  // `child_count` equal to the rows actually served. Both arms remain armed; only the
+  // overlap is removed.
+  const counted = rosterRun(chain(withLedger({ rows: 5, total: 9, childCount: 5 }), withPageLimit(3), (s) => must(s,
     'if (typeof total === \'number\' && rows.length < total)', 'if (false)')));
   assert.notEqual(counted.status, INFRA);
   assert.doesNotMatch(token(counted.out), /code=ROSTER-INCOMPLETE/, 'the mutation must actually remove the refusal');
@@ -2053,4 +2084,76 @@ test('wave 65: the by-id request actually CARRIES limit and count — read off c
   assert.match(argv, /^filter\[_id\]=some-successor-id$/m, 'never a bare _id — measured live, the wrapper-less form returns the whole table');
   assert.match(argv, /^limit=2$/m, 'one row is the answer; the SECOND row is the proof the filter did not hold');
   assert.match(argv, /^count=true$/m, 'so the refusal can state how many rows actually matched');
+});
+
+// ─── THE PUBLISHED-ONLY ROSTER NAMES ITS OWN BLIND SPOT ──────────────────────────────
+//
+// `/v1/data/query` answers from the PUBLISHED perspective and there is no parameter that
+// changes it. Measured against the live ledger on 2026-08-24, three requests differing in
+// exactly one parameter returned byte-identical bodies:
+//
+//   …?filter[parent_id]=task-fb4fb869490b4213&limit=1&count=true
+//                                     -> {total:348, perspective:"published"}
+//   …&perspective=drafts              -> {total:348, perspective:"published"}
+//   …&zzz_not_a_real_param=1          -> {total:348, perspective:"published"}
+//
+// An unknown perspective is DROPPED, not refused — the same silent drop this predicate
+// already records for `filter[]` and for `order`. So the roster walk cannot be taught to
+// see drafts; it can only be taught to notice that it did not. On the same parent the
+// same day, `/v1/tasks/…` reported child_count 349 against this walk's 348, and the row
+// in the gap was `drafts.dr-w34-bl-5658-blocks-its-own-routing-fix`, OPEN — a live row
+// invisible to the instrument whose whole job is certifying that no live row remains.
+test('wave 66: a DRAFT child the published roster cannot see is a REFUSAL, not a clean seal', () => {
+  // Seven published rows, and a ledger that says there are eight children. The eighth is
+  // a draft. Pre-fix this sealed: clause (a) counted orphans over the seven it could see.
+  const blind = rosterRun(chain(withLedger({ rows: 7, total: 7, childCount: 8 }), withPageLimit(3)));
+  assert.equal(blind.status, INFRA, 'a population this program could not read whole is an infra fault, never a verdict');
+  assert.match(token(blind.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=ROSTER-DRAFT-BLIND/);
+  assert.match(blind.out, /this walk read 7 published rows/);
+  assert.match(blind.out, /child_count 8/);
+  assert.match(blind.out, /1 child is invisible/, 'the DELTA is named, singular');
+  assert.doesNotMatch(blind.out, /VERDICT: SEAL/);
+
+  // BOTH REMEDIES ARE NAMED, because they are opposite and one is destructive: a stale
+  // `drafts.<id>` twin published over its parent overwrites the published criteria and can
+  // un-stamp a met one. The refusal must not let a reader guess.
+  assert.match(blind.out, /TWIN/);
+  assert.match(blind.out, /published-wins/);
+
+  // THE CONTROL — mutation-proof that the arm is load-bearing. Soften the refusal into a
+  // warning and the identical run certifies clause (a) CLEAN over the seven rows it could
+  // see, with an eighth live row it never read. That is the false seal this exists to stop.
+  const softened = rosterRun(chain(
+    withLedger({ rows: 7, total: 7, childCount: 8 }),
+    withPageLimit(3),
+    (s) => must(s, 'if (ledgerCount > rows.length) {', 'if (false) {')));
+  assert.notEqual(softened.status, INFRA, 'softened, the walk stops refusing');
+  assert.doesNotMatch(token(softened.out), /code=ROSTER-DRAFT-BLIND/);
+  assert.match(token(softened.out), /\ba=PASS\b/, 'and clause (a) passes over a population it knows is partial');
+});
+
+test('wave 66: NO gap is NO refusal — the arm must not fire on a parent with zero drafts', () => {
+  // The false-positive floor. `child_count` equal to the published roster is the normal
+  // case for the overwhelming majority of parents (measured 2026-08-24: cch-instruments-epic
+  // 280==280, dr-backlog-never-started 334==334), and the new read must be silent there.
+  const clean = rosterRun(chain(withLedger({ rows: 7, total: 7 }), withPageLimit(3)));
+  assert.notEqual(clean.status, INFRA, `a roster with no draft gap is not an infra fault: ${token(clean.out)}`);
+  assert.doesNotMatch(token(clean.out), /code=ROSTER-DRAFT-BLIND/);
+  assert.match(token(clean.out), /\ba=PASS\b/);
+});
+
+test('wave 66: a cross-check that CANNOT BE READ refuses — an unverified population is not a verified one', () => {
+  // The property that matters most, and the one a soft cross-check would have destroyed.
+  // During this work the bp server dropped 26 consecutive reads; an instrument that treats
+  // an unreadable cross-check as "no gap found" reports NO HUMAN GATES REMAIN during the
+  // exact incident when someone needs the list. `child_count` absent stands for every way
+  // the second read can fail to produce a number.
+  const unreadable = rosterRun(chain(
+    withLedger({ rows: 7, total: 7 }),
+    withPageLimit(3),
+    (s) => must(s, 'return { doc: { child_count: 7 } };', 'return { doc: {} };')));
+  assert.equal(unreadable.status, INFRA, 'a cross-check that produced no number certifies nothing');
+  assert.match(token(unreadable.out), /code=DRAFT-CROSSCHECK-UNREADABLE/);
+  assert.match(unreadable.out, /no numeric child_count/);
+  assert.doesNotMatch(unreadable.out, /VERDICT: SEAL/);
 });
