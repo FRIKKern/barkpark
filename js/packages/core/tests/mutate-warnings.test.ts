@@ -23,7 +23,10 @@ import { BarkparkValidationError } from '../src/errors'
 
 const ADVICE: MutateWarning[] = [
   { code: 'tag_count_norm', severity: 'advisory', message: 'papers carry 2–4 tags' },
-  // The E4 dedup wall stamps the SHARPER band (dedup_wall.ex:524). The SDK type
+  // The E4 dedup wall stamps the SHARPER band (dedup_wall.ex :: warning/1 — a
+  // SYMBOL, not a line number: the `:524` this used to carry went stale as soon
+  // as anything above it moved, and the doc-anchor gate caught it on the very
+  // next PR). The SDK type
   // declared `severity: 'advisory'` alone, which made this literal unassignable
   // and `severity === 'warning'` a compile error — the client type was NARROWER
   // than the wire. Delete `'warning'` from the union in types.ts and tsc reds here.
