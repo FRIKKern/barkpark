@@ -64,8 +64,8 @@ defmodule Barkpark.TenancySingletonSlugTest do
           claimant_token()
         )
 
-      assert {:error, %Ecto.Changeset{}} = result,
-             "an explicit slug claim took the singleton seat"
+      assert match?({:error, %Ecto.Changeset{}}, result),
+             "an explicit slug claim took the singleton seat; got: #{inspect(result)}"
 
       refute Tenancy.get_default_workspace(),
              "the seat must still be vacant after a refused claim"
@@ -77,9 +77,9 @@ defmodule Barkpark.TenancySingletonSlugTest do
 
       result = Tenancy.create_workspace_with_owner(%{name: "Default"}, claimant_token())
 
-      assert {:error, %Ecto.Changeset{}} = result,
+      assert match?({:error, %Ecto.Changeset{}}, result),
              "a DERIVED slug claim took the singleton seat — put_derived_slug/1 " <>
-               "slugifies the name, so the guard must sit after derivation"
+               "slugifies the name, so the guard must sit after derivation; got: #{inspect(result)}"
 
       refute Tenancy.get_default_workspace()
     end
@@ -88,9 +88,10 @@ defmodule Barkpark.TenancySingletonSlugTest do
       for name <- ["DEFAULT", "default", "  Default  ", "default!"] do
         assert Tenancy.slugify(name) == "default", "fixture assumption: #{name}"
 
-        assert {:error, %Ecto.Changeset{}} =
-                 Tenancy.create_workspace_with_owner(%{name: name}, claimant_token()),
-               "name #{inspect(name)} claimed the singleton seat"
+        claimed = Tenancy.create_workspace_with_owner(%{name: name}, claimant_token())
+
+        assert match?({:error, %Ecto.Changeset{}}, claimed),
+               "name #{inspect(name)} claimed the singleton seat; got: #{inspect(claimed)}"
       end
     end
 
@@ -117,10 +118,11 @@ defmodule Barkpark.TenancySingletonSlugTest do
 
   describe "NEGATIVE ARMS — the legitimate creators keep working" do
     test "Tenancy.create_workspace/1 still mints the singleton (seeds / support re-mint)" do
-      assert {:ok, %Workspace{slug: "default"}} =
-               Tenancy.create_workspace(%{slug: "default", name: "Default Workspace"}),
+      minted = Tenancy.create_workspace(%{slug: "default", name: "Default Workspace"})
+
+      assert match?({:ok, %Workspace{slug: "default"}}, minted),
              "the INTERNAL creator was guarded — this breaks seeding and the " <>
-               "support bracket's own recovery"
+               "support bracket's own recovery; got: #{inspect(minted)}"
 
       assert Tenancy.get_default_workspace()
     end
@@ -128,8 +130,10 @@ defmodule Barkpark.TenancySingletonSlugTest do
     test "Seeds.Shared.ensure_default_scope/0 still establishes the default" do
       _ = Barkpark.Seeds.Shared.ensure_default_scope()
 
-      assert %Workspace{slug: "default"} = Tenancy.get_default_workspace(),
-             "ensure_default_scope/0 could not re-establish the singleton"
+      default_ws = Tenancy.get_default_workspace()
+
+      assert match?(%Workspace{slug: "default"}, default_ws),
+             "ensure_default_scope/0 could not re-establish the singleton; got: #{inspect(default_ws)}"
     end
 
     test "an ordinary owner-create is untouched" do
