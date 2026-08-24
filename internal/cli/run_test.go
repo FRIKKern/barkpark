@@ -164,7 +164,14 @@ func TestRunCommandTruncationNoticeBoundaries(t *testing.T) {
 		body string
 	}{
 		{name: "short default page", cmd: paginatedReadCommand(3), body: short},
-		{name: "explicit limit", g: globals{limit: 3, limitSet: true}, cmd: paginatedReadCommand(3), body: full},
+		// "explicit limit" USED TO LIVE HERE, pinning silence on a page that
+		// filled an explicit --limit exactly. That was the inversion
+		// task-d5640a667988b1d1 names: the flag being honoured silenced the
+		// warning that the flag being honoured made necessary. The case is
+		// MOVED, not deleted — it now asserts the notice in
+		// TestTruncationGuardSurvivesAnExplicitLimit, and its quiet twin
+		// (a page SHORT of an explicit limit) stays below.
+		{name: "explicit limit, page not full", g: globals{limit: 9, limitSet: true}, cmd: paginatedReadCommand(3), body: full},
 		{name: "all pagination", g: globals{all: true}, cmd: paginatedReadCommand(3), body: full},
 		{name: "non-paginated read", cmd: nonPaginatedReadCommand(), body: full},
 		{name: "write", g: globals{yes: true}, cmd: paginatedWriteCommand(3), body: full},
