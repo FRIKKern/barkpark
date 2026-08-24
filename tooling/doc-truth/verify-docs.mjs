@@ -807,6 +807,14 @@ function verifyLineref(claim) {
   if (!lines) {
     return tag(claim, "unverifiable", "low", `lineref file unreadable: ${rel}`);
   }
+  // A CITED WINDOW THAT CLIPS ITS OWN EVIDENCE. Checked FIRST — before the
+  // needle harvest and before the ±3 scan — because BOTH of the outcomes below
+  // hide this class: an empty needle set exits "unverifiable" without ever
+  // looking at the window, and the ±3 slack reaches OUTSIDE the cited range and
+  // confirms on the very line the citation excluded.
+  const clipped = clippedEnumeration(claim, lines, rel);
+  if (clipped) return tag(claim, "stale", "high", clipped);
+
   // Extract salient tokens from the claim's surrounding markdown line that
   // should sit near the referenced code line: quoted strings, dotted symbols,
   // snake_case idents, env-var names. Use the full source line so anchors in a
@@ -818,7 +826,9 @@ function verifyLineref(claim) {
   }
   // For each referenced line number, scan ±3 for any needle.
   const WINDOW = 3;
+  const independent = needles.filter((nd) => !selfDerived(nd, t));
   let anyHit = false;
+  let indHit = false;
   const checked = [];
   for (const n of t.lines) {
     const lo = Math.max(1, n - WINDOW);
@@ -826,14 +836,24 @@ function verifyLineref(claim) {
     let hit = false;
     for (let i = lo; i <= hi; i++) {
       const text = lines[i - 1] || "";
-      if (needles.some((nd) => text.includes(nd))) { hit = true; break; }
+      if (!hit && needles.some((nd) => text.includes(nd))) hit = true;
+      if (independent.some((nd) => text.includes(nd))) { indHit = true; break; }
     }
     checked.push({ n, hit, beyond: n > lines.length });
     if (hit) anyHit = true;
   }
-  if (anyHit) {
+  if (indHit) {
     return tag(claim, "confirmed", "high",
       `referenced content found within ±${WINDOW} of cited line(s)`);
+  }
+  if (anyHit) {
+    // Every hit came from a needle the CITATION ITSELF supplied. That is not a
+    // confirmation, and it is not evidence of drift either — say so, rather
+    // than stamping the claim verified at high confidence.
+    return tag(claim, "unverifiable", "low",
+      `only self-derived anchors [${needles.filter((nd) => selfDerived(nd, t)).slice(0, 3).join(", ")}]` +
+      ` sit near cited line(s) ${t.lines.join("/")} in ${rel} — a needle taken from the cited path` +
+      ` confirms nothing about the claim`);
   }
   // No needle near any cited line ⇒ the line number drifted. Dominant stale.
   const beyond = checked.some((c) => c.beyond);
@@ -841,6 +861,124 @@ function verifyLineref(claim) {
     ? `cited line(s) ${t.lines.join("/")} exceed file length (${lines.length}) in ${rel}`
     : `none of the referenced anchors [${needles.slice(0, 3).join(", ")}] sit within ±${WINDOW} of cited line(s) ${t.lines.join("/")} in ${rel}`;
   return tag(claim, "stale", "high", ev);
+}
+
+// ── the TOO-NARROW WINDOW ────────────────────────────────────────────────────
+// THE DEFECT THIS CATCHES, from the tree it was written against. A census row
+// read:
+//
+//   source declares only `watch` and `preflight` verbs
+//   (scripts/pds-window-sentinel.sh:48-49)
+//
+// The sentinel declares THREE verbs and the third is the DEFAULT
+// (`local cmd="${1:-sample}"`). The USAGE block is a homogeneous run —
+//
+//   #   scripts/pds-window-sentinel.sh sample      <- clipped
+//   #   scripts/pds-window-sentinel.sh watch
+//   #   scripts/pds-window-sentinel.sh preflight
+//
+// — and the citation took the last two lines of it. Every other member of this
+// bug family announces itself: a stale pin points at a line that moved, a
+// hardcoded count stops matching, a line-anchored waiver rehashes. This one
+// never reds, because the cited lines are IN RANGE and NON-BLANK and say exactly
+// what the claim says they say. "In range and non-blank" is not "correct": the
+// window's job was to be evidence, and it excluded the one line that refutes it.
+// A citation is normally what makes a claim checkable; here it is what made the
+// claim wrong, and made it look well-evidenced while wrong.
+//
+// THE SIGNAL, and why it does not need to read English. Two independent
+// conditions must BOTH hold:
+//
+//   (1) STRUCTURAL — the cited lines form a contiguous run of >= 2 that shares a
+//       substantial common prefix, and the line immediately before or after the
+//       run shares that same prefix. A shared prefix is what makes lines
+//       SIBLINGS: entries of one list, arms of one case, rows of one table. The
+//       citation cut a list in the middle of itself.
+//   (2) EXHAUSTIVE — the citing prose claims the cited window is the WHOLE set
+//       (`only`, `solely`, `exclusively`, `both`, `no other`, `nothing but`).
+//
+// (1) alone is ordinary and common: citing two lines of a longer list is fine
+// when the claim is about those two lines. (2) alone is fine too. It is the
+// CONJUNCTION that is a false claim about a set — the claim asserts totality
+// over a window that provably is not total. Requiring both is what keeps this
+// off the 547-entry baseline instead of flooding it.
+const EXHAUSTIVE_CUE =
+  /\b(only|solely|exclusively|both|nothing but|no other|and no more|the (?:sole|lone))\b/i;
+
+function commonPrefix(a, b) {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return a.slice(0, i);
+}
+
+// Returns evidence text when the citation is an exhaustive claim over a clipped
+// homogeneous run, else null.
+function clippedEnumeration(claim, lines, rel) {
+  const t = claim.target;
+  const prose = claim.srcLine || claim.raw;
+  if (!EXHAUSTIVE_CUE.test(prose)) return null;
+
+  // THE SPAN, NOT THE ENDPOINTS. `t.lines` is a deduped SET of every number the
+  // citation mentions, so `types.ts:117-126` arrives as [117, 126] — two points
+  // ten lines apart, indistinguishable there from the two separate points in
+  // `content.ex ~:2153/:2172`. Only the raw text says which is which: a dash
+  // between two numbers is a RANGE and means every line between them. Reading the
+  // span off `t.lines` instead would restrict this check to citations of exactly
+  // two ADJACENT lines and silently skip every wider window — 8 candidates on the
+  // tree this was written against, of which only the adjacent ones would qualify.
+  const spans = [];
+  for (const m of (claim.raw || "").matchAll(/(\d{2,5})\s*[-–]\s*(\d{2,5})/g)) {
+    const a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+    if (b > a && b - a < 400) spans.push([a, b]);
+  }
+  if (spans.length === 0) return null;
+
+  for (const [lo, hi] of spans) {
+    if (lo < 1 || hi > lines.length) continue;
+    const cited = [];
+    for (let n = lo; n <= hi; n++) cited.push((lines[n - 1] || "").replace(/\s+$/, ""));
+    if (cited.some((l) => l.trim() === "")) continue; // a blank line is not a list entry
+
+    // The shared shape of the cited lines. Require it to carry real content —
+    // 8+ non-space characters — so a run of `#` or `  ` never counts as a prefix.
+    let prefix = cited[0];
+    for (const l of cited.slice(1)) prefix = commonPrefix(prefix, l);
+    if (prefix.trim().length < 8) continue;
+
+    // A sibling immediately outside the run, sharing that same prefix.
+    for (const [n, side] of [[lo - 1, "before"], [hi + 1, "after"]]) {
+      if (n < 1 || n > lines.length) continue;
+      const text = (lines[n - 1] || "").replace(/\s+$/, "");
+      if (!text.startsWith(prefix)) continue;
+      const widened = side === "before" ? `${n}-${hi}` : `${lo}-${n}`;
+      return (
+        `cited range ${lo}-${hi} in ${rel} is an EXHAUSTIVE claim over a CLIPPED run:` +
+        ` line ${n} (immediately ${side}) shares the cited lines' prefix ${JSON.stringify(prefix.trim())}` +
+        ` and is excluded from the window. The claim asserts totality over a window that is not total` +
+        ` — widen the citation to ${widened} or drop the exhaustiveness wording.`
+      );
+    }
+  }
+  return null;
+}
+
+// SELF-DERIVED ANCHORS CANNOT VERIFY THE CITATION THEY CAME FROM. `linerefNeedles`
+// drops the whole `t.file` / `t.base` token but leaves its PIECES in: the
+// route-segment harvester turns `scripts/pds-window-sentinel.sh:64-65` into the
+// needle `pds`, a substring of the citation's own path. A file whose header
+// repeats its own path on every USAGE line then "confirms" the citation against
+// its own name. Measured on 7df142e0a7: that single needle carried the false
+// claim `source declares only watch and preflight verbs
+// (scripts/pds-window-sentinel.sh:64-65)` all the way to confirmed/HIGH.
+//
+// Scoped DELIBERATELY to the CONFIRM decision only. Removing these needles from
+// the STALE decision as well re-scores 350 baseline entries out of existence and
+// promotes 13 fresh ones — a churn this row did not ask for. A self-derived
+// needle stays able to say "the file is still shaped roughly like this"; it is
+// only barred from certifying the claim.
+function selfDerived(s, t) {
+  return t.file.includes(s) || t.base.includes(s);
 }
 
 // Pull checkable anchors out of a lineref claim's raw text.
@@ -991,6 +1129,18 @@ function reverify(claim) {
     if (rel) {
       const lines = fileLines(linerefTargetPath(rel));
       if (lines) {
+        // A CLIPPED-ENUMERATION finding must not be re-checked by the needle
+        // scan below. The scan's whole job is to forgive a citation that is off
+        // by a few lines — which is exactly the defect here, so running it would
+        // suppress every finding of this class the moment it was raised. Re-derive
+        // the clip INDEPENDENTLY instead: if the neighbouring sibling is still
+        // there, the finding survives; if the file changed underneath, it goes.
+        const stillClipped = clippedEnumeration(claim, lines, rel);
+        if (stillClipped) return { ...claim, reverified: true, evidence: stillClipped };
+        if (/EXHAUSTIVE claim over a CLIPPED run/.test(claim.evidence || "")) {
+          return tag(claim, "confirmed", "high",
+            `RE-VERIFY GATE: the clipped sibling is no longer adjacent on re-check — finding suppressed`);
+        }
         const needles = linerefNeedles(claim.srcLine || claim.raw, t);
         const WINDOW = 5; // wider on re-check to avoid off-by-a-few false stale
         let hit = false;
