@@ -748,7 +748,7 @@ defmodule Barkpark.Tasks.Stage do
   # The adjudication triple is echoed the same way the note is — the VALUE plus
   # the KEY it landed on — so a consumer of the event can tell an adjudication
   # that was written from one that was merely passed.
-  defp staged_payload(from, to, engagement, holder, adj, superseded_note \\ nil) do
+  defp staged_payload(from, to, engagement, holder, adj, superseded_note) do
     %{
       "staged" => %{
         "superseded_note" => superseded_note,
