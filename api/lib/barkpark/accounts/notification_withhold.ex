@@ -48,10 +48,11 @@ defmodule Barkpark.Accounts.NotificationWithhold do
 
   alias Barkpark.Audit
 
-  # THE CLOSED VOCABULARY. Both atoms are cloud's, not new coinages:
-  # `:no_recipient_by_construction` is the reason at
-  # cloud/lib/barkpark_cloud/notifications.ex:502, and `:dispatch_crashed` is the
-  # one at :718.
+  # THE CLOSED VOCABULARY. Both atoms are cloud's, not new coinages. Cited by
+  # SYMBOL rather than by line, because a line anchor is the part that rots:
+  # `BarkparkCloud.Notifications.deliver_fleet_digest/1` passes
+  # `:no_recipient_by_construction` to `Withhold.record/4`, and
+  # `BarkparkCloud.Notifications.dispatch_event/3` passes `:dispatch_crashed`.
   @reasons [:no_recipient_by_construction, :dispatch_crashed]
 
   # The account notifications this funnel can speak about — every `deliver_*` on

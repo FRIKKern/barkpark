@@ -34,8 +34,9 @@ defmodule Barkpark.Accounts.NotificationWithholdTest do
 
   describe "the closed vocabulary is cloud's, not a new coinage" do
     test "both reasons are the atoms the cloud funnel already uses" do
-      # :no_recipient_by_construction — cloud/lib/barkpark_cloud/notifications.ex:502
-      # :dispatch_crashed             — cloud/lib/barkpark_cloud/notifications.ex:718
+      # Cited by SYMBOL, never by line — a line anchor is the part that rots.
+      # :no_recipient_by_construction — BarkparkCloud.Notifications.deliver_fleet_digest/1
+      # :dispatch_crashed             — BarkparkCloud.Notifications.dispatch_event/3
       assert Enum.sort(NotificationWithhold.reasons()) ==
                Enum.sort([:no_recipient_by_construction, :dispatch_crashed])
     end
