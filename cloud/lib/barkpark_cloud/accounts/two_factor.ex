@@ -85,7 +85,7 @@ defmodule BarkparkCloud.Accounts.TwoFactor do
   # (a) STRUCTURAL: the persisted key is guarded by a STRICT ORDERING PREDICATE
   #     in the WHERE, not by equality and not by a read-then-write —
   #     `(is_nil(u.two_factor_last_step) or u.two_factor_last_step < ^step)` at
-  #     cloud/lib/barkpark_cloud/accounts.ex:2186, in the same `update_all` that
+  #     cloud/lib/barkpark_cloud/accounts.ex:Accounts.verify_two_factor_otp/2, in the same `update_all` that
   #     sets it. An out-of-order (rewound, replayed, or straddling) step
   #     therefore matches ZERO rows and is rejected. That is exactly #12628's
   #     remedy — tolerate out-of-order buckets by acting only on strictly-newer
