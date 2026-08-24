@@ -19,6 +19,7 @@ github-inbound-intake	ingest
 github-mirror-reconcile	reconcile
 github-projects-sync	sync
 heat-quantile-bin	HeatQuantileBins
+http-redirect-policy	CheckRedirect
 instance-content-bootstrap	Run
 mcp-task-tools	registerTaskTools
 merge-gate-criterion-predicate	merge_gated?
