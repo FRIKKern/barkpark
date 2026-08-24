@@ -44,15 +44,6 @@ export const FORBIDDEN_SET_KEYS: ReadonlySet<string> = new Set([
 ])
 
 /**
- * Translate a Sanity-style array selector to the top-level field the server's
- * field-based append/prepend operates on. Accepts `field` or `field[index]`
- * (the index is positional sugar — append is always the tail, prepend the head);
- * rejects nested/dotted paths the server can't address, and system fields.
- * Shared by {@link createPatch} and the transaction builder so a selector means
- * the same thing in either.
- * @internal
- */
-/**
  * Assert the append/prepend payload is a list. Shared by {@link createPatch} and the
  * transaction builder's inner patch — four call sites previously carried a verbatim
  * copy of this throw.
@@ -64,6 +55,15 @@ export function requireItems(op: string, items: unknown): void {
   }
 }
 
+/**
+ * Translate a Sanity-style array selector to the top-level field the server's
+ * field-based append/prepend operates on. Accepts `field` or `field[index]`
+ * (the index is positional sugar — append is always the tail, prepend the head);
+ * rejects nested/dotted paths the server can't address, and system fields.
+ * Shared by {@link createPatch} and the transaction builder so a selector means
+ * the same thing in either.
+ * @internal
+ */
 export function selectorField(op: string, selector: string): string {
   if (typeof selector !== 'string' || selector.length === 0) {
     throw new BarkparkValidationError(`patch.${op} requires a field selector`, { field: op })
