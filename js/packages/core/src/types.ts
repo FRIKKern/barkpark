@@ -184,6 +184,15 @@ export interface MutateResult {
     | 'delete'
     | 'noop'
   document: BarkparkDocument
+  /**
+   * Advisories the publish wall raised for THIS write, carried through by the
+   * single-mutation helpers (`publish` / `unpublish` / `discardDraft` /
+   * `patch().commit()`), which return one result rather than the envelope.
+   * OMITTED — never `[]` — when the server sent none, so `'warnings' in result`
+   * is a real test. Non-blocking by contract: their presence never means the
+   * write failed. Batch callers read {@link MutateEnvelope.warnings} instead.
+   */
+  warnings?: MutateWarning[]
 }
 
 /**
@@ -193,7 +202,16 @@ export interface MutateResult {
  */
 export interface MutateWarning {
   code: string
-  severity: 'advisory'
+  /**
+   * The emitter's own band. `'advisory'` is the default (`Warnings.put/3`);
+   * the E4 dedup wall's advise band and the task plugin's merge-gate notice
+   * stamp the sharper `'warning'` (dedup_wall.ex, plugins/tasks.ex). This was
+   * declared as `'advisory'` alone, which made the server's real `'warning'`
+   * unassignable and a `severity === 'warning'` comparison a COMPILE ERROR —
+   * the SDK type was narrower than the wire. The open `(string & {})` arm keeps
+   * a future band non-breaking while both known values still autocomplete.
+   */
+  severity: 'advisory' | 'warning' | (string & {})
   message: string
 }
 

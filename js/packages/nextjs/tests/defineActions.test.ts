@@ -34,7 +34,12 @@ const { revalidateTag } = vi.hoisted(() => ({
 vi.mock('next/cache', () => ({ revalidateTag }))
 
 import { defineActions } from '../src/actions/defineActions'
-import type { BarkparkClient, MutateEnvelope, MutateResult } from '@barkpark/core'
+import type {
+  BarkparkClient,
+  MutateEnvelope,
+  MutateResult,
+  MutateWarning,
+} from '@barkpark/core'
 
 // ---------------------------------------------------------------------------
 // Test doubles
@@ -85,6 +90,8 @@ function makeClient(
     unpublishResult?: MutateResult
     commitError?: unknown
     emptyResults?: boolean
+    /** Publish-wall advisories riding the transaction envelope (mutate_controller.ex). */
+    envelopeWarnings?: MutateWarning[]
     scope?: { workspace?: string; project?: string }
   } = {},
 ): MockClient {
@@ -110,9 +117,13 @@ function makeClient(
   const unpublishResult = opts.unpublishResult ?? makeResult({ operation: 'unpublish' })
   const discardDraftResult = makeResult({ operation: 'discardDraft' })
 
+  // The server OMITS `warnings` when the drain came back empty, so the default
+  // envelope must not carry the key at all — spreading an always-present `[]`
+  // here would make the absence assertion below vacuous.
   const envelope: MutateEnvelope = {
     transactionId: 'tx1',
     results: opts.emptyResults === true ? [] : [mutateResult],
+    ...(opts.envelopeWarnings !== undefined ? { warnings: opts.envelopeWarnings } : {}),
   }
 
   const txBuilder = {
@@ -537,6 +548,42 @@ describe('defineActions', () => {
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:doc:p1')
       expect(revalidateTag).toHaveBeenCalledWith('bp:ds:production:type:post')
       expect(revalidateTag).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  // [publish-warnings-dropped] `createDoc` / `deleteDoc` commit a transaction and
+  // then narrow the envelope to `results[0]` — which threw away the publish
+  // wall's non-blocking `warnings`. The other four actions call a core
+  // single-mutation helper, so core's `onlyResult` now carries advisories for
+  // them; these two narrow the envelope here and had to carry them here.
+  describe('publish-wall advisories survive the envelope narrowing', () => {
+    const advice: MutateWarning[] = [
+      { code: 'tag_count_norm', severity: 'advisory', message: 'papers carry 2–4 tags' },
+      { code: 'near_duplicate', severity: 'warning', message: 'looks like p0' },
+    ]
+
+    it('createDoc carries them onto the returned result', async () => {
+      const { client } = makeClient({ envelopeWarnings: advice })
+      const result = await defineActions({ client }).createDoc({ _type: 'post', title: 'x' })
+      expect(result.warnings).toEqual(advice)
+    })
+
+    it('deleteDoc carries them onto the returned result', async () => {
+      const { client } = makeClient({ envelopeWarnings: advice })
+      const result = await defineActions({ client }).deleteDoc('p1', 'post')
+      expect(result.warnings).toEqual(advice)
+    })
+
+    it('a clean write leaves the key ABSENT, not an empty array', async () => {
+      const { client } = makeClient()
+      const actions = defineActions({ client })
+      expect('warnings' in (await actions.createDoc({ _type: 'post', title: 'x' }))).toBe(false)
+      expect('warnings' in (await actions.deleteDoc('p1', 'post'))).toBe(false)
+    })
+
+    it('an explicitly empty server list is still absence, not advice', async () => {
+      const { client } = makeClient({ envelopeWarnings: [] })
+      expect('warnings' in (await defineActions({ client }).deleteDoc('p1', 'post'))).toBe(false)
     })
   })
 })

@@ -263,6 +263,9 @@ export type {
   MetaResponse,
   MutateEnvelope,
   MutateResult,
+  // The advisory's own type. It had never been exported — a consumer could
+  // receive `warnings` on the envelope but could not name what it held.
+  MutateWarning,
   OrderDirection,
   OrderField,
   OrderSpec,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import type { BarkparkClient, MutateResult } from '@barkpark/core'
+import type { BarkparkClient, MutateEnvelope, MutateResult } from '@barkpark/core'
 import { BarkparkAPIError, BarkparkValidationError } from '@barkpark/core'
 import { revalidateTag } from 'next/cache'
 import { formatTagPrefix } from '../tag-prefix'
@@ -104,6 +104,19 @@ function buildTagPrefix(dataset: string, workspace?: string, project?: string): 
 }
 
 /**
+ * [publish-warnings-dropped] `createDoc` / `deleteDoc` go through a transaction
+ * and then narrow the envelope to `results[0]` — which silently discarded the
+ * publish wall's non-blocking `warnings`. The four actions that call a core
+ * single-mutation helper (`patchDoc` / `publish` / `unpublish` / `discardDraft`)
+ * now get them carried for free by `onlyResult` in @barkpark/core; these two
+ * narrow the envelope themselves, so they must carry them themselves. Same
+ * omit-when-empty shape, so `'warnings' in result` stays a real test.
+ */
+function withWarnings(result: MutateResult, envelope: MutateEnvelope): MutateResult {
+  return envelope.warnings?.length ? { ...result, warnings: envelope.warnings } : result
+}
+
+/**
  * Builds a {@link BarkparkActions} bundle suitable for use as Server Actions.
  *
  * Each mutation:
@@ -173,7 +186,7 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
         })
       }
       fanOutTags(prefix, result.id, input._type)
-      return result
+      return withWarnings(result, envelope)
     },
 
     async patchDoc(id, type, patch) {
@@ -237,7 +250,7 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
         })
       }
       fanOutTags(prefix, result.id, type)
-      return result
+      return withWarnings(result, envelope)
     },
   }
 }
