@@ -43,7 +43,9 @@ pnpm --filter @barkpark/core test:all  # core: node + workerd + browser
 pnpm size
 ```
 
-CI fails if the bundle exceeds the absolute size limits (e.g. 12 KB gzip for the ESM bundle, 13 KB for CJS — see each package's `.size-limit.json`).
+CI fails if an entry exceeds the **absolute** byte cap declared for it in that package's `.size-limit.json`. The caps are not restated here: a number copied into prose goes stale silently (this line claimed 12 KB / 13 KB long after the real caps had moved), and then a reader cannot tell which of the two binds. Read `.size-limit.json`; it is the cap.
+
+There is no percentage budget and no regression comparison — nothing in this repo stores a previous build to compare against. A cap breach means **trim the bundle**, not raise the number.
 
 ## ADR amendment rule
 

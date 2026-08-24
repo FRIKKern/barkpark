@@ -1,26 +1,26 @@
 <!-- doc-tier: agent | canonical-for: js-monorepo | budget: 600tok -->
 # js/ — Barkpark JS monorepo
 
-pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test`. Consumption guide: `docs/cards/js-sdk.md`. NOTE: the repo-root `sdk/` is the Bulldocs ingest SDK — a different thing.
+pnpm + changesets. `cd js && pnpm install && pnpm build`; tests via `pnpm test`. Consumption guide: `docs/cards/js-sdk.md`. NOTE: repo-root `sdk/` is the Bulldocs ingest SDK — a different thing.
 
 ## Package map
 
 | Package | What |
 |---|---|
 | `@barkpark/core` | runtime-agnostic HTTP client (`createClient`) |
-| `@barkpark/codegen` | schema introspection → typed-client codegen: `barkpark generate` (+ `--from` drift gate), pairs with core `typedClient<TMap>` |
+| `@barkpark/codegen` | schema → typed-client codegen: `barkpark generate` (+ `--from` drift gate); pairs with core `typedClient<TMap>` |
 | `@barkpark/nextjs` | App Router integration — subpaths `client` / `server` / `webhook` / `draft-mode` / `revalidate` / `preload` / `actions` |
-| `@barkpark/react` | framework-free renderers (PortableText, Image, Reference) — zero `next` imports |
-| `@barkpark/groq`, `@barkpark/nextjs-query` | 1.1 roadmap, reserved npm names — `docs/decisions/deferred.md` |
-| `create-barkpark-app` | scaffolder + starter templates |
+| `@barkpark/react` | framework-free renderers (PortableText, Image, Reference); zero `next` imports |
+| `@barkpark/groq`, `@barkpark/nextjs-query` | 1.1 roadmap, reserved npm names (`docs/decisions/deferred.md`) |
+| `create-barkpark-app` | scaffolder + starters |
 
 ## Hard rules
 
-- **CI gate:** `.github/workflows/js-tests.yml` — build → test → lint → typecheck → size on every `js/**` push/PR (added 2026-06-11; nothing ran the suite before).
-- **No `node:` imports** in `@barkpark/core` or the `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`). `webhook` was ported to Web Crypto via `@barkpark/core` (#498) — now Edge-compatible. Only `draft-mode` still VIOLATES this (Phase-5 `node:crypto`, sync `signDraftModeToken`) — the check step is ADVISORY pending the ADR-002 port-or-amend decision (`docs/decisions/deferred.md`).
-- **Bundle budget:** `pnpm size`; the CI gate fails on >2% regression. Don't grow core to fix an integration.
-- **ADR amendment rule:** any change to the Decision section of a locked ADR requires a follow-up amendment ADR (in `docs/decisions/`).
-- **Changesets:** every PR touching `packages/**` should carry `pnpm changeset`. The `changesets` job (js-tests.yml) checks this but is NOT in main's required-status-check set — red does not block merge, it is advisory. Green only certifies a changeset FILE exists, never that its version bump is correct (#9601 shipped a wrong one green).
+- **CI gate:** `.github/workflows/js-tests.yml` — build → test → lint → typecheck → size on every `js/**` push/PR.
+- **No `node:` imports** in `@barkpark/core` or the `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`). `webhook` was ported to Web Crypto (#498); only `draft-mode` still VIOLATES this (Phase-5 `node:crypto`, sync `signDraftModeToken`), so the check step is ADVISORY pending the ADR-002 port-or-amend call (`docs/decisions/deferred.md`).
+- **Bundle budget:** `pnpm size`. size-limit enforces an **absolute byte cap per entry**, declared in that package's `.size-limit.json` — no percentage, no baseline, nothing compared against a previous build. Headroom is often under 1 KB. **On a breach: trim, never raise the cap.** Don't grow core to fix an integration.
+- **ADR amendment rule:** any change to a locked ADR's Decision section requires a follow-up amendment ADR (`docs/decisions/`).
+- **Changesets:** every PR touching `packages/**` should carry `pnpm changeset`. The `changesets` job (js-tests.yml) is ADVISORY — not in main's required set, so red does not block merge. Green only certifies a changeset FILE exists, never that its version bump is correct (#9601 shipped a wrong one green).
 
 ## Root-export stub trap
 
