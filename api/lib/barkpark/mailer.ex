@@ -42,6 +42,22 @@ defmodule Barkpark.Mailer do
     Swoosh.Adapters.Test => :test_capture
   }
 
+  # The CLOSED vocabulary of `deliverability/0` reasons. Exported by
+  # `deliverability_reasons/0` so a consumer can pin its own mapping against
+  # this list in a test rather than hand-copying the literal — a copy goes stale
+  # silently the first time a fifth state is added here.
+  @reasons [:ok, :local_mailbox, :test_capture, :unconfigured]
+
+  # Compile-time tripwire. Adding an adapter to @non_delivering with a reason
+  # that is not in @reasons would ship a vocabulary the seam's consumers cannot
+  # see, which is the same class of silent divergence this module exists to
+  # close. Fail the BUILD instead.
+  unexported = (Map.values(@non_delivering) ++ [:ok, :unconfigured]) -- @reasons
+
+  if unexported != [] do
+    raise "Barkpark.Mailer: deliverability reasons missing from @reasons: #{inspect(unexported)}"
+  end
+
   @doc """
   The `{name, address}` From for every transactional email, read at CALL time so
   a `config/runtime.exs` override (`MAIL_FROM_ADDRESS` / `MAIL_FROM_NAME`) wins
@@ -261,4 +277,16 @@ defmodule Barkpark.Mailer do
 
     status
   end
+
+  @doc """
+  The closed vocabulary of `deliverability/0` reasons:
+  `[:ok, :local_mailbox, :test_capture, :unconfigured]`.
+
+  Exported so a consumer that maps these onto its own vocabulary can assert
+  against THIS list in a test instead of hand-copying the literal. A copied
+  literal keeps passing after a fifth reason is added here, which is exactly how
+  two sides of a seam start disagreeing without anything going red.
+  """
+  @spec deliverability_reasons() :: [atom(), ...]
+  def deliverability_reasons, do: @reasons
 end

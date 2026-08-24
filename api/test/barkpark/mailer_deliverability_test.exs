@@ -211,4 +211,70 @@ defmodule Barkpark.MailerDeliverabilityTest do
       refute log =~ "MAIL IS NOT DELIVERABLE"
     end
   end
+
+  describe "deliverability_reasons/0 — the exported seam vocabulary" do
+    # Consumers of this seam (the api-controller-silent-withholds lane maps
+    # these onto its own withhold reasons) pin their mapping against this list
+    # rather than copying the literal. A copy keeps passing after a fifth reason
+    # is added here — which is how two sides of a seam drift apart with nothing
+    # going red.
+    test "is the closed set of reasons deliverability/0 can return" do
+      assert Mailer.deliverability_reasons() == [
+               :ok,
+               :local_mailbox,
+               :test_capture,
+               :unconfigured
+             ]
+    end
+
+    test "every reason actually reachable through deliverability/0 is exported" do
+      reachable =
+        for adapter <- [
+              Swoosh.Adapters.Local,
+              Swoosh.Adapters.Test,
+              WorkingRelayAdapter,
+              nil
+            ] do
+          if adapter,
+            do: put_adapter(adapter),
+            else: Application.put_env(:barkpark, Barkpark.Mailer, [])
+
+          Mailer.deliverability().reason
+        end
+
+      assert Enum.sort(Enum.uniq(reachable)) ==
+               Enum.sort(Mailer.deliverability_reasons()),
+             "a reason is reachable but not exported (or exported but dead)"
+    end
+
+    test "deliverable? is exactly `reason == :ok` in every state" do
+      # deliverable? and reason are two projections of ONE fact, not two facts.
+      # Pinned so a future branch cannot set deliverable?: true alongside a
+      # non-:ok reason.
+      for adapter <- [Swoosh.Adapters.Local, Swoosh.Adapters.Test, WorkingRelayAdapter, nil] do
+        if adapter,
+          do: put_adapter(adapter),
+          else: Application.put_env(:barkpark, Barkpark.Mailer, [])
+
+        d = Mailer.deliverability()
+        assert d.deliverable? == (d.reason == :ok), "mismatch for #{inspect(adapter)}"
+      end
+    end
+
+    test "drops_mail? implies not deliverable?, but NOT the reverse" do
+      # The two predicates are genuinely different questions, which is why both
+      # exist. `drops_mail?` asks "was a real person's mail discarded?";
+      # `deliverable?` asks "can this adapter reach the outside world at all?".
+      # Swoosh.Adapters.Test is the case that separates them: it cannot deliver,
+      # yet nothing was withheld from anyone, because under MIX_ENV=test the
+      # recipient IS the assertion.
+      put_adapter(Swoosh.Adapters.Test)
+      refute Mailer.deliverability().deliverable?
+      refute Mailer.drops_mail?()
+
+      put_adapter(Swoosh.Adapters.Local)
+      refute Mailer.deliverability().deliverable?
+      assert Mailer.drops_mail?()
+    end
+  end
 end
