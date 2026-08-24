@@ -5,6 +5,7 @@ defmodule Barkpark.Media.Delivery.Retriever do
   alias Barkpark.Content.Document
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Search.Synonyms
+  alias Barkpark.Search.TypoPolicy
 
   @asset_type "mediaAsset"
 
@@ -126,10 +127,16 @@ defmodule Barkpark.Media.Delivery.Retriever do
   end
 
   defp include_dynamic(terms, config, relaxed) do
-    threshold = similarity_threshold(config, relaxed)
+    threshold = TypoPolicy.threshold(config, relaxed)
 
     Enum.reduce(terms, nil, fn term, dyn ->
       pattern = like_pattern(term)
+      # Documents-surface parity (the gap this closes): `typo_policy.enabled`
+      # and `min_len_1typo` live in the SAME config object media reads for its
+      # thresholds, and media used to apply `similarity()` to every term
+      # regardless — so an admin who turned typo tolerance off, or raised the
+      # minimum token length, changed document results and nothing at all here.
+      fuzzy? = TypoPolicy.fuzzy_term?(config, term)
 
       # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite these
       # `similarity()` arms or add a media-files trgm index expecting a win).
@@ -151,8 +158,6 @@ defmodule Barkpark.Media.Delivery.Retriever do
           [m, d],
           ilike(m.original_name, ^pattern) or ilike(m.filename, ^pattern) or
             ilike(d.title, ^pattern) or
-            fragment("similarity(?, ?) > ?", m.original_name, ^term, ^threshold) or
-            fragment("similarity(?, ?) > ?", m.filename, ^term, ^threshold) or
             fragment(
               "EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(?->'tags', '[]'::jsonb)) elem WHERE elem ILIKE ?)",
               d.content,
@@ -160,12 +165,27 @@ defmodule Barkpark.Media.Delivery.Retriever do
             )
         )
 
+      clause =
+        if fuzzy? do
+          dynamic(
+            [m, d],
+            ^clause or
+              fragment("similarity(?, ?) > ?", m.original_name, ^term, ^threshold) or
+              fragment("similarity(?, ?) > ?", m.filename, ^term, ^threshold)
+          )
+        else
+          clause
+        end
+
       if dyn, do: dynamic([m, d], ^dyn or ^clause), else: clause
     end)
   end
 
   defp exclude_dynamic(excludes, relaxed) do
-    threshold = similarity_threshold(%{}, relaxed)
+    # Config-blind by construction, exactly as before — see the documents
+    # retriever's exclude arm for the same note; routed through the shared
+    # reader so the two surfaces' defaults cannot drift apart again.
+    threshold = TypoPolicy.threshold(%{}, relaxed)
 
     Enum.reduce(excludes, nil, fn term, dyn ->
       pattern = like_pattern(term)
@@ -192,18 +212,6 @@ defmodule Barkpark.Media.Delivery.Retriever do
 
       if dyn, do: dynamic([m, d], ^dyn or ^clause), else: clause
     end)
-  end
-
-  defp similarity_threshold(config, true) do
-    config
-    |> Map.get("typo_policy", %{})
-    |> Map.get("similarity_threshold_relaxed", 0.15)
-  end
-
-  defp similarity_threshold(config, false) do
-    config
-    |> Map.get("typo_policy", %{})
-    |> Map.get("similarity_threshold", 0.25)
   end
 
   def like_pattern(term) do

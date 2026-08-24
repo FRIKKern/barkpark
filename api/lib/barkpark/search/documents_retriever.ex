@@ -14,6 +14,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
+  alias Barkpark.Search.TypoPolicy
 
   # Default ranking-pool size (Barkpark Cloud P4 / Move B). The expensive
   # per-row ranking computation (`ts_rank` + `similarity`) runs only on this
@@ -429,11 +430,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp include_dynamic(terms, parsed, config, relaxed) do
-    threshold = similarity_threshold(config, relaxed)
-    # Min token length below which the pg_trgm fuzzy arm is suppressed (still
-    # matchable via tsvector/ilike). Short tokens like "hi"/"by" otherwise
-    # trigram-match almost anything above threshold — pure false positives.
-    min_fuzzy_len = fuzzy_min_len(config)
+    threshold = TypoPolicy.threshold(config, relaxed)
 
     term_dyn =
       Enum.reduce(terms, nil, fn term, dyn ->
@@ -468,8 +465,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
         # it 4-5x/keystroke). It now reads the narrow `slug_text` GENERATED STORED
         # column, so the filter is cheap without changing the plan shape or the
         # matched set (slug_text = coalesce(content->>'slug','') by construction).
+        # The fuzzy arm runs only for terms `TypoPolicy` admits: typo tolerance
+        # ON (`typo_policy.enabled`) and the token at least `min_len_1typo`
+        # long. Short tokens like "hi"/"by" otherwise trigram-match almost
+        # anything above threshold — pure false positives — and an admin who
+        # switched typo tolerance off used to get this arm anyway.
         clause =
-          if String.length(term) >= min_fuzzy_len do
+          if TypoPolicy.fuzzy_term?(config, term) do
             dynamic([d], ^clause or fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold))
           else
             clause
@@ -501,7 +503,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp exclude_dynamic(excludes, relaxed) do
-    threshold = similarity_threshold(%{}, relaxed)
+    # NOTE the empty config: the exclude arm has never read the surface config's
+    # thresholds, so it keeps the code defaults here. Routed through the shared
+    # reader anyway so the defaults cannot drift from the include arm's.
+    threshold = TypoPolicy.threshold(%{}, relaxed)
     excludes = Enum.reject(excludes, &(&1 == ""))
 
     Enum.reduce(excludes, nil, fn term, dyn ->
@@ -767,27 +772,6 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # A field with no explicit weight defaults to 1 (still ranks, just unweighted).
   defp field_weight(nil), do: 1.0
   defp field_weight(_), do: 0.0
-
-  # Minimum token length for the pg_trgm fuzzy title arm — reads
-  # typo_policy.min_len_1typo, defaulting to 4 when absent. Tokens shorter than
-  # this skip the similarity() arm (they still match via tsvector/ilike).
-  defp fuzzy_min_len(config) do
-    config
-    |> Map.get("typo_policy", %{})
-    |> Map.get("min_len_1typo", 4)
-  end
-
-  defp similarity_threshold(config, true) do
-    config
-    |> Map.get("typo_policy", %{})
-    |> Map.get("similarity_threshold_relaxed", 0.15)
-  end
-
-  defp similarity_threshold(config, false) do
-    config
-    |> Map.get("typo_policy", %{})
-    |> Map.get("similarity_threshold", 0.25)
-  end
 
   def like_pattern(term) do
     escaped =
