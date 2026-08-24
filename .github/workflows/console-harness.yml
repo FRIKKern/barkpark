@@ -559,6 +559,31 @@ jobs:
       - name: Bring-up retry unit tests (the refusal path a green run never visits)
         run: node --test cloud/priv/static/__preview__/bringup-retry.test.mjs
 
+      # THE RENDERED-HOST FLOOR'S OWN TESTS (task-e72560e947dba4e6).
+      #
+      # Wired here for the same reason as the bring-up retry above: this module
+      # decides whether a host that does not paint becomes a SETTLE or a
+      # REFUSAL, and both of its interesting paths are invisible in a green
+      # browser run. A screen that paints on the first pass never settles, and a
+      # screen that refuses takes the whole job red — so on a healthy runner the
+      # settle loop, the animation diagnosis and the refusal wording are all
+      # UNVISITED. This step is the only thing in CI that visits them.
+      #
+      # The load-bearing assertions are the fail-closed ones: a display:none
+      # host still refuses, it refuses on the FIRST pass without spending the
+      # settle budget, and the floor never returns without a painting host. If
+      # any of those regressed, the settle would have traded an intermittent
+      # refusal for a vacuous green — a required Console gate certifying a
+      # screen nobody can see, which is the exact defect
+      # (cchi-w20-bl-guard-greens-when-its-hosts-disappear) the floor exists to
+      # catch.
+      #
+      # The REAL-BROWSER half lives in fixtures/ready-host-paint/proof.mjs and
+      # runs in the browser job below, because the defect is a computed-opacity
+      # read only a rendering engine performs.
+      - name: Rendered-host floor unit tests (the settle a green run never visits)
+        run: node --test cloud/priv/static/__preview__/ready-host-paint.test.mjs
+
       # The SPA's design contract, machine-checked (charter GR5): dead classes,
       # undefined tokens, WCAG contrast across every theme identity, offline-purity,
       # and the living styleguide's class/token drift. Exits non-zero on any E1-E8
@@ -1172,6 +1197,36 @@ jobs:
       # baked into a step name is a sentence nothing re-derives — the disease
       # this epic keeps curing. The guard prints its own leg roster on every
       # run; read that, not this line.
+      # THE FLOOR'S OWN MUTATION PROOF, BEFORE the legs it gates.
+      #
+      # It runs the shipped rendered-host floor against committed fixtures in
+      # this same browser and asserts SIX directions, of which the first is the
+      # one that matters: the pre-fix code path (settle defeated) must still
+      # REFUSE a screen that renders perfectly, quoting the computed opacity it
+      # judged on. A fix whose proof cannot reproduce the defect is a story
+      # about the pixels — and three of the four remedies that suggest
+      # themselves here (drop checkOpacity, wait unconditionally, skip the
+      # ancestor walk) score perfectly on the legs below while re-opening the
+      # hole the floor exists for. Each of those was mutated and lands red on a
+      # named direction; see the proof's header.
+      #
+      # It runs FIRST so that a floor which has silently stopped being able to
+      # refuse is reported as itself, rather than as 300 suspiciously clean
+      # cells in the legs underneath.
+      - name: Rendered-host floor — mutation proof in a real browser
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/fixtures/ready-host-paint/proof.mjs || rc=$?
+          case "$rc" in
+            0) echo "Rendered-host floor: the defect reproduces on demand, the settle repairs it, and every hole it exists for still refuses." ;;
+            2) echo "::error title=Floor proof REFUSED::No browser (exit 2). An ENVIRONMENT refusal — NO claim is being made about the floor."; exit 1 ;;
+            1) echo "::error title=Floor proof FAILED::The rendered-host floor behaved wrongly (exit 1). The failing DIRECTION is named above. If direction 1 failed, the guard can no longer refuse an unpainted host and every green below is worthless; if direction 4, 5 or 6 failed, the settle has been widened into a blanket wait that greens invisible screens."; exit 1 ;;
+            *) echo "::error title=Floor proof UNINTERPRETABLE::proof.mjs exited ${rc}, outside its vocabulary (0/1/2). Cannot tell, therefore red."; exit 1 ;;
+          esac
+
       - name: Overflow guard — every defect leg in one browser run
         id: overflow
         env:

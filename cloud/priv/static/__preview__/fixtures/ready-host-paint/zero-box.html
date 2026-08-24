@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ready-host floor fixture — visible to checkVisibility, zero to a person</title>
+<!--
+  THE CASE ONLY THE ZERO-BOX TEST CATCHES, and the reason the floor asks two
+  questions instead of one.
+
+  This host is NOT display:none, NOT visibility:hidden, NOT transparent.
+  `checkVisibility({checkVisibilityCSS:true, checkOpacity:true})` returns TRUE
+  for it — every CSS property it inspects is fine. It simply has no area.
+
+  That is the original defect verbatim: `0 <= 0` scored 28/28 cells clean over
+  98 pills nobody could see. A remedy that leaned on checkVisibility alone would
+  green this fixture, which is why the floor keeps `r.width>0 && r.height>0` as
+  a separate, independent question — and why this fixture is committed. Deleting
+  the zero-box test from the probe makes proof.mjs red HERE and nowhere else.
+-->
+<style>
+  .deploy-detail { width: 0; height: 0; overflow: hidden; background: #333; }
+</style>
+<div class="deploy-detail">a cell with no area</div>
