@@ -11,7 +11,8 @@ defmodule Barkpark.Search.QueryPipeline do
     QueryParser,
     Retrievers,
     SurfaceConfigs,
-    Synonyms
+    Synonyms,
+    TypoPolicy
   }
 
   @type result :: %{
@@ -267,13 +268,20 @@ defmodule Barkpark.Search.QueryPipeline do
 
   defp try_drop_tokens(_scope, _parsed, _config, _opts, _strategy), do: nil
 
+  # The widen pass IS typo tolerance (it re-runs the query at the relaxed
+  # pg_trgm threshold), so `typo_policy.enabled => false` turns it off — a
+  # config that suppresses the fuzzy arms and then re-admits the same near
+  # misses through recovery would honour the knob only until it mattered.
+  # `drop_tokens` is untouched: dropping a term is not a typo correction.
   defp try_typo_widen(scope, parsed, config, opts, strategy)
        when strategy in ["drop_tokens", "typo_widen"] do
-    relaxed_opts = Keyword.put(opts, :relaxed, true)
-    {hits, total, _meta} = DocumentsRetriever.search(scope, parsed, config, relaxed_opts)
+    if TypoPolicy.enabled?(config) do
+      relaxed_opts = Keyword.put(opts, :relaxed, true)
+      {hits, total, _meta} = DocumentsRetriever.search(scope, parsed, config, relaxed_opts)
 
-    if total > 0 do
-      {hits, total, "typo_widen"}
+      if total > 0 do
+        {hits, total, "typo_widen"}
+      end
     end
   end
 
@@ -298,7 +306,7 @@ defmodule Barkpark.Search.QueryPipeline do
             {h, t, r}
 
           nil ->
-            case try_typo_widen_media(parsed, search_fn, strategy) do
+            case try_typo_widen_media(parsed, search_fn, strategy, config) do
               {h, t, r} -> {h, t, r}
               nil -> {[], 0, nil}
             end
@@ -328,16 +336,18 @@ defmodule Barkpark.Search.QueryPipeline do
 
   defp try_drop_tokens_media(_parsed, _search_fn, _strategy), do: nil
 
-  defp try_typo_widen_media(parsed, search_fn, strategy)
+  defp try_typo_widen_media(parsed, search_fn, strategy, config)
        when strategy in ["drop_tokens", "typo_widen"] do
-    {hits, total} = search_fn.(parsed, true)
+    if TypoPolicy.enabled?(config) do
+      {hits, total} = search_fn.(parsed, true)
 
-    if total > 0 do
-      {hits, total, "typo_widen"}
+      if total > 0 do
+        {hits, total, "typo_widen"}
+      end
     end
   end
 
-  defp try_typo_widen_media(_parsed, _search_fn, _strategy), do: nil
+  defp try_typo_widen_media(_parsed, _search_fn, _strategy, _config), do: nil
 
   defp highlight_hits("documents", docs, parsed, config, scope, opts) do
     # Resolve each hit type's schema ONCE so the highlighter can drop only the
