@@ -13,6 +13,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Media
   alias Barkpark.Media.Storage.{Access, Checkout, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
+  alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
   alias BarkparkWeb.Plugs.RequireWritePermission
@@ -28,7 +29,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def search(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
-    opts = MediaSearchParams.parse(params) ++ scope_opts(conn)
+    opts = MediaSearchParams.parse(params) ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
     {files, total, facets, meta} = Media.search_files(dataset, opts)
     docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
     render_opts = render_opts(conn, params)
@@ -282,7 +283,7 @@ defmodule BarkparkWeb.V1.MediaController do
         mime_type: blank_to_nil(params["type"] || params["mimeType"]),
         kind: blank_to_nil(params["kind"]),
         q: blank_to_nil(params["q"])
-      ] ++ scope_opts(conn)
+      ] ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
 
     {files, total} = Media.query_files(dataset, opts)
     docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
@@ -307,12 +308,28 @@ defmodule BarkparkWeb.V1.MediaController do
     })
   end
 
+  @doc """
+  Single asset, gated by `Access.allowed?/4` at `:view`.
+
+  The versioned twin of `MediaController.show/2`, which grew the identical gate
+  for the identical reason (the felix W14 field-visibility leak) and left every
+  sibling door open. Without it an anonymous caller read a `private` or `token`
+  asset's `filename` / `path` / `size` — and `visibility`, the tier this action
+  was reporting but not enforcing — from a route the `:api` pipeline never
+  halts. `Envelope` redaction reaches only the nested `asset` document; the blob
+  row it is wrapped around had no gate at all.
+
+  403, not 404, for parity with the legacy sibling: both doors answer the same
+  question, and disagreeing about the status code would make a caller's probe of
+  one door mean something different at the other.
+  """
   def show(conn, %{"dataset" => dataset, "id" => id} = params) do
     t0 = System.monotonic_time(:microsecond)
 
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
-         true <- file.dataset == dataset do
-      doc = Media.asset_doc_for_file(file, dataset)
+         :ok <- ensure_dataset(file, dataset),
+         doc = asset_doc(file, dataset),
+         :ok <- ensure_viewable(conn, file, doc) do
       ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
       json(conn, %{
@@ -320,15 +337,13 @@ defmodule BarkparkWeb.V1.MediaController do
         syncTags: sync_tags(dataset, file.id),
         ms: ms
       })
-    else
-      false -> {:error, :not_found}
-      error -> error
     end
   end
 
   def relations(conn, %{"dataset" => dataset, "id" => id} = params) do
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
-         :ok <- ensure_dataset(file, dataset) do
+         :ok <- ensure_dataset(file, dataset),
+         :ok <- ensure_viewable(conn, file, asset_doc(file, dataset)) do
       # Thread the tenancy scope into the relation graph so every back-link
       # query + related-asset/file resolution is bounded to the caller's
       # workspace — the related assets/titles/signed-urls in another workspace
@@ -511,14 +526,77 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  # THE SIGNING SWITCH IS A PRINCIPAL TEST (task-d55b02001cf589f0).
+  #
+  # `appendRequestSecret` used to be the WHOLE condition, read straight off the
+  # query string. For a `bp_visibility: "token"` asset `Urls.maybe_sign/3` then
+  # minted a real `SignedUrl` into the JSON — and `Access.delivery_ok?/3` admits
+  # a valid signature ALONE on the bytes route. So an anonymous caller holding
+  # nothing but an asset id turned `GET /v1/media/:ds/:id?appendRequestSecret=1`
+  # into gated BYTES. The `token` tier's entire premise is that the signature is
+  # something only an authorised caller can obtain; it was obtainable by asking.
+  #
+  # The param stays load-bearing (a caller still opts IN to signed URLs), but it
+  # can no longer CREATE authority. `Access.authenticated?/1` is the same
+  # predicate `allowed?/4` uses, deliberately — a local "is there an api_token"
+  # here would refuse the account-session workspace member that module went out
+  # of its way to admit.
+  #
+  # This closes every door at once: index / show / search / relations / upload
+  # all render through here, on the flat routes AND on their /w/:ws/p/:proj
+  # twins, which run the same actions.
   defp render_opts(conn, params, extra \\ []) do
     dataset = Keyword.get(extra, :dataset, Map.get(params, "dataset", "production"))
 
     [
       conn: conn,
       dataset: dataset,
-      sign_urls: params["appendRequestSecret"] in ["true", "1"]
+      sign_urls: params["appendRequestSecret"] in ["true", "1"] and Access.authenticated?(conn)
     ]
+  end
+
+  # A caller with NO principal reads the public tier only. This is the
+  # query-shaped twin of `ensure_viewable/3`: a listing has no per-row place to
+  # answer 403, and a post-render filter would leave `count` describing rows the
+  # caller never received — so the clamp rides into the query itself and the
+  # total counts what was actually returned.
+  #
+  # `Access.allowed?(conn, _, doc, :view)` for an unauthenticated caller reduces
+  # to `delivery_ok?(vis, false, signed)`, and a LISTING carries no signature, so
+  # "public" is the exact set. Authorised callers pass `[]` and see every tier,
+  # unchanged.
+  defp visibility_clamp_opts(conn) do
+    if Access.authenticated?(conn), do: [], else: [visibility_clamp: :public]
+  end
+
+  defp ensure_viewable(conn, file, doc) do
+    if Access.allowed?(conn, file, doc, :view), do: :ok, else: {:error, :forbidden}
+  end
+
+  # THE GATE MUST READ THE DOCUMENT THE RENDERER READS, or it is decorative.
+  #
+  # `Media.asset_doc_for_file/2` defaults `opts` to `[]`, and an unscoped
+  # `find_by_media_file_id/3` resolves the `dataset` STRING inside the DEFAULT
+  # project. For an asset living in another workspace — every asset reached
+  # through a `/w/:ws/p/:proj/v1/media/...` route — that resolves to a different
+  # `dataset_id` and the lookup returns nil. `Access.visibility(nil)` is
+  # "public", so on the scoped twin a `private` asset rendered as public and a
+  # `token` asset was never signed. MEASURED: the workspace-member positive
+  # control in v1_media_anon_read_clamp_test.exs failed for this reason on
+  # UNMODIFIED main, before any gate existed to blame.
+  #
+  # Left unfixed it would have made this row's own gate vacuous on exactly the
+  # door criterion 5 asks about: `ensure_viewable/3` would ask "may you view
+  # this public asset?" about an asset that is not public.
+  #
+  # `file_scope_opts/1` derives the tenant from the blob row — the SAME helper
+  # `AssetResponse.render/3` already uses for its internal resolution, so the
+  # gate and the response cannot disagree about which document they mean. The
+  # blob itself was already tenancy-confined by `Media.get_file/2` above, so
+  # this narrows the doc lookup to that confinement rather than widening
+  # anything.
+  defp asset_doc(file, dataset) do
+    Media.asset_doc_for_file(file, dataset, PluginAssets.file_scope_opts(file))
   end
 
   defp conflict(conn, message) do

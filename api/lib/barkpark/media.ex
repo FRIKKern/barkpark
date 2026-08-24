@@ -324,6 +324,11 @@ defmodule Barkpark.Media do
         :collection,
         :tags,
         :visibility,
+        # The unauthenticated read ceiling. It MUST be in this take-list: the
+        # list/index path is the one that reaches `Search.search/2` through
+        # here, and a key absent from the list is dropped SILENTLY — the clamp
+        # would compile, pass review, and enforce nothing.
+        :visibility_clamp,
         :sort,
         :workspace_id,
         :project_id

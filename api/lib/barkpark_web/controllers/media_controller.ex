@@ -89,15 +89,26 @@ defmodule BarkparkWeb.MediaController do
   resolves it the same way, so a `:media` share is checked against the dataset
   this action actually lists; before task-4f26838232b5ece0 the guard compared
   `"production"` while `?dataset=` listed another dataset's library.
+
+  Clamped to the public tier for a caller with no principal — the LISTING twin
+  of the `Access.allowed?/4` gate on `show/2` directly below. `show/2` grew that
+  gate for the felix W14 leak, and this sibling, in the same module, kept
+  enumerating the `filename` / `path` / `size` of every `private` and `token`
+  asset to anyone (task-27d5fdba100d2bc6 item 3). A listing cannot answer 403
+  per row, so the ceiling rides into the query and `count` counts what was
+  actually returned.
   """
   def index(conn, params) do
     dataset = Map.get(params, "dataset", "production")
     mime_filter = Map.get(params, "type")
     opts = scope_opts(conn)
 
+    read_opts =
+      if Access.authenticated?(conn), do: opts, else: [{:visibility_clamp, :public} | opts]
+
     files =
       dataset
-      |> Media.list_files([mime_type: mime_filter] ++ opts)
+      |> Media.list_files([mime_type: mime_filter] ++ read_opts)
       |> then(&confine_many(opts, &1))
 
     json(conn, %{

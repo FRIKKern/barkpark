@@ -117,8 +117,23 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
     end
   end
 
+  # SPLIT FROM ONE TEST INTO TWO (task-d55b02001cf589f0).
+  #
+  # This block used to hold a SINGLE test, "returns signed delivery URLs for
+  # token assets", whose request went out WITHOUT `authed()` — the only request
+  # in this file that did. `conn_case.ex` hands out a bare `build_conn()`, so it
+  # carried no Authorization header at all: the test asserted, and kept GREEN,
+  # that an ANONYMOUS caller is minted a valid `SignedUrl` for a `token` asset.
+  # It was the repro, standing in the suite as a specification.
+  #
+  # A single test could not survive the fix honestly. Adding `authed()` to it
+  # would have kept a passing assertion while deleting the only evidence anyone
+  # had ever asked the anonymous question. So it is now a PAIR that cannot both
+  # pass on a broken surface: the positive names its credential, and the
+  # negative is what the positive is worth.
   describe "appendRequestSecret" do
-    test "returns signed delivery URLs for token assets", %{conn: conn} do
+    test "returns signed delivery URLs for token assets — for an AUTHORISED caller",
+         %{conn: conn} do
       created = upload_asset(conn)
       id = created["result"]["id"]
 
@@ -129,11 +144,32 @@ defmodule BarkparkWeb.Integration.V1MediaGovernanceTest do
 
       resp =
         conn
+        |> authed()
         |> get(~p"/v1/media/production/#{id}?appendRequestSecret=true")
         |> json_response(200)
 
       assert resp["result"]["originalUrl"] =~ "_="
       assert resp["result"]["visibility"] == "token"
+
+      # The signature is not decorative: it is what makes the bytes reachable.
+      assert build_conn() |> get(resp["result"]["originalUrl"]) |> Map.get(:status) == 200
+
+      cleanup(created)
+    end
+
+    test "mints NOTHING for an anonymous caller", %{conn: conn} do
+      created = upload_asset(conn)
+      id = created["result"]["id"]
+
+      conn
+      |> authed()
+      |> patch(~p"/v1/media/production/#{id}", %{"bp_visibility" => "token"})
+      |> json_response(200)
+
+      resp = build_conn() |> get(~p"/v1/media/production/#{id}?appendRequestSecret=true")
+
+      assert resp.status == 403,
+             "an anonymous caller read a token asset: #{resp.status} #{resp.resp_body}"
 
       cleanup(created)
     end

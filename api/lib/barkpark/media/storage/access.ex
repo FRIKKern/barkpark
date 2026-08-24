@@ -156,7 +156,24 @@ defmodule Barkpark.Media.Storage.Access do
   # satisfied by ANY token, read-only included, and write authority is enforced
   # upstream by `require_write/1` — never here. Asking `:write` of a user would
   # make the account arm stricter than the token arm it exists to match.
-  defp authenticated?(conn) do
+  #
+  # PUBLIC because the media READ path needs the SAME principal question and
+  # must not grow a second, narrower answer to it (task-d55b02001cf589f0):
+  # `V1.MediaController.render_opts/3` gates URL SIGNING on it, and the listing
+  # clamp gates on it too. A local `conn.assigns[:api_token] != nil` at either
+  # call site would be exactly the divergence the comment above was written
+  # about — it would refuse a signature to the account-session workspace member
+  # this arm exists to admit.
+  @doc """
+  Whether the request carries a PRINCIPAL — an API token (any permission,
+  share tokens included) or an account session whose user is a member of the
+  RESOLVED workspace.
+
+  This is authentication, never authorization: it answers "is there someone
+  here", and `allowed?/4` decides what that someone may do.
+  """
+  @spec authenticated?(Plug.Conn.t() | map()) :: boolean()
+  def authenticated?(conn) do
     match?(%{assigns: %{api_token: %_{} = _}}, conn) or account_member?(conn)
   end
 

@@ -108,7 +108,20 @@ defmodule Barkpark.Media.Storage.Collections do
   defp collection_search_opts(%Document{content: content}, collection_id, opts) do
     base =
       opts
-      |> Keyword.take([:limit, :offset, :sort, :facets, :facet_selections])
+      # `:visibility_clamp` is the unauthenticated read ceiling and MUST survive
+      # this take — a key absent from the list is dropped silently, so the clamp
+      # would enforce nothing on the collection-assets door while enforcing on
+      # its `/v1/media/:ds` sibling. Note it rides ALONGSIDE `:visibility` (set
+      # by a virtual collection's own filter, below) rather than replacing it:
+      # the filter narrows, the clamp bounds.
+      |> Keyword.take([
+        :limit,
+        :offset,
+        :sort,
+        :facets,
+        :facet_selections,
+        :visibility_clamp
+      ])
       |> Keyword.put_new(:limit, 50)
       |> Keyword.put_new(:offset, 0)
       |> Keyword.put_new(:sort, "created-desc")
