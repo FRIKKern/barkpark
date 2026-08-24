@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-mvp-12"
+RENDERER_VERSION = "chronicle-mvp-13"
 LEDGER_PREVIEW_LIMIT = 24
 DEFAULT_HISTORY_MONTHS = 18
 DEFAULT_REPO = "FRIKKern/barkpark"
@@ -486,29 +486,21 @@ def period_payload(
 ) -> dict[str, Any]:
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in selected)
-    leading_areas = [sentence_case(area) for area, _count in areas.most_common(3)]
-    public_titles = {
+    folio_parts = edition_folio(period, selected).split("-")
+    display_titles = {
         "day": (
-            f"{period.key} shiplog · {period.start.strftime('%A')} · "
-            f"folio {edition_folio(period, selected)}"
+            f"{period.start.strftime('%d %B %Y').lstrip('0')} · Edition "
+            f"{period.start.timetuple().tm_yday:03d}-{folio_parts[0]}-{folio_parts[1]}"
         ),
         "week": (
-            f"{period.key} dispatch · {period.start.strftime('%d %b')}–"
-            f"{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')} · "
-            f"folio {edition_folio(period, selected)}"
+            f"Week {period.key.split('-W')[-1]} · {period.start.strftime('%d %b')}–"
+            f"{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')} · Dispatch "
+            f"w{period.start.isocalendar()[1]:03d}-{folio_parts[0]}-{folio_parts[1]}"
         ),
         "month": (
-            f"{period.title} field journal · {len(selected):,} changes, "
-            f"{', '.join(leading_areas) if leading_areas else 'quiet'} leading · "
-            f"{digest(selected)}"
+            f"{period.title} · Volume {period.start.month:03d}-{folio_parts[0]}-{folio_parts[1]}"
         ),
-        "year": f"Annual product record · {period.title}",
-    }
-    display_titles = {
-        "day": f"What shipped on {period.start.strftime('%d %B %Y').lstrip('0')}",
-        "week": f"Week {period.key.split('-W')[-1]}: what shipped",
-        "month": f"{period.title}: the release notes",
-        "year": f"Barkpark in {period.title}",
+        "year": f"Barkpark in {period.title} · Annual {period.title}-{folio_parts[0]}-{folio_parts[1]}",
     }
     date_range = f"{period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}"
     profile = collections.Counter(event.kind for event in selected)
@@ -596,7 +588,7 @@ def period_payload(
     payload = {
         "_id": period.slug,
         "slug": period.slug,
-        "title": public_titles[period.kind],
+        "title": display_titles[period.kind],
         "description": f"Premium Barkpark release notes for {period.title}, with highlights, a complete log, and verified source links.",
         "style": "article",
         "event_type": f"changelog.{period.kind}",

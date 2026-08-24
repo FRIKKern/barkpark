@@ -85,10 +85,9 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("https://github.com/acme/project/pull/13", serialized)
         self.assertIn('"type": "bar-chart"', serialized)
         self.assertIn('"type": "lineage"', serialized)
-        self.assertIn("folio", week["title"])
         week_h1 = next(block for block in week["blocks"] if block["id"] == "auto:title")
-        self.assertEqual("Week 34: what shipped", week_h1["text"])
-        self.assertNotIn("folio", week_h1["text"])
+        self.assertEqual(week["title"], week_h1["text"])
+        self.assertRegex(week_h1["text"], r"Week 34 .* Dispatch w034-[a-f0-9]{4}-[a-f0-9]{4}")
         index = by_slug["barkpark-chronicle"]
         serialized_index = json.dumps(index)
         self.assertIn("/papers/barkpark-changelog-2026-w34", serialized_index)
