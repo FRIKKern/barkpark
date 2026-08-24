@@ -182,6 +182,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "./bringup-retry.mjs";
+import { assertReadyHostsPaint as assertFloor } from "./ready-host-paint.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -865,55 +866,14 @@ async function main() {
     fontPinRuns++;
   };
 
-  // THE RENDERED-HOST FLOOR (cchi-w20-bl-guard-greens-when-its-hosts-disappear).
-  // display:none keeps a node in the DOM: querySelector stays truthy, computed
-  // styles still read their specified values, and every rect is 0x0 — so
-  // `0 <= 0` scored 28/28 cells clean over 98 pills that no person could see.
-  // The floor is DERIVED from what each leg already declares: the literal
-  // selectors inside its own readyExpr. After readiness, every non-negated
-  // literal selector that MATCHES at least one node must also PAINT at least
-  // one non-zero box, or the guard refuses by name — the leg was about to
-  // certify an invisible screen.
-  //   HONEST LIMITS, stated rather than implied: (a) the floor runs at the
-  //   NAV width — a width-scoped display:none inside a leg's own width loop
-  //   is not caught here and stays each leg's own duty; (b) only LITERAL
-  //   querySelector('...')/getElementById('...') strings contribute — a
-  //   readyExpr built from variables derives nothing; (c) a NEGATED selector
-  //   (`!document.querySelector(...)` — a leg waiting on absence) is skipped,
-  //   as is a selector matching zero nodes (an || arm whose twin satisfied
-  //   the gate); (d) a ZERO-HEIGHT CLIPPING ANCESTOR (height:0;
-  //   overflow:hidden) passes this floor — child rects keep their laid-out
-  //   sizes (measured: 102.4x28 under a 0-height .attention-list) and
-  //   checkVisibility stays true, so that case remains each clip-walking
-  //   leg's own duty. visibility:hidden and content-visibility:hidden ARE
-  //   caught, via checkVisibility (measured: both flip it false while the
-  //   rect area stays 2868px²).
-  const READY_SELECTOR_RE = /(!?)\s*document\.(?:querySelector(?:All)?\(\s*'([^']+)'\s*\)|getElementById\(\s*'([^']+)'\s*\))/g;
-  const assertReadyHostsPaint = async (url, readyExpr) => {
-    const sels = [];
-    for (const m of readyExpr.matchAll(READY_SELECTOR_RE)) {
-      if (m[1] === "!") continue;
-      const q = m[2] != null ? m[2] : "#" + m[3];
-      if (!sels.includes(q)) sels.push(q);
-    }
-    if (sels.length === 0) return;
-    const report = await evalJs(
-      `(function(){return ${JSON.stringify(sels)}.map(function(q){` +
-      `var els=[].slice.call(document.querySelectorAll(q));` +
-      `var rendered=els.filter(function(el){var r=el.getBoundingClientRect();if(!(r.width>0&&r.height>0))return false;return el.checkVisibility?el.checkVisibility({checkVisibilityCSS:true,checkOpacity:true}):true;}).length;` +
-      `return {q:q, matches:els.length, rendered:rendered};});})()`,
-    );
-    for (const r of report) {
-      if (r.matches > 0 && r.rendered === 0) {
-        throw new Error(
-          `READY HOST NOT PAINTED: "${r.q}" matches ${r.matches} node(s) at ${url} and NONE paints a box — ` +
-          `display:none keeps querySelector truthy while every rect is 0x0, and visibility:hidden / content-visibility:hidden keep the rect while checkVisibility reads false. ` +
-          `The readiness gate passed on a host a person cannot see; measuring on would certify an invisible ` +
-          `screen, so this run refuses instead (cchi-w20-bl-guard-greens-when-its-hosts-disappear).`,
-        );
-      }
-    }
-  };
+  // THE RENDERED-HOST FLOOR lives in ready-host-paint.mjs — extracted so its
+  // settle mechanics are provable without a browser (ready-host-paint.test.mjs)
+  // and so the animating-vs-invisible discrimination has one owner. It is
+  // injected with this run's browser and clock; everything it knows about WHY
+  // it exists, and why it now settles rather than judging a host mid-fade-in,
+  // is documented there.
+  const assertReadyHostsPaint = (url, readyExpr) =>
+    assertFloor({ url, readyExpr, evalJs, sleep, log: (l) => process.stdout.write(l) });
 
   // Navigate and poll until `readyExpr` is truthy (the SPA mounts async).
   //

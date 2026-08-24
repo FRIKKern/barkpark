@@ -1,0 +1,29 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ready-host floor fixture — a host mid entry animation</title>
+<!--
+  THE DEFECT FIXTURE for task-e72560e947dba4e6.
+
+  `.deploy-detail` is a faithful copy of app.css's `new-detail-in` case: a host
+  that is FULLY LAID OUT (300x40) and COMPLETELY INVISIBLE at t=0, because the
+  animation's first keyframe is `opacity: 0`. app.css ships three of these —
+  modal-in 0.15s, toast-in 0.18s, new-detail-in 0.28s — and all three put any
+  host inside them into this state for the length of the animation.
+
+  The floor judged at t=0 and refused. Measured in Chrome on this very file:
+      t+5ms    box 300x40  computed opacity "0"         new-detail-in running
+      t+405ms  box 300x40  computed opacity "1"         no animations
+  Nothing about the screen is wrong; the instrument sampled it too early.
+-->
+<style>
+  @keyframes new-detail-in {
+    from { opacity: 0; transform: translateY(-2px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .deploy-detail {
+    width: 300px; height: 40px;
+    background: #333; color: #fff;
+    animation: new-detail-in 0.28s ease;
+  }
+</style>
+<div class="deploy-detail">a screen that renders perfectly</div>

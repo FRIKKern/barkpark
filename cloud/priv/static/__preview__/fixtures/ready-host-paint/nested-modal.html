@@ -1,0 +1,28 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ready-host floor fixture — the host is a DESCENDANT of the animated element</title>
+<!--
+  THE MAIN-RUN CASE, reproduced.
+
+  Two of the four observed main refusals named `#a2f-error` at
+  /?scen=account-modal-2fa-badcode&theme=light&modal=account. `#a2f-error` does
+  not animate — the `.modal` AROUND it does (app.css: `animation: modal-in
+  var(--dur-1) var(--ease)`, `from { opacity: 0 }`), and checkOpacity resolves
+  against ancestors. So the failing host carries no animation of its own.
+
+  That is why the probe asks `getAnimations({subtree:true})` and why the
+  diagnosis is gathered from the same pass that judged: an element-only query
+  would report "no animation running" on the very case that motivated the fix,
+  and the floor would refuse it as a display:none.
+-->
+<style>
+  @keyframes modal-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.99); }
+    to   { opacity: 1; transform: none; }
+  }
+  .modal { width: 420px; padding: 24px; background: #fff; animation: modal-in 0.15s ease; }
+  #a2f-error { display: block; width: 300px; height: 20px; color: #b00; }
+</style>
+<div class="modal">
+  <span id="a2f-error">That code did not match.</span>
+</div>
