@@ -152,6 +152,26 @@ is exactly that string), runs `if: always()`, and fails when any upstream job
 lands outside its allow-set. That is the one name branch protection is meant to
 require — `Test (Elixir 1.18.1 / OTP 27.0)` is a job underneath it.
 
+**Gate ORDER inside `mix-test` is load-bearing** (task-openapi-drift-chronic).
+The two generated-artifact freshness gates — `OpenAPI drift check` and
+`Paper-component golden-parity freshness` — plus the `Plugins-off boot
+invariant` step run **after** `mix test`, under an `if:` that ignores the TEST
+result but still requires the `build` and `db` steps to have succeeded (so a
+broken compile does not cascade into a bogus "stale artifact" red). They used to
+run before it. Because a failed step
+aborts the rest of the job, one stale byte in `docs/openapi.json` on `main`
+meant every open PR reported **zero** test results — a generated-file nit
+masking the real suite, twice in one afternoon on 2026-07-13. Order is the whole
+fix: both gates are still merge-blocking and unchanged in strength, and
+`!cancelled()` means a red suite and a stale artifact are now reported
+**independently** rather than each hiding the other. **Do not move a freshness
+gate back above `mix test`.** The drift failure names its own remedy
+(`cd api && mix barkpark.openapi`), and
+`api/test/barkpark/api/openapi_test.exs` carries the asserts that make that
+remedy fair: generation is byte-deterministic (so a reported diff is the
+author's own change, never run-to-run jitter), and a new route or an edited
+help string provably moves the artifact bytes (so the gate has teeth).
+
 **`main` IS protected — as of 2026-07-28.** The long-standing "no branch
 protection" reading (verified 2026-06-21, re-checked 2026-07-01) is **dead**;
 do not plan from it. Re-derived 2026-08-04 (the two-context body this block
@@ -189,7 +209,7 @@ is harmless:
   their results, so a red upstream reds the required context and blocks the
   merge exactly as if it had been required itself. `Elixir gate` is
   `needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape]`
-  (elixir.yml:667), so all five block. Driven rather than read off the topology:
+  (the `elixir-gate` job's `needs:` line in elixir.yml), so all five block. Driven rather than read off the topology:
   its `Decide` body, extracted and run with every upstream `success`, exits 0;
   re-run with only the prod-compile result set to `failure` it exits 1; re-run
   with only the perf-bench result set to `failure` it exits 1, printing
@@ -207,7 +227,7 @@ is harmless:
   `needs.<job>.result` reads `success` even when it failed, so an advisory job
   wired into an aggregator's `needs:` would launder its own red into a green
   required context. `format` is deliberately kept out of that list for exactly
-  this reason (elixir.yml:655). `plugin-node` is a third case again: blocking
+  this reason (see the `elixir-gate` job's `needs:` comment block, which spells out why `format` is excluded). `plugin-node` is a third case again: blocking
   nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
 
 - **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
