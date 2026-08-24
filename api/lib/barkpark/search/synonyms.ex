@@ -7,7 +7,7 @@ defmodule Barkpark.Search.Synonyms do
   """
 
   import Ecto.Query
-  alias Barkpark.Search.{Crystal, MergePattern, Sanitizer, Synonym}
+  alias Barkpark.Search.{Crystal, Crystallizer, MergePattern, Sanitizer, Synonym}
   alias Barkpark.Repo
 
   @kinds ~w(one_way alt_correction)
@@ -194,10 +194,14 @@ defmodule Barkpark.Search.Synonyms do
     workspace_id = Keyword.get(opts, :workspace_id)
     period = opts |> Keyword.get(:period, "week") |> to_string()
 
+    # The default MUST be the key the crystallizer WROTE, not "seven days ago".
+    # `Date.add(today, -7)` coincides with the Monday-anchored week key only on
+    # Mondays, so this query matched nothing six days in seven and `candidates/3`
+    # answered an empty list with no error — see Crystallizer.period_start_for/2.
     period_start =
       case Keyword.get(opts, :period_start) do
         %Date{} = date -> date
-        _ -> Date.add(Date.utc_today(), -7)
+        _ -> Crystallizer.period_start_for(period)
       end
 
     merge_candidates =
@@ -221,7 +225,15 @@ defmodule Barkpark.Search.Synonyms do
           source: "auto",
           transitions: row.transition_count,
           reason: "zero_to_hit",
-          evidence: candidate_evidence(surface, scope, from_q, to_q, row.transition_count)
+          evidence:
+            candidate_evidence(
+              surface,
+              scope,
+              from_q,
+              to_q,
+              row.transition_count,
+              {period, period_start}
+            )
         }
       end)
       |> Enum.reject(fn c -> c.from in [nil, ""] or c.to in [nil, ""] end)
@@ -308,9 +320,15 @@ defmodule Barkpark.Search.Synonyms do
 
   defp preview_count(_, _, _, _), do: 0
 
-  defp candidate_evidence(surface, scope, from_q, to_q, transitions) do
-    from_stats = crystal_stats(surface, scope, from_q)
-    to_stats = crystal_stats(surface, scope, to_q)
+  # The evidence describes the SAME window as the merge pattern it annotates, so
+  # it takes that window rather than re-deriving one. The old body hardcoded
+  # `period: "week", period_start: Date.add(today, -7)` — the wrong key six days
+  # in seven, AND the wrong window whenever a caller passed an explicit one, so
+  # fromZeroHitRate/toCtr silently read 0.0 and every confidence score collapsed
+  # to the transition term alone.
+  defp candidate_evidence(surface, scope, from_q, to_q, transitions, window) do
+    from_stats = crystal_stats(surface, scope, from_q, window)
+    to_stats = crystal_stats(surface, scope, to_q, window)
 
     from_zero =
       if from_stats.search_count > 0 do
@@ -334,12 +352,12 @@ defmodule Barkpark.Search.Synonyms do
     }
   end
 
-  defp crystal_stats(surface, scope, query) when is_binary(query) do
+  defp crystal_stats(surface, scope, query, {period, period_start}) when is_binary(query) do
     case Repo.get_by(Crystal,
            surface: surface,
            scope: scope,
-           period: "week",
-           period_start: Date.add(Date.utc_today(), -7),
+           period: period,
+           period_start: period_start,
            query_normalized: Sanitizer.normalize(query),
            filter_fingerprint: ""
          ) do
@@ -351,7 +369,7 @@ defmodule Barkpark.Search.Synonyms do
     end
   end
 
-  defp crystal_stats(_, _, _), do: %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
+  defp crystal_stats(_, _, _, _), do: %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
 
   @doc false
   def fingerprint_query(fingerprint) when is_binary(fingerprint) do

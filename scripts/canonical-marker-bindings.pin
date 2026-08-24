@@ -27,6 +27,7 @@ platform-delivery-record	record_all
 preview-manifest	project
 pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
+search-crystal-period-key	period_start_for
 secret-redaction	redact
 sheets-bg-sanitizer	sanitize_bg
 slug-resolve	resolve_doc

@@ -18,6 +18,42 @@ defmodule Barkpark.Search.Crystallizer do
   # duplicate rows, bounded cost.
   @backfill_days 3
 
+  @doc """
+  The `period_start` key of the most recently COMPLETED period, given `today`.
+
+  ONE derivation, shared by the WRITER below and by every reader that filters
+  `period_start == ^…`. A reader that spells the key itself is a silent
+  zero-row bug, not a crash: `Crystal` / `MergePattern` rows exist, the query
+  simply matches none of them and the caller answers 200 with an empty result.
+
+  That is not hypothetical. `Search.Synonyms` spelled the week key
+  `Date.add(Date.utc_today(), -7)`, which coincides with the Monday-anchored key
+  the crystallizer writes only ON MONDAYS — so `candidates/3` and its
+  crystal-backed evidence read zero rows six days in seven. Call this instead of
+  re-deriving; if you need a different window, pass it explicitly.
+
+  * `:day` → yesterday (the first day the backfill window covers)
+  * `:week` → the Monday of the previous week
+  * `:month` → the first of the previous month
+  * anything else → the `:week` key, matching the readers' default period
+  """
+  # @canonical capability:search-crystal-period-key aka:period_start,week key,crystal key,beginning_of_week,default_period_start
+  @spec period_start_for(atom() | String.t(), Date.t()) :: Date.t()
+  def period_start_for(period, today \\ Date.utc_today())
+
+  def period_start_for(period, %Date{} = today) when is_atom(period) and not is_nil(period),
+    do: period_start_for(Atom.to_string(period), today)
+
+  def period_start_for("day", %Date{} = today), do: Date.add(today, -1)
+
+  def period_start_for("week", %Date{} = today),
+    do: today |> Date.beginning_of_week(:monday) |> Date.add(-7)
+
+  def period_start_for("month", %Date{} = today),
+    do: today |> Date.beginning_of_month() |> Date.add(-1) |> Date.beginning_of_month()
+
+  def period_start_for(_other, %Date{} = today), do: period_start_for("week", today)
+
   @doc "Crystallize all surface/scope/workspace tuples for a trailing day window plus week/month boundaries when due."
   @spec crystallize_due(Date.t()) :: map()
   def crystallize_due(%Date{} = today \\ Date.utc_today()) do
@@ -49,12 +85,11 @@ defmodule Barkpark.Search.Crystallizer do
     # window, so re-runs on the window days dedup rather than duplicate.
     week_stats =
       if Date.day_of_week(today) <= @backfill_days do
-        # Start of the most recently completed week (its Monday). Derived from
-        # the current week's Monday so the target is identical on every day of
-        # the window (Mon → today-7, Tue → today-8, Wed → today-9, all the same
-        # Monday), matching the original Monday-only behaviour on Mondays.
-        this_monday = Date.add(today, -(Date.day_of_week(today) - 1))
-        week_start = Date.add(this_monday, -7)
+        # Start of the most recently completed week (its Monday) — identical on
+        # every day of the window (Mon → today-7, Tue → today-8, Wed → today-9,
+        # all the same Monday). period_start_for/2 is the ONE spelling; readers
+        # call it too, which is the point.
+        week_start = period_start_for(:week, today)
 
         Enum.map(triples, fn {surface, scope, workspace_id} ->
           {{surface, scope, workspace_id},
@@ -68,7 +103,7 @@ defmodule Barkpark.Search.Crystallizer do
       if today.day <= @backfill_days do
         # Previous month's start — stable for every day in the window, so the 1st,
         # 2nd and 3rd all target the same month and dedup via upsert.
-        month_start = Date.add(Date.beginning_of_month(today), -1) |> Date.beginning_of_month()
+        month_start = period_start_for(:month, today)
 
         Enum.map(triples, fn {surface, scope, workspace_id} ->
           {{surface, scope, workspace_id},

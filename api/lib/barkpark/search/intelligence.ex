@@ -10,7 +10,7 @@ defmodule Barkpark.Search.Intelligence do
   """
 
   import Ecto.Query
-  alias Barkpark.Search.{Crystal, Event, MergePattern, Sanitizer, Synonyms}
+  alias Barkpark.Search.{Crystal, Crystallizer, Event, MergePattern, Sanitizer, Synonyms}
   alias Barkpark.Repo
 
   @typedoc """
@@ -1090,19 +1090,11 @@ defmodule Barkpark.Search.Intelligence do
   end
 
   # Defaults MUST land exactly on the key the crystallizer writes, else the
-  # `period_start ==` filters in `insights` return empty. Week rows are keyed to
-  # the previous Monday (crystallizer runs on Mondays with `today - 7`); month
-  # rows are keyed to the first of the PREVIOUS month (runs on the 1st). Compute
-  # those same keys for any `today`.
-  defp default_period_start("day"), do: Date.add(Date.utc_today(), -1)
-
-  defp default_period_start("week"),
-    do: Date.utc_today() |> Date.beginning_of_week(:monday) |> Date.add(-7)
-
-  defp default_period_start("month"),
-    do: Date.utc_today() |> Date.beginning_of_month() |> Date.add(-1) |> Date.beginning_of_month()
-
-  defp default_period_start(_), do: default_period_start("week")
+  # `period_start ==` filters in `insights` return empty — 200 with no rows, no
+  # error anywhere. This used to be a hand-copy of that arithmetic; it now calls
+  # the writer's own function, because the copy in `Search.Synonyms` drifted and
+  # read zero rows six days in seven before anyone noticed.
+  defp default_period_start(period), do: Crystallizer.period_start_for(period)
 
   # `?period[k]=v` / `?period[]=x` reach here as a map/list — `to_string/1` on
   # those raises (Protocol.UndefinedError → 500). Only a binary/atom is a valid
