@@ -424,7 +424,16 @@ defmodule BarkparkWeb.StudioComponents.Nav do
               label rides the native tooltip (title) and the accessible name
               (aria-label). A tab with a nil/unknown icon degrades to the
               generic "file" glyph — its label tooltip keeps it legible
-              (charter D2). --%>
+              (charter D2).
+
+              THE DEGRADE IS `drawable_name/2`, NOT `||` (icons-tab-icon-tenant-guard).
+              A tab is PLUGIN data — `collect_top_menu_entries/1` above hands the
+              registry's entries straight through — so `tab[:icon]` is an
+              unbounded, out-of-tree value. `|| "file"` only answers nil/false:
+              an unknown STRING reached `icon/1` and painted a document in
+              dev/prod while RAISING in :test, and a truthy non-binary
+              (`:folder || "file"` is `:folder`) did the same. Both shapes
+              collapse here, at the call site, where "file" is a decision. --%>
         <a
           href={tab.path}
           class={"studio-tab #{if active, do: "active"}"}
@@ -432,7 +441,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
           title={tab.label}
           aria-label={tab.label}
           data-test-id="top-menu-tab"
-        ><span class="studio-tab-icon" aria-hidden="true"><.icon name={tab[:icon] || "file"} size={16} /></span></a>
+        ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></a>
       <% end %>
     </div>
     """
