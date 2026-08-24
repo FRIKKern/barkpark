@@ -1413,35 +1413,67 @@ defmodule BarkparkCloud.Registry do
   def active_provision_job?(barkpark), do: active_job_of_kind?(barkpark_id(barkpark), "provision")
 
   @doc """
-  True when `barkpark` has a provision of EITHER kind still in flight (pending or
-  claimed) — `"provision"` for a main, `"provision_support"` for a support
-  (task-688ebffc4b0aa50a). This is the predicate every "refuse to delete the row
-  mid-provision" guard wants, and `active_provision_job?/1` is not it.
+  True when `barkpark` has ANY job in flight (pending or claimed) whose
+  completion would touch infrastructure only this row still names — the guard
+  every "refuse to delete the row mid-flight" site wants (task-688ebffc4b0aa50a).
 
-  A support is never enqueued under kind `"provision"` (PDF-D83 gives it
-  `"provision_support"`), so the kind-specific predicate answers `false` for
-  every support — and BOTH of its guard call sites accept support rows:
-  `DELETE /v1/barkparks/:id` matches on team alone with no `fleet_role` filter,
-  and `POST /v1/internal/barkparks/:id/deprovision` takes any row at all. So the
-  guard was blind to supports at every surface that used it.
+  A DENYLIST, NOT AN ALLOWLIST, and that is the entire point. This guard has now
+  been wrong TWICE for the same reason: it named the kinds its author knew and
+  silently failed to cover the rest. First `"provision"` alone missed
+  `"provision_support"` — a support is never enqueued under `"provision"`
+  (PDF-D83) — and both of its call sites accept support rows, since
+  `DELETE /v1/barkparks/:id` matches on team alone with no `fleet_role` filter and
+  `POST /v1/internal/barkparks/:id/deprovision` takes any row at all. Then
+  `["provision", "provision_support"]` missed `"resurrect"`, which
+  `ProvisionJob`'s own moduledoc describes as recreating a machine as a
+  provision. Six kinds exist today; there will be a seventh, and an allowlist
+  fails it silently the same way.
 
-  The gap is not cosmetic. A support provision publishes an
-  `A <label>.barkpark.cloud` record as well as a box, so a row deleted
-  mid-provision strands a dangling A record — pointing at an address Hetzner will
-  later reassign to someone else — with nothing left in the control plane that
-  names it, and no deprovision job that could sweep it.
+  So the set is inverted: everything blocks EXCEPT the kinds proven safe. A newly
+  added kind is covered by default and has to be argued OUT, not remembered IN.
+  This is the discipline `reap_stale_provision_jobs/0` already uses with its
+  `j.kind != "provision_support"` catch-all arm.
+
+  EXCLUDED, each because completing it strands nothing this row names:
+
+    * `"deprovision"` — it IS the teardown. Blocking on it would refuse the very
+      operation that cleans up, and `enqueue_deprovision_job/1`'s own dedup guard
+      already prevents a second one.
+    * `"push_agent_key"` — writes a key to a box that already exists and is
+      already named. It creates no infrastructure, so it can strand none.
+
+  Everything else blocks: `provision`, `provision_support`, `resurrect`, and
+  `attach_domain`. `attach_domain` is in the set deliberately — its worker upserts
+  an A record (`AttachDomainWith`), so a row deleted mid-flight strands DNS
+  pointing at a box nothing can see. That narrows, but does not close, the race
+  filed as task-c1014bb6c82298c2: a job already CLAIMED when the delete lands is
+  past any check the control plane can make.
+
+  NOTE ON REACH: every call site consults this only on the NOT-YET-LIVE arm (a
+  live `host` routes to a deprovision job first), so the kind that actually bites
+  today is `resurrect` — the one kind that can be in flight while `host` is still
+  nil. The wider set is future-proofing, and is the reason a seventh kind will not
+  need this doc rewritten.
   """
-  @spec active_provision_job_any_kind?(Barkpark.t() | binary()) :: boolean()
-  def active_provision_job_any_kind?(barkpark),
-    do: active_job_of_kinds?(barkpark_id(barkpark), ["provision", "provision_support"])
+  @spec active_job_blocking_delete?(Barkpark.t() | binary()) :: boolean()
+  def active_job_blocking_delete?(barkpark),
+    do: active_job_except_kinds?(barkpark_id(barkpark), ["deprovision", "push_agent_key"])
 
-  defp active_job_of_kind?(barkpark_id, kind), do: active_job_of_kinds?(barkpark_id, [kind])
+  # Both predicates below differ only in how they constrain `kind`, so the whole
+  # WHERE is composed as one dynamic and interpolated at the TOP LEVEL — Ecto
+  # rejects a dynamic nested inside an `and`, which is what a first cut here did.
+  defp active_job_of_kind?(barkpark_id, kind) do
+    active_job?(dynamic([j], j.barkpark_id == ^barkpark_id and j.kind == ^kind))
+  end
 
-  defp active_job_of_kinds?(barkpark_id, kinds) do
+  defp active_job_except_kinds?(barkpark_id, kinds) do
+    active_job?(dynamic([j], j.barkpark_id == ^barkpark_id and j.kind not in ^kinds))
+  end
+
+  defp active_job?(kind_scope) do
     from(j in ProvisionJob,
-      where:
-        j.barkpark_id == ^barkpark_id and j.kind in ^kinds and
-          j.status in ["pending", "claimed"],
+      where: ^kind_scope,
+      where: j.status in ["pending", "claimed"],
       limit: 1,
       select: 1
     )
