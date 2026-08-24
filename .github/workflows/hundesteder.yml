@@ -1,0 +1,152 @@
+name: hundesteder
+
+# The apps/hundesteder gate: test + typecheck + build, on the app that has
+# shipped to Vercel with NO repo gate of any kind.
+# `grep -rln hundesteder .github/workflows/` used to return exactly one file --
+# mobile.yml -- and only inside a COMMENT, where hundesteder is named as "the
+# live zero-CI silent-skip precedent this paths block prevents". This file is
+# that precedent being paid off.
+#
+# WHAT WENT UNSEEN. #13316 (ec9d8fd4d0, 2026-08-23 19:41:32 +0200) added
+# `import { collectAllPages } from "../lib/paginate.ts"` and put five TS5097
+# errors on main. #13421 (5ba6c7119c, 2026-08-24 00:51:29 +0200) fixed them by
+# enabling `allowImportingTsExtensions`. Red on main for 5h10m -- not caught,
+# because no workflow in this repo ran tsc on this directory.
+#
+# TO BE PRECISE ABOUT THE BLAST RADIUS, because the filing row overstates it:
+# `next build` DOES fail on that TS5097 (measured: exit 1, "Failed to compile"),
+# so Vercel's own build would have gone red too. The red was not invisible to
+# EVERY instrument -- it was invisible to every instrument attached to the
+# MERGE. A deploy that fails after the merge is a worse signal than a check
+# that fails before it, which is the whole reason this file exists.
+#
+# --- three deliberate choices, each measured ---
+#
+# 1. ITS OWN INSTALL, IN ITS OWN DIRECTORY. apps/hundesteder is workspace-
+#    ISOLATED: it carries its own pnpm-workspace.yaml (`packages: []`) and its
+#    own pnpm-lock.yaml, and the ROOT pnpm-workspace.yaml lists only web,
+#    js/packages/core, js/packages/react and apps/mobile. Copying mobile.yml's
+#    root-level `pnpm install` verbatim is the predictable way to get a job
+#    that installs nothing for this app and passes without running it.
+#
+# 2. A TEST-COUNT FLOOR, BECAUSE `npm test` IS SATISFIABLE BY EMPTINESS.
+#    MEASURED, not theorised: the package.json script is
+#    `node --test --test-reporter=spec __tests__/*.test.ts`, the glob is
+#    expanded by the SHELL, and when it matches nothing the unexpanded literal
+#    is handed to node, which reports `pass 0` and EXITS 0. Renaming __tests__
+#    away and running the real `npm test` gives exit 0 with `tests 0`. Without
+#    the floor below, this step would be a green light wired to nothing from
+#    the day it landed -- the exact defect class this gate was filed to end.
+#    (`tsc -p` needs no such floor: an include matching nothing is TS18003 and
+#    exit 2. Verified.)
+#
+# 3. TSC SEPARATELY FROM `next build`, THOUGH BOTH TYPECHECK. `next build`
+#    stops at the FIRST type error; `tsc --noEmit` named all five TS5097s at
+#    once. On a red PR that difference is one round trip versus five.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/hundesteder/**"
+      - ".github/workflows/hundesteder.yml"
+  pull_request:
+    paths:
+      - "apps/hundesteder/**"
+      - ".github/workflows/hundesteder.yml"
+
+concurrency:
+  group: hundesteder-${{ github.ref }}
+  # Never cancel main (the 2026-06-10 elixir starvation lesson); collapse
+  # superseded PR runs.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  test:
+    name: Test + typecheck + build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Every step runs INSIDE the isolated workspace. See choice 1 above.
+        working-directory: apps/hundesteder
+    env:
+      # The floor for choice 2. The suite runs 48 tests today; 40 leaves room
+      # for ordinary churn while still failing loudly if the suite stops being
+      # found or is gutted. This is a MINIMUM on work done, not a tolerance on
+      # failures -- `fail` must still be exactly 0, asserted separately below.
+      MIN_TESTS: 40
+      # Build hermetically. lib/places.ts falls back to the LIVE
+      # api.barkpark.cloud when BARKPARK_API_URL is unset, and bpFetch swallows
+      # every upstream failure into `[]` -- so a default-env build silently
+      # depends on prod being reachable. Pointing at a closed port keeps the
+      # gate measuring THIS REPO: a merge must not be blocked because prod is
+      # down, and must not pass only because prod is up.
+      BARKPARK_API_URL: http://127.0.0.1:9
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # No pipes anywhere in this step. `cmd | tee` under pipefail is how a
+      # gate in this repo learned to return 141 under load; capture to a file
+      # and read the file.
+      - name: Test
+        run: |
+          set -u
+          rc=0
+          npm test >test-output.log 2>&1 || rc=$?
+          cat test-output.log
+
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::npm test exited $rc"
+            exit "$rc"
+          fi
+
+          # A node --test spec summary line is exactly three fields --
+          # `<glyph> pass 48` / `<glyph> fail 0` -- so match on the FIELDS
+          # rather than on the leading multibyte glyph, which is not portably
+          # matchable. NF == 3 and a numeric third field together keep an
+          # ordinary result line (`<glyph> some test name (0.02ms)`, NF wide
+          # and last field parenthesised) out of the count.
+          #
+          # If NO summary line is found at all, both awks print 0 and the floor
+          # below rejects the run. That direction is deliberate: a parser that
+          # cannot find the numbers must not be read as a pass. An earlier
+          # draft of this step used $(NF-1) unguarded, which errored on the
+          # blank lines in the log, printed EMPTY, and made every comparison
+          # below a no-op -- the step went green on a tree with no tests at
+          # all. Caught by running the mutants; hence the belt and braces.
+          passed=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { v = $3 } END { print v + 0 }' test-output.log)
+          failed=$(awk 'NF == 3 && $2 == "fail" && $3 ~ /^[0-9]+$/ { v = $3 } END { print v + 0 }' test-output.log)
+
+          echo "reported: pass=$passed fail=$failed (floor $MIN_TESTS)"
+
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::$failed test(s) failed"
+            exit 1
+          fi
+
+          # THE ANTI-EMPTINESS ASSERTION. A suite that ran nothing exits 0 with
+          # pass 0 -- see choice 2. Refuse to call that a pass.
+          if [ "$passed" -lt "$MIN_TESTS" ]; then
+            echo "::error::only $passed test(s) ran, floor is $MIN_TESTS -- the suite was not found, or was gutted. A gate that certifies an empty run certifies nothing."
+            exit 1
+          fi
+
+      - name: Typecheck
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Build
+        run: npx next build
