@@ -373,9 +373,14 @@ defmodule Barkpark.EdgeProjector.TasksEdgeProjectionTest do
 
       after_first = read.()
 
-      assert [%{via: via}] = after_first,
-             "backfill did not connect the pre-existing task to its paper"
+      # `assert pattern = expr, message` can never print its message — the match
+      # raises MatchError before assert/2 runs. Assert matchability first so the
+      # diagnostic survives, THEN destructure.
+      assert match?([_], after_first),
+             "backfill did not connect the pre-existing task to its paper; got " <>
+               inspect(after_first)
 
+      [%{via: via}] = after_first
       assert "wave_paper" in via
 
       # Re-runnable: a second sweep converges to the same single entry.
