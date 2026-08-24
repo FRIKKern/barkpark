@@ -171,10 +171,16 @@ func TestTaskClaimResourcesEmptyOmitsResourcesKey(t *testing.T) {
 // A 409 resource_conflict rides an ok:false envelope with a conflicts array. The
 // outcome must surface reason + the named holders WITHOUT collapsing into an
 // error (the frontier loop needs to branch on it and skip to the next pick).
+//
+// THE FIXTURE BELOW IS THE WIRE SHAPE, CAPTURED FROM guerrilla — the holder key
+// is `doc_id`. This test previously spelled it `"task"`, which no emitter in the
+// API sends (api/lib/barkpark/tasks/claim.ex builds `%{doc_id: …}`), so it was
+// green against a body the server does not produce while TaskConflict.Task was
+// empty on every real response. Read the holder through HolderID.
 func TestTaskClaimResourcesDecodesConflicts(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(`{"ok":false,"reason":"resource_conflict","conflicts":[{"task":"task-b","worker":"worker-2","resources":["internal/cli/cli.go"]}]}`))
+		_, _ = w.Write([]byte(`{"ok":false,"reason":"resource_conflict","conflicts":[{"worker":"worker-2","doc_id":"task-b","resources":["internal/cli/cli.go"]}]}`))
 	}))
 	defer srv.Close()
 
@@ -186,8 +192,42 @@ func TestTaskClaimResourcesDecodesConflicts(t *testing.T) {
 	if outcome.OK || outcome.Reason != "resource_conflict" {
 		t.Errorf("outcome = %+v, want ok=false reason=resource_conflict", outcome)
 	}
-	if len(outcome.Conflicts) != 1 || outcome.Conflicts[0].Task != "task-b" || outcome.Conflicts[0].Worker != "worker-2" {
+	if len(outcome.Conflicts) != 1 || outcome.Conflicts[0].HolderID() != "task-b" || outcome.Conflicts[0].Worker != "worker-2" {
 		t.Errorf("conflicts = %+v, want the named holder task-b/worker-2", outcome.Conflicts)
+	}
+}
+
+// TestTaskConflictHolderIDReadsTheWireKey is the guard the fixture above cannot
+// be: it asserts the SERVER's spelling decodes, that the legacy `task` spelling
+// still decodes (so a hand-written fixture or an older emitter is not broken by
+// the fix), and — the row that actually matters — that reading `.Task` on a real
+// response yields NOTHING. That last assertion is what made every holder line
+// render with a leading blank where the row id belongs.
+func TestTaskConflictHolderIDReadsTheWireKey(t *testing.T) {
+	// Captured verbatim from guerrilla.barkpark.cloud.
+	const wire = `{"worker":"build-lane-j","doc_id":"task-4b338a4dbe90d44d","resources":["internal/cli/run.go"]}`
+	var c TaskConflict
+	if err := json.Unmarshal([]byte(wire), &c); err != nil {
+		t.Fatalf("decoding the live wire body: %v", err)
+	}
+	if c.HolderID() != "task-4b338a4dbe90d44d" {
+		t.Errorf("HolderID() = %q, want the doc_id the server sent", c.HolderID())
+	}
+	if c.Task != "" {
+		t.Errorf("Task = %q — the server does not send a `task` key; this test would stop measuring the bug", c.Task)
+	}
+
+	var legacy TaskConflict
+	if err := json.Unmarshal([]byte(`{"task":"task-b","worker":"w"}`), &legacy); err != nil {
+		t.Fatalf("decoding the legacy spelling: %v", err)
+	}
+	if legacy.HolderID() != "task-b" {
+		t.Errorf("HolderID() = %q on the legacy `task` spelling, want task-b", legacy.HolderID())
+	}
+
+	var none TaskConflict
+	if none.HolderID() != "" {
+		t.Errorf("HolderID() = %q on an empty conflict, want empty", none.HolderID())
 	}
 }
 
