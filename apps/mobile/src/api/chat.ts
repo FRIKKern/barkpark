@@ -226,11 +226,49 @@ export interface SseFrame {
   id?: string
 }
 
+/** The most one unterminated frame may buffer before the stream is declared
+ * broken. Every other accumulator in this app is capped and says so —
+ * MAX_TAIL_BYTES (262144) in the chat reducer, MAX_STABLE_SEGMENTS beside it,
+ * PAPER_CACHE_CAP in the papers cache, HEIGHT_MEMO_CAP in MermaidIsland — and
+ * this one was the exception. 1 MiB is ~4x the tail cap and far above any frame
+ * the server emits (the recorded production capture's whole turn is under 3 KB),
+ * so a stream that reaches it is malformed, not merely large. */
+export const MAX_SSE_BUFFER_CHARS = 1_048_576
+
+/** A stream that never delivered a frame boundary inside MAX_SSE_BUFFER_CHARS.
+ * A plain Error would classify as `transient` all the same; the named class is
+ * so the degrade the user sees says WHICH failure this was rather than an
+ * anonymous one. */
+export class SseFrameTooLargeError extends Error {
+  constructor(readonly bufferedChars: number) {
+    super(
+      `chat events: no SSE frame boundary in ${bufferedChars} buffered characters ` +
+        `(cap ${MAX_SSE_BUFFER_CHARS}) — treating the stream as broken`,
+    )
+    this.name = 'SseFrameTooLargeError'
+  }
+}
+
 /** Incremental SSE frame splitter — feed it decoded text chunks in any
  * partitioning; it yields complete frames (blank-line separated, \n and \r\n
- * tolerated). Pure and buffer-bounded so the parsing seam is unit-testable
- * without a socket (the same split the SDK's listen.ts and the Go apiclient
- * decoder implement). */
+ * tolerated). Pure, so the parsing seam is unit-testable without a socket (the
+ * same split the SDK's listen.ts and the Go apiclient decoder implement).
+ *
+ * THE BUFFER IS BOUNDED, and it did not used to be. `push` only ever appended
+ * and truncated at a discovered boundary, so a proxy or captive portal that
+ * streams bytes without ever emitting a blank line grew it to the size of
+ * everything received. Nothing upstream noticed: pumpSse resets its backoff
+ * ladder on EVERY chunk ("bytes prove a live stream"), so the transport treats
+ * an unterminated flood as a healthy connection. On a phone that ends in an OOM
+ * rather than a degrade — the one failure mode this app cannot report.
+ *
+ * Past the cap it THROWS rather than dropping bytes. The throw is the honest
+ * arm: pumpSse's catch classifies it transient, shows `degraded`, backs off on
+ * the jittered ladder and reconnects with Last-Event-ID, so the session resumes
+ * from the last frame the client actually saw. Silently clearing the buffer
+ * would resynchronise on the next boundary and splice a document with a hole in
+ * it, which is the failure this codebase spends most of its accept rules
+ * avoiding. */
 export class SseSplitter {
   private buffer = ''
 
@@ -242,7 +280,17 @@ export class SseSplitter {
       const crlf = this.buffer.indexOf('\r\n\r\n')
       let start: number
       let end: number
-      if (lf === -1 && crlf === -1) break
+      if (lf === -1 && crlf === -1) {
+        // No boundary in what we hold. Bounded wait: a frame this large is not
+        // a slow frame, it is a stream that will never terminate one. Reset so
+        // the object is reusable, then say what happened.
+        if (this.buffer.length > MAX_SSE_BUFFER_CHARS) {
+          const buffered = this.buffer.length
+          this.buffer = ''
+          throw new SseFrameTooLargeError(buffered)
+        }
+        break
+      }
       if (lf !== -1 && (crlf === -1 || lf < crlf)) {
         start = lf
         end = lf + 2
