@@ -219,7 +219,7 @@ assert_fact_min blocking_count 3
 echo
 
 echo "case 3: every heavy job is gated on the dispatcher, not on a path filter"
-for j in sobelow sobelow-inline-overlap mix-audit; do
+for j in sobelow sobelow-inline-overlap sobelow-baseline-fingerprint mix-audit; do
   assert_fact "if::$j" "needs.changes.outputs.api == 'true'"
   assert_fact "needs::$j" "changes"
 done
@@ -471,28 +471,35 @@ gate() {
 }
 
 gate "everything succeeded" 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true
 gate "docs-only: gated jobs skipped against api=false" 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_AUDIT=skipped O_API=false
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false
 gate "a blocking job FAILED" 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
 gate "the CVE audit was CANCELLED" 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=cancelled O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=cancelled O_API=true
 gate "a job skipped though its gate said true" 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=skipped O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=skipped O_API=true
 gate "the dispatcher itself failed" 1 \
-  R_CHANGES=failure R_SHAPE=success R_OVERLAP=skipped R_AUDIT=skipped O_API=
+  R_CHANGES=failure R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=
 gate "an EMPTY result (job not in needs)" 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT= O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT= O_API=true
 gate "an unrecognised result" 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=neutral O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=neutral O_API=true
 # The shape ratchet is unfiltered, so a SKIP of it is never legitimate — it can
 # only mean the job never ran. Without this clause the new needs entry would be
 # judged by `decide` but never exercised in any direction that can red.
 gate "the shape ratchet was SKIPPED (never legitimate — it is unfiltered)" 1 \
-  R_CHANGES=success R_SHAPE=skipped R_OVERLAP=success R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=skipped R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true
 gate "the shape ratchet FAILED" 1 \
-  R_CHANGES=success R_SHAPE=failure R_OVERLAP=success R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=failure R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true
+# Same reasoning for the fingerprint ratchet: reaching `needs` and being read by
+# `decide` proves it is WIRED, not that either verdict travels. These two drive
+# it in the only directions that can red.
+gate "the fingerprint ratchet FAILED" 1 \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=failure R_AUDIT=success O_API=true
+gate "the fingerprint ratchet skipped though its gate said true" 1 \
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=skipped R_AUDIT=success O_API=true
 echo
 
 echo "----"
