@@ -85,10 +85,16 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("https://github.com/acme/project/pull/13", serialized)
         self.assertIn('"type": "bar-chart"', serialized)
         self.assertIn('"type": "lineage"', serialized)
+        self.assertIn("folio", week["title"])
+        week_h1 = next(block for block in week["blocks"] if block["id"] == "auto:title")
+        self.assertEqual("Week 34: what shipped", week_h1["text"])
+        self.assertNotIn("folio", week_h1["text"])
         index = by_slug["barkpark-chronicle"]
         serialized_index = json.dumps(index)
         self.assertIn("/papers/barkpark-changelog-2026-w34", serialized_index)
-        self.assertIn('"text": "The year in motion"', serialized_index)
+        self.assertIn('"text": "What\\u2019s new in Barkpark"', serialized_index)
+        self.assertIn('"text": "Browse the changelog"', serialized_index)
+        self.assertIn('"type": "action"', serialized_index)
         self.assertIn("https://github.com/acme/project/pull/13", serialized_index)
 
     def test_backfills_active_months_and_builds_a_richer_month_archive(self):
@@ -107,11 +113,11 @@ class ChroniclePaperTest(unittest.TestCase):
         july_json = json.dumps(july, ensure_ascii=False)
         self.assertIn("How the month unfolded", july_json)
         self.assertIn("Weekly cadence · July 2026", july_json)
-        self.assertIn("Product-facing signals", july_json)
+        self.assertIn("Product updates", july_json)
         self.assertTrue(july["dedup_bypass"])
 
         index_json = json.dumps(by_slug["barkpark-chronicle"])
-        self.assertIn("Monthly chapters", index_json)
+        self.assertIn("Release archive", index_json)
         self.assertIn("/papers/barkpark-changelog-2026-07", index_json)
         self.assertIn("/papers/barkpark-changelog-2026-08", index_json)
 

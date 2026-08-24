@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-mvp-11"
+RENDERER_VERSION = "chronicle-mvp-12"
 LEDGER_PREVIEW_LIMIT = 24
 DEFAULT_HISTORY_MONTHS = 18
 DEFAULT_REPO = "FRIKKern/barkpark"
@@ -227,12 +227,13 @@ def edition_folio(period: Period, events: Iterable[Event]) -> str:
 
 def signal(period: Period, selected: list[Event]) -> str:
     if not selected:
-        return f"Quiet {period.kind}: no first-parent changes landed on main."
+        return f"A quiet {period.kind}: no product updates shipped during this edition."
     product = sum(event.kind in PRODUCT_KINDS for event in selected)
     areas = collections.Counter(event.area for event in selected)
-    lead = areas.most_common(1)[0][0]
-    noun = "change" if len(selected) == 1 else "changes"
-    return f"{len(selected):,} mainline {noun}, {product:,} product-facing; {lead} led the period."
+    area_count = len(areas)
+    release_noun = "update" if product == 1 else "updates"
+    area_noun = "area" if area_count == 1 else "areas"
+    return f"Barkpark shipped {product:,} product {release_noun} across {area_count:,} {area_noun}."
 
 
 def sentence_case(value: str) -> str:
@@ -268,7 +269,7 @@ def area_cards(block_id: str, selected: list[Event], repo: str, limit: int = 3) 
         items.append(
             {
                 "title": sentence_case(area),
-                "text": f"{count:,} changes · latest: {latest.title}",
+                "text": f"{count:,} {'change' if count == 1 else 'changes'} · latest: {latest.title}",
                 "href": event_url(latest, repo),
             }
         )
@@ -356,6 +357,84 @@ def linked_summary_list(block_id: str, items: list[dict[str, str]]) -> dict[str,
     }
 
 
+def linked_card_section(
+    block_id: str,
+    items: list[dict[str, str]],
+    *,
+    tracks: int = 2,
+) -> dict[str, Any]:
+    tones = ("info", "ok", "warn")
+    cards = []
+    for index, item in enumerate(items):
+        cards.append(
+            {
+                "id": f"{block_id}:card-{index + 1}",
+                "type": "card",
+                "tone": item.get("tone", tones[index % len(tones)]),
+                "slots": {
+                    "title": [
+                        {"type": "heading", "level": 3, "text": item["title"]},
+                    ],
+                    "body": [
+                        {"type": "paragraph", "content": [text(item["text"])]},
+                    ],
+                    "action": [
+                        {
+                            "type": "action",
+                            "label": item.get("label", "Read release notes"),
+                            "href": item["href"],
+                        }
+                    ],
+                },
+            }
+        )
+    return {
+        "id": block_id,
+        "type": "section",
+        "layout": {"mode": "grid", "tracks": tracks},
+        "blocks": cards,
+    }
+
+
+def release_highlights(
+    block_id: str,
+    selected: list[Event],
+    repo: str,
+    *,
+    limit: int = 3,
+) -> dict[str, Any]:
+    product = [event for event in selected if event.kind in PRODUCT_KINDS]
+    candidates = product or selected
+    items = []
+    for event in reversed(candidates[-limit:]):
+        category = {
+            "feat": "New",
+            "fix": "Fixed",
+            "perf": "Faster",
+            "revert": "Restored",
+        }.get(event.kind, "Improved")
+        items.append(
+            {
+                "title": sentence_case(event.title),
+                "text": f"{category} · {sentence_case(event.area)} · {event.occurred_at.strftime('%d %B')}",
+                "href": event_url(event, repo),
+                "label": "View source",
+                "tone": "ok" if event.kind == "feat" else "info",
+            }
+        )
+    if not items:
+        items.append(
+            {
+                "title": "No releases in this edition",
+                "text": "The archive remains available so the calendar stays understandable.",
+                "href": "/papers/barkpark-chronicle",
+                "label": "Browse the changelog",
+                "tone": "info",
+            }
+        )
+    return linked_card_section(block_id, items, tracks=min(len(items), 3))
+
+
 def child_archive_blocks(
     period: Period,
     selected: list[Event],
@@ -425,6 +504,12 @@ def period_payload(
         ),
         "year": f"Annual product record · {period.title}",
     }
+    display_titles = {
+        "day": f"What shipped on {period.start.strftime('%d %B %Y').lstrip('0')}",
+        "week": f"Week {period.key.split('-W')[-1]}: what shipped",
+        "month": f"{period.title}: the release notes",
+        "year": f"Barkpark in {period.title}",
+    }
     date_range = f"{period.start.strftime('%d %b')}–{(period.end - dt.timedelta(days=1)).strftime('%d %b %Y')}"
     profile = collections.Counter(event.kind for event in selected)
     dominant_kind = profile.most_common(1)[0][0] if profile else "quiet"
@@ -435,9 +520,10 @@ def period_payload(
     blocks.extend(
         [
             {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
-            heading("auto:title", 1, public_titles[period.kind]),
+            heading("auto:title", 1, display_titles[period.kind]),
             {"id": "auto:ingress", "type": "ingress", "content": [text(signal(period, selected))]},
-            {"id": "auto:byline", "type": "byline", "items": [date_range, "Verified mainline record", f"Edition {digest(selected)[:8]}" ]},
+            paragraph("auto:dek", "New features, improvements, and fixes—written for the people using Barkpark, with every item linked back to its source."),
+            {"id": "auto:byline", "type": "byline", "items": [date_range, "Verified release notes", f"Updated {period.end.strftime('%d %B %Y').lstrip('0')}" ]},
             {
                 "id": "auto:release-pulse",
                 "type": "stats",
@@ -448,17 +534,21 @@ def period_payload(
                     {"value": dominant_kind, "label": "dominant change kind"},
                 ],
             },
+            {"id": "auto:divider-highlights", "type": "divider"},
+            heading("auto:highlights-title", 2, "Highlights"),
+            paragraph("auto:highlights-dek", "The releases most likely to matter to people using and building with Barkpark."),
+            release_highlights("auto:highlights", selected, repo),
             {"id": "auto:divider-shape", "type": "divider"},
-            heading("auto:shape-title", 2, "The shape of the work"),
-            paragraph("auto:shape-dek", "A derived view of how the period moved: change kinds first, then the product areas carrying the most mainline activity."),
-            change_profile("auto:change-profile", selected, f"Change profile · {period.key}"),
+            heading("auto:shape-title", 2, "Release mix"),
+            paragraph("auto:shape-dek", "A quick view of what shipped, followed by the product areas that changed most."),
+            change_profile("auto:change-profile", selected, f"Updates by category · {period.key}"),
             area_cards("auto:areas", selected, repo, limit=area_limit),
             {"id": "auto:divider-sequence", "type": "divider"},
-            heading("auto:sequence-title", 2, "The sequence"),
-            paragraph("auto:sequence-dek", f"The {min(sequence_limit, len(selected))} freshest mainline signals, read newest first."),
+            heading("auto:sequence-title", 2, "Latest updates"),
+            paragraph("auto:sequence-dek", f"The {min(sequence_limit, len(selected))} newest changes in this edition, with source links."),
             event_lineage("auto:sequence", selected, repo, limit=sequence_limit),
             {"id": "auto:divider-ledger", "type": "divider"},
-            heading("auto:ledger-title", 2, "Source ledger"),
+            heading("auto:ledger-title", 2, "Complete release log"),
         ]
     )
     if period.kind == "month":
@@ -467,10 +557,10 @@ def period_payload(
         blocks[insertion:insertion] = [
             {"id": "auto:divider-cadence", "type": "divider"},
             heading("auto:cadence-title", 2, "How the month unfolded"),
-            paragraph("auto:cadence-dek", "Weekly cadence exposes sustained delivery, pauses, and concentrated shipping bursts without treating raw volume as quality."),
+            paragraph("auto:cadence-dek", "A week-by-week view of the month, useful for spotting shipping bursts and quieter stretches."),
             weekly_activity("auto:weekly-cadence", selected, period),
-            heading("auto:product-title", 2, "Product-facing signals"),
-            paragraph("auto:product-dek", "The freshest features, fixes, performance changes, and reversions from this chapter."),
+            heading("auto:product-title", 2, "Product updates"),
+            paragraph("auto:product-dek", "The newest features, fixes, performance improvements, and restorations from this month."),
             event_lineage("auto:product-signals", product_signals, repo, limit=8),
         ]
     if events is not None and archive is not None:
@@ -503,18 +593,11 @@ def period_payload(
             ),
         ]
     )
-    description = (
-        f"{period.title} records {len(selected):,} verified mainline changes across "
-        f"{len(areas):,} product areas; {sentence_case(areas.most_common(1)[0][0]) if areas else 'No area'} led, "
-        f"with {percentage(len(product), len(selected))} product-facing."
-        if period.kind == "month"
-        else f"The verified Barkpark {period.kind} record for {period.key}, projected from first-parent mainline history."
-    )
     payload = {
         "_id": period.slug,
         "slug": period.slug,
         "title": public_titles[period.kind],
-        "description": description,
+        "description": f"Premium Barkpark release notes for {period.title}, with highlights, a complete log, and verified source links.",
         "style": "article",
         "event_type": f"changelog.{period.kind}",
         "source_doc": f"git:first-parent:{period.kind}:{period.key}:{digest(selected)}",
@@ -543,25 +626,49 @@ def index_payload(
     current_week = events_in_period(events, periods["week"])
     product = [event for event in current_year if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in current_year)
-    cards = []
-    edition_names = {
-        "day": "Today’s shiplog",
-        "week": "The weekly dispatch",
-        "month": f"The {periods['month'].title.split()[0]} chapter",
-        "year": f"The {periods['year'].key} annual volume",
+    active_days = {event.occurred_at.date() for event in current_year}
+    active_weeks = {event.occurred_at.date().isocalendar()[:2] for event in current_year}
+    latest_day = periods_for(latest.occurred_at.date())["day"] if latest else periods["day"]
+    edition_cards = []
+    edition_copy = {
+        "day": (
+            "Latest release",
+            latest_day,
+            f"{latest_day.title} · {sentence_case(latest.title) if latest else 'No release yet'}",
+            "Read the latest notes",
+        ),
+        "week": (
+            "This week",
+            periods["week"],
+            f"Week {periods['week'].key.split('-W')[-1]} · {len(current_week):,} updates so far",
+            "Open the weekly roundup",
+        ),
+        "month": (
+            f"{periods['month'].title.split()[0]} roundup",
+            periods["month"],
+            "Highlights, release mix, and every source-backed change this month",
+            "Explore the month",
+        ),
+        "year": (
+            f"{periods['year'].key} archive",
+            periods["year"],
+            "The complete year in releases, organized month by month",
+            "Browse the year",
+        ),
     }
     for kind in ("day", "week", "month", "year"):
-        period = periods[kind]
-        count = len(events_in_period(events, period))
-        cards.append(
+        title_value, period, copy, label = edition_copy[kind]
+        edition_cards.append(
             {
-                "title": edition_names[kind],
-                "text": f"{period.title} · {count:,} verified mainline changes",
+                "title": title_value,
+                "text": copy,
                 "href": f"/papers/{period.slug}",
+                "label": label,
+                "tone": "ok" if kind == "day" else "info",
             }
         )
     all_digest = digest(events)
-    lead = f"Latest: {sentence_case(latest.title)}." if latest else "The journal opens quietly."
+    lead = "New features, thoughtful improvements, and important fixes—published continuously and collected in one place."
     monthly = collections.Counter(event.occurred_at.month for event in current_year)
     first_active_month = min(monthly) if monthly else periods["month"].start.month
     month_bars = [
@@ -577,56 +684,79 @@ def index_payload(
         archive_cards.append(
             {
                 "title": month.title,
-                "text": f"{len(selected):,} changes · {month_product:,} product-facing · {sentence_case(lead_area)} led",
+                "text": (
+                    f"{month_product:,} product {'update' if month_product == 1 else 'updates'} across "
+                    f"{len(month_areas):,} {'area' if len(month_areas) == 1 else 'areas'} · "
+                    f"{len(selected):,} source-backed {'change' if len(selected) == 1 else 'changes'}"
+                ),
                 "href": f"/papers/{month.slug}",
+                "label": f"Read {month.title}",
+                "tone": "info",
             }
         )
+    latest_card = [
+        {
+            "title": sentence_case(latest.title) if latest else "The changelog starts here",
+            "text": (
+                f"Shipped {latest.occurred_at.strftime('%d %B %Y')} · {sentence_case(latest.area)}"
+                if latest
+                else "No release has been recorded yet."
+            ),
+            "href": f"/papers/{latest_day.slug}",
+            "label": "Read the release",
+            "tone": "ok",
+        }
+    ]
     blocks = [
-        {"id": "auto:masthead", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · VOLUME {periods['year'].key} · LIVING PRODUCT JOURNAL"},
-        heading("auto:title", 1, "Barkpark Chronicle"),
+        {"id": "auto:masthead", "type": "eyebrow", "text": f"BARKPARK CHANGELOG · {periods['year'].key} · UPDATED CONTINUOUSLY"},
+        heading("auto:title", 1, "What’s new in Barkpark"),
         {"id": "auto:ingress", "type": "ingress", "content": [text(lead)]},
-        paragraph("auto:dek", "The evolving field journal of Barkpark: one verified history, edited into daily shiplogs, weekly dispatches, monthly chapters, and an annual volume."),
-        {"id": "auto:byline", "type": "byline", "items": [periods["day"].title, "Built from first-parent Git history", f"Edition {all_digest[:8]}"]},
+        paragraph("auto:dek", "Follow the latest release, catch up on a week, or explore the complete archive. Every note is generated from shipped work and linked to its source."),
+        {"id": "auto:byline", "type": "byline", "items": [f"Updated {periods['day'].title}", "Verified release history", "Day · week · month · year"]},
         {
             "id": "auto:pulse",
             "type": "stats",
             "items": [
-                {"value": f"{len(current_year):,}", "label": "changes in 2026"},
-                {"value": percentage(len(product), len(current_year)), "label": "product-facing share"},
-                {"value": str(len(areas)), "label": "active product areas"},
-                {"value": f"{len(current_week):,}", "label": "changes this week"},
+                {"value": f"{len(current_year):,}", "label": "updates shipped"},
+                {"value": f"{len(product):,}", "label": "product improvements"},
+                {"value": str(len(active_days)), "label": "shipping days"},
+                {"value": str(len(active_weeks)), "label": "weekly editions"},
             ],
         },
+        {"id": "auto:divider-featured", "type": "divider"},
+        heading("auto:featured-title", 2, "Latest release"),
+        paragraph("auto:featured-dek", "The newest shipped change, with the full daily edition one click away."),
+        linked_card_section("auto:featured", latest_card, tracks=1),
         {"id": "auto:divider-editions", "type": "divider"},
-        heading("auto:editions-title", 2, "Read the current editions"),
-        paragraph("auto:editions-dek", "Four lenses on the same source ledger. Start close to the work, then widen the frame."),
-        linked_summary_list("auto:periods", cards),
+        heading("auto:editions-title", 2, "Browse the changelog"),
+        paragraph("auto:editions-dek", "Choose the level of detail that fits the moment—from one release day to the whole year."),
+        linked_card_section("auto:periods", edition_cards, tracks=2),
         {"id": "auto:divider-archive", "type": "divider"},
-        heading("auto:archive-title", 2, "Monthly chapters"),
-        paragraph("auto:archive-dek", "A durable month-by-month reading path through the verified mainline record, newest chapter first."),
-        linked_summary_list("auto:month-archive", archive_cards),
+        heading("auto:archive-title", 2, "Release archive"),
+        paragraph("auto:archive-dek", "Every monthly roundup, newest first. Open any edition for highlights, categories, and the complete release log."),
+        linked_card_section("auto:month-archive", archive_cards, tracks=2),
         {"id": "auto:divider-motion", "type": "divider"},
-        heading("auto:motion-title", 2, "The year in motion"),
-        paragraph("auto:motion-dek", f"Monthly mainline activity across {periods['year'].key}. The shape is evidence, not a release score: a busy month is not automatically a better month."),
-        {"id": "auto:motion", "type": "bar-chart", "title": "Mainline changes by month", "bars": month_bars, "values": True},
-        heading("auto:areas-title", 2, "Where the work gathered"),
+        heading("auto:motion-title", 2, "Shipping activity"),
+        paragraph("auto:motion-dek", f"A month-by-month view of {periods['year'].key}. Volume shows cadence, not quality."),
+        {"id": "auto:motion", "type": "bar-chart", "title": "Updates by month", "bars": month_bars, "values": True},
+        heading("auto:areas-title", 2, "Product areas improved"),
         area_cards("auto:areas", current_year, repo, limit=4),
         {"id": "auto:divider-latest", "type": "divider"},
-        heading("auto:latest-title", 2, "Fresh signals"),
-        paragraph("auto:latest-dek", "The five most recent first-parent changes on main, linked back to their source."),
+        heading("auto:latest-title", 2, "Recently shipped"),
+        paragraph("auto:latest-dek", "The five newest changes, linked directly to the pull request or commit behind each release."),
         event_lineage("auto:latest", events, repo),
     ]
     blocks.extend(
         [
             {"id": "auto:divider-provenance", "type": "divider"},
-            paragraph("auto:provenance", f"Verified from {len(events):,} first-parent mainline changes · renderer {RENDERER_VERSION} · source digest {all_digest} · all edition links are stable Paper URLs."),
+            paragraph("auto:provenance", f"Verified from {len(events):,} first-parent mainline changes · renderer {RENDERER_VERSION} · source digest {all_digest} · every edition has a stable Paper URL."),
         ]
     )
     return {
         "_id": "barkpark-chronicle",
         "slug": "barkpark-chronicle",
-        "title": "Barkpark Chronicle",
-        "description": "Barkpark's living, source-linked changelog across day, ISO week, month, and year Papers.",
+        "title": "What’s new in Barkpark · the complete changelog",
+        "description": "Premium, source-linked Barkpark release notes across day, week, month, and year editions.",
         "style": "article",
         "event_type": "changelog.index",
         "source_doc": f"git:first-parent:index:{all_digest}",
