@@ -972,14 +972,28 @@ func defaultSecretGen() (Secrets, error) {
 	}, nil
 }
 
-// defaultHealthChecker wraps setup.RunHealthGate with the gate options the
-// go-live needs. StubsOptional is true because the agent + backup endpoints are
-// cloud-9/10 and not deployed on instances yet — requiring them would fail-close
-// EVERY go-live. The real checks (API up, studio, websocket-not-403, TLS, and
-// the token-gated Postgres read) still gate hard. Once cloud-9/10 ship, wire the
-// real AgentStatusURL/BackupStatusURL here and they enforce automatically.
+// GoLiveHealthGateOpts is the gate configuration the go-live path runs.
+// StubsOptional is true because the agent + backup endpoints are cloud-9/10 and
+// not deployed on instances yet — requiring them would fail-close EVERY go-live.
+// The real checks (API up, studio, websocket-not-403, TLS, and the Postgres
+// read) still gate hard, and with StubsOptional the unwired stubs now ABSTAIN
+// rather than voting: they cannot fail the gate and they are not counted as
+// checks that passed. Once cloud-9/10 ship, wire the real
+// AgentStatusURL/BackupStatusURL here and they enforce automatically.
+//
+// It is exported so the on-box agent's own gate configuration can be compared
+// against it in a regression test. The two paths ran DIFFERENT stub semantics
+// once — the agent used zero-value opts while go-live set StubsOptional — and
+// every online instance in the fleet reported health_status=down as a result
+// (azh-agent-healthgate-down-finding). A silent divergence between these two is
+// exactly the failure that must not recur, so it is pinned rather than trusted.
+func GoLiveHealthGateOpts() setup.HealthGate {
+	return setup.HealthGate{StubsOptional: true}
+}
+
+// defaultHealthChecker wraps setup.RunHealthGate with the go-live gate options.
 func defaultHealthChecker(ctx context.Context, base, token string) (setup.HealthReport, error) {
-	return setup.RunHealthGate(base, token, setup.HealthGate{StubsOptional: true})
+	return setup.RunHealthGate(base, token, GoLiveHealthGateOpts())
 }
 
 // defaultCaddySteps delegates to the CANONICAL setup.CaddySteps (cloud-4) — no
@@ -1023,7 +1037,9 @@ var DefaultHealthGate HealthChecker = defaultHealthChecker
 // DefaultHealthGate's resolver-based dialing for now.
 func PinnedHealthGate(ip string) HealthChecker {
 	return func(_ context.Context, base, token string) (setup.HealthReport, error) {
-		return setup.RunHealthGate(base, token, setup.HealthGate{StubsOptional: true, PinnedIP: ip})
+		opts := GoLiveHealthGateOpts()
+		opts.PinnedIP = ip
+		return setup.RunHealthGate(base, token, opts)
 	}
 }
 
