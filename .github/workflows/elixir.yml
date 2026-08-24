@@ -476,6 +476,32 @@ jobs:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
 
+      # ── unreachable-assert-message ratchet, riding this job ──────────────
+      # A STEP, not a job, and deliberately so. The path-escape job's own
+      # comment records why: each of security-gate-shape.test.sh and the three
+      # *-path-escape-check.test.sh derive `blocking_not_in_needs` FROM this
+      # YAML and demand a new blocking job be added to the aggregator's
+      # `needs` — and adding it there leaves their `env -i` exercises without
+      # the new R_* var, which dies on `set -u`. Correct ratchets, both
+      # directions; the answer is not to add a job.
+      #
+      # It rides mix-test because that is the blocking job that already has
+      # Elixir on PATH, and this gate parses with Code.string_to_quoted/2. It
+      # runs BEFORE deps/compile: the scanner needs neither, so a defective
+      # assert reds in seconds instead of after a full compile + DB setup.
+      #
+      # --selftest FIRST (distrust vacuous green). Five arms in a temp tree,
+      # including one that proves a CLEAN tree passes — without it a scanner
+      # that always reports "clean" would satisfy a can-it-red test while
+      # measuring nothing.
+      - name: The unreachable-assert-message guard must be able to fail
+        working-directory: .
+        run: bash scripts/unreachable-assert-message-check.sh --selftest
+
+      - name: No NEW unreachable assert messages (never-worse ratchet)
+        working-directory: .
+        run: bash scripts/unreachable-assert-message-check.sh
+
       - name: Cache deps
         uses: actions/cache@v4
         with:

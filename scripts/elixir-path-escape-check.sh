@@ -133,6 +133,7 @@ scripts/gate-announces-skips.test.sh'
 #   .github/workflows/deploy.yml, scripts/check-deployyml-filters.sh
 #       <- api/test/barkpark/sites/deployyml_connectors_pathfilter_test.exs
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
+.github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
 cmd/barkpark/testdata/**
 deploy/site-deploy-node.sh
@@ -153,6 +154,7 @@ scripts/pds-published-artifact-door_test.sh
 scripts/pds-record-parity.test.sh
 scripts/pds-status-only-residue.exs
 scripts/pds-window-sentinel_test.sh
+scripts/unreachable-assert-message-check.sh
 web/__tests__/**'
 
 # EXEMPT — escapes that resolve to a real file but are NOT reachable from the
