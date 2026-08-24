@@ -4615,9 +4615,9 @@
        .bp-paper-surface block above (view_edit_parity_test §2 enforces the match).
        Top-only so the flat ProseMirror (collapse) and div-wrapped reader (additive)
        land identical. */
-    .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; }
-    .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; }
-    .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
+    .bp-paper-editor-body h1 { font-size: var(--bp-h1-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h1-lh);  letter-spacing: var(--bp-h1-tracking); margin: 1.2em 0 0; overflow-wrap: break-word; }
+    .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); margin: 1.9em 0 0; overflow-wrap: break-word; }
+    .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; overflow-wrap: break-word; }
     /* THE SECTION HEAD — the Studio canvas's copy of the device the reader draws
        with `.bp-paper-surface > #paper-body > h2` (paper-surface.css carries the
        full reasoning) and the embedder bundle repeats. A TOP-LEVEL level-2
@@ -4643,7 +4643,7 @@
        italic is an author mark the node emits INLINE (font-style:italic), NOT in the
        class, so it stays out of these rules on both surfaces. Keep byte-aligned with
        paper-surface.css + assets/paper-editor/src/styles.css. */
-    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; }
+    .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
     .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0 0 1.4rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
     .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; }
     .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
