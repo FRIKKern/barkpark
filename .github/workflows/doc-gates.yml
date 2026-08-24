@@ -38,6 +38,11 @@ on:
       # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
       - ".github/workflows/**"
       - "scripts/never-cancel-main-check.sh"
+      # the doc-truth sweeps — same reasoning as never-cancel-main above: their
+      # SUBJECT includes their own scanner and frozen baselines, and .mjs is not
+      # in the extension triggers, so without this a PR could weaken the sweep or
+      # rewrite lineref-baseline.json without this gate ever running.
+      - "tooling/doc-truth/**"
       # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
       # already rides the `**` glob above; these two lines cover an edit to the
       # gate scripts themselves, which no other glob matches.
@@ -188,6 +193,11 @@ on:
       # exactly how the 2026-06-10 guard stayed at sample scope for 40 days.
       - ".github/workflows/**"
       - "scripts/never-cancel-main-check.sh"
+      # the doc-truth sweeps — same reasoning as never-cancel-main above: their
+      # SUBJECT includes their own scanner and frozen baselines, and .mjs is not
+      # in the extension triggers, so without this a PR could weaken the sweep or
+      # rewrite lineref-baseline.json without this gate ever running.
+      - "tooling/doc-truth/**"
       # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
       # already rides the `**` glob above; these two lines cover an edit to the
       # gate scripts themselves, which no other glob matches.
@@ -578,17 +588,29 @@ jobs:
         run: bash scripts/go-literal-check.sh --selftest
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
-      # to @moduledoc/// /doc-comment PROSE so a drifted code-comment lineref, a
-      # resurrected dead-dependency citation, or a live-asserted retired technology
-      # is caught automatically. Fail-closed:
-      #   · acceptance-code-comments.mjs — the 29-defect fail-before corpus + the
-      #     never-cry-wolf control + the plant-catch checks (exit 1 on any miss).
-      #   · retired-terms.mjs — never-worse vs the frozen baseline (exit 1 on any
-      #     NOVEL dead-tech / live-assertion beyond the known backlog).
+      # to @moduledoc/// /doc-comment PROSE and ordinary `#`//`//` comments.
+      # Fail-closed, but READ THE REACH OF EACH ARM — they are not the same:
+      #   · acceptance-code-comments.mjs — a REGRESSION HARNESS, not a sweep. It
+      #     points runVerify at the frozen 29-defect corpus, one control file and
+      #     one planted temp file. It proves the CHECKER still works; it never
+      #     opens the rest of the tree. (This comment used to say a drifted
+      #     lineref "is caught automatically" full stop — true of the two sweeping
+      #     arms below, but for linerefs it was true only of those 29. The tree
+      #     carried 547 unwatched stale linerefs while this step was green.)
+      #   · retired-terms.mjs — REPO-WIDE sweep (git ls-files), never-worse vs the
+      #     frozen baseline (exit 1 on any NOVEL dead-tech / live-assertion).
+      #   · lineref-sweep.mjs — REPO-WIDE sweep of every tracked .ex/.exs/.go/.ts
+      #     for comment linerefs whose cited file:line no longer holds what the
+      #     comment says. Never-worse vs fixtures/lineref-baseline.json: 542
+      #     frozen entries, exit 1 only on a NOVEL citation. --selftest runs first
+      #     and proves the arm can still RED on a planted drift, so a green sweep
+      #     is evidence about the tree rather than about a broken scanner.
       - name: Code-comment citation guard (fails this job)
         run: |
           node tooling/doc-truth/acceptance-code-comments.mjs
           node tooling/doc-truth/retired-terms.mjs
+          node tooling/doc-truth/lineref-sweep.mjs --selftest
+          node tooling/doc-truth/lineref-sweep.mjs
 
       # Tenant fail-open read baseline gate (barkpark-w9dg scar class — the FIXED
       # public-paper cross-workspace leak). Tenant isolation on the document/graph

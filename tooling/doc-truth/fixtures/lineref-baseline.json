@@ -1,0 +1,2174 @@
+{
+  "generatedAt": "2026-08-24T08:04:22.051Z",
+  "note": "Frozen pre-existing stale linerefs. Keyed <doc>|<raw> — NO line number, so an insertion above a comment does not re-key its entry. Shrinking this file is always welcome; growing it requires a human deciding the new citation is acceptable.",
+  "entries": [
+    {
+      "doc": "api/config/config.exs",
+      "raw": "config.exs:64"
+    },
+    {
+      "doc": "api/lib/barkpark_web/components/icons.ex",
+      "raw": "barkpark/tasks/schema.ex:67,69` — the task"
+    },
+    {
+      "doc": "api/lib/barkpark_web/components/icons.ex",
+      "raw": "live_auth.ex:163`, but resolved at COMPILE time so"
+    },
+    {
+      "doc": "api/lib/barkpark_web/components/icons.ex",
+      "raw": "studio_components/editor.ex:808`) passes a **tenant/schema-supplied**"
+    },
+    {
+      "doc": "api/lib/barkpark_web/components/icons.ex",
+      "raw": "studio_live/doc_actions.ex:183` — the \"Revert to"
+    },
+    {
+      "doc": "api/lib/barkpark_web/components/icons.ex",
+      "raw": "studio_live/doc_actions.ex:230` — \"View blast"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/app_token_controller.ex",
+      "raw": "auth_controller.ex:179/:218,"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/app_token_controller.ex",
+      "raw": "bulldocs_intents_controller.ex:50) and is what makes this routed"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+      "raw": "errors.ex:289/:316/:330)."
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/legacy_controller.ex",
+      "raw": "content/lifecycle.ex:694) — and `rev` is the store's"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/legacy_controller.ex",
+      "raw": "content/query.ex:57 — the identity apply at :166),"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/legacy_controller.ex",
+      "raw": "query_controller.ex:371),"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/legacy_controller.ex",
+      "raw": "query_controller.ex:66); this action passed no perspective, so the"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/share_controller.ex",
+      "raw": "resolve_workspace.ex:71-76, 134)."
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/share_link_controller.ex",
+      "raw": "resolve_workspace.ex:76 / :134)."
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/share_link_controller.ex",
+      "raw": "share_link_test.exs:37-44`) grants the admin its membership in `link-ws`,"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/token_controller.ex",
+      "raw": "auth.ex:302-320 → `"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/v1/media_collections_controller.ex",
+      "raw": "share.ex:69-82) tail-calls"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/v1/media_controller.ex",
+      "raw": "media_controller.ex:362-371) does not have: `file` is bound"
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/v1/media_controller.ex",
+      "raw": "media.ex:413-455)."
+    },
+    {
+      "doc": "api/lib/barkpark_web/controllers/webhook_controller.ex",
+      "raw": "webhooks.ex:135-142, through `audit_webhook/2` which passes `result`"
+    },
+    {
+      "doc": "api/lib/barkpark_web/endpoint.ex",
+      "raw": "cloud/lib/barkpark_cloud/web/router.ex:370-375"
+    },
+    {
+      "doc": "api/lib/barkpark_web/endpoint.ex",
+      "raw": "cloud/lib/barkpark_cloud/web/router.ex:370-375` / `:415-422`."
+    },
+    {
+      "doc": "api/lib/barkpark_web/live/studio/settings_live.ex",
+      "raw": "structure.ex:83-85): shared nil-workspace globals"
+    },
+    {
+      "doc": "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "raw": "caps.ex:82). Nothing new to classify."
+    },
+    {
+      "doc": "api/lib/barkpark_web/live/studio/studio_live/handlers/paper.ex",
+      "raw": "scope.ex:175-178). Two adjacent controls in"
+    },
+    {
+      "doc": "api/lib/barkpark_web/live/studio/studio_live/handlers/paper.ex",
+      "raw": "studio_live/paths.ex:86) is the ONLY query writer — so a sidebar"
+    },
+    {
+      "doc": "api/lib/barkpark_web/plugs/paper_revision_headers.ex",
+      "raw": "bulldocs_live.ex:766 —"
+    },
+    {
+      "doc": "api/lib/barkpark_web/plugs/paper_revision_headers.ex",
+      "raw": "bulldocs_live.ex:766) — that"
+    },
+    {
+      "doc": "api/lib/barkpark_web/request_stats.ex",
+      "raw": "endpoint.ex:75) emits `[:phoenix, :endpoint, :stop]`"
+    },
+    {
+      "doc": "api/lib/barkpark_web/request_stats.ex",
+      "raw": "endpoint.ex:75), so a served static file emits ZERO"
+    },
+    {
+      "doc": "api/lib/barkpark_web/studio_chrome.ex",
+      "raw": "live_auth.ex:199-211), and mirroring it is deliberate — the banner offers"
+    },
+    {
+      "doc": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "raw": "scope.ex:170-178) `push_patch`"
+    },
+    {
+      "doc": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "raw": "shared/paper.ex:755)"
+    },
+    {
+      "doc": "api/lib/barkpark_web/studio/pane_builder.ex",
+      "raw": "writer.ex:576-594);"
+    },
+    {
+      "doc": "api/lib/barkpark/accounts.ex",
+      "raw": "cloud/lib/barkpark_cloud/accounts.ex:2186 — a different mechanism that"
+    },
+    {
+      "doc": "api/lib/barkpark/content/envelope.ex",
+      "raw": "broadcast.ex :69 immediate"
+    },
+    {
+      "doc": "api/lib/barkpark/content/lifecycle.ex",
+      "raw": "inbound_events.ex:172`, and `"
+    },
+    {
+      "doc": "api/lib/barkpark/content/lifecycle.ex",
+      "raw": "plugins/github/link.ex:193` via `"
+    },
+    {
+      "doc": "api/lib/barkpark/content/mutations.ex",
+      "raw": "applier.ex:177), `MutateController` passes `source: :api`"
+    },
+    {
+      "doc": "api/lib/barkpark/content/mutations.ex",
+      "raw": "close.ex:159) and `"
+    },
+    {
+      "doc": "api/lib/barkpark/content/mutations.ex",
+      "raw": "close.ex:92), so the row is"
+    },
+    {
+      "doc": "api/lib/barkpark/content/mutations.ex",
+      "raw": "docs/api-v1.md:105`: \"overwrites an *existing* draft,"
+    },
+    {
+      "doc": "api/lib/barkpark/content/mutations.ex",
+      "raw": "mutate_controller.ex:14) so a"
+    },
+    {
+      "doc": "api/lib/barkpark/content/mutations.ex",
+      "raw": "mutate_controller.ex:14). Replication is allowed through verbatim — a"
+    },
+    {
+      "doc": "api/lib/barkpark/content/mutations.ex",
+      "raw": "write_scope.ex:39). `Sync.Applier` passes `source: :sync`"
+    },
+    {
+      "doc": "api/lib/barkpark/content/query.ex",
+      "raw": "writer.ex:1291) and `"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "app_token_controller.ex:48,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "auth_controller.ex:238)"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "auth.ex:325) and the one"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "fleet_support_token_controller.ex:33,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "media.ex:436, `"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "media.ex:603) rejects — a per-segment allowlist that"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "media.ex:654) runs the client filename through `Path.basename/2`, which"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "media.ex:91, the"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "playground_controller.ex:134,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "token_controller.ex:30,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "workspace_bundle.ex:1013) COPYs the manifest-named"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/local.ex",
+      "raw": "workspace_bundle/catalog.ex:98) — straight into the real table with"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "app_token_controller.ex:48,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "auth_controller.ex:238)"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "auth.ex:325) and the one"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "fleet_support_token_controller.ex:33,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "media_controller.ex:316 (`read_body length:/read_length: 100_000_000`)."
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "media.ex:436, `"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "media.ex:654) runs the client filename through `Path.basename/2`, which"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "playground_controller.ex:134,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "token_controller.ex:30,"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "workspace_bundle.ex:1013) COPYs the manifest-named"
+    },
+    {
+      "doc": "api/lib/barkpark/media/blobstore/s3.ex",
+      "raw": "workspace_bundle/catalog.ex:98) — straight into the real table with"
+    },
+    {
+      "doc": "api/lib/barkpark/media/delivery/search.ex",
+      "raw": "search.ex:406"
+    },
+    {
+      "doc": "api/lib/barkpark/plugins/bootstrap.ex",
+      "raw": "schema_definition.ex:77-79) — `Content.put_scope_attrs/2` drops any"
+    },
+    {
+      "doc": "api/lib/barkpark/plugins/onixedit/export/validator.ex",
+      "raw": "validator.ex:68`"
+    },
+    {
+      "doc": "api/lib/barkpark/plugins/onixedit/export/validator.ex",
+      "raw": "validator.ex:72`) that the deadline wrapper moved"
+    },
+    {
+      "doc": "api/lib/barkpark/plugins/quiz.ex",
+      "raw": "pulse.ex:75. Started at boot"
+    },
+    {
+      "doc": "api/lib/barkpark/portable_doc/render/walk.ex",
+      "raw": "fleet_email.ex:580), and DELIBERATELY not Go pdrender's terminal ⠋ frame:"
+    },
+    {
+      "doc": "api/lib/barkpark/portable_doc/slots.ex",
+      "raw": "compose.ex:688)."
+    },
+    {
+      "doc": "api/lib/barkpark/sites/deploy_runner.ex",
+      "raw": "deploy_runner.ex:526/:1351/:1368`) that the deadline wrapper moved"
+    },
+    {
+      "doc": "api/lib/barkpark/sites/prebuilt_artifact.ex",
+      "raw": "deploy/site-deploy.sh:1371`, `exit 11`) — and so does HEALTH one stage"
+    },
+    {
+      "doc": "api/lib/barkpark/sites/provisioner.ex",
+      "raw": "deploy_request.ex:104 to a pattern with no dot and no slash in it. The only"
+    },
+    {
+      "doc": "api/lib/barkpark/sites/provisioner.ex",
+      "raw": "deploy_request.ex:104: no dot, no slash) joined with"
+    },
+    {
+      "doc": "api/lib/barkpark/sites/provisioner.ex",
+      "raw": "deploy_request.ex:104) and the `@partial_suffix` /"
+    },
+    {
+      "doc": "api/lib/barkpark/sites/provisioner.ex",
+      "raw": "deploy_request.ex:104), a pattern that"
+    },
+    {
+      "doc": "api/lib/barkpark/studio_chat/plan_papers.ex",
+      "raw": "content/papers/block_ops.ex:209). So the plan"
+    },
+    {
+      "doc": "api/lib/barkpark/tasks/query.ex",
+      "raw": "board.ex:190-202). Resolve the `task` schema ONCE per `rows_for_query` call"
+    },
+    {
+      "doc": "api/lib/barkpark/tasks/query.ex",
+      "raw": "queue.ex ~146-173) and"
+    },
+    {
+      "doc": "api/lib/mix/tasks/barkpark.paper_components.gen_golden_parity.ex",
+      "raw": "queue.ex:42\" · absent); the stage fixture covers origin. Only the"
+    },
+    {
+      "doc": "api/lib/mix/tasks/barkpark.paper_components.gen_golden_parity.ex",
+      "raw": "queue.ex:42\"` → provenance (line), node 3 absent → null."
+    },
+    {
+      "doc": "api/priv/repo/migrations/20260702130000_add_documents_content_gin_index.exs",
+      "raw": "content/sheets.ex ~80-102)"
+    },
+    {
+      "doc": "api/priv/repo/migrations/20260714010000_data_keys_workspace_attribution.exs",
+      "raw": "crypto_test.exs:214 went red). This migration is the"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/federated_grant_deny_test.exs",
+      "raw": "router.ex ~1270) — NOT `:api_grant_read`. There is no"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/filter_ops_test.exs",
+      "raw": "query_controller.ex:51 guard | result                |"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "app_token_controller.ex:141` (self-revoke) — OUT OF SCOPE, REPAIRABLE."
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "app_token_controller.ex:164` (admin revoke-by-raw) — OUT OF SCOPE,"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "legacy_controller.ex:96 ───────────────────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "media_controller.ex:365      DELETE /media/:id"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "media_controller.ex:365 ───────────────────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "plugin_settings_controller.ex:53` (update) — OUT OF SCOPE, REPAIRABLE."
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "plugin_settings_controller.ex:65` (delete) — OUT OF SCOPE, NEEDS CALLEE"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "schema_controller.ex:62      DELETE /v1/schemas/:dataset/:name"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "schema_controller.ex:62 ────────────────────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "secret_controller.ex:67` (update) — OUT OF SCOPE, REPAIRABLE."
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "secret_controller.ex:80` (delete) — OUT OF SCOPE, NEEDS CALLEE WIDENING."
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "share_controller.ex:141      DELETE /v1/shares/tokens/:token_id"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "share_controller.ex:141 ───────────────────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "share_controller.ex:141` here."
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "share_link_controller.ex:221 ──────────────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "share_link_controller.ex:221 DELETE /v1/shares/links/:id"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "webauthn_controller.ex:212` (delete credential) — OUT OF SCOPE, NEEDS"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_delete_receipt_differential_test.exs",
+      "raw": "webhook_controller.ex:53 ──────────────────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs",
+      "raw": "plugin_settings_controller.ex:53 update (settings map + \"write\" audit row)"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs",
+      "raw": "secret_controller.ex:80          delete (audit row is INSIDE the delete txn)"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "app_token_controller.ex:141 (self-revoke) ─────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "app_token_controller.ex:164 (admin revoke-by-raw) ─────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "token_controller.ex:45                 POST   /w/:ws/p/:proj/v1/tokens"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "token_controller.ex:45 (the 201 credential receipt) ───────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "v1/media_collections_controller.ex:94 ─────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "v1/media_controller.ex:401             DELETE /v1/media/:dataset/:id"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "v1/media_controller.ex:401 ────────────────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/contract/pds_request_echo_differential_test.exs",
+      "raw": "v1/media_controller.ex` binds `file` at :403 from a PRE-WRITE"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/bulldocs_sessions_controller_test.exs",
+      "raw": "block_ops.ex:907 moduledoc) always writes its patched content to the"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/correction_receipt_test.exs",
+      "raw": "router.ex:1656` `post(\"/search/:dataset/correction\", SearchController,"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/cycle_fleet_controller_test.exs",
+      "raw": "router.ex:187/:488) and its message never moves,"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/github_webhook_integration_test.exs",
+      "raw": "github_webhook_controller.ex:189 asserted"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/grant_search_deny_test.exs",
+      "raw": "query_pipeline.ex ~99-116) and the Postgres `DocumentsRetriever` never called"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/interaction_receipt_test.exs",
+      "raw": "router.ex:1655` `post(\"/search/:dataset/interaction\", …)` inside"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/mutate_controller_test.exs",
+      "raw": "applier.ex:177) where"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/mutate_controller_test.exs",
+      "raw": "docs/api-v1.md:105` (\"overwrites an *existing* draft,"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/mutate_controller_test.exs",
+      "raw": "mutate_controller.ex:14). A"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/query_controller_perspective_test.exs",
+      "raw": "public_read.ex:141) to a browser-shipped"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+      "raw": "router.ex:1493 opens"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+      "raw": "router.ex:1508)"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+      "raw": "router.ex:1511)"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+      "raw": "router.ex:1512)"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/scim_groups_controller_test.exs",
+      "raw": "router.ex:86-91) is accepts json / ApiSecurityHeaders / RateLimit /"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/workspace_controller_test.exs",
+      "raw": "internal/cli/cloud_support_cmd.go:1736) and the provisioner"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/workspace_controller_test.exs",
+      "raw": "internal/cli/cloud_workspace_cmd.go:165), the"
+    },
+    {
+      "doc": "api/test/barkpark_web/controllers/workspace_controller_test.exs",
+      "raw": "internal/provisioner/support.go:730) — all present an admin-permissioned"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "access_controller.ex:223 — no-store ─────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "chat_controller.ex:413` — `"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "chat_controller.ex:470` — `ChatController.fleet_events/2` (herd SSE),"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "grant_controller.ex:111 — no-store ──────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "listen_controller.ex:58` — `"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "media_controller.ex:201 — private, max-age=0, must-revalidate ───────"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "media/delivery/urls.ex:58` — the immutable rendition policy, pinned by"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "metrics_controller.ex:26 — no-store ─────────────────────────────────"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "session_controller.ex:436` — pinned by the session-controller suite."
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "share_link_controller.ex:153 — private, max-age=0, must-revalidate ──"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/http_cache_policy_test.exs",
+      "raw": "tickets_attachments_controller.ex:239 — private, max-age=0, … ───────"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/legacy_crud_test.exs",
+      "raw": "content/query.ex:57), so `drafts.` rows sat in the result set — the same"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/public_read_enforcement_test.exs",
+      "raw": "query_controller.ex:371). This"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/public_read_enforcement_test.exs",
+      "raw": "router.ex:2336) was uncertified while export/analytics/history/revision each"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/public_read_enforcement_test.exs",
+      "raw": "router.ex:488) and running only this file:"
+    },
+    {
+      "doc": "api/test/barkpark_web/integration/public_read_private_type_clamp_test.exs",
+      "raw": "router.ex` ~:2196) rides bare `:scoped_api` — no"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/admin/plugins_live_test.exs",
+      "raw": "onixedit.ex:205 — the"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/caps_mount_reachability_test.exs",
+      "raw": "resolve_workspace.ex:134); `LiveScope.on_mount(:resolve)`"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/caps_mount_reachability_test.exs",
+      "raw": "studio_chrome.ex:176 →"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/caps_mount_reachability_test.exs",
+      "raw": "studio_chrome.ex:176 → nav_to_shares/1)"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/chat_render_golden_test.exs",
+      "raw": "chat_live_test.exs:3580 — transcript + composer + agents-rail)"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/pds_w43_caps_derive_cost_test.exs",
+      "raw": "auth.ex:108-117), which is the"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+      "raw": "access.ex:292) with the target doc's real"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+      "raw": "components.ex:1787) and has no target to reason"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+      "raw": "live_scope.ex:286) sets `write_gate?: true` and"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+      "raw": "paper.ex:152) — the arm pds-w44 added."
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/pds_w44_grant_door_test.exs",
+      "raw": "shared/paper.ex:98-100) → `Caps.write_capable?/2`. No `handle_event` hook —"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/shared_nonwall_rejection_test.exs",
+      "raw": "mutations.ex:151) emits"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/shared_publish_wall_test.exs",
+      "raw": "dedup_wall.ex:138-140)"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/shared_publish_wall_test.exs",
+      "raw": "tag_registry.ex:189)"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_live_plugin_pane_grantee_audit_test.exs",
+      "raw": "live_scope.ex:281-286)."
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_live_plugin_pane_grantee_audit_test.exs",
+      "raw": "pane_builder.ex:258, :310),"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_live_plugin_pane_grantee_audit_test.exs",
+      "raw": "pane_builder.ex:526-531) returns that"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_live_plugin_pane_grantee_audit_test.exs",
+      "raw": "structure.ex:210, :354) — they enumerate the"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_live_plugin_pane_grantee_audit_test.exs",
+      "raw": "studio_live/shared.ex:631-635), which threads"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_live_width_bucket_test.exs",
+      "raw": "studio_live_editor_test.exs:277"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_live_width_bucket_test.exs",
+      "raw": "studio_live_editor_test.exs:277` asserts the"
+    },
+    {
+      "doc": "api/test/barkpark_web/live/studio/studio_route_grammar_test.exs",
+      "raw": "scoped_studio_mount_test.exs:202-224`"
+    },
+    {
+      "doc": "api/test/barkpark_web/plugs/require_chat_access_test.exs",
+      "raw": "auth.ex:738`)."
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs",
+      "raw": "claude_chat_test.exs:1209. `--tools \"\"`, the exact `--disallowedTools` deny"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs",
+      "raw": "claude_chat_test.exs:2039): the"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs",
+      "raw": "claude_chat_test.exs:69 — flip the chat config on, hard-disable the"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs",
+      "raw": "claude_chat.ex:1319-1324)."
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs",
+      "raw": "claude_chat.ex:922 already"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs",
+      "raw": "data_case.ex:82):"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/editor_panel_containment_test.exs",
+      "raw": "components.ex:913), so it is"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/editor_panel_containment_test.exs",
+      "raw": "components.ex:940 — after the editor shell"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/editor_panel_containment_test.exs",
+      "raw": "router.ex:1259) — it renders no"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/editor_panel_containment_test.exs",
+      "raw": "sheet_grid.ex:2478) — the one surface the carve-out insures."
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/editor_panel_containment_test.exs",
+      "raw": "sheet_grid.ex:3030, a sibling of the grid-wrap inside the sheet panel"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/nil_icon_never_crashes_test.exs",
+      "raw": "icons.ex:258:"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/nil_icon_never_crashes_test.exs",
+      "raw": "icons.ex:293:"
+    },
+    {
+      "doc": "api/test/barkpark_web/studio/nil_icon_never_crashes_test.exs",
+      "raw": "studio_live/components.ex:1106: anonymous fn/4 in …studio_live_shell/1"
+    },
+    {
+      "doc": "api/test/barkpark/accounts_test.exs",
+      "raw": "plugs/require_recent_mfa.ex:35)"
+    },
+    {
+      "doc": "api/test/barkpark/connectors/bridge_client_test.exs",
+      "raw": "connect.ts: {status: 422, body: {error: \"invalid_credential\", reason}} —"
+    },
+    {
+      "doc": "api/test/barkpark/connectors/bridge_client_test.exs",
+      "raw": "connect.ts: 200 {ok, provider, install_key, display_name}"
+    },
+    {
+      "doc": "api/test/barkpark/content/papers/reader_lagging_stamp_test.exs",
+      "raw": "tooling/grip/ledger/pe-w2-guerrilla-live-writes-2026-08-17.md`): 119"
+    },
+    {
+      "doc": "api/test/barkpark/content/search_tags_for_type_direct_test.exs",
+      "raw": "handlers/paper.ex:527 →"
+    },
+    {
+      "doc": "api/test/barkpark/content/session_blocks_doc_test.exs",
+      "raw": "block_ops.ex:1509) so an"
+    },
+    {
+      "doc": "api/test/barkpark/content/tag_registry_provenance_test.exs",
+      "raw": "bootstrap_guard_test.exs:162)"
+    },
+    {
+      "doc": "api/test/barkpark/media_path_is_a_published_reference_test.exs",
+      "raw": "live/studio/studio_live/handlers/media.ex:54`). `"
+    },
+    {
+      "doc": "api/test/barkpark/media/blobstore_s3_test.exs",
+      "raw": "endpoint.ex:155 /"
+    },
+    {
+      "doc": "api/test/barkpark/media/blobstore_s3_test.exs",
+      "raw": "media_controller.ex:316). No legitimately-uploaded"
+    },
+    {
+      "doc": "api/test/barkpark/plugin_free_boot_test.exs",
+      "raw": "seeds/demo.ex:185/212/226) to"
+    },
+    {
+      "doc": "api/test/barkpark/plugin_free_boot_test.exs",
+      "raw": "tag_registry.ex:78` declares it public)."
+    },
+    {
+      "doc": "api/test/barkpark/plugins/bootstrap_default_slot_probe_test.exs",
+      "raw": "schema.ex:440-448)"
+    },
+    {
+      "doc": "api/test/barkpark/plugins/bootstrap_default_slot_probe_test.exs",
+      "raw": "scope.ex:140) genuinely is"
+    },
+    {
+      "doc": "api/test/barkpark/plugins/capabilities_pagination_flag_test.exs",
+      "raw": "internal/cli/run.go:236` — `--all` walks offset pages only when"
+    },
+    {
+      "doc": "api/test/barkpark/plugins/capabilities_pagination_flag_test.exs",
+      "raw": "internal/cli/run.go:373` — the `unreadable_list_page` refusal (the PDS"
+    },
+    {
+      "doc": "api/test/barkpark/plugins/capabilities_pagination_flag_test.exs",
+      "raw": "internal/cli/run.go:527` — the \"page reached the default limit, more may"
+    },
+    {
+      "doc": "api/test/barkpark/plugins/capabilities_pagination_flag_test.exs",
+      "raw": "internal/cli/run.go:540) reads the limit flag's"
+    },
+    {
+      "doc": "api/test/barkpark/portable_doc/render/canvas_reader_parity_gate_test.exs",
+      "raw": "compose.ex:688 + Components.tasks_html). A LEGACY author-pinned task-list (a"
+    },
+    {
+      "doc": "api/test/barkpark/quiz/bridge_sandbox_cascade_test.exs",
+      "raw": "lib/barkpark/quiz/bridge.ex:113  apply_now/3"
+    },
+    {
+      "doc": "api/test/barkpark/quiz/bridge_sandbox_cascade_test.exs",
+      "raw": "lib/barkpark/quiz/content.ex:92  Quiz.Content.load_question/2"
+    },
+    {
+      "doc": "api/test/barkpark/sites/deploy_runner_test.exs",
+      "raw": "deploy_runner.ex:374), so bash runs from a scriptless tmp dir where"
+    },
+    {
+      "doc": "api/test/barkpark/tasks_test.exs",
+      "raw": "claim.ex:357), so the fence still fires."
+    },
+    {
+      "doc": "api/test/barkpark/tasks/close_test.exs",
+      "raw": "ttl_sweeper.ex:355,366)."
+    },
+    {
+      "doc": "api/test/barkpark/tasks/dedup_test.exs",
+      "raw": "lib/barkpark/tasks/dedup.ex:287:"
+    },
+    {
+      "doc": "api/test/support/pubsub_singletons.ex",
+      "raw": "bridge.ex:113"
+    },
+    {
+      "doc": "api/test/support/pubsub_singletons.ex",
+      "raw": "bridge.ex:73 handle_info/2`."
+    },
+    {
+      "doc": "apps/mobile/src/chat/reducer.ts",
+      "raw": "chat_controller.ex:396) while this client reconnects on a 1s→16s ladder, so a"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/accounts/authz.ex",
+      "raw": "test/barkpark_cloud/web/router_team_switcher_test.exs:72`, which loops"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/deploy_ledger.ex",
+      "raw": "public_read.ex:134`), not a per-site token. Folding them into"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/deploy_ledger.ex",
+      "raw": "router.ex:9901): putting the accusation"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/deploy_ledger.ex",
+      "raw": "src/lib/bp.ts:94`,"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/failure_copy.ex",
+      "raw": "internal/cli/cloud/restore_driver.go:137`"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/failure_copy.ex",
+      "raw": "internal/hetzner/dns.go:74,114,137,156`, `"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/failure_copy.ex",
+      "raw": "internal/hetzner/dns.go:74,92,107,114,137,156"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/failure_copy.ex",
+      "raw": "warmpool_assign.go:30` returns"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/notifications.ex",
+      "raw": "delivery.ex:78)"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/notifications.ex",
+      "raw": "delivery.ex:78), so a"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/notifications/delivery_reason.ex",
+      "raw": "event_email.ex:97`), with one difference that matters: FailureCopy PASSES"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/notifications/delivery_reason.ex",
+      "raw": "notifications/render.ex:86` and"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/notifications/event_email.ex",
+      "raw": "failure_copy.ex:184-187` rules that any path rendering a"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/notifications/event_email.ex",
+      "raw": "failure_copy.ex:20"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/notifications/event_email.ex",
+      "raw": "failure_copy.ex:20`/`:41` state that this"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/registry.ex",
+      "raw": "api/lib/barkpark_web/router.ex:1996-1997 — the scoped `/w/:ws/p/:proj` mirror"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/registry.ex",
+      "raw": "deployment.ex:147-150 forbids it; `transition_changeset` is the sole"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/registry.ex",
+      "raw": "deployment.ex:40-44) stamping `failure_reason: reason`."
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/registry.ex",
+      "raw": "env_var.ex:95 —"
+    },
+    {
+      "doc": "cloud/lib/barkpark_cloud/web/router.ex",
+      "raw": "adapter.ex:263) — `send_headers/4` runs unconditionally. Same probe also"
+    },
+    {
+      "doc": "cloud/priv/repo/migrations/20260808050000_add_commit_distance_to_barkparks.exs",
+      "raw": "registry.ex:4102-4114`) from true to"
+    },
+    {
+      "doc": "cloud/priv/repo/migrations/20260809180000_backfill_abandonment_deferral_structure.exs",
+      "raw": "deploy.ex:1469/1473): a capacity"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/accounts_invitations_test.exs",
+      "raw": "accounts.ex:1722"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/accounts_invitations_test.exs",
+      "raw": "accounts.ex:1801 demands"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/accounts/authz_call_site_census_test.exs",
+      "raw": "lib/barkpark_cloud/accounts/authz.ex:134"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/accounts/authz_call_site_census_test.exs",
+      "raw": "lib/barkpark_cloud/web/router.ex:1184  team_admin?  team arg:"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/accounts/authz_call_site_census_test.exs",
+      "raw": "test/barkpark_cloud/web/router_team_switcher_test.exs:72`, which loops"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/deploy_ledger_reachability_test.exs",
+      "raw": "router.ex:9489) puts it on the operator census envelope, so `renderDeployDelivery`'s `d == nil` \\\"NOT MEASURED\\\" arm stops being the only arm that ever executes.\"},"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/deploy_ledger_test.exs",
+      "raw": "deploy/site-deploy-node.sh:494`: an empty"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/deploy_ledger_test.exs",
+      "raw": "public_read.ex:134` — the eleven-row"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/deploy_ledger_test.exs",
+      "raw": "src/lib/bp.ts:94`), so the same"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/deploy_ledger_test.exs",
+      "raw": "templates/astro-search-starter/src/lib/bp.ts:94` throws the BUILD one."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "deploy/site-deploy.sh:968 (READ-ONLY) — the build's own FATAL line. The"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "internal/cli/cloud/provider.go:614 — `hcloud server create %q: %w: %s`,"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "internal/cli/cloud/provider.go:637 — `hcloud server create %q: ip read-back"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "internal/cli/cloud/restore_driver.go:137 `resurrect create %q: %w`,"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "internal/hetzner/dns.go:137 — hetzner dns delete %q: %w"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "internal/hetzner/dns.go:74 — hetzner dns upsert %q: %w"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "prebuilt_artifact.ex:626)."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/failure_copy_test.exs",
+      "raw": "warmpool_assign.go:30 `create warm server %q: %w`), so the header must not"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/notifications_test.exs",
+      "raw": "internal/cli/cloud/provider.go:579`) — five candidates, four voting"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/notifications/failure_raw_boundary_test.exs",
+      "raw": "failure_copy.ex:184-187` rules that any path rendering a RAW capture without"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/notifications/failure_raw_boundary_test.exs",
+      "raw": "failure_copy.ex:20"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/notifications/failure_raw_boundary_test.exs",
+      "raw": "failure_copy.ex:20`/`:41`/`:136` rule that the honest internal reason is"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/payload_key_set_census_test.exs",
+      "raw": "internal/cli/cloud_support_cmd.go:1460-1462`, which declares"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/payload_key_set_census_test.exs",
+      "raw": "platform_delivery.ex` casts it (:144), declares"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/payload_key_set_census_test.exs",
+      "raw": "router.ex:9809) is the NOTIFICATIONS delivery serializer,"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/promise_actor_manifest_test.exs",
+      "raw": "accounts.ex:103; the predicate lives inside `reset_password_by_token/2`'s"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/promise_actor_manifest_test.exs",
+      "raw": "accounts.ex:1205, predicate `i.expires_at > ^now` at :1210."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/promise_actor_manifest_test.exs",
+      "raw": "accounts.ex:1210), reachable"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/promise_actor_manifest_test.exs",
+      "raw": "app.js:14361, planFeatures). The"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/promise_actor_manifest_test.exs",
+      "raw": "app.js:19564) / \"expires in 7 days\""
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/promise_actor_manifest_test.exs",
+      "raw": "app.js:4958). `@reset_validity_minutes 60` at"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/promise_actor_manifest_test.exs",
+      "raw": "billing_client_mirror_test.exs:70), so this is a real hole and"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/provisioning_test.exs",
+      "raw": "provider.go:543-552)."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "client.go:1207,"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "client.go:2261`) piped to `fmt.Fprintln` (`"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "cloud_deploy_census_cmd.go:538` said"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "deploy_ledger.ex:893` emits it inside `census/3`) — and D442"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "internal/cli/cloud_deploy_census_cmd.go:222`)"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "internal/runtime/runtime_test.go:774"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "internal/runtime/runtime_test.go:774` and `:775`. Every one of the four is the"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "internal/runtime/runtime.go:147` (`func tlsModeForServing(mode string) string`),"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "internal/runtime/runtime.go:279` (`TLSMode: tlsModeForServing(...)`),"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/reader_less_instrument_census_test.exs",
+      "raw": "platform_delivery.ex:356`, and the claim that stood here — zero readers in"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/registry_test.exs",
+      "raw": "api/lib/barkpark/webhooks.ex:197 (`active_webhooks_for/4`):"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/sites_deploy_stage_caption_test.exs",
+      "raw": "deploy/lib/site-deploy-common.sh:55) in Elixir:"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/sites_deploy_stage_caption_test.exs",
+      "raw": "deploy/site-deploy.sh:1939, and its byte-identical"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_act_residue_manifest_test.exs",
+      "raw": "archive_store_test.exs:461-541. Public so"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_act_residue_manifest_test.exs",
+      "raw": "lifecycle_state_manifest_test.exs:536` — carried by two anti-vacuity arms"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_act_residue_manifest_test.exs",
+      "raw": "registry.ex:1270) and the delete never"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_act_residue_manifest_test.exs",
+      "raw": "registry.ex:1340) and"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_act_residue_manifest_test.exs",
+      "raw": "router_ability_matrix_test.exs:40, :187-188)."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_act_residue_manifest_test.exs",
+      "raw": "router_ability_matrix_test.exs:40."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_act_residue_manifest_test.exs",
+      "raw": "test/barkpark_cloud/web/router_audit_test.exs:344 (\"a live box (deprovision"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_write_census_test.exs",
+      "raw": "deploy.ex:1127-1150)"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/terminal_write_census_test.exs",
+      "raw": "deploy.ex:1704-1731)"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/claim_payload_manifest_test.exs",
+      "raw": "transport_manifest_test.exs:279-345 — the shipped"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_moduledoc_table_test.exs",
+      "raw": "router.ex ~:3252); its"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_sites_test.exs",
+      "raw": "deploy_request.ex:314) — read off the actual"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_sites_test.exs",
+      "raw": "prebuilt_artifact.ex:572)."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_sites_test.exs",
+      "raw": "prebuilt_artifact.ex:626, byte-for-byte, nested exactly as"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_sites_test.exs",
+      "raw": "router.ex:11065) and runs `Auth.require_user/2` ONLY — the cond"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_transport_redaction_test.exs",
+      "raw": "router.ex:12261)"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_transport_redaction_test.exs",
+      "raw": "router.ex:13923)"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/router_transport_redaction_test.exs",
+      "raw": "router.ex:14006)"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/verify_route_producer_exemption_test.exs",
+      "raw": "lib/barkpark_cloud/usage.ex:923`  — the usage meter's instance probe."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/verify_route_producer_exemption_test.exs",
+      "raw": "lib/barkpark_cloud/verify.ex:131` — `"
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/verify_route_producer_exemption_test.exs",
+      "raw": "lib/barkpark_cloud/web/router.ex:11204` — the third router consumer."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/verify_route_producer_exemption_test.exs",
+      "raw": "lib/barkpark_cloud/web/router.ex:2367`  — support-instance provisioning."
+    },
+    {
+      "doc": "cloud/test/barkpark_cloud/web/verify_route_producer_exemption_test.exs",
+      "raw": "lib/barkpark_cloud/web/router.ex:2719`  — owner-facing `/credentials`."
+    },
+    {
+      "doc": "connectors/src/connectors/discord.ts",
+      "raw": "chat-adapter/discord/dist/index.js:761-782`). In a multi-tenant"
+    },
+    {
+      "doc": "connectors/src/connectors/discord.ts",
+      "raw": "chat-adapter/discord/dist/index.js:907`). MODAL_SUBMIT (5) has NO branch,"
+    },
+    {
+      "doc": "connectors/src/connectors/imessage.ts",
+      "raw": "node_modules/chat-adapter-imessage/dist/index.js:985-1005`), so a stray"
+    },
+    {
+      "doc": "connectors/src/connectors/slack.ts",
+      "raw": "index.js:1511` — `"
+    },
+    {
+      "doc": "connectors/src/connectors/slack.ts",
+      "raw": "index.js:1515-1519). Key the"
+    },
+    {
+      "doc": "connectors/src/http/mounts.ts",
+      "raw": "chat/dist/index.js:2606-2617` only backgrounds the"
+    },
+    {
+      "doc": "connectors/src/state/thread-session-map.ts",
+      "raw": "index.js:510), which would silently drop the Session of"
+    },
+    {
+      "doc": "connectors/test/discord-connector.test.ts",
+      "raw": "chat-adapter/discord/dist/index.js:2151-2179`):"
+    },
+    {
+      "doc": "internal/cli/cloud_deploy_cmd.go",
+      "raw": "deploy/instance-deploy.sh:24). The"
+    },
+    {
+      "doc": "internal/cli/cloud_site_cmd_test.go",
+      "raw": "deploy.ex:1424), and it is the case that actually had"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd_test.go",
+      "raw": "cloud_site_cmd.go:163 fallback must NOT be copied"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd_test.go",
+      "raw": "media_controller.ex:247-251), not the local stat,"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd_test.go",
+      "raw": "workspace_bundle.ex:182; both import arms pass `"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd_test.go",
+      "raw": "workspace_bundle.ex:182), never a bare integer. The old int mock is"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd_test.go",
+      "raw": "workspace_controller.ex:330 and :348). Six members, 42"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd.go",
+      "raw": "cloud_site_cmd.go:163's version): the resolved context carries an"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd.go",
+      "raw": "endpoint.ex:124 both use"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd.go",
+      "raw": "media_controller.ex:247-251 echoes `byte_size(body)`, measured BEFORE"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd.go",
+      "raw": "workspace_bundle.ex:182) and both import arms send"
+    },
+    {
+      "doc": "internal/cli/cloud_workspace_cmd.go",
+      "raw": "workspace_controller.ex:330, :348). The"
+    },
+    {
+      "doc": "internal/cli/cloud/dns_cloud_test.go",
+      "raw": "cmd/barkpark-provisioner/main.go:150 — `dns := cloud.NewCloudDNS()`, then"
+    },
+    {
+      "doc": "internal/cli/cloud/dns_cloud_test.go",
+      "raw": "internal/cli/cloud_support_cmd.go:100 — supportDNSFor builds the same type"
+    },
+    {
+      "doc": "internal/cli/cmux_hook_test.go",
+      "raw": "cmux_hook.go:192-195)."
+    },
+    {
+      "doc": "internal/cli/cmux_hook_test.go",
+      "raw": "cmux_hook.go:257): the"
+    },
+    {
+      "doc": "internal/cli/cmux_hook_test.go",
+      "raw": "cmux_hook.go:305-318) failing does not break the hook: the"
+    },
+    {
+      "doc": "internal/cli/cmux_install_merge.go",
+      "raw": "cmux_install.go line 91 reserves)."
+    },
+    {
+      "doc": "internal/cli/config.go",
+      "raw": "/router.ex:6292 — superseding charter D91's session-only record)."
+    },
+    {
+      "doc": "internal/cli/errors_exit_taxonomy_test.go",
+      "raw": "params.ex:825 mints for `--met --miss`)."
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "access_controller.ex:189"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1102"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1117"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1151"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1438"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1446"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1478"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1478 — the referenced doc did"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1493"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:1635"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:237"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:273"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:354"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:401"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:432"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_ingest_controller.ex:938"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_source_controller.ex:28"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "bulldocs_source_controller.ex:77"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "chat_controller.ex:146"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "chat_controller.ex:934"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "chat_controller.ex:943"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "chat_controller.ex:948"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "chat_host_controller.ex:112"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "chat_host_controller.ex:95"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "require_org_mfa_enrolment.ex:73"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "require_recent_mfa.ex:57"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "search_controller.ex:527"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "sheets/ops_controller.ex:100"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "sheets/ops_controller.ex:131"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "sheets/ops_controller.ex:87"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "site_deploy_controller.ex:299"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "site_deploy_controller.ex:323"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "webhook_controller.ex:280"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "webhook_controller.ex:288"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:1011"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:1035"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:1051"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:450"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:513"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:575"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:592"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:651"
+    },
+    {
+      "doc": "internal/cli/errors.go",
+      "raw": "workspace_controller.ex:992"
+    },
+    {
+      "doc": "internal/cli/export_cmd.go",
+      "raw": "scripts/pds-pull-proof.sh:1232-1245 is the design precedent,"
+    },
+    {
+      "doc": "internal/cli/globals.go",
+      "raw": "cloud_site_cmd.go:163): the resolved content"
+    },
+    {
+      "doc": "internal/cli/hetzner_res_census_test.go",
+      "raw": "hetzner_backup_cmd.go:225,"
+    },
+    {
+      "doc": "internal/cli/hetzner_res_census_test.go",
+      "raw": "hetzner_dns_cmd.go:767,"
+    },
+    {
+      "doc": "internal/cli/hetzner_res_census_test.go",
+      "raw": "hetzner_net_cmd.go:1115 and :1693),"
+    },
+    {
+      "doc": "internal/cli/hetzner_res_census_test.go",
+      "raw": "hetzner_net_cmd.go:811 and :1224 is the KIND"
+    },
+    {
+      "doc": "internal/cli/hetzner_res_census_test.go",
+      "raw": "hetzner_net_cmd.go:811 and :1224 to their four dispatch literals."
+    },
+    {
+      "doc": "internal/cli/hetzner_res_census_test.go",
+      "raw": "hetzner_storage_cmd.go:423"
+    },
+    {
+      "doc": "internal/cli/hetzner_respost_mutation.go",
+      "raw": "hetzner_lb_cmd_test.go:596/:606 reds on. Nothing else in `extra` may come"
+    },
+    {
+      "doc": "internal/cli/onramp_cmd_test.go",
+      "raw": "docs/setup/CURSOR.md:78-91 publishes, in the Cursor ${env:VAR} dialect."
+    },
+    {
+      "doc": "internal/cli/onramp_cmd_test.go",
+      "raw": "docs/setup/GEMINI-CLI.md:51-62 — the byte-parity lock."
+    },
+    {
+      "doc": "internal/cli/onramp_cmd_test.go",
+      "raw": "docs/setup/GEMINI-CLI.md:51-62 publishes, in Gemini's own"
+    },
+    {
+      "doc": "internal/cli/onramp_cmd_test.go",
+      "raw": "docs/setup/WINDSURF.md:50-61 — the byte-parity lock"
+    },
+    {
+      "doc": "internal/cli/onramp_cmd_test.go",
+      "raw": "docs/setup/WINDSURF.md:50-61 publishes, in Cursor's shared ${env:VAR}"
+    },
+    {
+      "doc": "internal/cli/onramp_cmd_test.go",
+      "raw": "docs/setup/ZED.md:59-67 publishes (decision"
+    },
+    {
+      "doc": "internal/cli/onramp_write_test.go",
+      "raw": "onramp_write.go:328/354/381 which CRLF-rewrites). A marker-less"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "media_controller.ex:46 returns `files:`,"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "query_controller.ex:90        documents: rendered"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "search/hit_envelope.ex:71     documents: …"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "tasks_controller.ex:83        %{ok: true, docs: …}"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "tickets_controller.ex:93,169  tickets: rows"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "v1/media_collections_controller.ex:32  collections: …"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "v1/media_collections_controller.ex:69 hits: hits"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "v1/media_controller.ex:298    assets: assets"
+    },
+    {
+      "doc": "internal/cli/paginate_all_test.go",
+      "raw": "v1/media_controller.ex:90     hits: hits"
+    },
+    {
+      "doc": "internal/cli/run_write_receipt_test.go",
+      "raw": "chat_controller.ex:334), so \"empty body ⇒ refuse\" would red a real"
+    },
+    {
+      "doc": "internal/cli/run_write_receipt_test.go",
+      "raw": "ticket_keys_controller.ex:44 (201 mint)"
+    },
+    {
+      "doc": "internal/cli/run_write_receipt_test.go",
+      "raw": "workspace_controller.ex:112 (delete)"
+    },
+    {
+      "doc": "internal/cli/run.go",
+      "raw": "seed_cmd.go:95 hand-rolled, so this unifies three spellings into one and"
+    },
+    {
+      "doc": "internal/cli/servers_cmd_test.go",
+      "raw": "servers_cmd.go:84-92, 125-133, 163-171, 211-219) to the"
+    },
+    {
+      "doc": "internal/cli/sites_cmd_test.go",
+      "raw": "internal/cli/cloud_site_cmd.go:2013 states for the"
+    },
+    {
+      "doc": "internal/cli/sites_cmd.go",
+      "raw": "internal/cli/cloud_site_cmd.go:2013 states for the"
+    },
+    {
+      "doc": "internal/cli/success_claim_registry_test.go",
+      "raw": "client.go:1163), the type"
+    },
+    {
+      "doc": "internal/cli/success_claim_registry_test.go",
+      "raw": "client.go:172,"
+    },
+    {
+      "doc": "internal/cli/success_claim_registry_test.go",
+      "raw": "cloud_support_cmd.go:1229/:1236): the sweep names what the"
+    },
+    {
+      "doc": "internal/cli/success_claim_registry_test.go",
+      "raw": "cloud_support_cmd.go:799), whose narration is composed"
+    },
+    {
+      "doc": "internal/cli/success_claim_registry_test.go",
+      "raw": "hetzner_respost.go:104), whose gone-arm IS hzResDone."
+    },
+    {
+      "doc": "internal/taskboard/compose_test.go",
+      "raw": "compose.go:148 HoverStop wiring — the mirror of TestWideRailHoverPaintsStop."
+    },
+    {
+      "doc": "internal/taskboard/fetch_test.go",
+      "raw": "paginate_all_test.go:94-104 — carries NINE poison bodies. Dropping all nine"
+    },
+    {
+      "doc": "internal/taskboard/fetch_test.go",
+      "raw": "paginate_all_test.go:94-104)."
+    },
+    {
+      "doc": "js/packages/react/src/blocks/core.ts",
+      "raw": "figures.ex line 124"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "auth_controller.ex:329"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "auth_controller.ex:417, the charter's OWN declared-honest anti-enumeration control: a"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "auth_controller.ex:417. Deleting a"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/app_token_controller.ex:215 — the admin revoke-by-id"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:177"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:214"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:329"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:351"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:379"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:399"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:417"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:463"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:528"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:567"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/auth_controller.ex:600"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_form_controller.ex:50"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_form_controller.ex:54"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:164"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:244"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:321"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:431"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:502"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:551"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:715"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_ingest_controller.ex:814"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/bulldocs_intents_controller.ex:50"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_adopt_controller.ex:66"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_adopt_controller.ex:69"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_status_controller.ex:65"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:111"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:115"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:120"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:145"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:150"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:154"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:161"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:189"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:194"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:200"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:205"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:209"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:86"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/github_webhook_controller.ex:87"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/oidc_controller.ex:82"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/plugin_settings_controller.ex:53"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/plugin_settings_controller.ex:65"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/pulse_controller.ex:58"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/query_controller.ex:199"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/saml_controller.ex:66"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/search_controller.ex:190"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/search_controller.ex:316"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/search_controller.ex:337"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/search_controller.ex:340"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/secret_controller.ex:67"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/secret_controller.ex:80"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/self_update_controller.ex:24"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/site_deploy_controller.ex:81"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/social_controller.ex:66"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1008"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1015"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1142"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1289"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1327"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1352"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1379"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1422"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1655"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:1696"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:170"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:224"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:316"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:371"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:435"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:558"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:587"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:652"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:788"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:83"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:861"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:952"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:961"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tasks_controller.ex:984"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tickets_controller.ex:169"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tickets_controller.ex:263"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/tickets_controller.ex:93"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/v1/media_controller.ex:188"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/v1/media_controller.ex:228"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/v1/media_controller.ex:231"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/webauthn_controller.ex:170"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/webauthn_controller.ex:212"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark_web/controllers/webauthn_controller.ex:64"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark/plugins/sheets/web/import_controller.ex:64"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "barkpark/plugins/sheets/web/ops_controller.ex:71"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "bulldocs_form_controller.ex:54, the honeypot arm that by design writes nothing,"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "bulldocs_ingest_controller.ex:164 was demoted to `unjudged_other`"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "bulldocs_ingest_controller.ex:630 and :715, whose cited tests drive the route and never"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "bulldocs_ingest_controller.ex:630, inside the batch clause of apply_op/2 at :604,"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "github_webhook_controller.ex:194's"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "github_webhook_controller.ex:194's clause head is"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "github_webhook_controller.ex:87 (`perl -i -pe 'print \"\\n\" if"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "github_webhook_controller.ex:87 took `0 undeclared of 1 fired` -> `1 undeclared of 1"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "github_webhook_controller.ex:87, the one site the CATCH-ALL-TO-SUCCESS arm fires on"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "github_webhook_controller.ex:87, whose route is unrouted —"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "internal/cli/hetzner_respost.go:197`"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "oidc_controller.ex:82. All 14 CAS sites reach POST-READ via ARM 1 (`select:`), zero"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "pulse_controller.ex, where the register holds create/2 (:58)"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "tasks_controller.ex:1352 and"
+    },
+    {
+      "doc": "scripts/pds-elixir-receipt-census.exs",
+      "raw": "tasks_controller.ex:587 lives in close_response/3, which touches no Repo"
+    },
+    {
+      "doc": "templates/astro-search-starter/src/finder/lib/tokens.gen.ts",
+      "raw": "emit.mjs:1979) has 19 entries and NOT"
+    },
+    {
+      "doc": "templates/search-starter/lib/tokens.gen.ts",
+      "raw": "emit.mjs:1979) has 19 entries and NOT"
+    },
+    {
+      "doc": "web/__tests__/paginate.test.ts",
+      "raw": "api/lib/barkpark_web/controllers/query_controller.ex:29"
+    },
+    {
+      "doc": "web/__tests__/paginate.test.ts",
+      "raw": "api/lib/barkpark_web/controllers/query_controller.ex:29`). A caller asking"
+    },
+    {
+      "doc": "web/__tests__/paginate.test.ts",
+      "raw": "query_controller.ex:120-131 actually emits."
+    },
+    {
+      "doc": "web/__tests__/paginate.test.ts",
+      "raw": "query_controller.ex:29 does."
+    },
+    {
+      "doc": "web/lib/listings.ts",
+      "raw": "query_controller.ex:97-130` and answers \"is there a row past this page\""
+    },
+    {
+      "doc": "web/lib/paginate.ts",
+      "raw": "api/lib/barkpark_web/controllers/query_controller.ex:29`,"
+    },
+    {
+      "doc": "web/lib/paginate.ts",
+      "raw": "query_controller.ex:120-131). `hasMore`"
+    },
+    {
+      "doc": "web/lib/paginate.ts",
+      "raw": "query_controller.ex:29` clamps `limit` to `min(1000) |> max(1)`. Requesting"
+    },
+    {
+      "doc": "web/lib/paginate.ts",
+      "raw": "query_controller.ex:97-130), the walk"
+    },
+    {
+      "doc": "web/lib/posts.ts",
+      "raw": "papers.ts: 1000/page (the server's own clamp) x 20 pages."
+    }
+  ]
+}
