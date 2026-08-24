@@ -38,7 +38,12 @@ defmodule BarkparkCloud.Telemetry do
         req_per_s: number | nil,  # request rate (instance-exposed; nil until it ships)
         p95_ms: number | nil,     # p95 request latency ms (instance-exposed; nil until it ships)
         backup: %{ok: boolean | nil, detail: String.t() | nil},
-        checks: %{pass: non_neg_integer, total: non_neg_integer, failing: [String.t()]},
+        checks: %{
+          pass: non_neg_integer,
+          skipped: non_neg_integer,
+          total: non_neg_integer,
+          failing: [String.t()]
+        },
         dirty_tree: boolean | nil,
         reported_at: String.t() | nil   # event inserted_at, RFC3339
       }
@@ -66,7 +71,7 @@ defmodule BarkparkCloud.Telemetry do
 
   alias BarkparkCloud.Registry.AgentEvent
 
-  @empty_checks %{pass: 0, total: 0, failing: []}
+  @empty_checks %{pass: 0, skipped: 0, total: 0, failing: []}
 
   @doc """
   Normalize one captured health report into the stable telemetry envelope.
@@ -278,19 +283,35 @@ defmodule BarkparkCloud.Telemetry do
   defp consumer_root_status(status) when status in ["read", "absent", "unmeasured"], do: status
   defp consumer_root_status(_), do: "unmeasured"
 
-  # Roll the health-gate array up to {pass, total, failing}. A non-list (absent
-  # / malformed) yields the zero roll-up — never nil arithmetic downstream.
+  # Roll the health-gate array up to {pass, skipped, total, failing}. A non-list
+  # (absent / malformed) yields the zero roll-up — never nil arithmetic
+  # downstream.
+  #
+  # `skipped` counts the checks that DID NOT RUN, and it is its own bucket
+  # because the alternatives are both lies: counted as passing, the roll-up
+  # claims the gate verified a condition nothing probed; counted as failing, a
+  # correctly-configured box reads as broken. The gate emits these as
+  # `status: "skip"` (see internal/cli/setup/healthgate.go).
+  #
+  # The invariant is `pass + skipped + length(failing) == total`. It USED to be
+  # `pass + length(failing) == total`; a reader deriving a failure count as
+  # `total - pass` was already wrong for optional stubs and is now visibly so.
   defp summarize_checks(checks) when is_list(checks) do
-    {pass, failing} =
-      Enum.reduce(checks, {0, []}, fn check, {pass, failing} ->
-        if check_passed?(check) do
-          {pass + 1, failing}
-        else
-          {pass, [check_name(check) | failing]}
+    {pass, skipped, failing} =
+      Enum.reduce(checks, {0, 0, []}, fn check, {pass, skipped, failing} ->
+        case check_status(check) do
+          :pass -> {pass + 1, skipped, failing}
+          :skip -> {pass, skipped + 1, failing}
+          :fail -> {pass, skipped, [check_name(check) | failing]}
         end
       end)
 
-    %{pass: pass, total: length(checks), failing: Enum.reverse(failing)}
+    %{
+      pass: pass,
+      skipped: skipped,
+      total: length(checks),
+      failing: Enum.reverse(failing)
+    }
   end
 
   defp summarize_checks(_), do: @empty_checks
@@ -326,6 +347,23 @@ defmodule BarkparkCloud.Telemetry do
   # boolean; "ok" is a defensive alias consulted only when "pass" is absent or
   # non-boolean — an alias must never overrule an explicit `"pass" => false`.
   # Any non-boolean / missing value → not passing (fail closed).
+  # The three-valued read of one check. An explicit `status` wins when the agent
+  # sends one; anything else falls back to the historical two-state `pass`/`ok`
+  # bool, so a box running an agent built before `status` existed keeps its
+  # previous roll-up exactly. An UNRECOGNISED status string is NOT treated as a
+  # skip — a value this control plane cannot interpret must not silently excuse
+  # a check from the count — it degrades to the bool fallback.
+  defp check_status(check) when is_map(check) do
+    case Map.get(check, "status") do
+      "pass" -> :pass
+      "fail" -> :fail
+      "skip" -> :skip
+      _ -> if check_passed?(check), do: :pass, else: :fail
+    end
+  end
+
+  defp check_status(_), do: :fail
+
   defp check_passed?(check) when is_map(check) do
     case bool_or_nil(Map.get(check, "pass")) do
       nil -> bool_or_nil(Map.get(check, "ok")) == true

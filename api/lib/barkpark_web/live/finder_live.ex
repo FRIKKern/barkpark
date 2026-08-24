@@ -282,7 +282,9 @@ defmodule BarkparkWeb.FinderLive do
   end
 
   # `paper` is the ONLY type with a public reader — `live("/papers/:slug",
-  # BulldocsLive)` (router.ex:2442). Every other type used to resolve to
+  # BulldocsLive)` in router.ex. (Cited by SYMBOL, not by line: the line anchor
+  # this used to carry rotted the moment an unrelated pipeline gained a plug.)
+  # Every other type used to resolve to
   # `~p"/finder"`: a link back to the page the reader is already standing on, so
   # a task/sheet/session hit rendered as a control that did nothing (defect 2).
   #

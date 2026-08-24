@@ -5,6 +5,8 @@ Give your Claude Code agent a real task board — lifecycle, priorities, and an
 atomic claim/close contract built for concurrent workers — as first-class MCP
 tools. Two minutes, three steps.
 
+**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. The full doctrine, and the three ways a registration silently does not happen, is in [Agent Onramps](AGENT-ONRAMPS.md).
+
 ## 1. Install the `bp` CLI
 
 macOS / Linux:

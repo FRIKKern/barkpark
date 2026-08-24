@@ -142,31 +142,53 @@ func resolveDoctorTarget(out *writer, name, urlOverride, tokenOverride string) (
 }
 
 // renderDoctorReport prints the human report: a header naming the target, one
-// line per check with a ✓/✗ marker and detail, then the overall verdict.
+// line per check with a ✓/✗/– marker and detail, then the overall verdict.
+//
+// The dash is a check that DID NOT RUN, and it is rendered as its own marker
+// rather than folded into ✓ because an operator reading a green doctor needs to
+// know which conditions it declined to look at. "all N checks passed" is only
+// printed when N probes actually ran.
 func renderDoctorReport(out *writer, target, base string, report setup.HealthReport) {
 	out.outf("bp doctor — %s (%s)", target, base)
 	for _, c := range report.Checks {
-		mark := "✓"
-		if !c.Pass {
-			mark = "✗"
+		mark := "✗"
+		switch c.Effective() {
+		case setup.CheckPass:
+			mark = "✓"
+		case setup.CheckSkip:
+			mark = "–"
 		}
 		out.outf("  %s %-22s %s", mark, c.Name, c.Detail)
 	}
+	skipped := report.Skipped()
 	if report.OK {
-		out.outf("=> READY — all %d checks passed", len(report.Checks))
+		if len(skipped) == 0 {
+			out.outf("=> READY — all %d checks passed", len(report.Checks))
+		} else {
+			out.outf("=> READY — %d passed, %d NOT CHECKED: %s",
+				len(report.Passed()), len(skipped), strings.Join(skipped, ", "))
+		}
 	} else {
 		out.outf("=> NOT READY — %d/%d failed: %s",
 			len(report.Failures()), len(report.Checks), strings.Join(report.Failures(), ", "))
 	}
+	if !report.OK && len(skipped) > 0 {
+		out.outf("   (%d NOT CHECKED: %s)", len(skipped), strings.Join(skipped, ", "))
+	}
 }
 
 // doctorJSON projects the report onto a stable JSON envelope for `-o json`.
+//
+// `pass` keeps its historical two-state meaning for existing scripts; `status`
+// and the top-level `skipped` list are the additive channel that distinguishes
+// a probe that FAILED from one that never ran.
 func doctorJSON(target, base string, report setup.HealthReport) map[string]any {
 	checks := make([]map[string]any, 0, len(report.Checks))
 	for _, c := range report.Checks {
 		checks = append(checks, map[string]any{
 			"name":   c.Name,
 			"pass":   c.Pass,
+			"status": string(c.Effective()),
 			"detail": c.Detail,
 		})
 	}
@@ -176,6 +198,7 @@ func doctorJSON(target, base string, report setup.HealthReport) map[string]any {
 		"base_url": base,
 		"checks":   checks,
 		"failures": report.Failures(),
+		"skipped":  report.Skipped(),
 	}
 }
 

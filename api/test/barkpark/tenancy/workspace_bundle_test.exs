@@ -309,6 +309,185 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     end
   end
 
+  # ── :full means full — bare-slug E3 fidelity under a shared slug (PDS-D45/D74)
+
+  # THE PROPERTY BELOW STATES ITS OWN CARVE-OUTS. For every E3-dataset table, the
+  # rows sitting under a slug this workspace's projects OWN fall in exactly three
+  # buckets, and they must add up:
+  #
+  #   travelled  — the member's row_count
+  #   declared   — the manifest's machine-readable `declared_loss` count
+  #   foreign    — rows the table itself PROVES belong to another workspace
+  #
+  # `foreign` is the ONLY legitimate silent omission, and it is named per table
+  # here, so a future weakening has to delete a named carve-out rather than
+  # quietly widen an inequality. Everything else that fails to travel MUST be
+  # counted out loud; a row in none of the three buckets vanished silently, and
+  # that is the defect this block exists to convict.
+  #
+  # Carve-outs deliberately OUTSIDE the property (they are not loss):
+  #   * generated columns (documents.search_vector) — Postgres re-derives them on
+  #     import, so their absence from the column list is by construction;
+  #   * the boundary tables no bundle carries (users, organizations,
+  #     chat_sessions, …) — @pinned_non_tenant, outside the tenancy partition;
+  #   * a sibling workspace's rows — excluded BY DESIGN (charter D21), which is
+  #     exactly the `foreign` bucket wherever the table can prove it.
+  @foreign_row_predicate %{
+    # `shares` carries workspace_slug NOT NULL and workspaces.slug is uniquely
+    # indexed, so a row naming a DIFFERENT workspace is provably not ours.
+    "shares" => "t.workspace_slug <> $2",
+    # `preview_token_jti` carries ONLY a bare `dataset` string — no workspace_id /
+    # project_id / dataset_id column exists. NOTHING in the row proves ownership
+    # either way, so it has no `foreign` bucket at all: every candidate must
+    # either travel or be declared. `$2::text` is the workspace slug and is never
+    # NULL, so this is a constant FALSE that still binds the parameter — the cast
+    # is required (a bare `$2 IS NULL` is 42P18 indeterminate_datatype), and the
+    # parameter must be referenced at all (Postgres rejects a bind supplying more
+    # parameters than the statement uses).
+    "preview_token_jti" => "$2::text IS NULL"
+  }
+
+  describe "a :full bundle is LOSS-EXPLICIT for the bare-slug E3 family (PDS-D45/D74)" do
+    test "PROPERTY: every bare-slug E3 row under an owned slug travels, is declared, or is provably foreign" do
+      f = seed_shared_slug_fixture!()
+
+      {:ok, bundle} = WorkspaceBundle.export(f.ws_a.id)
+      {manifest, _dumps} = Archive.unpack(bundle)
+
+      owned = owned_slugs(f.ws_a.id)
+      members = table_index(manifest)
+      losses = declared_loss_index(manifest)
+
+      # The fixture must actually exercise the shape, else the property is vacuous.
+      assert f.shared in owned
+      refute f.shared in manifest["dataset_slugs"]
+
+      for table <- Catalog.e3_dataset_keyed() do
+        foreign_pred = Map.fetch!(@foreign_row_predicate, table)
+
+        candidates =
+          scalar(
+            "SELECT count(*) FROM #{quote_ident(table)} t " <>
+              "WHERE t.dataset = ANY($1::text[]) AND NOT (#{foreign_pred})",
+            [owned, f.ws_a.slug]
+          )
+
+        travelled = get_in(members, [table, "row_count"]) || 0
+        declared = get_in(losses, [table, "row_count"]) || 0
+
+        assert candidates == travelled + declared,
+               "SILENT LOSS in #{table}: #{candidates} row(s) sit under a slug workspace " <>
+                 "#{f.ws_a.slug} owns and are not provably foreign, but only #{travelled} " <>
+                 "travelled and #{declared} were declared — " <>
+                 "#{candidates - travelled - declared} vanished with no sentinel."
+      end
+    end
+
+    test "shares: the workspace's OWN row under a SHARED slug travels; the sibling's does not" do
+      f = seed_shared_slug_fixture!()
+
+      {:ok, bundle} = WorkspaceBundle.export(f.ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      # On origin/main the shared slug is narrowed OUT of `dataset_slugs`, the
+      # bare `dataset = ANY(slugs)` copy selects nothing under it, and this row is
+      # silently absent — a :full backup missing a live share.
+      assert dumps["shares"] =~ f.a_shared_share_id
+      assert dumps["shares"] =~ f.a_excl_share_id
+
+      # The exclusivity rule still holds where it matters: B's row under the very
+      # same slug is categorically absent from A's bundle.
+      refute dumps["shares"] =~ f.b_shared_share_id
+
+      assert table_index(manifest)["shares"]["row_count"] == 2,
+             "the member count must be the TRUE count, not the truncated one"
+    end
+
+    test "preview_token_jti: the unattributable rows are DECLARED with their slugs and count, and shares is not" do
+      f = seed_shared_slug_fixture!()
+
+      {:ok, bundle} = WorkspaceBundle.export(f.ws_a.id)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      losses = declared_loss_index(manifest)
+      loss = Map.fetch!(losses, "preview_token_jti")
+
+      assert loss["reason"] == "unattributable_shared_dataset_slug"
+      assert loss["slugs"] == [f.shared]
+
+      # BOTH rows under the shared slug are counted: the bundle cannot tell whose
+      # they are, so it reports the honest upper bound rather than guessing.
+      assert loss["row_count"] == 2
+      assert is_binary(loss["message"]) and loss["message"] =~ "preview_token_jti"
+
+      # The cross-tenant refutation is untouched: nothing under the shared slug
+      # travels, it is merely no longer SILENT.
+      refute dumps["preview_token_jti"] =~ f.a_shared_jti
+      refute dumps["preview_token_jti"] =~ f.b_shared_jti
+      assert dumps["preview_token_jti"] =~ f.a_excl_jti
+
+      # shares is deliberately NOT in the loss list — it got the correct-export
+      # answer, so declaring a loss for it would be a lie in the other direction.
+      refute Map.has_key?(losses, "shares")
+    end
+
+    test "no shared slug in play → declared_loss is present and EMPTY (the key is not conditional)" do
+      %{ws_a: ws_a} = seed_two_workspaces!()
+
+      {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
+      {manifest, _dumps} = Archive.unpack(bundle)
+
+      assert manifest["declared_loss"] == [],
+             "the key must always be present — a consumer that only sees it on loss " <>
+               "cannot tell 'no loss' from 'an engine too old to say'"
+    end
+
+    test "a dataset-scoped bundle does not WIDEN shares to the workspace's other datasets" do
+      f = seed_shared_slug_fixture!()
+
+      {:ok, bundle} = WorkspaceBundle.export(f.ws_a.id, dataset: f.excl)
+      {manifest, dumps} = Archive.unpack(bundle)
+
+      assert dumps["shares"] =~ f.a_excl_share_id
+
+      refute dumps["shares"] =~ f.a_shared_share_id,
+             "a dataset-scoped pull carried a share for a DIFFERENT dataset — the " <>
+               "workspace_slug predicate widened the grain"
+
+      refute dumps["shares"] =~ f.b_shared_share_id
+      assert table_index(manifest)["shares"]["row_count"] == 1
+    end
+
+    test "export and teardown agree: delete_workspace sweeps every shares row A's bundle carried, and spares B's" do
+      f = seed_shared_slug_fixture!()
+
+      # The binding assertion: whatever the EXPORT claims as A's travels, the
+      # TEARDOWN must remove — otherwise a workspace that was backed up and then
+      # deleted leaves rows behind that its own bundle said it owned. Without the
+      # teardown half of the split this fails while 98 other tests stay green.
+      {:ok, bundle} = WorkspaceBundle.export(f.ws_a.id)
+      {_manifest, dumps} = Archive.unpack(bundle)
+      exported = share_ids_in(dumps["shares"])
+
+      assert f.a_shared_share_id in exported,
+             "fixture regression: the shared-slug row must be IN the bundle for this " <>
+               "lockstep assertion to mean anything"
+
+      assert {:ok, _} = Tenancy.delete_workspace(f.ws_a)
+
+      survivors =
+        scalar("SELECT count(*) FROM shares WHERE id::text = ANY($1::text[])", [exported])
+
+      assert survivors == 0,
+             "delete_workspace left #{survivors} shares row(s) the :full bundle exported as " <>
+               "this workspace's — export and teardown disagree (tenancy.ex documents them " <>
+               "as the EXACT same shapes)"
+
+      # And the sweep is still fail-CLOSED across the tenant boundary.
+      assert scalar("SELECT count(*) FROM shares WHERE id::text = $1", [f.b_shared_share_id]) == 1
+    end
+  end
+
   # ── search_surface_config per-workspace E1 attribution (Wave 5 Slice A) ───────
 
   describe "search_surface_config is exported per-workspace (charter D45/D49)" do
@@ -1234,7 +1413,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       end
     end
 
-    test "unpack/1 KEEPS its binary contract, so the 20 cross-tenant refutes stay real" do
+    test "unpack/1 KEEPS its binary contract, so the 25 cross-tenant refutes stay real" do
       %{ws_a: ws_a} = seed_two_workspaces!()
       {:ok, bundle} = WorkspaceBundle.export(ws_a.id)
       {_manifest, dumps} = Archive.unpack(bundle)
@@ -1253,10 +1432,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       fake_path_shape = Map.new(dumps, fn {t, _} -> {t, "/tmp/tables/#{t}.copy"} end)
       refute fake_path_shape["documents"] =~ ws_a.id
 
-      # THE COUNT, STATED. Twenty `refute dumps[…] =~ …` cross-tenant isolation
-      # tripwires ride this contract across the two bundle suites. If a future
-      # change flips `unpack/1` to paths, they all go quietly green — so the
-      # count is pinned here, in the same file, next to the reason.
+      # THE COUNT, STATED. Twenty-five `refute dumps[…] =~ …` cross-tenant
+      # isolation tripwires ride this contract across the two bundle suites. If a
+      # future change flips `unpack/1` to paths, they all go quietly green — so
+      # the count is pinned here, in the same file, next to the reason.
+      #
+      # 20 -> 25 (PDS-D74): the bare-slug E3 fidelity block added five, all under
+      # a cross-tenant-SHARED dataset slug — one that the sibling's `shares` row
+      # never travels, two that neither workspace's unattributable
+      # `preview_token_jti` rows do, and two more proving a dataset-scoped pull
+      # neither widens nor leaks. Raised deliberately, not to make a red go away.
       counted =
         for file <- [
               "test/barkpark/tenancy/workspace_bundle_test.exs",
@@ -1269,8 +1454,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
           n -> n + 1
         end
 
-      assert counted == 20,
-             "expected 20 `refute …dumps[…]` cross-tenant tripwires riding unpack/1's " <>
+      assert counted == 25,
+             "expected 25 `refute …dumps[…]` cross-tenant tripwires riding unpack/1's " <>
                "binary contract; found #{counted}. If you added or removed one, update this " <>
                "count deliberately — do not delete the assertion."
     end
@@ -1909,6 +2094,91 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     }
   end
 
+  # ── bare-slug E3 fidelity fixture (PDS-D45/D74) ──────────────────────────────
+
+  # Two workspaces colliding on ONE dataset slug, with a bare-slug E3 row of each
+  # kind on BOTH sides of the collision plus an exclusive-slug control. This is
+  # the shape guerrilla is in today (`production` owned by both `default` and
+  # `gyldendal`), reduced to a fixture.
+  defp seed_shared_slug_fixture! do
+    ws_a = create_workspace!(unique("wsa"))
+    proj_a = create_project!(ws_a, unique("proja"))
+    ws_b = create_workspace!(unique("wsb"))
+    proj_b = create_project!(ws_b, unique("projb"))
+
+    tag = System.unique_integer([:positive])
+    shared = "shared-prod-#{tag}"
+    excl = "excl-a-#{tag}"
+
+    seed_dataset!(proj_a.id, excl)
+    seed_dataset!(proj_a.id, shared)
+    seed_dataset!(proj_b.id, shared)
+
+    # `shares` — attributable: it carries workspace_slug + project_slug + dataset.
+    a_shared = insert_share!(ws_a.slug, proj_a.slug, shared)
+    a_excl = insert_share!(ws_a.slug, proj_a.slug, excl)
+    b_shared = insert_share!(ws_b.slug, proj_b.slug, shared)
+
+    # `preview_token_jti` — unattributable: a bare `dataset` string is all it has.
+    a_shared_jti = "A-SHARED-JTI-#{tag}"
+    b_shared_jti = "B-SHARED-JTI-#{tag}"
+    a_excl_jti = "A-EXCL-JTI-#{tag}"
+    insert_preview_jti!(a_shared_jti, shared)
+    insert_preview_jti!(b_shared_jti, shared)
+    insert_preview_jti!(a_excl_jti, excl)
+
+    %{
+      ws_a: ws_a,
+      ws_b: ws_b,
+      proj_a: proj_a,
+      proj_b: proj_b,
+      tag: tag,
+      shared: shared,
+      excl: excl,
+      a_shared_share_id: a_shared,
+      a_excl_share_id: a_excl,
+      b_shared_share_id: b_shared,
+      a_shared_jti: a_shared_jti,
+      b_shared_jti: b_shared_jti,
+      a_excl_jti: a_excl_jti
+    }
+  end
+
+  defp insert_share!(workspace_slug, project_slug, dataset) do
+    %{rows: [[id]]} =
+      Repo.query!(
+        "INSERT INTO shares (id, workspace_slug, project_slug, dataset, surfaces, access, " <>
+          "inserted_at, updated_at) VALUES (gen_random_uuid(), $1, $2, $3, ARRAY['docs'], " <>
+          "'read', now(), now()) RETURNING id::text",
+        [workspace_slug, project_slug, dataset]
+      )
+
+    id
+  end
+
+  # Every dataset slug under the workspace's projects — the OWNED set, which is a
+  # SUPERSET of `dataset_slugs_for/1`'s workspace-EXCLUSIVE set. The gap between
+  # the two is exactly the population the fidelity block is about.
+  defp owned_slugs(ws_id) do
+    Repo.query!(
+      "SELECT DISTINCT d.slug FROM datasets d JOIN projects p ON p.id = d.project_id " <>
+        "WHERE p.workspace_id = $1::text::uuid",
+      [ws_id]
+    ).rows
+    |> List.flatten()
+  end
+
+  defp declared_loss_index(manifest),
+    do: Map.new(manifest["declared_loss"] || [], &{&1["table"], &1})
+
+  # `id` is the first column of `shares` (Catalog.non_generated_columns returns
+  # ordinal order), so the leading tab-separated field of each COPY line is it.
+  defp share_ids_in(dump) do
+    dump
+    |> String.split("\n", trim: true)
+    |> Enum.map(&(&1 |> String.split("\t") |> hd()))
+  end
+
   defp seed_dataset!(project_id, slug) do
     Repo.query!(
       "INSERT INTO datasets (id, project_id, slug, name, inserted_at, updated_at) " <>
@@ -2021,14 +2291,27 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
   end
 
   defp independent_count(%{"partition" => "E3", "name" => t}, ws, slugs) do
-    if t in Catalog.e3_doc_keyed() do
-      scalar(
-        "SELECT count(*) FROM #{quote_ident(t)} x WHERE EXISTS (SELECT 1 FROM documents d " <>
-          "WHERE d.workspace_id = $1::text::uuid AND d.doc_id = x.doc_id AND d.dataset = x.dataset)",
-        [ws]
-      )
-    else
-      scalar("SELECT count(*) FROM #{quote_ident(t)} WHERE dataset = ANY($1::text[])", [slugs])
+    cond do
+      t in Catalog.e3_doc_keyed() ->
+        scalar(
+          "SELECT count(*) FROM #{quote_ident(t)} x WHERE EXISTS (SELECT 1 FROM documents d " <>
+            "WHERE d.workspace_id = $1::text::uuid AND d.doc_id = x.doc_id AND d.dataset = x.dataset)",
+          [ws]
+        )
+
+      # PDS-D74: an E3-dataset table with its own workspace key is scoped by that
+      # key, not by the exclusive slug set. Derived here from the WORKSPACE ROW
+      # (id → slug), never from the exporter's literal, so this stays an
+      # independent witness rather than a restatement of the implementation.
+      col = Map.get(Catalog.e3_dataset_workspace_slug_column(), t) ->
+        scalar(
+          "SELECT count(*) FROM #{quote_ident(t)} x WHERE x.#{quote_ident(col)} = " <>
+            "(SELECT w.slug FROM workspaces w WHERE w.id = $1::text::uuid)",
+          [ws]
+        )
+
+      true ->
+        scalar("SELECT count(*) FROM #{quote_ident(t)} WHERE dataset = ANY($1::text[])", [slugs])
     end
   end
 

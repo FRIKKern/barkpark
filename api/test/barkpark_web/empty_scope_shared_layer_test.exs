@@ -92,9 +92,41 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
       )
 
     raw = "esl-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(raw, "esl", "test", ["read", "write", "admin"])
+    {:ok, unbound} = Auth.create_token(raw, "esl", "test", ["read", "write", "admin"])
 
-    {:ok, ws_a: ws_a, raw: raw}
+    # THE PROBE TOKEN MUST CARRY NO WORKSPACE BINDING, and saying so takes a
+    # write: `create_token/4` silently binds to the seeded Default Workspace
+    # when one exists (auth.ex — "when `workspace_id` is `nil` the token falls
+    # back to the seeded Default Workspace"), and one exists here because the
+    # fixtures above ran first.
+    #
+    # `vacate!/0` below only RENAMES the default workspace's slug. The row, and
+    # this token's binding to it, survive — so a bound token still resolves a
+    # tenant through `Plugs.DeriveWorkspaceFromToken` and the request is NOT the
+    # unresolved one these arms exist to test. Nulling the column is the same
+    # move the shared-layer rows above already make, and for the same reason:
+    # the shape under test is the PRE-TENANCY one, and a fixture that merely
+    # omits the scope gets a Default-owned row (or here, a Default-bound token)
+    # instead.
+    #
+    # Before task-28c3f7f0987d6e85 nothing read a token's workspace on the flat
+    # pipeline, so a bound token was indistinguishable from an unbound one and
+    # this write was unnecessary. It is necessary now, and its absence is what
+    # made these arms go red on that change — the fixture drifted out from under
+    # them, the invariant did not move.
+    {1, _} =
+      Repo.update_all(
+        from(t in Barkpark.Auth.ApiToken, where: t.id == ^unbound.id),
+        set: [workspace_id: nil]
+      )
+
+    # A SECOND token, deliberately bound to workspace A, for the derivation arm
+    # below. It is the control that proves the arms above are about resolution
+    # and not about tokens in general.
+    bound_raw = "esl-bound-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(bound_raw, "esl-bound", "test", ["read"], ws_a.id)
+
+    {:ok, ws_a: ws_a, raw: raw, bound_raw: bound_raw}
   end
 
   defp vacate! do
@@ -187,6 +219,25 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
       refute b =~ @marker, "doc/:ds/:type/:id leaked a workspace-owned row"
     end
 
+    # THE DERIVATION PATH IS THE OTHER WAY IN (task-28c3f7f0987d6e85). Since
+    # `Plugs.DeriveWorkspaceFromToken` joined the `:api` pipeline, a request can
+    # resolve a tenant with NO Default seat and NO path slugs — from the token
+    # alone. That is a second route to `scope_opts/1`, and it must land on the
+    # token's OWN workspace, never on another tenant's rows and never on the
+    # permissive read the sentinel exists to prevent.
+    test "a token BOUND to A reads A's own rows, and only those", %{bound_raw: bound_raw} do
+      {_s, b} = fetch(bound_raw, "/v1/data/query/#{@ds}/post")
+
+      assert b =~ @marker,
+             "a token bound to workspace A must read A's own row — the derivation " <>
+               "resolved no tenant, or resolved the wrong one"
+
+      refute b =~ @shared_marker,
+             "a token bound to a REAL workspace read the shared layer too; if this " <>
+               "flips, decide it deliberately rather than by accident — it widens " <>
+               "every tenant-scoped flat read to the pre-tenancy rows"
+    end
+
     # search/:ds is DELIBERATELY ABSENT from this suite. It leaked in the census,
     # but it is NOT this class: SearchController never routes the document read
     # through `scope_opts/1`. It builds its own opts and takes the workspace from
@@ -243,6 +294,12 @@ defmodule BarkparkWeb.EmptyScopeSharedLayerTest do
       # to SEE A's row. If it cannot, those arms are absence-shaped and prove
       # nothing — this is the check that stops this suite rotting into a green
       # that means nothing.
+      #
+      # This reaches A through `AssignDefaultScope` (A now HOLDS the "default"
+      # slug), which is only possible because the probe token carries no
+      # workspace binding — see the setup. A bound token would resolve its own
+      # workspace first and this arm would go blind, which is exactly how it
+      # reddened on task-28c3f7f0987d6e85 before the fixture was repaired.
       vacate!()
       ws_a = Repo.get_by(Workspace, slug: "esl-a")
 

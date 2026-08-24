@@ -38,6 +38,7 @@ unknown still falls to exit 1.
 
 **Compound reason tokens.** The tasks API mints reasons that carry their detail
 inline — `not_holder:<worker>`, `not_in_progress:<status>`, `criteria_unmet:<i,j>`,
+`acknowledgement_unposted:<issue>`,
 `invalid_lifecycle:<s>`, `sentinel_worker_id:<w>`. The CLI looks up the literal
 token first, then the family name before the first `:` (`reasonKey` /
 `lookupExit` in `internal/cli/errors.go`). This is a lookup on the reason STRING
@@ -110,6 +111,7 @@ is the status the API actually returns for that code.
 | `fenced_off` · `stale_claim` · `not_ready` · `blocked_by_unsatisfied_deps` · `resource_conflict` · `already_claimed`† | 409 | `6` | Task claim/close contention (`/v1/tasks/*` `ok:false` reasons). †`already_claimed` is a defensive CLI mapping (`internal/cli/errors.go`) for forward compatibility — the API does not currently emit it; the five confirmed server-side reasons are the other codes in this row. | Re-claim / re-fetch; `resource_conflict` carries `conflicts[]` naming the holders. |
 | `not_holder` · `not_in_progress` | 409 | `6` | Stamp/close refused: the lease moved (another worker holds the claim) or the task left `in_progress`. The server mints these COMPOUND — `not_holder:<worker>`, `not_in_progress:<status>` (`tasks_controller/params.ex` `reason_to_string/1`); the CLI keys on the part before the first `:`. | `re-read with bp task get, re-claim under your worker id, then retry` — RETRYABLE. |
 | `doc_changed_since_claim` · `claimed_has_worker` | 409 | `6` | The task's brief changed under your claim, or the claim is held by a named worker. | Re-read / reconcile, then retry (the CLI hint names the recovery). |
+| `acknowledgement_unposted` | 409 | `5` | The task was born from an OUTSIDER's GitHub issue (`gh-<num>`) and its `ack_gate` acceptance criterion is unmet, so a `done`/`cancelled` close would end the row with the reporter never told. Mints compound as `acknowledgement_unposted:<issue>`. | Post the outcome on the issue and stamp the criterion with the comment URL — or `--set ack_override="<why the reporter is not being told>"`. NOT retryable as sent: nothing moved, and `criteria_override` does not discharge it. |
 | `criteria_mismatch` · `criteria_index_out_of_range` · `criterion_text_required` · `note_required` | 409/422 | `5` | Stamp payload guards: the `--criterion-text` does not match the row at `--criterion N`, the index is off the end, a `--met` arrived without its text, or a `--miss` without a note. | `fix the flag and re-send` — NOT retryable as sent. |
 | `illegal_transition` | 422 | `5` | A lifecycle stage the task cannot make from its current state (`tasks_controller.ex` `put_status(:unprocessable_entity)`). Also arrives as a BARE-STRING `{"error":"illegal_transition"}` from the cloud router; both shapes bucket to `5`. | `the transition is impossible from this state` — the one member of this family that a retry can NEVER satisfy. |
 | `share_expired` | 410 | `4` | Media collection share link expired/gone. | `share expired` — treat as gone (not-found bucket). |

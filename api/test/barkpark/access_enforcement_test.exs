@@ -427,9 +427,18 @@ defmodule Barkpark.AccessEnforcementTest do
                grant_scoped: true
              ) == 1
 
-      # WITHOUT the flag the same id set counts BOTH — byte-identical to today,
-      # proving the narrowing is the grant clause, not some unrelated filter.
-      assert Content.count_documents_by_ids(ids, @dataset, workspace_id: ws.id) == 2
+      # WITHOUT the flag the same id set counts BOTH — proving the narrowing is
+      # the grant clause, not some unrelated filter. The SAME caller_context
+      # rides along, so `grant_scoped` is now the only variable between the two
+      # calls (it was previously two: the flag AND the context). Load-bearing
+      # since task-38786b2edab15955 added a schema-visibility clamp at this
+      # seat: the clamp is keyed on the caller's TIER, and these fixture types
+      # have no schema row at all, so a context-less caller would legitimately
+      # count ZERO here and the control would stop isolating the grant clause.
+      assert Content.count_documents_by_ids(ids, @dataset,
+               workspace_id: ws.id,
+               caller_context: ctx
+             ) == 2
     end
 
     test "fail-closed: a grant_scoped caller with NO covering grant counts ZERO" do

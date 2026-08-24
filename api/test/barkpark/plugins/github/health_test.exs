@@ -121,7 +121,8 @@ defmodule Barkpark.Plugins.Github.HealthTest do
                    pending_capped: false
                  }
                ],
-               queue: %{available: 0, scheduled: 0, executing: 0, retryable: 0, total: 0}
+               queue: %{available: 0, scheduled: 0, executing: 0, retryable: 0, total: 0},
+               unacknowledged: %{total: 0, closed: 0, open: 0, no_criterion: 0, rows: []}
              } = snap
     end
 
@@ -139,6 +140,67 @@ defmodule Barkpark.Plugins.Github.HealthTest do
       # inside `safe/2` and degrade this to false while the rest of the snapshot
       # still totals (never a raise to the caller).
       assert Health.snapshot().db_ok == true
+    end
+  end
+
+  # --- the reporter loop -----------------------------------------------------
+
+  describe "unacknowledged census (the reporter loop)" do
+    test "an unanswered intake row reaches the snapshot an operator reads" do
+      restore_config(nil)
+
+      %Barkpark.Content.Document{}
+      |> Ecto.Changeset.change(%{
+        doc_id: "gh-9531",
+        type: "task",
+        dataset: @dataset,
+        title: "UserNotifier hardcodes the transactional From address",
+        status: "draft",
+        content: %{
+          "kind" => "task",
+          "lifecycle_status" => "open",
+          "github" => %{
+            "repo" => "FRIKKern/barkpark",
+            "issue" => 9531,
+            "state" => "intake"
+          }
+        },
+        rev: Ecto.UUID.generate()
+      })
+      |> Repo.insert!()
+
+      census = Health.snapshot().unacknowledged
+
+      assert census.total == 1
+      assert census.open == 1
+      assert census.no_criterion == 1
+      assert [%{doc_id: "gh-9531", issue: 9531, state: "intake"}] = census.rows
+    end
+
+    test "the dataset pin narrows the census the same way it narrows conflicts (D18)" do
+      restore_config(nil)
+
+      for {ds, number} <- [{@dataset, 9531}, {"staging", 8100}] do
+        %Barkpark.Content.Document{}
+        |> Ecto.Changeset.change(%{
+          doc_id: "gh-#{number}",
+          type: "task",
+          dataset: ds,
+          title: "outsider ##{number}",
+          status: "draft",
+          content: %{
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "github" => %{"repo" => "FRIKKern/barkpark", "issue" => number, "state" => "intake"}
+          },
+          rev: Ecto.UUID.generate()
+        })
+        |> Repo.insert!()
+      end
+
+      assert Health.snapshot(@dataset).unacknowledged.total == 1
+      assert Health.snapshot("staging").unacknowledged.total == 1
+      assert Health.snapshot().unacknowledged.total == 2
     end
   end
 

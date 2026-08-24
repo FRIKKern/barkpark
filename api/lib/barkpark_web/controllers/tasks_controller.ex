@@ -547,6 +547,10 @@ defmodule BarkparkWeb.TasksController do
         # cannot be used to launder the gate.
         |> Params.put_opt(:holder_override, params["holder_override"])
         |> Params.put_opt(:criteria_override, params["criteria_override"])
+        # The reporter-loop override (`Github.Acknowledgement`). Separate from
+        # `criteria_override` on purpose: closing an outsider's bug report
+        # without telling them is its own admission and must be its own record.
+        |> Params.put_opt(:ack_override, params["ack_override"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       # Snapshot the rail BEFORE the close (from the already-fetched pre-close

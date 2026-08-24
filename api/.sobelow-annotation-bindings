@@ -11,6 +11,8 @@ lib/barkpark/media/image_backend/magick.ex	run_bounded
 lib/barkpark/media/renditions.ex	generate
 lib/barkpark/plugins/bulldocs.ex	register_schemas
 lib/barkpark/plugins/frt.ex	load_schema!
+lib/barkpark/plugins/github/health.ex	queue_snapshot
+lib/barkpark/plugins/github/health.ex	zero_queue
 lib/barkpark/plugins/indx/persistence.ex	load
 lib/barkpark/plugins/media.ex	load_schema!
 lib/barkpark/plugins/onixedit.ex	book_raw_with_subschemas
@@ -73,6 +75,7 @@ lib/barkpark/tenancy.ex	delete_e3_doc_keyed
 lib/barkpark/tenancy/workspace_bundle.ex	alter_user_triggers!
 lib/barkpark/tenancy/workspace_bundle.ex	copy_into
 lib/barkpark/tenancy/workspace_bundle.ex	copy_source
+lib/barkpark/tenancy/workspace_bundle.ex	declared_loss_entry
 lib/barkpark/tenancy/workspace_bundle.ex	do_export
 lib/barkpark/tenancy/workspace_bundle.ex	drop_member_fks!
 lib/barkpark/tenancy/workspace_bundle.ex	export

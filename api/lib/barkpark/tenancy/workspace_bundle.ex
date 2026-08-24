@@ -91,10 +91,36 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   `dataset_slugs_for/1` (PDS-D29): that helper drops any slug a sibling
   workspace also owns, so on a real host it selects the EMPTY SET for the very
   dataset being pulled. It resolves datasets → projects → workspace instead and
-  raises `ExportScopeError` on ambiguity. The E3 dataset-keyed members, whose
-  bare slug is genuinely unattributable, keep going through
-  `dataset_slugs_for/1` and INTERSECT it with the target slug — a shared slug
-  therefore yields the empty set, fail-closed.
+  raises `ExportScopeError` on ambiguity. The E3 dataset-keyed members whose
+  bare slug is genuinely unattributable keep going through `dataset_slugs_for/1`
+  and INTERSECT it with the target slug — a shared slug therefore yields the
+  empty set, fail-closed.
+
+  ## `dataset_slugs` names the EXCLUSIVE set, and `declared_loss` says what that cost (PDS-D45/D46/D74)
+
+  Two manifest keys that are easy to misread, so read them together:
+
+    * `dataset_slugs` is NOT "the datasets in this bundle". It is the
+      workspace-EXCLUSIVE attribution set — the slugs no other workspace's
+      project also owns. A shared slug being ABSENT from it is correct behaviour
+      (PDS-D46), not a bug: it is the fail-closed key that keeps a bare-slug
+      `dataset = ANY(...)` copy from pulling a co-tenant's rows. The workspace's
+      documents, media and every other workspace_id-keyed row under that slug
+      still travel — they are attributed by column, not by slug.
+    * `declared_loss` is what that exclusion actually costs, counted. A table
+      whose ONLY tenant key is the bare `dataset` slug
+      (`Catalog.e3_dataset_unattributable/0`) genuinely cannot export its rows
+      under a shared slug, so it gets an entry naming the slugs, the row count
+      and a person-facing reason. `[]` is the normal answer and is ALWAYS
+      present — "no loss" must be distinguishable from "an engine too old to
+      say". A table that CAN name its own workspace
+      (`Catalog.e3_dataset_workspace_slug_column/0`, today `shares`) is exported
+      by that column instead and never appears here.
+
+  Silence was the actual defect (PDS-D45): on guerrilla, `production` is owned by
+  both `default` and `gyldendal`, so a `:full` "full-fidelity backup" shipped a
+  zero-byte `shares` member and said nothing. `shares` now travels; the rows that
+  still cannot are counted out loud.
 
   ## Import (charter D7 · PDS-D8/D9 · task-7889645a51769a36)
 
@@ -171,6 +197,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   """
 
   import Ecto.Query
+
+  require Logger
 
   alias Barkpark.Repo
   alias Barkpark.Content.Scope
@@ -392,6 +420,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         message: "not a #{Archive.format()} bundle: format=#{inspect(manifest["format"])}"
     end
 
+    # PDS-D45: a declared loss is only honest if someone HEARS it. The manifest
+    # rides back to the caller inside `stats()` (machine-readable), and the
+    # restore operator — who is usually watching a log, not parsing a tar — gets
+    # it here, before the first row lands.
+    warn_declared_loss(manifest)
+
     # Test-only fault seam (mirrors :export_copy_fault): when configured, the
     # import RETURNS the given {:error, term} after the real unpack + format
     # check, so the HTTP edge's unmatched-term contract (named, logged 500
@@ -402,6 +436,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       nil -> run_import(manifest, dumps, mode, grant)
     end
   end
+
+  # An older bundle has no `declared_loss` key at all; that is not a loss claim of
+  # zero, it is no claim — say nothing rather than imply completeness.
+  defp warn_declared_loss(%{"declared_loss" => [_ | _] = losses}) do
+    total = losses |> Enum.map(& &1["row_count"]) |> Enum.sum()
+
+    Logger.warning(
+      "workspace bundle import: the source DECLARED #{total} withheld row(s) across " <>
+        "#{length(losses)} table(s) — this restore is knowingly incomplete. " <>
+        Enum.map_join(losses, " ", & &1["message"])
+    )
+  end
+
+  defp warn_declared_loss(_manifest), do: :ok
 
   defp run_import(manifest, dumps, mode, grant) do
     Repo.transaction(
@@ -631,8 +679,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     profile = normalize_profile!(Keyword.get(opts, :profile))
     target = resolve_dataset!(ws, Keyword.get(opts, :dataset))
 
-    dataset_slugs = narrow_slugs(dataset_slugs_for(ws.id), target)
+    slug_partition = partition_dataset_slugs_for(ws.id)
+    dataset_slugs = narrow_slugs(slug_partition.exclusive, target)
     ctx = export_ctx(ws, dataset_slugs, profile, target)
+    declared_loss = declared_loss(slug_partition.shared, target, profile)
 
     specs =
       ([{Catalog.root_table(), "root", :root}] ++
@@ -685,6 +735,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         "workspace_slug" => ws.slug,
         "exported_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
         "dataset_slugs" => dataset_slugs,
+        # PDS-D45/D74: what this bundle could NOT carry, said out loud. ALWAYS
+        # present (`[]` on the overwhelmingly common no-collision path) — a key
+        # that appears only on loss cannot be told apart from an engine too old
+        # to have one, which is the same silence in a new costume.
+        "declared_loss" => declared_loss,
         "profile" => Atom.to_string(profile),
         "dataset" => target && target.slug,
         "source_workspace" => ws.slug,
@@ -767,9 +822,78 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp narrow_slugs(slugs, nil), do: slugs
   defp narrow_slugs(slugs, %{slug: slug}), do: Enum.filter(slugs, &(&1 == slug))
 
+  # ── Declared loss (PDS-D45/D74) ──────────────────────────────────────────────
+
+  # THE RULE THIS ENFORCES: a `:full` bundle that cannot carry something must SAY
+  # SO. `Catalog.e3_dataset_unattributable/0` names the tables whose only tenant
+  # key is a bare `dataset` slug; under a slug a sibling workspace also owns, that
+  # key attributes to NEITHER, so the rows cannot travel without becoming a
+  # cross-tenant leak. Refusing them is right. Refusing them SILENTLY — a
+  # zero-byte member under a manifest that reads like a complete backup — is the
+  # defect: whoever restores gets a quietly incomplete dataset and nothing
+  # anywhere says so.
+  #
+  # So each such table gets an entry naming the slugs, the row count that did not
+  # travel, and a sentence a person can act on. The count is the honest UPPER
+  # bound — it includes rows that may belong to the co-tenant, because the whole
+  # point is that the table cannot tell. Over-reporting what was withheld is the
+  # safe direction; under-reporting is the bug being fixed.
+  #
+  # Zero cost on the healthy path: with no shared slugs the list is `[]` and not
+  # one count query runs.
+  defp declared_loss([], _target, _profile), do: []
+
+  defp declared_loss(shared_slugs, target, profile) do
+    case narrow_slugs(shared_slugs, target) do
+      [] ->
+        []
+
+      slugs ->
+        Catalog.e3_dataset_unattributable()
+        # A table the profile DENIES is absent from the bundle by an explicit,
+        # reviewed decision (PDS-D31), not by this silent drop — declaring a
+        # loss for it would be noise that hides the real one.
+        |> Enum.reject(&(profile == :dev and Catalog.dev_action(&1) == :deny))
+        |> Enum.map(&declared_loss_entry(&1, slugs))
+        |> Enum.reject(&(&1["row_count"] == 0))
+    end
+  end
+
+  # Reachability: `table` comes from `Catalog.e3_dataset_unattributable/0` (a
+  # pinned literal list) via `qi/1`; `slugs` is rendered by
+  # `Catalog.text_array_literal/1`, which single-quotes and doubles every
+  # embedded quote.
+  # sobelow_skip ["SQL.Query"]
+  defp declared_loss_entry(table, slugs) do
+    %{rows: [[count]]} =
+      Repo.query!(
+        "SELECT count(*) FROM #{qi(table)} t " <>
+          "WHERE t.dataset = ANY(#{Catalog.text_array_literal(slugs)})",
+        []
+      )
+
+    %{
+      "table" => table,
+      "reason" => "unattributable_shared_dataset_slug",
+      "slugs" => slugs,
+      "row_count" => count,
+      "message" =>
+        "#{count} row(s) in #{table} were NOT exported: their only tenant key is the " <>
+          "dataset slug #{Enum.map_join(slugs, ", ", &inspect/1)}, which a project of another " <>
+          "workspace also owns, so the rows cannot be attributed to this workspace and " <>
+          "carrying them would leak a co-tenant's data. The count is an upper bound — some " <>
+          "may be the co-tenant's. Give #{table} a workspace column to end this loss."
+    }
+  end
+
   defp export_ctx(%Workspace{} = ws, slugs, profile, target) do
     %{
       ws_lit: Catalog.uuid_literal!(ws.id),
+      # PDS-D74: the tenant key for the ATTRIBUTED E3-dataset arm. Safe precisely
+      # because `workspaces.slug` is uniquely indexed — unlike the `dataset` slug,
+      # which is unique only per project.
+      ws_slug_lit: Catalog.text_literal(ws.slug),
+      dataset_slug_lit: target && Catalog.text_literal(target.slug),
       slugs: slugs,
       profile: profile,
       dataset: target,
@@ -830,7 +954,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   the slug set from ONE source of truth instead of re-deriving it.
   """
   @spec dataset_slugs_for(binary()) :: [String.t()]
-  def dataset_slugs_for(ws_id) do
+  def dataset_slugs_for(ws_id), do: partition_dataset_slugs_for(ws_id).exclusive
+
+  @doc """
+  The same derivation as `dataset_slugs_for/1`, but keeping BOTH halves.
+
+    * `:exclusive` — the slugs this workspace owns and no other does. The
+      bare-slug E3/allowlist copy and teardown key on these, and only these.
+    * `:shared` — the slugs `dataset_slugs_for/1` DROPS because a project of
+      another workspace owns them too.
+
+  `:shared` used to be an anonymous subtraction inside one function, which is how
+  a `:full` bundle came to omit rows with nothing anywhere saying so (PDS-D45).
+  Naming it is what lets the exporter DECLARE that omission: for an E3-dataset
+  table with no workspace key of its own (`Catalog.e3_dataset_unattributable/0`),
+  these slugs are exactly the population it cannot carry.
+  """
+  @spec partition_dataset_slugs_for(binary()) :: %{exclusive: [String.t()], shared: [String.t()]}
+  def partition_dataset_slugs_for(ws_id) do
     project_ids =
       Project
       |> Scope.scope_to_workspace(ws_id)
@@ -838,7 +979,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       |> Repo.all()
 
     if project_ids == [] do
-      []
+      %{exclusive: [], shared: []}
     else
       # Slugs owned by a project NOT belonging to this workspace — because
       # `project_ids` is the COMPLETE set of this workspace's projects, "not in
@@ -852,12 +993,20 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         |> distinct(true)
         |> Repo.all()
 
-      Dataset
-      |> where([d], d.project_id in ^project_ids)
-      |> where([d], d.slug not in ^shared_slugs)
-      |> select([d], d.slug)
-      |> distinct(true)
-      |> Repo.all()
+      owned =
+        Dataset
+        |> where([d], d.project_id in ^project_ids)
+        |> select([d], d.slug)
+        |> distinct(true)
+        |> Repo.all()
+
+      {shared, exclusive} = Enum.split_with(owned, &(&1 in shared_slugs))
+
+      # Sorted: a bare `DISTINCT` has no defined row order, and both halves are
+      # serialised into the manifest (`dataset_slugs`, `declared_loss`). Leaving
+      # them at the planner's mercy would make two exports of an unchanged
+      # workspace differ in bytes for no reason.
+      %{exclusive: Enum.sort(exclusive), shared: Enum.sort(shared)}
     end
   end
 
@@ -928,8 +1077,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       doc_anchor_narrowing(ctx) <> ")"
   end
 
-  defp copy_where(_table, :e3_dataset, ctx) do
-    "WHERE t.dataset = ANY(#{Catalog.text_array_literal(ctx.slugs)})"
+  # E3 dataset-keyed, ATTRIBUTED arm (PDS-D74). A table that carries its own
+  # workspace slug column is scoped by THAT, never by the bare `dataset` slug:
+  # `workspaces.slug` is uniquely indexed, so the column names exactly one tenant,
+  # whereas a `dataset` slug two workspaces both own names neither. This is what
+  # keeps a `:full` bundle from dropping every `shares` row of a workspace that
+  # happens to share a slug with a co-tenant — the guerrilla shape, where
+  # `production` belongs to both `default` and `gyldendal`.
+  #
+  # It does NOT weaken the exclusivity rule: the sibling's rows carry the
+  # sibling's `workspace_slug`, so they are excluded by the same predicate that
+  # includes ours. The dataset GRAIN is re-applied separately, in
+  # `dataset_predicates/3` — without it this predicate would widen a
+  # dataset-scoped pull to every dataset the workspace shares.
+  defp copy_where(table, :e3_dataset, ctx) do
+    case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
+      {:ok, col} -> "WHERE t.#{qi(col)} = #{ctx.ws_slug_lit}"
+      :error -> "WHERE t.dataset = ANY(#{Catalog.text_array_literal(ctx.slugs)})"
+    end
   end
 
   # data_keys.scope = "dataset:" <> slug (search_surface_config left the allowlist
@@ -970,10 +1135,27 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp dataset_predicates("projects", _kind, ctx), do: ["t.#{qi("id")} = #{ctx.project_lit}"]
   defp dataset_predicates("datasets", _kind, ctx), do: ["t.#{qi("id")} = #{ctx.dataset_lit}"]
 
+  # The ATTRIBUTED E3-dataset arm is the ONE member whose base scope is not
+  # already dataset-grained: `copy_where/4` keys it on the workspace slug, which
+  # spans every dataset that workspace shares. Re-apply the grain here or a
+  # dataset-scoped pull would silently WIDEN — the mirror-image defect of the
+  # silent narrowing this slice fixes. The `dataset` slug is a safe grain HERE
+  # (where it was not safe as a tenant key) because the workspace is already
+  # pinned by the base predicate, and `resolve_dataset!/2` REFUSES a slug two of
+  # the workspace's projects both own — so within one workspace the slug names
+  # exactly one dataset.
+  defp dataset_predicates(table, :e3_dataset, ctx) do
+    if Map.has_key?(Catalog.e3_dataset_workspace_slug_column(), table) do
+      ["t.#{qi("dataset")} = #{ctx.dataset_slug_lit}"]
+    else
+      []
+    end
+  end
+
   # E3/allowlist members are keyed by the ALREADY-narrowed slug set; the doc-keyed
   # semi-join is narrowed inside its EXISTS anchor (see doc_anchor_narrowing/1).
   defp dataset_predicates(_table, kind, _ctx)
-       when kind in [:e3_doc, :e3_dataset, :allowlist],
+       when kind in [:e3_doc, :allowlist],
        do: []
 
   defp dataset_predicates(table, _kind, ctx) do

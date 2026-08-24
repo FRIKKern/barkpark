@@ -92,9 +92,12 @@ defmodule Barkpark.Plugin do
   the studio-scoped basics (`:admin` default under `/studio`, `:ops` under
   `/admin`, `:public`/`:none`, `:api` and `:token` under `/v1/plugins`):
 
-    * `:token_root` — `[:api, :require_token]` pipeline mounted at the host
-      `/v1` top level (the tasks plugin's `"/tasks/ready"` lands at
-      `/v1/tasks/ready`).
+    * `:token_root` — `[:api, :require_token, RequireWriteForMutation]`
+      pipeline mounted at the host `/v1` top level (the tasks plugin's
+      `"/tasks/ready"` lands at `/v1/tasks/ready`). A GET/HEAD/OPTIONS route
+      needs only a token; every other method ALSO needs `write`/`admin`
+      permission (task-a87a3346b8ff736a — a read-only token used to claim,
+      stamp and close tasks here).
     * `:ingest` — `RequireIngestToken` shared-secret pipeline under
       `/v1/plugins/<slug>` (the Bulldocs paper-ingest API).
     * `:public_root` — public LiveView at the host top-level scope with its
@@ -338,7 +341,10 @@ defmodule Barkpark.Plugin do
           `/v1/plugins`)
         - `:token_root` — API pipeline + token required, NOT admin; root-mounted
           sibling of `:token` at the host `/v1` top-level scope (so a route
-          `"/tasks/ready"` lands at `/v1/tasks/ready`)
+          `"/tasks/ready"` lands at `/v1/tasks/ready`). A non-GET route on this
+          bucket ALSO requires `write`/`admin` permission — the gate is
+          method-derived (`Plugs.RequireWriteForMutation`), so a new mutating
+          spec is closed by default rather than ungated by omission
         - `:ticket_key` — the low-trust ticket-key tier (RequireTicketKey, NOT an
           api_tokens bearer); root-mounted at the host `/v1` top-level scope (so
           a route `"/tickets"` lands at `/v1/tickets`)
@@ -562,7 +568,8 @@ defmodule Barkpark.Plugin do
       `/v1/plugins` with the API pipeline + admin required, `:token` under
       `/v1/plugins` with the API pipeline + token required (not admin),
       `:token_root` at the host's `/v1` top-level scope with the API pipeline +
-      token required (root-mounted sibling of `:token`),
+      token required, plus `write`/`admin` on every non-GET method
+      (root-mounted sibling of `:token`),
       `:ticket_key` at the host's `/v1` top-level scope gated by
       RequireTicketKey (the low-trust ticket-key tier),
       `:ingest` under `/v1/plugins` with the RequireIngestToken pipeline,

@@ -143,11 +143,16 @@ func runMCPServe(out *writer, g globals, ctx manifest.Context, tail []string) in
 // honest 0-install surface. This is the connector-scoped Cloud surface (D24
 // knob 3, Go half): expose exactly the workspace's connected nouns, nothing else.
 func buildMCPServer(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, toolset string, nouns []string, enumeratePapers bool) (*mcp.Server, error) {
+	// Instructions ride the initialize result (go-sdk ServerOptions.Instructions
+	// → InitializeResult.Instructions), so an MCP-only client is primed with the
+	// movement-ledger doctrine without ever reading a doc — the whole point of
+	// carrying it here rather than only in AGENTS.md. Same const the onramp teach
+	// block renders, so the two can never drift.
 	srv := mcp.NewServer(&mcp.Implementation{
 		Name:    "barkpark-tasks",
 		Title:   "Barkpark Tasks",
 		Version: cliVersion,
-	}, nil)
+	}, &mcp.ServerOptions{Instructions: movementLedgerDoctrine})
 
 	// Headless liveness (charter decision 5): tool handlers ride the guard-free
 	// execManifestCommand seam, but force g.yes anyway as belt-and-braces — a

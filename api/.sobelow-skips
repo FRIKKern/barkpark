@@ -1,5 +1,4 @@
 
-DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:319,2C2D0EA
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/content/validation.ex:109,FD6035
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/plugins/tickets/attachments.ex:259,31F6FE7
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/sync/pusher.ex:210,104F576
@@ -38,7 +37,6 @@ Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/re
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:252,2F231DA
 Traversal.FileModule: Directory Traversal in `File.stream!`,lib/barkpark/codelists/editeur.ex:122,107C442
 XSS.Raw: XSS,lib/barkpark_web/layouts/bulldocs.html.heex:95,ADA708
-DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/plugins/github/health.ex:308,3288FF6
 Config.CSRF: Missing CSRF Protections,lib/barkpark_web/router.ex:385,411219D
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/indx/persistence.ex:103,29C99C9
 XSS.Raw: XSS,lib/barkpark_web/controllers/error_html.ex:25,6380E04

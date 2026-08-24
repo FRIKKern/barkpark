@@ -21,6 +21,18 @@ defmodule Barkpark.Application do
     # every deployment that has not opted in.
     _ = Barkpark.Mailer.from()
 
+    # Companion to the check above, and the other half of the same defect: the
+    # From can be perfectly valid while there is no relay to hand the message
+    # to. `config/config.exs` defaults `Barkpark.Mailer` to
+    # `Swoosh.Adapters.Local`, an in-memory mailbox whose `deliver/2` returns
+    # `{:ok, _}`, so an instance that never set SMTP_HOST accepts every magic
+    # link, password reset, verification and access grant and discards it while
+    # answering 200. WARNS rather than raising: a box with no relay is a
+    # legitimate configuration (every laptop is one), so this states the
+    # condition instead of refusing to boot. See
+    # `Barkpark.Mailer.warn_if_undeliverable/0`.
+    _ = Barkpark.Mailer.warn_if_undeliverable()
+
     # The /v1/graph admission-cap slot table, created HERE and nowhere else that
     # matters. It is a CONCURRENCY BOUND, not a cache: the rows are the slots
     # currently held, so the table must outlive every request that holds one.

@@ -3756,7 +3756,7 @@
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/webhooks/{dataset}/{id}/reenable": {
@@ -4302,7 +4302,7 @@
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/collections/{id}/members/{asset_id}": {
@@ -6520,7 +6520,7 @@
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/plugins/onixedit/export/{dataset}/{id}": {
@@ -9239,7 +9239,7 @@
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/tasks/{doc_id}/release": {
@@ -9308,7 +9308,7 @@
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/related/{dataset}/{id}": {
@@ -10015,7 +10015,7 @@
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/schemas/{dataset}": {
@@ -12091,11 +12091,11 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Two honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet) and a close by a non-holder (409 not_holder) — each with a loud on-the-record --set override (criteria_override / holder_override); see the set flag.",
+        "summary": "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Three honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), and a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override), and none of them discharges another; see the set flag.",
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/data/counts/{dataset}": {
@@ -12402,7 +12402,7 @@
         "tags": [
           "task"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/cycles/{epic_id}/{wave_id}/promote": {

@@ -1018,6 +1018,16 @@ async (faceOverride) => {
     s.remove();
     return w;
   };
+  // Presence probing needs MORE THAN ONE generic. Palatino and Times New Roman
+  // both have a '0' advance of exactly 1024/2048 em, so comparing a candidate
+  // against plain serif cannot separate "absent, fell back to Times" from
+  // "present and metrically identical to Times". Three generics with different
+  // metrics make that collision vanishingly unlikely.
+  const PRESENCE_GENERICS = ['monospace', 'serif', 'sans-serif'];
+  const familyIsPresent = (fam) => PRESENCE_GENERICS.some(
+    (g) => Math.abs(advanceOf('"' + fam + '", ' + g) - advanceOf(g)) > 0.01,
+  );
+
   const stackAdvance = advanceOf(fontFamilyDeclared);
   const families = fontFamilyDeclared.split(',').map((f) => f.trim());
   let winner = null;
@@ -1469,7 +1479,24 @@ async (faceOverride) => {
       // present a fallback reading as the named face.
       requested_primary: wantedFamilies[0] ?? null,
       face_applied: winner !== null && wantedFamilies.length > 0 && winner === wantedFamilies[0],
-      face_available: wantedFamilies.map((f) => ({ family: f, loaded: document.fonts.check(\`\${sizeForLoad} "\${f}"\`) })),
+      // FONT PRESENCE, MEASURED. This was document.fonts.check(), which is not
+      // a presence test at all: measured on this build it returns TRUE for
+      // every local family it is asked about, including the invented control
+      // 'Definitely Not A Real Font XYZQ' — 3 of 8 candidates wrong, every one
+      // in the same direction. The consequence is already in the repository:
+      // EVERY committed artifact under scripts/measurements/ carries loaded
+      // true for all seven families, with no false anywhere in any run —
+      // including 'Palatino Linotype' and 'Source Serif 4', neither of which is
+      // installed on the measuring Mac (CDP CSS.getPlatformFontsForNode reports
+      // Times for both). A column that is always true reads as evidence and
+      // carries none, and it misreported precisely the face
+      // spd-palatino-linotype-unmeasured exists to flag as never measured.
+      //
+      // A family is present iff naming it AHEAD of a generic changes the
+      // advance versus that generic alone. Scored 8/8 against CDP ground truth
+      // where fonts.check scored 5/8, the hard case being Palatino: present,
+      // and metrically identical to Times New Roman.
+      face_available: wantedFamilies.map((f) => ({ family: f, loaded: familyIsPresent(f) })),
       fell_back_to_generic_serif: winner === null || /^(serif|ui-serif)$/.test(String(winner)),
     },
     ch: {

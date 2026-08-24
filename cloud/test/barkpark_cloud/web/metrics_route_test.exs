@@ -133,7 +133,7 @@ defmodule BarkparkCloud.Web.MetricsRouteTest do
       assert [%{"value" => 55}] = m["series"]["mem"]
       assert [%{"value" => 60}] = m["series"]["disk"]
       assert [%{"value" => 1.25}] = m["series"]["load"]
-      assert m["service_health"] == %{"pass" => 1, "total" => 1, "failing" => []}
+      assert m["service_health"] == %{"pass" => 1, "skipped" => 0, "total" => 1, "failing" => []}
     end
 
     test "the -1 unwired sentinel renders as a JSON null, not a zero" do
@@ -185,7 +185,7 @@ defmodule BarkparkCloud.Web.MetricsRouteTest do
                "beam_swap" => []
              }
 
-      assert m["service_health"] == %{"pass" => 0, "total" => 0, "failing" => []}
+      assert m["service_health"] == %{"pass" => 0, "skipped" => 0, "total" => 0, "failing" => []}
     end
 
     test "points is clamped: over-cap → 200, default → 30" do

@@ -213,7 +213,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
   end
 
   describe "Tasks.cli_commands/0" do
-    test "declares the thirteen task verbs, all read-tier, grounded in a real /v1/tasks route" do
+    test "declares the thirteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -244,10 +244,22 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 
       # task is no longer a core noun — the verbs moved verbatim onto the Tasks
-      # plugin; auth_tier stays "read" (the /v1/tasks scope is bearer-gated, not
-      # admin).
+      # plugin. The tier is DERIVED FROM THE METHOD, not declared per verb: the
+      # /v1/tasks scope is bearer-gated (not admin) for reads, and write-gated
+      # for everything else since task-a87a3346b8ff736a. This assertion used to
+      # read `auth_tier == "read"` for all of them, which pinned the manifest to
+      # a surface a read-only token could genuinely claim, stamp and close.
       assert Enum.all?(task_cmds, &(&1.noun == "task"))
-      assert Enum.all?(task_cmds, &(&1.auth_tier == "read"))
+
+      for cmd <- task_cmds do
+        expected = if cmd.http.method == "GET", do: "read", else: "write"
+
+        assert cmd.auth_tier == expected,
+               "#{cmd.id} is #{cmd.http.method} #{cmd.http.path_template} but declares " <>
+                 "auth_tier #{inspect(cmd.auth_tier)}; the router gates every non-GET on " <>
+                 "the :token_root bucket behind RequireWriteForMutation, so the manifest " <>
+                 "must say #{inspect(expected)} or `bp` will promise a credential that 403s"
+      end
 
       # The fleet pair: roster is a read; beat is the one write-tier verb
       # (listener presence heartbeat) — pinned so a tier drift is caught here.
@@ -279,7 +291,8 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                {"observed_epoch", "int", true}
              ]
 
-      assert release.auth_tier == "read"
+      # POST, so write-tier — `release` moves a task's claim lease.
+      assert release.auth_tier == "write"
       assert release.flags == []
 
       # task.claim declares required worker_id body arg (server requires it).

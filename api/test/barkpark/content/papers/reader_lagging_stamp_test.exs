@@ -113,8 +113,10 @@ defmodule Barkpark.Content.Papers.ReaderLaggingStampTest do
     test "an integer-3 stamp over drifted HTML serves blocks instead of 422ing" do
       {blocks, paper} = drifted(%{"body_html_sv" => @legacy_integer_stamp})
 
-      assert {:blocks, ^blocks} = Papers.reader_source(paper, @dataset, []),
-             "the renderer's own pre-digest integer stamp is lagging, not divergent"
+      source = Papers.reader_source(paper, @dataset, [])
+
+      assert match?({:blocks, ^blocks}, source),
+             "the renderer's own pre-digest integer stamp is lagging, not divergent; got: #{inspect(source)}"
     end
 
     test "the integer stamp is REPLACED by the current digest on read — proven from the reloaded row" do
@@ -197,8 +199,10 @@ defmodule Barkpark.Content.Papers.ReaderLaggingStampTest do
           "body_html_sv" => Render.body_html_render_version()
         })
 
-      assert {:error, :ambiguous_source} = Papers.reader_source(paper, @dataset, []),
-             "a stamp that claims THIS renderer, contradicted by the bytes, must fail closed"
+      source = Papers.reader_source(paper, @dataset, [])
+
+      assert match?({:error, :ambiguous_source}, source),
+             "a stamp that claims THIS renderer, contradicted by the bytes, must fail closed; got: #{inspect(source)}"
     end
 
     test "the current digest is the ONLY stamp value that can 422" do

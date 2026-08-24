@@ -566,9 +566,14 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Thirteen verbs over thirteen routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
-  `:api + :require_token`, NOT admin — claim/close/release are bearer-gated workflow ops,
-  not document mutations):
+  Thirteen verbs over thirteen routes. The GET verbs are `auth_tier: "read"`;
+  every POST verb is `auth_tier: "write"` because the `/v1/tasks` scope is
+  `:api + :require_token + RequireWriteForMutation` — a bearer alone is enough
+  to READ the ledger, and a write-capable permission is required to move it.
+  The tier used to read `"read"` across the board, which made the manifest an
+  accurate description of a surface that should not have existed: a read-only
+  token really could claim, stamp and close (task-a87a3346b8ff736a). NOT admin,
+  either way — these are bearer-gated workflow ops, not document mutations:
 
     * `ls` — `GET /v1/tasks` (paginated). READ, table.
     * `ready` — `GET /v1/tasks/ready` (paginated). READ, table.
@@ -760,7 +765,7 @@ defmodule Barkpark.Plugins.Tasks do
         verb: "claim",
         summary: "Claim a ready task by id.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/claim"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -801,9 +806,9 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "close",
         summary:
-          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Two honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet) and a close by a non-holder (409 not_holder) — each with a loud on-the-record --set override (criteria_override / holder_override); see the set flag.",
+          "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Three honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet), a close by a non-holder (409 not_holder), and a done/cancelled close of a gh-<num> row born from an outsider's GitHub issue whose ack_gate criterion is unmet (409 acknowledgement_unposted) — each with a loud on-the-record --set override (criteria_override / holder_override / ack_override), and none of them discharges another; see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -865,7 +870,16 @@ defmodule Barkpark.Plugins.Tasks do
                 "cancelling means). THE HOLDER GATE (PDS-D288): a close by a worker other than " <>
                 "the claim's holder is REFUSED — 409 not_holder — unless it carries --set " <>
                 "holder_override=\"<why you are closing someone else's claim>\", recorded as " <>
-                "close_override.holder. A blank reason is NOT an override for either key. " <>
+                "close_override.holder. THE ACKNOWLEDGEMENT GATE (the reporter loop): a done or " <>
+                "cancelled close of a gh-<num> row born from an OUTSIDER's GitHub issue is " <>
+                "REFUSED — 409 acknowledgement_unposted — while its ack_gate criterion is unmet. " <>
+                "The reporter is outside this ledger and the issue is the only surface they can " <>
+                "see; post the outcome there, then stamp the criterion with the comment URL. The " <>
+                "way through is --set ack_override=\"<why the reporter is not being told>\", " <>
+                "recorded as close_override.acknowledgement. criteria_override does NOT discharge " <>
+                "it, and blocked closes are EXEMPT by name (cancelled deliberately is not — a " <>
+                "cancel is when silence hurts most). A blank reason is NOT an override for any of " <>
+                "the three keys. " <>
                 "--set observed_rev=<rev> pins the strict full-rev CAS and BYPASSES the default " <>
                 "work-digest fence (use when you intend to close against the exact rev you read)."
           },
@@ -889,7 +903,7 @@ defmodule Barkpark.Plugins.Tasks do
         verb: "release",
         summary: "Release a held task claim without waiting for its lease to expire.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/release"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -925,7 +939,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated; a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -1001,7 +1015,7 @@ defmodule Barkpark.Plugins.Tasks do
         verb: "next",
         summary: "Atomically claim the next executable task (priority order by default).",
         http: %{method: "POST", path_template: "/v1/tasks/claim"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "worker_id",
@@ -1044,7 +1058,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/move"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -1074,7 +1088,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stage"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -1142,7 +1156,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Heartbeat a held claim: write the now-line (what you're doing right now) AND renew the lease (epoch bump + ts refresh) in one atomic write. No epoch arg — pulse survives fence bumps; a lost lease (reaped/released/closed) is 409 not_holder, never a silent re-claim. Boards render claim.now with its ts so a stale pulse reads stale.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/pulse"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -1298,6 +1312,16 @@ defmodule Barkpark.Plugins.Tasks do
       `Barkpark.Content.Edge`, so they pass changeset validation.
     * `content.parent_id` — the hierarchy parent → one `parent` edge
       (`from_id` = child, `to_id` = parent).
+    * `content.wave_paper` and `content.papers` — the paper this task cites →
+      one edge per distinct target, `kind` = the source field name. Neither key
+      reaches the CORE extractor as an edge (`wave_paper` is undeclared;
+      `papers` is a bare `"array"`, not `arrayOf reference`), so without this
+      they contributed nothing to the graph. `design_doc` is a declared
+      `reference` and is projected by the core extractor, NOT here — a task
+      citing one paper through several keys gets one edge per key, which is
+      what `Tasks.Expectations.driven_tasks/2` reports as its `via` list. See
+      `paper_citation_edges/2` for the measured corpus impact and for why this
+      rides the plugin callback rather than a schema `reference` declaration.
 
   When `doc.task_edges` is absent (an un-hydrated payload — e.g. a task saved
   outside the projector worker, or a non-task doc), NO dependency edge is
@@ -1328,8 +1352,9 @@ defmodule Barkpark.Plugins.Tasks do
 
       dep_edges = dep_edges_from_task_edges(doc, from_id)
       parent_edges = parent_edge(content, from_id)
+      paper_edges = paper_citation_edges(content, from_id)
 
-      dep_edges ++ parent_edges
+      dep_edges ++ parent_edges ++ paper_edges
     else
       []
     end
@@ -1385,6 +1410,71 @@ defmodule Barkpark.Plugins.Tasks do
       _ ->
         []
     end
+  end
+
+  # ── Paper citations: `wave_paper` + `papers` (graph-papers) ────────────────
+  #
+  # A task cites the Paper that drives it through THREE keys, and until this
+  # function existed only ONE of them reached the graph:
+  #
+  #   * `design_doc` — declared `"type" => "reference"` on the task schema, so
+  #     `Content.Edges.extract_edges/2` projects it. Untouched here.
+  #   * `papers` — declared `"type" => "array"`. `extract_field_edges/2` matches
+  #     only `"reference"` and `"arrayOf"`-of-`"reference"`; a bare `"array"`
+  #     falls to its catch-all `[]` clause.
+  #   * `wave_paper` — not declared on the task schema at all, so it is never in
+  #     the `fields` list the core extractor folds over. The epic-cycle harness
+  #     is its only writer.
+  #
+  # MEASURED on the live corpus (2026-08-24, 7249 published tasks / 1015
+  # published papers): 213 tasks carry `design_doc`, 412 carry `papers`, 4320
+  # carry `wave_paper`. Distinct papers reachable through `bp graph tasks` was
+  # 24; the three keys together cite 564. Every wave paper the epic-cycle
+  # harness has written was disconnected from its own wave.
+  #
+  # WHY HERE AND NOT ON THE SCHEMA. `parent_id` is the precedent directly above:
+  # a plain content key the plugin knows names a document, projected by this
+  # pure callback rather than by a schema `reference` declaration. Taking that
+  # route keeps two properties the schema route would break — `papers` stays the
+  # v1 read-only array whose sole writer is `POST /v1/tasks/:id/papers` (and its
+  # `check_optional_string_list` validation), and `wave_paper` stays undeclared,
+  # so declaring it does not hand 4320 rows an editable Studio input on a field
+  # the harness owns. `design_doc` also stays the ONE single-reference field, so
+  # `?expand=design_doc` is unaffected.
+  #
+  # `kind` IS the source field name, matching the graph-edge-seam convention the
+  # core extractor follows, so `Tasks.Expectations.driven_tasks/2` reports the
+  # citing channel in its `via` list. That reader is kind-agnostic and already
+  # documents the multi-channel case ("a task may cite the paper via more than
+  # one field"), so nothing downstream needed a change to read these.
+  defp paper_citation_edges(content, from_id) do
+    wave_edges =
+      content
+      |> Map.get("wave_paper")
+      |> List.wrap()
+      |> paper_edges(from_id, "wave_paper")
+
+    list_edges =
+      content
+      |> Map.get("papers")
+      |> List.wrap()
+      |> paper_edges(from_id, "papers")
+
+    wave_edges ++ list_edges
+  end
+
+  # One edge per non-blank id. Deduped on the resolved target because
+  # `content_edges` is unique on `(from_id, to_id, kind)` — a `papers` list that
+  # names the same paper twice (or names both `slug` and `drafts.slug`, which
+  # `published_id/1` collapses to one target) must not emit a colliding pair.
+  defp paper_edges(values, from_id, kind) do
+    values
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.map(&Barkpark.Content.published_id(String.trim(&1)))
+    |> Enum.uniq()
+    |> Enum.map(fn to_id ->
+      %{from_id: from_id, to_id: to_id, kind: kind, plugin_source: "tasks"}
+    end)
   end
 
   @doc """

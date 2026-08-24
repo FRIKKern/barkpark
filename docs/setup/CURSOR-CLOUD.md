@@ -5,6 +5,8 @@ Cursor's cloud agents run in a fresh remote VM, not your laptop, so the onramp i
 
 > Cursor's cloud-agent config keys move faster than this doc. Confirm the current names at [cursor.com/docs/cloud-agent/setup](https://cursor.com/docs/cloud-agent/setup) before you commit.
 
+**Register the movement** — every unit of work runs under a claimed `bp` task: claim before you work, stamp evidence as you prove it, close on the claim epoch. The full doctrine, and the three ways a registration silently does not happen, is in [Agent Onramps](AGENT-ONRAMPS.md).
+
 ## 1. Install `bp` at boot
 
 Cursor Cloud reads `.cursor/environment.json` from your repo root. Its `install` command runs on every fresh VM — put the CLI installer there:

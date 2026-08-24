@@ -169,8 +169,10 @@ defmodule Barkpark.Content.ValidationTest do
         name = schema["name"]
         %{title: title, content: content} = Map.fetch!(@sample_content_by_schema, name)
 
-        assert {:ok, ^content} = Validation.validate(content, title, schema),
-               "flat_mode parity broken for seed schema '#{name}' — see masterplan §Phase 0"
+        validated = Validation.validate(content, title, schema)
+
+        assert match?({:ok, ^content}, validated),
+               "flat_mode parity broken for seed schema '#{name}' — see masterplan §Phase 0; got: #{inspect(validated)}"
       end
     end
 
@@ -184,8 +186,10 @@ defmodule Barkpark.Content.ValidationTest do
         edited_content = Map.put(content, "edited_at", "2026-04-25T00:00:00Z")
         edited_title = title <> " (edited)"
 
-        assert {:ok, ^edited_content} = Validation.validate(edited_content, edited_title, schema),
-               "edit round-trip failed for seed schema '#{name}'"
+        validated = Validation.validate(edited_content, edited_title, schema)
+
+        assert match?({:ok, ^edited_content}, validated),
+               "edit round-trip failed for seed schema '#{name}'; got: #{inspect(validated)}"
       end
     end
 

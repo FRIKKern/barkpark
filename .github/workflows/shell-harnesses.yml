@@ -104,6 +104,12 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # DEPLOY CONVERGENCE (task-0c3069135d1b4bfd). The last entry is an INPUT,
+      # not the harness: the check reads deploy.yml's own on.push.paths and the
+      # `changes` job's per-target filters rather than copying them, so an edit
+      # to that workflow can invalidate this matrix without touching the script.
+      - "scripts/deploy-convergence-check.sh"
+      - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
       - "scripts/required-checks-verify.sh"
@@ -224,6 +230,12 @@ on:
     paths:
       - "scripts/doctor.sh"
       - "scripts/doctor.test.sh"
+      # DEPLOY CONVERGENCE (task-0c3069135d1b4bfd). The last entry is an INPUT,
+      # not the harness: the check reads deploy.yml's own on.push.paths and the
+      # `changes` job's per-target filters rather than copying them, so an edit
+      # to that workflow can invalidate this matrix without touching the script.
+      - "scripts/deploy-convergence-check.sh"
+      - ".github/workflows/deploy.yml"
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
       - "scripts/required-checks-verify.sh"
@@ -481,6 +493,31 @@ jobs:
         # both ratchets are in this workflow's paths list, so the next path-set
         # edit reds here on the PR that makes it.
         run: bash scripts/registration-sample.test.sh
+
+  deploy-convergence:
+    name: deploy-convergence-check.sh ancestry + strand matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: deploy-convergence-check.sh syntax check
+        run: bash -n scripts/deploy-convergence-check.sh
+      - name: the real deploy.yml still yields BOTH per-target filters
+        # The script derives relevance from deploy.yml rather than copying it —
+        # the whole defect class here is two lists that must agree and nothing
+        # making them. That derivation is silent when it breaks: an empty filter
+        # would make every box read converged for free. `filters` prints what it
+        # derived and exits 2 when a set is empty, so a rename inside the
+        # `changes` job reds on the PR that does it rather than months later.
+        run: bash scripts/deploy-convergence-check.sh filters
+      - name: ancestry beats wall clock, and a real strand still reds
+        # 11 cases over real git repos in mktemp — no network, no gh, no box, so
+        # it cannot rot into a skip. The load-bearing pair is 6 and 7: 6 proves
+        # the not-yet-owed guard suppresses a merge-race false red, 7 proves that
+        # same guard did NOT blind the instrument to a strand that is genuinely
+        # owed. A guard with only the first half trades a false positive for a
+        # false negative, which on this axis means a silent stale production.
+        run: bash scripts/deploy-convergence-check.sh --selftest
 
   console-path-ratchet:
     name: console-path-escape-check.sh classification matrix
