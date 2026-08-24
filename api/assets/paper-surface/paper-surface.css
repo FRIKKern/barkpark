@@ -1376,8 +1376,41 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-dataviz--empty { margin: 1.4rem 0; padding: 10px 13px; border: 1px dashed var(--paper-chrome-border); border-radius: 10px; color: var(--paper-ink-faint); font-family: var(--paper-font-mono); font-size: 0.72rem; }
 
 .bp-paper-surface .bp-stat { display: inline-flex; flex-direction: column; gap: 4px; min-width: 130px; background: var(--paper-bg-deep); padding: 13px 15px; margin: 1.4rem 0; vertical-align: top; }
-.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; }
-.bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; }
+/* THE VALUE MUST BE ABLE TO BREAK, AND `anywhere` IS THE ONLY THING THAT WORKS.
+   `.bp-stat__v` is the largest type in the sheet — 1.7rem mono — and it sits in
+   a cell that is far narrower than a phone screen. The `.bp-stats` grid below
+   is `repeat(auto-fit, minmax(140px, 1fr))`, so at a 390px viewport the reading
+   column (358px of content) makes exactly two ~179px tracks. Measured in
+   headless Chromium: a value of twelve characters with no break opportunity
+   fills that track and pushes the DOCUMENT past the viewport, and from there
+   every extra character costs another ~16px of sideways page scroll.
+
+   Twelve characters is not an exotic input, it is a formatted number. Neither
+   `$1,234,567.89` nor `1 234 567,89` offers a single break opportunity —
+   comma, period and the U+202F narrow no-break space used for digit grouping
+   all refuse one — and a stats row formats every cell the same way, so the
+   second cell is already at the screen edge when it starts. A stat block whose
+   job is to show a large figure could not show a large figure on a phone.
+
+   `anywhere`, not `break-word`: `.bp-stat` is `inline-flex`, i.e. shrink-to-fit,
+   and outside the grid it sizes itself from its content's intrinsic width.
+   `break-word` never reports a smaller intrinsic width, so it fixes the grid
+   case and leaves the standalone stat exactly as broken — measured, both arms.
+   Only `anywhere` participates in min-content sizing, which is precisely the
+   property needed here and precisely the property that makes it the wrong
+   choice for the headings elsewhere in this sheet.
+
+   Wrapping a number is not lovely. Truncating one is a lie, and `overflow:
+   hidden; text-overflow: ellipsis` — the clamp the nowrap labels in this sheet
+   use — would present a shortened figure as if it were the whole figure. A
+   number that wraps is still readable; a number silently missing its last
+   digits is not. */
+.bp-paper-surface .bp-stat__v { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.7rem; font-weight: 650; line-height: 1.1; color: var(--paper-ink); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+/* The label is prose in a 179px track. `break-word` is enough here — the label
+   never sizes its own box (the grid track does), so the min-content behaviour
+   `.bp-stat__v` needs is not required, and the weaker declaration is the one
+   that cannot move a layout. */
+.bp-paper-surface .bp-stat__l { font-size: 0.72rem; color: var(--paper-ink-soft); letter-spacing: 0.01em; overflow-wrap: break-word; }
 .bp-paper-surface .bp-stat__bar { height: 6px; border-radius: 3px; background: var(--paper-rule); overflow: hidden; margin-bottom: 4px; }
 .bp-paper-surface .bp-stat__bar i { display: block; height: 100%; border-radius: 3px; background: var(--paper-accent); }
 .bp-paper-surface .bp-stat__spark { width: 100%; height: 26px; margin-top: 4px; }
