@@ -8,6 +8,7 @@
 import {
   getChatSession,
   interruptChat,
+  patchChatSession,
   sendChatMessage,
   streamChatEvents,
   type ChatStreamOptions,
@@ -23,10 +24,15 @@ jest.mock('../src/api/chat', () => ({
   interruptChat: jest.fn(),
   respondChatApproval: jest.fn(),
   streamChatEvents: jest.fn(),
+  // Added for the setChoice rollback proofs below. A jest.fn() with no
+  // implementation returns undefined, and `.catch` on undefined throws — so
+  // every test touching setChoice sets its own resolved/rejected promise.
+  patchChatSession: jest.fn(),
 }))
 
 const mockGet = getChatSession as jest.Mock
 const mockStream = streamChatEvents as jest.Mock
+const mockPatch = patchChatSession as jest.Mock
 
 const conn: InstanceConnection = {
   projectUrl: 'https://bp.example',
@@ -45,6 +51,7 @@ const flushMicro = async () => {
 beforeEach(() => {
   mockGet.mockReset()
   mockStream.mockReset()
+  mockPatch.mockReset()
 })
 
 test('stop() then start() restarts: fresh seed GET, loading resolves, exactly ONE live interval', async () => {
@@ -270,4 +277,107 @@ test('interrupt() entry-clears a stale transport failure, like send() and setCho
   } finally {
     jest.useRealTimers()
   }
+})
+
+/* ── setChoice: the rollback is fenced on the field it wrote ────────────────
+ * The handler used to capture `before` at call time and write `before[key]`
+ * into the CURRENT snapshot, guarded only by `this.stopped`. A slow failure
+ * could therefore overwrite a NEWER choice the server had already accepted.
+ * Every other async closure in this class fences on `gen !== this.startGen`. */
+
+/** A store with a live stream and a settled seed, ready to take a choice. */
+async function startedStore(): Promise<ChatSessionStore> {
+  mockGet.mockResolvedValue(session())
+  mockStream.mockImplementation(() => new Promise(() => {}))
+  const store = new ChatSessionStore(conn, 's1')
+  store.start()
+  await flushMicro()
+  return store
+}
+
+test('a LATE-failing choice write does not clobber a newer choice the server accepted', async () => {
+  const store = await startedStore()
+  try {
+    // Call A fails, but only after call B has already succeeded.
+    let failA: (e: Error) => void = () => {}
+    mockPatch.mockImplementationOnce(
+      () => new Promise((_res, rej) => { failA = rej }),
+    )
+    mockPatch.mockImplementationOnce(() => Promise.resolve(undefined))
+
+    store.setChoice('mode', 'plan')
+    expect(store.getSnapshot().choices.mode).toBe('plan')
+
+    store.setChoice('mode', 'default') // B — succeeds; the server now holds this
+    await flushMicro()
+    expect(store.getSnapshot().choices.mode).toBe('default')
+
+    failA(new Error('timeout')) // A's PATCH finally rejects
+    await flushMicro()
+
+    // Before the fence this wrote 'acceptEdits' — a value neither the user nor
+    // the server ever chose.
+    expect(store.getSnapshot().choices.mode).toBe('default')
+    // …and it did not raise an error about a write the user already replaced.
+    expect(store.getSnapshot().transportError).toBeUndefined()
+  } finally {
+    store.stop()
+  }
+})
+
+test('an ORDINARY failing choice write still rolls back and still says so', async () => {
+  // The other half of the law: a fence that suppressed every rollback would
+  // pass the test above and silently break the feature.
+  const store = await startedStore()
+  try {
+    const seeded = store.getSnapshot().choices.mode
+    mockPatch.mockImplementationOnce(() => Promise.reject(new Error('offline')))
+
+    store.setChoice('mode', 'plan')
+    expect(store.getSnapshot().choices.mode).toBe('plan') // optimistic
+    await flushMicro()
+
+    expect(store.getSnapshot().choices.mode).toBe(seeded) // rolled back
+    expect(store.getSnapshot().transportError).toContain('could not set mode')
+  } finally {
+    store.stop()
+  }
+})
+
+test('the fence is PER FIELD — a failing mode write still rolls back beside a live model write', async () => {
+  // A generation counter would have made these two conflict; they are
+  // independent fields and must not.
+  const store = await startedStore()
+  try {
+    const seededMode = store.getSnapshot().choices.mode
+    let failMode: (e: Error) => void = () => {}
+    mockPatch.mockImplementationOnce(
+      () => new Promise((_res, rej) => { failMode = rej }),
+    )
+    mockPatch.mockImplementationOnce(() => Promise.resolve(undefined))
+
+    store.setChoice('mode', 'plan')
+    store.setChoice('modelChoice', 'opus') // a DIFFERENT field moves on
+    await flushMicro()
+
+    failMode(new Error('timeout'))
+    await flushMicro()
+
+    expect(store.getSnapshot().choices.mode).toBe(seededMode) // still rolled back
+    expect(store.getSnapshot().choices.modelChoice).toBe('opus') // untouched
+    expect(store.getSnapshot().transportError).toContain('could not set mode')
+  } finally {
+    store.stop()
+  }
+})
+
+test('a failure after stop() touches nothing', async () => {
+  const store = await startedStore()
+  let fail: (e: Error) => void = () => {}
+  mockPatch.mockImplementationOnce(() => new Promise((_res, rej) => { fail = rej }))
+  store.setChoice('mode', 'plan')
+  store.stop()
+  fail(new Error('timeout'))
+  await flushMicro()
+  expect(store.getSnapshot().transportError).toBeUndefined()
 })
