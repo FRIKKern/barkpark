@@ -314,6 +314,122 @@ else
 fi
 echo
 
+# ── case 3c: THE OTHER TWO JOIN FORMS — pipe and list ───────────────────────
+# Case 3b proves the `-root` door sees `Path.join(@root, "lit")`. It proves
+# NOTHING about the two other ways the same anchor reaches the same file, and
+# both are live idioms in api/lib + api/test:
+#
+#   `@root |> Path.join("lit")`        the pipe form   (tag `test-rootpipe`)
+#   `Path.join([@root, "lit", …])`     the list form   (tag `test-rootlist`)
+#
+# MEASURED, and the reason this case exists: a 14-shape probe matrix planted in
+# api/test — one file per idiom, each reading the undeclared repo-root file
+# CLAUDE.md — was run against origin/main's scanner. It resolved 4 of the 14
+# shapes cleanly. The pipe and list forms were among the nine it could not see,
+# and NEITHER was named in the script's RESIDUE note, which listed only three
+# known-blind shapes. So the gate was credited with 5 doors at full strength
+# while seeing 4 of 14 shapes: counting doors is not counting what a door sees.
+#
+# Each form gets its OWN tag and therefore its own case. A single fused `-root`
+# count would let one form's grep be deleted while the tag stayed populated by
+# the other two — the aggregate blindness this whole file exists to refuse.
+echo "case 3c: the PIPE and LIST join forms are seen, and each is load-bearing"
+FX_FORMS="$TMPROOT/joinforms"
+make_fixture "$FX_FORMS"
+mkdir -p "$FX_FORMS/nowhere"
+: >"$FX_FORMS/nowhere/piped.json"
+: >"$FX_FORMS/nowhere/listed.json"
+
+# --- the pipe form ---------------------------------------------------------
+cat >"$FX_FORMS/api/test/barkpark/piped_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r, do: @repo_root |> Path.join("nowhere/piped.json") |> File.read!()
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_FORMS" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a PIPE-form uncovered read"
+else
+  no "PASSED with a pipe-form uncovered read — the rootpipe arm is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/piped.json"; then
+  ok "names the path the pipe form resolved to"
+else
+  no "did not name the pipe-form path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/piped_test.exs"; then
+  ok "attributes the pipe-form read to its file"
+else
+  no "did not attribute the pipe-form read: $out"
+fi
+if has "$out" "idiom test-rootpipe: "; then
+  ok "reports test-rootpipe as its own idiom, not folded into test-root"
+else
+  no "the pipe form has no tag of its own — a fused count cannot see it die: $out"
+fi
+rm -f "$FX_FORMS/api/test/barkpark/piped_test.exs"
+
+# --- the list form ---------------------------------------------------------
+cat >"$FX_FORMS/api/test/barkpark/listed_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r, do: File.read!(Path.join([@repo_root, "nowhere/listed.json"]))
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_FORMS" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a LIST-form uncovered read"
+else
+  no "PASSED with a list-form uncovered read — the rootlist arm is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/listed.json"; then
+  ok "names the path the list form resolved to"
+else
+  no "did not name the list-form path: $out"
+fi
+if has "$out" "idiom test-rootlist: "; then
+  ok "reports test-rootlist as its own idiom"
+else
+  no "the list form has no tag of its own: $out"
+fi
+
+# --- a DECLARED read through either form must stay green -------------------
+# The forms must not turn every anchored read into a red; over-reporting costs
+# the dispatcher exactly what it exists to save.
+rm -f "$FX_FORMS/api/test/barkpark/listed_test.exs"
+cat >"$FX_FORMS/api/test/barkpark/forms_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def a, do: @repo_root |> Path.join("internal/taskboard/tokens_gen.go")
+  def b, do: Path.join([@repo_root, "internal/taskboard/components.go"])
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_FORMS" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "DECLARED reads through the pipe and list forms stay green"
+else
+  no "a declared pipe/list read redded — the new arms over-report: $out"
+fi
+
+# --- the arms are LOAD-BEARING --------------------------------------------
+# A case that only ever watches the arm succeed has agreed with it, not tested
+# it. Delete the two new arms from a COPY and the pipe fixture must green again
+# — that green IS the proof the arm is what caught it.
+rm -f "$FX_FORMS/api/test/barkpark/forms_ok_test.exs"
+cat >"$FX_FORMS/api/test/barkpark/piped_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r, do: @repo_root |> Path.join("nowhere/piped.json") |> File.read!()
+EX
+MUT_FORMS="$TMPROOT/mutant-no-join-forms.sh"
+sed 's|for form in root rootpipe rootlist; do|for form in root; do|' "$SCRIPT" >"$MUT_FORMS"
+if ! cmp -s "$MUT_FORMS" "$SCRIPT"; then
+  ok "the join-form mutation applied (the form loop really changed)"
+else
+  no "the join-form mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_FORMS" bash "$MUT_FORMS" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "without the rootpipe/rootlist arms the same read greens — the arms are load-bearing"
+else
+  no "the pipe fixture redded even with the arms deleted — case 3c proves nothing: $out"
+fi
+echo
+
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────
 # Same mutation, but inside a real git repo where the offending fixture is
 # present on disk and NOT tracked. A `git ls-files` enumeration reports clean
