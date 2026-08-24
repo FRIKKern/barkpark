@@ -242,6 +242,16 @@ if [ "$MODE" != "deploy" ]; then
   FLIP_FROM="${FLIP_FROM:-$ACTIVE_PORT}"
   cp -a "$CADDYFILE" "$CADDYFILE.pre-rollback"
   sed -i "s/localhost:${FLIP_FROM}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
+  # Same landed-check as the forward flip, and MORE load-bearing here: this
+  # path's post-flip curl is deliberately log-only, so without this a rollback
+  # whose sed matched nothing would log "ROLLED BACK", rewrite STATE, exit 0 —
+  # and then disable the slot Caddy is still pointing at.
+  if grep -q "localhost:${FLIP_FROM}" "$CADDYFILE" || ! grep -q "localhost:${TARGET_PORT}" "$CADDYFILE"; then
+    log "FLIP DID NOT LAND: after the rollback rewrite $CADDYFILE still carries :$FLIP_FROM (or never gained :$TARGET_PORT) — restoring, no flip, fail closed"
+    cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"
+    systemctl disable --now "barkpark-slot@$TARGET_SLOT" 2>/dev/null || true
+    git reset --hard "$OLD"; exit 24
+  fi
   if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
     log "Caddyfile invalid after rollback flip — restoring, fail closed"
     cp -a "$CADDYFILE.pre-rollback" "$CADDYFILE"
@@ -774,6 +784,23 @@ FLIP_FROM="$(grep -oE "localhost:(${BLUE_PORT}|${GREEN_PORT})" "$CADDYFILE" 2>/d
 FLIP_FROM="${FLIP_FROM:-$ACTIVE_PORT}"
 cp -a "$CADDYFILE" "$CADDYFILE.pre-deploy"
 sed -i "s/localhost:${FLIP_FROM}/localhost:${TARGET_PORT}/g" "$CADDYFILE"
+# Did the rewrite actually MOVE the upstream? The post-flip PUBLIC gate below
+# claims to catch "a sed that missed the live upstream line". It cannot: BOTH
+# slots serve /api/schemas, so when the flip is a no-op the OLD slot answers
+# that probe 200 through the UNCHANGED Caddyfile, the gate passes, and the
+# script then disables the old slot — leaving Caddy proxying a dead port, exit
+# 0, "healthy" in every log line. A Caddyfile whose upstream is written some
+# other way (127.0.0.1:<port>, a hand-edit) is invisible to the ACTIVE_PORT
+# grep, to the FLIP_FROM re-read above AND to this sed, so all three fall back
+# in agreement and nothing downstream can tell. Only the file can. Fail closed
+# here, while the old slot is still serving and still enabled.
+if grep -q "localhost:${FLIP_FROM}" "$CADDYFILE" || ! grep -q "localhost:${TARGET_PORT}" "$CADDYFILE"; then
+  log "FLIP DID NOT LAND: after the rewrite $CADDYFILE still carries :$FLIP_FROM (or never gained :$TARGET_PORT) — the upstream is not written as 'localhost:<slot port>'; restoring, no swap, :$FLIP_FROM still serving"
+  cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
+  systemctl disable --now "barkpark-slot@$TARGET" 2>/dev/null || true
+  restore_slot_sha
+  git reset --hard "$OLD"; exit 14
+fi
 if ! caddy validate --config "$CADDYFILE" >/dev/null 2>&1; then
   log "Caddyfile invalid after port flip — restoring, no swap"
   cp -a "$CADDYFILE.pre-deploy" "$CADDYFILE"
