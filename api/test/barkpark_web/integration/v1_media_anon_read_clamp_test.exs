@@ -123,17 +123,31 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
       end
     end
 
+    # The escalation, end to end, in ONE test — because the two halves are only
+    # a vulnerability together. Metadata disclosure alone is a lesser finding;
+    # what makes this a `token`-tier bypass is that the URL handed over in
+    # step one is the credential accepted in step two. The failure message
+    # prints BOTH requests and BOTH statuses so a red run is the report.
     test "and the bytes stay refused end-to-end for whatever URL the anonymous caller can obtain",
          %{conn: conn} do
       %{"id" => id} = asset_with_visibility(conn, "token")
 
-      case anon_show(id, "?appendRequestSecret=true") do
-        {:refused, _} ->
-          :ok
+      meta_path = "/v1/media/#{@ds}/#{id}?appendRequestSecret=true"
+      meta = get(build_conn(), meta_path)
 
-        {:ok, result} ->
-          assert get(build_conn(), result["originalUrl"]).status == 403,
-                 "anonymous byte fetch succeeded via #{result["originalUrl"]}"
+      case meta.status do
+        200 ->
+          url = json_response(meta, 200)["result"]["originalUrl"]
+          bytes = get(build_conn(), url)
+
+          assert bytes.status == 403,
+                 "ESCALATION anonymous->bytes:\n" <>
+                   "  GET #{meta_path}  -> #{meta.status}, originalUrl = #{url}\n" <>
+                   "  GET #{url}  -> #{bytes.status}, #{byte_size(bytes.resp_body)} bytes"
+
+        status ->
+          assert status in [401, 403, 404],
+                 "expected the anonymous metadata read to be refused, got #{status}"
       end
     end
 
