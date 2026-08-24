@@ -46,6 +46,8 @@ export BARKPARK_API_URL=https://api.example.com
 export BARKPARK_API_TOKEN=bp_admin_...
 ```
 
+Recognized names, first set wins (canonical beats alias): server `BARKPARK_API_URL` → `BARKPARK_SERVER` → `BARKPARK_URL`; token `BARKPARK_API_TOKEN` → `BARKPARK_TOKEN`. Aliases: the Next.js template dialect (`templates/DEPLOYING.md`).
+
 **Cloud** — an agent on Barkpark Cloud logs into the control plane, reads its fleet, pulls a live instance's admin token, and connects to it:
 
 ```bash

@@ -2353,9 +2353,21 @@ func TestClassifyTaskNotFound(t *testing.T) {
 
 // clearBarkparkEnv unsets the BARKPARK_* vars so resolveContext reads purely from
 // the seeded config + flags (env would otherwise win and mask the test).
+// clearBarkparkEnv unsets the WHOLE env dialect for one test, so a name
+// exported on the developer's own machine cannot outrank the fixture under
+// assertion. The server and token names are read out of ServerEnvNames /
+// TokenEnvNames rather than typed here — axi-b4 added BARKPARK_URL and
+// BARKPARK_TOKEN to those lists and this hand-written copy went stale in the
+// same commit, which is how the omission was found: on a machine that really
+// does export BARKPARK_TOKEN, TestResolveContextRepoFile read the developer's
+// live admin token instead of the fixture's "tok-global". Deriving the list
+// makes that failure impossible to reintroduce.
 func clearBarkparkEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_API_TOKEN", "BARKPARK_WORKSPACE", "BARKPARK_PROJECT", "BARKPARK_DATASET"} {
+	keys := append([]string{}, ServerEnvNames...)
+	keys = append(keys, TokenEnvNames...)
+	keys = append(keys, "BARKPARK_WORKSPACE", "BARKPARK_PROJECT", "BARKPARK_DATASET")
+	for _, k := range keys {
 		t.Setenv(k, "")
 	}
 }

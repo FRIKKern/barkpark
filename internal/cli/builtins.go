@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
@@ -146,8 +145,13 @@ func whoamiSourceName(g globals, ctx manifest.Context) (source string, active bo
 	if g.server != "" {
 		return "flag", false, name
 	}
-	// 2. Env var (BARKPARK_API_URL / BARKPARK_SERVER), if actually set.
-	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
+	// 2. Env var, if actually set — every name the resolver answers to, read from
+	//    the SAME list envContext resolves through (ServerEnvNames). This label
+	//    is what `bp whoami` prints under "source", so a name the resolver
+	//    honours but this check misses makes whoami blame the saved config or
+	//    the baked default for a server the environment chose. That is worse
+	//    than silence: it sends the next person to change the wrong thing.
+	if anyEnvSet(ServerEnvNames...) {
 		return "env", false, name
 	}
 	// 3. Saved config — the resolved server matches the persisted active server.

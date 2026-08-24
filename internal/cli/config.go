@@ -310,7 +310,9 @@ func ConfigPath() (string, error) {
 // It routes first-run UX only (the bare-`bp` wizard, the friendlier manifest
 // error) and never changes command semantics.
 func FirstRun() bool {
-	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" || os.Getenv("BARKPARK_API_TOKEN") != "" {
+	// axi-b4: read from the shared dialect lists, so a name the resolver honours
+	// can never leave a configured user being offered the first-run wizard.
+	if anyEnvSet(ServerEnvNames...) || anyEnvSet(TokenEnvNames...) {
 		return false
 	}
 	path, err := ConfigPath()

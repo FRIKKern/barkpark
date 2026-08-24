@@ -85,7 +85,10 @@ func offerOpenDesk(out *writer) int {
 // to print setup guidance instead. Exported and side-effect-free (a pure read of
 // env + on-disk config) so it is unit-testable.
 func LoggedInWithoutServer() bool {
-	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
+	// axi-b4: EVERY server name the resolver honours, from the shared list. A
+	// name missing here makes this answer true for a user who DID configure a
+	// server, and the TUI then prints setup guidance for a box it is connected to.
+	if anyEnvSet(ServerEnvNames...) {
 		return false
 	}
 	c, err := LoadConfig()

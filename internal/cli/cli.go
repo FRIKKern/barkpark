@@ -730,18 +730,59 @@ func resolveContext(g globals) manifest.Context {
 // This is deliberately NOT apiclient.ConfigFromEnv (which bakes a non-empty
 // floor); the floor lives in bakedDefaults instead.
 func envContext() apiclient.Config {
-	server := os.Getenv("BARKPARK_API_URL")
-	if server == "" {
-		server = os.Getenv("BARKPARK_SERVER")
-	}
 	return apiclient.Config{
-		BaseURL:   server,
-		Token:     os.Getenv("BARKPARK_API_TOKEN"),
+		BaseURL:   firstEnv(ServerEnvNames...),
+		Token:     firstEnv(TokenEnvNames...),
 		Workspace: os.Getenv("BARKPARK_WORKSPACE"),
 		Project:   os.Getenv("BARKPARK_PROJECT"),
 		Dataset:   os.Getenv("BARKPARK_DATASET"),
 	}
 }
+
+// ServerEnvNames and TokenEnvNames are the env names this CLI answers to, in
+// PRECEDENCE ORDER — first one set wins. They are exported and shared so the
+// resolver, the `bp whoami` source label and the TUI's startup banner cannot
+// drift on what counts as "configured by env"; before this list existed, a name
+// added to one of the three was silently missing from the other two.
+//
+// axi-b4-barkpark-url-env-footgun — WHY THE LAST NAME IN EACH LIST IS HERE.
+// `BARKPARK_TOKEN` is not a typo a user invented: it is the CANONICAL name for
+// this exact concept everywhere else in this repo. `web/lib/bp-env.ts` reads
+// it, `templates/DEPLOYING.md` documents it as the pair with `BARKPARK_API_URL`
+// for every templated Next.js app, and the site deploy path INJECTS it into
+// every build a customer runs (api/lib/barkpark/sites/deploy_request.ex,
+// deploy_runner.ex). `BARKPARK_URL` is live too — the release-capture adapter
+// sets it (api/lib/barkpark/cycle_fleet/release_capture_adapter.ex). A user who
+// exported either was following this org's own other dialect.
+//
+// AND THE OLD FAILURE WAS NOT "UNAUTHENTICATED", WHICH IS WHY THIS IS A ROW.
+// An unset Token falls through resolveContext to `bakedDefaults()`, whose floor
+// is the WELL-KNOWN "barkpark-dev-token". So exporting BARKPARK_TOKEN and
+// running `bp` did not fail loudly — it silently sent the dev token instead of
+// the one the user had just set, and `bp whoami` reported a token was present.
+//
+// SILENT ALIAS, NOT A WARNING (wave-2 charter decision 21), matching the only
+// deprecated-name precedent this codebase has: web/lib/bp-env.ts's
+// `canonical ?? legacy` shape. The canonical name always wins when both are set.
+var (
+	ServerEnvNames = []string{"BARKPARK_API_URL", "BARKPARK_SERVER", "BARKPARK_URL"}
+	TokenEnvNames  = []string{"BARKPARK_API_TOKEN", "BARKPARK_TOKEN"}
+)
+
+// firstEnv returns the value of the first name that is set to a non-empty
+// string, or "" when none is. Order IS the precedence.
+func firstEnv(names ...string) string {
+	for _, n := range names {
+		if v := os.Getenv(n); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// anyEnvSet reports whether any of the named vars is set to a non-empty value —
+// the question every "where did this come from" label asks.
+func anyEnvSet(names ...string) bool { return firstEnv(names...) != "" }
 
 // bakedDefaults is the lowest-precedence floor — the same values
 // apiclient.ConfigFromEnv historically baked into the env layer, relocated here
@@ -788,7 +829,7 @@ func ResolvedAPIConfig() apiclient.Config {
 // else the baked floor → "default". It re-derives rather than threading state
 // through manifest.Resolve, so it stays a pure read with no behavioural coupling.
 func ServerSource() string {
-	if os.Getenv("BARKPARK_API_URL") != "" || os.Getenv("BARKPARK_SERVER") != "" {
+	if anyEnvSet(ServerEnvNames...) {
 		return "env"
 	}
 	if c, err := LoadConfig(); err == nil && c != nil && c.Server != "" {
