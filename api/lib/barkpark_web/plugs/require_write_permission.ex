@@ -26,6 +26,15 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
   import Plug.Conn
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
+  @doc """
+  The assign this plug stamps when — and only when — it GRANTS the write.
+
+  A controller that wants to re-assert "the write gate ran and said yes"
+  reads this through `granted?/1` instead of re-deriving the judgment from
+  `conn.assigns[:api_token]`. See `granted?/1` for why.
+  """
+  def granted_assign, do: :write_permission_granted
+
   def init(opts), do: opts
 
   def call(conn, _opts) do
@@ -34,16 +43,50 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
     # scope). It deliberately holds no global :write perm, so let `share_writer`
     # short-circuit the permits?/2 check. Set ONLY by RequireShareEditToken.
     if conn.assigns[:share_writer] == true do
-      conn
+      grant(conn)
     else
       with %{api_token: token} <- conn.assigns,
            true <- TenancyAuth.permits?(token, :write) do
-        conn
+        grant(conn)
       else
         _ -> account_write?(conn)
       end
     end
   end
+
+  @doc """
+  Did THIS plug grant the write on THIS conn?
+
+  ## Why this exists (task-6e22b3922dc42e8c)
+
+  `V1.MediaController` and `V1.MediaCollectionsController` each carried their
+  own `require_write/1` that RE-DERIVED this judgment from
+  `conn.assigns[:api_token]`. Two implementations of one judgment have to be
+  maintained in lockstep, and they had already drifted apart in two ways:
+
+    * **A principal the gate ADMITS, the controller REFUSED.** `call/2` falls
+      THROUGH a failing token arm into `account_write?/1`; the controllers
+      RETURNED from theirs. So a request carrying a read-only `:api_token`
+      alongside a `:current_user` who is a write-capable member of the resolved
+      workspace was granted here (account arm) and then answered 403 (media) or
+      401 (collections) by the controller — the gate's yes overturned downstream.
+    * **Two status codes for one condition.** This plug answers 403 for every
+      refusal; the controllers answered 401 from their token-absent arm.
+
+  The controller arms are NOT deleted, because deleting them would make a route
+  that ever loses this plug from its pipeline silently writable. They now read
+  THIS verdict instead of forming their own. That inverts the failure mode: an
+  ungated route has no grant assign, so `granted?/1` is false and the write is
+  REFUSED. Fail-closed by construction, and it costs no second `authorize/3`
+  query — the account arm's DB read already happened here.
+
+  Every route reaching those controllers' write actions runs this plug today
+  (`:media_mutate`, `:scoped_media_mutate`, and `[:scoped_api, :media_mutate]`),
+  so no live route changes its answer; what changes is the two divergences above.
+  """
+  def granted?(%Plug.Conn{} = conn), do: conn.assigns[granted_assign()] == true
+
+  defp grant(conn), do: assign(conn, granted_assign(), true)
 
   defp forbidden(conn) do
     env = Barkpark.Content.Errors.to_envelope({:error, :forbidden}, conn)
@@ -72,7 +115,7 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
     with %Barkpark.Accounts.User{} = user <- conn.assigns[:current_user],
          %{id: ws_id} when is_binary(ws_id) <- conn.assigns[:current_workspace],
          :ok <- TenancyAuth.authorize(user, ws_id, :write) do
-      conn
+      grant(conn)
     else
       _ -> forbidden(conn)
     end
