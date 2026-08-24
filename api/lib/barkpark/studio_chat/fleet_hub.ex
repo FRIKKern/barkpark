@@ -52,11 +52,47 @@ defmodule Barkpark.StudioChat.FleetHub do
 
   use GenServer
 
+  require Logger
+
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.Recorder
 
   @ring_cap 256
   @fleet_topic "studio_chat:fleet"
+
+  # ── the per-session maps are bounded too, not just the ring ────────────────
+  #
+  # `record_flip/4` caps the ring in one expression and then, on the very next
+  # line, writes `states` and `owners` with no bound at all — one entry per
+  # session id, added on the FIRST activity frame (including the line-only
+  # non-flip branch) and never removed. This is a singleton under
+  # `StudioChat.Supervisor`, so "never removed" means BEAM lifetime: a
+  # long-uptime box with session churn accumulates two map entries per session
+  # ever started, and the ring cap next to them made that omission look
+  # deliberate.
+  #
+  # THE HORIZON IS DERIVED, NOT PICKED. `AgentStateSweeper` already answers
+  # exactly this question for the herd `agent_state` column, and states its
+  # arithmetic: 150s is "2.5x the 60s heartbeat — a live session is always
+  # fresher". This reuses that MULTIPLE against the live heartbeat interval
+  # rather than copying its constant, because the interval is configurable
+  # (`:studio_chat_agent_heartbeat_ms`, read by `Recorder`) and a hardcoded
+  # 150 silently stops meaning 2.5x the moment an operator moves it.
+  #
+  # The tick is the heartbeat interval itself: that is the finest granularity at
+  # which liveness information arrives on this topic, so sweeping faster cannot
+  # learn anything new. Worst-case residency is therefore horizon + one tick,
+  # i.e. 3.5x the heartbeat — named, not hidden.
+  @heartbeat_multiple 2.5
+
+  # A sid whose entries are dropped and which then returns is treated exactly
+  # like a session this hub has never seen — which is the CORRECT treatment for
+  # a session the rest of the system already considers offline (the sibling
+  # sweeper has by then relabelled its row `unknown`). It costs one extra flip
+  # on its return, which is truthful, and its heartbeats fail closed for scope
+  # until its next activity frame — the same fail-closed rule the moduledoc
+  # already documents for a session whose activity FleetHub never saw. That
+  # consequence is why the sweep is REPORTED rather than silent.
 
   @typedoc "A ring entry — a replayable four-state flip. `owner_ws` never leaves this map."
   @type entry :: %{
@@ -152,6 +188,7 @@ defmodule Barkpark.StudioChat.FleetHub do
   @impl true
   def init(_opts) do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.activity_topic())
+    schedule_sweep()
 
     {:ok,
      %{
@@ -162,7 +199,10 @@ defmodule Barkpark.StudioChat.FleetHub do
        # sid => last-emitted four-state (dedup + the :offline prior).
        states: %{},
        # sid => last-seen owner_workspace_id (heartbeat scope, D43h).
-       owners: %{}
+       owners: %{},
+       # sid => monotonic ms of the last frame of ANY kind for that session.
+       # This is what bounds `states` and `owners`: all three are swept together.
+       seen: %{}
      }}
   end
 
@@ -170,7 +210,7 @@ defmodule Barkpark.StudioChat.FleetHub do
   def handle_info({:chat_activity, sid, activity}, state) do
     owner_ws = Map.get(activity, :owner_workspace_id)
     mapped = map_state(Map.get(activity, :state), Map.get(state.states, sid))
-    {:noreply, record_flip(state, sid, mapped, owner_ws)}
+    {:noreply, record_flip(touch(state, sid), sid, mapped, owner_ws)}
   end
 
   # An external reporter's authoritative write (herd-s6, charter D79h): while
@@ -181,7 +221,7 @@ defmodule Barkpark.StudioChat.FleetHub do
   # rule). Same flips-only ring discipline as a derived transition.
   def handle_info({:chat_reported_state, sid, %{agent_state: mapped} = frame}, state)
       when mapped in ["working", "blocked", "idle", "unknown"] do
-    {:noreply, record_flip(state, sid, mapped, Map.get(frame, :owner_workspace_id))}
+    {:noreply, record_flip(touch(state, sid), sid, mapped, Map.get(frame, :owner_workspace_id))}
   end
 
   def handle_info({:chat_heartbeat, sid, ts}, state) do
@@ -190,7 +230,10 @@ defmodule Barkpark.StudioChat.FleetHub do
     # own); an unseen session fails closed for every workspace scope.
     owner_ws = Map.get(state.owners, sid)
     Phoenix.PubSub.broadcast(Barkpark.PubSub, @fleet_topic, {:fleet_heartbeat, sid, ts, owner_ws})
-    {:noreply, state}
+    # A heartbeat is the cheapest liveness proof there is, so it MUST refresh the
+    # sweep clock — otherwise a session that is idle-but-alive (heartbeating, no
+    # flips) would be swept out from under its own heartbeats and lose scope.
+    {:noreply, touch(state, sid)}
   end
 
   def handle_info({:chat_title, sid, title}, state) when is_binary(title) do
@@ -201,7 +244,12 @@ defmodule Barkpark.StudioChat.FleetHub do
     # fails closed for every workspace scope.
     owner_ws = Map.get(state.owners, sid)
     Phoenix.PubSub.broadcast(Barkpark.PubSub, @fleet_topic, {:fleet_title, sid, title, owner_ws})
-    {:noreply, state}
+    {:noreply, touch(state, sid)}
+  end
+
+  def handle_info(:sweep_sessions, state) do
+    schedule_sweep()
+    {:noreply, sweep_sessions(state)}
   end
 
   # The workflow rail rides the per-session wire, never the fleet wire (D44h).
@@ -241,6 +289,70 @@ defmodule Barkpark.StudioChat.FleetHub do
 
       %{state | seq: seq, ring: ring, states: Map.put(state.states, sid, mapped), owners: owners}
     end
+  end
+
+  # ── the sweep that turns two unbounded maps into bounded ones ──────────────
+
+  defp touch(state, sid) do
+    %{state | seen: Map.put(state.seen, sid, System.monotonic_time(:millisecond))}
+  end
+
+  defp schedule_sweep do
+    Process.send_after(self(), :sweep_sessions, heartbeat_ms())
+  end
+
+  # The interval every consumer of this topic already agrees on. `Recorder` reads
+  # the same key to pace the heartbeats this hub is bounded against, so the two
+  # cannot drift apart under configuration.
+  defp heartbeat_ms do
+    Application.get_env(:barkpark, :studio_chat_agent_heartbeat_ms, 60_000)
+  end
+
+  defp stale_after_ms, do: round(heartbeat_ms() * @heartbeat_multiple)
+
+  @doc false
+  @spec sweep_sessions(map()) :: map()
+  def sweep_sessions(state) do
+    cutoff = System.monotonic_time(:millisecond) - stale_after_ms()
+
+    {live_seen, dropped} = Map.split_with(state.seen, fn {_sid, ms} -> ms > cutoff end)
+
+    case map_size(dropped) do
+      0 ->
+        state
+
+      n ->
+        keep = fn map -> Map.drop(map, Map.keys(dropped)) end
+
+        swept = %{
+          state
+          | seen: live_seen,
+            states: keep.(state.states),
+            owners: keep.(state.owners)
+        }
+
+        report_sweep(n, map_size(swept.seen), cutoff)
+        swept
+    end
+  end
+
+  # Routine hygiene, but NOT silent: a dropped sid loses its dedup prior (one
+  # extra flip on its return) and its heartbeat scope (fail-closed until its next
+  # activity frame). One line per sweep carrying the count — never one per sid,
+  # which would turn a bound into log spam and get it switched off.
+  defp report_sweep(dropped, remaining, cutoff) do
+    Logger.info(
+      "FleetHub swept #{dropped} session(s) with no frame of any kind for " <>
+        "#{stale_after_ms()}ms (#{@heartbeat_multiple}x the #{heartbeat_ms()}ms heartbeat); " <>
+        "#{remaining} session(s) still tracked. Each dropped session loses its dedup prior " <>
+        "and its heartbeat scope until its next activity frame."
+    )
+
+    :telemetry.execute(
+      [:barkpark, :studio_chat, :fleet_hub, :sessions_swept],
+      %{dropped: dropped, remaining: remaining, stale_after_ms: stale_after_ms()},
+      %{cutoff_ms: cutoff}
+    )
   end
 
   # ─────────────────────────────────────────────────────────────────────────
