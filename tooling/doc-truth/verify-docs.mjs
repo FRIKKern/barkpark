@@ -820,7 +820,17 @@ function verifyLineref(claim) {
   // snake_case idents, env-var names. Use the full source line so anchors in a
   // sibling backtick span are seen.
   const needles = linerefNeedles(claim.srcLine || claim.raw, t);
-  if (needles.length === 0) {
+
+  // THE STEM IS NOT EVIDENCE. `dedup_wall.ex` does not say `dedup_wall` in its
+  // own body — almost no file names itself — so demanding that token near the
+  // cited line is a test the truth cannot pass. When the stem is the ONLY thing
+  // harvested there is no anchor at all, and the honest verdict is "cannot
+  // check", never "stale". Deliberately scoped to the SOLE-needle case: where a
+  // real anchor exists too, the stem rides along exactly as before, which is
+  // what keeps this from re-scoring 14 confirmed citations into novel findings.
+  const stem = basenameStem(t);
+  const anchors = needles.filter((n) => n !== stem);
+  if (needles.length === 0 || anchors.length === 0) {
     // nothing concrete to check against — leave as low-conf unverifiable
     return tag(claim, "unverifiable", "low", `lineref has no checkable anchor near :${t.lines.join("/")}`);
   }
@@ -981,6 +991,32 @@ function selfDerived(s, t) {
   return t.file.includes(s) || t.base.includes(s);
 }
 
+// A FILE DOES NOT NAME ITSELF IN ITS OWN BODY, so its own name is never an
+// anchor for a citation OF it. The guard for this already existed and never
+// fired: it compared the harvested token against `t.base.replace(/\W/g, "_")`,
+// which turns `dedup_wall.ex` into `dedup_wall_ex` — a string no prose ever
+// contains. So the snake_case harvester kept `dedup_wall`, the sweep demanded
+// that token within ±3 of the cited line, `dedup_wall.ex` naturally never says
+// its own name, and a CORRECT citation was reported as stale.
+//
+// MEASURED on main at 3dd205eeb4: `mutate-warnings.test.ts:26` cites
+// `dedup_wall.ex:524` for "the SHARPER band". Line 524 is `severity: "warning"`
+// inside `defp warning/1` at :519 — exactly what the comment says. The gate
+// reported it NOVEL and reddened main.
+//
+// The class is every citation of the form `<snake_case_file>.ex:<line>` carrying
+// no second symbol: the stem is then the ONLY needle, so the finding is
+// guaranteed. This is the mirror of the too-narrow-window defect — there a wrong
+// citation was accepted, here a right one is rejected — and a gate that reds on
+// correct citations is the fastest way to get the whole never-worse baseline
+// switched off.
+//
+// Stripping the EXTENSION is the whole fix; the stem is dropped however it was
+// harvested (the route-segment rule reaches it too, via `content/dedup_wall.ex`).
+function basenameStem(t) {
+  return String(t.base || "").replace(/\.[A-Za-z0-9]+$/, "");
+}
+
 // Pull checkable anchors out of a lineref claim's raw text.
 function linerefNeedles(raw, t) {
   const needles = new Set();
@@ -990,7 +1026,7 @@ function linerefNeedles(raw, t) {
   for (const m of raw.matchAll(/\b([A-Z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)+)\b/g)) needles.add(m[1]);
   // snake_case / handle_event-style identifiers (>=4 chars, has _ )
   for (const m of raw.matchAll(/\b([a-z][a-z0-9_]*_[a-z0-9_]+)\b/g)) {
-    if (m[1].length >= 4 && m[1] !== t.base.replace(/\W/g, "_")) needles.add(m[1]);
+    if (m[1].length >= 4) needles.add(m[1]);
   }
   // env-var / SCREAMING_CASE constant names (PHX_HOST, LAST_EVENT_ID). Require an
   // underscore or digit so English words written in caps for EMPHASIS (NOT, INTO,
