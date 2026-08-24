@@ -19,94 +19,107 @@ defmodule BarkparkWeb.QueryController do
   action_fallback BarkparkWeb.FallbackController
 
   def index(conn, %{"dataset" => dataset, "type" => type} = params) do
-    if preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) do
-      t0 = System.monotonic_time(:microsecond)
-      perspective = AnonPerspective.resolve(conn, params)
-      # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
-      # offset [0,100_000] — see Content.Query) so the echoed limit/offset in the
-      # response body match what the query actually used. Otherwise a paginator
-      # reading `limit`/`offset` back computes the wrong next page.
-      limit = parse_int(params["limit"], 100) |> min(1000) |> max(1)
-      offset = parse_int(params["offset"], 0) |> max(0) |> min(100_000)
-      order = parse_order_param(params["order"])
-      filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
-      expand_spec = parse_expand(params["expand"])
+    cond do
+      not (preview?(conn) or authed?(conn) or
+               Content.schema_public?(type, dataset, scope_opts(conn))) ->
+        {:error, :not_found}
 
-      schema = fetch_schema(conn, type, dataset)
-      caller_context = CallerContext.from_conn(conn)
+      # An unsupported ?perspective is a 400, not a silent downgrade — the
+      # existence-hiding 404 above comes FIRST so the refusal can never become
+      # an existence probe, exactly the ordering counts/2 uses.
+      bad = unsupported_read_perspective(params) ->
+        refuse_read_perspective(conn, bad)
 
-      cond do
-        # An unparseable flat --filter string normalizes to an {:error, …}
-        # sentinel, never %{} — an empty map here used to slip past both
-        # guards below and SILENTLY return the UNFILTERED set (D75: `--filter
-        # 'tags hasStrong x:50'` exited 0 with every row). A refusal naming
-        # the accepted grammar beats a silent passthrough.
-        match?({:error, _}, filter_map) ->
-          filter_map
+      true ->
+        query_index(conn, dataset, type, params)
+    end
+  end
 
-        # Fail CLOSED on an unknown filter operator. Otherwise it falls through
-        # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
-        # every row — a typo'd op (?filter[status][bogus]=x) looked like it
-        # filtered but didn't. Checked here so the reject beats the query.
-        bad = invalid_filter_op(filter_map) ->
-          case bad do
-            # A documented operator whose value/shape can't be honoured carries
-            # its OWN message — the shared "unknown filter operator" wording
-            # contradicted itself for hasStrong/is/$or (see invalid_filter_op/1).
-            {:clause, message, details} ->
-              {:error, {:invalid_filter_clause, message, details}}
+  defp query_index(conn, dataset, type, params) do
+    t0 = System.monotonic_time(:microsecond)
+    perspective = AnonPerspective.resolve(conn, params)
+    # Clamp to the same bounds Content.list_documents enforces (limit [1,1000],
+    # offset [0,100_000] — see Content.Query) so the echoed limit/offset in the
+    # response body match what the query actually used. Otherwise a paginator
+    # reading `limit`/`offset` back computes the wrong next page.
+    limit = parse_int(params["limit"], 100) |> min(1000) |> max(1)
+    offset = parse_int(params["offset"], 0) |> max(0) |> min(100_000)
+    order = parse_order_param(params["order"])
+    filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
+    expand_spec = parse_expand(params["expand"])
 
-            {field, op} ->
-              {:error, {:invalid_filter_op, field, op}}
-          end
+    schema = fetch_schema(conn, type, dataset)
+    caller_context = CallerContext.from_conn(conn)
 
-        # WS-B MEDIUM-4: reject a filter/order that targets a field this caller may
-        # not SEE — otherwise the WHERE/ORDER becomes an oracle to binary-search or
-        # sort by a hidden field's value even though the body is redacted. Checked
-        # BEFORE the query so the COUNT/order never runs over a forbidden field.
-        field = forbidden_query_field(filter_map, order, schema, caller_context) ->
-          {:error, {:forbidden_field, field}}
+    cond do
+      # An unparseable flat --filter string normalizes to an {:error, …}
+      # sentinel, never %{} — an empty map here used to slip past both
+      # guards below and SILENTLY return the UNFILTERED set (D75: `--filter
+      # 'tags hasStrong x:50'` exited 0 with every row). A refusal naming
+      # the accepted grammar beats a silent passthrough.
+      match?({:error, _}, filter_map) ->
+        filter_map
 
-        true ->
-          docs =
-            Content.list_documents(
-              type,
-              dataset,
-              [
-                perspective: perspective,
-                filter_map: filter_map,
-                limit: limit,
-                offset: offset,
-                order: order
-              ] ++ scope_opts(conn)
-            )
+      # Fail CLOSED on an unknown filter operator. Otherwise it falls through
+      # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
+      # every row — a typo'd op (?filter[status][bogus]=x) looked like it
+      # filtered but didn't. Checked here so the reject beats the query.
+      bad = invalid_filter_op(filter_map) ->
+        case bad do
+          # A documented operator whose value/shape can't be honoured carries
+          # its OWN message — the shared "unknown filter operator" wording
+          # contradicted itself for hasStrong/is/$or (see invalid_filter_op/1).
+          {:clause, message, details} ->
+            {:error, {:invalid_filter_clause, message, details}}
 
-          rendered =
-            Envelope.render_many(docs, schema, caller_context)
-            |> Expand.expand(
-              expand_spec,
-              dataset,
-              [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
-                scope_opts(conn)
-            )
-            |> project_fields(parse_fields(params["fields"]))
-            |> maybe_resolve_tasks(conn, params)
+          {field, op} ->
+            {:error, {:invalid_filter_op, field, op}}
+        end
 
-          inner =
-            %{
-              perspective: to_string(perspective),
-              documents: rendered,
-              count: length(docs),
+      # WS-B MEDIUM-4: reject a filter/order that targets a field this caller may
+      # not SEE — otherwise the WHERE/ORDER becomes an oracle to binary-search or
+      # sort by a hidden field's value even though the body is redacted. Checked
+      # BEFORE the query so the COUNT/order never runs over a forbidden field.
+      field = forbidden_query_field(filter_map, order, schema, caller_context) ->
+        {:error, {:forbidden_field, field}}
+
+      true ->
+        docs =
+          Content.list_documents(
+            type,
+            dataset,
+            [
+              perspective: perspective,
+              filter_map: filter_map,
               limit: limit,
-              offset: offset
-            }
-            |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
+              offset: offset,
+              order: order
+            ] ++ scope_opts(conn)
+          )
 
-          etag = list_etag(dataset, type, rendered)
-          respond(conn, inner, dataset, list_sync_tags(dataset, type, rendered), etag, t0)
-      end
-    else
-      {:error, :not_found}
+        rendered =
+          Envelope.render_many(docs, schema, caller_context)
+          |> Expand.expand(
+            expand_spec,
+            dataset,
+            [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
+              scope_opts(conn)
+          )
+          |> project_fields(parse_fields(params["fields"]))
+          |> maybe_resolve_tasks(conn, params)
+
+        inner =
+          %{
+            perspective: to_string(perspective),
+            documents: rendered,
+            count: length(docs),
+            limit: limit,
+            offset: offset
+          }
+          |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
+
+        etag = list_etag(dataset, type, rendered)
+        respond(conn, inner, dataset, list_sync_tags(dataset, type, rendered), etag, t0)
     end
   end
 
@@ -379,19 +392,60 @@ defmodule BarkparkWeb.QueryController do
       AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.") ->
         {:error, :not_found}
 
-      preview?(conn) or authed?(conn) or Content.schema_public?(type, dataset, scope_opts(conn)) ->
-        show_doc(conn, dataset, type, doc_id, params)
+      not (preview?(conn) or authed?(conn) or
+               Content.schema_public?(type, dataset, scope_opts(conn))) ->
+        {:error, :not_found}
+
+      # AFTER the two existence-hiding 404s above, never before — otherwise the
+      # refusal answers "this document exists but your perspective is wrong" to
+      # a caller the endpoint is meant to tell nothing. Same ordering as counts/2.
+      bad = unsupported_read_perspective(params) ->
+        refuse_read_perspective(conn, bad)
 
       true ->
-        {:error, :not_found}
+        show_doc(conn, dataset, type, doc_id, params)
     end
+  end
+
+  # `?perspective` on the two document read paths honours exactly the three
+  # values the manifest advertises. Anything else USED TO BE SILENTLY ACCEPTED:
+  # AnonPerspective.parse/1 has a catch-all that maps every unrecognised string
+  # to :published, so `?perspective=bogus` returned 200 over the published set —
+  # on doc-get with no echo at all, and on query with `"perspective":"published"`
+  # in the body, actively telling the caller its typo had been honoured.
+  #
+  # /v1/data/counts has refused this since it learned to (refuse_perspective/2
+  # below); these two endpoints are brought to the same model rather than the
+  # catch-all being changed, because parse/1's fail-safe default is relied on by
+  # every OTHER caller and narrowing it there would be a much wider blast radius
+  # than this defect justifies.
+  #
+  # nil (absent) is fine. The value is returned so the refusal can name what the
+  # caller actually sent.
+  defp unsupported_read_perspective(params) do
+    case Map.get(params, "perspective") do
+      nil -> nil
+      p when p in ["published", "drafts", "raw"] -> nil
+      other -> other
+    end
+  end
+
+  defp refuse_read_perspective(conn, value) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "unsupported perspective #{inspect(value)} — supported values are " <>
+        "published, drafts and raw; omit ?perspective for published",
+      %{parameter: "perspective", supported: ["published", "drafts", "raw"], received: value}
+    )
   end
 
   defp show_doc(conn, dataset, type, doc_id, params) do
     t0 = System.monotonic_time(:microsecond)
     expand_spec = parse_expand(params["expand"])
 
-    with {:ok, doc} <- Content.get_document(doc_id, type, dataset, scope_opts(conn)) do
+    with {:ok, doc} <- get_document_for_perspective(conn, doc_id, type, dataset, params) do
       schema = fetch_schema(conn, type, dataset)
       caller_context = CallerContext.from_conn(conn)
 
@@ -410,6 +464,47 @@ defmodule BarkparkWeb.QueryController do
       etag = doc_etag(doc)
       sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
       respond(conn, rendered, dataset, sync_tags, etag, t0)
+    end
+  end
+
+  # doc-get USED TO READ `?perspective` AND THROW IT AWAY. show_doc/5 did a bare
+  # exact-id `get_document`, so a caller that asked for the draft got the
+  # PUBLISHED row at 200 with `_draft: false` and no signal of any kind — while
+  # the sibling `GET /v1/data/query/:dataset/:type?perspective=drafts` honoured
+  # the same flag, on the same document, in the same instant. Two read paths
+  # disagreeing about one document, and the by-id one silently answering a
+  # question nobody asked. Both spellings declare the identical
+  # `perspective` flag in `GET /v1/capabilities` (doc.get and doc.query), so the
+  # divergence was a defect, not a design choice.
+  #
+  # `:drafts` prefers the draft twin and FALLS BACK to the published row. The
+  # fallback is what matches the query endpoint: its drafts perspective returns
+  # drafts where they exist and published rows where they do not, so a
+  # published-only document must not start 404ing under `?perspective=drafts`.
+  #
+  # `:published` and `:raw` keep the exact-id lookup, and they genuinely coincide
+  # here: doc-get addresses ONE row by id, so "raw" (no perspective filter) and
+  # "published" resolve to the same row. A caller that spells `drafts.<id>`
+  # still gets that row — the documented bare-`bp doc get` asymmetry, which is a
+  # different thing from an explicit flag being ignored.
+  #
+  # NO NEW EXPOSURE, and this is the part worth checking rather than assuming.
+  # `AnonPerspective.resolve/2` pins every anonymous and `public-read` caller to
+  # `:published` before this runs, and show/2 already 404s an anon caller that
+  # names a `drafts.` id. For an authed caller nothing widens either: doc-get
+  # already served `GET /v1/data/doc/:ds/:type/drafts.<id>` to any read token, so
+  # honouring the flag reaches the SAME row by a different spelling. Pinned both
+  # ways in query_controller_perspective_test.exs.
+  defp get_document_for_perspective(conn, doc_id, type, dataset, params) do
+    case AnonPerspective.resolve(conn, params) do
+      :drafts ->
+        case Content.get_document(DraftId.draft_id(doc_id), type, dataset, scope_opts(conn)) do
+          {:ok, draft} -> {:ok, draft}
+          _ -> Content.get_document(doc_id, type, dataset, scope_opts(conn))
+        end
+
+      _ ->
+        Content.get_document(doc_id, type, dataset, scope_opts(conn))
     end
   end
 

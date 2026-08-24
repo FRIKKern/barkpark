@@ -43,7 +43,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 | Param | Default | Notes |
 |-------|---------|-------|
-| `perspective` | `published` | `published\|drafts\|raw`; tokenless pinned `published` |
+| `perspective` | `published` | `published\|drafts\|raw`; unsupported → 400; tokenless pinned `published` |
 | `limit` | `100` | Int, min 1, max 1000 |
 | `offset` | `0` | Int |
 | `fields` | — | CSV content-field projection (`title,slug`); system fields kept |
@@ -57,7 +57,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a).
+Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4): `drafts` prefers the `drafts.` twin, else published.
 
 ### 5a. Reference Expansion
 
@@ -71,7 +71,7 @@ Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag
 
 Tags — `GET /v1/data/tags/:dataset` (`?type=`, default `paper,task`): per-tag per-type published counts → `{result:{tags:[{tag,counts,total}],count}}`; `/tags/:dataset/:tag`: docs ranked by that tag's strength (legacy flat last) → `result.documents:[{doc_id,type,title,strength,rationale,main_tag_match}]`. Anon 404.
 
-Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts, one aggregate → `{ok,dataset,perspective:"published",counts:{<type>:N}}` (frozen, not `result`-wrapped). Anon 404. Published-only: absent/`published` → `200`; any other `?perspective` → **`400 malformed`**, never a silently-published body.
+Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts, one aggregate → `{ok,dataset,perspective:"published",counts:{<type>:N}}` (frozen, not `result`-wrapped). Anon 404. Published-only; other `?perspective` → 400 (§4).
 
 ### 5c. History [token]
 

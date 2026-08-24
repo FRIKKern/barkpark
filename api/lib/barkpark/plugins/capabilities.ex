@@ -710,7 +710,12 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("doc_id", true, "string", "Document id.")
         ],
         flags: [
-          flag("perspective", "string", "published | drafts | raw.", default: "published"),
+          flag(
+            "perspective",
+            "string",
+            "published | drafts | raw. drafts prefers the drafts.<id> twin and falls back to the published row; published and raw resolve the id exactly as given. Any other value is a 400, never a silent downgrade to published.",
+            default: "published"
+          ),
           flag(
             "expand",
             "string",
