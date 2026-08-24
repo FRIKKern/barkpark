@@ -23,7 +23,7 @@ Private endpoints need `Authorization: Bearer <token>`. Dev token: `barkpark-dev
 
 Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any token · **[admin]** = admin.
 
-**Discovery.** OpenAPI 3.1 of `/v1`: `GET /openapi.json` (public, manifest-generated).
+**Discovery.** OpenAPI 3.1 of `/v1`: `GET /v1/openapi.json` (public, manifest-generated).
 
 ## 3. Document Envelope
 
@@ -63,7 +63,7 @@ Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?f
 
 `?expand=true` (or `?expand=author,category`) inlines reference fields with the full referenced document — single refs and `arrayOf`-of-reference lists, values plain id strings or `{_ref: id}`. **Depth 1** only — nested refs and missing targets stay raw (expanded = map, raw = string).
 
-### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [public]
+### 5b. Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
 Inbound refs (reverse of §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
 
