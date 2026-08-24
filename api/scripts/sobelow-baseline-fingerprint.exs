@@ -9,6 +9,28 @@ csrf_type = "Config.CSRF: Missing CSRF Protections"
 https_type = "Config.HTTPS: HTTPS Not Enabled"
 https_reason = "HTTPS configuration details could not be found in `prod.exs`."
 
+# THE `config/prod.exs:0` ROW IS CORRECT AT 0. DO NOT "FIX" IT TO 1.
+#
+# Two lanes independently read a live Config.HTTPS finding at line 1 while the
+# baseline row declares 0, and both flagged it as a real discrepancy worth
+# settling. It is not one. They read the line from SARIF, and
+# `lib/sobelow/finding_log.ex:154` is:
+#
+#     defp sarif_num(0), do: 1
+#
+# — because the SARIF schema requires startLine >= 1. The finding's actual
+# `vuln_line_no` is the literal 0 hardcoded at `lib/sobelow/config/https.ex:48`
+# (the finding is the ABSENCE of config, so there is no node to point at), and
+# `finding.ex:60` hashes THAT, not the SARIF-rendered value. So 0 is exact:
+# neither a file-level sentinel nor stale documentation.
+#
+# The consequence is why this comment exists. Recomputed here:
+#     declared line 0 -> 2B5C077   (matches the stored hash)
+#     SARIF's line 1  -> 4E639D3   (matches nothing)
+# Editing that row to 1 to agree with SARIF would KILL a working waiver and red
+# this very check. If this checker ever reds on that row, suspect the edit, not
+# the row.
+
 # Detector families whose vuln_source is a quoted AST node carrying line AND
 # column metadata. That term is not in the baseline row and cannot be recovered
 # from it, so these rows are SKIPPED here — never passed.

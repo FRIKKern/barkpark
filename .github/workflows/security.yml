@@ -184,17 +184,35 @@ jobs:
           # heavy jobs actually read: everything under api/ (lib, mix.lock,
           # .sobelow-skips, api/scripts/*) plus this workflow itself.
           #
-          # WHAT THIS DISPATCH COSTS, stated so nobody reads main's green as a
-          # verdict it never rendered. A push to main touching neither api/ nor
-          # this file emits api=false, every heavy job skips, and `security-gate`
-          # greens on those skips — correctly, since nothing it guards changed.
-          # The consequence is that a defect INSIDE the api/ path set is only
-          # ever observed on a head that touches api/, so it can sit latent on
-          # main indefinitely and surface on some unrelated PR that does. That
-          # is exactly how #13886's baseline drift stayed invisible: the run
-          # that could have seen it was the advisory one, and every push after
-          # it skipped the job entirely. Main's green is an artifact of what it
-          # skipped, not evidence the gate passed.
+          # THIS SET NEVER APPLIES TO A PUSH. The `event != pull_request` arm
+          # below emits api=true unconditionally, so main is NOT path-skipped,
+          # and "main went green because it skipped the job" is a FALSE
+          # explanation for a missing verdict on main. It was written into this
+          # file once and is corrected rather than deleted, because it is the
+          # intuitive wrong answer and someone will reach for it again.
+          #
+          # WHY MAIN IS ACTUALLY MISSING SOBELOW VERDICTS — measured over the 14
+          # most recent main commits on 2026-08-24, reading the JOBS api and not
+          # the run conclusion:
+          #
+          #     12  run cancelled, sobelow job never created  -> UNSCANNED
+          #      1  run still queued
+          #      1  run conclusion `success`, sobelow job `failure`
+          #
+          # The mechanism is the `concurrency` block at the top of this file:
+          # `cancel-in-progress` is FALSE on main, so runs queue instead of
+          # superseding, GitHub keeps exactly ONE pending run per group, and the
+          # next push evicts the one already waiting. Coverage is therefore lost
+          # in proportion to MERGE RATE and is worst on the busiest days — a
+          # quiet repo looks healthy. A `cancelled` run is neither a pass nor a
+          # skip: a census that does not count it as UNSCANNED is blind to the
+          # dominant mechanism.
+          #
+          # And note the last row: a run can conclude `success` while a job
+          # inside it concluded `failure`, so `gh run list --json conclusion`
+          # cannot answer this question at all — only `actions/runs/<id>/jobs`
+          # can. Main's green is an artifact of what was never scanned, and of a
+          # run conclusion that hides its own job's failure.
           api=false
           while IFS= read -r f; do
             [ -n "$f" ] || continue
