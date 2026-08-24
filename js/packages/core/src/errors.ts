@@ -204,6 +204,53 @@ export type BarkparkErrorCode =
  * extra fields (`retryAfterMs`, `serverEtag`, `timeoutMs`, `issues`, …) are
  * reachable without a cast.
  */
+/**
+ * The response-guard ladder the two STREAMING paths share.
+ *
+ * `listen()` and `exportDataset()` both bypass the JSON transport — their
+ * bodies are streams, not envelopes — so each carried its own copy of
+ * auth-check, ok-check, body-check, differing only in a label and (for listen)
+ * an extra content-type check. Folding them keeps the two in step and pays for
+ * the fetch fix in export.ts (core is on a hard gzipped budget — js/CLAUDE.md
+ * "Bundle budget").
+ *
+ * Every message and error class is reproduced verbatim from the two copies, and
+ * the ORDER is preserved exactly: auth, then ok, then content-type (listen
+ * only), then body — so a response that fails two checks still reports the same
+ * one it reported before.
+ *
+ * `url` is threaded on the error only when the caller has one, matching what
+ * each site already passed.
+ */
+export function assertStreamResponse(
+  response: Response,
+  label: string,
+  opts?: { url?: string; contentType?: string },
+): asserts response is Response & { body: ReadableStream<Uint8Array> } {
+  const meta = {
+    status: response.status,
+    ...(opts?.url !== undefined ? { url: opts.url } : {}),
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new BarkparkAuthError(`${label}: ${response.status} auth failed`, meta)
+  }
+  if (!response.ok) {
+    throw new BarkparkAPIError(`${label}: HTTP ${response.status}`, meta)
+  }
+  if (opts?.contentType !== undefined) {
+    const ct = response.headers.get('content-type') ?? ''
+    if (!ct.includes(opts.contentType)) {
+      throw new BarkparkAPIError(
+        `${label}: expected ${opts.contentType}, got ${ct || '(none)'}`,
+        meta,
+      )
+    }
+  }
+  if (!response.body) {
+    throw new BarkparkAPIError(`${label}: response has no body`, meta)
+  }
+}
+
 export function isBarkparkError(e: unknown, code: 'BarkparkAPIError'): e is BarkparkAPIError
 export function isBarkparkError(e: unknown, code: 'BarkparkAuthError'): e is BarkparkAuthError
 export function isBarkparkError(e: unknown, code: 'BarkparkNetworkError'): e is BarkparkNetworkError

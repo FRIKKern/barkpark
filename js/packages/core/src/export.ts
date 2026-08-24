@@ -9,7 +9,7 @@
 // because the body is a stream, not a single JSON envelope.
 
 import { scopePrefix } from './scope'
-import { BarkparkAPIError, BarkparkAuthError, BarkparkNetworkError } from './errors'
+import { BarkparkAPIError, BarkparkNetworkError, assertStreamResponse } from './errors'
 import type { BarkparkClientConfig, BarkparkDocument, ExportOptions } from './types'
 
 // Parse one NDJSON line into a document, re-wrapping the raw SyntaxError a
@@ -51,22 +51,30 @@ export async function* exportDataset(
   const init: RequestInit = { headers }
   if (opts?.signal !== undefined) init.signal = opts.signal
 
+  // [export-ignores-config-fetch] Every other path in this package honours the
+  // caller's fetch override — transport.ts for all JSON calls, listen.ts for the
+  // other stream. Export alone reached straight for the global, so a configured
+  // `fetch` (MSW in a test suite, a tracing or auth-injecting wrapper in
+  // production, a custom agent) was silently bypassed by dataset export and
+  // nothing errored: the request simply went out through a different door than
+  // the caller wired up. The runtime guard mirrors listen.ts's, so a runtime
+  // with no fetch at all fails with a typed error rather than "fetch is not a
+  // function".
+  const fetchImpl = config.fetch ?? globalThis.fetch
+  // No `typeof fetchImpl === 'function'` guard, unlike listen.ts: there the
+  // fetch call sits OUTSIDE a try, so a missing global would surface as a raw
+  // TypeError. Here it is already inside one, and the catch below re-wraps
+  // anything it throws as a typed BarkparkNetworkError carrying the original as
+  // `cause` — a guard would only restate that, for bytes this package does not
+  // have. (Written, then verified: adding one changed no test outcome.)
   let response: Response
   try {
-    response = await fetch(`${base}${path}`, init)
+    response = await fetchImpl(`${base}${path}`, init)
   } catch (cause) {
     throw new BarkparkNetworkError('export: fetch failed', { cause })
   }
 
-  if (response.status === 401 || response.status === 403) {
-    throw new BarkparkAuthError(`export: ${response.status} auth failed`, { status: response.status })
-  }
-  if (!response.ok) {
-    throw new BarkparkAPIError(`export: HTTP ${response.status}`, { status: response.status })
-  }
-  if (!response.body) {
-    throw new BarkparkAPIError('export: response has no body', { status: response.status })
-  }
+  assertStreamResponse(response, 'export')
 
   const reader = response.body.getReader()
   const decoder = new TextDecoder('utf-8')
