@@ -26,15 +26,24 @@ defmodule BarkparkWeb.PluginRoutesTest do
        pilot path. Compile-time registration succeeded, independent
        of any runtime request.
 
-  Tagged `@moduletag :plugin_routes` so the default `mix test` run does
-  not have to absorb the cost. Run explicitly:
+  RUNS IN THE DEFAULT LANE. This module used to carry
+  `@moduletag :plugin_routes`, which `test/test_helper.exs` excludes and which no
+  CI step ever re-includes (`.github/workflows/elixir.yml` runs a bare `mix test`
+  plus one dedicated `--only boot_test` step; there is no `--only plugin_routes`
+  step) — so the whole plugin-route highway lock, auth-bucket assertions
+  included, had not run in CI at all. A test that cannot run cannot fail, so the
+  tag is gone. The stated reason for it was the env mutation in describe 2 (and
+  now describe 5), both of which are safe here: `async: false` modules are
+  scheduled after every async module, so no concurrent test can observe
+  `:barkpark, :plugins` while it is swapped, and both setups restore the previous
+  value in `on_exit`. The whole file costs ~3.3s.
 
-      mix test --only plugin_routes test/barkpark_web/plugin_routes_test.exs
+  The `:plugin_routes` tag itself stays registered in `test_helper.exs` — the
+  plugin-route describe of `test/barkpark_web/studio/nav_parity_sweep_test.exs`
+  still uses it, and that one mutates per-workspace plugin SETTINGS.
   """
 
   use ExUnit.Case, async: false
-
-  @moduletag :plugin_routes
 
   import Phoenix.ConnTest
 
@@ -221,95 +230,184 @@ defmodule BarkparkWeb.PluginRoutesTest do
     end
   end
 
-  # ── Describe 4 — `:token` plugin-route bucket selection (Phase B) ──────
+  # ── Describe 4 — plugin-route bucket selection, against the REAL macro ────
   #
-  # The `:token` highway bucket gates plugin CONTROLLER routes with
-  # `[:api, :require_token]` — authenticated (valid api_tokens bearer) but
-  # NOT requiring the admin role. It mirrors the `:api`/`:ingest` buckets
-  # and is DORMANT until a plugin contributes an `auth: :token` route.
+  # WHY THIS REPLACED THE PREVIOUS DESCRIBES 4 AND 5 (vacuous-hunt-2).
   #
-  # The `plugin_routes/1` macro filters `collect_routes/1` output through the
-  # private `route_in_scope?/2` (which delegates to `auth_matches_scope?/2`,
-  # the generic `auth == scope` clause). We lock that selection contract
-  # directly: a 5-tuple route spec declared with `auth: :token` is selected
-  # by `scope: :token` and is NOT selected by `scope: :api`. Same shape as
-  # the bucket assertions for the other auth gates.
+  # The two describes here used to assert against a hand-written COPY of the
+  # macro's private `route_in_scope?/2` — a `select_for_scope/2` defined in
+  # THIS file — plus, for the accepted-bucket claim, a literal atom's
+  # membership in a literal list written on the same line:
+  #
+  #     assert :token in [:admin, :ops, :public, :api, :token, :ingest, :public_root]
+  #
+  # Neither expression referenced any module under `lib/`. Two proofs:
+  #
+  #   1. Extracted verbatim into a standalone script and run under plain
+  #      `elixir` with the entire application ABSENT (no Mix, no deps, no
+  #      compiled Barkpark): `4 tests, 0 failures`.
+  #   2. In situ, mutating the real `auth_matches_scope?/2` in
+  #      `lib/barkpark_web/router/plugins.ex` to `defp auth_matches_scope?(_, _),
+  #      do: false` — so NO 5-tuple plugin route is emitted into ANY bucket,
+  #      making "an `auth: :token` route is selected by scope :token" FALSE in
+  #      production — left all four green. The mutation is proven to have landed
+  #      because describe 3's router-introspection test reddened on the same run
+  #      (`12 tests, 1 failure`, at :163).
+  #
+  # The copy had also DRIFTED: it listed 7 and 8 accepted scopes against the
+  # macro's real 12 (`:session_token_root`, `:ticket_key`, `:public_api` and
+  # `:github_webhook` were never in it) — so even read as documentation it
+  # under-reported the surface.
+  #
+  # These tests expand the REAL macro. `plugin_routes/1` validates its `scope:`
+  # and filters `Registry.collect_routes/1` through `route_in_scope?/2` during
+  # MACRO EXPANSION, so `Macro.expand/2` is the honest seam onto both private
+  # functions — the same code path the host router takes at compile time.
 
-  describe "`:token` plugin-route bucket selection (Phase B)" do
-    @token_spec {:post, "/example/token", BarkparkWeb.PageController, :index, auth: :token}
+  require BarkparkWeb.Router.Plugins
 
-    test "an `auth: :token` route is selected by scope :token and not scope :api" do
-      assert select_for_scope([@token_spec], :token) == [@token_spec],
-             "expected the auth: :token route to be selected by the :token bucket"
-
-      assert select_for_scope([@token_spec], :api) == [],
-             "expected the auth: :token route to be EXCLUDED from the :api bucket"
-    end
-
-    test "`plugin_routes(scope: :token)` is an accepted bucket (guard list)" do
-      # The macro raises ArgumentError for an unknown scope; :token must pass.
-      assert :token in [:admin, :ops, :public, :api, :token, :ingest, :public_root]
-    end
-
-    # Mirrors the macro's filter step (`Enum.filter(&route_in_scope?/2)`)
-    # without depending on the private function: the documented contract is
-    # `auth == scope` (generic clause), with `:none` aliasing to `:public`.
-    defp select_for_scope(specs, scope) do
-      Enum.filter(specs, fn
-        {_kind, _path, _mod, _action} -> scope == :admin
-        {_kind, _path, _mod, _action, opts} when is_list(opts) -> route_auth(opts, scope)
-        _ -> false
-      end)
-    end
-
-    defp route_auth(opts, scope) do
-      case Keyword.get(opts, :auth, :admin) do
-        :none -> scope == :public
-        auth -> auth == scope
+  describe "plugin_routes/1 scope validation (the real guard list)" do
+    test "an unknown scope raises ArgumentError naming the accepted buckets" do
+      assert_raise ArgumentError, ~r/plugin_routes\(scope: \.\.\.\) requires/, fn ->
+        expand_bucket(:not_a_real_bucket)
       end
     end
-  end
 
-  # ── Describe 5 — `:token_root` plugin-route bucket selection (C4-2) ────
-  #
-  # The `:token_root` highway bucket is the ROOT-mounted sibling of `:token`:
-  # same `[:api, :require_token]` pipeline (controller routes only), but mounted
-  # at the host `/v1` top-level scope instead of under `/v1/plugins` — so a spec
-  # `{:get, "/tasks/ready", Mod, :ready, auth: :token_root}` lands at
-  # `/v1/tasks/ready`. It is DORMANT until a plugin contributes an
-  # `auth: :token_root` route.
-  #
-  # As with the `:token` bucket, the macro filters `collect_routes/1` through the
-  # generic `auth == scope` clause. We lock that selection contract directly: a
-  # 5-tuple route spec declared with `auth: :token_root` is selected by
-  # `scope: :token_root` and is NOT selected by `scope: :token` or `scope: :api`.
+    # COMPLETENESS, PROVEN — not enumerated. The failure mode this closes: a
+    # plugin declares `auth: :whatever` for which the host router has no
+    # `plugin_routes(scope: :whatever)` callsite/bucket, so `route_in_scope?/2`
+    # never matches it and the route is SILENTLY never emitted — no compile
+    # error, no 404 anyone attributes to the plugin, the endpoint simply does
+    # not exist. Deriving the left side from the registry (rather than listing
+    # it) means a new plugin bucket cannot drift past this test.
+    test "every auth: bucket declared by a registered plugin route is an accepted scope" do
+      declared =
+        %{phase: :compile}
+        |> Registry.collect_routes()
+        |> Enum.map(&declared_auth/1)
+        |> Enum.uniq()
+        |> Enum.sort()
 
-  describe "`:token_root` plugin-route bucket selection (C4-2)" do
-    @token_root_spec {:get, "/tasks/ready", BarkparkWeb.PageController, :index, auth: :token_root}
+      # Guard against the emptiness that would make the assertion below
+      # vacuous: the default test env DOES load plugins that contribute routes.
+      assert declared != [],
+             "no plugin contributed any route — this completeness check would " <>
+               "pass on an empty set, proving nothing"
 
-    test "an `auth: :token_root` route is selected by scope :token_root only" do
-      assert select_for_scope([@token_root_spec], :token_root) == [@token_root_spec],
-             "expected the auth: :token_root route to be selected by the :token_root bucket"
+      unaccepted = Enum.reject(declared, &accepted_bucket?/1)
 
-      assert select_for_scope([@token_root_spec], :token) == [],
-             "expected the auth: :token_root route to be EXCLUDED from the :token bucket"
+      assert unaccepted == [],
+             """
+             These `auth:` values are declared by a registered plugin route but are
+             NOT accepted by `plugin_routes(scope: ...)`, so `route_in_scope?/2`
+             never selects them and every route carrying them is SILENTLY dropped
+             at router compile time:
 
-      assert select_for_scope([@token_root_spec], :api) == [],
-             "expected the auth: :token_root route to be EXCLUDED from the :api bucket"
-    end
+                 #{inspect(unaccepted)}
 
-    test "`plugin_routes(scope: :token_root)` is an accepted bucket (guard list)" do
-      # The macro raises ArgumentError for an unknown scope; :token_root must pass.
-      assert :token_root in [
-               :admin,
-               :ops,
-               :public,
-               :api,
-               :token,
-               :token_root,
-               :ingest,
-               :public_root
-             ]
+             Fix: add the bucket to the guard list in
+             `lib/barkpark_web/router/plugins.ex` AND wrap a `plugin_routes(scope: ...)`
+             callsite in `BarkparkWeb.Router` with the right pipeline — never just
+             one of the two.
+             """
     end
   end
+
+  describe "plugin_routes/1 bucket FILTERING (real route_in_scope?/2)" do
+    # A probe plugin whose four specs cover every branch of the real
+    # `route_in_scope?/2`: a bare 4-tuple (defaults to :admin), an explicit
+    # `auth: :token`, an explicit `auth: :token_root`, and `auth: :none` (the
+    # spec-side name the `:public` bucket aliases).
+    defmodule BucketProbePlugin do
+      def register_routes(_ctx) do
+        [
+          {:get, "/probe/default-admin", BarkparkWeb.PageController, :index},
+          {:post, "/probe/token", BarkparkWeb.PageController, :index, auth: :token},
+          {:get, "/probe/token-root", BarkparkWeb.PageController, :index, auth: :token_root},
+          {:get, "/probe/public", BarkparkWeb.PageController, :index, auth: :none}
+        ]
+      end
+    end
+
+    setup do
+      prev = Application.get_env(:barkpark, :plugins, :unset)
+      Application.put_env(:barkpark, :plugins, [BucketProbePlugin])
+
+      on_exit(fn ->
+        case prev do
+          :unset -> Application.delete_env(:barkpark, :plugins)
+          v -> Application.put_env(:barkpark, :plugins, v)
+        end
+      end)
+
+      :ok
+    end
+
+    test "each probe route is emitted by its OWN bucket and by no other" do
+      # {path, the one bucket that must emit it}
+      expected = [
+        {"/probe/default-admin", :admin},
+        {"/probe/token", :token},
+        {"/probe/token-root", :token_root},
+        {"/probe/public", :public}
+      ]
+
+      all_buckets = Enum.map(expected, &elem(&1, 1)) ++ [:ops, :api, :ingest]
+
+      for {path, owning_bucket} <- expected, bucket <- Enum.uniq(all_buckets) do
+        # Match the QUOTED path in the emitted AST text, never a bare substring:
+        # `/probe/token` is a prefix of `/probe/token-root`, and a substring test
+        # reported a leak that was not there. The emitted form is always
+        # `get("/probe/token", …)`, so the quotes make the match exact.
+        emitted = expand_bucket(bucket) =~ ~s("#{path}")
+
+        if bucket == owning_bucket do
+          assert emitted,
+                 "expected #{path} to be emitted by plugin_routes(scope: #{inspect(bucket)})"
+        else
+          refute emitted,
+                 "#{path} LEAKED into plugin_routes(scope: #{inspect(bucket)}) — a route " <>
+                   "emitted into a foreign bucket rides that bucket's pipeline, which is " <>
+                   "how an admin-gated route ends up behind no on_mount at all"
+        end
+      end
+    end
+
+    test "the probe plugin is actually reaching the registry (guard against a silent empty scan)" do
+      paths =
+        %{phase: :compile}
+        |> Registry.collect_routes()
+        |> Enum.map(&elem(&1, 1))
+
+      assert "/probe/token" in paths,
+             "the probe plugin contributed nothing — every filtering assertion above " <>
+               "would then be satisfied by emptiness. Got: #{inspect(paths)}"
+    end
+  end
+
+  # ── helpers on the real macro ─────────────────────────────────────────────
+
+  # Expand `plugin_routes(scope: scope)` exactly as `BarkparkWeb.Router` does at
+  # compile time, and render the emitted router AST as text. Expansion is where
+  # the scope guard raises and where `route_in_scope?/2` filters, so this reaches
+  # both private functions without copying either.
+  defp expand_bucket(scope) do
+    quote(do: BarkparkWeb.Router.Plugins.plugin_routes(scope: unquote(scope)))
+    |> Macro.expand(__ENV__)
+    |> Macro.to_string()
+  end
+
+  defp accepted_bucket?(auth) do
+    # `:none` is the spec-side opt value; `:public` is the callsite bucket name.
+    scope = if auth == :none, do: :public, else: auth
+    expand_bucket(scope)
+    true
+  rescue
+    ArgumentError -> false
+  end
+
+  defp declared_auth({_kind, _path, _mod, _action}), do: :admin
+
+  defp declared_auth({_kind, _path, _mod, _action, opts}) when is_list(opts),
+    do: Keyword.get(opts, :auth, :admin)
 end
