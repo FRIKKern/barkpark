@@ -58,8 +58,13 @@ on:
       # the catalog in place (D30) and the lint/parse/format/apply/jsassert suites
       # read the testdata fixtures, so those edits change what the Go suite asserts
       # with no .go diff — same #963->#969-class gap as the carve-outs above. Closes
-      # it at the trigger. scaffy/seed/** is excluded: no Go test reads it.
+      # it at the trigger. scaffy/seed/** carries main_test.go (fetch retry +
+      # drift-table statuses), but every file it tests is *.go and is therefore
+      # already caught by the "**/*.go" glob above — it is listed here anyway so
+      # a non-.go edit under scaffy/seed (README, repair.sh, the mock fixture)
+      # still runs the suite that asserts against them.
       - "scaffy/commands/**"
+      - "scaffy/seed/**"
       - "internal/scaffy/testdata/**"
       # Onramp teach-block parity (docs/setup/CODEX.md, docs/setup/AGENTS-MD.md).
       # TestOnrampAgentsMdWrapperParity reads CODEX.md from DISK and asserts it
@@ -82,8 +87,10 @@ on:
       - "docs/cli/fixtures/**"
       - "cloud/priv/static/__fixtures__/**"
       # Scaffy census trap (mirrors the push list): catalog + testdata fixtures
-      # gate the Go suite though scaffy/** PRs otherwise skip it; seed/** excluded.
+      # gate the Go suite though scaffy/** PRs otherwise skip it. seed/** is now
+      # INCLUDED — it has Go tests as of scaffy/seed/main_test.go.
       - "scaffy/commands/**"
+      - "scaffy/seed/**"
       - "internal/scaffy/testdata/**"
       - "docs/setup/CODEX.md"
       - "docs/setup/AGENTS-MD.md"
