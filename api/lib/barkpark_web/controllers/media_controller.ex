@@ -245,14 +245,102 @@ defmodule BarkparkWeb.MediaController do
   #     `MediaFile.serve_content_type/1` (dangerous svg/html/xml/js collapse to a
   #     non-executable octet-stream) AND paired with `nosniff` + an `attachment`
   #     disposition for dangerous types — the stored-XSS vector is defused here.
-  # sobelow_skip ["Traversal.SendFile", "XSS.ContentType"]
+  #   * Traversal.FileModule (File.stat/1): the byte-range answer needs the
+  #     blob's SIZE to clamp the range and fill `content-range`. It stats the
+  #     same server-derived `full_path` the send_file argument uses — never a
+  #     request segment — and an unreadable stat degrades to the whole-file
+  #     200 rather than guessing a size.
+  # sobelow_skip ["Traversal.SendFile", "XSS.ContentType", "Traversal.FileModule"]
   defp maybe_send_file(conn, full_path, mime) do
-    conn
-    |> put_resp_content_type(MediaFile.serve_content_type(mime))
-    |> put_resp_header("x-content-type-options", "nosniff")
-    |> put_resp_header("content-disposition", disposition(mime))
-    |> send_file(200, full_path)
+    conn =
+      conn
+      |> put_resp_content_type(MediaFile.serve_content_type(mime))
+      |> put_resp_header("x-content-type-options", "nosniff")
+      |> put_resp_header("content-disposition", disposition(mime))
+      # BYTE RANGES, so a browser can SEEK (2026-08-24). Without this every
+      # `Range:` request answered 200 with the whole blob, so a <video> asking
+      # for one minute out of a 47-minute recording had to download the file
+      # from byte 0 — media fragments (`#t=start,end`), scrubbing and any
+      # clip-style playback were unusable on hosted video.
+      |> put_resp_header("accept-ranges", "bytes")
+
+    size =
+      case File.stat(full_path) do
+        {:ok, %File.Stat{size: size}} -> size
+        _ -> nil
+      end
+
+    case requested_range(get_req_header(conn, "range"), size) do
+      {:range, first, last} ->
+        conn
+        |> put_resp_header("content-range", "bytes #{first}-#{last}/#{size}")
+        |> send_file(206, full_path, first, last - first + 1)
+
+      :unsatisfiable ->
+        conn
+        |> put_resp_header("content-range", "bytes */#{size}")
+        |> send_resp(416, "")
+
+      :none ->
+        send_file(conn, 200, full_path)
+    end
   end
+
+  # ONE range only, and only the forms a media element actually sends:
+  #   bytes=START-END · bytes=START- · bytes=-SUFFIX
+  # Anything else (multipart ranges, garbage, an unknown file size) falls back
+  # to the whole file — a 200 is always a correct answer to a Range request.
+  defp requested_range(_headers, nil), do: :none
+  defp requested_range([], _size), do: :none
+
+  defp requested_range([value | _], size) do
+    case String.split(String.trim(value), "=") do
+      ["bytes", spec] -> parse_range_spec(String.trim(spec), size)
+      _ -> :none
+    end
+  end
+
+  defp parse_range_spec(spec, size) do
+    cond do
+      String.contains?(spec, ",") ->
+        :none
+
+      String.starts_with?(spec, "-") ->
+        case Integer.parse(String.trim_leading(spec, "-")) do
+          {suffix, ""} when suffix > 0 ->
+            first = max(size - suffix, 0)
+            clamp_range(first, size - 1, size)
+
+          _ ->
+            :none
+        end
+
+      true ->
+        case String.split(spec, "-") do
+          [first_str, ""] ->
+            with {first, ""} <- Integer.parse(first_str), do: clamp_range(first, size - 1, size)
+
+          [first_str, last_str] ->
+            with {first, ""} <- Integer.parse(first_str),
+                 {last, ""} <- Integer.parse(last_str),
+                 do: clamp_range(first, last, size)
+
+          _ ->
+            :none
+        end
+        |> case do
+          {:range, _, _} = ok -> ok
+          :unsatisfiable -> :unsatisfiable
+          _ -> :none
+        end
+    end
+  end
+
+  defp clamp_range(first, last, size) when first >= 0 and first < size and last >= first do
+    {:range, first, min(last, size - 1)}
+  end
+
+  defp clamp_range(_first, _last, _size), do: :unsatisfiable
 
   defp disposition(mime) do
     if MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline"
