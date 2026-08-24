@@ -8,7 +8,7 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the que
 | Surface | What |
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system); `dependencies`/`claim` read-only. |
-| **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / close / move` — manifest-driven (`GET /v1/capabilities`). |
+| **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / close / move` — manifest-driven. |
 | **Terminal TUI** | `bp tasks` (= `bp task tui`) opens the reader; `c`/`x` claim/close (worker `BARKPARK_WORKER_ID`, default `tui-<hostname>`). Keys: [tui cheatsheet](../cheatsheets/tui.md). |
 | **HTTP API** | Sixteen bearer endpoints under `/v1/tasks/*` (read tier): the verbs plus fetch, edges, labels, papers. |
 | **Events** | Each op emits a `mutation_events` row — `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
@@ -42,7 +42,7 @@ The `task` schema auto-registers each boot (idempotent on `(name, dataset)`); tw
 bp capabilities -o json          # or: curl -H "Authorization: Bearer $TOKEN" $API/v1/capabilities
 ```
 
-**3. Create tasks.** Standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose` — why/endgame/importance/relevance + claim/evidence/source —, `estimate`, `due_at`, `outcome`, …); the `task` schema is authoritative. `brief` = the presentation-grade PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback (search, old clients). Author briefs as blocks, not a text wall.
+**3. Create tasks.** Standard mutation envelope. Required content: `kind: "task"` + a valid `lifecycle_status`. Optional: `priority` (0–4, 0 = highest), `assignee`, `parent_id`, `labels`, `papers`, dossier fields (`brief`, `description`, `acceptance_criteria`, `purpose`, `estimate`, `due_at`, `outcome`, …); the `task` schema is authoritative. `brief` = the PortableDoc envelope (`{version: 1, blocks: [...]}`), `description` its text fallback. Author briefs as blocks, not a text wall.
 
 ```bash
 curl -X POST $API/v1/data/mutate/production \
@@ -83,7 +83,7 @@ The contract, precisely:
 
 - **Claim** flips to `in_progress`, stamps `{worker, ts_iso, epoch}`, and bumps the epoch.
 - **Release** — `POST /v1/tasks/:id/release`, holder `worker_id` + `observed_epoch`: `in_progress`→`open`, clears `claim.worker`+`assignee`, bumps the epoch, stamps `released_by`/`released_at`, emits `task.released`.
-- **Stamp** — holder + epoch fenced. `--met` needs evidence **and** `--criterion-text` (exact row wording; index-only met-flip → 409 `criterion_text_required`). `--miss` needs neither — records one of the last 5 attempts, no `met` flip. Emits `task.criterion`; never trips the work-digest fence.
+- **Stamp** — holder + epoch fenced. `--met` needs evidence **and** `--criterion-text` (exact row wording; index-only met-flip → 409 `criterion_text_required`). `--miss` needs neither — records one of the last 5 attempts, no `met` flip. Emits `task.criterion`; never trips the work-digest fence. **Real only once the PUBLISHED row holds it:** refusals are loud (exit 6 + remedy), but a draft-only row's stamp lands where no board reads it, and a `bp` predating #13410 prints a green for it. `make cli-build`; trust the read-back, not the exit code.
 - **Merge gates are the lead's**; PR-body proof dies at merge — close over, never flip ([ADR 0005](../decisions/0005-pr-body-criteria.md)).
 - **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat: renews the lease, emits `task.pulse`. No epoch arg.
 - **Close** needs holder + epoch (`fenced_off` on mismatch). Status defaults `done`; reason + criterion updates (`met:true` needs its `criterion` text) commit in the same rev-CAS. Brief drift → `doc_changed_since_claim`; pass `observed_rev` for strict full-rev CAS.
@@ -91,7 +91,7 @@ The contract, precisely:
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
 - **Criteria progress (advisory).** Envelopes (`get`/`ls`/`ready`/`prime`/children) carry `criteria_progress: {met, total}` — only `met:true` counts, omitted when absent (never `0/0`).
 - **Reader order is contractual.** Criteria first, then the purpose dossier; un-dossiered tasks show facts labelled DERIVED. `why` is causal (the problem/risk), never a title/criterion restatement.
-- **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + `blocks` edges); prime carries `rails: {parent_id → rail_rev}`. `notices`: `blocked_while_claimed`, and `rail_changed` when body `observed_rail_rev` ≠ current. **Allow-and-fence (L4):** a blocker edge or `move` onto an `in_progress` task bumps its epoch (mutator never rejected); the holder's stale close → `fenced_off`, fixed by a same-worker re-claim (epoch bump, digest kept).
+- **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + `blocks` edges); prime carries `rails: {parent_id → rail_rev}`. `notices`: `blocked_while_claimed`, and `rail_changed` when body `observed_rail_rev` ≠ current. **Allow-and-fence (L4):** a blocker edge or `move` onto an `in_progress` task bumps its epoch; the holder's stale close → `fenced_off`, fixed by a same-worker re-claim (epoch bump, digest kept).
 - **Move (re-parent).** `POST /v1/tasks/:id/move` `{new_parent_id}` (null = root) flips `parent_id`, emits `task.reparented` `{from, to}`, returns `rail_rev` (dest) + `from_rail_rev`. Bad parent → 409 `invalid_parent`, self/descendant → `cycle`, same-parent → no-op.
 
 **5. Dependencies, labels, papers.**
@@ -144,7 +144,7 @@ A cmux pane can auto-own its task. `bp cmux install --print` shows the four hook
 
 Open `/studio` → the **Tasks ✅** group. You (form) flip `lifecycle_status`/`priority`/`assignee` and edit titles/descriptions; the agent (API) claims/closes with fencing, adds edges, relabels, links papers. The TUI edits flat fields; composites (`acceptance_criteria`) are Studio/API-only — the API single-writes structured values. Live over PubSub.
 
-The live board at **`/admin/projects`** (`:ops` admin-gated) is a kanban over the same docs: five realtime columns — open · ready · in_progress · blocked · done (cancelled → tally); a claim/close flashes and slides the card, no refresh. Its reader leads with criteria + the purpose dossier. **Drag** restages through the fenced `claim`/`close` primitives (foreign-held card refuses, as does a `done` drop over unmet criteria; `ready` is derived, no drop). **Group**/**filter** via chips in a shareable URL (`?group=&goal=&priority=&label=&worker=`).
+The live board at **`/admin/projects`** (`:ops` admin-gated) is a kanban over the same docs: five realtime columns — open · ready · in_progress · blocked · done (cancelled → tally). Its reader leads with criteria + the purpose dossier. **Drag** restages through the fenced `claim`/`close` primitives (foreign-held card refuses, as does a `done` drop over unmet criteria; `ready` is derived, no drop). **Group**/**filter** via chips in a shareable URL (`?group=&goal=&priority=&label=&worker=`).
 
 ## Goals and phases
 
