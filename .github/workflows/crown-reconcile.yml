@@ -64,9 +64,33 @@
 #   * silence during an Actions outage, and GitHub's 60-day auto-disable of
 #     scheduled workflows in an inactive repo
 #   * the run population is ONE page of 100 successful runs; when that page
-#     fills, the population prints as `N+` rather than being rounded down
+#     fills, the population prints as `N+` rather than being rounded down — and
+#     the run now SAYS the other half of that residual out loud: a delivering
+#     run that fell off the page cannot be counted BEHIND at all, so a truncated
+#     run's silence on those runs is a blind spot, not a clean reading. A ROW
+#     naming a run below the page minimum is no longer accused on a truncated
+#     page (it would be a ghost the truncation manufactured); it is an
+#     UNREADABLE condition by name and lands in rc 2
 #   * the reverse direction reads one bounded page of the newest rows, so a
 #     ghost row older than that page is not seen this run
+
+# THE TWO SIDES ARE SAMPLED APART IN TIME (task-7a85d1b5f471af8f)
+#
+# This job freezes the deploy.yml run list first, then asks the jobs API once
+# per examined run (65 runs on a live window — minutes, not seconds), and only
+# then reads the crown. A row written inside that gap names a run that was NOT
+# TERMINAL when the run list was taken, so `.conclusion == "success"` could not
+# have matched it, and the verdict accused a correct row. Run 32726853411
+# printed `behind=0/65` — nothing was lost — beside `wrong=2/100`, both rows the
+# same sha, written by runs 32726835915 and 32726853417, which started 13s
+# before and in the SAME SECOND as this reconciler.
+#
+# The fix is a WATERMARK, not a tolerance: the run list's state at the instant
+# it was sampled — which runs were non-terminal, and the highest run id that
+# existed — decides whether a row's writer could have been judged at all. Such a
+# row is printed as WRITTEN-IN-FLIGHT with its own count, excluded from BOTH
+# sides, and judged NORMALLY by the next run, where a run that never delivered
+# is WRONG. No accusation is forgiven; one run of latency is spent.
 
 name: crown-reconcile
 
@@ -301,9 +325,16 @@ jobs:
               names a sha no run delivered), or SERVING-UNRECORDED (production
               runs a commit the record has never heard of). The usual cause is
               deploy.yml's `record-delivery` job being gated off by its `if:`,
-              or the run never reaching it.
-            - `2` — a SILENCE: part of what this compares could not be read, the
-              population was empty, or the re-ask list was ABSENT (its memory
+              or the run never reaching it. A row whose writing run was still
+              IN FLIGHT when the run list was sampled is NOT this: it prints as
+              WRITTEN-IN-FLIGHT, is excluded from both sides, and is judged by
+              the next run — the reconciler no longer accuses its own
+              concurrent writers (task-7a85d1b5f471af8f).
+            - `2` — a SILENCE: part of what this compares could not be read, a
+              row named a delivering run older than the truncated run page could
+              see (TRUNCATED-UNJUDGEABLE — a run that fell off a bounded page is
+              not a ghost), the population was empty, or the re-ask list was
+              ABSENT (its memory
               did not survive the run boundary, or the fetch failed). Nothing
               here is a statement that the crown is correct. This arm used to
               `exit 0`. A benign in-flight SERVING GRACE is NOT this: that is
