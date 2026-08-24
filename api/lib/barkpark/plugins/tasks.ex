@@ -566,9 +566,14 @@ defmodule Barkpark.Plugins.Tasks do
   definitions — only the provenance changes (the capabilities controller now
   stamps `source: "plugin:tasks"` instead of `"core"`).
 
-  Thirteen verbs over thirteen routes, all `auth_tier: "read"` (the `/v1/tasks` scope is
-  `:api + :require_token`, NOT admin — claim/close/release are bearer-gated workflow ops,
-  not document mutations):
+  Thirteen verbs over thirteen routes. The GET verbs are `auth_tier: "read"`;
+  every POST verb is `auth_tier: "write"` because the `/v1/tasks` scope is
+  `:api + :require_token + RequireWriteForMutation` — a bearer alone is enough
+  to READ the ledger, and a write-capable permission is required to move it.
+  The tier used to read `"read"` across the board, which made the manifest an
+  accurate description of a surface that should not have existed: a read-only
+  token really could claim, stamp and close (task-a87a3346b8ff736a). NOT admin,
+  either way — these are bearer-gated workflow ops, not document mutations:
 
     * `ls` — `GET /v1/tasks` (paginated). READ, table.
     * `ready` — `GET /v1/tasks/ready` (paginated). READ, table.
@@ -760,7 +765,7 @@ defmodule Barkpark.Plugins.Tasks do
         verb: "claim",
         summary: "Claim a ready task by id.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/claim"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -803,7 +808,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Close a claimed task by id; --set 'criteria:=[…]' updates acceptance criteria in the same atomic write (omitted evidence preserves the stored value; evidence:\"\" clears it). By default fences on a claim-time work digest: if the task's brief (title/description/acceptance_criteria) changed under your claim, the close 409s doc_changed_since_claim and the response names current_rev + changed_fields. To recover: re-read the task, reconcile those changed fields, then close with that current_rev via --set observed_rev=<current_rev> (strict full-rev CAS, bypasses the digest fence). A plain re-read is NOT enough — a same-worker re-read preserves the claim-time work digest, so closing again without observed_rev repeats the same 409. Two honesty gates can also refuse: a done close over unmet acceptance criteria (409 criteria_unmet) and a close by a non-holder (409 not_holder) — each with a loud on-the-record --set override (criteria_override / holder_override); see the set flag.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/close"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -889,7 +894,7 @@ defmodule Barkpark.Plugins.Tasks do
         verb: "release",
         summary: "Release a held task claim without waiting for its lease to expire.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/release"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -925,7 +930,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Stamp ONE acceptance criterion mid-claim: --criterion N (N is the ZERO-BASED index — the first criterion is 0, NOT 1) with either --met --evidence \"…\" (flips the lock; evidence is REQUIRED, non-empty) or --miss --note \"…\" (records the honest attempt on the criterion's attempts list — bounded to the 5 most recent — WITHOUT flipping met). --met ALSO REQUIRES --criterion-text \"<the criterion's exact stored wording>\": the index alone is unverifiable, so an unguarded met-flip is REJECTED (409 criterion_text_required) rather than silently flipping whatever row the index lands on. If the text does not match the row at N the stamp is REJECTED too (409 criteria_mismatch) — nothing is written. --miss needs no text (it flips nothing). A criterion that is a MERGE GATE — the LEAD's to close when the PR merges — REFUSES a --met (409 merge_gated_criterion) unless you pass --merge-gated; a builder flipping one fabricates a done before the PR exists. Holder-only + the same epoch fence as close (a lapsed claim can't stamp — renew via re-claim, then restamp); your own stamps never trip close's work-digest fence. Emits a task.criterion event. Stamp is progress; close is the seal.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stamp"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -1001,7 +1006,7 @@ defmodule Barkpark.Plugins.Tasks do
         verb: "next",
         summary: "Atomically claim the next executable task (priority order by default).",
         http: %{method: "POST", path_template: "/v1/tasks/claim"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "worker_id",
@@ -1044,7 +1049,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Re-parent a task (rail-l3): move it under another task's rail, or omit new_parent_id to move it to the root. Emits a task.reparented event; the response carries the destination rail_rev + the source from_rail_rev.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/move"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -1074,7 +1079,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open, OR the row's OWN current state. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. THE TERMINAL SAME-STATE ADJUDICATION EDGE (PDS wave 25): a same-state no-op is accepted on EVERY status, not just the stageable ones — done→done, blocked→blocked, in_progress→in_progress — so a FINISHED row can record its disposition/reason/reopen-trigger IN PLACE instead of being resurrected to `open` first (which would leave it saying open while carrying claim.closed_by, and put it back in `bp task ready`). It widens ADJUDICATION, not MOVEMENT: the from-state is read from the locked row, never from your input, so state==current is satisfiable only by a row already in that state, and the write set never includes content.claim — a done→done stage leaves lifecycle_status=done and close attribution byte-identical. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. open → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stage"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
@@ -1142,7 +1147,7 @@ defmodule Barkpark.Plugins.Tasks do
         summary:
           "Heartbeat a held claim: write the now-line (what you're doing right now) AND renew the lease (epoch bump + ts refresh) in one atomic write. No epoch arg — pulse survives fence bumps; a lost lease (reaped/released/closed) is 409 not_holder, never a silent re-claim. Boards render claim.now with its ts so a stale pulse reads stale.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/pulse"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{
             name: "doc_id",
