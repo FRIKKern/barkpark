@@ -766,6 +766,9 @@ defmodule BarkparkWeb.TasksController.Params do
   def reason_to_string({:criteria_unmet, indices}) when is_list(indices),
     do: "criteria_unmet:#{Enum.join(indices, ",")}"
 
+  def reason_to_string({:acknowledgement_unposted, issue}),
+    do: "acknowledgement_unposted:#{issue || "?"}"
+
   def reason_to_string({:sentinel_worker_id, worker}), do: "sentinel_worker_id:#{worker}"
   def reason_to_string(other), do: inspect(other)
 
@@ -843,6 +846,23 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|flipped in this very close command do not count — that would be the closer grading its own homework. | <>
         ~s|Stamp them as you prove them (`bp task stamp <id> <worker> <epoch> --criterion N --criterion-text "…" | <>
         ~s|--met --evidence "…"`), or close over them on the record: --set criteria_override="<why it is done anyway>".|
+
+  # The reporter loop (`Github.Acknowledgement`). This refusal must carry three
+  # things the caller cannot get anywhere else: WHO is waiting (someone outside
+  # this ledger, who can only see the issue), WHAT discharges it (a comment plus
+  # the stamp — the stamp alone is a lie, the comment alone is invisible here),
+  # and that `criteria_override` is NOT the escape hatch, because reaching for
+  # the wrong override and finding it works is exactly how this gap would
+  # reopen.
+  def criteria_hint({:acknowledgement_unposted, issue}, :close),
+    do:
+      ~s|this task was BORN from an outsider's GitHub issue#{if issue, do: " (##{issue})", else: ""}, and nobody outside | <>
+        ~s|this ledger can see the close you are about to write — the issue is the only surface they have, and | <>
+        ~s|the bridge already promised them updates there. Post the outcome as a comment on the issue (the fix | <>
+        ~s|with its PR or commit, or why it will not be done), then stamp the ack_gate criterion with the comment | <>
+        ~s|URL as evidence. If the row has no ack_gate criterion it was born before this gate existed — add one. | <>
+        ~s|To close anyway, on the record: --set ack_override="<why the reporter is not being told>". | <>
+        ~s|criteria_override does NOT discharge this: they are different admissions.|
 
   def criteria_hint({:sentinel_worker_id, worker}, _surface),
     do:

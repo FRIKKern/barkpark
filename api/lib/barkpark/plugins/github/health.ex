@@ -17,6 +17,13 @@ defmodule Barkpark.Plugins.Github.Health do
     3. **queue** — the `github_mirror` Oban queue depth by state.
     4. **active / repo** — the settings gate + repo string for the console
        header.
+    5. **unacknowledged** — the REPORTER LOOP census
+       (`Github.Acknowledgement.census/2`): `gh-<num>` rows born from an
+       outsider's issue whose acknowledgement criterion is not stamped met. It
+       is here rather than in its own surface because it is the same question
+       every other section answers — what is this bridge quietly not doing —
+       and because `bp github status` and the `:ops` console already read this
+       map, so the overdue rows reach an operator with no new plumbing.
 
   ## Rules it honors
 
@@ -39,7 +46,7 @@ defmodule Barkpark.Plugins.Github.Health do
   import Ecto.Query
 
   alias Barkpark.Content.MutationEvent
-  alias Barkpark.Plugins.Github.{Conflict, Cursor, Outbox, Settings}
+  alias Barkpark.Plugins.Github.{Acknowledgement, Conflict, Cursor, Outbox, Settings}
   alias Barkpark.Repo
 
   # How many open conflict rows to hand the console as plain maps (newest-first).
@@ -85,7 +92,8 @@ defmodule Barkpark.Plugins.Github.Health do
             executing: non_neg_integer(),
             retryable: non_neg_integer(),
             total: non_neg_integer()
-          }
+          },
+          unacknowledged: Acknowledgement.census()
         }
 
   @doc """
@@ -139,7 +147,8 @@ defmodule Barkpark.Plugins.Github.Health do
       repo: repo,
       conflicts: conflicts_snapshot(repo, dataset),
       datasets: datasets_snapshot(dataset),
-      queue: queue_snapshot()
+      queue: queue_snapshot(),
+      unacknowledged: unacknowledged_snapshot(dataset)
     }
   end
 
@@ -318,6 +327,22 @@ defmodule Barkpark.Plugins.Github.Health do
     @queue_states
     |> Map.new(fn state -> {String.to_atom(state), 0} end)
     |> Map.put(:total, 0)
+  end
+
+  # ---------------------------------------------------------------------------
+  # (4) The reporter loop — unacknowledged intake rows
+  # ---------------------------------------------------------------------------
+
+  # Same `safe/2` posture as every other section: a missing table or a dark
+  # plugin yields an honest empty census rather than a 500 on a health probe.
+  # The zeros are distinguishable from a real quiet bridge by `db_ok`, exactly
+  # as for the other sections.
+  defp unacknowledged_snapshot(dataset) do
+    safe(fn -> Acknowledgement.census(dataset) end, zero_unacknowledged())
+  end
+
+  defp zero_unacknowledged do
+    %{total: 0, closed: 0, open: 0, no_criterion: 0, rows: []}
   end
 
   # ---------------------------------------------------------------------------
