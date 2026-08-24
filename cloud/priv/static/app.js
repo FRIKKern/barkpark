@@ -17172,7 +17172,13 @@
     }
     return '<div class="tier' + (isCurrent ? " tier-current" : "") + (t.free ? " tier-free" : "") + '">' +
       '<div class="tier-name">' + esc(t.name) + "</div>" +
-      '<p class="tier-note">' + esc(t.note) + "</p>" +
+      // cch-tier-note-undefined-render — a note is OPTIONAL prose, so a tier
+      // without one gets no paragraph. See the `.tier .btn` rule in app.css
+      // (margin-top: auto): omitting this <p> also removes the flex spacer that
+      // bottom-aligns the buttons across the grid, and that alignment is now
+      // carried by the button itself. Measured in a browser before and after —
+      // dropping the <p> alone moved this card's button 36px up.
+      (t.note ? '<p class="tier-note">' + esc(t.note) + "</p>" : "") +
       btn +
     "</div>";
   }

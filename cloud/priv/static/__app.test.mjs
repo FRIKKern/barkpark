@@ -13842,6 +13842,80 @@ test("tierCardHtml: a trial team's Free card never offers a doomed checkout (rev
   assert.ok(hooks.tierCardHtml(free, "free", false).includes(">Current plan<"));
 });
 
+// ── cch-tier-note-undefined-render ───────────────────────────────────────────
+//
+// THE FILED ROW IS REFUTED ON ITS STATED HARM, and the refutation is the reason
+// these tests exist in this shape. The row says a note-less PLAN_CATALOG row
+// "renders the literal text 'undefined' to the user". It does not: `esc` opens
+// with `String(s == null ? "" : s)`, and `== null` catches undefined as well as
+// null, so a missing note renders an EMPTY paragraph. Driven through the real
+// renderer, not read off the source — `hooks.tierCardHtml({plan,name}, …)` on
+// merged-main bytes returned `<p class="tier-note"></p>` for an absent, an
+// empty AND a null note, and never the string "undefined".
+//
+// AND THE ROW'S OWN REMEDY WOULD HAVE SHIPPED A DEFECT. "Omit the <p> entirely"
+// is right about the markup and silent about what the markup was DOING:
+// `.tier-note` carries `flex: 1` inside a `flex-direction: column` card, so it
+// is the spacer that bottom-aligns every Subscribe button across the grid.
+// Measured in headless Chrome against the real app.css, three cards at 1200
+// wide with the middle row's note removed:
+//   empty <p> (merged-main behaviour)  buttons at 100.5 / 100.5 / 100.5  aligned
+//   <p> omitted, nothing else changed  buttons at 100.5 /  64.5 / 100.5  36px break
+//   <p> omitted + `.tier .btn { margin-top: auto }`   100.5 / 100.5 / 100.5  aligned
+// Nothing visible is broken TODAY — every shipped catalog row has a note, so
+// the empty paragraph never renders in production. This closes a latent hazard
+// (which is exactly why cch-w50-s1 rewrote a note instead of deleting it) and
+// pays for it with the one declaration that keeps the row of buttons straight.
+
+test("tierCardHtml: an absent, empty or null note renders NO paragraph at all", () => {
+  for (const note of [undefined, "", null]) {
+    const tier = { plan: "supporter", name: "Supporter" };
+    if (note !== undefined) tier.note = note;
+    const html = hooks.tierCardHtml(tier, "free", false);
+    assert.ok(
+      !html.includes('class="tier-note"'),
+      `note ${JSON.stringify(note)} still rendered a tier-note paragraph: ${html}`,
+    );
+    // The rest of the card is untouched — this must not become "render less".
+    assert.ok(html.includes(">Supporter<"), "the tier name still renders");
+    assert.ok(html.includes("Subscribe"), "the tier action still renders");
+  }
+});
+
+test("tierCardHtml: a tier WITH a note still renders it verbatim", () => {
+  const t = { plan: "supporter", name: "Supporter", note: "Managed hosting for your instance." };
+  const html = hooks.tierCardHtml(t, "free", false);
+  assert.ok(
+    html.includes('<p class="tier-note">Managed hosting for your instance.</p>'),
+    `the note paragraph is gone for a tier that HAS one: ${html}`,
+  );
+  // And every shipped catalog row must keep rendering one, or the "nothing is
+  // broken today" half of this finding has quietly stopped being true.
+  for (const row of hooks.planCatalog) {
+    assert.ok(
+      hooks.tierCardHtml(row, "free", false).includes('class="tier-note"'),
+      `catalog row ${row.plan} no longer renders a note — the empty-paragraph case is now REACHABLE in production`,
+    );
+  }
+});
+
+// THE 36 PIXELS, PINNED WHERE THEY ARE PAID. Omitting the paragraph removes the
+// flex spacer, and `margin-top: auto` on the button is what replaces it. This is
+// a SOURCE pin and says so: it asserts the declaration is present, not that the
+// buttons line up — only a browser can assert the pixels, and the numbers in the
+// header above are that measurement, taken by hand against this stylesheet.
+// Deleting the declaration reds here rather than silently breaking the grid.
+test("the tier button carries the alignment the note paragraph used to provide", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const rule = css.match(/\n\.tier \.btn \{([^}]*)\}/);
+  assert.ok(rule, "the `.tier .btn` rule is gone from app.css");
+  assert.match(
+    rule[1], /margin-top:\s*auto/,
+    "`.tier .btn` lost `margin-top: auto` — a tier without a note no longer has the flex spacer that " +
+    "bottom-aligned the buttons, and the measured cost of that is a 36px break in the row",
+  );
+});
+
 // ════════════════════════════════════════════════════════════════════════════
 // gr-p2 launch theater (GR18): conditional rail proof, price-before-charge,
 // failure snap (skipped rows). Appended at the tail (OC9 append-only law).
