@@ -94,7 +94,10 @@ defmodule Barkpark.Search.SurfaceConfig do
   end
 
   defp unknown_key_errors(policy) do
-    case policy |> Map.keys() |> Enum.map(&to_string/1) |> Enum.reject(&(&1 in @typo_policy_keys)) do
+    case policy
+         |> Map.keys()
+         |> Enum.map(&to_string/1)
+         |> Enum.reject(&(&1 in @typo_policy_keys)) do
       [] ->
         []
 
@@ -134,9 +137,14 @@ defmodule Barkpark.Search.SurfaceConfig do
 
   defp fetch_key(policy, key) do
     cond do
-      Map.has_key?(policy, key) -> {:ok, Map.get(policy, key)}
-      Map.has_key?(policy, String.to_existing_atom(key)) -> {:ok, Map.get(policy, String.to_existing_atom(key))}
-      true -> :absent
+      Map.has_key?(policy, key) ->
+        {:ok, Map.get(policy, key)}
+
+      Map.has_key?(policy, String.to_existing_atom(key)) ->
+        {:ok, Map.get(policy, String.to_existing_atom(key))}
+
+      true ->
+        :absent
     end
   rescue
     ArgumentError -> :absent

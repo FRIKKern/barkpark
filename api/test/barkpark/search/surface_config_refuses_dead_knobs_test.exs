@@ -59,12 +59,12 @@ defmodule Barkpark.Search.SurfaceConfigRefusesDeadKnobsTest do
     for strategy <- ~w(none drop_tokens typo_widen) do
       test "#{strategy} is accepted", %{ws: ws} do
         assert {:ok, echo} =
-                  SurfaceConfigs.upsert(
-                    "documents",
-                    @scope,
-                    %{"zeroHitStrategy" => unquote(strategy)},
-                    ws.id
-                  )
+                 SurfaceConfigs.upsert(
+                   "documents",
+                   @scope,
+                   %{"zeroHitStrategy" => unquote(strategy)},
+                   ws.id
+                 )
 
         assert echo["zero_hit_strategy"] == unquote(strategy)
       end
