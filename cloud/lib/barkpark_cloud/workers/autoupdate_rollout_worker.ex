@@ -13,9 +13,12 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
     1. SETTLE — for every in-flight instance (one whose `autoupdate_triggered_at`
        is stamped) re-check its live verdict. If it now reports `current`, the
        update landed: clear the marker. If it has NOT settled within
-       `#{div(20 * 60, 60)} min`, the wave failed to land: clear the marker AND
-       pause the instance's autoupdate so a bad box is contained, not retried in
-       a storm — a human investigates.
+       `#{div(20 * 60, 60)} min`, clear the marker — and pause the instance's
+       autoupdate ONLY if the box actually ANSWERED and still is not current (a
+       measured failure to land, which would otherwise retry in a storm — a human
+       investigates). If the control plane could not READ the box, nothing is
+       paused: `autoupdate_paused` has no automatic clear, and an unreachable box
+       has already left the candidate set on `update_state: "unknown"`.
     2. GATE — if anything is still in flight after the settle pass, STOP. The
        rollout is serial: never start a new instance while a wave is unsettled.
        This IS the health gate — a slow/failing update blocks advancement.
@@ -78,9 +81,17 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
   end
 
   defp settle_one(bp) do
-    # refresh_update_status persists the fresh verdict and never raises; re-read
-    # the row to branch on the just-written state.
-    _ = Registry.refresh_update_status(bp)
+    # THE RETURN VALUE IS THE DISCRIMINATOR, NOT THE RE-READ (task-a207d875e61a2e02).
+    #
+    # `refresh_update_status/1` persists the fresh verdict and never raises, and the
+    # row is re-read below to branch on the just-written state. But the CONTAINMENT
+    # decision cannot be made off that re-read — and this is the same distinction
+    # `refuse_unarmed_resume/2` turns on in `web/router.ex`. `{:ok, _}` is emitted by
+    # exactly one path (a decoded 200: the box answered and we read its body); every
+    # failure rung answers `{:error, reason}` AFTER landing `update_state: "unknown"`.
+    # The re-read cannot tell those apart, because both produce a row that is simply
+    # not `"current"`.
+    measurement = Registry.refresh_update_status(bp)
 
     case Registry.get_barkpark(bp.id) do
       nil ->
@@ -93,12 +104,7 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
             Logger.info("autoupdate: #{fresh.slug} settled current — wave OK")
 
           triggered_expired?(fresh) ->
-            _ = Registry.clear_autoupdate_triggered(fresh)
-            _ = Registry.pause_autoupdate(fresh)
-
-            Logger.warning(
-              "autoupdate: #{fresh.slug} did not settle within grace (state=#{fresh.update_state}) — paused for investigation"
-            )
+            settle_expired(fresh, measurement)
 
           true ->
             # Still within grace and not yet current — keep waiting.
@@ -109,6 +115,66 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
     e ->
       Logger.error("autoupdate: settle failed for #{inspect(bp.id)}: #{Exception.message(e)}")
       :ok
+  end
+
+  # THE GRACE EXPIRED — BUT "DID NOT SETTLE" AND "WE COULD NOT ASK" ARE NOT THE
+  # SAME SENTENCE, and this branch used to write the same flag for both.
+  #
+  # `autoupdate_paused` has NO automatic clear: its only `false` writer anywhere is
+  # the human PATCH on `/v1/barkparks/:id/autoupdate`, behind
+  # `Auth.require_primary_team_admin`. There is a `pause_autoupdate/1` verb and no
+  # resume verb at all. So every entry into it has to earn itself, exactly as the
+  # 503 branch below now does (#13474 / #13551).
+  #
+  # And this timer fires on a HEALTHY box more readily than it looks: applying an
+  # update RESTARTS the BEAM, so a box is EXPECTED to be unreachable for part of its
+  # own settle window. A box that is merely slow — a big rebuild, a loaded ARM host,
+  # a restart under an api/** auto-deploy — crosses the grace while the control
+  # plane simply could not reach it, and was latched off autoupdate for good on a
+  # measurement nobody ever took.
+  defp settle_expired(fresh, {:ok, _measured}) do
+    # MEASURED. The box answered on its own admin route and its body still does not
+    # say `current`: the wave genuinely did not land. This box is ALSO still a
+    # candidate (`update_state` is whatever it reported — typically `"behind"`), so
+    # `order_by: update_checked_at` would hand it straight back and the rollout would
+    # re-trigger it every grace window, forever, while the serial-of-1 gate blocked
+    # every other box behind it. That is the wedge, and containment is the honest
+    # answer to it — the same "last resort, and only where dropping it would wedge"
+    # judgement the 503 branch records below.
+    _ = Registry.clear_autoupdate_triggered(fresh)
+    _ = Registry.pause_autoupdate(fresh)
+
+    Logger.warning(
+      "autoupdate: #{fresh.slug} did not settle within grace (state=#{fresh.update_state}) — " <>
+        "the box answered and is still not current, so it is paused for investigation " <>
+        "(a human must resume it)"
+    )
+  end
+
+  defp settle_expired(fresh, {:error, reason}) do
+    # NEVER MEASURED, so nothing is latched — the fail-open half of
+    # `refuse_unarmed_resume/2`, applied here. We could not reach the box (or could
+    # not read what it sent), so we cannot say the update failed, and refusing on a
+    # measurement we could not take is what creates an unclearable state.
+    #
+    # DROPPING THE PAUSE LEAVES NO WEDGE, which is why this needs no replacement
+    # flag. Every failure rung of `refresh_update_status/1` has already written
+    # `update_state: "unknown"`, and `next_autoupdate_candidate/1` requires
+    # `update_state == "behind"` — so this box is ALREADY out of the candidate set
+    # without any flag, and it re-enters on its own the moment it answers again and a
+    # sweep writes a real verdict back. The pause was pure redundancy here: it bought
+    # no containment the row did not already have, and cost a human PATCH to undo.
+    #
+    # Clearing the in-flight marker is what must still happen: leaving it stamped
+    # would hold the serial-of-1 gate shut and freeze the whole fleet's advancement
+    # behind one unreachable box.
+    _ = Registry.clear_autoupdate_triggered(fresh)
+
+    Logger.warning(
+      "autoupdate: #{fresh.slug} did not settle within grace and the control plane could " <>
+        "not read it (#{inspect(reason)}) — marker cleared, NOT paused; it is already out " <>
+        "of the candidate set on update_state=unknown and re-enters when it answers again"
+    )
   end
 
   defp triggered_expired?(%{autoupdate_triggered_at: nil}), do: false
@@ -200,14 +266,17 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
       # `apply_enabled: true`, `refresh_update_status/1` writes `"armed"`, and
       # the box re-enters the candidate set. Nobody clears a flag.
       #
-      # THE PAUSE SURVIVES AS A LAST RESORT, and only where dropping it would
-      # wedge. If the arming write itself fails, the box stays eligible and
-      # `order_by: update_checked_at` re-picks it every tick forever. A latched
-      # box is bad; a rollout that advances nothing is worse, so a failed write
-      # falls back to the old containment — loudly, because it is now the
-      # abnormal path.
+      # AND THE PAUSE NO LONGER SURVIVES AS A LAST RESORT EITHER
+      # (task-a207d875e61a2e02). It used to: a failed arming write fell back to the
+      # old containment, on the reasoning that "a latched box is bad; a rollout that
+      # advances nothing is worse". That reasoning weighed ONE latched box against a
+      # wedge. It is the wrong weighing, because this branch never stamps
+      # `autoupdate_triggered_at` — so under a PERSISTENT write failure the fallback
+      # does not latch one box, it latches one box per tick until the fleet is gone,
+      # which is the very shape the paragraph above describes as the original bug.
+      # The error arm below states why the fallback could not have helped anyway.
       {:ok, 503, _body} ->
-        case Registry.record_apply_unarmed(bp) do
+        case registry().record_apply_unarmed(bp) do
           {:ok, _} ->
             Logger.warning(
               "autoupdate: #{bp.slug} has no one-click apply (503) — recorded unarmed and " <>
@@ -215,13 +284,34 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
                 "the hourly sweep reads it armed)"
             )
 
+          # AND THE FALLBACK PAUSE IS GONE TOO (task-a207d875e61a2e02). This arm used
+          # to answer a failed arming write with `pause_autoupdate/1`, and it is the
+          # one place in this worker where that could still walk the WHOLE fleet: it
+          # never stamps `autoupdate_triggered_at`, so the serial-of-1 gate never
+          # slowed it — one box latched per 5-minute tick for as long as the write
+          # kept failing, which is precisely the shape #13474 removed from the line
+          # above.
+          #
+          # IT ALSO COULD NOT HAVE WORKED. `record_apply_unarmed/1` writes two columns
+          # of the `barkparks` row through `Repo.update/1`; `pause_autoupdate/1` writes
+          # a third column of the SAME row through the SAME `Repo.update/1`
+          # (`set_autoupdate/2`). Any DB-level reason the first write fails — a dead
+          # pool, a read-only replica, a lock timeout — fails the second identically.
+          # The only failure the fallback could survive is a changeset validation on
+          # the arming attrs specifically, and those attrs are two hardcoded valid
+          # values. So the branch bought containment in no world it can actually reach,
+          # while creating the fleet-walk in every world it can.
+          #
+          # Nothing replaces it. The box stays a candidate and the rollout retries it
+          # next tick, which is correct: a failed arming write is a CONTROL-PLANE fault,
+          # and pausing a customer's box to route around our own DB is the same
+          # category error as pausing one for answering 503 — a measurement treated as
+          # a policy decision.
           {:error, reason} ->
-            _ = Registry.pause_autoupdate(bp)
-
             Logger.error(
               "autoupdate: #{bp.slug} answered 503 and the unarmed record FAILED " <>
-                "(#{inspect(reason)}) — fell back to pausing it, which no code path clears; " <>
-                "a human must resume it after arming"
+                "(#{inspect(reason)}) — NOT paused (a pause writes the same row through " <>
+                "the same Repo and would fail too); will retry next tick"
             )
         end
 
@@ -235,6 +325,18 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
           "autoupdate: #{bp.slug} trigger failed (#{inspect(reason)}) — will retry next tick"
         )
     end
+  end
+
+  # The Registry module the 503 branch records arming through. Resolved at call
+  # time and swappable ONLY via `Application.get_env(:barkpark_cloud, __MODULE__,
+  # [])`, exactly like `Billing.registry/0` (whose docstring states the same
+  # intent): real code always gets the real `Registry`, and the `:registry` key
+  # exists purely so a test can force `record_apply_unarmed/1` to fail and prove
+  # that a persistent arming-write failure pauses NOTHING.
+  @spec registry() :: module()
+  defp registry do
+    Application.get_env(:barkpark_cloud, __MODULE__, [])
+    |> Keyword.get(:registry, Registry)
   end
 
   # Staging first; prod only behind a green staging gate. A behind staging box is

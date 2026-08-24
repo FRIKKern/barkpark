@@ -587,5 +587,41 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
       assert %{id: id} = Registry.next_autoupdate_candidate()
       assert id == bp.id, "eligible again, end to end"
     end
+
+    # task-a207d875e61a2e02, criterion 3. The case above latches a box that is BOTH
+    # settle-failed AND unarmed, so its 409 is correct. This is the other half: a
+    # box latched purely by the settle timer, on a box that is demonstrably ARMED.
+    # The two machine-observed conditions must not collapse into one row shape, or
+    # the sole exit from a machine-set latch gets gated on an irrelevant remedy.
+    test "a settle-latched box that IS armed resumes without the arming refusal" do
+      {user, team} = user_with_team()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      stale = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+      bp = live_behind(team, %{autoupdate_triggered_at: stale})
+
+      # ARMED (apply_enabled: true) and still `behind` after the grace — a MEASURED
+      # failure to land, so the worker contains it.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", true)}}
+      ])
+
+      AutoupdateRolloutWorker.perform(%Oban.Job{})
+
+      latched = Registry.get_barkpark(bp.id)
+      assert latched.autoupdate_paused, "measured failure to settle → contained"
+      assert latched.apply_arming == "armed", "and recorded as armed, not unarmed"
+
+      # The resume probe re-measures and reads `armed`, so refuse_unarmed_resume/2
+      # ALLOWS: the operator is not told to arm a box that is already armed.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 200, body: self_update_body("behind", true)}}
+      ])
+
+      assert patch_autoupdate(bp.id, token, %{"autoupdate_paused" => false}).status == 200,
+             "a settle-latch is not an arming problem and must not be refused as one"
+
+      refute Registry.get_barkpark(bp.id).autoupdate_paused
+    end
   end
 end
