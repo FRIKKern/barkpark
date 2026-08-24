@@ -124,6 +124,23 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
 
   `repo` may be `nil` (a dark plugin with no configured repo); the wording then
   names the issue number alone rather than fabricating a repo it does not know.
+
+  ## THIS TEXT IS READ BY THE REPORTER — write it for both audiences
+
+  Once a maintainer runs `bp github adopt`, the outbound mirror projects the
+  row's `acceptance_criteria` into the ISSUE BODY as a GitHub task list
+  (`Github.Projection.upsert_acceptance_marker/2` — "the charter's flagship
+  liveness signal"). So this sentence lands, unchecked, on the stranger's own
+  issue. That is a good outcome and the wording is chosen for it: a public
+  unchecked box that says an answer is owed is a better promise than the
+  bridge's original "Updates will be posted here", because the reporter can see
+  whether it has been ticked.
+
+  It also means the wording must never contain an internal aside. An earlier
+  draft explained to the closer that "the reporter is OUTSIDE this ledger" — true,
+  addressed to the wrong person, and visible to the very reporter it talks about.
+  Keep every clause true when read from either side; put the explanation for the
+  closer in `criteria_hint/2` and in this moduledoc, where only the closer sees it.
   """
   # @canonical capability:github-reporter-acknowledgement aka:ack_gate,reporter-loop,backlink-obligation,unacknowledged doc:docs/cards/plugins.md
   @spec criterion(String.t() | nil, integer() | String.t()) :: map()
@@ -133,9 +150,8 @@ defmodule Barkpark.Plugins.Github.Acknowledgement do
     %{
       "criterion" =>
         "ACKNOWLEDGED UPSTREAM: the outcome is posted as a comment on #{where} — the fix " <>
-          "with its PR or commit, or the reason this will not be done. Paste the comment URL " <>
-          "as evidence. The reporter is OUTSIDE this ledger: the issue is the only surface " <>
-          "they can see, and the bridge's birth backlink promised them updates there.",
+          "with its PR or commit, or the reason this will not be done — and the comment URL " <>
+          "is recorded here as evidence.",
       "met" => false,
       "evidence" => "",
       @flag => true

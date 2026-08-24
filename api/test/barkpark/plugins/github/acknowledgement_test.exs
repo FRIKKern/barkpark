@@ -17,7 +17,7 @@ defmodule Barkpark.Plugins.Github.AcknowledgementTest do
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content.Document
-  alias Barkpark.Plugins.Github.Acknowledgement
+  alias Barkpark.Plugins.Github.{Acknowledgement, Projection}
   alias Barkpark.Repo
 
   @dataset "production"
@@ -71,6 +71,40 @@ defmodule Barkpark.Plugins.Github.AcknowledgementTest do
       assert criterion["criterion"] =~ "issue #9531"
       refute criterion["criterion"] =~ "nil"
       assert criterion["ack_gate"] == true
+    end
+  end
+
+  describe "criterion/2 reaches the REPORTER, not only the closer" do
+    test "the outbound mirror projects it into the issue body as an unchecked box" do
+      # This is the consequence a wording edit has to be made in full knowledge
+      # of: once a maintainer runs `bp github adopt`, the mirror renders the
+      # row's acceptance_criteria into the ISSUE BODY as a GitHub task list. So
+      # this sentence lands on the stranger's own issue. Pinned as a TEST rather
+      # than as a comment, because a comment cannot stop the next author writing
+      # an internal aside into text the reporter reads.
+      criterion = Acknowledgement.criterion("FRIKKern/barkpark", 9531)
+      body = Projection.upsert_acceptance_marker("the original report", [criterion])
+
+      assert body =~ "### Acceptance criteria"
+      assert body =~ "- [ ] ACKNOWLEDGED UPSTREAM"
+      assert body =~ "FRIKKern/barkpark#9531"
+      # The reporter's own text is preserved outside the fence.
+      assert body =~ "the original report"
+    end
+
+    test "every clause stays true read from the REPORTER's side" do
+      text = Acknowledgement.criterion("FRIKKern/barkpark", 9531)["criterion"]
+
+      # An earlier draft explained to the CLOSER that "the reporter is OUTSIDE
+      # this ledger" — true, addressed to the wrong person, and rendered onto the
+      # issue of the very reporter it talks about. The explanation for the closer
+      # belongs in `criteria_hint/2`, which only the closer ever sees.
+      refute text =~ "OUTSIDE this ledger"
+      refute text =~ "reporter"
+      # and it still says the three checkable things
+      assert text =~ "FRIKKern/barkpark#9531"
+      assert text =~ "PR or commit"
+      assert text =~ "comment URL"
     end
   end
 
