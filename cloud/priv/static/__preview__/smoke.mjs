@@ -3379,8 +3379,8 @@ const EXPECTATIONS = {
     },
   },
   "operator-me-unreadable": {
-    what: "Operator console — /v1/me 500s: the body REPORTS the failed check with a retry, instead of claiming forever that it is checking",
-    check(reg) {
+    what: "Operator console — /v1/me 500s STICKILY: the body REPORTS the failed check, and pressing the retry on a read that fails AGAIN repaints the report rather than stranding the spinner",
+    async check(reg, hooks, ctx) {
       const body = reg.get("operator-body").innerHTML || "";
       // THE DEFECT, DRIVEN. On origin/main this string is the whole body, for
       // the rest of the session: loadOperator branched on `!meCache` alone, and
@@ -3403,6 +3403,123 @@ const EXPECTATIONS = {
       assert.equal(reg.get("nav-operator").hidden, true, "an unknown role never reveals the sidebar entry");
       // …and no operator route was read: the four cards were never painted.
       assert.equal(reg.get("op-brake-body"), undefined, "no operator card is mounted while the role is unknown");
+
+      // cch-w37-bl-operator-retry-click-undriven — THE ARM THE RECOVERY TWIN
+      // CANNOT REACH: a retry whose re-read FAILS TOO. The handler paints the
+      // spinner before it re-reads, so if nothing repaints afterwards the
+      // console is left claiming to check an answer that already came back —
+      // the exact forever-spinner the failed arm was built to end, reachable
+      // again through the exit that was supposed to end it.
+      //
+      // THE ROW'S THIRD REGRESSION IS REFUTED, AND THIS IS WHERE IT DIES. The
+      // row lists "drops the .then" among the regressions that pass every gate.
+      // It passes because it is a NO-OP, not because coverage was missing:
+      // loadMe re-enters this loader from BOTH arms already (app.js — the
+      // success seam and the cch-w37-s6 failure seam, each guarded on
+      // `currentView() === "operator"`), and the retry only exists inside the
+      // operator view. Measured, not read: replacing the handler's
+      // `loadMe().then(…)` with a bare `loadMe()` leaves this whole suite's
+      // output BYTE-IDENTICAL across every scenario (diff rc 0, both rc 0).
+      // The `.then` is belt-and-braces over a seam that already fires — and on
+      // this failing path it makes the failed arm paint twice. No test in this
+      // file claims to catch its deletion, because no observable behaviour
+      // changes when it goes.
+      const ids = [...body.matchAll(/<button[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+      assert.equal(ids.length, 1, "the failed arm must offer exactly one button — found " + JSON.stringify(ids));
+      const btn = reg.get(ids[0]);
+      assert.ok(btn,
+        "#" + ids[0] + " is the id the failed arm renders, and nothing in app.js ever looked it up — " +
+        "the retry's listener is bound to some other node");
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      const fired = btn.click();
+      assert.ok(fired > 0, "#" + ids[0] + " dispatched " + fired + " click handler(s) — the retry is DEAD");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 2, "the retry must re-issue the read exactly once");
+      const after = reg.get("operator-body").innerHTML || "";
+      assert.ok(!after.includes("Checking operator access"),
+        "the retry left the console on the spinner it painted while it waited — the second read failed and nothing " +
+        "repainted the report, which is the forever-spinner this whole arm exists to end; got: " + after);
+      assert.ok(after.includes("We couldn't check your account"),
+        "a retry whose re-read fails too must say so again, not go blank; got: " + after);
+      assert.ok(after.includes(ids[0]), "…and must still offer the retry — one failure does not retire the exit");
+      // STILL FAIL-CLOSED after the press: no route read, no sidebar entry.
+      assert.equal(reg.get("nav-operator").hidden, true, "a failed re-read never reveals the sidebar entry");
+      for (const path of ["/v1/operator/autoupdate", "/v1/operator/fleet", "/v1/operator/warm-pool", "/v1/operator/deliveries"]) {
+        assert.equal(ctx.countCalls("GET", path), 0, "no operator route may be read after a failed retry (" + path + ")");
+      }
+    },
+  },
+  // cch-w37-bl-operator-retry-click-undriven — THE CLICK, WHICH NOTHING DROVE.
+  //
+  // The sibling above asserts the failed BODY renders and carries the retry.
+  // That is the whole of what was proven: no harness in this repo had ever
+  // pressed it. Three regressions passed every gate — a listener wired to the
+  // wrong node, a dropped `.then`, and a loader re-entered on a SUCCESSFUL read
+  // (painting twice and issuing the four operator reads twice). The third is the
+  // one with no analogue on the billing surface, because only this loader fans
+  // out to four routes.
+  //
+  // THE ID IS READ OFF THE RENDERED BODY, NEVER TYPED HERE. This shim's `$("#x")`
+  // AUTO-VIVIFIES, so a listener bound to a node the markup does not contain
+  // still attaches to something — and a hardcoded id in this file would click
+  // that same phantom and report success. Extracting the id from the HTML the
+  // person is actually shown makes "wired to the wrong node" observable: the
+  // click lands on the rendered button, finds no handler, and `fired` is 0.
+  "operator-me-recovers": {
+    what: "Operator console — /v1/me 500s ONCE: the retry is CLICKED, the shell paints, /v1/me is read exactly twice and each of the four operator routes exactly once",
+    async check(reg, hooks, ctx) {
+      const OPS = ["/v1/operator/autoupdate", "/v1/operator/fleet", "/v1/operator/warm-pool", "/v1/operator/deliveries"];
+      const before = reg.get("operator-body").innerHTML || "";
+      assert.ok(before.includes("We couldn't check your account"),
+        "the boot read must FAIL first — without the failed arm there is no recovery to measure; got: " + before);
+      assert.ok(!before.includes("Checking operator access"), "the failed arm is not the spinner");
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 1, "exactly one /v1/me read at boot");
+      for (const path of OPS) {
+        assert.equal(ctx.countCalls("GET", path), 0, "no operator route may be read while the role is unknown (" + path + ")");
+      }
+      assert.equal(reg.get("nav-operator").hidden, true, "the sidebar entry stays hidden while the role is unknown");
+
+      // THE BUTTON THE PERSON SEES, by the id the markup declares.
+      const ids = [...before.matchAll(/<button[^>]*\bid="([^"]+)"/g)].map((m) => m[1]);
+      assert.equal(ids.length, 1, "the failed arm must offer exactly one button — found " + JSON.stringify(ids));
+      // THE REGISTRY IS THE FIRST WITNESS. It holds exactly the ids app.js has
+      // looked up; an id the failed arm RENDERS but nobody ever queried is the
+      // wrong-node bug in its purest form, and it must say so rather than dying
+      // on `undefined.click`.
+      const btn = reg.get(ids[0]);
+      assert.ok(btn,
+        "#" + ids[0] + " is the id the failed arm renders, and nothing in app.js ever looked it up — " +
+        "the retry's listener is bound to some other node");
+      const fired = btn.click();
+      assert.ok(fired > 0,
+        "#" + ids[0] + " dispatched " + fired + " click handler(s) — the retry the failed arm renders is DEAD, " +
+        "or its listener is bound to a node this markup does not contain");
+      await ctx.settle();
+
+      // THE READ RE-ISSUED, AND EXACTLY ONCE. `>= 2` would pass a loader that
+      // re-enters itself forever; the shipped `.then` re-enters ONLY when the
+      // read did not land, so a healed read costs exactly one extra /v1/me.
+      assert.equal(ctx.countCalls("GET", "/v1/me"), 2,
+        "the retry must re-issue /v1/me exactly once — " + ctx.countCalls("GET", "/v1/me") + " total reads");
+
+      const after = reg.get("operator-body").innerHTML || "";
+      assert.ok(!after.includes("We couldn't check your account"), "the failure copy retires once the read lands");
+      assert.ok(!after.includes("Checking operator access"),
+        "the console must not be left on the spinner the retry painted while it waited; got: " + after);
+      // THE SHELL ACTUALLY PAINTED — the four card slots the operator page owns.
+      for (const slot of ["op-brake-body", "op-canary-body", "op-warm-body", "op-digest-body"]) {
+        assert.ok(after.includes(slot), "the operator shell did not mount #" + slot + "; got: " + after);
+      }
+      assert.equal(reg.get("nav-operator").hidden, false, "a proven operator gets the sidebar entry back");
+
+      // THE DOUBLE-READ REGRESSION, NAMED. loadMe's SUCCESS arm re-enters this
+      // loader itself; re-entering again from the retry's `.then` paints the
+      // page twice and reads all four routes twice. Nothing before this
+      // scenario could see it, because nothing pressed the button.
+      for (const path of OPS) {
+        assert.equal(ctx.countCalls("GET", path), 1,
+          path + " was read " + ctx.countCalls("GET", path) + " time(s) — the recovered loader must fan out exactly once");
+      }
     },
   },
   // ── MVP-0 Personal Dev Fleet (pdf-mvp0-fleet-card-spa): the fleet card ─────
