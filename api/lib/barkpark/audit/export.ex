@@ -39,6 +39,7 @@ defmodule Barkpark.Audit.Export do
       }
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias Barkpark.Repo
   alias Barkpark.Audit.{Event, ExportSink}
@@ -47,6 +48,25 @@ defmodule Barkpark.Audit.Export do
   @batch_size 500
   # Mirrors the webhook auto-disable streak threshold.
   @max_consecutive_failures 15
+
+  # Half-open retry. An auto-disabled sink is NOT dead: after a cooldown it
+  # rejoins the flush candidate set for one probe. Entry AND exit are both
+  # automatic, so a transient receiver outage cannot permanently end a
+  # customer's audit-trail ingestion. The cooldown grows with the streak past
+  # the latch threshold (60s, 120s, 240s ... capped) so a receiver that is down
+  # for a week is probed ~24x/day rather than 1440x/day.
+  @retry_base_seconds 60
+  @retry_max_seconds 3600
+  # Bounds the exponent so `2 ** over` can never build a giant integer on a
+  # sink whose streak ran into the thousands.
+  @retry_max_doublings 8
+
+  # Stable, greppable log codes for the two latch transitions. An operator
+  # alerting on `audit_export_sink_auto_disabled` learns the SIEM went dark;
+  # `audit_export_sink_recovered` closes the incident.
+  @disabled_code "audit_export_sink_auto_disabled"
+  @recovered_code "audit_export_sink_recovered"
+  @probe_failed_code "audit_export_sink_probe_failed"
 
   # ── Sink config ──────────────────────────────────────────────────────────
 
@@ -64,11 +84,114 @@ defmodule Barkpark.Audit.Export do
   @spec list_active_sinks() :: [ExportSink.t()]
   def list_active_sinks, do: Repo.all(from s in ExportSink, where: s.active == true)
 
+  @doc """
+  The sinks this tick should attempt: every active sink, PLUS every
+  AUTO-disabled sink whose backoff cooldown has elapsed — a half-open probe.
+
+  A sink that was disabled by a person (`active: false` with no
+  `auto_disabled_at` stamp) is never probed: only the automatic latch has an
+  automatic exit.
+  """
+  @spec list_flush_candidates(DateTime.t()) :: [ExportSink.t()]
+  def list_flush_candidates(now \\ DateTime.utc_now()) do
+    # SQL prefilters on the SHORTEST possible cooldown; the exact per-row
+    # cooldown depends on that row's streak, so it is refined in Elixir over
+    # the (small) disabled set rather than encoded as a SQL expression.
+    earliest = DateTime.add(now, -@retry_base_seconds, :second)
+
+    from(s in ExportSink,
+      where:
+        s.active == true or
+          (not is_nil(s.auto_disabled_at) and s.auto_disabled_at <= ^earliest),
+      order_by: [asc: s.name]
+    )
+    |> Repo.all()
+    |> Enum.filter(&due?(&1, now))
+  end
+
+  @doc """
+  Re-enable a disabled sink directly and restore it to a clean shippable state:
+  `active: true`, `consecutive_failures: 0`, and the `auto_disabled_at` /
+  `disable_reason` stamps cleared. Mirrors `Barkpark.Webhooks.reenable_webhook/1`.
+
+  Idempotent for an already-active sink (it also clears an in-progress streak).
+  This is the MANUAL exit; the automatic one is `list_flush_candidates/1`.
+  """
+  @spec reenable_sink(ExportSink.t()) :: {:ok, ExportSink.t()} | {:error, Ecto.Changeset.t()}
+  def reenable_sink(%ExportSink{} = sink) do
+    sink
+    |> Ecto.Changeset.change(%{
+      active: true,
+      consecutive_failures: 0,
+      auto_disabled_at: nil,
+      disable_reason: nil
+    })
+    |> Repo.update()
+  end
+
+  @doc """
+  Person-facing health of every sink — the queryable surface that makes a dark
+  SIEM VISIBLE instead of silent. `:dark_for_seconds` is how long this sink has
+  been shipping nothing; `:next_retry_at` is when the half-open probe fires.
+  """
+  @spec sink_health(DateTime.t()) :: [map()]
+  def sink_health(now \\ DateTime.utc_now()) do
+    Enum.map(list_sinks(), fn sink ->
+      %{
+        id: sink.id,
+        name: sink.name,
+        workspace_id: sink.workspace_id,
+        status: status(sink),
+        consecutive_failures: sink.consecutive_failures,
+        auto_disabled_at: sink.auto_disabled_at,
+        disable_reason: sink.disable_reason,
+        next_retry_at: next_retry_at(sink),
+        dark_for_seconds: dark_for_seconds(sink, now)
+      }
+    end)
+  end
+
+  defp status(%ExportSink{active: false, auto_disabled_at: nil}), do: :disabled
+  defp status(%ExportSink{active: false}), do: :auto_disabled
+  defp status(%ExportSink{consecutive_failures: n}) when n > 0, do: :degraded
+  defp status(%ExportSink{}), do: :healthy
+
+  defp next_retry_at(%ExportSink{active: true}), do: nil
+  defp next_retry_at(%ExportSink{auto_disabled_at: nil}), do: nil
+
+  defp next_retry_at(%ExportSink{} = sink),
+    do: DateTime.add(sink.auto_disabled_at, cooldown_seconds(sink.consecutive_failures), :second)
+
+  defp dark_for_seconds(%ExportSink{auto_disabled_at: nil}, _now), do: nil
+  defp dark_for_seconds(%ExportSink{active: true}, _now), do: nil
+
+  defp dark_for_seconds(%ExportSink{auto_disabled_at: at}, now),
+    do: DateTime.diff(now, at, :second)
+
+  defp due?(%ExportSink{active: true}, _now), do: true
+  defp due?(%ExportSink{auto_disabled_at: nil}, _now), do: false
+
+  defp due?(%ExportSink{} = sink, now) do
+    DateTime.compare(next_retry_at(sink), now) != :gt
+  end
+
+  # 60s, 120s, 240s ... capped at @retry_max_seconds, keyed off how far the
+  # streak has run PAST the latch threshold (i.e. how many probes have failed).
+  defp cooldown_seconds(failures) do
+    doublings =
+      failures |> Kernel.-(@max_consecutive_failures) |> max(0) |> min(@retry_max_doublings)
+
+    min(@retry_base_seconds * Integer.pow(2, doublings), @retry_max_seconds)
+  end
+
   # ── Flush ──────────────────────────────────────────────────────────────
 
-  @doc "Flush every active sink. Returns the per-sink results."
+  @doc """
+  Flush every candidate sink (active sinks plus auto-disabled sinks whose
+  cooldown elapsed). Returns the per-sink results.
+  """
   @spec flush() :: [term()]
-  def flush, do: Enum.map(list_active_sinks(), &flush_sink/1)
+  def flush, do: Enum.map(list_flush_candidates(), &flush_sink/1)
 
   @doc """
   Ship the events past this sink's cursor. Advances the cursor (and resets the
@@ -158,28 +281,96 @@ defmodule Barkpark.Audit.Export do
 
   # ── Cursor + auto-disable ────────────────────────────────────────────────
 
-  defp advance(%ExportSink{id: id}, max_id) do
-    from(s in ExportSink, where: s.id == ^id)
-    |> Repo.update_all(set: [consecutive_failures: 0, last_exported_id: max_id])
+  # A successful ship CLEARS the latch as well as advancing the cursor: if this
+  # was a half-open probe, the sink is live again with a clean streak. This is
+  # the automatic EXIT that the auto-disable previously had none of.
+  defp advance(%ExportSink{} = sink, max_id) do
+    now = DateTime.utc_now()
+
+    from(s in ExportSink, where: s.id == ^sink.id)
+    |> Repo.update_all(
+      set: [
+        consecutive_failures: 0,
+        last_exported_id: max_id,
+        active: true,
+        auto_disabled_at: nil,
+        disable_reason: nil,
+        updated_at: now
+      ]
+    )
+
+    if not sink.active do
+      Logger.warning(
+        "[#{@recovered_code}] audit export sink #{sink.id} (#{sink.name}) recovered " <>
+          "after #{dark_for_seconds(sink, now)}s disabled; shipping resumed"
+      )
+    end
+
+    :ok
   end
 
+  # Atomic increment (single UPDATE ... RETURNING) so concurrent flushes of the
+  # same sink cannot lose a count the way `sink.consecutive_failures + 1` did.
   defp record_failure(%ExportSink{} = sink, reason) do
-    failures = sink.consecutive_failures + 1
+    {_, rows} =
+      from(s in ExportSink, where: s.id == ^sink.id, select: s.consecutive_failures)
+      |> Repo.update_all(inc: [consecutive_failures: 1])
 
-    if failures >= @max_consecutive_failures do
-      from(s in ExportSink, where: s.id == ^sink.id)
+    case rows do
+      [count] when is_integer(count) ->
+        if count >= @max_consecutive_failures, do: latch(sink, count, reason)
+        {:ok, count}
+
+      _ ->
+        # Row is gone (sink deleted mid-flight) — nothing to count against.
+        {:ok, 0}
+    end
+  end
+
+  # Flip the sink inactive and stamp the latch metadata. The `active == true`
+  # guard makes the FIRST crossing the only one that logs: a later failure (a
+  # half-open probe that failed again) matches zero rows here and falls through
+  # to `restart_cooldown/3`, so the operator gets ONE line per dark interval,
+  # not one per failed tick.
+  defp latch(%ExportSink{} = sink, count, reason) do
+    now = DateTime.utc_now()
+    detail = build_disable_reason(count, reason)
+
+    {flipped, _} =
+      from(s in ExportSink, where: s.id == ^sink.id and s.active == true)
       |> Repo.update_all(
-        set: [
-          consecutive_failures: failures,
-          active: false,
-          auto_disabled_at: DateTime.utc_now(),
-          disable_reason:
-            "auto-disabled after #{failures} consecutive failures: #{inspect(reason)}"
-        ]
+        set: [active: false, auto_disabled_at: now, disable_reason: detail, updated_at: now]
+      )
+
+    if flipped == 1 do
+      Logger.error(
+        "[#{@disabled_code}] audit export sink #{sink.id} (#{sink.name}) auto-disabled: " <>
+          "#{detail}. Audit events are NOT reaching this SIEM. A half-open probe retries " <>
+          "in #{cooldown_seconds(count)}s; Barkpark.Audit.Export.sink_health/1 reports status."
       )
     else
-      from(s in ExportSink, where: s.id == ^sink.id)
-      |> Repo.update_all(set: [consecutive_failures: failures])
+      restart_cooldown(sink, count, detail, now)
     end
+
+    :ok
+  end
+
+  # The half-open probe failed. Push `auto_disabled_at` forward so the NEXT
+  # probe waits out a longer cooldown — without this the stamp stays old, every
+  # tick reads as due, and the "backoff" would retry once a minute forever.
+  defp restart_cooldown(%ExportSink{} = sink, count, detail, now) do
+    from(s in ExportSink, where: s.id == ^sink.id and s.active == false)
+    |> Repo.update_all(set: [auto_disabled_at: now, disable_reason: detail, updated_at: now])
+
+    Logger.info(
+      "[#{@probe_failed_code}] audit export sink #{sink.id} (#{sink.name}) probe failed; " <>
+        "next retry in #{cooldown_seconds(count)}s"
+    )
+  end
+
+  # Bounded so a long transport error can't overflow the `disable_reason` column.
+  defp build_disable_reason(count, reason) do
+    detail = reason |> inspect() |> String.slice(0, 180)
+    "auto-disabled after #{count} consecutive failures: #{detail}"
   end
 end
