@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
+.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -53,6 +53,9 @@ update: ## LOCAL: pull + rebuild bp + deps + migrations + digest of what changed
 
 doctor: ## LOCAL: read-only staleness report (behind? bp stale? migrations pending?)
 	@bash scripts/doctor.sh
+
+reap-test-dbs: ## LOCAL: preview orphaned barkpark_test* databases (DRY RUN; add APPLY=1 to drop)
+	@bash scripts/reap-test-databases.sh $(if $(APPLY),--apply,) $(if $(HOURS),--older-than-hours $(HOURS),)
 
 api: ## Start Phoenix API locally (dev mode)
 	cd api && mix phx.server
