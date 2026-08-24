@@ -100,7 +100,7 @@ function writeBaseline(findings) {
 }
 
 // ── selftest ─────────────────────────────────────────────────────────────────
-// Six arms. The gate must be provably able to RED, provably able to stay
+// Seven arms. The gate must be provably able to RED, provably able to stay
 // SILENT, provably able to tell known from novel, provably still reading files
 // that plain `grep` goes blind on, and provably able to see a cited window that
 // is one line TOO NARROW — plus the control proving that last arm reds on
@@ -118,8 +118,12 @@ function derivePlantTarget() {
     let text;
     try { text = readFileSync(join(ROOT, rel), "utf8"); } catch { continue; }
     const lines = text.split("\n");
-    // A public 0-arity-ish def gives a token the verifier will treat as an anchor.
-    const m = text.match(/^\s{2}def ([a-z_][a-z0-9_]*)\(/m);
+    // A public def whose name CONTAINS AN UNDERSCORE, because that is what the
+    // needle harvester actually picks up: a bare `build` matches no rule (not
+    // snake_case, not CamelCase, not SCREAMING), so a probe anchored on it has
+    // NO anchor and passes only if the filename stem leaks in as one. These arms
+    // used to rest on exactly the leak this change removes.
+    const m = text.match(/^\s{2}def ([a-z_][a-z0-9_]*_[a-z0-9_]+)\(/m);
     if (!m) continue;
     return { base: rel.split("/").pop(), symbol: m[1], beyond: lines.length + 10000 };
   }
@@ -161,6 +165,28 @@ function deriveClipTarget() {
         if (!above.startsWith(p)) return { base, lo: i + 1, hi: j };
       }
       i = Math.max(j, i + 1);
+    }
+  }
+  return null;
+}
+
+// A file whose BASENAME contains an underscore — its stem is then harvested by
+// the snake_case needle rule, which is the whole precondition for the
+// false-positive class arm (g) pins. Returns {base, line} or null.
+function deriveStemTarget() {
+  const { present } = codeCommentCorpus();
+  for (const rel of present) {
+    if (!rel.endsWith(".ex") || rel.includes("/test/")) continue;
+    const base = rel.split("/").pop();
+    if (!/^[a-z][a-z0-9]*_[a-z0-9_]+\.ex$/.test(base)) continue;
+    let text;
+    try { text = readFileSync(join(ROOT, rel), "utf8"); } catch { continue; }
+    const lines = text.split("\n");
+    if (lines.length < 30) continue;
+    // A line comfortably inside the file, and non-blank, so the citation is
+    // unambiguously CORRECT in the only sense the sweep can check.
+    for (let n = 20; n < Math.min(lines.length, 200); n++) {
+      if ((lines[n - 1] || "").trim() !== "") return { base, line: n };
     }
   }
   return null;
@@ -293,6 +319,38 @@ function selftest() {
         );
       }
     }
+
+    // (g) A FILE DOES NOT NAME ITSELF. A citation of the bare form
+    //     `<snake_case_file>.ex:<line>`, carrying no second symbol, leaves the
+    //     filename STEM as the only harvestable token — and a file almost never
+    //     writes its own name in its own body, so demanding that token near the
+    //     cited line is a test the truth cannot pass. On the tree this arm was
+    //     written against, that reddened main on a CORRECT citation
+    //     (`mutate-warnings.test.ts:26` → `dedup_wall.ex:524`, which really is
+    //     `severity: "warning"` inside `defp warning/1`). A gate that reds on
+    //     correct citations gets switched off, and takes the never-worse
+    //     baseline — the only real drift instrument here — with it.
+    const stemT = deriveStemTarget();
+    if (!stemT) {
+      fails.push("(g) SETUP: no underscore-basenamed .ex in the corpus — the stem arm would be vacuous");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The behaviour is described at (${stemT.base}:${stemT.line}).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const stemFindings = linerefFindings([probeRel]);
+      if (stemFindings.length !== 0) {
+        fails.push(
+          `(g) STEM: a CORRECT citation naming only ${stemT.base}:${stemT.line} produced ` +
+            `${stemFindings.length} finding(s) — the filename stem is being demanded as an anchor, ` +
+            "so every bare `<file>:<line>` citation in the repo is a false positive: " +
+            (stemFindings[0].evidence || ""),
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -311,6 +369,7 @@ function selftest() {
   process.stdout.write("  ok: (d) still reads a NUL-containing file that plain grep goes blind on\n");
   process.stdout.write("  ok: (e) bites on an exhaustive claim over a window one line too narrow\n");
   process.stdout.write("  ok: (f) silent on the SAME run cited whole — (e) reds on narrowness, not on ranges\n");
+  process.stdout.write("  ok: (g) silent on a CORRECT bare `<file>:<line>` — the filename stem is not an anchor\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
