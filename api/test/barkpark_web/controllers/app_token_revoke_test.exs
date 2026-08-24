@@ -65,6 +65,30 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
     as(build_conn(), bearer) |> delete("/v1/auth/app-tokens", Jason.encode!(body))
   end
 
+  # FIXTURE REPAIR (task-ea8cae3258ea4bd3). Revoke-by-email now confines to
+  # workspaces the bearer is an ADMIN MEMBER of, and `create_token/4` seats this
+  # suite's admin in the DEFAULT workspace while `mint_app_token/3` mints into a
+  # freshly created one. Minting does not confer authority over the target
+  # workspace — deliberately, since a mint that granted the minter a seat would
+  # be privilege escalation by side effect — so the seat has to be stated.
+  #
+  # This is the same repair `share_link_test.exs:37-44` made for the sibling
+  # arpss-w8 confinement, and for the same reason: a suite that seats every
+  # principal in one workspace cannot express tenancy at all.
+  #
+  # THE REAL DEPLOYMENT DOES NOT NEED THIS, and that is why the confinement is
+  # safe to ship. `Seeds.Clean.mint_admin_token!/2` binds the instance's admin
+  # token to `scope.workspace_id`, and that same workspace is what the control
+  # plane stores as `bootstrap_workspace` and sends back as the mint's
+  # `workspace` param (`Registry.mint_app_token/2`). The Cloud logout path
+  # therefore mints into, and revokes from, the one workspace its stored admin
+  # token already administers.
+  defp grant_workspace_admin!(bearer, ws) do
+    token = Auth.get_api_token_by_raw(bearer)
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin", "api_token")
+    :ok
+  end
+
   # Same revoke, but arriving THROUGH a proxy that names the original caller —
   # the shape every cloud-proxied revoke has now that the control plane relays
   # X-Forwarded-For (Registry.revoke_app_token/3).
@@ -210,6 +234,7 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
     test "revokes every live app:<email> token; count relayed; idempotently 0 on repeat",
          %{admin: admin} do
       ws = create_workspace!()
+      :ok = grant_workspace_admin!(admin, ws)
       email = unique_email()
       raw_a = mint_app_token(admin, email, ws)
       raw_b = mint_app_token(admin, email, ws)
