@@ -132,6 +132,28 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # (`sync_cursors` / `sync_dead_letters` / `sync_push_cursors` moved to E1 — D55.)
   @e3_dataset_keyed ~w(preview_token_jti shares)
 
+  # ── E3-dataset attribution: which of them can name their own tenant (PDS-D74)
+  #
+  # The bare `dataset` slug is unique only per `(project_id, slug)`, so a slug two
+  # workspaces both own attributes to NEITHER — `dataset_slugs_for/1` drops it and
+  # the bare `dataset = ANY(slugs)` copy then selects nothing under it. That is
+  # correct as a REFUSAL and wrong as a silent one; the two E3-dataset tables are
+  # not symmetric about it, so they get different answers:
+  #
+  #   * a table listed here carries its OWN workspace key, so it is exported and
+  #     swept by that column and a shared slug costs it nothing — `workspaces.slug`
+  #     is uniquely indexed (20260527110000), which is what makes a slug column a
+  #     safe tenant key where the `dataset` slug is not;
+  #   * a table NOT listed here has no tenant column at all, so its rows under a
+  #     shared slug are genuinely unattributable. They still do not travel — but
+  #     the bundle DECLARES them, with the slugs and the row count, instead of
+  #     dropping them silently (`WorkspaceBundle`'s `declared_loss` manifest key).
+  #
+  # Absence is the fail-LOUD default: a new E3-dataset table starts unattributable
+  # and shows up in `declared_loss` until someone gives it a real key, rather than
+  # inheriting a predicate that would resolve by slug string across tenants.
+  @e3_dataset_workspace_slug_column %{"shares" => "workspace_slug"}
+
   # The `scope`-column allowlist (charter D4/D5): tables whose tenant key is a
   # bare `scope` string, not a `dataset` column, so the mechanical dataset scan
   # cannot see them.
@@ -221,6 +243,24 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   def e3_doc_keyed, do: @e3_doc_keyed
   def e3_dataset_keyed, do: @e3_dataset_keyed
   def allowlist, do: @allowlist
+
+  @doc """
+  The E3-dataset tables that carry their OWN workspace key, mapped to the column
+  (PDS-D74). ONE source of truth for both halves of the lockstep: the exporter's
+  `copy_where/4` and `Tenancy.delete_workspace/1`'s sweep read the same map, so a
+  table can never be exported by one shape and torn down by another.
+  """
+  @spec e3_dataset_workspace_slug_column() :: %{String.t() => String.t()}
+  def e3_dataset_workspace_slug_column, do: @e3_dataset_workspace_slug_column
+
+  @doc """
+  The E3-dataset tables with NO workspace key of their own — the population whose
+  rows under a cross-tenant-shared dataset slug are genuinely unattributable and
+  must therefore be DECLARED in the bundle rather than silently omitted.
+  """
+  @spec e3_dataset_unattributable() :: [String.t()]
+  def e3_dataset_unattributable,
+    do: @e3_dataset_keyed -- Map.keys(@e3_dataset_workspace_slug_column)
 
   # ── Live enumerations (what the exporter actually reads) ─────────────────────
 
@@ -394,6 +434,22 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     # Every E2 table must have a reviewed join spec; every E3 table a keyed shape.
     for t <- live_e2, not Map.has_key?(@e2_joins, t) do
       raise "WorkspaceBundle.Catalog: E2 table #{inspect(t)} has no extraction join spec"
+    end
+
+    # PDS-D74: an E3-dataset table claimed as workspace-attributable must BE an
+    # E3-dataset table and must really have that column live. Getting either
+    # wrong would render a WHERE over a column that does not exist (a hard COPY
+    # failure) or, worse, quietly exempt a table from the declared-loss sweep.
+    for {t, col} <- @e3_dataset_workspace_slug_column do
+      unless t in @e3_dataset_keyed do
+        raise "WorkspaceBundle.Catalog: #{inspect(t)} claims a workspace slug column " <>
+                "but is not an E3-dataset table"
+      end
+
+      unless col in non_generated_columns(repo, t) do
+        raise "WorkspaceBundle.Catalog: #{inspect(t)} has no live #{inspect(col)} column — " <>
+                "its workspace-attributed export/teardown predicate would be invalid SQL"
+      end
     end
 
     partition =

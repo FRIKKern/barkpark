@@ -1467,7 +1467,7 @@ defmodule Barkpark.Tenancy do
   # Ordered cleanup inside the transaction. Each step short-circuits on
   # error so the transaction rolls back via Repo.rollback in the wrapper.
   defp do_delete_workspace(%Workspace{id: ws_id} = workspace) do
-    with :ok <- delete_workspace_string_keyed(ws_id),
+    with :ok <- delete_workspace_string_keyed(workspace),
          :ok <- delete_workspace_media(ws_id),
          :ok <- prepare_workspace_cycle_teardown(ws_id),
          :ok <- delete_workspace_documents(ws_id),
@@ -1517,22 +1517,30 @@ defmodule Barkpark.Tenancy do
   #     sibling-guard `NOT EXISTS` so a `(doc_id, dataset)` row ALSO owned by a
   #     DIFFERENT workspace (charter D7 — the key is not workspace-unique)
   #     SURVIVES this workspace's teardown.
-  #   * E3 dataset-keyed — `t.dataset = ANY(slugs)`, where `slugs` is the
-  #     PROJECT-QUALIFIED (workspace-EXCLUSIVE) set from
-  #     `WorkspaceBundle.dataset_slugs_for/1`: a slug shared with another
-  #     workspace is dropped, so this bare-slug sweep can never cross-tenant
-  #     delete a co-tenant's rows under the same slug (charter D21).
+  #   * E3 dataset-keyed — SPLIT PER TABLE, exactly as the exporter splits it
+  #     (PDS-D74), off the one shared map
+  #     `Catalog.e3_dataset_workspace_slug_column/0`:
+  #       - a table with its OWN workspace slug column is swept by THAT column
+  #         (`workspaces.slug` is uniquely indexed, so it names one tenant), which
+  #         is the only shape that reaches its rows under a SHARED dataset slug —
+  #         the same rows the export now carries;
+  #       - a table without one keeps `t.dataset = ANY(slugs)` over the
+  #         PROJECT-QUALIFIED (workspace-EXCLUSIVE) set from
+  #         `WorkspaceBundle.dataset_slugs_for/1`: a slug shared with another
+  #         workspace is dropped, so this bare-slug sweep can never cross-tenant
+  #         delete a co-tenant's rows under the same slug (charter D21). Its
+  #         shared-slug rows are LEFT, and the export declares them as loss.
   #   * allowlist — `t.scope = ANY(prefix <> slug)` with the per-table prefix.
   #     The allowlist is EMPTY as of Wave 5 (both `search_surface_config` and
   #     `data_keys` gained a `workspace_id` FK and moved to E1), so this loop
   #     currently matches no table; the shape is retained for any future
   #     bare-`scope` tenant table.
-  defp delete_workspace_string_keyed(ws_id) do
+  defp delete_workspace_string_keyed(%Workspace{id: ws_id, slug: ws_slug}) do
     ws_lit = Catalog.uuid_literal!(ws_id)
     slugs = WorkspaceBundle.dataset_slugs_for(ws_id)
 
     Enum.each(Catalog.e3_doc_keyed(), &delete_e3_doc_keyed(&1, ws_lit))
-    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, slugs))
+    Enum.each(Catalog.e3_dataset_keyed(), &delete_e3_dataset_keyed(&1, ws_slug, slugs))
 
     for {table, prefix} <- Catalog.allowlist() do
       delete_allowlist_scoped(table, prefix, slugs)
@@ -1558,17 +1566,37 @@ defmodule Barkpark.Tenancy do
     )
   end
 
-  # E3 dataset-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_dataset, …)`.
-  # An empty slug set yields `ANY(ARRAY[]::text[])`, which matches nothing.
-  # Reachability: `table` is a pinned `Catalog.e3_dataset_keyed/0` literal via
-  # `qi/1`; `slugs` is rendered by `Catalog.text_array_literal/1`, which
-  # single-quotes and doubles every embedded quote.
+  # E3 dataset-keyed sweep: mirrors `WorkspaceBundle.copy_where(_, :e3_dataset, …)`
+  # — INCLUDING its split (PDS-D74), which is the whole reason both sides read the
+  # same `Catalog.e3_dataset_workspace_slug_column/0` map. Splitting the export
+  # without splitting this sweep is not a cosmetic mismatch: the exporter would
+  # claim a shared-slug `shares` row as this workspace's while the teardown left
+  # it behind, so a workspace that was backed up and then deleted would strand
+  # rows its own bundle said it owned. That desync passed 98 tests, which is why
+  # the binding assertion lives in workspace_bundle_test.exs and not in a comment.
+  #
+  # Reachability: `table` and `col` are pinned `Catalog` literals via `qi/1`;
+  # `ws_slug` and `slugs` are rendered by `Catalog.text_literal/1` /
+  # `text_array_literal/1`, which single-quote and double every embedded quote.
   # sobelow_skip ["SQL.Query"]
-  defp delete_e3_dataset_keyed(table, slugs) do
-    Repo.query!(
-      "DELETE FROM #{qi(table)} t WHERE t.dataset = ANY(#{Catalog.text_array_literal(slugs)})",
-      []
-    )
+  defp delete_e3_dataset_keyed(table, ws_slug, slugs) do
+    where =
+      case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
+        # Safe precisely because `workspaces.slug` is uniquely indexed, so this
+        # names ONE tenant — and it sweeps the shared-slug rows the bare
+        # predicate below cannot touch, exactly the ones the export now carries.
+        {:ok, col} ->
+          "t.#{qi(col)} = #{Catalog.text_literal(ws_slug)}"
+
+        # The bare, workspace-EXCLUSIVE slug set. An empty set yields
+        # `ANY(ARRAY[]::text[])`, which matches nothing — fail-closed: a row
+        # under a shared slug is LEFT (an orphan is recoverable; a cross-tenant
+        # delete is not). The export declares that same population as loss.
+        :error ->
+          "t.dataset = ANY(#{Catalog.text_array_literal(slugs)})"
+      end
+
+    Repo.query!("DELETE FROM #{qi(table)} t WHERE #{where}", [])
   end
 
   # allowlist sweep: mirrors `WorkspaceBundle.copy_where(_, :allowlist, …)` —
