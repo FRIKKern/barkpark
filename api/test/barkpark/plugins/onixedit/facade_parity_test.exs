@@ -108,7 +108,7 @@ defmodule Barkpark.Plugins.OnixEdit.FacadeParityTest do
 
     test "codelist_requirements/0 keeps every list, order intact" do
       reqs = OnixEdit.codelist_requirements()
-      # 2 critical (contributor_role @17, thema @93) + 71 issue-73 lists.
+      # 2 critical (contributor_role @17, thema @1.6) + 71 issue-73 lists.
       assert length(reqs) == 73
 
       assert hd(reqs) == %{
@@ -120,7 +120,7 @@ defmodule Barkpark.Plugins.OnixEdit.FacadeParityTest do
       assert Enum.at(reqs, 1) == %{
                plugin_name: "onixedit",
                list_id: "onixedit:thema",
-               issue: "93"
+               issue: "1.6"
              }
 
       assert List.last(reqs) == %{

@@ -15,6 +15,8 @@ defmodule Barkpark.Plugins.OnixEdit.CodelistSeeders do
   delegate here. The returned values are byte-identical to before.
   """
 
+  alias Barkpark.Codelists.EDItEUR
+
   @plugin_name "onixedit"
 
   @doc """
@@ -50,7 +52,14 @@ defmodule Barkpark.Plugins.OnixEdit.CodelistSeeders do
     [
       # Critical lists pinned in the masterplan (D17 / D21).
       %{plugin_name: @plugin_name, list_id: "onixedit:contributor_role", issue: "17"},
-      %{plugin_name: @plugin_name, list_id: "onixedit:thema", issue: "93"},
+      # Thema's issue is "1.6", not "93". EDItEUR publishes Thema SEPARATELY
+      # from the ONIX codelist bundle, and the numeric ONIX list 93 is
+      # "Supplier role" — a fact `Barkpark.Codelists.EDItEUR` already
+      # documents at length. The 93 that sits next to Thema in book.json is
+      # the `SubjectSchemeIdentifier` VALUE inside ONIX list 27, not a
+      # pointer to an ONIX codelist. Read from the seeder's own pinned
+      # constant so the declaration cannot drift from what boot writes.
+      %{plugin_name: @plugin_name, list_id: "onixedit:thema", issue: EDItEUR.thema_issue()},
 
       # Lists referenced by the book schema. All pinned to ONIX issue 73.
       %{plugin_name: @plugin_name, list_id: "onixedit:notification_type", issue: "73"},
