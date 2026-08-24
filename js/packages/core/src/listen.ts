@@ -22,6 +22,7 @@ import {
   BarkparkEdgeRuntimeError,
   BarkparkNetworkError,
   BarkparkValidationError,
+  assertStreamResponse,
 } from './errors'
 import { detectEdgeRuntime } from './util/edge-detect'
 import { scopePrefix } from './scope'
@@ -260,31 +261,12 @@ export function createListenHandle<T = BarkparkDocument>(
               })
             }
 
-            if (response.status === 401 || response.status === 403) {
-              throw new BarkparkAuthError(`listen: ${response.status} auth failed`, {
-                status: response.status,
-                url: url.toString(),
-              })
-            }
-            if (!response.ok) {
-              throw new BarkparkAPIError(`listen: HTTP ${response.status}`, {
-                status: response.status,
-                url: url.toString(),
-              })
-            }
-            const ct = response.headers.get('content-type') ?? ''
-            if (!ct.includes('text/event-stream')) {
-              throw new BarkparkAPIError(
-                `listen: expected text/event-stream, got ${ct || '(none)'}`,
-                { status: response.status, url: url.toString() },
-              )
-            }
-            if (!response.body) {
-              throw new BarkparkAPIError('listen: response has no body', {
-                status: response.status,
-                url: url.toString(),
-              })
-            }
+            // Shared with exportDataset — same ladder, same order, same
+            // messages; see assertStreamResponse in errors.ts.
+            assertStreamResponse(response, 'listen', {
+              url: url.toString(),
+              contentType: 'text/event-stream',
+            })
 
             reconnectCount = 0 // successful open resets the error counter
 
