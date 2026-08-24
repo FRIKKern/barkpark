@@ -33,12 +33,13 @@ defmodule Barkpark.Plugins.Frt do
 
   (· marks a singleton.)
 
-  All 25 schemas are `visibility: "private"`. Because the host's
-  `Barkpark.Structure.build_settings_group/2` collects every private schema
-  into a "Settings" group, the frt types must be excluded there — otherwise
-  they would render twice (once in our 8 groups, once under Settings). The host
-  harvests plugin schema ownership generically via `owned_schema_types/0`
-  (below), so no per-plugin host edit is needed.
+  All 25 schemas are `visibility: "private"`. The host's desk catch-alls
+  (`Barkpark.Structure.build_settings_group/3` and
+  `build_generic_types_group/3`) collect every schema no curated group
+  claimed, so the frt types must be excluded there — otherwise they would
+  render twice (once in our 8 groups, once in a catch-all). The host harvests
+  plugin schema ownership generically via `owned_schema_types/0` (below), so
+  no per-plugin host edit is needed.
   """
 
   use Barkpark.Plugin,

@@ -17,16 +17,22 @@ defmodule Barkpark.Content.SchemaDefinition do
     # Defaults to `false` → byte-identical to today for every existing schema.
     field :owner_scoped, :boolean, default: false
 
-    # Desk-placement opt-in (issue #8463). A PRIVATE, non-plugin-owned schema
-    # is, by default, generic consumer content — `Barkpark.Structure` gives it
-    # a browsable `:document_type_list` node (same pane the curated host
-    # groups use) so any of a project's own registered types can be opened and
-    # edited in Studio. `singleton: true` opts a schema OUT of that generic
-    # bucket and into the old siteSettings-style behavior instead: a single
-    # `:document` node whose id equals the type name (the config-object shape
-    # — one canonical row, no list to browse). Defaults to `false` → a schema
-    # that never sets this is treated as ordinary content, never silently
-    # buried as a dead singleton. See `Barkpark.Structure.build_settings_group/2`.
+    # Desk-placement opt-in (issue #8463). A non-plugin-owned schema that no
+    # curated host group claimed is, by default, generic consumer content —
+    # `Barkpark.Structure` gives it a browsable `:document_type_list` node
+    # (same pane the curated host groups use) so any of a project's own
+    # registered types can be opened and edited in Studio. `singleton: true`
+    # opts a schema OUT of that generic bucket and into the siteSettings-style
+    # behavior instead: a single `:document` node whose id equals the type
+    # name (the config-object shape — one canonical row, no list to browse).
+    # Defaults to `false` → a schema that never sets this is treated as
+    # ordinary content, never silently buried as a dead singleton.
+    #
+    # This flag is the SOLE desk discriminant. `visibility` below is an access
+    # control and is deliberately NOT consulted for placement (Gyldendal #25):
+    # it defaults to "public", so keying placement on it stranded every schema
+    # registered without an explicit `visibility`.
+    # See `Barkpark.Structure.build_settings_group/3`.
     field :singleton, :boolean, default: false
     field :fields, {:array, :map}, default: []
     field :dataset, :string, default: "production"

@@ -17,14 +17,23 @@ defmodule Barkpark.Structure do
       default, or any promoted plugin). Books follow OnixEdit's
       enablement/placement; Media follows the media plugin's (`:top_menu`
       default = out of the tree). "content-types" (title "Content", issue
-      #8463) is the GENERIC fallback: every private, non-plugin-owned,
-      non-singleton schema — i.e. any consumer-registered type nobody curated
-      a home for — gets a drillable `:document_type_list` row there, so
-      Studio can browse and edit it. "settings" keeps ONLY the schemas that
-      opt into `singleton: true` (the real siteSettings-style config
-      objects) — see `build_settings_group/2` and
-      `build_generic_types_group/2`, which partition the exact same
-      private+unowned set.
+      #8463) is the GENERIC fallback: every non-plugin-owned, non-singleton
+      schema that no curated group claimed — i.e. any consumer-registered
+      type nobody wrote a home for — gets a drillable `:document_type_list`
+      row there, so Studio can browse and edit it. "settings" keeps ONLY the
+      schemas that opt into `singleton: true` (the real siteSettings-style
+      config objects) — see `build_settings_group/3` and
+      `build_generic_types_group/3`, which partition the exact same
+      unowned+uncurated set by that ONE flag.
+
+      Desk placement does NOT consult `visibility` (Gyldendal #25).
+      `visibility` is an ACCESS control (who may read the type over the API);
+      using it to also decide desk curation left a whole class homeless — a
+      schema registered through `POST /v1/schemas/:dataset` defaults to
+      `visibility: "public"`, which matched no group at all, and …Rest is
+      census-driven so a type with zero documents was invisible outright.
+      Which SECTION a consumer wants its type in remains unbuilt; that is the
+      `deskSection` key of Gyldendal #25, tracked separately.
     * **Plugins** — ONE nested `:list` node (`id: "plugins"`) holding the desk
       items of ENABLED plugins with placement `:plugins`, grouped per plugin.
       Emitted only when non-empty.
@@ -137,18 +146,30 @@ defmodule Barkpark.Structure do
       end
 
     # ── MAIN host groups: always top-level, in charter order ──
-    # `build_generic_types_group/2` sits right before Settings: it and
-    # `build_settings_group/2` read the SAME private+unowned schema set and
-    # partition it by the `singleton` flag, so they are kept adjacent here on
-    # purpose (one catch-all immediately followed by the other).
-    host_main = [
+    # The CURATED groups run first because the two catch-alls need to know
+    # which types already have a hand-written home: `curated_types` is the
+    # exact set of type names those groups claimed, so a curated type is never
+    # ALSO dumped into the generic bucket (`paper` is public and curated —
+    # without this it would list twice).
+    curated = [
       build_content_group(schemas),
       build_papers_group(schemas),
       build_sheets_group(schemas),
-      build_taxonomy_group(schemas),
-      build_generic_types_group(schemas, owned_map),
-      build_settings_group(schemas, owned_map)
+      build_taxonomy_group(schemas)
     ]
+
+    curated_types = collect_claimed_types(List.flatten(curated), [])
+
+    # `build_generic_types_group/3` sits right before Settings: it and
+    # `build_settings_group/3` read the SAME unowned, uncurated schema set and
+    # partition it by the `singleton` flag ALONE, so they are kept adjacent
+    # here on purpose (one catch-all immediately followed by the other).
+    host_main =
+      curated ++
+        [
+          build_generic_types_group(schemas, owned_map, curated_types),
+          build_settings_group(schemas, owned_map, curated_types)
+        ]
 
     # ── Placement-driven host groups: books follow OnixEdit, media follows
     # the media plugin. Each returns {main_placed_nodes, plugins_placed_nodes}. ──
@@ -744,14 +765,23 @@ defmodule Barkpark.Structure do
   # their seed definitions (`Barkpark.Seeds.Demo`); an already-deployed
   # instance's existing rows are flipped by the companion backfill migration
   # (`20260726130000_backfill_singleton_for_host_settings_types`).
-  defp build_settings_group(schemas, owned_map) do
+  # `visibility` is NOT consulted here (Gyldendal #25). It is an ACCESS
+  # control — who may read the type over the API — and was doing double duty
+  # as a desk-curation control, which silently cost a public `singleton: true`
+  # schema its home: it matched neither this filter nor the generic one, so it
+  # vanished from the desk entirely (zero documents → not even censused into
+  # …Rest). Desk placement is decided by `singleton` alone; the two jobs are
+  # separated. `curated_types` keeps a hand-curated type (e.g. the public
+  # `paper`) from ALSO landing in a catch-all.
+  defp build_settings_group(schemas, owned_map, curated_types) do
     owned = owned_type_set(owned_map)
 
     private =
       schemas
       |> Map.values()
-      |> Enum.filter(&(&1.visibility == "private" and &1.singleton))
+      |> Enum.filter(& &1.singleton)
       |> Enum.reject(&MapSet.member?(owned, &1.name))
+      |> Enum.reject(&MapSet.member?(curated_types, &1.name))
 
     if private == [] do
       []
@@ -804,14 +834,21 @@ defmodule Barkpark.Structure do
   # set of true singletons; "Content" collapses everything else into one
   # discoverable, growing bucket. See the PR description for the full naming
   # rationale considered.
-  defp build_generic_types_group(schemas, owned_map) do
+  # `visibility` is NOT consulted (Gyldendal #25) — see `build_settings_group/3`.
+  # Before that separation this filter read `visibility == "private"`, so a
+  # consumer who POSTed a schema to `/v1/schemas/:dataset` without a
+  # `visibility` key got the column default `"public"` and NO desk home at
+  # all: not the hardcoded content group, not here, not Settings, and …Rest is
+  # census-driven so a type with zero documents was not even listed there.
+  defp build_generic_types_group(schemas, owned_map, curated_types) do
     owned = owned_type_set(owned_map)
 
     generic =
       schemas
       |> Map.values()
-      |> Enum.filter(&(&1.visibility == "private" and not &1.singleton))
+      |> Enum.reject(& &1.singleton)
       |> Enum.reject(&MapSet.member?(owned, &1.name))
+      |> Enum.reject(&MapSet.member?(curated_types, &1.name))
 
     if generic == [] do
       []
