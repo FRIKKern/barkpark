@@ -445,11 +445,21 @@ jobs:
   # carry. Renaming this job would silently invalidate that ledger row.
   sobelow-baseline-fingerprint:
     name: Sobelow baseline rows still hash to their own fingerprint (blocking)
-    # BLOCKING, and in ITS OWN job for one reason: it needs the BEAM, and the
-    # job above is deliberately BEAM-free (~1s, no deps, no network) because
-    # that is what lets three text ratchets block cheaply. Adding setup-beam
-    # there would spend that property on every run of all three. So this job
-    # pays for the BEAM alone and leaves that one untouched.
+    # WHAT THIS JOB CAN AND CANNOT DO, stated exactly. It carries no
+    # `continue-on-error`, so a failure here fails its own check run AND the
+    # `Security gate` aggregator: it blocks within this workflow, exactly as
+    # the job above does. It does NOT carry merge authority. `Security gate`
+    # is an S7 exclusion in .github/required-checks.json and is not one of the
+    # four contexts branch protection requires, so nothing in this file can
+    # stop a merge on its own. Written out rather than shouted, because the
+    # shouted word would be a claim the committed spec does not back and
+    # scripts/merge-authority-claim-check.sh counts precisely that.
+    #
+    # It is in ITS OWN job for one reason: it needs the BEAM, and the job
+    # above is deliberately BEAM-free (~1s, no deps, no network) because that
+    # is what lets three text ratchets run cheaply. Adding setup-beam there
+    # would spend that property on every run of all three. So this job pays
+    # for the BEAM alone and leaves that one untouched.
     #
     # WHY NOT IN THE `sobelow` JOB, WHICH ALREADY HAS THE BEAM. Because that job
     # is `continue-on-error: true`. A check hosted there renders a red check run
