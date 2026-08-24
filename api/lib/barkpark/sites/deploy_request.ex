@@ -138,7 +138,7 @@ defmodule Barkpark.Sites.DeployRequest do
 
   Returns `{:error, code, message}` with a machine-readable `code`
   (`invalid_slug` | `invalid_build_id` | `invalid_content_rev` |
-  `invalid_mode` | `invalid_runtime_target` | `invalid_template` |
+  `invalid_deploy_mode` | `invalid_runtime_target` | `invalid_template` |
   `invalid_env` | `invalid_artifact` | `invalid_artifact_digest` |
   `artifact_too_large`) on any violation.
   """
@@ -196,7 +196,7 @@ defmodule Barkpark.Sites.DeployRequest do
   defp validate_mode("teardown"), do: {:ok, :teardown}
 
   defp validate_mode(_mode),
-    do: {:error, "invalid_mode", ~s(mode must be "deploy", "rollback", or "teardown")}
+    do: {:error, "invalid_deploy_mode", ~s(mode must be "deploy", "rollback", or "teardown")}
 
   # Runtime target is a CLOSED enum, validated EXACTLY like mode (charter D63):
   # it picks which engine script reaches argv — and later a systemd slot unit

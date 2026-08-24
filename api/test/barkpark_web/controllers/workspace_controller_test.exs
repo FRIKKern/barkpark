@@ -774,7 +774,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       end
     end
 
-    test "503 export_failed with a retry hint when the COPY dies of a transport failure — never a bare 500 internal_error",
+    test "503 export_transport_failed with a retry hint when the COPY dies of a transport failure — never a bare 500 internal_error",
          %{conn: conn} do
       raw_admin = "ws-export-503-#{System.unique_integer([:positive])}"
       {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
@@ -796,7 +796,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       assert resp.status == 503
       body = Jason.decode!(resp.resp_body)
-      assert body["error"]["code"] == "export_failed"
+      assert body["error"]["code"] == "export_transport_failed"
       assert body["error"]["reason"] == "database_unavailable"
       assert body["error"]["message"] != ""
       assert body["error"]["hint"] =~ "Retry"
@@ -1430,7 +1430,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert log =~ ":rollback"
     end
 
-    test "unknown mode → 422 invalid_mode (never silently treated as clean)",
+    test "unknown mode → 422 invalid_import_mode (never silently treated as clean)",
          %{conn: conn, member_ws: member_ws} do
       raw_admin = "ws-merge-bad-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
@@ -1442,7 +1442,7 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
         |> post("/api/workspaces/#{member_ws.slug}/import?mode=sideways", "never-imported")
 
       assert resp.status == 422
-      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_mode"
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_import_mode"
     end
   end
 

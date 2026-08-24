@@ -139,7 +139,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
   defp build_xlsx(doc, slug) do
     case XlsxExport.to_binary(doc.content || %{}, "#{slug}.xlsx") do
       {:ok, binary} -> {:ok, binary}
-      {:error, message} -> {:error, :unprocessable_entity, "export_failed", message}
+      {:error, message} -> {:error, :unprocessable_entity, "export_build_failed", message}
     end
   end
 

@@ -1228,7 +1228,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
     end
 
     test "rejects an unknown mode (never String.to_atom on request data)" do
-      assert {:error, "invalid_mode", _} = DeployRequest.new(%{"slug" => "s", "mode" => "nuke"})
+      assert {:error, "invalid_deploy_mode", _} = DeployRequest.new(%{"slug" => "s", "mode" => "nuke"})
     end
 
     test "runtime_target defaults to :static and accepts the closed enum (charter D63)" do

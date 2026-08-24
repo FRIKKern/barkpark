@@ -308,11 +308,11 @@ defmodule Barkpark.Tenancy.WorkspacePullProvenanceTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_bundle"
     end
 
-    test "the CONTROL still holds: an unknown mode is 422 invalid_mode", ctx do
+    test "the CONTROL still holds: an unknown mode is 422 invalid_import_mode", ctx do
       resp = import_body(ctx, "", "?mode=bogus")
 
       assert resp.status == 422
-      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_mode"
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_import_mode"
     end
   end
 

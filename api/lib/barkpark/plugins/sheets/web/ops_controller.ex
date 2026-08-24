@@ -32,7 +32,8 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
   Whole-request errors: 404 for an unknown slug, 422
   when the body carries no `"ops"` list or the list exceeds the per-call
   batch bound (`Session.max_ops_per_call/0` — split and resend), 503 when
-  the session died twice in a row (`session_unavailable` — retry shortly).
+  the session died twice in a row (`session_restarting` — retry shortly); a
+  session that could not start at all answers 422 `session_start_failed`.
 
   ## Exactly-once retry (`request_id`)
 
@@ -142,7 +143,7 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
         |> put_status(:service_unavailable)
         |> json(%{
           error: %{
-            code: "session_unavailable",
+            code: "session_restarting",
             message: "the sheet session is restarting — retry shortly"
           }
         })
@@ -151,7 +152,7 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{
-          error: %{code: "session_unavailable", message: "the sheet session could not start"}
+          error: %{code: "session_start_failed", message: "the sheet session could not start"}
         })
     end
   end

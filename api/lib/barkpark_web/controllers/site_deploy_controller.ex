@@ -16,7 +16,7 @@ defmodule BarkparkWeb.SiteDeployController do
     * **503** `feature_not_configured` — the box has not opted in
       (`BARKPARK_SITE_DEPLOY_APPLY=1`). Fail-closed default.
     * **400** `invalid_slug` / `invalid_build_id` / `invalid_content_rev` /
-      `invalid_mode` / `invalid_env` / `invalid_artifact` /
+      `invalid_deploy_mode` / `invalid_env` / `invalid_artifact` /
       `invalid_artifact_digest` / `artifact_too_large` — nothing reaches argv or
       the child's env until `Barkpark.Sites.DeployRequest` has validated it.
     * **400** `E_DIGEST_MISMATCH` / `E_NOT_GZIP` / `E_NOT_BASE64` /

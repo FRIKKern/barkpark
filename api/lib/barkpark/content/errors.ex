@@ -168,7 +168,13 @@ defmodule Barkpark.Content.Errors do
                          # Sheets ops API — plugins/sheets/web/ops_controller.ex
                          "malformed_ops",
                          "batch_too_large",
-                         "session_unavailable",
+                         # SPLIT (was one `session_unavailable` answering two
+                         # statuses): 503 when the session is restarting after a
+                         # crash loop (retryable, carries retry-after), 422 when
+                         # it could not start at all (permanent). One token could
+                         # not carry both retryability contracts.
+                         "session_restarting",
+                         "session_start_failed",
                          "invalid_request_id",
                          # Media collection share link expired — v1/media_collections_controller.ex
                          "share_expired",
@@ -185,7 +191,13 @@ defmodule Barkpark.Content.Errors do
                          # fail-closed guard (403), an unknown import mode (422),
                          # and a workspace-slug collision on adopt (409).
                          "bundle_import_disabled",
-                         "invalid_mode",
+                         # SPLIT (was `invalid_mode`, shared with the UNRELATED
+                         # site-deploy mode validator at a different status):
+                         # this is the bundle-IMPORT mode (422).
+                         "invalid_import_mode",
+                         # …and this is the site-DEPLOY mode (400,
+                         # sites/deploy_request.ex).
+                         "invalid_deploy_mode",
                          "workspace_slug_conflict",
                          # A bundle row colliding with resident target content on
                          # a constraint the merge arbiter does not cover (any
@@ -219,7 +231,13 @@ defmodule Barkpark.Content.Errors do
                          "insufficient_disk_space",
                          # Workspace bundle EXPORT (PDS W3) — v1/workspace_controller.ex:
                          # the export stream failed or timed out before the tar completed.
-                         "export_failed",
+                         # SPLIT (was one `export_failed` answering two statuses
+                         # with opposite retryability): the workspace bundle
+                         # export's transport failure is 503 and RETRYABLE…
+                         "export_transport_failed",
+                         # …while the sheets xlsx build failure is 422 and
+                         # PERMANENT (plugins/sheets/web/export_controller.ex).
+                         "export_build_failed",
                          # Chat transport send/create failures (chat_controller.ex,
                          # charter D26 reason split — mobile/TUI clients branch on
                          # these: 5xx → transient retry, 4xx → refused/permanent).
