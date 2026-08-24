@@ -300,6 +300,14 @@ defmodule Barkpark.Plugins.Github.Health do
   # (3) Queue depth
   # ---------------------------------------------------------------------------
 
+  # Both `String.to_atom` calls below walk @queue_states, a compile-time literal
+  # (`~w(available scheduled executing retryable)`), so no user input can reach
+  # the atom table. MIGRATED FROM `.sobelow-skips` (felix-w24-bl-staleness-line-anchor):
+  # a baseline row is pinned to a file:LINE, so adding the reporter-loop census
+  # section to this module's moduledoc silently moved both call sites and killed
+  # both waivers — the exact drift the media.ex precedent documents. An
+  # annotation binds by AST adjacency to the def below and survives line moves.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp queue_snapshot do
     safe(
       fn ->
@@ -323,6 +331,7 @@ defmodule Barkpark.Plugins.Github.Health do
     )
   end
 
+  # sobelow_skip ["DOS.StringToAtom"]
   defp zero_queue do
     @queue_states
     |> Map.new(fn state -> {String.to_atom(state), 0} end)
