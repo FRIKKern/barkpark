@@ -6,7 +6,7 @@ import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { SAMPLE_LISTINGS, type Listing } from "@/lib/listings-data";
 import { paperTags, type PaperTag } from "@/lib/paper-tags";
-import { collectAllPages } from "@/lib/paginate";
+import { collectAllPages, readQueryPage, type FetchedPage } from "@/lib/paginate";
 
 /**
  * The data layer for the listing-directory landing — the map's source of pins.
@@ -40,7 +40,15 @@ const LISTINGS_TYPE = process.env.LISTINGS_TYPE || "";
  * PER-PAGE size for the offset walk below (task-269eefbe4864d8a5): this used
  * to be the only page fetched, so a corpus over `LISTINGS_LIMIT` silently lost
  * pins with no error signal — latent while `LISTINGS_TYPE` is unset, but real
- * the moment a deployment turns this source on against a corpus that size. */
+ * the moment a deployment turns this source on against a corpus that size.
+ *
+ * This value is read from the ENVIRONMENT with no upper bound, which made it
+ * the one reachable instance of the clamped-page defect
+ * (task-6eb2d810605b1a41): the query API clamps `limit` to 1000, so
+ * `LISTINGS_LIMIT=2000` used to serve 1000 pins and report a CLEAN walk.
+ * `collectAllPages` now clamps the page size to `SERVER_MAX_PAGE_LIMIT` and
+ * warns, and `fetchListingsPage` hands it the server's exact `hasMore` —
+ * so an over-large value here costs an extra page, never a silent prefix. */
 const LISTINGS_LIMIT = Number(process.env.LISTINGS_LIMIT) || 500;
 /** Bounds the walk so a misbehaving upstream that never serves a short page
  * can't spin it forever — mirrors PAPERS_MAX_PAGES / POSTS_MAX_PAGES
@@ -141,13 +149,20 @@ function normalizeListing(raw: unknown): Listing | null {
 
 /* ── upstream fetch ─────────────────────────────────────────────────────── */
 
-/** Fetch one page of published listings of `LISTINGS_TYPE`. Returns null on a
- * failed fetch (the `collectAllPages` "page failed" signal) rather than
- * throwing, EXCEPT the first page — see `rawListings` for why. */
+/** Fetch one page of published listings of `LISTINGS_TYPE`, WITH the query
+ * API's exact truncation signal. Returns null on a failed fetch (the
+ * `collectAllPages` "page failed" signal) rather than throwing, EXCEPT the
+ * first page — see `rawListings` for why.
+ *
+ * `hasMore` is always present on the query envelope as of
+ * `query_controller.ex:97-130` and answers "is there a row past this page"
+ * EXACTLY; `nextOffset` rides along when a next page exists. Passing both up
+ * means the walk never has to guess from page length — see
+ * `lib/paginate.ts`'s law. */
 async function fetchListingsPage(
   limit: number,
   offset: number,
-): Promise<unknown[]> {
+): Promise<FetchedPage> {
   const qs = new URLSearchParams({
     "filter[status]": "published",
     limit: String(limit),
@@ -167,13 +182,11 @@ async function fetchListingsPage(
     throw e;
   }
 
-  // Accept both the query envelope (`{ result: { documents } }`) and a bare
-  // array, so the seam survives a minor API shape drift.
-  return Array.isArray(json)
-    ? json
-    : (((json as { result?: { documents?: unknown[] } })?.result?.documents ??
-        (json as { documents?: unknown[] })?.documents) ||
-      []);
+  // The envelope reader lives in `paginate.ts` (which imports nothing, so it
+  // ships and is tested as one artifact) and is the single place that knows
+  // where `hasMore`/`nextOffset` sit. Accepts the `{ result: { documents } }`
+  // envelope and a bare array alike, so the seam survives a minor shape drift.
+  return readQueryPage(json);
 }
 
 /** Raw, uncached query for published listings of `LISTINGS_TYPE`, walked page
