@@ -299,28 +299,28 @@ defmodule Barkpark.Tasks.DedupTest do
       # `DISTINCT ON (canonical doc_id) ASC` key — the same construction that put
       # every live `task-*` id past the cut on guerrilla.
       #
-      # The filler titles deliberately SHARE WORDS with the probe ("rate
-      # limiting …"), so they clear the trgm net and stay in the candidate set.
-      # Unrelated filler would simply be pre-filtered away, and a cap test whose
-      # filler never reaches the cap proves nothing about which rows the cap
-      # keeps. They stay well under the refuse threshold: the probe's scored
-      # tokens are {rate, limiting, mutate, controller} and each filler drowns
-      # the two it shares in six it does not.
+      # THE FILLER TITLES ARE TUNED ON TWO AXES AT ONCE, and the test is vacuous
+      # if either one is wrong.
+      #
+      #   1. TRIGRAM-NEAR the probe, so they clear @candidate_trgm_floor and are
+      #      actually IN the candidate set the cap then cuts. A first draft used
+      #      "rate limiting for the release notes generator …" — it shares two
+      #      WORDS but few trigrams, so the pre-filter dropped both fillers, the
+      #      candidate set was {z-dupe} alone, and every cap kept the duplicate
+      #      no matter how it was ordered. The test passed while proving nothing:
+      #      mutating the ORDER BY left it green.
+      #   2. TOKEN-FAR, so they cannot themselves refuse. Once stopwords go, the
+      #      probe scores {rate, limiting, mutate, controller} and each filler
+      #      shares only {rate} out of a seven-token union — Jaccard 0.14, well
+      #      under the 0.30 advise floor.
+      #
+      # Near-misspellings of the probe satisfy both: almost the same string,
+      # almost none of the same words.
       {:ok, _} =
-        create_task(
-          "a-filler-one",
-          "rate limiting for the release notes generator and sitemap export pipeline",
-          scope,
-          %{}
-        )
+        create_task("a-filler-one", "add rate throttling to the mutation controllers", scope, %{})
 
       {:ok, _} =
-        create_task(
-          "b-filler-two",
-          "rate limiting on the onix codelist validator and bokbasen delivery job",
-          scope,
-          %{}
-        )
+        create_task("b-filler-two", "add rate limiters to the mutating controls", scope, %{})
 
       {:ok, _} =
         create_task("z-dupe", @rate_limit, scope, %{"description" => @rate_limit_desc})
@@ -541,16 +541,27 @@ defmodule Barkpark.Tasks.DedupTest do
 
     # ARM B. A pre-filter that refused everything would pass arm A and still be
     # worthless, so the non-duplicate has to keep sailing through.
-    test "a genuinely distinct task still PASSES the pre-filtered query", %{scope: scope} do
+    #
+    # THE NEWCOMER'S TITLE IS A NEAR-MISSPELLING OF THE INCUMBENT'S, ON PURPOSE.
+    # An obviously-unrelated title ("render onix codelist 153 …") would be
+    # dropped by the trgm net before scoring, so the create would succeed no
+    # matter what the threshold said — the test would pass even with the refuse
+    # threshold dropped to 0.0, proving nothing about the decision. A trigram-
+    # near, token-far title keeps the candidate IN the set and forces the
+    # THRESHOLD to be the thing that lets it through: shared tokens are {rate}
+    # against a seven-token union, Jaccard 0.14, under the 0.30 advise floor.
+    test "a candidate that IS scanned but scores below the threshold still PASSES", %{
+      scope: scope
+    } do
       {:ok, _} =
         create_task("prefilter-other", @rate_limit, scope, %{"description" => @rate_limit_desc})
 
       assert {:ok, _} =
                create_task(
                  "prefilter-distinct",
-                 "render onix codelist 153 in the bokbasen export",
+                 "add rate throttling to the mutation controllers",
                  scope,
-                 %{"description" => "map audience codes onto the ONIX 3.0 codelist"}
+                 %{"description" => "cap concurrent writes per workspace in the sync fanout"}
                )
     end
 
