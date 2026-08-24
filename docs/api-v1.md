@@ -13,9 +13,7 @@ A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Docum
 
 ## 2. Base URL & Authentication
 
-```
-Base URL: http://<host>:4000
-```
+Base URL: `http://<host>:4000`
 
 Private endpoints need `Authorization: Bearer <token>`. Dev: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + configured defaults + Cloud origins.
 
@@ -27,7 +25,7 @@ Markers: **[public]** = no token (schema-visibility gated) · **[token]** = any 
 
 ## 3. Document Envelope
 
-Payload under `result`, plus four outer keys: `schemaHash` (hex digest of the dataset schema) · `etag` (change token; the HTTP `ETag`/304 ride an anonymous, UNSHAPED read only — a token or `?fields=`/`?expand=` withdraws both; `Vary: Authorization` always) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
+Payload under `result`, plus four outer keys: `schemaHash` (dataset schema digest) · `etag` (change token; `ETag`+304 only on anonymous reads with no `?fields=`/`?expand=`) · `ms` (server ms, int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
@@ -51,13 +49,13 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
-| `expand` | — | `true` (all refs) \| `field1,field2` (named refs). §5a. |
+| `expand` | — | `true` (all refs) \| `field1,field2` (named refs). |
 
 **Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` = next offset when more.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch one document by id. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4): `drafts` prefers the `drafts.` twin, else published.
+Fetch one document. 404 if missing or the schema is `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published.
 
 ### 5a. Reference Expansion
 
