@@ -257,7 +257,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
 		emitHelpHints(out, respBody)
 	}
-	return handleResponse(out, cmd, status, respBody)
+	return handleResponse(out, m, cmd, status, respBody)
 }
 
 // resolveView decides the ?view= projection for a CLI invocation (AXI R1,
@@ -1551,8 +1551,10 @@ func renderError(out *writer, ae apiError) {
 	}
 }
 
-// handleResponse renders a success or maps an error body to an exit code.
-func handleResponse(out *writer, cmd manifest.Command, status int, respBody []byte) int {
+// handleResponse renders a success or maps an error body to an exit code. It
+// takes the manifest, not just the command, so a refusal can name the command
+// that would ANSWER it — see notFoundHint.
+func handleResponse(out *writer, m *manifest.Manifest, cmd manifest.Command, status int, respBody []byte) int {
 	if status >= 200 && status < 300 {
 		renderSuccess(out, cmd, respBody)
 		return exitOK
@@ -1565,6 +1567,14 @@ func handleResponse(out *writer, cmd manifest.Command, status int, respBody []by
 	// diagnoses are not interchangeable. Per-invocation state on the writer, not
 	// a package global: one writer per bp run.
 	out.lastErrorCode = ae.code
+	// A not_found the server did not annotate gets the remedy derived from the
+	// command that was actually dispatched, rather than the code table's
+	// one-size-fits-all document answer. serverHint still outranks it — the
+	// server knows more than we do — and notFoundHint returns "" rather than
+	// inventing a verb the manifest cannot confirm.
+	if ae.code == "not_found" && ae.serverHint == "" {
+		ae.localHint = notFoundHint(m, cmd)
+	}
 	renderError(out, ae)
 	return ae.exit
 }

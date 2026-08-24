@@ -44,7 +44,7 @@ func runAllVsSingle(t *testing.T, body string) (allOut, singleOut string, allCod
 	var singleStdout, singleStderr bytes.Buffer
 	sout := newWriter(&singleStdout, &singleStderr)
 	sout.output = "json"
-	if code := handleResponse(sout, cmd, 200, []byte(body)); code != exitOK {
+	if code := handleResponse(sout, nil, cmd, 200, []byte(body)); code != exitOK {
 		t.Fatalf("single-page exit = %d, want %d; stderr=%q", code, exitOK, singleStderr.String())
 	}
 	return allStdout.String(), singleStdout.String(), allCode

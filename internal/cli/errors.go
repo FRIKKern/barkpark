@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
 // apiError is the decoded outcome of a non-2xx (or error-shaped) API response.
@@ -20,6 +21,16 @@ type apiError struct {
 	message    string
 	requestID  string
 	serverHint string // envelope `hint` field — the server's per-error fix suggestion
+	// localHint is a hint derived from the DISPATCHED COMMAND rather than from
+	// the error code alone. The code-keyed table below cannot see which command
+	// ran, so its not_found entry had to describe one shape and described the
+	// document one: "check the type/id and --dataset; run `bp schema ls` to list
+	// types". On `bp token revoke <id>` both halves are wrong — that route
+	// carries no :dataset, and `bp schema ls` lists content schemas, which
+	// cannot tell you a token id. notFoundHint fills this in when the manifest
+	// can name the enumerating sibling verb for real. Ranked below serverHint
+	// (the server knows most) and above the code table (which knows least).
+	localHint string
 	// details is the envelope `details` object VERBATIM, kept as raw JSON. The
 	// server sets it on 18 error paths and its shape is per-code — {field:[…]}
 	// for validation_failed, {field,rule,fix,index} for label_spine,
@@ -874,6 +885,9 @@ func (e apiError) hint() string {
 	if e.serverHint != "" {
 		return e.serverHint
 	}
+	if e.localHint != "" {
+		return e.localHint
+	}
 	switch e.code {
 	case "not_found", "schema_unknown":
 		return "check the type/id and --dataset; run `bp schema ls` to list types"
@@ -913,6 +927,89 @@ func (e apiError) hint() string {
 	default:
 		return ""
 	}
+}
+
+// enumeratingVerbs are the verb names a noun uses for "show me what exists",
+// most specific first. `ls` is the house style; `browse` is the tag reads and
+// `inbox` the tickets operator queue, both of which are the only enumeration
+// their noun has. `mine` is deliberately absent — `access mine` lists only the
+// caller's own grants, so naming it as the way to find an id you were refused
+// would point at a strictly smaller set than the one you are looking in.
+var enumeratingVerbs = []string{"ls", "list", "browse", "inbox"}
+
+// notFoundHint derives the remedy for a not_found refusal from the command that
+// was actually dispatched, or returns "" when it cannot name one honestly.
+//
+// The code-keyed hint table cannot see the command, so its single not_found
+// entry describes the document shape for every noun: "check the type/id and
+// --dataset; run `bp schema ls` to list types". That text only reaches the user
+// when the SERVER sent no hint of its own, which is the case for the twelve
+// controllers carrying a private not_found/2 that emits {code, message} and
+// nothing else. Measured live against guerrilla.barkpark.cloud, six of twelve
+// probed refusals landed there: token revoke, workspace member-rm, access show,
+// ticket show, ticket-key rotate and task get. The rest — doc, media, secret,
+// schema, webhook — carry a server hint, which still outranks this.
+//
+// On `bp token revoke <id>`, the verb you reach for when a credential has
+// leaked, both halves of the fallback are false: that route is
+// /w/:ws/p/:proj/v1/tokens/:id and carries no :dataset, and `bp schema ls`
+// lists content schemas, which can never tell you a token id. The remedy was
+// `bp token ls`, one command away, and the refusal did not mention it.
+//
+// The verb is looked up in the SAME manifest that produced the failing command,
+// never guessed. That is the point: a hint naming a command that does not exist
+// costs the reader an extra failed run and teaches them to stop trusting hints,
+// so when the manifest cannot confirm a sibling this returns "" and the
+// code-keyed table answers exactly as before.
+func notFoundHint(m *manifest.Manifest, cmd manifest.Command) string {
+	if m == nil || cmd.Noun == "" {
+		return ""
+	}
+	verb := enumeratingSibling(m, cmd)
+	if verb == "" {
+		return ""
+	}
+	// The dataset clause is earned, not assumed: it is added only when the route
+	// actually carries a :dataset placeholder. Telling someone to check
+	// --dataset on a workspace-scoped route is the same species of wrong answer
+	// this function exists to remove.
+	if cmd.PathPlaceholders()["dataset"] {
+		return fmt.Sprintf("run `bp %s %s` to see what exists, and check --dataset — this route is dataset-scoped", cmd.Noun, verb)
+	}
+	return fmt.Sprintf("run `bp %s %s` to see what exists (this route is not dataset-scoped, so --dataset cannot affect it)", cmd.Noun, verb)
+}
+
+// enumeratingSibling picks the verb under cmd's noun that lists the things cmd
+// was looking for, or "" when the manifest declares none.
+//
+// The noun alone is too coarse. `workspace` carries ls, member-ls, project-ls
+// and dataset-ls, so a `workspace member-rm` refusal answered with `bp
+// workspace ls` names a command that lists WORKSPACES — it cannot show the seat
+// whose id was rejected, and pointing at it would reproduce the exact defect
+// this hint exists to remove. So a hyphenated verb is matched inside its family
+// first: `member-rm` looks for `member-ls`, `scoped-get` for `scoped-ls`,
+// `collection-assets` for `collections`. Only a verb with no family, or one
+// whose family has no list, falls back to the noun-wide enumeration.
+func enumeratingSibling(m *manifest.Manifest, cmd manifest.Command) string {
+	var candidates []string
+	if family, _, hyphenated := strings.Cut(cmd.Verb, "-"); hyphenated && family != "" {
+		candidates = append(candidates, family+"-ls", family+"-list", family+"s")
+	}
+	candidates = append(candidates, enumeratingVerbs...)
+
+	for _, want := range candidates {
+		if want == cmd.Verb {
+			// cmd IS the list verb; a refusal from it is not an id lookup, and
+			// telling the reader to re-run what just failed is noise.
+			return ""
+		}
+		for _, c := range m.Commands {
+			if c.Noun == cmd.Noun && c.Verb == want {
+				return want
+			}
+		}
+	}
+	return ""
 }
 
 // errorMessage renders the user-facing one-liner for an apiError, following the
