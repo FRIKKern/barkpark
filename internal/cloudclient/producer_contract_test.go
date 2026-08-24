@@ -29,10 +29,16 @@ package cloudclient
 //
 // THE PAIRING, established by reading the routes: SiteDeployment is decoded
 // from `{"deployment": …}` bodies (postSiteDeploy, SpawnSiteDeployment) which
-// the control plane fills from EITHER deployment_json/1 (router.ex:7838, 7866,
-// 8837, 9117, 13145) or its wrapper site_deployment_json/3 (12577), which is
-// deployment_json/1 plus :stages and :url. The union of both is what the
-// producer can send.
+// the control plane fills from EITHER `deployment_json/1` or its wrapper
+// `site_deployment_json/3` — the latter being `deployment_json/1` plus `:stages`
+// and `:url`. Both live in the CLOUD router, cloud/lib/barkpark_cloud/web/
+// router.ex, which is NOT the api/ router of the same basename. The union of
+// both functions is what the producer can send.
+//
+// Cited by SYMBOL, not by line: this file exists because an anchor rotted
+// silently, and its first version cited five call sites by line number in a
+// file that moves constantly. `grep -n 'deployment_json' ` on the cloud router
+// finds every one of them and cannot go stale.
 
 import (
 	"os"
