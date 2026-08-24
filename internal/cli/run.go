@@ -750,11 +750,21 @@ func isHTMLDocument(b []byte) bool {
 // suppressed when the caller chose an explicit limit (or --all), for writes, and
 // for non-paginated commands.
 func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Command, respBody []byte) {
-	if !cmd.Paginated || cmd.Writes || g.all || g.limitSet {
+	if !cmd.Paginated || cmd.Writes || g.all {
 		return
 	}
 
+	// AN EXPLICIT --limit USED TO SILENCE THIS ENTIRELY, which inverted the
+	// guard: `--limit 50` returning exactly 50 rows is the single strongest
+	// signal that the page was cut, and it was the one case that said nothing.
+	// The flag that was HONOURED silenced the warning that the flag being
+	// honoured made necessary. An explicit limit now sets the threshold rather
+	// than suppressing the check.
 	limit := defaultPageLimit(cmd)
+	explicit := false
+	if g.limitSet {
+		limit, explicit = g.limit, true
+	}
 	if limit <= 0 {
 		return
 	}
@@ -763,6 +773,10 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 		return
 	}
 
+	if explicit {
+		out.userErr("result page filled your --limit of %d exactly; more may be available — raise --limit or re-run with --all", limit)
+		return
+	}
 	out.userErr("result page reached the default limit of %d; more may be available — re-run with --all", limit)
 }
 
@@ -2372,7 +2386,34 @@ func mustResult(inner []byte) []byte {
 // This warns rather than refuses on purpose: the request is still correct and
 // still answers the question, and refusing would break every existing script
 // that passes a harmless global. stderr keeps stdout parseable.
+//
+// --all WAS THE ONE KNOB STILL DROPPED IN TOTAL SILENCE, and it is the flag
+// agents pass most reflexively. Measured against the live manifest before this
+// change (bp doc get post p1 --dry-run, both channels captured):
+//
+//	--limit 7    stderr: note: --limit ignored — `doc get` does not accept …
+//	--offset 5   stderr: note: --offset ignored — `doc get` does not accept …
+//	--all        stderr: (nothing)
+//
+// It is honoured by exactly one branch of runCommand — `cmd.Paginated && g.all
+// && !cmd.Writes` — so a paginated WRITE swallows it too, not just the
+// non-paginated reads the limit/offset arm covers. Hence the separate
+// condition: this arm is keyed on how --all is actually consumed, not on
+// cmd.Paginated alone.
 func warnDroppedPagination(out *writer, g globals, cmd manifest.Command) {
+	// --all rides only the paginated-READ walk; a write or a non-paginated
+	// command drops it.
+	if g.all && (!cmd.Paginated || cmd.Writes) {
+		what := "does not paginate"
+		if cmd.Writes {
+			what = "is a write, and a write is never paginated"
+		}
+		out.errf(
+			"note: --all ignored — `%s %s` %s; the answer below is a single result, not a walked collection",
+			cmd.Noun, cmd.Verb, what,
+		)
+	}
+
 	if cmd.Paginated {
 		return
 	}
