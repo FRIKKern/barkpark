@@ -9,8 +9,24 @@ defmodule BarkparkWeb.ShareLinkController do
     * `POST/GET/DELETE /v1/shares/links` — ADMIN. Mint (raw token shown once),
       list an item's links, revoke one.
 
-  Read links serve PUBLISHED data only (the ref is a published id; drafts.* is
-  never resolved), mirroring section read shares.
+  A link's `ref_id` is a PUBLISHED id, and that is now IMPLEMENTED rather than
+  merely asserted: `Sharing.Links.published_ref_id/1` strips a `drafts.` prefix
+  at the context boundary, so `create/1` cannot persist a draft ref whichever
+  door minted it, `mint` validates existence against the id it will actually
+  store, and `show` re-applies it when serving a row minted before the clamp
+  existed. Corrected 2026-08-24 (`arpss-w8-bl-share-link-drafts-ref-id`): this
+  paragraph used to state the clamp as a fact while NOTHING in this file checked
+  the prefix — the normalisation lived only in `item_share.ex`, i.e. on the
+  Studio door and not on this one. It stood unrevised from the feature commit
+  (b523b2e3a4, 2026-06-09) through four later correction passes over this
+  moduledoc, because it sits ABOVE the first `##` and every audit swept the
+  sections.
+
+  READ VS EDIT IS NOT A SERVE-PATH DISTINCTION, and the old wording implied it
+  was. `show` does not branch on `link.access` — both levels take the same path
+  and receive the same published bytes. `access` governs what the RECIPIENT
+  SURFACE grants (an edit link is what the scoped editor accepts), never which
+  data this controller resolves.
 
   ## Tenancy confinement on `/v1/shares/links` (arpss-w8)
 
@@ -69,7 +85,8 @@ defmodule BarkparkWeb.ShareLinkController do
       instruction to reuse one call site rather than a property to assert about
       the framework.
     * An id that is nil or non-castable → a DENIAL, never a 500. Every id goes
-      through `Repo.uuid_or_nil/1` first.
+      through `Repo.uuid_or_nil/1` first — inside `Sharing.Links` since the
+      predicate moved there, not in this file.
     * NO named target → 200 with foreign rows simply absent. Not reachable here
       (`list` requires a `scope`), stated so the law is complete.
 
@@ -163,27 +180,30 @@ defmodule BarkparkWeb.ShareLinkController do
   use BarkparkWeb, :controller
 
   alias Barkpark.{Content, Media, Tenancy}
-  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Errors
   alias Barkpark.Content.Labels
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.PortableDoc.{Projection, Render}
-  alias Barkpark.Repo
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
-  alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
 
   # ── PUBLIC resolver ──────────────────────────────────────────────────────
 
   def show(conn, %{"token" => token}) do
     case Links.resolve(token) do
-      {:ok, link} -> serve(conn, link, token)
+      # The clamp is re-applied on READ, not only on write: rows minted before
+      # `Links.create/1` normalised can still carry a `drafts.` ref, and fixing
+      # only the mint path would leave every already-issued link live.
+      {:ok, link} -> serve(conn, published_link(link), token)
       {:error, _} -> not_found_html(conn)
     end
   end
+
+  defp published_link(%ShareLink{ref_id: ref_id} = link),
+    do: %{link | ref_id: Links.published_ref_id(ref_id)}
 
   # P5 (Scoped-by-URL): a PAPER short link 302s to its CANONICAL scoped
   # address with the token riding as ?share= — the recipient lands on the
@@ -404,31 +424,22 @@ defmodule BarkparkWeb.ShareLinkController do
 
   # ── tenancy confinement ───────────────────────────────────────────────────
   #
-  # Mirrored VERBATIM from the sibling half (`share_controller.ex`), as a
-  # PRIVATE helper: the two halves of the share surface share ONE predicate, and
-  # a shared public helper is deliberately not extracted (that would widen this
-  # slice's fence into files another wave is editing).
+  # The predicate itself now lives at the CONTEXT boundary
+  # (`Sharing.Links.workspace_admin?/2`), which both doors onto this surface
+  # cross — this controller and `StudioLive.Handlers.ItemShare`. It used to be
+  # mirrored as a private helper in each, which is how the `drafts.` clamp came
+  # to exist on one door and not the other. Unified by
+  # `arpss-w8-bl-links-context-boundary-predicate` now that both halves have
+  # merged; the totality reasoning and the authorize/3-vs-workspace_admin?/2
+  # ruling moved WITH it and are stated there.
   #
-  # TOTALITY: bare `TenancyAuth.workspace_admin?/2` RAISES on most of the shapes
-  # that can reach here — FunctionClauseError on a nil actor, a
-  # `%CallerContext{}`, an `%ApiToken{id: nil}` or a nil workspace id, and
-  # Ecto.Query.CastError (NOT Ecto.CastError) on `""` and any non-UUID binary.
-  # So the actor is read as `conn.assigns[:api_token]` SPECIFICALLY (never a
-  # generic principal helper — `CallerContext.from_conn/1` prefers
-  # `:caller_context`, which raises), both ids are routed through
-  # `Repo.uuid_or_nil/1`, and anything that does not match is a DENIAL. A 500
-  # here would trade a leak for a crash oracle.
-  defp workspace_admin?(conn, workspace_id) do
-    actor = conn.assigns[:api_token]
-
-    case {actor, Repo.uuid_or_nil(workspace_id)} do
-      {%ApiToken{id: token_id}, ws_id} when is_binary(token_id) and is_binary(ws_id) ->
-        TenancyAuth.workspace_admin?(actor, ws_id)
-
-      _ ->
-        false
-    end
-  end
+  # The ACTOR is still extracted here, and still as `conn.assigns[:api_token]`
+  # SPECIFICALLY — never a generic principal helper, because
+  # `CallerContext.from_conn/1` prefers `:caller_context`, which raises. Only
+  # the authorization crossed the boundary; principal extraction is web-layer
+  # work and stayed put.
+  defp workspace_admin?(conn, workspace_id),
+    do: Links.workspace_admin?(conn.assigns[:api_token], workspace_id)
 
   # The denial term is NON-BINARY on purpose: `mint`'s else carries
   # `{:error, msg} when is_binary(msg) -> unprocessable/2`, so a string denial
@@ -437,22 +448,11 @@ defmodule BarkparkWeb.ShareLinkController do
     if workspace_admin?(conn, workspace_id), do: :ok, else: {:error, :forbidden}
   end
 
-  # A link is revocable when its row exists AND the caller is a workspace admin
-  # of the ROW's own workspace. Every failure — non-castable id, missing row,
-  # foreign row, a row with no workspace_id — collapses to the SAME
-  # `{:error, :not_found}`, so `revoke/2`'s 404 arm is one call site and a
-  # foreign row is byte-identical to a missing one. `Links.revoke/1`'s signature
-  # is deliberately untouched: its Studio LiveView caller has a socket, not a
-  # conn, so an arity change would ripple outside this slice's fence.
-  defp revoke_scoped(conn, id) do
-    with row_id when is_binary(row_id) <- Repo.uuid_or_nil(id),
-         %ShareLink{workspace_id: ws_id} <- Repo.get(ShareLink, row_id),
-         true <- workspace_admin?(conn, ws_id) do
-      Links.revoke(row_id)
-    else
-      _ -> {:error, :not_found}
-    end
-  end
+  # Authorize-and-revoke is `Links.revoke_scoped/2` now; the denial shape (every
+  # failure collapsing to one `{:error, :not_found}`, so a foreign row is
+  # byte-identical to a missing one) is stated and tested there.
+  defp revoke_scoped(conn, id),
+    do: Links.revoke_scoped(conn.assigns[:api_token], id)
 
   defp forbidden(conn) do
     ErrorResponse.emit(conn, {:error, :forbidden}, "workspace access required")
@@ -466,12 +466,17 @@ defmodule BarkparkWeb.ShareLinkController do
   defp scope_triple(_), do: {:error, "scope is required (ws[/project[/dataset]])"}
 
   # kind=doc needs ref_type + ref_id; kind=media needs ref_id only.
+  # `published_ref_id/1` is applied HERE, before `ensure_item_exists/6`, so the
+  # existence check runs against the id `Links.create/1` will actually persist.
+  # Normalising only at the context would mint a link to a published id whose
+  # row does not exist whenever a paper exists ONLY as a draft — a dead `/s/`
+  # URL instead of a 422.
   defp item_ref(%{"kind" => "media", "ref_id" => ref_id}) when is_binary(ref_id) and ref_id != "",
-    do: {:ok, "media", nil, ref_id}
+    do: {:ok, "media", nil, Links.published_ref_id(ref_id)}
 
   defp item_ref(%{"kind" => "doc", "ref_type" => rt, "ref_id" => ref_id})
        when is_binary(rt) and rt != "" and is_binary(ref_id) and ref_id != "",
-       do: {:ok, "doc", rt, ref_id}
+       do: {:ok, "doc", rt, Links.published_ref_id(ref_id)}
 
   defp item_ref(_), do: {:error, "kind must be doc (with ref_type) or media, plus ref_id"}
 

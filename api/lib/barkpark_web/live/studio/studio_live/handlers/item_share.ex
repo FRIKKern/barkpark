@@ -6,13 +6,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
-  alias Barkpark.Accounts.User
-  alias Barkpark.Auth.ApiToken
-  alias Barkpark.Repo
   alias Barkpark.Sharing.Links
-  alias Barkpark.Sharing.ShareLink
   alias Barkpark.Structure
-  alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
@@ -20,7 +15,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
 
   def item_share_open(%{"kind" => kind} = params, socket) do
     if Caps.admin?(socket) do
-      ref_id = params["ref-id"] |> to_string() |> String.replace_prefix("drafts.", "")
+      # Was an inline `String.replace_prefix/3` — the ONLY place this rule
+      # existed, which is precisely why the HTTP mint never had it. It is one
+      # shared function now; this call is kept so the pane shows the published
+      # id, and `Links.create/1` enforces it regardless.
+      ref_id = params["ref-id"] |> to_string() |> Links.published_ref_id()
 
       item = %{
         kind: kind,
@@ -108,50 +107,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
   # `:binary_id`. Mirrors `ShareLinkController.revoke_scoped/2` (the HTTP half,
   # #12569/#12700), whose sibling this is.
   #
-  # `Links.revoke/1`'s arity is untouched ON PURPOSE: it has non-HTTP callers
-  # with no actor to authorize, and its two admin callers hold different actor
-  # shapes (a conn there, a socket here).
-  defp revoke_scoped(socket, id) do
-    with row_id when is_binary(row_id) <- Repo.uuid_or_nil(id),
-         %ShareLink{workspace_id: ws_id} <- Repo.get(ShareLink, row_id),
-         true <- workspace_admin?(socket, ws_id) do
-      Links.revoke(row_id)
-    else
-      _ -> {:error, :not_found}
-    end
-  end
-
-  # TOTALITY: bare `TenancyAuth.workspace_admin?/2` RAISES on the shapes that
-  # can reach here — `FunctionClauseError` on a nil principal or a nil/non-UUID
-  # workspace id — so both sides are narrowed first and ANYTHING unmatched is a
-  # DENIAL. A nil `workspace_id` on the row is therefore NOT revocable through
-  # this surface (no nil-permissive "platform admin" passthrough).
+  # Authorize-and-revoke now lives at the CONTEXT boundary
+  # (`Sharing.Links.revoke_scoped/2`), shared with the HTTP half instead of
+  # mirrored into it — `arpss-w8-bl-links-context-boundary-predicate`. The
+  # totality reasoning, the denial shape, and the ruling that the predicate is
+  # `workspace_admin?/2` (the membership ROLE) and never `authorize/3` moved
+  # WITH the code and are stated there.
   #
-  # Both principal kinds a Studio socket can carry are tried, because both can
-  # legitimately hold a seat: an api_token session and a logged-in account. The
-  # predicate is `workspace_admin?/2` (the membership ROLE), never
-  # `authorize/3` — `authorize/3`'s api_token arm ORs the token's GLOBAL
-  # `permissions[]` with membership, so a plain `member` of B holding global
-  # `admin` perms would PASS it. That actor is exactly the attacker in the
-  # committed cross-tenant test.
-  defp workspace_admin?(socket, workspace_id) do
-    case Repo.uuid_or_nil(workspace_id) do
-      nil ->
-        false
+  # BOTH principal kinds a Studio socket can carry are passed, because either
+  # can legitimately hold the seat: an api_token session and a logged-in
+  # account. Extracting them is socket work and stays here; the context takes
+  # the list and tries them in order.
+  defp revoke_scoped(socket, id),
+    do: Links.revoke_scoped(principals(socket), id)
 
-      ws_id ->
-        [socket.assigns[:api_token], socket.assigns[:current_user]]
-        |> Enum.any?(&principal_admin?(&1, ws_id))
-    end
-  end
-
-  defp principal_admin?(%ApiToken{id: id} = token, ws_id) when is_binary(id),
-    do: TenancyAuth.workspace_admin?(token, ws_id)
-
-  defp principal_admin?(%User{id: id} = user, ws_id) when is_binary(id),
-    do: TenancyAuth.workspace_admin?(user, ws_id)
-
-  defp principal_admin?(_principal, _ws_id), do: false
+  defp principals(socket),
+    do: [socket.assigns[:api_token], socket.assigns[:current_user]]
 
   def jump_to_user(%{"type" => type, "doc-id" => doc_id}, socket) do
     structure = Structure.build(socket.assigns.dataset, ScopeHelpers.scope_opts(socket))
