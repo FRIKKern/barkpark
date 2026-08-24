@@ -80,6 +80,17 @@ export interface ListenOptions {
    * 75000 (2.5× the server's 30s keepalive). Pass 0 (or a non-positive value) to disable.
    */
   idleTimeoutMs?: number
+  /**
+   * Called when a frame's `data:` payload does not parse as JSON and is skipped.
+   * The frame is a lost event: the stream continues (one corrupt frame must not
+   * kill a live subscription), but the loss is no longer invisible. `raw` is the
+   * joined `data:` text as received, `err` the JSON.parse failure.
+   *
+   * Purely observational — throwing from it is not a supported way to stop the
+   * stream, and a throw here is swallowed so a logging callback cannot take down
+   * a subscription. Use it to log, count, or alert.
+   */
+  onDroppedFrame?: (raw: string, err: unknown) => void
   signal?: AbortSignal
 }
 
@@ -320,13 +331,24 @@ export function createListenHandle<T = BarkparkDocument>(
                     continue
                   }
 
+                  const joined = parsed.dataLines.join('\n')
                   let payload: Record<string, unknown>
                   try {
-                    const joined = parsed.dataLines.join('\n')
                     const v = JSON.parse(joined)
                     payload = v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
-                  } catch {
-                    // Malformed data — skip this frame, do not crash
+                  } catch (parseErr) {
+                    // [malformed-frame-silent] Malformed data — skip this frame,
+                    // do not crash (killing a live subscription over one corrupt
+                    // event is worse than losing it). But a skip is a LOST EVENT,
+                    // and it used to be reported on NO channel at all — no throw,
+                    // no callback, no counter — while the iterator's "here is
+                    // every event" contract stayed nominally true. onDroppedFrame
+                    // is that channel.
+                    try {
+                      opts?.onDroppedFrame?.(joined, parseErr)
+                    } catch {
+                      // A logging callback must not be able to kill the stream.
+                    }
                     frameEnd = findFrameBoundary(buffer)
                     continue
                   }
