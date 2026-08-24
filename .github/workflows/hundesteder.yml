@@ -114,12 +114,23 @@ jobs:
             exit "$rc"
           fi
 
-          # A node --test spec summary line is exactly three fields --
-          # `<glyph> pass 48` / `<glyph> fail 0` -- so match on the FIELDS
-          # rather than on the leading multibyte glyph, which is not portably
-          # matchable. NF == 3 and a numeric third field together keep an
-          # ordinary result line (`<glyph> some test name (0.02ms)`, NF wide
-          # and last field parenthesised) out of the count.
+          # A node --test summary line is exactly three fields -- `<glyph> pass
+          # 48` under the spec reporter, `# pass 48` under TAP -- so match on
+          # the FIELDS rather than on the leading glyph, which is multibyte
+          # under spec and not portably matchable. NF == 3 and a numeric third
+          # field together keep an ordinary result line (`<glyph> some test
+          # name (0.02ms)`, NF wide and last field parenthesised) out of it.
+          #
+          # SUMMED, NOT LAST-WINS, AND THAT DISTINCTION IS LOAD-BEARING. A
+          # runner that spawns ONE PROCESS PER FILE emits one summary per file,
+          # and taking the last would read a single file's tally as the whole
+          # suite's. Measured against scripts/node-test-floor.mjs, which does
+          # exactly that: it reports `# pass 8`, `# pass 6`, `# pass 34` for
+          # this suite's three files, so last-wins saw 34 against a floor of 40
+          # and would have failed a perfectly healthy run. Summing reads 48
+          # under BOTH shapes -- the single aggregate today, the per-file
+          # tallies if the test script is swapped -- so this step does not
+          # break the day someone improves the runner underneath it.
           #
           # If NO summary line is found at all, both awks print 0 and the floor
           # below rejects the run. That direction is deliberate: a parser that
@@ -128,8 +139,8 @@ jobs:
           # blank lines in the log, printed EMPTY, and made every comparison
           # below a no-op -- the step went green on a tree with no tests at
           # all. Caught by running the mutants; hence the belt and braces.
-          passed=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { v = $3 } END { print v + 0 }' test-output.log)
-          failed=$(awk 'NF == 3 && $2 == "fail" && $3 ~ /^[0-9]+$/ { v = $3 } END { print v + 0 }' test-output.log)
+          passed=$(awk 'NF == 3 && $2 == "pass" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' test-output.log)
+          failed=$(awk 'NF == 3 && $2 == "fail" && $3 ~ /^[0-9]+$/ { s += $3 } END { print s + 0 }' test-output.log)
 
           echo "reported: pass=$passed fail=$failed (floor $MIN_TESTS)"
 
