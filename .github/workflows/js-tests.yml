@@ -92,6 +92,11 @@ jobs:
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium
 
+      # NOTE on emptiness: `vitest run` exits 1 when it finds no test files, so
+      # each package's gate reds on an empty suite — EXCEPT in projects mode,
+      # where an empty project passes as long as a sibling project has files.
+      # @barkpark/nextjs therefore runs its two projects as separate commands
+      # (see its package.json `test`), and no config may set passWithNoTests.
       - name: Test
         run: pnpm test
 

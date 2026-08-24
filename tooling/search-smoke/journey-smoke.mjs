@@ -150,6 +150,17 @@ const BROWSER_CLOSE_CAP = 2000;
 const TERM_POLL_CAP = 3000;
 const KILL_POLL_CAP = 2000;
 
+// A per-VM, stochastic Chrome bring-up refusal ("Chrome never wrote
+// DevToolsActivePort — it did not start") is a KNOWN class in this repo, not
+// a hypothesis: console-harness's bringup-retry.mjs (#10018) measured 85 real
+// browser-job attempts at 74 success / 11 failure, 10 of the 11 being exactly
+// this. THE LINE THIS MUST NOT CROSS (same ruling that file cites): this
+// retries ONLY the bring-up — the browser never existed, so no beat was ever
+// measured and there is nothing to hide. Once devPort is readable, nothing
+// downstream is retried; a beat that reds after Chrome is up stays red.
+const BRINGUP_ATTEMPTS = 2; // bounded: unbounded turns a dead runner into a slower lie
+const STDERR_TAIL_CAP = 4000; // Chrome is chatty in headless; the fatal line is in the tail
+
 const DEFAULT_QUERY = "search";
 const DEFAULT_ENGINE = "postgres";
 
@@ -1066,70 +1077,121 @@ function report(ledger, { base, strict, wall }) {
 // ─────────────────────────────────────────────────────────────────────────────
 //  the run
 // ─────────────────────────────────────────────────────────────────────────────
+function isAlive(p) { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } }
+
+async function reapChrome(chrome, label) {
+  if (!isAlive(chrome)) return;
+  try { chrome.kill("SIGTERM"); } catch { /* gone */ }
+  let waited = 0;
+  while (isAlive(chrome) && waited < TERM_POLL_CAP) { await sleep(50); waited += 50; }
+  if (isAlive(chrome)) {
+    try { chrome.kill("SIGKILL"); } catch { /* gone */ }
+    waited = 0;
+    while (isAlive(chrome) && waited < KILL_POLL_CAP) { await sleep(50); waited += 50; }
+    if (isAlive(chrome)) {
+      process.stderr.write(
+        `!! ${label} SHOUT: chrome pid ${chrome.pid} SURVIVED SIGKILL after ${KILL_POLL_CAP}ms. ` +
+          `Reap it by hand: kill -9 ${chrome.pid}\n`,
+      );
+    }
+  }
+}
+
+function captureStderr(child, cap = STDERR_TAIL_CAP) {
+  let tail = "";
+  if (!child || !child.stderr) return () => tail;
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    tail += chunk;
+    if (tail.length > cap) tail = tail.slice(tail.length - cap);
+  });
+  child.stderr.on("error", () => { /* the pipe dying is not a measurement */ });
+  return () => tail;
+}
+
+function formatStderrTail(tail) {
+  const text = (tail || "").replace(/\s+$/, "");
+  if (!text) return "     chrome stderr: (empty — the process wrote nothing before it went away)\n";
+  const lines = text.split("\n");
+  return `     chrome stderr (last ${lines.length} line(s)):\n` + lines.map((l) => `       | ${l}\n`).join("");
+}
+
 async function withChrome(fn) {
   const chromeBin = findChrome();
   if (!chromeBin) {
     process.stderr.write("!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
     process.exit(2);
   }
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), "journey-smoke-"));
-  let chrome = null, cdp = null;
+
+  let chrome = null, cdp = null, profile = null;
 
   const teardown = async () => {
     if (cdp) {
       await Promise.race([cdp.send("Browser.close").catch(() => {}), sleep(BROWSER_CLOSE_CAP)]);
       cdp.close();
     }
-    const alive = (p) => { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } };
-    if (alive(chrome)) {
-      try { chrome.kill("SIGTERM"); } catch { /* gone */ }
-      let waited = 0;
-      while (alive(chrome) && waited < TERM_POLL_CAP) { await sleep(50); waited += 50; }
-      if (alive(chrome)) {
-        try { chrome.kill("SIGKILL"); } catch { /* gone */ }
-        waited = 0;
-        while (alive(chrome) && waited < KILL_POLL_CAP) { await sleep(50); waited += 50; }
-        if (alive(chrome)) {
-          process.stderr.write(
-            `!! TEARDOWN SHOUT: chrome pid ${chrome.pid} SURVIVED SIGKILL after ${KILL_POLL_CAP}ms. ` +
-              `Reap it by hand: kill -9 ${chrome.pid}\n`,
-          );
-        }
-      }
-    }
-    try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
+    await reapChrome(chrome, "TEARDOWN");
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
   };
 
   try {
-    chrome = spawn(
-      chromeBin,
-      [
-        "--headless=new",
-        "--disable-gpu",
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--no-first-run",
-        "--no-default-browser-check",
-        "--disable-extensions",
-        "--disable-background-networking",
-        "--window-size=1400,1000",
-        `--user-data-dir=${profile}`,
-        "--remote-debugging-port=0",
-        "about:blank",
-      ],
-      { stdio: "ignore" },
-    );
-
-    const portFile = path.join(profile, "DevToolsActivePort");
+    // BOUNDED BRING-UP RETRY. A fresh profile dir EVERY attempt — reusing the
+    // dir would re-race the same DevToolsActivePort path against a possibly
+    // still-dying Chrome. Each failed attempt's stderr is captured and printed
+    // (the old `stdio: "ignore"` threw away exactly the line that says why).
+    const reasons = [];
     let devPort = null;
-    for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
-      try {
-        const raw = fs.readFileSync(portFile, "utf8").split("\n");
-        if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
-      } catch { /* not written yet */ }
-      await sleep(100);
+    for (let attempt = 1; attempt <= BRINGUP_ATTEMPTS && !devPort; attempt++) {
+      const attemptProfile = fs.mkdtempSync(path.join(os.tmpdir(), "journey-smoke-"));
+      const attemptChrome = spawn(
+        chromeBin,
+        [
+          "--headless=new",
+          "--disable-gpu",
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          "--no-first-run",
+          "--no-default-browser-check",
+          "--disable-extensions",
+          "--disable-background-networking",
+          "--window-size=1400,1000",
+          `--user-data-dir=${attemptProfile}`,
+          "--remote-debugging-port=0",
+          "about:blank",
+        ],
+        { stdio: ["ignore", "ignore", "pipe"] },
+      );
+      const readStderr = captureStderr(attemptChrome);
+
+      const portFile = path.join(attemptProfile, "DevToolsActivePort");
+      let attemptPort = null;
+      for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+        try {
+          const raw = fs.readFileSync(portFile, "utf8").split("\n");
+          if (raw[0] && Number(raw[0])) { attemptPort = Number(raw[0]); break; }
+        } catch { /* not written yet */ }
+        await sleep(100);
+      }
+
+      if (attemptPort) {
+        chrome = attemptChrome;
+        profile = attemptProfile;
+        devPort = attemptPort;
+        if (attempt > 1) process.stdout.write(`>> chrome  bring-up succeeded on attempt ${attempt}/${BRINGUP_ATTEMPTS}\n`);
+        break;
+      }
+
+      reasons.push(`attempt ${attempt}/${BRINGUP_ATTEMPTS}: DevToolsActivePort never appeared\n${formatStderrTail(readStderr())}`);
+      await reapChrome(attemptChrome, `BRING-UP attempt ${attempt}`);
+      try { fs.rmSync(attemptProfile, { recursive: true, force: true }); } catch { /* best effort */ }
     }
-    if (!devPort) throw new Error("Chrome never wrote DevToolsActivePort — it did not start");
+
+    if (!devPort) {
+      throw new Error(
+        `Chrome never wrote DevToolsActivePort — it did not start (${BRINGUP_ATTEMPTS} attempt(s)):\n` +
+          reasons.join(""),
+      );
+    }
 
     const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
     process.stdout.write(`>> chrome  ${chromeBin}\n>> build   ${version.Browser} · node ${process.version}\n`);

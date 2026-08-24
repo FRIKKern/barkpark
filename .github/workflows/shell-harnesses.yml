@@ -225,6 +225,23 @@ on:
       # finding this wave is built on.
       - "scripts/doc-gates-paths-parity-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # node-test-floor.test.sh. Its SUBJECT SET is the runner plus every gate
+      # that calls it, because the failure this harness exists to catch is a
+      # change to the runner's OUTPUT SHAPE breaking a downstream parser --
+      # apps/hundesteder's Test step sums the per-file `# pass N` lines against
+      # a MIN_TESTS floor, so that workflow is an INPUT here, not a caller. A
+      # guard whose trigger does not cover its subject set never runs on the PR
+      # that breaks it.
+      - "scripts/node-test-floor.mjs"
+      - "scripts/node-test-floor.test.sh"
+      - "sdk/package.json"
+      - "web/package.json"
+      - "apps/hundesteder/package.json"
+      - "templates/search-starter/package.json"
+      - "templates/astro-search-starter/package.json"
+      - ".github/workflows/hundesteder.yml"
+      - ".github/workflows/astro-search-finder-test.yml"
+      - ".github/workflows/search-starter-smoke.yml"
   push:
     branches: [main]
     paths:
@@ -315,6 +332,24 @@ on:
       - "scripts/doc-gates-paths-parity-check.sh"
       - ".github/workflows/doc-gates.yml"
 
+      # node-test-floor.test.sh. Its SUBJECT SET is the runner plus every gate
+      # that calls it, because the failure this harness exists to catch is a
+      # change to the runner's OUTPUT SHAPE breaking a downstream parser --
+      # apps/hundesteder's Test step sums the per-file `# pass N` lines against
+      # a MIN_TESTS floor, so that workflow is an INPUT here, not a caller. A
+      # guard whose trigger does not cover its subject set never runs on the PR
+      # that breaks it.
+      - "scripts/node-test-floor.mjs"
+      - "scripts/node-test-floor.test.sh"
+      - "sdk/package.json"
+      - "web/package.json"
+      - "apps/hundesteder/package.json"
+      - "templates/search-starter/package.json"
+      - "templates/astro-search-starter/package.json"
+      - ".github/workflows/hundesteder.yml"
+      - ".github/workflows/astro-search-finder-test.yml"
+      - ".github/workflows/search-starter-smoke.yml"
+
 permissions:
   contents: read
 
@@ -326,6 +361,32 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+
+  node-test-floor:
+    name: node-test-floor.mjs mutation matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        # fs.globSync needs node >= 22; the runner refuses BY NAME below that
+        # rather than throwing a TypeError that reads like a bug in the suite.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: node-test-floor.test.sh syntax check
+        run: bash -n scripts/node-test-floor.test.sh
+      - name: "node-test-floor mutation matrix (hermetic mktemp fixtures, no network)"
+        # Nineteen assertions; the ones that matter prove the runner can FAIL: a
+        # zero-match pattern, a file registering zero tests (node reports that
+        # file as `# tests 1` -- the FILE counted as its own passing test, which
+        # defeats a naive tests>0 floor and defeated the first version of this
+        # one), a missing path beside a real one, a forwarded --test-reporter,
+        # and the per-file TAP blocks staying whole and in FILE order under the
+        # pool. That last one is not decoration: streaming the pool instead of
+        # buffering keeps the SUM correct while scrambling the order, so a
+        # position-keyed consumer breaks silently -- verified by mutation.
+        run: bash scripts/node-test-floor.test.sh
   doctor-matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 15
