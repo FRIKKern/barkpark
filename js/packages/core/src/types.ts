@@ -1149,13 +1149,37 @@ export interface DocsBuilder<T = BarkparkDocument> {
   findPage(): Promise<QueryPage<T>>
 }
 
-/** A page of query results plus the full match `total` — returned by `findPage()`. */
+/**
+ * A page of query results plus the full match `total` and the server's own
+ * truncation signal — returned by `findPage()`.
+ */
 export interface QueryPage<T = BarkparkDocument> {
   documents: T[]
   total: number
   count: number
   limit: number
   offset: number
+  /**
+   * Whether any row exists past this page. The SERVER'S answer, not a derived
+   * one: it reads a single row beyond the page and reports whether that row
+   * materialised, so it is exact and costs no COUNT.
+   *
+   * Read this instead of comparing `count` to `limit`. That comparison is the
+   * classic wrong derivation — a type holding exactly `limit` matching rows and
+   * one holding a million are byte-identical under it, and it reports "more"
+   * for a page that is merely full. `offset + count < total` is correct but
+   * only because `findPage` pays for a second COUNT query to know `total`.
+   *
+   * `false` also stands in for a server old enough not to send the field.
+   */
+  hasMore: boolean
+  /**
+   * The offset that reads the NEXT page — so a caller never re-derives it and
+   * never derives one for a page with no successor. OMITTED (never `0`) when
+   * `hasMore` is false, and withheld past the server's 100 000 offset ceiling,
+   * where a further read would re-serve this same page rather than advance.
+   */
+  nextOffset?: number
 }
 
 /** Multi-mutation transaction builder. All ops commit atomically. */

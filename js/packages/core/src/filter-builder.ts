@@ -70,16 +70,22 @@ export function makeFilterExpression(
   if (typeof field !== 'string' || field.length === 0) {
     throw new BarkparkValidationError('filter field must be a non-empty string', { field: 'field' })
   }
+  // `op` is a parameter and never reassigned, so this membership test is
+  // loop-invariant and was evaluated five times below with the same answer.
+  // Hoisted verbatim — every guard keeps its exact condition, and the saving
+  // pays for the truncation fields findPage now carries (js/CLAUDE.md
+  // "Bundle budget").
+  const arrayOp = ARRAY_OPS.includes(op)
   if (!VALID_OPS.includes(op)) {
     throw new BarkparkValidationError(
       `unknown filter op: ${op} — expected one of ${VALID_OPS.join(', ')}`,
       { field: 'op', issues: [{ op, allowed: VALID_OPS }] },
     )
   }
-  if (ARRAY_OPS.includes(op) && !Array.isArray(value)) {
+  if (arrayOp && !Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' requires an array value`, { field: 'value' })
   }
-  if (ARRAY_OPS.includes(op) && Array.isArray(value) && value.length === 0) {
+  if (arrayOp && Array.isArray(value) && value.length === 0) {
     // `filter[field][in]=` (empty candidate list) is an ambiguous match-nothing
     // query — almost always an upstream bug (an empty variable slipped through).
     // Fail closed like every peer guard rather than ship a silent no-match.
@@ -88,7 +94,7 @@ export function makeFilterExpression(
       { field: 'value' },
     )
   }
-  if (ARRAY_OPS.includes(op) && Array.isArray(value)) {
+  if (arrayOp && Array.isArray(value)) {
     // buildQueryString joins candidates with ',' (the wire format the server
     // splits on), so a comma inside a value would silently split into extra
     // candidates — `.in('sku', ['A,B'])` would query A OR B, not the literal
@@ -102,11 +108,11 @@ export function makeFilterExpression(
       )
     }
   }
-  if (!ARRAY_OPS.includes(op) && Array.isArray(value)) {
+  if (!arrayOp && Array.isArray(value)) {
     throw new BarkparkValidationError(`op '${op}' does not accept array`, { field: 'value' })
   }
   if (
-    !ARRAY_OPS.includes(op) &&
+    !arrayOp &&
     value !== null &&
     typeof value === 'object' &&
     !(value instanceof Date)

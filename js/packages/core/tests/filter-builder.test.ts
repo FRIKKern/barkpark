@@ -211,7 +211,18 @@ describe('filter-builder', () => {
 
   it('findPage() calls the page executor with the state; throws when none was provided', async () => {
     let seenState: any
-    const page = { documents: [{ _id: 'p1' } as any], total: 9, count: 1, limit: 20, offset: 0 }
+    // hasMore is REQUIRED on QueryPage: a page that cannot say whether more
+    // rows exist is not a page. nextOffset stays optional -- it is absent when
+    // there is no next page.
+    const page = {
+      documents: [{ _id: 'p1' } as any],
+      total: 9,
+      count: 1,
+      limit: 20,
+      offset: 0,
+      hasMore: true,
+      nextOffset: 20,
+    }
     const b1 = createDocsBuilder(
       async () => [],
       async () => 0,
