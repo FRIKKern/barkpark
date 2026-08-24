@@ -204,6 +204,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
 	g.view = resolveView(out, g, cmd)
 
+	// Say so when --limit/--offset cannot leave the client for this command.
+	// applyQuery is writer-less (it is shared with the headless MCP dispatch),
+	// so the notice belongs here — the same seam resolveView uses above.
+	warnDroppedPagination(out, g, cmd)
+
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
 		if !renderErrorEnvelope(out, "usage", derr.msg, "", "") {
@@ -228,6 +233,19 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	if cmd.Writes && isProd(ctx, m) && !g.yes && !serverDeclaredNonProd(ctx.Server) {
 		if !confirmProdWrite(out, cmd, ctx) {
 			out.errf("aborted: prod write not confirmed")
+			return exitUsage
+		}
+	}
+
+	// Destroy-tier guard (destroy_confirm.go): a credential/seat destroy names
+	// its victim and needs --yes, on EVERY server. The prod guard above cannot
+	// cover this — it is keyed on the target being prod, so `bp token revoke`
+	// against a local or production:false instance skipped confirmation
+	// entirely, and when it did fire it named only the verb and the server.
+	// Runs after it (a prod destroy answers both) and before the send.
+	if destroyArgs, gated := destroyRefArgs(cmd, tail); gated {
+		if !confirmDestroy(out, g, ctx, m, cmd, destroyArgs) {
+			out.errf("aborted: destroy not confirmed")
 			return exitUsage
 		}
 	}
@@ -2271,6 +2289,42 @@ func mustArray(items []json.RawMessage) []byte {
 func mustResult(inner []byte) []byte {
 	b, _ := json.Marshal(map[string]json.RawMessage{"result": inner})
 	return b
+}
+
+// warnDroppedPagination names the pagination knobs the caller set that this
+// command cannot carry, instead of dropping them in silence.
+//
+// applyQuery forwards --limit/--offset only when the command is `paginated` or
+// declares the flag itself (the DECLARATION rule, documented at its call site
+// with the six live commands that motivated it). What it has never done is SAY
+// so. The result is the sharpest lie a read can tell: `bp token ls --limit 5`
+// exits 0 having asked for, and printed, the server's whole unpaginated
+// inventory — the caller reads a page it did not ask for as the page it did.
+// `bp workspace member-ls --offset 50` is the same shape; both list every seat
+// or credential in the workspace, which is exactly where a silent truncation
+// (or a silent NON-truncation the caller believes is a page) misleads most.
+//
+// This warns rather than refuses on purpose: the request is still correct and
+// still answers the question, and refusing would break every existing script
+// that passes a harmless global. stderr keeps stdout parseable.
+func warnDroppedPagination(out *writer, g globals, cmd manifest.Command) {
+	if cmd.Paginated {
+		return
+	}
+	var dropped []string
+	if g.limitSet && !commandDeclaresFlag(cmd, "limit") {
+		dropped = append(dropped, "--limit")
+	}
+	if g.offsetSet && !commandDeclaresFlag(cmd, "offset") {
+		dropped = append(dropped, "--offset")
+	}
+	if len(dropped) == 0 {
+		return
+	}
+	out.errf(
+		"note: %s ignored — `%s %s` does not accept pagination; the answer below is the server's full result, not a page",
+		strings.Join(dropped, " and "), cmd.Noun, cmd.Verb,
+	)
 }
 
 // confirmProdWrite prompts on stderr and reads a [y/N] answer from stdin.
