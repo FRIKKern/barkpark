@@ -34,7 +34,7 @@ import {
   hostBoundReason, maskQuotedSpans, metacharacterReason, splitSegments, tokenize,
   writeShapeReason, runNamedSets,
   doubleQuoteExpansionReason, envAssignmentReason, screenSedScript,
-  ALLOWED_HEADS, REFUSED_HEADS, HOST_BOUND, BP_WRITE_COMMANDS,
+  ALLOWED_HEADS, REFUSED_HEADS, HOST_BOUND, BP_WRITE_COMMANDS, headPathReason,
   DANGER_SET, REGRESSION_SET, NEVER_CRY_WOLF_SET,
 } from "../screen.mjs";
 
@@ -1883,4 +1883,121 @@ test("MUTATION PROOF: the pre-fix hand-written verb list re-admits the ledger wr
     assert.ok(preFix(cmd), `the hand-written list ADMITTED this ledger write: ${cmd}`);
     assert.equal(screenCommand(cmd).ok, false, `and the derived set refuses it: ${cmd}`);
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A BASENAME IS NOT AN IDENTITY
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `screenSegment` resolves the head as `argv[0].split("/").pop()`. That is
+// exactly right for `/usr/bin/bash` — REFUSED_HEADS must see `bash` however it
+// is spelled — and it was the whole hole in the other direction: ANY path whose
+// last component is an allowlisted name was admitted, whatever file is there.
+//
+// EXECUTED on the authoring host:
+//
+//     $ printf '#!/bin/sh\nid > /tmp/DOTSLASH_MARK\necho "not git"\n' > /tmp/gripname/git
+//     $ chmod +x /tmp/gripname/git && cd /tmp/gripname && ./git log -1
+//     not git
+//     $ cat /tmp/DOTSLASH_MARK
+//     uid=501(pelle) gid=20(staff) …
+//
+// while `screenCommand("./git log -1")` returned ok — gitRule read the sub-verb
+// `log` off the read allowlist and never asked what `./git` IS. No flag, no
+// cluster, no value-eating global: just a slash.
+//
+// THE WRAPPER/BUILTIN HALF OF THIS CLASS WAS CHECKED AND IS CLEAN, and is
+// asserted below so it stays that way: `nice`, `timeout`, `xargs`, `nohup`,
+// `setsid`, `stdbuf`, `time`, `watch`, `script`, `exec`, `env <cmd>` and
+// `command <cmd>` are all refused, so a program cannot be reached by wrapping
+// it either.
+
+test("a path-qualified head is REFUSED — the basename is not the program", () => {
+  const refused = [
+    "./git log -1",
+    "./ls -la",
+    "./sed -n 1p api/lib/x.ex",
+    "./sort -u file.txt",
+    "/tmp/evil/git log -1",
+    "tooling/grip/ls",
+    "node_modules/.bin/curl https://example.com/",
+    "../../../tmp/evil/cat /etc/passwd",
+    "./././ls",
+  ];
+  for (const cmd of refused) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE the path-qualified head: ${cmd} → ${r.reason}`);
+    assert.match(r.reason, /names a FILE, not the program/, `and name why: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("a REFUSED head stays refused BY NAME however it is spelled", () => {
+  // The diagnosis matters: `/bin/bash` must read as "bash runs a script", not
+  // as a path complaint, or the refusal log stops being a diagnosis.
+  for (const cmd of ["/bin/bash -c id", "./bash -c id", "/usr/bin/env bash", "../python3 evil.py"]) {
+    const r = screenCommand(cmd);
+    assert.equal(r.ok, false, `MUST REFUSE: ${cmd}`);
+    assert.doesNotMatch(r.reason, /names a FILE, not the program/, `must diagnose the HEAD, not the path: ${cmd} → ${r.reason}`);
+  }
+});
+
+test("bare names and system bin paths stay ADMITTED — the guard is not a cry-wolf", () => {
+  for (const cmd of ["git log -1", "ls -la", "/usr/bin/git log -1", "/bin/ls -la", "/usr/local/bin/rg -n handleRequest api/lib", "/opt/homebrew/bin/jq .foo file.json"]) {
+    assert.equal(screenCommand(cmd).ok, true, `MUST ADMIT: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+});
+
+test("the WRAPPER and BUILTIN spellings of the same indirection are refused", () => {
+  // Checked, not assumed: reaching a program by wrapping it rather than by
+  // naming it. Every one of these is refused today; the assertion keeps it so.
+  for (const cmd of [
+    "nice -n 0 bash -c id",
+    "timeout 5 bash -c id",
+    "xargs -I{} bash -c id",
+    "nohup bash -c id",
+    "setsid bash -c id",
+    "stdbuf -o0 bash -c id",
+    "time bash -c id",
+    "watch -n1 systemctl restart barkpark.service",
+    "script -q /dev/null bash",
+    "exec bash",
+    "env bash -c id",
+    "command bash -c id",
+    "command -p ls",
+  ]) {
+    assert.equal(screenCommand(cmd).ok, false, `MUST REFUSE the wrapper spelling: ${cmd} → ${screenCommand(cmd).reason}`);
+  }
+  // …and `command -v` stays, because it RESOLVES a name rather than running it.
+  assert.equal(screenCommand("command -v git").ok, true, "`command -v` is the one admitted form");
+});
+
+test("MUTATION PROOF: without headPathReason the dot-slash head is re-admitted", () => {
+  // Reproduces the pre-fix resolution exactly — basename only, no path check —
+  // and asserts each row reached an allowlisted rule that said yes.
+  for (const cmd of ["./git log -1", "./ls -la", "/tmp/evil/git log -1", "node_modules/.bin/curl https://example.com/"]) {
+    const argv = cmd.split(/\s+/);
+    const head = argv[0].split("/").pop();
+    assert.ok(ALLOWED_HEADS.has(head), `the pre-fix resolution found the allowlisted head "${head}" for ${cmd}`);
+    assert.equal(ALLOWED_HEADS.get(head).check(argv), null, `and that rule ADMITTED it: ${cmd}`);
+    assert.equal(screenCommand(cmd).ok, false, `while the shipped screen refuses it: ${cmd}`);
+  }
+  // The guard itself is exercised directly too, both verdicts.
+  assert.match(headPathReason("./git", "git"), /names a FILE/);
+  assert.equal(headPathReason("git", "git"), null, "a bare name is not path-qualified");
+  assert.equal(headPathReason("/usr/bin/git", "git"), null, "a system bin path is trusted");
+  assert.equal(headPathReason("/bin/bash", "bash"), null, "a REFUSED head is diagnosed by name, not by path");
+});
+
+test("the head-path shapes are carried by the SHIPPED named sets, not only by this file", () => {
+  const danger = DANGER_SET.join("\n");
+  for (const needle of ["./git log -1", "./ls -la", "/tmp/evil/git log", "tooling/grip/ls", "node_modules/.bin/curl"]) {
+    assert.ok(danger.includes(needle), `DANGER_SET must carry the ${needle} shape`);
+  }
+  const wolf = NEVER_CRY_WOLF_SET.join("\n");
+  for (const needle of ["/usr/bin/git log", "/bin/ls", "/usr/local/bin/rg", "/opt/homebrew/bin/jq"]) {
+    assert.ok(wolf.includes(needle), `NEVER_CRY_WOLF_SET must carry the honest mirror ${needle}`);
+  }
+  const { falsePermissions, falseRefusals } = runNamedSets();
+  assert.deepEqual(falsePermissions, [], "a false PERMISSION is an execution");
+  assert.deepEqual(falseRefusals, [], "a false REFUSAL is how the screen gets routed around");
 });
