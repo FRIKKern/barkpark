@@ -916,3 +916,167 @@ func TestRuntimeAndClaudeLanesShareTheTail(t *testing.T) {
 		t.Fatalf("control: claude lane must still settle, effs %v", effs)
 	}
 }
+
+// ── the tail display cap (mob-bl-go-tail-cap-parity) ────────────────────────
+//
+// State.Tail was UNBOUNDED on both lanes: mob-bl-runtime-lane-consumer capped
+// the MOBILE tail at 262144 bytes with FREEZE semantics, but its brief scoped
+// the cap to mobile only, so a runaway turn grew the Go string without limit in
+// the TUI. The standing parity law says a weakness present in both reducers is
+// fixed on both; these tests are the Go half of apps/mobile/src/chat/
+// reducer.ts's appendTail contract.
+//
+// FREEZE, not close and not shed: the tail stops growing, everything already
+// shown is KEPT, one honest line says the preview was truncated, deltas keep
+// arriving and the turn still settles.
+
+// capOverflowText returns text long enough that one delta breaches MaxTailBytes.
+func capOverflowText() string {
+	return strings.Repeat("x", MaxTailBytes+1)
+}
+
+func TestTailCap_ClaudeLaneFreezesAtTheCap(t *testing.T) {
+	st, _ := drive(State{SessionID: "s1"}, t0, initFrame(t), deltaFrame(t, "kept"))
+	st, _ = drive(st, t0, deltaFrame(t, capOverflowText()))
+
+	if !st.TailCapped {
+		t.Fatalf("tail must latch capped once a delta breaches %d bytes", MaxTailBytes)
+	}
+	// KEPT: what was already shown survives; the overflowing delta does not land.
+	if !strings.HasPrefix(st.Tail, "kept") {
+		t.Fatalf("frozen tail dropped what was already shown: %.40q", st.Tail)
+	}
+	if strings.Contains(st.Tail, "xxxx") {
+		t.Fatalf("the overflowing delta must NOT be appended")
+	}
+	// HONEST: the marker says the preview was truncated.
+	if !strings.HasSuffix(st.Tail, TailCapNotice) {
+		t.Fatalf("frozen tail must carry the notice, got %.80q", st.Tail)
+	}
+	// BOUNDED: notice included, the tail cannot approach the runaway size.
+	if len(st.Tail) > MaxTailBytes+len(TailCapNotice) {
+		t.Fatalf("frozen tail is %d bytes, over the bound", len(st.Tail))
+	}
+
+	// FROZEN, not closed: later deltas are absorbed without growing the tail and
+	// without a second notice.
+	frozen := st.Tail
+	st, _ = drive(st, t0, deltaFrame(t, "after"), deltaFrame(t, "more"))
+	if st.Tail != frozen {
+		t.Fatalf("a capped tail must stop growing; %.60q -> %.60q", frozen, st.Tail)
+	}
+	if strings.Count(st.Tail, TailCapNotice) != 1 {
+		t.Fatalf("the notice must appear exactly once, got %d", strings.Count(st.Tail, TailCapNotice))
+	}
+
+	// AND THE TURN STILL SETTLES — the cap is a display bound, never a shed.
+	st, effs := drive(st, t0, resultFrame(t, "", false))
+	f, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatalf("a capped turn must still settle and refetch, effs %v", effs)
+	}
+	if f.Gen != st.Gen {
+		t.Fatalf("settle fetch Gen %d != state Gen %d — the cap broke the D77 fence", f.Gen, st.Gen)
+	}
+}
+
+func TestTailCap_RuntimeLaneFreezesAtTheCap(t *testing.T) {
+	// The row's actual ask: BOTH arms. The runtime lane appended at its own site
+	// and would have stayed unbounded if only the claude arm were routed through
+	// the shared accumulator.
+	st, _ := drive(State{SessionID: "s1"}, t0, runtimeTextFrame(t, "text_delta", "kept"))
+	st, _ = drive(st, t0, runtimeTextFrame(t, "text_delta", capOverflowText()))
+
+	if !st.TailCapped {
+		t.Fatalf("runtime lane must latch capped too — it has its own append site")
+	}
+	if !strings.HasPrefix(st.Tail, "kept") || !strings.HasSuffix(st.Tail, TailCapNotice) {
+		t.Fatalf("runtime frozen tail wrong shape: %.80q", st.Tail)
+	}
+	frozen := st.Tail
+	st, _ = drive(st, t0, runtimeTextFrame(t, "text_delta", "after"))
+	if st.Tail != frozen {
+		t.Fatalf("capped runtime tail must stop growing")
+	}
+}
+
+func TestTailCap_SettleReleasesTheLatch(t *testing.T) {
+	// The cap bounds ONE turn's preview, never the session. A latch that survived
+	// the settle would cap every later turn at zero bytes — a worse bug than the
+	// one the cap fixes, and invisible to a test that only drives one turn.
+	st, _ := drive(State{SessionID: "s1"}, t0, initFrame(t), deltaFrame(t, capOverflowText()))
+	if !st.TailCapped {
+		t.Fatalf("precondition: the tail must be capped")
+	}
+	_, effs := drive(st, t0, resultFrame(t, "", false))
+	f, ok := hasFetchTail(effs)
+	if !ok {
+		t.Fatalf("precondition: expected a settle fetch")
+	}
+	st, _ = drive(st, t0, resultFrame(t, "", false))
+	st, _ = drive(st, t0, TailFetchedEvent{Session: Session{ID: "s1"}, Gen: f.Gen})
+
+	if st.TailCapped || st.TailBytes != 0 || st.Tail != "" {
+		t.Fatalf("settle must release the latch: capped=%v bytes=%d tail=%.30q",
+			st.TailCapped, st.TailBytes, st.Tail)
+	}
+
+	// The NEXT turn streams normally.
+	st, _ = drive(st, t0, initFrame(t), deltaFrame(t, "fresh turn"))
+	if st.Tail != "fresh turn" || st.TailCapped {
+		t.Fatalf("post-settle turn must stream normally, got %.40q capped=%v", st.Tail, st.TailCapped)
+	}
+}
+
+func TestTailCap_UnderTheCapIsUntouched(t *testing.T) {
+	// THE NEGATIVE ARM. A cap is only a fix if an ordinary turn is byte-identical
+	// to before: an accumulator that froze early, dropped text, or stamped a
+	// notice on a short tail would pass every assertion above.
+	st, _ := drive(State{SessionID: "s1"}, t0, initFrame(t), deltaFrame(t, "Hel"), deltaFrame(t, "lo"))
+	if st.Tail != "Hello" {
+		t.Fatalf("ordinary tail changed: %q", st.Tail)
+	}
+	if st.TailCapped {
+		t.Fatalf("a 5-byte tail must not be capped")
+	}
+	if st.TailBytes != 5 {
+		t.Fatalf("TailBytes = %d, want 5 — the counter must track streamed bytes", st.TailBytes)
+	}
+	if strings.Contains(st.Tail, TailCapNotice) {
+		t.Fatalf("an uncapped tail must carry no notice")
+	}
+
+	// Exactly AT the cap is still allowed — the bound is a breach test, not a
+	// fencepost that steals the last byte.
+	st, _ = drive(State{SessionID: "s1"}, t0, initFrame(t),
+		deltaFrame(t, strings.Repeat("y", MaxTailBytes)))
+	if st.TailCapped {
+		t.Fatalf("a tail of exactly MaxTailBytes must NOT be capped")
+	}
+	if st.TailBytes != MaxTailBytes {
+		t.Fatalf("TailBytes = %d, want %d", st.TailBytes, MaxTailBytes)
+	}
+}
+
+func TestTailCap_MultibyteIsCountedInBytesNotRunes(t *testing.T) {
+	// The cap is stated in UTF-8 BYTES (charter D64), which is what the mobile
+	// twin counts by hand. A rune-counting Go implementation would let a
+	// multibyte stream reach ~4x the intended size — the same runaway this fix
+	// bounds, just slower.
+	const emoji = "😀" // 4 bytes, 1 rune
+	per := MaxTailBytes/len(emoji) + 1
+	st, _ := drive(State{SessionID: "s1"}, t0, initFrame(t),
+		deltaFrame(t, strings.Repeat(emoji, per)))
+	if !st.TailCapped {
+		t.Fatalf("a multibyte stream past the BYTE cap must freeze (rune-counting would not)")
+	}
+}
+
+func TestTailCap_MatchesTheMobileConstant(t *testing.T) {
+	// The parity law is about the NUMBER as much as the behaviour: two reducers
+	// with different ceilings show different amounts of the same turn.
+	// apps/mobile/src/chat/reducer.ts: `export const MAX_TAIL_BYTES = 262_144`.
+	if MaxTailBytes != 262144 {
+		t.Fatalf("MaxTailBytes = %d, but the mobile twin uses 262144", MaxTailBytes)
+	}
+}
