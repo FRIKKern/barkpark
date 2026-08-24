@@ -765,13 +765,39 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 		q.Set("view", g.view)
 	}
 
-	if cmd.Paginated {
-		if g.limitSet {
-			q.Set("limit", strconv.Itoa(g.limit))
-		}
-		if g.offsetSet {
-			q.Set("offset", strconv.Itoa(g.offset))
-		}
+	// --limit / --offset are GLOBAL flags: parseGlobals consumes them wherever
+	// they appear in argv, so a command-local `limit`/`offset` flag the manifest
+	// declares can NEVER see them — the same trap globals.go documents for
+	// --dataset (globals.go:52). Gating the forward on `cmd.Paginated` alone
+	// therefore DROPPED them, silently and before the request was built, on
+	// every command that declares its own limit/offset without being paginated.
+	// Six on the live manifest, all measured with --dry-run against
+	// guerrilla.barkpark.cloud:
+	//
+	//	bp doc related X --limit 25   -> /v1/data/related/production/X   (no limit)
+	//	bp doc history post p1 --limit 3 -> /v1/data/history/…/post/p1   (no limit)
+	//	bp media search --limit 100 --offset 200 -> /v1/media/…/search   (NEITHER)
+	//	bp media suggest --limit 20   -> /v1/media/…/search/suggestions  (no limit)
+	//	bp task prime --limit 50      -> /v1/tasks/prime?view=brief      (no limit)
+	//	bp task events --limit 25     -> /v1/tasks/events                (no limit)
+	//
+	// Each answered with the SERVER's default (10, 10, 50, 8, 10, 500) at rc=0,
+	// so the caller read a page it had not asked for as the page it had.
+	// media.search is the sharpest: its own flag summary reads "Hits to skip
+	// (paginate with --limit)", and neither knob could ever leave the CLI, so
+	// every "next page" was page one. The discriminator is the globals table,
+	// not the route — on the same commands `--since 99` and `--kind image` rode
+	// fine, because parseGlobals does not recognise them.
+	//
+	// The rule is DECLARATION-driven, not paginated-driven: forward the knob
+	// when the command's own manifest says it accepts it. `paginated: true`
+	// stays in the disjunction because those seven commands take limit/offset
+	// as protocol whether or not they also enumerate them as flags.
+	if g.limitSet && (cmd.Paginated || commandDeclaresFlag(cmd, "limit")) {
+		q.Set("limit", strconv.Itoa(g.limit))
+	}
+	if g.offsetSet && (cmd.Paginated || commandDeclaresFlag(cmd, "offset")) {
+		q.Set("offset", strconv.Itoa(g.offset))
 	}
 
 	// Declared positional args that belong in the query string (e.g. search.query
@@ -790,6 +816,16 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 	clientOnly := map[string]bool{"file": true, "set": true, "quiet": true, "all": true}
 	for _, f := range cmd.Flags {
 		if clientOnly[f.Name] || f.Type == "file" || commandFlagBelongsInBody(cmd, f.Name) {
+			continue
+		}
+		// limit/offset are already resolved above from the globals, which is the
+		// ONLY place they can arrive from (parseGlobals consumes them wherever
+		// they appear, so `flags` never holds them). Skipping the name we
+		// already set keeps that provable rather than assumed: were a caller to
+		// populate both, `q.Add` here would append a SECOND scalar `limit=` and
+		// Plug would keep one of the two by decode order — the duplicate-key
+		// coin-flip the repeatable-flag branch below exists to avoid.
+		if (f.Name == "limit" || f.Name == "offset") && q.Has(f.Name) {
 			continue
 		}
 		if f.Type == "bool" {
