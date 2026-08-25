@@ -550,6 +550,21 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "not the async deployRefusalCopy rail. Flip: a console UI starts sending via."
     },
     %{
+      code: "cloudflare_orphan_cleanup_failed",
+      site: "router.ex do_bind_cloudflare (orphan_guard, the post-write box-liveness re-check)",
+      reason:
+        "Console-UNREACHABLE today, same fence as cloudflare_bind_failed: no console " <>
+          "deploy body sets `via`, so maybe_bind_cloudflare short-circuits {:cont} and " <>
+          "orphan_guard never runs from the console. Were it to: this 502 is the " <>
+          "honesty-edge case where the box was deprovisioned mid-write AND the cleanup " <>
+          "delete of the record just written also failed — the SYNCHRONOUS POST " <>
+          "/v1/sites/:id/deploy response, before any deployment row is minted, so " <>
+          "runDeploy's non-201 branch paints the deploy caller's generic fallback, not " <>
+          "the async deployRefusalCopy rail. Its sibling 409 (the cleanup delete " <>
+          "SUCCEEDING) reuses instance_not_live, already read. Flip: a console " <>
+          "domain-binding UI starts sending via."
+    },
+    %{
       code: "cloudflare_zone_missing",
       site: "router.ex bind_cloudflare",
       reason:

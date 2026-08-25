@@ -91,6 +91,10 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
       do: raise("Cloudflare.Client.ensure_zone_proxied/2 ran on the standalone path")
 
     @impl true
+    def delete_dns_record(_token, _zone_id, _record_id),
+      do: raise("Cloudflare.Client.delete_dns_record/3 ran on the standalone path")
+
+    @impl true
     def create_origin_ca_cert(_hosts, _csr),
       do: raise("Cloudflare.Client.create_origin_ca_cert/2 ran on the standalone path")
   end

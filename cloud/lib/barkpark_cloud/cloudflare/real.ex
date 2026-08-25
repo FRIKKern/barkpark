@@ -13,6 +13,9 @@ defmodule BarkparkCloud.Cloudflare.Real do
       `{"result":{"status":"active"}}`.
     * `upsert_dns_record/3` — `POST /zones/:zone/dns_records` to create, or
       `PUT /zones/:zone/dns_records/:id` to update when the record carries an id.
+    * `delete_dns_record/3` — `DELETE /zones/:zone/dns_records/:id`. The
+      orphan-cleanup verb: the router's cf-in-front bind calls this when a
+      box-liveness re-check after the upsert finds the box gone.
     * `ensure_zone_proxied/3` — `PATCH /zones/:zone/dns_records/:id` with
       `{"proxied": true}` (the orange-cloud flip).
     * `create_origin_ca_cert/2` — `POST /certificates` with the hostnames + CSR.
@@ -88,6 +91,23 @@ defmodule BarkparkCloud.Cloudflare.Real do
   end
 
   @impl true
+  def delete_dns_record(token, zone_id, record_id)
+      when is_binary(zone_id) and is_binary(record_id) do
+    with {:ok, token} <- present_token(token),
+         {:ok, decoded} <- request(delete_dns_record_request(token, zone_id, record_id)) do
+      case decoded do
+        %{"result" => %{"id" => id}} when is_binary(id) -> {:ok, %{deleted: true}}
+        # Cloudflare's DELETE response shape is otherwise identical to the
+        # other verbs' {"result": {...}}; a missing/blank id still means the
+        # call reached 2xx, so treat it as deleted rather than erroring on a
+        # response-shape technicality the orphan-cleanup caller cannot act on.
+        %{"result" => _} -> {:ok, %{deleted: true}}
+        _ -> {:error, :unexpected_response}
+      end
+    end
+  end
+
+  @impl true
   def ensure_zone_proxied(token, zone_id, record_id)
       when is_binary(zone_id) and is_binary(record_id) do
     with {:ok, token} <- present_token(token),
@@ -145,6 +165,21 @@ defmodule BarkparkCloud.Cloudflare.Real do
       })
 
     build_request(method, path, token, body, "application/json")
+  end
+
+  @doc """
+  Delete a DNS record: `DELETE /zones/:zone/dns_records/:id`. PURE. The
+  orphan-cleanup verb's wire shape — no body, same Bearer auth as every other
+  callback here.
+  """
+  def delete_dns_record_request(token, zone_id, record_id) do
+    build_request(
+      :delete,
+      "/zones/" <> URI.encode(zone_id) <> "/dns_records/" <> URI.encode(record_id),
+      token,
+      "",
+      "application/json"
+    )
   end
 
   @doc """
