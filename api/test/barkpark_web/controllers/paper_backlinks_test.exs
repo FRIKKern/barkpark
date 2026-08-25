@@ -39,8 +39,11 @@ defmodule BarkparkWeb.PaperBacklinksTest do
     assert html =~ ~s(data-live="true")
     assert html =~ "The weekly product and delivery brief."
     assert html =~ "Weekly review"
-    assert html =~ "Rev 17 · Updated 23 Aug 2026"
+    assert html =~ "Updated 23 Aug 2026"
+    assert html =~ ~s(data-paper-revision="17")
+    refute html =~ "Rev 17"
     assert html =~ ~s(class="bp-paper-card")
+    assert html =~ ~s(style="display:flex;min-width:0;min-height:10.5rem)
     assert html =~ ~s(<section)
     # Linked titles point at /papers/<from_doc_id>.
     assert html =~ ~s(href="/papers/p-alpha")
@@ -74,6 +77,26 @@ defmodule BarkparkWeb.PaperBacklinksTest do
     html = PaperBacklinks.section_html(referencers)
     assert html =~ "p-untitled"
     assert html =~ ~s(href="/papers/p-untitled")
+  end
+
+  test "keeps the graph useful without turning the reader into a card wall" do
+    referencers =
+      for index <- 1..6 do
+        %{
+          from_doc_id: "paper-#{index}",
+          title: "Paper #{index}",
+          type: "paper",
+          event_type: "changelog.day"
+        }
+      end
+
+    html = PaperBacklinks.section_html(referencers)
+
+    assert length(Regex.scan(~r/class="bp-paper-card"/, html)) == 4
+    assert html =~ "Daily edition"
+    refute html =~ "Changelog.day"
+    refute html =~ "Paper 5"
+    refute html =~ "Paper 6"
   end
 
   test "skips a referencer with no resolvable from_doc_id; omits an all-unresolved section" do
