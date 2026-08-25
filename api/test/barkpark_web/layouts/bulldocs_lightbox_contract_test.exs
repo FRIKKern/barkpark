@@ -2,9 +2,10 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
   use ExUnit.Case, async: true
 
   @layout Path.expand("../../../lib/barkpark_web/layouts/bulldocs.html.heex", __DIR__)
+  @surface Path.expand("../../../assets/paper-surface/paper-surface.css", __DIR__)
 
   setup_all do
-    {:ok, source: File.read!(@layout)}
+    {:ok, source: File.read!(@layout), surface: File.read!(@surface)}
   end
 
   test "reader ships one semantic image dialog", %{source: source} do
@@ -33,6 +34,8 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
 
     assert source =~ "lightboxImg.alt = image.alt || \"\""
     assert source =~ "dialog.showModal()"
+    assert source =~ ~s|image.dataset.bpLightboxable === "true"|
+    assert source =~ ~s|img[data-bp-lightboxable="true"]|
   end
 
   test "keyboard and streamed images retain the lightbox behavior", %{source: source} do
@@ -88,5 +91,14 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
              ~s|target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" })|
 
     assert source =~ ~s|.bp-card[data-bp-chapter-target]:focus-visible|
+  end
+
+  test "lightbox triggers have visible focus and honor reduced motion", %{surface: surface} do
+    assert surface =~ ~s|.bp-paper-article img[data-bp-lightboxable="true"]|
+    assert surface =~ "cursor: zoom-in"
+    assert surface =~ ~r/:focus-visible\s*\{[^}]*outline:/s
+
+    assert surface =~
+             ~r/@media \(prefers-reduced-motion: reduce\).*?img\[data-bp-lightboxable="true"\].*?transition: none;/s
   end
 end
