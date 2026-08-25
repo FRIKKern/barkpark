@@ -39,7 +39,16 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
     assert source =~ "--bp-evidence-band: 1180px"
     assert source =~ "--bp-evidence-band-max: 1360px"
     assert source =~ ~s|[data-block-id*="-clip-"]:has(> .bp-button)|
+    assert source =~ "min-height: 44px"
     assert source =~ ".bp-paper-article figure > .bp-cols"
+    assert source =~ "max-height: min(72vh, 760px)"
+    assert source =~ "object-fit: contain"
     assert source =~ "grid-template-columns: 1fr"
+  end
+
+  test "task headings have a quiet editorial boundary", %{source: source} do
+    assert source =~ ~s|#paper-body > [data-block-id]:has(> h3)|
+    assert source =~ "border-top: 1px solid"
+    assert source =~ "text-wrap: balance"
   end
 end

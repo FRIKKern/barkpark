@@ -8,14 +8,28 @@ defmodule BarkparkWeb.Layouts.BulldocsMobileControlsTest do
             __DIR__
           )
 
-  test "paper view controls do not float over evidence on narrow screens" do
+  test "paper view controls share one normal-flow utility row" do
     src = File.read!(@layout)
 
-    assert src =~ ~r/@media \(max-width: 720px\).*?\.bp-view-toggle \{.*?position: static;/s,
-           "mobile reader controls must participate in page flow instead of covering paper text or figures"
+    assert src =~
+             ~s|<div class="bp-view-controls" role="group" aria-label="Paper view controls">|
+
+    assert src =~ ~r/\.bp-view-controls \{.*?display: flex;.*?flex-wrap: wrap;/s
+
+    refute src =~ ~r/\.bp-view-toggle \{[^}]*position:\s*fixed;/s,
+           "reader controls must never cover paper text or evidence"
 
     assert src =~
-             ~r/@media \(max-width: 720px\).*?\.bp-view-toggle--email,\s*\.bp-mode-toggle \{.*?bottom: auto;/s,
-           "the desktop vertical offsets must be cleared for the mobile control row"
+             ~r/@media \(max-width: 720px\).*?\.bp-view-controls \{.*?width: calc\(100% - 32px\);/s,
+           "the grouped controls must fit the narrow viewport"
+  end
+
+  test "mobile evidence uses the viewport without cropping images" do
+    src = File.read!(@layout)
+
+    assert src =~ ~r/@media \(max-width: 720px\).*?--bp-evidence-width: calc\(100vw - 32px\);/s
+
+    assert src =~
+             ~r/@media \(max-width: 720px\).*?figure > \.bp-cols img \{.*?width: 100%;.*?height: auto;.*?max-height: none;/s
   end
 end
