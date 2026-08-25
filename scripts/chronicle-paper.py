@@ -1276,27 +1276,131 @@ def archive_chapter_links(
     description: str,
 ) -> dict[str, Any]:
     refs = []
+    used_titles: set[str] = set()
+    used_surfaces: set[str] = set()
     for period in periods:
         selected = events_in_period(events, period)
         if selected:
-            latest = selected[-1]
-            count = f"{len(selected):,} {'change' if len(selected) == 1 else 'changes'}"
-            reason = f"{count}. Latest movement: {concrete_fallback_headline(latest)}."
+            editorial = deterministic_editorial(period, selected)
+            candidates = [
+                (
+                    story["title"],
+                    archive_chapter_summary(story["title"])
+                    or f"{story['explanation']} {story['outcome']}",
+                    archive_chapter_surface(story["title"]),
+                )
+                for story in editorial["work_themes"]
+                if not archive_chapter_title_is_weak(story["title"])
+            ]
+            candidates.extend(
+                (headline, summary, archive_chapter_surface(headline))
+                for event in reversed(representative_events(selected))
+                if event.kind in PRODUCT_KINDS
+                for headline in [concrete_fallback_headline(event)]
+                for summary in [archive_chapter_summary(headline)]
+                if summary is not None and not archive_chapter_title_is_weak(headline)
+            )
+            title, summary, surface = next(
+                (
+                    (candidate_title, candidate_summary, candidate_surface)
+                    for candidate_title, candidate_summary, candidate_surface in candidates
+                    if candidate_title.casefold() not in used_titles
+                    and candidate_surface not in used_surfaces
+                ),
+                next(
+                    (
+                        (candidate_title, candidate_summary, candidate_surface)
+                        for candidate_title, candidate_summary, candidate_surface in candidates
+                        if candidate_title.casefold() not in used_titles
+                    ),
+                    (editorial["theme"], editorial["plain_summary"], archive_chapter_surface(editorial["theme"])),
+                ),
+            )
+            used_titles.add(title.casefold())
+            used_surfaces.add(surface)
+            count = f"{len(selected):,} verified {'change' if len(selected) == 1 else 'changes'}"
         else:
-            reason = "A quiet chapter with no recorded release activity."
+            chapter_name = period.title.split(",")[0]
+            title = f"{chapter_name} was a quiet chapter"
+            summary = "Nothing new shipped in this period. The edition remains visible so the pause is part of the story."
+            count = "No recorded release activity"
+        date_range = (
+            f"{period.start.strftime('%d %b')}–"
+            f"{(period.end - dt.timedelta(days=1)).strftime('%d %b')}"
+        )
         refs.append({
             "slug": period.slug,
-            "title": period.title,
-            "description": reason,
-            "reason": reason,
+            "title": title,
+            "description": summary,
+            "eyebrow": f"{period.title.split(',')[0]} · {date_range}",
+            "meta": count,
+            "prefer_authored_copy": True,
         })
+    if refs:
+        refs[-1]["featured"] = True
     return {
         "id": block_id,
         "type": "paper-links",
         "title": title_value,
         "description": description,
+        "layout": "chapters",
         "refs": refs,
     }
+
+
+def archive_chapter_surface(title_value: str) -> str:
+    """Group sibling chapter headlines by the reader-facing product story."""
+    lowered = title_value.casefold()
+    for surface in (
+        "barkpark cloud", "studio", "papers", "chronicle", "task", "terminal",
+        "long-running work", "failures", "quality checks", "access", "sign-in",
+        "lists", "search", "published content", "media", "mobile",
+    ):
+        if surface in lowered:
+            return surface
+    return lowered.split()[0] if lowered.split() else "chapter"
+
+
+def archive_chapter_title_is_weak(title_value: str) -> bool:
+    lowered = title_value.casefold()
+    weak_phrases = (
+        "previously broken path",
+        "supports a new everyday action",
+        "easier to understand and maintain",
+        "records a concrete product change",
+    )
+    technical_fragments = (
+        "_", "sigkill", "predicate", "guard", "argv", "etag", "schema",
+        "non-zero", "reach limit", "digest", "callback", "payload",
+    )
+    return any(phrase in lowered for phrase in weak_phrases) or any(fragment in lowered for fragment in technical_fragments)
+
+
+def archive_chapter_summary(title_value: str) -> str | None:
+    """Give polished deterministic headlines an equally specific reader outcome."""
+    lowered = title_value.casefold()
+    summaries = (
+        ("barkpark cloud makes releases", "Release failures became easier to see and understand, so a troubled rollout no longer looks healthy or mysteriously unfinished."),
+        ("barkpark cloud makes site status", "Site health and release state became clearer, with awkward and refused actions leaving a useful explanation behind."),
+        ("studio makes projects", "Project navigation and read-only work became more coherent, so people can move through Studio without guessing what is available."),
+        ("studio chat", "Studio conversations moved closer to the work while their background processes became less likely to leak or stall."),
+        ("long-running work", "Large pieces of work became easier to begin, follow, and hand over without losing the thread that explains why they exist."),
+        ("failures", "Missing or failed results now say what happened instead of dressing an error up as an empty or successful page."),
+        ("quality checks", "Release checks became harder to fool, including empty runs that once looked reassuring without proving anything."),
+        ("papers bring visual", "Screenshots and terminal recordings now sit beside the change they prove, giving long editions something concrete to show."),
+        ("papers read more", "Stronger type, spacing, and section rhythm make long Papers feel composed while the ordinary reading line stays calm."),
+        ("papers tell richer", "Papers gained a clearer visual hierarchy and more useful evidence without turning the reading path into a wall of chrome."),
+        ("chronicle month", "Monthly and annual editions now carry real visual evidence, with deeper technical detail kept behind the readable story."),
+        ("chronicle archive", "The Chronicle now keeps its calendar editions current, so a reader can move from the overview into the week or day that shaped it."),
+        ("task boards", "Task ownership and progress became easier to see, both on the board and from the terminal where work begins."),
+        ("the terminal", "Terminal commands became clearer about what happened, what is still running, and what needs attention next."),
+        ("access rules", "Sensitive paths received firmer access rules while ordinary signed-in work stayed straightforward."),
+        ("sign-in", "Sign-in and access behavior became more predictable around the moments where identity and visibility matter."),
+        ("lists now", "Long lists now return the complete result instead of quietly stopping early."),
+        ("search commands", "Search now makes both its results and its failures easier to understand from the terminal."),
+        ("published content", "Published material now uses one dependable identity across the places that read and link to it."),
+    )
+    return next((summary for prefix, summary in summaries if prefix in lowered), None)
 
 
 def index_archive_list(block_id: str, periods: list[Period]) -> dict[str, Any]:
@@ -1541,37 +1645,6 @@ def editorial_story_lineage(
     return {"id": block_id, "type": "lineage", "nodes": nodes}
 
 
-def archive_chapter_lineage(
-    block_id: str,
-    periods: list[Period],
-    events: list[Event],
-) -> dict[str, Any]:
-    """Render a long edition's calendar as a compact, comparable chronology."""
-    nodes = []
-    for period in periods:
-        selected = events_in_period(events, period)
-        count = len(selected)
-        latest = next(
-            (event for event in reversed(selected) if event.kind in PRODUCT_KINDS),
-            selected[-1] if selected else None,
-        )
-        date_range = (
-            f"{period.start.strftime('%d %b')}–"
-            f"{(period.end - dt.timedelta(days=1)).strftime('%d %b')}"
-        )
-        nodes.append({
-            "overline": f"{period.title.split(',')[0]} · {date_range}",
-            "title": concrete_fallback_headline(latest) if latest else "A quiet week in the release record",
-            "body": (
-                f"{count:,} {'change' if count == 1 else 'changes'} reached main."
-                if count
-                else "No release activity was recorded."
-            ),
-            "source": f"/papers/{period.slug}",
-        })
-    return {"id": block_id, "type": "lineage", "nodes": nodes}
-
-
 def child_archive_blocks(
     period: Period,
     selected: list[Event],
@@ -1599,16 +1672,13 @@ def child_archive_blocks(
         if weeks:
             blocks.extend([
                 {"id": "auto:divider-archive-1", "type": "divider"},
-                heading(
-                    "auto:archive-title-1",
-                    2,
-                    f"{period.title.removesuffix(f' {period.start.year}')}, week by week",
+                archive_chapter_links(
+                    "auto:archive-1",
+                    weeks,
+                    events,
+                    title_value=f"{period.title.removesuffix(f' {period.start.year}')}, week by week",
+                    description="Each week has its own argument: what moved, why it mattered, and where to read the complete edition.",
                 ),
-                paragraph(
-                    "auto:archive-dek-1",
-                    "Five chapters show when the work landed and what changed; open any week for its complete story.",
-                ),
-                archive_chapter_lineage("auto:archive-1", weeks, events),
             ])
         if days:
             blocks.extend([
