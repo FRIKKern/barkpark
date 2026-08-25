@@ -1824,7 +1824,7 @@ def period_payload(
         "slug": period.slug,
         "title": display_titles[period.kind],
         "description": f"A clear, source-grounded account of what Barkpark worked on in {period.title}.",
-        "style": "article-wide" if period.kind in {"month", "year"} else "article",
+        "style": "article",
         "event_type": f"changelog.{period.kind}",
         "source_doc": f"git:first-parent:{period.kind}:{period.key}:{digest(selected)}:{editorial_digest(editorial)}",
         "tags": [

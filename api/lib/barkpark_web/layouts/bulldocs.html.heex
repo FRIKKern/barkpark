@@ -854,17 +854,8 @@
     .bp-image-lightbox__close:hover { background: color-mix(in srgb, CanvasText 14%, transparent); }
     .bp-image-lightbox__close:focus-visible { outline: 2px solid CanvasText; outline-offset: 3px; }
 
-    /* Long-form editorial editions use the same native Paper surface and
-       typography, with enough room for timelines and evidence to read as a
-       composed spread instead of a narrow stack. */
-    .bp-paper-shell.bp-paper-article.bp-paper-article-wide {
-      max-width: 1040px;
-      padding: 56px 48px 96px;
-    }
-
     @media (max-width: 720px) {
-      .bp-paper-shell.bp-paper-article,
-      .bp-paper-shell.bp-paper-article.bp-paper-article-wide {
+      .bp-paper-shell.bp-paper-article {
         max-width: 100%;
         padding: 36px 24px 72px;
       }

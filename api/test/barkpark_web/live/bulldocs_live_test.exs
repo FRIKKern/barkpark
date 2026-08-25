@@ -105,7 +105,9 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       end
     end
 
-    test "article-wide keeps the article renderer and opts into the editorial grid", %{conn: conn} do
+    test "legacy article-wide keeps the article renderer without widening the prose shell", %{
+      conn: conn
+    } do
       slug = "2026-08-wide-chronicle"
 
       {:ok, _paper} =
@@ -127,7 +129,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
       assert html =~ "bp-paper-surface"
       assert html =~ "bp-paper-article"
-      assert html =~ "bp-paper-article-wide"
+      refute html =~ "bp-paper-article-wide"
       assert html =~ "A broad editorial month."
     end
 

@@ -276,7 +276,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert resp.status == 200
     assert resp.resp_body =~ "Static Block Authority"
     assert resp.resp_body =~ "bp-paper-article"
-    assert resp.resp_body =~ "bp-paper-article-wide"
+    refute resp.resp_body =~ "bp-paper-article-wide"
     assert resp.resp_body =~ "A Post"
     refute resp.resp_body =~ "Other Tenant Post"
     refute resp.resp_body =~ "STALE STATIC CACHE"

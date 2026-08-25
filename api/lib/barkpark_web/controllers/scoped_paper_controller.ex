@@ -52,7 +52,6 @@ defmodule BarkparkWeb.ScopedPaperController do
         |> put_layout(false)
         |> render(:show,
           article?: paper_article?(paper),
-          wide_article?: paper_wide_article?(paper),
           body_html: paper_body_html(paper),
           preview: preview,
           page_title: preview["title"],
@@ -102,7 +101,4 @@ defmodule BarkparkWeb.ScopedPaperController do
   # mirroring BulldocsLive's `@article?` toggle.
   defp paper_article?(%{content: content}),
     do: Map.get(content || %{}, "style") in ["article", "article-wide"]
-
-  defp paper_wide_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") == "article-wide"
 end
