@@ -24,7 +24,7 @@
 ## Information architecture
 - Primary navigation: Chronicle index → current day/week/month/year editions → adjacent editions and source evidence.
 - Core routes/screens: `/papers/barkpark-chronicle`, `/papers/barkpark-changelog-YYYY-MM-DD`, `/papers/barkpark-changelog-YYYY-wWW`, `/papers/barkpark-changelog-YYYY-MM`, `/papers/barkpark-changelog-YYYY`.
-- Content hierarchy: Branded edition → plain-English answer → real visual proof when available → at most three work themes → one progress assessment → “worth opening next” Paper cards → visible calendar archive → collapsed technical record.
+- Content hierarchy: Branded edition → plain-English answer → visible period pulse → real visual overture when available → defining work themes → progress assessment → release highlights → period chapters and related Papers → collapsed complete ledger.
 
 ## Design principles
 - Lead with reader value: Describe the shipped outcome before its repository mechanics.
@@ -37,6 +37,7 @@
 - Familiar at first glance: Use recognizable changelog conventions—release date, category, highlight, details, archive, source.
 - Evidence without noise: Keep Git provenance available and explicit, but subordinate it to the product story.
 - One premium system: Compose existing Paper blocks and tokens; improve Chronicle authorship rather than forking the renderer.
+- Scale earns scope: A day is a crisp dispatch, a week is a review, a month is a visual magazine issue, and a year is an annual. Longer periods use more chapters and real evidence without turning the main path into a raw ledger.
 - Tradeoffs: Editorial clarity outranks exhaustive detail above the fold; exhaustive ledgers remain available lower in each edition.
 
 ## Visual language
@@ -45,12 +46,12 @@
 - Spacing/layout rhythm: Preserve the measured 660px prose column, wide evidence band, 92px section beat, and structural rule hierarchy. The index uses no authored divider immediately before a section heading and no one-item grid; its open editorial groups should feel like a journal contents page, not stacked containers.
 - Shape/radius/elevation: Existing restrained Paper cards; no new shadows or decorative chrome.
 - Motion: None required for reading; existing theme controls only.
-- Imagery/iconography: Screenshots and asciicasts are evidence, never decoration. Each artifact must come from a commit inside the edition, explain what the reader is seeing, and be omitted when no honest visual exists. Prefer one representative over light/dark/mobile duplicates. Never autoplay.
+- Imagery/iconography: Screenshots and asciicasts are evidence, never decoration. Each artifact must come from a commit inside the edition, explain what the reader is seeing, and be omitted when no honest visual exists. Prefer one representative over light/dark/mobile duplicates. Longer editions compose a restrained hero plus proof gallery so the breadth of a busy month or year is visible. Never autoplay.
 
 ## Components
 - Existing components to reuse: Eyebrow, heading, ingress, byline, columns, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, expandable, and inline link.
-- New/changed components: Chronicle uses native `figure(image)` and `asciicast` blocks for proof. A `paper-links` block carries authored Paper refs and editorial reasons; the reader resolves current published title, summary, type, revision, and update time into premium cards, while email/TUI retain honest authored links. The index keeps an unboxed latest story, borderless edition navigation, a monthly list, and one expandable complete calendar.
-- Variants and states: Day uses at most one screenshot or cast; week at most two screenshots and one cast; month three and one; year four and one. Empty periods receive an explicit quiet-edition message and retain navigation.
+- New/changed components: Chronicle composes native `stats`, `figure(image)`, `asciicast`, `section`, `card`, and `lineage` blocks into a visible release pulse, proof gallery, release highlights, and period chapter cards. A `paper-links` block carries authored Paper refs and editorial reasons; the reader resolves current published details while email/TUI retain honest authored links. The index keeps an unboxed latest story, borderless edition navigation, a monthly list, and one expandable complete calendar.
+- Variants and states: Day uses at most one screenshot and one cast; week three and one; month eight and two; year twelve and three. Month and year add visual galleries, release highlights, and card-based chapter navigation. Empty periods receive an explicit quiet-edition message and retain navigation.
 - Token/component ownership: `design/tokens.json` and `api/assets/paper-surface/paper-surface.css` remain canonical; Chronicle-specific composition lives in `scripts/chronicle-paper.py`.
 
 ## Accessibility
@@ -81,7 +82,7 @@
 
 ## Editorial system
 - Edition contract: `theme`, `plain_summary`, one-to-three `work_themes` with `explanation`, `outcome`, and source references, plus one `progress_assessment`.
-- Scale: Daily editions say plainly what kind of day it was and what changed; weekly editions connect work into a direction; monthly editions explain the durable themes; annual editions describe the larger arc. Longer periods do not earn more primary sections—only stronger synthesis.
+- Scale: Daily editions say plainly what kind of day it was and what changed; weekly editions connect work into a direction; monthly editions become richly illustrated issues that explain durable themes and the weeks inside them; annual editions become visual records of the larger arc. The extra depth must remain authored, scannable, and grounded rather than repeating the source ledger.
 - Authorship: An AI editorial pass may synthesize the verified event packet. It receives bounded source records and aggregate facts, returns strict structured JSON, and is rejected unless every work theme cites supplied commit identifiers, every headline passes the subject-plus-change gate, and all visible copy passes the main-path language gate.
 - Grounding: Numeric facts are rendered deterministically outside model prose. Model prose must not introduce numbers, customer claims, financial claims, adoption claims, security guarantees, dates, deadlines, or unshipped promises.
 - Fallback: If editorial generation is unavailable or invalid, every edition still receives the same narrative sections from a deterministic, source-grounded editor. Generation and publishing fail soft; evidence never disappears.

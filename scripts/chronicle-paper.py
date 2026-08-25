@@ -265,9 +265,9 @@ IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 CAST_EXTENSIONS = {".cast"}
 MEDIA_LIMITS = {
     "day": (1, 1),
-    "week": (2, 1),
-    "month": (3, 1),
-    "year": (4, 1),
+    "week": (3, 1),
+    "month": (8, 2),
+    "year": (12, 3),
 }
 CURATED_CASTS_BY_PATH = {
     "tooling/paper-excellence/twin/payload.json": (
@@ -300,7 +300,11 @@ def artifact_candidates(selected: list[Event]) -> list[tuple[Event, str, str]]:
             lowered = path.lower()
             if any(part in lowered for part in ("node_modules/", "vendor/", "fixtures/")):
                 continue
-            identity = re.sub(r"(?:[-_](?:dark|light|mobile|desktop|768|1440|2x))+(?=\.)", "", lowered)
+            identity = re.sub(
+                r"(?:_{1,2}|-)(?:dark|light|mobile|desktop|360|768|1280|1440|1920|2x)",
+                "",
+                lowered,
+            )
             if identity in seen:
                 continue
             seen.add(identity)
@@ -320,7 +324,7 @@ def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[di
     image_limit, cast_limit = MEDIA_LIMITS[period.kind]
     images = 0
     casts = 0
-    blocks: list[dict[str, Any]] = []
+    evidence: list[dict[str, Any]] = []
     for event, path, kind in artifact_candidates(selected):
         if kind == "image" and images >= image_limit:
             continue
@@ -328,17 +332,14 @@ def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[di
             continue
         headline = concrete_fallback_headline(event)
         source = artifact_url(event, path, repo)
-        if not blocks:
-            blocks.extend([
-                {"id": "auto:divider-evidence", "type": "divider"},
-                heading("auto:evidence-title", 2, "See the change" if period.kind == "day" else "Moments from this edition"),
-                paragraph("auto:evidence-dek", "Real product evidence from the work in this edition."),
-            ])
         number = images + casts + 1
-        caption = f"{headline}. Shown from the change that shipped it."
+        caption = (
+            f"{event.occurred_at.strftime('%d %b')} · {reader_area(event.area)} — "
+            f"{headline}. Real release evidence from the change that shipped it."
+        )
         if kind == "image":
             images += 1
-            blocks.append({
+            evidence.append({
                 "id": f"auto:evidence-{number}",
                 "type": "figure",
                 "caption": caption,
@@ -351,7 +352,7 @@ def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[di
             })
         else:
             casts += 1
-            blocks.append({
+            evidence.append({
                 "id": f"auto:evidence-{number}",
                 "type": "asciicast",
                 "src": source,
@@ -361,6 +362,36 @@ def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[di
             })
         if images >= image_limit and casts >= cast_limit:
             break
+    if not evidence:
+        return []
+
+    titles = {
+        "day": ("See the change", "One real product moment from today’s release."),
+        "week": ("The week in pictures", "Real product moments chosen from the changes that landed this week."),
+        "month": ("A month you can see", "A visual tour through the product moments that made this month distinct."),
+        "year": ("The year in pictures", "A visual record of the product changing across the year."),
+    }
+    title_value, dek = titles[period.kind]
+    blocks: list[dict[str, Any]] = [
+        {"id": "auto:divider-evidence", "type": "divider"},
+        heading("auto:evidence-title", 2, title_value),
+        paragraph("auto:evidence-dek", dek),
+    ]
+    figures = [block for block in evidence if block["type"] == "figure"]
+    casts = [block for block in evidence if block["type"] == "asciicast"]
+    if figures:
+        blocks.append(figures[0])
+        if len(figures) > 1:
+            blocks.append({
+                "id": "auto:evidence-gallery",
+                "type": "section",
+                "layout": {"mode": "grid", "tracks": 2},
+                "blocks": figures[1:],
+            })
+    if casts:
+        if period.kind in {"month", "year"}:
+            blocks.append(heading("auto:evidence-casts-title", 3, "Watch it move"))
+        blocks.extend(casts)
     return blocks
 
 
@@ -393,6 +424,27 @@ def signal(period: Period, selected: list[Event]) -> str:
 
 def sentence_case(value: str) -> str:
     return value[:1].upper() + value[1:] if value else value
+
+
+def reader_area(value: str) -> str:
+    """Fold implementation scopes into a small, honest reader-facing product map."""
+    area = value.lower()
+    families = (
+        (("task", "board", "dispatch", "fleet"), "Tasks"),
+        (("paper", "bulldoc", "portable", "render", "chronicle", "changelog"), "Papers"),
+        (("studio", "structure", "desk", "editor"), "Studio"),
+        (("cloud", "site", "deploy", "release"), "Barkpark Cloud"),
+        (("tui", "cli", "terminal", "command"), "Terminal"),
+        (("chat", "assistant", "model", "provider"), "Chat"),
+        (("media", "image", "asset", "video"), "Media"),
+        (("auth", "access", "session", "member", "team"), "Access"),
+        (("search", "find", "query", "graph"), "Search"),
+        (("email", "notification", "webhook", "connector"), "Connections"),
+        (("mobile", "web", "reader", "frontend"), "Reader"),
+        (("api", "sdk", "data", "schema", "content"), "Platform"),
+        (("docs", "test", "ci", "build", "foundation", "repo"), "Foundations"),
+    )
+    return next((label for needles, label in families if any(needle in area for needle in needles)), "Product foundations")
 
 
 def edition_display_title(theme: str, suffix: str, limit: int = 255) -> str:
@@ -1022,6 +1074,21 @@ def event_lineage(block_id: str, selected: list[Event], repo: str, limit: int = 
     return {"id": block_id, "type": "lineage", "nodes": nodes}
 
 
+def release_highlights(block_id: str, selected: list[Event], repo: str, limit: int) -> dict[str, Any]:
+    """A reader-facing release trail with product language and exact provenance."""
+    candidates = [event for event in selected if event.kind in PRODUCT_KINDS] or selected
+    nodes = [
+        {
+            "overline": f"{event.occurred_at.strftime('%d %b')} · {reader_area(event.area)}",
+            "title": concrete_fallback_headline(event),
+            "body": "Open the shipped change and its source record.",
+            "source": event_url(event, repo),
+        }
+        for event in reversed(candidates[-limit:])
+    ]
+    return {"id": block_id, "type": "lineage", "nodes": nodes}
+
+
 def weekly_activity(block_id: str, selected: list[Event], period: Period) -> dict[str, Any]:
     counts: collections.Counter[dt.date] = collections.Counter()
     cursor = period.start
@@ -1039,6 +1106,21 @@ def weekly_activity(block_id: str, selected: list[Event], period: Period) -> dic
             {"label": f"{start.strftime('%d %b')}", "value": count}
             for start, count in sorted(counts.items())
         ],
+        "values": True,
+    }
+
+
+def monthly_activity(block_id: str, selected: list[Event], period: Period) -> dict[str, Any]:
+    counts: collections.Counter[str] = collections.Counter()
+    for month in range(1, 13):
+        counts[dt.date(period.start.year, month, 1).strftime("%b")] = 0
+    for event in selected:
+        counts[event.occurred_at.strftime("%b")] += 1
+    return {
+        "id": block_id,
+        "type": "bar-chart",
+        "title": f"Monthly cadence · {period.title}",
+        "bars": [{"label": label, "value": value} for label, value in counts.items()],
         "values": True,
     }
 
@@ -1068,6 +1150,25 @@ def archive_list(block_id: str, periods: list[Period], events: list[Event]) -> d
         note = "quiet edition" if count == 0 else f"{count:,} change" if count == 1 else f"{count:,} changes"
         items.append([link(period.title, f"/papers/{period.slug}"), text(f" · {note}")])
     return {"id": block_id, "type": "list", "ordered": False, "items": items}
+
+
+def archive_chapter_cards(block_id: str, periods: list[Period], events: list[Event]) -> dict[str, Any]:
+    items = []
+    for period in periods:
+        selected = events_in_period(events, period)
+        if selected:
+            latest = selected[-1]
+            count = f"{len(selected):,} {'change' if len(selected) == 1 else 'changes'}"
+            description = f"{count}. Latest movement: {concrete_fallback_headline(latest)}."
+        else:
+            description = "A quiet chapter with no recorded release activity."
+        items.append({
+            "title": period.title,
+            "text": description,
+            "href": f"/papers/{period.slug}",
+            "label": "Open this chapter",
+        })
+    return linked_card_section(block_id, items, tracks=2)
 
 
 def index_archive_list(block_id: str, periods: list[Period]) -> dict[str, Any]:
@@ -1295,37 +1396,48 @@ def child_archive_blocks(
     events: list[Event],
     archive: dict[str, list[Period]],
 ) -> list[dict[str, Any]]:
-    sections: list[tuple[str, str, list[Period]]] = []
     if period.kind == "year":
         children = [child for child in archive["month"] if period.start <= child.start < period.end]
-        sections.append(("Monthly chapters", "Every month in this annual volume, including the quiet ones.", children))
+        if not children:
+            return []
+        return [
+            {"id": "auto:divider-archive-1", "type": "divider"},
+            heading("auto:archive-title-1", 2, "The year, chapter by chapter"),
+            paragraph("auto:archive-dek-1", "Open any month for its full story, visual evidence, and daily record."),
+            archive_chapter_cards("auto:archive-1", children, events),
+        ]
     elif period.kind == "month":
         weeks = [child for child in archive["week"] if child.start < period.end and child.end > period.start]
         days = [child for child in archive["day"] if period.start <= child.start < period.end]
-        sections.extend(
-            [
-                ("Weekly dispatches", "Every weekly view touching this month, including boundary weeks.", weeks),
-                ("Daily editions", "Every calendar day in this monthly chapter.", days),
-            ]
-        )
+        blocks: list[dict[str, Any]] = []
+        if weeks:
+            blocks.extend([
+                {"id": "auto:divider-archive-1", "type": "divider"},
+                heading("auto:archive-title-1", 2, "The month, week by week"),
+                paragraph("auto:archive-dek-1", "Each weekly chapter gives the work room to breathe, including boundary weeks."),
+                archive_chapter_cards("auto:archive-1", weeks, events),
+            ])
+        if days:
+            blocks.extend([
+                heading("auto:archive-title-2", 2, "Browse every day"),
+                {
+                    "id": "auto:archive-2",
+                    "type": "expandable",
+                    "summary": f"Open all {len(days)} daily editions",
+                    "children": [archive_list("auto:archive-days", days, events)],
+                },
+            ])
+        return blocks
     elif period.kind == "week":
         days = [child for child in archive["day"] if period.start <= child.start < period.end]
-        sections.append(("Daily editions", "Every calendar day in this weekly dispatch.", days))
-
-    blocks: list[dict[str, Any]] = []
-    for index, (title_value, description, children) in enumerate(sections):
-        if not children:
-            continue
-        suffix = str(index + 1)
-        blocks.extend(
-            [
-                {"id": f"auto:divider-archive-{suffix}", "type": "divider"},
-                heading(f"auto:archive-title-{suffix}", 2, title_value),
-                paragraph(f"auto:archive-dek-{suffix}", description),
-                archive_list(f"auto:archive-{suffix}", children, events),
+        if days:
+            return [
+                {"id": "auto:divider-archive-1", "type": "divider"},
+                heading("auto:archive-title-1", 2, "Daily editions"),
+                paragraph("auto:archive-dek-1", "Every calendar day in this weekly dispatch."),
+                archive_list("auto:archive-1", days, events),
             ]
-        )
-    return blocks
+    return []
 
 
 def period_payload(
@@ -1342,6 +1454,7 @@ def period_payload(
     editorial = editorial or deterministic_editorial(period, selected)
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in selected)
+    reader_areas = {reader_area(event.area) for event in selected}
     suffixes = {
         "day": period.start.strftime("%d %B %Y").lstrip("0"),
         "week": f"Week {period.key.split('-W')[-1]}",
@@ -1358,21 +1471,48 @@ def period_payload(
     )
     profile = collections.Counter(event.kind for event in selected)
     dominant_kind = profile.most_common(1)[0][0] if profile else "quiet"
-    area_limit = 6 if period.kind == "month" else 3
-    sequence_limit = 10 if period.kind == "month" else 5
-    ledger_limit = 40 if period.kind == "month" else LEDGER_PREVIEW_LIMIT
+    area_limit = 8 if period.kind == "year" else 6 if period.kind == "month" else 3
+    sequence_limit = 14 if period.kind == "year" else 10 if period.kind == "month" else 5
+    ledger_limit = 60 if period.kind == "year" else 40 if period.kind == "month" else LEDGER_PREVIEW_LIMIT
+    active_days = len({event.occurred_at.date() for event in selected})
+    active_months = len({event.occurred_at.strftime("%Y-%m") for event in selected})
+    unit_value = active_months if period.kind == "year" else active_days
+    unit_label = "active months" if period.kind == "year" else "active days"
+    deks = {
+        "day": "A clear account of the day comes first. The detailed source record is tucked neatly underneath.",
+        "week": "The week’s story, visible product moments, and release trail come first. The complete source record remains underneath.",
+        "month": "A full editorial review of the month: what changed, how the product looked, and where the work gathered momentum.",
+        "year": "Barkpark’s annual record: the defining work, the product in motion, and every monthly chapter behind it.",
+    }
+    work_titles = {
+        "day": "What we worked on",
+        "week": "The week’s defining work",
+        "month": "The month’s defining work",
+        "year": "The year’s defining work",
+    }
     blocks: list[dict[str, Any]] = navigation_blocks(periods, period.kind)
     blocks.extend([
         {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
         heading("auto:title", 1, display_titles[period.kind]),
         {"id": "auto:ingress", "type": "ingress", "content": [text(editorial["plain_summary"])]},
-        paragraph("auto:dek", "A short, human account comes first, so you can understand the work without knowing the machinery behind it. The detailed receipts are tucked neatly underneath."),
+        paragraph("auto:dek", deks[period.kind]),
         {"id": "auto:byline", "type": "byline", "items": [date_range, f"Through {through_date.strftime('%d %B %Y').lstrip('0')}"]},
     ])
+    if selected and period.kind in {"week", "month", "year"}:
+        blocks.append({
+            "id": "auto:period-pulse",
+            "type": "stats",
+            "items": [
+                {"value": str(len(selected)), "label": "shipped changes"},
+                {"value": str(len(product)), "label": "product updates"},
+                {"value": str(unit_value), "label": unit_label},
+                {"value": str(len(reader_areas)), "label": "product areas"},
+            ],
+        })
     blocks.extend(evidence_blocks(period, selected, repo))
     blocks.extend([
         {"id": "auto:divider-work", "type": "divider"},
-        heading("auto:work-title", 2, "What we worked on"),
+        heading("auto:work-title", 2, work_titles[period.kind]),
         editorial_story_section("auto:work-themes", editorial["work_themes"], selected, repo)
         if editorial["work_themes"]
         else paragraph("auto:work-themes", "No new work landed in this interval."),
@@ -1385,6 +1525,18 @@ def period_payload(
             "content": [text(editorial["progress_assessment"])],
         },
     ])
+    if selected and period.kind in {"month", "year"}:
+        blocks.extend([
+            {"id": "auto:divider-highlights", "type": "divider"},
+            heading("auto:highlights-title", 2, "Release highlights"),
+            paragraph("auto:highlights-dek", "The product-facing changes that best show the period moving, each linked to its source."),
+            release_highlights(
+                "auto:release-highlights",
+                selected,
+                repo,
+                limit=18 if period.kind == "year" else 12,
+            ),
+        ])
     related = related_paper_block(period, selected, related_papers or [])
     if related is not None:
         blocks.append(related)
@@ -1409,13 +1561,12 @@ def period_payload(
         heading("auto:sequence-title", 2, "Latest updates"),
         event_lineage("auto:sequence", selected, repo, limit=sequence_limit),
     ]
-    if period.kind == "month":
-        product_signals = [event for event in selected if event.kind in PRODUCT_KINDS]
+    if period.kind in {"month", "year"}:
         technical_record.extend([
-            heading("auto:cadence-title", 2, "How the month unfolded"),
-            weekly_activity("auto:weekly-cadence", selected, period),
-            heading("auto:product-title", 2, "Product updates"),
-            event_lineage("auto:product-signals", product_signals, repo, limit=8),
+            heading("auto:cadence-title", 2, "How the period unfolded"),
+            monthly_activity("auto:monthly-cadence", selected, period)
+            if period.kind == "year"
+            else weekly_activity("auto:weekly-cadence", selected, period),
         ])
     technical_record.append(heading("auto:ledger-title", 2, "Complete release log"))
     if selected:
