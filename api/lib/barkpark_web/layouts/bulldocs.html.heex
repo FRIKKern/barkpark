@@ -725,6 +725,7 @@
       align-items: center;
       gap: 0.55rem;
       max-width: 100%;
+      min-height: 44px;
       padding: 0.35rem 0;
       border: 0;
       border-radius: 0;
@@ -760,6 +761,29 @@
     }
 
     .bp-paper-article figure > .bp-cols { gap: clamp(2rem, 3vw, 2.8rem); }
+    .bp-paper-article figure > .bp-cols img {
+      display: block;
+      width: auto;
+      max-width: 100%;
+      height: auto;
+      max-height: min(72vh, 760px);
+      margin-inline: auto;
+      object-fit: contain;
+      object-position: top center;
+    }
+
+    /* Each decision starts on a fresh editorial beat. The rule is deliberately
+       quiet: it gives long client reviews structure without turning sections
+       into another set of bordered cards. */
+    .bp-paper-article #paper-body > [data-block-id]:has(> h3) {
+      margin-top: clamp(3.75rem, 8vw, 6.5rem);
+      padding-top: clamp(1.2rem, 2.4vw, 1.8rem);
+      border-top: 1px solid color-mix(in srgb, var(--paper-rule) 78%, transparent);
+    }
+    .bp-paper-article #paper-body > [data-block-id]:has(> h3) > h3 {
+      margin-top: 0;
+      text-wrap: balance;
+    }
 
     /* Paper-image lightbox. Progressive enhancement lives in the reader shell
        so PortableDoc's email/static <img> contract remains byte-stable. */
@@ -1298,7 +1322,7 @@
     td.sheet-al-right { text-align: right; }
     td.sheet-al-center { text-align: center; }
 
-    /* ── View-toggle pills (bottom-right): switch between Reader, TUI, and Email
+    /* ── View-toggle pills: switch between Reader, TUI, and Email
        views of the same paper. Opt-in (body.bp-tui / body.bp-email), persisted
        client-side. TUI view is NOT a CSS terminal imitation — it renders the
        paper through the REAL Go pdrender compiled to WASM (the `#bp-terminal`
@@ -1306,8 +1330,15 @@
        wasm; the same renderer `bp paper view` runs). The rules HERE are only the
        toggle-pill chrome — presentational + additive, and scoped to
        `.bp-paper-article` so email/non-article papers are never affected. */
+    .bp-view-controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      width: min(calc(100% - 40px), 1040px);
+      margin: 24px auto calc(24px + env(safe-area-inset-bottom));
+    }
     .bp-view-toggle {
-      position: fixed; right: 20px; bottom: 20px; z-index: 60;
       display: inline-flex; align-items: center; gap: 8px;
       font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
       font-weight: 600; letter-spacing: 0.02em;
@@ -1318,23 +1349,21 @@
       transition: background 0.15s, color 0.15s, transform 0.08s;
     }
     .bp-view-toggle:hover { transform: translateY(-1px); }
-    /* The email pill stacks above the TUI pill. The three views are mutually
+    /* The three views are mutually
        exclusive; inside an alternate view only that view's own pill stays
        visible, as the way back to the reader. */
-    .bp-view-toggle--email { bottom: 62px; }
     body.bp-tui .bp-view-toggle--email { display: none; }
     body.bp-email .bp-view-toggle:not(.bp-view-toggle--email) { display: none; }
-    /* Dark/light mode pill — stacks above the email pill. The label names the
+    /* Dark/light mode pill. The label names the
        mode a click switches TO; the stamp itself is written by the nonced
        mode-toggle IIFE at the end of <body>. Hidden inside the TUI view
        (always terminal-dark); the email-mode rule above already hides it
        there, and print + the no-article guard below cover the rest. */
-    .bp-mode-toggle { bottom: 104px; }
     body.bp-tui .bp-mode-toggle { display: none; }
     .bp-view-toggle:focus-visible { outline: 2px solid #2f7d5b; outline-offset: 2px; }
     .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f7d5b; }
     /* hide the toggle when there is no article paper on the page */
-    body:not(:has(.bp-paper-article)) .bp-view-toggle { display: none; }
+    body:not(:has(.bp-paper-article)) .bp-view-controls { display: none; }
 
     /* toggle look in TUI mode */
     body.bp-tui .bp-view-toggle {
@@ -1343,13 +1372,10 @@
     }
     body.bp-tui .bp-view-toggle .bp-vt-dot { background: #5fcf9c; box-shadow: 0 0 6px #5fcf9c; }
 
-    /* toggle look in Email mode — the pill sits on the inbox ground */
-    body.bp-email .bp-view-toggle--email { bottom: 20px; }
+    /* toggle look in Email mode — the pill sits below the inbox ground */
     body.bp-email .bp-view-toggle--email .bp-vt-dot { box-shadow: 0 0 6px #2f7d5b; }
 
-    /* On phones the reader controls belong after the paper, not on top of it.
-       Keeping them in normal flow preserves every caption and evidence image;
-       the desktop fixed stack remains useful where a side gutter exists. */
+    /* Comparison evidence stacks before the reading column gets cramped. */
     @media (max-width: 900px) {
       .bp-paper-article figure > .bp-cols { grid-template-columns: 1fr; }
     }
@@ -1357,6 +1383,8 @@
     @media (max-width: 720px) {
       .bp-paper-shell.bp-paper-article {
         --bp-evidence-gutter: 16px;
+        --bp-evidence-width: calc(100vw - 32px);
+        --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
         padding-inline: 20px;
       }
       .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) {
@@ -1366,27 +1394,27 @@
       }
       .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button {
         width: 100%;
-        min-height: 44px;
         padding-block: 0.55rem;
       }
-      .bp-view-toggle {
-        position: static;
-        right: auto;
-        z-index: 1;
+      .bp-paper-article figure > .bp-cols img {
+        width: 100%;
+        height: auto;
+        max-height: none;
+        object-fit: contain;
+      }
+      .bp-view-controls {
+        justify-content: flex-start;
         gap: 6px;
-        margin: 18px 3px calc(18px + env(safe-area-inset-bottom));
+        width: calc(100% - 32px);
+        margin-block: 18px calc(18px + env(safe-area-inset-bottom));
+      }
+      .bp-view-toggle {
+        gap: 6px;
+        margin: 0;
         padding: 7px 10px;
         font-size: 11.5px;
         backdrop-filter: none;
       }
-      .bp-view-toggle:not(.bp-view-toggle--email):not(.bp-mode-toggle) {
-        margin-left: 12px;
-      }
-      .bp-view-toggle--email,
-      .bp-mode-toggle {
-        bottom: auto;
-      }
-      body.bp-email .bp-view-toggle--email { bottom: auto; }
     }
 
     /* ── the REAL TUI render (the actual Go pdrender, compiled to WASM) ──────
@@ -1721,15 +1749,6 @@
         addEventListener inside the nonced toggle IIFE below, NOT an inline
         onclick — an enforcing script-src without 'unsafe-inline' blocks inline
         handlers (which is what neutralises an injected onerror=). --%>
-  <button
-    type="button"
-    class="bp-view-toggle"
-    aria-pressed="false"
-    aria-label="Toggle terminal (TUI) view"
-  >
-    <span class="bp-vt-dot" aria-hidden="true"></span>
-    <span class="bp-vt-label">TUI view</span>
-  </button>
   <%!-- Email view: the paper as a RECEIVED MAIL. A mail-client window whose
         message body iframes the literal /papers/:slug/email response — the
         same bytes a mail backend sends (lazy: src set on first activation).
@@ -1787,29 +1806,40 @@
       <a class="bp-mail-browser" id="bp-mail-browser" href="#" target="_blank" rel="noopener">View in browser ↗</a>
     </div>
   </div>
-  <%!-- CSP layer-2: bound via addEventListener in the nonced IIFE below (see
-        the TUI toggle above), not an inline onclick. --%>
-  <button
-    type="button"
-    class="bp-view-toggle bp-view-toggle--email"
-    aria-pressed="false"
-    aria-label="Toggle email view"
-  >
-    <span class="bp-vt-dot" aria-hidden="true"></span>
-    <span class="bp-vt-label">Email view</span>
-  </button>
-  <%!-- Dark/light mode pill. CSP layer-2: handler bound in the nonced IIFE
-        below, never an inline onclick. aria-pressed mirrors "dark mode on";
-        the label names the mode a click switches TO. --%>
-  <button
-    type="button"
-    class="bp-view-toggle bp-mode-toggle"
-    aria-pressed="false"
-    aria-label="Switch between dark and light mode"
-  >
-    <span class="bp-vt-dot" aria-hidden="true"></span>
-    <span class="bp-vt-label">Mode</span>
-  </button>
+  <%!-- CSP layer-2: every control is bound via addEventListener in the nonced
+        IIFEs below, never through an inline onclick. --%>
+  <div class="bp-view-controls" role="group" aria-label="Paper view controls">
+    <button
+      type="button"
+      class="bp-view-toggle"
+      aria-pressed="false"
+      aria-label="Toggle terminal (TUI) view"
+    >
+      <span class="bp-vt-dot" aria-hidden="true"></span>
+      <span class="bp-vt-label">TUI view</span>
+    </button>
+    <button
+      type="button"
+      class="bp-view-toggle bp-view-toggle--email"
+      aria-pressed="false"
+      aria-label="Toggle email view"
+    >
+      <span class="bp-vt-dot" aria-hidden="true"></span>
+      <span class="bp-vt-label">Email view</span>
+    </button>
+    <%!-- Dark/light mode pill. CSP layer-2: handler bound in the nonced IIFE
+          below, never an inline onclick. aria-pressed mirrors "dark mode on";
+          the label names the mode a click switches TO. --%>
+    <button
+      type="button"
+      class="bp-view-toggle bp-mode-toggle"
+      aria-pressed="false"
+      aria-label="Switch between dark and light mode"
+    >
+      <span class="bp-vt-dot" aria-hidden="true"></span>
+      <span class="bp-vt-label">Mode</span>
+    </button>
+  </div>
   <script nonce={assigns[:csp_nonce]}>
     (function () {
       var KEY = "barkpark_theme";
