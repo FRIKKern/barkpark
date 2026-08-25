@@ -9,7 +9,23 @@ defmodule BarkparkWeb.PaperBacklinks do
 
   alias Barkpark.PortableDoc.Render.Util
 
-  @max_cards 6
+  @max_cards 4
+
+  @section_style "margin-top:4.5rem;padding-top:1.5rem;border-top:1px solid var(--paper-rule,#dde7e2)"
+  @head_style "display:flex;align-items:flex-start;justify-content:space-between;gap:1.5rem;margin-bottom:1.25rem"
+  @kicker_style "margin:0 0 0.35rem;color:var(--paper-accent,#1e5347);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.68rem;font-weight:700;letter-spacing:0.11em;text-transform:uppercase"
+  @heading_style "margin:0;color:var(--paper-ink,#17332d);font-size:1.45rem;line-height:1.2;letter-spacing:-0.02em"
+  @description_style "max-width:32rem;margin:0.4rem 0 0;color:var(--paper-ink-soft,#55635e);font-size:0.88rem;line-height:1.5"
+  @live_style "display:inline-flex;flex:none;align-items:center;gap:0.4rem;margin-top:0.2rem;color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.68rem;font-weight:650;letter-spacing:0.08em;text-transform:uppercase"
+  @dot_style "display:block;width:0.42rem;height:0.42rem;border-radius:50%;background:var(--paper-accent,#1e5347)"
+  @grid_style "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:0.75rem"
+  @card_style "display:flex;min-width:0;min-height:10.5rem;flex-direction:column;padding:1rem;border:1px solid var(--paper-rule,#dde7e2);background:color-mix(in srgb,var(--paper-bg,#fff) 84%,transparent);color:var(--paper-ink,#17332d);text-decoration:none"
+  @card_top_style "display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.1rem"
+  @badge_style "color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.67rem;letter-spacing:0.075em;text-transform:uppercase"
+  @arrow_style "color:var(--paper-accent,#1e5347);font-size:1rem"
+  @title_style "display:block;color:var(--paper-ink,#17332d);font-family:ui-serif,Georgia,serif;font-size:1.05rem;line-height:1.28"
+  @summary_style "display:-webkit-box;overflow:hidden;margin-top:0.45rem;color:var(--paper-ink-soft,#55635e);font-size:0.79rem;line-height:1.45;-webkit-box-orient:vertical;-webkit-line-clamp:2"
+  @meta_style "margin-top:auto;padding-top:1rem;color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.67rem;letter-spacing:0.075em;text-transform:uppercase"
 
   @type referencer :: %{
           optional(:from_id) => String.t(),
@@ -52,12 +68,12 @@ defmodule BarkparkWeb.PaperBacklinks do
     if cards == "" do
       ""
     else
-      ~s(<section id="#{css_class}" class="bp-paper-connections #{css_class}" aria-label="#{label}" data-live="true">) <>
-        ~s(<header class="bp-paper-connections-head"><div>) <>
-        ~s(<p class="bp-paper-connections-kicker">Connected work</p>) <>
-        ~s(<h2>#{label}</h2><p>#{description}</p></div>) <>
-        ~s(<span class="bp-paper-live"><i aria-hidden="true"></i>Live</span></header>) <>
-        ~s(<div class="bp-paper-card-grid">#{cards}</div></section>)
+      ~s(<section id="#{css_class}" class="bp-paper-connections #{css_class}" aria-label="#{label}" data-live="true" style="#{@section_style}">) <>
+        ~s(<header class="bp-paper-connections-head" style="#{@head_style}"><div>) <>
+        ~s(<p class="bp-paper-connections-kicker" style="#{@kicker_style}">Connected work</p>) <>
+        ~s(<h2 style="#{@heading_style}">#{label}</h2><p style="#{@description_style}">#{description}</p></div>) <>
+        ~s(<span class="bp-paper-live" style="#{@live_style}"><i aria-hidden="true" style="#{@dot_style}"></i>Live</span></header>) <>
+        ~s(<div class="bp-paper-card-grid" style="#{@grid_style}">#{cards}</div></section>)
     end
   end
 
@@ -67,12 +83,13 @@ defmodule BarkparkWeb.PaperBacklinks do
     summary = Util.escape_html(summary(ref))
     badge = Util.escape_html(badge(ref))
     metadata = Util.escape_html(metadata(ref))
+    revision = revision_attr(Map.get(ref, :rev))
 
-    ~s(<a class="bp-paper-card" href="#{href}">) <>
-      ~s(<span class="bp-paper-card-top"><span class="bp-paper-card-badge">#{badge}</span>) <>
-      ~s(<span class="bp-paper-card-arrow" aria-hidden="true">↗</span></span>) <>
-      ~s(<strong>#{title}</strong><span class="bp-paper-card-summary">#{summary}</span>) <>
-      ~s(<span class="bp-paper-card-meta">#{metadata}</span></a>)
+    ~s(<a class="bp-paper-card" href="#{href}"#{revision} style="#{@card_style}">) <>
+      ~s(<span class="bp-paper-card-top" style="#{@card_top_style}"><span class="bp-paper-card-badge" style="#{@badge_style}">#{badge}</span>) <>
+      ~s(<span class="bp-paper-card-arrow" aria-hidden="true" style="#{@arrow_style}">↗</span></span>) <>
+      ~s(<strong style="#{@title_style}">#{title}</strong><span class="bp-paper-card-summary" style="#{@summary_style}">#{summary}</span>) <>
+      ~s(<span class="bp-paper-card-meta" style="#{@meta_style}">#{metadata}</span></a>)
   end
 
   defp card_html(_), do: ""
@@ -83,14 +100,31 @@ defmodule BarkparkWeb.PaperBacklinks do
   defp summary(ref) do
     case Map.get(ref, :description) do
       value when is_binary(value) and value != "" -> value
-      _ -> "References this Paper in its current published revision."
+      _ -> "See how this work fits into the wider story."
     end
   end
 
   defp badge(ref) do
     case Map.get(ref, :event_type) || Map.get(ref, :type) do
+      "changelog.index" ->
+        "Chronicle"
+
+      "changelog.year" ->
+        "Year in review"
+
+      "changelog.month" ->
+        "Monthly edition"
+
+      "changelog.week" ->
+        "Weekly edition"
+
+      "changelog.day" ->
+        "Daily edition"
+
       value when is_binary(value) and value != "" ->
-        value |> String.replace("_", " ") |> String.capitalize()
+        value
+        |> String.replace(~r/[._-]+/, " ")
+        |> String.capitalize()
 
       _ ->
         "Paper"
@@ -98,16 +132,13 @@ defmodule BarkparkWeb.PaperBacklinks do
   end
 
   defp metadata(ref) do
-    [revision_label(Map.get(ref, :rev)), updated_label(Map.get(ref, :updated_at))]
-    |> Enum.reject(&is_nil/1)
-    |> case do
-      [] -> "Published Paper"
-      parts -> Enum.join(parts, " · ")
-    end
+    updated_label(Map.get(ref, :updated_at)) || "Published Paper"
   end
 
-  defp revision_label(rev) when is_binary(rev) and rev != "", do: "Rev " <> rev
-  defp revision_label(_), do: nil
+  defp revision_attr(rev) when is_binary(rev) and rev != "",
+    do: ~s( data-paper-revision="#{Util.escape_attr(rev)}")
+
+  defp revision_attr(_), do: ""
 
   defp updated_label(%DateTime{} = value),
     do: "Updated " <> Calendar.strftime(value, "%d %b %Y")
