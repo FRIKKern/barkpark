@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"mime"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -108,7 +109,8 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	// Build the request body for writes. Declared non-path args seed the JSON
 	// object; --set merges over them; mutation commands merge a --file JSON
 	// object before --set, while other commands use --file as the whole body; a
-	// file-typed arg on a media route is sent as multipart/form-data instead.
+	// a POST-bound, declared file-typed arg is sent as multipart/form-data
+	// instead (whatever the route is spelled).
 	body, stream, contentType, err := buildBodyWithStdinOwnership(cmd, cmdFlags, argMap, ownsProcessStdin)
 	if err != nil {
 		return nil, &dispatchError{msg: err.Error(), withUsage: false}
@@ -165,11 +167,11 @@ func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string]
 // body, never rendering. A multipart upload rides the streaming transfer client
 // (no wall-clock Timeout — a large/slow media body must not be killed at 30s);
 // every other request keeps the 30s doRequest client, byte-identical.
-func sendManifestRequest(req *manifestRequest) (int, []byte, error) {
+func sendManifestRequest(req *manifestRequest) (int, []byte, string, error) {
 	if req.stream != nil {
-		return doRequestStream(req.method, req.url, req.headers, req.stream, -1)
+		return doRequestStreamCT(req.method, req.url, req.headers, req.stream, -1)
 	}
-	return doRequest(req.method, req.url, req.headers, req.body)
+	return doRequestCT(req.method, req.url, req.headers, req.body)
 }
 
 // execManifestCommand is the headless dispatch primitive: it resolves tail into
@@ -184,7 +186,8 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 	if derr != nil {
 		return 0, nil, derr
 	}
-	return sendManifestRequest(req)
+	status, respBody, _, err := sendManifestRequest(req)
+	return status, respBody, err
 }
 
 // runCommand executes one manifest command for the CLI: it resolves the request
@@ -204,10 +207,14 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
 	g.view = resolveView(out, g, cmd)
 
-	// Say so when --limit/--offset cannot leave the client for this command.
+	// REFUSE when a pagination knob cannot leave the client for this command.
 	// applyQuery is writer-less (it is shared with the headless MCP dispatch),
-	// so the notice belongs here — the same seam resolveView uses above.
-	warnDroppedPagination(out, g, cmd)
+	// so the check belongs here — the same seam resolveView uses above — and
+	// it runs BEFORE buildManifestRequest, so a refused invocation sends
+	// nothing and reads nothing.
+	if code, refused := refuseDroppedKnobs(out, g, cmd); refused {
+		return code
+	}
 
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
@@ -255,7 +262,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return runPaginatedAll(out, cmd, req.url, req.headers)
 	}
 
-	status, respBody, err := sendManifestRequest(req)
+	status, respBody, respCT, err := sendManifestRequest(req)
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 			out.userErr("request failed: %v", err)
@@ -269,7 +276,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if code, handled := screenWriteReceipt(out, cmd, status, respBody); handled {
 			return code
 		}
-		if code, handled := screenUnpaginatedRead(out, cmd, status, respBody); handled {
+		if code, handled := screenUnpaginatedRead(out, cmd, status, respBody, respCT); handled {
 			return code
 		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
@@ -603,14 +610,21 @@ const unreadableReadContradictionHint = "the SERVER contradicted itself — a su
 //     non-JSON;
 //   - an error envelope on a 2xx — the server contradicting itself.
 //
-// The non-JSON class is deliberately restricted to an HTML document rather than
-// "does not parse as JSON", because onixedit.export is a REAL non-paginated
-// read that streams ONIX 3.0 XML through this same dispatch (plugins/onixedit/
-// cli.ex:34) and a blanket JSON demand would red an honest export. Separating
-// a plaintext gateway error from a legitimate text payload needs the response
-// Content-Type, which sendManifestRequest does not carry today; that remainder
-// is filed, not silently folded in here.
-func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+// THE NON-JSON CLASS IS DECIDED BY THE CONTENT-TYPE, NOT BY A PARSE ATTEMPT.
+// A blanket "does not parse as JSON" would red onixedit.export, a REAL
+// non-paginated read that streams ONIX 3.0 XML through this same dispatch
+// (plugins/onixedit/cli.ex:34). The header is the honest discriminator: a
+// server that DECLARES application/json and then sends bytes that are not JSON
+// is contradicting itself, and that is a transport lie whoever sent it. A
+// server that declares text/xml and sends XML is telling the truth.
+//
+// This closes the measured hole a load-balancer banner walked through: HTTP
+// 200, `upstream connect error`, 23 bytes, rendered as the answer at exit 0 in
+// all four output shapes. It is screened now only when the response also
+// claims to be JSON — a bare gateway that declares text/plain or nothing at
+// all still passes, because this function cannot tell that from an honest
+// plaintext payload without inventing a rule the manifest does not state.
+func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBody []byte, contentType string) (int, bool) {
 	if cmd.Writes || cmd.Paginated {
 		return 0, false
 	}
@@ -620,6 +634,10 @@ func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBo
 	}
 
 	reason, contradiction := unreadableReadBody(respBody)
+	if reason == "" && declaredJSONThatIsNotJSON(contentType, respBody) {
+		reason = "declared Content-Type " + contentType +
+			" and sent bytes that are not JSON — a transport lie, not an answer"
+	}
 	if reason == "" {
 		return 0, false
 	}
@@ -645,6 +663,29 @@ func screenUnpaginatedRead(out *writer, cmd manifest.Command, status int, respBo
 // including `{}`, `[]`, `null`, every scalar, non-HTML non-JSON bytes, and any
 // object regardless of its keys. That is the point: a read has honest empty
 // answers, and an allowlist of recognised shapes here would red them.
+// declaredJSONThatIsNotJSON reports the one class the body alone cannot name:
+// the server SAID application/json and then did not send JSON. A gateway that
+// interposes its own plaintext banner keeps the upstream's declared type often
+// enough that this catches it, while onixedit.export (application/xml) and any
+// other honestly-typed payload are never touched.
+//
+// An EMPTY body is not judged here — unreadableReadBody already owns that case
+// with a better sentence, and double-naming it would produce two reasons for
+// one fault.
+func declaredJSONThatIsNotJSON(contentType string, body []byte) bool {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	if mediaType != "application/json" && !strings.HasSuffix(mediaType, "+json") {
+		return false
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return false
+	}
+	return json.Unmarshal(body, new(any)) != nil
+}
+
 func unreadableReadBody(body []byte) (string, bool) {
 	trimmed := bytes.TrimSpace(body)
 	if len(trimmed) == 0 {
@@ -714,11 +755,21 @@ func isHTMLDocument(b []byte) bool {
 // suppressed when the caller chose an explicit limit (or --all), for writes, and
 // for non-paginated commands.
 func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Command, respBody []byte) {
-	if !cmd.Paginated || cmd.Writes || g.all || g.limitSet {
+	if !cmd.Paginated || cmd.Writes || g.all {
 		return
 	}
 
+	// AN EXPLICIT --limit USED TO SILENCE THIS ENTIRELY, which inverted the
+	// guard: `--limit 50` returning exactly 50 rows is the single strongest
+	// signal that the page was cut, and it was the one case that said nothing.
+	// The flag that was HONOURED silenced the warning that the flag being
+	// honoured made necessary. An explicit limit now sets the threshold rather
+	// than suppressing the check.
 	limit := defaultPageLimit(cmd)
+	explicit := false
+	if g.limitSet {
+		limit, explicit = g.limit, true
+	}
 	if limit <= 0 {
 		return
 	}
@@ -727,6 +778,10 @@ func warnIfDefaultPageMayBeTruncated(out *writer, g globals, cmd manifest.Comman
 		return
 	}
 
+	if explicit {
+		out.userErr("result page filled your --limit of %d exactly; more may be available — raise --limit or re-run with --all", limit)
+		return
+	}
 	out.userErr("result page reached the default limit of %d; more may be available — re-run with --all", limit)
 }
 
@@ -1067,8 +1122,9 @@ func applyQuery(rawURL string, g globals, cmd manifest.Command, flags map[string
 //     workspace.project-create `name` -> {"name":"…"}.
 //  3. --set k=v pairs, merged last so repeated --set values win per key.
 //
-// A file-typed arg on a media route is special-cased FIRST: it ships as
-// multipart/form-data with the file under the "file" form field, not as JSON —
+// A POST-bound, declared file-typed arg is special-cased FIRST, regardless of
+// route: it ships as multipart/form-data with the file under the "file" form
+// field, not as JSON —
 // and as a streaming io.Reader (returned in stream, with body nil) so a large
 // upload is neither buffered whole in memory nor killed by the 30s wall-clock.
 // Reads return nil; a write with no body source sends an empty JSON object so a
@@ -1087,8 +1143,9 @@ func buildBodyWithStdinOwnership(cmd manifest.Command, flags map[string][]string
 		return nil, nil, "", nil
 	}
 
-	// Media upload (or any file-typed arg on a POST media route): multipart,
-	// streamed via io.Pipe so it rides doRequestStream's transfer client.
+	// Media upload (or any POST command with a declared file-typed arg):
+	// multipart, streamed via io.Pipe so it rides doRequestStream's transfer
+	// client.
 	if path, ok := mediaUploadFileArg(cmd, args); ok {
 		r, ct, err := buildMultipartFile(path)
 		return nil, r, ct, err
@@ -1362,17 +1419,23 @@ func stdinHasRedirectedInput() bool {
 	return n > 0
 }
 
-// mediaUploadFileArg returns the bound file path when cmd has a file-typed
-// declared arg AND posts to a media route — the signal that the payload must be
-// sent as multipart/form-data rather than JSON. The route check keeps the
-// multipart path narrow (only media uploads), so a future file-typed arg on a
-// non-media route still goes through the JSON path unless the manifest opts it
-// in via a media path.
+// mediaUploadFileArg returns the bound file path when cmd has a POST-bound,
+// file-typed DECLARED ARG — the signal that the payload must be sent as
+// multipart/form-data rather than JSON. This used to also require the route's
+// path_template to contain the substring "/media", which stood in for "this
+// command uploads a file" instead of reading the manifest's own declaration
+// of that fact. A plugin's own ingest route (e.g. a sheets or bulldocs import
+// endpoint spelled without "/media" anywhere) has a legitimate file-typed arg
+// too, and fell through to the JSON path: the file's PATH STRING got shipped
+// as a JSON value ({"file":"/abs/path"}) instead of the file's BYTES as a
+// multipart part, and the server answered "multipart field \"file\" is
+// required". The manifest's own `type: "file"` on a declared ARG (as opposed
+// to a `--file` FLAG — see commandHasFileFlag — which reads a local JSON
+// payload off disk and is not this at all) is the authoritative signal by
+// itself; the route text was never load-bearing beyond restating what the one
+// existing holder (media.upload) already declares structurally.
 func mediaUploadFileArg(cmd manifest.Command, args map[string]string) (string, bool) {
 	if cmd.HTTP.Method != "POST" {
-		return "", false
-	}
-	if !strings.Contains(cmd.HTTP.PathTemplate, "/media") {
 		return "", false
 	}
 	for _, a := range cmd.Args {
@@ -1471,9 +1534,23 @@ func newTransferClient() *http.Client {
 // leaves it unknown (chunked). It performs NO retries — required, since a pipe
 // body cannot be replayed.
 func doRequestStream(method, rawURL string, headers map[string]string, body io.Reader, contentLength int64) (int, []byte, error) {
+	status, respBody, _, err := doRequestStreamCT(method, rawURL, headers, body, contentLength)
+	return status, respBody, err
+}
+
+// doRequestStreamCT is doRequestStream plus the response Content-Type. The
+// header is the ONLY thing that separates a plaintext gateway banner from an
+// honest non-JSON payload, and dropping it is why a load-balancer's "upstream
+// connect error" at HTTP 200 used to render as the answer at exit 0.
+//
+// Added ALONGSIDE doRequestStream rather than replacing it so no existing
+// caller has to change: the three-value form stays the signature every current
+// call site compiles against, and only the manifest dispatch reaches for the
+// fourth value.
+func doRequestStreamCT(method, rawURL string, headers map[string]string, body io.Reader, contentLength int64) (int, []byte, string, error) {
 	req, err := http.NewRequest(method, rawURL, body)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	if contentLength >= 0 {
 		req.ContentLength = contentLength
@@ -1483,25 +1560,38 @@ func doRequestStream(method, rawURL string, headers map[string]string, body io.R
 	}
 	resp, err := newTransferClient().Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
+	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
-		return resp.StatusCode, nil, err
+		return resp.StatusCode, nil, ct, err
 	}
-	return resp.StatusCode, respBody, nil
+	return resp.StatusCode, respBody, ct, nil
 }
 
-// doRequest performs the HTTP call and returns status + body.
+// doRequest performs the HTTP call and returns status + body. It is the
+// three-value form 30 call sites across seed/migrate/paper/vercel/tinker/
+// scaffy/builtins compile against; it discards the Content-Type that
+// doRequestCT reads, so none of them had to change when the screen started
+// needing the header.
 func doRequest(method, rawURL string, headers map[string]string, body []byte) (int, []byte, error) {
+	status, respBody, _, err := doRequestCT(method, rawURL, headers, body)
+	return status, respBody, err
+}
+
+// doRequestCT is doRequest plus the response Content-Type — the discriminator
+// screenUnpaginatedRead needs to tell a plaintext gateway banner from an
+// honest non-JSON payload like onixedit.export's ONIX 3.0 XML.
+func doRequestCT(method, rawURL string, headers map[string]string, body []byte) (int, []byte, string, error) {
 	var rdr io.Reader
 	if body != nil {
 		rdr = bytes.NewReader(body)
 	}
 	req, err := http.NewRequest(method, rawURL, rdr)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
@@ -1509,14 +1599,15 @@ func doRequest(method, rawURL string, headers map[string]string, body []byte) (i
 	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: checkRedirect}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, "", err
 	}
 	defer resp.Body.Close()
+	ct := resp.Header.Get("Content-Type")
 	respBody, err := readCapped(resp.Body, maxResponseBytes)
 	if err != nil {
-		return resp.StatusCode, nil, err
+		return resp.StatusCode, nil, ct, err
 	}
-	return resp.StatusCode, respBody, nil
+	return resp.StatusCode, respBody, ct, nil
 }
 
 // maxResponseBytes caps how much of an HTTP response body the generic request
@@ -2305,12 +2396,58 @@ func mustResult(inner []byte) []byte {
 // or credential in the workspace, which is exactly where a silent truncation
 // (or a silent NON-truncation the caller believes is a page) misleads most.
 //
-// This warns rather than refuses on purpose: the request is still correct and
-// still answers the question, and refusing would break every existing script
-// that passes a harmless global. stderr keeps stdout parseable.
-func warnDroppedPagination(out *writer, g globals, cmd manifest.Command) {
+// THIS REFUSES. It used to warn, and the reversal is deliberate and owned —
+// see the note below, because the code must not carry a rationale it no longer
+// follows.
+//
+// THE OLD RATIONALE, VERBATIM, SO THE REVERSAL IS LEGIBLE: "This warns rather
+// than refuses on purpose: the request is still correct and still answers the
+// question, and refusing would break every existing script that passes a
+// harmless global." That reasoning rested on a caller population that could be
+// enumerated. It cannot: a repo-wide sweep finds ZERO
+// `bp … --all/--limit/--offset` invocations in scripts/ or .github/, and the
+// callers that actually pass these flags are AGENTS, which live outside this
+// repo entirely. An enumeration that returns zero because it cannot see the
+// callers is not evidence of safety.
+//
+// So the register flips to the #13620 precedent — refuse a knob you cannot
+// honour — on the ground that a flag honoured in APPEARANCE and discarded in
+// FACT is the same class of defect as every other silent drop: the caller
+// believes it asked for something it did not get, and nothing on any channel
+// contradicts them. A refusal is loud and recoverable; a silent drop is
+// neither. THIS IS A BEHAVIOUR BREAK for any caller that sprinkles --all across
+// mixed verbs, and it is meant to be trivially reversible: delete the two
+// `refused` returns and restore out.errf to get the notice back.
+//
+// WHAT WAS ACTUALLY SILENT, measured against the live manifest before the
+// change (bp doc get post p1 --dry-run, BOTH channels captured — capturing
+// stdout alone is what made all three look silent):
+//
+//	--limit 7    stderr: note: --limit ignored — `doc get` does not accept …
+//	--offset 5   stderr: note: --offset ignored — `doc get` does not accept …
+//	--all        stderr: (nothing)
+//
+// --all is honoured by exactly one branch of runCommand — `cmd.Paginated &&
+// g.all && !cmd.Writes` — so a paginated WRITE swallows it too, not just the
+// non-paginated reads the limit/offset arm covers. Hence the separate
+// condition: that arm is keyed on how --all is actually CONSUMED, not on
+// cmd.Paginated alone.
+func refuseDroppedKnobs(out *writer, g globals, cmd manifest.Command) (int, bool) {
+	// --all rides only the paginated-READ walk; a write or a non-paginated
+	// command drops it.
+	if g.all && (!cmd.Paginated || cmd.Writes) {
+		what := "does not paginate"
+		if cmd.Writes {
+			what = "is a write, and a write is never paginated"
+		}
+		return useError(out, "usage", fmt.Sprintf(
+			"--all cannot be honoured: `%s %s` %s. Nothing was sent. Re-run without --all — the answer is a single result, not a walked collection.",
+			cmd.Noun, cmd.Verb, what,
+		), exitUsage), true
+	}
+
 	if cmd.Paginated {
-		return
+		return 0, false
 	}
 	var dropped []string
 	if g.limitSet && !commandDeclaresFlag(cmd, "limit") {
@@ -2320,12 +2457,12 @@ func warnDroppedPagination(out *writer, g globals, cmd manifest.Command) {
 		dropped = append(dropped, "--offset")
 	}
 	if len(dropped) == 0 {
-		return
+		return 0, false
 	}
-	out.errf(
-		"note: %s ignored — `%s %s` does not accept pagination; the answer below is the server's full result, not a page",
-		strings.Join(dropped, " and "), cmd.Noun, cmd.Verb,
-	)
+	return useError(out, "usage", fmt.Sprintf(
+		"%s cannot be honoured: `%s %s` does not accept pagination. Nothing was sent. Re-run without %s — the answer is the server's full result, not a page.",
+		strings.Join(dropped, " and "), cmd.Noun, cmd.Verb, strings.Join(dropped, " or "),
+	), exitUsage), true
 }
 
 // confirmProdWrite prompts on stderr and reads a [y/N] answer from stdin.

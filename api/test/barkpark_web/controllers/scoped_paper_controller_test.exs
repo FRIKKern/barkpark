@@ -222,7 +222,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
     end
   end
 
-  describe "GET /w/:ws/p/:project/papers/:slug — 'Linked mentions' backlinks section" do
+  describe "GET /w/:ws/p/:project/papers/:slug — related Paper cards" do
     test "renders the section listing a paper that references this one", %{
       conn: conn,
       ws: ws,
@@ -265,7 +265,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       conn = get(conn, paper_path(ws, project, "shared-paper"))
       body = html_response(conn, 200)
 
-      assert body =~ "Linked mentions"
+      assert body =~ "Related papers"
       assert body =~ "The Linking Paper"
       assert body =~ ~s(href="/papers/linking-paper")
     end
@@ -282,7 +282,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       body = html_response(conn, 200)
 
       assert body =~ "Hello Shared Paper"
-      refute body =~ "Linked mentions"
+      refute body =~ "Related papers"
     end
 
     test "TENANCY: a referencer in ANOTHER workspace is NOT shown to this reader", %{
@@ -334,7 +334,7 @@ defmodule BarkparkWeb.ScopedPaperControllerTest do
       refute body =~ "Foreign Linker"
       refute body =~ ~s(href="/papers/foreign-linker")
       # With the only referencer scoped out, the section is omitted entirely.
-      refute body =~ "Linked mentions"
+      refute body =~ "Related papers"
     end
   end
 

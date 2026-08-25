@@ -421,13 +421,29 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   # project. Keys bind at the workspace level (`Keys.mint` sets `workspace_id`,
   # never a project), so every ticket is created with the key's scope —
   # `project_id` nil. `Content.list_documents` / `get_document` run
-  # `Content.Scope.scope_to_workspace/3`, which filters `project_id ==
+  # `Content.Scope.scope_to_workspace_or_global/3` (threaded from
+  # `Content.Query.base_query/4`), whose binary-workspace arm delegates to
+  # `scope_to_workspace/3` and filters `project_id ==
   # ^project_id` with NO null fallback: a project-scoped operator context would
   # therefore see ZERO key-created tickets. Dropping `project_id` here keeps the
   # whole workspace's tickets visible to any operator in that workspace,
   # regardless of the project pane they happen to be viewing. (The submitter
   # surface is unaffected — it scopes through `key_scope/1`, which never carries
   # a project either.)
+  #
+  # DIRECTION WARNING (do not read the sentence above as fail-closed). The
+  # helper named there is `scope_to_workspace_or_global/3`, NOT the fail-closed
+  # `scope_to_workspace/3`, and the two have OPPOSITE nil behaviour:
+  #
+  #   scope_to_workspace_or_global(q, nil, _) -> query UNTOUCHED  = every tenant
+  #   scope_to_workspace(q, nil, _)           -> where(q, false)  = zero rows
+  #
+  # So an operator scope that resolved NO workspace widens this read to every
+  # tenant's tickets rather than narrowing it. Reaching that state needs an
+  # absent `:workspace_id`, which on the LiveView path means an unset
+  # `:current_workspace` (see `BarkparkWeb.ScopeHelpers.scope_opts/1`: the
+  # `:shared_only` sentinel is emitted for a `%Plug.Conn{}` and NOT for a
+  # socket). Trace the helper before assuming a direction.
   defp operator_scope(scope), do: Keyword.delete(scope, :project_id)
 
   # ── Presenter ────────────────────────────────────────────────────────────

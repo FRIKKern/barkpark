@@ -41,5 +41,10 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Build + test
+      # `npm test` is sdk/scripts/run-tests.mjs, NOT a bare `node --test` glob.
+      # The bare form exited 0 on a zero-match glob, so deleting "test/**/*.ts"
+      # from sdk/tsconfig.json silenced all 33 assertions and this job stayed
+      # green. The runner reds on an empty or partial collection and prints
+      # `sdk gate: ran <N> tests from <F> files` into the job summary.
+      - name: Build + test (reds on an empty run — sdk/scripts/run-tests.mjs)
         run: npm test

@@ -11,7 +11,7 @@ defmodule BarkparkWeb.TasksController.Params do
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Repo
-  alias Barkpark.Content.{CallerContext, Document, Envelope}
+  alias Barkpark.Content.{CallerContext, Document, DraftId, Envelope}
   alias Barkpark.Content.Scope
   alias Barkpark.Tasks.{Criteria, QueueGate}
   alias Barkpark.Tasks.Edge
@@ -541,11 +541,14 @@ defmodule BarkparkWeb.TasksController.Params do
   end
 
   # The prefix-agnostic doc_id key the parent-edge queries group on — the
-  # Elixir-side twin of the SQL `regexp_replace(…, '^drafts\.', '')`.
+  # Elixir-side twin of the SQL `regexp_replace(…, '^drafts\.', '')`. Delegates
+  # the rule itself to DraftId.published_id/1 (the canonical owner); this
+  # wrapper adds only the nil-safety these call sites need — DraftId's own
+  # published_id/1 requires a binary and raises on nil.
   def strip_draft_prefix(nil), do: nil
 
   def strip_draft_prefix(doc_id) when is_binary(doc_id),
-    do: String.replace_prefix(doc_id, "drafts.", "")
+    do: DraftId.published_id(doc_id)
 
   # Augment the base render_doc map with the three count fields the
   # `bp task` list/ready shapes carry (dependency_count + dependent_count

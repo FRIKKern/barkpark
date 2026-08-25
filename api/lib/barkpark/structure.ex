@@ -342,9 +342,36 @@ defmodule Barkpark.Structure do
   end
 
   # The census MIRRORS `build/2`'s schema scope: workspace + nil-workspace
-  # globals, project NOT narrowed. `Analytics.type_census/2` enforces that; we
-  # only forward the workspace id (dropping :project_id).
-  defp census_opts(opts), do: Keyword.take(opts, [:workspace_id])
+  # globals, project NOT narrowed. `Analytics.type_census/2` enforces that.
+  #
+  # This helper is a WHITELIST, so every key it does not name is silently
+  # dropped — and a dropped key is only safe when its consumer defaults to the
+  # NARROW behaviour. Naming each one, with its sign (task-c6d2e34c64100678,
+  # where the unnamed drops were half the defect):
+  #
+  #   * `:workspace_id` — FORWARDED. The tenancy floor the census is built on.
+  #
+  #   * `:grant_scoped` — FORWARDED. `Content.Scope.maybe_scope_to_grants/2` is
+  #     gated by `Keyword.get(opts, :grant_scoped, false)`, so DROPPING it read
+  #     as "do not narrow", not as "narrow to nothing". Absence WIDENS. A
+  #     grant-admitted non-member (LiveScope's grant arm) therefore censused the
+  #     whole workspace, disclosing every type name and document count outside
+  #     the grant.
+  #
+  #   * `:caller_context` — FORWARDED, and load-bearing only because of the key
+  #     above: `scope_to_grants/3` fails CLOSED without it, so forwarding the
+  #     flag alone would BLANK a grantee's …Rest tier instead of narrowing it.
+  #     On its own this key's absence narrows (`Schema.bypasses_visibility_gate?/1`
+  #     catch-alls to false), which is why it was safe to drop before the flag
+  #     arrived and is safe to forward now.
+  #
+  #   * `:project_id` — DROPPED, deliberately. The desk lists a workspace's
+  #     content TYPES, which are workspace-level, not per-project; narrowing to
+  #     one project would MISREPORT the census against the tree `build/2` draws
+  #     around it. A project-scoped GRANT still confines the census to its
+  #     project — that is the grant ladder, not this drop.
+  defp census_opts(opts),
+    do: Keyword.take(opts, [:workspace_id, :grant_scoped, :caller_context])
 
   # Both branches name a REAL glyph. They used to leave `:icon` nil — the orphan
   # branch by omission, the schema branch whenever the schema declared no icon —

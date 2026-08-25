@@ -99,7 +99,7 @@ func TestReaderLawRefusalsAllCarryTheirRemedy(t *testing.T) {
 		{
 			name: "non-paginated read",
 			run: func(out *writer) (int, bool) {
-				return screenUnpaginatedRead(out, nonPaginatedReadCommand(), http.StatusOK, []byte(`<html><body>502</body></html>`))
+				return screenUnpaginatedRead(out, nonPaginatedReadCommand(), http.StatusOK, []byte(`<html><body>502</body></html>`), "")
 			},
 			wantHint: "the transport, not the query",
 		},

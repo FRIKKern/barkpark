@@ -170,9 +170,12 @@ drop_victim_checkrun() { # <dir>
 
 D1="$(derive zombied)"
 drop_victim_checkrun "$D1"
-# The producing run exists, is queued, is on its FIRST attempt, and dispatched
-# nothing: jobs.total_count is 0. That tuple is what ZOMBIED means.
-jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "queued" | .created_at = "2026-08-06T11:00:00Z" else . end]}' \
+# The producing run exists, is queued, is on its FIRST attempt, dispatched
+# nothing (jobs.total_count 0), AND IS OLDER THAN THE THRESHOLD. All four are
+# ZOMBIED. The age is not decoration: 2026-08-05T11:00:00Z against the pinned
+# NOW is 37h, past the 24h default, and §1.6 below removes only the age and
+# watches this same tuple stop being a zombie.
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "queued" | .created_at = "2026-08-05T11:00:00Z" else . end]}' \
   "$D1/runs-$SHA.json" > "$D1/.tmp" && mv "$D1/.tmp" "$D1/runs-$SHA.json"
 jq -n '{total_count: 0, jobs: []}' > "$D1/jobs-$VICTIM_RUN.json"
 
@@ -211,6 +214,30 @@ if [ "$RC" = "0" ] && ! grep -q 'ABSENT' <<<"$OUT"; then
   ok "1.5 …and with the SAME zombied run but the context RENDERED, it is exit 0 — the verdict tracks absence, not queue state"
 else
   bad "1.5 a rendered context beside a queued run should be exit 0; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# THE AGE GUARD, MUTATION-PROVEN. The live census scored a run created SIXTY
+# SECONDS earlier as ZOMBIED — the class the header defines off a FIFTEEN-DAY
+# specimen — because the implementation kept the tuple and dropped the age that
+# made the tuple mean anything. Here the ONLY field that moves is created_at.
+D1C="$(derive zombied-young)"
+drop_victim_checkrun "$D1C"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "queued" | .created_at = "2026-08-06T23:59:00Z" else . end]}' \
+  "$D1C/runs-$SHA.json" > "$D1C/.tmp" && mv "$D1C/.tmp" "$D1C/runs-$SHA.json"
+jq -n '{total_count: 0, jobs: []}' > "$D1C/jobs-$VICTIM_RUN.json"
+OUT="$(run_census "$D1C")"; RC=$?
+if [ "$RC" = "0" ] && grep -qE '^ +class +UNDISPATCHED_YOUNG$' <<<"$OUT" && ! grep -q 'ABSENT' <<<"$OUT"; then
+  ok "1.6 …and the SAME tuple one minute old is UNDISPATCHED_YOUNG at exit 0 — age is the discriminator, not the tuple"
+else
+  bad "1.6 a one-minute-old undispatched run must not be ZOMBIED; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+# …and the threshold is what does it, not the date literal: drop the bar under
+# its age and the identical fixture becomes a zombie again.
+OUT="$(run_census "$D1C" --stale-queue-hours 0)"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'ABSENT' <<<"$OUT" && grep -qE '^ +class +ZOMBIED$' <<<"$OUT"; then
+  ok "1.7 …and lowering --stale-queue-hours to 0 turns that identical fixture back into a screaming ZOMBIED — the guard is the threshold"
+else
+  bad "1.7 the young fixture should be ZOMBIED under a zero threshold; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
 # ═══ 2. the other two classes ════════════════════════════════════════════════
@@ -313,17 +340,98 @@ if [ "$RC" = "0" ] && ! grep -q 'ABSENT' <<<"$OUT" && grep -q 'absent=0' <<<"$OU
 else
   bad "3.1 a rendered pending check must not be reported absent; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
-# And the discriminator is the RENDERING, not the status word: delete the same
-# pending check run and the very same fixture screams.
+# And the probe is not vacuous: remove that same check run, leave the producing
+# run COMPLETED, and the identical fixture screams. Completed is load-bearing
+# here — while the producing run is still working, a missing name is population
+# 3 below, not an absence, and §3.4 pins that separately.
 D4B="$(derive pending-deleted)"
-jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "in_progress" else . end]}' \
-  "$D4B/runs-$SHA.json" > "$D4B/.tmp" && mv "$D4B/.tmp" "$D4B/runs-$SHA.json"
 drop_victim_checkrun "$D4B"
 OUT="$(run_census "$D4B")"; RC=$?
 if [ "$RC" = "1" ] && grep -q 'ABSENT' <<<"$OUT"; then
-  ok "3.2 …and REMOVING that same check run flips the identical fixture to ABSENT — rendering is the discriminator, not the status word"
+  ok "3.2 …and REMOVING that check run beside a COMPLETED producing run flips the identical fixture to ABSENT — the probe can lose"
 else
   bad "3.2 the pending probe is vacuous: removing the check run did not flip it (exit $RC)"
+fi
+
+# ═══ 3b. POPULATION THREE — the job GitHub has not created yet ═══════════════
+section "3b. a needs:-gated job that does not exist YET is not an absence"
+
+# THE FIXTURE THIS HARNESS NEVER HAD, and its absence is why the census ran red
+# 71 times out of 71 between 2026-08-07 and 2026-08-24 while this suite passed
+# on every one of those runs. §3.1 above pins a check run that IS RENDERED and
+# unconcluded. It says nothing about a job that DOES NOT EXIST — and GitHub does
+# not create a `needs:`-gated job, or any check run for it, until every one of
+# its `needs:` has concluded. Every gate in this repo is a terminal aggregator,
+# so this population is non-empty on every pull request for the whole first
+# phase of its CI.
+#
+# The shape, captured from run 32766664303 (cloud.yml, PR #14040) at 19:11Z on
+# 2026-08-24: the run is queued, jobs.total_count is 2, and the two jobs are the
+# UPSTREAM ones — the gate itself is not in the list. Twenty minutes later the
+# same run id reported total_count 5 with `Cloud gate` present. Nothing was
+# fixed in between.
+D4C="$(derive job-not-created-yet)"
+drop_victim_checkrun "$D4C"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "queued" else . end]}' \
+  "$D4C/runs-$SHA.json" > "$D4C/.tmp" && mv "$D4C/.tmp" "$D4C/runs-$SHA.json"
+# Jobs DISPATCHED — and the victim's own job deliberately not among them.
+jq -n --arg v "$VICTIM" '{total_count: 2, jobs: [
+    {name: "Dispatch (changed-path sets)", status: "completed", conclusion: "success"},
+    {name: "path-escape ratchet",          status: "queued",    conclusion: null}
+  ]}' > "$D4C/jobs-$VICTIM_RUN.json"
+OUT="$(run_census "$D4C")"; RC=$?
+if [ "$RC" = "0" ] && grep -qE '^ +class +DISPATCHED_PENDING$' <<<"$OUT" && grep -q 'absent=0' <<<"$OUT"; then
+  ok "3.3 a producing run still working, with the gate job NOT in its job list, is DISPATCHED_PENDING at exit 0 — not an absence"
+else
+  bad "3.3 a not-yet-created needs:-gated job must not be reported absent; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+if grep -qF "context \"$VICTIM\" has not been created yet" <<<"$OUT"; then
+  ok "3.4 …and it is REPORTED, in the in-flight column, naming the context — routed, never suppressed"
+else
+  bad "3.4 the in-flight row does not name \"$VICTIM\""; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# THE MUTATION THAT PROVES 3.3 CAN LOSE. One field moves — the producing run
+# finishes — and the very same missing name becomes a standing absence. Without
+# this, 3.3 is satisfied by a census that stopped looking at heads entirely.
+D4D="$(derive job-never-created)"
+cp -R "$D4C/." "$D4D/"
+jq --arg p "$VICTIM_PATH" '{workflow_runs: [.workflow_runs[] | if .path == $p then .status = "completed" else . end]}' \
+  "$D4D/runs-$SHA.json" > "$D4D/.tmp" && mv "$D4D/.tmp" "$D4D/runs-$SHA.json"
+OUT="$(run_census "$D4D")"; RC=$?
+if [ "$RC" = "1" ] && grep -qE '^ +class +NAME_NOT_IN_RUN$' <<<"$OUT" && grep -qF "context \"$VICTIM\" renders nowhere" <<<"$OUT"; then
+  ok "3.5 …and the SAME fixture with the producing run COMPLETED screams NAME_NOT_IN_RUN, naming it — 'still working' is the discriminator, not 'we stopped looking'"
+else
+  bad "3.5 completing the producing run did not flip 3.3 to a scream; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# ═══ 3c. the conflicted head ═════════════════════════════════════════════════
+section "3c. a CONFLICTING pull request is a merge conflict, not a missing context"
+
+# GitHub cannot compute a merge commit for a conflicted pull request, so it runs
+# no `pull_request` workflow at all and every required context goes missing at
+# once. That is already reported — by the pull request's own UI and by
+# `mergeable` — and this census exists for what NOTHING ELSE reports.
+D4E="$(derive pr-conflicted)"
+jq '[.[] | .mergeable = "CONFLICTING"]' "$D4E/prs.json" > "$D4E/.tmp" && mv "$D4E/.tmp" "$D4E/prs.json"
+jq '{check_runs: []}' "$D4E/checkruns-$SHA.json" > "$D4E/.tmp" && mv "$D4E/.tmp" "$D4E/checkruns-$SHA.json"
+jq '{workflow_runs: []}' "$D4E/runs-$SHA.json" > "$D4E/.tmp" && mv "$D4E/.tmp" "$D4E/runs-$SHA.json"
+OUT="$(run_census "$D4E")"; RC=$?
+if [ "$RC" = "0" ] && grep -qE '^ +class +PR_CONFLICTED$' <<<"$OUT" && grep -q 'absent=0' <<<"$OUT"; then
+  ok "3.6 a CONFLICTING head with no runs and nothing rendered is PR_CONFLICTED at exit 0"
+else
+  bad "3.6 expected PR_CONFLICTED at exit 0; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+# …and `mergeable` is doing the work, not the empty run list: flip that ONE
+# field back and the identical fixture screams NO_RUN for every context.
+D4F="$(derive pr-mergeable)"
+cp -R "$D4E/." "$D4F/"
+jq '[.[] | .mergeable = "MERGEABLE"]' "$D4F/prs.json" > "$D4F/.tmp" && mv "$D4F/.tmp" "$D4F/prs.json"
+OUT="$(run_census "$D4F")"; RC=$?
+if [ "$RC" = "1" ] && grep -qE '^ +class +NO_RUN$' <<<"$OUT"; then
+  ok "3.7 …and flipping mergeable to MERGEABLE turns the identical fixture into a screaming NO_RUN — one field, whole verdict"
+else
+  bad "3.7 mergeable is not the discriminator: the MERGEABLE twin did not scream; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
 # ═══ 4. the queue query, and the assertion that can lose ═════════════════════
@@ -393,6 +501,67 @@ if [ "$RC" = "0" ]; then
   ok "5.2 …and raising --stale-queue-hours past its age clears it — the threshold is doing the work, not a hardcoded id"
 else
   bad "5.2 the same fixture should pass under an enormous threshold; got $RC"
+fi
+
+# ═══ 5b. the two limbs are reported APART ════════════════════════════════════
+section "5b. the queue limb states its own verdict, whatever the absence limb does"
+
+# WHY THIS PROBE EXISTS. The two limbs used to share one sentence and one exit
+# code, and the consequence was measured: seven undispatched runs on a real main
+# commit sat unactioned for seventeen days while the absence limb over-reported
+# on every one of the 71 runs this census had. The queue finding was correct the
+# whole time and nobody could see it. A reader grepping for the queue verdict
+# must get an answer the absence limb cannot dilute or suppress.
+QUEUE_LINE='VERDICT  queue limb'
+ABSENCE_LINE='VERDICT  absence limb'
+
+# Both limbs firing at once — the hard case, and the one the fused report lost.
+D10="$(derive both-limbs)"
+drop_victim_checkrun "$D10"
+jq '{workflow_runs: [.workflow_runs[] | if .id == 910007 then .created_at = "2026-07-23T07:38:15Z" | .run_attempt = 9 else . end]}' \
+  "$D10/queued-paginated.json" > "$D10/.tmp" && mv "$D10/.tmp" "$D10/queued-paginated.json"
+OUT="$(run_census "$D10")"; RC=$?
+if [ "$RC" = "1" ] \
+   && grep -qF "$QUEUE_LINE   : SCREAM" <<<"$OUT" \
+   && grep -qF "$ABSENCE_LINE : SCREAM" <<<"$OUT"; then
+  ok "5.3 with BOTH limbs firing, each states its own SCREAM on its own line — neither is folded into the other"
+else
+  bad "5.3 both limbs firing did not produce two separate verdict lines; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# THE ONE THAT MATTERS: a screaming absence limb must not make the queue limb
+# report anything but the truth about the queue.
+D11="$(derive absence-only)"
+drop_victim_checkrun "$D11"
+OUT="$(run_census "$D11")"; RC=$?
+if [ "$RC" = "1" ] \
+   && grep -qF "$ABSENCE_LINE : SCREAM" <<<"$OUT" \
+   && grep -qF "$QUEUE_LINE   : clean" <<<"$OUT"; then
+  ok "5.4 …and a screaming ABSENCE limb still lets the queue limb report CLEAN — the limbs cannot contaminate each other"
+else
+  bad "5.4 the queue limb did not report clean beside a screaming absence limb; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# And the mirror, which is the seventeen-day case exactly: a clean absence limb
+# beside a screaming queue.
+OUT="$(run_census "$D6")"; RC=$?
+if [ "$RC" = "1" ] \
+   && grep -qF "$QUEUE_LINE   : SCREAM" <<<"$OUT" \
+   && grep -qF "$ABSENCE_LINE : clean" <<<"$OUT"; then
+  ok "5.5 …and a queue-only finding is stated as a queue-only finding, with the absence limb explicitly CLEAN"
+else
+  bad "5.5 the queue-only fixture did not separate the limbs; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# The verdict lines must be able to say `clean` — otherwise 5.4 and 5.5 are
+# satisfied by a report that prints SCREAM unconditionally.
+OUT="$(run_census "$BASE")"; RC=$?
+if [ "$RC" = "0" ] \
+   && grep -qF "$QUEUE_LINE   : clean" <<<"$OUT" \
+   && grep -qF "$ABSENCE_LINE : clean" <<<"$OUT"; then
+  ok "5.6 …and on the clean base fixture BOTH lines read clean — the word SCREAM is earned, not printed"
+else
+  bad "5.6 the base fixture did not report both limbs clean; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
 # ═══ 6. it fails CLOSED — an unreadable feed is never a clean bill of health ══

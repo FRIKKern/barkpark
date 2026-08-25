@@ -100,6 +100,8 @@ defmodule BarkparkWeb.BulldocsLive do
           source
       end
 
+    paper_link_refs = reader_source |> source_blocks() |> paper_link_refs()
+
     # Preview manifest (preview-contract pc-w2) — the outward social-share card.
     # Computed BEFORE the `connected?` branch so the DEAD render (crawlers +
     # unfurlers run no JS) already carries the og/twitter/JSON-LD head. Resolves
@@ -112,6 +114,11 @@ defmodule BarkparkWeb.BulldocsLive do
       socket
       |> assign(:preview, preview)
       |> assign(:page_title, preview["title"])
+
+    task_ws = (paper && paper.workspace_id) || reader_scope[:workspace_id]
+
+    subscribe_document_changes? =
+      task_ws && (has_live_task_blocks?(paper) || paper_link_refs != [])
 
     if connected?(socket) do
       # Workspace-scope the subscription (barkpark-n56v, P0). The topic now
@@ -134,15 +141,21 @@ defmodule BarkparkWeb.BulldocsLive do
         )
       )
 
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Content.paper_relations_topic(
+          (paper && paper.workspace_id) || reader_scope[:workspace_id],
+          dataset
+        )
+      )
+
       # Live plans: a paper embedding a task query ALSO listens on its tenant's
       # document stream, so an embedded board/list/roadmap re-resolves and
       # re-renders the moment a task moves (the "always feel progress" criterion
       # on a real plan). Gated on `has_live_task_blocks?` so a plain paper adds
       # no subscription. Task docs (`type:"task"`) broadcast `:document_changed`
       # on this workspace-scoped topic (content/broadcast.ex).
-      task_ws = (paper && paper.workspace_id) || reader_scope[:workspace_id]
-
-      if task_ws && has_live_task_blocks?(paper) do
+      if subscribe_document_changes? do
         Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:ws:#{task_ws}:#{dataset}")
       end
     end
@@ -188,7 +201,12 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:simplify?, paper_goal_id(paper) != nil)
       |> assign(:pending_simplify, nil)
       |> assign(:last_simplify, nil)
-      # "Linked mentions" + "Driven tasks" — both sections read the SAME
+      # Outbound `paper-links` refs are stored separately from rendered HTML so
+      # workspace document broadcasts can refresh only readers whose related
+      # Paper metadata may actually have changed.
+      |> assign(:paper_link_refs, paper_link_refs)
+      |> assign(:document_changes_subscribed?, connected?(socket) && subscribe_document_changes?)
+      # Related Papers + "Driven tasks" — both sections read the SAME
       # inbound-edge walk, so they are assigned together off ONE
       # `reverse_referencers/2` call (am-w1-s3). See `assign_linked_sections/3`
       # for the scope + engine posture; each assign is `""` when its section
@@ -225,7 +243,7 @@ defmodule BarkparkWeb.BulldocsLive do
     Barkpark.Tenancy.workspace_theme(workspace)
   end
 
-  # Assign the "Linked mentions" AND "Driven tasks" sections for a paper off
+  # Assign the related-Paper AND "Driven tasks" sections for a paper off
   # ONE inbound-edge walk. Empty strings (no markup) when the paper is absent
   # or nothing links to it.
   #
@@ -748,7 +766,8 @@ defmodule BarkparkWeb.BulldocsLive do
 
       %{
         wikilinks: Content.resolve_wikilinks_in_blocks(blocks, dataset, scope),
-        values: Content.resolve_values_in_blocks(blocks, dataset, scope)
+        values: Content.resolve_values_in_blocks(blocks, dataset, scope),
+        paper_links: resolve_paper_link_details(blocks, dataset, scope)
       }
       |> Map.merge(Labels.render_opts(dataset, scope))
     end
@@ -801,6 +820,56 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp any_live_task?(_), do: false
 
+  defp paper_link_refs(blocks) when is_list(blocks) do
+    blocks
+    |> Enum.flat_map(fn
+      %{"type" => "paper-links", "refs" => refs} -> Enum.map(List.wrap(refs), &paper_ref_slug/1)
+      %{"children" => children} when is_list(children) -> paper_link_refs(children)
+      %{"blocks" => children} when is_list(children) -> paper_link_refs(children)
+      _ -> []
+    end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp paper_link_refs(_), do: []
+
+  defp paper_ref_slug(slug) when is_binary(slug) do
+    case String.trim(slug) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp paper_ref_slug(%{"slug" => slug}), do: paper_ref_slug(slug)
+  defp paper_ref_slug(%{slug: slug}), do: paper_ref_slug(slug)
+  defp paper_ref_slug(_), do: nil
+
+  # One tenant-scoped batch read per render, never one query per card. Only
+  # published type:"paper" rows survive; unresolved refs remain authored links.
+  defp resolve_paper_link_details(blocks, dataset, scope) do
+    blocks
+    |> paper_link_refs()
+    |> Content.resolve_docs_by_ids(dataset, scope)
+    |> Enum.filter(&(&1.type == "paper"))
+    |> Map.new(fn paper ->
+      content = paper.content || %{}
+
+      {paper.doc_id,
+       %{
+         title: paper.title,
+         description: Map.get(content, "description"),
+         event_type: Map.get(content, "event_type"),
+         rev: Map.get(content, "rev") || paper.rev,
+         updated_at: paper_timestamp(paper.updated_at)
+       }}
+    end)
+  end
+
+  defp paper_timestamp(%DateTime{} = value), do: DateTime.to_iso8601(value)
+  defp paper_timestamp(%NaiveDateTime{} = value), do: NaiveDateTime.to_iso8601(value)
+  defp paper_timestamp(_), do: nil
+
   # Each stream item needs a stable `:id` (the block id) and its rendered
   # fragment. Only top-level blocks are streamed individually; a `section`
   # block renders as one fragment (its children live inside it). An article
@@ -836,6 +905,11 @@ defmodule BarkparkWeb.BulldocsLive do
   @impl true
   def handle_info({:paper_block, frame}, socket) do
     cond do
+      # A cached delta fragment cannot carry fresh metadata for `paper-links`.
+      # Re-resolve the complete block list whenever this reader has one.
+      socket.assigns[:paper_link_refs] != [] ->
+        {:noreply, refetch(socket)}
+
       # First block delta to a view still in HTML-only mode: we have no stream
       # to append onto, so adopt the block list wholesale via a refetch rather
       # than blindly inserting one item over the opaque HTML body.
@@ -855,6 +929,16 @@ defmodule BarkparkWeb.BulldocsLive do
 
   def handle_info({:paper_updated, _msg}, socket), do: {:noreply, refetch(socket)}
 
+  # Emitted only after the edge projector has reconciled the materialised
+  # graph. Re-read the compact related-Paper projection without replacing the
+  # article body, so cards update in place when links or source details change.
+  def handle_info({:paper_relations_changed, _msg}, socket) do
+    paper =
+      fetch_paper(socket.assigns.slug, socket.assigns[:reader_scope], socket.assigns[:dataset])
+
+    {:noreply, assign_linked_sections(socket, paper, socket.assigns[:dataset])}
+  end
+
   # Live-plan push: a task moved in this paper's tenant → re-resolve the
   # embedded task blocks (resolve-at-read) and re-stream. Only reacts to
   # `type:"task"` docs and only while in block mode; the paper's own edits ride
@@ -862,6 +946,14 @@ defmodule BarkparkWeb.BulldocsLive do
   # no-op — the plan only redraws when work actually moves.
   def handle_info({:document_changed, %{type: "task"}}, socket) do
     if socket.assigns[:block_mode], do: {:noreply, refetch(socket)}, else: {:noreply, socket}
+  end
+
+  def handle_info({:document_changed, %{type: "paper", doc_id: doc_id}}, socket) do
+    if Content.published_id(doc_id) in socket.assigns[:paper_link_refs] do
+      {:noreply, refetch(socket)}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:document_changed, _msg}, socket), do: {:noreply, socket}
@@ -922,6 +1014,8 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:block_mode, false)
         |> assign(:found, false)
         |> assign(:source_error, nil)
+        |> assign(:paper_link_refs, [])
+        |> assign_linked_sections(nil, socket.assigns[:dataset])
 
       paper ->
         article? = paper_article?(paper)
@@ -936,8 +1030,10 @@ defmodule BarkparkWeb.BulldocsLive do
         case reader_source do
           {:blocks, blocks} ->
             resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
+            refs = paper_link_refs(resolved)
 
             socket
+            |> ensure_document_changes_subscription(paper, refs)
             |> stream(
               :blocks,
               to_stream_items(
@@ -952,6 +1048,8 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:block_mode, true)
             |> assign(:found, true)
             |> assign(:source_error, nil)
+            |> assign(:paper_link_refs, refs)
+            |> assign_linked_sections(paper, socket.assigns[:dataset])
 
           {:html, html} ->
             # Refetched a paper that has reverted to HTML-only — fall back.
@@ -962,6 +1060,8 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:block_mode, false)
             |> assign(:found, true)
             |> assign(:source_error, nil)
+            |> assign(:paper_link_refs, [])
+            |> assign_linked_sections(paper, socket.assigns[:dataset])
 
           {:error, reason} ->
             socket
@@ -972,6 +1072,8 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:block_mode, false)
             |> assign(:found, false)
             |> assign(:source_error, reason)
+            |> assign(:paper_link_refs, [])
+            |> assign_linked_sections(paper, socket.assigns[:dataset])
         end
     end
   end
@@ -979,6 +1081,25 @@ defmodule BarkparkWeb.BulldocsLive do
   # Stream dom ids are namespaced by the stream name; mirror that so deletes by
   # id line up with what the template renders.
   defp dom_id(id), do: "blocks-#{id}"
+
+  defp ensure_document_changes_subscription(socket, paper, refs) do
+    if connected?(socket) && refs != [] && !socket.assigns[:document_changes_subscribed?] do
+      ws_id = (paper && paper.workspace_id) || socket.assigns[:reader_scope][:workspace_id]
+
+      if ws_id do
+        Phoenix.PubSub.subscribe(
+          Barkpark.PubSub,
+          "documents:ws:#{ws_id}:#{socket.assigns.dataset}"
+        )
+
+        assign(socket, :document_changes_subscribed?, true)
+      else
+        socket
+      end
+    else
+      socket
+    end
+  end
 
   @impl true
   def render(assigns) do
@@ -1086,11 +1207,10 @@ defmodule BarkparkWeb.BulldocsLive do
           <article id="paper-body" data-rev={@rev}>{raw(@html)}</article>
       <% end %>
 
-      <%!-- "Linked mentions" (Phase-3 backlinks). Papers that wikilink TO this
-            one, server-rendered AFTER the body as a section (NOT an inline
-            node). `@backlinks_html` is the full <section> or "" — empty string
-            ⇒ no markup ⇒ the section is hidden when nothing links here. Not
-            flag-gated: derived from the stored blocks + wikilink nodes. --%>
+      <%!-- Related Papers. Real graph-backed document cards rendered AFTER the
+            body and refreshed in place when projection completes.
+            `@backlinks_html` is the full <section> or "" — empty string means
+            no markup, so the section disappears when nothing links here. --%>
       {raw(@backlinks_html)}
 
       <%!-- "Driven tasks" (lvw-t8 expectation reverse view). Tasks that cite

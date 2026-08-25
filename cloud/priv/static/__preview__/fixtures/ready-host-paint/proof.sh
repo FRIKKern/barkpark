@@ -10,7 +10,11 @@
 #
 # exit 0 = every direction landed where it should
 # exit 1 = the floor behaved wrongly (a direction failed)
-# exit 2 = no browser — an ENVIRONMENT refusal, never a failed proof
+# exit 2 = REFUSED TO MEASURE — no browser, or a direction whose precondition
+#          could not be established (already-painted host, selector matching
+#          zero nodes, arming class that starts no animation). An ENVIRONMENT
+#          refusal, never a failed proof — and never a pass: a proof that
+#          judged nothing must not read as one.
 set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 exec node "$DIR/proof.mjs" "$@"

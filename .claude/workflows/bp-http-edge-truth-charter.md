@@ -227,6 +227,36 @@ caching."
   (3/5 swapped) — the charter's numbering (3=statics, 5=rendition URL) is canonical and the task
   description is patched to match.
 
+- **D18 — (implements D6; widens its shaping set, reverses nothing) The query ETag is withdrawn for
+  THREE shaping params, not one — `?fields=`, `?expand=`, `?resolve=` — and for ANY bound principal,
+  not only a token: `conditional_safe?/1` requires an anonymous caller context AND no shaping param
+  before an ETag is emitted or an If-None-Match honored.** *Why:* D6 named `?fields=` and "a token"
+  because those were the two the capstone had measured. Reading the code for this slice found the
+  same blindness on two more axes with the same mechanism and no additional cost to close:
+  `project_fields/2` keeps every `_`-prefixed key, so `_id`/`_rev` — the ENTIRE ETag input — survive
+  a projection byte-identical, and `Expand.expand/4` and `maybe_resolve_tasks/3` both rewrite the
+  body strictly after the ids and revs are fixed. The principal arm widens from "token" to "any
+  non-anonymous `CallerContext`" because `RequireUserSession` installs a context WITHOUT setting
+  `:api_token`, so a token-only test would have left every session-authenticated read still
+  emitting a principal-blind validator. Direction is unchanged and still D1-safe: every arm
+  WITHDRAWS a validator, so the worst outcome of overreach is a full 200 where a 304 would have
+  done — never a stale or cross-principal body. *Live evidence that moved it (prod, anonymous, with
+  a working 200-control):* `GET /v1/data/doc/production/task/task-f69b2c1a31b71ec0` and the same URL
+  with `?fields=title` both answered the strong validator `"b75c68f15a031a542076615145dbe70c"` over a
+  10,174-byte and a 630-byte body, and replaying the first ETag against the `?fields=` URL answered
+  **304 with an empty body**; a bogus ETag on that same URL answered 200/630.
+
+- **D19 — Capabilities is EXONERATED on the ETag axis and gets the `Vary` header only.** *Why:* the
+  survey premise was that the tier-keyed ETag might collide across tiers. It cannot:
+  `Capabilities.project/2` overwrites `auth_tier` and filters commands/nouns, and `etag_for/1`
+  digests the PROJECTED map (dropping only `etag` and `generated_at`), so the tier is inside the
+  validator by construction. A live anon-vs-token probe against guerrilla returned one identical
+  ETag — but the DIFF showed the two bodies differing only in `generated_at`, and both reported
+  `auth_tier: "none"`: the config token is stale and was resolving to anonymous, so that probe
+  compared anonymous against anonymous and proved NOTHING about the tier axis. Recorded here so the
+  next reader does not re-derive a collision from that transcript. The remaining real gap is the
+  missing cache instruction, which is what this slice adds.
+
 ## Fence
 
 **In fence:** `api/lib/barkpark_web/plugs/paper_revision_headers.ex` · `api/lib/barkpark/media/**`
@@ -311,3 +341,13 @@ written notice. E3's "supported" blessing is DAG-gated on E1's media fix (slice 
   transcripts per D13. Next wave: W2 slices 4 (Vary + query-ETag omission, closes bpb-step7 per
   D17) and 5 (rendition content-addressing) once all W1 PRs merge; E2 notice
   `het-w1-bl-e2-endpoint-notice` still open for the lead to relay.
+- 2026-08-24 · W2 slice 4 built by lane `http-edge-truth` on `http-edge-truth-w2`. Decisions D18
+  (shaping set widened to fields/expand/resolve + any bound principal) and D19 (capabilities
+  exonerated on the ETag axis, Vary-only) recorded. Decisive proof: the cross-representation 304 on
+  prod named in D18, reproduced as a test. Files: `query_controller.ex` (respond/6 + three new
+  private helpers), `capabilities_controller.ex` (Vary, merged not overwritten), new pin suite
+  `api/test/barkpark_web/integration/http_conditional_policy_test.exs`, `docs/api-v1.md` §3.
+  OPEN, for the lead: the api-v1.md co-change puts that file 103 B over its 14,000 B budget — the
+  doc had SIX bytes of headroom and carries no defensible fat, so the cap needs a ration decision
+  (trim a neighbouring section, or split the doc) that is above this slice's pay grade. `Doc budgets
+  + anchors` is not in the required set, so it does not block the merge.

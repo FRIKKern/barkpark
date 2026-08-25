@@ -34,7 +34,7 @@ FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # scaffy:add-block-type CodeTabs MARK:parity-count-script-code-tabs
 # scaffy:add-block-type Tabs MARK:parity-count-script-tabs
 # scaffy:add-block-type Route MARK:parity-count-script-route
-EXPECTED_COUNT=63
+EXPECTED_COUNT=64
 
 if [ ! -f "$COMPOSE" ]; then
   echo "FAIL: compose.ex not found at $COMPOSE" >&2

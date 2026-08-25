@@ -39,21 +39,40 @@ defmodule Rig.Render do
   @live_view_path "lib/barkpark_web/live/bulldocs_live.ex"
 
   def main(argv) do
-    {fixture_path, out_path} =
-      case argv do
-        [f, o] -> {f, o}
-        _ -> die("usage: render.exs <fixture.json> <out.html>")
-      end
-
     assert_wrapper_matches_live_view!()
     assert_stream_item_matches_live_view!()
     assert_theme_pin!()
+    boot_phoenix!()
 
+    case argv do
+      [fixture_path, out_path] ->
+        render_one!(fixture_path, out_path)
+
+      ["--batch", fixture_dir, site_dir] ->
+        fixtures = Path.wildcard(Path.join(fixture_dir, "*.json")) |> Enum.sort()
+        fixtures == [] && die("batch directory has no JSON fixtures: #{fixture_dir}")
+
+        Enum.each(fixtures, fn fixture_path ->
+          slug = fixture_path |> Path.basename() |> Path.rootname()
+          render_one!(fixture_path, Path.join([site_dir, "papers", slug, "index.html"]))
+        end)
+
+        File.cp!(
+          Path.join([site_dir, "papers", "barkpark-chronicle", "index.html"]),
+          Path.join(site_dir, "index.html")
+        )
+
+        IO.puts("rig/render: batch rendered #{length(fixtures)} papers -> #{site_dir}")
+
+      _ ->
+        die("usage: render.exs <fixture.json> <out.html> | --batch <fixture-dir> <site-dir>")
+    end
+  end
+
+  defp render_one!(fixture_path, out_path) do
     fixture = fixture_path |> File.read!() |> Jason.decode!()
     blocks = fixture["blocks"] || die("fixture has no \"blocks\": #{fixture_path}")
     blocks == [] && die("fixture has zero blocks: #{fixture_path}")
-
-    boot_phoenix!()
 
     # THE SHIPPING SHAPE, not the convenient one. The block-backed reader does
     # not concatenate block HTML into the article: it streams each top-level

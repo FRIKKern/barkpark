@@ -1,3 +1,20 @@
+# ############################################################################
+# INERT — GitHub Actions NEVER RUNS THIS FILE.
+#
+# Actions only reads workflows from `.github/workflows/` at the REPOSITORY
+# ROOT. Everything under `js/.github/workflows/` is dead configuration: it is
+# not in `gh api repos/<owner>/<repo>/actions/workflows` (63 registered
+# workflows, none under js/), it produces no check run, and nothing it asserts
+# about CI behaviour is true of this repository.
+#
+# The real js/ gate is `.github/workflows/js-tests.yml` at the repo root.
+#
+# This header exists because a comment in THIS TREE claiming a "+2% bundle-size
+# regression gate" was copied into js/CLAUDE.md and docs/cards/js-sdk.md, where
+# it told every agent that a mechanism existed which never had. An inert file
+# that describes gate behaviour is a lie with a long reach.
+# ############################################################################
+
 name: release
 on:
   push:

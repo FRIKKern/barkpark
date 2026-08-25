@@ -76,7 +76,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
       POST    /v1/barkparks/:id/push-relay admin  provision the instance chat_blocked webhook that drives the push relay (D15; idempotent, converges)
       POST    /v1/fleet/supports   admin(d)  register a SUPPORT machine bound to a main (PDF-D61; PAT needs `deploy` / session team-admin)
-      DELETE  /v1/fleet/supports/:id admin(d)  unbind + delete a SUPPORT fleet row (PDF-D61; same disjunction as the POST; mains refused 409)
+      DELETE  /v1/fleet/supports/:id admin(d)  remove a SUPPORT fleet row (PDF-D61; live box -> deprovision job 202 so its A record dies WITH it; ?mode=detach = row only; mains refused 409)
       POST    /v1/barkparks/:id/agent-key admin(d)  paste-a-key delivery to a LIVE support box (PDF-D94; key rides memory only, never stored)
       GET     /v1/barkparks/:id/agent-key admin(d)  latest push_agent_key job status (status/error only — the row never held the key)
       POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
@@ -2277,10 +2277,16 @@ defmodule BarkparkCloud.Web.Router do
 
               # Not live YET, but a provision is in flight: deleting the row now
               # would let the worker bring a box up the control plane can't see
-              # (succeed_job no-ops on the missing row) — a stranded billed box.
-              # Refuse until the provision lands (then it's a live-box deprovision)
+              # (succeed_job no-ops on the missing row) — a stranded billed box,
+              # and for a support an orphan A record too. ANY BLOCKING KIND
+              # counts, not a named list: this route matches on team alone, so a
+              # SUPPORT row (kind "provision_support") reaches it, and a
+              # `resurrect` can be in flight here too (task-688ebffc4b0aa50a).
+              # See active_job_blocking_delete?/1 — the set is a DENYLIST, so a
+              # newly added kind is covered by default rather than silently missed.
+              # Refuse until the job lands (then it's a live-box deprovision)
               # or fails (then it's a clean non-live remove).
-              Registry.active_provision_job?(bp) ->
+              Registry.active_job_blocking_delete?(bp) ->
                 json(conn, 409, %{
                   error: "provisioning_in_progress",
                   detail:
@@ -2487,16 +2493,57 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # DELETE /v1/fleet/supports/:id → 200 {ok:true, status:"removed"} — unbind +
-  # delete a SUPPORT fleet row (Personal Dev Fleet Wave C, PDF-D61). Team-scoped:
-  # a wrong-team / unknown / malformed id is the same 404 (no existence leak).
-  # ONLY a support row is removable here — a main (or an ungrouped legacy row) is
-  # refused 409, so this endpoint can never tear down the developer's home base.
+  # DELETE /v1/fleet/supports/:id — remove a SUPPORT fleet row (Personal Dev
+  # Fleet Wave C, PDF-D61). Team-scoped: a wrong-team / unknown / malformed id is
+  # the same 404 (no existence leak). ONLY a support row is removable here — a
+  # main (or an ungrouped legacy row) is refused 409, so this endpoint can never
+  # tear down the developer's home base.
   # Credential-aware, the SAME family as POST /v1/fleet/supports and go-live: a
   # credential that can BIND can UNBIND — a PAT must carry the `deploy` ability;
   # a session must be team-admin (owner/admin). Anon 401. The no-team case falls
   # through to the downstream 404 (POST's is 422 — the asymmetry is left for
   # backlog pdf-bl-cp-no-team-status-mismatch, deliberately not normalized here).
+  #
+  # task-688ebffc4b0aa50a — THE LIVE/NON-LIVE DISJUNCTION, the same one
+  # `DELETE /v1/barkparks/:id` above already makes, and for the same reason.
+  # A `mode: "provision"` support (PDF-D83) is not a bookkeeping row: the worker
+  # gave it a real Hetzner box AND an `A <label>.barkpark.cloud` record pointing
+  # at that box (`provision_support`'s secure step). Deleting the row alone
+  # stranded BOTH — a billed box nothing can see, and a dangling A record whose
+  # address Hetzner will eventually reassign to a stranger, at which point the
+  # abandoned hostname resolves to someone else's machine (subdomain takeover).
+  #
+  #   * LIVE (host set) → enqueue a DEPROVISION job, 202 {status:"deprovisioning"}.
+  #     The Go worker deletes the server and sweeps the box's A records BY VALUE
+  #     (`DeprovisionWith` → `WarmPool.DeprovisionByIP`), and ONLY THEN does
+  #     `succeed_deprovision_job/1` delete the row. That ordering is the point:
+  #     the row is the sole pointer to what to delete (the claim payload derives
+  #     `dns_label`/`dns_zone` from `url` at claim time), so dropping it first
+  #     would lose the record's name while the record stayed live. If the DNS
+  #     sweep fails the worker reports /fail, the row SURVIVES, and the operator
+  #     can re-run — never a state where the record is unreachable AND live.
+  #     Re-running a remove is safe: a second DELETE dedups onto the in-flight job
+  #     and answers 202 again (`:already_deprovisioning`), never a second teardown.
+  #   * PROVISIONING (host nil, a `provision_support` job in flight) → 409.
+  #     Deleting now would let the worker bring up a box — and publish an A
+  #     record — that the control plane can no longer see; the support-job succeed
+  #     path no-ops on the missing row, so both leak with nothing left to name them.
+  #   * NON-LIVE, nothing in flight (register-only bind, or a failed provision
+  #     that already tore its own box down) → delete the row now, 200
+  #     {status:"removed"} — the historical behaviour, and the only arm where
+  #     there is no box and no record to lose.
+  #
+  # `?mode=detach` deletes the ROW ONLY (200 {status:"removed", mode:"detach"})
+  # even when host is set — the same escape hatch, and the same words, as
+  # `POST /v1/internal/barkparks/:id/deprovision`'s detach mode. It exists for a
+  # caller that tore the box and its DNS down ITSELF and can prove it:
+  # `bp cloud support remove` deletes the server and sweeps the zone by value
+  # before it ever reaches this route, and passes `mode=detach` ONLY on the runs
+  # where that sweep actually happened. On a run where the sweep was SKIPPED (no
+  # dedicated DNS credential — the fleet compute token sees zero zones) the CLI
+  # omits the mode on purpose, so this route takes the deprovision path and the
+  # worker — which does hold a DNS credential — sweeps instead. Detach is the
+  # caller ASSERTING the record is already gone; it is never the default.
   delete "/v1/fleet/supports/:id" do
     conn = Auth.require_user_or_pat(conn, [])
 
@@ -2525,13 +2572,46 @@ defmodule BarkparkCloud.Web.Router do
 
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid, fleet_role: "support"} = support when tid == team.id ->
-            case Registry.delete_barkpark(support) do
-              {:ok, _} ->
-                push_event(team.id, "fleet")
-                json(conn, 200, %{ok: true, status: "removed"})
+            cond do
+              # The caller tore box + DNS down itself and says so (see above).
+              fleet_support_detach?(conn) ->
+                case Registry.delete_barkpark(support) do
+                  {:ok, _} ->
+                    push_event(team.id, "fleet")
+                    json(conn, 200, %{ok: true, status: "removed", mode: "detach"})
 
-              {:error, %Ecto.Changeset{} = cs} ->
-                json(conn, 422, %{error: "invalid", details: errors(cs)})
+                  {:error, %Ecto.Changeset{} = cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
+
+              # Live box — tear the real server AND its A record down (deprovision
+              # job). The row is deleted by the worker's succeed callback, never
+              # here: it is the only thing that still names the record to delete.
+              is_binary(support.host) and support.host != "" ->
+                deprovision_live_barkpark(conn, team, support)
+
+              # Not live YET, but a job that would build or restore this box is
+              # in flight (a provision_support here, or a resurrect) — refuse
+              # until it lands (then it is a live-box deprovision) or fails (then
+              # it is a clean non-live remove).
+              Registry.active_job_blocking_delete?(support) ->
+                json(conn, 409, %{
+                  error: "provisioning_in_progress",
+                  detail:
+                    "This support is still provisioning. Try removing it once it's up or has failed."
+                })
+
+              # Non-live, nothing in flight: no box, no record — the row IS the
+              # whole resource, so removing it strands nothing.
+              true ->
+                case Registry.delete_barkpark(support) do
+                  {:ok, _} ->
+                    push_event(team.id, "fleet")
+                    json(conn, 200, %{ok: true, status: "removed"})
+
+                  {:error, %Ecto.Changeset{} = cs} ->
+                    json(conn, 422, %{error: "invalid", details: errors(cs)})
+                end
             end
 
           # Exists in-team but is a main / ungrouped — NOT a support. Refuse: this
@@ -7137,7 +7217,10 @@ defmodule BarkparkCloud.Web.Router do
                   json(conn, 422, %{error: "invalid", details: errors(cs)})
               end
 
-            Registry.active_provision_job?(bp) ->
+            # ANY BLOCKING KIND — this internal route takes any row, supports
+            # included, and a resurrect can be in flight (task-688ebffc4b0aa50a);
+            # see active_job_blocking_delete?/1.
+            Registry.active_job_blocking_delete?(bp) ->
               json(conn, 409, %{error: "provisioning_in_progress"})
 
             true ->
@@ -7732,7 +7815,7 @@ defmodule BarkparkCloud.Web.Router do
           # unreachable from inside `:ok`, which is why the delete's own failure
           # needs this nested case rather than a fourth outer arm.
           case Registry.delete_site(site) do
-            {:ok, _} ->
+            {:ok, _, %{read_token: read_token}} ->
               _ =
                 Accounts.record_audit(%{
                   team_id: site.team_id,
@@ -7740,13 +7823,36 @@ defmodule BarkparkCloud.Web.Router do
                   action: "site.deleted",
                   target_type: "site",
                   target_id: site.id,
-                  metadata: %{slug: site.slug, kind: site.kind}
+                  # ssw8: the credential half of the teardown is RECORDED, not
+                  # assumed. `read_token` is the one fact about this delete that
+                  # nothing else in the system can reconstruct afterwards — the
+                  # row that named the token is gone by the time anyone asks.
+                  metadata: %{
+                    slug: site.slug,
+                    kind: site.kind,
+                    read_token: to_string(read_token)
+                  }
                 })
 
               push_event(site.team_id, "sites")
               push_event(site.team_id, "audit")
 
-              json(conn, 200, %{ok: true, status: "deleted", slug: site.slug})
+              # ssw8 — DO NOT CLAIM A CLEAN TEARDOWN THE BOX DID NOT CONFIRM.
+              # The delete succeeded either way (the CP row is the truth, and a
+              # box that is down must not make its sites undeletable), but the
+              # 200 states which of the two happened. On `:error` it also NAMES
+              # the leftover, because this response is the last place the pointer
+              # exists: the site row that carried the box, the workspace scope and
+              # the slug has just been deleted. `Mix.Tasks.BarkparkCloud.SiteReadTokens`
+              # is the sweep that finds it again if this line is missed.
+              body = %{
+                ok: true,
+                status: "deleted",
+                slug: site.slug,
+                read_token: read_token_status(read_token)
+              }
+
+              json(conn, 200, site_delete_token_warning(body, site, read_token))
 
             {:error, :foreign_key_constraint, constraint} ->
               json(conn, 500, %{
@@ -12868,10 +12974,31 @@ defmodule BarkparkCloud.Web.Router do
              "the instance hosting this site has no address yet — wait for it to finish provisioning before pointing a domain at it"
          })}
 
+      # BEFORE the write: refuse when the box read above is already stale — the
+      # same fail-closed discipline the Go worker's platform-DNS branch uses
+      # (cch orphan-fix, #14039). Narrow on its own (the box can still vanish a
+      # moment later, in the network round trip below), but cheap, so it stays.
+      not box_still_holds_origin?(site.barkpark_id, origin) ->
+        {:halt,
+         json(conn, 409, %{
+           error: "instance_not_live",
+           detail:
+             "the instance backing this site was deprovisioned while this request was in flight; refusing to point DNS at a freed address (fail closed)"
+         })}
+
       true ->
         # Point the domain at the box origin (A record), flip it PROXIED (orange
         # cloud), and only THEN persist the binding — the token + zone_id are
         # THREADED as arguments (D52), never global config.
+        #
+        # AFTER the upsert (and the proxy flip), `orphan_guard/5` re-reads the
+        # box and DELETES the record just written if it went away underneath
+        # us. This is the half the pre-check above cannot cover: deprovision
+        # can land in the gap the two Cloudflare HTTP round trips stand for,
+        # same as the Go sibling's window between its pre-check and its DNS
+        # write. Cloudflare zones are per-team BYOA — there is no
+        # `SweepOrphans` equivalent that could ever reach this record another
+        # way, so this re-check is the ONLY thing that ever will.
         with {:ok, %{record_id: record_id}} <-
                Cloudflare.upsert_dns_record(token, zone_id, %{
                  type: "A",
@@ -12880,6 +13007,7 @@ defmodule BarkparkCloud.Web.Router do
                  proxied: true
                }),
              {:ok, %{proxied: true}} <- Cloudflare.ensure_zone_proxied(token, zone_id, record_id),
+             :ok <- orphan_guard(token, zone_id, record_id, site.barkpark_id, origin, domain),
              {:ok, bound_site} <-
                Registry.set_cf_binding(site, %{
                  serving_mode: "cf_proxied",
@@ -12900,6 +13028,34 @@ defmodule BarkparkCloud.Web.Router do
 
           {:cont, bound_site}
         else
+          {:error, {:orphan_cleaned, cleaned_domain}} ->
+            Logger.error(
+              "cloudflare_bind_orphan_cleaned: #{cleaned_domain} deprovisioned mid-write, the A record just written was deleted again"
+            )
+
+            {:halt,
+             json(conn, 409, %{
+               error: "instance_not_live",
+               detail:
+                 "the instance backing this site was deprovisioned while the A record was being written — #{cleaned_domain} has been deleted again (fail closed)"
+             })}
+
+          {:error, {:orphan_cleanup_failed, orphan_domain, orphan_ip, reason}} ->
+            # The loudest thing this process will ever say about this record:
+            # no other artefact anywhere will ever name it again.
+            Logger.error(
+              "cloudflare_bind_ORPHANED_RECORD: #{orphan_domain} -> #{orphan_ip} the box was deprovisioned mid-write and deleting the record again failed: #{inspect(reason)}"
+            )
+
+            {:halt,
+             json(conn, 502, %{
+               error: "cloudflare_orphan_cleanup_failed",
+               detail:
+                 "ORPHANED A RECORD #{orphan_domain} -> #{orphan_ip}: the instance was " <>
+                   "deprovisioned mid-write and deleting the record again failed. Delete it " <>
+                   "by hand in Cloudflare — nothing else can reach a record whose box is gone."
+             })}
+
           {:error, reason} ->
             # Belt: the FULL raw provider body stays server-side for operators;
             # the client gets only the bounded, status-keyed `cloudflare_reason/1`
@@ -12912,6 +13068,39 @@ defmodule BarkparkCloud.Web.Router do
                detail: cloudflare_reason(reason)
              })}
         end
+    end
+  end
+
+  # Does a managed box still hold `origin`? Reads `Registry.get_barkpark/1`
+  # FRESH (never a struct fetched earlier in the request) so a deprovision that
+  # lands mid-request is seen. A deprovision success DELETES the barkpark row
+  # (`Registry.succeed_deprovision_job/2`, cascade removes its sites), and a
+  # re-provision-in-place would change `host` on the SAME row — either one
+  # means "not live any more", exactly like the Go worker's `boxHoldsIP` reads
+  # the fleet by VALUE (the IP), never by a name/id that can go stale.
+  defp box_still_holds_origin?(barkpark_id, origin) do
+    case Registry.get_barkpark(barkpark_id) do
+      %Barkpark{host: ^origin} -> true
+      _ -> false
+    end
+  end
+
+  # The orphan edge. Re-checks liveness AFTER the write and, if the box went
+  # away underneath us, deletes the record just created — the money edge a
+  # pre-check cannot cover, mirroring `AttachDomainWith`'s post-upsert
+  # liveness re-check + `DeleteRecord` call on the Go worker side (cch
+  # orphan-fix, #14039). Returns `:ok` when the box is still live,
+  # `{:error, {:orphan_cleaned, domain}}` when the cleanup delete succeeded, or
+  # `{:error, {:orphan_cleanup_failed, domain, ip, reason}}` when it did not —
+  # that last shape carries the only artefact that will ever name this record.
+  defp orphan_guard(token, zone_id, record_id, barkpark_id, origin, domain) do
+    if box_still_holds_origin?(barkpark_id, origin) do
+      :ok
+    else
+      case Cloudflare.delete_dns_record(token, zone_id, record_id) do
+        {:ok, _} -> {:error, {:orphan_cleaned, domain}}
+        {:error, reason} -> {:error, {:orphan_cleanup_failed, domain, origin, reason}}
+      end
     end
   end
 
@@ -13336,7 +13525,13 @@ defmodule BarkparkCloud.Web.Router do
         {:ok, attrs}
 
       is_binary(ws) and is_binary(proj) and is_binary(ds) ->
-        case Registry.mint_public_read_token(bp, ws, proj, ds, "site-read-#{slug}") do
+        # The label comes from `Registry.site_read_token_label/1`, not a local
+        # literal: the revoke on delete and the orphan sweep find this credential
+        # BY that label (the CP never stores its box-side id), so a drift between
+        # mint and revoke would silently reopen the leak ssw8 closed.
+        label = Registry.site_read_token_label(slug)
+
+        case Registry.mint_public_read_token(bp, ws, proj, ds, label) do
           {:ok, token} -> {:ok, Map.put(attrs, :read_token, token)}
           {:error, reason} -> {:error, {:mint_failed, mint_failure_copy(bp, reason)}}
         end
@@ -13347,6 +13542,42 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp mint_site_read_token(_bp, attrs, _slug), do: {:ok, attrs}
+
+  # ssw8 — the DELETE's credential half, in the wire's own words.
+  #
+  #   "revoked"     — the box confirms no live token by this site's label remains
+  #   "none"        — the site had no content binding, so none was ever minted
+  #   "not_revoked" — the revoke could NOT be confirmed; assume the credential is live
+  #
+  # Three values, not a boolean, because "there was nothing to revoke" and "we
+  # could not revoke it" are opposite facts and a boolean would collapse one of
+  # them into the other.
+  defp read_token_status(:ok), do: "revoked"
+  defp read_token_status(:noop), do: "none"
+  defp read_token_status(_), do: "not_revoked"
+
+  # On an unconfirmed revoke, hand the caller the pointer the deleted row can no
+  # longer hold: which box, which workspace scope, which label. Without these
+  # three the credential is live AND unreachable — the state this row exists to
+  # prevent — because nothing else in the control plane records a site's box-side
+  # token identity. A confirmed (or absent) credential adds nothing.
+  defp site_delete_token_warning(body, _site, status) when status in [:ok, :noop], do: body
+
+  defp site_delete_token_warning(body, site, _status) do
+    bp = Registry.get_barkpark(site.barkpark_id)
+    box = if bp, do: bp.slug, else: "its instance"
+    scope = "#{site.bootstrap_workspace}/#{site.bootstrap_project}"
+
+    Map.put(
+      body,
+      :warning,
+      "the site is deleted, but its read token could not be revoked: #{box} did not confirm " <>
+        "the revoke. The credential #{Registry.site_read_token_label(site)} in workspace scope " <>
+        "#{scope} may still be LIVE and can still read published content. Revoke it on the box " <>
+        "(DELETE /w/#{site.bootstrap_workspace}/p/#{site.bootstrap_project}/v1/tokens/:id) or run " <>
+        "`mix barkpark_cloud.site_read_tokens #{box}` on the control plane to find and revoke it."
+    )
+  end
 
   # The instance's own words, in plain language. A mint failure is almost always
   # an instance-side fact (not live yet, no stored admin token, the token route is
@@ -13815,6 +14046,17 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp safe_get_job(id), do: Repo.get_by_uuid(BarkparkCloud.Registry.ProvisionJob, id)
+
+  # `?mode=detach` on DELETE /v1/fleet/supports/:id — registry-only removal, for
+  # a caller that already tore the box and its DNS record down (task-688ebffc4b0aa50a).
+  # Read from the QUERY STRING, not a body: a DELETE body is not reliably sent by
+  # every client (the Go CLI's own delete helper sends none), so a mode that only
+  # arrived in a body would silently degrade to the default — which here means an
+  # unexpected 202 rather than a leak, but a silent shape change either way.
+  defp fleet_support_detach?(conn) do
+    conn = Plug.Conn.fetch_query_params(conn)
+    conn.query_params["mode"] == "detach"
+  end
 
   defp deprovision_live_barkpark(conn, team, bp) do
     case Registry.enqueue_deprovision_job(bp) do

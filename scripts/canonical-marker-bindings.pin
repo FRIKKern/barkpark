@@ -8,6 +8,7 @@ connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler
 corpus-visible-schemas	visible_schemas
 doc-backlinks	reverse_referencers
+draft-published-id	published_id
 engine-error-vocabulary	error_values
 envelope-dek	active_dek
 error-response-emit	emit
@@ -30,6 +31,7 @@ pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
 search-crystal-period-key	period_start_for
 secret-redaction	redact
+share-scope-tenancy	declarable_scope?
 sheets-bg-sanitizer	sanitize_bg
 slug-resolve	resolve_doc
 status-vocabulary	role_for_status

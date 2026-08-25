@@ -35,6 +35,16 @@ defmodule BarkparkCloud.Cloudflare.Client do
     * `upsert_dns_record/3` — create-or-update a DNS record in a zone (point the
       custom domain at the origin), authenticating with the threaded `token`.
       Returns `{:ok, %{record_id:, name:}}`.
+    * `delete_dns_record/3` — delete a DNS record by id, authenticating with the
+      threaded `token`. THE ORPHAN-CLEANUP VERB (cch orphan-fix, #14039's
+      sibling on the cloud/ side): a record upserted at a box origin outlives
+      that box the instant the box is deprovisioned mid-write, and no box-keyed
+      backstop anywhere in this app can reach it (Cloudflare zones are
+      per-team BYOA — there is no `SweepOrphans` equivalent here). Without this
+      verb the write site had NO way to undo its own write; the router's
+      `do_bind_cloudflare` calls it on the re-check-after-write edge, exactly
+      like `AttachDomainWith` calls `DeleteRecord` on the Go worker side.
+      Returns `{:ok, %{deleted: true}}`.
     * `ensure_zone_proxied/3` — flip a DNS record to PROXIED (the orange cloud),
       so traffic rides Cloudflare's CDN + DDoS shield instead of hitting the
       origin directly, authenticating with the threaded `token`. Returns
@@ -87,6 +97,20 @@ defmodule BarkparkCloud.Cloudflare.Client do
   """
   @callback upsert_dns_record(token, zone_id, dns_record) ::
               {:ok, %{record_id: String.t(), name: String.t()}} | {:error, term}
+
+  @doc """
+  Delete the DNS record `record_id` in `zone_id`, authenticating with `token`.
+  Returns `{:ok, %{deleted: true}}` or `{:error, term}`. `token` is threaded as
+  the first argument (D52) for the same per-team-credential reason as
+  `upsert_dns_record/3`.
+
+  This is the cleanup half of the orphan guard: a record written for a box that
+  is deprovisioned mid-write has NO other path to deletion — Cloudflare zones
+  are per-team accounts, so there is no fleet-wide sweep that could ever reach
+  them by box label the way `SweepOrphans` reaches Hetzner-zone records.
+  """
+  @callback delete_dns_record(token, zone_id, record_id :: String.t()) ::
+              {:ok, %{deleted: true}} | {:error, term}
 
   @doc """
   Flip the DNS record `record_id` in `zone_id` to PROXIED (orange cloud),

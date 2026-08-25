@@ -436,6 +436,11 @@ defmodule Barkpark.Content.Broadcast do
     "doc:ws:#{normalize_topic_ws(workspace_id)}:#{dataset}:#{@paper_type}:#{slug}"
   end
 
+  @doc "Workspace-scoped topic for changes to the materialised Paper relationship graph."
+  def paper_relations_topic(workspace_id, dataset \\ @paper_default_dataset) do
+    "paper-relations:ws:#{normalize_topic_ws(workspace_id)}:#{dataset}"
+  end
+
   @doc """
   Per-doc PubSub topic for an ordinary document, SCOPED to the owning
   workspace: `doc:ws:<workspace_id>:<dataset>:<type>:<pubid>`.

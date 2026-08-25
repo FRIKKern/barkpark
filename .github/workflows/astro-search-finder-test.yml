@@ -51,9 +51,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # Run through the floor, never bare `node --test`: a bare run whose glob
+      # matches nothing prints "# tests 0" and exits 0, so this job would go
+      # green having proven nothing at all. The floor reds on a zero-match
+      # pattern, on a file that registers no tests, and prints the test count.
       - name: Run the finder contract tests
         working-directory: templates/astro-search-starter
-        run: node --test 'src/**/*.test.ts'
+        run: node ../../scripts/node-test-floor.mjs 'src/**/*.test.ts'
 
   token-guard:
     name: Browser-token build guard (both editions)
@@ -70,4 +74,4 @@ jobs:
       # Removing either guard reds this job.
       - name: Run the token-guard contract tests
         working-directory: templates/search-starter
-        run: node --test token-guard.test.mjs
+        run: node ../../scripts/node-test-floor.mjs token-guard.test.mjs

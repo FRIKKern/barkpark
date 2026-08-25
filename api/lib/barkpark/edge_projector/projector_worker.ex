@@ -265,6 +265,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
             "truncated=#{truncated == :cap}"
         )
 
+        broadcast_relations_changed(scope, ws, nil, types)
+
         :ok
 
       {:error, reason} ->
@@ -343,6 +345,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
             "added=#{added} removed=#{removed}"
         )
 
+        broadcast_relations_changed(scope, ws, id, Map.get(args, "types", []))
+
         :ok
 
       {:error, reason} ->
@@ -353,6 +357,20 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
 
         {:error, reason}
     end
+  end
+
+  defp broadcast_relations_changed(scope, workspace_id, doc_id, types) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      Content.paper_relations_topic(workspace_id, scope),
+      {:paper_relations_changed,
+       %{
+         doc_id: doc_id,
+         types: types,
+         workspace_id: workspace_id,
+         dataset: scope
+       }}
+    )
   end
 
   # Per-doc delete: remove every edge touching the doc PK. The doc is fetched
@@ -384,6 +402,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
           Logger.info(
             "EdgeProjector.ProjectorWorker: deleted #{count} edge(s) for _id=#{id} scope=#{scope}"
           )
+
+          broadcast_relations_changed(scope, ws, id, Map.get(args, "types", []))
 
           :ok
 

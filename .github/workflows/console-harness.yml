@@ -1044,7 +1044,24 @@ jobs:
               ;;
             1)
               verdict MEASURED_DEFECT
-              echo "::error title=CSSOM parity DEFECT::The browser's CSSOM disagrees with the authored stylesheet (exit 1). This is a REAL CSS defect in cloud/priv/static/app.css — rules the browser dropped or rewrote. See the diff above."
+              # THE DEFECT BANNER NAMES A CAUSE SET, for the same reason the
+              # REFUSED banner below it does — and it is the LAST of the three
+              # arms to learn it. This copy used to say, unconditionally, "rules
+              # the browser dropped or rewrote. See the diff above." Counted in
+              # cssom-parity.mjs, exit 1 has THREE shapes and only ONE of them
+              # prints a diff: the selector comparison at the bottom of the run.
+              # The other two — `Chrome parsed ZERO style rules` (:742) and `N
+              # stylesheet(s) were unreadable` (:743) — abort BEFORE any
+              # comparison exists, so the banner promised the reader evidence
+              # that is not in the log and named a mechanism ("dropped or
+              # rewrote") that did not occur.
+              #
+              # This is NOT a re-litigation of D101, which deliberately draws
+              # the refusal line at bring-up and keeps everything after it on
+              # exit 1 as a claim about the stylesheet. That line stands. What
+              # changes is only that the banner stops describing all three
+              # causes as the one that has a diff.
+              echo "::error title=CSSOM parity DEFECT::The instrument MEASURED cloud/priv/static/app.css and is making a claim about it (exit 1) — this is not a refusal. WHICH claim is in this job's own log, above, and exit 1 covers THREE causes that do not read alike. (a) A PARITY MISS: authored selectors that never reached the browser's CSSOM — the run prints the per-selector diff, and that diff is the evidence. (b) ZERO style rules parsed: the stylesheet never reached the CSSOM at all, so NO diff exists above and nothing was 'dropped or rewritten' — read the line the instrument printed. (c) UNREADABLE stylesheet(s): cssRules threw while walking them, so the comparison was abandoned as a would-be false green, and again there is no diff. Only (a) has a diff to see, so do NOT go looking for one before reading which cause fired."
               exit 1
               ;;
             *)
@@ -1222,7 +1239,7 @@ jobs:
           node cloud/priv/static/__preview__/fixtures/ready-host-paint/proof.mjs || rc=$?
           case "$rc" in
             0) echo "Rendered-host floor: the defect reproduces on demand, the settle repairs it, and every hole it exists for still refuses." ;;
-            2) echo "::error title=Floor proof REFUSED::No browser (exit 2). An ENVIRONMENT refusal — NO claim is being made about the floor."; exit 1 ;;
+            2) echo "::error title=Floor proof REFUSED::The proof REFUSED TO MEASURE (exit 2) — no browser, or a direction whose precondition could not be established (an already-painted host, a selector matching zero nodes, an arming class that starts no animation). The reason is printed above. NO claim is being made about the floor either way, which is why this is red rather than green: a proof that judged nothing must never read as a pass."; exit 1 ;;
             1) echo "::error title=Floor proof FAILED::The rendered-host floor behaved wrongly (exit 1). The failing DIRECTION is named above. If direction 1 failed, the guard can no longer refuse an unpainted host and every green below is worthless; if direction 4, 5 or 6 failed, the settle has been widened into a blanket wait that greens invisible screens."; exit 1 ;;
             *) echo "::error title=Floor proof UNINTERPRETABLE::proof.mjs exited ${rc}, outside its vocabulary (0/1/2). Cannot tell, therefore red."; exit 1 ;;
           esac

@@ -349,29 +349,33 @@ defmodule Barkpark.Content.AuthoringWall do
 
   defp emit_spacing_norm_advisory(_ref, _pid, _type), do: :ok
 
-  # The advisory's counter mirrors the tagged HARD gate's semantics
-  # (`EpicQuality.empty_paragraph?/1` and its whole-tree walk): a paragraph is
-  # a spacer only when it has no content AND no non-blank `text` key — a
-  # text-keyed paragraph is legal prose, not a scaffold — and every container
-  # key the gate's walk descends is descended HERE too, read from
-  # `EpicQuality.nested_keys/0` (one owner), so the advisory warns exactly
+  # The advisory's counter mirrors the tagged HARD gate's semantics by CALLING
+  # it: `EpicQuality.empty_paragraph?/1` is the single owner of "is this
+  # paragraph a spacer", and `EpicQuality.nested_keys/0` the single owner of
+  # "which containers does the walk descend", so the advisory warns exactly
   # where the tagged gate would refuse instead of passing an author it later
-  # 422s. The independent review of #11616 caught the previous two-key walk
-  # missing spacers inside columns/steps/panels/tabs/sections/content/items/rows.
+  # 422s. A re-derived predicate here diverged twice already: the review of
+  # #11616 caught a two-key walk missing spacers inside
+  # columns/steps/panels/tabs/sections/content/items/rows, and the copy that
+  # replaced it still read key SHAPE rather than flattened text, so it both
+  # missed value-keyed prose and stopped at a paragraph without descending the
+  # paragraph's OWN `content` — where the live nested leaves actually sit, and
+  # which the hard gate's `walk_maps/1` does descend.
   defp count_spacer_paragraphs(blocks) when is_list(blocks),
     do: blocks |> Enum.map(&spacer_paragraphs_in/1) |> Enum.sum()
 
   defp count_spacer_paragraphs(_), do: 0
 
   defp spacer_paragraphs_in(%{"type" => "paragraph"} = block) do
-    text = Map.get(block, "text")
-
-    if List.wrap(block["content"]) == [] and not (is_binary(text) and String.trim(text) != ""),
-      do: 1,
-      else: 0
+    own = if EpicQuality.empty_paragraph?(block), do: 1, else: 0
+    own + nested_spacer_paragraphs(block)
   end
 
-  defp spacer_paragraphs_in(%{} = block) do
+  defp spacer_paragraphs_in(%{} = block), do: nested_spacer_paragraphs(block)
+
+  defp spacer_paragraphs_in(_), do: 0
+
+  defp nested_spacer_paragraphs(%{} = block) do
     Enum.reduce(EpicQuality.nested_keys(), 0, fn key, acc ->
       case Map.get(block, key) do
         children when is_list(children) -> acc + count_spacer_paragraphs(children)
@@ -379,8 +383,6 @@ defmodule Barkpark.Content.AuthoringWall do
       end
     end)
   end
-
-  defp spacer_paragraphs_in(_), do: 0
 
   defp content_of(%Document{content: content}), do: content
   defp content_of(%{content: content}), do: content

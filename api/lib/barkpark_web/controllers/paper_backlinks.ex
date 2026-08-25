@@ -1,151 +1,150 @@
 defmodule BarkparkWeb.PaperBacklinks do
   @moduledoc """
-  Renders the reader's **"Used by"** + **"Linked mentions"** sections — the
-  visible half of the backlinks feature. Given the
-  `Barkpark.Content.Graph.reverse_referencers/2` result (papers that reference
-  TO the one being read), it emits a tasteful HTML block to append AFTER the
-  paper body in the public reader. `valueref`-kind referencers (docs whose body
-  inline-references this doc as a canonical value, lvw-t3) group under "Used
-  by"; everything else stays under "Linked mentions".
+  Renders graph-backed, editorial Paper cards below the public reader.
 
-  ## Engine-backed (not a scan)
-
-  This section is powered by the SAME indexed engine the Studio editor's
-  backlinks pane uses — `Content.Graph.reverse_referencers/2`, an inbound-edge
-  query over the materialised `content_edges` table (edges written on publish).
-  It is NOT a full-corpus block scan. The reader therefore sees exactly the
-  inbound referencers the graph engine resolved, scoped to the caller's tenant.
-
-  Each referencer is an inbound-edge map:
-
-      %{from_id, from_doc_id, title, type, kind, via_field, plugin_source}
-
-  ## Contract
-
-    * **Zero referencers → `""`.** An empty (or non-list) input renders NOTHING,
-      so the controller/template can inline the string unconditionally and the
-      section simply vanishes when nothing links here.
-    * Each entry is the referencing paper's title as an
-      `<a href="/papers/<from_doc_id>">`. The doc_id + title come from the
-      referencer map; the href mirrors `Render.Walk.wikilink/3`'s `/papers/<id>`
-      form. A referencer with no `from_doc_id` (an unresolved source) is skipped.
-    * **No context snippets.** The indexed engine returns no per-occurrence text
-      (the Studio pane has none either); the section is a clean list of linking
-      titles. This is the deliberate trade for using the proper engine — the old
-      scan's snippets are dropped for consistency with the Studio pane.
-
-  ## Styling
-
-  Inline styles only (mirrors `Render.Walk`, which targets email / web / Studio
-  alike without an external sheet). It reuses the reader's serif body + warm
-  rule colours so it reads as part of the article chrome, but adds NO new heavy
-  stylesheet. All user text is HTML-escaped.
+  Every card is a real tenant-scoped document from the materialised content
+  graph. The LiveView refreshes this projection when edge projection finishes,
+  keeping titles, summaries, revisions, timestamps, and relationships current.
   """
 
   alias Barkpark.PortableDoc.Render.Util
 
-  @typedoc """
-  One inbound referencer as returned by `Content.Graph.reverse_referencers/2`.
-  """
+  @max_cards 4
+
+  @section_style "margin-top:4.5rem;padding-top:1.5rem;border-top:1px solid var(--paper-rule,#dde7e2)"
+  @head_style "display:flex;align-items:flex-start;justify-content:space-between;gap:1.5rem;margin-bottom:1.25rem"
+  @kicker_style "margin:0 0 0.35rem;color:var(--paper-accent,#1e5347);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.68rem;font-weight:700;letter-spacing:0.11em;text-transform:uppercase"
+  @heading_style "margin:0;color:var(--paper-ink,#17332d);font-size:1.45rem;line-height:1.2;letter-spacing:-0.02em"
+  @description_style "max-width:32rem;margin:0.4rem 0 0;color:var(--paper-ink-soft,#55635e);font-size:0.88rem;line-height:1.5"
+  @live_style "display:inline-flex;flex:none;align-items:center;gap:0.4rem;margin-top:0.2rem;color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.68rem;font-weight:650;letter-spacing:0.08em;text-transform:uppercase"
+  @dot_style "display:block;width:0.42rem;height:0.42rem;border-radius:50%;background:var(--paper-accent,#1e5347)"
+  @grid_style "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:0.75rem"
+  @card_style "display:flex;min-width:0;min-height:10.5rem;flex-direction:column;padding:1rem;border:1px solid var(--paper-rule,#dde7e2);background:color-mix(in srgb,var(--paper-bg,#fff) 84%,transparent);color:var(--paper-ink,#17332d);text-decoration:none"
+  @card_top_style "display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.1rem"
+  @badge_style "color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.67rem;letter-spacing:0.075em;text-transform:uppercase"
+  @arrow_style "color:var(--paper-accent,#1e5347);font-size:1rem"
+  @title_style "display:block;color:var(--paper-ink,#17332d);font-family:ui-serif,Georgia,serif;font-size:1.05rem;line-height:1.28"
+  @summary_style "display:-webkit-box;overflow:hidden;margin-top:0.45rem;color:var(--paper-ink-soft,#55635e);font-size:0.79rem;line-height:1.45;-webkit-box-orient:vertical;-webkit-line-clamp:2"
+  @meta_style "margin-top:auto;padding-top:1rem;color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.67rem;letter-spacing:0.075em;text-transform:uppercase"
+
   @type referencer :: %{
           optional(:from_id) => String.t(),
           optional(:from_doc_id) => String.t() | nil,
           optional(:title) => String.t() | nil,
+          optional(:description) => String.t() | nil,
+          optional(:event_type) => String.t() | nil,
+          optional(:rev) => String.t() | nil,
+          optional(:updated_at) => DateTime.t() | NaiveDateTime.t() | nil,
           optional(:type) => String.t() | nil,
-          optional(:kind) => String.t() | nil,
-          optional(:via_field) => String.t() | nil,
-          optional(:plugin_source) => String.t() | nil
+          optional(:kind) => String.t() | nil
         }
 
-  # Theme-aware chrome, matched to the `.bp-paper-article` surface in
-  # `layouts/bulldocs.html.heex` (muted / rule / accent). The section renders
-  # INSIDE `.bp-paper-surface`, which defines the `--paper-*` tokens with light AND
-  # dark variants (paper-surface.css) — so reference the tokens, with the original
-  # parchment hex as the fallback for any surface that doesn't define them (keeps a
-  # linked-mention link legible in dark mode; the #1217 dark-token bug class).
-  @muted "var(--paper-ink-soft, #55635e)"
-  @rule "var(--paper-rule, #dde7e2)"
-  @accent "var(--paper-accent, #1e5347)"
-
-  @doc """
-  Render the backlinks sections for a list of inbound referencers (the
-  `Content.Graph.reverse_referencers/2` result). Returns `""` for an empty list
-  (or any non-list), so the caller can splice it in unconditionally. A
-  referencer with no resolvable `from_doc_id` is skipped; if that leaves no
-  renderable entries, the whole section is omitted.
-
-  Two groups, kind-partitioned (lvw-t3, mirroring the Studio pane's
-  `Shared.Paper.partition_backlinks/1`):
-
-    * **"Used by"** — `valueref`-kind referencers: the docs whose body
-      inline-references this doc as a canonical value (the used-by / impact
-      list). Rendered FIRST, and only when non-empty.
-    * **"Linked mentions"** — every other referencer, byte-identical to the
-      historical section.
-
-  Both lists inherit `reverse_referencers/2`'s fail-closed posture: an
-  out-of-scope referencer was dropped upstream (MEDIUM-5 — no stub row here,
-  and deliberately NO aggregate "K you cannot see" count), and the published
-  materialised corpus means a draft-only referencer is absent by design (D1).
-  """
   @spec section_html([referencer()]) :: String.t()
   def section_html(referencers) when is_list(referencers) and referencers != [] do
-    {used_by, mentions} =
-      Enum.split_with(referencers, fn ref -> Map.get(ref, :kind) == "valueref" end)
+    {used_by, related} =
+      referencers
+      |> Enum.filter(&(Map.get(&1, :type) in [nil, "paper"]))
+      |> Enum.split_with(&(Map.get(&1, :kind) == "valueref"))
 
-    group_html(used_by, "Used by", "bp-paper-usedby") <>
-      group_html(mentions, "Linked mentions", "bp-paper-backlinks")
+    group_html(used_by, "Used by", "Papers that depend on this work.", "bp-paper-usedby") <>
+      group_html(
+        related,
+        "Related papers",
+        "Live from Barkpark’s content graph — open a Paper to keep reading.",
+        "bp-paper-related"
+      )
   end
 
   def section_html(_), do: ""
 
-  # One titled group: heading + list. `""` when no referencer in the group is
-  # renderable, so an absent group leaves no markup behind.
-  defp group_html(referencers, label, css_class) do
-    items =
+  defp group_html(referencers, label, description, css_class) do
+    cards =
       referencers
-      |> Enum.map(&entry_html/1)
+      |> Enum.map(&card_html/1)
       |> Enum.reject(&(&1 == ""))
+      |> Enum.take(@max_cards)
       |> Enum.join("")
 
-    if items == "" do
+    if cards == "" do
       ""
     else
-      ~s(<section class="#{css_class}" aria-label="#{label}" ) <>
-        ~s(style="margin-top:3rem;padding-top:1.4rem;border-top:1px solid #{@rule}">) <>
-        ~s(<h2 style="font-size:0.82rem;letter-spacing:0.06em;text-transform:uppercase;) <>
-        ~s(color:#{@muted};margin:0 0 1rem">#{label}</h2>) <>
-        ~s(<ul style="list-style:none;margin:0;padding:0">#{items}</ul>) <>
-        ~s(</section>)
+      ~s(<section id="#{css_class}" class="bp-paper-connections #{css_class}" aria-label="#{label}" data-live="true" style="#{@section_style}">) <>
+        ~s(<header class="bp-paper-connections-head" style="#{@head_style}"><div>) <>
+        ~s(<p class="bp-paper-connections-kicker" style="#{@kicker_style}">Connected work</p>) <>
+        ~s(<h2 style="#{@heading_style}">#{label}</h2><p style="#{@description_style}">#{description}</p></div>) <>
+        ~s(<span class="bp-paper-live" style="#{@live_style}"><i aria-hidden="true" style="#{@dot_style}"></i>Live</span></header>) <>
+        ~s(<div class="bp-paper-card-grid" style="#{@grid_style}">#{cards}</div></section>)
     end
   end
 
-  # One referencer: its title as a link to /papers/<from_doc_id>. A referencer
-  # with no resolvable doc_id (a source the engine could not hydrate under the
-  # caller's scope) renders nothing — the reader never links to an opaque id.
-  defp entry_html(%{from_doc_id: doc_id} = ref) when is_binary(doc_id) and doc_id != "" do
+  defp card_html(%{from_doc_id: doc_id} = ref) when is_binary(doc_id) and doc_id != "" do
     href = Util.escape_attr("/papers/" <> doc_id)
-    title_html = Util.escape_html(title_or_slug(Map.get(ref, :title), doc_id))
+    title = Util.escape_html(title_or_slug(Map.get(ref, :title), doc_id))
+    summary = Util.escape_html(summary(ref))
+    badge = Util.escape_html(badge(ref))
+    metadata = Util.escape_html(metadata(ref))
+    revision = revision_attr(Map.get(ref, :rev))
 
-    # `list-style:none` is declared per-<li>, not only on the <ul>: the
-    # canonical paper-surface stylesheet's `.bp-paper-surface ul li
-    # { list-style: disc }` targets the li DIRECTLY, which beats the
-    # list-style the <ul>'s inline style would only pass down by inheritance
-    # — without it every backlink row grows a stray disc marker on article
-    # papers (the reader <main> carries `bp-paper-surface` since Stage 2).
-    ~s(<li style="list-style:none;margin:0 0 1rem">) <>
-      ~s(<a href="#{href}" style="color:#{@accent};text-decoration:none;font-weight:600">) <>
-      title_html <>
-      ~s(</a>) <>
-      ~s(</li>)
+    ~s(<a class="bp-paper-card" href="#{href}"#{revision} style="#{@card_style}">) <>
+      ~s(<span class="bp-paper-card-top" style="#{@card_top_style}"><span class="bp-paper-card-badge" style="#{@badge_style}">#{badge}</span>) <>
+      ~s(<span class="bp-paper-card-arrow" aria-hidden="true" style="#{@arrow_style}">↗</span></span>) <>
+      ~s(<strong style="#{@title_style}">#{title}</strong><span class="bp-paper-card-summary" style="#{@summary_style}">#{summary}</span>) <>
+      ~s(<span class="bp-paper-card-meta" style="#{@meta_style}">#{metadata}</span></a>)
   end
 
-  defp entry_html(_), do: ""
+  defp card_html(_), do: ""
 
-  defp title_or_slug(title, doc_id) do
-    case title do
-      t when is_binary(t) and t != "" -> t
-      _ -> doc_id
+  defp title_or_slug(title, _doc_id) when is_binary(title) and title != "", do: title
+  defp title_or_slug(_title, doc_id), do: doc_id
+
+  defp summary(ref) do
+    case Map.get(ref, :description) do
+      value when is_binary(value) and value != "" -> value
+      _ -> "See how this work fits into the wider story."
     end
   end
+
+  defp badge(ref) do
+    case Map.get(ref, :event_type) || Map.get(ref, :type) do
+      "changelog.index" ->
+        "Chronicle"
+
+      "changelog.year" ->
+        "Year in review"
+
+      "changelog.month" ->
+        "Monthly edition"
+
+      "changelog.week" ->
+        "Weekly edition"
+
+      "changelog.day" ->
+        "Daily edition"
+
+      value when is_binary(value) and value != "" ->
+        value
+        |> String.replace(~r/[._-]+/, " ")
+        |> String.capitalize()
+
+      _ ->
+        "Paper"
+    end
+  end
+
+  defp metadata(ref) do
+    updated_label(Map.get(ref, :updated_at)) || "Published Paper"
+  end
+
+  defp revision_attr(rev) when is_binary(rev) and rev != "",
+    do: ~s( data-paper-revision="#{Util.escape_attr(rev)}")
+
+  defp revision_attr(_), do: ""
+
+  defp updated_label(%DateTime{} = value),
+    do: "Updated " <> Calendar.strftime(value, "%d %b %Y")
+
+  defp updated_label(%NaiveDateTime{} = value),
+    do: "Updated " <> Calendar.strftime(value, "%d %b %Y")
+
+  defp updated_label(_), do: nil
 end

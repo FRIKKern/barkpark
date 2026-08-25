@@ -11,12 +11,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   Modeled on `Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity` as a SIBLING
   (pure `build/1` → byte-equal N-mirror write → freshness lock), NOT an extension:
   that task freezes a HAND-DERIVED structural projection for 13 component types;
-  this one freezes the REAL `:article` HTML emission for the 62 blog-grammar types
+  this one freezes the REAL `:article` HTML emission for the 64 blog-grammar types
   plus a parser-derived DOM-shape the JS Layer-2 comparator reads.
 
-  ## The 62 in-scope types (charter D7)
+  ## The 64 in-scope types (charter D7)
 
-  `compose.ex` dispatches 61 distinct block types (incl. the 3 interactive chat
+  `compose.ex` dispatches 63 distinct block types (incl. the 3 interactive chat
   cards from #3514 — chat-approval/chat-question/chat-plan — and gauge-list from
   #3670). The 15 schema-field/embed types
   (`field-{string,slug,text,boolean,select,datetime,color,reference,image,number}`,
@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   alias Barkpark.PortableDoc.Render
 
-  # ── the 62 in-scope authored inputs ───────────────────────────────────────────
+  # ── the 64 in-scope authored inputs ───────────────────────────────────────────
   #
   # ONE realistic block per in-scope type. Every string is whitespace-clean so the
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
@@ -703,6 +703,19 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
         }
       ]
     },
+    "paper-links" => %{
+      "type" => "paper-links",
+      "title" => "Continue reading",
+      "description" => "Papers with useful context for this change.",
+      "refs" => [
+        %{
+          "slug" => "paper-authoring-excellence",
+          "title" => "Paper authoring excellence",
+          "description" => "A practical guide to publishing clear, useful Papers.",
+          "reason" => "See the principles behind this example."
+        }
+      ]
+    },
     "section" => %{
       "type" => "section",
       "layout" => %{"mode" => "grid", "tracks" => 2, "gap" => "md"},
@@ -750,7 +763,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   @doc "The 3 alias pairs whose BOTH members are in-scope."
   def alias_pairs, do: @alias_pairs
 
-  @doc "The 62 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
+  @doc "The 64 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
   def types, do: @inputs |> Map.keys() |> Enum.sort()
 
   @doc "The authored input block for a type slug."

@@ -1,25 +1,25 @@
 [
  {
-  "name": "PortableText (import { PortableText } from the ROOT barrel) \u2014 the subpath entry split isolates the shim into its own chunk, so even the barrel import tree-shakes free of the renderer (measured 1.2 KB; was 20.75 KB riding the shared renderer chunk)",
+  "name": "PortableText (import { PortableText } from the ROOT barrel) — the subpath entry split isolates the shim into its own chunk, so even the barrel import tree-shakes free of the renderer (measured 1.2 KB; was 20.75 KB riding the shared renderer chunk)",
   "path": "dist/index.mjs",
   "import": "{ PortableText }",
   "limit": "1.3 KB",
   "gzip": true
  },
  {
-  "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs) (measured 23.73 KB; +0.11 KB for the field-number emitter \u2014 label + formatted value/unit row)",
+  "name": "PortableDoc renderer — client entry (dist/index.mjs) (measured 24.45 KB; +0.64 KB for related Paper cards with authored/live metadata)",
   "path": "dist/index.mjs",
-  "limit": "23.81 KB",
+  "limit": "24.55 KB",
   "gzip": true
  },
  {
-  "name": "RSC server entry (dist/server.mjs \u2014 PortableDoc + toPlainText closure) (measured 22.71 KB; +0.13 KB for the field-number emitter)",
+  "name": "RSC server entry (dist/server.mjs — PortableDoc + toPlainText closure) (measured 23.45 KB; +0.67 KB for related Paper rendering and plain-text extraction)",
   "path": "dist/server.mjs",
-  "limit": "22.78 KB",
+  "limit": "23.55 KB",
   "gzip": true
  },
  {
-  "name": "Media hydration client (dist/client.mjs \u2014 mermaid + asciinema, both external + dynamic)",
+  "name": "Media hydration client (dist/client.mjs — mermaid + asciinema, both external + dynamic)",
   "path": "dist/client.mjs",
   "limit": "2 KB",
   "gzip": true,
@@ -29,15 +29,15 @@
   ]
  },
  {
-  "name": "PortableText subpath (dist/portable-text.mjs \u2014 the legacy shim alone, measured 1.33 KB)",
+  "name": "PortableText subpath (dist/portable-text.mjs — the legacy shim alone, measured 1.33 KB)",
   "path": "dist/portable-text.mjs",
   "limit": "1.4 KB",
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath (dist/portable-doc.mjs \u2014 renderer without the legacy shim, measured 19.91 KB)",
+  "name": "PortableDoc subpath (dist/portable-doc.mjs — renderer without the legacy shim; measured 20.59 KB with related Paper cards)",
   "path": "dist/portable-doc.mjs",
-  "limit": "20 KB",
+  "limit": "20.7 KB",
   "gzip": true
  }
 ]

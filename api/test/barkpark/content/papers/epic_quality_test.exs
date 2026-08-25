@@ -263,4 +263,77 @@ defmodule Barkpark.Content.Papers.EpicQualityTest do
     assert {:error, {:invalid_epic_paper_quality, details}} = EpicQuality.validate(content)
     assert "primary_reading_load_exceeded" in details["failures"]
   end
+
+  # ── the spacer predicate reads TEXT, not key shape ─────────────────────────
+  #
+  # `empty_paragraph?/1` used to test `content in [nil, []]` plus a blank
+  # `text` key. That contradicted `meaningful?/1` in this same module (whose
+  # `@text_keys` already include `value`) and misfired in BOTH directions.
+  # Both pins below FAIL against that predicate.
+
+  test "value-keyed prose is NOT a spacer - the three live leaves of felix-pristine-wave-14" do
+    # Shapes read off the published paper on 2026-08-24: blocks[47]/[48]/[54]
+    # are paragraphs whose content[0] is a paragraph carrying 633-841
+    # characters of prose under `value`, with no `content` and no `text`.
+    leaves =
+      for value <- [
+            "A1 (xlsx zip-bomb) CONFIRMED offline: a 1.45 MiB archive materialised 400 MiB via :zip.extract(binary, [:memory]) with no cap.",
+            "A4 (media /meta) CONFIRMED LIVE: anonymous GET /media/:id/meta returned a private asset's filename, path and size.",
+            "Backlog (published epic children): task-felix-w14-media-meta-fieldvis-leak (P1, out-of-fence), task-felix-w14-xlsx-zip-bomb-cap (P1)."
+          ],
+          do: %{"type" => "paragraph", "content" => [%{"type" => "paragraph", "value" => value}]}
+
+    # Asserted through the PUBLIC gate, so this pin fails on the BEHAVIOUR
+    # (the paper 422s on prose) rather than on the predicate's visibility.
+    content = update_in(valid_content(), ["blocks"], &(&1 ++ leaves))
+
+    refute :empty_paragraph_spacer in EpicQuality.failures(content),
+           "value-keyed prose is real content, not an authored spacer"
+
+    assert :ok = EpicQuality.validate(content)
+  end
+
+  test "a paragraph that renders blank is STILL a spacer, however its emptiness is spelled" do
+    # The old predicate caught only the literal `content: []`; every other
+    # spelling of "renders nothing" sailed through, because a content list
+    # holding an inline leaf is merely non-EMPTY, never proof of prose.
+    for {label, block} <- [
+          # akerbrygge-gjennomgang-2026-08-07 blocks[253], verbatim: one of the
+          # authored spacers the flipped spacing doctrine removed. `id` is inert
+          # to the predicate and is kept so the pin names a REAL block.
+          {"content: [] (akerbrygge blocks[253])",
+           %{"type" => "paragraph", "content" => [], "id" => "i200"}},
+          {"an empty inline leaf",
+           %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => ""}]}},
+          {"a whitespace inline leaf",
+           %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "   "}]}},
+          {"an inline leaf with no value at all",
+           %{"type" => "paragraph", "content" => [%{"type" => "text"}]}},
+          {"a blank text key", %{"type" => "paragraph", "text" => "  "}},
+          {"an empty value key", %{"type" => "paragraph", "value" => ""}}
+        ] do
+      content = update_in(valid_content(), ["blocks"], &(&1 ++ [block]))
+
+      assert {:error, {:invalid_epic_paper_quality, details}} = EpicQuality.validate(content)
+
+      assert "empty_paragraph_spacer" in details["failures"],
+             "the wall stopped biting for: #{label}"
+    end
+  end
+
+  test "empty_paragraph?/1 is the public one-owner predicate the advisory mirror shares" do
+    # AuthoringWall.count_spacer_paragraphs/1 calls THIS, so the advisory can no
+    # longer drift from the hard gate by re-deriving its own key list.
+    refute EpicQuality.empty_paragraph?(%{
+             "type" => "paragraph",
+             "value" => "Prose carried under the documented value key."
+           })
+
+    assert EpicQuality.empty_paragraph?(%{
+             "type" => "paragraph",
+             "content" => [%{"type" => "text", "value" => ""}]
+           })
+
+    refute EpicQuality.empty_paragraph?(%{"type" => "heading", "level" => 1, "text" => "Heading"})
+  end
 end

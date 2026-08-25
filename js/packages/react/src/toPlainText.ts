@@ -298,6 +298,17 @@ function blockText(b: Block): string {
     // previously an unexamined drop behind the "starter block" skip rationale.
     case 'expandable':
       return joinBlocks([str(b.summary), childrenText(b.blocks ?? b.children)])
+    // Related reading is document copy: section introduction, then each card's
+    // title, summary and editorial reason in visual order.
+    case 'paper-links':
+      return joinBlocks([
+        str(b.title) || 'Explore the work',
+        str(b.description),
+        ...asList(b.refs).map((ref) => {
+          const item = typeof ref === 'string' ? { slug: ref } : isMap(ref) ? ref : {}
+          return joinBlocks([str(item.title) || str(item.slug), str(item.description), str(item.reason)])
+        }),
+      ])
     // Footnote: each note's text, in order.
     case 'footnote':
       return joinBlocks(asList(b.notes).map((n) => (isMap(n) ? str(n.text) : '')))

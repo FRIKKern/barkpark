@@ -426,23 +426,79 @@ func serverURL() string {
 	return defaultServer
 }
 
+// fetchAttempts and fetchBackoff bound the retry in fetchServed. They are
+// variables, not constants, so the tests can drive the retry loop without
+// sleeping for seconds.
+//
+// WHY A RETRY AT ALL, AND WHY IT MUST STAY BOUNDED. Run 32624106095
+// (2026-08-23T06:53:32Z) reddened scaffy-catalog-drift with UNREACHABLE; ten
+// minutes later run 32624562064 fetched the same host fine and reported 22/22
+// MATCH. Nothing about the catalog changed — guerrilla simply did not answer
+// that one request. That is 1 spurious red in the gate's first 12 runs on a
+// daily cron: roughly one false alarm a month, forever, on a watcher whose
+// whole value is that people believe its reds. An alarm that cries wolf
+// monthly teaches exactly the scrolling-past this gate was promoted to stop.
+//
+// WHAT THIS IS NOT. It is NOT a softening of the UNREACHABLE verdict. After
+// the attempts are exhausted the error is returned unchanged, runCheck fails,
+// no table is printed, and the workflow still reds hard and still names the
+// failure UNREACHABLE. "A check that cannot check never reports clean" is
+// untouched — retrying only distinguishes "the host is down" from "one packet
+// went missing", which the old single-shot fetch could not tell apart.
+var (
+	fetchAttempts = 3
+	fetchBackoff  = 500 * time.Millisecond
+)
+
 // fetchServed pulls the PUBLISHED command catalog tokenless and returns a map
 // of _id → sha256(source) hex. Every failure path — transport, non-200,
-// unreadable body, malformed JSON — is an error so the check fails loud.
+// unreadable body, malformed JSON — is an error so the check fails loud. A
+// TRANSIENT failure is retried up to fetchAttempts times with linear backoff;
+// a failure that cannot be cured by waiting (a 404, a body that is not the
+// envelope) fails on the first attempt so a misconfiguration is reported fast
+// instead of being padded out by pointless retries.
 func fetchServed(server string) (map[string]string, error) {
+	var lastErr error
+	for attempt := 1; attempt <= fetchAttempts; attempt++ {
+		out, retryable, err := fetchServedOnce(server)
+		if err == nil {
+			if attempt > 1 {
+				fmt.Fprintf(os.Stderr, "fetched the served catalog on attempt %d/%d (earlier attempt failed: %v)\n",
+					attempt, fetchAttempts, lastErr)
+			}
+			return out, nil
+		}
+		lastErr = err
+		if !retryable || attempt == fetchAttempts {
+			break
+		}
+		fmt.Fprintf(os.Stderr, "attempt %d/%d to fetch the served catalog failed (%v) — retrying in %s\n",
+			attempt, fetchAttempts, err, time.Duration(attempt)*fetchBackoff)
+		time.Sleep(time.Duration(attempt) * fetchBackoff)
+	}
+	return nil, lastErr
+}
+
+// fetchServedOnce is one attempt. The bool reports whether the failure is
+// worth retrying: transport errors, 5xx and 429 are transient; a 4xx other
+// than 429 and a body that will not decode are not — waiting cannot fix a
+// wrong URL or a non-envelope response.
+func fetchServedOnce(server string) (map[string]string, bool, error) {
 	url := server + "/v1/data/query/production/command?limit=100"
 	client := &http.Client{Timeout: 20 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GET %s: %s", url, resp.Status)
+		retryable := resp.StatusCode >= 500 || resp.StatusCode == http.StatusTooManyRequests
+		return nil, retryable, fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, err
+		// A read that dies mid-body is a transport fault, not a bad catalog.
+		return nil, true, err
 	}
 	var env struct {
 		Result struct {
@@ -453,11 +509,11 @@ func fetchServed(server string) (map[string]string, error) {
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
-		return nil, fmt.Errorf("decode query envelope: %w", err)
+		return nil, false, fmt.Errorf("decode query envelope: %w", err)
 	}
 	out := make(map[string]string, len(env.Result.Documents))
 	for _, d := range env.Result.Documents {
 		out[d.ID] = fmt.Sprintf("%x", sha256.Sum256([]byte(d.Source)))
 	}
-	return out, nil
+	return out, false, nil
 }

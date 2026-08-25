@@ -27,7 +27,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       assign(socket,
         show_shares: true,
         shares_error: nil,
-        shares_rows: load_share_rows(),
+        shares_rows: load_share_rows(socket),
         shares_scope_prefill: shares_scope_prefill(socket),
         shares_prefill_surfaces: []
       )
@@ -1302,12 +1302,76 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc false
-  def load_share_rows do
+  # THE SHARES PANEL'S READ HALF, scoped (task-c91e5e19da811fe5).
+  #
+  # `Sharing.shares_env/0` and `list_stored/0` are INSTANCE-WIDE, and this
+  # function used to take no scope argument at all. Its only gate was
+  # `Caps.admin?/1` in the callers — admin of the MOUNTED workspace — so an
+  # account admin of workspace A was assigned every other tenant's share rows:
+  # their workspace/project/dataset slugs, their surfaces, and each share's
+  # anonymous `:papers` reader URL (`Sharing.share_urls/0`, a tokenless entry
+  # point into that tenant's shared data). That is strictly more than the HTTP
+  # twin grants: `GET /v1/shares` runs `:require_admin`, which an account
+  # session cannot satisfy at all.
+  #
+  # THE SAME PREDICATE AS THE WRITE HALVES, deliberately. `shares_add/2` and
+  # `shares_remove/2` both clamp with `declarable_scope?/2` — and the latter's
+  # comment calls its own clamp "the availability mirror of the disclosure
+  # hole". This is that disclosure hole, closed with the predicate that was
+  # already there rather than a second one, so what the panel LISTS and what it
+  # lets you TOUCH can never drift apart.
+  #
+  # The instance-authority arm keeps the full list by design: that principal is
+  # exactly what `/v1/shares` demands.
+  def load_share_rows(socket) do
     env = Enum.map(Barkpark.Sharing.shares_env(), &share_row(&1, "env"))
     stored = Enum.map(Barkpark.Sharing.list_stored(), &share_row(&1, "stored"))
     urls = share_url_index()
 
-    Enum.map(env ++ stored, fn row -> %{row | url: Map.get(urls, row.scope)} end)
+    env
+    |> Enum.concat(stored)
+    |> Enum.filter(&declarable_scope?(socket, &1.scope))
+    |> Enum.map(fn row -> %{row | url: Map.get(urls, row.scope)} end)
+  end
+
+  @doc false
+  # May this caller act on — and see — a share scope?
+  #
+  # ONE predicate, three enforcement points: `shares_add/2`, `shares_remove/2`,
+  # and `load_share_rows/1` above. It lived as a private in `Handlers.Shares`
+  # while the read path had no clamp at all; that split is precisely how the
+  # disclosure half stayed open after the availability half was closed.
+  #
+  # Splits on "/" and takes the first segment, so it accepts a full
+  # `ws/proj/dataset` scope (add, and a row's `:scope`) and a bare workspace
+  # slug (remove) identically.
+  # @canonical capability:share-scope-tenancy aka:declarable_scope,shares panel scope,cross-workspace share,share disclosure clamp
+  def declarable_scope?(socket, scope) do
+    mounted = scope_slug(socket.assigns[:current_workspace], "default")
+
+    scope
+    |> String.split("/")
+    |> List.first()
+    |> to_string()
+    |> String.trim()
+    |> case do
+      ^mounted -> true
+      _ -> instance_declare_authority?(socket)
+    end
+  end
+
+  @doc false
+  # The authority `/v1/shares` demands: a token carrying the `admin` permission
+  # (`BarkparkWeb.Plugs.RequireAdmin`). Never the account arm.
+  #
+  # Fail-closed on the account arm: `Auth.has_permission?/2` reads
+  # `token.permissions` with no nil clause, so an account session (no
+  # `:api_token`) would RAISE rather than deny. Match the struct instead.
+  def instance_declare_authority?(socket) do
+    case socket.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token -> Barkpark.Auth.has_permission?(token, "admin")
+      _ -> false
+    end
   end
 
   @doc false

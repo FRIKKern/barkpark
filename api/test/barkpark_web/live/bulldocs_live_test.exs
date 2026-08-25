@@ -169,11 +169,11 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     end
   end
 
-  describe "backlinks: engine-backed 'Linked mentions' section (public flat reader)" do
+  describe "backlinks: live related-Paper cards (public flat reader)" do
     @bl_target "2026-06-24-bl-target"
     @bl_source "2026-06-24-bl-source"
 
-    test "renders a 'Linked mentions' section listing a paper that references here",
+    test "renders a related-Paper card for a Paper that references here",
          %{conn: conn} do
       # Target paper (the one being read) — plain HTML body is fine.
       {:ok, _t} =
@@ -209,11 +209,38 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         dataset: Content.paper_default_dataset()
       )
 
-      {:ok, _view, html} = live(conn, "/papers/#{@bl_target}")
+      {:ok, view, html} = live(conn, "/papers/#{@bl_target}")
 
-      assert html =~ "Linked mentions"
+      assert html =~ "Related papers"
+      assert html =~ ~s(data-live="true")
       assert html =~ "Source Paper"
       assert html =~ ~s(href="/papers/#{@bl_source}")
+
+      {:ok, _updated_source} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: @bl_source,
+            blocks: [
+              %{
+                "id" => "h",
+                "type" => "heading",
+                "level" => 1,
+                "text" => "Updated Source Paper"
+              },
+              %{
+                "id" => "p",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "Updated body."}]
+              }
+            ]
+          })
+        )
+
+      send(view.pid, {:paper_relations_changed, %{doc_id: @bl_source}})
+      refreshed = render(view)
+
+      assert refreshed =~ "Updated Source Paper"
+      refute refreshed =~ ">Source Paper<"
     end
 
     test "omits the section entirely when nothing references the paper", %{conn: conn} do
@@ -225,7 +252,7 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       {:ok, _view, html} = live(conn, "/papers/#{@bl_target}")
 
       assert html =~ "Lonely"
-      refute html =~ "Linked mentions"
+      refute html =~ "Related papers"
       refute html =~ "Driven tasks"
     end
   end
@@ -395,12 +422,12 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       {:ok, _view, html} = live(conn, "/papers/#{@ub_canonical}")
 
       # The REAL valueref-kind edge renders in the panel: the referencing paper
-      # lists under "Used by" (not under "Linked mentions" — no non-valueref
+      # lists under "Used by" (not under "Related papers" — no non-valueref
       # referencer exists here, so that section is absent entirely).
       assert html =~ "Used by"
       assert html =~ "Dependent Paper"
       assert html =~ ~s(href="/papers/#{@ub_user}")
-      refute html =~ "Linked mentions"
+      refute html =~ "Related papers"
 
       # Fail-closed (MEDIUM-5): the out-of-scope referencer leaves NO trace —
       # no title, no slug/link, no stub row.
@@ -409,8 +436,10 @@ defmodule BarkparkWeb.BulldocsLiveTest do
 
       # ...and NO aggregate "K you cannot see" count: the Used-by list carries
       # EXACTLY the one visible row.
-      [used_by_section] = Regex.run(~r/<section class="bp-paper-usedby".*?<\/section>/s, html)
-      assert length(String.split(used_by_section, "<li", trim: true)) == 2
+      [used_by_section] =
+        Regex.run(~r/<section[^>]*class="[^"]*bp-paper-usedby[^"]*".*?<\/section>/s, html)
+
+      assert length(Regex.scan(~r/class="bp-paper-card"/, used_by_section)) == 1
     end
   end
 

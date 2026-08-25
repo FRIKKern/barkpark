@@ -133,8 +133,39 @@ var codeExit = map[string]int{
 	"criterion_text_required":     exitValidation,
 	"note_required":               exitValidation,
 	"illegal_transition":          exitValidation,
-	"rate_limited":                exitRateLimit,
-	"internal_error":              exitServer,
+	// The four the D371 split MISSED, every one measured at exit 2 before this
+	// block (probe through the real `bp task close` dispatch, 2026-08-24) — the
+	// SAME code as a malformed command line, which is the exact confusion the
+	// split exists to remove. Note the shape: the tasks controller refuses with
+	// {"ok":false,"reason":…} (tasks_controller.ex conflict/3), whose branch
+	// falls back to exitUsage (2), NOT the coded-envelope branch's exitGeneric
+	// (1) — so reading the fallback off exitForCode alone gets the wrong number.
+	//
+	// They bucket as validation and not conflict because nothing moved under
+	// the caller in any of the four: re-sending the identical request can never
+	// succeed, and every fix is an act OUTSIDE the request.
+	//
+	//   criteria_unmet:<i,j>      a `done` close over unmet criteria. Fix:
+	//                             `bp task stamp` them, or close on the record
+	//                             with `--set criteria_override=`.
+	//   invalid_lifecycle:<s>     the close names a status the transition table
+	//                             disallows (tasks/close.ex:107). A different
+	//                             status is a different request.
+	//   sentinel_worker_id:<w>    the worker id is a placeholder — "none",
+	//                             "null", "nil", "-" (tasks/internal.ex:179).
+	//                             A real identity is a different request.
+	//   merge_gated_criterion     a builder `--met` on a criterion the LEAD
+	//                             closes at merge (tasks/stamp.ex:275). Fix:
+	//                             `--merge-gated`, or set "merge_gate": false.
+	//
+	// The first three carry their detail inline and reach the table through
+	// reasonKey's family lookup; merge_gated_criterion is minted bare.
+	"criteria_unmet":        exitValidation,
+	"invalid_lifecycle":     exitValidation,
+	"sentinel_worker_id":    exitValidation,
+	"merge_gated_criterion": exitValidation,
+	"rate_limited":          exitRateLimit,
+	"internal_error":        exitServer,
 
 	// ── The API-parity backfill (task-2a774c5536503306) ───────────────────
 	//

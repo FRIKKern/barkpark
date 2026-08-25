@@ -56,6 +56,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   """
 
   alias Barkpark.Tenancy.WorkspaceBundle.InvalidBundleError
+  # Archive ⇄ Janitor is a deliberate two-way collaboration, not a layering
+  # slip: Archive asks the Janitor to MARK liveness on files it creates, and the
+  # Janitor asks Archive WHERE those files live (`spill_dir_config/0`) and what
+  # they are named (`scratch_prefix/0`). Both directions are plain runtime
+  # function calls — no macros, no structs — so there is no compile cycle.
+  alias Barkpark.Tenancy.WorkspaceBundle.Janitor
 
   @format "bp-export-v1"
   @grain "workspace"
@@ -111,6 +117,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
       two-export `cmp` is NOT a valid regression test — see the transport
       parity test.
     * `:dir` — where to create the tar (default: `spill_dir/0`).
+
+  ## Ownership: the tar is OWNED and deliberately NOT disowned on success
+
+  The tar is marked live (`Janitor.own/1`) before its first byte and disowned
+  only when this function DELETES it — the `catch` path. On the success path it
+  keeps its sidecar, because `pack/3` hands the path to a caller that still has
+  to read or stream it. `export_to_file/2` documents that the caller owns the
+  returned path; disowning at hand-off would tell the janitor the file is
+  unattended while it is being downloaded, which is exactly the reap-mid-send
+  the derived `max_age_seconds` cutoff exists to make survivable. Whoever
+  deletes the tar disowns it — for `export/2` that is the engine, for
+  `export_to_file/2` it is the caller.
   """
   # File.chmod!/File.rm act on `spill` (caller-supplied table_files values,
   # engine-built via Archive.spill_path from catalog-derived table names) and on
@@ -121,6 +139,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
     mtime = Keyword.get(opts, :mtime, :os.system_time(:second))
     dir = Keyword.get_lazy(opts, :dir, &spill_dir/0)
     path = Path.join(dir, "#{@bundle_prefix}#{System.unique_integer([:positive])}.tar")
+
+    # Claim the tar BEFORE the first byte: the sidecar's whole job is to say "a
+    # live pid is working here", and the window that needs covering starts at
+    # creation, not at completion. Best-effort by construction (`own/1` swallows
+    # its own IO result) — ownership marking must never be able to fail a pack.
+    Janitor.own(path)
 
     try do
       {:ok, tar} = :erl_tar.open(String.to_charlist(path), [:write])
@@ -141,6 +165,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
           # A CHARLIST source — erl_tar streams it from disk, 64 KiB at a time.
           :ok = :erl_tar.add(tar, String.to_charlist(spill), member, add_opts(mtime))
           File.rm(spill)
+          # The spill is gone, so its sidecar must go with it. The janitor
+          # REJECTS `.owner` files as sweep candidates (they are collected with
+          # their subject, never alone), so a sidecar outliving its subject is
+          # never reclaimed — it squats forever. Small, but it is litter the
+          # sweep is structurally unable to clean.
+          Janitor.disown(spill)
         end)
       after
         :erl_tar.close(tar)
@@ -153,6 +183,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
       # janitor's job, pds-w11-spill-janitor.)
       kind, reason ->
         File.rm(path)
+        Janitor.disown(path)
         :erlang.raise(kind, reason, __STACKTRACE__)
     end
   end
@@ -180,11 +211,52 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
     # must fail loudly at the top of the export, never quietly pick the one
     # directory most likely to BE the tmpfs the assertion below exists to
     # refuse. Same idiom as `Barkpark.Media.upload_dir/0`.
-    dir = Application.fetch_env!(:barkpark, :bundle_spill_dir)
+    dir =
+      case spill_dir_config() do
+        {:ok, dir} ->
+          dir
+
+        :error ->
+          raise ArgumentError,
+                "the :bundle_spill_dir key is unset — an export has nowhere disk-backed to " <>
+                  "spill to. Set :bundle_spill_dir / BARKPARK_BUNDLE_SPILL_DIR."
+      end
 
     File.mkdir_p!(dir)
     assert_not_tmpfs!(dir)
     dir
+  end
+
+  @doc """
+  What configuration says the spill directory is — `{:ok, dir}` or `:error`.
+
+  THE SINGLE RESOLUTION SITE (`pds-w11-janitor-engine-handshake`). The engine
+  and `WorkspaceBundle.Janitor` must agree on this directory to the byte or the
+  janitor sweeps somewhere nothing is written and reports a clean green forever
+  while the spills pile up elsewhere. They used to agree by both spelling the
+  same atom in two places, which is agreement by coincidence — one rename away
+  from a silent divergence that no test would catch. Now the key and its name
+  are decided HERE, once, and `Janitor.spill_dir/0` calls this.
+
+  What deliberately stays split is the MISSING-key policy, because the two
+  callers want opposite things and both are right:
+
+    * `spill_dir/0` (engine) RAISES — an export with nowhere to spill must fail
+      at the top, never quietly pick the one directory most likely to be tmpfs;
+    * `Janitor.spill_dir/0` falls back — the janitor is a boot-time, one-shot,
+      `restart: :temporary` task, and a reclaim sweep must never be the thing
+      that breaks a boot.
+
+  Returning `{:ok, dir} | :error` is what lets one resolver serve both: the
+  decision "what does config say" happens once, and each caller applies its own
+  policy to `:error` explicitly, in the open.
+  """
+  @spec spill_dir_config() :: {:ok, String.t()} | :error
+  def spill_dir_config do
+    case Application.get_env(:barkpark, :bundle_spill_dir) do
+      dir when is_binary(dir) and dir != "" -> {:ok, dir}
+      _ -> :error
+    end
   end
 
   @doc """
@@ -230,9 +302,50 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   # System.unique_integer/1 — no request input reaches it.
   # sobelow_skip ["Traversal.FileModule"]
   def open_scratch_dir! do
-    dir = Path.join(spill_dir(), "#{@scratch_prefix}#{System.unique_integer([:positive])}")
+    dir = scratch_path(spill_dir())
     File.mkdir_p!(dir)
+    Janitor.own(dir)
     dir
+  end
+
+  @doc """
+  The path of a fresh scratch directory under `parent` — THE one namer.
+
+  Every extraction directory the engine creates gets its name here, so "is this
+  directory something the janitor can collect?" has a single answer instead of
+  one answer per call site. It had two, and they disagreed: `open_scratch_dir!/0`
+  used the swept `bp-ws-import-` prefix while `import_bundle_file/2` hardcoded
+  `members-<int>`, which matches none of the janitor's three prefixes. That made
+  `import_bundle_file/2`'s own documented promise — "a SIGKILL that outruns both
+  is collected by `Janitor` via the `bp-ws-import-` prefix" — false, and a killed
+  import left a multi-GB extraction directory the sweep could never see.
+
+  `parent` is a caller-chosen directory (the spill dir, or the directory holding
+  a bundle already spilled there); the BASENAME is engine-generated and carries
+  no request input.
+  """
+  @spec scratch_path(Path.t()) :: String.t()
+  def scratch_path(parent) do
+    Path.join(parent, "#{@scratch_prefix}#{System.unique_integer([:positive])}")
+  end
+
+  @doc """
+  Remove a scratch directory and its ownership sidecar.
+
+  Pair for `open_scratch_dir!/0`. A bare `File.rm_rf/1` at the call site removes
+  the directory and STRANDS its `.owner` sidecar, which the janitor can never
+  collect on its own (it rejects `.owner` files as sweep candidates, by design —
+  they are collected with their subject). One helper so the pairing cannot drift
+  apart the way `own/1` and the engine did.
+  """
+  # `dir` is engine-built by open_scratch_dir!/0 under the fetch_env! spill dir;
+  # no request input reaches it.
+  # sobelow_skip ["Traversal.FileModule"]
+  @spec discard_scratch_dir(Path.t()) :: :ok
+  def discard_scratch_dir(dir) do
+    File.rm_rf(dir)
+    Janitor.disown(dir)
+    :ok
   end
 
   @doc """

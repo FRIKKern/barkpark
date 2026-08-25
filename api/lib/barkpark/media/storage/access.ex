@@ -157,22 +157,36 @@ defmodule Barkpark.Media.Storage.Access do
   # upstream by `require_write/1` — never here. Asking `:write` of a user would
   # make the account arm stricter than the token arm it exists to match.
   #
-  # PUBLIC because the media READ path needs the SAME principal question and
-  # must not grow a second, narrower answer to it (task-d55b02001cf589f0):
-  # `V1.MediaController.render_opts/3` gates URL SIGNING on it, and the listing
-  # clamp gates on it too. A local `conn.assigns[:api_token] != nil` at either
-  # call site would be exactly the divergence the comment above was written
-  # about — it would refuse a signature to the account-session workspace member
-  # this arm exists to admit.
+  # PUBLIC (task-f71cab067a90a89d): the Studio LiveView image-picker handler
+  # (`StudioLive.Handlers.Media.open_image_picker/2`) needs the SAME principal
+  # question to clamp its listing for an anonymous demo visitor, and must not
+  # grow a second, narrower answer to it — a local re-derivation is exactly the
+  # "one rule, several private copies" defect class this module's own history
+  # (the comment above) already warns about. Works unmodified on a
+  # `Phoenix.LiveView.Socket` too: both arms below read only `.assigns`, which
+  # a socket carries the same shape as a conn.
+  #
+  # SECOND, INDEPENDENT CALLER FAMILY (task-d55b02001cf589f0), arrived at from
+  # the opposite direction and recorded here because the agreement is the
+  # evidence: the versioned media READ path asks the same question in two
+  # places — `V1.MediaController.render_opts/3` (and its fork in
+  # `MediaCollectionsController`) gates URL SIGNING on it, and the anonymous
+  # listing clamp gates on it too. Two unrelated changes independently
+  # concluded that a local `conn.assigns[:api_token] != nil` would be the
+  # divergence the comment above warns about; here it would have refused a
+  # signature to the account-session workspace member this arm exists to admit.
+  #
+  # KEEP THE SOCKET IN THE SPEC. The media-side change originally wrote the
+  # narrower `Plug.Conn.t() | map()`, which would have silently retracted the
+  # contract the Studio picker relies on. Widen, never narrow, this signature.
   @doc """
-  Whether the request carries a PRINCIPAL — an API token (any permission,
-  share tokens included) or an account session whose user is a member of the
-  RESOLVED workspace.
-
-  This is authentication, never authorization: it answers "is there someone
-  here", and `allowed?/4` decides what that someone may do.
+  Whether the request/socket carries a PRINCIPAL — an API token (any
+  permission, share tokens included: `Auth.create_share_token/5` inserts a real
+  `api_tokens` row) or an account session whose user is a member of the
+  RESOLVED workspace. Authentication, not authorization: `allowed?/4` decides
+  what that someone may do.
   """
-  @spec authenticated?(Plug.Conn.t() | map()) :: boolean()
+  @spec authenticated?(Plug.Conn.t() | Phoenix.LiveView.Socket.t() | map()) :: boolean()
   def authenticated?(conn) do
     match?(%{assigns: %{api_token: %_{} = _}}, conn) or account_member?(conn)
   end

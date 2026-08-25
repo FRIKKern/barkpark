@@ -92,6 +92,11 @@ jobs:
       - name: Install Playwright chromium
         run: npx playwright install --with-deps chromium
 
+      # NOTE on emptiness: `vitest run` exits 1 when it finds no test files, so
+      # each package's gate reds on an empty suite — EXCEPT in projects mode,
+      # where an empty project passes as long as a sibling project has files.
+      # @barkpark/nextjs therefore runs its two projects as separate commands
+      # (see its package.json `test`), and no config may set passWithNoTests.
       - name: Test
         run: pnpm test
 
@@ -104,11 +109,40 @@ jobs:
       # nothing. These two steps are the gate. (The chromium install above already
       # existed for another package's browser proof; test:browser now uses it too
       # instead of it being paid for and half-used.)
+      #
+      # A SEPARATE trap lives in the `pnpm --filter` shape itself, distinct from
+      # the node --test / vitest zero-match modes fixed elsewhere: `pnpm --filter
+      # <name> <script>` prints "No projects matched the filters" and EXITS 0
+      # when the filter matches zero workspace packages. Measured: filtering on a
+      # renamed package name reproduces this exactly — the step goes green having
+      # run nothing. A rename of @barkpark/core, or a typo here, would silently
+      # delete this exact edge-runtime proof again. Both steps below capture
+      # output and grep for that literal message before trusting pnpm's exit code.
       - name: "Test — @barkpark/core under workerd (edge runtime proof)"
-        run: pnpm --filter @barkpark/core test:workerd
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/core test:workerd 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          if echo "$out" | grep -q "No projects matched the filters"; then
+            echo "core gate FAILED: pnpm --filter matched ZERO packages — @barkpark/core was renamed, moved, or removed and this step silently ran nothing" >&2
+            exit 1
+          fi
+          exit "$status"
 
       - name: "Test — @barkpark/core under a real browser"
-        run: pnpm --filter @barkpark/core test:browser
+        run: |
+          set +e
+          out="$(pnpm --filter @barkpark/core test:browser 2>&1)"
+          status=$?
+          set -e
+          echo "$out"
+          if echo "$out" | grep -q "No projects matched the filters"; then
+            echo "core gate FAILED: pnpm --filter matched ZERO packages — @barkpark/core was renamed, moved, or removed and this step silently ran nothing" >&2
+            exit 1
+          fi
+          exit "$status"
 
       - name: Lint
         run: pnpm lint

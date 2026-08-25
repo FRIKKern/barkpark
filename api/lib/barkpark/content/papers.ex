@@ -1293,6 +1293,12 @@ defmodule Barkpark.Content.Papers do
   closed: if no Default workspace is seeded there is no public tenant, so it
   returns `nil` rather than fall back to an unscoped read.
 
+  **Published perspective, unconditionally.** `slug` is a raw caller-supplied
+  doc_id, so a `drafts.`-prefixed id addresses the draft row directly; the
+  resolve is clamped with `published_only: true` so an unpublished row is
+  invisible on every public surface regardless of how it is spelled. See
+  `BarkparkWeb.Integration.PublicReaderDraftsIdLeakTest`.
+
   Returns the `%Document{}` or `nil`.
   """
   def get_public_document(type, slug, dataset \\ @paper_default_dataset)
@@ -1325,9 +1331,19 @@ defmodule Barkpark.Content.Papers do
         # anonymous caller when the type IS owner-scoped). The list return
         # makes the type pick exact — a same-slug document of another type can
         # never shadow the requested one.
+        #
+        # `published_only: true` is HARD-CODED, not an opt: this resolver serves
+        # ONLY anonymous public surfaces (every caller is a `get_public_*` entry
+        # point), and leaving the perspective opt-in is exactly what opened the
+        # leak. `slug` is a caller-supplied doc_id, so the bare spelling AND the
+        # `drafts.` spelling are both addressable here; the clamp's prefix
+        # conjunct (`Query.maybe_published_only/2`) is what makes
+        # `GET /papers/drafts.<slug>` a 404 instead of the unpublished body.
+        # Anything that legitimately reads a draft (the Studio, an authorized
+        # scope) goes through `get_paper/3` / `get_document/4`, never here.
         doc =
           [slug]
-          |> Content.resolve_docs_by_ids(dataset, workspace_id: ws_id)
+          |> Content.resolve_docs_by_ids(dataset, workspace_id: ws_id, published_only: true)
           |> Enum.find(&(&1.type == type))
 
         doc && {doc, workspace}

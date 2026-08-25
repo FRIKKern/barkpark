@@ -11,8 +11,14 @@
 //                          judge now) must REFUSE, quoting computed opacity "0"
 //                          on a host measured at 300x40. This is the bug, on
 //                          demand — and it is ARMED, not raced: see below.
-//   2. FIX WORKS           animating.html (a natural on-load entry animation)
-//                          with the shipped cap must PASS.
+//   2a. FIX WORKS          animating.html (a natural on-load entry animation)
+//                          with the shipped cap must PASS. Nothing is asked
+//                          about WHEN the floor arrived — only that it measured.
+//   2b. AND SAYS SO        the ARMED fixture, shipped cap: the settle must
+//                          announce itself exactly once, naming the animation.
+//                          The animation is started inside the floor's own
+//                          first probe, so there is always something to settle
+//                          on — see runFloorArmed.
 //   3. NESTED CASE         nested-modal.html — the host is a DESCENDANT of the
 //                          animated element, which is the shape both `#a2f-error`
 //                          main refusals had — must also PASS.
@@ -41,6 +47,16 @@
 // in the SAME evaluate. Same measurement, 0 in 14 vacuous at the same load, and
 // no animation was lengthened to buy the margin.
 //
+// THE SAME GAP REOPENED ONE ROUND TRIP LATER (task-93220c098b7f4ecf). Arming in
+// one evaluate and running the floor in the NEXT still leaves a window the size
+// of a CDP round trip — and direction 2 never got the arming at all: it ran the
+// floor against the on-load fixture and demanded the settle narrate itself,
+// which only happens if the floor beats a 280ms animation. Measured on main on
+// 2026-08-24: 8 failures in 18 runs, always that arm, always `settled in 3ms …
+// printed nothing`, on a REQUIRED check. Both directions now arm INSIDE the
+// floor's own first probe (runFloorArmed), so no direction in this file is
+// decided by how busy the host was.
+//
 //   node cloud/priv/static/__preview__/fixtures/ready-host-paint/proof.mjs
 //   CHROME=/path/to/chrome node …/proof.mjs
 
@@ -52,6 +68,7 @@ import { fileURLToPath } from "node:url";
 
 import { SETTLE_CAP_MS, assertReadyHostsPaint, paintProbeJs, readySelectorsFrom } from "../../ready-host-paint.mjs";
 import { BRINGUP_ATTEMPTS, bringUpChrome, captureStderr } from "../../bringup-retry.mjs";
+import { createExitVocabulary } from "../../exit-vocabulary.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -73,13 +90,36 @@ function findChrome() {
   return null;
 }
 
+// THE EXIT VOCABULARY, IMPORTED RATHER THAN RE-DECIDED.
+//
+// This file used to spell its own refusals — `process.stderr.write("!! PROOF
+// (exit 2): …"); process.exit(2)` — at four sites, and so did every sibling
+// instrument, each with its own wording and its own idea of which faults were
+// refusals. overflow-guard.mjs had the rule written down correctly and nowhere
+// else, which is exactly why cssom-parity.mjs could quote the reasoning three
+// lines above two throws that break it. exit-vocabulary.mjs is that rule as a
+// function call: refuse() makes NO claim, defect() accuses the subject, and
+// settle() sorts an unexpected throw toward "I did not measure" rather than
+// toward an accusation. It also drains stdout before exiting, which a hand-
+// rolled `write(); exit()` does not — on a pipe that can truncate the refusal
+// and leave a bare exit code with no cause.
+//
+// `teardown` closes the CDP socket, so no refusal path can leave one open. `ws`
+// is assigned later; the closure reads it at call time, so an early refusal
+// (no Chrome) tears down nothing and a late one tears down the socket.
+let ws = null;
+const vocab = createExitVocabulary({
+  instrument: "PROOF",
+  subject: "the rendered-host floor (ready-host-paint.mjs)",
+  teardown: async () => { try { if (ws) ws.close(); } catch { /* already gone */ } },
+});
+
 // A missing browser is an ENVIRONMENTAL refusal (exit 2), never a failed proof
 // (exit 1) — the same discrimination overflow-guard.mjs makes, for the same
 // reason: exit 1 here must mean "the floor behaved wrongly".
 const chromeBin = findChrome();
 if (!chromeBin) {
-  process.stderr.write("!! PROOF (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
-  process.exit(2);
+  await vocab.refuse("no Chrome/Chromium found. Set CHROME=/path/to/chrome.");
 }
 
 const profiles = [];
@@ -110,10 +150,7 @@ const brought = await bringUpChrome({
     try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ }
   },
   log: (l) => process.stderr.write(l),
-}).catch((e) => {
-  process.stderr.write(`!! PROOF (exit 2): Chrome never came up — ${e.message}\n`);
-  process.exit(2);
-});
+}).catch((e) => vocab.refuse(`Chrome never came up — ${e.message}`));
 
 const chrome = brought.child;
 process.once("exit", () => {
@@ -123,7 +160,9 @@ process.once("exit", () => {
 
 const version = await (await fetch(`http://127.0.0.1:${brought.devPort}/json/version`)).json();
 process.stdout.write(`>> chrome     ${version.Browser} · node ${process.version}\n`);
-const ws = new WebSocket(version.webSocketDebuggerUrl);
+// Assigned into the `ws` declared above, so the vocabulary's teardown can close
+// it on any refusal from here on without every exit site remembering to.
+ws = new WebSocket(version.webSocketDebuggerUrl);
 await new Promise((res, rej) => {
   ws.addEventListener("open", res, { once: true });
   ws.addEventListener("error", () => rej(new Error("CDP connect failed")), { once: true });
@@ -176,21 +215,102 @@ async function load(file) {
 
 const results = [];
 
-// Judge the page AS IT STANDS, without navigating — used where the caller has
-// already put the DOM into the exact state under test and a re-navigation would
-// throw that state away and restart the race this proof exists to remove.
-async function runFloorHere(readyExpr, { cap = SETTLE_CAP_MS } = {}) {
+// ── ARMING, PERFORMED INSIDE THE FLOOR'S OWN FIRST PROBE ─────────────────────
+// The strongest form of "control the CONDITION, do not race a clock": the class
+// that starts the animation is added in the SAME `Runtime.evaluate` that the
+// floor takes its first measurement in. There is no gap between the two — not a
+// CDP round trip, not a task boundary, not a frame — so the floor's opening
+// verdict is always taken against a freshly-started animation, at any load.
+//
+// Arming in one evaluate and THEN running the floor (this file's previous
+// shape) still left a gap: the arming evaluate returned, and the floor's probe
+// was a SEPARATE round trip. Spend 280ms between the two — which a loaded
+// runner does — and the animation is over before the floor ever looks, so the
+// direction silently changes meaning. That residual is what reddened
+// DIRECTION 2 on main eight times in eighteen runs (2026-08-24): it reported
+// `settled in 3ms`, i.e. the floor found nothing to wait for, and then failed
+// the assertion that demanded the settle narrate itself. Injecting the arming
+// INTO the probe removes the gap instead of shrinking it, so neither direction
+// can be decided by how busy the host was.
+//
+// `armJs` runs first, the probe expression second, and the row the probe
+// returns is kept as `first` — the proof that the state under test really
+// existed, read from the very measurement the floor acted on rather than from a
+// second look at a page that has since moved on.
+async function runFloorArmed(file, readyExpr, armJs, { cap = SETTLE_CAP_MS } = {}) {
+  await load(file);
+  let first = null;
+  let armError = null;
+  let armedOnce = false;
+  const armingEvalJs = (expression) => {
+    if (armedOnce) return evalJs(expression);
+    armedOnce = true;
+    return evalJs(`(function(){${armJs}\nreturn (${expression});})()`).then(
+      (row) => {
+        first = Array.isArray(row) ? row[0] : row;
+        return row;
+      },
+      (e) => {
+        // KEPT, NOT SWALLOWED. An arming script that throws produces the same
+        // `first === null` as a floor that never probed, and the two have
+        // opposite remedies — so the refusal below has to be able to tell them
+        // apart instead of guessing.
+        armError = e;
+        throw e;
+      },
+    );
+  };
   const t0 = Date.now();
   const lines = [];
   try {
     await assertReadyHostsPaint({
-      url: "file://…/animating-triggered.html", readyExpr, evalJs, sleep, cap, log: (l) => lines.push(l),
+      url: `file://…/${file}`, readyExpr, evalJs: armingEvalJs, sleep, cap, log: (l) => lines.push(l),
     });
-    return { ok: true, ms: Date.now() - t0, lines };
+    return { ok: true, ms: Date.now() - t0, lines, first, armError };
   } catch (e) {
-    return { ok: false, ms: Date.now() - t0, lines, message: e.message };
+    return { ok: false, ms: Date.now() - t0, lines, first, armError, message: e.message };
   }
 }
+
+// THE PRECONDITION IS ESTABLISHED, NOT HOPED FOR — and a direction that could
+// not establish it makes NO CLAIM.
+//
+// This is the cchi-w20 lesson turned on the instrument instead of the guard:
+// zero matches means zero assertions ran, and a proof that ran zero assertions
+// must never read as a pass. So an unestablished state exits 2 (an
+// ENVIRONMENTAL refusal — "no claim is being made about the floor"), never 0
+// and never 1. Every branch below is reachable by breaking the fixture, and
+// each one names which half of the state was missing.
+function requireArmedState(where, run) {
+  const row = run && run.first;
+  const why =
+    run && run.armError
+      ? `the arming expression itself threw in the page — ${String(run.armError.message).slice(0, 160)}`
+      : !row
+        ? "the floor never probed at all — its readyExpr derived no literal selector, so ZERO assertions ran"
+        : row.matches === 0
+          ? `the selector "${row.q}" matched NO nodes — zero hosts judged, which must never read as a pass`
+          : row.rendered !== 0
+            ? "the host was ALREADY PAINTED at the first probe — the state under test never existed"
+            : (row.animations || []).length === 0
+              ? "no animation was running at the first probe — the arming class did not start one"
+              : null;
+  if (!why) return;
+  return vocab.refuse(
+    `${where} could not be put into the state under test — ${why}.\n` +
+    `   measured at the floor's OWN first probe: ${JSON.stringify(row)}\n` +
+    `   The arming class must start the animation in the same evaluate that reads it;\n` +
+    `   if that stopped being true, fix the fixture, not the cap.`,
+  );
+}
+
+// The class that turns animating-triggered.html's inert host into an entering
+// one. It is added inside the probe, never before it.
+// NULL-SAFE ON PURPOSE. If the host vanished, the honest report is the floor's
+// own measurement — "the selector matched NO nodes", the cchi-w20 shape — not a
+// TypeError from the arming script, which describes the instrument rather than
+// the page. requireArmedState refuses either way; only the diagnosis differs.
+const ARM_ENTERING = "document.querySelector('.deploy-detail')?.classList.add('is-entering');";
 
 async function runFloor(file, readyExpr, { cap = SETTLE_CAP_MS } = {}) {
   await load(file);
@@ -244,36 +364,50 @@ process.stdout.write("\n=== 1. DEFECT REPRODUCED: settle defeated (cap 0) on a s
 // The repair is the one this whole row is about — do not wait on a clock,
 // control the CONDITION. animating-triggered.html leaves the animation INERT
 // until `.is-entering` lands, so the navigation is paid FIRST and then the
-// animation is started and READ IN THE SAME EVALUATE. Nothing can intervene
-// between the two at any load, and no animation was lengthened to buy margin.
-await load("animating-triggered.html");
-const armed = await evalJs(
-  `(function(){document.querySelector('.deploy-detail').classList.add('is-entering');` +
-  `return (${paintProbeJs([".deploy-detail"])})[0];})()`,
-);
-process.stdout.write(`  armed in one task -> ${JSON.stringify(armed)}\n`);
-// If the state could not be established, this direction makes NO CLAIM and says
-// so as an environment refusal — it must never pass by accident, and it must
-// never red as though the floor misbehaved.
-if (!(armed.matches > 0 && armed.rendered === 0 && (armed.animations || []).length > 0)) {
-  process.stderr.write(
-    `!! PROOF (exit 2): could not put the host into the pre-fix state (unpainted WITH a running animation).\n` +
-    `   measured: ${JSON.stringify(armed)}\n` +
-    `   NO CLAIM is being made about the floor. Adding .is-entering must start the animation in the\n` +
-    `   same task that reads it; if that stopped being true, fix the fixture, not the cap.\n`,
-  );
-  ws.close();
-  process.exit(2);
-}
-const d1 = await runFloorHere("document.querySelector('.deploy-detail')", { cap: 0 });
+// animation is started and READ IN THE SAME EVALUATE AS THE FLOOR'S OWN FIRST
+// PROBE (runFloorArmed). Nothing can intervene between the two at any load, and
+// no animation was lengthened to buy margin.
+const d1 = await runFloorArmed("animating-triggered.html", "document.querySelector('.deploy-detail')", ARM_ENTERING, { cap: 0 });
+process.stdout.write(`  armed in the floor's own probe -> ${JSON.stringify(d1.first)}\n`);
+requireArmedState("direction 1 (settle defeated, cap 0)", d1);
 EXPECT("the pre-fix code path REFUSES a perfectly-rendering screen", !d1.ok, d1.ok ? "it passed — the defect no longer reproduces, so this proof certifies nothing" : d1.message.slice(0, 200));
 EXPECT("and the refusal quotes the computed opacity it judged on", !d1.ok && /computed opacity "0"/.test(d1.message), !d1.ok ? `refusal contains: ${(d1.message.match(/measured on the first match: [^.]+\./) || ["(nothing)"])[0]}` : "n/a");
 EXPECT("on a host it also measured as LAID OUT — the box is not the problem", !d1.ok && /box 300x40/.test(d1.message), "box 300x40 present in the refusal");
 
 process.stdout.write("\n=== 2. FIX: the same fixture, shipped cap ===\n");
+// TWO CLAIMS, EACH TRUE AT ANY TIMING — which is the whole repair here.
+//
+// The single claim this replaced ran the floor against animating.html (whose
+// animation starts on load) and demanded that the settle NARRATE itself. That
+// narration only happens when the floor's opening probe catches a running
+// animation, so the assertion was really asking "did the floor look before the
+// 280ms animation ended?" — a question about the runner's load, not about the
+// floor. On main it answered NO in 8 of 18 runs (`settled in 3ms … printed
+// nothing`) and reddened a REQUIRED check on bytes nothing was wrong with.
+//
+// Worse, it contradicted direction 6, which asserts the OPPOSITE — that a
+// settle with nothing to wait for prints nothing. Both cannot be right about
+// the same fast host, so the flake was not merely noisy; one arm was wrong.
+//
+// 2a asks only what the fix actually promises for a natural on-load entry
+// animation: it is MEASURED rather than refused. That holds whether the floor
+// arrives mid-fade or after it — no narration is required, so nothing is being
+// asked about the clock.
 const d2 = await runFloor("animating.html", "document.querySelector('.deploy-detail')");
 EXPECT("an animating host is MEASURED, not refused", d2.ok, d2.ok ? `settled in ${d2.ms}ms` : d2.message.slice(0, 200));
-EXPECT("and the settle said so, once, naming the animation", d2.ok && d2.lines.length === 1 && /new-detail-in/.test(d2.lines[0]), (d2.lines[0] || "(printed nothing)").trim());
+
+// 2b keeps the narration claim — it is worth keeping, because a settle that
+// happened silently would make this whole fix invisible in a green run — but
+// ESTABLISHES the animation instead of hoping for it. The arming class lands
+// inside the floor's first probe, so there is always something running to
+// settle on, and `requireArmedState` proves it from that same probe: if the
+// host were already painted, or matched nothing, the direction refuses at
+// exit 2 rather than passing or failing on a state it never had.
+const d2b = await runFloorArmed("animating-triggered.html", "document.querySelector('.deploy-detail')", ARM_ENTERING);
+process.stdout.write(`  armed in the floor's own probe -> ${JSON.stringify(d2b.first)}\n`);
+requireArmedState("direction 2b (settle narrates, shipped cap)", d2b);
+EXPECT("an ARMED animating host is MEASURED, not refused", d2b.ok, d2b.ok ? `settled in ${d2b.ms}ms` : d2b.message.slice(0, 200));
+EXPECT("and the settle said so, once, naming the animation", d2b.ok && d2b.lines.length === 1 && /new-detail-in/.test(d2b.lines[0]), `${d2b.lines.length} line(s): ${(d2b.lines[0] || "(printed nothing)").trim()}`);
 
 process.stdout.write("\n=== 3. THE MAIN-RUN SHAPE: host is a DESCENDANT of the animated element ===\n");
 const d3 = await runFloor("nested-modal.html", "document.getElementById('a2f-error')");
@@ -300,14 +434,13 @@ EXPECT("and printed no settle line — nothing was animating to wait for", d4.li
 
 const failed = results.filter((r) => !r.pass);
 process.stdout.write(`\n${results.length - failed.length}/${results.length} checks passed\n`);
+// A FAILED DIRECTION IS A MEASURED DEFECT, and it is the ONLY exit 1 this file
+// has: the floor was exercised and behaved wrongly. Every other way out is a
+// refusal, which is the asymmetry exit-vocabulary.mjs exists to keep.
 if (failed.length) {
-  process.stderr.write(`\n!! PROOF FAILED — ${failed.map((f) => f.name).join("; ")}\n`);
-  ws.close();
-  process.exit(1);
+  await vocab.defect(`the floor behaved wrongly in: ${failed.map((f) => f.name).join("; ")}`);
 }
-process.stdout.write(
-  "PROOF OK — the defect reproduces on demand, the settle repairs it, and the display:none hole\n" +
-  "the floor exists for still refuses on the first pass with no settle budget spent.\n",
+await vocab.pass(
+  "the defect reproduces on demand, the settle repairs it, and the display:none hole\n" +
+  "the floor exists for still refuses on the first pass with no settle budget spent.",
 );
-ws.close();
-process.exit(0);

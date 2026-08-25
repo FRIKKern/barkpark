@@ -237,8 +237,11 @@ docker-logs: ## Tail Docker logs
 
 deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean rebuild + restart
 	@# The deploy is the `.githooks/post-merge` hook (core.hooksPath=.githooks): it
-	@# sources asdf+.env, `rm -rf api/_build/prod`, recompiles, restarts the service,
-	@# then rebuilds the Go TUI. So `git pull` IS the deploy. This recipe used to
+	@# delegates to scripts/deploy-rebuild.sh, which builds ASIDE in api/_build_next,
+	@# swaps into api/_build/prod only on success, restarts the service, then rebuilds
+	@# the Go TUI. A failed build leaves the old build serving AND the hook still
+	@# exits 0 — so read its output for `WARN: deploy-rebuild failed` rather than
+	@# trusting the exit code. So `git pull` IS the deploy. This recipe used to
 	@# DUPLICATE that (a second rm+compile+restart) — and broke when run via
 	@# non-interactive ssh because `mix` is off the PATH, deleting _build/prod then
 	@# failing → a from-scratch restart-recompile = prod downtime. Now we delegate.

@@ -18,7 +18,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
        |> assign(
          show_shares: true,
          shares_error: nil,
-         shares_rows: Shared.load_share_rows(),
+         shares_rows: Shared.load_share_rows(socket),
          shares_scope_prefill: Shared.shares_scope_prefill(socket),
          shares_prefill_surfaces: surfaces
        )}
@@ -46,31 +46,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # `parse_entry/1` see 4+ segments and fall to its catch-all, and a `;` makes
   # `parse/1` return two shares where `add_share/1` matches only `[%Share{}]`.
   # Both already fail closed with `{:error, :invalid}`.
-  defp declarable_scope?(socket, scope) do
-    mounted = Shared.scope_slug(socket.assigns[:current_workspace], "default")
-
-    scope
-    |> String.split("/")
-    |> List.first()
-    |> to_string()
-    |> String.trim()
-    |> case do
-      ^mounted -> true
-      _ -> instance_declare_authority?(socket)
-    end
-  end
-
-  # The authority `/v1/shares` demands: a token carrying the `admin`
-  # permission (`BarkparkWeb.Plugs.RequireAdmin`). Never the account arm.
-  # Fail-closed on the account arm: `Auth.has_permission?/2` reads
-  # `token.permissions` with no nil clause, so an account session (no
-  # `:api_token`) would raise rather than deny. Match the struct instead.
-  defp instance_declare_authority?(socket) do
-    case socket.assigns[:api_token] do
-      %Barkpark.Auth.ApiToken{} = token -> Barkpark.Auth.has_permission?(token, "admin")
-      _ -> false
-    end
-  end
+  # Moved to `Shared.declarable_scope?/2` (`@canonical
+  # capability:share-scope-tenancy`) so the panel's READ half enforces the same
+  # rule as these two write halves. It lived here as a private while
+  # `load_share_rows/0` had no clamp at all — the split that let the disclosure
+  # direction stay open after the availability direction was closed
+  # (task-c91e5e19da811fe5).
+  defp declarable_scope?(socket, scope), do: Shared.declarable_scope?(socket, scope)
 
   def shares_close(socket) do
     {:noreply, assign(socket, show_shares: false, shares_error: nil)}
@@ -100,7 +82,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
             {:ok, _share} ->
               {:noreply,
                socket
-               |> assign(shares_rows: Shared.load_share_rows(), shares_error: nil)
+               |> assign(shares_rows: Shared.load_share_rows(socket), shares_error: nil)
                |> put_flash(:info, "Shared #{scope}.")}
 
             {:error, _reason} ->
@@ -147,7 +129,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
 
             socket =
               socket
-              |> assign(shares_rows: Shared.load_share_rows(), shares_error: nil)
+              |> assign(shares_rows: Shared.load_share_rows(socket), shares_error: nil)
               |> put_share_removal_flash(ws, proj, dataset, count)
 
             {:noreply, socket}

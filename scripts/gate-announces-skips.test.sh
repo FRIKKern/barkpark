@@ -513,11 +513,11 @@ run_gate "Console gate: RED — no reassuring notice on a failure" "$console_ste
 security_step="$TMPROOT/step-security.sh"
 python3 "$EXTRACT" "$REAL_ROOT/.github/workflows/security.yml" security-gate "$security_step"
 run_gate "Security gate: docs-only, nothing dispatched" "$security_step" yes 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_AUDIT=skipped O_API=false
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false
 run_gate "Security gate: the scans really ran" "$security_step" no 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=success O_API=true
 run_gate "Security gate: RED — no reassuring notice on a failure" "$security_step" no 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
 echo
 
 # ── case 5: the emitted annotation body actually says the derived sentence ──
@@ -553,7 +553,7 @@ run_gate "Console gate: api-only" "$console_step" yes 0 \
   R_ESCAPE=success O_CONSOLE=false
 body_says "Console gate" - "NOTHING CONSOLE RAN"
 run_gate "Security gate: docs-only" "$security_step" yes 0 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_AUDIT=skipped O_API=false
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_FINGERPRINT=skipped R_AUDIT=skipped O_API=false
 body_says "Security gate" - "NOTHING SECURITY RAN"
 echo
 
@@ -663,9 +663,9 @@ red_names "Console gate: tier-floor-render failed" "$console_step" "tier-floor-r
   R_ESCAPE=success O_CONSOLE=true
 
 red_names "Security gate: mix-audit failed" "$security_step" "mix-audit" "sobelow-inline-overlap" \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
 red_names "Security gate: sobelow-inline-overlap failed" "$security_step" "sobelow-inline-overlap" "mix-audit" \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=failure R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=failure R_FINGERPRINT=success R_AUDIT=success O_API=true
 
 # The OTHER `bad=1` sites, which a failure-only guard would leave unaccumulated:
 # a skip against a gate that is not 'false', and an EMPTY result. Both are reds
@@ -686,7 +686,7 @@ echo
 # re-parallelises four sentences.
 echo "case 7b: naming the set did not flatten security.yml's advisory clause"
 run_gate "Security gate: RED" "$security_step" no 1 \
-  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_FINGERPRINT=success R_AUDIT=failure O_API=true
 SEC_ANN="$(grep '^::error' "$OUT" | tr '\n' ' ')"
 if has "$SEC_ANN" "advisory context, not one of the four required on main"; then
   ok "Security gate …still says it is advisory, not one of the four required"

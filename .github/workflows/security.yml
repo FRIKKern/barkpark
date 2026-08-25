@@ -10,8 +10,10 @@ name: security
 # Jobs:
 #   1. sobelow    — Phoenix-aware static analysis. Surfaces NEW insecure
 #                   patterns: the pre-existing findings on main are captured
-#                   in api/.sobelow-skips (the reviewed baseline — 57 rows after
-#                   wave 24 deleted 32 dead waivers); `--exit Low`
+#                   in api/.sobelow-skips (the reviewed baseline — 41 rows: 34
+#                   AST-anchored + 6 Config.CSRF + 1 Config.HTTPS. It read "57
+#                   after wave 24 deleted 32 dead waivers", which was true when
+#                   written and has not been true for some time); `--exit Low`
 #                   reports any non-baselined finding at Low confidence or above.
 #                   ADVISORY (continue-on-error: true) — Sobelow fingerprints are
 #                   derived from compiled AST and are NOT stable across Elixir
@@ -178,9 +180,49 @@ jobs:
             exit 0
           fi
 
-          # THE PATH SET, declared once. Keep in sync with the roster the three
+          # THE PATH SET, declared once. Keep in sync with the roster the four
           # heavy jobs actually read: everything under api/ (lib, mix.lock,
-          # .sobelow-skips, api/scripts/*.sh) plus this workflow itself.
+          # .sobelow-skips, api/scripts/*) plus this workflow itself.
+          #
+          # THIS SET NEVER APPLIES TO A PUSH. The `event != pull_request` arm
+          # below emits api=true unconditionally, so main is NOT path-skipped,
+          # and "main went green because it skipped the job" is a FALSE
+          # explanation for a missing verdict on main. It was written into this
+          # file once and is corrected rather than deleted, because it is the
+          # intuitive wrong answer and someone will reach for it again.
+          #
+          # WHY MAIN IS ACTUALLY MISSING SOBELOW VERDICTS — measured over the 14
+          # most recent main commits on 2026-08-24, reading the JOBS api and not
+          # the run conclusion:
+          #
+          #     12  run cancelled, sobelow job never created  -> UNSCANNED
+          #      1  run still queued
+          #      1  run conclusion `success`, sobelow job `failure`
+          #
+          # The mechanism is the `concurrency` block at the top of this file:
+          # `cancel-in-progress` is FALSE on main, so runs queue instead of
+          # superseding, GitHub keeps exactly ONE pending run per group, and the
+          # next push evicts the one already waiting. Coverage is therefore lost
+          # in proportion to MERGE RATE and is worst on the busiest days — a
+          # quiet repo looks healthy. A `cancelled` run is neither a pass nor a
+          # skip: a census that does not count it as UNSCANNED is blind to the
+          # dominant mechanism.
+          #
+          # The last row is a MEASUREMENT trap, not a defect, and the two must
+          # not be collapsed. A run concludes `success` while the sobelow job
+          # inside it concluded `failure` because that job carries
+          # `continue-on-error: true` — documented at the top of this file with
+          # a written exit condition (task-c9d6d29cc0059d2a: regenerate the
+          # baseline in CI or remediate the real findings, then flip to
+          # blocking) and recorded as an S2 ADVISORY exclusion in
+          # .github/required-checks.json. It is behaving as designed, and the
+          # check run itself is RED and visible.
+          #
+          # What the trap costs is only this: `gh run list --json conclusion`
+          # cannot see it, so a census built on run conclusions undercounts.
+          # Use `actions/runs/<id>/jobs`. Pairing this row with the 12 above as
+          # if both were damage inflates the finding — the UNSCANNED 12 are the
+          # whole of it, and they are severe alone.
           api=false
           while IFS= read -r f; do
             [ -n "$f" ] || continue
@@ -394,6 +436,91 @@ jobs:
       - name: Every baseline entry still points at a construct of its own type
         run: bash api/scripts/sobelow-baseline-staleness-check.sh
 
+  # spec-authority: advisory-ok — same standing as the job above, for the same
+  # reason. The `(blocking)` token is inside the JOB name, which IS this job's
+  # rendered check-run context, and that context carries a committed exclusion
+  # row (S6 LEAF OF AN EXCLUDED AGGREGATOR) in .github/required-checks.json.
+  # The token means "blocking WITHIN this workflow, unlike the advisory sobelow
+  # job" — it does not claim branch protection, which `Security gate` does not
+  # carry. Renaming this job would silently invalidate that ledger row.
+  sobelow-baseline-fingerprint:
+    name: Sobelow baseline rows still hash to their own fingerprint (blocking)
+    # WHAT THIS JOB CAN AND CANNOT DO, stated exactly. It carries no
+    # `continue-on-error`, so a failure here fails its own check run AND the
+    # `Security gate` aggregator: it blocks within this workflow, exactly as
+    # the job above does. It does NOT carry merge authority. `Security gate`
+    # is an S7 exclusion in .github/required-checks.json and is not one of the
+    # four contexts branch protection requires, so nothing in this file can
+    # stop a merge on its own. Written out rather than shouted, because the
+    # shouted word would be a claim the committed spec does not back and
+    # scripts/merge-authority-claim-check.sh counts precisely that.
+    #
+    # It is in ITS OWN job for one reason: it needs the BEAM, and the job
+    # above is deliberately BEAM-free (~1s, no deps, no network) because that
+    # is what lets three text ratchets run cheaply. Adding setup-beam there
+    # would spend that property on every run of all three. So this job pays
+    # for the BEAM alone and leaves that one untouched.
+    #
+    # WHY NOT IN THE `sobelow` JOB, WHICH ALREADY HAS THE BEAM. Because that job
+    # is `continue-on-error: true`. A check hosted there renders a red check run
+    # that `needs.<job>.result` reports as `success` — the aggregator cannot see
+    # it, and by design it is excluded from `needs` entirely. A fingerprint check
+    # placed there CANNOT RED. That is exactly how this capability was reported
+    # built once before while the defect stayed live: the reconcile script sits
+    # in that job and only uploads an artifact. `felix-w24-bl-config-hash-line-
+    # consistency` was reopened for it.
+    #
+    # THE ADVISORY RATIONALE DOES NOT TRANSFER. `sobelow` is advisory because
+    # SOBELOW's fingerprints come from compiled AST and drift across toolchains.
+    # This job compiles nothing, fetches no deps, and runs no Sobelow code — it
+    # recomputes phash2 over [binary, atom|binary, binary, integer]. Measured
+    # while writing it: every hash in the committed baseline, generated by CI on
+    # OTP 27, reproduces byte-exactly on OTP 28 — on the Config.* path AND on
+    # the AST path. Toolchain-stable, therefore blocking.
+    #
+    # WHAT IT CATCHES THAT THE OTHER THREE CANNOT. `--skip` matches on the HASH
+    # ALONE (lib/sobelow.ex:531-546 discards the type and the file:line into
+    # underscored variables). So a row whose hash stops matching keeps LOOKING
+    # like a reviewed waiver while waiving nothing, and the finding it covered
+    # is reported again as if it were new.
+    #
+    # It IS reported — the advisory job renders a RED check run and says so.
+    # What is missing is not visibility but CONSEQUENCE: no gate reds, so
+    # nothing stops a merge, and on main that job's run is usually evicted from
+    # the concurrency queue before it renders at all. Say it that way rather
+    # than calling it hidden; `continue-on-error` is a documented decision with
+    # a written exit condition, not a concealment.
+    #
+    # Measured on the head this job was added to: #13886 inserted 23 lines
+    # above router.ex:131 and orphaned all six Config.CSRF rows at once, while
+    # the staleness and overlap ratchets both stayed green.
+    #
+    # NOT A WIDENING OF THE STALENESS RATCHET. That one checks rows carrying a
+    # per-line function token and reports Config.* as SKIPPED — 34 of 41. This
+    # one checks rows reconstructible from row data — the other 7, exactly.
+    # The populations partition the baseline; each still PASSES on the shape the
+    # other catches, and each exits 2 rather than 0 when handed only the other's
+    # rows.
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup BEAM
+        uses: erlef/setup-beam@v1
+        with:
+          # Same pin as the sobelow job and elixir.yml. Nothing is compiled
+          # here; this is only the runtime that provides :erlang.phash2.
+          otp-version: "27.0"
+          elixir-version: "1.18.1"
+
+      - name: Selftest (the fingerprint ratchet must be able to fail)
+        run: bash api/scripts/sobelow-baseline-fingerprint-check.sh --selftest
+
+      - name: Every reconstructible baseline row still hashes to its stored fingerprint
+        run: bash api/scripts/sobelow-baseline-fingerprint-check.sh
+
   mix-audit:
     name: Dependency CVE audit (mix_audit over mix.lock, blocking)
     # BLOCKING (no continue-on-error). The 8 pre-existing CVEs were remediated by
@@ -486,7 +613,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Security gate
     if: always()
-    needs: [changes, gate-shape, sobelow-inline-overlap, mix-audit]
+    needs: [changes, gate-shape, sobelow-inline-overlap, sobelow-baseline-fingerprint, mix-audit]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -494,6 +621,7 @@ jobs:
           R_CHANGES: ${{ needs.changes.result }}
           R_SHAPE: ${{ needs.gate-shape.result }}
           R_OVERLAP: ${{ needs.sobelow-inline-overlap.result }}
+          R_FINGERPRINT: ${{ needs.sobelow-baseline-fingerprint.result }}
           R_AUDIT: ${{ needs.mix-audit.result }}
           O_API: ${{ needs.changes.outputs.api }}
         run: |
@@ -584,6 +712,7 @@ jobs:
           # The shape ratchet is unfiltered, so it may never skip either.
           decide "gate-shape"              "${R_SHAPE}"   "NEVER"
           decide "sobelow-inline-overlap"  "${R_OVERLAP}" "${O_API}"
+          decide "sobelow-baseline-fingerprint" "${R_FINGERPRINT}" "${O_API}"
           decide "mix-audit"               "${R_AUDIT}"   "${O_API}"
 
           echo

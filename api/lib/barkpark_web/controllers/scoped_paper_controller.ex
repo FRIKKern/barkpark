@@ -55,7 +55,7 @@ defmodule BarkparkWeb.ScopedPaperController do
           body_html: paper_body_html(paper),
           preview: preview,
           page_title: preview["title"],
-          # "Linked mentions" — papers that link TO this one, rendered as a
+          # Related Paper cards — papers that link TO this one, rendered as a
           # server-side section AFTER the body. Powered by the INDEXED engine
           # `Content.Graph.reverse_referencers/2` (over `content_edges`), scoped
           # exactly like the read so it only sees papers the caller may read.

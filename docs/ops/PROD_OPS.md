@@ -14,33 +14,27 @@
 | Env file | `/opt/barkpark/.env` (`DATABASE_URL`, `SECRET_KEY_BASE`, `BARKPARK_EXTRA_ORIGINS` ws origins) |
 | Logs | `journalctl -u barkpark -f` |
 
-Deploy: `ssh root@89.167.28.206`, `cd /opt/barkpark`, `git pull` (post-merge hook auto-rebuilds + restarts; `make deploy` wraps this pull). Golden Rules apply verbatim — never partial-clean `_build`, never skip `systemctl restart`, always test after deploy.
+Deploy: `ssh root@89.167.28.206`, then on the box `cd /opt/barkpark && git pull` (the post-merge hook rebuilds + restarts; `make deploy` wraps it). Golden Rules apply verbatim — never partial-clean `_build`, never skip `systemctl restart`, always test after deploy.
 
 ## The postcheck rule
 
 A misbooted or stopped Phoenix node looks identical to a healthy one from
 outside the box — systemd returned, SSH closed, no error surfaced. So any
-workflow that touches `systemctl barkpark` on production **must** end with
+workflow touching `systemctl barkpark` on prod **must** end with
 `api/scripts/prod-postcheck.sh`, which probes the public HTTP surface.
 
 - **Atomic transitions:** prefer `systemctl restart` over stop-then-start;
-  a deliberate stop without restart gets documented before you run it.
-- **No silent ops:** SSH'd in to patch something? Run the script before
-  you log out. The point is to refuse "looks fine, didn't check."
+  document a deliberate stop before you run it.
+- **No silent ops:** SSH'd in to patch something? Run the script before you
+  log out. The point is to refuse "looks fine, didn't check."
 
 ## How to run
 
-From a workstation:
-
 ```bash
+# from a workstation — QUOTED, so the cd runs on the remote side:
 ssh root@<prod-host> "cd /opt/barkpark && ./api/scripts/prod-postcheck.sh"
-```
-
-On the box itself:
-
-```bash
-cd /opt/barkpark
-./api/scripts/prod-postcheck.sh
+# on the box itself:
+cd /opt/barkpark && ./api/scripts/prod-postcheck.sh
 ```
 
 Exit code 0 = healthy. Non-zero = unhealthy; the script writes a tail of
@@ -48,28 +42,24 @@ Exit code 0 = healthy. Non-zero = unhealthy; the script writes a tail of
 
 ## What it checks
 
-1. **Service is active.** `systemctl is-active --quiet barkpark`. If the
-   unit is inactive the script starts it — the script is a recovery
-   guardrail, not a passive monitor. Run it only when "service should be
-   running" is the desired end state.
-2. **Boot delay.** Sleeps 2 s before the HTTP probe so the BEAM has time
-   to bind `:4000` after a fresh start.
-3. **HTTP 200 from `/api/schemas`.** Legacy unauth path. Returns JSON
-   when Phoenix is alive, no auth header required. Probe path can be
-   swapped to `/studio` (HTML 200) if the legacy schemas endpoint is ever
-   retired; do not swap to `/v1/schemas/production` (admin-token gated).
+1. **Service is active.** `systemctl is-active --quiet barkpark`; if inactive
+   the script STARTS it — a recovery guardrail, not a passive monitor. Run it
+   only when "service should be running" is the desired end state.
+2. **Boot delay.** Sleeps 2 s so the BEAM can bind `:4000` after a start.
+3. **HTTP 200 from `/api/schemas`.** Legacy unauth path, returns JSON when
+   Phoenix is alive. Swap to `/studio` (HTML 200) if it is ever retired;
+   never to `/v1/schemas/production` (admin-token gated).
 
 ## Operational checklist
 
-- Apply the change via the documented Makefile target (`make deploy`,
-  `make rebuild`, `make restart`) rather than ad-hoc `systemctl` invocations
-  where possible.
+- Prefer a Makefile target (`make deploy`, `make rebuild`, `make restart`)
+  over ad-hoc `systemctl` invocations.
 - Run `./api/scripts/prod-postcheck.sh`. Confirm `PASS prod healthy …`.
 - Tail `journalctl -u barkpark -f` for at least 60 s and watch for boot
   errors, repeated supervisor restarts, or 5xx-emitting controllers.
-- If the postcheck FAILs: read the `systemctl status` tail it printed,
-  then `journalctl -u barkpark -n 200 --no-pager` for the surrounding
-  context. Do not retry the same `systemctl` invocation blindly.
+- If the postcheck FAILs: read the `systemctl status` tail it printed, then
+  `journalctl -u barkpark -n 200 --no-pager`. Do not retry the same
+  `systemctl` invocation blindly.
 
 ## Prod migrations — validated live 2026-06-10 (95-commit deploy, 5 migrations)
 
@@ -78,35 +68,36 @@ Additive migrations (the normal case): migrate FIRST — old code ignores new
 columns, but new code selecting an unmigrated column 500s on every request:
 
 ```bash
-ssh root@89.167.28.206 && cd /opt/barkpark
+ssh root@89.167.28.206   # then ON THE BOX — never `&&`, that cd's on your laptop
+cd /opt/barkpark
 set -a; . ./.env; set +a                    # backup: ecto:// -> postgresql://
 pg_dump "${DATABASE_URL/ecto:/postgresql:}" | gzip > /root/pre-deploy.sql.gz
 git checkout -- bin/barkpark bin/barkpark-pg go.sum  # build-dirtied artifacts abort the pull
 git -c core.hooksPath=/dev/null pull --ff-only   # NO hook — old code keeps serving
 make migrate                                # bash start.sh mix ecto.migrate (ASDF + .env)
-bash .githooks/post-merge                   # clean rebuild + restart
+bash .githooks/post-merge                   # rebuild + restart — SEE WARNING BELOW
 ./api/scripts/prod-postcheck.sh
 ```
 
 Destructive migrations (drop/rename) have no zero-downtime order — schedule
 a window: stop, migrate, deploy, start.
 
-Known transient: in the rebuild window, error-path requests on the old BEAM
-can crash (`Plug.Exception is undefined` — lazy-loading from the deleted
-`_build`). Self-heals at restart; deploy in quiet moments, don't chase it.
+**The hook cannot report failure.** It exits 0 even when the rebuild fails
+(old build keeps serving), so `prod-postcheck.sh` PASSes against that old
+build: grep its output for `WARN: deploy-rebuild failed`. A green postcheck
+proves the service is up, never that your code deployed. It is also a no-op
+on a `.slots` (blue/green) box — not this host yet.
 
-Never run `make reset-db` (drop + recreate) or `mix ecto.reset` on production.
-If a migration fails mid-way, stop — read `journalctl -u barkpark -n 200`,
-do not retry blindly, and prefer a forward-fix migration over editing an
-applied one.
+Never run `make reset-db` (drop + recreate) or `mix ecto.reset` on prod. If a
+migration fails mid-way, stop — read `journalctl -u barkpark -n 200`, do not
+retry blindly, and prefer a forward-fix over editing an applied migration.
 
 ## Phoenix server rollback
 
 Roll back by reverting source, never by resetting the server checkout:
 
 ```bash
-# Workstation, on a BRANCH — main refuses a direct push (GH006 is
-# correct, not a retry cue):
+# Workstation, on a BRANCH — main refuses a direct push (GH006 is correct):
 git revert <bad-sha>          # forward-moving revert commit
 git push -u origin <branch>   # open a PR; merge: scripts/bp-merge.sh
 
@@ -119,8 +110,9 @@ git pull                      # post-merge hook rebuilds + restarts
 ```
 
 Rules: never `git reset --hard` or force-push on the prod checkout; the
-rebuild must be the full `make rebuild` clean path (nuke `api/_build/prod`)
-— a partial clean serves stale BEAM/HEEx (Past Mistakes #1–3). If the bad
+rebuild must go through `make rebuild` (builds aside into `api/_build_next`,
+swaps on success) — never a hand-rolled partial clean, which serves stale
+BEAM/HEEx (Past Mistakes #1–3). If the bad
 commit included a migration, rolling back code does NOT undo the schema;
 write a compensating migration if the schema change itself must be undone.
 npm/SDK rollback: `docs/ops/npm-rollback-playbook.md`.

@@ -796,12 +796,116 @@ function verifyRoute(claim) {
   return tag(claim, "unverifiable", "low", `route not matched in router (dynamic; not flagged false)`);
 }
 
+// EVERY tracked file a citation could mean, and whether the citation itself
+// narrowed the choice. Returns {candidates, explicit}.
+//
+// THE DEFECT THIS REPLACES. The old path was `resolveBasenameNear(t.base, …)` —
+// t.BASE, never t.FILE — so a citation that supplied a directory had it thrown
+// away at the door and was then matched against whatever file happened to share
+// the basename. `cloud/lib/barkpark_cloud/accounts.ex:2186` was checked against
+// api/lib/barkpark/accounts.ex (943 lines) and reported as exceeding the file
+// length. The comment was right; the resolver was wrong, and the verdict read
+// as rot. Measured 2026-08-24: 33 of 36 out-of-range findings were false
+// positives this way, and 10 of those 33 had supplied an explicit path.
+//
+// EXPLICIT BEATS BASENAME, ALWAYS. When the citation carries a `/`, the path
+// (or path SUFFIX — `lib/barkpark_cloud/web/router.ex` names one file
+// unambiguously) is the answer, and there is NO basename fallback: falling back
+// is what produced the false positives, and a cited path that does not exist is
+// its own honest verdict rather than an excuse to go looking elsewhere.
+function linerefCandidates(t, docPath) {
+  const tok = (t.file || "").replace(/^\.\//, "");
+  if (tok.includes("/")) {
+    const hits = [];
+    for (const p of trackedFiles()) if (p === tok || p.endsWith("/" + tok)) hits.push(p);
+    return { candidates: hits, explicit: true };
+  }
+  const hits = [];
+  for (const p of trackedFiles()) if (basename(p) === t.base) hits.push(p);
+  if (hits.length > 1) {
+    // Keep the sibling-preferring answer FIRST so a single-verdict read is
+    // unchanged for the common case, but carry every candidate so the caller
+    // can refuse to guess.
+    const near = resolveBasenameNear(t.base, docPath);
+    if (near && hits.includes(near)) return { candidates: [near, ...hits.filter((h) => h !== near)], explicit: false };
+  }
+  return { candidates: hits, explicit: false };
+}
+
+// A one-line description of each candidate for an ambiguity verdict: the path
+// and its length, which is what a reader needs to see which one was meant.
+function candidateSummary(cands) {
+  return cands
+    .map((p) => {
+      const l = fileLines(linerefTargetPath(p));
+      return `${p} (${l ? l.length : "unreadable"} lines)`;
+    })
+    .join(" · ");
+}
+
+// AMBIGUITY IS NOT A DEFECT; AN UNRESOLVABLE CITATION IS. When a bare stem
+// names several files, this verifies against EVERY one and keeps the first
+// non-stale answer — so a citation that is correct about SOME candidate is
+// never reported as rot. Only when it is stale against all of them is the
+// ambiguity itself reported, naming each candidate and its line count.
+//
+// DELIBERATE DEVIATION FROM criterion 1 AS WRITTEN, stated rather than hidden.
+// Criterion 1 asks that any bare stem with 2+ matches red. Measured on this
+// tree: 189 of 618 bare-stem citations are ambiguous. Red-ing all of them adds
+// ~189 novel findings against a 519-entry baseline — which criterion 2 forbids
+// ("a fix that reshuffles the baseline is a different change"). The two cannot
+// both hold. This implements the half that removes false verdicts without
+// manufacturing new ones, and reports ambiguity in the evidence of the verdicts
+// that DO fire.
 function verifyLineref(claim) {
   const t = claim.target;
-  const rel = resolveBasenameNear(t.base, claim.doc);
-  if (!rel) {
-    return tag(claim, "unverifiable", "low", `lineref basename does not resolve to a file: ${t.base}`);
+  const { candidates, explicit } = linerefCandidates(t, claim.doc);
+
+  if (candidates.length === 0) {
+    return explicit
+      ? tag(claim, "unverifiable", "low", `lineref path does not resolve to a tracked file: ${t.file}`)
+      : tag(claim, "unverifiable", "low", `lineref basename does not resolve to a file: ${t.base}`);
   }
+
+  if (candidates.length > 1) {
+    // THE PRIMARY'S VERDICT STANDS UNLESS THE LINE IS OUT OF RANGE.
+    //
+    // The first draft of this took the first NON-stale answer from any
+    // candidate — and that suppressed a real, frozen defect
+    // (`api/lib/barkpark/plugins/capabilities.ex:1527`, the flagship bare-range
+    // case: "router.ex /v1/auth/* (public 716-724, gated 727-734)"). Lines
+    // 716-734 exist in BOTH routers, so a citation genuinely stale about the
+    // api router passed against the cloud router by coincidence and the
+    // acceptance harness reported a MISS. Shopping for a file where a claim
+    // happens to pass is the over-ACCEPT failure this checker already has an
+    // open row for; making it worse while fixing over-REJECT is not a trade.
+    //
+    // So the fallback is scoped to the ONE symptom this change exists to fix:
+    // an OUT-OF-RANGE verdict, which is the signature of binding to the wrong
+    // file (a short twin cannot hold a line the real target has). If the cited
+    // line EXISTS in the primary, that file is a plausible referent and its
+    // verdict — confirmed, unverifiable or stale-on-anchors — is the answer.
+    const primary = verifyLinerefAgainst(claim, candidates[0]);
+    if (!(primary.status === "stale" && /exceed file length/.test(primary.evidence || ""))) {
+      return primary;
+    }
+    for (const cand of candidates.slice(1)) {
+      const v = verifyLinerefAgainst(claim, cand);
+      if (v.status !== "stale") return v;
+      if (!/exceed file length/.test(v.evidence || "")) return v;
+    }
+    // Out of range in every candidate: the citation is wrong wherever it
+    // points, and the reader is owed the whole candidate set.
+    return tag(claim, "stale", "high",
+      `${primary.evidence} — AMBIGUOUS stem \`${t.base}\` matches ${candidates.length} tracked files, ` +
+      `and the cited line is out of range in every one: ${candidateSummary(candidates)}`);
+  }
+
+  return verifyLinerefAgainst(claim, candidates[0]);
+}
+
+function verifyLinerefAgainst(claim, rel) {
+  const t = claim.target;
   const abs = linerefTargetPath(rel);
   const lines = fileLines(abs);
   if (!lines) {
