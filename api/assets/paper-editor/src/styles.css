@@ -591,6 +591,7 @@
 @media (max-width: 720px) { .bp-paper-editor-body .bp-section__grid { grid-template-columns: 1fr; } }
 .bp-paper-editor-body .bp-section__cell { min-width: 0; }
 .bp-paper-editor-body .bp-section__cell > :first-child { margin-top: 0; }
+.bp-paper-editor-body .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 /* Section frame — the framed-finale device (charter D19), hand-copied mirror of
  * .bp-paper-surface .bp-section--framed (paper-surface.css) for the STANDALONE
  * embedder bundle. Hairline frame in rule color + CSS padding (never spacer

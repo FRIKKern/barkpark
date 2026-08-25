@@ -429,16 +429,24 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertEqual(len(chapters["refs"]), len({ref["title"].casefold() for ref in chapters["refs"]}))
         self.assertTrue(chapters["refs"][-1]["featured"])
         self.assertEqual("expandable", by_id["auto:archive-2"]["type"])
-        self.assertEqual("lineage", by_id["auto:work-themes"]["type"])
-        self.assertTrue(all("·" in node["overline"] for node in by_id["auto:work-themes"]["nodes"]))
-        self.assertEqual("What changed", by_id["auto:work-title"]["text"])
+        self.assertEqual("section", by_id["auto:edition-brief"]["type"])
+        self.assertEqual("wide", by_id["auto:edition-brief"]["variant"])
+        self.assertEqual("paper-links", by_id["auto:time-machine"]["type"])
+        self.assertEqual("timeline", by_id["auto:time-machine"]["layout"])
+        self.assertEqual("section", by_id["auto:story-spread"]["type"])
+        self.assertEqual("wide", by_id["auto:story-spread"]["variant"])
+        self.assertEqual(2, by_id["auto:story-spread"]["blocks"][0]["span"])
+        self.assertEqual("diagram", by_id["auto:relationship-thread"]["type"])
+        self.assertIn("made reusable", by_id["auto:relationship-thread"]["source"])
+        self.assertNotIn("auto:work-themes", by_id)
+        self.assertNotIn("auto:work-title", by_id)
         self.assertEqual("pullquote", by_id["auto:progress-assessment"]["type"])
         self.assertNotIn("auto:progress-title", by_id)
         self.assertNotIn("auto:dek", by_id)
         self.assertLessEqual(len(by_id["auto:release-highlights"]["nodes"]), 6)
         block_ids = [block["id"] for block in payload["blocks"]]
         if "auto:evidence-lead" in block_ids:
-            self.assertLess(block_ids.index("auto:work-themes"), block_ids.index("auto:evidence-lead"))
+            self.assertLess(block_ids.index("auto:evidence-lead"), block_ids.index("auto:edition-brief"))
         technical = by_id["auto:technical-record"]
         self.assertTrue(any(block["id"] == "auto:ledger" for block in technical["children"]))
 

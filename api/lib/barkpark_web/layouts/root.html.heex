@@ -4822,6 +4822,7 @@
     @media (max-width: 720px) { .bp-canvas-section > .bp-section__grid { grid-template-columns: 1fr; } }
     .bp-canvas-section .bp-section__cell { min-width: 0; }
     .bp-canvas-section .bp-section__cell > :first-child { margin-top: 0; }
+    .bp-canvas-section.bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
     <%!-- FRAMED-FINALE (charter D34, variant="framed"): the canvas node-view toggles
          `bp-section--framed` on its wrapper when attrs.variant === "framed". Editor
          mirror of the reader frame — hairline border in rule color, and the frame
