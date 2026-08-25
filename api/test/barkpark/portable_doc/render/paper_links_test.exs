@@ -83,4 +83,47 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     refute html =~ "Why it matters:"
     assert html =~ "background:var(--paper-accent-soft"
   end
+
+  test "chapter layout keeps authored editorial copy while exposing a live edition" do
+    block = %{
+      "type" => "paper-links",
+      "layout" => "chapters",
+      "title" => "August, week by week",
+      "description" => "Five distinct chapters.",
+      "refs" => [
+        %{
+          "slug" => "barkpark-changelog-2026-w35",
+          "title" => "Papers bring visual proof into the story",
+          "description" => "Screenshots now explain the change instead of decorating it.",
+          "eyebrow" => "Week 35 · 24 Aug–30 Aug",
+          "meta" => "206 verified changes",
+          "prefer_authored_copy" => true,
+          "featured" => true
+        }
+      ]
+    }
+
+    html =
+      Render.render_block(block, %{
+        style: :article,
+        paper_links: %{
+          "barkpark-changelog-2026-w35" => %{
+            title: "Generic live title",
+            description: "Generic live description",
+            rev: 12
+          }
+        }
+      })
+
+    assert html =~ ~s(data-layout="chapters")
+    assert html =~ "data-chapter"
+    assert html =~ "Papers bring visual proof into the story"
+    assert html =~ "Screenshots now explain the change"
+    assert html =~ "Week 35 · 24 Aug–30 Aug"
+    assert html =~ "Live edition · 206 verified changes"
+    assert html =~ "grid-column:1/-1"
+    refute html =~ "Generic live title"
+    refute html =~ "Generic live description"
+    refute html =~ "rev 12"
+  end
 end
