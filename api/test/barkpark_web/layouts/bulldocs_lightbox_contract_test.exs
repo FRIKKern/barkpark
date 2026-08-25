@@ -36,6 +36,8 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
   test "comparison evidence and clip controls use the editorial reader treatment", %{
     source: source
   } do
+    assert source =~ ~r/\.bp-paper-shell\.bp-paper-article\s*\{[^}]*max-width: 660px/s
+    refute source =~ ".bp-paper-article-wide"
     assert source =~ "--bp-evidence-band: 1180px"
     assert source =~ "--bp-evidence-band-max: 1360px"
     assert source =~ ~s|[data-block-id*="-clip-"]:has(> .bp-button)|

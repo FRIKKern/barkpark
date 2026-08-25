@@ -4690,6 +4690,10 @@
        byte-aligned with assets/paper-editor/src/styles.css. */
     .bp-paper-editor-body .bp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--paper-rule); margin: var(--bp-air-stats) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
     .bp-paper-editor-body .bp-chart { margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+    /* Explicit column compositions use the same evidence band as the reader;
+       prose surrounding the component remains on the measured column. */
+    .bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
+    @media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
     /* editable-table EDIT-ONLY chrome (the reader lacks it — NOT parity-gated; kept OFF
        the .bp-table* selectors so it never leaks into the parity comparison). The
        control rails reveal on hover so an idle table reads byte-identically to /papers. */

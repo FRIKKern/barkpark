@@ -1,7 +1,6 @@
 <main class={[
   "bp-paper-shell",
-  @article? && "bp-paper-article",
-  @wide_article? && "bp-paper-article-wide"
+  @article? && "bp-paper-article"
 ]}>
   <%!-- Sentinel mirrors BulldocsLive's no-reload marker so the scoped reader's
         outer markup matches the public reader's. Static render — no streaming,

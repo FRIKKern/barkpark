@@ -89,8 +89,8 @@ class ChroniclePaperTest(unittest.TestCase):
         week = by_slug["barkpark-changelog-2026-w34"]
         self.assertEqual("changelog.week", week["event_type"])
         self.assertEqual("article", week["style"])
-        self.assertEqual("article-wide", by_slug["barkpark-changelog-2026-08"]["style"])
-        self.assertEqual("article-wide", by_slug["barkpark-changelog-2026"]["style"])
+        self.assertEqual("article", by_slug["barkpark-changelog-2026-08"]["style"])
+        self.assertEqual("article", by_slug["barkpark-changelog-2026"]["style"])
         month_blocks = {block["id"]: block for block in by_slug["barkpark-changelog-2026-08"]["blocks"]}
         self.assertEqual("lineage", month_blocks["auto:archive-1"]["type"])
         self.assertEqual("expandable", month_blocks["auto:archive-2"]["type"])

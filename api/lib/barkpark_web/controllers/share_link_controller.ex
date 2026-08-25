@@ -244,7 +244,6 @@ defmodule BarkparkWeb.ShareLinkController do
         |> put_view(BarkparkWeb.ScopedPaperHTML)
         |> render(:show,
           article?: paper_article?(paper),
-          wide_article?: paper_wide_article?(paper),
           body_html: paper_body_html(paper, link),
           preview: preview,
           page_title: preview["title"],
@@ -565,9 +564,6 @@ defmodule BarkparkWeb.ShareLinkController do
 
   defp paper_article?(%{content: content}),
     do: Map.get(content || %{}, "style") in ["article", "article-wide"]
-
-  defp paper_wide_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") == "article-wide"
 
   # Canonical v1 error envelope (code + request_id) for the JSON API paths — the
   # same contract as the content endpoints; was a bare `%{error: msg}` with
