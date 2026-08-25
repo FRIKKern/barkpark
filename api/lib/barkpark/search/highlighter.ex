@@ -429,8 +429,40 @@ defmodule Barkpark.Search.Highlighter do
 
   defp document_field_text(_doc, _field), do: nil
 
+  # task-5cf80a99ecd52bf2: the full set of names this function has a clause
+  # for. `Barkpark.Search.SurfaceConfig.changeset/2` validates `highlightFields`
+  # against this SAME list at write time — keep the two in lockstep (add a
+  # name here ⇒ add it there too), or the write-time gate and this read-time
+  # catch-all disagree about what counts as "valid".
+  @media_highlight_fields ~w(original_name filename title tags)
+
+  @doc false
+  @spec media_highlight_field?(String.t()) :: boolean()
+  def media_highlight_field?(field) when is_binary(field), do: field in @media_highlight_fields
+
+  # Documents surface accepts "title" plus any `content.<path>` — open-ended
+  # by design (searchable_fields/highlightFields can declare arbitrary schema
+  # paths). `document_field_text/2` above already has a total catch-all
+  # (`_, _ -> nil`), so an unknown documents field degrades silently instead
+  # of crashing — this predicate is write-time hygiene, not a crash guard.
+  @doc false
+  @spec document_highlight_field?(String.t()) :: boolean()
+  def document_highlight_field?("title"), do: true
+  def document_highlight_field?("content." <> _rest), do: true
+  def document_highlight_field?(_other), do: false
+
   defp media_field_text(file, _doc, "original_name"), do: file.original_name
   defp media_field_text(file, _doc, "filename"), do: file.filename
   defp media_field_text(_file, doc, "title"), do: doc && doc.title
   defp media_field_text(_file, _doc, "tags"), do: nil
+
+  # task-5cf80a99ecd52bf2: a `highlightFields` value with no clause above used
+  # to raise `FunctionClauseError` here — crashing the NEXT search request
+  # after a bad value was stored (a stored-config denial of service; the
+  # write that stored it was long over by the time this fired). Rows written
+  # before `SurfaceConfig.changeset/2`'s write-time gate existed can still
+  # carry a bad value, so this read-time catch-all stays even with that gate
+  # in place: an unrecognized field degrades to "no highlight" instead of
+  # crashing every caller until someone manually reverts the row.
+  defp media_field_text(_file, _doc, _unknown_field), do: nil
 end
