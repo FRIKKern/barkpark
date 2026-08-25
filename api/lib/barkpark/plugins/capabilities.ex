@@ -1430,6 +1430,169 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # ── media search-surface config + synonyms (task-b1801ed5c86d2e2e). Nine
+      # routes under /v1/media/:dataset/search/* had zero commands — settings,
+      # insights, synonyms (list/create/promote/preview/delete) and interaction
+      # all rode the `media` noun with no verb at all. settings/insights/
+      # synonyms sit behind `:flat_admin_api` (RequireAdmin) -> tier "admin",
+      # matching the documents-search block below; search-interaction rides
+      # bare `:api` -> "none", same as `media.suggest`/`media.search`.
+      # `scoped_prefix` is set ONLY where router.ex actually mounts a
+      # `/w/:workspace_slug/p/:project_slug` mirror — settings, synonym-preview
+      # and promote have none.
+      core_cmd(
+        "media.search-settings",
+        "media",
+        "search-settings",
+        "Read the media library's search-tuning config.",
+        "GET",
+        "/v1/media/:dataset/search/settings",
+        "admin",
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "media.update-search-settings",
+        "media",
+        "update-search-settings",
+        "Update the media library's search-tuning config. --set key:=json for nested " <>
+          "fields (searchableFields, typoPolicy, zeroHitStrategy, highlightFields); an " <>
+          "omitted key keeps its current value.",
+        "PUT",
+        "/v1/media/:dataset/search/settings",
+        "admin",
+        flags: [
+          flag(
+            "set",
+            "string",
+            "Settings field key=value (repeatable; key:=json for typed values like " <>
+              "highlightFields/searchableFields/typoPolicy).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        default_output: "table"
+      ),
+      core_cmd(
+        "media.search-insights",
+        "media",
+        "search-insights",
+        "Search-quality analytics for the media library over a period: top queries, " <>
+          "zero-hit rate, merge patterns.",
+        "GET",
+        "/v1/media/:dataset/search/insights",
+        "admin",
+        flags: [
+          flag("period", "string", "day | week | month (default week)."),
+          flag("periodStart", "string", "ISO date to anchor the period (default: current).")
+        ],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.search-synonyms",
+        "media",
+        "search-synonyms",
+        "List the media library's search synonyms.",
+        "GET",
+        "/v1/media/:dataset/search/synonyms",
+        "admin",
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.search-synonym-preview",
+        "media",
+        "search-synonym-preview",
+        "Preview a media search synonym's hit-count impact before creating it.",
+        "GET",
+        "/v1/media/:dataset/search/synonyms/preview",
+        "admin",
+        args: [arg("q", true, "string", "Query to preview an expansion for (aliases: from).")],
+        flags: [
+          flag("to", "string", "Target term — hit count for an alt_correction-style preview.")
+        ],
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "media.create-search-synonym",
+        "media",
+        "create-search-synonym",
+        "Create a media search synonym (one_way: `from` also matches `to`; " <>
+          "alt_correction: interchangeable).",
+        "POST",
+        "/v1/media/:dataset/search/synonyms",
+        "admin",
+        args: [
+          arg("from", true, "string", "Source query term."),
+          arg("to", true, "string", "Target query term.")
+        ],
+        flags: [
+          flag("kind", "string", "one_way | alt_correction.", default: "one_way"),
+          flag("source", "string", "manual | auto.", default: "manual"),
+          flag("enabled", "bool", "Whether the synonym is active.", default: true)
+        ],
+        writes: true,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.promote-search-synonym",
+        "media",
+        "promote-search-synonym",
+        "Promote a from/to pair straight to an auto-sourced media search synonym.",
+        "POST",
+        "/v1/media/:dataset/search/synonyms/promote",
+        "admin",
+        args: [
+          arg("from", true, "string", "Source query term."),
+          arg("to", true, "string", "Target query term.")
+        ],
+        flags: [flag("kind", "string", "one_way | alt_correction.", default: "one_way")],
+        writes: true,
+        default_output: "table"
+      ),
+      core_cmd(
+        "media.delete-search-synonym",
+        "media",
+        "delete-search-synonym",
+        "Delete a media search synonym by id.",
+        "DELETE",
+        "/v1/media/:dataset/search/synonyms/:id",
+        "admin",
+        args: [arg("id", true, "string", "Synonym id.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "media.search-interaction",
+        "media",
+        "search-interaction",
+        "Record a click/select on a media search result, linked to its parent search event.",
+        "POST",
+        "/v1/media/:dataset/search/interaction",
+        "none",
+        args: [
+          arg(
+            "queryEventId",
+            true,
+            "string",
+            "searchEventId from the media.search response this click belongs to."
+          ),
+          arg("objectId", true, "string", "Id of the asset the caller clicked/selected.")
+        ],
+        flags: [
+          flag("type", "string", "select | click.", default: "click"),
+          flag("position", "int", "0-based position of the result in the hit list.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # indx is a retriever ENGINE, not a Barkpark.Plugin (no plugin.json, absent
       # from registry.ex) — it is reached via the core `search` noun's --engine
       # flag (postgres|indx, default postgres), NOT as a plugin noun/verb.
@@ -1468,6 +1631,224 @@ defmodule Barkpark.Plugins.Capabilities do
         # cards by default, humans get the full envelope. Emitted only under
         # ?views=1 (maybe_gate_views strips it otherwise).
         views: agent_views_descriptor(),
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # ── search settings / synonyms / insights / suggestions / interaction /
+      # correction / reindex (task-b1801ed5c86d2e2e). `search.query` above was
+      # the ONLY command this whole /v1/data/search/:dataset family had —
+      # twelve sibling routes rode the same noun with zero verbs. Tiers read
+      # off each route's OWN pipeline (docs/cli/manifest.schema.json rule):
+      # bare `[:api, :api_grant_read]` -> "none" (same as search.query),
+      # `[:api, :require_token]` -> "read", `:flat_admin_api` (RequireAdmin)
+      # -> "admin". `scoped_prefix` is set ONLY where router.ex actually
+      # mounts a `/w/:workspace_slug/p/:project_slug` mirror — settings,
+      # synonym-preview, promote and reindex have none.
+      core_cmd(
+        "search.suggestions",
+        "search",
+        "suggestions",
+        "Typeahead suggestions for a document search box — recent/popular/nohits queries.",
+        "GET",
+        "/v1/data/search/:dataset/suggestions",
+        "none",
+        args: [
+          arg("q", false, "string", "Partial query to filter suggestions (optional).")
+        ],
+        flags: [flag("limit", "int", "Max suggestions per bucket (default 8, max 20).")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "search.interaction",
+        "search",
+        "interaction",
+        "Record a click/select on a search result, linked to its parent search event.",
+        "POST",
+        "/v1/data/search/:dataset/interaction",
+        "none",
+        args: [
+          arg(
+            "queryEventId",
+            true,
+            "string",
+            "searchEventId from the search.query response this click belongs to."
+          ),
+          arg("objectId", true, "string", "Id of the document the caller clicked/selected.")
+        ],
+        flags: [
+          flag("type", "string", "select | click.", default: "click"),
+          flag("position", "int", "0-based position of the result in the hit list.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "search.correction",
+        "search",
+        "correction",
+        "Record a query-correction signal (from -> to); auto-promotes to a synonym " <>
+          "after two distinct sessions.",
+        "POST",
+        "/v1/data/search/:dataset/correction",
+        "none",
+        args: [
+          arg("from", true, "string", "The query the caller actually typed."),
+          arg("to", true, "string", "The query the caller meant / corrected to.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "search.reindex",
+        "search",
+        "reindex",
+        "Enqueue an Indx blue/green rebuild for a dataset.",
+        "POST",
+        "/v1/data/search/:dataset/reindex",
+        # `[:api, :require_token]` — any member token, not admin-only (see the
+        # route's own comment in router.ex on why this stays `read`).
+        "read",
+        flags: [
+          flag(
+            "types",
+            "string",
+            "Comma-separated document types to reindex (default: every core type)."
+          )
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "search.settings",
+        "search",
+        "settings",
+        "Read a dataset's search-tuning config (searchable fields, typo policy, " <>
+          "zero-hit strategy).",
+        "GET",
+        "/v1/data/search/:dataset/settings",
+        "admin",
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "search.update-settings",
+        "search",
+        "update-settings",
+        "Update a dataset's search-tuning config. --set key:=json for nested fields " <>
+          "(searchableFields, typoPolicy, zeroHitStrategy, highlightFields); an omitted " <>
+          "key keeps its current value.",
+        "PUT",
+        "/v1/data/search/:dataset/settings",
+        "admin",
+        flags: [
+          flag(
+            "set",
+            "string",
+            "Settings field key=value (repeatable; key:=json for typed values like " <>
+              "highlightFields/searchableFields/typoPolicy).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        default_output: "table"
+      ),
+      core_cmd(
+        "search.insights",
+        "search",
+        "insights",
+        "Search-quality analytics for a dataset over a period: top queries, zero-hit " <>
+          "rate, merge patterns.",
+        "GET",
+        "/v1/data/search/:dataset/insights",
+        "admin",
+        flags: [
+          flag("period", "string", "day | week | month (default week)."),
+          flag("periodStart", "string", "ISO date to anchor the period (default: current).")
+        ],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "search.synonyms",
+        "search",
+        "synonyms",
+        "List a dataset's search synonyms.",
+        "GET",
+        "/v1/data/search/:dataset/synonyms",
+        "admin",
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "search.synonym-preview",
+        "search",
+        "synonym-preview",
+        "Preview a synonym's hit-count impact before creating it.",
+        "GET",
+        "/v1/data/search/:dataset/synonyms/preview",
+        "admin",
+        args: [arg("q", true, "string", "Query to preview an expansion for (aliases: from).")],
+        flags: [
+          flag("to", "string", "Target term — hit count for an alt_correction-style preview.")
+        ],
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "search.create-synonym",
+        "search",
+        "create-synonym",
+        "Create a search synonym (one_way: `from` also matches `to`; alt_correction: " <>
+          "interchangeable).",
+        "POST",
+        "/v1/data/search/:dataset/synonyms",
+        "admin",
+        args: [
+          arg("from", true, "string", "Source query term."),
+          arg("to", true, "string", "Target query term.")
+        ],
+        flags: [
+          flag("kind", "string", "one_way | alt_correction.", default: "one_way"),
+          flag("source", "string", "manual | auto.", default: "manual"),
+          flag("enabled", "bool", "Whether the synonym is active.", default: true)
+        ],
+        writes: true,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "search.promote-synonym",
+        "search",
+        "promote-synonym",
+        "Promote a from/to pair straight to an auto-sourced synonym (the same path " <>
+          "record_correction takes after two distinct sessions).",
+        "POST",
+        "/v1/data/search/:dataset/synonyms/promote",
+        "admin",
+        args: [
+          arg("from", true, "string", "Source query term."),
+          arg("to", true, "string", "Target query term.")
+        ],
+        flags: [flag("kind", "string", "one_way | alt_correction.", default: "one_way")],
+        writes: true,
+        default_output: "table"
+      ),
+      core_cmd(
+        "search.delete-synonym",
+        "search",
+        "delete-synonym",
+        "Delete a search synonym by id.",
+        "DELETE",
+        "/v1/data/search/:dataset/synonyms/:id",
+        "admin",
+        args: [arg("id", true, "string", "Synonym id.")],
+        writes: true,
+        default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
