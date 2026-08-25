@@ -156,7 +156,23 @@ defmodule Barkpark.Media.Storage.Access do
   # satisfied by ANY token, read-only included, and write authority is enforced
   # upstream by `require_write/1` — never here. Asking `:write` of a user would
   # make the account arm stricter than the token arm it exists to match.
-  defp authenticated?(conn) do
+  #
+  # PUBLIC (task-f71cab067a90a89d): the Studio LiveView image-picker handler
+  # (`StudioLive.Handlers.Media.open_image_picker/2`) needs the SAME principal
+  # question to clamp its listing for an anonymous demo visitor, and must not
+  # grow a second, narrower answer to it — a local re-derivation is exactly the
+  # "one rule, several private copies" defect class this module's own history
+  # (the comment above) already warns about. Works unmodified on a
+  # `Phoenix.LiveView.Socket` too: both arms below read only `.assigns`, which
+  # a socket carries the same shape as a conn.
+  @doc """
+  Whether the request/socket carries a PRINCIPAL — an API token (any
+  permission) or an account session whose user is a member of the RESOLVED
+  workspace. Authentication, not authorization: `allowed?/4` decides what
+  that someone may do.
+  """
+  @spec authenticated?(Plug.Conn.t() | Phoenix.LiveView.Socket.t() | map()) :: boolean()
+  def authenticated?(conn) do
     match?(%{assigns: %{api_token: %_{} = _}}, conn) or account_member?(conn)
   end
 
