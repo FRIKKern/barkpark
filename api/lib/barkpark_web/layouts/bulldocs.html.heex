@@ -773,6 +773,7 @@
       outline-offset: 4px;
     }
     .bp-image-lightbox {
+      color-scheme: dark;
       width: 100vw;
       max-width: none;
       height: 100vh;
@@ -783,7 +784,7 @@
       background: transparent;
       overflow: hidden;
     }
-    .bp-image-lightbox::backdrop { background: rgba(7, 12, 10, 0.88); }
+    .bp-image-lightbox::backdrop { background: color-mix(in srgb, Canvas 88%, transparent); }
     .bp-image-lightbox__stage {
       width: 100%;
       height: 100%;
@@ -800,12 +801,12 @@
       max-height: 100%;
       object-fit: contain;
       border-radius: 6px;
-      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.46);
+      box-shadow: 0 24px 80px color-mix(in srgb, Canvas 46%, transparent);
     }
     .bp-image-lightbox__caption {
       max-width: 76ch;
       margin: 0;
-      color: rgba(255, 255, 255, 0.82);
+      color: color-mix(in srgb, CanvasText 82%, transparent);
       font: 500 0.82rem/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       text-align: center;
     }
@@ -817,17 +818,17 @@
       z-index: 1;
       width: 2.65rem;
       height: 2.65rem;
-      border: 1px solid rgba(255, 255, 255, 0.32);
+      border: 1px solid color-mix(in srgb, CanvasText 32%, transparent);
       border-radius: 50%;
-      background: rgba(8, 13, 11, 0.72);
-      color: #fff;
+      background: color-mix(in srgb, Canvas 72%, transparent);
+      color: CanvasText;
       font-size: 1.45rem;
       line-height: 1;
       cursor: pointer;
       backdrop-filter: blur(12px);
     }
-    .bp-image-lightbox__close:hover { background: rgba(255, 255, 255, 0.14); }
-    .bp-image-lightbox__close:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+    .bp-image-lightbox__close:hover { background: color-mix(in srgb, CanvasText 14%, transparent); }
+    .bp-image-lightbox__close:focus-visible { outline: 2px solid CanvasText; outline-offset: 3px; }
 
     /* pdd-t19 → parity: the article stream's VERTICAL RHYTHM now lives in the
        SHARED `.bp-paper-surface hN` rules (top-only margins, parity-gated with
