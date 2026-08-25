@@ -1052,6 +1052,12 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ ~s(data-cast-poster="npt:0:12")
     end
 
+    test "a compact row count rides data-cast-rows on the article mount" do
+      block = Map.put(@asciicast, "rows", 18)
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ ~s(data-cast-rows="18")
+    end
+
     test "no poster → no attribute, so the client keeps its npt:0:1 default" do
       html = Render.render_block(@asciicast, %{style: :article})
       refute html =~ "data-cast-poster"

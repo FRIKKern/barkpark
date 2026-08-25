@@ -132,6 +132,16 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
                ~s(data-cast-src="https://example.com/cast.json" data-cast-poster="npt:0:12" style=)
     end
 
+    test "a valid row limit makes a compact player available to the client" do
+      html = Figures.asciicast_html("https://example.com/cast.json", "", "", 18, :article)
+      assert html =~ ~s(data-cast-rows="18")
+    end
+
+    test "an unsafe row limit is omitted" do
+      html = Figures.asciicast_html("https://example.com/cast.json", "", "", 2, :article)
+      refute html =~ "data-cast-rows"
+    end
+
     test "an unset poster leaves the mount byte-identical (no attribute)" do
       html = Figures.asciicast_html("https://example.com/cast.json", "", "", :article)
       refute html =~ "data-cast-poster"

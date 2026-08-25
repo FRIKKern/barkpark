@@ -335,7 +335,7 @@ defmodule Barkpark.Content.AuthoringWall do
 
     spacer_count = count_spacer_paragraphs(blocks)
 
-    if content["style"] == "article" and spacer_count > 0 do
+    if content["style"] in ["article", "article-wide"] and spacer_count > 0 do
       Warnings.put(
         "spacing_norm",
         "#{pid}: article paper contains #{spacer_count} empty paragraph block(s) used as " <>

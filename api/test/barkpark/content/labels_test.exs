@@ -62,6 +62,10 @@ defmodule Barkpark.Content.LabelsTest do
       assert Labels.paper_style(%{"style" => "article"}, nil) == "article"
     end
 
+    test "explicit 'article-wide' in attrs preserves the editorial width" do
+      assert Labels.paper_style(%{"style" => "article-wide"}, nil) == "article-wide"
+    end
+
     test "any other explicit style in attrs normalises to nil" do
       assert Labels.paper_style(%{"style" => "email"}, nil) == nil
     end
@@ -69,6 +73,11 @@ defmodule Barkpark.Content.LabelsTest do
     test "falls back to existing doc's stored style when attrs carry no style" do
       existing = %{content: %{"style" => "article"}}
       assert Labels.paper_style(%{}, existing) == "article"
+    end
+
+    test "falls back to an existing wide article style" do
+      existing = %{content: %{"style" => "article-wide"}}
+      assert Labels.paper_style(%{}, existing) == "article-wide"
     end
 
     test "explicit attrs override existing doc's style" do

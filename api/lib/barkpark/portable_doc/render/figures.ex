@@ -147,7 +147,10 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # owning the `npt:0:1` fallback. The value is attribute-escaped and handed to
   # the player verbatim (asciinema ignores a poster it cannot parse); it is NOT
   # a URL, so `safe_url` (the `src`/video-poster helper) does not apply.
-  def asciicast_html(src, caption, poster, :article) do
+  def asciicast_html(src, caption, poster, style),
+    do: asciicast_html(src, caption, poster, nil, style)
+
+  def asciicast_html(src, caption, poster, rows, :article) do
     cap =
       if caption == "" do
         ""
@@ -161,13 +164,16 @@ defmodule Barkpark.PortableDoc.Render.Figures do
     poster_attr =
       if poster == "", do: "", else: ~s( data-cast-poster="#{escape_html(poster)}")
 
+    rows_attr =
+      if is_integer(rows) and rows in 6..40, do: ~s( data-cast-rows="#{rows}"), else: ""
+
     ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
-      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
+      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
       cap <>
       "</figure>"
   end
 
-  def asciicast_html(src, caption, _poster, _style) do
+  def asciicast_html(src, caption, _poster, _rows, _style) do
     # Email / default: no asciinema runtime, so link to the recording instead of
     # mounting a player. The `bp-asciicast` mount point is intentionally ABSENT
     # here — the hook must not be triggered in email contexts.

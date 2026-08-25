@@ -259,6 +259,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     stale_content =
       paper.content
       |> Map.put("blocks", blocks)
+      |> Map.put("style", "article-wide")
       |> Map.put("body_html", "<p>STALE STATIC CACHE</p>")
 
     paper
@@ -274,6 +275,8 @@ defmodule BarkparkWeb.ShareLinkTest do
 
     assert resp.status == 200
     assert resp.resp_body =~ "Static Block Authority"
+    assert resp.resp_body =~ "bp-paper-article"
+    assert resp.resp_body =~ "bp-paper-article-wide"
     assert resp.resp_body =~ "A Post"
     refute resp.resp_body =~ "Other Tenant Post"
     refute resp.resp_body =~ "STALE STATIC CACHE"
