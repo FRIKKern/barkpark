@@ -636,13 +636,17 @@ def concrete_fallback_headline(event: Event) -> str:
     """Prefer a precise shipped-change headline when editorial synthesis is unavailable."""
     title_value = event.title.lower()
     if any(word in title_value for word in ("chronicle", "changelog", "journal", "edition")):
+        if any(word in title_value for word in ("visual", "screenshot", "gallery", "asciicast", "rich", "grand")):
+            return "Chronicle months and years become rich visual editions"
         if "index" in title_value:
             return "Chronicle index becomes easier to browse"
+        if any(word in title_value for word in ("headline", "title", "identity", "distinct")):
+            return "Chronicle headlines name the change"
         if any(word in title_value for word in ("reader", "review", "write-up")):
             return "Chronicle editions lead with the story"
         if any(word in title_value for word in ("publish", "archive", "backfill")):
             return "Chronicle archive stays current"
-        return "Chronicle editions become easier to tell apart"
+        return "Chronicle records the work in plain language"
     if "task" in title_value and any(word in title_value for word in ("restore", "list", "view", "visible")):
         return "Tasks return to view"
     if "task" in title_value and any(word in title_value for word in ("claim", "ready", "board", "queue")):

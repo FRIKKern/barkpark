@@ -317,6 +317,17 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertTrue(block["refs"][0]["title"])
         self.assertTrue(block["refs"][0]["reason"])
 
+    def test_chronicle_visual_work_receives_a_specific_reader_headline(self):
+        event = chronicle.Event(
+            dt.datetime(2026, 8, 25, tzinfo=dt.timezone.utc),
+            "a" * 40,
+            "feat(chronicle): make long editions visual (#14131)",
+        )
+        self.assertEqual(
+            "Chronicle months and years become rich visual editions",
+            chronicle.concrete_fallback_headline(event),
+        )
+
     def test_curated_cast_is_attached_only_to_the_commit_that_introduced_it(self):
         event = chronicle.Event(
             dt.datetime(2026, 8, 12, tzinfo=dt.timezone.utc),
