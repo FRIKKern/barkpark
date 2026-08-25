@@ -95,7 +95,7 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn("https://github.com/acme/project/pull/13", serialized)
         self.assertIn('"type": "bar-chart"', serialized)
         self.assertIn('"type": "lineage"', serialized)
-        self.assertIn('"text": "What we worked on"', serialized)
+        self.assertIn('"text": "The week\\u2019s defining work"', serialized)
         self.assertIn('"text": "How this period moved"', serialized)
         self.assertIn('"type": "expandable"', serialized)
         self.assertIn('"type": "paper-links"', serialized)
@@ -133,9 +133,10 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertEqual(6, len(by_slug))
         july = by_slug["barkpark-changelog-2026-07"]
         july_json = json.dumps(july, ensure_ascii=False)
-        self.assertIn("How the month unfolded", july_json)
+        self.assertIn("How the period unfolded", july_json)
         self.assertIn("Weekly cadence · July 2026", july_json)
-        self.assertIn("Product updates", july_json)
+        self.assertIn("Release highlights", july_json)
+        self.assertIn('"id": "auto:period-pulse"', july_json)
         self.assertTrue(july["dedup_bypass"])
 
         index_json = json.dumps(by_slug["barkpark-chronicle"])
@@ -180,13 +181,13 @@ class ChroniclePaperTest(unittest.TestCase):
         )
 
         year_json = json.dumps(by_slug["barkpark-changelog-2026"])
-        self.assertIn("Monthly chapters", year_json)
+        self.assertIn("The year, chapter by chapter", year_json)
         self.assertIn("/papers/barkpark-changelog-2026-07", year_json)
         self.assertIn("/papers/barkpark-changelog-2026-08", year_json)
 
         august_json = json.dumps(by_slug["barkpark-changelog-2026-08"])
-        self.assertIn("Weekly dispatches", august_json)
-        self.assertIn("Daily editions", august_json)
+        self.assertIn("The month, week by week", august_json)
+        self.assertIn("Browse every day", august_json)
         self.assertIn("/papers/barkpark-changelog-2026-w34", august_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-17", august_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-23", august_json)
@@ -234,6 +235,59 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertEqual("image", image["type"])
         self.assertIn(f"/acme/project/{event.sha}/docs/evidence/tasks-board.png", image["src"])
         self.assertNotIn("tasks-board.png", image["alt"])
+
+    def test_month_composes_a_real_evidence_hero_gallery_and_multiple_casts(self):
+        paths = tuple(
+            [
+                "docs/evidence/product-overview-light.png",
+                "docs/evidence/product-overview-dark.png",
+            ]
+            + [f"docs/evidence/product-moment-{index}.png" for index in range(1, 10)]
+            + [f"docs/evidence/demo-{index}.cast" for index in range(1, 4)]
+        )
+        event = chronicle.Event(
+            dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc),
+            "f" * 40,
+            "feat(papers): show the release story with real product evidence (#44)",
+            paths,
+        )
+        period = chronicle.periods_for(dt.date(2026, 8, 24))["month"]
+        blocks = chronicle.evidence_blocks(period, [event], "acme/project")
+        gallery = next(block for block in blocks if block.get("id") == "auto:evidence-gallery")
+        figures = [block for block in blocks if block.get("type") == "figure"] + gallery["blocks"]
+        casts = [block for block in blocks if block.get("type") == "asciicast"]
+
+        self.assertEqual("A month you can see", next(block for block in blocks if block["id"] == "auto:evidence-title")["text"])
+        self.assertEqual(8, len(figures))
+        self.assertEqual(2, len(casts))
+        self.assertEqual(2, gallery["layout"]["tracks"])
+        serialized = json.dumps(blocks)
+        self.assertEqual(1, serialized.count("product-overview-"))
+        self.assertIn("24 Aug · Papers", figures[0]["caption"])
+
+    def test_long_editions_put_scale_and_release_highlights_on_the_reading_path(self):
+        events = self.read_fixture_events()
+        archive = chronicle.historical_periods(events, dt.date(2026, 8, 23))
+        period = next(item for item in archive["month"] if item.key == "2026-08")
+        selected = chronicle.events_in_period(events, period)
+        payload = chronicle.period_payload(
+            period,
+            selected,
+            chronicle.periods_for(dt.date(2026, 8, 23)),
+            "acme/project",
+            events=events,
+            archive=archive,
+            related_papers=chronicle.load_related_papers(),
+        )
+        by_id = {block["id"]: block for block in payload["blocks"]}
+
+        self.assertEqual("stats", by_id["auto:period-pulse"]["type"])
+        self.assertEqual("lineage", by_id["auto:release-highlights"]["type"])
+        self.assertEqual("section", by_id["auto:archive-1"]["type"])
+        self.assertEqual(2, by_id["auto:archive-1"]["layout"]["tracks"])
+        self.assertEqual("expandable", by_id["auto:archive-2"]["type"])
+        technical = by_id["auto:technical-record"]
+        self.assertTrue(any(block["id"] == "auto:ledger" for block in technical["children"]))
 
     def test_no_visual_block_is_invented_when_a_period_has_no_media(self):
         events = self.read_fixture_events()
