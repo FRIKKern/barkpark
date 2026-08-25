@@ -704,7 +704,131 @@
     .bp-paper-shell.bp-paper-article {
       max-width: 660px;
       padding: 56px 40px 96px;
+      /* Client evidence needs more stage than prose. Keep the shared reading
+         measure untouched while letting paired screenshots use the viewport. */
+      --bp-evidence-band: 1180px;
+      --bp-evidence-band-max: 1360px;
+      --bp-evidence-fill: 0.74;
     }
+
+    /* Recording links are supporting evidence, not a stack of form controls.
+       Consecutive action blocks therefore read as a loose clip rail: compact,
+       rounded, and able to wrap naturally without the old touching boxes. */
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) {
+      display: inline-block;
+      max-width: 100%;
+      margin: 0.42rem 1.1rem 0.42rem 0;
+      vertical-align: top;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      max-width: 100%;
+      padding: 0.35rem 0;
+      border: 0;
+      border-radius: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.82rem;
+      line-height: 1.25;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+      box-sizing: border-box;
+      transition: color 140ms ease, transform 140ms ease;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button::before {
+      content: "▶";
+      flex: none;
+      display: inline-grid;
+      place-items: center;
+      width: 1.85rem;
+      height: 1.85rem;
+      border: 1px solid color-mix(in srgb, var(--paper-accent) 48%, transparent);
+      border-radius: 50%;
+      font-size: 0.56em;
+      text-indent: 0.12em;
+      transition: background 140ms ease, border-color 140ms ease;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button:hover {
+      transform: translateY(-1px);
+      text-decoration: underline;
+      text-underline-offset: 0.2em;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button:hover::before {
+      background: var(--paper-accent-soft);
+      border-color: var(--paper-accent);
+    }
+
+    .bp-paper-article figure > .bp-cols { gap: clamp(2rem, 3vw, 2.8rem); }
+
+    /* Paper-image lightbox. Progressive enhancement lives in the reader shell
+       so PortableDoc's email/static <img> contract remains byte-stable. */
+    .bp-paper-article img[data-bp-lightboxable="true"] {
+      cursor: zoom-in;
+      transition: opacity 140ms ease;
+    }
+    .bp-paper-article img[data-bp-lightboxable="true"]:hover { opacity: 0.94; }
+    .bp-paper-article img[data-bp-lightboxable="true"]:focus-visible {
+      outline: 3px solid var(--paper-accent);
+      outline-offset: 4px;
+    }
+    .bp-image-lightbox {
+      color-scheme: dark;
+      width: 100vw;
+      max-width: none;
+      height: 100vh;
+      max-height: none;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+    .bp-image-lightbox::backdrop { background: color-mix(in srgb, Canvas 88%, transparent); }
+    .bp-image-lightbox__stage {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      place-items: center;
+      gap: 0.85rem;
+      box-sizing: border-box;
+      padding: clamp(3.5rem, 7vw, 6rem) clamp(1rem, 4vw, 4rem) clamp(1.25rem, 4vw, 3rem);
+    }
+    .bp-image-lightbox__image {
+      display: block;
+      max-width: min(1600px, 100%);
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 6px;
+      box-shadow: 0 24px 80px color-mix(in srgb, Canvas 46%, transparent);
+    }
+    .bp-image-lightbox__caption {
+      max-width: 76ch;
+      margin: 0;
+      color: color-mix(in srgb, CanvasText 82%, transparent);
+      font: 500 0.82rem/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+    }
+    .bp-image-lightbox__caption:empty { display: none; }
+    .bp-image-lightbox__close {
+      position: fixed;
+      top: max(1rem, env(safe-area-inset-top));
+      right: max(1rem, env(safe-area-inset-right));
+      z-index: 1;
+      width: 2.65rem;
+      height: 2.65rem;
+      border: 1px solid color-mix(in srgb, CanvasText 32%, transparent);
+      border-radius: 50%;
+      background: color-mix(in srgb, Canvas 72%, transparent);
+      color: CanvasText;
+      font-size: 1.45rem;
+      line-height: 1;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+    }
+    .bp-image-lightbox__close:hover { background: color-mix(in srgb, CanvasText 14%, transparent); }
+    .bp-image-lightbox__close:focus-visible { outline: 2px solid CanvasText; outline-offset: 3px; }
 
     /* pdd-t19 → parity: the article stream's VERTICAL RHYTHM now lives in the
        SHARED `.bp-paper-surface hN` rules (top-only margins, parity-gated with
@@ -1207,6 +1331,48 @@
     body.bp-email .bp-view-toggle--email { bottom: 20px; }
     body.bp-email .bp-view-toggle--email .bp-vt-dot { box-shadow: 0 0 6px #2f7d5b; }
 
+    /* On phones the reader controls belong after the paper, not on top of it.
+       Keeping them in normal flow preserves every caption and evidence image;
+       the desktop fixed stack remains useful where a side gutter exists. */
+    @media (max-width: 900px) {
+      .bp-paper-article figure > .bp-cols { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .bp-paper-shell.bp-paper-article {
+        --bp-evidence-gutter: 16px;
+        padding-inline: 20px;
+      }
+      .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) {
+        display: block;
+        margin: 0;
+        border-top: 1px solid var(--paper-rule);
+      }
+      .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button {
+        width: 100%;
+        min-height: 44px;
+        padding-block: 0.55rem;
+      }
+      .bp-view-toggle {
+        position: static;
+        right: auto;
+        z-index: 1;
+        gap: 6px;
+        margin: 18px 3px calc(18px + env(safe-area-inset-bottom));
+        padding: 7px 10px;
+        font-size: 11.5px;
+        backdrop-filter: none;
+      }
+      .bp-view-toggle:not(.bp-view-toggle--email):not(.bp-mode-toggle) {
+        margin-left: 12px;
+      }
+      .bp-view-toggle--email,
+      .bp-mode-toggle {
+        bottom: auto;
+      }
+      body.bp-email .bp-view-toggle--email { bottom: auto; }
+    }
+
     /* ── the REAL TUI render (the actual Go pdrender, compiled to WASM) ──────
        In TUI mode we HIDE the reader article and show a real TERMINAL WINDOW:
        a title bar (traffic lights + slug), and a fixed-width content column
@@ -1414,6 +1580,7 @@
       .bp-paper-article .bp-paper-simplify,
       .bp-paper-article .bp-diff-overlay,
       .bp-paper-article .bp-goal-rail { display: none !important; }
+      .bp-image-lightbox { display: none !important; }
       /* Any surviving sticky/fixed positioning collapses to static so nothing
          floats or clips in paged output. */
       .bp-paper-article .bp-paper-actions,
@@ -1432,6 +1599,89 @@
 </head>
 <body>
   {@inner_content}
+
+  <dialog id="bp-image-lightbox" class="bp-image-lightbox" aria-label="Enlarged paper image">
+    <button
+      type="button"
+      class="bp-image-lightbox__close"
+      aria-label="Close enlarged image"
+    >×</button>
+    <div class="bp-image-lightbox__stage">
+      <img class="bp-image-lightbox__image" src="" alt="" />
+      <p class="bp-image-lightbox__caption"></p>
+    </div>
+  </dialog>
+
+  <script nonce={assigns[:csp_nonce]}>
+    (function () {
+      var article = document.querySelector(".bp-paper-article");
+      var dialog = document.getElementById("bp-image-lightbox");
+      if (!article || !dialog || typeof dialog.showModal !== "function") return;
+
+      var lightboxImg = dialog.querySelector(".bp-image-lightbox__image");
+      var caption = dialog.querySelector(".bp-image-lightbox__caption");
+      var closeButton = dialog.querySelector(".bp-image-lightbox__close");
+      var trigger = null;
+
+      function isEligible(image) {
+        return image && article.contains(image) && !image.closest("a, button");
+      }
+
+      function prepare(root) {
+        var images = root.matches && root.matches("img") ? [root] : Array.from(root.querySelectorAll("img"));
+        images.filter(isEligible).forEach(function (image) {
+          image.dataset.bpLightboxable = "true";
+          image.tabIndex = 0;
+          image.setAttribute("role", "button");
+          image.setAttribute("aria-label", (image.alt ? image.alt + ". " : "") + "Open enlarged image");
+        });
+      }
+
+      function open(image) {
+        if (!isEligible(image)) return;
+        trigger = image;
+        lightboxImg.src = image.currentSrc || image.src;
+        lightboxImg.alt = image.alt || "";
+        caption.textContent = image.alt || "";
+        dialog.showModal();
+      }
+
+      function close() {
+        if (dialog.open) dialog.close();
+      }
+
+      prepare(article);
+      new MutationObserver(function (records) {
+        records.forEach(function (record) {
+          record.addedNodes.forEach(function (node) {
+            if (node.nodeType === Node.ELEMENT_NODE) prepare(node);
+          });
+        });
+      }).observe(article, { childList: true, subtree: true });
+
+      article.addEventListener("click", function (event) {
+        var image = event.target.closest("img");
+        if (isEligible(image)) open(image);
+      });
+      article.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        var image = event.target.closest("img");
+        if (!isEligible(image)) return;
+        event.preventDefault();
+        open(image);
+      });
+      closeButton.addEventListener("click", close);
+      dialog.addEventListener("click", function (event) {
+        if (event.target === dialog || event.target.classList.contains("bp-image-lightbox__stage")) close();
+      });
+      dialog.addEventListener("cancel", function () { close(); });
+      dialog.addEventListener("close", function () {
+        lightboxImg.removeAttribute("src");
+        if (trigger && trigger.isConnected) trigger.focus();
+        trigger = null;
+      });
+    })();
+  </script>
 
   <%!-- Reader / TUI / Email view toggles (bottom-right, mutually exclusive).
         TUI mode renders the paper through the REAL Go pdrender, compiled to
