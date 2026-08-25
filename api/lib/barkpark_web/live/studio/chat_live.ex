@@ -33,6 +33,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   require Logger
 
   alias Barkpark.ChatHosts
+  alias Barkpark.Content.DraftId
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
@@ -5231,7 +5232,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       Tasks.prime([worker: worker, limit: 10] ++ hand_task_scope())
       |> Map.get(:in_progress, [])
       |> Map.new(fn d ->
-        {String.replace_prefix(d.doc_id, "drafts.", ""), hand_task_row(d.title, d.content)}
+        {DraftId.published_id(d.doc_id), hand_task_row(d.title, d.content)}
       end)
 
     assign(socket, hand_tasks: rows)
@@ -5258,7 +5259,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # A ready-queue Document as a lean picker row.
   defp hand_ready_row(doc) do
     %{
-      id: String.replace_prefix(doc.doc_id, "drafts.", ""),
+      id: DraftId.published_id(doc.doc_id),
       title: doc.title || doc.content["title"] || "untitled task",
       priority: doc.content["priority"]
     }

@@ -24,6 +24,7 @@ defmodule Barkpark.Content.DraftId do
     end
   end
 
+  # @canonical capability:draft-published-id aka:strip drafts,drafts prefix,draft prefix,published id,draft twin,replace_prefix
   def published_id(doc_id) do
     String.replace_prefix(doc_id, @drafts_prefix, "")
   end
