@@ -89,6 +89,11 @@ class ChroniclePaperTest(unittest.TestCase):
         week = by_slug["barkpark-changelog-2026-w34"]
         self.assertEqual("changelog.week", week["event_type"])
         self.assertEqual("article", week["style"])
+        self.assertEqual("article-wide", by_slug["barkpark-changelog-2026-08"]["style"])
+        self.assertEqual("article-wide", by_slug["barkpark-changelog-2026"]["style"])
+        month_blocks = {block["id"]: block for block in by_slug["barkpark-changelog-2026-08"]["blocks"]}
+        self.assertEqual("lineage", month_blocks["auto:archive-1"]["type"])
+        self.assertEqual("expandable", month_blocks["auto:archive-2"]["type"])
         self.assertEqual(["barkpark", "docs"], [tag["tag"] for tag in week["tags"]])
         serialized = json.dumps(week)
         self.assertIn("https://github.com/acme/project/pull/12", serialized)
@@ -133,6 +138,8 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertEqual(6, len(by_slug))
         july = by_slug["barkpark-changelog-2026-07"]
         july_json = json.dumps(july, ensure_ascii=False)
+        self.assertIn("July, week by week", july_json)
+        self.assertNotIn("August, week by week", july_json)
         self.assertIn("How the period unfolded", july_json)
         self.assertIn("Weekly cadence · July 2026", july_json)
         self.assertIn("Release highlights", july_json)
@@ -181,14 +188,14 @@ class ChroniclePaperTest(unittest.TestCase):
         )
 
         year_json = json.dumps(by_slug["barkpark-changelog-2026"])
-        self.assertIn("The year, chapter by chapter", year_json)
-        self.assertIn("/papers/barkpark-changelog-2026-07", year_json)
-        self.assertIn("/papers/barkpark-changelog-2026-08", year_json)
+        self.assertIn("The year, month by month", year_json)
+        self.assertIn('"slug": "barkpark-changelog-2026-07"', year_json)
+        self.assertIn('"slug": "barkpark-changelog-2026-08"', year_json)
 
         august_json = json.dumps(by_slug["barkpark-changelog-2026-08"])
-        self.assertIn("The month, week by week", august_json)
-        self.assertIn("Browse every day", august_json)
-        self.assertIn("/papers/barkpark-changelog-2026-w34", august_json)
+        self.assertIn("August, week by week", august_json)
+        self.assertIn("Open all 23 daily editions", august_json)
+        self.assertIn('"source": "/papers/barkpark-changelog-2026-w34"', august_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-17", august_json)
         self.assertIn("/papers/barkpark-changelog-2026-08-23", august_json)
 
@@ -236,7 +243,7 @@ class ChroniclePaperTest(unittest.TestCase):
         self.assertIn(f"/acme/project/{event.sha}/docs/evidence/tasks-board.png", image["src"])
         self.assertNotIn("tasks-board.png", image["alt"])
 
-    def test_month_composes_a_real_evidence_hero_gallery_and_multiple_casts(self):
+    def test_month_composes_restrained_native_visual_evidence(self):
         paths = tuple(
             [
                 "docs/evidence/product-overview-light.png",
@@ -254,16 +261,143 @@ class ChroniclePaperTest(unittest.TestCase):
         period = chronicle.periods_for(dt.date(2026, 8, 24))["month"]
         blocks = chronicle.evidence_blocks(period, [event], "acme/project")
         gallery = next(block for block in blocks if block.get("id") == "auto:evidence-gallery")
-        figures = [block for block in blocks if block.get("type") == "figure"] + gallery["blocks"]
+        lead = next(block for block in blocks if block.get("id") == "auto:evidence-lead")
+        figures = [lead["columns"][1][0]] + gallery["blocks"]
         casts = [block for block in blocks if block.get("type") == "asciicast"]
 
-        self.assertEqual("A month you can see", next(block for block in blocks if block["id"] == "auto:evidence-title")["text"])
-        self.assertEqual(8, len(figures))
-        self.assertEqual(2, len(casts))
+        self.assertEqual("The month in motion", lead["columns"][0][0]["text"])
+        self.assertEqual(4, len(figures))
+        self.assertEqual(1, len(casts))
+        self.assertEqual("columns", lead["type"])
+        self.assertFalse(any(block.get("type") == "figure" for block in blocks))
         self.assertEqual(2, gallery["layout"]["tracks"])
         serialized = json.dumps(blocks)
         self.assertEqual(1, serialized.count("product-overview-"))
         self.assertIn("24 Aug · Papers", figures[0]["caption"])
+        self.assertNotIn("Real release evidence", serialized)
+        self.assertNotIn("Watch it move", serialized)
+
+    def test_media_selection_is_deterministic_and_diverse_before_repeats(self):
+        start = dt.datetime(2026, 8, 1, tzinfo=dt.timezone.utc)
+        events = [
+            chronicle.Event(start, "1" * 40, "feat(tasks): show ready work", (
+                "docs/evidence/tasks-overview-light.png",
+                "docs/evidence/tasks-overview-dark.png",
+                "docs/evidence/tasks-second.png",
+            )),
+            chronicle.Event(start + dt.timedelta(days=1), "2" * 40, "fix(tasks): restore claimed work", (
+                "docs/evidence/tasks-restored.png",
+            )),
+            chronicle.Event(start + dt.timedelta(days=2), "3" * 40, "feat(papers): improve the reader", (
+                "docs/evidence/paper-reader.png",
+            )),
+        ]
+
+        first = chronicle.artifact_candidates(events)
+        second = chronicle.artifact_candidates(events)
+        reversed_paths = [events[0].__class__(
+            events[0].occurred_at,
+            events[0].sha,
+            events[0].subject,
+            tuple(reversed(events[0].paths)),
+        ), *events[1:]]
+
+        self.assertEqual(first, second)
+        projection = lambda candidates: [
+            (event.sha, path, kind) for event, path, kind in candidates
+        ]
+        self.assertEqual(projection(first), projection(chronicle.artifact_candidates(reversed_paths)))
+        period = chronicle.periods_for(start.date())["month"]
+        self.assertEqual(
+            json.dumps(chronicle.evidence_blocks(period, events, "acme/project"), sort_keys=True),
+            json.dumps(chronicle.evidence_blocks(period, reversed_paths, "acme/project"), sort_keys=True),
+        )
+        self.assertEqual(1, sum("tasks-overview-" in path for _event, path, _kind in first))
+        self.assertEqual(3, len({event.sha for event, _path, _kind in first[:3]}))
+        self.assertEqual(
+            {"Papers", "Tasks"},
+            {chronicle.reader_area(event.area) for event, _path, _kind in first[:2]},
+        )
+
+    def test_paper_excellence_document_captures_are_not_release_evidence(self):
+        paths = (
+            "tooling/paper-excellence/evidence/shots/whole-paper.png",
+            "tooling/paper-excellence/rig/baselines/paper.png",
+            "tooling/paper-excellence/twin/shots/paper.png",
+            "tooling/paper-excellence/evidence/pe-w1-figure-legibility.png",
+            "tooling/paper-excellence/evidence/reader-before.png",
+            "tooling/paper-excellence/evidence/reader-diff.png",
+            "tooling/paper-excellence/evidence/reader-failure.png",
+            "tooling/paper-excellence/evidence/reader-probe.png",
+            "tooling/paper-excellence/evidence/full.jpeg",
+            "tooling/paper-excellence/evidence/light.jpeg",
+            "tooling/paper-excellence/evidence/decl-premium.jpeg",
+            "tooling/paper-excellence/evidence/cast.jpeg",
+        )
+        event = chronicle.Event(
+            dt.datetime(2026, 8, 12, tzinfo=dt.timezone.utc),
+            "a" * 40,
+            "feat(papers): refine the paper reader",
+            paths,
+        )
+        period = chronicle.periods_for(event.occurred_at.date())["month"]
+
+        self.assertEqual([], chronicle.artifact_candidates([event]))
+        self.assertEqual([], chronicle.evidence_blocks(period, [event], "acme/project"))
+
+        cast_event = chronicle.Event(
+            event.occurred_at,
+            event.sha,
+            event.subject,
+            (*paths, "tooling/paper-excellence/twin/payload.json"),
+        )
+        blocks = chronicle.evidence_blocks(period, [cast_event], "acme/project")
+        self.assertFalse(any(block.get("type") == "figure" for block in blocks))
+        lead = next(block for block in blocks if block.get("id") == "auto:evidence-lead")
+        self.assertEqual("asciicast", lead["type"])
+        self.assertEqual(18, lead["rows"])
+        self.assertIn("a contributor’s words changed before merge", lead["caption"])
+        self.assertEqual("The month in motion", next(block for block in blocks if block.get("id") == "auto:evidence-title")["text"])
+
+    def test_year_media_and_visible_highlights_are_editorially_capped(self):
+        start = dt.datetime(2026, 1, 1, tzinfo=dt.timezone.utc)
+        events = [
+            chronicle.Event(
+                start + dt.timedelta(days=index),
+                f"{index:040x}",
+                f"feat(area-{index}): ship visible change {index}",
+                (f"docs/evidence/change-{index}.png", f"docs/evidence/change-{index}.cast"),
+            )
+            for index in range(12)
+        ]
+        period = chronicle.periods_for(start.date())["year"]
+        blocks = chronicle.evidence_blocks(period, events, "acme/project")
+        serialized = json.dumps(blocks)
+        self.assertEqual(6, serialized.count('"type": "figure"'))
+        self.assertEqual(2, serialized.count('"type": "asciicast"'))
+        self.assertFalse(any(block.get("type") == "figure" for block in blocks))
+        highlights = chronicle.release_highlights("highlights", events, "acme/project", limit=9)["nodes"]
+        self.assertLessEqual(len(highlights), 9)
+        self.assertEqual(len(highlights), len({node["title"] for node in highlights}))
+
+    def test_day_and_week_keep_their_compact_story_treatment(self):
+        event = chronicle.Event(
+            dt.datetime(2026, 8, 24, tzinfo=dt.timezone.utc),
+            "e" * 40,
+            "feat(tasks): show claimed work",
+            ("docs/evidence/task-board.png",),
+        )
+        periods = chronicle.periods_for(event.occurred_at.date())
+        day = chronicle.period_payload(periods["day"], [event], periods, "acme/project")
+        week = chronicle.period_payload(periods["week"], [event], periods, "acme/project")
+
+        for payload in (day, week):
+            by_id = {block["id"]: block for block in payload["blocks"]}
+            self.assertEqual("figure", next(block for block in payload["blocks"] if block.get("type") == "figure")["type"])
+            self.assertEqual("section", by_id["auto:work-themes"]["type"])
+            self.assertEqual("callout", by_id["auto:progress-assessment"]["type"])
+            self.assertIn("auto:progress-title", by_id)
+            self.assertIn("auto:dek", by_id)
 
     def test_long_editions_put_scale_and_release_highlights_on_the_reading_path(self):
         events = self.read_fixture_events()
@@ -283,9 +417,22 @@ class ChroniclePaperTest(unittest.TestCase):
 
         self.assertEqual("stats", by_id["auto:period-pulse"]["type"])
         self.assertEqual("lineage", by_id["auto:release-highlights"]["type"])
-        self.assertEqual("section", by_id["auto:archive-1"]["type"])
-        self.assertEqual(2, by_id["auto:archive-1"]["layout"]["tracks"])
+        self.assertEqual("lineage", by_id["auto:archive-1"]["type"])
+        self.assertEqual("August, week by week", by_id["auto:archive-title-1"]["text"])
+        self.assertLessEqual(len(by_id["auto:archive-1"]["nodes"]), 5)
+        self.assertTrue(all(node["source"].startswith("/papers/barkpark-changelog-2026-w") for node in by_id["auto:archive-1"]["nodes"]))
+        self.assertTrue(all("·" in node["overline"] for node in by_id["auto:archive-1"]["nodes"]))
         self.assertEqual("expandable", by_id["auto:archive-2"]["type"])
+        self.assertEqual("lineage", by_id["auto:work-themes"]["type"])
+        self.assertTrue(all("·" in node["overline"] for node in by_id["auto:work-themes"]["nodes"]))
+        self.assertEqual("What changed", by_id["auto:work-title"]["text"])
+        self.assertEqual("pullquote", by_id["auto:progress-assessment"]["type"])
+        self.assertNotIn("auto:progress-title", by_id)
+        self.assertNotIn("auto:dek", by_id)
+        self.assertLessEqual(len(by_id["auto:release-highlights"]["nodes"]), 6)
+        block_ids = [block["id"] for block in payload["blocks"]]
+        if "auto:evidence-lead" in block_ids:
+            self.assertLess(block_ids.index("auto:work-themes"), block_ids.index("auto:evidence-lead"))
         technical = by_id["auto:technical-record"]
         self.assertTrue(any(block["id"] == "auto:ledger" for block in technical["children"]))
 
@@ -324,7 +471,7 @@ class ChroniclePaperTest(unittest.TestCase):
             "feat(chronicle): make long editions visual (#14131)",
         )
         self.assertEqual(
-            "Chronicle months and years become rich visual editions",
+            "Chronicle month and year editions now include visual evidence",
             chronicle.concrete_fallback_headline(event),
         )
 

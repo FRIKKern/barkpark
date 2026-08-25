@@ -982,6 +982,22 @@ describe('PortableDoc — the type-keyed renderer', () => {
       expect(html).not.toContain('onerror="x')
       expect(html).toContain('&quot;')
     })
+
+    it('valid asciicast rows reach the shared hydration mount', () => {
+      const html = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', rows: 18 },
+      ])
+      expect(html).toContain('data-cast-src="https://ex.com/c.cast" data-cast-rows="18" style=')
+    })
+
+    it('invalid asciicast rows are omitted like the Elixir renderer', () => {
+      for (const rows of [5, 41, 18.5, '18']) {
+        const html = renderPortableDocument([
+          { type: 'asciicast', src: 'https://ex.com/c.cast', rows },
+        ])
+        expect(html).not.toContain('data-cast-rows')
+      }
+    })
   })
 
   // Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped

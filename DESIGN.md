@@ -2,7 +2,7 @@
 
 ## Source of truth
 - Status: Active
-- Last refreshed: 2026-08-24
+- Last refreshed: 2026-08-25
 - Primary product surfaces: Public Paper reader, Barkpark Chronicle index, Chronicle day/week/month/year editions, Studio Paper editor, email and TUI Paper views.
 - Evidence reviewed: `api/assets/paper-surface/paper-surface.css`, the PortableDoc image/figure/asciicast renderers, the live Paper relation resolver, `docs/evidence/**`, `tooling/paper-excellence/evidence/**`, the committed Paper Excellence screenshot panel, and fresh multi-viewport Chronicle renders.
 
@@ -43,15 +43,15 @@
 ## Visual language
 - Color: Existing evergreen Paper palette; semantic accents only for release categories and status.
 - Typography: Existing Paper editorial serif for narrative hierarchy and system sans/mono for metadata, labels, and evidence.
-- Spacing/layout rhythm: Preserve the measured 660px prose column, wide evidence band, 92px section beat, and structural rule hierarchy. The index uses no authored divider immediately before a section heading and no one-item grid; its open editorial groups should feel like a journal contents page, not stacked containers.
+- Spacing/layout rhythm: Preserve the measured 660px prose column, wide evidence band, 92px section beat, and structural rule hierarchy. A monthly or annual visual overture pairs editorial context with a restrained lead artifact inside the native column system; it never drops a full-page screenshot across the entire evidence band. The index uses no authored divider immediately before a section heading and no one-item grid; its open editorial groups should feel like a journal contents page, not stacked containers.
 - Shape/radius/elevation: Existing restrained Paper cards; no new shadows or decorative chrome.
 - Motion: None required for reading; existing theme controls only.
-- Imagery/iconography: Screenshots and asciicasts are evidence, never decoration. Each artifact must come from a commit inside the edition, explain what the reader is seeing, and be omitted when no honest visual exists. Prefer one representative over light/dark/mobile duplicates. Longer editions compose a restrained hero plus proof gallery so the breadth of a busy month or year is visible. Never autoplay.
+- Imagery/iconography: Screenshots and asciicasts are evidence, never decoration. Each artifact must come from a commit inside the edition, explain what the reader is seeing, and be omitted when no honest visual exists. Prefer one representative over light/dark/mobile duplicates. Reject full-document reader captures, screenshot-rig baselines, and repeated artifacts from one release when a focused product view exists. Longer editions compose a restrained lead plus a small proof gallery; honest scarcity is more premium than filler. Never autoplay.
 
 ## Components
 - Existing components to reuse: Eyebrow, heading, ingress, byline, columns, stats, section/grid, slot-based card with action, chart, lineage, list, callout, divider, expandable, and inline link.
-- New/changed components: Chronicle composes native `stats`, `figure(image)`, `asciicast`, `section`, `card`, and `lineage` blocks into a visible release pulse, proof gallery, release highlights, and period chapter cards. A `paper-links` block carries authored Paper refs and editorial reasons; the reader resolves current published details while email/TUI retain honest authored links. The index keeps an unboxed latest story, borderless edition navigation, a monthly list, and one expandable complete calendar.
-- Variants and states: Day uses at most one screenshot and one cast; week three and one; month eight and two; year twelve and three. Month and year add visual galleries, release highlights, and card-based chapter navigation. Empty periods receive an explicit quiet-edition message and retain navigation.
+- New/changed components: Chronicle composes native `stats`, `columns`, `figure(image)`, `asciicast`, `section`, `card`, and `lineage` blocks into a visible release pulse, restrained visual overture, editorial change rows, and compact release highlights. A `paper-links` block carries authored Paper refs and editorial reasons for both related reading and calendar chapters; the reader resolves current published details while email/TUI retain honest authored links. The index keeps an unboxed latest story, borderless edition navigation, a monthly list, and one expandable complete calendar.
+- Variants and states: Day uses at most one screenshot and one cast; week three and one; month four and one; year six and two. Month and year keep every figure inside a contained native column or grid composition, use lineage rows for the defining work, and use live Paper links for week/month chapters. Empty periods receive an explicit quiet-edition message and retain navigation.
 - Token/component ownership: `design/tokens.json` and `api/assets/paper-surface/paper-surface.css` remain canonical; Chronicle-specific composition lives in `scripts/chronicle-paper.py`.
 
 ## Accessibility

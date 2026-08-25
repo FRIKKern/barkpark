@@ -161,7 +161,7 @@ defmodule Barkpark.Content.Labels do
   def paper_render_opts(dataset, style), do: paper_render_opts(dataset, style, [])
 
   @doc false
-  def paper_render_opts(dataset, "article", scope),
+  def paper_render_opts(dataset, style, scope) when style in ["article", "article-wide"],
     do: Map.put(render_opts(dataset, scope), :style, :article)
 
   def paper_render_opts(dataset, _style, scope), do: render_opts(dataset, scope)
@@ -170,16 +170,16 @@ defmodule Barkpark.Content.Labels do
   # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs
   # wins (so an ingest/POST can set it), else the existing doc's stored style is
   # preserved (a partial update never silently demotes an article paper), else
-  # nil (the email default). Only "article" is meaningful; anything else is
-  # normalized away so we never persist a stray marker.
+  # nil (the email default). The two article widths share one render palette;
+  # anything else is normalized away so we never persist a stray marker.
   def paper_style(attrs, existing) do
     explicit = attrs["style"]
     existing_style = existing && get_in(existing.content || %{}, ["style"])
 
     cond do
-      explicit == "article" -> "article"
+      explicit in ["article", "article-wide"] -> explicit
       is_binary(explicit) -> nil
-      existing_style == "article" -> "article"
+      existing_style in ["article", "article-wide"] -> existing_style
       true -> nil
     end
   end

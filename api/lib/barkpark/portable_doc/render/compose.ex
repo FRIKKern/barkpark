@@ -479,14 +479,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     src = stringish(Map.get(b, "src", ""))
     caption = stringish(Map.get(b, "caption", ""))
     poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
-    %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, poster, :article)}
+
+    %{
+      "kind" => "_raw",
+      "html" => Figures.asciicast_html(src, caption, poster, asciicast_rows(b), :article)
+    }
   end
 
   def compose_block(%{"type" => "asciicast"} = b, style) do
     src = stringish(Map.get(b, "src", ""))
     caption = stringish(Map.get(b, "caption", ""))
     poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
-    %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, poster, style)}
+
+    %{
+      "kind" => "_raw",
+      "html" => Figures.asciicast_html(src, caption, poster, asciicast_rows(b), style)
+    }
   end
 
   # A curated set of related Papers. Authored refs remain useful in pure/email
@@ -1872,6 +1880,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp stringish(nil), do: ""
   defp stringish(v) when is_number(v) or is_atom(v), do: to_string(v)
   defp stringish(_), do: ""
+
+  defp asciicast_rows(block) do
+    case Map.get(block, "rows") do
+      value when is_integer(value) and value in 6..40 -> value
+      _ -> nil
+    end
+  end
 
   # ── footnote helpers ─────────────────────────────────────────────────────
   defp footnote_row_html(%{} = note) do
