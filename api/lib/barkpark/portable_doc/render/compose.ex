@@ -2552,6 +2552,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp paper_links_html(block, style) do
     resolved = Map.get(block, "_paper_links", %{})
     reasons = Map.get(block, "reasons", %{})
+    layout = nonblank(Map.get(block, "layout"))
 
     cards =
       block
@@ -2559,7 +2560,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       |> List.wrap()
       |> Enum.map(&paper_link_ref(&1, resolved, reasons))
       |> Enum.reject(&is_nil/1)
-      |> Enum.map_join(&paper_link_card(&1, style))
+      |> Enum.map_join(fn ref -> paper_link_card(ref, style, layout) end)
 
     if cards == "" do
       ""
@@ -2573,9 +2574,30 @@ defmodule Barkpark.PortableDoc.Render.Compose do
             ~s|<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">#{Util.escape_html(description)}</p>|,
           else: ""
 
-      ~s|<section data-paper-links aria-label="#{Util.escape_attr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
-        ~s|<header style="margin:0 0 1.15rem"><h2 style="margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)">#{Util.escape_html(title)}</h2>#{intro}</header>| <>
-        ~s(<div style="display:grid;gap:0.85rem">#{cards}</div></section>)
+      section_style =
+        if layout == "chapters",
+          do:
+            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:1px solid var(--paper-ink, #17332d)",
+          else:
+            "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+
+      title_style =
+        if layout == "chapters",
+          do:
+            "margin:0;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.8rem,4vw,2.65rem);line-height:1.08;letter-spacing:-0.025em;color:var(--paper-ink, #17332d)",
+          else: "margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)"
+
+      grid_style =
+        if layout == "chapters",
+          do:
+            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)",
+          else: "display:grid;gap:0.85rem"
+
+      layout_attr = if layout, do: ~s| data-layout="#{Util.escape_attr(layout)}"|, else: ""
+
+      ~s|<section data-paper-links#{layout_attr} aria-label="#{Util.escape_attr(title)}" style="#{section_style}">| <>
+        ~s|<header style="margin:0 0 #{if layout == "chapters", do: "2.15rem", else: "1.15rem"}"><h2 style="#{title_style}">#{Util.escape_html(title)}</h2>#{intro}</header>| <>
+        ~s(<div style="#{grid_style}">#{cards}</div></section>)
     end
   end
 
@@ -2588,14 +2610,29 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     if slug do
       live = Map.get(resolved, slug, %{})
+      prefer_authored_copy = Map.get(ref, "prefer_authored_copy") == true
+      authored_title = nonblank(Map.get(ref, "title"))
+      authored_description = nonblank(Map.get(ref, "description"))
 
       %{
         slug: slug,
-        title: live_value(live, :title) || nonblank(Map.get(ref, "title")) || slug,
-        description: live_value(live, :description) || nonblank(Map.get(ref, "description")),
+        title:
+          if(prefer_authored_copy,
+            do: authored_title || live_value(live, :title) || slug,
+            else: live_value(live, :title) || authored_title || slug
+          ),
+        description:
+          if(prefer_authored_copy,
+            do: authored_description || live_value(live, :description),
+            else: live_value(live, :description) || authored_description
+          ),
         reason:
           nonblank(Map.get(ref, "reason")) ||
             nonblank(Map.get(reasons, slug)),
+        eyebrow: nonblank(Map.get(ref, "eyebrow")),
+        meta: nonblank(Map.get(ref, "meta")),
+        featured: Map.get(ref, "featured") == true,
+        live: map_size(live) > 0,
         event_type: live_value(live, :event_type),
         rev: live_value(live, :rev),
         updated_at: live_value(live, :updated_at)
@@ -2605,7 +2642,29 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp paper_link_ref(_, _, _), do: nil
 
-  defp paper_link_card(ref, style) do
+  defp paper_link_card(ref, _style, "chapters") do
+    href = Util.escape_attr("/papers/" <> ref.slug)
+    featured = if ref.featured, do: "grid-column:1/-1;", else: ""
+
+    eyebrow =
+      if ref.eyebrow,
+        do:
+          ~s|<span style="display:block;margin-bottom:1.05rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.72rem;letter-spacing:0.12em;text-transform:uppercase;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(ref.eyebrow)}</span>|,
+        else: ""
+
+    description = paper_link_description(ref.description)
+    live_label = if ref.live, do: "Live edition", else: "Edition"
+    meta = [live_label, ref.meta] |> Enum.reject(&is_nil/1) |> Enum.join(" · ")
+
+    ~s|<a data-paper-link-card data-chapter href="#{href}" style="#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none">| <>
+      eyebrow <>
+      ~s|<strong style="display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
+      description <>
+      ~s|<span style="display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.7rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(meta)} &nbsp;→</span>| <>
+      ~s(</a>)
+  end
+
+  defp paper_link_card(ref, style, _layout) do
     href = Util.escape_attr("/papers/" <> ref.slug)
     description = paper_link_description(ref.description)
     reason = paper_link_reason(ref.reason, ref.description)

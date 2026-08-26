@@ -576,7 +576,7 @@
  * mirror only paints the embedder host. bpColumns emits `--bp-cols:N` off the projected
  * column count, and the reader's own grid rule reads it. Keep byte-aligned with
  * paper-surface.css. */
-.bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; align-items: start; }
+.bp-paper-editor-body .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
 @media (max-width: 720px) { .bp-paper-editor-body .bp-cols { grid-template-columns: 1fr; } }
 .bp-paper-editor-body .bp-cols__c { min-width: 0; }
 .bp-paper-editor-body .bp-cols__c > :first-child { margin-top: 0; }
