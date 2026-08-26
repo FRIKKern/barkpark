@@ -14,6 +14,18 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
     refute source =~ "onclick="
   end
 
+  test "wide proof opens at original size with an explicit fit alternative and pan surface", %{
+    source: source
+  } do
+    assert source =~ ~s|data-bp-lightbox-view="actual"|
+    assert source =~ ~s|data-bp-lightbox-view="fit"|
+    assert source =~ ~s|class="bp-image-lightbox__viewport" tabindex="0"|
+    assert source =~ ~s|setView(ratio >= 2.2 ? "actual" : "fit")|
+    assert source =~ "max-width: none"
+    assert source =~ "viewport.scrollLeft = pan.left"
+    assert source =~ ~s|viewport.addEventListener("pointermove"|
+  end
+
   test "paper images open progressively with their selected asset", %{source: source} do
     assert source =~ ~s|document.querySelector(".bp-paper-article")|
     assert source =~ ~s|event.target.closest("img")|
@@ -52,5 +64,20 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
     assert source =~ ~s|#paper-body > [data-block-id]:has(> h3)|
     assert source =~ "border-top: 1px solid"
     assert source =~ "text-wrap: balance"
+  end
+
+  test "numbered chapter-map cards link to matching numbered section headings", %{
+    source: source
+  } do
+    assert source =~ ~s|article.querySelectorAll('[data-block-id*="chapter-map"] .bp-card')|
+    assert source =~ ~s|card.dataset.bpChapterTarget = target.id|
+    assert source =~ ~s|card.setAttribute("role", "link")|
+    assert source =~ ~s|history.replaceState(null, "", "#" + target.id)|
+    assert source =~ ~s|window.matchMedia("(prefers-reduced-motion: reduce)")|
+
+    assert source =~
+             ~s|target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" })|
+
+    assert source =~ ~s|.bp-card[data-bp-chapter-target]:focus-visible|
   end
 end
