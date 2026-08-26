@@ -69,9 +69,18 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
   test "numbered chapter-map cards link to matching numbered section headings", %{
     source: source
   } do
+    assert source =~ ~s|function prepareChapters()|
+    assert source =~ ~s|var article = document.querySelector(".bp-paper-article")|
     assert source =~ ~s|article.querySelectorAll('[data-block-id*="chapter-map"] .bp-card')|
     assert source =~ ~s|card.dataset.bpChapterTarget = target.id|
     assert source =~ ~s|card.setAttribute("role", "link")|
+    assert source =~ ~s|window.addEventListener("phx:page-loading-stop", schedulePrepare)|
+
+    assert source =~
+             ~s|new MutationObserver(schedulePrepare).observe(document.body, { childList: true, subtree: true })|
+
+    assert source =~ ~s|document.addEventListener("click"|
+    assert source =~ ~s|document.addEventListener("keydown"|
     assert source =~ ~s|history.replaceState(null, "", "#" + target.id)|
     assert source =~ ~s|window.matchMedia("(prefers-reduced-motion: reduce)")|
 

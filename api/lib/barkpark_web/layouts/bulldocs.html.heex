@@ -1873,34 +1873,50 @@
 
   <script nonce={assigns[:csp_nonce]}>
     (function () {
-      var article = document.querySelector(".bp-paper-article");
-      if (!article) return;
-
       function chapterNumber(text) {
         var match = String(text || "").trim().match(/^0*(\d+)\s*[\u00b7.:–-]/);
         return match ? Number(match[1]) : null;
       }
 
-      var headings = Array.from(article.querySelectorAll("#paper-body h2"));
-      var targets = new Map();
-      headings.forEach(function (heading) {
-        var number = chapterNumber(heading.textContent);
-        var wrapper = heading.closest("[data-block-id]");
-        if (number === null || !wrapper || targets.has(number)) return;
-        if (!wrapper.id) wrapper.id = "bp-paper-chapter-" + number;
-        wrapper.dataset.bpChapterAnchor = "true";
-        targets.set(number, wrapper);
-      });
+      function prepareChapters() {
+        var article = document.querySelector(".bp-paper-article");
+        if (!article) return;
 
-      article.querySelectorAll('[data-block-id*="chapter-map"] .bp-card').forEach(function (card) {
-        var title = card.querySelector(".bp-card__t");
-        var target = targets.get(chapterNumber(title && title.textContent));
-        if (!target) return;
-        card.dataset.bpChapterTarget = target.id;
-        card.tabIndex = 0;
-        card.setAttribute("role", "link");
-        card.setAttribute("aria-label", "Go to " + (title ? title.textContent.trim() : "chapter"));
-      });
+        var headings = Array.from(article.querySelectorAll("#paper-body h2"));
+        var targets = new Map();
+        headings.forEach(function (heading) {
+          var number = chapterNumber(heading.textContent);
+          var wrapper = heading.closest("[data-block-id]");
+          if (number === null || !wrapper || targets.has(number)) return;
+          if (!wrapper.id) wrapper.id = "bp-paper-chapter-" + number;
+          wrapper.dataset.bpChapterAnchor = "true";
+          targets.set(number, wrapper);
+        });
+
+        article.querySelectorAll('[data-block-id*="chapter-map"] .bp-card').forEach(function (card) {
+          var title = card.querySelector(".bp-card__t");
+          var target = targets.get(chapterNumber(title && title.textContent));
+          if (!target) return;
+          card.dataset.bpChapterTarget = target.id;
+          card.tabIndex = 0;
+          card.setAttribute("role", "link");
+          card.setAttribute("aria-label", "Go to " + (title ? title.textContent.trim() : "chapter"));
+        });
+      }
+
+      var prepareScheduled = false;
+      function schedulePrepare() {
+        if (prepareScheduled) return;
+        prepareScheduled = true;
+        requestAnimationFrame(function () {
+          prepareScheduled = false;
+          prepareChapters();
+        });
+      }
+
+      prepareChapters();
+      window.addEventListener("phx:page-loading-stop", schedulePrepare);
+      new MutationObserver(schedulePrepare).observe(document.body, { childList: true, subtree: true });
 
       function follow(card) {
         var target = card && document.getElementById(card.dataset.bpChapterTarget);
@@ -1910,11 +1926,11 @@
         target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
       }
 
-      article.addEventListener("click", function (event) {
+      document.addEventListener("click", function (event) {
         var card = event.target.closest(".bp-card[data-bp-chapter-target]");
         if (card) follow(card);
       });
-      article.addEventListener("keydown", function (event) {
+      document.addEventListener("keydown", function (event) {
         if (event.key !== "Enter" && event.key !== " ") return;
         var card = event.target.closest(".bp-card[data-bp-chapter-target]");
         if (!card) return;
