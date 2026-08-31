@@ -47,7 +47,7 @@ BIN="$TMP/bin"; mkdir -p "$BIN"
 # still further down the real PATH, so "remove the stub" would silently fall
 # through to the live tool and the bp-is-absent case would test nothing.
 SYS="$TMP/sys"; mkdir -p "$SYS"
-for t in bash basename dirname date grep head tr cat sed python3; do
+for t in bash basename dirname date grep head tail tr cut sort cat sed python3; do
   real="$(command -v "$t" 2>/dev/null)"
   [ -n "$real" ] && ln -sf "$real" "$SYS/$t"
 done
@@ -323,6 +323,47 @@ if ! has "$OUT" "none open"; then
   ok "12b it does NOT claim there is no open PR"
 else
   bad "12b an unread PR signal was reported as 'none open'"
+fi
+
+section "13 the Task: TRAILER wins over a task id quoted in prose"
+# Measured on this script's own PR: a body-wide `grep -o | head -1` returned a
+# task id from a USAGE EXAMPLE and read a stranger's claim.
+fresh_world trailer_precedence
+echo 5000 > "$STUB/push-age-min"
+printf '4242\thttps://x/4242\t2026-08-31T09:00:00Z\tsomeone\n' > "$STUB/pr-line.txt"
+cat > "$STUB/pr-body.txt" <<'BODY'
+Some prose. For example you would run:
+
+    scripts/already-fixed.sh --task task-deadbeefdeadbeef
+
+and read the verdict.
+
+Task: task-aaaabbbbccccdddd
+BODY
+claim_json "right-owner" 3 > "$STUB/task-raw.json"
+run --no-fetch feature-x
+if has "$OUT" "task task-aaaabbbbccccdddd (from Task: trailer)"; then
+  ok "13a the TRAILER id was used, not the example id"
+else
+  bad "13a picked the wrong task id: $(grep -F 'task task-' <<<"$OUT" || echo none)"
+fi
+if ! has "$OUT" "task-deadbeefdeadbeef"; then
+  ok "13b the prose id never reached the claim read"
+else
+  bad "13b a task id quoted in prose was resolved as the owner"
+fi
+
+section "14 with NO trailer it still falls back, but LABELS the guess"
+fresh_world no_trailer
+echo 5000 > "$STUB/push-age-min"
+printf '4242\thttps://x/4242\t2026-08-31T09:00:00Z\tsomeone\n' > "$STUB/pr-line.txt"
+printf 'No trailer here, only a mention of task-aaaabbbbccccdddd inline.\n' > "$STUB/pr-body.txt"
+claim_json "fallback-owner" 3 > "$STUB/task-raw.json"
+run --no-fetch feature-x
+if has "$OUT" "(from a bare mention in the body (NO Task: trailer))"; then
+  ok "14a the fallback is DISCLOSED as a bare mention, not passed off as a trailer"
+else
+  bad "14a the fallback was not labelled"
 fi
 
 echo

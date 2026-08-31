@@ -194,9 +194,23 @@ CLAIM_TS=""
 CLAIM_AGE=""
 CLAIM_WHY=""
 
+TASK_SOURCE=""
+
+# THE TRAILER LINE FIRST, AND A BARE SCAN ONLY AS A FALLBACK. A body-wide
+# `grep -o 'task-[0-9a-f]+' | head -1` looks equivalent and is not: measured on
+# this script's own PR, it returned a task id quoted inside a USAGE EXAMPLE and
+# went off to read a stranger's claim. The trailer is the declaration; anything
+# else in the body is prose. Bare, backticked and bulleted trailers all count,
+# and the LAST one wins because a trailer sits at the end.
 if [ -n "$PR_BODY" ]; then
-  # Bare, backticked or bulleted — all three trailer shapes are in the wild.
-  TASK_ID="$(grep -oE 'task-[0-9a-f]{8,}' <<<"$PR_BODY" | head -1 || true)"
+  TASK_ID="$(grep -oiE '^[[:space:]]*([-*][[:space:]]*)?task:[[:space:]]*`?task-[0-9a-f]{8,}' <<<"$PR_BODY" \
+             | grep -oiE 'task-[0-9a-f]{8,}' | tail -1 || true)"
+  if [ -n "$TASK_ID" ]; then
+    TASK_SOURCE="Task: trailer"
+  else
+    TASK_ID="$(grep -oE 'task-[0-9a-f]{8,}' <<<"$PR_BODY" | head -1 || true)"
+    [ -n "$TASK_ID" ] && TASK_SOURCE="a bare mention in the body (NO Task: trailer)"
+  fi
 fi
 
 # claim_fields — reads the FLAT top-level `claim` off a raw bp task document on
@@ -310,7 +324,8 @@ fi
 
 printf '\n  bp claim behind the Task: trailer:\n'
 if [ -n "$CLAIM_WORKER" ]; then
-  printf '    task %s held by %s (epoch %s)\n' "$TASK_ID" "$CLAIM_WORKER" "${CLAIM_EPOCH:-?}"
+  printf '    task %s (from %s)\n' "$TASK_ID" "$TASK_SOURCE"
+  printf '    held by %s (epoch %s)\n' "$CLAIM_WORKER" "${CLAIM_EPOCH:-?}"
   if [ -n "$CLAIM_AGE" ]; then
     printf '    claim last moved %s minutes ago (%s)\n' "$CLAIM_AGE" "$CLAIM_TS"
   else
