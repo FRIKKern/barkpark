@@ -48,15 +48,16 @@ var (
 // diffTwinStatusMessage maps a non-OK published-twin read to the status line
 // openDiffView shows instead of opening the modal. NotFound means the draft
 // has genuinely never been published — today's copy, byte-identical, shown
-// as a neutral info line. Unreachable means the probe itself failed (5s
-// timeout, transport error, bad body) — it must NOT be reported as "never
-// published" (that would assert the twin is absent when we simply don't
-// know), so it gets a distinct, error-styled message instead.
+// as a neutral info line. Any OTHER failure means the probe itself did not
+// land, and must NOT be reported as "never published" (that would assert the
+// twin is absent when we simply don't know), so it gets a distinct,
+// error-styled message that names WHICH failure: "network error, try again"
+// was wrong copy for a 403 (retrying a refusal never helps) and for a 5xx.
 func diffTwinStatusMessage(outcome apiclient.DocReadOutcome) (msg string, isErr bool) {
 	if outcome == apiclient.DocReadNotFound {
 		return "never published — every field is new", false
 	}
-	return "could not check published twin — network error, try again", true
+	return "could not check published twin — " + outcome.Describe(), true
 }
 
 // openDiffView builds the field diff for the doc in the editor. Inert (status

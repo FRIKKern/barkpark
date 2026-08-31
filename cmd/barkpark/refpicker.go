@@ -6,6 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
@@ -66,7 +68,10 @@ func publishedID(id string) string {
 // list, else on the first document (the "(clear)" row is never the default
 // landing unless the list is empty). All fetched titles are cached.
 func (m *model) openRefPicker(field Field) {
-	docs := m.ds.Query(field.RefType, "")
+	// QueryResult, not Query: a refused/unreachable read also yields zero
+	// docs, and the empty-list arm below reported that as "no <type>
+	// documents" — asserting the type is empty when we never got to look.
+	docs, outcome := m.ds.QueryResult(field.RefType, "")
 	if m.refTitles == nil {
 		m.refTitles = make(map[string]string)
 	}
@@ -95,8 +100,19 @@ func (m *model) openRefPicker(field Field) {
 		cursor:    cursor,
 	}
 	if len(docs) == 0 {
-		m.refPicker.err = "no " + field.RefType + " documents"
+		m.refPicker.err = refPickerEmptyError(field.RefType, outcome)
 	}
+}
+
+// refPickerEmptyError names WHY the picker has no rows. An empty list is only
+// "no <type> documents" when the read actually succeeded; a refusal or an
+// unreachable server gets its own message, because the two suggest opposite
+// next actions (create one vs. fix the connection).
+func refPickerEmptyError(refType string, outcome apiclient.DocReadOutcome) string {
+	if outcome.Failed() {
+		return "couldn't load " + refType + " — " + outcome.Describe()
+	}
+	return "no " + refType + " documents"
 }
 
 // openOptionPicker reuses the reference-picker modal for a LONG select
@@ -257,7 +273,7 @@ func (m *model) cacheRefTitlesFor(schema *Schema) {
 		if _, ok := m.refTitles[val]; ok {
 			continue
 		}
-		docs := m.ds.Query(f.RefType, "")
+		docs, outcome := m.ds.QueryResult(f.RefType, "")
 		if m.refTitles == nil {
 			m.refTitles = make(map[string]string)
 		}
@@ -268,8 +284,11 @@ func (m *model) cacheRefTitlesFor(schema *Schema) {
 		// from it points at a deleted doc. The "" sentinel means "checked,
 		// not found" — renderField shows the broken-reference warning. A
 		// FAILED fetch returns zero docs and would mark every ref broken,
-		// so only mark when the fetch produced something.
-		if _, ok := m.refTitles[val]; !ok && len(docs) > 0 {
+		// so only mark when the READ SUCCEEDED. This replaces a len(docs)>0
+		// proxy that was wrong in BOTH directions: it stayed silent about a
+		// genuinely broken ref whenever the type happened to be empty, and it
+		// could not see a successful read that returned nothing.
+		if _, ok := m.refTitles[val]; !ok && outcome == apiclient.DocReadOK {
 			m.refTitles[val] = ""
 		}
 	}

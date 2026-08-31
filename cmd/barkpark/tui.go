@@ -21,6 +21,14 @@ type Pane struct {
 	Cursor    int
 	Scroll    int
 	IsDocList bool
+	// ReadFailed marks a doc-list pane whose query did NOT succeed — a
+	// transport error, a 401/403, a 5xx, or an undecodable body. It exists
+	// because Items is empty in exactly that case too, and painting the
+	// "No documents yet" placeholder over a refused read tells the user the
+	// type is empty when the truth is that we never got to look. Only ever
+	// set from apiclient's DocReadOutcome; a decodable 200 with zero rows is
+	// an honest empty and leaves this false.
+	ReadFailed bool
 }
 
 // PaneItem is a single renderable row inside a Pane.
@@ -128,6 +136,12 @@ type model struct {
 	discardArmed   bool
 	discardDocID   string // the BARE published id (what the mutation takes)
 	discardDocType string
+	// docReadFailed marks a NodeDocument pane whose single-document query did
+	// NOT succeed. It is the editor-pane twin of Pane.ReadFailed: with no rows
+	// AND no successful read, selectedDoc stays nil and renderEditor would fall
+	// to the "Select a document to edit" splash — the same lie the doc-list
+	// pane told with "No documents yet". Reset on every rebuildPanes.
+	docReadFailed bool
 	// workerID is this TUI's task-claim worker identity (BARKPARK_WORKER_ID,
 	// default "tui-<hostname>"), computed once in initialModel.
 	workerID string
@@ -369,6 +383,7 @@ func (m *model) rebuildPanes() {
 	m.showEditor = false
 	m.selectedDoc = nil
 	m.editorSchema = nil
+	m.docReadFailed = false
 
 	current := rootStructure
 	m.panes = append(m.panes, m.buildListPane(current))
@@ -404,9 +419,15 @@ func (m *model) rebuildPanes() {
 			goto done
 
 		case NodeDocument:
-			docs := m.ds.Query(child.TypeName, "")
+			// QueryResult, not Query: a refused/unreachable read also yields
+			// zero docs, and leaving selectedDoc nil sends renderEditor to the
+			// "select a document" splash — indistinguishable from a type that
+			// genuinely holds none.
+			docs, outcome := m.ds.QueryResult(child.TypeName, "")
 			if len(docs) > 0 {
 				m.selectedDoc = &docs[0]
+			} else if outcome.Failed() {
+				m.docReadFailed = true
 			}
 			m.editorSchema = findSchema(child.TypeName)
 			m.showEditor = true
@@ -450,7 +471,7 @@ func (m *model) buildListPane(node *StructureNode) Pane {
 }
 
 func (m *model) buildDocListPane(node *StructureNode) Pane {
-	docs := m.ds.Query(node.TypeName, node.Filter)
+	docs, outcome := m.ds.QueryResult(node.TypeName, node.Filter)
 	preview := schemaListPreview(node.TypeName)
 	var items []PaneItem
 	for i := range docs {
@@ -465,7 +486,7 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 			Meta:     rowMeta(docs[i], preview),
 		})
 	}
-	return Pane{Node: node, Items: items, IsDocList: true}
+	return Pane{Node: node, Items: items, IsDocList: true, ReadFailed: outcome != apiclient.DocReadOK}
 }
 
 // refreshViewport rebuilds editor content without resetting scroll position.
