@@ -13,6 +13,14 @@ defmodule Barkpark.Media do
 
   @metadata_fields ~w(title altText caption description tags collection collections assetRole rights focalPoint relatedAssets bp_visibility)
 
+  # `list_files/2`'s bound, named so the function and its docstring cannot
+  # drift apart — mirrors the @max_limit convention in
+  # `Barkpark.Content.Query` (clamp the caller's `:limit`, never discard it).
+  # The VALUE is unrelated to that module's: this is also today's DEFAULT
+  # (pre-existing behaviour for every caller that passes no `:limit`), so it
+  # stays at the historical ceiling rather than Query's tighter 1000.
+  @max_limit 10_000
+
   # ── blob path allowlist (pds W1 G2 — put_blob/2) ───────────────────────────
   #
   # The cross-instance blob-push route (PUT .../media/blob/*path) writes bytes at
@@ -294,9 +302,18 @@ defmodule Barkpark.Media do
     end
   end
 
-  @doc "List all media files for a dataset."
+  @doc """
+  List media files for a dataset. Returns a bare list, bounded by `:limit`
+  (default #{inspect(@max_limit)}, clamped to `@max_limit` — never honoured
+  verbatim above it). This is NOT "all" files: a dataset holding more rows
+  than the effective limit is silently truncated here, identically to before
+  this bound existed. Callers that need to know whether the page is exhaustive
+  — or the dataset's true row count — must use `query_files/2`, which returns
+  `{files, total}`.
+  """
   def list_files(dataset, opts \\ []) when is_binary(dataset) do
-    {files, _} = query_files(dataset, Keyword.delete(opts, :limit) |> Keyword.put(:limit, 10_000))
+    limit = opts |> Keyword.get(:limit, @max_limit) |> min(@max_limit) |> max(1)
+    {files, _total} = query_files(dataset, Keyword.put(opts, :limit, limit))
     files
   end
 

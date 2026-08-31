@@ -10,7 +10,8 @@ defmodule Barkpark.MediaTest do
     * `get_file_by_path/2` — happy path, :not_found, workspace isolation.
     * `delete_file/2` — happy path deletes DB row, :not_found guard, workspace
       isolation (cross-workspace delete returns :not_found).
-    * `list_files/2` — returns all unscoped rows for a dataset.
+    * `list_files/2` — bounded by `:limit` (default + clamp 10_000; never
+      honoured verbatim above that).
     * `query_files/2` — returns {files, total_count}.
     * `search_files/2` — returns {files, total, facets, meta}.
 
@@ -73,6 +74,36 @@ defmodule Barkpark.MediaTest do
     tmp = Path.join(System.tmp_dir!(), "mt-#{System.unique_integer([:positive])}-#{filename}")
     File.write!(tmp, content)
     %Plug.Upload{path: tmp, filename: filename, content_type: "application/octet-stream"}
+  end
+
+  # Bulk-seed `media_files` rows straight through `insert_all` — mirrors
+  # `content/query_collect_all_documents_test.exs`'s convention for pinning a
+  # clamp without N real create round-trips. Chunked at 500 rows/statement so
+  # a @max_limit-sized seed (10_001 rows × 9 columns) never approaches
+  # Postgres's ~65_535 bound-parameter ceiling per statement.
+  defp seed_many!(n, dataset) do
+    now = DateTime.utc_now()
+
+    1..n
+    |> Enum.map(fn i ->
+      suffix = "#{System.unique_integer([:positive])}-#{i}"
+
+      %{
+        id: Ecto.UUID.generate(),
+        filename: "bulk-#{suffix}.png",
+        original_name: "bulk-original-#{suffix}.png",
+        path: "test/bulk/#{suffix}.png",
+        mime_type: "image/png",
+        size: 1,
+        dataset: dataset,
+        inserted_at: now,
+        updated_at: now
+      }
+    end)
+    |> Enum.chunk_every(500)
+    |> Enum.each(fn chunk -> {_count, nil} = Repo.insert_all(MediaFile, chunk) end)
+
+    :ok
   end
 
   # Override :media_uploads config for one test, restoring the prior value after.
@@ -322,6 +353,48 @@ defmodule Barkpark.MediaTest do
     test "returns empty list when no files exist for the dataset" do
       fresh = "fresh-ds-#{System.unique_integer([:positive])}"
       assert Media.list_files(fresh) == []
+    end
+
+    # THE DEFECT (task wb-api-media-list-files-limit): unpatched code does
+    # `Keyword.delete(opts, :limit) |> Keyword.put(:limit, 10_000)` — it
+    # explicitly discards the caller's `:limit` before substituting a fixed
+    # 10_000. Seeded count (5) sits well under that 10_000, so unpatched code
+    # returns all 5 here regardless of the `limit: 3` the caller asked for;
+    # this assertion REDS on unpatched code and is GREEN once `:limit` is
+    # threaded through.
+    test "honours a caller-supplied :limit smaller than the seeded rows" do
+      ds = "limit-honoured-#{System.unique_integer([:positive])}"
+      seed_many!(5, ds)
+
+      files = Media.list_files(ds, limit: 3)
+
+      assert length(files) == 3
+    end
+
+    # THE CLAMP: a limit above @max_limit is capped, never honoured verbatim
+    # and never an error. Mirrors
+    # `content/query_collect_all_documents_test.exs`'s "the clamp is REAL"
+    # shape — seed one row past the ceiling and prove the page stops short.
+    test "a :limit above @max_limit is clamped, not honoured verbatim" do
+      ds = "limit-clamped-#{System.unique_integer([:positive])}"
+      seed_many!(10_001, ds)
+
+      files = Media.list_files(ds, limit: 50_000)
+
+      assert length(files) == 10_000
+    end
+
+    # DEFAULT PRESERVATION: no existing caller passes `:limit` (see the
+    # `grep -rn 'list_files(' api/lib api/test` evidence on the task), so the
+    # no-:limit ceiling must stay exactly what it was before this fix —
+    # 10_000 — or every one of those callers changes behaviour silently.
+    test "with no :limit supplied, the ceiling stays the historical 10_000" do
+      ds = "limit-default-#{System.unique_integer([:positive])}"
+      seed_many!(10_001, ds)
+
+      files = Media.list_files(ds)
+
+      assert length(files) == 10_000
     end
   end
 
