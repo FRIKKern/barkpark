@@ -154,6 +154,38 @@ function normalizeFieldList(input: string | readonly string[], label: string): s
   return cleaned.join(',')
 }
 
+/**
+ * Coerce a caller-supplied cache-tag list into a real array.
+ *
+ * The READ-side twin of the `Array.isArray` guards on the WRITE side
+ * (src/revalidate/index.ts `sync_tags` / `paths`), for the same reason and
+ * against the same hazard: `opts.tags` / `opts.syncTags` are TYPED
+ * `readonly string[]`, but the type closes nothing — TypeScript's
+ * excess-property check fires only on a fresh object literal, and this package
+ * ships CJS/ESM consumable from plain JS where no type exists at all. A bare
+ * STRING is iterable, so `tags: 'my-tag'` used to SPREAD into
+ * ['m','y','-','t','a','g'], and the per-element `typeof t === 'string'` filter
+ * downstream is exactly what made it silent — every character passes it. The
+ * fetch was then cached under six single-character junk tags and never under
+ * the real one, so `revalidateTag('my-tag')` never matched: a permanently stale
+ * page with no error anywhere. A non-array non-string (a number/object from a
+ * config-assembled options bag) previously reached the spread and threw a raw
+ * `TypeError: not iterable` out of `barkparkFetch`, escaping the Barkpark error
+ * taxonomy entirely.
+ *
+ * COERCE rather than throw, deliberately: this is the read path, where the only
+ * consequence of a caller's mistake is cache-tag shape, and a throw would turn
+ * a rendering page into a 500. It also matches the two precedents this package
+ * already set — {@link normalizeFieldList} above coerces `string | string[]`
+ * the same way, and the write side simply IGNORES a non-array rather than
+ * raising. Empty strings are dropped (an empty tag matches nothing).
+ */
+function asTagList(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value as readonly string[]
+  if (typeof value === 'string') return value.length > 0 ? [value] : []
+  return []
+}
+
 function pickRequestId(body: unknown): string | undefined {
   if (body === null || typeof body !== 'object') return undefined
   const b = body as Record<string, unknown>
@@ -295,8 +327,10 @@ export async function barkparkFetchInner<T = unknown>(
   // grammar), else LEGACY flat `bp:ds:<dataset>` (back-compat).
   const prefix = resolveTagPrefix(cfg)
   const dsTag = `${prefix}:_all`
-  const userTags = opts.tags ?? []
-  const knownSyncTags = opts.syncTags ?? []
+  // `asTagList`, not `?? []`: a bare-string `tags` is iterable and would spread
+  // character by character into the tag set below — see that helper's note.
+  const userTags = asTagList(opts.tags)
+  const knownSyncTags = asTagList(opts.syncTags)
 
   // Canonical auto-tags so `revalidateTag('<prefix>:doc:<id>')` and
   // `:type:<type>` fired by the webhook bridge actually match this fetch.
@@ -353,6 +387,9 @@ async function runFetch<T>(cfg: BarkparkServerConfig, input: RunFetchInput): Pro
       init.cache = 'force-cache'
       const seen = new Set<string>()
       const tags: string[] = []
+      // The `typeof t === 'string'` below is an ELEMENT filter, not a container
+      // guard — every character of a spread string passes it. The container
+      // guard is `asTagList`, applied where userTags/knownSyncTags are built.
       for (const t of [input.dsTag, ...input.autoTags, ...input.userTags, ...input.knownSyncTags]) {
         if (typeof t === 'string' && t.length > 0 && !seen.has(t)) {
           seen.add(t)
