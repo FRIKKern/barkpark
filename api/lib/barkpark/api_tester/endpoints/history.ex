@@ -119,8 +119,15 @@ defmodule Barkpark.ApiTester.Endpoints.History do
       }
       """,
       possible_errors: [:unauthorized, :not_found],
+      # wb-api-tester-unverified-badge: no real revision id is available without
+      # a prior history-list round-trip, so the default ("") `id` never reaches
+      # this controller's own "revision not found" logic — verified live: it
+      # falls through to the unrelated generic-document 404 envelope instead (a
+      # route mismatch, not this endpoint's contract). Asserting that accidental
+      # shape would be exactly the kind of check-that-isn't-a-check this task
+      # removes. runnable: false is the honest choice.
       expect: nil,
-      runnable: true
+      runnable: false
     }
   end
 
@@ -157,8 +164,13 @@ defmodule Barkpark.ApiTester.Endpoints.History do
       }
       """,
       possible_errors: [:unauthorized, :not_found],
+      # wb-api-tester-unverified-badge: same as history-show — the default ("")
+      # `id` doesn't reach this controller's "revision not found" logic, it hits
+      # an unrelated generic-document 404 via route mismatch (verified live).
+      # This endpoint is also a WRITE (restores a draft) — doubly not something
+      # to auto-run with a fabricated id. runnable: false is the honest choice.
       expect: nil,
-      runnable: true
+      runnable: false
     }
   end
 end

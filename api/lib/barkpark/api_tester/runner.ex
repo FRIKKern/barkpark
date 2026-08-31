@@ -83,7 +83,8 @@ defmodule Barkpark.ApiTester.Runner do
     - `body_text`   — raw response body
     - `body_json`   — decoded JSON if parseable, else nil
     - `duration_ms` — wall-clock time
-    - `verdict`     — :pass | :fail | :error (runtime issue)
+    - `verdict`     — :pass | :fail | :error (runtime issue) | :unverified (no
+                       expectation was evaluated — NOT a pass, a third state)
     - `verdict_reason` — short human string
     - `request`     — echoed back for display (url/method/headers/body_text)
   """
@@ -106,18 +107,25 @@ defmodule Barkpark.ApiTester.Runner do
 
     started = System.monotonic_time(:millisecond)
 
+    # Tests thread extra Req options (e.g. `req_options: [plug: {Req.Test, Stub}]`)
+    # so verdict computation is unit-testable without a live HTTP port — mirrors
+    # Barkpark.ApiTestRunner.fire/2's `:req_options` pass-through. Appended last
+    # so a caller override wins on overlap.
+    req_opts =
+      [
+        method: method_atom(tc.method),
+        url: url,
+        headers: headers,
+        body: body,
+        decode_body: false,
+        receive_timeout: 5_000,
+        connect_options: [timeout: 2_000],
+        retry: false
+      ] ++ Keyword.get(opts, :req_options, [])
+
     req_result =
       try do
-        Req.request(
-          method: method_atom(tc.method),
-          url: url,
-          headers: headers,
-          body: body,
-          decode_body: false,
-          receive_timeout: 5_000,
-          connect_options: [timeout: 2_000],
-          retry: false
-        )
+        Req.request(req_opts)
       rescue
         e -> {:error, Exception.message(e)}
       end
@@ -169,8 +177,13 @@ defmodule Barkpark.ApiTester.Runner do
   end
 
   # ── Predicate checks ──────────────────────────────────────────────────
+  #
+  # `:unverified` is a THIRD state, not a passing grade: these two arms
+  # never inspect the response at all, so a 500 must not badge the same
+  # as a real, checked 200. Do not fold `:unverified` into `:pass` in any
+  # caller — see Studio's format layer for the distinct badge mapping.
 
-  defp check(%{expect: nil}, _), do: {:pass, "no expectation — manual check"}
+  defp check(%{expect: nil}, _), do: {:unverified, "no expectation — manual check"}
 
   defp check(%{expect: {expected_status, predicate}}, %{
          status: status,
@@ -187,7 +200,7 @@ defmodule Barkpark.ApiTester.Runner do
     end
   end
 
-  defp check(_, _), do: {:pass, "no expectation"}
+  defp check(_, _), do: {:unverified, "no expectation"}
 
   defp run_predicate(:ok, _, _), do: :ok
 

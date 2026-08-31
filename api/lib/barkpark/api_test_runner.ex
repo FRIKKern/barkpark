@@ -20,9 +20,13 @@ defmodule Barkpark.ApiTestRunner do
         asserts: [{tag, :pass | :fail, message}],
         cleanup: [%{method:, path:, status:, duration_ms:} | %{error: msg}],
         duration_ms: total_ms,
-        status: :pass | :fail | :error,
+        status: :pass | :fail | :error | :unverified,
         error_message: nil | String.t()
       }
+
+  `:unverified` is a THIRD state, not a pass: it fires only when the spec
+  carries zero `:asserts` (nothing was actually checked against the
+  response), so a 500 can never badge the same as a real, checked pass.
   """
 
   alias Barkpark.ApiTestRunner.Asserts
@@ -246,6 +250,11 @@ defmodule Barkpark.ApiTestRunner do
   # ----- status / redaction ----------------------------------------------
 
   defp compute_status(nil, _), do: :error
+
+  # A response landed but the spec checked nothing against it — this is the
+  # zero-expectation case the gate-integrity fix targets: :unverified is a
+  # THIRD state, never folded into :pass, so a 500 can't badge green.
+  defp compute_status(_resp, []), do: :unverified
 
   defp compute_status(_resp, asserts) do
     cond do
