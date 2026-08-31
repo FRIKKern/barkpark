@@ -11,7 +11,8 @@ import (
 // LIVE server publishes at GET /v1/capabilities (verified against
 // http://89.167.28.206/v1/capabilities: auth_tier "none", path_template
 // "/v1/data/search/:dataset", and a declared `perspective` flag whose summary
-// reads "published (default) | drafts | raw." — capabilities.ex:1655).
+// reads "published (default) | drafts | raw." — see the `search.query` entry in
+// api/lib/barkpark/plugins/capabilities.ex).
 //
 // It is hand-built rather than read from docs/cli/fixtures/core-manifest.json
 // because that fixture predates the flag: it still carries search.query at tier
