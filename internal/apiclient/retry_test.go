@@ -4,6 +4,8 @@
 package apiclient
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -401,6 +403,63 @@ func TestDoesNotRetryWhenTheDeadlineCannotAffordIt(t *testing.T) {
 				t.Errorf("body must survive intact, got %q", string(body))
 			}
 		})
+	}
+}
+
+// A context that is CANCELLABLE but carries no deadline — exactly the shape
+// interrupt handling threads through — must interrupt the inter-attempt
+// backoff sleep, not be silently ignored by it. Regression for
+// wbt-go-retry-context-cancel: hasBudgetFor only ever consulted Deadline(),
+// and sleepFor slept unconditionally, so a mid-backoff cancellation was
+// invisible to both and RoundTrip slept out the entire delay before noticing.
+func TestRetryBackoffCancelledContextReturnsPromptly(t *testing.T) {
+	srv := &scriptedServer{script: []scriptedResponse{
+		{http.StatusInternalServerError, liveInternalErrorBody},
+		{http.StatusOK, `{"ok":true}`},
+	}}
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	rt, _ := testTransport(nil)
+	// A REAL sleep here, deliberately: the point of this test is the race
+	// between the backoff and the cancellation, and a no-op injected sleep
+	// would make that race meaningless. The first scheduled delay is
+	// retryDelays[0] (250ms); cancelling at 20ms and asserting completion
+	// well under that proves the cancellation won the race, not the clock —
+	// and it proves the t.sleep seam is exercisable on this path too.
+	rt.sleep = func(d time.Duration) { time.Sleep(d) }
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	resp, err := rt.RoundTrip(req)
+	elapsed := time.Since(start)
+	if resp != nil {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		_ = resp.Body.Close()
+	}
+
+	if err == nil {
+		t.Fatal("want an error from the cancelled backoff, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want it to wrap context.Canceled", err)
+	}
+	if elapsed >= retryDelays[0] {
+		t.Errorf("elapsed = %s, want well under the %s backoff delay — the cancellation should have cut the sleep short", elapsed, retryDelays[0])
+	}
+	if got := srv.hits.Load(); got != 1 {
+		t.Errorf("server hits = %d, want exactly 1 — cancellation must stop before the retried request goes out", got)
 	}
 }
 
