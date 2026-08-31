@@ -70,6 +70,11 @@ function note(msg) {
   process.stderr.write(msg + "\n");
 }
 
+// Sentinel for "the gate could not read its instrument". Thrown rather than
+// exited so the single exit point below can set process.exitCode and let node
+// flush — the same drain race this whole file exists to close.
+class GateFault extends Error {}
+
 function runNodeJson(scriptPath, extraArgs = []) {
   const out = execFileSync(process.execPath, [scriptPath, "--json", ...extraArgs], {
     cwd: REPO_ROOT,
@@ -96,7 +101,7 @@ function runNodeJson(scriptPath, extraArgs = []) {
       note(`  buffer — the payload was TRUNCATED, not malformed. Check that the`);
       note(`  script does not call process.exit() after writing --json to stdout.`);
     }
-    process.exit(2);
+    throw new GateFault();
   }
 }
 
@@ -323,4 +328,15 @@ function main() {
   return 0;
 }
 
-process.exit(main());
+// process.exitCode, NOT process.exit() — same reason grade.mjs and boundary.mjs
+// no longer call it. main() writes the --json report to stdout immediately
+// before this line, and architecture.yml pipes this script into `tee`; an
+// exit() here would race the async pipe drain and cut the report at one 65536-
+// byte buffer. Assigning exitCode lets node flush and then exit with the same
+// status, so the gate keeps its 0 / 1 (regression) / 2 (fault) contract.
+try {
+  process.exitCode = main();
+} catch (err) {
+  if (!(err instanceof GateFault)) throw err;
+  process.exitCode = 2; // FAULT — the diagnosis is already on stderr.
+}
