@@ -126,6 +126,37 @@ abort_deploy() {
 trap 'ensure_shared_services >/dev/null 2>&1 || true' EXIT
 trap 'ensure_shared_services >/dev/null 2>&1 || true; exit 130' HUP INT TERM
 
+# ---- Pre-build headroom guard (2026-08-31 outage: the box hit 100% of 38G —
+# 839 never-pruned deploy images + 14GB build cache — and Postgres could not
+# write pgsql_tmp, 500ing GET /v1/barkparks; the whole fleet surface went dark).
+# A `docker compose build` on a nearly-full disk digs the hole DEEPER (build
+# cache + a new image land before anything could be reclaimed) and the thing it
+# starves is the LIVE DB sharing this filesystem — so below the floor we refuse
+# outright, before any container is touched. Measures the filesystem holding
+# docker's data (falls back to / when /var/lib/docker is not its own thing).
+# Fails OPEN only when df itself cannot answer — a guard that refuses every
+# deploy on a healthy box is worse than none (same call as the fleet build
+# gate) — and that skip is logged loudly.
+HEADROOM_PATH="${BARKPARK_HEADROOM_PATH:-/var/lib/docker}"
+[ -d "$HEADROOM_PATH" ] || HEADROOM_PATH=/
+MIN_FREE_GB="${BARKPARK_MIN_FREE_GB:-5}"
+if ! echo "$MIN_FREE_GB" | grep -qE '^[0-9]+$'; then
+  log "WARNING: BARKPARK_MIN_FREE_GB='$MIN_FREE_GB' is not a whole number of GB — using the default 5G floor"
+  MIN_FREE_GB=5
+fi
+AVAIL_KB="$(df -Pk "$HEADROOM_PATH" 2>/dev/null | awk 'NR==2 {print $4}')"
+if ! echo "$AVAIL_KB" | grep -qE '^[0-9]+$'; then
+  log "WARNING: could not measure free space on $HEADROOM_PATH (df answered '$AVAIL_KB') — headroom guard SKIPPED, deploy continues"
+elif [ "$AVAIL_KB" -lt "$((MIN_FREE_GB * 1024 * 1024))" ]; then
+  AVAIL_H="$(awk "BEGIN{printf \"%.1fG\", $AVAIL_KB/1048576}")"
+  log "REFUSING to build: only $AVAIL_H free on $HEADROOM_PATH, below the ${MIN_FREE_GB}G floor — a build on a full disk digs the hole deeper and can kill the live DB (2026-08-31: 100% disk 500'd the fleet API). Remediation: GitHub Actions -> cp-ops -> box-prune with box_ip pointed at THIS box, or on the box: docker image prune -af && docker builder prune -af. Floor override: BARKPARK_MIN_FREE_GB."
+  git reset --hard "$OLD"
+  exit 17
+else
+  AVAIL_H="$(awk "BEGIN{printf \"%.1fG\", $AVAIL_KB/1048576}")"
+  log "headroom ok: $AVAIL_H free on $HEADROOM_PATH (floor ${MIN_FREE_GB}G)"
+fi
+
 log "docker compose build (active slot still serving)"
 if ! compose build; then
   log "BUILD FAILED — reset + abort (no downtime)"; git reset --hard "$OLD"; exit 13
@@ -235,6 +266,36 @@ sleep 5
 for c in $(docker ps -q --filter "publish=$ACTIVE_PORT"); do
   log "stopping old slot container on :$ACTIVE_PORT ($c)"; docker stop -t 30 "$c"
 done
+
+# ---- Post-flip disk hygiene (the other half of the 2026-08-31 outage fix):
+# every deploy used to leave one more image behind, forever — 839 of them when
+# the box hit 100%. Prune here and ONLY here: every failure path above exits
+# before this line, so a failed health gate / dead flip / unhealthy slot never
+# prunes anything. `docker image prune -a` removes only images NO container
+# references — the new slot's image is held by its RUNNING container and the
+# rollback image is held by the just-stopped old-slot container (kept precisely
+# for instant `docker start` rollback), so both survive every prune by
+# construction. Build cache keeps a floor (fast rebuilds) instead of growing
+# forever. Non-fatal on purpose: the flip has already landed and been proven —
+# a prune hiccup must not turn a good deploy red.
+log "post-flip prune: unreferenced images + build cache (rollback slot's image survives — its stopped container references it)"
+if img_out="$(docker image prune -af 2>&1)"; then
+  log "image prune: $(printf '%s\n' "$img_out" | grep -i 'reclaimed' || echo 'nothing to reclaim')"
+else
+  log "WARNING: docker image prune failed (deploy unaffected): $(printf '%s\n' "$img_out" | tail -1)"
+fi
+CACHE_KEEP="${BARKPARK_BUILD_CACHE_KEEP:-2GB}"
+if cache_out="$(docker builder prune -af --keep-storage "$CACHE_KEEP" 2>&1)"; then
+  log "builder prune (cache floor $CACHE_KEEP): $(printf '%s\n' "$cache_out" | grep -iE 'reclaimed|^Total' | tail -1 || echo 'nothing to reclaim')"
+elif cache_out="$(docker builder prune -af 2>&1)"; then
+  # --keep-storage has been deprecated once already (buildx renamed it); if the
+  # flag ever disappears the prune must still run — an unbounded cache is the
+  # outage, a cold cache is only a slower next build.
+  log "builder prune: --keep-storage refused, pruned ALL build cache instead: $(printf '%s\n' "$cache_out" | grep -iE 'reclaimed|^Total' | tail -1 || echo 'nothing to reclaim')"
+else
+  log "WARNING: docker builder prune failed (deploy unaffected): $(printf '%s\n' "$cache_out" | tail -1)"
+fi
+log "disk after prune: $(df -Pk "$HEADROOM_PATH" 2>/dev/null | awk 'NR==2 {printf "%.1fG free of %.1fG (%s used) on %s", $4/1048576, $2/1048576, $5, $6}')"
 
 # ---- Pin the provisioner's control-url to the STABLE FRONT (dwb-16).
 # ROOT CAUSE of the "/new froze at Starting" incident: the worker unit hardcoded

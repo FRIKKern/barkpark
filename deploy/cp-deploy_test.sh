@@ -206,6 +206,19 @@ case "${1:-}" in
         exit 0 ;;
     esac
     exit 0 ;;
+  image)
+    [ "${2:-}" = "prune" ] || exit 0
+    [ "${IMAGE_PRUNE_FAIL:-0}" = 1 ] && { echo "Error: image prune blew up" >&2; exit 1; }
+    echo "Total reclaimed space: 21.4GB"
+    exit 0 ;;
+  builder)
+    [ "${2:-}" = "prune" ] || exit 0
+    for a in "$@"; do case "$a" in
+      --keep-storage) [ "${BUILDER_KEEP_FLAG_FAIL:-0}" = 1 ] && { echo "unknown flag: --keep-storage" >&2; exit 125; } ;;
+    esac; done
+    [ "${BUILDER_PRUNE_FAIL:-0}" = 1 ] && { echo "Error: builder prune blew up" >&2; exit 1; }
+    echo "Total: 14.2GB"
+    exit 0 ;;
 esac
 exit 0
 EOF
@@ -259,6 +272,22 @@ EOF
 if [ "${1:-}" = "-i" ]; then shift; expr="$1"; shift; exec perl -pi -e "$expr" "$@"; fi
 exec /usr/bin/sed "$@"
 EOF
+  # Fake df: DF_AVAIL_KB drives the headroom guard (default: 50G free, well
+  # above any floor); DF_FAIL=1 makes df unanswerable (the guard's skip path).
+  cat > "$dir/df" <<'EOF'
+#!/usr/bin/env bash
+[ "${DF_FAIL:-0}" = 1 ] && exit 1
+avail="${DF_AVAIL_KB:-52428800}"
+total=104857600
+echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+echo "/dev/fake $total $((total - avail)) $avail 50% /"
+EOF
+  # macOS has no flock(1) and the deploy lock is not under test here. Faked
+  # ONLY when the real one is absent, so Linux CI still exercises the real
+  # thing — without this every case on a Mac dies at exit 15 (lock wait).
+  if ! command -v flock >/dev/null 2>&1; then
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/flock"
+  fi
   chmod +x "$dir"/*
 }
 
@@ -383,6 +412,113 @@ check "public probe 404: exit 14 (not 0)"        "[ '$rc' = '14' ]"
 check "public probe 404: named in the log"       "grep -q 'post-flip public health check FAILED' '$FTMP/out.log'"
 check "public probe 404: Caddy flipped BACK to :4100" "[ \"\$(upstream)\" = 'localhost:4100' ]"
 check "public probe 404: the LIVE blue slot was NEVER stopped" "[ -f '$DSTATE/running.4100' ]"
+
+# ===========================================================================
+# Disk hygiene: post-flip prune + pre-build headroom guard
+# (task-646054a48241ffe2 — the 2026-08-31 outage: 839 never-pruned deploy
+# images + 14GB build cache filled the box to 100% and Postgres 500'd the
+# fleet list). Two arms: every SUCCESSFUL deploy prunes what nothing
+# references (the rollback slot's image survives — its stopped container
+# references it), and a deploy that would build below the headroom floor
+# REFUSES before touching anything.
+# ===========================================================================
+echo
+echo "cp-deploy disk hygiene (task-646054a48241ffe2)"
+
+# Prune must run AFTER the old slot is retired — the stopped container is what
+# anchors the rollback image through `docker image prune -af`. Order is read
+# from the docker log, not inferred from the script text.
+prune_after_stop() {
+  local stop_ln prune_ln
+  stop_ln="$(grep -n '^docker stop' "$DOCKERLOG" | tail -1 | cut -d: -f1)"
+  prune_ln="$(grep -n '^docker image prune' "$DOCKERLOG" | head -1 | cut -d: -f1)"
+  [ -n "$stop_ln" ] && [ -n "$prune_ln" ] && [ "$prune_ln" -gt "$stop_ln" ]
+}
+
+# ---- Case 8: a healthy deploy prunes after retiring the old slot, and the
+# output carries the evidence: reclaimed bytes + a df line.
+setup_flip localhost:4100
+rc="$(run_flip)"
+check "healthy: exit 0" "[ '$rc' = '0' ]"
+check "healthy: headroom measured + logged before the build" "grep -q 'headroom ok:' '$FTMP/out.log'"
+check "healthy: image prune ran" "grep -q '^docker image prune -af' '$DOCKERLOG'"
+check "healthy: builder prune ran with a cache floor" "grep -q -- '^docker builder prune -af --keep-storage' '$DOCKERLOG'"
+check "healthy: reclaimed image bytes logged" "grep -q 'image prune: Total reclaimed space: 21.4GB' '$FTMP/out.log'"
+check "healthy: reclaimed build-cache bytes logged" "grep -q 'Total: 14.2GB' '$FTMP/out.log'"
+check "healthy: df line logged after the prune" "grep -q 'disk after prune: .*free of' '$FTMP/out.log'"
+check "healthy: prune ran AFTER the old slot was stopped" "prune_after_stop"
+
+# ---- Case 9: prune fires ONLY on a successful flip — every abort path skips
+# it. A failed deploy must never reclaim anything: the abort paths lean on the
+# rollback image + old slot, and pruning mid-abort is exactly the wrong moment.
+setup_flip localhost:4100
+rc="$(run_flip PUBLIC_HEALTH_CODE=502)"
+check "public probe fails: exit 14" "[ '$rc' = '14' ]"
+check "public probe fails: NO image prune ran" "! grep -q 'image prune' '$DOCKERLOG'"
+check "public probe fails: NO builder prune ran" "! grep -q 'builder prune' '$DOCKERLOG'"
+
+setup_flip localhost:4100
+rc="$(run_flip HEALTH_CODE=404)"
+check "boot probe fails: exit 14" "[ '$rc' = '14' ]"
+check "boot probe fails: NO image prune ran" "! grep -q 'image prune' '$DOCKERLOG'"
+check "boot probe fails: NO builder prune ran" "! grep -q 'builder prune' '$DOCKERLOG'"
+
+setup_flip localhost:4100
+rc="$(run_flip COMPOSE_BUILD_FAIL=1)"
+check "build fails: exit 13" "[ '$rc' = '13' ]"
+check "build fails: NO image prune ran" "! grep -q 'image prune' '$DOCKERLOG'"
+check "build fails: NO builder prune ran" "! grep -q 'builder prune' '$DOCKERLOG'"
+
+# ---- Case 10: below the floor (1G free vs the 5G default) the deploy REFUSES
+# before building — a build on a full disk digs the hole deeper and the live DB
+# shares the filesystem.
+setup_flip localhost:4100
+rc="$(run_flip DF_AVAIL_KB=1048576)"
+check "headroom refusal: exit 17" "[ '$rc' = '17' ]"
+check "headroom refusal: names the floor" "grep -q '5G floor' '$FTMP/out.log'"
+check "headroom refusal: names the actual free space" "grep -q 'only 1.0G free' '$FTMP/out.log'"
+check "headroom refusal: names the box-prune remediation" "grep -q 'box-prune' '$FTMP/out.log'"
+check "headroom refusal: nothing was built" "! grep -q 'compose.*build' '$DOCKERLOG'"
+check "headroom refusal: Caddy untouched" "[ \"\$(upstream)\" = 'localhost:4100' ]"
+check "headroom refusal: the live slot survives" "[ -f '$DSTATE/running.4100' ]"
+check "headroom refusal: checkout reset back" "grep -q 'reset --hard' '$GITLOG'"
+
+# ---- Case 11: above the floor the deploy proceeds; a raised floor is honoured
+setup_flip localhost:4100
+rc="$(run_flip DF_AVAIL_KB=$((6 * 1024 * 1024)))"
+check "6G free vs 5G floor: exit 0" "[ '$rc' = '0' ]"
+check "6G free vs 5G floor: flip landed" "[ \"\$(upstream)\" = 'localhost:4101' ]"
+
+setup_flip localhost:4100
+rc="$(run_flip DF_AVAIL_KB=$((6 * 1024 * 1024)) BARKPARK_MIN_FREE_GB=10)"
+check "6G free vs raised 10G floor: exit 17" "[ '$rc' = '17' ]"
+check "6G free vs raised 10G floor: refusal names the raised floor" "grep -q '10G floor' '$FTMP/out.log'"
+
+# ---- Case 12: df unanswerable -> the guard skips OPEN, loudly. A guard that
+# refuses every deploy on a healthy box is worse than none (fleet-build-gate
+# precedent), but the skip must be visible in the log.
+setup_flip localhost:4100
+rc="$(run_flip DF_FAIL=1)"
+check "df dead: deploy proceeds (exit 0)" "[ '$rc' = '0' ]"
+check "df dead: the skip is loud in the log" "grep -q 'headroom guard SKIPPED' '$FTMP/out.log'"
+
+# ---- Case 13: a prune failure never turns a PROVEN deploy red — the flip has
+# already landed and been health-gated; hygiene is best-effort after that.
+setup_flip localhost:4100
+rc="$(run_flip IMAGE_PRUNE_FAIL=1 BUILDER_PRUNE_FAIL=1)"
+check "prunes fail: deploy still exit 0" "[ '$rc' = '0' ]"
+check "prunes fail: image prune WARNING logged" "grep -q 'WARNING: docker image prune failed' '$FTMP/out.log'"
+check "prunes fail: builder prune WARNING logged" "grep -q 'WARNING: docker builder prune failed' '$FTMP/out.log'"
+check "prunes fail: the flip stands" "[ \"\$(upstream)\" = 'localhost:4101' ]"
+
+# ---- Case 14: --keep-storage refused (buildx renamed it once already) -> the
+# cache is still pruned flagless. An unbounded cache IS the outage; a cold
+# cache is only a slower next build.
+setup_flip localhost:4100
+rc="$(run_flip BUILDER_KEEP_FLAG_FAIL=1)"
+check "keep-storage refused: deploy still exit 0" "[ '$rc' = '0' ]"
+check "keep-storage refused: fallback named in the log" "grep -q 'pruned ALL build cache' '$FTMP/out.log'"
+check "keep-storage refused: a flagless builder prune ran" "grep -q '^docker builder prune -af\$' '$DOCKERLOG'"
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL PASS"; else echo "$fails FAIL"; fi
 exit "$fails"
