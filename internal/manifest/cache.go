@@ -26,9 +26,21 @@ type Cache struct {
 
 // cacheEntry is the on-disk JSON shape. Body is stored raw so a load returns the
 // exact bytes the ETag was content-addressed over.
+//
+// ManifestVersion and GeneratedAt mirror the two generation fields the stored
+// manifest itself carries (Manifest.ManifestVersion / Manifest.GeneratedAt in
+// manifest.go), lifted to the entry's top level so Fetch's downgrade guard
+// (fetch.go) can read the cached generation via CachedGeneration without a
+// full re-parse of Body. Both are omitempty: a cacheEntry written before this
+// guard existed (the pre-change shape, just {etag, body}) has neither.
+// CachedGeneration reports that absence as ok=false — "generation unknown",
+// never "definitely older" — so an old on-disk cache file degrades
+// gracefully instead of blocking the next Store.
 type cacheEntry struct {
-	ETag string          `json:"etag"`
-	Body json.RawMessage `json:"body"`
+	ETag            string          `json:"etag"`
+	Body            json.RawMessage `json:"body"`
+	ManifestVersion string          `json:"manifest_version,omitempty"`
+	GeneratedAt     string          `json:"generated_at,omitempty"`
 }
 
 // DefaultCacheDir is ${XDG_CACHE_HOME:-~/.cache}/barkpark. A missing HOME (rare,
@@ -96,18 +108,46 @@ func (c *Cache) Load(key string) (m *Manifest, etag string, ok bool) {
 	return parsed, entry.ETag, true
 }
 
+// CachedGeneration returns the generated_at and manifest_version Store last
+// recorded for key, read directly off the entry's top-level fields (no Body
+// re-parse). ok=false means either no entry exists for key, the entry is
+// corrupt, or the entry predates this guard (Store began stamping these
+// fields with this change — an on-disk entry from an older bp has neither).
+// Callers MUST treat ok=false as "generation unknown," never as "older," so
+// a legacy cache file never blocks the next Store.
+func (c *Cache) CachedGeneration(key string) (generatedAt, manifestVersion string, ok bool) {
+	raw, err := os.ReadFile(c.pathFor(key))
+	if err != nil {
+		return "", "", false
+	}
+	var entry cacheEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return "", "", false
+	}
+	if entry.GeneratedAt == "" {
+		return "", "", false
+	}
+	return entry.GeneratedAt, entry.ManifestVersion, true
+}
+
 // Store writes body + etag for key, creating the cache dir if needed. It
 // validates body parses before persisting so a 304 against this entry later
 // always returns a usable manifest. A write failure is returned so the caller
 // can decide whether to care (Fetch ignores it — caching is best-effort).
 func (c *Cache) Store(key string, body []byte, etag string) error {
-	if _, err := Parse(body); err != nil {
+	m, err := Parse(body)
+	if err != nil {
 		return fmt.Errorf("cache store: body does not parse: %w", err)
 	}
 	if err := os.MkdirAll(c.dir, 0o755); err != nil {
 		return fmt.Errorf("cache store: mkdir: %w", err)
 	}
-	entry := cacheEntry{ETag: etag, Body: json.RawMessage(body)}
+	entry := cacheEntry{
+		ETag:            etag,
+		Body:            json.RawMessage(body),
+		ManifestVersion: m.ManifestVersion,
+		GeneratedAt:     m.GeneratedAt,
+	}
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("cache store: marshal: %w", err)
