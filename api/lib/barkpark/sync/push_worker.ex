@@ -29,6 +29,8 @@ defmodule Barkpark.Sync.PushWorker do
 
   use GenServer
 
+  require Logger
+
   alias Barkpark.Sync
   alias Barkpark.Sync.{Outbox, PushCursor, Pusher}
 
@@ -94,11 +96,16 @@ defmodule Barkpark.Sync.PushWorker do
       close_fun: state.close_fun
     }
 
-    {results, _cursor} = Pusher.drain(events, state.ctx, funs)
+    {results, cursor} = Pusher.drain(events, state.ctx, funs)
 
     {attempt, delay} =
       if halted?(results) do
-        {state.attempt + 1, state.backoff_fun.(state.attempt)}
+        # `state.attempt` (pre-increment) still drives `backoff_fun` exactly as
+        # before this change — only the NEW value is reused as the
+        # consecutive-halt count for visibility, no extra state field.
+        new_attempt = state.attempt + 1
+        report_halt(state.ctx, results, cursor, new_attempt)
+        {new_attempt, state.backoff_fun.(state.attempt)}
       else
         {0, state.settings.push_interval_ms}
       end
@@ -112,6 +119,72 @@ defmodule Barkpark.Sync.PushWorker do
   defp halted?(results) do
     Enum.any?(results, &match?({_id, {:error, :transient}}, &1))
   end
+
+  # Drain-halt visibility (the PUSH side of this subsystem was previously
+  # completely dark — no log, telemetry, or dead-letter; the PULL side has had
+  # a `Logger.warning` at the equivalent site since `Worker` was written).
+  #
+  # The warning is rate-limited to a cadence that widens WITH the backoff
+  # itself: fired on the 1st halt, then only when `consecutive_halts` is a
+  # power of two (1, 2, 4, 8, 16, 32, ...). A remote that is wedged for good
+  # still gets a trickle of warnings forever (never silence), but a transient
+  # blip that clears in a few ticks logs once, not once per ~30s forever.
+  # Telemetry is NOT rate-limited — it fires on every halt, because a counter
+  # losing samples to a log-noise budget defeats the point of a counter; the
+  # log is the noise-bounded surface, the telemetry event is the complete one.
+  #
+  # `reason` is logged exactly as `Pusher.drain/3` returns it today (always
+  # `:transient` — pusher.ex collapses every non-whitelisted failure before it
+  # gets here). Threading the pre-coercion underlying reason out of Pusher is
+  # deferred (backlog: wb-bl-sync-pusher-reason-preservation) and explicitly
+  # OUT of this task's fence; reporting `:transient` honestly beats fabricating
+  # a cause this worker does not actually have.
+  defp report_halt(ctx, results, cursor, consecutive_halts) do
+    {halted_id, reason} = halted_entry(results)
+
+    metadata = %{
+      source: ctx.source,
+      dataset: ctx.dataset,
+      url: Map.get(ctx, :url),
+      event_id: halted_id,
+      cursor: cursor,
+      reason: reason,
+      consecutive_halts: consecutive_halts
+    }
+
+    if log_halt?(consecutive_halts) do
+      Logger.warning(
+        "[Sync] push drain halted at event #{inspect(halted_id)} " <>
+          "(#{inspect(reason)}) pushing #{inspect(ctx.dataset)} to " <>
+          "#{inspect(Map.get(ctx, :url))}; cursor frozen at #{cursor}, " <>
+          "consecutive halts: #{consecutive_halts}"
+      )
+    end
+
+    :telemetry.execute(
+      [:barkpark, :sync, :push, :halt],
+      %{consecutive_halts: consecutive_halts, cursor: cursor},
+      metadata
+    )
+
+    :ok
+  end
+
+  defp halted_entry(results) do
+    case Enum.find(results, &match?({_id, {:error, :transient}}, &1)) do
+      {id, {:error, reason}} -> {id, reason}
+      nil -> {nil, :transient}
+    end
+  end
+
+  defp log_halt?(1), do: true
+  defp log_halt?(n) when n > 1, do: power_of_two?(n)
+  defp log_halt?(_), do: false
+
+  defp power_of_two?(n) when n <= 0, do: false
+  defp power_of_two?(1), do: true
+  defp power_of_two?(n) when rem(n, 2) == 0, do: power_of_two?(div(n, 2))
+  defp power_of_two?(_), do: false
 
   defp schedule(state, delay), do: state.tick_fun.(self(), delay)
 
