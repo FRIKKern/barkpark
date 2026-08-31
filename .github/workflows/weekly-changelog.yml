@@ -79,7 +79,20 @@ jobs:
           BACKFILL_ALL: ${{ github.event.inputs.backfill_all || 'false' }}
         run: |
           if [ "$BACKFILL_ALL" = "true" ]; then
-            mapfile -t weeks < <(python3 scripts/weekly-changelog.py --list-editorial-weeks)
+            if ! weeks_raw="$(python3 scripts/weekly-changelog.py --list-editorial-weeks)"; then
+              echo "::error::--list-editorial-weeks exited non-zero; refusing a silent no-op backfill"
+              exit 1
+            fi
+            mapfile -t weeks <<< "$weeks_raw"
+            non_empty_weeks=()
+            for week in "${weeks[@]}"; do
+              [ -n "$week" ] && non_empty_weeks+=("$week")
+            done
+            weeks=("${non_empty_weeks[@]}")
+            if [ "${#weeks[@]}" -eq 0 ]; then
+              echo "::error::--list-editorial-weeks produced no weeks; refusing a silent no-op backfill"
+              exit 1
+            fi
           else
             weeks=("$WEEK")
           fi
