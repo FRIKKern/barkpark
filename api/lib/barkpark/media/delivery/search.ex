@@ -165,6 +165,7 @@ defmodule Barkpark.Media.Delivery.Search do
     |> maybe_filter_tags(selections["tags"])
     |> maybe_filter_visibility(Keyword.get(opts, :visibility))
     |> maybe_filter_visibility(selections["visibility"])
+    |> maybe_clamp_visibility(Keyword.get(opts, :visibility_clamp))
   end
 
   # Pre-scoped Document subquery the search LEFT-JOINs against. Without scope on
@@ -633,8 +634,25 @@ defmodule Barkpark.Media.Delivery.Search do
              ], params ++ [tags], idx + 1}
       end)
 
+    parts = parts ++ visibility_clamp_sql(Keyword.get(opts, :visibility_clamp))
+
     {Enum.join(parts, " "), params}
   end
+
+  # The raw-SQL twin of `maybe_clamp_visibility/2`. The tags facet is the ONE
+  # aggregation that does not route through `build_query/2`, so without this an
+  # anonymous tag census would count a PRIVATE asset's tags — leaking the
+  # vocabulary of the very rows the same request is refused. Same COALESCE
+  # default and same `:public` key as its Ecto twin, so the two cannot drift in
+  # meaning without drifting visibly.
+  #
+  # No bound parameter, deliberately: the ceiling is a constant and never
+  # caller-derived, so the SQL text stays free of request input and the accepted
+  # sobelow waiver on `run_tags_facet_sql/2` keeps its stated basis.
+  defp visibility_clamp_sql(:public),
+    do: ["AND COALESCE(d.content->>'bp_visibility', 'public') = 'public'"]
+
+  defp visibility_clamp_sql(_), do: []
 
   defp flat_filters(opts, extra) do
     skip_tags? = Keyword.get(extra, :skip_tags, false)
@@ -923,6 +941,36 @@ defmodule Barkpark.Media.Delivery.Search do
   defp maybe_filter_visibility(query, visibility) when is_binary(visibility) do
     where(query, [_m, d], fragment("?->>? = ?", d.content, "bp_visibility", ^visibility))
   end
+
+  # THE UNAUTHENTICATED READ CLAMP (task-27d5fdba100d2bc6 item 3).
+  #
+  # Distinct from `maybe_filter_visibility/2` above in BOTH directions, which is
+  # why it is a separate clause rather than a reuse:
+  #
+  #   * It is a CEILING, not a filter. `maybe_filter_visibility/2` is caller
+  #     supplied — an anonymous caller could pass `?visibility=private` and it
+  #     was honoured. The clamp is appended AFTER it, so both predicates hold and
+  #     the caller's filter can only ever narrow inside the ceiling.
+  #
+  #   * It is NULL-TOLERANT, and must be. `= 'public'` would be wrong here:
+  #     `Access.visibility/1` reads `content["bp_visibility"] || "public"` and
+  #     answers "public" for a nil doc, so a blob with no `mediaAsset` document
+  #     at all — or one whose document predates the field — IS public. On a LEFT
+  #     JOIN with no match `d.content` is NULL, and a bare equality would drop
+  #     exactly those rows: the clamp would hide legitimately public assets from
+  #     every anonymous consumer. COALESCE reproduces the Elixir default.
+  #
+  # `""` deliberately does NOT survive the clamp, matching `delivery_ok?/3`'s
+  # unknown-tier arm, which denies an unauthenticated caller.
+  defp maybe_clamp_visibility(query, :public) do
+    where(
+      query,
+      [_m, d],
+      fragment("COALESCE(?->>?, 'public') = 'public'", d.content, "bp_visibility")
+    )
+  end
+
+  defp maybe_clamp_visibility(query, _), do: query
 
   defp maybe_filter_mime(query, nil), do: query
   defp maybe_filter_mime(query, ""), do: query
