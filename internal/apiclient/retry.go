@@ -5,6 +5,7 @@ package apiclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -180,7 +181,13 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 				Delay:   delay,
 			})
 		}
-		t.sleepFor(delay)
+		if err := t.sleepFor(req.Context(), delay); err != nil {
+			// The caller cancelled (or its context otherwise ended) while we
+			// were waiting out the backoff. Surface that promptly rather
+			// than sleeping out a delay nobody is waiting on anymore —
+			// resp.Body is already drained and closed above.
+			return nil, fmt.Errorf("barkpark: retry backoff interrupted: %w", err)
+		}
 	}
 }
 
@@ -218,15 +225,49 @@ func (t *retryTransport) delayFor(attempt int) time.Duration {
 	return delays[len(delays)-1]
 }
 
-func (t *retryTransport) sleepFor(d time.Duration) {
+// sleepFor waits for d, honoring ctx's cancellation. It returns ctx.Err()
+// promptly if ctx ends before the wait completes, nil once the full d has
+// elapsed.
+//
+// A context that is cancellable but carries no deadline — exactly the shape
+// interrupt handling threads through — is invisible to hasBudgetFor above
+// (it only consults Deadline()), so this select is the only place that
+// notices a mid-backoff cancellation. Without it, RoundTrip would sleep out
+// the entire delay after the caller had already given up.
+//
+// The injected t.sleep seam (see testTransport) rides the same race: its
+// completion is turned into a channel close so a test can still prove the
+// cancellable path fires without spending the real delay on the happy path.
+func (t *retryTransport) sleepFor(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
-		return
+		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	if t.sleep != nil {
-		t.sleep(d)
-		return
+		done := make(chan struct{})
+		go func() {
+			t.sleep(d)
+			close(done)
+		}()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+			return nil
+		}
 	}
-	time.Sleep(d)
+
+	timer := time.NewTimer(d)
+	defer timer.Stop() // stopped on both the cancelled and the elapsed branch
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // isRetryableServerFault reports whether resp is EXACTLY the transient fault
