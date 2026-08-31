@@ -198,9 +198,12 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       # row-level indicator at all. That reasoning is UNCHANGED by the fix —
       # what changed is that the ENVELOPE now answers where the rows cannot,
       # which is the entire justification for adding it.
-      empty = conn |> bearer(@garbage) |> federated_body(
-                "/v1/search/#{@dataset}?q=zzznomatchzzz&surfaces=documents&perspective=drafts"
-              )
+      empty =
+        conn
+        |> bearer(@garbage)
+        |> federated_body(
+          "/v1/search/#{@dataset}?q=zzznomatchzzz&surfaces=documents&perspective=drafts"
+        )
 
       assert hits(empty) == [],
              "zero-row precondition broken; got #{inspect(ids(empty))}"
