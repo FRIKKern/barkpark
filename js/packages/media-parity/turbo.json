@@ -1,3 +1,16 @@
 {
-  "extends": ["//"]
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "vitest.config.ts",
+        "vitest.browser.config.ts",
+        "vitest.workerd.config.ts",
+        "wrangler.toml",
+        "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**"
+      ]
+    }
+  }
 }
