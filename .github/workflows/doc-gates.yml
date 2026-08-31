@@ -137,6 +137,9 @@ on:
       - "api/lib/**/*.ex"
       - "scripts/tenant-scope-check.sh"
       - "scripts/tenant-scope-baseline.txt"
+      # NEW-lineref gate. No baseline file to list: it is diff-scoped, so the
+      # script is the whole input surface.
+      - "scripts/new-lineref-check.sh"
       # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
       # principal must be the MOST RESTRICTIVE anonymous one — never a bypass. This
       # gate reds if a fail-OPEN nil/catch-all clause of Envelope.field_readable?/3
@@ -292,6 +295,9 @@ on:
       - "api/lib/**/*.ex"
       - "scripts/tenant-scope-check.sh"
       - "scripts/tenant-scope-baseline.txt"
+      # NEW-lineref gate. No baseline file to list: it is diff-scoped, so the
+      # script is the whole input surface.
+      - "scripts/new-lineref-check.sh"
       # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
       # principal must be the MOST RESTRICTIVE anonymous one — never a bypass. This
       # gate reds if a fail-OPEN nil/catch-all clause of Envelope.field_readable?/3
@@ -343,6 +349,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history so the NEW-lineref gate below can reach the PR base and
+          # diff against the MERGE BASE. At the default depth of 1 there is no
+          # base commit in the clone, and that gate would exit 2
+          # (HARNESS-UNAVAILABLE) on every PR — honest, but it would never
+          # actually check anything. Every other step here reads the worktree
+          # and is indifferent to depth.
+          fetch-depth: 0
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -611,6 +625,36 @@ jobs:
           node tooling/doc-truth/retired-terms.mjs
           node tooling/doc-truth/lineref-sweep.mjs --selftest
           node tooling/doc-truth/lineref-sweep.mjs
+
+      # NEW linerefs, which the sweep above structurally cannot see.
+      #
+      # lineref-sweep.mjs reports a citation only once `runVerify` finds the
+      # cited line no longer holds what the comment says — i.e. once it has
+      # ALREADY drifted. A citation that is ACCURATE TODAY is not a finding, so
+      # it passes, and rots at its leisure; the sweep then reds later, on a PR
+      # that merely inserted a line somewhere above it, authored by someone who
+      # never saw the comment. That is this class taking its third lap.
+      #
+      # This arm refuses the citation while it is still true, because being true
+      # today is not a property a line number keeps. Between them: the sweep
+      # holds the 542 already-drifted entries flat, this one stops the 543rd
+      # being written.
+      #
+      # DIFF-SCOPED, so there is no baseline and nothing that can rot. Measured
+      # before it was wired: over the last 40 commits on main, 37 touched source
+      # and 4 (~11%) introduced exactly one new comment lineref each — about one
+      # PR in nine, one line to fix. Run against those four real commits it reds
+      # on all four, naming each citation; against five real commits that added
+      # 15-138 comment lines with no citation it passes all five.
+      #
+      # --selftest first, 8 hermetic arms, including the two that keep it honest
+      # rather than merely present: an unresolvable base REFUSES at exit 2
+      # instead of passing, and HEAD == base reports SKIPPED rather than OK so a
+      # reader can tell "found nothing" from "never looked".
+      - name: New file:line citations in comments (fails this job)
+        run: |
+          bash scripts/new-lineref-check.sh --selftest
+          bash scripts/new-lineref-check.sh
 
       # Tenant fail-open read baseline gate (barkpark-w9dg scar class — the FIXED
       # public-paper cross-workspace leak). Tenant isolation on the document/graph
