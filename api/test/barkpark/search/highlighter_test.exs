@@ -383,5 +383,35 @@ defmodule Barkpark.Search.HighlighterTest do
 
       assert result["7"]["title"] == "<mark>elixir</mark> Book"
     end
+
+    # task-5cf80a99ecd52bf2: `media_field_text/3` used to have a clause per
+    # KNOWN field name (title/original_name/filename/tags) and NOTHING else —
+    # a `highlight_fields` entry that is not one of those names (e.g. a
+    # config value written before write-time validation existed, or any
+    # already-corrupted row) raised `FunctionClauseError`. That crash landed
+    # on the NEXT search request, not the write that introduced the bad
+    # value — a stored-config denial of service. This is the READ-side half
+    # of the fix (defence in depth: rows corrupted BEFORE the write-time
+    # validation landed still exist and must degrade, not crash).
+    test "an unrecognized highlight_fields entry degrades to no highlight, never raises" do
+      file = %FakeFile{id: 99, original_name: "photo.jpg", filename: "photo.jpg"}
+      parsed = %{terms: ["photo"], phrases: [], prefixes: []}
+      config = %{"highlight_fields" => ["filename", "cliverbs-media-marker"]}
+
+      result = Highlighter.highlight_media([file], parsed, config, %{})
+
+      assert result["99"]["filename"] == "<mark>photo</mark>.jpg"
+      refute Map.has_key?(result["99"], "cliverbs-media-marker")
+    end
+
+    test "an unrecognized field as the ONLY configured field still returns (not raises)" do
+      file = %FakeFile{id: 100, original_name: "photo.jpg", filename: "photo.jpg"}
+      parsed = %{terms: ["photo"], phrases: [], prefixes: []}
+      config = %{"highlight_fields" => ["cliverbs-media-marker"]}
+
+      result = Highlighter.highlight_media([file], parsed, config, %{})
+
+      assert result["100"] == %{}
+    end
   end
 end

@@ -3,6 +3,8 @@ defmodule Barkpark.Search.SurfaceConfig do
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Barkpark.Search.Highlighter
+
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "search_surface_config" do
@@ -58,6 +60,7 @@ defmodule Barkpark.Search.SurfaceConfig do
       message: "must be one of: " <> Enum.join(@zero_hit_strategies, ", ")
     )
     |> validate_typo_policy()
+    |> validate_highlight_fields()
     # Defense in depth (constraints-are-truth): the DB carries TWO partial UNIQUE
     # indexes (charter D57) — `(surface, scope) WHERE workspace_id IS NULL`
     # (search_surface_config_surface_scope_idx, the global-default rows) and
@@ -92,6 +95,41 @@ defmodule Barkpark.Search.SurfaceConfig do
       end
     end)
   end
+
+  # task-5cf80a99ecd52bf2: `highlight_fields` used to be cast with no check
+  # against what the highlighter can actually render. A value outside the
+  # surface's known field set stored cleanly (200) and crashed the NEXT
+  # search request in `Barkpark.Search.Highlighter.media_field_text/3` — a
+  # `FunctionClauseError` on a totally unrelated caller, since that function
+  # had no catch-all. This is the WRITE-side half of the fix (the primary
+  # one — it stops the row ever being corrupted); `media_field_text/3` also
+  # grew a catch-all (defence in depth) for rows written before this gate
+  # existed. `Highlighter.media_highlight_field?/1` and
+  # `document_highlight_field?/1` are the single source of truth for what
+  # each surface can render — kept in the Highlighter module so a new field
+  # clause there and its write-time acceptance can never drift apart.
+  defp validate_highlight_fields(changeset) do
+    surface = get_field(changeset, :surface)
+
+    validate_change(changeset, :highlight_fields, fn :highlight_fields, fields ->
+      case Enum.reject(fields, &highlightable?(surface, &1)) do
+        [] ->
+          []
+
+        bad ->
+          [
+            highlight_fields: "not a highlightable #{surface} field: " <> Enum.join(bad, ", ")
+          ]
+      end
+    end)
+  end
+
+  defp highlightable?("media", field), do: Highlighter.media_highlight_field?(field)
+  defp highlightable?("documents", field), do: Highlighter.document_highlight_field?(field)
+  # An unset/unrecognized surface (e.g. a bare %SurfaceConfig{} in a unit
+  # test that never assigns :surface) has no known field set to check
+  # against — permissive, matching cast/3's behaviour before this change.
+  defp highlightable?(_other_surface, _field), do: true
 
   defp unknown_key_errors(policy) do
     case policy
