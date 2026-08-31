@@ -68,12 +68,14 @@ defmodule BarkparkWeb.SearchController do
 
         # ONE shared envelope builder (AXI R3) — same function REST/loopback/WS
         # all consume. `?view=brief` returns brief hit cards; default stays full.
+        # `:offset` echoes the page start so the envelope's `hasMore` is honest.
         envelope =
           HitEnvelope.build(docs, count, query, meta,
             caller_context: caller_context,
             schema_resolver: schema_resolver(conn, dataset),
             fields: params["fields"],
-            view: params["view"]
+            view: params["view"],
+            offset: opts[:offset]
           )
 
         json(conn, Map.put(envelope, :ms, ms))
@@ -149,16 +151,18 @@ defmodule BarkparkWeb.SearchController do
         caller_context = CallerContext.from_conn(conn)
 
         # ONE shared envelope builder (AXI R3): documents/count/query/
-        # parsedQuery/highlights/recovery/correctedTo/facets/truncation come
-        # from `HitEnvelope.build/5` — the same function the loopback route and
-        # the WS channel consume — with this route's extras (searchEventId, ms)
-        # put on top. `?view=brief` returns brief hit cards; default stays full.
+        # parsedQuery/highlights/recovery/correctedTo/facets/truncation/hasMore
+        # come from `HitEnvelope.build/5` — the same function the loopback route
+        # and the WS channel consume — with this route's extras (searchEventId,
+        # ms) put on top. `?view=brief` returns brief hit cards; default stays
+        # full. `:offset` echoes the page start so `hasMore` is honest.
         envelope =
           HitEnvelope.build(docs, count, query, meta,
             caller_context: caller_context,
             schema_resolver: schema_resolver(conn, dataset),
             fields: params["fields"],
-            view: params["view"]
+            view: params["view"],
+            offset: opts[:offset]
           )
 
         json(
