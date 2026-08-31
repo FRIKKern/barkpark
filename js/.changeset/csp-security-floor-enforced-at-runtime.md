@@ -1,0 +1,5 @@
+---
+'@barkpark/nextjs': patch
+---
+
+`csp`: enforce the documented security floor at RUNTIME. `buildCspPolicy` read `options.additional[name]` for every base directive, floor included, so `object-src`, `frame-ancestors`, `base-uri`, `form-action` and `default-src` — the five the module header calls fixed and `ExtendableDirective` says "cannot be reached from options" — were all widenable by a caller. The type did not close it either: `Partial<Record<ExtendableDirective, readonly string[]>>` accepts a variable of type `Record<string, readonly string[]>` (excess-property checking only fires on a fresh object literal), which is the shape a consumer assembling its policy from config or env actually has, and the package ships CJS/ESM consumable from plain JS besides. Naming a non-extendable directive in `additional` now THROWS, up front, before any directive is built — the same throw-not-warn posture the module already takes for `'unsafe-inline'` in `script-src`. Every extendable directive is unchanged, and so is every emitted policy that did not reach for the floor. Breaking only for a caller who was relying on the hole.

@@ -198,35 +198,87 @@ func TestTaskClaimExecute_NotReadyDiagnosesGenuinelyBlocked(t *testing.T) {
 	}
 }
 
-func TestTaskClaimExecute_ReadBackUnreachableSaysSoAndNothingMore(t *testing.T) {
-	var hits int32
-	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claim"):
-			atomic.AddInt32(&hits, 1)
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{"ok":false,"reason":"not_ready"}`))
-		default:
-			w.WriteHeader(http.StatusInternalServerError)
-		}
-	}))
-	t.Cleanup(backend.Close)
-	mf := filepath.Join(t.TempDir(), "manifest.json")
-	if err := os.WriteFile(mf, []byte(minimalClaimManifest), 0o600); err != nil {
-		t.Fatalf("write manifest: %v", err)
+// A read-back that did not land must say so and assert NOTHING about the
+// claim. The message now also names WHICH failure it was: reporting a flat
+// 403 as "the store may simply be unreachable" sent operators to debug the
+// network for an answer the server had already given in full.
+func TestTaskClaimExecute_ReadBackFailureSaysSoAndNothingMore(t *testing.T) {
+	cases := []struct {
+		name       string
+		readStatus int
+		want       string // the substring that names this failure class
+		forbidden  []string
+	}{
+		{
+			name:       "server error",
+			readStatus: http.StatusInternalServerError,
+			want:       "the store errored reading task-x back",
+			forbidden:  []string{"refused the read"},
+		},
+		{
+			name:       "forbidden",
+			readStatus: http.StatusForbidden,
+			want:       "the store refused the read-back of task-x",
+			// The old copy for this case. A refusal is not an unreachable store.
+			forbidden: []string{"may simply be unreachable", "unreachable"},
+		},
+		{
+			name:       "unauthenticated",
+			readStatus: http.StatusUnauthorized,
+			want:       "the store refused the read-back of task-x",
+			forbidden:  []string{"may simply be unreachable", "unreachable"},
+		},
+		{
+			name:       "other non-2xx",
+			readStatus: http.StatusTooManyRequests,
+			want:       "could not read task-x back",
+			forbidden:  nil,
+		},
 	}
-	t.Setenv("BARKPARK_MANIFEST", mf)
-	t.Setenv("BARKPARK_API_URL", backend.URL)
-	t.Setenv("BARKPARK_API_TOKEN", "claim-stub")
 
-	out, code := captureExecuteCode(t, []string{"task", "claim", "task-x", "me"})
-	if code != exitConflict {
-		t.Fatalf("exit = %d, want exitConflict; out:\n%s", code, out)
-	}
-	if !strings.Contains(out, "could not read task-x back") {
-		t.Errorf("output should report the read-back failure honestly; got:\n%s", out)
-	}
-	if strings.Contains(out, "genuinely not ready") || strings.Contains(out, "held live by") {
-		t.Errorf("an unreachable read-back must not assert a cause it cannot support; got:\n%s", out)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var hits int32
+			backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/claim"):
+					atomic.AddInt32(&hits, 1)
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"ok":false,"reason":"not_ready"}`))
+				default:
+					w.WriteHeader(c.readStatus)
+				}
+			}))
+			t.Cleanup(backend.Close)
+			mf := filepath.Join(t.TempDir(), "manifest.json")
+			if err := os.WriteFile(mf, []byte(minimalClaimManifest), 0o600); err != nil {
+				t.Fatalf("write manifest: %v", err)
+			}
+			t.Setenv("BARKPARK_MANIFEST", mf)
+			t.Setenv("BARKPARK_API_URL", backend.URL)
+			t.Setenv("BARKPARK_API_TOKEN", "claim-stub")
+
+			out, code := captureExecuteCode(t, []string{"task", "claim", "task-x", "me"})
+			if code != exitConflict {
+				t.Fatalf("exit = %d, want exitConflict; out:\n%s", code, out)
+			}
+			if !strings.Contains(out, c.want) {
+				t.Errorf("output should name this read-back failure (%q); got:\n%s", c.want, out)
+			}
+			for _, bad := range c.forbidden {
+				if strings.Contains(out, bad) {
+					t.Errorf("output misdescribes the failure (contains %q); got:\n%s", bad, out)
+				}
+			}
+			// Unchanged invariant: a read-back that did not land supports no
+			// verdict about the claim, and must never fall through to the
+			// read-back line and report a ZERO document as if it were read.
+			if strings.Contains(out, "genuinely not ready") || strings.Contains(out, "held live by") {
+				t.Errorf("a failed read-back must not assert a cause it cannot support; got:\n%s", out)
+			}
+			if strings.Contains(out, "read-back of task-x — lifecycle_status=") {
+				t.Errorf("a failed read-back printed the empty document as a read-back; got:\n%s", out)
+			}
+		})
 	}
 }

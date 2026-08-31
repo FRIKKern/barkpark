@@ -24,7 +24,11 @@
 // ## The security floor is not configurable
 //
 // `default-src`, `object-src`, `base-uri`, `frame-ancestors` and `form-action`
-// are fixed. `script-src` accepts additions but REJECTS `'unsafe-inline'` and
+// are fixed — enforced at RUNTIME against `EXTENDABLE_DIRECTIVES`, since the
+// `additional` TYPE never closed the door (a `Record<string, readonly
+// string[]>` assembled from config is assignable to it with no error, and the
+// package is consumable from plain JS besides). Naming a floor directive in
+// `additional` THROWS. `script-src` accepts additions but REJECTS `'unsafe-inline'` and
 // `'unsafe-eval'`: the whole point of the nonce is that an injected inline
 // script cannot execute, and a policy that re-admits `'unsafe-inline'` is
 // decoration. Conformant browsers also ignore `'unsafe-inline'` alongside a
@@ -40,7 +44,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 /**
  * The directives a consumer may WIDEN. Everything absent from this union is
- * part of the fixed security floor and cannot be reached from options.
+ * part of the fixed security floor and cannot be reached from options — an
+ * invariant {@link EXTENDABLE_DIRECTIVES} enforces at RUNTIME, because the type
+ * alone never did (see that constant's note).
  */
 export type ExtendableDirective =
   | 'script-src'
@@ -51,6 +57,36 @@ export type ExtendableDirective =
   | 'frame-src'
   | 'media-src'
   | 'worker-src'
+
+/**
+ * The runtime twin of {@link ExtendableDirective} — the allow-list
+ * `buildCspPolicy` actually consults.
+ *
+ * The type could not carry this on its own. `additional` is typed
+ * `Partial<Record<ExtendableDirective, readonly string[]>>`, and TypeScript's
+ * excess-property check only fires on a fresh object literal: a variable of
+ * type `Record<string, readonly string[]>` — the realistic shape when a
+ * consumer assembles its policy map from config or env — is assignable with no
+ * error. The package also ships CJS/ESM consumable from plain JS, where no
+ * type exists at all. Before this list, `buildCspPolicy` read
+ * `extra[name as ExtendableDirective]` for EVERY base directive, so
+ * `object-src`, `frame-ancestors`, `base-uri`, `form-action` and `default-src`
+ * — the five the module header calls fixed — were all reachable from options.
+ */
+const EXTENDABLE_DIRECTIVES: readonly ExtendableDirective[] = [
+  'script-src',
+  'style-src',
+  'img-src',
+  'font-src',
+  'connect-src',
+  'frame-src',
+  'media-src',
+  'worker-src',
+]
+
+function isExtendable(name: string): name is ExtendableDirective {
+  return (EXTENDABLE_DIRECTIVES as readonly string[]).includes(name)
+}
 
 /** Sources that make a nonce-based `script-src` meaningless. */
 const FORBIDDEN_SCRIPT_SOURCES = ["'unsafe-inline'", "'unsafe-eval'"] as const
@@ -107,6 +143,22 @@ function baseDirectives(nonce: string): Array<[string, string[]]> {
 export function buildCspPolicy(nonce: string, options: CspOptions = {}): string {
   const extra = options.additional ?? {}
 
+  // Enforce the allow-list BEFORE any directive is built, so a floor key can
+  // never be merged. Throwing (rather than dropping) matches the module's
+  // posture for `'unsafe-inline'` below: a caller who believes they widened
+  // `object-src` and silently did not is worse off than one who is told.
+  for (const name of Object.keys(extra)) {
+    if (!isExtendable(name)) {
+      // Message kept terse on purpose: `dist/csp.mjs` sits under a 1 kB
+      // size-limit cap (js/CLAUDE.md "Bundle budget"), and the extendable list
+      // is reused from the constant rather than re-spelled.
+      throw new Error(
+        `buildCspPolicy: "${name}" is in the fixed security floor. ` +
+          `Extendable: ${EXTENDABLE_DIRECTIVES.join(' ')}`,
+      )
+    }
+  }
+
   const scriptExtras = extra['script-src'] ?? []
   for (const src of scriptExtras) {
     if ((FORBIDDEN_SCRIPT_SOURCES as readonly string[]).includes(src.trim())) {
@@ -119,7 +171,12 @@ export function buildCspPolicy(nonce: string, options: CspOptions = {}): string 
   }
 
   const directives = baseDirectives(nonce).map(([name, sources]) => {
-    const additions = extra[name as ExtendableDirective] ?? []
+    // `isExtendable` rather than a cast: `name` walks the FULL base list, floor
+    // directives included, so a cast here reads `extra['object-src']` whenever
+    // one is present. The guard above already refuses such a key — this keeps
+    // the invariant readable where it matters instead of depending on a check
+    // twenty lines up.
+    const additions = (isExtendable(name) ? extra[name] : undefined) ?? []
     const merged = [...sources]
     for (const src of additions) {
       if (!merged.includes(src)) merged.push(src)
