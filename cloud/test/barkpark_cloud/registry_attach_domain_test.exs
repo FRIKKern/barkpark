@@ -342,6 +342,137 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
     end
   end
 
+  ## The REVERSE direction — the two Site claim doors
+  #
+  # `custom_host → site domain` has been checked since the guard landed. The
+  # reverse — `site domain → custom_host` — was NOT, on EITHER door, so a plain
+  # member could hand another team's live hostname to a site they controlled and
+  # no route existed to take it back. The describe above asserts only the
+  # reverse order, which is exactly why the gap survived every hardening commit.
+  #
+  # These drive the SAME four surfaces from the Site side, through BOTH doors:
+  # attach (`add_site_domain/2`) and CREATE (`create_site/2`, which never calls
+  # the attach function and therefore ran no collision test at all).
+
+  describe "add_site_domain/2 — the hostname namespace, from the Site side" do
+    test "a hostname held as ANOTHER team's instance custom_host → {:error, :domain_taken}" do
+      victim = barkpark_fixture(team_fixture())
+      assert {:ok, _} = Registry.set_custom_host(victim, "barkpark.jarl.no")
+
+      grabber_bp = barkpark_fixture(team_fixture())
+      {:ok, site} = Registry.create_site(grabber_bp, %{name: "Grab", slug: "grab"})
+
+      assert {:error, :domain_taken} = Registry.add_site_domain(site, "barkpark.jarl.no")
+
+      # The name never left its owner: no site resolves it, so the unauthenticated
+      # ask-gate cannot hand the grabber a cert for it.
+      assert Registry.domain_owner_site("barkpark.jarl.no") == nil
+    end
+
+    test "normalization is shared: a differently-CASED spelling of the same host still collides" do
+      victim = barkpark_fixture(team_fixture())
+      assert {:ok, _} = Registry.set_custom_host(victim, "barkpark.jarl.no")
+
+      grabber_bp = barkpark_fixture(team_fixture())
+      {:ok, site} = Registry.create_site(grabber_bp, %{name: "Grab", slug: "grab-case"})
+
+      assert {:error, :domain_taken} = Registry.add_site_domain(site, "BarkPark.Jarl.No.")
+    end
+
+    test "a host UNDER a DIFFERENT team's attached domain → :domain_taken; under your OWN team's → ok" do
+      owner_team = team_fixture()
+      owner = barkpark_fixture(owner_team)
+      assert {:ok, _} = Registry.set_custom_host(owner, "barkpark.jarl.no")
+
+      intruder_bp = barkpark_fixture(team_fixture())
+      {:ok, intruder_site} = Registry.create_site(intruder_bp, %{name: "Sub", slug: "sub"})
+
+      assert {:error, :domain_taken} =
+               Registry.add_site_domain(intruder_site, "sub.barkpark.jarl.no")
+
+      # The legit edge the suffix rule exists to preserve: the SAME team may hang
+      # a site under its own attached domain.
+      sibling_bp = barkpark_fixture(owner_team)
+      {:ok, sibling_site} = Registry.create_site(sibling_bp, %{name: "Own", slug: "own"})
+      assert {:ok, _} = Registry.add_site_domain(sibling_site, "sub2.barkpark.jarl.no")
+    end
+
+    test "ANOTHER barkpark's live provisioning FQDN → {:error, :domain_taken}" do
+      {:ok, live} = Registry.register_managed_barkpark(team_fixture(), "Gyldendal", "gyldendal")
+      assert live.url == "https://" <> @domain
+
+      bp = barkpark_fixture(team_fixture())
+      {:ok, site} = Registry.create_site(bp, %{name: "Grab", slug: "grab-url"})
+
+      assert {:error, :domain_taken} = Registry.add_site_domain(site, @domain)
+    end
+
+    test "site-vs-site is unchanged, and a released name is claimable again" do
+      bp_a = barkpark_fixture(team_fixture())
+      {:ok, site_a} = Registry.create_site(bp_a, %{name: "A", slug: "a-rel"})
+      bp_b = barkpark_fixture(team_fixture())
+      {:ok, site_b} = Registry.create_site(bp_b, %{name: "B", slug: "b-rel"})
+
+      assert {:ok, site_a} = Registry.add_site_domain(site_a, "shared.example.com")
+      assert {:error, :domain_taken} = Registry.add_site_domain(site_b, "shared.example.com")
+
+      # Idempotent self re-add is still a no-op, not a conflict.
+      assert {:ok, _} = Registry.add_site_domain(site_a, "shared.example.com")
+
+      {:ok, _} = Registry.remove_site_domain(site_a, "shared.example.com")
+      assert {:ok, _} = Registry.add_site_domain(site_b, "shared.example.com")
+    end
+  end
+
+  describe "create_site/2 — the SECOND claim door" do
+    test "a `domains` array naming another team's custom_host → {:error, :domain_taken}, no row" do
+      victim = barkpark_fixture(team_fixture())
+      assert {:ok, _} = Registry.set_custom_host(victim, "barkpark.jarl.no")
+
+      before = Repo.aggregate(BarkparkCloud.Registry.Site, :count)
+      grabber_bp = barkpark_fixture(team_fixture())
+
+      assert {:error, :domain_taken} =
+               Registry.create_site(grabber_bp, %{
+                 name: "Grab",
+                 slug: "grab-create",
+                 domains: ["barkpark.jarl.no"]
+               })
+
+      # The whole create fails closed — a refused claim must not leave a site behind.
+      assert Repo.aggregate(BarkparkCloud.Registry.Site, :count) == before
+      assert Registry.domain_owner_site("barkpark.jarl.no") == nil
+    end
+
+    test "the create door also sees SITE domains (it saw nothing at all before)" do
+      bp_a = barkpark_fixture(team_fixture())
+      {:ok, site_a} = Registry.create_site(bp_a, %{name: "A", slug: "a-cd"})
+      {:ok, _} = Registry.add_site_domain(site_a, "taken.example.com")
+
+      bp_b = barkpark_fixture(team_fixture())
+
+      assert {:error, :domain_taken} =
+               Registry.create_site(bp_b, %{
+                 name: "B",
+                 slug: "b-cd",
+                 domains: ["taken.example.com"]
+               })
+    end
+
+    test "a free hostname still creates normally (the guard refuses claims, not creates)" do
+      bp = barkpark_fixture(team_fixture())
+
+      assert {:ok, site} =
+               Registry.create_site(bp, %{
+                 name: "Fine",
+                 slug: "fine-cd",
+                 domains: ["FREE.example.com"]
+               })
+
+      assert site.domains == ["free.example.com"]
+    end
+  end
+
   ## The attach_domain job queue
 
   describe "enqueue_attach_domain_job/1" do

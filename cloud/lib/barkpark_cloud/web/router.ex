@@ -196,6 +196,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/deployments/:dep_id/artifact user  upload a PREBUILT dist for a minted deployment, then start it (write ability)
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
+      DELETE  /v1/sites/:id/domains user     remove a domain from a site — frees the hostname
       POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret (manual)
       POST    /v1/sites/:id/github/connect admin  pick a repo → auto-register the push webhook on GitHub (gh-4)
       DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
@@ -7753,6 +7754,16 @@ defmodule BarkparkCloud.Web.Router do
               |> maybe_put_menu(menu)
             )
 
+          # The hostname namespace is ONE namespace and the CREATE path is a
+          # claim door: `domains` goes straight into `Registry.create_site/2`,
+          # which now runs the same collision leaf the attach route runs. A name
+          # another site — or another team's instance `custom_host` — already
+          # holds is a CONFLICT, so it answers the same 409 as
+          # `POST /v1/sites/:id/domains`, never a 201 the ask-gate would then
+          # honour for two owners.
+          {:error, :domain_taken} ->
+            json(conn, 409, %{error: "domain_taken"})
+
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
         end
@@ -8456,6 +8467,59 @@ defmodule BarkparkCloud.Web.Router do
             # would honor for two owners (domain-takeover guard).
             {:error, :domain_taken} ->
               json(conn, 409, %{error: "domain_taken"})
+
+            {:error, cs} ->
+              json(conn, 422, %{error: "invalid", details: errors(cs)})
+          end
+      end
+    end)
+  end
+
+  # DELETE /v1/sites/:id/domains {domain} → 200 {site}. The inverse of the POST
+  # above, and the reason it had to exist: a hostname written into a site's
+  # `domains` array could not be taken back over HTTP AT ALL. `PATCH
+  # /v1/sites/:id` touches only theme/doc_type/prebuilt_enabled, and
+  # `Registry.remove_site_domain/2` had zero router callers — so freeing a
+  # wrongly-claimed name meant deleting the whole site, and a name claimed across
+  # a team boundary could not be freed by its rightful owner at all.
+  #
+  # TIER, chosen deliberately: `user`, the same guard its inverse runs
+  # (`with_team_site/3`'s `:session` default = `Auth.require_user/2`, team-scoped
+  # site lookup, no role check). Releasing a name must never be HARDER than
+  # claiming it — an `admin` wall here would recreate, at the role level, exactly
+  # the "no way back" this route closes, and would sit oddly beside `DELETE
+  # /v1/sites/:id`, which lets the same member destroy the entire site. Scope is
+  # unchanged from every other site route: only the team that HOLDS the name can
+  # release it.
+  delete "/v1/sites/:id/domains" do
+    with_team_site(conn, fn conn, site ->
+      domain = conn.body_params["domain"]
+
+      cond do
+        not is_binary(domain) or domain == "" ->
+          json(conn, 422, %{error: "domain_required"})
+
+        true ->
+          # activity-audit-log: the domain-array update + a `site.domain_removed`
+          # audit event commit atomically, exactly as the add side does. Releasing
+          # a hostname is precisely the act an audit register exists to record.
+          audited =
+            Accounts.audit(
+              %{
+                team_id: site.team_id,
+                actor_user_id: conn.assigns.current_user.id,
+                action: "site.domain_removed",
+                target_type: "site",
+                target_id: site.id,
+                metadata: %{site_id: site.id, domain: domain}
+              },
+              fn -> Registry.remove_site_domain(site, domain) end
+            )
+
+          case audited do
+            {:ok, site} ->
+              push_event(site.team_id, "audit")
+              json(conn, 200, %{site: site_json(site)})
 
             {:error, cs} ->
               json(conn, 422, %{error: "invalid", details: errors(cs)})

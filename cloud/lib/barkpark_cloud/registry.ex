@@ -5495,10 +5495,19 @@ defmodule BarkparkCloud.Registry do
   like the env blob. `kind` + the `bootstrap_*` dataset triple pass straight
   through the changeset.
 
-  Returns `{:ok, %Site{}}` or `{:error, %Ecto.Changeset{}}`.
+  THE CREATE DOOR IS A CLAIM DOOR. `attrs.domains` goes straight into the
+  changeset, so this path never calls `add_site_domain/2` and therefore ran NO
+  collision test at all until `first_claimed_domain/2` was added below — not the
+  site-vs-site one, and never the `custom_host` one. It now runs the same
+  `hostname_claimed?/2` leaf the attach door runs; a domain already claimed
+  anywhere in the hostname namespace fails the whole create with
+  `{:error, :domain_taken}` (→ 409) and writes no row.
+
+  Returns `{:ok, %Site{}}`, `{:error, :domain_taken}`, or
+  `{:error, %Ecto.Changeset{}}`.
   """
   @spec create_site(Barkpark.t(), map()) ::
-          {:ok, Site.t()} | {:error, Ecto.Changeset.t()}
+          {:ok, Site.t()} | {:error, :domain_taken} | {:error, Ecto.Changeset.t()}
   def create_site(%Barkpark{} = barkpark, attrs) do
     # site-spawner W5 (charter D47): mint the per-site content-publish webhook
     # secret BEFORE the insert so its ciphertext lands on the row; the plaintext is
@@ -5521,19 +5530,46 @@ defmodule BarkparkCloud.Registry do
       |> Map.put(:barkpark_id, barkpark.id)
       |> Map.put(:team_id, barkpark.team_id)
 
-    case %Site{} |> Site.changeset(prepared) |> Repo.insert() do
-      {:ok, site} ->
-        # Best-effort: register the dataset-scoped webhook on the box so a publish
-        # fires the CP receiver. NEVER fails the create — the site row is the truth;
-        # a box that is not yet live (or refuses) just means auto-rebuild is wired
-        # on the next successful registration path. Fires only for a live static
-        # site with a bootstrap_dataset (charter D42/D47).
-        _ = maybe_register_content_webhook(barkpark, site, content_secret)
-        {:ok, site}
+    # THE SECOND CLAIM DOOR. `POST /v1/sites` writes `domains` straight through,
+    # so fixing `add_site_domain/2` alone would be theatre — an attacker would
+    # simply CREATE the site with the stolen hostname instead of attaching it
+    # afterwards. Same leaf, same verdict, before any row exists.
+    case first_claimed_domain(prepared, barkpark) do
+      nil ->
+        case %Site{} |> Site.changeset(prepared) |> Repo.insert() do
+          {:ok, site} ->
+            # Best-effort: register the dataset-scoped webhook on the box so a publish
+            # fires the CP receiver. NEVER fails the create — the site row is the truth;
+            # a box that is not yet live (or refuses) just means auto-rebuild is wired
+            # on the next successful registration path. Fires only for a live static
+            # site with a bootstrap_dataset (charter D42/D47).
+            _ = maybe_register_content_webhook(barkpark, site, content_secret)
+            {:ok, site}
 
-      {:error, _cs} = error ->
-        error
+          {:error, _cs} = error ->
+            error
+        end
+
+      _taken ->
+        {:error, :domain_taken}
     end
+  end
+
+  # The first domain in a create's attrs already claimed elsewhere in the
+  # hostname namespace, or nil. NO self-exclusions are passed: the site does not
+  # exist yet (nothing to exclude on the site side), and its own box's
+  # `custom_host` / provisioning FQDN is still a SECOND upstream that one
+  # hostname cannot also route to — exactly the rule `add_site_domain/2` applies.
+  # Accepts atom or string keys (the router sends atoms, the HTTP-mutate path
+  # strings) and normalises with the ONE `normalize_domain/1` the guard and the
+  # ask-gate share, so `Example.com` in a create body collides just as it does on
+  # attach.
+  defp first_claimed_domain(attrs, %Barkpark{team_id: team_id}) do
+    (Map.get(attrs, :domains) || Map.get(attrs, "domains") || [])
+    |> List.wrap()
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&normalize_domain/1)
+    |> Enum.find(&hostname_claimed?(&1, team_id: team_id))
   end
 
   # Mint + Vault-encrypt the content-publish secret when this is a content-bound
@@ -6243,13 +6279,20 @@ defmodule BarkparkCloud.Registry do
   Add `domain` to a Site's `domains` array. Domains are normalized (lower-cased,
   trimmed, trailing-dot stripped) and deduplicated.
 
-  A domain resolves to exactly ONE owning site fleet-wide. Adding a domain that a
-  DIFFERENT site (any team) already owns is rejected with `{:error, :domain_taken}`
-  (→ 409) BEFORE it can reach the on-demand-TLS ask-gate. This closes the
-  cross-team domain collision / takeover vector: without it two teams could both
-  register `example.com`, the ask-gate would answer 200 for both, and cert
-  issuance / DNS pointing became ambiguous (team B could claim a domain team A
-  points DNS at).
+  A hostname resolves to exactly ONE owning surface fleet-wide. Adding a domain
+  already claimed anywhere in that namespace is rejected with
+  `{:error, :domain_taken}` (→ 409) BEFORE it can reach the on-demand-TLS
+  ask-gate. This closes the cross-team domain collision / takeover vector:
+  without it two teams could both register `example.com`, the ask-gate would
+  answer 200 for both, and cert issuance / DNS pointing became ambiguous (team B
+  could claim a domain team A points DNS at).
+
+  The collision test is `hostname_claimed?/2` — the SAME leaf `set_custom_host/2`
+  calls, so the two claim doors cannot drift apart again. It was site-vs-site
+  ONLY until then, which is precisely how the asymmetry survived:
+  `custom_host_taken?/2` consulted Site domains, but nothing consulted
+  `barkparks.custom_host` from this side, so a plain member could attach another
+  team's live hostname to a site they controlled.
 
   Legit edges preserved:
 
@@ -6272,9 +6315,13 @@ defmodule BarkparkCloud.Registry do
       norm in existing ->
         {:ok, site}
 
-      # Owned by a DIFFERENT site (any team) — reject before the ask-gate can
-      # answer 200 for two owners.
-      domain_owned_by_other_site?(norm, site.id) ->
+      # Claimed anywhere else in the ONE hostname namespace — another site
+      # (any team), a barkpark's `custom_host`, a foreign team's parent domain,
+      # or a live provisioning FQDN. Reject before the ask-gate can answer 200
+      # for two owners. Until this called `hostname_claimed?/2` it tested SITES
+      # ONLY, so a site could take a hostname another team already served as its
+      # `custom_host` — and no route existed to take it back.
+      hostname_claimed?(norm, except_site_id: site.id, team_id: site.team_id) ->
         {:error, :domain_taken}
 
       true ->
@@ -6318,10 +6365,56 @@ defmodule BarkparkCloud.Registry do
     d |> String.downcase() |> String.trim() |> String.trim_trailing(".")
   end
 
-  # Is `norm` already registered to a site OTHER than `site_id`? (any team)
-  defp domain_owned_by_other_site?(norm, site_id) do
+  # ── ONE hostname namespace, ONE predicate ──────────────────────────────
+  #
+  # A hostname answers on exactly ONE surface across our boxes. TWO doors can
+  # claim one: a Site's `domains` array (`add_site_domain/2` on attach,
+  # `create_site/2` on create) and a barkpark's `custom_host`
+  # (`set_custom_host/2`). Until this leaf existed the two doors ran DIFFERENT
+  # collision tests — four surfaces on the custom_host side, other-sites-only on
+  # the site side — and every hardening commit widened ONE of them (#11708 added
+  # the provisioning-FQDN leg, #11785 trimmed its SQL; neither touched the site
+  # side). A second copy would drift the same way, so both doors now call DOWN
+  # into this one. The merge is legal because both callers live in THIS module:
+  # neither predicate has to depend on the other, and nothing calls upward.
+  #
+  # `opts` carry the SELF-EXCLUSIONS — the only thing the two doors legitimately
+  # differ on:
+  #
+  #   * `:except_site_id`     — the site doing the claiming; its own array is not
+  #     a conflict with itself. `nil` on the custom_host door: a barkpark is
+  #     never a Site, so every site row there is somebody else's surface.
+  #   * `:except_barkpark_id` — the barkpark doing the claiming; re-attaching the
+  #     host you already answer on is an idempotent no-op, not a conflict. `nil`
+  #     on the site door — deliberately: a Site and its own box are still two
+  #     upstreams and one hostname cannot route to both. That is exactly the
+  #     strictness the custom_host door has always applied in the other direction
+  #     (its Site leg excludes no site, not even a sibling on the same box), so
+  #     making the site door strict is symmetry, not a new rule.
+  #   * `:team_id`            — whose parent domains you may nest under.
+  #
+  # Decode shared, render per surface: what each door DOES with a collision stays
+  # its own (`{:error, :domain_taken}` here, `{:error, :taken}` there). Only the
+  # DECODING — which surfaces count as a claim — is one implementation.
+  defp hostname_claimed?(norm, opts) do
+    except_site_id = Keyword.get(opts, :except_site_id)
+    except_barkpark_id = Keyword.get(opts, :except_barkpark_id)
+    team_id = Keyword.fetch!(opts, :team_id)
+
+    site_domain_claimed?(norm, except_site_id) or
+      barkpark_custom_host_claimed?(norm, except_barkpark_id) or
+      foreign_custom_host_suffix?(norm, team_id) or
+      provisioning_fqdn_taken?(norm, except_barkpark_id)
+  end
+
+  # Is `norm` registered to a Site? `except_site_id` drops ONE row from the walk;
+  # `nil` drops none. The nil case CANNOT be an unconditional `s.id != ^nil` —
+  # SQL `id != NULL` is never true, which would empty the walk and answer "free"
+  # for every registered name (the same trap `exclude_self_claim/2` documents).
+  defp site_domain_claimed?(norm, except_site_id) do
     Site
-    |> where([s], s.id != ^site_id and fragment("? = ANY(?)", ^norm, s.domains))
+    |> where([s], fragment("? = ANY(?)", ^norm, s.domains))
+    |> exclude_site(except_site_id)
     |> select([s], 1)
     |> limit(1)
     |> Repo.one()
@@ -6330,6 +6423,9 @@ defmodule BarkparkCloud.Registry do
       _ -> true
     end
   end
+
+  defp exclude_site(query, nil), do: query
+  defp exclude_site(query, site_id), do: where(query, [s], s.id != ^site_id)
 
   @doc """
   Resolve `domain` to its single owning Site, or `nil`. Case-folded lookup. With
@@ -6418,11 +6514,13 @@ defmodule BarkparkCloud.Registry do
   # domain, never under someone else's), or ANOTHER barkpark's provisioning
   # FQDN (`url` stores `https://<fqdn>`; self is excluded there too, so a row
   # may attach the host it already answers on).
+  #
+  # Those four legs ARE `hostname_claimed?/2`, which the Site claim doors call
+  # too — this head only names the barkpark's self-exclusions. It is a thin
+  # adapter ON PURPOSE: the four-leg list must exist in exactly one place, or the
+  # next hardening commit widens one door and leaves the other where it was.
   defp custom_host_taken?(norm, %Barkpark{id: self_id, team_id: team_id}) do
-    registered_site_domain?(norm) or
-      other_barkpark_custom_host?(norm, self_id) or
-      foreign_custom_host_suffix?(norm, team_id) or
-      provisioning_fqdn_taken?(norm, self_id)
+    hostname_claimed?(norm, except_barkpark_id: self_id, team_id: team_id)
   end
 
   # Does `norm` sit UNDER a custom_host owned by a different team? The stored
@@ -6441,9 +6539,14 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  defp other_barkpark_custom_host?(norm, self_id) do
+  # Does a barkpark hold `norm` as its `custom_host`? `except_barkpark_id` drops
+  # ONE row (self); `nil` drops none — the same nil-trap as
+  # `site_domain_claimed?/2`, so the exclusion is a conditional `where`, never
+  # `b.id != ^nil`.
+  defp barkpark_custom_host_claimed?(norm, except_barkpark_id) do
     Barkpark
-    |> where([b], b.custom_host == ^norm and b.id != ^self_id)
+    |> where([b], b.custom_host == ^norm)
+    |> exclude_self_claim(except_barkpark_id)
     |> select([b], 1)
     |> limit(1)
     |> Repo.one()
@@ -6690,20 +6793,8 @@ defmodule BarkparkCloud.Registry do
   def domain_registered?(domain) when is_binary(domain) do
     norm = normalize_domain(domain)
 
-    registered_site_domain?(norm) or registered_preview_host?(norm) or
+    site_domain_claimed?(norm, nil) or registered_preview_host?(norm) or
       registered_custom_host?(norm)
-  end
-
-  defp registered_site_domain?(norm) do
-    Site
-    |> where([s], fragment("? = ANY(?)", ^norm, s.domains))
-    |> select([s], 1)
-    |> limit(1)
-    |> Repo.one()
-    |> case do
-      nil -> false
-      _ -> true
-    end
   end
 
   # gh-6: a branch-preview host is TLS-allowlisted for as long as a preview
