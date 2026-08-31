@@ -857,7 +857,7 @@ defmodule Barkpark.Media do
   #     here is load-bearing: an unconverted `:dataset_not_found` would fall to
   #     `upload/3`'s 503 storage catch-all and mislabel.
   defp put_scope_attrs(attrs, opts) do
-    project_id = Keyword.get(opts, :project_id) || default_project_id()
+    project_id = Barkpark.Tenancy.scope_project_id(opts)
 
     scoped =
       attrs
@@ -868,13 +868,6 @@ defmodule Barkpark.Media do
       {:ok, nil} -> {:ok, scoped}
       {:ok, dataset_id} -> {:ok, Map.put(scoped, :dataset_id, dataset_id)}
       {:error, _reason} = error -> error
-    end
-  end
-
-  defp default_project_id do
-    case Barkpark.Tenancy.get_default_project() do
-      %{id: id} -> id
-      _ -> nil
     end
   end
 

@@ -173,17 +173,10 @@ defmodule Barkpark.Plugins.Media.Assets do
   # a read/delete path. Returns nil when unresolvable so the caller keeps the
   # legacy STRING filter.
   defp resolve_dataset_id(dataset, opts) when is_binary(dataset) do
-    project_id = Keyword.get(opts, :project_id) || default_project_id()
+    project_id = Barkpark.Tenancy.scope_project_id(opts)
 
     case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
       %Barkpark.Tenancy.Dataset{id: id} -> id
-      _ -> nil
-    end
-  end
-
-  defp default_project_id do
-    case Barkpark.Tenancy.get_default_project() do
-      %{id: id} -> id
       _ -> nil
     end
   end
