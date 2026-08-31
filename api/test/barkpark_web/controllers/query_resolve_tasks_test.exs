@@ -31,6 +31,21 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end
 
+    # The bearer must be a REAL token. It used to be a bare
+    # "Bearer barkpark-dev-token" with nothing minted behind it — a string that
+    # `Auth.verify_token/1` rejects (see test/barkpark/seeds_clean_test.exs),
+    # so every request in this file silently ran as an ANONYMOUS caller while
+    # reading as authed. The flat `/v1/data` read pipeline now refuses a
+    # presented-but-unverifiable bearer with 401 (task-46872cadcfc50c5f), which
+    # surfaced the decoration. Minting it makes the file test what it says.
+    {:ok, _} =
+      Barkpark.Auth.create_token(
+        "barkpark-dev-token",
+        "dev",
+        @dataset,
+        ["read", "write", "admin"]
+      )
+
     %{conn: put_req_header(conn, "authorization", "Bearer barkpark-dev-token"), scope: scope}
   end
 

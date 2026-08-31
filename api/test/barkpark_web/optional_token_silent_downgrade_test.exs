@@ -134,6 +134,17 @@ defmodule BarkparkWeb.OptionalTokenSilentDowngradeTest do
 
     resp = conn |> authed(@raw_b) |> get(query_path())
 
+    # Pin the literal status, not merely the absence of foreign ids: a bare
+    # `refute` is satisfiable by an empty list, by B's own rows, or by an error
+    # page with no ids at all. Only 401 says REFUSED.
+    assert resp.status == 401,
+           "a presented-but-unverifiable (revoked) bearer must be refused 401 on this " <>
+             "route, not answered — got #{resp.status} #{resp.resp_body}"
+
+    assert get_in(Jason.decode!(resp.resp_body), ["error", "code"]) == "unauthorized",
+           "the refusal must be the canonical error envelope, not an empty 200 or a " <>
+             "bare error page — got #{resp.resp_body}"
+
     refute resp.status == 200 and "otsd-default-1" in doc_ids(resp),
            "OptionalToken swallowed the revoked bearer: the request was served as " <>
              "ANONYMOUS, AssignDefaultScope stamped the seeded Default workspace, and " <>
@@ -150,6 +161,17 @@ defmodule BarkparkWeb.OptionalTokenSilentDowngradeTest do
     {:ok, _} = token_b |> Ecto.Changeset.change(expires_at: past) |> Repo.update()
 
     resp = conn |> authed(@raw_b) |> get(query_path())
+
+    # Same 401 as the revoked arm, deliberately INDISTINGUISHABLE from it —
+    # `Auth.verify_token/1`'s revoked/expired/unknown fold is a documented
+    # existence-hiding decision and the fix does not differentiate the three.
+    assert resp.status == 401,
+           "a presented-but-unverifiable (expired) bearer must be refused 401 on this " <>
+             "route, not answered — got #{resp.status} #{resp.resp_body}"
+
+    assert get_in(Jason.decode!(resp.resp_body), ["error", "code"]) == "unauthorized",
+           "the refusal must be the canonical error envelope, not an empty 200 or a " <>
+             "bare error page — got #{resp.resp_body}"
 
     refute resp.status == 200 and "otsd-default-1" in doc_ids(resp),
            "OptionalToken swallowed the expired bearer: same silent tenant swap as " <>

@@ -110,6 +110,33 @@ defmodule BarkparkWeb.Router do
   # `CallerContext.from_conn/1` prefers an assigned `:caller_context` over the
   # `:api_token` — setting it on a write could downgrade the caller.
   pipeline :api_grant_read do
+    # Presented-but-UNVERIFIABLE bearer → 401, on this flat read surface ONLY
+    # (task-46872cadcfc50c5f). `:api` already ran OptionalToken in its default
+    # fail-soft mode, which SWALLOWS a revoked/expired/unknown bearer: the conn
+    # continued anonymous, `DeriveWorkspaceFromToken` had no `:api_token` to
+    # derive from, and `AssignDefaultScope` stamped the seeded Default
+    # workspace — so a caller holding a decayed workspace-B token got a 200
+    # carrying ANOTHER TENANT's published rows with zero signal. A tenant swap
+    # by credential decay, not a refusal.
+    #
+    # Three deliberate narrowings, each load-bearing:
+    #   * only a bearer that was PRESENTED and failed to verify is refused. A
+    #     request with NO Authorization header is untouched — the anonymous /
+    #     browser public read is a supported product surface, and this is NOT a
+    #     blanket 401.
+    #   * only THIS pipeline opts in. Every other OptionalToken mount (`:api`,
+    #     `:shared_docs_api`, `:scoped_mutate`, `:access_principal`) keeps the
+    #     fail-soft default, which `test/barkpark_web/plugs/optional_token_test.exs`
+    #     pins by name.
+    #   * a VALID token is untouched, and a public-read token IS valid —
+    #     `Auth.verify_token/1` succeeds on it — so the public-read credentials
+    #     baked into shipped site JS keep serving. "Unverifiable" and
+    #     "public-read tier" are disjoint sets; that distinction is what makes
+    #     this safe where a blanket 401 was not.
+    #
+    # No-ops when `:api` already assigned `:api_token`, so the extra
+    # verify_token/1 is paid only on the failing path.
+    plug(BarkparkWeb.Plugs.OptionalToken, strict_on_presented: true)
     plug(BarkparkWeb.Plugs.ResolveTokenOwner)
     plug(BarkparkWeb.Plugs.AssignGrantScope)
     # Deny-by-default clamp for a `public-read`-only token (site-spawner D6):
