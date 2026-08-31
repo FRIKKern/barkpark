@@ -2683,6 +2683,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     href = Util.escape_attr("/papers/" <> ref.slug)
     eyebrow = ref.eyebrow || "Edition"
     description = paper_link_description(ref.description)
+
     status =
       [if(ref.live, do: "Live edition", else: "Edition"), ref.updated_at]
       |> Enum.reject(&is_nil/1)
