@@ -54,12 +54,25 @@ defmodule Barkpark.Plugins.RegistryDeskItemsTest do
       assert "Y link" in labels
     end
 
-    test "tolerates plugins whose callback raises" do
-      name = "fake-desk-raise-#{System.unique_integer([:positive])}"
-      :ok = Registry.register(FakeRaisingDeskPlugin, %{"plugin_name" => name})
+    # `assert is_list(...)` verified only "did not raise": a `safe_call/4` that
+    # returned `[]` for EVERY plugin gutted the collector and stayed green.
+    # Assert instead that a healthy neighbour SURVIVES the bad plugin, and
+    # that the raise was caught for the offending module by name.
+    test "isolates a plugin whose callback raises, keeping its neighbours" do
+      good = "fake-desk-raise-good-#{System.unique_integer([:positive])}"
+      bad = "fake-desk-raise-#{System.unique_integer([:positive])}"
+      :ok = Registry.register(FakeDeskPluginX, %{"plugin_name" => good})
+      :ok = Registry.register(FakeRaisingDeskPlugin, %{"plugin_name" => bad})
 
-      # Must not raise — safe_call catches and substitutes [].
-      assert is_list(Registry.collect_desk_items("production"))
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          labels =
+            Enum.map(Registry.collect_desk_items("production"), &(Map.get(&1, :label) || ""))
+
+          assert "X link" in labels
+        end)
+
+      assert log =~ "FakeRaisingDeskPlugin.desk_items/1 raised"
     end
 
     test "OnixEdit's Bokbasen items are reachable through the collector" do

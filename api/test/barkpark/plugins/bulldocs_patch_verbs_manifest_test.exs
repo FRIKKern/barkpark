@@ -45,17 +45,37 @@ defmodule Barkpark.Plugins.BulldocsPatchVerbsManifestTest do
     # The authority is BlockOps, not this test. If the server learns a seventh
     # verb, this reds and whoever added it updates the manifest in the same
     # change — which is the whole point of pinning against the source.
-    source =
-      File.read!("lib/barkpark/content/papers/block_ops.ex")
+    #
+    # The scan MUST be open. It used to be a closed alternation over the same
+    # six strings as @verbs, which makes `dispatched ⊆ @verbs` a theorem: a
+    # seventh verb was invisible to it, so the test could only ever detect
+    # REMOVAL of one of the six — the exact opposite of the sentence above.
+    #
+    # `locate_paper_affected/2` dispatches in two shapes, so both are scanned:
+    #   * a literal head — `%{"op" => "append-block", ...}`
+    #   * a guard list   — `when kind in ["patch-block", "replace-block"]`
+    source = File.read!("lib/barkpark/content/papers/block_ops.ex")
 
-    dispatched =
-      Regex.scan(
-        ~r/"(append-block|insert-after|patch-block|replace-block|remove-block|move-block)"/,
-        source
-      )
+    literal_verbs =
+      ~r/"op" => "([a-z][a-z-]*)"/
+      |> Regex.scan(source)
       |> Enum.map(&List.last/1)
-      |> Enum.uniq()
-      |> Enum.sort()
+
+    guarded_verbs =
+      ~r/kind in \[([^\]]*)\]/
+      |> Regex.scan(source)
+      |> Enum.map(&List.last/1)
+      |> Enum.flat_map(fn list ->
+        ~r/"([a-z][a-z-]*)"/ |> Regex.scan(list) |> Enum.map(&List.last/1)
+      end)
+
+    dispatched = (literal_verbs ++ guarded_verbs) |> Enum.uniq() |> Enum.sort()
+
+    # Floor: an open scan that matches NOTHING would make the comparison a
+    # comparison of two empty-ish lists rather than a real check.
+    assert length(dispatched) >= 6,
+           "the dispatch scan found #{inspect(dispatched)} — it stopped matching " <>
+             "BlockOps' clause shapes, so this test is no longer checking anything"
 
     assert dispatched == Enum.sort(@verbs),
            "BlockOps dispatches #{inspect(dispatched)} but this test pins #{inspect(Enum.sort(@verbs))} — " <>
