@@ -202,6 +202,18 @@ func execManifestCommand(g globals, ctx manifest.Context, m *manifest.Manifest, 
 func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
 	out.resolveOutputForCommand(g, cmd.DefaultOutput)
 
+	// webhook test-send verdict-aware exit (task-60887badc1d2900f decision
+	// (a)): the ONE additive, opt-in flag this command understands that the
+	// manifest never declares, so it must be stripped out of tail before
+	// buildManifestRequest ever reaches splitArgs — which would otherwise
+	// refuse it as an unknown command-local flag. Scoped to cmd.ID, not parsed
+	// for any other command, so `bp webhook create --fail-on-failed-delivery`
+	// still refuses exactly as before.
+	var failOnFailedDelivery bool
+	if cmd.ID == "webhook.test-send" {
+		failOnFailedDelivery, tail = extractFailOnFailedDeliveryFlag(tail)
+	}
+
 	// Resolve the request-side view HERE, with the writer in hand — never
 	// inside buildManifestRequest, which is pure/writer-less and shared by the
 	// headless MCP dispatch (the MCP handlers set g.view themselves).
@@ -283,7 +295,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		emitMovementDoctrine(out, cmd)
 		emitHelpHints(out, respBody)
 	}
-	return handleResponse(out, m, cmd, status, respBody)
+	code := handleResponse(out, m, cmd, status, respBody)
+
+	// The flag only ever overrides the HONEST success path (code == exitOK,
+	// meaning handleResponse's 2xx branch rendered it, not a screen's own
+	// refusal above with its own exit code). Rendering is byte-identical
+	// either way — renderSuccess already ran inside handleResponse — only the
+	// process exit code changes, and only when the caller opted in.
+	if code == exitOK && failOnFailedDelivery && webhookDeliveryVerdictFailed(respBody) {
+		return exitGeneric
+	}
+	return code
 }
 
 // resolveView decides the ?view= projection for a CLI invocation (AXI R1,
@@ -503,6 +525,57 @@ func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody 
 	)
 	refuseWithRemedy(out, "unreadable_write_receipt", msg, unreadableWriteReceiptHint)
 	return exitGeneric, true
+}
+
+// failOnFailedDeliveryFlag is the literal token for `bp webhook test-send
+// --fail-on-failed-delivery` — task-60887badc1d2900f's decision (a): exit 0
+// stands by default (webhook_controller.test_send/2 reports the delivery
+// VERDICT in a 2xx body by design — "Returns the delivery verdict so the SPA
+// can show an immediate ok/failed result"), and this is the additive,
+// opt-in escape hatch for the one caller that cannot act on a printed line: a
+// script. It is NOT declared on webhook.test-send's manifest entry
+// (api/lib/barkpark/plugins/capabilities.ex — read, not touched, by this
+// task), so it must never reach splitArgs, which would refuse it as an
+// unknown command-local flag.
+const failOnFailedDeliveryFlag = "--fail-on-failed-delivery"
+
+// extractFailOnFailedDeliveryFlag removes every bare occurrence of
+// failOnFailedDeliveryFlag from tail and reports whether it was present. It
+// is a bool flag taking no value — an inline `--fail-on-failed-delivery=x`
+// form is deliberately left in tail untouched, so it falls through to
+// splitArgs' ordinary "unknown flag" refusal instead of silently succeeding
+// on a typo'd value.
+func extractFailOnFailedDeliveryFlag(tail []string) (bool, []string) {
+	found := false
+	kept := make([]string, 0, len(tail))
+	for _, a := range tail {
+		if a == failOnFailedDeliveryFlag {
+			found = true
+			continue
+		}
+		kept = append(kept, a)
+	}
+	return found, kept
+}
+
+// webhookDeliveryVerdictFailed reports whether a webhook test-send response
+// body's top-level "delivery" object carries a non-success status.
+// webhooks/delivery.ex enumerates exactly three: pending | ok | failed_giveup
+// — "ok" is the only success state, so anything else (today, always
+// "failed_giveup": both test-send and replay drive ONE synchronous attempt
+// with no retry loop, so the verdict this function ever sees is terminal,
+// never "pending") counts as failed. Malformed/absent bodies report false
+// (no verdict to act on) rather than false-positive a refusal.
+func webhookDeliveryVerdictFailed(respBody []byte) bool {
+	var env struct {
+		Delivery struct {
+			Status string `json:"status"`
+		} `json:"delivery"`
+	}
+	if json.Unmarshal(unwrapResult(respBody), &env) != nil {
+		return false
+	}
+	return env.Delivery.Status != "" && env.Delivery.Status != "ok"
 }
 
 // unreadableWriteReceipt names WHY a 2xx write body said nothing, or "" when
