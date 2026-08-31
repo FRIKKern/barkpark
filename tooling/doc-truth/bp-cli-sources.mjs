@@ -136,6 +136,7 @@ function scanGo(root) {
   const fileFlags = new Map();      // repo-relative file -> Set("--flag")  [E]
   const flagAt = new Map();         // file -> Map("--flag" -> "file:line")  [E]
   let nounsAt = BUILTINS;           // "file:line" of `var completionNouns`
+  let globalsAt = BUILTINS;         // "file:line" of `var completionGlobals`
   const synopses = [];              // {path:[tok], required:Set, all:Set}
   let completionNouns = null;       // [B]
   let completionGlobals = new Set();
@@ -174,7 +175,10 @@ function scanGo(root) {
         nounsAt = `${rel}:${text.slice(0, nb.index).split("\n").length}`;
       }
       const gb = text.match(/var\s+completionGlobals\s*=\s*\[\]string\{([\s\S]*?)\}/);
-      if (gb) for (const m of gb[1].matchAll(/"([^"]+)"/g)) completionGlobals.add(m[1]);
+      if (gb) {
+        for (const m of gb[1].matchAll(/"([^"]+)"/g)) completionGlobals.add(m[1]);
+        globalsAt = `${rel}:${text.slice(0, gb.index).split("\n").length}`;
+      }
     }
 
     let fn = null;
@@ -257,7 +261,7 @@ function scanGo(root) {
   }
   if (!rootFn) return { ok: false, why: "top-level `switch noun` dispatch not found in internal/cli" };
   return {
-    ok: true, nodes, funcFile, hz, hzAt, fileFlags, flagAt, nounsAt, synopses,
+    ok: true, nodes, funcFile, hz, hzAt, fileFlags, flagAt, nounsAt, globalsAt, synopses,
     completionNouns: new Set(completionNouns), completionGlobals, rootFn,
   };
 }
@@ -357,6 +361,7 @@ export function loadBpSources({ root = REPO_ROOT, offline = false, manifestPath 
     E: go.ok ? go.fileFlags : null,
     Eat: go.ok ? go.flagAt : new Map(),
     Bat: go.ok ? go.nounsAt : BUILTINS,
+    Gat: go.ok ? go.globalsAt : BUILTINS,
     globals: go.ok ? go.completionGlobals : new Set(),
     synopses: go.ok ? go.synopses : [],
     counts: {
@@ -413,6 +418,56 @@ function isFlag(tok) {
 export const PROVEN = "proven";
 export const UNPROVEN = "unproven";
 export const UNRESOLVED = "unresolved";
+// A pure grammar diagram (`bp [global flags] <noun> <verb> [args] [command
+// flags]`) prints no literal command at all — scoring it PROVEN/UNPROVEN would
+// manufacture a pass over nothing, scoring it UNRESOLVED would manufacture a
+// red on prose that is documenting the grammar, not invoking it. It is its own
+// verdict: reported, never a pass, never counted as a parse failure.
+export const NOT_A_COMMAND = "not-a-command";
+
+// A "/"-alternation lists VERBS for one noun (`get/ls/query`); each listed word
+// must be a real word-token (never a flag, a placeholder, or a shell value) or
+// this is not a verb summary.
+function splitVerbAlternation(tok) {
+  if (!tok.includes("/") || tok.includes("|")) return null;
+  const parts = tok.split("/");
+  return parts.length > 1 && parts.every((p) => /^[a-z][\w-]*$/.test(p)) ? parts : null;
+}
+
+// A "|"-alternation documents the VALUES one argument accepts (`bash|zsh|fish`)
+// — it is never a verb or noun, so it is read exactly like a placeholder: once
+// a command path already exists, it terminates the walk as a positional
+// argument this gate says nothing further about.
+function isArgAlternation(tok) {
+  return !tok.includes("/") && /^[a-z][\w-]*(?:\|[a-z][\w-]*)+$/i.test(tok);
+}
+
+// A line is a pure metasyntax / grammar diagram when every token after `bp` is
+// either an angle placeholder (`<noun>`) or a fully-bracketed group (`[global
+// flags]`, `[args]`) — never a bare literal word. One bare word anywhere (e.g.
+// `doc` in `bp doc ls post`) means this is a real, adjudicable command.
+export function isMetasyntaxLine(text) {
+  const m = String(text).trim().match(/^(?:bp|barkpark)\s+(.+)$/);
+  if (!m) return false;
+  const toks = tokenize(m[1]);
+  let i = 0;
+  while (i < toks.length) {
+    const t = toks[i];
+    if (t.startsWith("<") && t.endsWith(">")) { i++; continue; }
+    if (t.startsWith("[") || t.startsWith("(")) {
+      const open = t[0], close = open === "[" ? "]" : ")";
+      let depth = 0;
+      do {
+        for (const ch of toks[i]) { if (ch === open) depth++; else if (ch === close) depth--; }
+        i++;
+      } while (i < toks.length && depth > 0);
+      if (depth > 0) return false; // unterminated group — not a clean diagram
+      continue;
+    }
+    return false; // a bare literal token — this IS a printed command
+  }
+  return i > 0;
+}
 
 // Resolve one printed `bp …` command against the union.
 //
@@ -438,9 +493,18 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
     return res;
   }
 
+  // a pure grammar diagram (`bp [global flags] <noun> <verb> …`) prints no
+  // literal command — adjudicate it as neither a pass nor a parse failure.
+  if (isMetasyntaxLine(text)) {
+    res.verdict = NOT_A_COMMAND;
+    res.reasons.push(`grammar diagram, not a printed command: ${text}`);
+    return res;
+  }
+
   let node = useD ? sources.D.nodes.get(sources.D.rootFn) : null;
   let leafFn = null;
   let i = 1;
+  let consumedGlobal = false;
 
   // pre-noun global flags: `bp -s <server> workspace create …`
   while (i < tokens.length && res.path.length === 0 && isFlag(tokens[i])) {
@@ -450,6 +514,9 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
       res.reasons.push(`\`${g}\` is not a global flag (${sources.origins.B} completionGlobals)`);
       return res;
     }
+    consumedGlobal = true;
+    res.via.push("B");
+    cite("B", g, sources.Gat);
     i++;
     // a value-taking global consumes the next token unless it is itself a flag
     // or resolves as a noun.
@@ -472,6 +539,13 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
     if (isPlaceholder(tok)) {
       if (res.path.length > 0) break; // a positional argument
       continue;
+    }
+    if (isArgAlternation(tok)) {
+      // `bash|zsh|fish` etc — a pipe alternation over one ARGUMENT's values,
+      // never a verb or noun. Once a command path already exists it is read
+      // exactly like a placeholder: the rest of the line is positional.
+      if (res.path.length > 0) break;
+      // no path yet — fall through; nothing currently needs this at the head.
     }
     if (node && node.cases.has(tok)) {
       res.path.push(tok);
@@ -509,12 +583,32 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
     // other one fall through to the manifest row.
     const noun = res.path[0];
     if (res.path.length === 1 && useA && sources.A.nouns.has(noun)) {
-      if ((sources.A.verbs.get(noun) || new Set()).has(tok)) {
+      const verbSet = sources.A.verbs.get(noun) || new Set();
+      if (verbSet.has(tok)) {
         res.path.push(tok);
         res.via.push("A");
         cite("A", tok, sources.A.at.get(`${noun}.${tok}`));
         leaf = true;
         continue;
+      }
+      // a verb SUMMARY — `bp doc get/ls/query/…` — is a coverage GAIN, not a
+      // suppression: it expands into one check per verb against this noun's
+      // manifest verb set, and a verb the noun lacks still REDs, named.
+      const alt = splitVerbAlternation(tok);
+      if (alt) {
+        const missing = alt.filter((v) => !verbSet.has(v));
+        if (missing.length === 0) {
+          res.path.push(tok);
+          res.via.push("A");
+          for (const v of alt) cite("A", v, sources.A.at.get(`${noun}.${v}`));
+          leaf = true;
+          continue;
+        }
+        res.verdict = UNRESOLVED;
+        res.reasons.push(
+          `\`bp ${noun} ${tok}\` — alternation lists verb(s) not in manifest noun \`${noun}\`: ` +
+          missing.join(", "));
+        return res;
       }
       res.verdict = UNRESOLVED;
       res.reasons.push(
@@ -540,6 +634,10 @@ export function resolveBpCommand(sources, line, { fenced = false, use = "ABCDE" 
   }
 
   if (res.path.length === 0) {
+    // a bare declared global (or several) IS the command — `bp --version`,
+    // `bp -V`, `bp -h`, `bp --help` all resolve without a noun. An UNDECLARED
+    // bare flag already REDs inside the loop above and never reaches here.
+    if (consumedGlobal) return res;
     res.verdict = UNRESOLVED;
     res.reasons.push(`bare \`bp\` with no resolvable command: ${text}`);
     return res;
