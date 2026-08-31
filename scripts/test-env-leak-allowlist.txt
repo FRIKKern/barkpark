@@ -1,0 +1,87 @@
+# test-env-leak-allowlist.txt — reviewed waivers for scripts/test-env-leak-gate.sh
+#
+# The gate flags an ExUnit test that mutates VM-global state
+# (Application.put_env / put_all_env / :persistent_term.put) with no paired
+# restore in the same module. These 13 sites already existed when the gate
+# landed. They are LITERAL, COMMITTED rows — never a floor computed from the
+# tree, which would agree with a gutted tree by construction.
+#
+# FORMAT (TAB-separated, exactly four fields):
+#   <count>	<path relative to api/test>	<app>/<key>	<reason>
+#
+# A row with fewer than four fields, or a reason under 12 characters, is
+# REFUSED. An allowlist whose rows nobody had to justify is a mute button.
+#
+# The key is (count, file, app/key) and deliberately NOT file:line — a
+# line-anchored pin slides on any insertion above it and then names files the PR
+# never touched.
+#
+# COUNTS MAY ONLY FALL. Fix a site and the row reds until you lower it; that is
+# the ratchet working, not a bug. Delete the row when the file reaches zero.
+#
+# EVERY ROW WAS READ INDIVIDUALLY before being written here. 21 candidate sites
+# were adjudicated; 6 were false positives the scanner was then taught to stop
+# flagging (a def/defp-scoped try/after, and case-template credit); 15 survived.
+# 11 are real leaks tracked by task-949912e93ee948d4. 2 are KNOWN false
+# positives kept as rows rather than papered over in the detector; their reasons
+# say so.
+#
+# THE FILE DID NOT GROW WHEN #14414 LANDED, AND THAT IS THE POINT. #14414
+# rewrote the :plugins idiom across the tree and touched three files named
+# below. It raised 12 NEW hits in three OTHER files — every one of them a false
+# positive on code that is not merely correct but better than the inline idiom,
+# because it restores through `Barkpark.PluginEnv.restore/1` and so tells an
+# absent :plugins from an explicit [] (the discovery kill switch). Baselining
+# twelve well-written tests is how a waiver file becomes the real policy, so the
+# scanner learned the idiom instead — a restore performed by a CALLED support
+# module now credits its caller. The regenerated baseline came back byte-for-byte
+# identical to these rows.
+#
+# One line moved (audit_dispatch_test.exs 52 -> 63) and nothing here changed,
+# because the rows are keyed on COUNTS, not file:line.
+#
+# THE MOTIVATING SITE IS NOT IN THIS FILE, and that is the ratchet working
+# rather than an omission. barkpark_web/write_hotpath_telemetry_test.exs — the
+# incident specimen, two tests setting :plugins with no on_exit — was baselined
+# at 2 while its fix was in flight, and #14074 landed the fix mid-review. The
+# gate refused to stay green over the stale row:
+#
+#   RATCHET  barkpark_web/write_hotpath_telemetry_test.exs (:barkpark/:plugins)
+#            — now 0, allowlisted 2. Lower or delete the row.
+#
+# so the row was deleted. Counts may only fall, and a floor nobody re-earns is
+# a floor that rusts.
+
+# ── :barkpark/:allow_private_outbound ───────────────────────────────────────
+# An SSRF guard's kill switch, set in `setup`. Both files DO register an
+# on_exit — it restores :webhook_http_adapter and deletes the test pid, and
+# never touches this key. Leaked ON, the guard is disarmed for whatever module
+# runs next, and a test can then pass for the wrong reason.
+1	barkpark/webhooks/audit_dispatch_test.exs	:barkpark/:allow_private_outbound	pre-existing, filed as task-949912e93ee948d4 — SSRF kill switch set in setup; the file's on_exit restores other keys but never this one
+1	barkpark/webhooks/audit_webhooks_test.exs	:barkpark/:allow_private_outbound	pre-existing, filed as task-949912e93ee948d4 — SSRF kill switch set in setup; the file's on_exit restores other keys but never this one
+
+# ── :persistent_term, custom per-test keys ──────────────────────────────────
+# Capture terms written by fixture plugins to record that a callback fired
+# ({SeederPlugin, :ran}, {BootCollectorsTest, :route_ctx}, …). :persistent_term
+# is not merely global, it is global AND unowned — nothing tears it down between
+# modules, and no case template knows these keys exist. Several are `erase`d
+# BEFORE the test that reads them, which is the same protects-only-me shape as
+# the incident.
+3	barkpark/plugins/registry/plugin_callbacks_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — per-plugin capture terms; RegistryCase restores its own snapshot key, never these
+2	barkpark/plugins/registry/boot_collectors_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — capture terms erased before the reading test, never after it
+3	barkpark/plugins/registry_collect_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — capture terms erased before the reading test, never after it
+1	barkpark/plugins/indx/recovery_persistence_test.exs	:persistent_term/*	pre-existing, filed as task-949912e93ee948d4 — the indexer live_dataset pointer is written by wipe_pointer/1 and never restored
+
+# ── KNOWN FALSE POSITIVES — kept as rows, not hidden in the detector ─────────
+# These two ARE restored: the file writes `use Barkpark.RegistryCase`, whose
+# on_exit calls Barkpark.Plugins.Registry.reset/0, which reaches
+# :persistent_term.put(@snapshot_key, …) inside api/lib. The gate credits a case
+# template's on_exit (that is why four other sites are no longer flagged), but
+# it will not follow a remote call out of api/test into api/lib to see what it
+# writes — a scanner that chased arbitrary call chains would pardon far more
+# than it should, and the looseness would be invisible.
+#
+# Waiving two known-good sites is the honest trade against teaching the detector
+# to guess. If Registry.reset/0 ever stops restoring the snapshot, these rows
+# are where a reader looks first.
+2	barkpark/plugins/registry_cache_test.exs	:persistent_term/@snapshot_key	KNOWN false positive, not a leak — RegistryCase's on_exit restores @snapshot_key via Registry.reset/0, a call the scanner will not follow into api/lib

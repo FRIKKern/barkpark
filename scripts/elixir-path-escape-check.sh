@@ -167,6 +167,9 @@ scripts/pds-published-artifact-door_test.sh
 scripts/pds-record-parity.test.sh
 scripts/pds-status-only-residue.exs
 scripts/pds-window-sentinel_test.sh
+scripts/test-env-leak-allowlist.txt
+scripts/test-env-leak-gate.sh
+scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
 web/__tests__/**
 web/public/assets/bp-paper-editor.css
