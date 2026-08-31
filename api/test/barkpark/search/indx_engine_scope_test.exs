@@ -143,10 +143,20 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
 
     b_ids = Enum.map(b_hits, & &1.doc_id)
 
-    # The leak invariant is about VISIBLE hits: exactly one survives the
-    # Postgres source-read scope, and it is B's. (`total` now reflects the
-    # pre-scope candidate pool count, not the visible slice.)
-    assert b_total == 2
+    # The leak invariant covers the COUNT as well as the visible hits: exactly
+    # one row survives the Postgres source-read scope, it is B's, and the
+    # reported total agrees with it.
+    #
+    # This assertion used to read `b_total == 2`, with the parenthetical "`total`
+    # now reflects the pre-scope candidate pool count, not the visible slice" —
+    # i.e. this fixture already reproduced the count leak and the invariant was
+    # narrowed to exclude it. Two workspaces share one dataset-keyed Indx pool
+    # (that is what `BothDocsClient` models), so a pre-scope pool count tells B
+    # how many documents workspace A has matching its query. `total_for/3` now
+    # recomputes the total through `Content.count_documents_by_ids/3` — the same
+    # scoping stack the hydration read applies — so the number can never exceed
+    # what the caller may see. Tightened, not relaxed: 2 -> 1.
+    assert b_total == 1
     assert length(b_ids) == 1
     assert "drafts.b-hit" in b_ids
     refute "drafts.a-hit" in b_ids
