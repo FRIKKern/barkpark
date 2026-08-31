@@ -3,6 +3,7 @@ package taskboard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -228,10 +229,13 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 	// guard yet carry a row OLDER (in server UpdatedAt/Epoch) than what's on
 	// screen. Reconcile per doc id so a displayed row can only move FORWARD: keep
 	// the shown row when the incoming one is stale for it, take the incoming row
-	// otherwise, add new rows, drop rows the snapshot no longer lists. The merged
-	// set feeds build, repo correlation, the flash diff, AND prevTasks/cache — so
-	// a stale-then-fresh sequence neither reverts a row nor spuriously flashes it.
-	merged := mergeForward(m.prevTasks, msg.snap.Tasks)
+	// otherwise, add new rows, drop rows the snapshot no longer lists — UNLESS the
+	// window is truncated (below), in which case a non-terminal row the snapshot
+	// no longer lists might just be outside the clamp, not closed. The merged set
+	// feeds build, repo correlation, the flash diff, AND prevTasks/cache — so a
+	// stale-then-fresh sequence neither reverts a row nor spuriously flashes it.
+	truncated := snapshotTruncated(msg.snap)
+	merged, agedOut := mergeForward(m.prevTasks, msg.snap.Tasks, truncated)
 	mergedSnap := msg.snap
 	mergedSnap.Tasks = merged
 	// Keep the reading substrate in hand (charter D28): the merged task set feeds
@@ -297,6 +301,23 @@ func (m Model) applySnapshot(msg snapshotMsg) (Model, tea.Cmd) {
 		// the network round-trip would make every success flash unreadably.
 		m.ui.Strip = ActionStrip{}
 		m.pendingClose = ""
+	}
+	// Aged-out notice (distinct from the ambient "showing N of M" footnote,
+	// which only says the corpus is bigger than the fetch — never that specific
+	// rows went stale). agedOut is always 0 when the window was not truncated,
+	// so an untruncated refresh never touches the strip here. This intentionally
+	// runs AFTER the keepStrip guard above: on the rare refresh that is both a
+	// post-action reconcile AND truncated, the honest aged-out count takes
+	// priority over the action's own confirmation rather than silently losing it.
+	if agedOut > 0 {
+		word := "task"
+		if agedOut != 1 {
+			word = "tasks"
+		}
+		m.ui.Strip = ActionStrip{
+			Message: fmt.Sprintf("%d %s aged out of the 1000-row window — still open, not closed", agedOut, word),
+			Role:    RoleWarn,
+		}
 	}
 	if m.liveIsFresh() {
 		m.ui.Conn = ConnLive
@@ -396,6 +417,26 @@ func snapshotErrorLabel(err error) string {
 	default:
 		return "offline"
 	}
+}
+
+// snapshotTruncated reports whether the 1000-row task-list clamp is active on
+// this fetch: the fetch is desc:updated_at (tasks_controller.ex) clamped to a
+// fixed row count, so over a corpus bigger than the clamp, len(snap.Tasks) —
+// the envelopes actually returned — falls short of the summed lifecycle
+// Counts the server reports as the true corpus total. This is the SAME
+// predicate render.go's summedLifecycleCounts/"showing N of M" footnote uses
+// (b.TaskCount > 0 && b.TaskCount < total), evaluated one step earlier in the
+// pipeline — against the RAW incoming snapshot, before mergeForward runs —
+// because mergeForward is exactly the thing that needs to know whether a
+// prev-only absence means "closed" or "rotated out of the window". A zero
+// fetch (len 0, e.g. an empty corpus) is never truncated.
+func snapshotTruncated(snap Snapshot) bool {
+	total := 0
+	for _, v := range snap.Counts {
+		total += v
+	}
+	n := len(snap.Tasks)
+	return n > 0 && n < total
 }
 
 // liveIsFresh reports whether a live SSE event has been seen recently enough to
