@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Contract.SearchTest do
 
   alias Barkpark.Auth
   alias Barkpark.Content
+  alias Barkpark.Search.HitEnvelope
 
   setup do
     Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
@@ -275,6 +276,88 @@ defmodule BarkparkWeb.Contract.SearchTest do
       [doc | _] = body["documents"]
       assert Map.has_key?(doc, "_id")
       assert Map.has_key?(doc, "_type")
+    end
+  end
+
+  # wb-api-search-hasmore-echo: the envelope now echoes whether another page
+  # exists (derived from the corpus-total `count` already on the wire), so a
+  # paging client stops guessing from `length(documents) == limit`.
+  describe "hasMore pagination echo" do
+    setup do
+      for i <- 1..5 do
+        Content.create_document(
+          "post",
+          %{"doc_id" => "drafts.hm#{i}", "title" => "Hasmoreitem Alpha #{i}"},
+          "test"
+        )
+
+        Content.publish_document("hm#{i}", "post", "test")
+      end
+
+      :ok
+    end
+
+    test "REST /v1/data/search: true on page 1, false on the last page", %{conn: conn} do
+      page1 =
+        get(conn, "/v1/data/search/test", %{
+          "q" => "hasmoreitem",
+          "limit" => "2",
+          "offset" => "0"
+        })
+
+      body1 = Jason.decode!(page1.resp_body)
+      assert body1["count"] == 5
+      assert length(body1["documents"]) == 2
+      assert body1["hasMore"] == true
+
+      last_page =
+        get(conn, "/v1/data/search/test", %{
+          "q" => "hasmoreitem",
+          "limit" => "2",
+          "offset" => "4"
+        })
+
+      body_last = Jason.decode!(last_page.resp_body)
+      assert body_last["count"] == 5
+      assert length(body_last["documents"]) == 1
+      assert body_last["hasMore"] == false
+    end
+
+    test "loopback /v1/data/local/search: true on page 1, false on the last page", %{conn: conn} do
+      page1 =
+        get(conn, "/v1/data/local/search/test", %{
+          "q" => "hasmoreitem",
+          "limit" => "2",
+          "offset" => "0"
+        })
+
+      body1 = Jason.decode!(page1.resp_body)
+      assert body1["count"] == 5
+      assert length(body1["documents"]) == 2
+      assert body1["hasMore"] == true
+
+      last_page =
+        get(conn, "/v1/data/local/search/test", %{
+          "q" => "hasmoreitem",
+          "limit" => "2",
+          "offset" => "4"
+        })
+
+      body_last = Jason.decode!(last_page.resp_body)
+      assert body_last["count"] == 5
+      assert length(body_last["documents"]) == 1
+      assert body_last["hasMore"] == false
+    end
+
+    test "build/5 defaults offset to 0 when the opt is absent, so an existing caller that never passes :offset keeps working" do
+      envelope =
+        HitEnvelope.build([], 5, "hasmoreitem", %{},
+          caller_context: nil,
+          schema_resolver: fn _type -> nil end
+        )
+
+      assert envelope.count == 5
+      assert envelope.hasMore == true
     end
   end
 end
