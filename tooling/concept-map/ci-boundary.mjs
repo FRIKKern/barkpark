@@ -89,17 +89,34 @@ function runNodeJson(scriptPath, extraArgs = []) {
     // Left bare, JSON.parse throws an uncaught SyntaxError, node exits 1, and 1
     // is this script's REGRESSION code — so an unreadable payload renders as
     // architectural debt that nobody added. Exit 2 (fault) instead, and name the
-    // signature of the failure we have actually seen: a child that calls
-    // process.exit() after writing to a PIPE is torn down before the async write
-    // drains, truncating stdout at one pipe buffer (65536 bytes). That is why
-    // neither grade.mjs nor boundary.mjs ends in process.exit().
-    const truncated = text.length > 0 && text.length % 65536 === 0;
+    // failure we have actually seen: a child that calls process.exit() after
+    // writing to a PIPE is torn down before the async write drains, cutting the
+    // payload short. That is why no script in this pipeline ends in
+    // process.exit().
+    //
+    // REACHABILITY, measured (5 trials per size, piped through `tee`):
+    //   1000 / 30000 / 60000 / 65000 / 65535 / 65536 bytes -> ALWAYS complete
+    //   70000 -> cut to 65536 on 2 of 5 runs
+    //   200000 -> cut to 65536, 73728 or 81920, on 3 of 5 runs
+    // So the cut is NOT always one 65536 buffer — 73728 and 81920 were both
+    // observed (the cuts land on 8192-byte boundaries). An earlier version of
+    // this check tested `length % 65536 === 0` and would have called those two
+    // "malformed", which is the wrong diagnosis pointing at the wrong file.
+    //
+    // What IS reliable is the floor: at or below PIPE_BUF the write fits the
+    // buffer and exit() cannot cut it, so truncation is RULED OUT. Above it,
+    // truncation is the first thing to suspect.
+    const PIPE_BUF = 65536;
     note(`ci-boundary: FAULT — ${scriptPath} did not emit parseable JSON.`);
     note(`  read ${text.length} bytes; ${err.message}`);
-    if (truncated) {
-      note(`  ${text.length} bytes is an exact multiple of the 65536-byte pipe`);
-      note(`  buffer — the payload was TRUNCATED, not malformed. Check that the`);
-      note(`  script does not call process.exit() after writing --json to stdout.`);
+    if (text.length >= PIPE_BUF) {
+      note(`  ${text.length} bytes is at or above the ${PIPE_BUF}-byte pipe buffer, so this`);
+      note(`  is very likely a TRUNCATED payload rather than a malformed one.`);
+      note(`  Check that ${scriptPath} does not call process.exit() after writing`);
+      note(`  --json to stdout; use process.exitCode and let node flush.`);
+    } else {
+      note(`  ${text.length} bytes is below the ${PIPE_BUF}-byte pipe buffer, which RULES OUT`);
+      note(`  the process.exit() truncation race — this payload is genuinely malformed.`);
     }
     throw new GateFault();
   }
