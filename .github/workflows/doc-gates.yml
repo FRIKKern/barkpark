@@ -98,6 +98,19 @@ on:
       # file the fence's memory lives in could change without the gate that
       # reads it ever running.
       - "design/emit-manifest.json"
+      # the Part E ratchet's OWN baseline, and the one ledger entry that matched no
+      # glob either (gate-red-dtoken). design/check.mjs is the only thing in the repo
+      # that reads design/exemptions.json, and that file matched ZERO globs in both
+      # `on:` blocks — so a PR editing the baseline ALONE never ran the gate the
+      # baseline governs. That is the documented defeat in
+      # tooling/grip/ledger/exemptions-ratchet-memory-refuted-2026-08-19.md: raise a
+      # count in PR-1 (no glob matches, doc-gates never runs, green), then spend the
+      # slack in PR-2 (Part E compares against the raised ceiling and passes) — two
+      # ordinary PRs, ratchet defeated. api/priv/static/assets/bp-graph.js is the
+      # same shape: a ledger entry whose only other trigger, bp-graph-drift.yml, is
+      # named "(advisory)".
+      - "design/exemptions.json"
+      - "api/priv/static/assets/bp-graph.js"
       # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
       # Elixir consumer compile-time-reads it inside the cloud image build, which
       # only sees cloud/, so the design/ home broke every cp deploy) — the SOLE
@@ -253,6 +266,19 @@ on:
       # file the fence's memory lives in could change without the gate that
       # reads it ever running.
       - "design/emit-manifest.json"
+      # the Part E ratchet's OWN baseline, and the one ledger entry that matched no
+      # glob either (gate-red-dtoken). design/check.mjs is the only thing in the repo
+      # that reads design/exemptions.json, and that file matched ZERO globs in both
+      # `on:` blocks — so a PR editing the baseline ALONE never ran the gate the
+      # baseline governs. That is the documented defeat in
+      # tooling/grip/ledger/exemptions-ratchet-memory-refuted-2026-08-19.md: raise a
+      # count in PR-1 (no glob matches, doc-gates never runs, green), then spend the
+      # slack in PR-2 (Part E compares against the raised ceiling and passes) — two
+      # ordinary PRs, ratchet defeated. api/priv/static/assets/bp-graph.js is the
+      # same shape: a ledger entry whose only other trigger, bp-graph-drift.yml, is
+      # named "(advisory)".
+      - "design/exemptions.json"
+      - "api/priv/static/assets/bp-graph.js"
       # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
       # Elixir consumer compile-time-reads it inside the cloud image build, which
       # only sees cloud/, so the design/ home broke every cp deploy) — the SOLE

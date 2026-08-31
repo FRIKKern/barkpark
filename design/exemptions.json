@@ -1,6 +1,16 @@
 {
  "_rule": "Frozen baseline of hand-stamped color literals that the theme compiler did NOT emit. design/check.mjs Part E re-counts each file and FAILS on ANY drift from `count` \u2014 growth (a new literal) OR shrink (a literal was tokenized). A ratchet: every change to a file's literal count MUST update its baseline in THIS SAME DIFF. The ledger only shrinks over time; it can never silently grow. Counting rule lives next to the implementation in design/check.mjs Part E (LEDGER_LITERAL regex + stripLedgerNoise): a color literal is `#hex` (3-8 digits) or an rgb()/rgba()/hsl()/hsla() whose first argument is NOT var() \u2014 `hsl(var(--x))` is compiler-driven token consumption, not a hand-stamp, so it is excluded (this is what lets a literal\u2192var conversion register as a shrink). Marker regions \u2014 ANY `BEGIN/END GENERATED: <name>` block, i.e. `tokens` (design/emit.mjs), `paper-surface` (the reader\u2192editor mirror), and `status-tones` (the status skin) \u2014 and comments (CSS /* */, HTML <!-- -->, HEEx <%!-- --%> and <%# %>) are blanked before counting, so generator-emitted literals and e.g. the `#940` PR-ref in app.css never count as hand-stamps.",
  "_note": "The per-file `count` splits as {hex + literal-rgb/rgba + literal-hsl}. These are the surfaces still holding hand-stamped color the theme-system compiler has not yet reached; as tokenization lands, LOWER the number here in the same diff.",
+ "_retired": [
+  {
+   "path": "web/public/assets/bp-paper-editor.css",
+   "was_count": 107,
+   "retired_by": "gate-red-dtoken, 2026-09-01",
+   "why": "REMOVED, not raised. Part E's counting rule cannot apply to this path, so its number never measured hand-stamps. The file is the MINIFIED build of api/assets/paper-editor/src/styles.css: esbuild strips comments, so the bundle carries 0 `BEGIN/END GENERATED` markers (the source carries 1) and stripLedgerNoise() blanks nothing — every literal design/emit.mjs emitted is counted as a hand-stamp. Measured at a0c52917da: of the 69 distinct hex values the file gained in 0ceefc5911 (#14397, the vendor resync), 69 of 69 sit inside the source's BEGIN/END GENERATED span and 0 are orphans; before that commit the bundle carried ZERO `[data-bp-theme]` blocks and after it carries all five (charple/ember/evergreen/fjord/iris). The +132 that reddened main WAS the N-theme identity layer arriving in a copy that had missed it for months — which also means the count is a function of THEME COUNT, so theme #6 would red Part E again for no design reason. That is what trains people to bump a baseline, and bumping is the one thing this ratchet exists to prevent.",
+   "coverage_is_not_lost": "The bundle's genuine hand-stamped residue is already ratcheted at its SOURCE — the api/assets/paper-editor/src/styles.css entry below (count 57), whose markers are intact, so the blanking rule works there. Byte-integrity of the built artifact is pinned by api/test/barkpark/paper_editor_vendor_drift_test.exs, which byte-compares web/public/assets/bp-paper-editor.css against api/priv/static/assets/bp-paper-editor.css and runs under the REQUIRED `Elixir gate`. A byte pin is strictly stronger than a literal count, and it covers BOTH legs of the pair — this ledger only ever watched one (api/priv/static/assets/bp-paper-editor.css was never an entry).",
+   "reinstate_if": "the bundle ever ships UNMINIFIED, or the build learns to preserve the BEGIN/END GENERATED markers. Then the blanking rule fires again and a count here means what it says."
+  }
+ ],
  "entries": [
   {
    "path": "api/lib/barkpark_web/layouts/root.html.heex",
@@ -26,11 +36,6 @@
    "path": "api/assets/paper-editor/src/styles.css",
    "count": 57,
    "note": "Paper-editor Studio bundle (the scoped embedder source), outside the GENERATED: paper-surface mirror block (L30-324, blanked by Part E's generalized marker): 43 hex + 14 literal rgb/rgba. The residue is un-tokenizable in place: dead `var(--paper-*, #hex)` fallbacks (the token is always emitted, so the fallback never paints but must stay for the de-scoped custom-element build path), the independent `.bp-wikilink-menu` pre-paint theme scope (its own --paper-* capture \u2014 a sans-serif chrome menu that renders before the reader tokens attach), and the render.ex attribute-selector string-matches (`div[style*=\"background:#ffffff\"]`, `a[style*=\"color:#1d4ed8\"]`) that repaint server-inlined block styles \u2014 the hex there is a SELECTOR literal matching emitted markup, not a paint value. Frozen here; previously blind to every gate."
-  },
-  {
-   "path": "web/public/assets/bp-paper-editor.css",
-   "count": 107,
-   "note": "The web reader's shipped paper-editor stylesheet \u2014 the built, minified, de-scoped (`:root,:host`) bundle loaded by the `<bp-paper-editor>` custom element (web/components/paper-editor-mount.tsx), the web-surface counterpart of the Studio styles.css above: 86 hex + 21 literal rgb/rgba (higher raw count than the source because minification inlines and there are no GENERATED markers to blank). Same residue classes: the `:root`/`:root[data-theme=dark]` token-capture origin (--paper-*/--bp-tone-*/--st-* defaults \u2014 the hand-authored theme values the compiler mirrors), `var(--paper-*, #hex)` fallbacks, the `.bp-wikilink-menu` independent scope, and render attribute-selector string-matches. A build artifact \u2014 never hand-edited; its token layer tracks the lockstep via design/paper-editor-mirror.mjs + emit.mjs. Frozen here; previously untracked by every gate."
   },
   {
    "path": "api/assets/paper-surface/paper-surface.css",
