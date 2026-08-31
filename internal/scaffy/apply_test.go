@@ -601,7 +601,20 @@ ASSERT CMD "printf x > ci-proof.txt" TIER ci
 // TestAssertCmdD38 — sh -c verbatim from RepoRoot (strings carry their
 // own cd), CC=/usr/bin/clang appended to the env, inline prefixes
 // honored by the shell, tokens substituted, TIER ci never executed.
+//
+// The CC arm asserted here is the ABSENT-CC default, so this test must
+// PIN the ambient CC to absent rather than inherit whatever the operator
+// exported. D101 amended D38 to preserve a stranger's CC verbatim (see
+// TestAssertCmdD101CCWhenUnset, which covers both arms), and that
+// amendment silently made this assertion environment-dependent: it reds
+// under the CC=/usr/bin/cc every contributor to this repo must export
+// for CGO. The product behaviour is right; reading the ambient value
+// instead of declaring it was the defect.
 func TestAssertCmdD38(t *testing.T) {
+	if old, ok := os.LookupEnv("CC"); ok {
+		os.Unsetenv("CC")
+		t.Cleanup(func() { os.Setenv("CC", old) })
+	}
 	root := t.TempDir()
 	cmdPath := writeCommand(t, root, "check-env.scaffy", checkEnvSrc)
 	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
