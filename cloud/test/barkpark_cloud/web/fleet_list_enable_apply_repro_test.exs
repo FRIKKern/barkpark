@@ -19,7 +19,10 @@ defmodule BarkparkCloud.Web.FleetListEnableApplyReproTest do
 
   defp fixture do
     n = System.unique_integer([:positive])
-    {:ok, user} = Accounts.register_user(%{email: "u#{n}@example.com", password: "correct-horse-battery"})
+
+    {:ok, user} =
+      Accounts.register_user(%{email: "u#{n}@example.com", password: "correct-horse-battery"})
+
     {:ok, team} = Accounts.create_team(%{name: "T#{n}", slug: "t-#{n}"})
     {:ok, _} = Accounts.add_member(team, user, "admin")
     {:ok, token} = Accounts.create_user_session_token(user)
@@ -64,11 +67,24 @@ defmodule BarkparkCloud.Web.FleetListEnableApplyReproTest do
 
     # claimed job (worker mid-flight)
     {:ok, c} = Registry.enqueue_enable_apply_job(degraded)
-    c |> Ecto.Changeset.change(status: "claimed", claim_token: "tok-x", claimed_at: now, attempts: 1) |> Repo.update!()
+
+    c
+    |> Ecto.Changeset.change(
+      status: "claimed",
+      claim_token: "tok-x",
+      claimed_at: now,
+      attempts: 1
+    )
+    |> Repo.update!()
 
     # failed job (SSH refused)
     %ProvisionJob{}
-    |> ProvisionJob.changeset(%{barkpark_id: current.id, kind: "enable_apply", status: "failed", error: "ssh: connect refused"})
+    |> ProvisionJob.changeset(%{
+      barkpark_id: current.id,
+      kind: "enable_apply",
+      status: "failed",
+      error: "ssh: connect refused"
+    })
     |> Repo.insert!()
 
     conn =
