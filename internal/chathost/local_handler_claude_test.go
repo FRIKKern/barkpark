@@ -14,7 +14,7 @@ import (
 // TestRunClaudePublishesTerminalErrorOnPrematureExit is the regression for the
 // hang: the claude subprocess exits 0 without ever emitting a stream-json
 // record of type "result". Before the fix, runClaude returned nil in this
-// shape, so Runner.start (runner.go:104-118) published NO terminal frame and
+// shape, so Runner.start (runner.go) published NO terminal frame and
 // the chat turn hung forever.
 func TestRunClaudePublishesTerminalErrorOnPrematureExit(t *testing.T) {
 	installClaudeTurnHelper(t, "no_result")
