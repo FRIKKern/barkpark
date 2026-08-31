@@ -1349,6 +1349,22 @@ defmodule BarkparkWeb.ChatController do
       total_cost_usd: s.total_cost_usd,
       last_context_tokens: s.last_context_tokens,
       context_window: s.context_window,
+      # Provider-OBSERVED runtime facts (wb-api-chat-observed-telemetry-readout):
+      # distinct from model_choice/effort_choice (what was REQUESTED) above —
+      # these are what the provider actually reported, written by
+      # RuntimeTelemetry.observe/2 and observe_identity/2. nil means no
+      # observation has landed yet; NEVER coalesced to 0 or to the requested
+      # model (honesty rule — a missing fact must read as unknown, not zero).
+      observed_model: s.observed_model,
+      observed_effort: s.observed_effort,
+      observed_input_tokens: s.observed_input_tokens,
+      observed_cached_input_tokens: s.observed_cached_input_tokens,
+      observed_output_tokens: s.observed_output_tokens,
+      observed_reasoning_output_tokens: s.observed_reasoning_output_tokens,
+      observed_total_tokens: s.observed_total_tokens,
+      observed_context_window: s.observed_context_window,
+      runtime_identity: s.runtime_identity,
+      runtime_telemetry_limitations: s.runtime_telemetry_limitations,
       # Herd (charter D65h): the show read carries the agent_state pair too —
       # a single-session poller must not need the sidebar list to know the
       # pill state.
