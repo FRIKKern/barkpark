@@ -72,6 +72,16 @@ jobs:
 
       - name: Run boundary gate
         run: |
+          # `set -euo pipefail` is LOAD-BEARING. Actions' unspecified-shell
+          # default is `bash -e {0}` — WITHOUT pipefail — and the pipeline below
+          # is this step's LAST command, so without pipefail the step's status is
+          # always tee's 0. ci-boundary.mjs exits 1 on a boundary REGRESSION and
+          # 2 on its own fault; both were being discarded, which left this job's
+          # red channel structurally dead and would have made the documented
+          # promotion path in the header ("flip continue-on-error to false")
+          # mint a gate that cannot fail. The summary step below is `if:
+          # always()`, so it still reports when this step reds.
+          set -euo pipefail
           node tooling/concept-map/ci-boundary.mjs --json 2>&1 | tee /tmp/boundary-gate.txt
 
       - name: Report to PR summary
