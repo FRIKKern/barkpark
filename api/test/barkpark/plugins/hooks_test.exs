@@ -183,11 +183,13 @@ defmodule Barkpark.Plugins.HooksTest do
 
   # ── helpers ─────────────────────────────────────────────────────────
 
+  # Delegated to `Barkpark.PluginEnv` so the restore uses the `:unset`
+  # sentinel. The hand-rolled version defaulted the snapshot to `[]`, which on
+  # the (unset) boot baseline turned "restore" into `put_env(:plugins, [])` —
+  # BootCollectors' discovery kill switch — and this module has no self-reset,
+  # so the `[]` outlived the file and blanked plugin routes for later tests.
   defp with_plugins(modules, ctx) when is_list(modules) do
-    prior = Application.get_env(:barkpark, :plugins, [])
-    Application.put_env(:barkpark, :plugins, modules)
-    ExUnit.Callbacks.on_exit(ctx, fn -> Application.put_env(:barkpark, :plugins, prior) end)
-    :ok
+    Barkpark.PluginEnv.with_plugins(modules, ctx)
   end
 
   defp with_async_target(ctx) do

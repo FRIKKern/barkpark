@@ -67,9 +67,9 @@ defmodule Barkpark.Plugins.RegistryRendererConnectionTest do
         name
       end)
 
-    prior = Application.get_env(:barkpark, :plugins, [])
-    Application.put_env(:barkpark, :plugins, names)
-    ExUnit.Callbacks.on_exit(ctx, fn -> Application.put_env(:barkpark, :plugins, prior) end)
+    # `PluginEnv.with_plugins/2` restores through an `:unset` sentinel; a `[]`
+    # snapshot default would restore an EXPLICIT `[]`, the discovery kill switch.
+    :ok = Barkpark.PluginEnv.with_plugins(names, ctx)
 
     names
   end

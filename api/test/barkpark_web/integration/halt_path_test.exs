@@ -74,8 +74,13 @@ defmodule BarkparkWeb.Integration.HaltPathTest do
         "test"
       )
 
-    original = Application.get_env(:barkpark, :plugins, [])
-    on_exit(fn -> Application.put_env(:barkpark, :plugins, original) end)
+    # The tests below `put_env(:plugins, [SomePlugin])`; this restores the
+    # snapshot. `PluginEnv.capture/0` (an `:unset` sentinel), not
+    # `get_env(…, [])` — a `[]` default would restore an EXPLICIT `[]` on the
+    # unset boot baseline, which is BootCollectors' discovery kill switch and
+    # blanks plugin routes for every test that runs after this file.
+    original = Barkpark.PluginEnv.capture()
+    on_exit(fn -> Barkpark.PluginEnv.restore(original) end)
 
     :ok
   end
