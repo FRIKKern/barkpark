@@ -70,10 +70,36 @@ defmodule BarkparkWeb.PluginScopeSession do
   (`:scoped_plugin_admin` / `:scoped_plugin_public` / `:scoped_plugin_ops`)
   mount no `RequireShareScope`, so they never set `share_public` and this arm
   is inert for them.
+
+  ## Liveness re-check on the OPEN socket (task-972d97ffd2e468d9)
+
+  The re-resolve above still only ran at MOUNT time. A link revoked or
+  expired after a reader's socket was already connected kept streaming that
+  reader every PubSub update for the life of the socket — `/s/<token>` and a
+  fresh dead render went dark immediately, but the already-open tab did not,
+  which is not what an owner believes "revoke" buys them.
+
+  So an item-share-granted CONNECTED mount (`Phoenix.LiveView.connected?/1` —
+  a dead render schedules nothing) also arms a periodic re-check:
+  `Process.send_after/3` schedules `@share_liveness_msg` to itself every
+  `@share_liveness_interval_ms`, and `attach_hook/4` on `:handle_info`
+  intercepts it, re-running the EXACT SAME `confine_item_share/3` predicate
+  used at mount against the params/session captured at mount time. Success
+  re-arms the timer; failure reuses `deny/1` — the same flash + full redirect
+  a failed mount returns — which terminates the socket. Expiry needs no
+  second mechanism: `Links.resolve/1` already filters `expires_at`, so the
+  same re-check tears down an expired link too (proven by a dedicated test
+  rather than assumed).
+
+  The attached hook returns `{:cont, socket}` for every message that is not
+  `@share_liveness_msg` — it must never intercept a foreign `handle_info`
+  meant for the mounted LiveView itself.
   """
 
   import Phoenix.Component, only: [assign: 3]
-  import Phoenix.LiveView, only: [put_flash: 3, redirect: 2]
+
+  import Phoenix.LiveView,
+    only: [put_flash: 3, redirect: 2, connected?: 1, attach_hook: 4]
 
   alias Barkpark.Sharing
   alias Barkpark.Sharing.Links
@@ -103,6 +129,22 @@ defmodule BarkparkWeb.PluginScopeSession do
   # reading — narrowing the section-share path is explicitly out of scope for
   # this confinement).
   @section_surface :papers
+
+  # Liveness re-check (see moduledoc). The message is namespaced by module so
+  # a test can address it directly (`send(view.pid, {__MODULE__, :share_liveness_check})`)
+  # without this module exporting anything new.
+  @share_liveness_msg {__MODULE__, :share_liveness_check}
+  @share_liveness_hook :plugin_scope_session_share_liveness
+
+  # What the handle_info hook re-checks the item token against, stashed on
+  # the socket at arm-time so the periodic callback needs no extra lookups.
+  @share_liveness_assign :__plugin_scope_session_share_liveness__
+
+  # 20s: honest about the exposure window (the row's complaint is an
+  # UNBOUNDED socket, not merely a slow one) while staying well above one
+  # PubSub tick, so a normal reader never pays for more than one re-resolve
+  # per several document updates. Tens of seconds, not minutes.
+  @share_liveness_interval_ms 20_000
 
   @doc """
   `live_session :session` MFA. Receives the HTTP conn; returns the extra
@@ -176,7 +218,10 @@ defmodule BarkparkWeb.PluginScopeSession do
       |> assign_scope(:current_workspace, session[@session_ws_id], session[@session_ws_slug])
       |> assign_scope(:current_project, session[@session_proj_id], session[@session_proj_slug])
 
-    confine_item_share(params, session, socket)
+    case confine_item_share(params, session, socket) do
+      {:cont, socket} -> {:cont, maybe_arm_share_liveness(socket, params, session)}
+      {:halt, socket} -> {:halt, socket}
+    end
   end
 
   defp assign_scope(socket, _key, nil, _slug), do: socket
@@ -218,6 +263,57 @@ defmodule BarkparkWeb.PluginScopeSession do
         deny(socket)
     end
   end
+
+  # ── Open-socket liveness re-check (task-972d97ffd2e468d9) ──────────────────
+
+  # Arms the periodic re-check ONLY for a CONNECTED, anonymously share-granted
+  # mount — a dead render (`connected?/1` false) is re-derived fresh on every
+  # HTTP request already and schedules nothing, and a member/unscoped mount
+  # carries no `@session_share_public` so it never reaches here. The
+  # already-stashed branch guards `attach_hook/4` (which raises on a duplicate
+  # hook name) against `on_mount` somehow re-entering the SAME process; it
+  # still refreshes the stashed params/session rather than no-op, so a second
+  # entry can never re-arm against stale mount params.
+  defp maybe_arm_share_liveness(socket, params, session) do
+    cond do
+      session[@session_share_public] != true ->
+        socket
+
+      not connected?(socket) ->
+        socket
+
+      match?(%{}, socket.assigns[@share_liveness_assign]) ->
+        assign(socket, @share_liveness_assign, %{params: params, session: session})
+
+      true ->
+        Process.send_after(self(), @share_liveness_msg, @share_liveness_interval_ms)
+
+        socket
+        |> assign(@share_liveness_assign, %{params: params, session: session})
+        |> attach_hook(@share_liveness_hook, :handle_info, &handle_share_liveness_info/2)
+    end
+  end
+
+  # The hook itself. Re-runs the EXACT predicate mount uses, against the
+  # params/session captured at arm-time, so a revoked or expired link tears
+  # down an already-open socket instead of only failing the next mount.
+  # MUST `{:cont, socket}` on every message that is not its own — this hook
+  # is attached on every item-share-granted LiveView, so it must never
+  # swallow a `handle_info` the mounted view itself expects.
+  defp handle_share_liveness_info(@share_liveness_msg, socket) do
+    %{params: params, session: session} = socket.assigns[@share_liveness_assign]
+
+    case confine_item_share(params, session, socket) do
+      {:cont, socket} ->
+        Process.send_after(self(), @share_liveness_msg, @share_liveness_interval_ms)
+        {:halt, socket}
+
+      {:halt, socket} ->
+        {:halt, socket}
+    end
+  end
+
+  defp handle_share_liveness_info(_other, socket), do: {:cont, socket}
 
   # Re-resolve the SIGNED session's raw token and require it to bind the
   # resource addressed by the CURRENT mount params, at the CURRENT scope.
