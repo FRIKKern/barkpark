@@ -88,13 +88,22 @@ fi
 
 # ── 1c. Orphaned test databases ──────────────────────────────────────────────
 # Every lane runs `MIX_TEST_PARTITION=<lane> mix ecto.create`; nothing drops
-# them, so the count is MONOTONIC and the ceiling is max_connections (100), not
-# disk. This matters here rather than in a log nobody reads because pool
-# exhaustion is MISREAD BY DEFAULT: `mix ecto.create` dies with "couldn't be
-# created: killed" and a run dies with FATAL 53300 — neither names the cause,
-# and both read like a code fault. A lane that records that abort as a red has
-# invented a failure. Read-only: this counts, it never drops.
+# them, so the count is MONOTONIC (314 measured 2026-08-24, task-1a7e52b811dabc3c).
+# `make test` (scripts/test-partition-cleanup.sh) now drops a lane's own
+# partition on a clean exit; `make reap-test-dbs` sweeps by age for the lanes
+# that never reach one. Read-only here: this counts, it never drops.
+#
+# ORPHAN COUNT AND CONNECTION PRESSURE ARE TWO SEPARATE FACTS — do not fuse
+# them. An idle orphaned database holds ZERO connections (verified live
+# 2026-08-31: 182 orphans, 0 of them in pg_stat_activity); the connections in
+# use belong to whatever is ACTUALLY running right now (dev `phx.server`s,
+# live lanes' pools, ...). A prior version of this check printed "at the
+# ceiling" unconditionally whenever the orphan count was high, regardless of
+# actual connection usage — which is itself a misread-failure risk of exactly
+# the kind this check exists to prevent. So the two are reported, and warned
+# on, independently below.
 TEST_DB_WARN="${BARKPARK_TEST_DB_WARN:-60}"
+CONN_WARN_PCT="${BARKPARK_TEST_DB_CONN_WARN_PCT:-80}"
 if command -v psql >/dev/null 2>&1; then
   TEST_DBS="$(psql -h "${BARKPARK_TEST_DB_HOST:-localhost}" -U "${BARKPARK_TEST_DB_USER:-postgres}" \
       -tAc "select count(*) from pg_database where datname like 'barkpark\\_test%';" 2>/dev/null)"
@@ -104,9 +113,13 @@ if command -v psql >/dev/null 2>&1; then
       -tAc "select setting from pg_settings where name='max_connections';" 2>/dev/null)"
   if [ -n "$TEST_DBS" ]; then
     if [ "$TEST_DBS" -gt "$TEST_DB_WARN" ] 2>/dev/null; then
-      bad "$TEST_DBS orphaned barkpark_test* databases (connections ${CONN_USED:-?}/${CONN_MAX:-?}) — at the ceiling, ecto.create dies with \"couldn't be created: killed\" and tests with \"FATAL 53300 too_many_connections\". NEITHER is a code fault; do not record such an abort as a red. Preview: make reap-test-dbs"
+      bad "$TEST_DBS orphaned barkpark_test* databases (disk only — connections ${CONN_USED:-?}/${CONN_MAX:-?}, see below). Preview: make reap-test-dbs, or make test to stop leaking at the source"
     else
       ok "$TEST_DBS barkpark_test* databases (connections ${CONN_USED:-?}/${CONN_MAX:-?})"
+    fi
+    if [ -n "$CONN_USED" ] && [ -n "$CONN_MAX" ] && [ "$CONN_MAX" -gt 0 ] 2>/dev/null \
+        && [ $(( CONN_USED * 100 / CONN_MAX )) -ge "$CONN_WARN_PCT" ] 2>/dev/null; then
+      bad "connections ${CONN_USED}/${CONN_MAX} is near the ceiling — ecto.create dies with \"couldn't be created: killed\" and tests with \"FATAL 53300 too_many_connections\" when it's hit. NEITHER is a code fault; do not record such an abort as a red"
     fi
   else
     skip "postgres unreachable — orphaned-test-database check skipped"
