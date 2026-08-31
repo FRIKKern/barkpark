@@ -44,19 +44,26 @@ defmodule Barkpark.Tasks.Fleet do
 
   ## The fail-closed roster (PDF-D19)
 
-  `roster/2` reads `type == "listener"` GLOBAL-per-dataset — deliberately NO
-  workspace clause, copying `Barkpark.Tasks.Board.snapshot/1`'s shape: the
-  workspace-filtered index shape fail-closes to EMPTY on a nil workspace,
-  and the global shape makes that bug impossible. Staleness is computed at
-  read time and never stored: a row whose `last_seen` is missing, unparsable,
-  or older than its OWN `ttl_s` reads `"offline"` (fail closed); a fresh row
-  reads its stored self-declared status.
+  `roster/2` reads `type == "listener"` per-dataset, fenced to the caller's
+  workspace by the three-arm `opts[:workspace_id]` scope (binary /
+  `:shared_only` / `nil`). PDF-D19's requirement — an unresolved workspace
+  must never fail-close the board to EMPTY — is preserved by the
+  `:shared_only` sentinel, which reads the SHARED layer rather than nothing;
+  `nil` still means the explicit global read, so internal callers are
+  unchanged. See the long comment above `load_listeners/2` for why this
+  honours PDF-D19 rather than overturning it.
+
+  Staleness is computed at read time and never stored: a row whose
+  `last_seen` is missing, unparsable, or older than its OWN `ttl_s` reads
+  `"offline"` (fail closed); a fresh row reads its stored self-declared
+  status.
   """
 
   import Ecto.Query, only: [from: 2]
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Scope
   alias Barkpark.Repo
 
   @type_name "listener"
@@ -127,20 +134,52 @@ defmodule Barkpark.Tasks.Fleet do
   # @canonical capability:fleet-presence-staleness aka:online,offline,roster,ttl
   def roster(dataset, opts \\ []) when is_binary(dataset) do
     now = Keyword.get(opts, :now) || DateTime.utc_now()
-    tasks_by_worker = current_tasks_by_worker(dataset)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    tasks_by_worker = current_tasks_by_worker(dataset, workspace_id)
 
     dataset
-    |> load_listeners()
+    |> load_listeners(workspace_id)
     |> Enum.map(&to_row(&1, tasks_by_worker, now))
     |> Enum.sort_by(& &1["worker"])
   end
 
-  # Global-per-dataset read — NO workspace clause on purpose (PDF-D19, the
-  # Board.snapshot shape): a workspace-filtered read fail-closes to empty on a
-  # nil workspace; the global shape makes that bug impossible. Draft/published
-  # twins collapse to one canonical row (published wins), Board-style.
-  defp load_listeners(dataset) do
+  # ── The tenant fence, and why it does NOT overturn PDF-D19 ─────────────────
+  #
+  # This read used to carry NO workspace clause at all. Its comment said why:
+  #
+  #   "Global-per-dataset read — NO workspace clause on purpose (PDF-D19, the
+  #    Board.snapshot shape): a workspace-filtered read fail-closes to empty on
+  #    a nil workspace; the global shape makes that bug impossible."
+  #
+  # PDF-D19's concern is real and is PRESERVED here. Read it precisely: it
+  # rejects a NAIVE workspace filter, because `scope_to_workspace/3` fails
+  # CLOSED on nil and would blank the board for an unresolved caller. It does
+  # not say tenants should see each other — that was a side effect of the only
+  # two options the decision had at the time (blank, or global).
+  #
+  # There is now a third option. `:shared_only` (the `ScopeHelpers.scope_opts/1`
+  # sentinel, task-3e2a70930c6df723) distinguishes "this REQUEST resolved no
+  # workspace" from "an internal caller deliberately wants everything" — the two
+  # intents an absent key could not tell apart. `scope_to_workspace_or_global/3`
+  # gives all three arms at once:
+  #
+  #   binary workspace_id -> that workspace's rows
+  #   :shared_only        -> the SHARED layer (workspace_id IS NULL) — a real,
+  #                          non-empty result, so PDF-D19's fail-closed-to-empty
+  #                          bug REMAINS impossible
+  #   nil                 -> the explicit global read, byte-identical to before,
+  #                          so every internal caller is untouched
+  #
+  # The write side already agrees: a beat registered by an unresolved request
+  # stamps `workspace_id = NULL` (`WriteScope.resolve_write_scope/1` collapses
+  # `:shared_only` to nil), which is exactly the layer the `:shared_only` read
+  # arm selects. The sentinel round-trips.
+  #
+  # Draft/published twins still collapse to one canonical row (published wins),
+  # Board-style.
+  defp load_listeners(dataset, workspace_id) do
     from(d in Document, where: d.type == @type_name and d.dataset == ^dataset)
+    |> Scope.scope_to_workspace_or_global(workspace_id, nil)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
     |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)
@@ -153,11 +192,18 @@ defmodule Barkpark.Tasks.Fleet do
   # Read-time join: worker -> the doc_id of its current in_progress task.
   # Identity follows the board_live.ex precedent: claim.worker || assignee.
   # Most-recently-updated wins when a worker somehow holds several.
-  defp current_tasks_by_worker(dataset) do
+  #
+  # SAME FENCE, and it is not optional: this is the second unscoped read in the
+  # door. Fencing `load_listeners/2` alone still leaks — the roster row for a
+  # worker the caller CAN see would join a task id from a workspace it cannot,
+  # because worker strings are not workspace-unique. The arms are identical, so
+  # the two reads can never drift apart in scope.
+  defp current_tasks_by_worker(dataset, workspace_id) do
     from(d in Document,
       where: d.type == "task" and d.dataset == ^dataset,
       where: fragment("?->>'lifecycle_status' = 'in_progress'", d.content)
     )
+    |> Scope.scope_to_workspace_or_global(workspace_id, nil)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
     |> Enum.map(fn {_lid, twins} -> canonical_twin(twins) end)

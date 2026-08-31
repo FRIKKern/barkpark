@@ -2052,14 +2052,27 @@ defmodule BarkparkWeb.TasksController do
   end
 
   # ─── GET /v1/fleet/roster ───────────────────────────────────────────────
-  # The fleet roster — global-per-dataset (PDF-D19, no workspace clause) with
-  # online/offline computed at read time, fail closed. The envelope key is
-  # `documents` (PDF-D21): the one key every installed bp binary renders as a
-  # real table; a bespoke key would degrade to one crammed KV cell.
+  # The fleet roster — per-dataset AND per-workspace, with online/offline
+  # computed at read time, fail closed. The envelope key is `documents`
+  # (PDF-D21): the one key every installed bp binary renders as a real table;
+  # a bespoke key would degrade to one crammed KV cell.
+  #
+  # `scope_opts(conn)` is the fence (task-b9f15f2a947f99d1). It was omitted
+  # here, so this read ran global-per-dataset and served EVERY workspace's
+  # listener rows — and, through the task join, every workspace's in-progress
+  # task ids — to any bearer. `dataset` is a caller-chosen STRING that every
+  # workspace shares, so it was never a tenant boundary.
+  #
+  # This does NOT overturn PDF-D19 (see the comment above
+  # `Fleet.load_listeners/2`): `scope_opts/1` emits the `:shared_only`
+  # sentinel when a request resolves no workspace, which reads the SHARED
+  # layer instead of fail-closing to empty. `fleet_beat` above already passes
+  # the same opts on registration, so the write and the read now agree on the
+  # tenant — previously the write was scoped and only the read was not.
 
   def fleet_roster(conn, _params) do
     dataset = request_dataset(conn)
-    json(conn, %{ok: true, documents: Fleet.roster(dataset)})
+    json(conn, %{ok: true, documents: Fleet.roster(dataset, scope_opts(conn))})
   end
 
   defp unprocessable(conn, reason, message) do

@@ -381,6 +381,199 @@ defmodule Barkpark.Tasks.FleetTest do
     assert roster_row(@dataset, worker) == nil
   end
 
+  # ── 5b. WORKSPACE scoping — the three-arm fence (task-b9f15f2a947f99d1) ───
+  #
+  # The roster is a TENANT read. PDF-D19's requirement is "an unresolved
+  # workspace must never blank the board" — which the `:shared_only` sentinel
+  # satisfies WITHOUT handing every tenant every other tenant's rows. Three
+  # arms, each proven on its own below:
+  #
+  #   binary workspace_id -> that workspace's listeners AND task join, only
+  #   :shared_only        -> the SHARED layer (workspace_id IS NULL), never []
+  #   nil                 -> today's global read, unchanged (internal callers)
+  #
+  # Every assertion pins POSITIVE content as well as the absence: a bare
+  # "B's rows are gone" passes on a correct fence, on an empty result from a
+  # broken fixture, and on an error. The positives tell those three apart.
+
+  defp mk_listener_in!(worker, scope) do
+    {:ok, doc} =
+      Content.create_document(
+        "listener",
+        %{
+          "doc_id" => "listener-" <> worker,
+          "title" => worker,
+          "content" => %{
+            "worker" => worker,
+            "status" => "working",
+            "ttl_s" => Fleet.default_ttl_s(),
+            "last_seen" => DateTime.to_iso8601(DateTime.utc_now())
+          }
+        },
+        @dataset,
+        scope
+      )
+
+    doc
+  end
+
+  # A row on the SHARED layer (workspace_id IS NULL). It cannot be made by
+  # passing `[]`: `WriteScope.resolve_write_scope/1` falls back to the seeded
+  # Default workspace for an empty scope, so the scope is nulled directly —
+  # the same shape a write from a fresh, unseeded DB produces (which is
+  # exactly the nil-workspace case PDF-D19 is about).
+  defp mk_shared_listener!(worker) do
+    doc = mk_listener_in!(worker, [])
+
+    {1, _} =
+      from(d in Document, where: d.id == ^doc.id)
+      |> Repo.update_all(set: [workspace_id: nil, project_id: nil, dataset_id: nil])
+
+    doc
+  end
+
+  defp mk_in_progress_task!(worker, scope) do
+    task_id = uniq("ws-task")
+
+    {:ok, task} =
+      Content.create_document(
+        "task",
+        %{
+          "doc_id" => task_id,
+          "title" => task_id,
+          "content" => %{"kind" => "task", "lifecycle_status" => "open"}
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} = Tasks.claim_by_id(task.doc_id, worker, scope)
+    Content.published_id(task.doc_id)
+  end
+
+  # Two real tenants, each with a listener AND that listener's in-progress
+  # task — the two things `roster/2` reads (listener rows + the task join).
+  defp two_tenant_fleet do
+    ws_a = TenancyFixtures.create_workspace!()
+    proj_a = TenancyFixtures.create_project!(ws_a)
+    ws_b = TenancyFixtures.create_workspace!()
+    proj_b = TenancyFixtures.create_project!(ws_b)
+
+    scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
+    scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
+
+    worker_a = uniq("wsa")
+    worker_b = uniq("wsb")
+
+    _ = mk_listener_in!(worker_a, scope_a)
+    _ = mk_listener_in!(worker_b, scope_b)
+
+    %{
+      ws_a: ws_a,
+      ws_b: ws_b,
+      worker_a: worker_a,
+      worker_b: worker_b,
+      task_a: mk_in_progress_task!(worker_a, scope_a),
+      task_b: mk_in_progress_task!(worker_b, scope_b)
+    }
+  end
+
+  test "roster fences BOTH the listener rows and the task join to the caller's workspace" do
+    f = two_tenant_fleet()
+    now = DateTime.utc_now()
+
+    rows_a = Fleet.roster(@dataset, workspace_id: f.ws_a.id, now: now)
+    workers_a = Enum.map(rows_a, & &1["worker"])
+
+    # POSITIVE first — without these the absences below would also pass on an
+    # empty roster (the very fail-closed-to-empty bug PDF-D19 warns about).
+    assert f.worker_a in workers_a
+    row_a = Enum.find(rows_a, &(&1["worker"] == f.worker_a))
+    assert row_a["status"] == "working"
+    assert row_a["task"] == f.task_a
+
+    # THE LEAK, most-severe claim first: B's in-progress task id must not
+    # surface through the join...
+    refute f.task_b in Enum.map(rows_a, & &1["task"])
+    # ...nor may B's listener row itself appear in A's roster.
+    refute f.worker_b in workers_a
+
+    # The mirror, so this is a real fence and not "A simply sorted first".
+    rows_b = Fleet.roster(@dataset, workspace_id: f.ws_b.id, now: now)
+    workers_b = Enum.map(rows_b, & &1["worker"])
+
+    assert f.worker_b in workers_b
+    assert Enum.find(rows_b, &(&1["worker"] == f.worker_b))["task"] == f.task_b
+    refute f.worker_a in workers_b
+    refute f.task_a in Enum.map(rows_b, & &1["task"])
+  end
+
+  test "the task join is fenced too: a worker name shared by two tenants joins its OWN task" do
+    # This is the assertion that makes the SECOND fence load-bearing. Fencing
+    # `load_listeners/2` alone is not enough and the test above cannot show it:
+    # there, each worker name lives in one workspace, so the unfenced join map
+    # is never consulted for a foreign key. Worker strings are NOT
+    # workspace-unique, though — so when the same name exists in both tenants,
+    # an unfenced `current_tasks_by_worker/2` hands A's row whichever task
+    # sorted first (most-recently-updated wins), i.e. B's.
+    ws_a = TenancyFixtures.create_workspace!()
+    proj_a = TenancyFixtures.create_project!(ws_a)
+    ws_b = TenancyFixtures.create_workspace!()
+    proj_b = TenancyFixtures.create_project!(ws_b)
+
+    scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
+    scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
+
+    worker = uniq("dup")
+
+    _ = mk_listener_in!(worker, scope_a)
+    task_a = mk_in_progress_task!(worker, scope_a)
+    # Created LAST, so it wins the most-recently-updated tie-break in the join.
+    task_b = mk_in_progress_task!(worker, scope_b)
+
+    row =
+      @dataset
+      |> Fleet.roster(workspace_id: ws_a.id, now: DateTime.utc_now())
+      |> Enum.find(&(&1["worker"] == worker))
+
+    # Positive: the row exists and carries A's OWN task — not nil, not B's.
+    assert row
+    assert row["task"] == task_a
+    refute row["task"] == task_b
+  end
+
+  test "CONTROL: an unresolved workspace reads the SHARED set — never empty (PDF-D19)" do
+    f = two_tenant_fleet()
+    now = DateTime.utc_now()
+
+    shared_worker = uniq("shared")
+    _ = mk_shared_listener!(shared_worker)
+
+    rows = Fleet.roster(@dataset, workspace_id: :shared_only, now: now)
+    workers = Enum.map(rows, & &1["worker"])
+
+    # PDF-D19's ACTUAL requirement: a nil/unresolved workspace must not blank
+    # the board. It does not — the sentinel reads the shared layer.
+    refute rows == []
+    assert shared_worker in workers
+    assert Enum.find(rows, &(&1["worker"] == shared_worker))["status"] == "working"
+
+    # ...and it is still not a cross-tenant read.
+    refute f.worker_a in workers
+    refute f.worker_b in workers
+  end
+
+  test "a nil workspace keeps the GLOBAL read — internal callers unchanged (PDF-D19)" do
+    f = two_tenant_fleet()
+
+    workers = @dataset |> Fleet.roster(now: DateTime.utc_now()) |> Enum.map(& &1["worker"])
+
+    # The nil arm is the deliberate, named global read: every internal caller
+    # (`Fleet.roster(dataset)`, mix tasks, the existing suite) is untouched.
+    assert f.worker_a in workers
+    assert f.worker_b in workers
+  end
+
   # ── 6. current-task join ─────────────────────────────────────────────────
 
   test "roster joins the worker's in_progress task via claim.worker, assignee fallback",
