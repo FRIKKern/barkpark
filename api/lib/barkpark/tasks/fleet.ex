@@ -179,6 +179,7 @@ defmodule Barkpark.Tasks.Fleet do
   # Board-style.
   defp load_listeners(dataset, workspace_id) do
     from(d in Document, where: d.type == @type_name and d.dataset == ^dataset)
+    # global-read: the fail-OPEN family is deliberate here and NARROWS this read rather than widening it (task-b9f15f2a947f99d1 — it previously had no workspace clause at all). Its nil arm is reachable ONLY by internal callers (fleet_live.ex's admin :ops board, mix tasks, tests); every HTTP caller arrives via scope_opts(conn), which emits a binary workspace_id or the :shared_only sentinel and NEVER nil, so the request surface is fenced. Fail-CLOSED scope_to_workspace/3 is refused on purpose: PDF-D19 ratified that blanking this board on a nil workspace is the worse bug.
     |> Scope.scope_to_workspace_or_global(workspace_id, nil)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
@@ -203,6 +204,7 @@ defmodule Barkpark.Tasks.Fleet do
       where: d.type == "task" and d.dataset == ^dataset,
       where: fragment("?->>'lifecycle_status' = 'in_progress'", d.content)
     )
+    # global-read: same posture and same three arms as load_listeners/2 above, deliberately identical so the two reads in this door cannot drift apart in scope. This one also NARROWS a previously unclaused read; its nil arm serves the same internal callers, and no HTTP path can reach nil.
     |> Scope.scope_to_workspace_or_global(workspace_id, nil)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
