@@ -11,7 +11,12 @@ defmodule Barkpark.Content.Analytics do
   Dataset scope mirrors `Barkpark.Content`'s private `scope_to_dataset/3`:
   resolved via the still-on-facade public `resolve_read_dataset_id/2` (concern
   K, not yet relocated), then the NULL-tolerant legacy-string OR. Workspace
-  scope rides the shared `Barkpark.Content.Scope.scope_to_workspace_or_global/3`.
+  scope rides the shared `Barkpark.Content.Scope.scope_to_workspace_or_global/3`
+  — and EVERY read here also threads
+  `Barkpark.Content.Scope.maybe_scope_to_grants/2`, the single owner of the
+  `:grant_scoped` gate, so a grant-derived caller's aggregates are narrowed to
+  its grant ladder. All four are reachable by such a caller (task-59d79b4058a7a434);
+  none may be left off the gate.
   """
 
   import Ecto.Query
@@ -76,7 +81,27 @@ defmodule Barkpark.Content.Analytics do
     |> Repo.all()
   end
 
-  @doc "Count documents grouped by type, with published/draft breakdown."
+  @doc """
+  Count documents grouped by type, with published/draft breakdown.
+
+  GRANT NARROWING (task-59d79b4058a7a434). Threads `maybe_scope_to_grants/2`,
+  the single owner of the `:grant_scoped` gate, for the same reason
+  `type_census/2` above does — and this function needed it MORE, because it is
+  one of the three `AnalyticsController.index/2` actually calls.
+
+  The fix under task-c6d2e34c64100678 landed on `type_census/2` alone, on the
+  reading that a grant-derived caller cannot reach a `:require_token` route.
+  That is false: `RequireToken` wants a Bearer and `ResolveWorkspace`'s grant
+  arm wants a signed-in non-member USER, and one caller satisfies both — on
+  `:scoped_api` GET, `OptionalSessionToken` assigns `:current_user` from the
+  session cookie regardless of the bearer, so a grantee holding her OWN
+  workspace's token plus her login cookie passes the token gate as a
+  non-member and is admitted through the grant arm. Pinned by
+  `test/barkpark_web/integration/analytics_grant_narrowing_test.exs`.
+
+  No-op for members, tokens and anonymous reads — none of them carries the
+  flag — so their responses are byte-identical.
+  """
   def document_stats(dataset, opts \\ []) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
@@ -84,6 +109,7 @@ defmodule Barkpark.Content.Analytics do
     Document
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_grants(opts)
     |> group_by([d], d.type)
     |> select([d], %{
       type: d.type,
@@ -95,7 +121,27 @@ defmodule Barkpark.Content.Analytics do
     |> Repo.all()
   end
 
-  @doc "Count total documents in a dataset."
+  @doc """
+  Count total documents in a dataset.
+
+  GRANT NARROWING (task-59d79b4058a7a434). Threads `maybe_scope_to_grants/2`,
+  the single owner of the `:grant_scoped` gate, for the same reason
+  `type_census/2` above does — and this function needed it MORE, because it is
+  one of the three `AnalyticsController.index/2` actually calls.
+
+  The fix under task-c6d2e34c64100678 landed on `type_census/2` alone, on the
+  reading that a grant-derived caller cannot reach a `:require_token` route.
+  That is false: `RequireToken` wants a Bearer and `ResolveWorkspace`'s grant
+  arm wants a signed-in non-member USER, and one caller satisfies both — on
+  `:scoped_api` GET, `OptionalSessionToken` assigns `:current_user` from the
+  session cookie regardless of the bearer, so a grantee holding her OWN
+  workspace's token plus her login cookie passes the token gate as a
+  non-member and is admitted through the grant arm. Pinned by
+  `test/barkpark_web/integration/analytics_grant_narrowing_test.exs`.
+
+  No-op for members, tokens and anonymous reads — none of them carries the
+  flag — so their responses are byte-identical.
+  """
   def total_documents(dataset, opts \\ []) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
@@ -103,11 +149,35 @@ defmodule Barkpark.Content.Analytics do
     Document
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_grants(opts)
     |> select([d], count(d.id))
     |> Repo.one()
   end
 
-  @doc "Recent mutation activity — last N events."
+  @doc """
+  Recent mutation activity — last N events.
+
+  GRANT NARROWING (task-59d79b4058a7a434). Threads `maybe_scope_to_grants/2`,
+  the single owner of the `:grant_scoped` gate, for the same reason
+  `type_census/2` above does — and this function needed it MORE, because it is
+  one of the three `AnalyticsController.index/2` actually calls. `MutationEvent`
+  carries the whole `workspace → project → dataset → type → doc_id` ladder, so
+  `scope_to_grants/3` narrows it exactly as it narrows `Document` — and this one
+  leaks doc_ids, not just counts.
+
+  The fix under task-c6d2e34c64100678 landed on `type_census/2` alone, on the
+  reading that a grant-derived caller cannot reach a `:require_token` route.
+  That is false: `RequireToken` wants a Bearer and `ResolveWorkspace`'s grant
+  arm wants a signed-in non-member USER, and one caller satisfies both — on
+  `:scoped_api` GET, `OptionalSessionToken` assigns `:current_user` from the
+  session cookie regardless of the bearer, so a grantee holding her OWN
+  workspace's token plus her login cookie passes the token gate as a
+  non-member and is admitted through the grant arm. Pinned by
+  `test/barkpark_web/integration/analytics_grant_narrowing_test.exs`.
+
+  No-op for members, tokens and anonymous reads — none of them carries the
+  flag — so their responses are byte-identical.
+  """
   def recent_activity(dataset, opts \\ []) do
     limit = Keyword.get(opts, :limit, 50)
     workspace_id = Keyword.get(opts, :workspace_id)
@@ -116,6 +186,7 @@ defmodule Barkpark.Content.Analytics do
     MutationEvent
     |> scope_to_dataset(dataset, opts)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_scope_to_grants(opts)
     |> order_by([e], desc: e.inserted_at)
     |> limit(^limit)
     |> select([e], %{
