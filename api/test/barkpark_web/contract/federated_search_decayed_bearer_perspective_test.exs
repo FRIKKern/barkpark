@@ -19,10 +19,23 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
   anonymous and still silently pinned to `:published` by
   `BarkparkWeb.AnonPerspective`.
 
+  THE ASYMMETRY IS NOW WIDER THAN WHEN THIS FILE WAS WRITTEN. #14318 merged
+  nine seconds before the commit that added the flat-route contrast test, so
+  neither could see the other: that test asserted the silent 200 the flat route
+  used to give a decayed bearer, and it went red on main the moment the two
+  landed together. The 401 is the CORRECT answer and the assertion was the
+  stale half — the contrast is restated below against the behaviour that
+  actually ships, and it is a sharper contrast, not a weaker one. Same decayed
+  credential, same instant: `/v1/data/query` refuses 401 in the open, the
+  federated route answers 200 in silence.
+
   THE SIGNAL ASYMMETRY WAS THE FINDING, stated precisely rather than maximally.
   `QueryController` echoes the perspective it ACTUALLY used at
   `result.perspective`, so a caller on `/v1/data/query` could detect the
-  downgrade from the response envelope alone.
+  downgrade from the response envelope alone. That echo is still pinned here,
+  now via an ANONYMOUS caller — the population the strict-bearer arm
+  deliberately leaves untouched, and therefore the one that can still reach
+  `QueryController` to demonstrate it.
   `FederatedSearchController`'s body was
   `%{query, surfaces, results, searchEventId, ms}` — no perspective key at any
   level. Same downgrade, same instant, one route told you and the other did
@@ -301,23 +314,69 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       assert body["error"]["message"] =~ "perspective"
     end
 
-    test "CONTRAST: the flat /v1/data/query route DOES echo the perspective it used", %{
-      conn: conn
-    } do
-      resp =
+    test "CONTRAST: the SAME decayed bearer is refused 401 on the flat route, answered 200 here",
+         %{conn: conn} do
+      # THE CONTRAST GOT STRONGER, not weaker. When this file was written the
+      # flat route also answered 200 to a decayed bearer and merely told the
+      # truth about it in `result.perspective`. #14318 then mounted
+      # `OptionalToken, strict_on_presented: true` on `:api_grant_read`, so the
+      # flat route no longer answers that caller at all — it refuses outright.
+      #
+      # Same garbage credential, same question, same instant, two routes: one
+      # refuses in the open, the other answers in silence.
+      refused =
         conn
         |> bearer(@garbage)
         |> get("/v1/data/query/#{@dataset}/#{@type_name}?perspective=drafts")
 
-      assert resp.status == 200
+      assert refused.status == 401,
+             "the flat route must REFUSE a presented-but-unverifiable bearer " <>
+               "(#14318 mounts `strict_on_presented: true` on `:api_grant_read`); " <>
+               "got #{refused.status}"
+
+      refused_body = Jason.decode!(refused.resp_body)
+      assert refused_body["error"]["code"] == "unauthorized"
+
+      # A refusal carries no corpus and no perspective — there is nothing here a
+      # caller could mistake for an answer. That absence IS the loud half.
+      refute Map.has_key?(refused_body, "result")
+
+      # The federated half is UNMOVED: bare `:api` mounts no strict-bearer arm,
+      # so the identical credential is still silently downgraded to anonymous
+      # and still answered 200 over the published corpus.
+      silent = conn |> bearer(@garbage) |> federated_body(@drafts_url)
+
+      assert ids(silent) == ["fsd-pub"]
+
+      # ...and with the flat route no longer answering this caller at all, the
+      # envelope echo added here is the ONLY channel left that tells a decayed
+      # bearer its drafts request was clamped. That is why it had to exist.
+      assert silent["perspective"] == "published"
+    end
+
+    test "the flat route's echo is REAL: an anonymous drafts request reads back published", %{
+      conn: conn
+    } do
+      # The signal asymmetry in the @moduledoc rests on `QueryController`
+      # echoing `result.perspective`, and the test above can no longer show it
+      # (that caller is refused before the controller ever runs). So it is shown
+      # with the population #14318 deliberately does NOT touch: a request that
+      # presents NO `Authorization` header, which is a supported public read
+      # tier and passes `OptionalToken` untouched on every mount, strict arm
+      # included. `AnonPerspective.anon_pinned?/1` pins it to `:published`.
+      resp = get(conn, "/v1/data/query/#{@dataset}/#{@type_name}?perspective=drafts")
+
+      assert resp.status == 200,
+             "an anonymous read is a supported surface on the flat route; got #{resp.status}"
+
       body = Jason.decode!(resp.resp_body)
 
-      # This is the route the parent fix (#14318) covers, and it is ALREADY the
-      # route that tells the caller the truth. The federated route above is
-      # neither covered by that fix nor honest about the downgrade.
+      # It asked for drafts, it was clamped to published, and it SAYS SO. That
+      # honesty is what the federated route lacked before the echo was added.
       assert body["result"]["perspective"] == "published",
              "expected the flat query route to echo its resolved perspective"
 
+      # And the clamp itself holds: the seeded draft is not served.
       assert Enum.map(body["result"]["documents"], & &1["_id"]) == ["fsd-pub"]
     end
   end
