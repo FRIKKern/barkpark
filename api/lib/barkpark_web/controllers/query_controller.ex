@@ -60,6 +60,15 @@ defmodule BarkparkWeb.QueryController do
       match?({:error, _}, filter_map) ->
         filter_map
 
+      # An unrecognised non-empty ?order= spec used to silently default to
+      # :updated_at_desc (a DIFFERENT order than asked), hiding a client typo
+      # as a successful response — the Gyldendal S2 silent-failures class.
+      # parse_order_param/1 now returns {:error, {:invalid_order, spec}}
+      # instead; route it to the existing Ecto.Changeset 422 validation_failed
+      # envelope (no new error code) naming the bad spec and the grammar.
+      match?({:error, _}, order) ->
+        order_error(order)
+
       # Fail CLOSED on an unknown filter operator. Otherwise it falls through
       # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
       # every row — a typo'd op (?filter[status][bogus]=x) looked like it
@@ -1013,15 +1022,35 @@ defmodule BarkparkWeb.QueryController do
 
   # Comma-separated specs → multi-field sort (`title:asc,price:desc` sorts by title,
   # then price as a tiebreak). A single spec stays a single parsed value (back-compat).
+  # An ABSENT ?order= (nil, or "" after split/trim) keeps defaulting to
+  # :updated_at_desc — that is the documented default, not a fallback. An
+  # UNRECOGNISED non-empty spec is different: see parse_order/1 below.
   defp parse_order_param(s) when is_binary(s) do
     case String.split(s, ",", trim: true) do
-      [single] -> parse_order(single)
-      [_ | _] = multi -> Enum.map(multi, &parse_order/1)
       [] -> :updated_at_desc
+      [single] -> parse_order(single)
+      multi -> collect_order_specs(multi)
     end
   end
 
   defp parse_order_param(other), do: parse_order(other)
+
+  # Parses every spec in a multi-field sort; the FIRST unrecognised spec wins
+  # and short-circuits the rest, so the caller sees exactly the term it typo'd
+  # rather than a rest-ignored partial sort.
+  defp collect_order_specs(specs) do
+    specs
+    |> Enum.reduce_while([], fn spec, acc ->
+      case parse_order(spec) do
+        {:error, _} = error -> {:halt, error}
+        parsed -> {:cont, [parsed | acc]}
+      end
+    end)
+    |> case do
+      {:error, _} = error -> error
+      parsed -> Enum.reverse(parsed)
+    end
+  end
 
   defp parse_order("_updatedAt:asc"), do: :updated_at_asc
   defp parse_order("_updatedAt:desc"), do: :updated_at_desc
@@ -1033,17 +1062,41 @@ defmodule BarkparkWeb.QueryController do
   # Content.Query resolves it against the promoted columns / nested JSONB content
   # (it already dot-splits via nested_segments). The dot-path group MUST match
   # the SDK's order validator — without it, `price.amount:desc` failed this regex
-  # and silently fell back to :updated_at_desc, so nested-field sorts the SDK
-  # advertised + sent were ignored.
+  # and used to silently fall back to :updated_at_desc, so nested-field sorts the
+  # SDK advertised + sent were ignored.
+  #
+  # An UNRECOGNISED non-empty spec now fails LOUD instead of defaulting — the
+  # `_ -> :updated_at_desc` arm this replaces is exactly the silent fallback
+  # that swallowed `price.amount:desc` above before the regex grew the dot-path
+  # group, and it would swallow the next typo the same way (Gyldendal S2
+  # silent-failures class). `order_error/1` turns this into a 422 naming the
+  # bad spec and the accepted grammar.
   defp parse_order(spec) when is_binary(spec) do
     case Regex.run(~r/^([a-zA-Z][a-zA-Z0-9_]*(?:\.[a-zA-Z0-9_]+)*):(asc|desc)$/, spec) do
       [_, field, "asc"] -> {:field, field, :asc}
       [_, field, "desc"] -> {:field, field, :desc}
-      _ -> :updated_at_desc
+      _ -> {:error, {:invalid_order, spec}}
     end
   end
 
   defp parse_order(_), do: :updated_at_desc
+
+  # Turns {:error, {:invalid_order, spec}} into the EXISTING Ecto.Changeset
+  # validation-error envelope (FallbackController already renders any
+  # %Ecto.Changeset{} as 422 `validation_failed`, details keyed by field) —
+  # reusing that shape instead of inventing a new error code. The one message
+  # carries both the rejected spec and the accepted grammar.
+  defp order_error({:error, {:invalid_order, spec}}), do: {:error, invalid_order_changeset(spec)}
+
+  defp invalid_order_changeset(spec) do
+    {%{}, %{order: :string}}
+    |> Ecto.Changeset.change()
+    |> Ecto.Changeset.add_error(
+      :order,
+      "unrecognised order spec #{inspect(spec)}; expected <field>[.<path>]:asc|desc " <>
+        "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, or _createdAt:asc|desc"
+    )
+  end
 
   defp parse_expand(nil), do: []
   defp parse_expand(""), do: []
