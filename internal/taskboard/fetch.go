@@ -417,12 +417,12 @@ func decodePrime(body []byte) (primeExtras, error) {
 // priority is decoded permissively because content.priority is an integer 0..4
 // on the wire while the board carries it as a display string.
 type taskWire struct {
-	DocID           string          `json:"doc_id"`
-	Title           string          `json:"title"`
-	Lifecycle       string          `json:"lifecycle_status"`
-	Kind            string          `json:"kind"`
-	ParentID        string          `json:"parent_id"`
-	Priority        json.RawMessage `json:"priority"`
+	DocID     string          `json:"doc_id"`
+	Title     string          `json:"title"`
+	Lifecycle string          `json:"lifecycle_status"`
+	Kind      string          `json:"kind"`
+	ParentID  string          `json:"parent_id"`
+	Priority  json.RawMessage `json:"priority"`
 	// Labels is RawMessage for the SAME reason as Priority/Papers/Content/
 	// PreviousWorker/ExpiredAt/Now below: a []string here made ONE row with an
 	// oddly-shaped labels value fail the WHOLE list decode (encoding/json
