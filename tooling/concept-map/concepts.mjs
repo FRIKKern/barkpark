@@ -69,6 +69,7 @@ import { fileURLToPath } from "node:url";
 
 import { isRegistered } from "./registration.mjs";
 import { isMixTaskFile } from "./entrypoints.mjs";
+import { conceptTokenMatchers } from "./concept-tokens.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -127,7 +128,7 @@ function assignConcepts(graph) {
 
   // longest token first so "portable_doc" beats a stray "doc", etc.
   const tokens = [...concepts].sort((a, b) => b.length - a.length);
-  const tokenRe = new Map(tokens.map((t) => [t, new RegExp("(^|[/_.])" + t + "([/_.]|$)")]));
+  const tokenRe = conceptTokenMatchers(tokens);
 
   for (const n of graph.nodes) {
     if (conceptOf.has(n.id)) continue;
