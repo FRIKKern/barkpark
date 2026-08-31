@@ -1046,6 +1046,17 @@ FAKENPM
   check "no SWITCH stage line at all"      nosaw SWITCH
   check "Caddy upstream did NOT move (the gate STILL fails closed)" [ "$(cf_port)" = "$before_port" ]
   check "the corpus-less release is purged" [ ! -d "$N_SITE/releases/n3b" ]
+  # THE CLASSIFIER'S ANCHOR, asserted by the PRODUCER (deploy-reliability dr-w8
+  # S1). `cloud/lib/barkpark_cloud/deploy_ledger.ex` reads the upstream status
+  # out of the stored failure_reason with the regex
+  #   could not read a content document: graph (\d+):
+  # anchored on THIS sentence — the one written a few lines above, in the empty
+  # bp-doc-id branch. Reword that English and every one of those rows silently
+  # degrades back to the causeless DOC_ID_EMPTY bucket with nothing anywhere
+  # failing. So the producer asserts the consumer's anchor against its own
+  # emitted bytes: a reflow reds HERE, on the shell side, at edit time.
+  check "the emitted marker still matches the CLASSIFIER's anchor (cloud deploy_ledger.ex)" \
+    grep -Eq 'could not read a content document: graph [0-9]+:' "$TD/out.log"
 
   echo "[selftest] e2e: an empty bp-doc-id with NO status marker still refuses, and SAYS the cause went unrecorded"
   before_port="$(cf_port)"
