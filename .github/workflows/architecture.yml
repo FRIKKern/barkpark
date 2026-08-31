@@ -126,10 +126,16 @@ jobs:
               // it "files with dependents" — files that ARE depended upon. This step
               // counts elixir.forward — files that HAVE dependencies. Both are
               // correct and they answer different questions, but this line used to
-              // reuse build-index.mjs's wording verbatim, so a SINGLE run printed
-              // "754 files with dependents" and "657 files with dependents" two steps
-              // apart and read as one measurement disagreeing with itself. It cost a
-              // real investigation. Print both, name both.
+              // reuse that exact wording, so a SINGLE run printed "754 files with
+              // dependents" and "657 files with dependents" two steps apart and read
+              // as one measurement disagreeing with itself. It cost a real
+              // investigation. Print both, name both.
+              //
+              // NO APOSTROPHES BELOW THIS POINT. The whole script is one
+              // single-quoted shell word (node -e '...'); an apostrophe closes it
+              // early and truncates the JS mid-comment. That failure is silent in
+              // any test that extracts this block and runs it as a FILE — the
+              // extraction never applies shell quoting. Exercise it through a shell.
               const rev = (j.elixir && j.elixir.reverse) || {};
               console.log(
                 "warm graph OK: " + n + " elixir files WITH DEPENDENCIES (forward edges), " +
