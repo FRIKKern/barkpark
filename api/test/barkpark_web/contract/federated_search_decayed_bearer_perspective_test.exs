@@ -34,11 +34,29 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
   result set is NON-EMPTY. An empty page carries no indicator whatsoever, and
   there is no envelope-level echo to assert on. That is the gap.
 
-  Population coverage note: the VALID `public-read` token half of this defect is
-  already pinned in
-  `test/barkpark_web/integration/public_read_search_matrix_test.exs`
-  ("mixed public-read token + ?perspective=drafts is silently pinned"). This
-  file pins the DECAYED-bearer half, which no test covered.
+  TWO POPULATIONS, and the second is the durable one:
+
+    1. DECAYED credential (garbage/revoked/expired bearer). Silently downgraded
+       to anonymous by `OptionalToken`, then pinned. A strict-on-presented
+       bearer gate mounted on `:api_grant_read` does NOT reach this route, so
+       it is live today — but if such a gate ever lands on bare `:api`, this
+       half starts 401ing and its RED goes away.
+    2. VALID credential with insufficient permission (a `public-read` token).
+       `Auth.verify_token/1` SUCCEEDS, so NO bearer gate can ever refuse it.
+       `AnonPerspective.anon_pinned?/1` pins it exactly like an anonymous
+       caller, and the envelope still says nothing. This half survives any
+       bearer-strictness fix, which is why it is pinned separately below.
+
+  The same `public-read` token is refused LOUDLY (403 "perspective not allowed")
+  on `/v1/data/query`, because `:api_grant_read` mounts `Plugs.PublicRead`. Same
+  credential, same question, same instant: one route refuses in the open, the
+  other answers 200 in silence. That asymmetry is pinned here as a passing
+  contrast test.
+
+  Prior coverage, so this file is not read as duplicating it:
+  `test/barkpark_web/integration/public_read_search_matrix_test.exs` pins that a
+  mixed public-read token is silently ROW-clamped on this route. It does not
+  assert anything about the response ENVELOPE, which is the gap this file pins.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -86,7 +104,15 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
     {:ok, _} =
       Auth.create_token(admin_raw, "fsd-admin", @dataset, ["read", "write", "admin"], ws.id)
 
-    {:ok, admin: admin_raw}
+    # A VALID credential with insufficient permission. `verify_token/1` SUCCEEDS
+    # on this one, so no strict-bearer gate can ever refuse it — this is the
+    # population that survives the parent fix entirely.
+    pubread_raw = "fsd-pubread-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Auth.create_token(pubread_raw, "fsd-pubread", @dataset, ["public-read"], ws.id)
+
+    {:ok, admin: admin_raw, pubread: pubread_raw}
   end
 
   defp bearer(conn, raw), do: put_req_header(conn, "authorization", "Bearer " <> raw)
@@ -152,6 +178,58 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
 
       assert hits(empty) == []
       refute Map.has_key?(empty, "perspective")
+    end
+
+    test "a VALID public-read token is clamped here too — and 200s where the flat route 403s",
+         %{conn: conn, pubread: pubread} do
+      resp = conn |> bearer(pubread) |> get(@drafts_url)
+
+      # STATUS PINNED EXPLICITLY. `Plugs.PublicRead` would answer 403
+      # "perspective not allowed" — but it is not mounted on bare `:api`, so
+      # the federated route answers 200 over the published corpus instead.
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
+
+      assert ids(body) == ["fsd-pub"], "expected the published row; got #{inspect(ids(body))}"
+      refute "drafts.fsd-draft" in ids(body)
+    end
+
+    test "RED (valid credential): no envelope signal for a token that VERIFIES", %{
+      conn: conn,
+      pubread: pubread
+    } do
+      # THE DURABLE HALF OF THIS PIN. `Auth.verify_token/1` succeeds for this
+      # caller, so no strict-on-presented bearer gate can reach it — not the
+      # one on `:api_grant_read`, and not any future one. If the garbage-bearer
+      # case above ever starts 401ing, THIS case still holds and the defect is
+      # still live.
+      body = conn |> bearer(pubread) |> federated_body(@drafts_url)
+
+      assert Map.has_key?(body, "perspective"),
+             "a VALID public-read token asked for ?perspective=drafts, was clamped to " <>
+               "published, and the body carries no perspective key to say so. " <>
+               "Body keys: #{inspect(Enum.sort(Map.keys(body)))}"
+
+      assert body["perspective"] == "published"
+    end
+
+    test "CONTRAST: the same VALID public-read token is refused LOUDLY on the flat route", %{
+      conn: conn,
+      pubread: pubread
+    } do
+      resp =
+        conn
+        |> bearer(pubread)
+        |> get("/v1/data/query/#{@dataset}/#{@type_name}?perspective=drafts")
+
+      # `:api_grant_read` mounts `Plugs.PublicRead`, which denies a non-published
+      # perspective outright. Same credential, same question, same instant — one
+      # route refuses it in the open and the other answers 200 in silence. THAT
+      # asymmetry is the finding.
+      assert resp.status == 403
+      body = Jason.decode!(resp.resp_body)
+      assert body["error"]["code"] == "forbidden"
+      assert body["error"]["message"] =~ "perspective"
     end
 
     test "CONTRAST: the flat /v1/data/query route DOES echo the perspective it used", %{
