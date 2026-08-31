@@ -193,13 +193,24 @@ func requireStatedScope(ctx manifest.Context, cmd manifest.Command, target destr
 // :placeholder in the URL the command will actually build — its flat
 // path_template PLUS the scoped_prefix, since the prefix is where
 // :workspace_slug lives for every command in the destroy registry.
+//
+// The membership test is against the manifest's own PARSED placeholder set, not
+// `strings.Contains(tmpl, ":"+n)`. The short scope aliases make a substring
+// test unsound by construction: the project probe passes "p", and ":p" is a
+// prefix of :principal_ref, :paper_id, :plugin and :path. workspace.member-rm's
+// own flat template is "/v1/members/:principal_ref", so the substring form
+// reported "this route reads the project scope" on the strength of a seat
+// reference — and requireStatedScope would then refuse the destroy until the
+// operator named a -p <project> the URL never consumes. A placeholder is a
+// whole token or it is not that placeholder.
 func commandReadsPlaceholder(cmd manifest.Command, names ...string) bool {
 	tmpl := cmd.HTTP.PathTemplate
 	if cmd.ScopedPrefix != nil {
 		tmpl = *cmd.ScopedPrefix + tmpl
 	}
+	present := manifest.PlaceholderNames(tmpl)
 	for _, n := range names {
-		if strings.Contains(tmpl, ":"+n) {
+		if present[n] {
 			return true
 		}
 	}
