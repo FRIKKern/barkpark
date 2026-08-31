@@ -244,7 +244,7 @@ is harmless:
   go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
   is structurally ineligible to be required, since an absent context reports
   `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 21 `(fails this job)` steps below (that label
+  the same sense as doc-gates' 22 `(fails this job)` steps below (that label
   replaced `(blocking)` there in #12631). Until 2026-08-08 it
   appeared in **neither** `.github/required-checks.json` nor this page:
   `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
@@ -953,10 +953,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-one)
+### The doc-gates roster (it is not two scripts — it is twenty-two)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **21 steps labelled `(fails this job)`** plus 6
+undersells it: it runs **22 steps labelled `(fails this job)`** plus 6
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -984,11 +984,11 @@ stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
 whole of its authority.
 
 (The count read 17 until 2026-08-07 — `Never-cancel-main concurrency ratchet`
-and `Nil-polarity fail-closed gate` were missing from the table below. The 21 is
+and `Nil-polarity fail-closed gate` were missing from the table below. The 22 is
 derived by running, not transcribed:
 
 ```bash
-grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 21
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 22
 ```
 
 That replaces the command this page cited until 2026-08-19, `grep -c
@@ -998,7 +998,7 @@ today — the page was naming a derivation that refuted its own number. §20 CLA
 below, and the workflow drift apart, and it counts the UNION of both labels so a
 revert to the old name is still counted rather than read as zero. RESIDUE, named
 rather than left to be tripped over: the unanchored `grep -c '(fails this job)'`
-returns **22**, because `.github/workflows/doc-gates.yml:15` quotes both labels
+returns **23**, because `.github/workflows/doc-gates.yml` quotes both labels
 inside its own corrective header — anchor on `- name:`, as above. §20 CLAUSE
 11's pass message also still spells the label `(blocking)`; it compares NUMBERS,
 so its verdict is unaffected.) In workflow order:
@@ -1021,11 +1021,12 @@ so its verdict is unaffected.) In workflow order:
 | 14 | Web literal-color | `scripts/web-literal-check.sh` |
 | 15 | Go literal-color | `scripts/go-literal-check.sh` (+ `--selftest`) |
 | 16 | Code-comment citation guard | `tooling/doc-truth/acceptance-code-comments.mjs` · `retired-terms.mjs` |
-| 17 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
-| 18 | Nil-polarity fail-closed gate | `scripts/nil-polarity-check.sh` (+ `--selftest`) |
-| 19 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
-| 20 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
-| 21 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
+| 17 | New file:line citations in comments | `scripts/new-lineref-check.sh` (+ `--selftest`) |
+| 18 | Tenant fail-open read baseline | `scripts/tenant-scope-check.sh` (+ `--selftest`) |
+| 19 | Nil-polarity fail-closed gate | `scripts/nil-polarity-check.sh` (+ `--selftest`) |
+| 20 | Preview-env isolation | `scripts/preview-env-isolation-check.sh` (+ `--selftest`) |
+| 21 | PortableDoc render parity | `scripts/pd-parity-completeness.sh` |
+| 22 | Scaffy anchor drift | `bp scaffy validate` over `scaffy/commands/` (+ `--selftest`) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s

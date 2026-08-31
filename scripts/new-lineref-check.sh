@@ -51,6 +51,28 @@
 # and a
 # scanner that cannot tell prose from payload reports noise until it is ignored.
 #
+# WHAT EACH GATE STILL SEES AFTER THIS ONE LANDS — stated explicitly, because
+# two gates over one corpus is how a check goes quietly vacuous.
+#
+#   lineref-sweep.mjs   UNCHANGED. It still walks the WHOLE tracked corpus via
+#                       git ls-files and still reds on any of its 542 baselined
+#                       citations that DRIFTS. This gate removes nothing from
+#                       its input: it edits no file the sweep reads, filters
+#                       nothing ahead of it, and touches neither the baseline
+#                       nor the corpus definition. Its population is the same
+#                       set of files it saw yesterday.
+#
+#   new-lineref-check   ONLY the comment lines a PR ADDS. It never looks at an
+#                       existing citation, so it can never report — or silence —
+#                       anything the sweep is watching.
+#
+# The two are disjoint by construction: one watches citations that EXIST for
+# drift, the other refuses citations that do not exist yet. The only coupling is
+# intended and one-way — a citation this gate refuses never enters the sweep's
+# corpus, so the sweep's population stops GROWING while every entry already in
+# it stays as watched as before. Neither gate is a pre-filter for the other, and
+# neither can be deleted without losing a population the other never sees.
+
 # EXIT CODES, kept distinct:
 #   0  no new citations
 #   1  FINDING — at least one added comment introduces a file:line citation
