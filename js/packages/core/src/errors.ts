@@ -19,6 +19,17 @@ export interface BarkparkErrorOptions {
   /** Server-supplied, human-readable fix suggestion for this error code (the
    *  envelope's optional `hint` field; same string the `bp` CLI prints). */
   hint?: string
+  /** The server envelope's optional structured `details` map (e.g.
+   *  `duplicate_task`'s `similar`/`advise`, `schema_has_documents`'s `count`,
+   *  `workspace_suspended`'s `reason`) — shape is code-specific; the server
+   *  (api/lib/barkpark/content/errors.ex) owns what each code puts here. */
+  details?: Record<string, unknown>
+  /** The envelope's optional top-level `reason` discriminator — a stable
+   *  sub-code the server attaches alongside `code` when one machine `code`
+   *  covers more than one cause (e.g. `forbidden`'s `not_a_member` vs. the
+   *  generic permission-tier refusal, `unauthorized`'s `replay`). Distinct
+   *  from `serverCode`: `code` says WHAT failed, `reason` says WHY. */
+  reason?: string
 }
 
 /**
@@ -36,6 +47,13 @@ export abstract class BarkparkError extends Error {
   public readonly url?: string
   public readonly status?: number
   public readonly hint?: string
+  /** The server envelope's structured `details` map, when present — see
+   *  {@link BarkparkErrorOptions.details}. Inherited by every subclass so a
+   *  caller never has to guess which error classes carry it. */
+  public readonly details?: Record<string, unknown>
+  /** The envelope's top-level `reason` discriminator, when present — see
+   *  {@link BarkparkErrorOptions.reason}. */
+  public readonly reason?: string
 
   constructor(message: string, opts?: BarkparkErrorOptions) {
     super(message, opts?.cause !== undefined ? { cause: opts.cause } : undefined)
@@ -46,6 +64,8 @@ export abstract class BarkparkError extends Error {
     if (opts?.url !== undefined) this.url = opts.url
     if (opts?.status !== undefined) this.status = opts.status
     if (opts?.hint !== undefined) this.hint = opts.hint
+    if (opts?.details !== undefined) this.details = opts.details
+    if (opts?.reason !== undefined) this.reason = opts.reason
   }
 }
 
@@ -110,12 +130,15 @@ export interface BarkparkValidationErrorOptions extends BarkparkErrorOptions {
 export class BarkparkValidationError extends BarkparkError {
   public readonly issues?: unknown[]
   public readonly field?: string
-  public readonly reason?: string
+  // `reason` is now declared on the BarkparkError base (wbt-jwt-sdk-error-
+  // details-reason) — same type, same undefined-guard — so it is inherited
+  // rather than redeclared here; redeclaring it would need an `override`
+  // modifier for no behavioral gain.
   constructor(message: string, opts?: BarkparkValidationErrorOptions) {
     super(message, opts)
     if (opts?.issues !== undefined) this.issues = opts.issues
     if (opts?.field !== undefined) this.field = opts.field
-    if (opts?.reason !== undefined) this.reason = opts.reason
+    // `reason` is assigned by the BarkparkError base constructor above.
   }
 }
 
