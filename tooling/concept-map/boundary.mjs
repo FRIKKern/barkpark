@@ -837,7 +837,8 @@ function main() {
   } else {
     printHuman(res);
   }
-  process.exit(0);
+  // NO process.exit() here — see grade.mjs: exit() truncates a piped stdout at
+  // one 64KiB pipe buffer, and ci-boundary.mjs parses this --json payload.
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

@@ -531,7 +531,11 @@ function main() {
   } else {
     printHuman(res);
   }
-  process.exit(0);
+  // NO process.exit() here. Node's stdout to a PIPE is async; process.exit()
+  // tears the process down before the write drains, silently truncating the
+  // payload at one pipe buffer (64KiB). ci-boundary.mjs pipes this --json and
+  // JSON.parse()s it, so an exit() here fails the gate at random on any report
+  // larger than the buffer. Falling off main() flushes, then exits 0.
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

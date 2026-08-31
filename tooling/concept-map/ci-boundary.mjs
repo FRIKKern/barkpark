@@ -76,7 +76,28 @@ function runNodeJson(scriptPath, extraArgs = []) {
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "inherit"],
   });
-  return JSON.parse(out.toString("utf8"));
+  const text = out.toString("utf8");
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    // A gate that cannot READ its own instrument must say HOLD, not "regression".
+    // Left bare, JSON.parse throws an uncaught SyntaxError, node exits 1, and 1
+    // is this script's REGRESSION code — so an unreadable payload renders as
+    // architectural debt that nobody added. Exit 2 (fault) instead, and name the
+    // signature of the failure we have actually seen: a child that calls
+    // process.exit() after writing to a PIPE is torn down before the async write
+    // drains, truncating stdout at one pipe buffer (65536 bytes). That is why
+    // neither grade.mjs nor boundary.mjs ends in process.exit().
+    const truncated = text.length > 0 && text.length % 65536 === 0;
+    note(`ci-boundary: FAULT — ${scriptPath} did not emit parseable JSON.`);
+    note(`  read ${text.length} bytes; ${err.message}`);
+    if (truncated) {
+      note(`  ${text.length} bytes is an exact multiple of the 65536-byte pipe`);
+      note(`  buffer — the payload was TRUNCATED, not malformed. Check that the`);
+      note(`  script does not call process.exit() after writing --json to stdout.`);
+    }
+    process.exit(2);
+  }
 }
 
 // Canonical edge key — stable, ascii, never trips a shell or a diff.
