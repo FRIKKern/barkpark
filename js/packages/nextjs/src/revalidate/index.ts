@@ -184,8 +184,26 @@ export function revalidateBarkpark(payload?: RevalidatePayload | string): void {
 
   // Path-based revalidation. The env-gate was already enforced at the top of
   // the function, so these calls can fire unconditionally here.
-  if (payload.path !== undefined) revalidatePath(payload.path)
-  if (payload.paths) {
-    for (const p of payload.paths) revalidatePath(p)
+  //
+  // Both arms are TYPE-guarded for the same reason the sync_tags comment above
+  // gives, and this is where that hazard bites hardest. `paths` used to be a
+  // bare truthy check, and a bare STRING is truthy AND iterable: a webhook body
+  // carrying `paths: '/blog'` made this for...of walk it CHARACTER by character
+  // — revalidatePath('/'), ('b'), ('l'), ('o'), ('g') — five garbage
+  // invalidations, and the intended path never revalidated. Worse than the
+  // sync_tags case it was derived from: these are revalidatePath calls, not tag
+  // adds, and a single character is not a valid Next route path, so depending
+  // on the Next version this either mis-invalidates silently or THROWS out of
+  // the consumer's webhook handler — after the tag fan-out above already fired,
+  // which is exactly the partial, non-atomic invalidation the path-gate at the
+  // top of this function is placed early to prevent.
+  //
+  // `path` gets the same treatment: a number or object from a raw `req.json()`
+  // body reached revalidatePath untouched.
+  if (nonEmpty(payload.path)) revalidatePath(payload.path)
+  if (Array.isArray(payload.paths)) {
+    for (const p of payload.paths) {
+      if (nonEmpty(p)) revalidatePath(p)
+    }
   }
 }
