@@ -66,6 +66,41 @@ defmodule Barkpark.Content.DedupWallTest do
     assert %{refuse: [], advise: []} = DedupWall.assess(new, [inc])
   end
 
+  test "a declared supersession is exempt against exactly the doc it names" do
+    new =
+      ref("new-corr", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+      |> Map.put(:supersedes, "old-rl")
+
+    inc = ref("old-rl", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+
+    # Near-identical — the hard-refuse shape — but the similarity to the doc it
+    # DECLARES it replaces is the point of a correction, not duplication.
+    assert %{refuse: [], advise: []} = DedupWall.assess(new, [inc])
+  end
+
+  test "a declared supersession still REFUSES against a DIFFERENT near-duplicate" do
+    new =
+      ref("new-corr2", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+      |> Map.put(:supersedes, "some-other-doc")
+
+    inc = ref("old-rl", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+
+    # The exemption is pairwise: a supersession claim against X buys no pass
+    # against Y.
+    assert %{refuse: [match], advise: []} = DedupWall.assess(new, [inc])
+    assert match.id == "old-rl"
+  end
+
+  test "the supersedes pointer is drafts.-normalized before exclusion" do
+    new =
+      ref("new-corr3", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+      |> Map.put(:supersedes, "drafts.old-rl")
+
+    inc = ref("old-rl", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+
+    assert %{refuse: [], advise: []} = DedupWall.assess(new, [inc])
+  end
+
   test "tags carry the weighted-tag shape and still yield tag-name tokens" do
     weighted = [
       %{"tag" => "rate-limiting", "strength" => 80},
@@ -139,6 +174,57 @@ defmodule Barkpark.Content.DedupWallTest do
     }
 
     assert :ok = DedupWall.guard(fresh, "paper", @dataset)
+  end
+
+  test "check/4 passes a publish whose content.supersedes names the near-duplicated incumbent" do
+    publish_paper!("live-pred", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+
+    incoming = %{
+      doc_id: "drafts.corrected",
+      title: "Rate limiting the mutate controller",
+      content: %{
+        "tags" => [%{"tag" => "rate-limiting"}, %{"tag" => "mutate"}],
+        "supersedes" => "live-pred"
+      }
+    }
+
+    assert :ok = DedupWall.check(incoming, "paper", @dataset)
+  end
+
+  test "check/4 still refuses when content.supersedes names a DIFFERENT doc, and says so" do
+    publish_paper!("live-pred2", "Rate limiting the mutate controller", [
+      "rate-limiting",
+      "mutate"
+    ])
+
+    incoming = %{
+      doc_id: "drafts.mis-declared",
+      title: "Rate limiting the mutate controller",
+      content: %{
+        "tags" => [%{"tag" => "rate-limiting"}, %{"tag" => "mutate"}],
+        "supersedes" => "unrelated-doc"
+      }
+    }
+
+    assert {:error, {:duplicate_of, payload}} = DedupWall.check(incoming, "paper", @dataset)
+    assert payload.duplicate_of == "live-pred2"
+    # The message names the mismatch: the declared target is not the refuser.
+    assert payload.message =~ "unrelated-doc"
+    assert payload.message =~ "live-pred2"
+  end
+
+  test "the refusal message offers the supersession escape, never self-falsification" do
+    publish_paper!("live-msg", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+
+    incoming = %{
+      doc_id: "drafts.msg",
+      title: "Rate limiting the mutate controller",
+      content: %{"tags" => [%{"tag" => "rate-limiting"}, %{"tag" => "mutate"}]}
+    }
+
+    assert {:error, {:duplicate_of, payload}} = DedupWall.check(incoming, "paper", @dataset)
+    assert payload.message =~ ~s(content.supersedes: "live-msg")
+    refute payload.message =~ "differentiate"
   end
 
   test "check/4 advises (does not block) on a gray-zone match" do

@@ -31,6 +31,8 @@ defmodule Barkpark.Content.Lifecycle do
 
   import Ecto.Query, only: [from: 2]
 
+  require Logger
+
   alias Barkpark.Repo
   alias Barkpark.Content
 
@@ -220,6 +222,13 @@ defmodule Barkpark.Content.Lifecycle do
           # the write-through must be invoked here explicitly.
           Sheets.tap_sheet_writethrough(result)
 
+          # Publishing a doc that declares `content.supersedes` stamps the
+          # predecessor with `superseded_by` (the DedupWall exemption's other
+          # half): a correction nobody can find from the row they are reading
+          # is not a correction. Best-effort AFTER the publish committed — a
+          # stamp failure must never fail the publish that carries the fix.
+          tap_supersession_stamp(result, type, dataset, opts)
+
           WriteScope.fire_after(result, :after_publish, payload)
       end
 
@@ -228,6 +237,94 @@ defmodule Barkpark.Content.Lifecycle do
       # returns it UNCHANGED (each shape emits its telemetry at
       # AuthoringWall's own else seam), and the controllers map it to
       # 422/422/409.
+    end
+  end
+
+  # ── Supersession stamp (the DedupWall pairwise exemption's other half) ─────
+  #
+  # A successor that published under `content.supersedes: <doc_id>` marks the
+  # predecessor's PUBLISHED row with `superseded_by: <successor id>`, so the
+  # pointer is visible from the row being replaced. Best-effort by design:
+  # the successor's publish already committed, and refusing/raising here would
+  # strand the correction behind bookkeeping — so every miss (no such
+  # predecessor, unpublished predecessor, changeset error) logs a warning and
+  # returns the publish result unchanged. Idempotent: an already-correct stamp
+  # is left untouched (no rev churn on republish).
+  defp tap_supersession_stamp({:ok, %Document{} = published} = result, type, dataset, opts) do
+    content = if is_map(published.content), do: published.content, else: %{}
+
+    case normalize_supersedes(Map.get(content, "supersedes")) do
+      nil ->
+        :ok
+
+      target_pid when target_pid == published.doc_id ->
+        # Self-supersession is meaningless; never stamp a row as replaced by itself.
+        :ok
+
+      target_pid ->
+        stamp_superseded_by(target_pid, published.doc_id, type, dataset, opts)
+    end
+
+    result
+  end
+
+  defp tap_supersession_stamp(result, _type, _dataset, _opts), do: result
+
+  defp normalize_supersedes(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      id -> DraftId.published_id(id)
+    end
+  end
+
+  defp normalize_supersedes(_), do: nil
+
+  defp stamp_superseded_by(target_pid, successor_pid, type, dataset, opts) do
+    case Content.get_document(target_pid, type, dataset, opts) do
+      {:ok, %Document{status: "published", content: content} = predecessor} ->
+        current = if is_map(content), do: content, else: %{}
+
+        if Map.get(current, "superseded_by") == successor_pid do
+          :ok
+        else
+          prev_rev = predecessor.rev
+
+          attrs = %{
+            "content" => Map.put(current, "superseded_by", successor_pid),
+            "rev" => Writer.generate_rev()
+          }
+
+          case predecessor |> Document.changeset(attrs) |> Repo.update() do
+            {:ok, _} = stamped ->
+              Broadcast.tap_broadcast(
+                stamped,
+                dataset,
+                type,
+                "update",
+                prev_rev,
+                Keyword.get(opts, :source, :api),
+                Keyword.get(opts, :user_id)
+              )
+
+              :ok
+
+            {:error, reason} ->
+              Logger.warning(
+                "supersession stamp failed: could not mark #{target_pid} " <>
+                  "superseded_by #{successor_pid}: #{inspect(reason)}"
+              )
+
+              :ok
+          end
+        end
+
+      _ ->
+        Logger.warning(
+          "supersession stamp skipped: #{successor_pid} declares supersedes " <>
+            "#{target_pid}, but no published #{type} row with that id exists in #{dataset}"
+        )
+
+        :ok
     end
   end
 

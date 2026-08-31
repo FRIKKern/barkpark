@@ -100,8 +100,8 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedNonWallRejectionTest do
     end
 
     # THE FIELD IS NOT ALWAYS "lifecycle_status". `stale_claim_error/1`
-    # (lifecycle.ex:461) keys on "claim" and `criteria_regression_error/1`
-    # (lifecycle.ex:479) on "acceptance_criteria". A render that pattern-matched
+    # (lifecycle.ex:stale_claim_error/1) keys on "claim" and `criteria_regression_error/1`
+    # (lifecycle.ex:criteria_regression_error/1) on "acceptance_criteria". A render that pattern-matched
     # the one field name in the row's brief would drop these two on the floor.
     test "renders the OTHER two fields the same family emits" do
       claim = flash_for({:error, {:invalid_task_content, %{"claim" => ["stale draft: …"]}}})

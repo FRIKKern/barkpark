@@ -85,8 +85,10 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedPublishWallTest do
            {:duplicate_of,
             %{
               message:
-                "this document near-duplicates an already-published one — extend it, " <>
-                  "or differentiate this one's title/tags before publishing",
+                "this document near-duplicates the already-published paper-live — " <>
+                  "extend that document instead, or, if this one REPLACES it, declare " <>
+                  "content.supersedes: \"paper-live\" and republish (the wall exempts " <>
+                  "exactly the declared pair; any other near-duplicate still refuses)",
               duplicate_of: "paper-live",
               similar: [%{id: "paper-live", similarity: 0.92, shared_tokens: 5}],
               advise: []
@@ -99,7 +101,8 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedPublishWallTest do
 
     assert flash =~ "Publish blocked"
     assert flash =~ "duplicate of paper-live"
-    assert flash =~ "differentiate this one's title/tags"
+    assert flash =~ "content.supersedes"
+    refute flash =~ "differentiate this one's title/tags"
     refute flash == "Action failed"
   end
 
@@ -142,15 +145,18 @@ defmodule BarkparkWeb.Studio.StudioLive.SharedPublishWallTest do
       line =
         Shared.format_wall_details(%{
           message:
-            "this document near-duplicates an already-published one — extend it, " <>
-              "or differentiate this one's title/tags before publishing",
+            "this document near-duplicates the already-published paper-live — " <>
+              "extend that document instead, or, if this one REPLACES it, declare " <>
+              "content.supersedes: \"paper-live\" and republish (the wall exempts " <>
+              "exactly the declared pair; any other near-duplicate still refuses)",
           duplicate_of: "paper-live",
           similar: [%{id: "paper-live", similarity: 0.92, shared_tokens: 5}],
           advise: []
         })
 
       assert line ==
-               "duplicate of paper-live — extend that document, or differentiate this one's title/tags"
+               "duplicate of paper-live — extend that document, or declare " <>
+                 "content.supersedes: \"paper-live\" if this one replaces it"
     end
   end
 end
