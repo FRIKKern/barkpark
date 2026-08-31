@@ -49,6 +49,10 @@ api/deps/
 api/deps
 # deploy-rebuild.sh's repo-local build mutex (never /tmp — squattable)
 .deploy-build.lock
+# deploy-rebuild.sh's machine-readable apply record (flight recorder — survives
+# the restart-line cgroup kill so a post-restart death is visible)
+.deploy-status.json
+.deploy-status.json.tmp
 
 # JS monorepo
 node_modules/

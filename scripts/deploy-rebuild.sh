@@ -12,8 +12,10 @@
 # Sequence: repo-local flock (ONE builder; all callers share api/_build_next)
 # → full from-scratch build ASIDE (Golden Rules 1-2 hold: fresh HEEx, forced
 # deps.compile — we nuke and rebuild the entire aside root, just not the live
-# one) → swap into api/_build/prod → non-fatal Go TUI build → non-fatal
-# barkpark-agent rebuild+restart → restart LAST.
+# one) → ecto.migrate on the NEW code (old build still serving; a failure
+# ABORTS the swap — fail closed, exit 13, mirroring instance-deploy.sh's
+# migrate arm) → swap into api/_build/prod → non-fatal Go TUI build →
+# non-fatal barkpark-agent rebuild+restart → restart LAST.
 #
 # Restart-last is deliberate: in the endpoint flow this script is a child of
 # barkpark.service, and systemd SIGTERMs the whole cgroup on stop — including
@@ -24,7 +26,9 @@
 # stays fixed).
 #
 # Exit codes: 0 deployed (or service simply not running) · 1 build failed
-# (api/_build/prod untouched, still restartable, NO restart) · 3 slot box.
+# (api/_build/prod untouched, still restartable, NO restart) · 13 migrate
+# failed (same guarantee: swap aborted, old code keeps serving, NO restart —
+# instance-deploy.sh's exit-13 convention) · 3 slot box.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -46,26 +50,66 @@ export MIX_ENV=prod
 exec 8>"$REPO/.deploy-build.lock"
 flock 8
 
+# ── Machine-readable apply record (flight recorder) ──────────────────────────
+# The final `systemctl restart` SIGTERMs this script's own cgroup (see header),
+# so the process can never report an apply that dies AT or AFTER the restart
+# line — the dooodo 0.2.26 crashloop (171+ boot loops, 42703 at boot) was
+# invisible everywhere for exactly this reason. This file is rewritten at every
+# phase TRANSITION, so whatever survives on disk names the last phase entered
+# and its outcome. `phase=restart outcome=applied` — written immediately before
+# the restart line — means "new code swapped + migrated, restart queued": a box
+# later found down or crashlooping with that record died post-restart. Wiring a
+# consumer (agent beat / check endpoint) is follow-up work; the record is the
+# contract. Never fatal: telemetry must not be able to abort a deploy.
+# Under the flock on purpose — one builder, one writer.
+STATUS_FILE="$REPO/.deploy-status.json"
+DEPLOY_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+write_status() { # $1 = phase (build|migrate|restart), $2 = outcome (running|failed|applied)
+  printf '{"engine":"deploy-rebuild","phase":"%s","outcome":"%s","sha":"%s","ts":"%s","pid":%d}\n' \
+    "$1" "$2" "$DEPLOY_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" \
+    > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE" 2>/dev/null || true
+}
+
 echo "[deploy-rebuild] Building Phoenix aside (api/_build_next — old build keeps serving)..."
+write_status build running
 rm -rf api/_build_next
-if (
+if ! (
   cd api &&
   MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix deps.get &&
   MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix deps.compile --force &&
   MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix compile
 ); then
-  # Residual risk (documented): a crash between this rm and mv loses the old
-  # build too — a seconds-wide window the slot path doesn't have. The running
-  # BEAM keeps serving from memory either way.
-  echo "[deploy-rebuild] Build OK — swapping into api/_build/prod..."
-  rm -rf api/_build/prod
-  mkdir -p api/_build
-  mv api/_build_next/prod api/_build/prod
-  rm -rf api/_build_next
-else
   echo "[deploy-rebuild] BUILD FAILED — api/_build/prod is untouched and still restartable. NOT restarting."
+  write_status build failed
   exit 1
 fi
+
+# Migrate BEFORE the swap, on the NEW code: MIX_BUILD_ROOT=_build_next runs the
+# freshly compiled migrations while api/_build/prod (the old build) is untouched
+# and the old BEAM keeps serving. Every other deploy lane migrates
+# (instance-deploy.sh:722 with hard revert + exit 13, bake-server-image.sh:155,
+# setup deploy.sh:279); this engine skipping it is what bricked dooodo on
+# 0.2.25→0.2.26 (schema_definitions.singleton shipped, migrate never ran, the
+# box crashlooped on 42703 at boot). FAIL CLOSED: a failed migrate aborts the
+# swap — no new build, no restart, the old code keeps serving — the closest this
+# build-aside engine can get to instance-deploy's revert semantics without a
+# slot to fall back to.
+echo "[deploy-rebuild] Migrating (new code, old build still serving)..."
+write_status migrate running
+if ! (cd api && MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix ecto.migrate); then
+  echo "[deploy-rebuild] MIGRATE FAILED — swap aborted; api/_build/prod (old code) is untouched and keeps serving. NOT restarting."
+  write_status migrate failed
+  exit 13
+fi
+
+# Residual risk (documented): a crash between this rm and mv loses the old
+# build too — a seconds-wide window the slot path doesn't have. The running
+# BEAM keeps serving from memory either way.
+echo "[deploy-rebuild] Build + migrate OK — swapping into api/_build/prod..."
+rm -rf api/_build/prod
+mkdir -p api/_build
+mv api/_build_next/prod api/_build/prod
+rm -rf api/_build_next
 
 # Go TUI client — NON-FATAL by design (the server runs the API, not the TUI).
 # Before the restart on purpose: after it we may not exist (cgroup kill).
@@ -132,6 +176,11 @@ if [ -f /etc/barkpark/agent.token ]; then
 fi
 
 # Restart LAST — see the header comment. Nothing may follow this block.
+# The record goes down BEFORE the restart because nothing after it may run:
+# outcome=applied here means "swapped + migrated, restart queued", not "boot
+# verified" — post-restart death is exactly what a consumer of this file
+# detects (applied record + box not serving the recorded sha).
+write_status restart applied
 if systemctl is-active barkpark > /dev/null 2>&1; then
   echo "[deploy-rebuild] Restarting service..."
   sudo systemctl restart barkpark

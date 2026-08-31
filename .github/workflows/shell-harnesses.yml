@@ -142,6 +142,8 @@ on:
       - "scripts/install-cli.test.sh"
       - "scripts/fetch-prebuilt.sh"
       - "scripts/fetch-prebuilt.test.sh"
+      - "scripts/deploy-rebuild.sh"
+      - "scripts/deploy-rebuild.test.sh"
       - "deploy/site-runtime-install.sh"
       - "deploy/site-runtime-install_test.sh"
       - "tooling/task-obsession/reland_check.py"
@@ -286,6 +288,8 @@ on:
       - "scripts/install-cli.test.sh"
       - "scripts/fetch-prebuilt.sh"
       - "scripts/fetch-prebuilt.test.sh"
+      - "scripts/deploy-rebuild.sh"
+      - "scripts/deploy-rebuild.test.sh"
       - "deploy/site-runtime-install.sh"
       - "deploy/site-runtime-install_test.sh"
       - "tooling/task-obsession/reland_check.py"
@@ -643,6 +647,13 @@ jobs:
         run: bash -n scripts/fetch-prebuilt.sh
       - name: fetch-prebuilt replay matrix (fake curl, no network)
         run: bash scripts/fetch-prebuilt.test.sh
+      - name: deploy-rebuild.sh syntax check
+        run: bash -n scripts/deploy-rebuild.sh
+      - name: deploy-rebuild behavior matrix (fake mix/systemctl, no service touched)
+        # task-273d965359c14e7d: migrate runs on the new code BEFORE the swap and
+        # restart; a failed migrate fails CLOSED (exit 13, old code serving, no
+        # restart); the pre-restart flight-recorder record is written.
+        run: bash scripts/deploy-rebuild.test.sh
       - name: site-runtime-install.sh syntax check
         run: bash -n deploy/site-runtime-install.sh
       - name: site-runtime-install replays (fake-only PATH, no box touched)
