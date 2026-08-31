@@ -47,9 +47,11 @@ package cli
 //     the server's error envelope as the message.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -156,7 +158,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if in.Order != "" {
 			tail = append(tail, "--order", in.Order)
 		}
-		return mcpRun(execManifestCommand(gq, ctx, m, readyCmd, tail)), nil
+		status, body, rerr := execManifestCommand(gq, ctx, m, readyCmd, tail)
+		return mcpRunFor(status, body, rerr, readyCmd.Writes), nil
 	})
 
 	// task_next — atomically claim the NEXT ready task. Claim-first: the claim IS
@@ -231,7 +234,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 				return mcpArgError(fmt.Errorf("execution_policy_override: %w", err)), nil
 			}
 		}
-		return mcpRun(execTaskNextWithPolicy(g, ctx, m, nextCmd, tail, policy)), nil
+		status, body, rerr := execTaskNextWithPolicy(g, ctx, m, nextCmd, tail, policy)
+		return mcpRunFor(status, body, rerr, nextCmd.Writes), nil
 	})
 
 	// task_show — full detail for one task id (children + child_count).
@@ -262,7 +266,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if strings.TrimSpace(in.DocID) == "" {
 			return mcpArgError(fmt.Errorf("doc_id is required")), nil
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, showCmd, []string{in.DocID})), nil
+		status, body, rerr := execManifestCommand(g, ctx, m, showCmd, []string{in.DocID})
+		return mcpRunFor(status, body, rerr, showCmd.Writes), nil
 	})
 
 	// task_close — complete a claimed task under epoch-CAS, optionally flipping
@@ -365,7 +370,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if rev := strings.TrimSpace(in.ObservedRev); rev != "" {
 			tail = append(tail, "--set", "observed_rev="+rev)
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, cc, tail)), nil
+		httpStatus, body, rerr := execManifestCommand(g, ctx, m, cc, tail)
+		return mcpRunFor(httpStatus, body, rerr, cc.Writes), nil
 	})
 
 	// task_create — file a new task. No manifest verb exists (the live manifest
@@ -559,7 +565,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		// servers; task_show stays full for any doc that needs the whole body.
 		gp := g
 		gp.view = "brief"
-		return mcpRun(execManifestCommand(gp, ctx, m, primeCmd, tail)), nil
+		status, body, rerr := execManifestCommand(gp, ctx, m, primeCmd, tail)
+		return mcpRunFor(status, body, rerr, primeCmd.Writes), nil
 	})
 
 	// task_stamp — record evidence on ONE acceptance criterion mid-claim. A
@@ -667,7 +674,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		} else {
 			tail = append(tail, "--miss", "--note", in.Note)
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, stampCmd, tail)), nil
+		status, body, rerr := execManifestCommand(g, ctx, m, stampCmd, tail)
+		return mcpRunFor(status, body, rerr, stampCmd.Writes), nil
 	})
 
 	// task_pulse — heartbeat a held claim: write the now-line AND renew the lease
@@ -728,7 +736,8 @@ func registerTaskTools(srv *mcp.Server, g globals, ctx manifest.Context, m *mani
 		if in.Criterion != nil {
 			tail = append(tail, "--criterion", strconv.Itoa(*in.Criterion))
 		}
-		return mcpRun(execManifestCommand(g, ctx, m, pulseCmd, tail)), nil
+		status, body, rerr := execManifestCommand(g, ctx, m, pulseCmd, tail)
+		return mcpRunFor(status, body, rerr, pulseCmd.Writes), nil
 	})
 
 	return nil
@@ -890,6 +899,76 @@ func mcpRun(status int, body []byte, err error) *mcp.CallToolResult {
 		Content: []mcp.Content{&mcp.TextContent{Text: text}},
 		IsError: status >= 400,
 	}
+}
+
+// mcpRunFor is mcpRun's read/write-aware twin — the fix for this defect. A 200
+// status alone is NOT a receipt: mcpRun's `status >= 400` test let a 200
+// carrying an error envelope, an HTML proxy/login page, {"result":null}, or a
+// bare {} write receipt reach the model as IsError:false with the poison body
+// presented as the answer. mcpRunFor closes that by running every 2xx/3xx body
+// through the SAME discriminators the human CLI render path already applies on
+// its own write and read paths (run.go's reader-law waves 29/30) —
+// unreadableWriteReceipt for a write, unreadableReadBody for a read — before
+// deciding IsError. writes names the command's nature; every call site already
+// knows it statically (manifest.Command.Writes), so nothing here re-derives
+// that signal, and the predicates themselves stay owned by run.go: this
+// function only CALLS them.
+//
+// Honest empties are preserved exactly as those predicates already define
+// them: {} from a counts read, [] from an empty list, and a 200
+// {"ok":false,"reason":"no_ready"} (the empty-queue claim) all stay
+// IsError:false. A status >= 400 skips the poison check entirely and falls
+// through to mcpRun's existing behaviour — an error status is already an
+// error; this function only widens what counts as one on a STATED success.
+func mcpRunFor(status int, body []byte, err error, writes bool) *mcp.CallToolResult {
+	if err != nil {
+		return mcpTextError("request failed: " + err.Error())
+	}
+	if status < http.StatusBadRequest {
+		if reason, hint := mcpPoisonedReceipt(status, body, writes); reason != "" {
+			kind := "read"
+			if writes {
+				kind = "write receipt"
+			}
+			msg := fmt.Sprintf(
+				"unreadable %s: HTTP %d %s (%d bytes): %s\n  remedy: %s",
+				kind, status, reason, len(body), bodyPreview(body), hint,
+			)
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{&mcp.TextContent{Text: clampMCPToolResult(msg)}},
+				IsError: true,
+			}
+		}
+	}
+	return mcpRun(status, body, err)
+}
+
+// mcpPoisonedReceipt names WHY a stated-success (< 400) body carries no honest
+// statement, reusing run.go's unexported discriminators — unreadableWriteReceipt
+// for a write, unreadableReadBody for a read — rather than re-deriving either
+// predicate. It returns ("", "") for every answer worth rendering, including
+// every honest empty those predicates already carve out, and for a declared
+// no-content status (204/205) with an empty body, which is a receipt, not
+// silence (mirroring screenWriteReceipt's own 204/205 exemption, run.go:486).
+func mcpPoisonedReceipt(status int, body []byte, writes bool) (reason, hint string) {
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(body)) == 0 {
+		return "", ""
+	}
+	if writes {
+		if r := unreadableWriteReceipt(body); r != "" {
+			return r, unreadableWriteReceiptHint
+		}
+		return "", ""
+	}
+	r, contradiction := unreadableReadBody(body)
+	if r == "" {
+		return "", ""
+	}
+	if contradiction {
+		return r, unreadableReadContradictionHint
+	}
+	return r, unreadableReadHint
 }
 
 // clampMCPToolResult bounds a tool-result body at mcpToolResultMaxBytes,
