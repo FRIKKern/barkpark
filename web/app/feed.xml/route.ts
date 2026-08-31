@@ -95,7 +95,8 @@ export async function GET(): Promise<Response> {
   let items: FeedItem[] = [];
   try {
     items = await collectItems();
-  } catch {
+  } catch (err) {
+    console.error("feed.xml: collectItems failed:", err);
     items = [];
   }
 
