@@ -7,6 +7,7 @@ defmodule Barkpark.Search.Synonyms do
   """
 
   import Ecto.Query
+  alias Barkpark.Content.Scope
   alias Barkpark.Search.{Crystal, Crystallizer, MergePattern, Sanitizer, Synonym}
   alias Barkpark.Repo
 
@@ -213,6 +214,7 @@ defmodule Barkpark.Search.Synonyms do
         order_by: [desc: m.transition_count],
         limit: 20
       )
+      |> scope_rollup_to_workspace(workspace_id)
       |> Repo.all()
       |> Enum.map(fn row ->
         from_q = fingerprint_query(row.from_fingerprint)
@@ -232,7 +234,8 @@ defmodule Barkpark.Search.Synonyms do
               from_q,
               to_q,
               row.transition_count,
-              {period, period_start}
+              {period, period_start},
+              workspace_id
             )
         }
       end)
@@ -326,9 +329,9 @@ defmodule Barkpark.Search.Synonyms do
   # in seven, AND the wrong window whenever a caller passed an explicit one, so
   # fromZeroHitRate/toCtr silently read 0.0 and every confidence score collapsed
   # to the transition term alone.
-  defp candidate_evidence(surface, scope, from_q, to_q, transitions, window) do
-    from_stats = crystal_stats(surface, scope, from_q, window)
-    to_stats = crystal_stats(surface, scope, to_q, window)
+  defp candidate_evidence(surface, scope, from_q, to_q, transitions, window, workspace_id) do
+    from_stats = crystal_stats(surface, scope, from_q, window, workspace_id)
+    to_stats = crystal_stats(surface, scope, to_q, window, workspace_id)
 
     from_zero =
       if from_stats.search_count > 0 do
@@ -352,15 +355,33 @@ defmodule Barkpark.Search.Synonyms do
     }
   end
 
-  defp crystal_stats(surface, scope, query, {period, period_start}) when is_binary(query) do
-    case Repo.get_by(Crystal,
-           surface: surface,
-           scope: scope,
-           period: period,
-           period_start: period_start,
-           query_normalized: Sanitizer.normalize(query),
-           filter_fingerprint: ""
-         ) do
+  # Query (not get_by), and workspace-keyed. The bare
+  # `Repo.get_by(Crystal, surface:, scope:, period:, period_start:,
+  # query_normalized:, filter_fingerprint:)` this replaces carried NO workspace
+  # key, which the per-tenant partial unique index
+  # (`search_intel_crystals_ws_unique_idx`, migration 20260715121000) turned
+  # into a CRASH: that index exists precisely so two workspaces sharing a scope
+  # STRING each keep their OWN roll-up row for the same query, so as soon as a
+  # second tenant crystallized a query the get_by matched two rows and raised
+  # `Ecto.MultipleResultsError` — an uncaught 500 on GET
+  # /v1/search/:dataset/insights for EVERY tenant asking about that query.
+  # A keyword get_by also cannot express the nil arm at all (Ecto forbids
+  # `= nil`; the legacy bucket needs `IS NULL`), which is the same reason
+  # `Intelligence.quality_stats/5` and `Crystallizer.upsert_crystal/1` are
+  # already written this way. This site was the one that was missed.
+  defp crystal_stats(surface, scope, query, {period, period_start}, workspace_id)
+       when is_binary(query) do
+    normalized = Sanitizer.normalize(query)
+
+    from(c in Crystal,
+      where:
+        c.surface == ^surface and c.scope == ^scope and c.period == ^period and
+          c.period_start == ^period_start and c.query_normalized == ^normalized and
+          c.filter_fingerprint == ""
+    )
+    |> scope_rollup_to_workspace(workspace_id)
+    |> Repo.one()
+    |> case do
       nil ->
         %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
 
@@ -369,7 +390,7 @@ defmodule Barkpark.Search.Synonyms do
     end
   end
 
-  defp crystal_stats(_, _, _, _), do: %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
+  defp crystal_stats(_, _, _, _, _), do: %{search_count: 0, zero_hit_count: 0, ctr: 0.0}
 
   @doc false
   def fingerprint_query(fingerprint) when is_binary(fingerprint) do
@@ -446,16 +467,36 @@ defmodule Barkpark.Search.Synonyms do
 
   defp put_workspace_id(attrs, _), do: attrs
 
-  # Tenant read boundary. A workspace-scoped caller sees ONLY its own rows plus
-  # legacy/global (NULL-workspace) rows — never a sibling workspace's rows under
-  # a shared dataset slug. A nil workspace_id (anonymous / unscoped / pre-tenancy)
-  # leaves the query workspace-blind (every matching row), preserving the exact
-  # legacy behaviour of the anonymous search read path.
-  defp scope_to_workspace(query, workspace_id) when is_binary(workspace_id) do
-    from(s in query, where: s.workspace_id == ^workspace_id or is_nil(s.workspace_id))
-  end
+  # Tenant read boundary for SYNONYM rows. A workspace-scoped caller sees its
+  # own rows PLUS the legacy/global (NULL-workspace) shared layer — never a
+  # sibling workspace's rows under a shared dataset slug. That shared layer is
+  # deliberate, which is why this routes through
+  # `Scope.scope_to_workspace_including_global/3` and NOT through the
+  # workspace-only `Scope.scope_to_workspace/3`; the two are not
+  # interchangeable, and swapping in the latter would silently blind every
+  # tenant to the shared synonyms.
+  #
+  # The `nil` mapping is the fix. The old catch-all was
+  # `defp scope_to_workspace(query, _), do: query` — a nil workspace_id (what
+  # the controllers' `workspace_id(conn)` yields when `:current_workspace` is
+  # absent, i.e. an anonymous / unresolved-tenant caller) left the query
+  # COMPLETELY UNFILTERED and read EVERY tenant's synonym rows. `:shared_only`
+  # makes nil mean the shared/global bucket (`workspace_id IS NULL`), matching
+  # the documented nil semantics of the sibling `Intelligence.scope_ws/2` and
+  # `Crystallizer.scope_workspace/2` — a single-tenant/pre-tenancy instance,
+  # whose rows all carry a NULL workspace_id, still reads exactly what it wrote.
+  defp scope_to_workspace(query, workspace_id),
+    do: Scope.scope_to_workspace_including_global(query, workspace_id || :shared_only, nil)
 
-  defp scope_to_workspace(query, _), do: query
+  # Tenant leaf for the intel ROLL-UP tables (Crystal, MergePattern) — a
+  # DIFFERENT boundary from `scope_to_workspace/2` above, deliberately. Roll-ups
+  # are per-tenant aggregates with NO shared layer: a workspace's insights must
+  # never blend a sibling's counts, and a NULL-workspace legacy row belongs to
+  # the legacy bucket alone. `nil` therefore means `workspace_id IS NULL`, never
+  # "every tenant". Byte-identical to `Intelligence.scope_ws/2` and
+  # `Crystallizer.scope_workspace/2`, which read these same two tables.
+  defp scope_rollup_to_workspace(query, workspace_id),
+    do: Scope.scope_to_workspace(query, workspace_id || :shared_only)
 
   # Delete tenant guard — a workspace-scoped caller may remove its own row or a
   # legacy/global (NULL-workspace) row, but not a sibling workspace's. Mirrors
