@@ -714,14 +714,18 @@ const diagram: Emit = (b) => {
 // the mount byte-identical to Figures.asciicast_html's and leaves the
 // `npt:0:1` fallback with the hydrating clients (client.ts / the LiveView
 // hook). Attribute-escaped, NOT `safeUrl` — a poster is a timestamp, not a URL.
+// `rows` mirrors the Elixir renderer's compact-player contract: only integer
+// terminal heights from 6 through 40 reach the DOM.
 const asciicast: Emit = (b) => {
   const src = str(b.src)
   const caption = str(b.caption)
   const poster = str(b.poster).trim()
   const posterAttr = poster === '' ? '' : ` data-cast-poster="${escapeAttr(poster)}"`
+  const rows = typeof b.rows === 'number' && Number.isInteger(b.rows) ? b.rows : undefined
+  const rowsAttr = rows !== undefined && rows >= 6 && rows <= 40 ? ` data-cast-rows="${rows}"` : ''
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
     asciicastFigcaption(caption) +
     `</figure>`
   )

@@ -9,7 +9,7 @@ defmodule Barkpark.TextDiff do
   classic JS line-diff algorithm). The wrapper exists because:
 
     * `Papers.TextDiff` lives under the *papers* namespace — the rail is a
-      separate consumer at the Beads-task substrate level and shouldn't
+      separate consumer at the task substrate level and shouldn't
       reach across into another bounded context for a name.
     * The rail's wire shape uses the `{op, text}` form (`+` / `-` / ` `
       for "context") — the brief's hunk schema. The papers port emits

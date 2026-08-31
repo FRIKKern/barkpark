@@ -134,17 +134,14 @@ node tooling/doc-truth/retired-terms.mjs [--json]
 
 The semantic complement: verify-docs catches drifted *citations*, retired-terms
 catches drifted *claims* — prose asserting a gutted technology is current
-(`cytoscape` after the graph pane went Canvas2D; `bin/bd-shim`, the retired beads
-shim, cited as a live `/v1/tasks` binary). **Not a blind grep** — a term is
+(`cytoscape` after the graph pane went Canvas2D). **Not a blind grep** — a term is
 allowed when it sits within ~170 chars of a negation/historical word
 (`gutted`, `removed`, `retired`, `NOT`, `historically`, `legacy`, `mirror`,
 `compatible` …), carries an inline `doc-truth-allow` pragma, or lives under an
 allowlisted path (`test/`, `CHANGELOG`, git-history docs, this tool's fixtures).
-So `Canvas2D, NOT Cytoscape`, `Cytoscape is fully gutted`, and the ~15 historical
-bd-shim contract mentions all **pass**, while a planted `# uses Cytoscape to
-render` (a live-use verb bound directly to the term) **flags**. `bin/bd-shim` is
-excused only by a *narrow* death-acknowledgment set — contract words don't make a
-gone binary path OK to cite. Exit is **never-worse** against the frozen corpus.
+So `Canvas2D, NOT Cytoscape` and `Cytoscape is fully gutted` **pass**, while a
+planted `# uses Cytoscape to render` (a live-use verb bound directly to the term)
+**flags**. Exit is **never-worse** against the frozen corpus.
 
 ### The code-comment acceptance test
 

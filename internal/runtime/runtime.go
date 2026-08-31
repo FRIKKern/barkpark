@@ -73,6 +73,11 @@ type Executor struct {
 	Runner        CommandRunner
 	FS            FS
 	Ports         PortAllocator
+
+	// Logger is called for non-fatal warnings the executor wants visible
+	// without failing the deploy — e.g. a best-effort drain that didn't
+	// succeed. nil -> silent. Mirrors waker.Waker.Logger.
+	Logger func(format string, args ...any)
 }
 
 // Deployment mirrors the fields the executor reads from the control plane. The
@@ -308,7 +313,9 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 
 	if livePort > 0 && livePort != port {
 		// Best-effort drain — failure here doesn't fail the deploy (the new
-		// container is already serving). Just log via the runner output.
+		// container is already serving). drainContainer captures its output
+		// and surfaces any failure through Logger so it's visible instead of
+		// silently vanishing.
 		_ = e.drainContainer(ctx, fmt.Sprintf("site-%s-blue", slug), livePort)
 	}
 
@@ -678,9 +685,17 @@ func (e *Executor) reloadCaddy(ctx context.Context) error {
 }
 
 func (e *Executor) drainContainer(ctx context.Context, name string, port int) error {
-	// Best-effort. A graceful 5s SIGTERM, then kill.
-	return e.runner().Run(ctx, devNull{}, "sh", "-c",
+	// Best-effort. A graceful 5s SIGTERM, then kill. Output is captured (not
+	// discarded into devNull) so a drain failure after cutover-to-live is
+	// visible via Logger instead of leaving the old container running with
+	// zero trace.
+	var buf bytes.Buffer
+	err := e.runner().Run(ctx, &buf, "sh", "-c",
 		fmt.Sprintf("docker ps -q --filter publish=%d | xargs -r docker stop -t 5", port))
+	if err != nil {
+		e.logf("drain %s (port %d) failed: %v; output: %s", name, port, err, strings.TrimSpace(buf.String()))
+	}
+	return err
 }
 
 // Run loops RunOnce on Interval. State is rebuilt before each iteration via
@@ -753,6 +768,13 @@ func (e *Executor) portAllocator() PortAllocator {
 		return e.Ports
 	}
 	return DefaultPortAllocator{}
+}
+
+// logf calls Logger when set; nil Logger makes this a silent no-op.
+func (e *Executor) logf(format string, args ...any) {
+	if e.Logger != nil {
+		e.Logger(format, args...)
+	}
 }
 
 func (e *Executor) healthTimeout() time.Duration {

@@ -4018,3 +4018,47 @@ func TestSiteStatusDetailDoesNotEchoTheReason(t *testing.T) {
 		t.Errorf("a detail that differs from the reason must still be rendered:\n%s", buf2.String())
 	}
 }
+
+// TestSiteFailureClassRowStripsANSILocally pins wbt-go-ledger-hygiene-sweep's
+// one proof obligation: the "failure class" row on `bp cloud site status`
+// must never carry a raw control byte to the terminal, even though strip_ansi
+// was added at the JSON boundary server-side and NOT in this Go printer.
+//
+// It asserts on the RENDERED row — spawnSiteStatusMap → renderKV — rather
+// than calling sanitizeCell directly. The value is sanitized TWICE on this
+// path today: once where it is set (cloud_site_cmd.go:2229-2230 ->
+// hzCell at hetzner_cmd.go:415) and again by renderKV's own cellString
+// (table.go:428-433), both of which bottom out in sanitizeCell
+// (table.go:456). MUTATION PROOF: dropping EITHER call site alone still
+// leaves the other guarding the render, so this test stays green — it is
+// sanitizeCell itself that is load-bearing; no-opping it (`return s` instead
+// of the strings.Map body) reds this test immediately:
+//
+//	--- FAIL: TestSiteFailureClassRowStripsANSILocally (0.00s)
+//	    the rendered "failure class" row carried a raw ESC byte — sanitizeCell
+//	    must strip it before the terminal sees it:
+//	    "...failure class  BUILD_FAILED \x1b[31mred\x1b[0m exit 1..."
+//
+// restoring sanitizeCell's body goes back to green. That is the real
+// regression this guards: EITHER call site may move or be refactored away
+// (cellString's backstop means hzCell's own call is not strictly load-bearing
+// today), but sanitizeCell dropping C0/DEL bytes from a table cell must not.
+func TestSiteFailureClassRowStripsANSILocally(t *testing.T) {
+	const poisoned = "BUILD_FAILED \x1b[31mred\x1b[0m exit 1"
+	dep := &cloudclient.SiteDeployment{ID: "dep-1", Status: "failed", FailureClass: poisoned}
+	site := cloudclient.SpawnSite{ID: testSiteID, Name: "blog", Slug: "blog", Kind: "static", Framework: "astro"}
+
+	out, buf, _ := newTestWriter()
+	renderKV(out, spawnSiteStatusMap(site, dep, dep, []cloudclient.SiteDeployment{*dep}))
+	stdout := buf.String()
+
+	if strings.ContainsRune(stdout, 0x1b) {
+		t.Fatalf("the rendered \"failure class\" row carried a raw ESC byte — sanitizeCell must strip it before the terminal sees it:\n%q", stdout)
+	}
+	if !strings.Contains(stdout, "failure class") {
+		t.Fatalf("siteFailureClass(dep, newest) was non-empty but no \"failure class\" row rendered:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "BUILD_FAILED") || !strings.Contains(stdout, "red") || !strings.Contains(stdout, "exit 1") {
+		t.Errorf("stripping the ESC bytes must not eat the surrounding readable text:\n%s", stdout)
+	}
+}

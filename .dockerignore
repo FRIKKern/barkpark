@@ -27,7 +27,6 @@ api/priv/static/cache_manifest.json
 .git
 .idea
 .vscode
-.beads
 .turbo
 .paperflow
 

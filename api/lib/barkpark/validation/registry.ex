@@ -29,8 +29,6 @@ defmodule Barkpark.Validation.Registry do
   use GenServer
   require Logger
 
-  alias Barkpark.Validation.Checker
-
   @name __MODULE__
   @table :barkpark_validation_checkers
 
@@ -106,21 +104,6 @@ defmodule Barkpark.Validation.Registry do
   """
   @spec builtin_names() :: MapSet.t()
   def builtin_names, do: MapSet.new(Map.keys(@builtins))
-
-  @doc """
-  Convenience entry point used by the rule DSL `:matches:<checker>` op.
-
-  Looks up `name`, dispatches to `module.check/2`, and surfaces a stable
-  error tuple when the checker is unknown.
-  """
-  @spec check(checker_name(), term(), Checker.params()) ::
-          :ok | {:error, Checker.reason()} | {:error, :unknown_checker}
-  def check(name, value, params) when is_binary(name) and is_map(params) do
-    case find(name) do
-      {:ok, module} -> module.check(value, params)
-      :error -> {:error, :unknown_checker}
-    end
-  end
 
   # ── GenServer ───────────────────────────────────────────────────────────
 

@@ -3,25 +3,21 @@
 // dependency as if it were live tech.
 //
 // This is the semantic complement of verify-docs.mjs. verify-docs catches
-// drifted CITATIONS (a lineref whose line number moved, a `bin/bd-shim` path
-// that no longer resolves). retired-terms catches drifted CLAIMS — prose that
+// drifted CITATIONS (such as a lineref whose line number moved).
+// retired-terms catches drifted CLAIMS — prose that
 // still asserts a gutted technology is current:
 //
 //   • `cytoscape` — the graph pane is a self-contained Canvas2D renderer now;
 //     Cytoscape was fully gutted. A comment that says the renderer USES it is
 //     wrong.
-//   • `bin/bd-shim` — the retired beads shim. Citing it as a live `/v1/tasks`
-//     consumer (as an existing binary path) is a dead-dependency assertion.
-//
 // It is emphatically NOT a blind grep. A retired term is ALLOWED when it sits:
 //   1. within NEG_WINDOW chars of a negation / historical framing word
 //      (gutted, removed, retired, legacy, NOT, historically, no longer …),
 //   2. on a line carrying an inline `doc-truth-allow` pragma, or
 //   3. under an allowlisted path (test/, CHANGELOG, git-history docs, the
 //      charter, this tool's own source + fixtures).
-// So `Canvas2D, NOT Cytoscape`, `Cytoscape is fully gutted`, `Historically
-// Cytoscape owned layout`, and the ~15 historical bd-shim contract mentions in
-// the tasks family all PASS, while a planted `# uses Cytoscape to render` FLAGS.
+// So `Canvas2D, NOT Cytoscape`, `Cytoscape is fully gutted`, and `Historically
+// Cytoscape owned layout` all PASS, while a planted live-use claim FLAGS.
 //
 //   node tooling/doc-truth/retired-terms.mjs [--json]
 //
@@ -45,16 +41,8 @@ const NEG_WINDOW = 170; // how far a negation/historical word may sit and still 
 const BIND = 24; // adjacency window for a live-use verb binding to the term
 
 // Broad historical / negation / contract framing — excuses a cytoscape mention.
-// `shim`, `mirror`, `compatible`, `byte-identical`, `backs`, `replaces` cover the
-// bd-compatible contract vocabulary the tasks family documents legitimately.
 const NEG_BROAD =
   /\b(gutt\w*|remov\w*|retir\w*|deprecat\w*|legacy|historical\w*|formerly|former|obsolet\w*|no longer|never|without|zero|dead|sunset|stub|not\b|no\b|used to|was\b|were\b|mirror\w*|byte-identical|compatible|backs?\b|back(s|ed|ing)?\s+the|replac\w*|translat\w*|cannot|superseded)\b/i;
-
-// NARROW death-acknowledgment — the ONLY thing that excuses citing a GONE binary
-// path (`bin/bd-shim`). Contract words like "mirroring/byte-identical" describe
-// the shim's WIRE shape; they do NOT make a dead file path OK to cite as present.
-const NEG_DEATH =
-  /\b(gutt\w*|remov\w*|retir\w*|deleted|former\w*|gone|no longer\s+exists?|historical\w*|obsolet\w*|sunset|superseded)\b/i;
 
 // A live-use verb binding DIRECTLY to the term (adjacent), either side.
 const LIVE_BEFORE =
@@ -75,16 +63,6 @@ const TERMS = [
         return { kind: "live-tech", confidence: "high" };
       }
       return { kind: "stale-tech-ref", confidence: "medium" };
-    },
-  },
-  {
-    id: "bd-shim",
-    // ONLY the dead binary PATH form is a defect; bare "bd-shim" prose documents
-    // the retired shim's contract and is always allowed.
-    re: /bin\/bd-shim/gi,
-    excuse: NEG_DEATH,
-    classify() {
-      return { kind: "dead-binary", confidence: "high" };
     },
   },
 ];

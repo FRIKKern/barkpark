@@ -66,7 +66,16 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
   # SSH exec, not a create→live chain); succeed/fail flip the JOB ROW ONLY
   # (`succeed_agent_key_job/3` — a key push must never clobber the live row's
   # health/host the way a provision succeed does).
-  @kinds ~w(provision deprovision attach_domain resurrect provision_support push_agent_key)
+  #
+  # isu-w5 (task-509f5fd02bc48f9c) — `enable_apply` retro-arms the self-update
+  # executor on an ALREADY-LIVE managed box: append BARKPARK_SELF_UPDATE_APPLY=1
+  # to the app env over SSH + restart. New boxes provision with the flag; this
+  # is the retrofit rail for the pre-flag cohort, auto-enqueued when a box on
+  # autoupdate is MEASURED unarmed (the admin's autoupdate opt-in is the
+  # consent). One SSH plan, no step vocabulary; claimed by a kind-filtered query
+  # (`POST /v1/internal/enable-apply-jobs/claim`); succeed/fail flip the JOB ROW
+  # ONLY (`succeed_enable_apply_job/3` — same live-row protection as agent-key).
+  @kinds ~w(provision deprovision attach_domain resurrect provision_support push_agent_key enable_apply)
 
   # dwb-14: the honest step vocabulary the Go worker reports as it walks the
   # create→live chain. Coarse-by-design (6 phases, not every SSH sub-step) so the

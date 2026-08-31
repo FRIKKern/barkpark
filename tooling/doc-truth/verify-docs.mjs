@@ -44,9 +44,7 @@ const ROUTER = join(ROOT, "api/lib/barkpark_web/router.ex");
 // Known repo top-level dirs that anchor a path claim even without an extension.
 // NB `bin/` is intentionally NOT here: `bin/<x>` overwhelmingly denotes a RELEASE
 // binary invocation (`bin/barkpark_cloud eval …`) or a code token (`bin/1`), not a
-// repo file — anchoring it drowns the HIGH lane in noise. The one dead-binary
-// citation this epic cares about (`bin/bd-shim`) is owned by retired-terms.mjs,
-// which knows it as a retired name rather than guessing from the path shape.
+// repo file — anchoring it drowns the HIGH lane in noise.
 const TOP_DIRS = [
   "api/", "tooling/", "docs/", "js/", "web/", "lib/", "priv/",
   "deploy/", ".github/", "scripts/", "internal/", "docs-site/",
@@ -381,8 +379,8 @@ function commentFragments(text, lang) {
 // Turn one prose fragment into synthetic spans. Mirrors how `extractSpans` emits
 // a span per backtick token: here we emit (1) the WHOLE fragment so a bare
 // `router.ex … 716-724` phrase classifies as a lineref, and (2) one span per
-// whitespace/punctuation-delimited token so a mid-sentence `bin/bd-shim` path or
-// `Module.func` symbol is seen. Comment spans are `fenced:true` to bypass the
+// whitespace/punctuation-delimited token so a mid-sentence path or `Module.func`
+// symbol is seen. Comment spans are `fenced:true` to bypass the
 // inline prose-guard (comment prose legitimately carries `…` and aligned spaces).
 function emitProseSpans(fragText, line) {
   const spans = [];
@@ -1389,8 +1387,8 @@ export function liveCorpus() {
 
 // The CODE-COMMENT corpus: every tracked .ex/.exs/.go/.ts, minus vendored /
 // generated trees. This is what the standing code-comment verifier indexes so a
-// drifted @moduledoc lineref or a resurrected `bin/bd-shim` citation is caught
-// the moment it lands. Graceful empty fallback when git is absent.
+// drifted @moduledoc lineref is caught the moment it lands. Graceful empty
+// fallback when git is absent.
 const CODE_EXTS = new Set([".ex", ".exs", ".go", ".ts"]);
 const CODE_EXCLUDE = ["node_modules/", "_build/", "deps/", "vendor/", "priv/static/", ".git/"];
 export function codeCommentCorpus() {

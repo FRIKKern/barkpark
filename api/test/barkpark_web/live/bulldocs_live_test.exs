@@ -105,6 +105,34 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       end
     end
 
+    test "legacy article-wide keeps the article renderer without widening the prose shell", %{
+      conn: conn
+    } do
+      slug = "2026-08-wide-chronicle"
+
+      {:ok, _paper} =
+        Content.upsert_paper(
+          Barkpark.LabelFixtures.paper_attrs(%{
+            slug: slug,
+            style: "article-wide",
+            blocks: [
+              %{
+                "id" => "wide-intro",
+                "type" => "paragraph",
+                "content" => [%{"type" => "text", "value" => "A broad editorial month."}]
+              }
+            ]
+          })
+        )
+
+      {:ok, _view, html} = live(conn, "/papers/#{slug}")
+
+      assert html =~ "bp-paper-surface"
+      assert html =~ "bp-paper-article"
+      refute html =~ "bp-paper-article-wide"
+      assert html =~ "A broad editorial month."
+    end
+
     test "renders a historical paper whose blocks exist only under content.body", %{conn: conn} do
       slug = "2026-07-16-nested-body-reader"
 

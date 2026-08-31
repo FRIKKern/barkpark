@@ -210,6 +210,37 @@ if [ "$MODE" = selftest ]; then
   st_case "marker in a test file is not scanned" 0 "§8 scanned 0 @canonical marker(s)" '
     printf -- "# @canonical capability:fixture-in-test\n  defp t_fn, do: :ok\n" > "$FIX/api/lib/x_test.exs"
     printf -- "// @canonical capability:fixture-in-gotest\nfunc TFn() {}\n" > "$FIX/api/lib/x_test.go"'
+
+  # DEFECT A — the scan used to be blind to JavaScript (no *.mjs/*.js in
+  # CANON_INCLUDES), so a marker squatting a slug, or sitting over a private
+  # helper, in a .mjs file sailed through while §8 still printed "ok". These
+  # two arms plant the same violations the .ex arms above plant, but in .mjs.
+  st_case ".mjs duplicate capability slug reds" 1 "claimed by >1 impl" '
+    printf -- "// @canonical capability:fixture-mjs-dup\nexport function oneFn() { return 1; }\n// @canonical capability:fixture-mjs-dup\nexport function twoFn() { return 2; }\n" > "$FIX/api/lib/dup.mjs"'
+  st_case ".mjs marker over a private (unexported) helper reds" 1 "has no public def/func/export within 6 lines" '
+    printf -- "// @canonical capability:fixture-mjs-private\nfunction helperFn() { return 1; }\n" > "$FIX/api/lib/private.mjs"'
+  # A plain .js script (no `import`/`export` anywhere — the cloud/priv/static/
+  # app.js shape) has no module boundary, so a bare top-level `function` IS
+  # its public entry point; `.mjs` directly above proves the SAME shape still
+  # REDs there, where `export` is the only public keyword a real ES module has.
+  st_case ".js (non-module) marker over a bare top-level function passes" 0 "§8 scanned 1 @canonical marker(s)" '
+    printf -- "// @canonical capability:fixture-js-bare-function\nfunction plainHelper() { return 1; }\n" > "$FIX/api/lib/plain.js"'
+
+  # DEFECT B — canon_hits() used to grep the bare literal anywhere in a file,
+  # so a @moduledoc/docstring QUOTING an existing slug in prose false-REDded as
+  # a duplicate (PR #12710). This plants a real marker AND a separate file
+  # whose docstring merely quotes that same slug to explain it — the quote must
+  # not be counted, so the run stays green with exactly one real marker.
+  st_case "docstring quoting an existing slug does not false-RED as a duplicate" 0 "docs-anchors-check: PASS" '
+    printf -- "# @canonical capability:fixture-quoted\ndef real_fn, do: :ok\n" >> "$FIX/api/lib/x.ex"
+    printf -- "%s\n" \
+      "defmodule Fixture.Quote do" \
+      "  @moduledoc \"\"\"" \
+      "  See @canonical capability:fixture-quoted for context on the predicate" \
+      "  this module tests." \
+      "  \"\"\"" \
+      "end" > "$FIX/api/lib/quote.ex"'
+
   # §8b EXTRACTOR. Under the single-pass strip this pinned the literal token
   # `function`, so the supplied pin below would MISMATCH and the arm would red.
   st_case "8b pin reaches the identifier past 'export async function'" 0 "§8b all 1 marker pairing(s) match the pin" '
@@ -657,15 +688,29 @@ fi
 # squatter against the owner. A test is never a canonical implementation, so the
 # index does not read one.
 CANON_INCLUDES=(--include='*.ex' --include='*.exs' --include='*.go'
-  --include='*.ts' --include='*.tsx'
+  --include='*.ts' --include='*.tsx' --include='*.mjs' --include='*.js'
   --exclude='*_test.go' --exclude='*_test.exs' --exclude='*_test.ts'
-  --exclude='*.test.ts' --exclude='*.test.tsx')
+  --exclude='*.test.ts' --exclude='*.test.tsx' --exclude='*.test.mjs'
+  --exclude='*.test.js' --exclude='*.spec.mjs' --exclude='*.spec.js')
 
 # Every `@canonical capability:` hit under $1, as file:line:text. The ONE reader
 # both invariants and the control go through, so a control that passes is a
 # statement about the shipping code path.
+#
+# DECLARATION-POSITION ONLY. A bare-literal grep for the marker string matched
+# anywhere it appeared, including inside a @moduledoc/docstring heredoc that
+# merely QUOTES an existing slug to explain it in prose (PR #12710: a test
+# moduledoc quoting `workspace-admin-authority` false-REDded as a duplicate, and
+# the workaround was deleting the explanatory prose — the gate punished better
+# documentation). Every real marker in this repo is a COMMENT whose content
+# starts with `@canonical capability:` right after the `#` or `//` marker
+# (Elixir/Go/bash use `#`; Go/TS/JS/mjs use `//`) — a docstring quote is prose
+# on an uncommented line and never satisfies that shape. Anchoring on
+# `^[[:space:]]*(#|//)[[:space:]]*@canonical capability:` keeps a real
+# duplicate red while letting prose pass.
 canon_hits() {
-  grep -rn '@canonical capability:' "${CANON_INCLUDES[@]}" "${GREP_PRUNE[@]}" \
+  grep -rnE '^[[:space:]]*(#|//)[[:space:]]*@canonical capability:' \
+    "${CANON_INCLUDES[@]}" "${GREP_PRUNE[@]}" \
     "$1" 2>/dev/null | grep -vE '/_build/|/deps/|/\.claude/|/node_modules/' || true
 }
 
@@ -678,7 +723,7 @@ canon_hits() {
 # in here touches $FAIL, which is what lets the same code run over a tree that
 # is SUPPOSED to be dirty.
 canon_scan() {
-  local root="$1" hits cf rest cl slug dpath
+  local root="$1" hits cf rest cl slug dpath pubentry_pat
   hits="$(canon_hits "$root")"
 
   printf '%s\n' "$hits" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/' \
@@ -687,7 +732,20 @@ canon_scan() {
   { printf '%s\n' "$hits" | grep . || true; } | while IFS= read -r hit; do
     cf=${hit%%:*}; rest=${hit#*:}; cl=${rest%%:*}
     slug=$(printf '%s' "$hit" | sed -E 's/.*capability:([A-Za-z0-9._-]+).*/\1/')
-    if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE '^[[:space:]]*(def |func |export )'; then
+    # `export` is the public-entry keyword for a real ES MODULE (.mjs, .ts,
+    # .tsx — every one of those is module-scoped, so anything not exported is
+    # module-private). A plain `.js` script is not necessarily a module at
+    # all — cloud/priv/static/app.js says so in its own header comment
+    # ("vanilla SPA, no framework, no build step") and attaches its public
+    # surface to an object literal far below the marker, not via `export`.
+    # For that shape a bare top-level `function` declaration IS the public
+    # entry (the widest visibility an IIFE-scoped script has), so `.js` alone
+    # — never `.mjs` — also accepts it.
+    case "$cf" in
+      *.js) pubentry_pat='^[[:space:]]*(def |func |export |function )' ;;
+      *)    pubentry_pat='^[[:space:]]*(def |func |export )' ;;
+    esac
+    if sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null | grep -qE "$pubentry_pat"; then
       echo "OK $cf:$cl $slug"
       # WHICH symbol the marker actually landed on — the 8b pin's payload.
       # "a public def within 6 lines" is an EXISTENCE test, and an inserted def
@@ -704,8 +762,8 @@ canon_scan() {
       # Looping walks the whole modifier run (`export default async function foo`
       # -> `foo`) and leaves every already-correct shape byte-identical.
       sym=$(sed -n "$((cl + 1)),$((cl + 6))p" "$cf" 2>/dev/null \
-        | grep -m1 -E '^[[:space:]]*(def |func |export )' 2>/dev/null \
-        | sed -E -e 's/^[[:space:]]*(def|func|export)[[:space:]]+//' \
+        | grep -m1 -E "$pubentry_pat" 2>/dev/null \
+        | sed -E -e 's/^[[:space:]]*(def|func|export|function)[[:space:]]+//' \
                  -e ':a' -e 's/^(async|function|const|let|var|class|default)[[:space:]]+//' -e 'ta' \
                  -e 's/[^A-Za-z0-9_?!].*$//' || true)
       [ -n "$sym" ] && echo "PAIR $slug $sym"

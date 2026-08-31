@@ -48,7 +48,13 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// authoring quality gate hard-stops, and an empty-title task is unusable in
 	// every board/queue view. Reject it here with a friendly message rather than
 	// round-tripping to a 409/422.
-	if title, _ := body["title"].(string); strings.TrimSpace(title) == "" {
+	//
+	// title is kept (not re-derived) past this point: it is the one thing the
+	// operator can search on if the CREATE mutation below answers ambiguously —
+	// this write gets no server-assigned id back on a timeout or 5xx, so the
+	// title is the only handle a re-check remedy has to offer.
+	title, _ := body["title"].(string)
+	if strings.TrimSpace(title) == "" {
 		return usageErrf(out, func() { printTaskCreateHelp(out) },
 			"a task needs a non-empty title (pass it positionally, via --title, or --set title=…)")
 	}
@@ -77,13 +83,34 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 		return exitGeneric
 	}
 
-	httpStatus, respBody, err := sendTaskMutations(ctx, mutations)
+	httpStatus, respBody, err := sendCreateTaskMutations(ctx, mutations)
 	if err != nil {
 		out.userErr("task create: %v", err)
+		// TRANSPORT ERROR (the DBConnection-under-fleet-load class, run.go's 30s
+		// client timeout being the common trigger): the request may never have
+		// reached the server, or may have landed and the RESPONSE was what got
+		// lost — either way this is the one bp write with no server-assigned id
+		// to re-check, because the create mutation is exactly the call that was
+		// supposed to hand one back. The sibling ledger verbs (stamp/close/pulse)
+		// answer a 5xx by re-reading the row at its known id; create has no id to
+		// re-read, so the remedy is a search on the title the caller supplied.
+		out.errf("  ambiguous: the task may or may not have been filed — the response never arrived, so no id came back to re-check. Search before retrying: bp search query %q", title)
 		return exitGeneric
 	}
 	if httpStatus < 200 || httpStatus >= 300 {
 		out.userErr("task create: %s", mutateErrorMessage(httpStatus, respBody))
+		if httpStatus >= 500 {
+			// 5xx: the server answered, but a 500-class response can still hide a
+			// write that committed before the failure — "a 5xx can hide a write
+			// that landed" is the same doctrine stamp/close/pulse already apply on
+			// their read-back branch. create has no id to re-read, so the remedy
+			// is the same title search as the transport-error branch.
+			out.errf("  ambiguous: the task may or may not have been filed despite the error — search before retrying: bp search query %q", title)
+		}
+		// 4xx (validation/auth/not_found/conflict/…): the server REFUSED before
+		// any commit, so nothing landed and there is nothing to go hunting for —
+		// printing the ambiguity caveat here would send the operator searching
+		// for a write that was never attempted.
 		return exitGeneric
 	}
 	created, ok := firstMutationRecord(respBody)
@@ -349,6 +376,14 @@ func taskCriterionTexts(value any) []any {
 // endpoint + bearer auth apiclient.MutateResults uses, over the CLI's shared
 // 30s doRequest transport (the same budget every manifest write gets), so the
 // two never drift on the task write contract. Writes nothing to stdout.
+// sendCreateTaskMutations is the injection seam for the CREATE mutation only
+// (the publish follow-up below still calls sendTaskMutations directly — its
+// ambiguity story already has a known bareID to point at, per this task's
+// brief). Tests override this file-local variable to simulate a transport
+// error or a 5xx without touching the shared sendTaskMutations helper, which
+// the MCP task_create tool also calls.
+var sendCreateTaskMutations = sendTaskMutations
+
 func sendTaskMutations(ctx manifest.Context, mutations []map[string]any) (int, []byte, error) {
 	endpoint := apiclient.ScopedURL(ctx.Server, ctx.Workspace, ctx.Project, "/v1/data/mutate/"+ctx.Dataset)
 	body, err := json.Marshal(map[string]any{"mutations": mutations})

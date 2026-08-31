@@ -184,4 +184,103 @@ describe('Phoenix flat envelope contract', () => {
       message: 'tenant is over quota',
     })
   })
+
+  // Regressions for wbt-jwt-sdk-error-details-reason: transport.ts parsed the
+  // canonical envelope's `details` object (api/lib/barkpark/content/errors.ex
+  // `build/1`) but only attached it to the 429/412/422 branches' thrown error —
+  // the 401/403/409/404 branches dropped it on the floor, and the envelope's
+  // top-level `reason` sub-code (sibling of `code`/`message`, e.g.
+  // `forbidden_membership`'s `reason: "not_a_member"`) was never read on the
+  // canonical object-envelope path at all. These RED without the `base` fix in
+  // transport.ts that spreads `details` + `reason` into every thrown error.
+
+  it('surfaces details.similar on a 409 duplicate_task (find-or-create gate)', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'duplicate_task',
+              message: 'task duplicates an existing task',
+              details: { similar: [{ id: 'task-1', title: 'Existing task' }], advise: 'claim task-1' },
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    )
+    await expect(createDocsOperation(config, 'post').find()).rejects.toMatchObject({
+      code: 'BarkparkConflictError',
+      serverCode: 'duplicate_task',
+      details: { similar: [{ id: 'task-1', title: 'Existing task' }], advise: 'claim task-1' },
+    })
+  })
+
+  it('surfaces details.count on a 409 schema_has_documents', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'schema_has_documents',
+              message: 'schema still has 3 document(s) of this type',
+              details: { count: 3 },
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    )
+    await expect(createDocsOperation(config, 'post').find()).rejects.toMatchObject({
+      code: 'BarkparkConflictError',
+      serverCode: 'schema_has_documents',
+      details: { count: 3 },
+    })
+  })
+
+  it('surfaces err.reason === "not_a_member" on a 403 forbidden_membership', async () => {
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'forbidden',
+              message: 'caller is not a member of this workspace',
+              reason: 'not_a_member',
+            },
+          },
+          { status: 403 },
+        ),
+      ),
+    )
+    await expect(createDocsOperation(config, 'post').find()).rejects.toMatchObject({
+      code: 'BarkparkAuthError',
+      serverCode: 'forbidden',
+      reason: 'not_a_member',
+    })
+  })
+
+  it('preserves details on a 404 not_found envelope', async () => {
+    // Use the query path (not getDoc, which swallows a 404 into `{ data: null }`
+    // by design — see doc.ts) so the error actually reaches the caller.
+    server.use(
+      http.get(`${TEST_BASE_URL}/v1/data/query/:ds/:type`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'not_found',
+              message: 'document not found',
+              details: { searched: 'post/p1' },
+            },
+          },
+          { status: 404 },
+        ),
+      ),
+    )
+    await expect(createDocsOperation(config, 'post').find()).rejects.toMatchObject({
+      code: 'BarkparkNotFoundError',
+      serverCode: 'not_found',
+      details: { searched: 'post/p1' },
+    })
+  })
 })

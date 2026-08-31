@@ -689,9 +689,11 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp paper_goal_id(_), do: nil
 
-  # The per-doc style marker. An article paper sets `content["style"] ==
-  # "article"`; everything else (and the empty state) is the email default.
-  defp paper_article?(%{content: content}), do: Map.get(content || %{}, "style") == "article"
+  # Legacy `article-wide` documents retain the article palette while sharing
+  # the same measured prose shell as every other article Paper.
+  defp paper_article?(%{content: content}),
+    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
+
   defp paper_article?(_), do: false
 
   # Render opts threaded into every block render. Article papers carry
@@ -1014,6 +1016,7 @@ defmodule BarkparkWeb.BulldocsLive do
         |> assign(:block_mode, false)
         |> assign(:found, false)
         |> assign(:source_error, nil)
+        |> assign(:article?, false)
         |> assign(:paper_link_refs, [])
         |> assign_linked_sections(nil, socket.assigns[:dataset])
 
@@ -1111,7 +1114,11 @@ defmodule BarkparkWeb.BulldocsLive do
           non-article papers (which keep the dark chrome above) — those emit
           bare `<h1>/<p>/…` the surface rules would restyle. The parchment
           reader skin re-skins the `--paper-*` tokens on this same element. --%>
-    <main class={["bp-paper-shell", @article? && "bp-paper-surface", @article? && "bp-paper-article"]}>
+    <main class={[
+      "bp-paper-shell",
+      @article? && "bp-paper-surface",
+      @article? && "bp-paper-article"
+    ]}>
       <%!-- Sentinel: rendered once at mount, OUTSIDE the streamed/re-assigned
             container. It survives a handle_info DOM diff but would be torn
             down by a remount/navigate — the surviving-sentinel proof of

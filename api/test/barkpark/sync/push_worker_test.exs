@@ -8,11 +8,14 @@ defmodule Barkpark.Sync.PushWorkerTest do
   """
   use Barkpark.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
   alias Barkpark.Sync.{PushCursor, PushWorker, Settings}
 
   @dataset "test"
+  @halt_event [:barkpark, :sync, :push, :halt]
 
   describe "default-off gate (invariant #2)" do
     test "push_active? is false when push_enabled is off even with full pull creds, true when on" do
@@ -104,6 +107,127 @@ defmodule Barkpark.Sync.PushWorkerTest do
 
       # The pre-enable event was NEVER pushed (history skipped, no ping-pong).
       refute_received {:pushed, ^pre_id}
+    end
+  end
+
+  describe "halt visibility" do
+    test "a halted drain logs a warning naming the remote/reason/cursor/halt-count and emits telemetry" do
+      source = "pw-halt-#{System.unique_integer([:positive])}"
+
+      push_fun = fn _ctx, _event, _base -> {:error, :transient} end
+      tick_fun = fn _pid, _delay -> :ok end
+
+      settings = %Settings{
+        source: source,
+        dataset: @dataset,
+        push_batch_size: 50,
+        push_interval_ms: 60_000
+      }
+
+      ref = :telemetry_test.attach_event_handlers(self(), [@halt_event])
+
+      {:ok, pid} =
+        PushWorker.start_link(
+          name: nil,
+          settings: settings,
+          ctx: %{source: source, dataset: @dataset, url: "https://remote.example/w/ws/p/proj"},
+          push_fun: push_fun,
+          tick_fun: tick_fun
+        )
+
+      # Barrier: bootstrap_if_absent runs on :continue, pinning the cursor to
+      # whatever already exists. The to-be-pushed event must be inserted AFTER
+      # this barrier (same discipline as the "drain tick" test above) or the
+      # bootstrap would silently swallow it as pre-enable history.
+      _ = :sys.get_state(pid)
+      e = insert_event!("halts")
+
+      log =
+        capture_log(fn ->
+          send(pid, :drain_tick)
+          _ = :sys.get_state(pid)
+          # `Logger.warning` inside the PushWorker process is async w.r.t. the
+          # test process; `:sys.get_state` only proves `handle_info` RAN, not
+          # that the enqueued log message reached the capture backend yet.
+          # `Logger.flush/0` blocks until the Logger pipeline drains (the same
+          # idiom as user_notifier_test.exs for an async-process log).
+          Logger.flush()
+        end)
+
+      assert log =~ "[Sync] push drain halted"
+      assert log =~ inspect(e.id)
+      assert log =~ ":transient"
+      assert log =~ "https://remote.example/w/ws/p/proj"
+      assert log =~ "consecutive halts: 1"
+
+      halt_event = @halt_event
+      assert_receive {^halt_event, ^ref, measurements, metadata}
+
+      assert measurements.consecutive_halts == 1
+      assert is_integer(measurements.cursor)
+      assert metadata.source == source
+      assert metadata.dataset == @dataset
+      assert metadata.url == "https://remote.example/w/ws/p/proj"
+      assert metadata.event_id == e.id
+      assert metadata.reason == :transient
+      assert metadata.consecutive_halts == 1
+
+      # The cursor stayed frozen at the last success (pre-existing behaviour,
+      # unchanged by this task) — no success has happened yet for this source.
+      assert PushCursor.get(source, @dataset) == 0
+    end
+
+    test "repeated consecutive halts do not log a warning on every tick" do
+      # Cadence: logged on the 1st halt, then only when the consecutive-halt
+      # count is a power of two (1, 2, 4, 8, ...) — see `log_halt?/1` in
+      # push_worker.ex. Three consecutive halts on the SAME stuck event (the
+      # cursor stays frozen so the same event is re-fetched every tick) must
+      # log on halt #1 and halt #2, but NOT on halt #3.
+      source = "pw-halt-cadence-#{System.unique_integer([:positive])}"
+
+      push_fun = fn _ctx, _event, _base -> {:error, :transient} end
+      tick_fun = fn _pid, _delay -> :ok end
+
+      settings = %Settings{
+        source: source,
+        dataset: @dataset,
+        push_batch_size: 50,
+        push_interval_ms: 60_000
+      }
+
+      {:ok, pid} =
+        PushWorker.start_link(
+          name: nil,
+          settings: settings,
+          ctx: %{source: source, dataset: @dataset},
+          push_fun: push_fun,
+          tick_fun: tick_fun
+        )
+
+      # Same bootstrap barrier as above: insert AFTER the cursor bootstraps,
+      # or this event is swallowed as pre-enable history and nothing halts.
+      _ = :sys.get_state(pid)
+      _e = insert_event!("stuck")
+
+      log =
+        capture_log(fn ->
+          for _ <- 1..3 do
+            send(pid, :drain_tick)
+            _ = :sys.get_state(pid)
+          end
+
+          Logger.flush()
+        end)
+
+      occurrences =
+        log
+        |> String.split("\n")
+        |> Enum.count(&String.contains?(&1, "[Sync] push drain halted"))
+
+      assert occurrences == 2
+      assert log =~ "consecutive halts: 1"
+      assert log =~ "consecutive halts: 2"
+      refute log =~ "consecutive halts: 3"
     end
   end
 

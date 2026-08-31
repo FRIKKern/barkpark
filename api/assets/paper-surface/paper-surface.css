@@ -1283,8 +1283,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-term__body .bp-tasks { margin: 0; }
 .bp-paper-surface .bp-term__foot { padding: 0.55rem 0.95rem; border-top: 1px solid var(--paper-rule); font-family: var(--paper-font-mono); font-size: 0.7rem; color: var(--paper-ink-faint); }
 
-/* ── columns — responsive multi-column layout ── */
-.bp-paper-surface .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; align-items: start; }
+/* ── columns — responsive multi-column layout ──
+   A columns block is an explicit composition surface, so it may use the
+   evidence band while the surrounding prose remains on the measured column. */
+.bp-paper-surface .bp-cols { display: grid; grid-template-columns: repeat(var(--bp-cols, 2), minmax(0, 1fr)); gap: 1.6rem; margin: 1.4rem 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; align-items: start; }
 @media (max-width: 720px) { .bp-paper-surface .bp-cols { grid-template-columns: 1fr; } }
 .bp-paper-surface .bp-cols__c { min-width: 0; }
 .bp-paper-surface .bp-cols__c > :first-child { margin-top: 0; }

@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-editorial-17"
+RENDERER_VERSION = "chronicle-editorial-25"
 EDITORIAL_SCHEMA = "barkpark.chronicle-editorial.v2"
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -266,13 +266,38 @@ CAST_EXTENSIONS = {".cast"}
 MEDIA_LIMITS = {
     "day": (1, 1),
     "week": (3, 1),
-    "month": (8, 2),
-    "year": (12, 3),
+    "month": (4, 1),
+    "year": (6, 2),
+}
+REJECTED_CHRONICLE_MEDIA_PREFIXES = (
+    "tooling/paper-excellence/evidence/shots/",
+    "tooling/paper-excellence/rig/baselines/",
+    "tooling/paper-excellence/twin/shots/",
+)
+REJECTED_PAPER_EXCELLENCE_MARKERS = (
+    "pe-w1-figure-legibility",
+    "before",
+    "diff",
+    "failure",
+    "probe",
+)
+REJECTED_PAPER_EXCELLENCE_ROOT_CAPTURES = {
+    "evidence/full.jpeg",
+    "evidence/light.jpeg",
+    "evidence/cast.jpeg",
 }
 CURATED_CASTS_BY_PATH = {
     "tooling/paper-excellence/twin/payload.json": (
         "https://guerrilla.barkpark.cloud/media/files/2026/08/arch-3c4075aa.cast",
         "https://guerrilla.barkpark.cloud/media/files/2026/08/race-97b047b6.cast",
+    ),
+}
+CURATED_CAST_CAPTIONS = {
+    "https://guerrilla.barkpark.cloud/media/files/2026/08/arch-3c4075aa.cast": (
+        "Release investigation — a real terminal replay traces how a contributor’s words changed before merge."
+    ),
+    "https://guerrilla.barkpark.cloud/media/files/2026/08/race-97b047b6.cast": (
+        "Reliability investigation — a terminal replay shows when competing readers could lose observations."
     ),
 }
 
@@ -284,10 +309,24 @@ def artifact_url(event: Event, path: str, repo: str) -> str:
     return f"https://raw.githubusercontent.com/{repo}/{event.sha}/{encoded}"
 
 
+def rejected_chronicle_media(path: str) -> bool:
+    lowered = path.lower()
+    if lowered.startswith(REJECTED_CHRONICLE_MEDIA_PREFIXES):
+        return True
+    if not lowered.startswith("tooling/paper-excellence/"):
+        return False
+    relative = lowered.removeprefix("tooling/paper-excellence/")
+    basename = pathlib.PurePosixPath(relative).name
+    return (
+        any(marker in lowered for marker in REJECTED_PAPER_EXCELLENCE_MARKERS)
+        or relative in REJECTED_PAPER_EXCELLENCE_ROOT_CAPTURES
+        or (relative.startswith("evidence/") and basename.startswith("decl") and basename.endswith(".jpeg"))
+    )
+
+
 def artifact_candidates(selected: list[Event]) -> list[tuple[Event, str, str]]:
-    """Return real media changed by this period, strongest reader evidence first."""
+    """Return honest media, preferring distinct changes and product surfaces."""
     ranked: list[tuple[int, dt.datetime, Event, str, str]] = []
-    seen: set[str] = set()
     for event in reversed(selected):
         paths = list(event.paths)
         for changed_path in event.paths:
@@ -298,16 +337,10 @@ def artifact_candidates(selected: list[Event]) -> list[tuple[Event, str, str]]:
             if kind is None:
                 continue
             lowered = path.lower()
+            if rejected_chronicle_media(lowered):
+                continue
             if any(part in lowered for part in ("node_modules/", "vendor/", "fixtures/")):
                 continue
-            identity = re.sub(
-                r"(?:_{1,2}|-)(?:dark|light|mobile|desktop|360|768|1280|1440|1920|2x)",
-                "",
-                lowered,
-            )
-            if identity in seen:
-                continue
-            seen.add(identity)
             score = 0
             if any(part in lowered for part in ("docs/evidence/", "evidence/shots/", "design/")):
                 score += 8
@@ -316,8 +349,45 @@ def artifact_candidates(selected: list[Event]) -> list[tuple[Event, str, str]]:
             if any(word in lowered for word in ("baseline", "diff", "failure", "thumbnail")):
                 score -= 5
             ranked.append((score, event.occurred_at, event, path, kind))
-    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
-    return [(event, path, kind) for _score, _stamp, event, path, kind in ranked]
+    ranked.sort(
+        key=lambda item: (-item[0], -item[1].timestamp(), item[2].sha, item[3], item[4])
+    )
+    unique_ranked = []
+    seen_identities: set[str] = set()
+    for item in ranked:
+        identity = re.sub(
+            r"(?:_{1,2}|-)(?:dark|light|mobile|desktop|360|768|1280|1440|1920|2x)",
+            "",
+            item[3].lower(),
+        )
+        if identity in seen_identities:
+            continue
+        seen_identities.add(identity)
+        unique_ranked.append(item)
+
+    # A long release period should not read like one prolific commit or one
+    # product surface repeated many times. Exhaust distinct events and reader
+    # areas before returning to either, while retaining the evidence ranking.
+    pending = unique_ranked
+    diverse: list[tuple[int, dt.datetime, Event, str, str]] = []
+    seen_events: set[str] = set()
+    seen_areas: set[str] = set()
+    for predicate in (
+        lambda item: item[2].sha not in seen_events and reader_area(item[2].area) not in seen_areas,
+        lambda item: item[2].sha not in seen_events,
+        lambda item: reader_area(item[2].area) not in seen_areas,
+        lambda _item: True,
+    ):
+        deferred = []
+        for item in pending:
+            if predicate(item):
+                diverse.append(item)
+                seen_events.add(item[2].sha)
+                seen_areas.add(reader_area(item[2].area))
+            else:
+                deferred.append(item)
+        pending = deferred
+    return [(event, path, kind) for _score, _stamp, event, path, kind in diverse]
 
 
 def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[dict[str, Any]]:
@@ -333,9 +403,8 @@ def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[di
         headline = concrete_fallback_headline(event)
         source = artifact_url(event, path, repo)
         number = images + casts + 1
-        caption = (
-            f"{event.occurred_at.strftime('%d %b')} · {reader_area(event.area)} — "
-            f"{headline}. Real release evidence from the change that shipped it."
+        caption = CURATED_CAST_CAPTIONS.get(path) or (
+            f"{event.occurred_at.strftime('%d %b')} · {reader_area(event.area)} — {headline}."
         )
         if kind == "image":
             images += 1
@@ -358,6 +427,7 @@ def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[di
                 "src": source,
                 "caption": caption,
                 "poster": "npt:0:08",
+                "rows": 18 if period.kind in {"month", "year"} else 24,
                 "source_ref": event.sha[:10],
             })
         if images >= image_limit and casts >= cast_limit:
@@ -368,29 +438,58 @@ def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[di
     titles = {
         "day": ("See the change", "One real product moment from today’s release."),
         "week": ("The week in pictures", "Real product moments chosen from the changes that landed this week."),
-        "month": ("A month you can see", "A visual tour through the product moments that made this month distinct."),
-        "year": ("The year in pictures", "A visual record of the product changing across the year."),
+        "month": ("The month in motion", "A restrained visual edit of the product moments that made this month distinct."),
+        "year": ("The year in motion", "A visual record of the product changing across the year."),
     }
     title_value, dek = titles[period.kind]
     blocks: list[dict[str, Any]] = [
         {"id": "auto:divider-evidence", "type": "divider"},
-        heading("auto:evidence-title", 2, title_value),
-        paragraph("auto:evidence-dek", dek),
     ]
     figures = [block for block in evidence if block["type"] == "figure"]
     casts = [block for block in evidence if block["type"] == "asciicast"]
+    if period.kind in {"month", "year"} and figures:
+        lead = figures[0]
+        blocks.append({
+            "id": "auto:evidence-lead",
+            "type": "columns",
+            "columns": [
+                [
+                    {"type": "heading", "level": 2, "text": title_value},
+                    {"type": "paragraph", "content": [text(dek)]},
+                    {
+                        "type": "paragraph",
+                        "content": [text(lead["caption"])],
+                    },
+                ],
+                [lead],
+            ],
+        })
+        figures = figures[1:]
+    elif period.kind in {"month", "year"}:
+        lead = casts[0]
+        blocks.extend([
+            heading("auto:evidence-title", 2, title_value),
+            paragraph("auto:evidence-dek", dek),
+            {**lead, "id": "auto:evidence-lead"},
+        ])
+        casts = casts[1:]
+    else:
+        blocks.extend([
+            heading("auto:evidence-title", 2, title_value),
+            paragraph("auto:evidence-dek", dek),
+        ])
     if figures:
-        blocks.append(figures[0])
-        if len(figures) > 1:
+        if period.kind not in {"month", "year"}:
+            blocks.append(figures[0])
+            figures = figures[1:]
+        if figures:
             blocks.append({
                 "id": "auto:evidence-gallery",
                 "type": "section",
                 "layout": {"mode": "grid", "tracks": 2},
-                "blocks": figures[1:],
+                "blocks": figures,
             })
     if casts:
-        if period.kind in {"month", "year"}:
-            blocks.append(heading("auto:evidence-casts-title", 3, "Watch it move"))
         blocks.extend(casts)
     return blocks
 
@@ -635,20 +734,30 @@ def deterministic_editorial(period: Period, selected: list[Event]) -> dict[str, 
 def concrete_fallback_headline(event: Event) -> str:
     """Prefer a precise shipped-change headline when editorial synthesis is unavailable."""
     title_value = event.title.lower()
+    if "zero tests" in title_value or "vacuous" in title_value or "test gates" in title_value:
+        return "Quality checks now refuse empty test runs"
+    if "search-family" in title_value or ("search" in title_value and "terminal verb" in title_value):
+        return "Search commands now make their result clear"
     if any(word in title_value for word in ("chronicle", "changelog", "journal", "edition")):
+        if any(word in title_value for word in ("visual", "screenshot", "gallery", "asciicast", "rich", "grand")):
+            return "Chronicle month and year editions now include visual evidence"
         if "index" in title_value:
             return "Chronicle index becomes easier to browse"
+        if any(word in title_value for word in ("headline", "title", "identity", "distinct")):
+            return "Chronicle headlines name the change"
         if any(word in title_value for word in ("reader", "review", "write-up")):
             return "Chronicle editions lead with the story"
         if any(word in title_value for word in ("publish", "archive", "backfill")):
             return "Chronicle archive stays current"
-        return "Chronicle editions become easier to tell apart"
+        return "Chronicle records the work in plain language"
     if "task" in title_value and any(word in title_value for word in ("restore", "list", "view", "visible")):
         return "Tasks return to view"
     if "task" in title_value and any(word in title_value for word in ("claim", "ready", "board", "queue")):
         return "Task boards show who is working on what"
     if "typed export" in title_value:
         return "Barkpark data travels safely into more tools"
+    if "published_id" in title_value or ("canonical" in title_value and event.area.lower() == "content"):
+        return "Published content now uses one trusted identity"
     if "paper" in title_value and any(word in title_value for word in ("overflow", "narrow", "mobile", "width")):
         return "Papers now fit smaller screens"
     if any(word in title_value for word in ("pagination", "truncat", "complete result")):
@@ -1077,15 +1186,21 @@ def event_lineage(block_id: str, selected: list[Event], repo: str, limit: int = 
 def release_highlights(block_id: str, selected: list[Event], repo: str, limit: int) -> dict[str, Any]:
     """A reader-facing release trail with product language and exact provenance."""
     candidates = [event for event in selected if event.kind in PRODUCT_KINDS] or selected
-    nodes = [
-        {
+    nodes = []
+    seen_titles: set[str] = set()
+    for event in reversed(candidates):
+        title_value = concrete_fallback_headline(event)
+        title_key = title_value.casefold()
+        if title_key in seen_titles:
+            continue
+        seen_titles.add(title_key)
+        nodes.append({
             "overline": f"{event.occurred_at.strftime('%d %b')} · {reader_area(event.area)}",
-            "title": concrete_fallback_headline(event),
-            "body": "Open the shipped change and its source record.",
+            "title": title_value,
             "source": event_url(event, repo),
-        }
-        for event in reversed(candidates[-limit:])
-    ]
+        })
+        if len(nodes) == limit:
+            break
     return {"id": block_id, "type": "lineage", "nodes": nodes}
 
 
@@ -1152,23 +1267,140 @@ def archive_list(block_id: str, periods: list[Period], events: list[Event]) -> d
     return {"id": block_id, "type": "list", "ordered": False, "items": items}
 
 
-def archive_chapter_cards(block_id: str, periods: list[Period], events: list[Event]) -> dict[str, Any]:
-    items = []
+def archive_chapter_links(
+    block_id: str,
+    periods: list[Period],
+    events: list[Event],
+    *,
+    title_value: str,
+    description: str,
+) -> dict[str, Any]:
+    refs = []
+    used_titles: set[str] = set()
+    used_surfaces: set[str] = set()
     for period in periods:
         selected = events_in_period(events, period)
         if selected:
-            latest = selected[-1]
-            count = f"{len(selected):,} {'change' if len(selected) == 1 else 'changes'}"
-            description = f"{count}. Latest movement: {concrete_fallback_headline(latest)}."
+            editorial = deterministic_editorial(period, selected)
+            candidates = [
+                (
+                    story["title"],
+                    archive_chapter_summary(story["title"])
+                    or f"{story['explanation']} {story['outcome']}",
+                    archive_chapter_surface(story["title"]),
+                )
+                for story in editorial["work_themes"]
+                if not archive_chapter_title_is_weak(story["title"])
+            ]
+            candidates.extend(
+                (headline, summary, archive_chapter_surface(headline))
+                for event in reversed(representative_events(selected))
+                if event.kind in PRODUCT_KINDS
+                for headline in [concrete_fallback_headline(event)]
+                for summary in [archive_chapter_summary(headline)]
+                if summary is not None and not archive_chapter_title_is_weak(headline)
+            )
+            title, summary, surface = next(
+                (
+                    (candidate_title, candidate_summary, candidate_surface)
+                    for candidate_title, candidate_summary, candidate_surface in candidates
+                    if candidate_title.casefold() not in used_titles
+                    and candidate_surface not in used_surfaces
+                ),
+                next(
+                    (
+                        (candidate_title, candidate_summary, candidate_surface)
+                        for candidate_title, candidate_summary, candidate_surface in candidates
+                        if candidate_title.casefold() not in used_titles
+                    ),
+                    (editorial["theme"], editorial["plain_summary"], archive_chapter_surface(editorial["theme"])),
+                ),
+            )
+            used_titles.add(title.casefold())
+            used_surfaces.add(surface)
+            count = f"{len(selected):,} verified {'change' if len(selected) == 1 else 'changes'}"
         else:
-            description = "A quiet chapter with no recorded release activity."
-        items.append({
-            "title": period.title,
-            "text": description,
-            "href": f"/papers/{period.slug}",
-            "label": "Open this chapter",
+            chapter_name = period.title.split(",")[0]
+            title = f"{chapter_name} was a quiet chapter"
+            summary = "Nothing new shipped in this period. The edition remains visible so the pause is part of the story."
+            count = "No recorded release activity"
+        date_range = (
+            f"{period.start.strftime('%d %b')}–"
+            f"{(period.end - dt.timedelta(days=1)).strftime('%d %b')}"
+        )
+        refs.append({
+            "slug": period.slug,
+            "title": title,
+            "description": summary,
+            "eyebrow": f"{period.title.split(',')[0]} · {date_range}",
+            "meta": count,
+            "prefer_authored_copy": True,
         })
-    return linked_card_section(block_id, items, tracks=2)
+    if refs:
+        refs[-1]["featured"] = True
+    return {
+        "id": block_id,
+        "type": "paper-links",
+        "title": title_value,
+        "description": description,
+        "layout": "chapters",
+        "refs": refs,
+    }
+
+
+def archive_chapter_surface(title_value: str) -> str:
+    """Group sibling chapter headlines by the reader-facing product story."""
+    lowered = title_value.casefold()
+    for surface in (
+        "barkpark cloud", "studio", "papers", "chronicle", "task", "terminal",
+        "long-running work", "failures", "quality checks", "access", "sign-in",
+        "lists", "search", "published content", "media", "mobile",
+    ):
+        if surface in lowered:
+            return surface
+    return lowered.split()[0] if lowered.split() else "chapter"
+
+
+def archive_chapter_title_is_weak(title_value: str) -> bool:
+    lowered = title_value.casefold()
+    weak_phrases = (
+        "previously broken path",
+        "supports a new everyday action",
+        "easier to understand and maintain",
+        "records a concrete product change",
+    )
+    technical_fragments = (
+        "_", "sigkill", "predicate", "guard", "argv", "etag", "schema",
+        "non-zero", "reach limit", "digest", "callback", "payload",
+    )
+    return any(phrase in lowered for phrase in weak_phrases) or any(fragment in lowered for fragment in technical_fragments)
+
+
+def archive_chapter_summary(title_value: str) -> str | None:
+    """Give polished deterministic headlines an equally specific reader outcome."""
+    lowered = title_value.casefold()
+    summaries = (
+        ("barkpark cloud makes releases", "Release failures became easier to see and understand, so a troubled rollout no longer looks healthy or mysteriously unfinished."),
+        ("barkpark cloud makes site status", "Site health and release state became clearer, with awkward and refused actions leaving a useful explanation behind."),
+        ("studio makes projects", "Project navigation and read-only work became more coherent, so people can move through Studio without guessing what is available."),
+        ("studio chat", "Studio conversations moved closer to the work while their background processes became less likely to leak or stall."),
+        ("long-running work", "Large pieces of work became easier to begin, follow, and hand over without losing the thread that explains why they exist."),
+        ("failures", "Missing or failed results now say what happened instead of dressing an error up as an empty or successful page."),
+        ("quality checks", "Release checks became harder to fool, including empty runs that once looked reassuring without proving anything."),
+        ("papers bring visual", "Screenshots and terminal recordings now sit beside the change they prove, giving long editions something concrete to show."),
+        ("papers read more", "Stronger type, spacing, and section rhythm make long Papers feel composed while the ordinary reading line stays calm."),
+        ("papers tell richer", "Papers gained a clearer visual hierarchy and more useful evidence without turning the reading path into a wall of chrome."),
+        ("chronicle month", "Monthly and annual editions now carry real visual evidence, with deeper technical detail kept behind the readable story."),
+        ("chronicle archive", "The Chronicle now keeps its calendar editions current, so a reader can move from the overview into the week or day that shaped it."),
+        ("task boards", "Task ownership and progress became easier to see, both on the board and from the terminal where work begins."),
+        ("the terminal", "Terminal commands became clearer about what happened, what is still running, and what needs attention next."),
+        ("access rules", "Sensitive paths received firmer access rules while ordinary signed-in work stayed straightforward."),
+        ("sign-in", "Sign-in and access behavior became more predictable around the moments where identity and visibility matter."),
+        ("lists now", "Long lists now return the complete result instead of quietly stopping early."),
+        ("search commands", "Search now makes both its results and its failures easier to understand from the terminal."),
+        ("published content", "Published material now uses one dependable identity across the places that read and link to it."),
+    )
+    return next((summary for prefix, summary in summaries if prefix in lowered), None)
 
 
 def index_archive_list(block_id: str, periods: list[Period]) -> dict[str, Any]:
@@ -1329,7 +1561,7 @@ def related_paper_block(
         if score:
             ranked.append((score, -index, item))
     ranked.sort(reverse=True, key=lambda item: (item[0], item[1]))
-    limit = {"day": 2, "week": 3, "month": 4, "year": 6}[period.kind]
+    limit = {"day": 2, "week": 3, "month": 3, "year": 4}[period.kind]
     refs = [
         {
             "slug": item["slug"],
@@ -1390,6 +1622,29 @@ def editorial_story_section(
     }
 
 
+def editorial_story_lineage(
+    block_id: str,
+    stories: list[dict[str, Any]],
+    selected: list[Event],
+    repo: str,
+) -> dict[str, Any]:
+    """Render long-edition themes as calm editorial rows, not card chrome."""
+    by_ref = {event.sha[:10]: event for event in selected}
+    nodes = []
+    for story in stories:
+        sources = [by_ref[ref] for ref in story["source_refs"] if ref in by_ref]
+        if not sources:
+            continue
+        primary = sources[0]
+        nodes.append({
+            "overline": f"{primary.occurred_at.strftime('%d %b')} · {reader_area(primary.area)}",
+            "title": story["title"],
+            "body": f"{story['explanation']} {story['outcome']}",
+            "source": event_url(primary, repo),
+        })
+    return {"id": block_id, "type": "lineage", "nodes": nodes}
+
+
 def child_archive_blocks(
     period: Period,
     selected: list[Event],
@@ -1402,9 +1657,13 @@ def child_archive_blocks(
             return []
         return [
             {"id": "auto:divider-archive-1", "type": "divider"},
-            heading("auto:archive-title-1", 2, "The year, chapter by chapter"),
-            paragraph("auto:archive-dek-1", "Open any month for its full story, visual evidence, and daily record."),
-            archive_chapter_cards("auto:archive-1", children, events),
+            archive_chapter_links(
+                "auto:archive-1",
+                children,
+                events,
+                title_value="The year, month by month",
+                description="Open any month for its full story, visual evidence, and daily record.",
+            ),
         ]
     elif period.kind == "month":
         weeks = [child for child in archive["week"] if child.start < period.end and child.end > period.start]
@@ -1413,13 +1672,16 @@ def child_archive_blocks(
         if weeks:
             blocks.extend([
                 {"id": "auto:divider-archive-1", "type": "divider"},
-                heading("auto:archive-title-1", 2, "The month, week by week"),
-                paragraph("auto:archive-dek-1", "Each weekly chapter gives the work room to breathe, including boundary weeks."),
-                archive_chapter_cards("auto:archive-1", weeks, events),
+                archive_chapter_links(
+                    "auto:archive-1",
+                    weeks,
+                    events,
+                    title_value=f"{period.title.removesuffix(f' {period.start.year}')}, week by week",
+                    description="Each week has its own argument: what moved, why it mattered, and where to read the complete edition.",
+                ),
             ])
         if days:
             blocks.extend([
-                heading("auto:archive-title-2", 2, "Browse every day"),
                 {
                     "id": "auto:archive-2",
                     "type": "expandable",
@@ -1487,17 +1749,26 @@ def period_payload(
     work_titles = {
         "day": "What we worked on",
         "week": "The week’s defining work",
-        "month": "The month’s defining work",
-        "year": "The year’s defining work",
+        "month": "What changed",
+        "year": "What changed",
     }
     blocks: list[dict[str, Any]] = navigation_blocks(periods, period.kind)
     blocks.extend([
         {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
         heading("auto:title", 1, display_titles[period.kind]),
         {"id": "auto:ingress", "type": "ingress", "content": [text(editorial["plain_summary"])]},
-        paragraph("auto:dek", deks[period.kind]),
-        {"id": "auto:byline", "type": "byline", "items": [date_range, f"Through {through_date.strftime('%d %B %Y').lstrip('0')}"]},
+        {
+            "id": "auto:byline",
+            "type": "byline",
+            "items": [
+                *(["Written by Barkpark"] if period.kind in {"month", "year"} else []),
+                date_range,
+                f"Through {through_date.strftime('%d %B %Y').lstrip('0')}",
+            ],
+        },
     ])
+    if period.kind in {"day", "week"}:
+        blocks.insert(-1, paragraph("auto:dek", deks[period.kind]))
     if selected and period.kind in {"week", "month", "year"}:
         blocks.append({
             "id": "auto:period-pulse",
@@ -1509,22 +1780,40 @@ def period_payload(
                 {"value": str(len(reader_areas)), "label": "product areas"},
             ],
         })
-    blocks.extend(evidence_blocks(period, selected, repo))
+    period_evidence = evidence_blocks(period, selected, repo)
+    if period.kind in {"day", "week"}:
+        blocks.extend(period_evidence)
     blocks.extend([
         {"id": "auto:divider-work", "type": "divider"},
         heading("auto:work-title", 2, work_titles[period.kind]),
-        editorial_story_section("auto:work-themes", editorial["work_themes"], selected, repo)
+        (
+            editorial_story_lineage("auto:work-themes", editorial["work_themes"], selected, repo)
+            if period.kind in {"month", "year"}
+            else editorial_story_section("auto:work-themes", editorial["work_themes"], selected, repo)
+        )
         if editorial["work_themes"]
         else paragraph("auto:work-themes", "No new work landed in this interval."),
-        heading("auto:progress-title", 2, "How this period moved"),
-        {
-            "id": "auto:progress-assessment",
-            "type": "callout",
-            "tone": "info",
-            "title": "The short version",
-            "content": [text(editorial["progress_assessment"])],
-        },
+        *(
+            [heading("auto:progress-title", 2, "How this period moved")]
+            if period.kind in {"day", "week"}
+            else []
+        ),
+        *(
+            [{
+                "id": "auto:progress-assessment",
+                "type": "callout",
+                "tone": "info",
+                "title": "The short version",
+                "content": [text(editorial["progress_assessment"])],
+            }]
+            if period.kind in {"day", "week"}
+            else []
+        ),
     ])
+    if period.kind in {"month", "year"}:
+        blocks.extend(period_evidence)
+    if events is not None and archive is not None:
+        blocks.extend(child_archive_blocks(period, selected, events, archive))
     if selected and period.kind in {"month", "year"}:
         blocks.extend([
             {"id": "auto:divider-highlights", "type": "divider"},
@@ -1534,14 +1823,17 @@ def period_payload(
                 "auto:release-highlights",
                 selected,
                 repo,
-                limit=18 if period.kind == "year" else 12,
+                limit=9 if period.kind == "year" else 6,
             ),
         ])
+        blocks.append({
+            "id": "auto:progress-assessment",
+            "type": "pullquote",
+            "content": [text(editorial["progress_assessment"])],
+        })
     related = related_paper_block(period, selected, related_papers or [])
     if related is not None:
         blocks.append(related)
-    if events is not None and archive is not None:
-        blocks.extend(child_archive_blocks(period, selected, events, archive))
     blocks.append({"id": "auto:divider-record", "type": "divider"})
     technical_record: list[dict[str, Any]] = [
         paragraph("auto:record-intro", "The detailed record behind this edition: counts, categories, source links, and the complete release trail."),
@@ -1754,7 +2046,7 @@ def build(
             periods,
             repo,
             events=events,
-            archive=complete_archive if full_history else None,
+            archive=complete_archive,
             editorial=editorials.get(f"{kind}:{period.key}", editorials.get(kind)),
             related_papers=related_papers,
         )
@@ -1778,7 +2070,7 @@ def build(
                 context,
                 repo,
                 events=events,
-                archive=complete_archive if full_history else None,
+                archive=complete_archive,
                 editorial=editorials.get(f"{kind}:{historical.key}"),
                 related_papers=related_papers,
             )
@@ -1788,7 +2080,7 @@ def build(
         repo,
         month_archive,
         editorials,
-        complete_archive if full_history else None,
+        complete_archive,
         related_papers,
     )
     return payloads

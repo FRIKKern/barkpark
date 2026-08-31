@@ -63,15 +63,15 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # `.bp-table__td` classes, and `declarations_for/3` accepts a class selector as the
   # `element` (targeting ".bp-paper-surface .bp-table__th" vs ".bp-paper-editor-body
   # .bp-table__th"), so a drift between the reader rule and the edit mirror trips §2.
-  # `.bp-stats` / `.bp-chart` complete the reader's EVIDENCE-BAND BREAKOUT trio
-  # (.bp-table is the third): all three step out of the prose column via
+  # `.bp-stats` / `.bp-chart` / `.bp-cols` complete the reader's EVIDENCE-BAND
+  # BREAKOUT set (.bp-table is the fourth): all four step out of the prose column via
   # `margin-inline: var(--bp-evidence-pull)` + `width: var(--bp-evidence-width)`,
   # so an unmirrored change to their geometry desyncs canvas from reader.
   # Red-before (mutation-proven 2026-08-17, pe-w2-parity-widening): with the gate
   # widened, `padding: 4px` added to `.bp-paper-surface .bp-stats` with no editor
   # twin reds §2 (".bp-stats.padding: View=\"4px\" Edit=nil"); before the widening
   # the same mutation shipped GREEN through the whole portable_doc tree.
-  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart)
+  @parity_elements ~w(h1 h2 h3 p li code img .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols)
 
   @root_heex Path.expand(
                "../../../../lib/barkpark_web/layouts/root.html.heex",

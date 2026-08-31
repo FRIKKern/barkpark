@@ -274,7 +274,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       id: "provision",
       file: "worker.go",
-      line: 883,
+      line: 917,
       func: "func (w *Worker) claim(ctx context.Context) (JobSpec, bool, error) {",
       var: "job",
       type: {"worker.go", "JobSpec"},
@@ -283,7 +283,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       id: "resurrect",
       file: "worker.go",
-      line: 1426,
+      line: 1460,
       func:
         "func (w *Worker) claimResurrect(ctx context.Context) (resurrectClaimSpec, bool, error) {",
       var: "spec",
@@ -293,7 +293,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       id: "support",
       file: "worker.go",
-      line: 1569,
+      line: 1603,
       func: "func (w *Worker) claimSupport(ctx context.Context) (SupportJobSpec, bool, error) {",
       var: "spec",
       type: {"support.go", "SupportJobSpec"},
@@ -302,7 +302,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       id: "support-dialect",
       file: "worker.go",
-      line: 1588,
+      line: 1622,
       func: "func (w *Worker) claimSupport(ctx context.Context) (SupportJobSpec, bool, error) {",
       var: "flat",
       inline: "flat",
@@ -312,7 +312,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       id: "deprovision",
       file: "worker.go",
-      line: 1131,
+      line: 1165,
       func:
         "func (w *Worker) claimDeprovision(ctx context.Context) (DeprovisionSpec, bool, error) {",
       var: "spec",
@@ -322,7 +322,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       id: "attach-domain",
       file: "worker.go",
-      line: 1247,
+      line: 1281,
       func:
         "func (w *Worker) claimAttachDomain(ctx context.Context) (AttachDomainSpec, bool, error) {",
       var: "spec",
@@ -348,38 +348,38 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       claim: "provision",
       key: "env",
-      site: "internal/provisioner/worker.go:883 → provisioner.JobSpec",
+      site: "internal/provisioner/worker.go:917 → provisioner.JobSpec",
       tracker:
         "cch-w52-bl-team-env-vars-are-shipped-in-the-provision-claim-and-nothing-on-the-box-consumes-them"
     },
     %{
       claim: "support",
       key: "env",
-      site: "internal/provisioner/worker.go:1569 → SupportJobSpec (+:1588 inline dialect)",
+      site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
       tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
     },
     %{
       claim: "support",
       key: "template",
-      site: "internal/provisioner/worker.go:1569 → SupportJobSpec (+:1588 inline dialect)",
+      site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
       tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
     },
     %{
       claim: "support",
       key: "agent_token",
-      site: "internal/provisioner/worker.go:1569 → SupportJobSpec (+:1588 inline dialect)",
+      site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
       tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
     },
     %{
       claim: "support",
       key: "kind",
-      site: "internal/provisioner/worker.go:1569 → SupportJobSpec (+:1588 inline dialect)",
+      site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
       tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
     },
     %{
       claim: "support",
       key: "credentials",
-      site: "internal/provisioner/worker.go:1569 → SupportJobSpec (+:1588 inline dialect)",
+      site: "internal/provisioner/worker.go:1603 → SupportJobSpec (+:1622 inline dialect)",
       tracker: "cch-w53-bl-the-support-claim-discards-five-keys-including-a-live-agent-token"
     }
   ]
@@ -393,13 +393,13 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
     %{
       claim: "resurrect",
       key: "env",
-      site: "internal/provisioner/worker.go:1426 → resurrectClaimSpec",
+      site: "internal/provisioner/worker.go:1460 → resurrectClaimSpec",
       tracker: "cch-w53-bl-the-resurrect-claim-discards-env-and-template"
     },
     %{
       claim: "resurrect",
       key: "template",
-      site: "internal/provisioner/worker.go:1426 → resurrectClaimSpec",
+      site: "internal/provisioner/worker.go:1460 → resurrectClaimSpec",
       tracker: "cch-w53-bl-the-resurrect-claim-discards-env-and-template"
     }
   ]
@@ -747,7 +747,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
                dialect,
                MapSet.new(~w(job_id claim_token name slug region server_type))
              ),
-             "the tolerated-dialect fallback at worker.go:1588 rescues a DIFFERENT key set than " <>
+             "the tolerated-dialect fallback at worker.go:1622 rescues a DIFFERENT key set than " <>
                "pinned: #{inspect(Enum.sort(MapSet.to_list(dialect)))}"
 
       # SupportJobSpec alone declares NONE of them — so a per-struct-only Side B

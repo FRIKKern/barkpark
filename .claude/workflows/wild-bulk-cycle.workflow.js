@@ -1,19 +1,19 @@
 export const meta = {
   name: 'wild-bulk-cycle',
-  description: 'Wild bulk development cycle: 1 Fable plans 3 codebase domains → 3 Opus leads fan out 10-20 Sonnet surveyors each → 1 Fable digests → 3 Opus task-cutters file 10-60 bp tasks → Sonnet preflight per task → 1 Fable HARMONIZES the whole roster (blast-radius + collision control) → 1 Sonnet builder per task → 3 Opus domain reviewers → polish Sonnets ONLY where needed → 1 Fable grades the whole cycle.',
+  description: 'Wild bulk development cycle: 1 Fable plans 3 codebase domains → 3 Opus leads fan out 10-20 Opus surveyors each → 1 Fable digests → 3 Opus task-cutters file 10-60 bp tasks → Opus preflight per task → 1 Fable HARMONIZES the whole roster (blast-radius + collision control) → 1 Opus builder per task → 3 Opus domain reviewers → polish Opus passes ONLY where needed → 1 Fable grades the whole cycle.',
   whenToUse:
-    'A bulk sweep-and-fix across the codebase — wider and wilder than bp-epic-cycle (10-60 tasks, Sonnet builders), so it spends MORE on mid-planning: every task is preflighted against reality and one Fable harmonizes the full roster before any builder flies. INVOKE: Workflow({scriptPath: ".claude/workflows/wild-bulk-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED>", epic_task_id: "<task-… slug if the parent exists>", charter_path: "<optional charter to respect>", lead_notes: "<optional>"}}). Launch via scriptPath, not name (the name registry is a session-start snapshot).',
+    'A bulk sweep-and-fix across the codebase — wider and wilder than bp-epic-cycle (10-60 tasks, Opus builders), so it spends MORE on mid-planning: every task is preflighted against reality and one Fable harmonizes the full roster before any builder flies. INVOKE: Workflow({scriptPath: ".claude/workflows/wild-bulk-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED>", epic_task_id: "<task-… slug if the parent exists>", charter_path: "<optional charter to respect>", lead_notes: "<optional>"}}). Launch via scriptPath, not name (the name registry is a session-start snapshot).',
   // EXACTLY the phase() titles the body announces, in call order. A title declared
   // here but never announced leaves a phantom progress group open for the whole run,
   // so the fan-out stages that ride inside these six (Recon/Survey, Build,
   // Review/Polish) are described in their host phase's detail instead of claiming a
   // group of their own.
   phases: [
-    { title: 'Plan', detail: '1 Fable (high): partition the codebase into exactly 3 blast-radius-aware domains, open the cycle Paper, ensure the epic parent task — then 3 Opus recon leads design 10-20 probes each and 30-60 Sonnet surveyors sweep them read-only', model: 'fable' },
+    { title: 'Plan', detail: '1 Fable (high): partition the codebase into exactly 3 blast-radius-aware domains, open the cycle Paper, ensure the epic parent task — then 3 Opus recon leads design 10-20 probes each and 30-60 Opus surveyors sweep them read-only', model: 'fable' },
     { title: 'Digest', detail: '1 Fable (high): synthesize ALL survey reports, dedup cross-domain, cut 3 finding bundles, fold into the Paper', model: 'fable' },
     { title: 'Cut', detail: '3 Opus task-cutters: 4-20 published rubric-quality bp tasks each — 10-60 total', model: 'opus' },
-    { title: 'Preflight', detail: '1 cheap Sonnet per task: verify the brief against reality — files exist, evidence still true, gate runnable', model: 'sonnet' },
-    { title: 'Harmonize', detail: '1 Fable (high): the blast-radius gate — holds ALL tasks + script-computed overlap matrix + preflight reports; merges/patches/defers until the roster is disjoint and coherent — then 1 worktree-isolated Sonnet builder per rostered task, 3 Opus domain reviewers, and 0-60 Sonnet polishers where a reviewer names a gap', model: 'fable' },
+    { title: 'Preflight', detail: '1 Opus (low effort) per task: verify the brief against reality — files exist, evidence still true, gate runnable', model: 'opus' },
+    { title: 'Harmonize', detail: '1 Fable (high): the blast-radius gate — holds ALL tasks + script-computed overlap matrix + preflight reports; merges/patches/defers until the roster is disjoint and coherent — then 1 worktree-isolated Opus builder per rostered task, 3 Opus domain reviewers, and 0-60 Opus polishers where a reviewer names a gap', model: 'fable' },
     { title: 'Verdict', detail: '1 Fable (high): whole-cycle review — ledger audit, merge-ready list, Cody grade, close the Paper', model: 'fable' },
   ],
 }
@@ -22,7 +22,7 @@ export const meta = {
 // Model doctrine (lead mandate): Fable holds ONLY the four critical-thinking
 // joints — Plan, Digest, Harmonize, Verdict — at high effort. Opus takes
 // the well-scoped design/judge seats (recon leads, task-cutters, domain
-// reviewers). Sonnet is the fleet (survey, preflight, build, polish). Never Haiku.
+// reviewers). Opus is the fleet too (survey, preflight, build, polish) — never Sonnet or Haiku (operator model policy 2026-08-31).
 // Same defensive parse as bp-epic-cycle: args can arrive as a JSON STRING.
 const A = (() => {
   if (typeof args === 'string') { try { return JSON.parse(args) } catch (e) { throw new Error('wild-bulk-cycle args is a non-JSON string') } }
@@ -32,8 +32,8 @@ if (!A.wish) throw new Error('wild-bulk-cycle requires an explicit args.wish')
 const WISH = A.wish
 const EPIC_TASK_ID = A.epic_task_id || null
 const CHARTER_PATH = A.charter_path || null
-const BUILD_MODEL = A.builder_model || 'sonnet'
-const SURVEY_MODEL = A.survey_model || 'sonnet'
+const BUILD_MODEL = A.builder_model || 'opus'
+const SURVEY_MODEL = A.survey_model || 'opus'
 const LEAD_MODEL = A.lead_model || 'opus'
 const CUTTER_MODEL = A.cutter_model || 'opus'
 const REVIEWER_MODEL = A.reviewer_model || 'opus'
@@ -44,7 +44,7 @@ const REVIEWER_MODEL = A.reviewer_model || 'opus'
 // fable sites; the fleet models are already args-overridable.
 const NO_FABLE = A.no_fable === true
 const M = (m) => (NO_FABLE && m === 'fable' ? 'opus' : m)
-// TWO SETTINGS ONLY, cycle-wide: fable@high for the thinking joints, opus/sonnet at
+// TWO SETTINGS ONLY, cycle-wide: fable@high for the thinking joints, opus at
 // their own depth for everything else. Nothing above 'high', and no 'max', anywhere
 // — a joint that wants more depth gets a better brief, not a bigger effort knob.
 // Fan-out FLOORS. Every maxItems below is an upper bound; nothing but a floor stops
@@ -172,7 +172,7 @@ const RECON_SCHEMA = {
     domain: { type: 'string' },
     survey: {
       type: 'array', minItems: 10, maxItems: 20,
-      description: '10-20 survey probes; each becomes one Sonnet surveyor. Cast a WIDE net over YOUR domain only',
+      description: '10-20 survey probes; each becomes one Opus surveyor. Cast a WIDE net over YOUR domain only',
       items: {
         type: 'object', additionalProperties: false,
         required: ['key', 'question', 'why'],
@@ -350,7 +350,7 @@ const CUT_SCHEMA = {
           title: { type: 'string' },
           surface: { type: 'string' },
           files: { type: 'array', items: { type: 'string' }, description: 'exact repo-relative paths the fix touches — the harmonizer collision-checks these across the whole cycle' },
-          instructions: { type: 'string', description: 'complete enough for a cold Sonnet builder: the defect, the evidence, the fix, the constraints' },
+          instructions: { type: 'string', description: 'complete enough for a cold Opus builder: the defect, the evidence, the fix, the constraints' },
           gate: { type: 'string', description: 'exact shell command(s) that prove it — DRY-RUN the gate yourself before filing' },
           size: { type: 'string', enum: ['small', 'medium'], description: 'wild-bulk tasks are small or medium; anything large goes to the backlog for an epic cycle' },
         },
@@ -443,7 +443,7 @@ const REVIEW_SCHEMA = {
         properties: {
           task_id: { type: 'string' },
           branch: { type: 'string', description: 'the builder\'s branch, or "" if it never committed' },
-          verdict: { type: 'string', enum: ['ship', 'polish', 'reject'], description: 'ship = good as-is, DO NOT touch (no need to fix what is good); polish = worth one Sonnet pass; reject = wrong approach or not worth rescuing — task reopens' },
+          verdict: { type: 'string', enum: ['ship', 'polish', 'reject'], description: 'ship = good as-is, DO NOT touch (no need to fix what is good); polish = worth one Opus pass; reject = wrong approach or not worth rescuing — task reopens' },
           issues: { type: 'string', description: 'what you found (diff-level, concrete), or "none"' },
           polish_brief: { type: 'string', description: 'ONLY for verdict=polish: the exact, bounded fix list for the polisher — no open-ended "improve things"; empty string otherwise' },
         },
@@ -498,7 +498,7 @@ const slug = (t) => t.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g
 // ── Phase 1: Plan — one Fable partitions the codebase into 3 blast-radius-aware domains ──
 phase('Plan')
 const planner = await agent(
-  `You are the PLANNER of a Barkpark WILD BULK CYCLE — one Fable mind opening a high-throughput sweep-and-fix across the codebase. Downstream of you: 3 Opus domain leads, 30-60 Sonnet surveyors, 3 Opus task-cutters, a harmonization gate, up to 60 Sonnet builders. This cycle is WIDE — the blast radius of a bad partition is 60 colliding branches — so partition for isolation first, ambition second.
+  `You are the PLANNER of a Barkpark WILD BULK CYCLE — one Fable mind opening a high-throughput sweep-and-fix across the codebase. Downstream of you: 3 Opus domain leads, 30-60 Opus surveyors, 3 Opus task-cutters, a harmonization gate, up to 60 Opus builders. This cycle is WIDE — the blast radius of a bad partition is 60 colliding branches — so partition for isolation first, ambition second.
 
 ${USER_WISH_BLOCK}
 ${CHARTER_LINE}
@@ -521,13 +521,13 @@ const CYCLE_PAPER = planner.paper_id
 const EPIC_TASK = planner.epic_task_id
 log(`Planner cut 3 domains: ${planner.domains.map((d) => d.slug).join(', ')}; paper ${CYCLE_PAPER}; epic task ${EPIC_TASK}`)
 
-// ── Phases 2+3: Recon + Survey — per-domain pipeline: Opus lead designs probes, Sonnets sweep ──
+// ── Phases 2+3: Recon + Survey — per-domain pipeline: Opus lead designs probes, Opus scouts sweep ──
 // Pipelined: domain B's lead thinks while domain A's surveyors already fly.
 const surveyed = (await pipeline(
   planner.domains,
   (d) =>
     agent(
-      `You are a DOMAIN LEAD in a Barkpark wild bulk cycle — one of 3, each owning a disjoint slice of the codebase. You design the survey; Sonnet scouts execute it.
+      `You are a DOMAIN LEAD in a Barkpark wild bulk cycle — one of 3, each owning a disjoint slice of the codebase. You design the survey; Opus scouts execute it.
 
 ${USER_WISH_BLOCK}
 
@@ -540,25 +540,25 @@ MISSION: ${d.mission}
 HAZARDS (the blast-radius map — your probes must cover these seams, not just avoid them): ${d.hazards}
 ${CHARTER_LINE}
 
-Design 10-20 survey probes for cheap Sonnet surveyors. Each probe is one scout: a concrete, answerable question that hunts fixable defects — bug classes, dead code, error paths, contract drift between surfaces, quality below the Kinsta/Vercel bar. Dedicate at least two probes to the domain's SEAMS — the places your files meet the other two domains and prod — because that is where a bulk cycle does accidental damage. Read just enough of your domain (skim structure, \`bp search\` prior art) to aim the probes well; the scouts do the reading. Spread the probes so together they COVER the domain — name the corners each one owns.`,
+Design 10-20 survey probes for Opus surveyors. Each probe is one scout: a concrete, answerable question that hunts fixable defects — bug classes, dead code, error paths, contract drift between surfaces, quality below the Kinsta/Vercel bar. Dedicate at least two probes to the domain's SEAMS — the places your files meet the other two domains and prod — because that is where a bulk cycle does accidental damage. Read just enough of your domain (skim structure, \`bp search\` prior art) to aim the probes well; the scouts do the reading. Spread the probes so together they COVER the domain — name the corners each one owns.`,
       { label: `recon:${d.slug}`, phase: 'Recon', schema: RECON_SCHEMA, model: LEAD_MODEL }
     ),
   async (recon, d) => {
     if (!recon) return null
     const probes = Array.isArray(recon.survey) ? recon.survey.slice(0, 20) : []
-    // Floor 2/4 — the real agent fan-out: one Sonnet scout per probe. Fires before
+    // Floor 2/4 — the real agent fan-out: one Opus scout per probe. Fires before
     // this domain's surveyors are spent. NOTE: pipeline() runs stages under
     // Promise.allSettled, so this throw is swallowed into a dropped domain rather
     // than aborting the cycle — the top-level surviving-domain check after the
     // pipeline is what actually stops the run. Both halves are required.
     if (probes.length < PROBE_FLOOR) {
-      throw new Error(`Survey fan-out floor [${d.slug}]: the domain lead designed ${probes.length} probe(s), below the floor of ${PROBE_FLOOR}. Each probe is one cheap Sonnet scout, and width is the cheapest part of a cycle — a thin probe set is how a domain's defects stay invisible and get rebuilt later at full price. Re-run Recon for this domain with a real ${PROBE_FLOOR}-20 probe sweep rather than proceeding.`)
+      throw new Error(`Survey fan-out floor [${d.slug}]: the domain lead designed ${probes.length} probe(s), below the floor of ${PROBE_FLOOR}. Each probe is one Opus scout, and width is the cheapest part of a cycle — a thin probe set is how a domain's defects stay invisible and get rebuilt later at full price. Re-run Recon for this domain with a real ${PROBE_FLOOR}-20 probe sweep rather than proceeding.`)
     }
     log(`[${d.slug}] lead designed ${probes.length} probes; surveying`)
     const reports = (await parallel(
       probes.map((q) => () =>
         agent(
-          `You are a SURVEYOR in a Barkpark wild bulk cycle — one of ~${probes.length} Sonnet scouts sweeping the "${d.name}" domain. READ-ONLY: no edits, no commits, no bp mutations. Budget: ~5 minutes — breadth over depth; park what you can't settle in open_questions.
+          `You are a SURVEYOR in a Barkpark wild bulk cycle — one of ~${probes.length} Opus scouts sweeping the "${d.name}" domain. READ-ONLY: no edits, no commits, no bp mutations. Budget: ~5 minutes — breadth over depth; park what you can't settle in open_questions.
 
 ${USER_WISH_BLOCK}
 
@@ -571,7 +571,7 @@ WHY IT MATTERS: ${q.why}
 
 Search Barkpark FIRST (\`bp search query "<terms>"\` — the \`query\` sub-verb is REQUIRED; dropping it exits 2 with \`unknown command "search"\`, and that failure reads exactly like a real absence of prior art, so check the exit code — papers and tasks carry prior art the tree doesn't), then grep/read the repo. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command. "The premise is wrong" is a valid answer.
 
-YOUR MAIN CARGO is fix_candidates[]: concrete, bounded, fixable defects — each with files, file:line evidence, a suggested fix, and severity (bug / debt / polish). A candidate a Sonnet builder could fix in one sitting is gold; a vague "this area smells" is noise. Note in the evidence when a candidate's files sit on a seam shared with another domain or prod — the harmonizer needs that.
+YOUR MAIN CARGO is fix_candidates[]: concrete, bounded, fixable defects — each with files, file:line evidence, a suggested fix, and severity (bug / debt / polish). A candidate an Opus builder could fix in one sitting is gold; a vague "this area smells" is noise. Note in the evidence when a candidate's files sit on a seam shared with another domain or prod — the harmonizer needs that.
 
 COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — path, what you checked it for, found / not_found / partial. NOT-FOUND IS A FINDING. Unlisted = unchecked.`,
           { label: `survey:${d.slug}:${q.key}`, phase: 'Survey', schema: SURVEY_SCHEMA, model: SURVEY_MODEL }
@@ -641,7 +641,7 @@ const cuts = (await parallel(
   digest.bundles.map((bundle) => () => {
     const d = domainOf(bundle.domain_slug)
     return agent(
-      `You are a TASK-CUTTER in a Barkpark wild bulk cycle — one of 3, turning a vetted finding bundle into published, claimable bp tasks. Every task you file becomes one Sonnet builder in an isolated worktree. After you, each task is PREFLIGHTED against reality and a Fable HARMONIZER cross-checks the whole 10-60-task roster — so file honestly and precisely; a sloppy brief costs a preflight failure and a patch.
+      `You are a TASK-CUTTER in a Barkpark wild bulk cycle — one of 3, turning a vetted finding bundle into published, claimable bp tasks. Every task you file becomes one Opus builder in an isolated worktree. After you, each task is PREFLIGHTED against reality and a Fable HARMONIZER cross-checks the whole 10-60-task roster — so file honestly and precisely; a sloppy brief costs a preflight failure and a patch.
 
 ${USER_WISH_BLOCK}
 
@@ -655,9 +655,9 @@ YOUR BUNDLE (vetted findings + triage guidance):
 ${JSON.stringify(bundle, null, 2)}
 
 Your job:
-1. CUT 4-20 TASKS from the findings — one task per coherent fix. Merge findings that one builder should fix together (same file, same theme); a Sonnet builder gets ONE sitting, so keep tasks small/medium. Anything large goes to the backlog (published, honest, priority set) — record ids in backlog_filed.
+1. CUT 4-20 TASKS from the findings — one task per coherent fix. Merge findings that one builder should fix together (same file, same theme); a builder gets ONE sitting, so keep tasks small/medium. Anything large goes to the backlog (published, honest, priority set) — record ids in backlog_filed.
 2. DISJOINT FILES: within your domain, no two tasks touch the same file — builders run in parallel worktrees and the lead merges their branches; overlaps become conflicts. Merge or drop rather than overlap. The files[] you report per task must be exact and complete: the harmonizer collision-checks them mechanically across all 3 domains, and a file you omit escapes the check.
-3. FILE EACH TASK to the rubric: outcome-shaped title, description a cold Sonnet could start from (the defect, the file:line evidence, the fix, the constraints, the domain hazards that apply), concrete evidence-bearing acceptance criteria (include a merge-gated "PR merged" criterion the lead closes), sane priority (bug=1, debt=2, polish=3), and an exact gate command — DRY-RUN each gate yourself before filing it.
+3. FILE EACH TASK to the rubric: outcome-shaped title, description a cold builder could start from (the defect, the file:line evidence, the fix, the constraints, the domain hazards that apply), concrete evidence-bearing acceptance criteria (include a merge-gated "PR merged" criterion the lead closes), sane priority (bug=1, debt=2, polish=3), and an exact gate command — DRY-RUN each gate yourself before filing it.
 4. PERFECT THE TASKS: re-read every task back from the server; verify published, parented under ${EPIC_TASK}, linked to the Paper, rubric-quality. Fix defects via bp. Set tasks_verified=true only after this read-back pass is clean.
 ${TASKS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
@@ -669,7 +669,7 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
 // Floor 4/4 — the build fan-out: one task becomes one builder. Checked per domain
 // BEFORE the flatMap, so the error names which cutter came up short rather than
 // reporting a healthy-looking total that hides one empty domain. Fires before
-// Preflight spends a Sonnet per task.
+// Preflight spends an Opus (low effort) per task.
 if (cuts.length < BUNDLE_FLOOR) {
   throw new Error(`Cutter survival floor: only ${cuts.length} of ${BUNDLE_FLOOR} task-cutters returned. parallel() swallows a died cutter into a null that is filtered away here, so the cycle would build one domain's fixes and report a full sweep. Check the parallel[] failure lines above, then resume the run rather than proceeding.`)
 }
@@ -685,12 +685,12 @@ if (allCutTasks.length === 0) {
   return { cycle_paper: CYCLE_PAPER, epic_task_id: EPIC_TASK, surveyors: surveyed.reduce((n, s) => n + s.reports.length, 0), fix_candidates: totalCandidates, tasks_filed: 0, note: 'no tasks cut — nothing to build', synthesis: digest.synthesis }
 }
 
-// ── Phase 6: Preflight — one cheap Sonnet per task verifies the brief against reality ──
+// ── Phase 6: Preflight — one Opus (low effort) per task verifies the brief against reality ──
 phase('Preflight')
 const preflights = (await parallel(
   allCutTasks.map((t) => () =>
     agent(
-      `You are a PREFLIGHT scout in a Barkpark wild bulk cycle — one cheap Sonnet checking ONE task brief against reality BEFORE a builder is spent on it. READ-ONLY on the repo; no bp mutations. Budget: ~3 minutes. You are the cycle's cheapest defense against wasted builders — be literal and skeptical.
+      `You are a PREFLIGHT scout in a Barkpark wild bulk cycle — one Opus scout (low effort) checking ONE task brief against reality BEFORE a builder is spent on it. READ-ONLY on the repo; no bp mutations. Budget: ~3 minutes. You are the cycle's cheapest defense against wasted builders — be literal and skeptical.
 
 TASK [${t.task_id}] (domain ${t.domain_slug}): ${t.title}
 FILES IT CLAIMS TO TOUCH: ${(t.files || []).join(', ')}
@@ -701,7 +701,7 @@ Check, concretely:
 1. missing_file — does every path in FILES exist (or is it explicitly a new file the instructions say to create)?
 2. stale_evidence — open the file:line evidence cited in the instructions; is the defect actually there, as described, TODAY? (Other sessions land constantly — evidence goes stale.)
 3. bad_gate — is the gate command runnable from the repo root? Run it if it looks < ~60s (node --check, a single go vet package, one mix test file); for long suites verify the referenced paths/targets exist. A gate that cannot run forces the builder to interpret instead of prove.
-4. underspecified — could a cold Sonnet start from this brief without guessing an important choice?
+4. underspecified — could a cold builder start from this brief without guessing an important choice?
 5. hazard / overlap_risk — do the FILES sit in a known-hot area or on a seam the instructions do not mention?
 
 Report ok=true ONLY if the brief survives unchanged. Every problem gets a concrete detail (which path, which line, what you observed instead). Put improvements that are not problems in notes.`,
@@ -730,7 +730,7 @@ log(`Overlap matrix: ${overlaps.length} file collisions across the roster`)
 // ── Phase 7: Harmonize — one Fable makes the whole roster coherent (THE blast-radius gate) ──
 phase('Harmonize')
 const harmonizer = await agent(
-  `You are the HARMONIZER of a Barkpark wild bulk cycle — one Fable holding the ENTIRE roster before up to 60 Sonnet builders fly in parallel worktrees. This is the cycle's blast-radius gate: after you, nobody cross-checks anything until review. Three Opus cutters filed these tasks independently; your job is to make 10-60 independent briefs behave like one plan.
+  `You are the HARMONIZER of a Barkpark wild bulk cycle — one Fable holding the ENTIRE roster before up to 60 Opus builders fly in parallel worktrees. This is the cycle's blast-radius gate: after you, nobody cross-checks anything until review. Three Opus cutters filed these tasks independently; your job is to make 10-60 independent briefs behave like one plan.
 
 ${USER_WISH_BLOCK}
 
@@ -746,13 +746,13 @@ ${JSON.stringify(allCutTasks, null, 2)}
 SCRIPT-COMPUTED FILE COLLISIONS (mechanical prefix/exact matching on the tasks' files[] — resolve EVERY row):
 ${JSON.stringify(overlaps, null, 2)}
 
-PREFLIGHT REPORTS (one Sonnet checked each brief against reality — problems are observations, not opinions):
+PREFLIGHT REPORTS (one Opus scout checked each brief against reality — problems are observations, not opinions):
 ${JSON.stringify(preflights, null, 2)}
 
 Your job — every cut task gets exactly one roster row with a final action:
 1. COLLISIONS: resolve every row of the collision matrix — merge the tasks (one builder does both; close the other as duplicate with a note), re-scope files so they are disjoint, or defer one. Across all action=build rows, files[] must be PAIRWISE DISJOINT — that invariant, not good intentions, is what lets 60 worktrees merge cleanly.
-2. PREFLIGHT FAILURES: a brief with stale_evidence or missing_file gets re-verified and PATCHED (fix the bp task text) or dropped — never handed to a builder as-is. bad_gate briefs get a working gate (dry-run it). underspecified briefs get the missing decision made — by you, now; do not push ambiguity onto a Sonnet.
-3. HARMONY: where two tasks would each invent the same helper/convention, designate ONE owner and point the other at it in harmony_note; where fixes on a shared seam could disagree (error shapes, naming, copy tone), decide the convention once and stamp it into both briefs. Where a task's files sit against a hazard (hot concurrent-dev area, prod-coupled code), either bound the brief so it cannot stray or defer it — a bulk cycle never bets the prod path on a Sonnet.
+2. PREFLIGHT FAILURES: a brief with stale_evidence or missing_file gets re-verified and PATCHED (fix the bp task text) or dropped — never handed to a builder as-is. bad_gate briefs get a working gate (dry-run it). underspecified briefs get the missing decision made — by you, now; do not push ambiguity onto a builder.
+3. HARMONY: where two tasks would each invent the same helper/convention, designate ONE owner and point the other at it in harmony_note; where fixes on a shared seam could disagree (error shapes, naming, copy tone), decide the convention once and stamp it into both briefs. Where a task's files sit against a hazard (hot concurrent-dev area, prod-coupled code), either bound the brief so it cannot stray or defer it — a bulk cycle never bets the prod path on a bulk builder.
 4. LEDGER: apply every change to the bp tasks themselves (patch instructions/files/gate, re-publish; close merged duplicates honestly; re-prioritize deferred tasks). The roster instructions you emit must MATCH the task text on the server — the builder is told the task is the contract of record.
 5. UPDATE THE CYCLE PAPER (${CYCLE_PAPER}) — append the harmonized roster (per task: action + one line why) + your harmony report, re-publish, BEFORE the builders fly. Set paper_updated=true only after you read it back.
 6. HEARTBEAT: stamp the epic task ${EPIC_TASK}'s wave_status ("wild-bulk: building <n> tasks — <one-line>") and re-publish.
@@ -781,14 +781,14 @@ if (orphaned.length > 0) {
 
 const domainRuns = (await pipeline(
   rosterByDomain,
-  // Stage 1 — BUILD: one Sonnet per rostered task, worktree-isolated
+  // Stage 1 — BUILD: one Opus per rostered task, worktree-isolated
   async (g) => {
     const d = g.domain
     log(`[${d.slug}] building ${g.items.length} tasks`)
     const builds = (await parallel(
       g.items.map((t, i) => () =>
         agent(
-          `You are a BUILDER in a Barkpark wild bulk cycle — one Sonnet fixing ONE task inside your OWN isolated git worktree (safe to edit/commit; you will not collide with other builders — the roster was harmonized so no two builders share a file). An Opus reviewer checks your work after — build honestly, not defensively.
+          `You are a BUILDER in a Barkpark wild bulk cycle — one Opus builder fixing ONE task inside your OWN isolated git worktree (safe to edit/commit; you will not collide with other builders — the roster was harmonized so no two builders share a file). An Opus reviewer checks your work after — build honestly, not defensively.
 
 ${USER_WISH_BLOCK}
 ${CHARTER_LINE}
@@ -823,12 +823,12 @@ Constraints: curl localhost only; never mix compile against prod; don't touch ot
     log(`[${d.slug}] build: ${green.length}/${builds.length} green`)
     return { domain: d, items: g.items, builds }
   },
-  // Stage 2 — REVIEW (Opus judge) + POLISH (Sonnets only where needed)
+  // Stage 2 — REVIEW (Opus judge) + POLISH (Opus only where needed)
   async (st) => {
     if (!st) return null
     const d = st.domain
     const review = await agent(
-      `You are a DOMAIN REVIEWER in a Barkpark wild bulk cycle — one of 3 Opus judges, reviewing every build in the "${d.slug}" domain. You do NOT fix anything yourself: you judge, and for each build that needs work you write a bounded polish brief that one Sonnet executes. Economy is the mandate: NO NEED TO FIX WHAT IS GOOD — a clean build gets verdict=ship and zero further spend.
+      `You are a DOMAIN REVIEWER in a Barkpark wild bulk cycle — one of 3 Opus judges, reviewing every build in the "${d.slug}" domain. You do NOT fix anything yourself: you judge, and for each build that needs work you write a bounded polish brief that one Opus pass executes. Economy is the mandate: NO NEED TO FIX WHAT IS GOOD — a clean build gets verdict=ship and zero further spend.
 
 ${USER_WISH_BLOCK}
 ${CHARTER_LINE}
@@ -844,7 +844,7 @@ ${JSON.stringify(st.builds.map((b) => ({ task_id: b.task_id, ok: b.ok, branch: b
 
 For EACH build, chase the builder's own doubts first, then review the diff adversarially: correctness (edge cases, escaping, stale state, error paths), scope discipline (did files_changed stay inside the task's FILES? a stray file breaks the cycle's disjointness invariant — automatic polish or reject), harmony obligations honored (the harmony_note conventions), the Kinsta/Vercel bar, coherence with the sibling fixes in your domain. Distrust vacuous green — check the gate actually pins the claimed behavior. Then verdict:
 - ship: good as-is. Say so and move on — do not manufacture criticism.
-- polish: worth ONE bounded Sonnet pass. polish_brief = the exact fix list (concrete, diff-level); never "improve it".
+- polish: worth ONE bounded Opus pass. polish_brief = the exact fix list (concrete, diff-level); never "improve it".
 - reject: wrong approach, or a red build not worth rescuing this cycle — say why; the final reviewer reopens the task.
 A red build (no branch / gate failed) whose task is still worth one fresh attempt gets verdict=polish with a brief that says "build from scratch"; otherwise reject.`,
       { label: `review:${d.slug}`, phase: 'Review', schema: REVIEW_SCHEMA, model: REVIEWER_MODEL }
@@ -858,7 +858,7 @@ A red build (no branch / gate failed) whose task is still worth one fresh attemp
       needsPolish.map((v, i) => () => {
         const t = taskById[v.task_id] || {}
         return agent(
-          `You are a POLISHER in a Barkpark wild bulk cycle — one Sonnet executing ONE bounded fix list from an Opus reviewer, inside your OWN isolated git worktree. Do EXACTLY what the brief says — no more (the reviewer already decided what is worth fixing), no less.
+          `You are a POLISHER in a Barkpark wild bulk cycle — one Opus polisher executing ONE bounded fix list from a reviewer, inside your OWN isolated git worktree. Do EXACTLY what the brief says — no more (the reviewer already decided what is worth fixing), no less.
 
 ${USER_WISH_BLOCK}
 DOMAIN HAZARDS: ${d.hazards}

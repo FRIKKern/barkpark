@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.TasksControllerTest do
   @moduledoc """
-  W7b step 1 (paper-rx0 / w7-07a) — contract tests for the bd-shim
-  surface. One happy path per endpoint + one auth-fail + one error shape.
+  W7b step 1 (paper-rx0 / w7-07a) — contract tests for the task API.
+  One happy path per endpoint + one auth-fail + one error shape.
 
     * `ready` happy path (one open task surfaces)
     * `claim` happy path → flips lifecycle to `in_progress`
@@ -159,8 +159,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert first["lifecycle_status"] == "open"
       assert first["type"] == "task"
 
-      # w7-08c (paper-y1c): edge-count fields present on the ready shape
-      # (the bd-shim's list/ready renderers carry them into the consumer JSON).
+      # w7-08c (paper-y1c): edge-count fields present on the ready shape.
       assert Map.has_key?(first, "dependency_count")
       assert Map.has_key?(first, "dependent_count")
       assert Map.has_key?(first, "comment_count")
@@ -466,7 +465,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       # The shim sends observed_epoch: (claim.epoch || 1) — i.e. 1 for a doc
       # with no claim. The close must succeed regardless of that value because
       # there is no lease to fence against.
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      close_body = Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1})
       resp = conn |> authed() |> post("/v1/tasks/#{root.doc_id}/close", close_body)
       assert resp.status == 200
 
@@ -482,7 +481,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       task = mk_task!(uniq("close-reason"), scope)
 
       close_body =
-        Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, reason: "done per criteria"})
+        Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1, reason: "done per criteria"})
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
       assert resp.status == 200
@@ -495,7 +494,7 @@ defmodule BarkparkWeb.TasksControllerTest do
          %{conn: conn, scope: scope} do
       task = mk_task!(uniq("close-blank-reason"), scope)
 
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, reason: ""})
+      close_body = Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1, reason: ""})
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
       assert resp.status == 200
 
@@ -520,7 +519,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       # write, which is exactly why it is the right place to prove it.
       close_body =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           criteria_override: "criteria-merge atomicity under test, not criteria proof",
           criteria: [
@@ -560,7 +559,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       clear_body =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           lifecycle_status: "cancelled",
           criteria: [%{index: 0, met: false, evidence: ""}]
@@ -578,7 +577,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       preserve_body =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           lifecycle_status: "cancelled",
           criteria: [%{index: 0, met: false}]
@@ -609,7 +608,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       close_body =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           criteria_override: "criterion 1 is genuinely out of scope; closing on the record",
           criteria: [
@@ -639,7 +638,7 @@ defmodule BarkparkWeb.TasksControllerTest do
           "acceptance_criteria" => [%{"criterion" => "never proven", "met" => false}]
         })
 
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      close_body = Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1})
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
 
       assert resp.status == 409
@@ -708,14 +707,14 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       # Shape error → 400, close untouched.
       bad_shape =
-        Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, criteria: [%{met: true}]})
+        Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1, criteria: [%{met: true}]})
 
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", bad_shape)
       assert resp.status == 400
 
       bad_evidence =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           lifecycle_status: "cancelled",
           criteria: [%{index: 0, met: false, evidence: 123}]
@@ -726,7 +725,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       # State conflict (index beyond the stored list) → 409, atomically aborted.
       oob =
-        Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1, criteria: [%{index: 5}]})
+        Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1, criteria: [%{index: 5}]})
 
       resp2 = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", oob)
       assert resp2.status == 409
@@ -1100,7 +1099,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       close_body =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           criteria: [%{index: 0, met: true, evidence: "no text passed"}]
         })
@@ -1284,7 +1283,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       # advisory warning is unchanged and still rides the 2xx beside it.
       close_body =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           criteria_override: "warning-surface under test"
         })
@@ -1304,7 +1303,7 @@ defmodule BarkparkWeb.TasksControllerTest do
          %{conn: conn, scope: scope} do
       task = mk_task!(uniq("crit-close-clean"), scope, criteria([crit_entry(true)]))
 
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      close_body = Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1})
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
 
       payload = Jason.decode!(resp.resp_body)
@@ -1316,7 +1315,7 @@ defmodule BarkparkWeb.TasksControllerTest do
          %{conn: conn, scope: scope} do
       task = mk_task!(uniq("crit-close-nocrit"), scope)
 
-      close_body = Jason.encode!(%{worker_id: "bd-shim", observed_epoch: 1})
+      close_body = Jason.encode!(%{worker_id: "test-worker", observed_epoch: 1})
       resp = conn |> authed() |> post("/v1/tasks/#{task.doc_id}/close", close_body)
 
       payload = Jason.decode!(resp.resp_body)
@@ -1330,7 +1329,7 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       close_body =
         Jason.encode!(%{
-          worker_id: "bd-shim",
+          worker_id: "test-worker",
           observed_epoch: 1,
           lifecycle_status: "cancelled"
         })
@@ -2026,8 +2025,7 @@ defmodule BarkparkWeb.TasksControllerTest do
   end
 
   # ─── tt5: GET /v1/tasks?label= generic exact-string filter ─────────────
-  # Backs the bd-shim's `bd list --label file-claim:<path>` (and any
-  # arbitrary label) → find every task holding a given claim.
+  # Exact label filtering finds every task holding a given claim.
 
   describe "GET /v1/tasks?label=" do
     test "hit: returns the task whose content.labels contains the exact label",
@@ -2078,7 +2076,7 @@ defmodule BarkparkWeb.TasksControllerTest do
   end
 
   # ─── tt5: POST /v1/tasks/:doc_id/labels add/remove mutation ────────────
-  # Backs the bd-shim's `bd update <id> --add-label/--remove-label`.
+  # Adds and removes labels through the task API.
 
   describe "POST /v1/tasks/:doc_id/labels" do
     test "add: union-adds a label, emits task.relabeled", %{conn: conn, scope: scope} do

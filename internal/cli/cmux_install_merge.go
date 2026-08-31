@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,18 +239,35 @@ func cmuxMergePreview(out *writer, g globals, path string, exists bool, orig, ne
 }
 
 func cmuxMergeWrite(out *writer, g globals, path string, exists bool, orig, next []byte, added []string) int {
+	// Captured BEFORE any write touches path, while the original file (and its
+	// mode) is still the thing sitting there — this is what lets a tightened
+	// 0600 settings.json stay 0600 after the merge.
+	mode := targetMode(path)
+
 	backup := ""
 	if exists {
 		var err error
-		backup, err = backupSettings(path, orig)
+		backup, err = backupSettings(path, orig, mode)
 		if err != nil {
 			// Refuse to overwrite without a backup — that is the one destructive
 			// move the contract forbids. Honest failure, nothing written.
 			return cmuxMergeFallback(out, path, err)
 		}
 	}
-	if err := writeSettings(path, next); err != nil {
+	if err := writeSettings(path, next, mode); err != nil {
+		// writeSettings is temp-file-plus-rename: `path` itself is never opened
+		// for writing, so ANY failure here (create, flush, chmod, or the rename
+		// itself) leaves whatever was already at `path` byte-for-byte untouched.
+		// The non-destructive fallback's "Nothing was written" claim is still
+		// true — unlike the direct os.WriteFile this replaced, which opened
+		// `path` with O_TRUNC before writing and so could truncate it first.
 		return cmuxMergeFallback(out, path, err)
+	}
+	if err := verifyWrittenSettings(path); err != nil {
+		// Past this point the rename already committed — `path` HAS changed,
+		// so this is no longer the "nothing was written" case and does not get
+		// the print-only fallback. Honest failure, non-zero exit, stderr.
+		return cmuxMergeWriteUnverified(out, path, backup, err)
 	}
 	if out.machineOut() {
 		out.renderJSON(map[string]any{
@@ -265,6 +283,28 @@ func cmuxMergeWrite(out *writer, g globals, path string, exists bool, orig, next
 	}
 	out.outf("# wrote %s — hooks ensured for: %s", path, strings.Join(added, ", "))
 	return exitOK
+}
+
+// cmuxMergeWriteUnverified fires only when the atomic rename onto `path`
+// already committed but the read-back afterward could not confirm the file
+// holds valid, merged JSON. Unlike cmuxMergeFallback this is NOT a "nothing
+// was written" situation — the file changed — so it is honest about that,
+// points at the backup when one exists, and exits non-zero to stderr instead
+// of the usual exit-0 convenience-installer path.
+func cmuxMergeWriteUnverified(out *writer, path, backup string, cause error) int {
+	msg := fmt.Sprintf("wrote %s but could not verify it afterward: %s", path, cause.Error())
+	if backup != "" {
+		msg += "; the previous content is backed up at " + backup
+	}
+	if out.machineOut() {
+		out.renderJSON(map[string]any{
+			"ok": false, "path": path, "written": true, "verified": false,
+			"backup": backup, "error": msg,
+		})
+		return exitGeneric
+	}
+	out.userErr("%s", msg)
+	return exitGeneric
 }
 
 // cmuxMergeFallback is the non-destructive escape hatch: when the settings file
@@ -294,21 +334,114 @@ func fallbackNote(path string, cause error) string {
 
 // backupSettings copies the current bytes to a timestamped sibling
 // (settings.json.bak-YYYYMMDDThhmmssZ) preserving them before any overwrite.
-func backupSettings(path string, orig []byte) (string, error) {
+// Written atomically (temp + rename) so a failure mid-backup never leaves a
+// partial .bak file sitting on disk, and carries the SAME mode as the real
+// settings file it is a copy of.
+func backupSettings(path string, orig []byte, mode os.FileMode) (string, error) {
 	stamp := cmuxNow().UTC().Format("20060102T150405Z")
 	backup := path + ".bak-" + stamp
-	if err := os.WriteFile(backup, orig, 0o644); err != nil {
+	if err := cmuxAtomicWriteFile(backup, orig, mode); err != nil {
 		return "", err
 	}
 	return backup, nil
 }
 
-// writeSettings creates the parent directory as needed and writes the merged file.
-func writeSettings(path string, data []byte) error {
+// writeSettings creates the parent directory as needed and atomically writes
+// the merged file: temp file in the same directory + write + fsync + chmod to
+// mode + rename onto path. `path` itself is never opened for writing — only
+// the disposable temp file is — so any failure before the final rename leaves
+// whatever was already at `path` byte-for-byte untouched.
+func writeSettings(path string, data []byte, mode os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return cmuxAtomicWriteFile(path, data, mode)
+}
+
+// targetMode is the mode a write to path should preserve: the existing file's
+// own mode when one is already there (so a user's tightened 0600 stays 0600
+// after we merge into it), or 0o644 for a brand-new file. Must be read BEFORE
+// any write touches path.
+func targetMode(path string) os.FileMode {
+	if fi, err := os.Stat(path); err == nil {
+		return fi.Mode().Perm()
+	}
+	return 0o644
+}
+
+// cmuxAtomicWriteAndSync is the seam around flushing bytes into an
+// already-created temp file. Tests override it to inject a failure at exactly
+// this point — after the disposable temp file exists but before it is renamed
+// onto the real target — to prove that failure mode never reaches the real
+// settings file. (The direct os.WriteFile this replaced opened `path` itself
+// with O_TRUNC before writing, so the identical failure used to truncate the
+// user's real file first and THEN fail.)
+var cmuxAtomicWriteAndSync = func(f *os.File, data []byte) error {
+	if _, err := f.Write(data); err != nil {
+		return err
+	}
+	return f.Sync()
+}
+
+// cmuxAtomicWriteFile writes data to a sibling temp file in path's own directory,
+// flushes + syncs it, chmods it to mode, then renames it onto path. Every step
+// up to and including a failed rename touches ONLY the disposable temp file —
+// whatever was at `path` before the call is never opened for writing, so a
+// failure anywhere in this function leaves it exactly as it was.
+func cmuxAtomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file in %s: %w", dir, err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()        // no-op if already closed below
+		_ = os.Remove(tmpPath) // no-op once the rename below has moved it away
+	}()
+
+	if err := cmuxAtomicWriteAndSync(tmp, data); err != nil {
+		return fmt.Errorf("write %s: %w", tmpPath, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmpPath, err)
+	}
+	if err := os.Chmod(tmpPath, mode); err != nil {
+		return fmt.Errorf("chmod %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename %s onto %s: %w", tmpPath, path, err)
+	}
+	return nil
+}
+
+// cmuxReadBack is the seam verifyWrittenSettings reads the freshly-written
+// file through. Tests override it to simulate a corrupted read-back (garbage
+// bytes, or a read error) even when the real rename already committed, to
+// prove the verify step alone turns that into a hard failure rather than a
+// false success.
+var cmuxReadBack = os.ReadFile
+
+// verifyWrittenSettings re-reads path right after a write and confirms it
+// parses as JSON carrying every one of our four hook commands. A successful
+// os.Rename only proves the bytes moved — this is what proves the bytes on
+// disk are actually the merge we intended, rather than trusting the write
+// blindly.
+func verifyWrittenSettings(path string) error {
+	data, err := cmuxReadBack(path)
+	if err != nil {
+		return fmt.Errorf("read back %s: %w", path, err)
+	}
+	_, hooks, err := parseSettings(data, true)
+	if err != nil {
+		return fmt.Errorf("read-back %s does not parse as JSON: %w", path, err)
+	}
+	for _, ev := range cmuxHookEvents {
+		if !eventHasCommand(hooks[ev], "bp cmux hook "+ev) {
+			return fmt.Errorf("read-back %s is missing the %q hook after merge", path, ev)
+		}
+	}
+	return nil
 }
 
 // --- diff (minimal LCS line diff — no external dep) -----------------------------

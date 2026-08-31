@@ -1255,8 +1255,20 @@ defmodule BarkparkWeb.Router do
   # any token holder may call, mounted under `/v1/plugins/<slug>/…`. No
   # live_session. Expands to nothing until a plugin contributes an `auth: :token`
   # route (dormant, like `:ingest`/`:public_root` were when first added).
+  #
+  # THE WRITE GATE (task-wb-api-plugin-token-bucket-write-gate, sibling of the
+  # `:token_root` fix under task-a87a3346b8ff736a). Same rationale as that
+  # bucket: routes here are contributed by `register_routes/1` at compile time,
+  # so the router never names them and a per-route `:require_write` would leave
+  # the NEXT `{:post, …, auth: :token}` spec ungated by omission. Gating by
+  # method makes the default for this bucket CLOSED. Live victim: the github
+  # plugin's `POST /github/adopt/:id` is `auth: :token` with no permission
+  # check of its own — a `read`-only bearer could flip a GitHub intake task to
+  # adopted. Do NOT hoist this into `:require_token`: that pipeline also
+  # carries `DELETE /v1/auth/app-tokens/current`, where a read token revoking
+  # ITSELF is the correct behaviour.
   scope "/v1/plugins" do
-    pipe_through([:api, :require_token])
+    pipe_through([:api, :require_token, BarkparkWeb.Plugs.RequireWriteForMutation])
 
     plugin_routes(scope: :token)
   end
@@ -1555,8 +1567,12 @@ defmodule BarkparkWeb.Router do
   # read the resolved `current_workspace`/`current_project` assigns via
   # `ScopeHelpers.scope_opts/1`. Same no-alias rationale as the flat bucket —
   # plugin route specs fully-qualify their controllers.
+  #
+  # THE WRITE GATE — mirrors the flat `:token` bucket above
+  # (task-wb-api-plugin-token-bucket-write-gate). Same METHOD-based closed
+  # default; see that bucket's comment for the full rationale.
   scope "/w/:workspace_slug/p/:project_slug/v1/plugins" do
-    pipe_through([:scoped_api, :require_token])
+    pipe_through([:scoped_api, :require_token, BarkparkWeb.Plugs.RequireWriteForMutation])
 
     plugin_routes(scope: :token)
   end

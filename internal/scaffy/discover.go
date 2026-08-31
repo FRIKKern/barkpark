@@ -250,7 +250,7 @@ func Discover(opts DiscoverOptions) (*DiscoverReport, error) {
 	}
 
 	// Existence filter: a candidate must exist at the until commit — dead
-	// registries (retired .beads ledgers and friends) are history, not work.
+	// registries and local ledgers are history, not work.
 	existing, err := lsTreeSet(rootDir, sha)
 	if err != nil {
 		return nil, err

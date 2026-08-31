@@ -112,7 +112,12 @@ defmodule Barkpark.ApiTester.Endpoints.Webhooks do
       }
       """,
       possible_errors: [:unauthorized, :forbidden, :validation_failed],
-      expect: nil,
+      # Real check (wb-api-tester-unverified-badge): POST creates unconditionally
+      # from the catalog's own body_example with no required path param, so the
+      # default "Run" deterministically hits the controller and gets 201 — verified
+      # live against a local Phoenix instance. A 500/4xx now fails instead of
+      # badging green.
+      expect: {201, :ok},
       runnable: true
     }
   end
@@ -141,8 +146,15 @@ defmodule Barkpark.ApiTester.Endpoints.Webhooks do
       body_example: nil,
       response_shape: "{\"deleted\": \"uuid\"}",
       possible_errors: [:unauthorized, :forbidden, :not_found],
+      # wb-api-tester-unverified-badge: no real id is available without a prior
+      # create/list round-trip, so the default ("") `id` never reaches this
+      # controller's own webhook_not_found logic — verified live: it falls
+      # through to the unrelated generic-document 404 envelope instead (a route
+      # mismatch, not this endpoint's contract). Asserting that accidental shape
+      # would be exactly the kind of check-that-isn't-a-check this task removes,
+      # and it is destructive besides. runnable: false is the honest choice.
       expect: nil,
-      runnable: true
+      runnable: false
     }
   end
 end

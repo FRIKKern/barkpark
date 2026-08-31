@@ -17,6 +17,7 @@ on:
         required: true
         options:
           - grant-forever
+          - cp-app-logs
           - guerrilla-logs-grep
           - site-runtime-install
           - site-artifact-fetch
@@ -27,11 +28,12 @@ on:
           - box-probe
           - box-prune
           - box-unit-repair
+          - box-migrate
       team:
         description: "grant-forever: team UUID (as shown by bp whoami / bp teams)"
         required: false
       needle:
-        description: "guerrilla-logs-grep: request id or token to grep (90-min journal window)"
+        description: "guerrilla-logs-grep / cp-app-logs: request id or token to grep (cp-app-logs: optional — omit for a plain tail)"
         required: false
       box_ip:
         description: "site-runtime-install / site-artifact-fetch: managed-box IPv4"
@@ -158,6 +160,54 @@ jobs:
                     echo == journal after ==
                     journalctl -u \"${UNIT}\" -n 10 --no-pager 2>/dev/null | tail -10
                   fi
+                '
+              "
+              ;;
+            box-migrate)
+              # The dooodo incident (task-8c4105022de20560): the legacy
+              # single-box self-update engine (scripts/deploy-rebuild.sh)
+              # rebuilds and restarts but never runs ecto.migrate, so a relay
+              # update that ships a migration leaves a legacy mix box
+              # crashlooping on missing columns — and nothing on the operator
+              # belt could apply migrations remotely. This arm stops the
+              # (crashlooping) barkpark.service, applies pending Ecto
+              # migrations via the box's own api/start.sh env wrapper (ASDF +
+              # .env + MIX_ENV=prod — the same `bash start.sh mix ecto.migrate`
+              # the Makefile db-migrate target runs), restarts the service, and
+              # reports the post-migrate boot state: is-active, the Golden-Rule
+              # health curl, a journal tail, and a kernel-log OOM check.
+              # Security boundary: box_ip is regex-validated below and the
+              # remote script is this FIXED text — no other input reaches the
+              # box, no free-form shell. Legacy mix-run boxes only; a slot box
+              # (.slots marker) is refused untouched — deploy/instance-deploy.sh
+              # owns migrations there (its exit-13 revert path).
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                KEY=/root/.ssh/barkpark_indx
+                [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} '
+                  set -uo pipefail
+                  cd /opt/barkpark/api || { echo no-checkout-at-/opt/barkpark; exit 1; }
+                  [ -d ../.slots ] && { echo slot-box-refused — use deploy/instance-deploy.sh; exit 1; }
+                  echo == stopping barkpark ==
+                  systemctl stop barkpark 2>/dev/null || true
+                  echo == migrating ==
+                  MIG=0
+                  timeout 600 bash start.sh mix ecto.migrate || MIG=\$?
+                  echo == starting barkpark ==
+                  systemctl start barkpark 2>/dev/null || true
+                  sleep 20
+                  echo == unit state ==
+                  systemctl is-active barkpark || true
+                  echo == health ==
+                  curl -fsS -m 10 -o /dev/null http://localhost:4000/api/schemas && echo HEALTH-OK || echo HEALTH-FAIL
+                  echo == journal tail ==
+                  journalctl -u barkpark -n 25 --no-pager 2>/dev/null | tail -25
+                  echo == kernel oom check ==
+                  journalctl -k -n 200 --no-pager 2>/dev/null | grep -iE \"out of memory|oom-kill\" | tail -5 || echo no-oom-in-recent-kernel-log
+                  [ \"\$MIG\" -eq 0 ] || { echo \"MIGRATE-FAILED exit \$MIG\"; exit 1; }
+                  echo box-migrate complete
                 '
               "
               ;;
@@ -300,6 +350,28 @@ jobs:
                 scp -i \"\$KEY\" -o StrictHostKeyChecking=accept-new /tmp/site-runtime-install.sh root@${BOX_IP}:/tmp/
                 ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} 'bash /tmp/site-runtime-install.sh'
               " < deploy/site-runtime-install.sh
+              ;;
+            cp-app-logs)
+              # The control plane's own app logs — the one surface a fleet-list
+              # 500 can actually be diagnosed from (operator SSH is deliberately
+              # narrow, so this rides the same CI-held key as every other arm).
+              # An OPTIONAL needle (same request-id charset as guerrilla's grep)
+              # narrows to one request's stacktrace; omitted, a bounded tail.
+              if [ -n "$NEEDLE" ]; then
+                [[ "$NEEDLE" =~ ^[A-Za-z0-9_-]{4,64}$ ]] \
+                  || { echo "needle must be 4-64 chars of [A-Za-z0-9_-]"; exit 1; }
+              fi
+              $SSH "root@${CP_HOST}" "
+                set -uo pipefail
+                c=\$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)
+                [ -n \"\$c\" ] || { echo 'no running control_plane container'; exit 1; }
+                if [ -n '$NEEDLE' ]; then
+                  docker logs --since 3h \"\$c\" 2>&1 | grep -F '$NEEDLE' -B 2 -A 60 | head -300 \
+                    || echo 'no log match for $NEEDLE in the last 3 hours'
+                else
+                  docker logs --since 90m \"\$c\" 2>&1 | tail -300
+                fi
+              "
               ;;
             guerrilla-logs-grep)
               # Request ids / tokens only — the needle is interpolated into a

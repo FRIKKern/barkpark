@@ -99,5 +99,6 @@ defmodule BarkparkWeb.ScopedPaperController do
 
   # Article papers get the `.bp-paper-article` chrome class (parchment + serif),
   # mirroring BulldocsLive's `@article?` toggle.
-  defp paper_article?(%{content: content}), do: Map.get(content || %{}, "style") == "article"
+  defp paper_article?(%{content: content}),
+    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
 end

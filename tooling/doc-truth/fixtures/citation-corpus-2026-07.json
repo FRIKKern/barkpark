@@ -53,30 +53,6 @@
   ],
   "deadTerms": [
     {
-      "file": "api/lib/barkpark/plugins/tasks.ex",
-      "line": 32,
-      "term": "bd-shim",
-      "kind": "dead-binary",
-      "guard": "retired-terms",
-      "cite": "* `register_routes/1` — the ten `/v1/tasks` endpoints the `bin/bd-shim`"
-    },
-    {
-      "file": "api/lib/barkpark/plugins/tasks.ex",
-      "line": 133,
-      "term": "bd-shim",
-      "kind": "dead-binary",
-      "guard": "retired-terms",
-      "cite": "The ten `/v1/tasks` endpoints `bin/bd-shim` hits, mirroring — byte-identical,"
-    },
-    {
-      "file": "api/lib/barkpark_web/controllers/tasks_controller.ex",
-      "line": 4,
-      "term": "bd-shim",
-      "kind": "dead-binary",
-      "guard": "retired-terms",
-      "cite": "bd-compatible shim (`bin/bd-shim`)."
-    },
-    {
       "file": "api/lib/barkpark_web/live/studio/studio_live/components.ex",
       "line": 479,
       "term": "cytoscape",

@@ -704,6 +704,265 @@
     .bp-paper-shell.bp-paper-article {
       max-width: 660px;
       padding: 56px 40px 96px;
+      /* Client evidence needs more stage than prose. Keep the shared reading
+         measure untouched while letting paired screenshots use the viewport. */
+      --bp-evidence-band: 1180px;
+      --bp-evidence-band-max: 1360px;
+      --bp-evidence-fill: 0.74;
+    }
+
+    /* Recording links are supporting evidence, not a stack of form controls.
+       Consecutive action blocks therefore read as a loose clip rail: compact,
+       rounded, and able to wrap naturally without the old touching boxes. */
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) {
+      display: inline-block;
+      max-width: 100%;
+      margin: 0.42rem 1.1rem 0.42rem 0;
+      vertical-align: top;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      max-width: 100%;
+      min-height: 44px;
+      padding: 0.35rem 0;
+      border: 0;
+      border-radius: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 0.82rem;
+      line-height: 1.25;
+      font-weight: 600;
+      letter-spacing: 0.005em;
+      box-sizing: border-box;
+      transition: color 140ms ease, transform 140ms ease;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button::before {
+      content: "▶";
+      flex: none;
+      display: inline-grid;
+      place-items: center;
+      width: 1.85rem;
+      height: 1.85rem;
+      border: 1px solid color-mix(in srgb, var(--paper-accent) 48%, transparent);
+      border-radius: 50%;
+      font-size: 0.56em;
+      text-indent: 0.12em;
+      transition: background 140ms ease, border-color 140ms ease;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button:hover {
+      transform: translateY(-1px);
+      text-decoration: underline;
+      text-underline-offset: 0.2em;
+    }
+    .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button:hover::before {
+      background: var(--paper-accent-soft);
+      border-color: var(--paper-accent);
+    }
+
+    .bp-paper-article figure > .bp-cols { gap: clamp(2rem, 3vw, 2.8rem); }
+    .bp-paper-article figure > .bp-cols img {
+      display: block;
+      width: auto;
+      max-width: 100%;
+      height: auto;
+      max-height: min(72vh, 760px);
+      margin-inline: auto;
+      object-fit: contain;
+      object-position: top center;
+    }
+
+    /* Each decision starts on a fresh editorial beat. The rule is deliberately
+       quiet: it gives long client reviews structure without turning sections
+       into another set of bordered cards. */
+    .bp-paper-article #paper-body > [data-block-id]:has(> h3) {
+      margin-top: clamp(3.75rem, 8vw, 6.5rem);
+      padding-top: clamp(1.2rem, 2.4vw, 1.8rem);
+      border-top: 1px solid color-mix(in srgb, var(--paper-rule) 78%, transparent);
+    }
+    .bp-paper-article #paper-body > [data-block-id]:has(> h3) > h3 {
+      margin-top: 0;
+      text-wrap: balance;
+    }
+    /* Authored chapter maps use ordinary Paper cards, then the reader binds
+       numbered cards to their matching numbered h2. Only cards with a real
+       target gain link chrome, so a decorative card never becomes a dead
+       affordance. */
+    .bp-paper-article .bp-card[data-bp-chapter-target] {
+      position: relative;
+      cursor: pointer;
+      padding-right: 3rem;
+      transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    }
+    .bp-paper-article .bp-card[data-bp-chapter-target]::after {
+      content: "↓";
+      position: absolute;
+      right: 1.1rem;
+      top: 50%;
+      translate: 0 -50%;
+      color: var(--paper-accent);
+      font: 600 1rem/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .bp-paper-article .bp-card[data-bp-chapter-target]:hover {
+      border-color: color-mix(in srgb, var(--paper-accent) 48%, var(--paper-rule));
+      background: color-mix(in srgb, var(--paper-accent-soft) 52%, var(--paper-bg-deep));
+      transform: translateY(-1px);
+    }
+    .bp-paper-article .bp-card[data-bp-chapter-target]:focus-visible {
+      outline: 3px solid var(--paper-accent);
+      outline-offset: 3px;
+    }
+    .bp-paper-article [data-bp-chapter-anchor] { scroll-margin-top: 1.5rem; }
+
+    /* Paper-image lightbox. Progressive enhancement lives in the reader shell
+       so PortableDoc's email/static <img> contract remains byte-stable. */
+    .bp-paper-article img[data-bp-lightboxable="true"] {
+      cursor: zoom-in;
+      transition: opacity 140ms ease;
+    }
+    .bp-paper-article img[data-bp-lightboxable="true"]:hover { opacity: 0.94; }
+    .bp-paper-article img[data-bp-lightboxable="true"]:focus-visible {
+      outline: 3px solid var(--paper-accent);
+      outline-offset: 4px;
+    }
+    .bp-image-lightbox {
+      color-scheme: dark;
+      width: 100vw;
+      max-width: none;
+      height: 100vh;
+      max-height: none;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      overflow: hidden;
+    }
+    .bp-image-lightbox::backdrop { background: color-mix(in srgb, Canvas 88%, transparent); }
+    .bp-image-lightbox__stage {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      gap: 0.85rem;
+      box-sizing: border-box;
+      padding: max(0.85rem, env(safe-area-inset-top)) clamp(0.75rem, 3vw, 2rem) max(0.85rem, env(safe-area-inset-bottom));
+    }
+    .bp-image-lightbox__toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.45rem;
+      min-height: 2.65rem;
+      padding-inline: 3.25rem;
+      font: 600 0.76rem/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .bp-image-lightbox__mode {
+      min-height: 2.35rem;
+      padding: 0.55rem 0.8rem;
+      border: 1px solid color-mix(in srgb, CanvasText 28%, transparent);
+      border-radius: 999px;
+      background: color-mix(in srgb, Canvas 74%, transparent);
+      color: CanvasText;
+      cursor: pointer;
+    }
+    .bp-image-lightbox__mode[aria-pressed="true"] {
+      border-color: color-mix(in srgb, CanvasText 72%, transparent);
+      background: color-mix(in srgb, CanvasText 16%, Canvas);
+    }
+    .bp-image-lightbox__mode:focus-visible {
+      outline: 2px solid CanvasText;
+      outline-offset: 2px;
+    }
+    .bp-image-lightbox__viewport {
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      overscroll-behavior: contain;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-gutter: stable both-edges;
+      border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+      border-radius: 8px;
+      background:
+        linear-gradient(45deg, color-mix(in srgb, CanvasText 4%, transparent) 25%, transparent 25%) 0 0 / 20px 20px,
+        linear-gradient(45deg, transparent 75%, color-mix(in srgb, CanvasText 4%, transparent) 75%) 0 0 / 20px 20px,
+        Canvas;
+      cursor: grab;
+    }
+    .bp-image-lightbox__viewport.is-panning { cursor: grabbing; }
+    .bp-image-lightbox__canvas {
+      min-width: 100%;
+      min-height: 100%;
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      box-sizing: border-box;
+      padding: clamp(0.65rem, 2vw, 1.25rem);
+    }
+    .bp-image-lightbox__image {
+      display: block;
+      width: auto;
+      height: auto;
+      max-width: none;
+      max-height: none;
+      margin: auto;
+      border-radius: 6px;
+      box-shadow: 0 24px 80px color-mix(in srgb, Canvas 46%, transparent);
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    .bp-image-lightbox[data-view="fit"] .bp-image-lightbox__canvas {
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+    }
+    .bp-image-lightbox[data-view="fit"] .bp-image-lightbox__image {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+    .bp-image-lightbox__caption {
+      max-width: 76ch;
+      margin: 0 auto;
+      color: color-mix(in srgb, CanvasText 82%, transparent);
+      font: 500 0.82rem/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+    }
+    .bp-image-lightbox__caption:empty { display: none; }
+    .bp-image-lightbox__close {
+      position: fixed;
+      top: max(1rem, env(safe-area-inset-top));
+      right: max(1rem, env(safe-area-inset-right));
+      z-index: 1;
+      width: 2.65rem;
+      height: 2.65rem;
+      border: 1px solid color-mix(in srgb, CanvasText 32%, transparent);
+      border-radius: 50%;
+      background: color-mix(in srgb, Canvas 72%, transparent);
+      color: CanvasText;
+      font-size: 1.45rem;
+      line-height: 1;
+      cursor: pointer;
+      backdrop-filter: blur(12px);
+    }
+    .bp-image-lightbox__close:hover { background: color-mix(in srgb, CanvasText 14%, transparent); }
+    .bp-image-lightbox__close:focus-visible { outline: 2px solid CanvasText; outline-offset: 3px; }
+    @media (max-width: 720px) {
+      .bp-image-lightbox__stage { gap: 0.6rem; }
+      .bp-image-lightbox__toolbar {
+        justify-content: flex-start;
+        padding-inline: 0;
+        padding-right: 3.25rem;
+      }
+      .bp-image-lightbox__caption { font-size: 0.74rem; }
+    }
+
+    @media (max-width: 720px) {
+      .bp-paper-shell.bp-paper-article {
+        max-width: 100%;
+        padding: 36px 24px 72px;
+      }
     }
 
     /* pdd-t19 → parity: the article stream's VERTICAL RHYTHM now lives in the
@@ -1158,7 +1417,7 @@
     td.sheet-al-right { text-align: right; }
     td.sheet-al-center { text-align: center; }
 
-    /* ── View-toggle pills (bottom-right): switch between Reader, TUI, and Email
+    /* ── View-toggle pills: switch between Reader, TUI, and Email
        views of the same paper. Opt-in (body.bp-tui / body.bp-email), persisted
        client-side. TUI view is NOT a CSS terminal imitation — it renders the
        paper through the REAL Go pdrender compiled to WASM (the `#bp-terminal`
@@ -1166,8 +1425,15 @@
        wasm; the same renderer `bp paper view` runs). The rules HERE are only the
        toggle-pill chrome — presentational + additive, and scoped to
        `.bp-paper-article` so email/non-article papers are never affected. */
+    .bp-view-controls {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      width: min(calc(100% - 40px), 1040px);
+      margin: 24px auto calc(24px + env(safe-area-inset-bottom));
+    }
     .bp-view-toggle {
-      position: fixed; right: 20px; bottom: 20px; z-index: 60;
       display: inline-flex; align-items: center; gap: 8px;
       font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
       font-weight: 600; letter-spacing: 0.02em;
@@ -1178,23 +1444,21 @@
       transition: background 0.15s, color 0.15s, transform 0.08s;
     }
     .bp-view-toggle:hover { transform: translateY(-1px); }
-    /* The email pill stacks above the TUI pill. The three views are mutually
+    /* The three views are mutually
        exclusive; inside an alternate view only that view's own pill stays
        visible, as the way back to the reader. */
-    .bp-view-toggle--email { bottom: 62px; }
     body.bp-tui .bp-view-toggle--email { display: none; }
     body.bp-email .bp-view-toggle:not(.bp-view-toggle--email) { display: none; }
-    /* Dark/light mode pill — stacks above the email pill. The label names the
+    /* Dark/light mode pill. The label names the
        mode a click switches TO; the stamp itself is written by the nonced
        mode-toggle IIFE at the end of <body>. Hidden inside the TUI view
        (always terminal-dark); the email-mode rule above already hides it
        there, and print + the no-article guard below cover the rest. */
-    .bp-mode-toggle { bottom: 104px; }
     body.bp-tui .bp-mode-toggle { display: none; }
     .bp-view-toggle:focus-visible { outline: 2px solid #2f7d5b; outline-offset: 2px; }
     .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f7d5b; }
     /* hide the toggle when there is no article paper on the page */
-    body:not(:has(.bp-paper-article)) .bp-view-toggle { display: none; }
+    body:not(:has(.bp-paper-article)) .bp-view-controls { display: none; }
 
     /* toggle look in TUI mode */
     body.bp-tui .bp-view-toggle {
@@ -1203,9 +1467,50 @@
     }
     body.bp-tui .bp-view-toggle .bp-vt-dot { background: #5fcf9c; box-shadow: 0 0 6px #5fcf9c; }
 
-    /* toggle look in Email mode — the pill sits on the inbox ground */
-    body.bp-email .bp-view-toggle--email { bottom: 20px; }
+    /* toggle look in Email mode — the pill sits below the inbox ground */
     body.bp-email .bp-view-toggle--email .bp-vt-dot { box-shadow: 0 0 6px #2f7d5b; }
+
+    /* Comparison evidence stacks before the reading column gets cramped. */
+    @media (max-width: 900px) {
+      .bp-paper-article figure > .bp-cols { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 720px) {
+      .bp-paper-shell.bp-paper-article {
+        --bp-evidence-gutter: 16px;
+        --bp-evidence-width: calc(100vw - 32px);
+        --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
+        padding-inline: 20px;
+      }
+      .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) {
+        display: block;
+        margin: 0;
+        border-top: 1px solid var(--paper-rule);
+      }
+      .bp-paper-article [data-block-id*="-clip-"]:has(> .bp-button) > .bp-button {
+        width: 100%;
+        padding-block: 0.55rem;
+      }
+      .bp-paper-article figure > .bp-cols img {
+        width: 100%;
+        height: auto;
+        max-height: none;
+        object-fit: contain;
+      }
+      .bp-view-controls {
+        justify-content: flex-start;
+        gap: 6px;
+        width: calc(100% - 32px);
+        margin-block: 18px calc(18px + env(safe-area-inset-bottom));
+      }
+      .bp-view-toggle {
+        gap: 6px;
+        margin: 0;
+        padding: 7px 10px;
+        font-size: 11.5px;
+        backdrop-filter: none;
+      }
+    }
 
     /* ── the REAL TUI render (the actual Go pdrender, compiled to WASM) ──────
        In TUI mode we HIDE the reader article and show a real TERMINAL WINDOW:
@@ -1414,6 +1719,7 @@
       .bp-paper-article .bp-paper-simplify,
       .bp-paper-article .bp-diff-overlay,
       .bp-paper-article .bp-goal-rail { display: none !important; }
+      .bp-image-lightbox { display: none !important; }
       /* Any surviving sticky/fixed positioning collapses to static so nothing
          floats or clips in paged output. */
       .bp-paper-article .bp-paper-actions,
@@ -1432,6 +1738,207 @@
 </head>
 <body>
   {@inner_content}
+
+  <dialog id="bp-image-lightbox" class="bp-image-lightbox" aria-label="Enlarged paper image">
+    <button
+      type="button"
+      class="bp-image-lightbox__close"
+      aria-label="Close enlarged image"
+    >×</button>
+    <div class="bp-image-lightbox__stage">
+      <div class="bp-image-lightbox__toolbar" aria-label="Image size">
+        <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="actual" aria-pressed="false">100%</button>
+        <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="fit" aria-pressed="false">Fit image</button>
+        <span class="bp-image-lightbox__hint">Drag or scroll to inspect</span>
+      </div>
+      <div class="bp-image-lightbox__viewport" tabindex="0" aria-label="Scrollable enlarged image">
+        <div class="bp-image-lightbox__canvas">
+          <img class="bp-image-lightbox__image" src="" alt="" />
+        </div>
+      </div>
+      <p class="bp-image-lightbox__caption"></p>
+    </div>
+  </dialog>
+
+  <script nonce={assigns[:csp_nonce]}>
+    (function () {
+      var article = document.querySelector(".bp-paper-article");
+      var dialog = document.getElementById("bp-image-lightbox");
+      if (!article || !dialog || typeof dialog.showModal !== "function") return;
+
+      var lightboxImg = dialog.querySelector(".bp-image-lightbox__image");
+      var caption = dialog.querySelector(".bp-image-lightbox__caption");
+      var closeButton = dialog.querySelector(".bp-image-lightbox__close");
+      var viewport = dialog.querySelector(".bp-image-lightbox__viewport");
+      var modeButtons = Array.from(dialog.querySelectorAll("[data-bp-lightbox-view]"));
+      var trigger = null;
+
+      function isEligible(image) {
+        return image && article.contains(image) && !image.closest("a, button");
+      }
+
+      function prepare(root) {
+        var images = root.matches && root.matches("img") ? [root] : Array.from(root.querySelectorAll("img"));
+        images.filter(isEligible).forEach(function (image) {
+          image.dataset.bpLightboxable = "true";
+          image.tabIndex = 0;
+          image.setAttribute("role", "button");
+          image.setAttribute("aria-label", (image.alt ? image.alt + ". " : "") + "Open enlarged image");
+        });
+      }
+
+      function open(image) {
+        if (!isEligible(image)) return;
+        trigger = image;
+        lightboxImg.src = image.currentSrc || image.src;
+        lightboxImg.alt = image.alt || "";
+        caption.textContent = image.alt || "";
+        dialog.showModal();
+        if (lightboxImg.complete && lightboxImg.naturalWidth) chooseInitialView();
+      }
+
+      function setView(view) {
+        dialog.dataset.view = view;
+        modeButtons.forEach(function (button) {
+          button.setAttribute("aria-pressed", button.dataset.bpLightboxView === view ? "true" : "false");
+        });
+        viewport.scrollTo({ left: 0, top: 0, behavior: "auto" });
+      }
+
+      function chooseInitialView() {
+        var ratio = lightboxImg.naturalHeight ? lightboxImg.naturalWidth / lightboxImg.naturalHeight : 1;
+        setView(ratio >= 2.2 ? "actual" : "fit");
+      }
+
+      function close() {
+        if (dialog.open) dialog.close();
+      }
+
+      prepare(article);
+      lightboxImg.addEventListener("load", chooseInitialView);
+      modeButtons.forEach(function (button) {
+        button.addEventListener("click", function () { setView(button.dataset.bpLightboxView); });
+      });
+
+      var pan = null;
+      viewport.addEventListener("pointerdown", function (event) {
+        if (event.pointerType !== "mouse" || event.button !== 0 || dialog.dataset.view !== "actual") return;
+        pan = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+        viewport.classList.add("is-panning");
+        viewport.setPointerCapture(event.pointerId);
+      });
+      viewport.addEventListener("pointermove", function (event) {
+        if (!pan) return;
+        viewport.scrollLeft = pan.left - (event.clientX - pan.x);
+        viewport.scrollTop = pan.top - (event.clientY - pan.y);
+      });
+      function stopPan() {
+        pan = null;
+        viewport.classList.remove("is-panning");
+      }
+      viewport.addEventListener("pointerup", stopPan);
+      viewport.addEventListener("pointercancel", stopPan);
+      new MutationObserver(function (records) {
+        records.forEach(function (record) {
+          record.addedNodes.forEach(function (node) {
+            if (node.nodeType === Node.ELEMENT_NODE) prepare(node);
+          });
+        });
+      }).observe(article, { childList: true, subtree: true });
+
+      article.addEventListener("click", function (event) {
+        var image = event.target.closest("img");
+        if (isEligible(image)) open(image);
+      });
+      article.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        var image = event.target.closest("img");
+        if (!isEligible(image)) return;
+        event.preventDefault();
+        open(image);
+      });
+      closeButton.addEventListener("click", close);
+      dialog.addEventListener("click", function (event) {
+        if (event.target === dialog) close();
+      });
+      dialog.addEventListener("cancel", function () { close(); });
+      dialog.addEventListener("close", function () {
+        lightboxImg.removeAttribute("src");
+        dialog.removeAttribute("data-view");
+        if (trigger && trigger.isConnected) trigger.focus();
+        trigger = null;
+      });
+    })();
+  </script>
+
+  <script nonce={assigns[:csp_nonce]}>
+    (function () {
+      function chapterNumber(text) {
+        var match = String(text || "").trim().match(/^0*(\d+)\s*[\u00b7.:–-]/);
+        return match ? Number(match[1]) : null;
+      }
+
+      function prepareChapters() {
+        var article = document.querySelector(".bp-paper-article");
+        if (!article) return;
+
+        var headings = Array.from(article.querySelectorAll("#paper-body h2"));
+        var targets = new Map();
+        headings.forEach(function (heading) {
+          var number = chapterNumber(heading.textContent);
+          var wrapper = heading.closest("[data-block-id]");
+          if (number === null || !wrapper || targets.has(number)) return;
+          if (!wrapper.id) wrapper.id = "bp-paper-chapter-" + number;
+          wrapper.dataset.bpChapterAnchor = "true";
+          targets.set(number, wrapper);
+        });
+
+        article.querySelectorAll('[data-block-id*="chapter-map"] .bp-card').forEach(function (card) {
+          var title = card.querySelector(".bp-card__t");
+          var target = targets.get(chapterNumber(title && title.textContent));
+          if (!target) return;
+          card.dataset.bpChapterTarget = target.id;
+          card.tabIndex = 0;
+          card.setAttribute("role", "link");
+          card.setAttribute("aria-label", "Go to " + (title ? title.textContent.trim() : "chapter"));
+        });
+      }
+
+      var prepareScheduled = false;
+      function schedulePrepare() {
+        if (prepareScheduled) return;
+        prepareScheduled = true;
+        requestAnimationFrame(function () {
+          prepareScheduled = false;
+          prepareChapters();
+        });
+      }
+
+      prepareChapters();
+      window.addEventListener("phx:page-loading-stop", schedulePrepare);
+      new MutationObserver(schedulePrepare).observe(document.body, { childList: true, subtree: true });
+
+      function follow(card) {
+        var target = card && document.getElementById(card.dataset.bpChapterTarget);
+        if (!target) return;
+        history.replaceState(null, "", "#" + target.id);
+        var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        target.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "start" });
+      }
+
+      document.addEventListener("click", function (event) {
+        var card = event.target.closest(".bp-card[data-bp-chapter-target]");
+        if (card) follow(card);
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        var card = event.target.closest(".bp-card[data-bp-chapter-target]");
+        if (!card) return;
+        event.preventDefault();
+        follow(card);
+      });
+    })();
+  </script>
 
   <%!-- Reader / TUI / Email view toggles (bottom-right, mutually exclusive).
         TUI mode renders the paper through the REAL Go pdrender, compiled to
@@ -1455,15 +1962,6 @@
         addEventListener inside the nonced toggle IIFE below, NOT an inline
         onclick — an enforcing script-src without 'unsafe-inline' blocks inline
         handlers (which is what neutralises an injected onerror=). --%>
-  <button
-    type="button"
-    class="bp-view-toggle"
-    aria-pressed="false"
-    aria-label="Toggle terminal (TUI) view"
-  >
-    <span class="bp-vt-dot" aria-hidden="true"></span>
-    <span class="bp-vt-label">TUI view</span>
-  </button>
   <%!-- Email view: the paper as a RECEIVED MAIL. A mail-client window whose
         message body iframes the literal /papers/:slug/email response — the
         same bytes a mail backend sends (lazy: src set on first activation).
@@ -1521,29 +2019,40 @@
       <a class="bp-mail-browser" id="bp-mail-browser" href="#" target="_blank" rel="noopener">View in browser ↗</a>
     </div>
   </div>
-  <%!-- CSP layer-2: bound via addEventListener in the nonced IIFE below (see
-        the TUI toggle above), not an inline onclick. --%>
-  <button
-    type="button"
-    class="bp-view-toggle bp-view-toggle--email"
-    aria-pressed="false"
-    aria-label="Toggle email view"
-  >
-    <span class="bp-vt-dot" aria-hidden="true"></span>
-    <span class="bp-vt-label">Email view</span>
-  </button>
-  <%!-- Dark/light mode pill. CSP layer-2: handler bound in the nonced IIFE
-        below, never an inline onclick. aria-pressed mirrors "dark mode on";
-        the label names the mode a click switches TO. --%>
-  <button
-    type="button"
-    class="bp-view-toggle bp-mode-toggle"
-    aria-pressed="false"
-    aria-label="Switch between dark and light mode"
-  >
-    <span class="bp-vt-dot" aria-hidden="true"></span>
-    <span class="bp-vt-label">Mode</span>
-  </button>
+  <%!-- CSP layer-2: every control is bound via addEventListener in the nonced
+        IIFEs below, never through an inline onclick. --%>
+  <div class="bp-view-controls" role="group" aria-label="Paper view controls">
+    <button
+      type="button"
+      class="bp-view-toggle"
+      aria-pressed="false"
+      aria-label="Toggle terminal (TUI) view"
+    >
+      <span class="bp-vt-dot" aria-hidden="true"></span>
+      <span class="bp-vt-label">TUI view</span>
+    </button>
+    <button
+      type="button"
+      class="bp-view-toggle bp-view-toggle--email"
+      aria-pressed="false"
+      aria-label="Toggle email view"
+    >
+      <span class="bp-vt-dot" aria-hidden="true"></span>
+      <span class="bp-vt-label">Email view</span>
+    </button>
+    <%!-- Dark/light mode pill. CSP layer-2: handler bound in the nonced IIFE
+          below, never an inline onclick. aria-pressed mirrors "dark mode on";
+          the label names the mode a click switches TO. --%>
+    <button
+      type="button"
+      class="bp-view-toggle bp-mode-toggle"
+      aria-pressed="false"
+      aria-label="Switch between dark and light mode"
+    >
+      <span class="bp-vt-dot" aria-hidden="true"></span>
+      <span class="bp-vt-label">Mode</span>
+    </button>
+  </div>
   <script nonce={assigns[:csp_nonce]}>
     (function () {
       var KEY = "barkpark_theme";

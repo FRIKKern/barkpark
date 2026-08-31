@@ -221,36 +221,123 @@ func (t *tree) delete(rel string) {
 	t.note(rel)
 }
 
-// flush writes the overlay to disk: CREATE implies mkdir -p (D26).
+// stagedWrite is one CREATE/INSERT/REPLACE write staged to a sibling
+// temp file, waiting for flush's commit phase to rename it into place.
+type stagedWrite struct {
+	rel string
+	abs string
+	tmp string
+}
+
+// flush writes the overlay to disk, all-or-nothing (apply.go:6-8):
+// every non-delete write is first staged to a sibling temp file in its
+// own directory (os.CreateTemp), written, synced and closed, and only
+// renamed into place once EVERY staged write has succeeded. A failure
+// at any point during staging removes every temp file created so far
+// and returns with no real path touched — the guarantee the prior
+// per-file os.WriteFile loop advertised but did not keep, since it
+// wrote straight to the real paths and aborted mid-loop on error.
+// Deletes run last, after every write is committed. CREATE still
+// implies mkdir -p (D26); an existing file's mode survives an
+// overwrite (staging never inherits os.CreateTemp's 0600 default) —
+// only a newly created path gets the 0o644 default.
 func (t *tree) flush() error {
+	var staged []stagedWrite
+	cleanupStaged := func() {
+		for _, s := range staged {
+			os.Remove(s.tmp)
+		}
+	}
+
 	for _, rel := range t.touched {
+		if t.deleted[rel] {
+			continue
+		}
 		abs, err := t.resolve(rel)
 		if err != nil {
+			cleanupStaged()
 			return err
-		}
-		if t.deleted[rel] {
-			if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			continue
 		}
 		// Record the ancestor dirs this CREATE is about to bring into
 		// being (computed BEFORE the mkdir, while they are still absent)
 		// so remove can retract them; writes to an existing file's dir
 		// yield nothing here.
 		t.noteCreatedDirs(dirsToCreate(t.root, abs))
-		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
-			return err
+		dir := filepath.Dir(abs)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			cleanupStaged()
+			return fmt.Errorf("flush %s: mkdir: %w", rel, err)
+		}
+		mode := os.FileMode(0o644)
+		if fi, statErr := os.Stat(abs); statErr == nil {
+			mode = fi.Mode().Perm() // preserve an existing file's mode
 		}
 		b := t.files[rel]
 		if b == nil {
 			b = []byte{} // empty fence ⇒ 0-byte file (D26)
 		}
-		if err := os.WriteFile(abs, b, 0o644); err != nil {
+		tmp, err := os.CreateTemp(dir, "."+filepath.Base(abs)+".scaffy-tmp-*")
+		if err != nil {
+			cleanupStaged()
+			return fmt.Errorf("flush %s: stage: %w", rel, err)
+		}
+		werr := stageWrite(tmp, b, mode)
+		if werr != nil {
+			os.Remove(tmp.Name())
+			cleanupStaged()
+			return fmt.Errorf("flush %s: stage: %w", rel, werr)
+		}
+		staged = append(staged, stagedWrite{rel: rel, abs: abs, tmp: tmp.Name()})
+	}
+
+	// Commit: every staged write verified — rename each temp into place.
+	for i, s := range staged {
+		if err := os.Rename(s.tmp, s.abs); err != nil {
+			// The remaining un-renamed temps are still just temps; the
+			// ones already renamed are now real files this call cannot
+			// retract (rename is the atomic unit, not the whole batch).
+			for _, rest := range staged[i+1:] {
+				os.Remove(rest.tmp)
+			}
+			return fmt.Errorf("flush %s: commit: %w", s.rel, err)
+		}
+	}
+
+	// Deletes last, only once every write above is committed.
+	for _, rel := range t.touched {
+		if !t.deleted[rel] {
+			continue
+		}
+		abs, err := t.resolve(rel)
+		if err != nil {
 			return err
+		}
+		if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("flush %s: remove: %w", rel, err)
 		}
 	}
 	return nil
+}
+
+// stageWrite writes b to tmp, verifies the write, syncs and closes it,
+// then chmods it to mode — the full staging sequence a temp file must
+// pass before flush will consider it fit to rename into place. tmp is
+// always closed by the time this returns, success or failure.
+func stageWrite(tmp *os.File, b []byte, mode os.FileMode) error {
+	n, err := tmp.Write(b)
+	if err == nil && n != len(b) {
+		err = fmt.Errorf("short write: wrote %d of %d bytes", n, len(b))
+	}
+	if err == nil {
+		err = tmp.Sync()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(tmp.Name(), mode)
+	}
+	return err
 }
 
 // noteCreatedDirs appends the given repo-relative dirs to the tree's

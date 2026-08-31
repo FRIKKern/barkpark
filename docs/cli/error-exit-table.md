@@ -203,6 +203,35 @@ The v2 envelope (opt-in via `Accept-Version: 2`) only reshapes the
 identical across versions, so the exit-code mapping above is version-invariant.
 Every other code/status is byte-identical between v1 and v2.
 
+## A 2xx body can carry its own failure verdict — `webhook test-send`
+
+One route breaks the "only `error.code` sets the exit code" rule on purpose,
+and the break is DELIBERATE, not a gap: `POST /v1/webhooks/:dataset/:id/test-send`
+(`webhook_controller.ex` `test_send/2`) always answers HTTP 200 with the
+delivery outcome *inside* the body — `{"delivery":{"status":"ok"|"failed_giveup", …}}`
+— so the Studio SPA can show an immediate result without an error envelope to
+parse. `webhook replay` answers the identical `{"delivery": …}` shape for the
+same reason (confirmed by source: both routes drive `Dispatcher`'s single
+synchronous attempt, `webhooks/dispatcher.ex` `record_single_attempt/3`, which
+resolves to exactly one of `ok` or `failed_giveup` — never `pending`).
+
+**The default, decided (task-60887badc1d2900f, option (a)): exit 0 stands.**
+`bp webhook test-send <id>` against an endpoint that just refused the
+connection still exits `0` — the human-readable `delivery: failed_giveup: …`
+line is the truth, the exit code is not, and that is the tradeoff this table
+keeps: a 2xx body is not allowed to mint a SECOND source of exit codes for
+every route, only this one opts in, explicitly, per command.
+
+`webhook.test-send` alone carries the opt-in escape hatch for the one caller
+the printed line cannot reach — a script: `--fail-on-failed-delivery`. Passed,
+and the body's `delivery.status` is anything other than `"ok"`, the CLI exits
+`1` (`exitGeneric` — the existing "other/network/timeout" bucket, which is
+exactly what a refused/timed-out test probe is) instead of `0`; the rendered
+output is byte-identical either way, only the process exit code changes.
+Unset, or the delivery succeeded, behaviour is untouched: exit `0`, same
+stdout. `webhook replay` does not carry this flag — the shared shape is noted
+above for the next reader, not extended here.
+
 ## Schema field references
 
 This document keys off the v1 error **envelope** (`error.code`, `error.message`,

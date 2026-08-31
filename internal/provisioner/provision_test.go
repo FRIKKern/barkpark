@@ -161,10 +161,13 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 	}
 
 	// ── the Caddy steps ran with PHX_HOST set + migrate ran ──
-	var sawPHX, sawMigrate bool
+	var sawPHX, sawSelfUpdate, sawMigrate bool
 	for _, c := range runner.cmds {
 		if contains(c, "PHX_HOST=acme.barkpark.cloud") {
 			sawPHX = true
+		}
+		if contains(c, "BARKPARK_SELF_UPDATE_APPLY=1") {
+			sawSelfUpdate = true
 		}
 		if contains(c, "ecto.migrate") {
 			sawMigrate = true
@@ -172,6 +175,11 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 	}
 	if !sawPHX {
 		t.Errorf("Caddy steps did not set PHX_HOST=acme.barkpark.cloud; ran: %v", runner.cmds)
+	}
+	// New boxes get the self-update executor flag at provision time (managed
+	// boxes are cloud-operated; the team autoupdate policy is the consent).
+	if !sawSelfUpdate {
+		t.Errorf("provision steps did not set BARKPARK_SELF_UPDATE_APPLY=1; ran: %v", runner.cmds)
 	}
 	if !sawMigrate {
 		t.Errorf("migrate step did not run; ran: %v", runner.cmds)

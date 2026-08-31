@@ -26,8 +26,11 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, copyFileSync, realpathSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   screenCommand, screenSegment, screenAll,
@@ -57,13 +60,49 @@ test("screenCommand returns {ok, reason} with a non-empty reason in both directi
 
 test("screen.mjs imports NOTHING from rerun.mjs (D29: a denylist verdict must never be read as an allowlist verdict)", () => {
   const src = readFileSync(SCREEN_MJS, "utf8");
+  // screen.mjs may import node: builtins ONLY — never rerun.mjs, never a
+  // third-party dependency. The entry guard (resolve()/fileURLToPath(), the
+  // same form ledger.mjs/backfill.mjs/acceptance.mjs/cli.mjs all use) needs
+  // two of those statically, so the bar is "every import is a node: builtin",
+  // not "zero imports".
   const imports = [...src.matchAll(/^\s*import\s[^;]*?from\s+["']([^"']+)["']/gm)].map((m) => m[1]);
-  assert.deepEqual(imports, [], `screen.mjs must be self-contained; found imports: ${imports.join(", ")}`);
+  assert.ok(imports.every((i) => i.startsWith("node:")), `screen.mjs must import node: builtins only; found: ${imports.join(", ")}`);
   assert.ok(!/from\s+["'][^"']*rerun\.mjs/.test(src), "screen.mjs must not import rerun.mjs");
-  // The two dynamic imports it does have are node: builtins, in the CLI only.
+  // The dynamic imports it also has are node: builtins, in the CLI only.
   const dynamic = [...src.matchAll(/await import\(["']([^"']+)["']\)/g)].map((m) => m[1]);
   assert.ok(dynamic.every((d) => d.startsWith("node:")), `dynamic imports must be node: builtins, got ${dynamic.join(", ")}`);
 });
+
+// The old guard built a URL by string-concatenating a filesystem path —
+// `new URL(\`file://${process.argv[1]}\`)` — and ANY URL-special character in
+// that path (a `#` fragment, a space, a `?` query) makes `.href` diverge from
+// `import.meta.url`. isMain then reads false, and screen.mjs exits 0 having
+// run none of --verify/--census/--selftest and printed nothing: all 219
+// safety-screen checks silently skipped. Worktrees, CI temp dirs and
+// branch-named checkouts routinely carry such characters. Proof runs the real
+// file as a real child process from a directory bearing each character — the
+// only way to exercise process.argv[1]/import.meta.url as node itself sets them.
+for (const marker of ["#", " ", "?"]) {
+  test(`entry guard: screen.mjs --selftest runs (prints output, exits 0) from a path containing ${JSON.stringify(marker)}`, () => {
+    // realpathSync sidesteps tmpdir's own symlink indirection (e.g. macOS
+    // /tmp -> /private/tmp) — that is a path-canonicalization detail this
+    // test has no stake in; the property under test is the URL-special
+    // character survives the guard, not symlink resolution.
+    const base = realpathSync(mkdtempSync(join(tmpdir(), "grip-screen-entry-")));
+    const dir = join(base, `has-${marker}-char`);
+    mkdirSync(dir);
+    const copy = join(dir, "screen.mjs");
+    copyFileSync(SCREEN_MJS, copy);
+    try {
+      const run = spawnSync(process.execPath, [copy, "--selftest"], { encoding: "utf8" });
+      assert.ok(run.stdout.length > 0, `expected non-empty stdout, got stderr: ${run.stderr}`);
+      assert.equal(run.status, 0, `expected exit 0, got ${run.status} — stdout: ${run.stdout} stderr: ${run.stderr}`);
+      assert.match(run.stdout, /PASS: all three named sets hold\./);
+    } finally {
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+}
 
 test("FAILS CLOSED: an unknown command head is REFUSED", () => {
   const r = screenCommand("some-novel-binary --do-a-thing");

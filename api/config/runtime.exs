@@ -794,6 +794,31 @@ if config_env() == :prod do
   # the `:url` hostname stays authoritative.
   socket_dir = System.get_env("DATABASE_SOCKET_DIR")
 
+  # NOTE ON queue_target/queue_interval PARITY WITH api/config/test.exs: that file
+  # widens 50ms/1000ms -> 5_000ms/30_000ms under a comment naming this exact error
+  # ("connection not available and request was dropped from queue"). Do NOT copy
+  # those values here. They fix a DIFFERENT cause: test.exs's contention is a
+  # healthy pool of `schedulers_online()*2` (~8) transiently outrun by the async
+  # suite's own fan-out, where nothing is actually starved for long and no user is
+  # waiting. Guerrilla prod's failures (root-caused live: tooling/grip/ledger/
+  # dr-w5-500-class-distinct-requests-2026-08-06.md, birth-fence-500-root-cause-
+  # 2026-07-31.md) are a STRUCTURALLY oversubscribed pool: 29 declared Oban queue
+  # slots share this same POOL_SIZE (default 10) with all HTTP traffic on a 2-vCPU
+  # box already deep in swap, and individual jobs (EdgeProjector, SSR site builds)
+  # have been observed holding a connection 12-38s — well past even a 5s target and
+  # past the unconfigured-here Ecto :timeout default (15_000ms). Widening the queue
+  # window would not rescue those requests (they still die at :timeout) and would
+  # make genuinely-overloaded HTTP requests wait longer before failing, which is
+  # worse for callers and adds to swap pressure — it delays and hides the failure
+  # rather than fixing it. The charter says so explicitly: "nothing here licenses
+  # raising POOL_SIZE on a 2-core box already 1.1 GB into swap" (bp-deploy-
+  # reliability-charter.md D75) and "raising POOL_SIZE just moves contention into
+  # Postgres — sizing waits for guerrilla-db-probe evidence" (bp-jarl-platform-
+  # followups-charter.md D11). The actual fix is tracked and gated on measurement:
+  # `jpf-bl-guerrilla-db-probe-arm` (read POOL_SIZE/max_connections/pg_stat_activity
+  # live) unblocks `jpf-bl-oban-pool-partition` (partition or cap Oban's pool share,
+  # then size POOL_SIZE on the numbers — NOT on feel). Both are open and unclaimed
+  # as of 2026-08-19; see also `mob-lm-guerrilla-pool-storm`.
   repo_opts = [
     # ssl: true,
     url: database_url,

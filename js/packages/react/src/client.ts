@@ -311,6 +311,7 @@ async function hydrateAsciicast(root: ParentNode): Promise<number> {
     player.create(src, el, {
       fit: 'width',
       poster: el.dataset.castPoster || 'npt:0:1',
+      rows: el.dataset.castRows ? Number(el.dataset.castRows) : undefined,
       idleTimeLimit: 2,
       theme: 'asciinema',
     })

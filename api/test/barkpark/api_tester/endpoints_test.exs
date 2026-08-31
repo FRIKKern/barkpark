@@ -187,6 +187,34 @@ defmodule Barkpark.ApiTester.EndpointsTest do
     assert wh_list.auth == :admin
   end
 
+  # ── Gate-integrity invariant (wb-api-tester-unverified-badge) ─────────
+  #
+  # A runnable endpoint with no `expect:` and no `scenarios:` can NEVER
+  # fail — runner.ex's `check/2` has nothing to inspect, so the single
+  # "Run" click badges PASS (now :unverified) regardless of what the
+  # server actually returned. This is the tripwire that keeps the zero-
+  # expectation class from regrowing once webhooks.ex/history.ex are
+  # fixed: every endpoint must carry either a real `expect:` (preferred)
+  # or `runnable: false` (which removes the false-positive Run button
+  # entirely, honestly, instead of badging it).
+  test "no runnable endpoint ships expect: nil with zero scenarios (the zero-expectation badge class)" do
+    offenders =
+      Endpoints.all("production")
+      |> Enum.filter(fn ep ->
+        ep.kind == :endpoint and
+          Map.get(ep, :runnable, true) == true and
+          Map.get(ep, :expect) == nil and
+          (Map.get(ep, :scenarios, []) || []) == []
+      end)
+      |> Enum.map(& &1.id)
+      |> Enum.sort()
+
+    assert offenders == [],
+           "runnable endpoints with no expectation and no scenarios badge PASS " <>
+             "without checking the response at all (give them a real `expect:` " <>
+             "or flip `runnable: false`): #{inspect(offenders)}"
+  end
+
   test "reference pages use :reference kind with a render_key" do
     envelope = Endpoints.find("production", "ref-envelope")
     errors = Endpoints.find("production", "ref-errors")

@@ -25,10 +25,20 @@ defmodule Barkpark.Search.HitEnvelope do
 
   The envelope's key set is identical in both views (`documents`, `count`,
   `query`, `parsedQuery`, `highlights`, `recovery`, `correctedTo`, `facets`,
-  `truncation`, `engineUsed`) so shape-destructuring clients (`find-shape.ts`)
-  never branch.
+  `truncation`, `engineUsed`, `hasMore`) so shape-destructuring clients
+  (`find-shape.ts`) never branch.
   Surface-specific extras (`ms`, `seq`, `searchEventId`) are `Map.put` by the
   call sites.
+
+  ## `count` vs `hasMore`/`offset` (NOT repaired here, just named)
+
+  On this builder's callers (REST/loopback/WS), `count` is the CORPUS TOTAL
+  for the query — `result.total`, not the number of rows in `documents`. That
+  collides in NAME (not in meaning — each endpoint is internally consistent)
+  with `QueryController`'s `count`, which is the number of PAGE ROWS returned.
+  A client reading both endpoints must already know which `count` it holds;
+  `hasMore` below is additive sugar derived from the corpus-total `count`
+  here, and does not resolve that naming collision.
   """
 
   alias Barkpark.Content.{CallerContext, Envelope}
@@ -51,6 +61,11 @@ defmodule Barkpark.Search.HitEnvelope do
     * `:fields` — the `?fields=` projection allowlist (full view only; brief
       cards are already a fixed projection).
     * `:view` — `"brief"` for brief hit cards; anything else is full.
+    * `:offset` — the page's starting offset into the corpus, as threaded by
+      the caller's own `offset` param. Defaults to `0` when absent/nil so a
+      caller written before `hasMore` existed (or a future caller that never
+      paginates) keeps working unchanged — `hasMore` then reads `count >
+      length(documents)`, i.e. "there is more than fits on this one page".
   """
   @spec build([struct()], non_neg_integer(), String.t() | nil, map(), keyword()) :: map()
   def build(docs, count, query, meta, opts) do
@@ -58,6 +73,7 @@ defmodule Barkpark.Search.HitEnvelope do
     schema_resolver = Keyword.fetch!(opts, :schema_resolver)
     fields = Keyword.get(opts, :fields)
     view = Keyword.get(opts, :view)
+    offset = Keyword.get(opts, :offset) || 0
 
     # `highlightFields` is schema-configurable, so the top-level `highlights`
     # map (keyed by doc id) can echo a full `content.body` per hit. In the brief
@@ -81,7 +97,12 @@ defmodule Barkpark.Search.HitEnvelope do
       # when another engine was requested but silently substituted (zero-hit
       # recovery, tenant gate, unregistered engine). Additive: clients that
       # don't read it are unchanged; clients that do stop guessing.
-      engineUsed: meta[:engine_used]
+      engineUsed: meta[:engine_used],
+      # Additive pagination echo: `count` here is already the corpus total
+      # (see moduledoc), so whether another page exists is derivable in-hand
+      # — the server had the fact and simply wasn't saying it. A paging
+      # client no longer has to guess from `length(documents) == limit`.
+      hasMore: count > offset + length(docs)
     }
   end
 
@@ -98,6 +119,13 @@ defmodule Barkpark.Search.HitEnvelope do
   `documents`→`hits`, `count`→`total`; `query`/`correctedTo`/`facets`/
   `truncation` are dropped (the federated surface never carried them — query is
   echoed top-level, the rest are single-surface diagnostics).
+
+  `hasMore` is DELIBERATELY dropped here too, not forwarded — the federated
+  caller (`FederatedSearchController`, owned by a sibling task) never threads
+  an `:offset` opt into `build/5` for this surface, so `hasMore` above is
+  always computed against an assumed `offset` of `0`. Forwarding it would
+  read as "this is page-aware" on a surface that is not yet, which is worse
+  than silence. Revisit together with whoever wires federated pagination.
   """
   @spec rekey_federated(map()) :: map()
   def rekey_federated(envelope) do

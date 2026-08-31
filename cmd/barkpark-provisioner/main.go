@@ -300,6 +300,12 @@ func run(args []string) int {
 		// restart) for an attach-domain job (idempotent). Runs in its own
 		// goroutine below, exactly like the deprovision loop.
 		AttachDomain: provisioner.DefaultAttachDomain(seams),
+		// The self-update executor-flag drain: flip BARKPARK_SELF_UPDATE_APPLY=1
+		// on a live box + restart (idempotent) for an enable-apply job, so a
+		// fleet autoupdate rollout can actually trigger updates on boxes
+		// provisioned before the flag existed. Runs in its own goroutine below,
+		// exactly like the attach-domain loop.
+		EnableApply: provisioner.DefaultEnableApply(seams),
 		// The provision_support drain (Personal Dev Fleet MVP-0, PDF-D83): the
 		// server-side support bring-up — create the box, configure it, pull the
 		// scrubbed dataset, install the listener runtime, verify the roster reads
@@ -395,7 +401,18 @@ func run(args []string) int {
 		return 0
 	}
 
-	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision + attach-domain + resurrect + support + agent-key) every %s\n", *controlURL, interval.String())
+	fmt.Fprintf(os.Stderr, "barkpark-provisioner: draining %s (provision + deprovision + attach-domain + resurrect + support + agent-key + enable-apply) every %s\n", *controlURL, interval.String())
+
+	go func() {
+		_ = w.RunEnableApplyWith(ctx, func(claimed bool, err error) {
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "barkpark-provisioner: enable-apply cycle error: %v\n", err)
+			case claimed:
+				fmt.Fprintln(os.Stderr, "barkpark-provisioner: enabled the self-update executor on a box")
+			}
+		})
+	}()
 
 	go func() {
 		_ = w.RunSupportWith(ctx, func(claimed bool, err error) {
@@ -450,6 +467,17 @@ func run(args []string) int {
 				fmt.Fprintf(os.Stderr, "barkpark-provisioner: attach-domain cycle error: %v\n", err)
 			case claimed:
 				fmt.Fprintln(os.Stderr, "barkpark-provisioner: attached a custom domain")
+			}
+		})
+	}()
+
+	go func() {
+		_ = w.RunEnableApplyWith(ctx, func(claimed bool, err error) {
+			switch {
+			case err != nil:
+				fmt.Fprintf(os.Stderr, "barkpark-provisioner: enable-apply cycle error: %v\n", err)
+			case claimed:
+				fmt.Fprintln(os.Stderr, "barkpark-provisioner: enabled the self-update executor on a box")
 			}
 		})
 	}()

@@ -340,7 +340,7 @@ defmodule Barkpark.Tasks.Schema do
 
         # Estimate at create; calibrated against outcome.actual_size at
         # close. Lets a context-budget-constrained agent pick small work
-        # off `bd ready`.
+        # out of the ready queue.
         %{
           "name" => "estimate",
           "title" => "Estimate",
@@ -633,7 +633,7 @@ defmodule Barkpark.Tasks.Schema do
           "of" => %{"type" => "reference", "refType" => "session"}
         },
 
-        # ── CLOSE — what `bd close` should leave behind ──────────────────
+        # ── CLOSE — durable completion context ───────────────────────────
         %{
           "name" => "outcome",
           "title" => "Outcome",
@@ -673,7 +673,7 @@ defmodule Barkpark.Tasks.Schema do
           ]
         },
 
-        # One-liner landing slot for `bd close --reason` (cheaper for an
+        # One-line landing slot for a close reason (cheaper for an
         # agent to reach than the outcome composite). Paired with the
         # cancelled_needs_reason soft banner.
         %{

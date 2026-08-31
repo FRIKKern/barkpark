@@ -42,7 +42,7 @@ const STATE = join(HERE, "last-reindex.json");
 // ── EXCLUDE — same shape the other tools use (file-importance/build-signals.mjs).
 // Plus the re-indexer's own derived outputs and state so a rebuild never re-triggers
 // the watcher (the index.json / symbols.json / manifest.json writes would loop).
-const EXCLUDE = /(^|\/)(node_modules|_build|deps|dist|\.beads|\.git|vendor|priv\/static\/assets|tmp)\/|package-lock\.json$|pnpm-lock\.yaml$|\.lock$|go\.sum$|erl_crash\.dump$/;
+const EXCLUDE = /(^|\/)(node_modules|_build|deps|dist|\.git|vendor|priv\/static\/assets|tmp)\/|package-lock\.json$|pnpm-lock\.yaml$|\.lock$|go\.sum$|erl_crash\.dump$/;
 // derived map artifacts — writing these must NOT count as a source change.
 const DERIVED = /(^|\/)(manifest\.json|index\.json|symbols\.json|last-impact\.json|last-reindex\.json|nodes\.json|.*-report\.json|.*-cache\.json)$/;
 

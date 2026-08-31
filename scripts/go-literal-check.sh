@@ -45,7 +45,17 @@
 #
 # It strips Go comments string-safely (a `#` in a `//` or `/* */` comment, e.g. a
 # palette note or a PR ref, never trips it; a `#hex` inside a string is still
-# detected). Usage: scripts/go-literal-check.sh   (check; CI + merge gate)
+# detected).
+#
+# THE CORPUS FLOOR (MIN_GO_FILES, wbt-jwt-go-literal-corpus-floor): a gate that
+# scans nothing PASSES, so this one refuses to. ROOTS (cmd/barkpark,
+# internal/cli) are walked with os.walk, which yields zero files — and raises
+# nothing — for a missing/renamed directory; FILES (the two fixed theme.go
+# paths) are independent of ROOTS and still exist regardless. So a renamed or
+# missing internal/cli silently fell back to scanning only those 2 fixed FILES
+# and printed "PASS — 2 Go file(s) scanned", exit 0, over a scan of the whole
+# CLI tree that never happened. MIN_GO_FILES closes it — see the floor's own
+# failure text below. Usage: scripts/go-literal-check.sh   (check; CI + merge gate)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -109,7 +119,26 @@ GO
         echo "go-literal-check --selftest: FAIL — a #hex in a COMMENT was flagged (comment lexer broke)."
         exit 1
     fi
-    echo "go-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex."
+    # 4) A NARROWED ROOTS directory (standing in for a renamed/missing
+    #    cmd/barkpark or internal/cli) MUST NOT pass vacuously. Reproduced
+    #    before MIN_GO_FILES existed: os.walk over a missing/renamed dir
+    #    yields zero files and raises nothing, so only the two fixed FILES
+    #    (theme.go x2) got counted and the gate printed "PASS — 2 Go file(s)
+    #    scanned", exit 0, over a scan that never happened. This case is the
+    #    only thing that keeps the MIN_GO_FILES floor honest.
+    empty_root="$tmp/empty_root"
+    mkdir -p "$empty_root"
+    if out="$(GO_LIT_SELFTEST_EMPTY_ROOTS="$empty_root" bash "$0" 2>&1)"; then
+        echo "go-literal-check --selftest: FAIL — narrowed ROOTS scanning only the 2 fixed FILES PASSED (vacuous green)."
+        echo "$out"
+        exit 1
+    fi
+    if ! printf '%s' "$out" | grep -q 'file(s) were scanned'; then
+        echo "go-literal-check --selftest: FAIL — the narrowed-ROOTS run failed for the wrong reason."
+        echo "$out"
+        exit 1
+    fi
+    echo "go-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex, and REFUSES to pass vacuously from narrowed ROOTS."
     exit 0
 fi
 
@@ -121,13 +150,20 @@ root = sys.argv[1]
 # GO_LIT_SELFTEST override: when set, scan ONLY that one file (the --selftest
 # tripwire points the REAL scanner at a throwaway temp file — same lexer, same
 # LITERAL, same allow logic — so the tripwire proves the actual gate, not a fork).
+# GO_LIT_SELFTEST_EMPTY_ROOTS: the corpus-floor tripwire (wbt-jwt-go-literal-
+# corpus-floor). Narrows ROOTS to one empty directory while leaving FILES at
+# their normal, real, existing paths — reproducing a renamed/missing
+# cmd/barkpark or internal/cli WITHOUT relocating the script itself (unlike
+# GO_LIT_SELFTEST above, which replaces the whole corpus with one fixture).
 _selftest = os.environ.get("GO_LIT_SELFTEST")
+_selftest_empty_roots = os.environ.get("GO_LIT_SELFTEST_EMPTY_ROOTS")
 if _selftest:
     ROOTS = []
     FILES = [_selftest]
 else:
-    ROOTS = [os.path.join(root, "cmd", "barkpark"),
-             os.path.join(root, "internal", "cli")]  # au-w4: whole CLI tree (subsumes setup/ + style_cmd.go)
+    ROOTS = ([_selftest_empty_roots] if _selftest_empty_roots else
+              [os.path.join(root, "cmd", "barkpark"),
+               os.path.join(root, "internal", "cli")])  # au-w4: whole CLI tree (subsumes setup/ + style_cmd.go)
     FILES = [os.path.join(root, "internal", "taskboard", "theme.go"),
              os.path.join(root, "internal", "pdrender", "theme.go")]  # ts-w2b: pdrender chrome threaded onto tokens_gen.go; only pdBtnFg stays a lit-allow
 
@@ -226,6 +262,16 @@ def go_files():
         yield f
 
 
+# A gate that scans nothing PASSES. Reproduced: os.walk over a missing/renamed
+# ROOTS directory yields zero files and raises nothing, so a renamed
+# internal/cli fell back to scanning only the 2 fixed FILES and printed
+# "PASS — 2 Go file(s) scanned", exit 0, over a scan that never happened. So
+# the real run asserts a NON-ZERO, PLAUSIBLE corpus before it is allowed to
+# pass. 164 Go files scanned today; the floor is set far below that so
+# ordinary deletions never trip it, and far above the degenerate 2 (the fixed
+# FILES alone) so that vacuous-pass path can't either.
+MIN_GO_FILES = 140
+
 failures = []
 scanned = 0
 for path in go_files():
@@ -233,6 +279,16 @@ for path in go_files():
     scanned += 1
     for ln, text in scan(path):
         failures.append((rel, ln, text))
+
+if not _selftest and scanned < MIN_GO_FILES:
+    print(f"go-literal-check: FAILED — only {scanned} Go file(s) were scanned, "
+          f"below the {MIN_GO_FILES}-file floor.\n")
+    print(f"  Scanned roots: {', '.join(ROOTS) if ROOTS else '(none)'}")
+    print("  A gate that scans nothing PASSES, so this refuses to. Either cmd/barkpark")
+    print("  or internal/cli was renamed/moved, or GO_LIT_SELFTEST_EMPTY_ROOTS leaked")
+    print("  into the real gate step, or the CLI tree genuinely shrank — in which case")
+    print("  lower MIN_GO_FILES deliberately, in the same commit.")
+    sys.exit(1)
 
 if not failures:
     print(f"go-literal-check: PASS — {scanned} Go file(s) scanned, "

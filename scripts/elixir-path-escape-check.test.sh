@@ -430,6 +430,310 @@ else
 fi
 echo
 
+# ── case 3d: SHAPE 1 — the INTERPOLATED ANCHOR is seen (tag test-rootinterp) ─
+# `Path.expand("../../..#{""}", __DIR__)` — the anchor's own literal carries a
+# splice. wbt-jwt-path-escape-blind-idioms closes this: the anchor regex used
+# to require the literal to be PURE dots-and-slashes, so an interpolated
+# anchor failed the match entirely and everything joined off it went dark.
+# Every join form resolves off the SAME computed anchor directory, so this
+# uses the plain `Path.join(@anchor, "lit")` form already proven live by case
+# 3b; the point here is the ANCHOR capture itself, not a new join shape.
+echo "case 3d: SHAPE 1 — an interpolated anchor literal is seen, tagged test-rootinterp"
+FX_INTERP="$TMPROOT/interpanchor"
+make_fixture "$FX_INTERP"
+mkdir -p "$FX_INTERP/nowhere"
+: >"$FX_INTERP/nowhere/interp.json"
+cat >"$FX_INTERP/api/test/barkpark/interp_test.exs" <<'EX'
+  @repo_root Path.expand("../../..#{""}", __DIR__)
+  @bad Path.join(@repo_root, "nowhere/interp.json")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_INTERP" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on an interpolated-anchor uncovered read"
+else
+  no "PASSED with an interpolated-anchor uncovered read — shape 1 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/interp.json"; then
+  ok "names the path the interpolated anchor resolved to"
+else
+  no "did not name the interpolated-anchor path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/interp_test.exs"; then
+  ok "attributes the interpolated-anchor read to its file"
+else
+  no "did not attribute the interpolated-anchor read: $out"
+fi
+if has "$out" "idiom test-rootinterp: "; then
+  ok "reports test-rootinterp as its own idiom, not folded into test-root"
+else
+  no "the interpolated anchor has no tag of its own — a fused count cannot see it die: $out"
+fi
+# a DECLARED read through an interpolated anchor must stay green — the door
+# must not turn every interpolated anchor into a red.
+rm -f "$FX_INTERP/api/test/barkpark/interp_test.exs"
+cat >"$FX_INTERP/api/test/barkpark/interp_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..#{""}", __DIR__)
+  @good Path.join(@repo_root, "internal/taskboard/tokens_gen.go")
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_INTERP" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a DECLARED read through an interpolated anchor stays green"
+else
+  no "a declared interpolated-anchor read redded — the door over-reports: $out"
+fi
+# the fix is LOAD-BEARING: reverting the anchor literal back to its pre-fix
+# `[./]+` (pure dots-and-slashes, no splice tolerance) must make the very same
+# uncovered fixture green again — that green IS the proof the widened regex
+# is what caught it, not a fixture quirk.
+rm -f "$FX_INTERP/api/test/barkpark/interp_ok_test.exs"
+cat >"$FX_INTERP/api/test/barkpark/interp_test.exs" <<'EX'
+  @repo_root Path.expand("../../..#{""}", __DIR__)
+  @bad Path.join(@repo_root, "nowhere/interp.json")
+EX
+MUT_INTERP="$TMPROOT/mutant-no-interp-anchor.sh"
+python3 - "$SCRIPT" "$MUT_INTERP" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+text = open(src).read()
+old = r'"[./]*(\#\{[^}]*\})?[./]*"'
+new = r'"[./]+"'
+assert text.count(old) == 1, "anchor regex literal not found exactly once — mutation would prove nothing"
+open(dst, "w").write(text.replace(old, new, 1))
+PY
+if ! cmp -s "$MUT_INTERP" "$SCRIPT"; then
+  ok "the interpolated-anchor mutation applied (the anchor regex really changed)"
+else
+  no "the interpolated-anchor mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_INTERP" bash "$MUT_INTERP" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "without interpolation tolerance the same read greens — shape 1's fix is load-bearing"
+else
+  no "the interpolated-anchor fixture redded even with the widened regex reverted — case 3d proves nothing: $out"
+fi
+echo
+
+# ── case 3e: SHAPE 4 — NON-__DIR__ BASE is seen (tag test-rootbase) ─────────
+# `Path.expand("lit", @root)` / `Path.absname("lit", @root)` — the anchor is
+# the SECOND argument, so none of the three join-form doors (all of which
+# look for the anchor BEFORE the comma) ever see it.
+echo "case 3e: SHAPE 4 — Path.expand/absname(\"lit\", @anchor) is seen, tagged test-rootbase"
+FX_BASE="$TMPROOT/rootbase"
+make_fixture "$FX_BASE"
+mkdir -p "$FX_BASE/nowhere"
+: >"$FX_BASE/nowhere/based.json"
+: >"$FX_BASE/nowhere/absbased.json"
+cat >"$FX_BASE/api/test/barkpark/based_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @bad Path.expand("nowhere/based.json", @repo_root)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_BASE" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a Path.expand(lit, @anchor) uncovered read"
+else
+  no "PASSED with a Path.expand(lit, @anchor) uncovered read — shape 4 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/based.json"; then
+  ok "names the path Path.expand(lit, @anchor) resolved to"
+else
+  no "did not name the Path.expand(lit, @anchor) path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/based_test.exs"; then
+  ok "attributes the Path.expand(lit, @anchor) read to its file"
+else
+  no "did not attribute the Path.expand(lit, @anchor) read: $out"
+fi
+if has "$out" "idiom test-rootbase: "; then
+  ok "reports test-rootbase as its own idiom"
+else
+  no "Path.expand(lit, @anchor) has no tag of its own: $out"
+fi
+# the Path.absname sibling form must be seen too, not just Path.expand
+rm -f "$FX_BASE/api/test/barkpark/based_test.exs"
+cat >"$FX_BASE/api/test/barkpark/absbased_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @bad Path.absname("nowhere/absbased.json", @repo_root)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_BASE" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has "$out" "UNCOVERED repo-root read: nowhere/absbased.json"; then
+  ok "the Path.absname(lit, @anchor) sibling form is seen too"
+else
+  no "Path.absname(lit, @anchor) is invisible to the rootbase door: $out"
+fi
+# a DECLARED read through this form must stay green
+rm -f "$FX_BASE/api/test/barkpark/absbased_test.exs"
+cat >"$FX_BASE/api/test/barkpark/based_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @good Path.expand("internal/taskboard/tokens_gen.go", @repo_root)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_BASE" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a DECLARED read through Path.expand(lit, @anchor) stays green"
+else
+  no "a declared Path.expand(lit, @anchor) read redded — the door over-reports: $out"
+fi
+# the door is LOAD-BEARING: disabling its grep must make the uncovered
+# fixture green again.
+rm -f "$FX_BASE/api/test/barkpark/based_ok_test.exs"
+cat >"$FX_BASE/api/test/barkpark/based_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @bad Path.expand("nowhere/based.json", @repo_root)
+EX
+MUT_BASE="$TMPROOT/mutant-no-rootbase.sh"
+python3 - "$SCRIPT" "$MUT_BASE" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if 'based="$(grep -Eoh' in line:
+        target = i
+        break
+assert target is not None, "the shape-4 grep line was not found — mutation would prove nothing"
+indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+lines[target] = indent + 'based=""\n'
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_BASE" "$SCRIPT"; then
+  ok "the rootbase mutation applied (the Path.expand/absname grep really changed)"
+else
+  no "the rootbase mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_BASE" bash "$MUT_BASE" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "without the rootbase grep the same read greens — shape 4's door is load-bearing"
+else
+  no "the based fixture redded even with the grep disabled — case 3e proves nothing: $out"
+fi
+echo
+
+# ── case 3f: SHAPE 6 — a MULTI-LINE Path.join( is seen (tag test-rootmulti) ──
+# A `Path.join(` whose anchor and literal sit on the lines AFTER the opener —
+# every other door is line-based, so none of them see it. This door reads a
+# WINDOW instead. LIVE today, anchored on `System.tmp_dir!()` rather than a
+# tracked repo-root anchor, at api/lib/barkpark/plugins/tickets/
+# attachments.ex:253 and api/lib/barkpark/plugins/onixedit/export/
+# validator.ex:93 — so this case proves BOTH halves: a tracked anchor in this
+# shape is caught, and the two real sites are SEEN (the opener scan runs
+# unconditionally) without being wrongly resolved to a new read.
+echo "case 3f: SHAPE 6 — a multi-line Path.join( is seen, tagged test-rootmulti"
+FX_MULTI="$TMPROOT/multiline"
+make_fixture "$FX_MULTI"
+mkdir -p "$FX_MULTI/nowhere"
+: >"$FX_MULTI/nowhere/multiline.json"
+cat >"$FX_MULTI/api/test/barkpark/multiline_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r do
+    Path.join(
+      @repo_root,
+      "nowhere/multiline.json"
+    )
+  end
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_MULTI" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a multi-line-join uncovered read"
+else
+  no "PASSED with a multi-line-join uncovered read — shape 6 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/multiline.json"; then
+  ok "names the path the multi-line join resolved to"
+else
+  no "did not name the multi-line-join path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/multiline_test.exs"; then
+  ok "attributes the multi-line-join read to its file"
+else
+  no "did not attribute the multi-line-join read: $out"
+fi
+if has "$out" "idiom test-rootmulti: "; then
+  ok "reports test-rootmulti as its own idiom"
+else
+  no "the multi-line join has no tag of its own: $out"
+fi
+# a DECLARED read through the multi-line form must stay green
+rm -f "$FX_MULTI/api/test/barkpark/multiline_test.exs"
+cat >"$FX_MULTI/api/test/barkpark/multiline_ok_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r do
+    Path.join(
+      @repo_root,
+      "internal/taskboard/tokens_gen.go"
+    )
+  end
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_MULTI" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a DECLARED read through the multi-line form stays green"
+else
+  no "a declared multi-line-join read redded — the door over-reports: $out"
+fi
+rm -f "$FX_MULTI/api/test/barkpark/multiline_ok_test.exs"
+
+# sanity against the REAL tree: the two live sites the task names really do
+# carry the bare `Path.join(` opener this door scans for, and contribute no
+# census row — "seen, not resolved", because neither binds its anchor
+# (System.tmp_dir!()) via Path.expand(…, __DIR__).
+for site in api/lib/barkpark/plugins/tickets/attachments.ex \
+  api/lib/barkpark/plugins/onixedit/export/validator.ex; do
+  if grep -qE '^[[:space:]]*Path\.join\([[:space:]]*$' "$REAL_ROOT/$site"; then
+    ok "the live multi-line opener in $site matches what shape 6 scans for"
+  else
+    no "the live multi-line opener in $site no longer matches — the task's claim is stale"
+  fi
+done
+# `--list-escapes` rows are `<path><TAB><source-file><TAB><idiom>`; the source
+# file is the SECOND column, so check it there rather than a bare substring
+# search (which could in principle also match a resolved PATH by accident).
+real_census_sources="$("$SCRIPT" --list-escapes | cut -f2 | sort -u)"
+for site in api/lib/barkpark/plugins/tickets/attachments.ex \
+  api/lib/barkpark/plugins/onixedit/export/validator.ex; do
+  if has_line "$real_census_sources" "$site"; then
+    no "$site unexpectedly contributes a census row via shape 6"
+  else
+    ok "$site is seen by the opener scan but resolves to no new read (anchors on System.tmp_dir!(), not tracked)"
+  fi
+done
+
+# the door is LOAD-BEARING: disabling the opener scan must make the synthetic
+# fixture green again.
+cat >"$FX_MULTI/api/test/barkpark/multiline_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  def r do
+    Path.join(
+      @repo_root,
+      "nowhere/multiline.json"
+    )
+  end
+EX
+MUT_MULTI="$TMPROOT/mutant-no-multiline.sh"
+python3 - "$SCRIPT" "$MUT_MULTI" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if 'openers="$(grep -noE' in line:
+        target = i
+        break
+assert target is not None, "the shape-6 opener-scan line was not found — mutation would prove nothing"
+indent = lines[target][:len(lines[target]) - len(lines[target].lstrip())]
+lines[target] = indent + 'openers=""\n'
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_MULTI" "$SCRIPT"; then
+  ok "the multi-line-join mutation applied (the opener scan really changed)"
+else
+  no "the multi-line-join mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_MULTI" bash "$MUT_MULTI" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "without the opener scan the same read greens — shape 6's door is load-bearing"
+else
+  no "the multi-line fixture redded even with the opener scan disabled — case 3f proves nothing: $out"
+fi
+echo
+
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────
 # Same mutation, but inside a real git repo where the offending fixture is
 # present on disk and NOT tracked. A `git ls-files` enumeration reports clean

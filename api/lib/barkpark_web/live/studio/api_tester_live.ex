@@ -491,6 +491,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
                 <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> pass</span>
                 <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> fail</span>
                 <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> error</span>
+                <span class="badge badge-verdict-unverified"><%= Enum.count(@scenario_results, &(&1.result.verdict == :unverified)) %> unverified</span>
               </div>
             <% else %>
               <%= if @last_result do %>
@@ -633,6 +634,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       .badge-verdict-pass { background: var(--ok-soft); color: var(--success); }
       .badge-verdict-fail { background: var(--danger-soft); color: var(--destructive); }
       .badge-verdict-error { background: var(--warn-soft); color: var(--warning); }
+      .badge-verdict-unverified { background: var(--bg-muted); color: var(--fg-muted); }
 
       /* Slim the verdict badge when it sits in place of a chevron in a pane-item row */
       .pane-item .badge {
@@ -697,6 +699,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         :pass -> "Pass"
         :fail -> "Fail"
         :error -> "Error"
+        :unverified -> "Unverified"
       end
 
     class = "badge badge-verdict-#{verdict}"

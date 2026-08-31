@@ -235,7 +235,12 @@ func paperTitle(doc paperDocShape) string {
 // single resource content — no re-render (charter decision 9). An HTTP >= 400 is
 // turned into a resource error: a 404 into the SDK's ResourceNotFoundError (so an
 // unknown id reads as "not found"), any other status into a plain error carrying
-// the server's envelope.
+// the server's envelope. A STATED success (< 400) that carries no honest answer —
+// an HTML proxy/login page, a non-JSON body, or an error envelope contradicting
+// the 2xx — is likewise turned into an error rather than handed to the client as
+// the paper's content: readPaperResource reuses run.go's unreadableReadBody (the
+// SAME read discriminator mcpRunFor applies to a task_show/task_ready tool call)
+// rather than re-deriving the predicate for resources.
 func readPaperResource(g globals, ctx manifest.Context, m *manifest.Manifest, getCmd manifest.Command, uri, id string) (*mcp.ReadResourceResult, error) {
 	tail := []string{"paper", id}
 	if commandHasFlag(getCmd, "perspective") {
@@ -251,6 +256,13 @@ func readPaperResource(g globals, ctx manifest.Context, m *manifest.Manifest, ge
 	}
 	if status >= 400 {
 		return nil, fmt.Errorf("read paper %q: HTTP %d: %s", id, status, strings.TrimSpace(string(body)))
+	}
+	if reason, contradiction := unreadableReadBody(body); reason != "" {
+		hint := unreadableReadHint
+		if contradiction {
+			hint = unreadableReadContradictionHint
+		}
+		return nil, fmt.Errorf("read paper %q: unreadable read: HTTP %d %s (%d bytes): %s (%s)", id, status, reason, len(body), bodyPreview(body), hint)
 	}
 	return &mcp.ReadResourceResult{
 		Contents: []*mcp.ResourceContents{{

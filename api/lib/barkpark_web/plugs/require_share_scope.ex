@@ -154,6 +154,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
         |> assign(:current_project, project)
         |> assign(:share_public, true)
         |> assign(:share_access, Sharing.access_for(ws_slug, project_slug, dataset))
+        |> assign(:share_grant, :section)
       else
         _ -> conn
       end
@@ -216,9 +217,36 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       |> assign(:current_project, project)
       |> assign(:share_public, true)
       |> assign(:share_access, :read)
+      |> assign(:share_grant, :item)
+      |> strip_item_grant_walk_params()
     else
       _ -> conn
     end
+  end
+
+  # An item grant is confined to the ONE resource it is bound to
+  # (`link_matches_route_resource?/2` above). `query_controller`'s `?expand=`
+  # and `?resolve=tasks` both walk OUTWARD from the bound doc — expand follows
+  # its references, resolve=tasks runs a scope-wide task query — so either
+  # param would let a leaked item link read documents it was never minted for.
+  # A `:section` grant has no such confinement (the whole scope is already
+  # readable), so only the `:item` grant strips these.
+  #
+  # STRIP, not a 403: a 403 would BREAK a reader's link the moment a paper
+  # happens to carry a reference or a task-list block — collateral damage for
+  # a param the reader never asked for. Stripping instead degrades silently to
+  # exactly the bound document, which is everything the link ever promised.
+  # Both `conn.params` (what the controller action pattern-matches against)
+  # AND `conn.query_params` (what a re-fetch or a downstream plug would see)
+  # are dropped, so neither copy of the param survives to the controller.
+  @strippable_walk_params ~w(expand resolve)
+
+  defp strip_item_grant_walk_params(conn) do
+    %{
+      conn
+      | params: Map.drop(conn.params, @strippable_walk_params),
+        query_params: Map.drop(conn.query_params, @strippable_walk_params)
+    }
   end
 
   # An item link is bound to ONE resource; it only opens a route addressing

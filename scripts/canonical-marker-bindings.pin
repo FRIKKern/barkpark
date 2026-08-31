@@ -6,6 +6,7 @@ codelist-lookup	lookup
 connector-credential-sealing	createCredentialCipher
 connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler
+console-authority-predicate	instanceAdminAuthority
 corpus-visible-schemas	visible_schemas
 doc-backlinks	reverse_referencers
 draft-published-id	published_id
@@ -23,6 +24,7 @@ github-reporter-acknowledgement	criterion
 heat-quantile-bin	HeatQuantileBins
 http-redirect-policy	CheckRedirect
 instance-content-bootstrap	Run
+instrument-exit-vocabulary	createExitVocabulary
 mcp-task-tools	registerTaskTools
 merge-gate-criterion-predicate	merge_gated?
 platform-delivery-record	record_all

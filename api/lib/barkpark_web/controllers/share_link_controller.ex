@@ -561,7 +561,9 @@ defmodule BarkparkWeb.ShareLinkController do
   end
 
   defp paper_body_html(_paper, _link), do: ""
-  defp paper_article?(%{content: content}), do: Map.get(content || %{}, "style") == "article"
+
+  defp paper_article?(%{content: content}),
+    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
 
   # Canonical v1 error envelope (code + request_id) for the JSON API paths — the
   # same contract as the content endpoints; was a bare `%{error: msg}` with

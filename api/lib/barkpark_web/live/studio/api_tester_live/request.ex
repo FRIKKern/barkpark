@@ -13,9 +13,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Request do
     end
   end
 
-  # No asserts = informational spec — treat as pass so the badge doesn't
-  # scream FAIL on a runner-only test case.
-  def compute_plugin_status([]), do: :pass
+  # No asserts = informational spec — nothing was actually checked against
+  # the response, so this is NOT a pass. :unverified is a third state (never
+  # a failure either): it badges distinctly from :pass so a 500 returned by
+  # a zero-expectation spec can't read green. See runner.ex's `check/2` and
+  # api_test_runner.ex's `compute_status/2` for the sibling sites.
+  def compute_plugin_status([]), do: :unverified
 
   def compute_plugin_status(asserts_results) do
     if Enum.all?(asserts_results, &(&1.status == :pass)), do: :pass, else: :fail

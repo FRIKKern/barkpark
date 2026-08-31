@@ -61,5 +61,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Format do
 
   def verdict_badge_class(:pass), do: "badge-verdict-pass"
   def verdict_badge_class(:fail), do: "badge-verdict-fail"
+  def verdict_badge_class(:unverified), do: "badge-verdict-unverified"
   def verdict_badge_class(_), do: "badge-verdict-error"
 end

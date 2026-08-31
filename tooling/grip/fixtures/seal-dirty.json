@@ -17,15 +17,14 @@
     "       port that kept fetchRoster reports one fewer blocking row than exists.",
     "  (b') the ROOT IS ABSENT FROM THE POOL. This is the clause D108 warns is deleted by inheritance:",
     "       the prior art excludes its root by construction, never by a check, so there is nothing to",
-    "       fail. Here there is. Note the root still carries lifecycle_status open — a (b') keyed on",
-    "       `claim == null` or on the root's status would pass this row and the amendment would be",
-    "       vacuous.",
+    "       fail. Here there is, and it fails on POOL MEMBERSHIP alone — a (b') keyed on `claim == null`",
+    "       or on the root's own status would pass this row and the amendment would be vacuous.",
     "  (c)  the root document is already `done`: the seal is being asked to bless an out-of-order close",
     "       retroactively. It refuses."
   ],
   "root_doc": { "_id": "truth-grip-epic", "_type": "task", "lifecycle_status": "done", "_draft": false },
   "namespace": [
-    { "_id": "truth-grip-epic", "_type": "task", "lifecycle_status": "open", "parent_id": null, "_draft": false },
+    { "_id": "truth-grip-epic", "_type": "task", "lifecycle_status": "done", "parent_id": null, "_draft": false },
     { "_id": "tgw1-workflow-gate-wiring", "_type": "task", "lifecycle_status": "done", "parent_id": "truth-grip-epic", "_draft": false },
     { "_id": "tgw2-verify-writes-back", "_type": "task", "lifecycle_status": "open", "parent_id": "tgw1-workflow-gate-wiring", "_draft": false },
     { "_id": "tgw6-bl-grip-suite-has-no-ci", "_type": "task", "lifecycle_status": "open", "parent_id": "truth-grip-epic", "_draft": false },

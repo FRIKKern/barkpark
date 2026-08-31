@@ -1395,6 +1395,72 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
+  @doc """
+  isu-w5 (task-509f5fd02bc48f9c): enqueue a `pending` ENABLE_APPLY job for
+  `barkpark` — the retro-arm rail that flips `BARKPARK_SELF_UPDATE_APPLY=1` on a
+  live managed box (+ app restart) so its one-click/autoupdate executor works.
+  New boxes provision with the flag; this repairs the pre-flag cohort instead of
+  leaving them silently skipped by the rollout.
+
+  Same one-active-per-kind guard as the other kinds: an ACTIVE (pending/claimed)
+  `enable_apply` job already in flight for this barkpark returns
+  `{:error, :already_arming}` — one arming in transit per box at a time, so the
+  hourly unarmed re-measurement never piles up duplicate jobs.
+  """
+  @spec enqueue_enable_apply_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_arming | Ecto.Changeset.t()}
+  def enqueue_enable_apply_job(barkpark) do
+    bp_id = barkpark_id(barkpark)
+
+    if active_job_of_kind?(bp_id, "enable_apply") do
+      {:error, :already_arming}
+    else
+      %ProvisionJob{}
+      |> ProvisionJob.changeset(%{
+        barkpark_id: bp_id,
+        kind: "enable_apply",
+        status: "pending"
+      })
+      |> Repo.insert()
+      |> translate_active_job_conflict(:already_arming)
+    end
+  end
+
+  @doc """
+  THE AUTO-ENQUEUE (task-509f5fd02bc48f9c criterion 2): file an enable-apply job
+  for a box that was just MEASURED unarmed — but only when the repair is
+  actually consented and deliverable. The admin's autoupdate opt-in IS the
+  consent (a managed box is cloud-operated by definition), so the gate is:
+
+    * `autoupdate_enabled` — the team asked for unattended updates; arming is
+      what makes that ask real. A box opted OUT is never touched.
+    * not `suspended` — never SSH into a suspended customer's box.
+    * a non-blank `host` — nowhere to deliver otherwise.
+
+  Best-effort AND quiet on dedup: `{:error, :already_arming}` means the rail is
+  already carrying this box (the hourly sweep re-reports unarmed until the job
+  lands) and is returned as `:ok`-shaped `{:ok, :already_arming}` so callers on
+  measurement paths never treat it as a failure. A box outside the gate returns
+  `{:ok, :skipped}`.
+  """
+  @spec maybe_enqueue_enable_apply_job(Barkpark.t()) ::
+          {:ok, ProvisionJob.t() | :already_arming | :skipped} | {:error, Ecto.Changeset.t()}
+  def maybe_enqueue_enable_apply_job(%Barkpark{} = bp) do
+    eligible? =
+      bp.autoupdate_enabled == true and bp.suspended == false and
+        is_binary(bp.host) and bp.host != ""
+
+    if eligible? do
+      case enqueue_enable_apply_job(bp) do
+        {:ok, job} -> {:ok, job}
+        {:error, :already_arming} -> {:ok, :already_arming}
+        {:error, cs} -> {:error, cs}
+      end
+    else
+      {:ok, :skipped}
+    end
+  end
+
   # dwb-11: map a lost race on the one-active-job-per-barkpark-kind partial unique
   # index to a clean dedup atom. Any OTHER changeset error (or the {:ok, _} happy
   # path) passes through unchanged — only the money-path collision is rewritten.
@@ -1614,6 +1680,15 @@ defmodule BarkparkCloud.Registry do
   @spec claim_next_agent_key_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
   def claim_next_agent_key_job(claim_token) when is_binary(claim_token),
     do: claim_next_job(claim_token, "push_agent_key")
+
+  @doc """
+  isu-w5: atomically claim the next claimable ENABLE_APPLY job — the retro-arm
+  worker's pull. Same machinery as `claim_next_job/2`, filtered to
+  `kind: "enable_apply"` so no other drain grabs it.
+  """
+  @spec claim_next_enable_apply_job(String.t()) :: {ProvisionJob.t(), Barkpark.t()} | nil
+  def claim_next_enable_apply_job(claim_token) when is_binary(claim_token),
+    do: claim_next_job(claim_token, "enable_apply")
 
   # Lock the oldest claimable row (pending, or claimed-but-stale); concurrent
   # claimers SKIP LOCKED past it. If a stale row has burned through its attempt
@@ -2430,6 +2505,33 @@ defmodule BarkparkCloud.Registry do
           {:ok, ProvisionJob.t()}
           | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
   def fail_agent_key_job(id, error, opts \\ []), do: fail_job(id, error, opts)
+
+  @doc """
+  isu-w5: mark enable-apply job `id` succeeded — the env flag landed on the box
+  and the app restarted. Flips the JOB ROW ONLY (`result_ip` when the worker
+  echoed the box ip): an arming push must NEVER run `succeed_job/3`'s barkpark
+  upsert, which would clobber a LIVE row's health/host. The `apply_arming`
+  column is deliberately NOT written here — it is a MEASUREMENT, and the
+  now-armed box answers `apply_enabled: true` on the next probe/sweep, which is
+  what re-enters it into the candidate set. Same idempotency + claim-fence
+  contract as `succeed_agent_key_job/3`.
+  """
+  @spec succeed_enable_apply_job(binary(), String.t() | nil, keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def succeed_enable_apply_job(id, ip \\ nil, opts \\ []) when is_binary(id) and is_list(opts),
+    do: succeed_job_row_only(id, ip, opts)
+
+  @doc """
+  isu-w5: mark enable-apply job `id` failed with `error`. The barkpark row is
+  untouched (the box stays live and stays MEASURED-unarmed, so the next unarmed
+  measurement re-enqueues — the retry loop). Delegates to `fail_job/3`, exactly
+  like the agent-key fail.
+  """
+  @spec fail_enable_apply_job(binary(), String.t(), keyword()) ::
+          {:ok, ProvisionJob.t()}
+          | {:error, :not_found | :conflict | :stale_claim | Ecto.Changeset.t()}
+  def fail_enable_apply_job(id, error, opts \\ []), do: fail_job(id, error, opts)
 
   # The shared job-row-only succeed (attach_domain + push_agent_key): flip the
   # job to succeeded WITHOUT touching the owning barkpark. Idempotent + fenced
@@ -4322,7 +4424,34 @@ defmodule BarkparkCloud.Registry do
     # produces today.
     |> Ecto.Changeset.force_change(:apply_arming, arming)
     |> Repo.update()
+    |> auto_enqueue_on_unarmed(arming)
   end
+
+  # isu-w5 (task-509f5fd02bc48f9c): a box that just MEASURED unarmed gets its
+  # repair filed, not just recorded — `maybe_enqueue_enable_apply_job/1` gates on
+  # consent (autoupdate_enabled, not suspended, has a host) and dedups via the
+  # one-active-per-kind index, so the hourly sweep re-reporting the same box is
+  # a no-op while a job is in flight. Best-effort: an enqueue failure must never
+  # mask the measurement that was successfully persisted (same posture as the
+  # rollout worker's 503 branch — a control-plane fault is retried next
+  # measurement, not escalated). Return value passes through untouched, so every
+  # `refresh_update_status/1` caller keeps its exact contract.
+  defp auto_enqueue_on_unarmed({:ok, %Barkpark{} = bp} = ok, "unarmed") do
+    case maybe_enqueue_enable_apply_job(bp) do
+      {:ok, _} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "enable-apply: #{bp.slug} measured unarmed but the auto-enqueue FAILED " <>
+            "(#{inspect(reason)}) — will retry on the next unarmed measurement"
+        )
+    end
+
+    ok
+  end
+
+  defp auto_enqueue_on_unarmed(result, _arming), do: result
 
   # Best-effort "unknown" landing for every failure mode — the row always
   # reflects that we asked and got no usable verdict, AND (cch-w58) WHICH
@@ -4736,6 +4865,13 @@ defmodule BarkparkCloud.Registry do
   Deliberately writes ONLY the two arming columns — it must not touch
   `update_state` (the box's `behind` verdict is unchanged by its refusal to
   apply) and it must not touch any autoupdate policy column.
+
+  isu-w5 (task-509f5fd02bc48f9c): recording is no longer the end of the story —
+  the same unarmed measurement auto-files the repair
+  (`maybe_enqueue_enable_apply_job/1`, consent-gated + deduped), so a box on
+  autoupdate that answers 503 gets ARMED by the provisioner instead of sitting
+  on the retro-arm worklist waiting for a human. Best-effort: an enqueue failure
+  never masks the successfully-persisted measurement.
   """
   @spec record_apply_unarmed(Barkpark.t()) :: {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def record_apply_unarmed(%Barkpark{} = bp) do
@@ -4745,6 +4881,7 @@ defmodule BarkparkCloud.Registry do
       apply_arming_checked_at: DateTime.utc_now()
     })
     |> Repo.update()
+    |> auto_enqueue_on_unarmed("unarmed")
   end
 
   @doc """

@@ -93,6 +93,31 @@
     return btoa(unescape(encodeURIComponent(str)));
   }
 
+  // Write to the browser clipboard. navigator.clipboard needs a secure
+  // context (https / localhost); fall back to the execCommand textarea dance
+  // for plain-http dev, restoring terminal focus after.
+  function copyToClipboard(text, refocus) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).catch(function () {
+        execCommandCopy(text, refocus);
+      });
+    } else {
+      execCommandCopy(text, refocus);
+    }
+  }
+
+  function execCommandCopy(text, refocus) {
+    var ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (e) {}
+    document.body.removeChild(ta);
+    if (refocus) refocus();
+  }
+
   // A classic dark terminal palette — terminals read best on their own dark
   // surface regardless of the Studio light/dark theme.
   function terminalTheme() {
@@ -163,6 +188,25 @@
 
       this._term = term;
       this._fit = fit;
+
+      // ⌘C (mac) / Ctrl+Shift+C — copy the xterm selection to the browser
+      // clipboard. xterm paints its own selection (no native DOM selection),
+      // so the browser's plain copy shortcut has nothing to grab; without
+      // this the only working path was right-click → Copy via the hidden
+      // helper textarea. Returning false keeps xterm from also forwarding
+      // the chord to the PTY.
+      term.attachCustomKeyEventHandler(function (ev) {
+        if (ev.type !== "keydown") return true;
+        var isCopy =
+          (ev.metaKey && !ev.ctrlKey && !ev.altKey && ev.key === "c") ||
+          (ev.ctrlKey && ev.shiftKey && (ev.key === "C" || ev.key === "c"));
+        if (isCopy && term.hasSelection()) {
+          copyToClipboard(term.getSelection(), function () { term.focus(); });
+          ev.preventDefault();
+          return false;
+        }
+        return true;
+      });
 
       // input → server
       term.onData(function (data) {

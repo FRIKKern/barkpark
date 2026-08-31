@@ -735,7 +735,7 @@ defmodule Barkpark.ApiTester.EndpointsCatalogBaseline do
     %{
       id: "history-show",
       label: "Get revision",
-      runnable: true,
+      runnable: false,
       auth: :token,
       description:
         "Fetch a single revision by UUID. Returns the full content snapshot as it existed at that point in time. Use this to inspect what changed between revisions.",
@@ -767,7 +767,7 @@ defmodule Barkpark.ApiTester.EndpointsCatalogBaseline do
     %{
       id: "history-restore",
       label: "Restore revision",
-      runnable: true,
+      runnable: false,
       auth: :token,
       description:
         "Restore a document to a previous revision. Creates or updates the draft at drafts.{doc_id} with the revision's content. The published version is not affected — you must publish separately.",
@@ -1028,12 +1028,12 @@ defmodule Barkpark.ApiTester.EndpointsCatalogBaseline do
       response_shape:
         "{\n  \"webhook\": {\n    \"id\": \"550e8400-...\",\n    \"name\": \"Notify Slack\",\n    \"url\": \"https://hooks.slack.com/...\",\n    \"dataset\": \"production\",\n    \"events\": [\"publish\"],\n    \"types\": [\"post\"],\n    \"active\": true,\n    \"created_at\": \"2026-04-16T12:00:00Z\",\n    \"updated_at\": \"2026-04-16T12:00:00Z\"\n  }\n}\n",
       possible_errors: [:unauthorized, :forbidden, :validation_failed],
-      expect: nil
+      expect: {201, :ok}
     },
     %{
       id: "webhooks-delete",
       label: "Delete webhook",
-      runnable: true,
+      runnable: false,
       auth: :admin,
       description:
         "Permanently remove a webhook subscription. Pending deliveries for this webhook are cancelled. Requires admin token.",

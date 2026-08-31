@@ -116,7 +116,7 @@ function main() {
   // ── (a') NEVER-WORSE (live tree): the corrected tree introduces no dead-tech ─
   // The complement of fail-before: the standing denylist over the REAL tree must
   // be clean now that the purge slices landed. This is the regression teeth — a
-  // future re-introduction of bin/bd-shim or live-Cytoscape prose fails here.
+  // future re-introduction of live-Cytoscape prose fails here.
   const liveTerm = scanCorpus();
   if (liveTerm.length !== 0) {
     fails.push(`(a') retired-terms live never-worse breach: ${liveTerm.length} dead-tech occurrence(s) remain on the corrected tree`);

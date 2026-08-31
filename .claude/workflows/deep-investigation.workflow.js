@@ -1,13 +1,13 @@
 export const meta = {
   name: 'deep-investigation',
-  description: 'Epic-preparation research harness: 1 Fable frames 5 investigation lanes → 5 Fable investigators → their data-needs pool into a ~25-Sonnet storm → routed back → each lane crunches everything and publishes an incredible preparation Paper → 1 Fable capstone links them. Papers only — no code, no builds.',
+  description: 'Epic-preparation research harness: 1 Fable frames 5 investigation lanes → 5 Fable investigators → their data-needs pool into a ~25-Opus storm → routed back → each lane crunches everything and publishes an incredible preparation Paper → 1 Fable capstone links them. Papers only — no code, no builds.',
   whenToUse:
     'INVOKE: Workflow({scriptPath: ".claude/workflows/deep-investigation.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED>", interview: "<Q&A digest from step 0>", lead_notes: "<optional steering>", epic_task_id: "<optional task-… slug>", storm_size: 25}}) — always by scriptPath, never by name (the name registry is a session-start snapshot). Use it to prepare a POTENTIAL epic before any charter or build wave exists. STEP 0 — THE INTERVIEW, in the MAIN session BEFORE launching: the run is headless and can never reach the user, so ask 1-4 HIGH-VALUE questions via AskUserQuestion — the ones whose answers most change the framing (product intent, audience, platform constraints, scope ambition, taste) — and pass the digest as args.interview; skip only when the wish is already unambiguous on those axes. The point is that the run starts INFORMATION-RICH: Frame should inherit everything the session already holds — interview answers, known ground truth, prior epics, steering (args.lead_notes) — so it spends its judgment on lane design, not on rediscovering what the user could have just said. The crown paper is the deliverable, and it feeds bp-epic-cycle as strategize-phase raw material.',
   phases: [
     { title: 'Frame', detail: '1 Fable, unhurried: reads until reading stops changing its mind, weighs rival framings, cuts exactly 5 investigation lanes with rich missions', model: 'fable' },
     { title: 'Investigate', detail: '5 Fable investigators, read-only, one per lane: deep dig — bp search first, then the repo; each files 3-8 data_needs it wants the storm to fetch', model: 'fable' },
-    { title: 'Dispatch', detail: '1 Fable: pools all data_needs, dedups/merges, designs the storm — 15-25 sharp Sonnet probes, each tagged with the lane(s) it serves', model: 'fable' },
-    { title: 'Storm', detail: '15-25 Sonnet probes, read-only, ~5 min each: fetch exactly what the lanes asked for, with coverage accounting and rerun-carrying facts', model: 'sonnet' },
+    { title: 'Dispatch', detail: '1 Fable: pools all data_needs, dedups/merges, designs the storm — 15-25 sharp Opus probes, each tagged with the lane(s) it serves', model: 'fable' },
+    { title: 'Storm', detail: '15-25 Opus probes, read-only, ~5 min each: fetch exactly what the lanes asked for, with coverage accounting and rerun-carrying facts', model: 'opus' },
     { title: 'Crunch', detail: '5 Fable crunchers, one per lane, carrying the lane brief + its investigation + its storm findings: synthesize everything, then CREATE + PUBLISH the lane\'s preparation Paper', model: 'fable' },
     { title: 'Capstone', detail: '1 Fable, unhurried: reads all 5 published Papers end-to-end and writes THE CROWN PAPER — one large premium report that weaves the best of every lane into a single fantastic document; the 5 lane Papers become its supporting stack; optionally seeds a considering-state epic candidate task', model: 'fable' },
   ],
@@ -37,10 +37,10 @@ const NEEDS_FLOOR = 8 // pooled across all 5 lanes — below this the investigat
 // Phase↔model doctrine (inherited from bp-epic-cycle, lead mandate rev 2):
 // every THINKING role is Fable — here that is 12 of the 13 non-storm agents
 // (frame, 5 investigators, dispatch, 5 crunchers, capstone). The storm is
-// Sonnet — cheap width fetching what the Fables asked for. Never Haiku.
+// Opus — width fetching what the Fables asked for. Never Sonnet or Haiku (operator model policy 2026-08-31).
 const FRAME_MODEL = A.frame_model || 'fable'
 const LANE_MODEL = A.lane_model || 'fable'
-const STORM_MODEL = A.storm_model || 'sonnet'
+const STORM_MODEL = A.storm_model || 'opus'
 
 const USER_WISH_BLOCK = `THE USER'S WISH (this is the focus — everything serves it, judged holistically, not as a checklist):
 """
@@ -136,7 +136,7 @@ const INVESTIGATE_SCHEMA = {
     facts: { type: 'array', description: FACTS_DESCRIPTION, items: FACT_ITEMS },
     data_needs: {
       type: 'array', minItems: 2, maxItems: 8,
-      description: '3-8 things you WANT FETCHED but should not burn your own depth on — mapping sweeps, inventories, cross-surface greps, external references. These become Sonnet storm probes; write each so a cheap agent with none of your context can nail it.',
+      description: '3-8 things you WANT FETCHED but should not burn your own depth on — mapping sweeps, inventories, cross-surface greps, external references. These become Opus storm probes; write each so an agent with none of your context can nail it.',
       items: {
         type: 'object', additionalProperties: false,
         required: ['need', 'why', 'sources_hint'],
@@ -158,14 +158,14 @@ const DISPATCH_SCHEMA = {
     synthesis: { type: 'string', description: 'cross-lane read: where lanes overlap, contradict, or leave gaps; which needs you merged/dropped and why; what the storm must come back with for the crunch to succeed' },
     probes: {
       type: 'array', minItems: 12, maxItems: 25,
-      description: 'the storm: 15-25 sharp Sonnet probes (target 25). Merge duplicate needs across lanes into one probe tagged with every lane it serves; split needs too big for ~5 minutes; add gap-filling probes the lanes missed.',
+      description: 'the storm: 15-25 sharp Opus probes (target 25). Merge duplicate needs across lanes into one probe tagged with every lane it serves; split needs too big for ~5 minutes; add gap-filling probes the lanes missed.',
       items: {
         type: 'object', additionalProperties: false,
         required: ['key', 'lanes', 'question', 'why', 'sources_hint'],
         properties: {
           key: { type: 'string', description: 'short kebab-case label' },
           lanes: { type: 'array', items: { type: 'string' }, description: 'lane key(s) this probe serves — its findings route back to exactly these crunchers ("all" is valid for cross-cutting probes)' },
-          question: { type: 'string', description: 'concrete and self-contained — a Sonnet with no other context must be able to nail it' },
+          question: { type: 'string', description: 'concrete and self-contained — an Opus with no other context must be able to nail it' },
           why: { type: 'string' },
           sources_hint: { type: 'string', description: 'where to look first; empty string if unknown' },
         },
@@ -297,7 +297,7 @@ phase('Investigate')
 const investigations = (await parallel(
   lanes.map((lane) => () =>
     agent(
-      `You are a LANE INVESTIGATOR on a Barkpark deep investigation — one of 5 Fable minds, each owning one lane. Go DEEP: your later self (the cruncher) will write this lane's Paper from what you establish now plus what a Sonnet storm fetches for you. Nothing is built this run.
+      `You are a LANE INVESTIGATOR on a Barkpark deep investigation — one of 5 Fable minds, each owning one lane. Go DEEP: your later self (the cruncher) will write this lane's Paper from what you establish now plus what an Opus storm fetches for you. Nothing is built this run.
 
 ${USER_WISH_BLOCK}
 
@@ -315,7 +315,7 @@ SUSPECTED SOURCES: ${(lane.suspected_sources || []).join(', ') || '(none — you
 
 ${BP_SEARCH_BLOCK} Then read the repo for real — file:line anchors, not vibes. "The premise is wrong" is a valid and valuable finding. Every load-bearing fact needs evidence you actually derived, and its \`rerun\` command.
 
-SPEND YOUR DEPTH WISELY — you have a Sonnet storm at your service. Anything that is WIDE rather than DEEP (inventories, cross-surface greps, endpoint censuses, prior-art sweeps, external references) goes into data_needs (3-8 of them, each written so a cheap agent with NONE of your context can nail it — name the question, the shape of a complete answer, and where to look). Keep your own time for the judgment-heavy digging only a Fable can do.
+SPEND YOUR DEPTH WISELY — you have an Opus storm at your service. Anything that is WIDE rather than DEEP (inventories, cross-surface greps, endpoint censuses, prior-art sweeps, external references) goes into data_needs (3-8 of them, each written so an agent with NONE of your context can nail it — name the question, the shape of a complete answer, and where to look). Keep your own time for the judgment-heavy digging only a Fable can do.
 
 COVERAGE ACCOUNTING: list EVERY file/paper/task you checked in coverage[] — path, what for, found/not_found/partial. NOT-FOUND IS A FINDING. Unlisted = unchecked.
 
@@ -330,12 +330,12 @@ if (investigations.length < LANE_COUNT) {
 const investGrip = gateFactProvenance(investigations)
 const totalNeeds = investigations.reduce((n, r) => n + (r.data_needs || []).length, 0)
 if (totalNeeds < NEEDS_FLOOR) {
-  throw new Error(`Data-needs floor: the 5 investigators pooled only ${totalNeeds} data_needs (floor ${NEEDS_FLOOR}). An investigation that asks the storm for almost nothing either didn't dig or is hoarding width a Sonnet should fetch. Re-run Investigate rather than starving the storm.`)
+  throw new Error(`Data-needs floor: the 5 investigators pooled only ${totalNeeds} data_needs (floor ${NEEDS_FLOOR}). An investigation that asks the storm for almost nothing either didn't dig or is hoarding width the storm should fetch. Re-run Investigate rather than starving the storm.`)
 }
 log(`${investigations.length}/${LANE_COUNT} investigators reported; ${totalNeeds} pooled data_needs; provenance gate: ${investGrip.demoted}/${investGrip.total} fact(s) DEMOTED (no rerun)`)
 
 // ── Phase 3: Dispatch — one Fable pools the needs and designs the storm ──────
-// Barrier justified: dedup/merge across ALL lanes' needs before spending 25 Sonnets.
+// Barrier justified: dedup/merge across ALL lanes' needs before spending 25 storm probes.
 phase('Dispatch')
 const dispatch = await agent(
   `You are the STORM DISPATCHER of a Barkpark deep investigation — one Fable mind holding all 5 lanes' investigation reports. The 5 investigators each filed data_needs: things they want FETCHED before they write their Papers. You design the storm that fetches it all.
@@ -350,11 +350,11 @@ ${JSON.stringify(investigations, null, 2)}
 
 Your job:
 1. SYNTHESIZE across lanes: where do they overlap, contradict each other, or jointly leave a gap no lane owns? Contradictions between lanes are the most valuable thing you can surface — the crunchers must not write 5 papers that silently disagree.
-2. DESIGN THE STORM: ${STORM_FLOOR}-${STORM_TARGET} Sonnet probes (target ${STORM_TARGET}).
+2. DESIGN THE STORM: ${STORM_FLOOR}-${STORM_TARGET} Opus probes (target ${STORM_TARGET}).
    - MERGE duplicate/overlapping needs across lanes into one probe tagged with every lane key it serves (lanes: ["a","b"], or ["all"] for cross-cutting).
-   - SPLIT needs too big for a ~5-minute read-only Sonnet.
+   - SPLIT needs too big for a ~5-minute read-only probe.
    - ADD probes for the cross-lane gaps and contradictions YOU found — the lanes cannot see each other; you can.
-   - Every probe must be self-contained: a Sonnet with zero other context must be able to nail it. Name the question, the shape of a complete answer, and sources_hint.
+   - Every probe must be self-contained: a probe agent with zero other context must be able to nail it. Name the question, the shape of a complete answer, and sources_hint.
    - Honor every lane's needs — a lane whose needs you silently drop writes a starved Paper. If you drop or fold a need, say so in the synthesis.`,
   { label: 'dispatch', phase: 'Dispatch', schema: DISPATCH_SCHEMA, model: FRAME_MODEL }
 )
@@ -365,12 +365,12 @@ if (probes.length < STORM_FLOOR) {
 }
 log(`Dispatcher designed ${probes.length} storm probes`)
 
-// ── Phase 4: Storm — the Sonnets fetch what the lanes asked for ──────────────
+// ── Phase 4: Storm — the Opus probes fetch what the lanes asked for ─────────
 phase('Storm')
 const stormReports = (await parallel(
   probes.map((p) => () =>
     agent(
-      `You are a STORM PROBE on a Barkpark deep investigation — one of ${probes.length} Sonnets in a wide fetch sweep serving 5 Fable paper-writers. READ-ONLY: no edits, no commits, no bp mutations. Budget: ~5 minutes — a fast honest answer with real file:line anchors beats a deep dive.
+      `You are a STORM PROBE on a Barkpark deep investigation — one of ${probes.length} Opus probes in a wide fetch sweep serving 5 Fable paper-writers. READ-ONLY: no edits, no commits, no bp mutations. Budget: ~5 minutes — a fast honest answer with real file:line anchors beats a deep dive.
 
 ${USER_WISH_BLOCK}
 

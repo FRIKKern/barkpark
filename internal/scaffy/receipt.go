@@ -57,6 +57,11 @@ type ReceiptOp struct {
 }
 
 // ReadReceipt loads a persisted receipt (the D36 remove-replay seam).
+// A torn or undecodable body (a crash mid-write under the old
+// single-os.WriteFile path, or hand corruption) gets an actionable
+// message instead of a silent dead end: a receipt that can't be read
+// back can't be retracted either, so `bp scaffy remove` needs to be
+// told exactly which file to delete and which command to re-run.
 func ReadReceipt(path string) (*Receipt, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -64,9 +69,24 @@ func ReadReceipt(path string) (*Receipt, error) {
 	}
 	var r Receipt
 	if err := json.Unmarshal(b, &r); err != nil {
-		return nil, fmt.Errorf("%s: not a scaffy receipt: %w", path, err)
+		return nil, fmt.Errorf(
+			"%s: torn or undecodable scaffy receipt (%w) — delete this file and re-run bp scaffy run for the %q command (from the receipt filename) with its original --var values to regenerate it before retrying bp scaffy remove",
+			path, err, receiptConceptHint(path))
 	}
 	return &r, nil
+}
+
+// receiptConceptHint pulls the leading <concept> segment out of a
+// receipt's D35 filename (<concept>--<primary-var-kebab>--<hash>.json)
+// so a torn receipt's error can still name which .scaffy command
+// produced it even though its JSON body can't be decoded.
+func receiptConceptHint(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), ".json")
+	concept, _, found := strings.Cut(base, "--")
+	if !found || concept == "" {
+		return "unknown"
+	}
+	return concept
 }
 
 // receiptPath computes the D35 location:
@@ -133,6 +153,12 @@ func kebabize(s string) string {
 // writeReceipt persists one mutating run's receipt. The caller only
 // invokes it when at least one op mutated (D35 — a no-op re-run never
 // clobbers the receipt of the run that did the work).
+//
+// Staged temp-file-plus-rename, the same discipline as tree.flush():
+// the new receipt is written, synced and closed under a sibling temp
+// name first and only renamed over the real path once that succeeds,
+// so an interrupted or failing write leaves the PREVIOUS receipt (or
+// no receipt, on a first run) intact rather than a truncated one.
 func writeReceipt(opts RunOptions, cmd *Command, src []byte, ops []ReceiptOp, createdDirs []string) (string, error) {
 	r := &Receipt{
 		ReceiptVersion: receiptVersion,
@@ -145,15 +171,27 @@ func writeReceipt(opts RunOptions, cmd *Command, src []byte, ops []ReceiptOp, cr
 		CreatedDirs:    createdDirs,
 	}
 	path := receiptPath(opts.RepoRoot, cmd, opts.Vars)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	b, err := json.MarshalIndent(r, "", "  ")
 	if err != nil {
 		return "", err
 	}
-	if err := os.WriteFile(path, append(b, '\n'), 0o644); err != nil {
-		return "", err
+	b = append(b, '\n')
+
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".scaffy-tmp-*")
+	if err != nil {
+		return "", fmt.Errorf("stage receipt %s: %w", path, err)
+	}
+	if werr := stageWrite(tmp, b, 0o644); werr != nil {
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("stage receipt %s: %w", path, werr)
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return "", fmt.Errorf("commit receipt %s: %w", path, err)
 	}
 	return path, nil
 }
