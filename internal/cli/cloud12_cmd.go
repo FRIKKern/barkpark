@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 
@@ -98,17 +99,94 @@ func LoggedInWithoutServer() bool {
 	return c.HasCloudToken() && strings.TrimSpace(c.Server) == ""
 }
 
-// cloudFail maps a cloud-client error onto the CLI's exit contract. cloudclient
-// prefixes every 401 with "unauthorized:" precisely so callers can read the auth
-// failure — an expired/revoked CloudToken exits exitAuth with a `bp login` hint,
-// matching requireCloud's absent-token path (a dead session and a missing one are
-// the same condition to a script). Everything else stays the generic failure it
-// always was.
+// cloudFail maps a cloud-client error onto the CLI's exit contract — the shared
+// seam ~30 cloud verbs hand a refusal to. An expired/revoked CloudToken exits
+// exitAuth with a `bp login` hint, matching requireCloud's absent-token path (a
+// dead session and a missing one are the same condition to a script). Everything
+// else stays the generic failure it always was.
 func cloudFail(out *writer, what string, err error) int {
-	if strings.Contains(err.Error(), "unauthorized") {
+	if cloudErrIsDeadSession(err) {
 		return useError(out, "auth", what+": "+err.Error()+" — session expired? run `bp login` again", exitAuth)
 	}
 	return useError(out, "failed", what+": "+err.Error(), exitGeneric)
+}
+
+// cloudErrIsDeadSession reports whether a cloud-client error is THIS caller's
+// credential being refused — i.e. an HTTP 401 — which is the only condition
+// `bp login` fixes.
+//
+// It reads the STATUS the refusal declares, never the sentence it renders. This
+// used to be `strings.Contains(err.Error(), "unauthorized")`: cloudclient
+// prefixes every 401 with "unauthorized:", so the substring stood in for a fact
+// the client had ALREADY parsed into a typed field — CloudRefusal.HTTPStatus,
+// which builtins.go, cloud_deliveries_cmd.go, cloud_deploy_census_cmd.go and
+// cloud_site_cmd.go all branch on. The substring answered a wider question than
+// the one asked, because the rendered message is not text the CLI authors: it
+// carries the plane's own `detail` sentence, its `reason`/`required`/`scope`
+// evidence, its flattened `details` map, and — for any body that is not the flat
+// {"error":"<string>"} shape — the RAW BODY verbatim (cloudError's 200-rune
+// fallback).
+//
+// The control plane RELAYS a downstream box's refusal into exactly that prose:
+// `POST /v1/sites` answers a failed read-token mint with 502
+// {"error":"read_token_mint_failed","detail":"<box> refused to mint the site's
+// read token (HTTP 401): <the box's own code — message>"} (router.ex
+// mint_failure_copy/mint_failure_detail), and the instance-API relay forwards the
+// box's whole error body under `upstream_error`. A box whose STORED ADMIN TOKEN
+// is dead answers with its canonical slug, the literal word "unauthorized" — so
+// the seam read the BOX's rejected credential as the USER's, exited 3 (auth),
+// and told the user to run `bp login`, which cannot fix a box-side token. A
+// script's auth-retry loop then re-authenticates forever against a refusal that
+// was never about its session.
+//
+// 403 is deliberately NOT auth here: a caller who authenticated and lacks the
+// role gets the generic failure plus the plane's own sentence, because `bp login`
+// is the wrong cure for it too. The verbs that DO want a status FAMILY ladder
+// (deliveriesExit, deployCensusExit, siteRefusalExit) already own their own.
+//
+// An error carrying no status at all (a transport failure, a decode error) keeps
+// the historical sentence match: it is the only signal such an error has, and
+// dropping it would silently narrow a case this function cannot otherwise see.
+func cloudErrIsDeadSession(err error) bool {
+	if err == nil {
+		return false
+	}
+	if status, ok := cloudErrStatus(err); ok {
+		return status == http.StatusUnauthorized
+	}
+	return strings.Contains(err.Error(), "unauthorized")
+}
+
+// cloudErrStatus returns the HTTP status a typed cloudclient refusal declares.
+// Every refusal type the client mints carries one; the bool is false only for an
+// error that never reached an HTTP response. errors.As so a wrapped refusal
+// (fmt.Errorf("…: %w", err)) is read through its wrapper.
+func cloudErrStatus(err error) (int, bool) {
+	var refusal *cloudclient.CloudRefusal
+	if errors.As(err, &refusal) {
+		return refusal.HTTPStatus, true
+	}
+	var route *cloudclient.CloudRouteError
+	if errors.As(err, &route) {
+		return route.HTTPStatus, true
+	}
+	var deliveries *cloudclient.DeliveriesError
+	if errors.As(err, &deliveries) {
+		return deliveries.HTTPStatus, true
+	}
+	var census *cloudclient.DeployCensusError
+	if errors.As(err, &census) {
+		return census.HTTPStatus, true
+	}
+	var verify *cloudclient.VerifyError
+	if errors.As(err, &verify) {
+		return verify.HTTPStatus, true
+	}
+	var rollback *cloudclient.RollbackError
+	if errors.As(err, &rollback) {
+		return rollback.HTTPStatus, true
+	}
+	return 0, false
 }
 
 // runLoginCloud is the `bp login` built-in — it REPLACES the v1 token-stub. It

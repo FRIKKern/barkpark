@@ -107,8 +107,23 @@ func fillTemplate(tmpl string, ctx Context, args map[string]string) (string, err
 // declared positional arg is path-bound (its name appears here) or whether it
 // should instead ride as a ?query= param (reads) or a JSON body field (writes).
 func (c Command) PathPlaceholders() map[string]bool {
+	return PlaceholderNames(c.HTTP.PathTemplate)
+}
+
+// PlaceholderNames returns the set of :placeholder names in an ARBITRARY path
+// template — the same whole-token parse fillTemplate performs, exposed for the
+// callers that must judge a template the Command struct does not hold on its
+// own (destroy_confirm's scope probe reads scoped_prefix + path_template
+// composed, since :workspace_slug lives in the prefix).
+//
+// It exists so those callers stop reaching for `strings.Contains(tmpl, ":"+n)`.
+// That substring test is unsound for the SHORT scope aliases the manifest
+// defines (`ws`, `p`): ":p" is a prefix of :principal_ref, :paper_id, :plugin
+// and :path, so a route carrying any of them was reported as reading the
+// project scope. A placeholder is a whole token or it is not that placeholder.
+func PlaceholderNames(tmpl string) map[string]bool {
 	set := map[string]bool{}
-	for _, m := range placeholderRe.FindAllString(c.HTTP.PathTemplate, -1) {
+	for _, m := range placeholderRe.FindAllString(tmpl, -1) {
 		set[m[1:]] = true // strip leading ':'
 	}
 	return set

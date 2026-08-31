@@ -109,9 +109,24 @@ func diagnoseClaimConflict(out *writer, ctx manifest.Context, req claimRequest) 
 	case apiclient.DocReadNotFound:
 		out.errf("diagnosis: task %s names no document on read-back — the refusal may have raced a delete/rename", req.docID)
 		return
-	case apiclient.DocReadUnreachable:
-		out.errf("diagnosis: could not read %s back to explain the refusal — the store may simply be unreachable, not necessarily unclaimable", req.docID)
+	case apiclient.DocReadForbidden:
+		// The read-back was REFUSED, not missed. Saying "may simply be
+		// unreachable" here sent operators to check the network for what is a
+		// credentials/permissions answer the server gave in full.
+		out.errf("diagnosis: the store refused the read-back of %s (not signed in, or this token has no access) — the refusal is an auth answer, not evidence about the claim", req.docID)
 		return
+	case apiclient.DocReadServerError:
+		out.errf("diagnosis: the store errored reading %s back — the server is up but broken on this read, so this says nothing about whether the row is claimable", req.docID)
+		return
+	default:
+		// Every remaining non-OK class (transport error, unreadable body, any
+		// other non-2xx). A default arm, not a DocReadUnreachable case: a new
+		// outcome must never fall through to the read-back line below and
+		// report a ZERO document as if it had been read.
+		if outcome.Failed() {
+			out.errf("diagnosis: could not read %s back to explain the refusal — %s, so this is not evidence the row is unclaimable", req.docID, outcome.Describe())
+			return
+		}
 	}
 	lifecycle := doc.ContentString("lifecycle_status")
 	claim := doc.ClaimInfo()

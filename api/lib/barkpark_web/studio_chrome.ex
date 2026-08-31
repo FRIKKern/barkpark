@@ -126,6 +126,12 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign_new(:dataset, fn -> params["dataset"] || Content.default_dataset() end)
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
+      # ORDER IS THE FIX (task-e656670726427b96): derive the principal's OWN
+      # workspace BEFORE the Default fallback, which is no-op-if-set. Reversed,
+      # it fails SILENTLY — the fallback pins Default and the derivation never
+      # runs. Same ordering contract as the HTTP pipeline's
+      # DeriveWorkspaceFromToken → AssignDefaultScope (router.ex:40-61).
+      |> derive_scope_from_principal()
       |> default_scope_fallback()
       # Resolve the workspace THEME IDENTITY (ts-w4e) from the now-resolved
       # current_workspace, so root.html.heex stamps `data-bp-theme` server-side
@@ -514,10 +520,61 @@ defmodule BarkparkWeb.StudioChrome do
     end
   end
 
-  # Flat surfaces (no resolver ran): pin the seeded Default scope so the
-  # full switcher renders everywhere — the same fallback the flat Studio's
-  # ensure_tenancy_scope applies. An unseeded tenancy stays nil and the
+  # The LiveView analogue of `BarkparkWeb.Plugs.DeriveWorkspaceFromToken`
+  # (task-e656670726427b96). The flat live_sessions — `:plugin_admin` most
+  # sharply — carry NO workspace producer: `LiveAuth :admin` gates on the
+  # workspace-BLIND `admin` permission and assigns only `:api_token`, so before
+  # this step `default_scope_fallback/1` below was the ONLY producer and it
+  # pinned the seeded Default for every admin, including one whose token is
+  # bound elsewhere. That is not merely a display defect on plugin surfaces:
+  # Tickets' `InboxLive` reads this very assign for `Keys.mint/rotate/pause/
+  # unpause`, so a workspace-B admin MINTED a live credential into Default and
+  # could churn Default's existing keys. `Keys.scope_workspace/2` is fail-closed
+  # and was working perfectly — it was handed the wrong workspace and faithfully
+  # confined the operator to the wrong tenant. The fence was never the bug; the
+  # assign upstream of it was.
+  #
+  # Runs only when nothing stronger resolved: a scoped mount's LiveScope /
+  # PluginScopeSession assign short-circuits on the same truthy guard the
+  # fallback uses, so the scoped surfaces are untouched by this step.
+  #
+  # FAIL-SOFT, exactly like the plug — it never halts, it only narrows:
+  #
+  #   * `:current_workspace` already set → untouched.
+  #   * no `:api_token` (the account-session arm, which carries `:current_user`)
+  #     → untouched, and the Default fallback below is CORRECT for it:
+  #     `LiveAuth.authorize_user/3` authorizes that principal against the
+  #     DEFAULT workspace specifically, so Default IS its authorized scope.
+  #   * `workspace_id` nil — a genuinely instance-wide token — → untouched, so
+  #     the host operator keeps landing on Default with the full switcher. This
+  #     is the legitimate instance-admin path and it is deliberately unchanged.
+  #   * `workspace_id` names no row → untouched rather than a 500.
+  defp derive_scope_from_principal(socket) do
+    if socket.assigns[:current_workspace] do
+      socket
+    else
+      with %{workspace_id: ws_id} when is_binary(ws_id) <- socket.assigns[:api_token],
+           %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_id(ws_id) do
+        assign(socket, current_workspace: ws, current_project: project_for(ws))
+      else
+        _ -> socket
+      end
+    end
+  end
+
+  # Flat surfaces where the principal named NO workspace of its own (an
+  # instance-wide token, or the account session, whose authority
+  # `LiveAuth.authorize_user/3` measures on Default): pin the seeded Default
+  # scope so the full switcher renders everywhere — the same fallback the flat
+  # Studio's ensure_tenancy_scope applies. An unseeded tenancy stays nil and the
   # layout's dataset-only branch covers it.
+  #
+  # SETTLED (task-e656670726427b96, acceptance 4): it must NOT pin Default for a
+  # principal that HAS a resolvable workspace — a bound principal's own tenant is
+  # a fact, and overriding it with Default silently redirects that operator's
+  # WRITES into a tenant they may hold no authority in. Hence
+  # `derive_scope_from_principal/1` runs first and this is now genuinely a
+  # last-resort fallback, reached only when there is nothing truer to bind to.
   defp default_scope_fallback(socket) do
     if socket.assigns[:current_workspace] do
       socket

@@ -6,6 +6,7 @@ defmodule Barkpark.Search.Crystallizer do
   """
 
   import Ecto.Query
+  alias Barkpark.Content.Scope
   alias Barkpark.Search.{Crystal, Event, MergePattern, Sanitizer}
   alias Barkpark.Repo
 
@@ -210,10 +211,16 @@ defmodule Barkpark.Search.Crystallizer do
   # the legacy/unscoped bucket, so match `IS NULL` (never `= NULL`, which is
   # never true) — Postgres treats NULL as distinct, so this keeps the null arm
   # from folding into a real tenant's roll-up.
-  defp scope_workspace(query, nil), do: from(e in query, where: is_nil(e.workspace_id))
-
+  #
+  # Mapped onto the centralized clause in `Content.Scope`, byte-for-byte: the
+  # `:shared_only` sentinel IS `workspace_id IS NULL`, and the binary arm IS
+  # `workspace_id == ^ws`. Deliberately the WORKSPACE-ONLY helper, NOT
+  # `scope_to_workspace_including_global/3` — a tenant's roll-up must never
+  # absorb the NULL-workspace legacy rows. (`Search.Synonyms` takes the
+  # including-global helper because its NULL rows ARE a shared layer; same
+  # shape, opposite contract.)
   defp scope_workspace(query, workspace_id),
-    do: from(e in query, where: e.workspace_id == ^workspace_id)
+    do: Scope.scope_to_workspace(query, workspace_id || :shared_only)
 
   defp period_bounds(:day, day) do
     start_dt = DateTime.new!(day, ~T[00:00:00], "Etc/UTC")

@@ -27,13 +27,19 @@ defmodule Barkpark.Plugins.Tickets.Keys do
     * `revoke/2`   — permanent kill (indistinguishable from missing = 401).
     * `list/1`     — the operator's keys for a workspace, newest first.
 
-  Every by-id mutation (`rotate`/`pause`/`unpause`/`revoke`) is scoped by the
-  caller's `workspace_id`: a key belonging to another workspace is simply NOT
+  Every workspace-scoped call — the by-id mutations (`rotate`/`pause`/
+  `unpause`/`revoke`) AND the `list/1` read — goes through the one
+  `scope_workspace/2` fence: a key belonging to another workspace is simply NOT
   FOUND, so an operator can never reach across the tenant boundary (the
   cross-tenant IDOR this module was hardened against). The scope is FAIL-CLOSED
-  — a nil workspace matches only the (rare) un-bound keys, never every tenant's
-  — deliberately unlike `list/1`, whose nil widens to all keys for the
-  operator's own listing (a read, not a destructive act).
+  — a nil workspace matches only the (rare) un-bound keys, never every
+  tenant's. `list/1` used to be the exception, widening nil to every tenant's
+  keys on the theory that a read is not a destructive act; that was the leak,
+  not the exemption. Both of its callers
+  (`BarkparkWeb.TicketKeysController.index/2`, `InboxLive`'s key panel) hand it
+  the caller's OWN workspace, and each resolves to nil when no tenancy was
+  seeded — so the widening only ever fired where the scope was unknown, which
+  is precisely when it must not fire.
 
   Permissions are the opaque `["ticket"]` — it satisfies no global read/write/
   admin tier, so even if the fail-closed WHERE clause were bypassed the key
@@ -191,20 +197,18 @@ defmodule Barkpark.Plugins.Tickets.Keys do
 
   @doc """
   List the ticket keys, newest first. `workspace` may be a `%Workspace{}`
-  struct, a workspace id binary, or `nil` (every ticket key). Rows only — the
-  caller MUST NOT expose `token_hash`.
+  struct, a workspace id binary, or `nil`. Rows only — the caller MUST NOT
+  expose `token_hash`.
+
+  FAIL-CLOSED on nil, exactly like the by-id fence: `nil` names the un-bound
+  tenant, NOT every tenant. See `scope_workspace/2`.
   """
   @spec list(struct() | binary() | nil) :: [ApiToken.t()]
   def list(workspace \\ nil) do
-    query =
-      ApiToken
-      |> where([t], t.kind == @kind)
-      |> order_by([t], desc: t.inserted_at)
-
-    case workspace_id(workspace) do
-      nil -> query
-      ws_id -> where(query, [t], t.workspace_id == ^ws_id)
-    end
+    ApiToken
+    |> where([t], t.kind == @kind)
+    |> order_by([t], desc: t.inserted_at)
+    |> scope_workspace(workspace_id(workspace))
     |> Repo.all()
   end
 
@@ -233,11 +237,14 @@ defmodule Barkpark.Plugins.Tickets.Keys do
 
   defp get_ticket_key(_, _), do: nil
 
-  # FAIL-CLOSED workspace scope for by-id mutations: a bound caller sees only its
-  # workspace's keys; a nil-scoped caller sees only the (rare) un-bound keys —
-  # NEVER every tenant's. This deliberately does NOT mirror `list/1`'s nil →
-  # unfiltered widening: a nil-scoped operator kill-switching every tenant's key
-  # is the exact fail-OPEN this fence exists to prevent.
+  # THE workspace fence, fail-closed, shared by the by-id mutations and by
+  # `list/1`: a bound caller sees only its workspace's keys; a nil-scoped caller
+  # sees only the (rare) un-bound keys — NEVER every tenant's. A nil-scoped
+  # operator kill-switching every tenant's key, or READING every tenant's
+  # key roster, is the exact fail-OPEN this fence exists to prevent. `list/1`
+  # was the one caller that skipped it and widened nil to all tenants; routing
+  # it here is what closed that door, so keep this the single scope predicate —
+  # a second, laxer copy is how the hole came back.
   defp scope_workspace(query, ws_id) when is_binary(ws_id),
     do: where(query, [t], t.workspace_id == ^ws_id)
 

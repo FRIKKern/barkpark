@@ -9,7 +9,9 @@ package cli
 // --print-only suppresses the launch entirely.
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -194,6 +196,34 @@ func runCloudOpen(out *writer, g globals, args []string) int {
 	return exitOK
 }
 
+// openResolveErr is a name-resolution failure that CARRIES its class instead of
+// spelling it. The class is a declared field precisely because the sentence
+// cannot be trusted to answer for it: every one of these messages interpolates
+// the caller's own ref (`no site matches %q`), so a ref that happens to spell
+// "unauthorized" — a site named `unauthorized-page`, say — made the old
+// substring ladder read a NOT-FOUND as an auth failure and tell the operator to
+// re-run `bp login` for a name that simply does not exist. Same shape as
+// siteRefusalFail's fix (cloud_site_cmd.go): the evidence was already on hand
+// and only the last inch discarded it.
+type openResolveErr struct {
+	// class is what the CLI's exit scheme needs to know, and the ONLY thing it
+	// reads. "auth" → exitAuth, "not_found" → exitNotFound.
+	class string
+	msg   string
+}
+
+func (e *openResolveErr) Error() string { return e.msg }
+
+// openAuthErr / openNotFoundErr are the two constructors, spelled so a call site
+// states the class next to the sentence it produces and cannot leave it blank.
+func openAuthErr(format string, args ...any) error {
+	return &openResolveErr{class: "auth", msg: fmt.Sprintf(format, args...)}
+}
+
+func openNotFoundErr(format string, args ...any) error {
+	return &openResolveErr{class: "not_found", msg: fmt.Sprintf(format, args...)}
+}
+
 // resolveOpenBarkparkID turns an instance id-or-name into its id. A UUID passes
 // through untouched (no network); a name/slug is resolved via GET /v1/barkparks,
 // which needs a Cloud token.
@@ -205,7 +235,7 @@ func resolveOpenBarkparkID(cfg *Config, ref string) (string, error) {
 		return ref, nil
 	}
 	if !cfg.HasCloudToken() {
-		return "", fmt.Errorf("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
+		return "", openAuthErr("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
 	}
 	list, err := cfg.CloudClient().ListBarkparks(cloudCtx())
 	if err != nil {
@@ -223,7 +253,7 @@ func resolveOpenBarkparkID(cfg *Config, ref string) (string, error) {
 			return b.ID, nil
 		}
 	}
-	return "", fmt.Errorf("no Barkpark matches %q (see `bp cloud status`)", ref)
+	return "", openNotFoundErr("no Barkpark matches %q (see `bp cloud status`)", ref)
 }
 
 // resolveOpenSiteID turns a site id-or-name into its id, mirroring
@@ -236,7 +266,7 @@ func resolveOpenSiteID(cfg *Config, ref string) (string, error) {
 		return ref, nil
 	}
 	if !cfg.HasCloudToken() {
-		return "", fmt.Errorf("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
+		return "", openAuthErr("not logged in — run `bp login` to resolve %q by name (or pass its id)", ref)
 	}
 	list, err := cfg.CloudClient().ListSites(cloudCtx())
 	if err != nil {
@@ -253,22 +283,44 @@ func resolveOpenSiteID(cfg *Config, ref string) (string, error) {
 			return s.ID, nil
 		}
 	}
-	return "", fmt.Errorf("no site matches %q (see `bp sites`)", ref)
+	return "", openNotFoundErr("no site matches %q (see `bp sites`)", ref)
 }
 
-// openResolveFail maps a name-resolution failure onto the CLI's exit scheme: an
-// auth-shaped message exits auth, an unresolved name is not_found, anything else
-// is generic.
+// openResolveFail maps a name-resolution failure onto the CLI's exit scheme: the
+// resolvers' own DECLARED outcomes carry their class, a control-plane refusal
+// carries its HTTP STATUS, and anything else (a transport error, a gateway page)
+// is generic. The message is unchanged in every arm — only how the exit code is
+// decided moved.
+//
+// IT USED TO SUBSTRING-MATCH THE RENDERED SENTENCE, and that sentence is not the
+// CLI's to pattern-match: `no Barkpark matches %q` / `no site matches %q`
+// interpolate the caller's OWN ref, so `bp cloud open site unauthorized-page`
+// hit the auth arm on a name that resolved to nothing — the operator was told
+// their session had expired and handed exit 3 while stderr said, in the same
+// breath, "no site matches". Both facts were already declared: the two local
+// outcomes are produced by known branches (now openAuthErr / openNotFoundErr)
+// and the ONLY wire-borne auth failure that can reach here is a 401, which
+// arrives as a typed *cloudclient.CloudRefusal — ListBarkparks and ListSites
+// both route every non-2xx through cloudError. Nothing has to read the prose.
 func openResolveFail(out *writer, err error) int {
 	msg := err.Error()
-	switch {
-	case strings.Contains(msg, "not logged in") || strings.Contains(msg, "unauthorized"):
-		return useError(out, "auth", msg, exitAuth)
-	case strings.Contains(msg, "no Barkpark matches") || strings.Contains(msg, "no site matches"):
-		return useError(out, "not_found", msg, exitNotFound)
-	default:
-		return useError(out, "failed", msg, exitGeneric)
+	var re *openResolveErr
+	if errors.As(err, &re) {
+		switch re.class {
+		case "auth":
+			return useError(out, "auth", msg, exitAuth)
+		case "not_found":
+			return useError(out, "not_found", msg, exitNotFound)
+		}
 	}
+	// A control-plane refusal grades on its STATUS, not its words: a 401 is the
+	// credential, and every other refusal (403 forbidden, 404 route missing, 5xx)
+	// is not something `bp login` fixes.
+	var refusal *cloudclient.CloudRefusal
+	if errors.As(err, &refusal) && refusal.HTTPStatus == http.StatusUnauthorized {
+		return useError(out, "auth", msg, exitAuth)
+	}
+	return useError(out, "failed", msg, exitGeneric)
 }
 
 // printCloudOpenHelp writes `bp cloud open` usage.
