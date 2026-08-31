@@ -236,12 +236,11 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # thing this guard exists to prevent is guarded from day one even while the
   # historical backlog is still being paid down.
   @filed_gaps %{
-    # BarkparkWeb.AppTokenController (5)
-    {"GET", "/v1/auth/app-tokens"} => @census_task,
-    {"POST", "/v1/auth/app-tokens"} => @census_task,
-    {"DELETE", "/v1/auth/app-tokens"} => @census_task,
-    {"DELETE", "/v1/auth/app-tokens/:*"} => @census_task,
-    {"DELETE", "/v1/auth/app-tokens/current"} => @census_task,
+    # BarkparkWeb.AppTokenController (0) — all 5 were paid down by #14242
+    # (merged), which declared the `app_token` noun: app_token.create/ls/
+    # revoke/revoke-by-id/revoke-current now carry POST + GET + DELETE
+    # /v1/auth/app-tokens, DELETE /v1/auth/app-tokens/:id and DELETE
+    # /v1/auth/app-tokens/current.
 
     # BarkparkWeb.AuthController (9)
     {"POST", "/v1/auth/erase"} => @census_task,
@@ -323,23 +322,22 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/admin/self-update"} => @census_task,
     {"POST", "/v1/admin/self-update"} => @census_task,
 
-    # BarkparkWeb.ShareController (3)
-    {"GET", "/v1/shares/tokens"} => @census_task,
-    {"POST", "/v1/shares/tokens"} => @census_task,
-    {"DELETE", "/v1/shares/tokens/:*"} => @census_task,
+    # BarkparkWeb.ShareController (0) — all 3 were paid down by #14242
+    # (merged): share.token-ls/mint/revoke now carry GET + POST
+    # /v1/shares/tokens and DELETE /v1/shares/tokens/:token_id.
 
-    # BarkparkWeb.ShareLinkController (3)
-    {"GET", "/v1/shares/links"} => @census_task,
-    {"POST", "/v1/shares/links"} => @census_task,
-    {"DELETE", "/v1/shares/links/:*"} => @census_task,
+    # BarkparkWeb.ShareLinkController (0) — all 3 were paid down by #14242
+    # (merged): share.link-ls/mint/revoke now carry GET + POST
+    # /v1/shares/links and DELETE /v1/shares/links/:id.
 
     # BarkparkWeb.SiteDeployController (2)
     {"GET", "/v1/admin/site-deploy"} => @census_task,
     {"POST", "/v1/admin/site-deploy"} => @census_task,
 
-    # BarkparkWeb.StatusController (2)
-    {"POST", "/v1/status/incidents"} => @census_task,
-    {"POST", "/v1/status/incidents/:*/resolve"} => @census_task,
+    # BarkparkWeb.StatusController (0) — both were paid down by #14242
+    # (merged), which declared the `incident` noun: incident.open and
+    # incident.resolve now carry POST /v1/status/incidents and POST
+    # /v1/status/incidents/:id/resolve.
 
     # BarkparkWeb.StructureController (1)
 

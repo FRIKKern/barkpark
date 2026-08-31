@@ -417,6 +417,63 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/fleet/support-tokens": {
+      "post": {
+        "operationId": "fleet_support_token.create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: name.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a write-capable, attributable support token for a remote Personal Dev Fleet machine.",
+        "tags": [
+          "fleet_support_token"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/media/{dataset}/search/synonyms/preview": {
       "get": {
         "operationId": "media.search-synonym-preview",
@@ -2229,6 +2286,63 @@
         "x-barkpark-scope": "ingest"
       }
     },
+    "/v1/status/incidents": {
+      "post": {
+        "operationId": "incident.create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: title, started_at.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Open a status-page incident.",
+        "tags": [
+          "incident"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/tasks/ready": {
       "get": {
         "operationId": "task.ready",
@@ -2651,6 +2765,152 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/auth/app-tokens": {
+      "delete": {
+        "operationId": "app_token.revoke",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke an app token by its raw secret, or every live token for an email (logout-everywhere, confined to workspaces the caller admins).",
+        "tags": [
+          "app_token"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "get": {
+        "operationId": "app_token.ls",
+        "parameters": [
+          {
+            "description": "Filter to one email's tokens — reveals their labels; an unfiltered list redacts every label.",
+            "in": "query",
+            "name": "email",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List app tokens on this instance (labels redacted unless ?email= filters to one address).",
+        "tags": [
+          "app_token"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "post": {
+        "operationId": "app_token.create",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: email.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a member-shaped [read,write,chat] app token for a JIT-provisioned cloud identity.",
+        "tags": [
+          "app_token"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/data/search/{dataset}/synonyms/promote": {
@@ -4558,6 +4818,52 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/auth/app-tokens/current": {
+      "delete": {
+        "operationId": "app_token.revoke-current",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Self-revoke the app token sent as the bearer — possession is the authorization, no admin required (admin bearers are refused).",
+        "tags": [
+          "app_token"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/tasks/claim": {
       "post": {
         "operationId": "task.next",
@@ -5136,6 +5442,64 @@
           "workspace"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/auth/app-tokens/{id}": {
+      "delete": {
+        "operationId": "app_token.revoke-by-id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke an app token by its row id — the escape hatch for a custom-labelled token.",
+        "tags": [
+          "app_token"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}/relations": {
@@ -8890,6 +9254,135 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/shares/links": {
+      "get": {
+        "operationId": "share.link-ls",
+        "parameters": [
+          {
+            "description": "ws[/project[/dataset]] the item lives in.",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "doc | media.",
+            "in": "query",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The item's id.",
+            "in": "query",
+            "name": "ref_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Document type — required when kind=doc.",
+            "in": "query",
+            "name": "ref_type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the item share-links (P7) for one doc/media item.",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "post": {
+        "operationId": "share.link-mint",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: scope, kind, ref_id.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a direct share link (P7) to ONE doc/media item (raw token shown once).",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/v1/media/{dataset}/collections/{id}": {
       "get": {
         "operationId": "media.collection",
@@ -8935,6 +9428,64 @@
           "media"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/shares/tokens/{token_id}": {
+      "delete": {
+        "operationId": "share.token-revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a share edit-token by id.",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/auth/login": {
@@ -10553,6 +11104,64 @@
         "summary": "Rotate a key's secret (same identity + history, new raw key).",
         "tags": [
           "ticket-key"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/fleet/support-tokens/{token_id}": {
+      "delete": {
+        "operationId": "fleet_support_token.revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke a support token by id (confined to the fleet-support- family, in a workspace the caller admins).",
+        "tags": [
+          "fleet_support_token"
         ],
         "x-barkpark-scope": "admin"
       }
@@ -12285,6 +12894,108 @@
           "search"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/v1/shares/tokens": {
+      "get": {
+        "operationId": "share.token-ls",
+        "parameters": [
+          {
+            "description": "Filter by ws[/project[/dataset]] scope.",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List share edit-tokens (optional scope filter), confined to workspaces the caller admins.",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "post": {
+        "operationId": "share.token-mint",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: scope, surfaces.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a share edit-token for one scope's surfaces (raw token shown once).",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/schemas/{dataset}": {
@@ -15621,6 +16332,64 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/shares/links/{id}": {
+      "delete": {
+        "operationId": "share.link-revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke one item share-link by id.",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/revision/{dataset}/{rev_id}": {
       "get": {
         "operationId": "doc.revision.scoped",
@@ -15749,6 +16518,75 @@
           "search"
         ],
         "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/status/incidents/{id}/resolve": {
+      "post": {
+        "operationId": "incident.resolve",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Resolve a status-page incident.",
+        "tags": [
+          "incident"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/v1/plugins/sheets/import": {
@@ -16098,6 +16936,18 @@
     {
       "description": "Claude chat sessions — create/list/read/update, send, interrupt, approve, archive/unarchive. Live token streaming rides the `bp chat` SSE events channel (a builtin carve-out, not a manifest verb).",
       "name": "chat"
+    },
+    {
+      "description": "Mobile app-token exchange — mint/list/revoke member-shaped, workspace-bound tokens, distinct from `token` (/v1/tokens).",
+      "name": "app_token"
+    },
+    {
+      "description": "Write-capable per-support ledger tokens for a remote Personal Dev Fleet machine.",
+      "name": "fleet_support_token"
+    },
+    {
+      "description": "Status-page incidents — admin-only create + resolve.",
+      "name": "incident"
     },
     {
       "description": "Bulldocs — live, no-reload paper/document surface. Ingests block-structured papers from external producers and renders them at /papers/:slug with real-time per-block streaming. Formerly the built-in Papers feature; now a first-party plugin built on the core portable-doc utilities.",
