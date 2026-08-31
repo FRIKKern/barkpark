@@ -6,6 +6,7 @@ package httpx
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -39,7 +40,7 @@ const MaxRedirects = 10
 // (its Location, or its verbatim status), so they stop at the first hop instead
 // of erroring; none of them follows a redirect silently, and neither does this.
 //
-// @canonical capability:http-redirect-policy aka:CheckRedirect,follow redirect,302,ErrUseLastResponse,downgrade POST to GET
+// @canonical capability:http-redirect-policy aka:CheckRedirect,follow redirect,302,ErrUseLastResponse,downgrade POST to GET,strip credentials,Authorization,Cookie,cross-scheme,cross-port
 func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) > 0 && IsWriteMethod(via[0].Method) {
 		return fmt.Errorf(
@@ -49,7 +50,43 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= MaxRedirects {
 		return fmt.Errorf("stopped after %d redirects", MaxRedirects)
 	}
+	if len(via) > 0 && credentialsAtRisk(via[0].URL, req.URL) {
+		req.Header.Del("Authorization")
+		req.Header.Del("Cookie")
+		req.Header.Del("Cookie2")
+		req.Header.Del("WWW-Authenticate")
+	}
 	return nil
+}
+
+// credentialsAtRisk reports whether a redirect from "from" to "to" changes
+// scheme or effective port while keeping the same hostname. Go's stdlib only
+// strips Authorization/Cookie on a differing Hostname() (idnaASCIIFromURL in
+// net/http's client.go ignores scheme and port entirely), so a same-host hop
+// that flips https->http, or that moves to a different port, forwards bp's
+// bearer token untouched unless this function says otherwise.
+func credentialsAtRisk(from, to *url.URL) bool {
+	if from.Hostname() != to.Hostname() {
+		// A different host is already stripped by net/http itself.
+		return false
+	}
+	return from.Scheme != to.Scheme || effectivePort(from) != effectivePort(to)
+}
+
+// effectivePort normalises url.URL.Port(), which is empty string for the
+// scheme's default port, so https://h and https://h:443 compare equal.
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch u.Scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
 }
 
 // IsWriteMethod reports whether a method carries a request body whose loss would
