@@ -376,8 +376,20 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
     end)
   end
 
-  # Every by-id key action is scoped to the operator's workspace (same
-  # `workspace_id/1` mint uses) so Studio cannot reach a key in another tenant.
+  # Every by-id key action is scoped to `workspace_id/1` — the SAME assign mint
+  # uses — and `Keys` fences on it fail-closed, so a key in another tenant is
+  # NOT FOUND.
+  #
+  # That confinement is only as true as the assign, which this module does not
+  # produce. It was once false in fact (task-e656670726427b96): on the FLAT
+  # `/studio/tickets` mount nothing resolved `:current_workspace`, so
+  # `StudioChrome.default_scope_fallback/1` pinned the seeded Default and every
+  # arm below — mint included — operated on the wrong tenant while the fence
+  # rubber-stamped it. The fix is upstream, in `StudioChrome`'s
+  # `derive_scope_from_principal/1`, which binds the principal's own workspace
+  # BEFORE that fallback. Do not restate tenant confinement here as if this
+  # module enforced it: the guarantee is the mount's, and any new flat mount of
+  # this LiveView inherits the obligation.
   defp apply_key_action(socket, :rotate, id),
     do: safely("keys_rotate", fn -> Keys.rotate(id, workspace_id(socket)) end)
 
