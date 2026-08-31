@@ -187,7 +187,7 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     refute html =~ "Failed to create"
 
     # The freshly created draft is a valid open task with NO priority —
-    # it must sort NULLS-LAST in bd ready exactly like a fresh bd task.
+    # it must sort NULLS-LAST in the ready queue exactly like a fresh task.
     docs = Content.list_documents("task", @dataset, perspective: :raw)
     created = Enum.find(docs, &(&1.title == "Untitled"))
     assert created, "expected the Studio-created task draft to exist"

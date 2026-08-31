@@ -1,7 +1,7 @@
 defmodule Barkpark.Tasks.Prime do
   @moduledoc false
-  # One-call agent-rehydration reads for `GET /v1/tasks/prime` (the `bd prime`
-  # lesson from the Beads retrospective). Owns the three multi-table reads the
+  # One-call agent-rehydration reads for `GET /v1/tasks/prime`. Owns the three
+  # multi-table reads the
   # HTTP controller previously built inline — lifted here verbatim so the web
   # layer delegates to the Tasks context instead of running domain queries
   # against `Document` / `MutationEvent` itself:

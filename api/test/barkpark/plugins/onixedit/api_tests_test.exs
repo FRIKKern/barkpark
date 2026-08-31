@@ -20,7 +20,7 @@ defmodule Barkpark.Plugins.OnixEdit.ApiTestsTest do
       the keys — string-keyed all the way down, so `Jason.encode/1`
       cannot trip on atom collisions).
 
-  Pure shape — no Beads, no Registry, no Req. Safe `async: true`.
+  Pure shape — no Registry, no Req. Safe `async: true`.
   """
 
   use ExUnit.Case, async: true

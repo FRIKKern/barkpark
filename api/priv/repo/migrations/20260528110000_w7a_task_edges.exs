@@ -31,7 +31,7 @@ defmodule Barkpark.Repo.Migrations.W7aTaskEdges do
   `from_id` = the dependent (the task that BLOCKS ON something).
   `to_id`   = the blocker (the task being depended upon).
 
-  Mirroring `bd dep add <child> <parent>` — the child "blocks on" the parent.
+  The child "blocks on" the parent.
   The W7-03 ready query (per plan §2) picks this direction:
 
       WHERE NOT EXISTS (

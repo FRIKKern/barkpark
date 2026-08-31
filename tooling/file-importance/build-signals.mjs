@@ -34,7 +34,7 @@ const matchAny=(p,globs)=>globs.some(g=>expand(g).some(e=>{if(!reC.has(e))reC.se
 const seamGlobs = cfg.seam.surfaces.flatMap(s=>s.globs);
 
 // ---- file list ----
-const EXCLUDE = /(^|\/)(node_modules|_build|deps|dist|\.beads|\.git|vendor|priv\/static\/assets|tmp)\/|package-lock\.json$|pnpm-lock\.yaml$|\.lock$|go\.sum$|erl_crash\.dump$/;
+const EXCLUDE = /(^|\/)(node_modules|_build|deps|dist|\.git|vendor|priv\/static\/assets|tmp)\/|package-lock\.json$|pnpm-lock\.yaml$|\.lock$|go\.sum$|erl_crash\.dump$/;
 const files = git(["ls-files"]).split("\n").filter(Boolean).filter(f => !EXCLUDE.test(f));
 
 // ---- churn (one pass over history) ----

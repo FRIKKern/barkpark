@@ -2,7 +2,7 @@ defmodule Barkpark.Plugins.Bulldocs.Events do
   @moduledoc """
   Context over the append-only `paper_events` store — the data spine for the
   native goal-path rail (P6.U2). Pure Ecto over `Barkpark.Repo`; never shells
-  out to Beads/`bd` (decoupled from W7).
+  out to an external task process (decoupled from W7).
   """
 
   import Ecto.Query

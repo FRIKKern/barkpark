@@ -74,7 +74,7 @@ deny-path test that encodes that trio and proves the NEW edge catches it.
   written). LIVE-CONFIRMED 2026-07-10: lost race returned not_ready on guerrilla.
 - **D7 — claims carry declared files as `resources` (Go client change only).** The server fence
   (`check_resources_free`: global `task-resources` advisory lock, jsonb overlap scan, 409
-  `resource_conflict` + holders — claim.ex:77-79,194-227) already shipped as the Beads file-claim
+  `resource_conflict` + holders — claim.ex:77-79,194-227) already shipped as resource-claim
   successor; the Go client just never sent resources and drops the `conflicts` holders array
   (client.go:870-875) — both fixed client-side. Query predicts (ready set), claim enforces (in_progress
   set): complementary, never conflated. LIVE-CONFIRMED 2026-07-10: identical-resource claim rejected with

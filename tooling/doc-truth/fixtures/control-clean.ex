@@ -12,8 +12,5 @@ defmodule DocTruth.ControlClean do
   The verifier entry point lives in `tooling/doc-truth/verify-docs.mjs`; the
   denylist in `tooling/doc-truth/retired-terms.mjs`. Both paths resolve.
   """
-
-  # Historically the bd-shim translated `bd` commands onto `/v1/tasks`; it is
-  # retired. Bare prose like this documents the contract and must NOT flag.
   def noop, do: :ok
 end

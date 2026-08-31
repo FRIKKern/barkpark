@@ -26,8 +26,8 @@ defmodule Barkpark.Tasks.Edges do
   @doc """
   Add a dependency edge: `child` blocks on `parent`.
 
-  Mirrors `bd dep add <child> <parent>` — the FIRST argument depends on the
-  SECOND. The edge is stored as `from_id = child_id, to_id = parent_id`
+  The FIRST argument depends on the SECOND. The edge is stored as
+  `from_id = child_id, to_id = parent_id`
   so the W7-03 ready query can scan a candidate's outbound `blocks` edges
   to find its blockers.
 
@@ -82,8 +82,8 @@ defmodule Barkpark.Tasks.Edges do
 
   @doc """
   Remove the `(child_id, parent_id, kind)` edge. Always returns `:ok` —
-  removing an absent edge is a no-op (matches `bd dep rm`'s tolerance,
-  and keeps the close-time `unblock_dependents` flow simple in W7-04).
+  removing an absent edge is a no-op, keeping the close-time
+  `unblock_dependents` flow simple in W7-04.
   """
   @spec remove_dep(binary(), binary(), atom() | String.t()) :: :ok
   def remove_dep(child_id, parent_id, kind) do
@@ -101,7 +101,7 @@ defmodule Barkpark.Tasks.Edges do
   The documents `task_id` depends on — the blockers, the `to_id` side of
   every outbound edge. The W7-03 ready query is a `NOT EXISTS` over this
   set; this function is the higher-level read for orchestrator surfaces
-  (build pre-flight, debug `bd dep ls`).
+  (build pre-flight and dependency inspection).
 
   ## Options
     * `:kind` — filter to one kind (atom or string). Default: `:blocks`.

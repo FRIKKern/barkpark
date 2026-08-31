@@ -6,7 +6,7 @@ defmodule Barkpark.Repo.Migrations.CreatePaperEvents do
   `goal-snapshot`, `phase-advanced`, …) per goal/paper — the data spine for
   the native goal-path rail (P6.U2).
 
-  Decoupled from Beads/W7: the web tier never shells out to `bd`. Rows are
+  Decoupled from W7: the web tier never shells out to an external task process. Rows are
   appended by `Barkpark.Content.upsert_paper/1` when an `event_type` is
   present. `branch` carries `alt-<n>` / `simplified-<n>` for the rail's
   gitGraph; `parent_event_id` threads the lineage chain.

@@ -670,7 +670,6 @@
           "drafts.ct-fix-adr-citations",
           "drafts.ct-fix-render-parity-anchors",
           "drafts.ct-fix-stale-linerefs-counts",
-          "drafts.ct-purge-bd-shim",
           "drafts.ct-purge-cytoscape",
           "drafts.ct-remediation-goal",
           "drafts.ct-retired-term-denylist",

@@ -46,8 +46,7 @@ defmodule BarkparkWeb.TasksController.Params do
   defdelegate apply_index_order(query, parent), to: TaskQuery
 
   # tt5: `label=<exact>` — keep only docs whose `content.labels` JSON array
-  # CONTAINS the exact label string. Backs the `bp task` label filter
-  # (historically the bd-shim's `bd list --label file-claim:<path>`) and any
+  # CONTAINS the exact label string. Backs the `bp task` label filter and any
   # arbitrary label → find every task holding a given claim. Tenancy-scoped via
   # the same workspace/project filters as the rest of the pipeline.
   #

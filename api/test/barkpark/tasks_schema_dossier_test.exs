@@ -313,8 +313,8 @@ defmodule Barkpark.TasksSchemaDossierTest do
       end
     end
 
-    test "a minimal bd-shim create payload still validates (zero-migration guarantee)" do
-      # Exactly what `bd create --description ... -p 2` sends today.
+    test "a minimal CLI create payload validates" do
+      # The smallest useful create payload.
       assert :ok =
                Tasks.validate_task_content(%{
                  "kind" => "task",

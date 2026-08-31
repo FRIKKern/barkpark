@@ -75,7 +75,7 @@ curl -s http://89.167.28.206/v1/data/query/production/post | grep "count" # Docu
 
 ## Task layer + session completion
 
-**Tasks are `type:task` documents in Barkpark's own Postgres**, driven through the `bp task` CLI (over `/v1/tasks`). Beads (`bd`/`.beads/`) is RETIRED (removed 2026-06-22) — do not reinstate it. Use `bp task` for ALL task tracking — do NOT use TodoWrite or markdown TODO lists. Full guide: `docs/setup/TASK-SYSTEM.md`.
+**Tasks are `type:task` documents in Barkpark's own Postgres**, driven through the `bp task` CLI (over `/v1/tasks`). Use `bp task` for ALL task tracking — do NOT use TodoWrite or markdown TODO lists. Full guide: `docs/setup/TASK-SYSTEM.md`.
 
 ```bash
 bp task ready            # Find available work

@@ -1,7 +1,6 @@
 defmodule BarkparkWeb.TasksController do
   @moduledoc """
-  W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the `bp task` CLI
-  (historically the bd-compatible shim `bin/bd-shim`, retired 2026-06-22).
+  W7b step 1 (paper-rx0 / w7-07a) — HTTP surface for the `bp task` CLI.
 
   Sixteen endpoints, all bearer-token gated via the existing `:api` +
   `:require_token` pipelines in `router.ex`:
@@ -27,13 +26,10 @@ defmodule BarkparkWeb.TasksController do
 
   ## Shape contract
 
-  All read responses carry a `doc` (or `docs`) map in the bd-compatible
-  shape (`id`, `title`, `status`, `type`, `lifecycle_status`, `kind`,
-  `content`, `priority`, `assignee`, `dependencies`, …) — close enough to
-  what `bd show --json` emitted that the now-retired `bin/bd-shim` passed
-  it through unchanged, translating label-flavoured args to query params
-  upstream of this controller. The `bp task` CLI consumes the same shape
-  today. See `render_doc/1`.
+  All read responses carry a `doc` (or `docs`) map with `id`, `title`,
+  `status`, `type`, `lifecycle_status`, `kind`, `content`, `priority`,
+  `assignee`, `dependencies`, and related task fields. The `bp task` CLI
+  consumes this shape. See `render_doc/1`.
 
   ## Why the doc_id is a URL segment for close but a body field for claim
 
@@ -116,8 +112,7 @@ defmodule BarkparkWeb.TasksController do
   end
 
   # ─── GET /v1/tasks/prime ────────────────────────────────────────────────
-  # One-call agent rehydration — the `bd prime` lesson from the Beads
-  # retrospective (2026-06-11). After compaction / a fresh session, an agent
+  # One-call agent rehydration. After compaction / a fresh session, an agent
   # needs its working context in ONE response instead of four calls:
   #
   #   * `in_progress` — live claims, narrowed to `?worker=<id>` when given
@@ -237,15 +232,12 @@ defmodule BarkparkWeb.TasksController do
   # w7-08c (paper-y1c): list-all endpoint. Returns every task doc in the
   # caller's tenant, optionally narrowed by `kind`, `lifecycle_status`, or
   # `phase_id` (parent match). Everything is a task — goals/phases/events are
-  # gone as types. Backs the `bp task` list family (historically the bd-shim's
-  # `bd list --json`) — replaces the previous "ready --limit 1000 then
-  # client-side filter" path (which lost in-progress + closed rows).
+  # gone as types. Backs the `bp task` list family and replaces the previous
+  # "ready --limit 1000 then client-side filter" path (which lost in-progress
+  # + closed rows).
   #
-  # Why server-side filtering: the shim used to fetch ready and filter
-  # client-side, which (a) only saw the ready slice (no in_progress / done /
-  # phases / goals) and (b) wasted bandwidth. Server-side filter is the
-  # honest implementation and matches what real `bd list` queries against
-  # the SQLite store.
+  # Why server-side filtering: client-side filtering only saw the ready slice
+  # (no in_progress / done / phases / goals) and wasted bandwidth.
 
   def index(conn, params) do
     # gr-bl-tasks-route-parent-filter-ignored: the `filter[...]` container is
@@ -391,8 +383,7 @@ defmodule BarkparkWeb.TasksController do
   end
 
   # ─── GET /v1/tasks/:doc_id ──────────────────────────────────────────────
-  # w7-08: dedicated single-task fetch, replacing the (now-retired) bd-shim's
-  # listAll() walk.
+  # w7-08: dedicated single-task fetch, replacing a listAll() walk.
   # Uses the SAME direct scoped query as `find_task_by_doc_id/2` — DO NOT
   # route through `Content.get_document/4` (dataset_id coalescence bug noted
   # in w7-07's report).
@@ -1688,8 +1679,7 @@ defmodule BarkparkWeb.TasksController do
   # then delegates to Tasks.relabel_by_id/3 (advisory-lock + CAS-on-rev +
   # task.relabeled mutation_event). Returns { ok, doc }.
   #
-  # Backs the `bp task` labels endpoint (historically the bd-shim's
-  # `bd update <id> --add-label/--remove-label`), which in turn backs
+  # Backs the `bp task` labels endpoint, which in turn backs
   # paper-claim-files' `file-claim:<path>` ownership labels.
 
   def relabel(conn, %{"doc_id" => doc_id} = params) do
