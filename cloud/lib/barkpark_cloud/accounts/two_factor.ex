@@ -118,6 +118,15 @@ defmodule BarkparkCloud.Accounts.TwoFactor do
   # "is monotonic in wall-clock time". Wall-clock time is NOT monotonic — that
   # is the whole premise of this wave. The verdict rests on the SQL guard at
   # accounts.ex:2186, which holds whether or not the clock behaves.
+  #
+  # THE MARKER IS THE POINT, not decoration. `aka:` carries `valid_otp` on
+  # purpose: the deleted twin's name is the term a reader who learned 2FA from
+  # the old code — or from a stale note, a cached search, an LLM's memory of
+  # this file — will actually type. Grepping it must land HERE, on the door that
+  # returns the step, rather than on nothing (which reads as "no such thing,
+  # write your own"). A marker that only lists the surviving spelling protects
+  # nobody, because nobody searches for the name they already found.
+  # @canonical capability:totp-step-verification aka:otp,2fa,totp,valid_otp,verify_two_factor_otp
   @spec matching_step(binary(), String.t(), integer()) :: {:ok, integer()} | :error
   def matching_step(secret, otp, now \\ System.os_time(:second))
 
