@@ -423,11 +423,20 @@ func firstMutationID(body []byte) (string, bool) {
 // apiclient path produced. Unknown shapes fall back to the clamped body verbatim
 // so nothing is ever swallowed.
 func mutateErrorMessage(status int, body []byte) string {
+	// `details` is json.RawMessage, NOT map[string][]string. The typed map was a
+	// GUESS about one shape (validation_failed's field→reasons), and json
+	// rejects the WHOLE document when any field mismatches — so the server's
+	// duplicate_task 409, whose details is {"similar":[{...}],"advise":[]},
+	// failed to unmarshal and dropped the entire envelope to the clamped-raw
+	// fallback below. The caller then saw the body cut at 200 runes, mid-`hint`,
+	// which is exactly where the id it needs lives. A decoder must never let one
+	// unexpected field discard the fields it CAN read.
 	var env struct {
 		Error struct {
-			Code    string              `json:"code"`
-			Message string              `json:"message"`
-			Details map[string][]string `json:"details"`
+			Code    string          `json:"code"`
+			Message string          `json:"message"`
+			Hint    string          `json:"hint"`
+			Details json.RawMessage `json:"details"`
 		} `json:"error"`
 	}
 	if json.Unmarshal(body, &env) == nil && (env.Error.Code != "" || env.Error.Message != "") {
@@ -435,21 +444,112 @@ func mutateErrorMessage(status int, body []byte) string {
 		if msg == "" {
 			msg = env.Error.Code
 		}
-		var parts []string
-		for field, reasons := range env.Error.Details {
-			parts = append(parts, field+": "+strings.Join(reasons, "; "))
-		}
-		sort.Strings(parts) // deterministic over the map
-		if len(parts) > 0 {
+		if parts := detailReasons(env.Error.Details); len(parts) > 0 {
 			msg += " — " + strings.Join(parts, " · ")
+		}
+		// The server's hint is the sentence that tells the caller what to DO. It
+		// was never read at all before, so every hinted refusal arrived with its
+		// remedy stripped.
+		if h := strings.TrimSpace(env.Error.Hint); h != "" {
+			msg += "\n  hint: " + h
+		}
+		// A refusal that says "pass distinct_from: [\"<id>\"]" must SHOW the ids.
+		// Instructing an action while withholding its required input reads as
+		// actionable and is not.
+		if cands := candidateLines(env.Error.Details); len(cands) > 0 {
+			msg += "\n  " + strings.Join(cands, "\n  ")
 		}
 		return msg
 	}
-	raw := strings.TrimSpace(string(body))
-	if r := []rune(raw); len(r) > 200 {
-		raw = string(r[:200]) + "…"
+	// Unknown shape. Do NOT truncate: the body is the only diagnosis left, and
+	// the 200-rune clamp cut it mid-sentence precisely when it mattered most.
+	return fmt.Sprintf("error %d: %s", status, strings.TrimSpace(string(body)))
+}
+
+// detailReasons renders the field→reasons shape validation_failed uses
+// ({"title":["is required"]}) as sorted "field: reason; reason" parts. Any
+// other details shape yields nothing here — it is rendered by candidateLines
+// or simply left out, never allowed to fail the whole parse.
+func detailReasons(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
 	}
-	return fmt.Sprintf("error %d: %s", status, raw)
+	var m map[string][]string
+	if json.Unmarshal(raw, &m) != nil {
+		return nil
+	}
+	parts := make([]string, 0, len(m))
+	for field, reasons := range m {
+		parts = append(parts, field+": "+strings.Join(reasons, "; "))
+	}
+	sort.Strings(parts) // deterministic over the map
+	return parts
+}
+
+// candidateLines renders the near-match candidate lists a dedup refusal
+// carries — details.similar (the rows that CAUSED the refusal) and
+// details.advise (rows worth a look that did not) — as one line per candidate,
+// leading with the id, because the id is the input the refusal's own remedy
+// demands. Built from api/lib/barkpark/tasks/dedup.ex present/1:
+// {id, similarity, relation, lifecycle_status}. Returns nil for any other
+// details shape.
+func candidateLines(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var d struct {
+		Similar []dedupCandidate `json:"similar"`
+		Advise  []dedupCandidate `json:"advise"`
+	}
+	if json.Unmarshal(raw, &d) != nil {
+		return nil
+	}
+	var lines []string
+	for _, c := range d.Similar {
+		if s := c.line("matches"); s != "" {
+			lines = append(lines, s)
+		}
+	}
+	for _, c := range d.Advise {
+		if s := c.line("related"); s != "" {
+			lines = append(lines, s)
+		}
+	}
+	if len(lines) > 0 {
+		lines = append(lines, "pass --set 'distinct_from:=[\"<id>\"]' with the id above to confirm yours is genuinely different")
+	}
+	return lines
+}
+
+// dedupCandidate is one near-match row from a dedup refusal's details.
+type dedupCandidate struct {
+	ID         string  `json:"id"`
+	Similarity float64 `json:"similarity"`
+	Relation   string  `json:"relation"`
+	Lifecycle  string  `json:"lifecycle_status"`
+}
+
+// line renders one candidate, id FIRST. An id-less row renders nothing — a
+// candidate we cannot name is not worth a line, since naming it is the point.
+func (c dedupCandidate) line(kind string) string {
+	if strings.TrimSpace(c.ID) == "" {
+		return ""
+	}
+	s := kind + " " + c.ID
+	var extras []string
+	if c.Similarity > 0 {
+		extras = append(extras, fmt.Sprintf("similarity %.2f", c.Similarity))
+	}
+	if c.Relation != "" {
+		extras = append(extras, c.Relation)
+	}
+	if c.Lifecycle != "" {
+		extras = append(extras, c.Lifecycle)
+	}
+	if len(extras) > 0 {
+		s += " (" + strings.Join(extras, ", ") + ")"
+	}
+	return s
 }
 
 // parseTaskCreateArgs folds the positional title + flags into the create body
