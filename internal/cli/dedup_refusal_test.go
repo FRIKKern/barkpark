@@ -125,3 +125,25 @@ func TestCandidateWithoutAnIDRendersNothing(t *testing.T) {
 		t.Errorf("advertised distinct_from with no id to pass — the exact bug, re-made:\n%s", got)
 	}
 }
+
+// The candidates get exactly ONE rendering. apierr.Summary() appends the
+// generic details view, which for a dedup refusal is the whole candidate array
+// as compact JSON — printing that AND the readable id-leading lines buries the
+// ids in the very noise they were extracted from. Caught when the shared parser
+// replaced this path's private decoder, and pinned so consolidation cannot
+// quietly re-introduce it.
+func TestDedupRefusalRendersCandidatesOnce(t *testing.T) {
+	got := mutateErrorMessage(409, []byte(duplicateTaskBody))
+	if strings.Contains(got, `[{"id":"task-abc123"`) || strings.Contains(got, "similar: [") {
+		t.Errorf("the raw candidate blob is printed alongside the parsed lines:\n%s", got)
+	}
+	if n := strings.Count(got, "task-abc123"); n != 1 {
+		t.Errorf("task-abc123 appears %d times, want exactly 1:\n%s", n, got)
+	}
+	// A refusal with NO candidates keeps the full generic details rendering —
+	// there is no second view, so the details ARE the detail.
+	plain := mutateErrorMessage(422, []byte(`{"error":{"code":"validation_failed","message":"v","details":{"title":["is required"]}}}`))
+	if !strings.Contains(plain, "title: is required") {
+		t.Errorf("a non-dedup refusal lost its details rendering:\n%s", plain)
+	}
+}

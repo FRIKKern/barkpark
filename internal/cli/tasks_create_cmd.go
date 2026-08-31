@@ -22,11 +22,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
+
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 // runTaskCreate handles `bp task create [<title>] [--title <t>]
@@ -422,134 +423,72 @@ func firstMutationID(body []byte) (string, bool) {
 // keeps the same "validation_failed — kind: is required · …" feedback the
 // apiclient path produced. Unknown shapes fall back to the clamped body verbatim
 // so nothing is ever swallowed.
+// THIS IS THE SITE THAT PROVED THE FORK. It declared
+//
+//	Details map[string][]string `json:"details"`
+//
+// a guess at validation_failed's ONE shape. encoding/json rejects the whole
+// document on a single field mismatch, so the server's duplicate_task 409 —
+// whose details is {"similar":[{id,…}],"advise":[]} — failed to unmarshal and
+// took code, message AND hint down with it, dropping the caller to the clamped
+// raw body below. The clamp then cut mid-`hint`, which is exactly where the id
+// lives. The refusal told the caller to pass distinct_from: ["<id>"] while
+// withholding the id, and was therefore unappealable.
+//
+// It now reads through internal/apierr like every other surface, and renders
+// the two things the old decoder threw away: the server's hint, and the
+// candidate ids the refusal's own remedy demands.
 func mutateErrorMessage(status int, body []byte) string {
-	// `details` is json.RawMessage, NOT map[string][]string. The typed map was a
-	// GUESS about one shape (validation_failed's field→reasons), and json
-	// rejects the WHOLE document when any field mismatches — so the server's
-	// duplicate_task 409, whose details is {"similar":[{...}],"advise":[]},
-	// failed to unmarshal and dropped the entire envelope to the clamped-raw
-	// fallback below. The caller then saw the body cut at 200 runes, mid-`hint`,
-	// which is exactly where the id it needs lives. A decoder must never let one
-	// unexpected field discard the fields it CAN read.
-	var env struct {
-		Error struct {
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Hint    string          `json:"hint"`
-			Details json.RawMessage `json:"details"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &env) == nil && (env.Error.Code != "" || env.Error.Message != "") {
-		msg := env.Error.Message
-		if msg == "" {
-			msg = env.Error.Code
+	if env, ok := apierr.Parse(body); ok {
+		lines := dedupCandidateLines(env)
+
+		// Summary() appends the GENERIC details rendering, which for a dedup
+		// refusal is the whole candidate array as compact JSON. When we are
+		// about to print those same candidates as readable id-leading lines,
+		// the blob is noise that buries them — so take the bare message here
+		// and let the lines below carry the payload. Every other refusal still
+		// gets the full Summary(), because for those the details ARE the
+		// detail and there is no second rendering.
+		msg := env.Summary()
+		if len(lines) > 0 {
+			msg = env.Message
+			if msg == "" {
+				msg = env.Code
+			}
 		}
-		if parts := detailReasons(env.Error.Details); len(parts) > 0 {
-			msg += " — " + strings.Join(parts, " · ")
-		}
-		// The server's hint is the sentence that tells the caller what to DO. It
-		// was never read at all before, so every hinted refusal arrived with its
-		// remedy stripped.
-		if h := strings.TrimSpace(env.Error.Hint); h != "" {
+		if h := env.HintLine(); h != "" {
 			msg += "\n  hint: " + h
 		}
-		// A refusal that says "pass distinct_from: [\"<id>\"]" must SHOW the ids.
-		// Instructing an action while withholding its required input reads as
-		// actionable and is not.
-		if cands := candidateLines(env.Error.Details); len(cands) > 0 {
-			msg += "\n  " + strings.Join(cands, "\n  ")
+		if len(lines) > 0 {
+			msg += "\n  " + strings.Join(lines, "\n  ")
 		}
 		return msg
 	}
 	// Unknown shape. Do NOT truncate: the body is the only diagnosis left, and
-	// the 200-rune clamp cut it mid-sentence precisely when it mattered most.
+	// the old 200-rune clamp cut it precisely when it mattered most.
 	return fmt.Sprintf("error %d: %s", status, strings.TrimSpace(string(body)))
 }
 
-// detailReasons renders the field→reasons shape validation_failed uses
-// ({"title":["is required"]}) as sorted "field: reason; reason" parts. Any
-// other details shape yields nothing here — it is rendered by candidateLines
-// or simply left out, never allowed to fail the whole parse.
-func detailReasons(raw json.RawMessage) []string {
-	if len(raw) == 0 {
-		return nil
-	}
-	var m map[string][]string
-	if json.Unmarshal(raw, &m) != nil {
-		return nil
-	}
-	parts := make([]string, 0, len(m))
-	for field, reasons := range m {
-		parts = append(parts, field+": "+strings.Join(reasons, "; "))
-	}
-	sort.Strings(parts) // deterministic over the map
-	return parts
-}
-
-// candidateLines renders the near-match candidate lists a dedup refusal
-// carries — details.similar (the rows that CAUSED the refusal) and
-// details.advise (rows worth a look that did not) — as one line per candidate,
-// leading with the id, because the id is the input the refusal's own remedy
-// demands. Built from api/lib/barkpark/tasks/dedup.ex present/1:
-// {id, similarity, relation, lifecycle_status}. Returns nil for any other
-// details shape.
-func candidateLines(raw json.RawMessage) []string {
-	if len(raw) == 0 {
-		return nil
-	}
-	var d struct {
-		Similar []dedupCandidate `json:"similar"`
-		Advise  []dedupCandidate `json:"advise"`
-	}
-	if json.Unmarshal(raw, &d) != nil {
-		return nil
-	}
+// dedupCandidateLines renders a dedup refusal's near-match rows one per line,
+// id FIRST, then the exact flag spelling that appeals the refusal. A refusal
+// that names an action must show that action's input.
+func dedupCandidateLines(env apierr.Envelope) []string {
+	similar, advise := env.Candidates()
 	var lines []string
-	for _, c := range d.Similar {
-		if s := c.line("matches"); s != "" {
+	for _, c := range similar {
+		if s := c.Line("matches"); s != "" {
 			lines = append(lines, s)
 		}
 	}
-	for _, c := range d.Advise {
-		if s := c.line("related"); s != "" {
+	for _, c := range advise {
+		if s := c.Line("related"); s != "" {
 			lines = append(lines, s)
 		}
 	}
 	if len(lines) > 0 {
-		lines = append(lines, "pass --set 'distinct_from:=[\"<id>\"]' with the id above to confirm yours is genuinely different")
+		lines = append(lines, `pass --set 'distinct_from:=["<id>"]' with the id above to confirm yours is genuinely different`)
 	}
 	return lines
-}
-
-// dedupCandidate is one near-match row from a dedup refusal's details.
-type dedupCandidate struct {
-	ID         string  `json:"id"`
-	Similarity float64 `json:"similarity"`
-	Relation   string  `json:"relation"`
-	Lifecycle  string  `json:"lifecycle_status"`
-}
-
-// line renders one candidate, id FIRST. An id-less row renders nothing — a
-// candidate we cannot name is not worth a line, since naming it is the point.
-func (c dedupCandidate) line(kind string) string {
-	if strings.TrimSpace(c.ID) == "" {
-		return ""
-	}
-	s := kind + " " + c.ID
-	var extras []string
-	if c.Similarity > 0 {
-		extras = append(extras, fmt.Sprintf("similarity %.2f", c.Similarity))
-	}
-	if c.Relation != "" {
-		extras = append(extras, c.Relation)
-	}
-	if c.Lifecycle != "" {
-		extras = append(extras, c.Lifecycle)
-	}
-	if len(extras) > 0 {
-		s += " (" + strings.Join(extras, ", ") + ")"
-	}
-	return s
 }
 
 // parseTaskCreateArgs folds the positional title + flags into the create body
