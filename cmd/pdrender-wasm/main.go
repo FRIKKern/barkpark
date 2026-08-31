@@ -200,8 +200,17 @@ var basic16 = [16]string{
 	"#6b7972", "#f08a80", "#5fcf9c", "#e0b65f", "#8ab4e8", "#c9a6f0", "#7fd6d6", "#eaf3ee",
 }
 
+// xterm256Fallback is returned for any input outside the valid 0..255 xterm
+// colour range (including non-numeric input) rather than indexing out of
+// bounds — this is the WASM bridge's declared-untrusted ANSI entrypoint, so
+// it must be safe on its own terms.
+const xterm256Fallback = "#000000"
+
 func xterm256(s string) string {
-	n, _ := strconv.Atoi(s)
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 || n > 255 {
+		return xterm256Fallback
+	}
 	if n < 16 {
 		return basic16[n]
 	}
