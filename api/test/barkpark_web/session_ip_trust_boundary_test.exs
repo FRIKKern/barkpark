@@ -37,6 +37,15 @@ defmodule BarkparkWeb.SessionIpTrustBoundaryTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.RateLimiterSandbox
+
+  # `:barkpark_rate_limiter` is a :named_table — WHOLE-NODE state no sandbox
+  # owns. Every session mint this suite drives goes through the same
+  # trust-boundary resolver rate-limited callers use, so this file touches
+  # `Barkpark.RateLimiter` too and must reset it like every other consumer
+  # (see rate_limiter_async_isolation_test.exs's cross-file census).
+  setup :reset_rate_limiter!
+
   alias Barkpark.Accounts
   alias Barkpark.Repo
 
