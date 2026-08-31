@@ -833,6 +833,100 @@ defmodule BarkparkWeb.ChatControllerTest do
     end
   end
 
+  # ── observed runtime telemetry readout (wb-api-chat-observed-telemetry-readout) ──
+  # session.ex:129-138 declares observed_model / observed_effort /
+  # observed_{input,cached_input,output,reasoning_output,total}_tokens /
+  # observed_context_window / runtime_identity / runtime_telemetry_limitations,
+  # and RuntimeTelemetry writes them on every provider result frame — this
+  # describe block proves the FULL continuity read actually surfaces them.
+  describe "GET /sessions/:id — provider-observed runtime telemetry readout" do
+    test "serialises observed_* / runtime_identity / runtime_telemetry_limitations once written",
+         %{admin: a1, sid: sid} do
+      session = StudioChat.get_session(sid)
+
+      Barkpark.Repo.update!(
+        Ecto.Changeset.change(session,
+          observed_model: "claude-opus-4-6",
+          observed_effort: "high",
+          observed_input_tokens: 1234,
+          observed_cached_input_tokens: 500,
+          observed_output_tokens: 321,
+          observed_reasoning_output_tokens: 77,
+          observed_total_tokens: 1555,
+          observed_context_window: 200_000,
+          runtime_identity: %{"runtime_id" => "codex-app-server-9"},
+          runtime_telemetry_limitations: ["registered-host CPU and memory telemetry are unavailable"]
+        )
+      )
+
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+
+      assert body["observed_model"] == "claude-opus-4-6"
+      assert body["observed_effort"] == "high"
+      assert body["observed_input_tokens"] == 1234
+      assert body["observed_cached_input_tokens"] == 500
+      assert body["observed_output_tokens"] == 321
+      assert body["observed_reasoning_output_tokens"] == 77
+      assert body["observed_total_tokens"] == 1555
+      assert body["observed_context_window"] == 200_000
+      assert body["runtime_identity"] == %{"runtime_id" => "codex-app-server-9"}
+
+      assert body["runtime_telemetry_limitations"] == [
+               "registered-host CPU and memory telemetry are unavailable"
+             ]
+    end
+
+    test "a session with no observations renders every observed_* key as nil, never 0/requested/empty map",
+         %{admin: a1, sid: sid} do
+      {:ok, _} = StudioChat.set_model_choice(sid, "opus")
+      {:ok, _} = StudioChat.set_effort_choice(sid, "high")
+
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+
+      # honesty rule: nil stays nil — never coalesced to 0, to the requested
+      # model_choice/effort_choice, or to an empty map.
+      assert body["observed_model"] == nil
+      assert body["observed_effort"] == nil
+      assert body["observed_input_tokens"] == nil
+      assert body["observed_cached_input_tokens"] == nil
+      assert body["observed_output_tokens"] == nil
+      assert body["observed_reasoning_output_tokens"] == nil
+      assert body["observed_total_tokens"] == nil
+      assert body["observed_context_window"] == nil
+      assert body["runtime_identity"] == nil
+      assert body["runtime_telemetry_limitations"] == nil
+
+      refute body["observed_model"] == body["model_choice"]
+      refute body["observed_effort"] == body["effort_choice"]
+    end
+
+    test "the sidebar shape deliberately omits observed_* (same D14 vacuous-green-trap boundary as draft/rail/choices)",
+         %{admin: a1, sid: sid} do
+      session = StudioChat.get_session(sid)
+
+      Barkpark.Repo.update!(
+        Ecto.Changeset.change(session,
+          observed_model: "claude-opus-4-6",
+          observed_effort: "high",
+          runtime_identity: %{"runtime_id" => "codex-app-server-9"}
+        )
+      )
+
+      entry = sidebar_entry(a1, sid)
+
+      refute Map.has_key?(entry, "observed_model")
+      refute Map.has_key?(entry, "observed_effort")
+      refute Map.has_key?(entry, "observed_input_tokens")
+      refute Map.has_key?(entry, "observed_cached_input_tokens")
+      refute Map.has_key?(entry, "observed_output_tokens")
+      refute Map.has_key?(entry, "observed_reasoning_output_tokens")
+      refute Map.has_key?(entry, "observed_total_tokens")
+      refute Map.has_key?(entry, "observed_context_window")
+      refute Map.has_key?(entry, "runtime_identity")
+      refute Map.has_key?(entry, "runtime_telemetry_limitations")
+    end
+  end
+
   # ── PATCH: exact allowlist, bounds, StudioChat.rename (obligation D) ────────
 
   describe "PATCH /sessions/:id — exact allowlist + bounds" do
