@@ -192,7 +192,10 @@ defmodule Barkpark.Content.DedupWallTest do
   end
 
   test "check/4 still refuses when content.supersedes names a DIFFERENT doc, and says so" do
-    publish_paper!("live-pred2", "Rate limiting the mutate controller", ["rate-limiting", "mutate"])
+    publish_paper!("live-pred2", "Rate limiting the mutate controller", [
+      "rate-limiting",
+      "mutate"
+    ])
 
     incoming = %{
       doc_id: "drafts.mis-declared",
