@@ -133,8 +133,9 @@ defmodule BarkparkWeb.FederatedSearchController do
     # VISIBILITY CLAMP (task-0fcec595765a7b00): this was the one AssetResponse
     # door with no ceiling — `caller_context` used to be discarded (`_caller_context`
     # in the head) and every hit rendered with `include_urls: true` regardless of
-    # who asked. Predicate mirrors `Barkpark.Media.Storage.Access.delivery_ok?/3`
-    # (access.ex:113-119): `public` is visible to everyone; `token`/`private`
+    # who asked. Predicate mirrors the private
+    # `Barkpark.Media.Storage.Access.delivery_ok?/3` clauses in
+    # api/lib/barkpark/media/storage/access.ex: `public` is visible to everyone; `token`/`private`
     # require an AUTHENTICATED caller. This clause mints no SignedUrl
     # (`render_opts` carries no `:conn`/`:sign_urls`), so `delivery_ok?/3`'s
     # `signed` arm never applies here and is intentionally not reproduced.

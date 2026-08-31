@@ -86,8 +86,9 @@ defmodule BarkparkWeb.Contract.FederatedSearchMediaScopeTest do
   # `include_urls: true` regardless of who asked — unlike the documents-surface
   # sibling immediately above it, which threads `caller_context` into
   # `HitEnvelope.build/5`. Predicate mirrors
-  # `Barkpark.Media.Storage.Access.delivery_ok?/3` (access.ex:113-119): `public`
-  # is visible to everyone, `token`/`private` require an authenticated caller.
+  # `Barkpark.Media.Storage.Access.delivery_ok?/3` (private clauses in
+  # `media/storage/access.ex`): `public` is visible to everyone, `token`/`private`
+  # require an authenticated caller.
   describe "federated media surface :: anonymous caller-context visibility clamp" do
     test "anonymous GET drops a private media hit, keeps the public one, and total matches the returned hits",
          ctx do
