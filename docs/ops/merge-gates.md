@@ -277,6 +277,21 @@ is harmless:
   `--expect-promoted '<name>'`, which DROPS the committed row instead of
   carrying it. Both arms are mutation-proven in §14b of
   `scripts/required-checks.test.sh`.
+- **ADDING A BLOCKING JOB TO `security.yml` COSTS A SIXTH PLACE, and forgetting
+  it reds the spec gate on every open PR.** #14073 paid the five its own message
+  enumerates (the job, the aggregator's `needs`, its decide binding, every
+  `env -i` simulator of that step body, the spec-authority marker) and stopped
+  there. The sixth is the `ACK_EX` list in §14 of
+  `scripts/required-checks.test.sh`: the hermetic suite drives the generator
+  over a FROZEN fixture pair, a job added after that freeze can never render
+  there, and the committed exclusion row it needs is therefore permanently
+  unrenderable ON THAT WINDOW — so the generator refuses every emit until the
+  name is acknowledged. Re-sampling is not the escape hatch (D130 freezes the
+  pair on purpose); typing the rendered name into `ACK_EX` is. Main was red on
+  exactly this from **2026-08-24T21:59Z to 2026-08-31T20:14Z** — 6d22h elapsed,
+  eight calendar dates — and every open PR carried the red with it. During that
+  window this gate was decorative, so a "merged on 4/4 green" in it records a
+  convention rather than a gate.
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
