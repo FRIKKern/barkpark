@@ -515,7 +515,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   # Append a `paper_events` row when this upsert carries a non-empty
-  # `event_type`. Decoupled from Beads/W7 — pure Postgres via
+  # `event_type`. Decoupled from W7 — pure Postgres via
   # `Barkpark.Plugins.Bulldocs.Events`. Failures are logged, never raised.
   #
   # W1.5-C: the event inherits the saved paper document's workspace/project —

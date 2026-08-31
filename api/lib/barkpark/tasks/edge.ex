@@ -12,8 +12,8 @@ defmodule Barkpark.Tasks.Edge do
   `from_id` = the dependent (it BLOCKS ON something).
   `to_id`   = the blocker (it is depended upon).
 
-  Mirroring `bd dep add <child> <parent>`. The ready query (W7-03) scans
-  outbound edges from a candidate (`from_id = candidate.id`) to find its
+  The ready query (W7-03) scans outbound edges from a candidate
+  (`from_id = candidate.id`) to find its
   blockers (`to_id`).
 
   ## Kinds

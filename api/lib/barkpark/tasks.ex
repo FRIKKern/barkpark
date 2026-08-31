@@ -106,8 +106,7 @@ defmodule Barkpark.Tasks do
   @event_task_closed "task.closed"
   @event_task_mutated "task.mutated"
   # tt5: file-claim label support. Emitted when content.labels changes via
-  # relabel_by_id/3 (the `bp task` labels path, `POST /v1/tasks/:doc_id/labels`
-  # — historically the retired bd-shim's `update --add-label/--remove-label`).
+  # relabel_by_id/3 (the `bp task` labels path, `POST /v1/tasks/:doc_id/labels`).
   @event_task_relabeled "task.relabeled"
   # Phase A: task→paper reference support. Emitted when content.papers changes
   # via update_paper_refs_by_id/3 (the `/v1/tasks/:doc_id/papers` path).
@@ -284,8 +283,8 @@ defmodule Barkpark.Tasks do
       `Scope.scope_to_workspace_or_global/3`).
 
   The query is ordered by `content.priority` ASC (NULLS LAST) then
-  `inserted_at` ASC — deterministic, lowest priority number first
-  (mirroring `bd ready`'s priority semantics where 0 is highest).
+  `inserted_at` ASC — deterministic, lowest priority number first, where 0
+  is highest.
 
   ## Options
     * `:workspace_id` — binary uuid. Required for tenant-scoped reads.
@@ -303,7 +302,7 @@ defmodule Barkpark.Tasks do
   ## Why string `phase_id` and not the uuid
 
   The W7-01 contract pins `content.parent_id` as the parent's `doc_id`
-  string (e.g. `"phase-build-a1b2"`), mirroring `bd`'s `--parent <slug>`
+  string (e.g. `"phase-build-a1b2"`), matching the CLI's direct parent-slug
   shape. The orchestrator surfaces the active phase as a slug;
   reading the row's `documents.id` uuid every time the statusline
   composes would be wasted DB chatter.
@@ -377,9 +376,8 @@ defmodule Barkpark.Tasks do
 
   Why a separate primitive: `claim/2` picks the next ready row (queue semantics
   — caller doesn't name a row). A targeted claim names the row instead. This
-  primitive (w7-08) serves callers that name a specific row — historically the
-  now-retired `bin/bd-shim` needed to translate `bd update <id> --claim`
-  (targeted), which the queue-based `claim/2` could not do without a wasted
+  primitive (w7-08) serves callers that name a specific row, which the
+  queue-based `claim/2` could not do without a wasted
   listAll() roundtrip plus losing semantics (the row the queue picks might not
   be the row the caller named).
 
@@ -473,8 +471,7 @@ defmodule Barkpark.Tasks do
       * `:lifecycle_status` (default `"done"`) — one of `done`/`cancelled`/
         `blocked`.
       * `:reason` (optional string) — persisted as `content.close_reason`,
-        the dossier's one-line close rationale (`bd close --reason`'s
-        landing slot, tsk-dossier-cli). Ignored when blank.
+        the dossier's one-line close rationale. Ignored when blank.
 
   ## Returns
     * `{:ok, %Document{}}` — closed successfully; the returned doc carries
@@ -585,9 +582,8 @@ defmodule Barkpark.Tasks do
   @doc """
   tt5: add/remove `content.labels` entries on a single task, advisory-lock +
   CAS-on-rev guarded, emitting a `task.relabeled` mutation_event. Powers the
-  `bp task` labels endpoint (`POST /v1/tasks/:doc_id/labels`) — historically the
-  now-retired bd-shim's `bd update <id> --add-label/--remove-label` translation
-  — which in turn backs paper-claim-files' `file-claim:<path>` ownership labels.
+  `bp task` labels endpoint (`POST /v1/tasks/:doc_id/labels`), which in turn
+  backs paper-claim-files' `file-claim:<path>` ownership labels.
 
   `add` and `remove` are lists of exact label strings. The result is a union
   add (dedup-preserving) minus the remove set. Idempotent: re-adding an

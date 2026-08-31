@@ -180,7 +180,7 @@ defmodule Barkpark.Tasks.Claim do
     if all_done?, do: :ok, else: {:error, :blocked_by_unsatisfied_deps}
   end
 
-  # Resource claims (the Beads file-claim successor): a targeted claim may carry
+  # Resource claims: a targeted claim may carry
   # `resources: ["a.go", …]` (opaque strings, exact-match). The overlap scan
   # refuses with `resource_conflict` + holders when any requested string is held
   # by another LIVE (in_progress) claim in the same tenancy. Resources live

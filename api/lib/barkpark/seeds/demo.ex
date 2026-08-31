@@ -251,7 +251,7 @@ defmodule Barkpark.Seeds.Demo do
 
     IO.puts("Seeded #{length(schemas)} schema definitions")
 
-    # ── W7a task schema (W7 retire-beads substrate) ──────────────────────────
+    # ── W7a task schema ─────────────────────────────────────────────────────
     #
     # Wave 7 step 1: everything is a task — a single first-class document type
     # living beside papers in the same workspace/project/dataset hierarchy (a
