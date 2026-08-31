@@ -80,7 +80,12 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
     # `{:error, :unauthorized}`, so a revoked token is the exact input class.
     {:ok, _} = Auth.revoke_token(dead)
 
-    assert {:error, _} = Auth.verify_token(raw_dead),
+    # Bound first, then asserted on a boolean: `assert pattern = expr, msg`
+    # silently DISCARDS the message (the match raises on its own), and this
+    # particular message is the anti-vacuity guard for the whole file.
+    dead_verifies? = match?({:ok, _}, Auth.verify_token(raw_dead))
+
+    refute dead_verifies?,
            "precondition: the revoked bearer must NOT verify, or every arm below is vacuous"
 
     %{
@@ -145,7 +150,8 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
     end
   end
 
-  # ── task-6716af864218081b — the flat /media read block (router.ex:2367-2374)
+  # ── task-6716af864218081b — the flat `/media` read block: the `scope "/media"`
+  # that pipes through `[:api, :strict_bearer_media_read]` in BarkparkWeb.Router
 
   describe "flat /media — a decayed bearer must be refused, not tenant-swapped" do
     test "GET /media", %{raw_dead: raw_dead, default_file: default_file} do
@@ -222,7 +228,8 @@ defmodule BarkparkWeb.MediaFlatDecayedBearerTest do
     end
   end
 
-  # ── task-79e10984bbb23734 — the flat /v1/media block (router.ex:2427-2440)
+  # ── task-79e10984bbb23734 — the flat `/v1/media` block: the `scope "/v1/media"`
+  # that pipes through `[:api, :strict_bearer_media_read]` in BarkparkWeb.Router
 
   describe "flat /v1/media — a decayed bearer must be refused on all ten routes" do
     test "the nine GETs", %{raw_dead: raw_dead, default_file: default_file} do
