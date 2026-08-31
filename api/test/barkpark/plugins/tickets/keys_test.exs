@@ -174,7 +174,8 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
       assert {:ok, _} = Keys.verify(b_raw)
 
       # FAIL-CLOSED: a nil workspace scope matches only un-bound keys, so it
-      # cannot reach a bound key either (contrast list/1's nil → all keys).
+      # cannot reach a bound key either — the same predicate `list/1` now
+      # shares (see the nil-scope tests below).
       assert {:error, :not_found} = Keys.revoke(b_key.id, nil)
 
       # ws B — the real owner — still operates its own key.
