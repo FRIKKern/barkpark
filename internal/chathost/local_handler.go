@@ -215,8 +215,12 @@ func (h *LocalHandler) runClaude(ctx context.Context, cwd, content string, remot
 	if err := scanner.Err(); err != nil {
 		return err
 	}
-	if err := cmd.Wait(); err != nil && !terminal {
-		return fmt.Errorf("claude: %w: %s", err, strings.TrimSpace(stderr.String()))
+	waitErr := cmd.Wait()
+	if waitErr != nil && !terminal {
+		return fmt.Errorf("claude: %w: %s", waitErr, strings.TrimSpace(stderr.String()))
+	}
+	if !terminal {
+		return fmt.Errorf("claude exited before turn completion: %s", strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
