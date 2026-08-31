@@ -36,7 +36,13 @@ defmodule Barkpark.Content.Related do
   ownership via `Scope.scope_to_owner/2` (nil caller fails closed to
   unowned-only), grant narrowing via `Scope.maybe_scope_to_grants/2`, dataset
   via the resolved-`dataset_id`-else-string discriminator, published
-  perspective only, self excluded.
+  perspective only, self excluded, and (tag leg only — task-b69106868a235768)
+  the schema-visibility clamp (`Schema.bypasses_visibility_gate?/1` +
+  `Schema.public_type_names/2`, the same pair `Query.restrict_to_visible_types/3`
+  applies) so a private-visibility candidate type never surfaces to a caller
+  who hasn't earned the unclamped view. The reference leg stays on
+  `Graph.reverse_referencers/2`'s own clamp — out of scope here, tracked as
+  backlog `wb-bl-graph-scope-query-visibility-clamp`.
 
   Prod cost reference (D69, EXPLAIN on guerrilla): 54.5ms @ 242-candidate
   fan-out, 106ms @ 1004, all buffer-cache hits — shipped index-free.
@@ -45,7 +51,7 @@ defmodule Barkpark.Content.Related do
   import Ecto.Query
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, DraftId, Graph, Scope, WriteScope}
+  alias Barkpark.Content.{Document, DraftId, Graph, Schema, Scope, WriteScope}
   alias Barkpark.Repo
 
   @default_limit 10
@@ -173,6 +179,7 @@ defmodule Barkpark.Content.Related do
         |> Scope.scope_to_workspace_or_global(workspace_id, project_id)
         |> Scope.scope_to_owner(Keyword.get(opts, :caller_context))
         |> Scope.maybe_scope_to_grants(opts)
+        |> restrict_to_visible_types(dataset, opts)
         |> order_by([d, score: sc],
           desc:
             fragment(
@@ -295,6 +302,35 @@ defmodule Barkpark.Content.Related do
 
   defp clamp_limit(n) when is_integer(n), do: n |> max(1) |> min(@max_limit)
   defp clamp_limit(_), do: @default_limit
+
+  # The read-time schema-visibility clamp for the tag leg (task-b69106868a235768).
+  # ONE PREDICATE, not a third copy: the tier test is
+  # `Schema.bypasses_visibility_gate?/1` and the allowlist is
+  # `Schema.public_type_names/2` — the exact pair `Content.Query`'s
+  # `restrict_to_visible_types/3` applies (query.ex:1719-1726, the canonical
+  # shape). Copied locally rather than called cross-module: that function is
+  # private to Query and query.ex is owned by another task this cycle.
+  #
+  # A caller `bypasses_visibility_gate?/1` accepts (Studio/authoring tier) pays
+  # no schema read at all — inert for every route caller today, since
+  # `QueryController.related/2` only ever reaches here through `authed?/1`,
+  # which excludes the public-read tier but admits any other real token. The
+  # reference leg (`Graph.reverse_referencers/2`, fused in at
+  # `related_documents/3` above) is NOT clamped here — see the moduledoc.
+  defp restrict_to_visible_types(query, dataset, opts) do
+    cond do
+      Schema.bypasses_visibility_gate?(Keyword.get(opts, :caller_context)) ->
+        query
+
+      is_binary(dataset) ->
+        where(query, [d], d.type in ^Schema.public_type_names(dataset, tenancy_opts(opts)))
+
+      true ->
+        where(query, [d], d.type in ^[])
+    end
+  end
+
+  defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
 
   # Mirrors `Content.Query`'s private dataset scope (the docs_with_tag
   # precedent): prefer the resolved `dataset_id`, fall back to the legacy
