@@ -21,6 +21,8 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
+
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 const paperStateFile = "state.json"
@@ -532,25 +534,29 @@ func runPaperPushCheck(out *writer, ctx manifest.Context, slug, bpml string) int
 
 // decodePaperCheckErr adapts a non-2xx validate reply into the shared
 // PaperAPIErr renderer — same envelope shape as pull/sync refusals.
+// It reads the envelope through internal/apierr and takes `error.errors` — the
+// paper-specific teach list — in a SECOND pass, exactly as
+// apiclient.decodePaperErr does. This function was a line-for-line fork of that
+// one; both now share the parser, so a malformed teach list costs only the
+// teach list instead of dropping code, message and hint together.
 func decodePaperCheckErr(status int, body []byte) *apiclient.PaperAPIErr {
-	var env struct {
-		Error struct {
-			Code    string                    `json:"code"`
-			Message string                    `json:"message"`
-			Hint    string                    `json:"hint"`
-			Errors  []apiclient.PaperTeachErr `json:"errors"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &env) != nil || env.Error.Code == "" {
+	env, ok := apierr.Parse(body)
+	if !ok || env.Code == "" {
 		msg := strings.TrimSpace(string(body))
 		if len(msg) > 200 {
 			msg = msg[:200] + "…"
 		}
 		return &apiclient.PaperAPIErr{Status: status, Code: fmt.Sprintf("http_%d", status), Message: msg}
 	}
+	var teach struct {
+		Error struct {
+			Errors []apiclient.PaperTeachErr `json:"errors"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &teach)
 	return &apiclient.PaperAPIErr{
-		Status: status, Code: env.Error.Code, Message: env.Error.Message,
-		Hint: env.Error.Hint, Errors: env.Error.Errors,
+		Status: status, Code: env.Code, Message: env.Message,
+		Hint: env.Hint, Errors: teach.Error.Errors,
 	}
 }
 

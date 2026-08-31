@@ -45,6 +45,8 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
+
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 // mcpTaskToolNames is the curated MCP task-tool catalog, in registration order
@@ -630,14 +632,21 @@ func onboardingToolCallProof(g globals, ctx manifest.Context, m *manifest.Manife
 // failure. It reads only server-side content — never anything the client holds.
 func summarizeReadyResult(body []byte, ok bool) string {
 	if !ok {
-		var env struct {
-			Error struct {
-				Code    string `json:"code"`
-				Message string `json:"message"`
-			} `json:"error"`
-		}
-		if json.Unmarshal(body, &env) == nil && env.Error.Code != "" {
-			return "task_ready returned " + env.Error.Code
+		// The shared parser: a refusal whose other fields are shaped
+		// unexpectedly must still surrender its code, or the doctor reports a
+		// bare "non-2xx" for a server that named its reason.
+		//
+		// The HINT rides along when the server sent one. A doctor line exists to
+		// tell the operator what to DO, and the code alone ("task_ready returned
+		// not_ready") names the fault while withholding the fix the server had
+		// already written down. Still server-side content only — a hint is
+		// composed by the server and holds nothing the client knows.
+		if env, ok := apierr.Parse(body); ok && env.Code != "" {
+			line := "task_ready returned " + env.Code
+			if h := env.HintLine(); h != "" {
+				line += " — " + h
+			}
+			return line
 		}
 		return "task_ready returned a non-2xx status"
 	}
