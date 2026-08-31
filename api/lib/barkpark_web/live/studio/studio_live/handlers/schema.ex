@@ -65,6 +65,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Schema do
              socket
              |> assign(confirm_modal: nil)
              |> put_flash(:error, "#{name} failed: #{DocActions.format_action_error(reason)}")}
+
+          # Catch-all: a handler returning anything other than {:ok, _} /
+          # {:error, _} (e.g. :ok, a bare map, nil) used to CaseClauseError
+          # here instead of producing a flash.
+          other ->
+            {:noreply,
+             socket
+             |> assign(confirm_modal: nil)
+             |> put_flash(:error, "#{name} failed: #{DocActions.format_action_error(other)}")}
         end
 
       _ ->

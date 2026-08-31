@@ -15,6 +15,8 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   module state. StudioLive's handlers and render call straight in.
   """
 
+  require Logger
+
   alias BarkparkWeb.ScopeHelpers
 
   # ── Schema-action helpers (Task #16 — action registry) ─────────────────────
@@ -297,8 +299,40 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       )
 
     case Map.get(handlers, name) do
-      handler when is_function(handler, 3) -> handler.(doc_id, dataset, mode)
-      _ -> {:error, {:unknown_action, name}}
+      handler when is_function(handler, 3) ->
+        safe_dispatch(handler, name, doc_id, dataset, mode)
+
+      _ ->
+        {:error, {:unknown_action, name}}
+    end
+  end
+
+  # Guards the plugin-owned handler call the same way
+  # `Plugins.Registry.safe_resolver_call/4` guards resolver calls (see
+  # `lib/barkpark/plugins/registry/resolver_chain.ex`) — a raising or
+  # throwing action handler (OnixEdit's XML / Bokbasen IO can genuinely
+  # raise) must not take down the dispatching LiveView process.
+  # `Logger.warning` is mandatory here: a rescue with no log trades a crash
+  # for a silent disappearance, which is worse.
+  defp safe_dispatch(handler, name, doc_id, dataset, mode) do
+    try do
+      handler.(doc_id, dataset, mode)
+    rescue
+      e ->
+        Logger.warning(
+          "BarkparkWeb.Studio.StudioLive.DocActions: action #{inspect(name)} handler raised — " <>
+            Exception.message(e)
+        )
+
+        {:error, {:handler_raised, Exception.message(e)}}
+    catch
+      kind, reason ->
+        Logger.warning(
+          "BarkparkWeb.Studio.StudioLive.DocActions: action #{inspect(name)} handler #{kind} — " <>
+            inspect(reason)
+        )
+
+        {:error, {:handler_raised, "#{kind} #{inspect(reason)}"}}
     end
   end
 
@@ -357,6 +391,8 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   def format_action_error(:no_doc), do: "No document loaded"
 
   def format_action_error({:unknown_action, name}), do: "Unknown action: #{name}"
+
+  def format_action_error({:handler_raised, msg}), do: "Action failed: #{msg}"
 
   def format_action_error(other), do: inspect(other, limit: 100)
 end
