@@ -1470,22 +1470,63 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
          --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
 # THE EXCLUSION HALF OF THE SAME ACKNOWLEDGEMENT (wave 57). `--expect-unrendered`
 # now answers for the `.exclusions` ledger as well as the check list, and this
-# frozen pair cannot render seven committed exclusion rows: six elixir.yml names
-# that simply did not run on these two heads, plus `gofmt drift ceiling
-# (blocking)`, whose job is pull_request-only and therefore unrenderable on ANY
-# branch head. They are listed here ONE NAME AT A TIME, exactly as an operator
-# would type them, so a row that stops being unrenderable reds this file instead
-# of quietly widening a blanket waiver. §14b below asserts the refusal that makes
-# this list necessary; every section that wants a successful EMIT passes "$ACK".
+# frozen pair cannot render eight committed exclusion rows: six elixir.yml names
+# that simply did not run on these two heads, `gofmt drift ceiling (blocking)`,
+# whose job is pull_request-only and therefore unrenderable on ANY branch head,
+# and `Sobelow baseline rows still hash to their own fingerprint (blocking)`
+# (security.yml), whose job POST-DATES the freeze — #14073 hand-added its S6 row
+# to the committed spec, and no frozen head can render a job younger than the
+# heads themselves. They are listed here ONE NAME AT A TIME, exactly as an
+# operator would type them, so a row that stops being unrenderable reds this file
+# instead of quietly widening a blanket waiver. §14b below asserts the refusal
+# that makes this list necessary; every section that wants a successful EMIT
+# passes "$ACK".
+#
+# THIS LIST IS PART OF THE PRICE OF A NEW BLOCKING JOB (measured 2026-08-24 →
+# 2026-08-31, #14073): a job added to an excluded aggregator's `needs` gets a
+# committed S6 exclusion row, and a committed row this frozen pair cannot render
+# must be typed here IN THE SAME PR — otherwise every emit below refuses with
+# EXCLUSION LOSS and `Required-check spec gate` reds on every head until someone
+# pays it. #14073 paid the workflow, the spec, and two sibling suites, and missed
+# this one; the refusal then surfaced only as downstream `jq: Could not open
+# file` noise (see the emit contract below) and read as flakiness for a week.
 ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Elixir path-escape ratchet"
         --expect-unrendered "Format (mix format --check-formatted, advisory) (27.0, 1.18.1)"
         --expect-unrendered "gofmt drift ceiling (blocking)"
         --expect-unrendered "Prod compile gate (Elixir 1.18.1 / OTP 27.0)"
+        --expect-unrendered "Sobelow baseline rows still hash to their own fingerprint (blocking)"
         --expect-unrendered "Test (Elixir 1.18.1 / OTP 27.0)"
         --expect-unrendered "Validation perf bench (median-of-5, alarm >100ms) (27.0, 1.18.1)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
+
+# ── THE EMIT CONTRACT: a refused generator must be NAMED, never inferred ──────
+# Every `--out` invocation below expects the generator to EMIT. The old form —
+# `bash "$GEN" … >/dev/null 2>&1 || true` — threw away the generator's exit code
+# AND its stderr, so when the generator REFUSED, the only symptom was the next
+# assertion's `jq: error: Could not open file …-spec.json`. Measured 2026-08-31:
+# #14073's unacknowledged exclusion row turned one EXCLUSION-LOSS refusal into
+# nine FAILs, none of which named it. gen_emit captures both channels; emit_diag
+# hands the FAIL line the generator's OWN exit code and refusal lines when the
+# emit failed, and the jq view of the emitted spec (the old message) when it did
+# not.
+GEN_EMIT_RC=0
+GEN_EMIT_ERR=""
+gen_emit() { # gen_emit <cmd…> — an emit the section expects to SUCCEED
+  GEN_EMIT_ERR="$TMP/gen-emit.err"
+  if "$@" >/dev/null 2>"$GEN_EMIT_ERR"; then GEN_EMIT_RC=0; else GEN_EMIT_RC=$?; fi
+}
+emit_diag() { # emit_diag <spec-file> <jq args…> — what the FAIL line carries
+  local out="$1" msg; shift
+  if [ "$GEN_EMIT_RC" -ne 0 ] || [ ! -s "$out" ]; then
+    msg="$(grep -E 'LOSS|LOST|STALE' "$GEN_EMIT_ERR" | head -3 | tr '\n' '|')"
+    [ -n "$msg" ] || msg="$(head -2 "$GEN_EMIT_ERR" | tr '\n' '|')"
+    printf 'the generator itself REFUSED the emit (exit %s): %s' "$GEN_EMIT_RC" "$msg"
+  else
+    jq "$@" "$out" 2>&1
+  fi
+}
 
 section "14. S1 LOSS — a committed name the sample did not render is refused BY NAME, before the merge can hide it"
 
@@ -1513,13 +1554,13 @@ else
   bad "the refusal did not distinguish the two causes of absence"
 fi
 
-bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/ack-spec.json" >/dev/null 2>&1 || true
+gen_emit bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/ack-spec.json"
 if jq -e '[.protection.required_status_checks.checks[].context]
           == ["Cloud gate","Console gate","Elixir gate","PR references an active task"]' \
      "$TMP/ack-spec.json" >/dev/null 2>&1; then
   ok "…and per-NAME acknowledgement lets it through, emitting exactly the four contexts"
 else
-  bad "the acknowledged emit is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/ack-spec.json" 2>&1)"
+  bad "the acknowledged emit is $(emit_diag "$TMP/ack-spec.json" -c '[.protection.required_status_checks.checks[].context]')"
 fi
 
 # MUTATION (i): the REFUSAL is load-bearing. Neuter its condition — one line —
@@ -1538,7 +1579,7 @@ NL_OUT="$(bash "$NOLOSS" "${FIXARGS[@]}" "${ACK_EX[@]}" 2>&1)" && NL_RC=0 || NL_
 if [ "$NL_RC" -eq 0 ] && ! grep -q "^S1 LOSS" <<<"$NL_OUT"; then
   ok "…and without it the SAME sample is accepted in silence (mutation-proven able to fail)"
 else
-  bad "the unguarded run still refused (exit $NL_RC)"
+  bad "the unguarded run still refused (exit $NL_RC): $(grep -E 'LOSS|LOST|STALE' <<<"$NL_OUT" | head -2 | tr '\n' '|')"
 fi
 
 # MUTATION (ii): the MERGE is the other half, and it is separately load-bearing.
@@ -1637,13 +1678,13 @@ else
   bad "the seeded PR-only row did not carry the PULL_REQUEST-ONLY hint: $(grep -F "LOST  $PRSEEDNAME" <<<"$X14_OUT")"
 fi
 
-bash "$GEN" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
+gen_emit bash "$GEN" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
   --expect-unrendered "$PRSEEDNAME" \
-  --out "$TMP/seeded-spec.json" >/dev/null 2>&1 || true
+  --out "$TMP/seeded-spec.json"
 if jq -e --arg c "$SEEDNAME" '[.exclusions[].context] | index($c)' "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and once acknowledged the seeded row SURVIVES the regeneration (the merge carries what the sample cannot see)"
 else
-  bad "the seeded exclusion did not survive: $(jq -c '[.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)"
+  bad "the seeded exclusion did not survive: $(emit_diag "$TMP/seeded-spec.json" -c '[.exclusions[].context]')"
 fi
 # Set inclusion, never a count: a count is satisfied by any 26 rows at all.
 if jq -e --slurpfile base "$SEEDX" \
@@ -1652,7 +1693,7 @@ if jq -e --slurpfile base "$SEEDX" \
      "$TMP/seeded-spec.json" >/dev/null 2>&1; then
   ok "…and EVERY committed exclusion context survives, 'gofmt drift ceiling (blocking)' included (set inclusion over the whole seeded base)"
 else
-  bad "rows were dropped: $(jq -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]' "$TMP/seeded-spec.json" 2>&1)"
+  bad "rows were dropped: $(emit_diag "$TMP/seeded-spec.json" -c --slurpfile b "$SEEDX" '[$b[0].exclusions[].context] - [.exclusions[].context]')"
 fi
 # The union must not FREEZE a row's grounds: where this run restated a reason,
 # the DERIVED one wins. `Security gate` is committed as an S7 decision and the
@@ -1663,7 +1704,7 @@ if jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
              | any(startswith("S7 EXCLUDED BY DECISION"))' "$SEEDX" >/dev/null 2>&1; then
   ok "…and where BOTH sides carry a row the DERIVED reason wins ('Security gate': S7 committed → S5 emitted)"
 else
-  bad "the base reason survived the derivation: $(jq -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]' "$TMP/seeded-spec.json" 2>&1)"
+  bad "the base reason survived the derivation: $(emit_diag "$TMP/seeded-spec.json" -c '[.exclusions[] | select(.context == "Security gate") | .reason[0:40]]')"
 fi
 
 # MUTATION (i): the UNION is load-bearing. Drop the base out of it — the exact
@@ -1676,15 +1717,15 @@ if ! grep -q '\$b\.exclusions' "$NOUNION"; then
 else
   bad "the exclusion-union mutation did not apply — the expression moved, so the proof below is vacuous"
 fi
-bash "$NOUNION" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
+gen_emit bash "$NOUNION" "${SEEDARGS[@]}" "${ACK[@]}" --expect-unrendered "$SEEDNAME" \
   --expect-unrendered "$PRSEEDNAME" \
-  --out "$TMP/nounion-spec.json" >/dev/null 2>&1 || true
+  --out "$TMP/nounion-spec.json"
 if jq -e --arg c "$SEEDNAME" \
      '([.exclusions[].context] | index($c) | not) and (.exclusions | length < 20)' \
      "$TMP/nounion-spec.json" >/dev/null 2>&1; then
   ok "…and without it the IDENTICAL run drops the seeded row and emits 18 of 26 (mutation-proven able to fail)"
 else
-  bad "the un-merged spec did not lose the row: $(jq -c '.exclusions | length' "$TMP/nounion-spec.json" 2>&1)"
+  bad "the un-merged spec did not lose the row: $(emit_diag "$TMP/nounion-spec.json" -c '.exclusions | length')"
 fi
 
 # MUTATION (ii): the REFUSAL is separately load-bearing. The union alone buys
@@ -1725,15 +1766,15 @@ fi
 # Its own acknowledgement DROPS the row rather than carrying it — an operator
 # saying "the derivation is right, the held-out decision is spent". A carry here
 # would be the incoherence the refusal exists to prevent, just typed by hand.
-bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP" \
+gen_emit bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP" \
   --merge-base "$STALEX" --sha e34031104 --sha f69cfb1f6 \
-  "${ACK[@]}" --expect-promoted "Cloud gate" --out "$TMP/promoted-spec.json" >/dev/null 2>&1 || true
+  "${ACK[@]}" --expect-promoted "Cloud gate" --out "$TMP/promoted-spec.json"
 if jq -e '([.exclusions[].context] | index("Cloud gate") | not)
           and ([.protection.required_status_checks.checks[].context] | index("Cloud gate"))' \
      "$TMP/promoted-spec.json" >/dev/null 2>&1; then
   ok "…and --expect-promoted DROPS that row instead of carrying it, so no context is emitted as both required and excluded"
 else
-  bad "the promoted acknowledgement left the spec self-contradictory: $(jq -c '[.exclusions[].context] | index("Cloud gate")' "$TMP/promoted-spec.json" 2>&1)"
+  bad "the promoted acknowledgement left the spec self-contradictory: $(emit_diag "$TMP/promoted-spec.json" -c '[.exclusions[].context] | index("Cloud gate")')"
 fi
 
 section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
@@ -1768,11 +1809,11 @@ fi
 # as a contradiction. Acknowledging it is what lets the assertion below read the
 # emit — and it is also the shape of the accident: the flags name exactly the
 # three contexts a missing demotion pass would have registered.
-bash "$NOS6" "${FIXARGS[@]}" "${ACK[@]}" \
+gen_emit bash "$NOS6" "${FIXARGS[@]}" "${ACK[@]}" \
   --expect-promoted "Dispatch (security paths)" \
   --expect-promoted "Security gate shape ratchet" \
   --expect-promoted "Sobelow baseline does not swallow its own inline waivers (blocking)" \
-  --out "$TMP/nos6-spec.json" >/dev/null 2>&1 || true
+  --out "$TMP/nos6-spec.json"
 if jq -e '[.protection.required_status_checks.checks[].context] as $c
           | ($c | index("Dispatch (security paths)"))
             and ($c | index("Security gate shape ratchet"))
@@ -1780,7 +1821,7 @@ if jq -e '[.protection.required_status_checks.checks[].context] as $c
      "$TMP/nos6-spec.json" >/dev/null 2>&1; then
   ok "…and without S6 the identical fixture PROMOTES all three security leaves into the spec (mutation-proven able to fail)"
 else
-  bad "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)"
+  bad "the un-demoted spec did not promote the leaves: $(emit_diag "$TMP/nos6-spec.json" -c '[.protection.required_status_checks.checks[].context]')"
 fi
 
 section "16. the deadlock sweep's predicate is TWO-SIDED — a PR that is already stuck is not a casualty of the flip"
@@ -2099,13 +2140,13 @@ fi
 # `--expect-promoted "Security gate"` for the same reason as §15's three leaves:
 # the mutant registers a name the committed spec holds OUT, and §14b refuses that
 # contradiction rather than emitting one context on both lists.
-bash "$NOS7" "${S7ARGS[@]}" "${ACK[@]}" --expect-promoted "Security gate" \
-  --out "$TMP/nos7-spec.json" >/dev/null 2>&1 || true
+gen_emit bash "$NOS7" "${S7ARGS[@]}" "${ACK[@]}" --expect-promoted "Security gate" \
+  --out "$TMP/nos7-spec.json"
 if jq -e '[.protection.required_status_checks.checks[].context] | index("Security gate")' \
      "$TMP/nos7-spec.json" >/dev/null 2>&1; then
   ok "…and without it the identical green fixture REGISTERS 'Security gate' (mutation-proven able to fail)"
 else
-  bad "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)"
+  bad "the un-held spec did not promote it: $(emit_diag "$TMP/nos7-spec.json" -c '[.protection.required_status_checks.checks[].context]')"
 fi
 
 # The committed file must not still be teaching the evaporated ground.

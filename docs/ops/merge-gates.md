@@ -276,7 +276,15 @@ is harmless:
   one context on both lists — so it refuses separately and takes
   `--expect-promoted '<name>'`, which DROPS the committed row instead of
   carrying it. Both arms are mutation-proven in §14b of
-  `scripts/required-checks.test.sh`.
+  `scripts/required-checks.test.sh`. **That refusal is part of the price of a
+  new blocking job** (measured 2026-08-24 → 2026-08-31): the hermetic suite
+  drives the generator over a FROZEN head pair, so a newly committed exclusion
+  row whose job post-dates the freeze cannot be re-derived and must be typed
+  into the suite's `ACK_EX` list (`scripts/required-checks.test.sh`) in the
+  same PR. #14073 paid the workflow, the spec, and two sibling suites but not
+  this list, and `Required-check spec gate` ran red on every head for a week —
+  non-required, so it stopped no merge: a non-required red asks "who inherits
+  this?", the same shape as the 2026-08-24 census red below.
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
