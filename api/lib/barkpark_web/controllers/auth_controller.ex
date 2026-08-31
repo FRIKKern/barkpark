@@ -28,6 +28,8 @@ defmodule BarkparkWeb.AuthController do
   alias Barkpark.Accounts.{NotificationWithhold, UserNotifier, UserSession}
   alias Barkpark.Audit
   alias Barkpark.Auth
+  alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   # ── Registration ───────────────────────────────────────────────────────────
 
@@ -255,12 +257,35 @@ defmodule BarkparkWeb.AuthController do
   `owner_user_id` is ALWAYS `current_user.id`, taken from the authenticated
   session — NEVER from the request body. Any caller-supplied `owner_user_id` /
   `user_id` in `params` is IGNORED: a user can only mint a token owned by
-  THEMSELVES. Permissions are fixed to `["read"]` (an identity token, not an
-  authority grant); the token confers no capability the user does not already
-  hold via a claimed grant.
+  THEMSELVES.
 
   The raw token is returned ONCE and never recoverable. Field hygiene: only the
   token's non-secret fields are echoed — never the `token_hash`.
+
+  ## Workspace + permission tier are DERIVED, never a literal (SECURITY)
+
+  Both used to be hardcoded (`role: "member"`, permissions `["read"]`) with no
+  `:workspace_id`, which meant `Auth.create_personal_access_token/3` fell back
+  to the seeded Default Workspace for EVERY caller and granted it a
+  `Tenancy.Membership` with zero relationship check — any session-authenticated
+  user, including one with no membership anywhere, self-minted a token that
+  could read Default-Workspace content. Fixed on both axes at once (a
+  permission-only fix WORSENS this: a higher-tier token minted into a
+  workspace the caller does not belong to):
+
+    * `:workspace_id` + the minting role are resolved from the caller's OWN
+      `Tenancy.Membership` (`resolve_caller_workspace/1`) — never a
+      client-supplied value, never the Default Workspace. A caller who holds
+      no membership anywhere resolves to `{nil, nil}`, and
+      `create_personal_access_token/3` then mints the token WORKSPACE-LESS
+      (no membership row at all) rather than falling back to any default.
+    * Permissions are `Auth.max_pat_permissions_for_role/1` of that SAME
+      resolved role (Option A, lead-ratified 2026-08-24): an owner/admin
+      self-mints up to `["read", "write", "admin"]`, a member still gets
+      `["read"]` only — `authorize_pat_permissions/2` is the same gate it was
+      written for, never bypassed.
+
+  `owner_user_id` stays hard-bound regardless of any of the above.
 
   ## MFA posture (deliberate, not accidental)
 
@@ -278,13 +303,16 @@ defmodule BarkparkWeb.AuthController do
   def create_token(conn, params) do
     user = conn.assigns.current_user
     name = token_name(params)
+    {workspace_id, role} = resolve_caller_workspace(user)
+    permissions = Auth.max_pat_permissions_for_role(role)
 
     # owner_user_id is HARD-BOUND to the session user. A body `owner_user_id` /
     # `user_id` is never read — this is the mint's no-escalation guarantee.
-    case Auth.create_personal_access_token(name, ["read"],
-           role: "member",
+    case Auth.create_personal_access_token(name, permissions,
+           role: role,
            created_by: user.email,
-           owner_user_id: user.id
+           owner_user_id: user.id,
+           workspace_id: workspace_id
          ) do
       {:ok, {raw, token}} ->
         # Minting a standing credential is an audit-worthy lifecycle event.
@@ -323,6 +351,22 @@ defmodule BarkparkWeb.AuthController do
   # falls back to a stable default so the mint never depends on client input.
   defp token_name(%{"name" => name}) when is_binary(name) and name != "", do: name
   defp token_name(_), do: "personal access token"
+
+  # Resolve the CALLER'S OWN workspace + membership role for the self-mint —
+  # never a client-supplied value, never the seeded Default Workspace.
+  # `Tenancy.list_workspaces_for/1` is membership-scoped (INNER JOIN on
+  # `workspace_memberships`), so a workspace the caller has no membership row
+  # in can never come back; a user with no membership anywhere resolves to
+  # `{nil, nil}`, which `Auth.create_personal_access_token/3` reads as "mint
+  # workspace-less" (no Tenancy.Membership grant). Ordered by slug, so a user
+  # in more than one workspace resolves deterministically to the same one on
+  # every call.
+  defp resolve_caller_workspace(user) do
+    case Tenancy.list_workspaces_for(user) do
+      [workspace | _rest] -> {workspace.id, TenancyAuth.membership_role(user, workspace.id)}
+      [] -> {nil, nil}
+    end
+  end
 
   @doc """
   Session management (era-w7): the caller's active sessions — the "your
