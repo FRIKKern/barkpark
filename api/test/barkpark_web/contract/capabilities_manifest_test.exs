@@ -1395,7 +1395,10 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       end)
 
       raw = "ucv-share-tok-admin-#{System.unique_integer([:positive])}"
-      {:ok, actor} = Auth.create_token(raw, "ucv-share-tok-admin", "test", ["read", "write", "admin"])
+
+      {:ok, actor} =
+        Auth.create_token(raw, "ucv-share-tok-admin", "test", ["read", "write", "admin"])
+
       ws = create_workspace!()
       project = create_project!(ws)
       {:ok, _} = TenancyAuth.create_membership(ws.id, actor.id, "admin")
@@ -1437,8 +1440,11 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              |> post("/v1/shares/tokens", %{scope: scope, surfaces: "docs"})
              |> Map.fetch!(:status) == 403
 
-      mint_resp = conn |> bearer(raw) |> post("/v1/shares/tokens", %{scope: scope, surfaces: "docs"})
+      mint_resp =
+        conn |> bearer(raw) |> post("/v1/shares/tokens", %{scope: scope, surfaces: "docs"})
+
       assert mint_resp.status == 201
+
       %{"token" => raw_share_token, "share_token" => %{"id" => token_id}} =
         json_response(mint_resp, 201)
 
@@ -1458,7 +1464,10 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "share.link-* (P7 item share links) live routes" do
     setup do
       raw = "ucv-share-link-admin-#{System.unique_integer([:positive])}"
-      {:ok, actor} = Auth.create_token(raw, "ucv-share-link-admin", "test", ["read", "write", "admin"])
+
+      {:ok, actor} =
+        Auth.create_token(raw, "ucv-share-link-admin", "test", ["read", "write", "admin"])
+
       ws = create_workspace!()
       project = create_project!(ws)
       {:ok, _} = TenancyAuth.create_membership(ws.id, actor.id, "admin")
@@ -1500,7 +1509,9 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert is_binary(raw_link_token) and raw_link_token != ""
 
       ls_resp =
-        conn |> bearer(raw) |> get("/v1/shares/links?scope=#{scope}&kind=media&ref_id=#{media.id}")
+        conn
+        |> bearer(raw)
+        |> get("/v1/shares/links?scope=#{scope}&kind=media&ref_id=#{media.id}")
 
       assert ls_resp.status == 200
       ids = ls_resp |> json_response(200) |> Map.fetch!("links") |> Enum.map(& &1["id"])
@@ -1546,7 +1557,9 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         assert cmd != nil, "#{id} missing from manifest"
         assert cmd["noun"] == "app_token"
         assert cmd["http"] == %{"method" => method, "path_template" => path}
-        assert cmd["auth_tier"] == tier, "#{id} auth_tier should be #{tier}, got #{cmd["auth_tier"]}"
+
+        assert cmd["auth_tier"] == tier,
+               "#{id} auth_tier should be #{tier}, got #{cmd["auth_tier"]}"
       end
     end
 
@@ -1641,7 +1654,12 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert Enum.any?(manifest["nouns"], &(&1["name"] == "fleet_support_token"))
 
       create_cmd = find_cmd(manifest, "fleet_support_token.create")
-      assert create_cmd["http"] == %{"method" => "POST", "path_template" => "/v1/fleet/support-tokens"}
+
+      assert create_cmd["http"] == %{
+               "method" => "POST",
+               "path_template" => "/v1/fleet/support-tokens"
+             }
+
       assert create_cmd["auth_tier"] == "admin"
       assert create_cmd["writes"] == true
 
@@ -1680,7 +1698,10 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "incident.* (status-page incidents) live routes" do
     setup do
       admin = "ucv-incident-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "ucv-incident-admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(admin, "ucv-incident-admin", "test", ["read", "write", "admin"])
+
       junior = "ucv-incident-junior-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(junior, "ucv-incident-junior", "test", ["read", "write"])
 
@@ -1693,7 +1714,12 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert Enum.any?(manifest["nouns"], &(&1["name"] == "incident"))
 
       create_cmd = find_cmd(manifest, "incident.create")
-      assert create_cmd["http"] == %{"method" => "POST", "path_template" => "/v1/status/incidents"}
+
+      assert create_cmd["http"] == %{
+               "method" => "POST",
+               "path_template" => "/v1/status/incidents"
+             }
+
       assert create_cmd["auth_tier"] == "admin"
 
       resolve_cmd = find_cmd(manifest, "incident.resolve")
@@ -1720,11 +1746,13 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       created = conn |> bearer(admin) |> post("/v1/status/incidents", attrs)
       assert created.status == 201
+
       %{"incident" => %{"id" => id, "status" => "investigating", "resolved_at" => nil}} =
         json_response(created, 201)
 
       resolved = conn |> bearer(admin) |> post("/v1/status/incidents/#{id}/resolve", %{})
       assert resolved.status == 200
+
       %{"incident" => %{"status" => "resolved", "resolved_at" => resolved_at}} =
         json_response(resolved, 200)
 

@@ -3287,7 +3287,11 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("email", true, "string", "Cloud account the token is minted for.")
         ],
         flags: [
-          flag("workspace", "string", "Workspace slug or id to bind (default: Default Workspace)."),
+          flag(
+            "workspace",
+            "string",
+            "Workspace slug or id to bind (default: Default Workspace)."
+          ),
           flag(
             "permissions",
             "string",
@@ -3388,7 +3392,9 @@ defmodule Barkpark.Plugins.Capabilities do
         "DELETE",
         "/v1/fleet/support-tokens/:token_id",
         "admin",
-        args: [arg("token_id", true, "string", "Support token id (from fleet_support_token create).")],
+        args: [
+          arg("token_id", true, "string", "Support token id (from fleet_support_token create).")
+        ],
         writes: true,
         default_output: "minimal"
       ),
