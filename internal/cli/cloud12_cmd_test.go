@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1923,5 +1924,114 @@ func TestLogoutIdempotentWhenLoggedOut(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("already logged out")) {
 		t.Fatalf("expected the idempotent message:\n%s", stdout.String())
+	}
+}
+
+// --- cloudFail reads the STATUS, not the sentence ----------------------------
+//
+// TestCloudFailDoesNotReadTheServersProseForAuth: cloudFail decides "your cloud
+// session is dead — run `bp login`" for ~30 cloud verbs. It used to decide it by
+// asking whether the RENDERED SENTENCE contained the substring "unauthorized" —
+// a sentence that carries the control plane's own `detail`, `reason`, `required`,
+// `scope` and `details` prose, and, for any body that is not the flat
+// {"error":"<string>"} shape, the RAW BODY verbatim (cloudError's 200-rune
+// fallback). All of that is text the CLI does not author.
+//
+// The fixture below is the control plane's OWN 502: router.ex 7741 answers a
+// site create whose read-token mint failed with
+// {"error":"read_token_mint_failed","detail":<mint_failure_copy>}, and
+// mint_failure_copy/mint_failure_detail (router.ex 13711-13763) RELAY THE BOX'S
+// OWN REFUSAL VERBATIM — "…: <code> — <message>". A box whose stored admin token
+// is dead answers with its canonical auth slug, the literal string
+// "unauthorized" (api/lib/barkpark/content/errors.ex builds
+// %{code: "unauthorized", message: "missing or invalid token", status: 401}).
+//
+// So the user's cloud session is fine, and the fact "was THIS request refused
+// for auth" is declared structurally on the wire — CloudRefusal.HTTPStatus,
+// which every other refusal reader in this tree already branches on
+// (builtins.go, cloud_deliveries_cmd.go, cloud_deploy_census_cmd.go,
+// cloud_site_cmd.go). Reading the box's word out of the plane's prose instead
+// told the user to re-run `bp login`, which fixes nothing, and exited 3 (auth)
+// where a script's auth-retry loop then re-authenticates forever.
+//
+// RED BEFORE (reproducible by reverting cloudFail alone): exit 3 with "bp login".
+func TestCloudFailDoesNotReadTheServersProseForAuth(t *testing.T) {
+	const relayed = "acme refused to mint the site's read token (HTTP 401): unauthorized — missing or invalid token"
+	body := `{"error":"read_token_mint_failed","detail":"` + relayed + `"}`
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+
+	c := &cloudclient.Client{BaseURL: srv.URL, Token: "sess-abc"}
+	_, err := c.CreateSpawnSite(cloudCtx(), cloudclient.SpawnSiteCreate{Name: "blog"})
+	if err == nil {
+		t.Fatal("CreateSpawnSite must fail on a 502")
+	}
+
+	// The typed fact is on the wire and already parsed — assert it, so this test
+	// can never pass because the refusal stopped being typed.
+	var ref *cloudclient.CloudRefusal
+	if !errors.As(err, &ref) {
+		t.Fatalf("a 502 refusal must be a *CloudRefusal, got %T (%v)", err, err)
+	}
+	if ref.HTTPStatus != http.StatusBadGateway {
+		t.Fatalf("HTTPStatus = %d, want %d", ref.HTTPStatus, http.StatusBadGateway)
+	}
+	if !strings.Contains(err.Error(), "unauthorized") {
+		t.Fatalf("fixture no longer exercises the trap — the rendered message must carry the box's relayed slug:\n%s", err.Error())
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	code := cloudFail(w, "create site", err)
+
+	if code == exitAuth {
+		t.Fatalf("cloudFail classified an HTTP %d refusal as a DEAD CLOUD SESSION (exit %d) "+
+			"because the control plane's relayed detail happens to SPELL %q — the status "+
+			"the refusal declares is %d, not 401, and the credential that was rejected is "+
+			"the BOX's, not the user's:\n%s",
+			ref.HTTPStatus, exitAuth, "unauthorized", ref.HTTPStatus, stderr.String())
+	}
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d (generic)", code, exitGeneric)
+	}
+	if strings.Contains(stderr.String(), "bp login") {
+		t.Fatalf("a 502 the BOX caused must never tell the user their cloud session expired:\n%s", stderr.String())
+	}
+	// The plane's own words still reach the user — the fix narrows the VERDICT,
+	// never the evidence.
+	if !strings.Contains(stderr.String(), relayed) {
+		t.Fatalf("the plane's relayed detail must still be surfaced verbatim:\n%s", stderr.String())
+	}
+}
+
+// TestCloudFailStillCallsARealDeadSessionAuth is the preserved half of the
+// contract: a genuine 401 keeps the "auth" label, exit 3 and the `bp login`
+// hint. The status is the signal, so this holds whatever the body says.
+func TestCloudFailStillCallsARealDeadSessionAuth(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = io.WriteString(w, `{"error":"invalid_credentials"}`)
+	}))
+	defer srv.Close()
+
+	c := &cloudclient.Client{BaseURL: srv.URL, Token: "sess-abc"}
+	_, err := c.CreateSpawnSite(cloudCtx(), cloudclient.SpawnSiteCreate{Name: "blog"})
+	if err == nil {
+		t.Fatal("CreateSpawnSite must fail on a 401")
+	}
+
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "table"
+	if code := cloudFail(w, "create site", err); code != exitAuth {
+		t.Fatalf("a 401 must exit %d (auth), got %d\n%s", exitAuth, code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "bp login") {
+		t.Fatalf("a dead session must still name the cure:\n%s", stderr.String())
 	}
 }
