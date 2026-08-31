@@ -84,21 +84,37 @@ defmodule Barkpark.Plugins.OnixEdit.ApiTestsTest do
       end
     end
 
+    # Stated precisely, because the weaker claim is the true one: this test was
+    # NOT vacuous. Its `other -> flunk` catch-all is live, so an undocumented
+    # `:auth` value has always red here, and that is what the test is for.
+    #
+    # Two narrower things were wrong. Every spec in `OnixEdit.api_tests/0`
+    # carries `:none` or `:admin`, so the `{:token, t}` and
+    # `{:plugin_setting, k}` arms are dead — their `is_binary` checks have
+    # never executed (the module's own TODO records that `:plugin_setting`
+    # auth is not wired yet). And the loop had no non-emptiness floor: an
+    # empty `specs` would iterate zero times and pass.
+    #
+    # Rewritten as a positive assertion so every spec asserts exactly once
+    # whichever mode it carries, with the floor added. This does NOT claim to
+    # catch a spec flipping between `:none` and `:admin` — that is a different
+    # check, and `"the /api/schemas spec is a no-auth GET"` below owns it.
     test "every :auth is one of the documented modes when present", %{specs: specs} do
+      assert specs != [], "no specs to check — this test would pass vacuously"
+
       for spec <- specs do
-        case Map.get(spec, :auth, :none) do
-          :none -> :ok
-          :admin -> :ok
-          {:token, t} -> assert is_binary(t)
-          {:plugin_setting, k} -> assert is_binary(k)
-          other -> flake_invalid_auth(spec.name, other)
-        end
+        auth = Map.get(spec, :auth, :none)
+
+        assert documented_auth?(auth),
+               "Spec #{spec.name} has invalid :auth value #{inspect(auth)}"
       end
     end
 
-    defp flake_invalid_auth(name, other) do
-      flunk("Spec #{name} has invalid :auth value #{inspect(other)}")
-    end
+    defp documented_auth?(:none), do: true
+    defp documented_auth?(:admin), do: true
+    defp documented_auth?({:token, t}), do: is_binary(t)
+    defp documented_auth?({:plugin_setting, k}), do: is_binary(k)
+    defp documented_auth?(_), do: false
   end
 
   describe "OnixEdit.api_tests/0 — public reads" do

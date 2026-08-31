@@ -76,19 +76,43 @@ defmodule Barkpark.Plugins.RegistryTopMenuTest do
       assert bravo.order == 100
     end
 
-    test "tolerates plugins whose callback raises" do
-      name = "fake-tm-raise-#{System.unique_integer([:positive])}"
-      :ok = Registry.register(FakeRaisingTopMenuPlugin, %{"plugin_name" => name})
+    # These two used to assert only `is_list(...)` — i.e. "did not raise".
+    # Making `ResolverChain.safe_call/4` return `[]` for EVERY plugin gutted
+    # the collector and kept them green. They now register the offending
+    # plugin ALONGSIDE a healthy one and assert that the healthy
+    # contribution SURVIVES, which is the property isolation actually means.
+    # This mirrors `registry_oban_crontab_test.exs` "isolates a plugin whose
+    # oban_crontab/0 raises", which already had the right shape.
+    test "isolates a plugin whose callback raises, keeping its neighbours" do
+      good = "fake-tm-raise-good-#{System.unique_integer([:positive])}"
+      bad = "fake-tm-raise-#{System.unique_integer([:positive])}"
+      :ok = Registry.register(FakeTopMenuPluginA, %{"plugin_name" => good})
 
-      # Must not raise — safe_call catches and substitutes [].
-      assert is_list(Registry.collect_top_menu_entries())
+      # The top-menu snapshot is computed workspace-less at REGISTRATION
+      # (snav-w1-gating-determinism) and `collect_top_menu_entries/0` only
+      # reads the cache — so the rescue fires here, not at collect time.
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          :ok = Registry.register(FakeRaisingTopMenuPlugin, %{"plugin_name" => bad})
+        end)
+
+      # The raise was actually caught for THIS plugin, not merely absent.
+      assert log =~ "FakeRaisingTopMenuPlugin.top_menu_entries/0 raised"
+
+      # And the healthy neighbour still lands — a blanket `[]` reds here.
+      labels = Enum.map(Registry.collect_top_menu_entries(), & &1.label)
+      assert "Alpha" in labels
     end
 
-    test "tolerates plugins that don't implement the callback" do
-      name = "fake-tm-noop-#{System.unique_integer([:positive])}"
-      :ok = Registry.register(__MODULE__, %{"plugin_name" => name})
+    test "tolerates plugins that don't implement the callback, keeping its neighbours" do
+      good = "fake-tm-noop-good-#{System.unique_integer([:positive])}"
+      noop = "fake-tm-noop-#{System.unique_integer([:positive])}"
+      :ok = Registry.register(FakeTopMenuPluginA, %{"plugin_name" => good})
+      :ok = Registry.register(__MODULE__, %{"plugin_name" => noop})
 
-      assert is_list(Registry.collect_top_menu_entries())
+      labels = Enum.map(Registry.collect_top_menu_entries(), & &1.label)
+
+      assert "Alpha" in labels
     end
 
     test "OnixEdit is off by default — its Bokbasen tab does NOT leak on the workspace-less collector" do

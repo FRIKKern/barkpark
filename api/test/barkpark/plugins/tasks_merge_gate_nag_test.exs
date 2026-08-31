@@ -54,7 +54,18 @@ defmodule Barkpark.Plugins.TasksMergeGateNagTest do
     end
 
     test "every sampled LEADING criterion from the live corpus warns" do
-      for %{"criterion" => text, "doc" => doc} <- fixture()["must_warn"] do
+      cases = fixture()["must_warn"]
+
+      # The mirror of the floor the silence half already carries
+      # ("must_stay_silent" asserts `length(cases) > 100`). Without it a
+      # fixture regeneration emitting `"must_warn": []` would iterate zero
+      # times and pass — silently retiring the nag's FIRING half, while this
+      # module's own doc insists "a nag that never fires and a nag that never
+      # shuts up are the same defect".
+      assert length(cases) >= 40,
+             "the warn fixture should carry the whole leading-form population"
+
+      for %{"criterion" => text, "doc" => doc} <- cases do
         log = log_for([%{"criterion" => text, "met" => false}])
 
         assert log =~ "merge_gate",
