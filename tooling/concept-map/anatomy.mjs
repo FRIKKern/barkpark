@@ -61,6 +61,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
+import { conceptTokenRe, conceptTokenMatchers } from "./concept-tokens.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -142,9 +143,7 @@ function assignConcepts(graph) {
     }
   }
   const tokens = [...concepts].sort((a, b) => b.length - a.length);
-  const tokenRe = new Map(
-    tokens.map((t) => [t, new RegExp("(^|[/_.])" + t + "([/_.]|$)")])
-  );
+  const tokenRe = conceptTokenMatchers(tokens);
   for (const n of graph.nodes) {
     if (conceptOf.has(n.id)) continue;
     const low = n.file.toLowerCase();
@@ -212,7 +211,7 @@ function listTestFiles(rootDir) {
 }
 
 function testFilesForConcept(concept, allTestFiles) {
-  const re = new RegExp("(^|[/_.])" + concept + "([/_.]|$)");
+  const re = conceptTokenRe(concept);
   return allTestFiles.filter((f) => re.test(f.toLowerCase()));
 }
 

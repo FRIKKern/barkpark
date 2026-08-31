@@ -121,7 +121,26 @@ jobs:
               const n = Object.keys(fwd).length;
               if (n === 0)
                 return "index.json elixir.forward is EMPTY — the xref graph did not build";
-              console.log("warm graph OK: " + n + " elixir files with dependents");
+              // TWO DIFFERENT COUNTS, DELIBERATELY LABELLED APART.
+              // build-index.mjs prints Object.keys(elixir.reverse).length and calls
+              // it "files with dependents" — files that ARE depended upon. This step
+              // counts elixir.forward — files that HAVE dependencies. Both are
+              // correct and they answer different questions, but this line used to
+              // reuse that exact wording, so a SINGLE run printed "754 files with
+              // dependents" and "657 files with dependents" two steps apart and read
+              // as one measurement disagreeing with itself. It cost a real
+              // investigation. Print both, name both.
+              //
+              // NO APOSTROPHES BELOW THIS POINT. The whole script is one
+              // single-quoted shell word (node -e '...'); an apostrophe closes it
+              // early and truncates the JS mid-comment. That failure is silent in
+              // any test that extracts this block and runs it as a FILE — the
+              // extraction never applies shell quoting. Exercise it through a shell.
+              const rev = (j.elixir && j.elixir.reverse) || {};
+              console.log(
+                "warm graph OK: " + n + " elixir files WITH DEPENDENCIES (forward edges), " +
+                Object.keys(rev).length + " files WITH DEPENDENTS (reverse edges)"
+              );
               return null;
             }
             const err = check();
