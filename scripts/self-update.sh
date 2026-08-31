@@ -15,8 +15,9 @@
 # build (HEAD already advanced → the retry merge is "Already up to date" →
 # no hook → no rebuild, ever). Calling deploy-rebuild.sh directly makes a
 # re-trigger always rebuild, and its exit code (0 ok / 1 build failed /
-# 3 slot box) flows back to the Runner, so the endpoint reports the TRUE
-# outcome instead of "merge succeeded".
+# 13 migrate failed, old code still serving / 3 slot box) flows back to the
+# Runner, so the endpoint reports the TRUE outcome instead of "merge
+# succeeded".
 #
 # NOTE: this applies from the LOCAL `origin` remote. Keep origin pointed at
 # the same repo the Checker polls (BARKPARK_UPSTREAM_REPO) or the banner and
