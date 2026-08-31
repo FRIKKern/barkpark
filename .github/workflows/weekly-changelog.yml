@@ -105,10 +105,23 @@ jobs:
             body="$RUNNER_TEMP/weekly-changelog-$week.md"
             python3 scripts/weekly-changelog.py --week "$week" --ref main > "$body"
             title="$(python3 scripts/weekly-changelog.py --week "$week" --ref main --title-only)"
-            number="$(gh issue list --state all --label weekly-changelog \
-              --search "$week in:title" --limit 100 --json number,title \
-              | jq -r --arg week "$week" \
-                '[.[] | select(.title | contains($week))][0].number // empty')"
+            # UNKNOWN must never read as ABSENT. This step runs under Actions'
+            # unspecified-shell default (`bash -e {0}`, NO pipefail), so a gh
+            # transport / auth / rate-limit failure printed nothing on stdout,
+            # jq greened the empty input, and the empty `number` was read below
+            # as "no issue exists for this week" — filing a DUPLICATE weekly
+            # edition. rc-check the producer, loudly, the same way
+            # --list-editorial-weeks is checked above, and HOLD instead.
+            if ! issues_json="$(gh issue list --state all --label weekly-changelog \
+              --search "$week in:title" --limit 100 --json number,title)"; then
+              echo "::error::gh issue list failed for week $week; cannot tell an existing edition from a missing one, refusing to risk a duplicate"
+              exit 1
+            fi
+            if ! number="$(printf '%s' "$issues_json" | jq -r --arg week "$week" \
+              '[.[] | select(.title | contains($week))][0].number // empty')"; then
+              echo "::error::could not parse the gh issue list response for week $week; refusing to risk a duplicate"
+              exit 1
+            fi
             if [ -n "$number" ]; then
               gh issue edit "$number" --title "$title" --body-file "$body" \
                 --add-label weekly-changelog
