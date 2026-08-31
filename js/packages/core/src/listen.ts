@@ -418,9 +418,14 @@ export function createListenHandle<T = BarkparkDocument>(
             const code = (err as { code?: unknown })?.code
             if (code === 'BarkparkAuthError' || err instanceof BarkparkAuthError) throw err
 
+            // 429 folded in alongside 5xx: it is the single most retryable status
+            // there is (the server is asking the caller to back off, not refusing
+            // the request), and it is exactly the shape a reconnect storm produces
+            // after a server restart makes every client reconnect at once. The
+            // BarkparkAuthError check above is unaffected — 401/403 still throw.
             const isNetworkish =
               err instanceof BarkparkNetworkError ||
-              (err instanceof BarkparkAPIError && (err.status ?? 0) >= 500)
+              (err instanceof BarkparkAPIError && ((err.status ?? 0) >= 500 || err.status === 429))
 
             if (isNetworkish && reconnectCount < maxReconnects) {
               // [backoff-jitter] Jitter the exponential delay so a fleet doesn't
