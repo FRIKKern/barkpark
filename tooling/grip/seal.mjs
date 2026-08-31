@@ -418,16 +418,31 @@ export function main(argv = process.argv.slice(2), out = console.log) {
     if (fixturePath) {
       try { fx = JSON.parse(readFileSync(fixturePath, "utf8")); }
       catch (e) { fail(`--ledger ${fixturePath}`, { klass: RUN_CLASS.INFRA, detail: String(e.message).slice(0, 90) }); }
+      // THE FIXTURE FLOOR. `(fx.namespace || [])` and `(fx.criteria || [])` used
+      // to turn a missing or empty key into a LEGAL zero-length corpus: clause
+      // (a) is an Array.prototype.every over zero items (true by definition) and
+      // clause (b) walks zero rows, so an empty fixture printed 0 published task
+      // rows and still exited 0 with THE PREDICATE HOLDS. Refused here, INFRA —
+      // the same class the JSON-parse failure above already uses — naming the
+      // offending key and the fixture path, never a verdict.
+      for (const key of ["namespace", "criteria"]) {
+        if (!Array.isArray(fx[key]) || fx[key].length === 0) {
+          fail(`--ledger ${fixturePath}`, { klass: RUN_CLASS.INFRA, detail: `fixture key "${key}" is missing or empty — a zero-length corpus makes every clause pass vacuously` });
+        }
+      }
     }
     let rows, pages, duplicates, pool, poolReport, direct, rootDoc, criteria;
     if (fx) {
-      rows = new Map((fx.namespace || []).map((r) => [r._id, r]));
+      rows = new Map(fx.namespace.map((r) => [r._id, r]));
       pages = ["(fixture)"]; duplicates = 0;
       pool = new Set(fx.pool || []);
       poolReport = { pages: ["(fixture)"], walked: pool.size, ids: pool, allIds: pool, allCount: pool.size, allUnique: pool.size, duplicates: 0, allDuplicates: 0 };
       direct = new Set(fx.direct_children || []);
-      rootDoc = fx.root_doc || null;
-      criteria = fx.criteria || [];
+      // rootDoc is derived from the loaded corpus, never trusted off a separate
+      // `fx.root_doc` field — a fixture could otherwise name a root that is not
+      // in its own namespace, and nothing would cross-check it.
+      rootDoc = rows.get(ROOT_ID) || null;
+      criteria = fx.criteria;
     } else {
       const walk = walkCorpus(server);
       rows = walk.rows; pages = walk.pages; duplicates = walk.duplicates;
