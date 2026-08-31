@@ -225,6 +225,13 @@ on:
       # finding this wave is built on.
       - "scripts/doc-gates-paths-parity-check.sh"
       - ".github/workflows/doc-gates.yml"
+      # weekly-changelog-backfill.test.sh. Its subject set is itself plus the
+      # workflow it pins against — the harness reads weekly-changelog.yml as a
+      # fixture and REDS if the week-collection snippet drifts from the fixed
+      # (exit-status-visible) shape, so a PR editing only the workflow must
+      # fire this lane too, not just one editing the harness.
+      - "scripts/weekly-changelog-backfill.test.sh"
+      - ".github/workflows/weekly-changelog.yml"
       # node-test-floor.test.sh. Its SUBJECT SET is the runner plus every gate
       # that calls it, because the failure this harness exists to catch is a
       # change to the runner's OUTPUT SHAPE breaking a downstream parser --
@@ -595,6 +602,32 @@ jobs:
         # parent's --selftest (cloud.yml:175, elixir.yml:241), and wiring them
         # twice would buy a second runner for the same assertions.
         run: bash scripts/console-path-escape-check.test.sh
+
+  weekly-changelog-backfill-guard:
+    name: weekly-changelog-backfill.test.sh drift check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: python3 + PyYAML is present (the harness parses the workflow with it)
+        # The harness reads .github/workflows/weekly-changelog.yml through
+        # PyYAML to pin the week-collection snippet; absence would fail the
+        # harness for the WRONG reason. ubuntu-latest ships python3, and
+        # PyYAML is preinstalled on the runner image; this step makes that
+        # dependency fail by NAME if an image change ever drops it.
+        run: |
+          command -v python3 >/dev/null || {
+            echo "python3 missing on the runner image" >&2
+            exit 1
+          }
+          python3 -c "import yaml" || {
+            echo "PyYAML missing on the runner image — the harness parses weekly-changelog.yml with it" >&2
+            exit 1
+          }
+      - name: weekly-changelog-backfill.test.sh syntax check
+        run: bash -n scripts/weekly-changelog-backfill.test.sh
+      - name: weekly-changelog-backfill.test.sh (pins weekly-changelog.yml's fixed collection shape)
+        run: bash scripts/weekly-changelog-backfill.test.sh
 
   pds-harnesses:
     name: PDS census / parity / scratch-target harnesses
