@@ -21,7 +21,9 @@ import (
 // serialization all ride the EXISTING run.go builder unchanged. The bridge
 // re-implements none of that; it only shapes tool metadata and rebuilds the
 // tail. Results follow charter decision 9: the raw response JSON as one text
-// content block, IsError on HTTP >= 400 (mcpRun, mcp_tasks.go).
+// content block, IsError on HTTP >= 400 OR an unreadable 2xx receipt
+// (mcpRunFor, mcp_tasks.go — cmd.Writes tells it whether to run the write or
+// read discriminator).
 //
 // Opt-in rationale: Cursor hard-caps 40 MCP tools across ALL enabled servers and
 // silently drops the excess, while a live guerrilla manifest is ~107 commands.
@@ -139,7 +141,8 @@ func registerBridgeToolsFiltered(srv *mcp.Server, g globals, ctx manifest.Contex
 			// (agentViewGlobals, run.go): a command declaring
 			// views.default_for_agents gets ?view= with zero per-tool code here —
 			// the manifest stays the moat.
-			return mcpRun(execManifestCommand(agentViewGlobals(g, cmd), ctx, m, cmd, tail)), nil
+			status, body, rerr := execManifestCommand(agentViewGlobals(g, cmd), ctx, m, cmd, tail)
+			return mcpRunFor(status, body, rerr, cmd.Writes), nil
 		})
 	}
 	return nil
