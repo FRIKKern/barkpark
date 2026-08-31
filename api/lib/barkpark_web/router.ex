@@ -836,16 +836,37 @@ defmodule BarkparkWeb.Router do
   # path) admin route that must attribute per-workspace. It is the flat twin of
   # `:scoped_admin`, and it REPLACES `:api` — never layers on it.
   #
-  # ORDER IS THE ENTIRE FIX (charter D45/D49; task-2b396416a680ff0b). A naive
-  # `[:api, :require_admin]` cannot attribute per-workspace: `:api` runs
-  # `AssignDefaultScope`, which stamps `current_workspace = <seeded Default>`
-  # BEFORE the admin gate, and `ScopeHelpers.scope_opts/1` reads exactly that
-  # assign — so every caller, from every workspace, converges on Default.
-  # `DeriveWorkspaceFromToken` is NO-OP-IF-SET, so appending it after `:api` is
-  # a pure no-op: Default has already won. Only this ordering works —
-  # token-resolve → DeriveWorkspaceFromToken → AssignDefaultScope → admin
-  # (the same shape as `:media_mutate`). `BarkparkWeb.FlatAdminTenancyTest`
-  # reads this block and goes RED if the two are ever swapped.
+  # ORDER IS THE ENTIRE FIX (charter D45/D49; task-2b396416a680ff0b). Only this
+  # ordering attributes per-workspace — token-resolve → DeriveWorkspaceFromToken
+  # → AssignDefaultScope → admin (the same shape as `:media_mutate`) — because
+  # `AssignDefaultScope` stamps `current_workspace = <seeded Default>` whenever
+  # that assign is absent, `ScopeHelpers.scope_opts/1` reads exactly that assign,
+  # and `DeriveWorkspaceFromToken` is NO-OP-IF-SET: place it second and Default
+  # has already won, for every caller from every workspace.
+  # `BarkparkWeb.FlatAdminTenancyTest` reads this block and goes RED if the two
+  # are ever swapped.
+  #
+  # HISTORICAL CLAIM, NOW FALSE — do not reason from it (task-ee099124abc578ef).
+  # This comment used to say a naive `[:api, :require_admin]` "cannot attribute
+  # per-workspace", because `:api` ran `AssignDefaultScope` with no derivation
+  # ahead of it. That stopped being true on 2026-08-24: `8dd6600f99` (#13886)
+  # put `DeriveWorkspaceFromToken` INTO `pipeline :api` itself, ahead of
+  # `AssignDefaultScope`, to close the same hole on the flat `/v1` alias. So
+  # `[:api, :require_admin]` DOES derive today, and the two pipelines now differ
+  # only in `OptionalToken` vs `RequireToken` (a distinction `:require_admin`
+  # erases one plug later by running `RequireToken` anyway).
+  #
+  # The stale sentence was not harmless: a security census read it, concluded
+  # that every `[:api, :require_admin]` route still collapsed to Default, and
+  # filed cross-tenant defect rows against surfaces that were already correct
+  # (the tickets key-mint surface among them — see
+  # `BarkparkWeb.TicketKeysWorkspaceAttributionTest`, which pins that surface's
+  # attribution end-to-end precisely because nothing else did). If you change
+  # either pipeline, re-state what is TRUE here rather than what was.
+  #
+  # None of that makes this pipeline redundant: it is the EXPLICIT, order-pinned
+  # mount, guarded by a test that names its plugs. `:api` carries the derivation
+  # by convergence, not by contract.
   #
   # It re-includes every `:api` security plug (AcceptBarkparkVendor, accepts
   # json, ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit,
