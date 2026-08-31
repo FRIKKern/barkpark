@@ -556,7 +556,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # are UNCAPPED upstream and deliberately NOT rendered here — only the incumbent
   # id. Ordered BEFORE the generic `%{}` clause below.
   def format_wall_details(%{duplicate_of: incumbent}) when is_binary(incumbent) do
-    "duplicate of #{incumbent} — extend that document, or differentiate this one's title/tags"
+    "duplicate of #{incumbent} — extend that document, or declare content.supersedes: \"#{incumbent}\" if this one replaces it"
   end
 
   def format_wall_details(%{} = detail) do

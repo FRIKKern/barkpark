@@ -27,7 +27,7 @@ defmodule Barkpark.Content.Errors do
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
     "duplicate_of" =>
-      "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document, or differentiate this one's title/tags before publishing.",
+      "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document — or, if this publish REPLACES it, declare content.supersedes with that id and republish.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the request with ?force=true to remove the schema and orphan them.",

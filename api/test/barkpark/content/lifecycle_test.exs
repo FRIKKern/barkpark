@@ -519,6 +519,73 @@ defmodule Barkpark.Content.LifecycleTest do
     end
   end
 
+  # ── Declared supersession (content.supersedes) ──────────────────────────────
+  #
+  # A correction is BY DEFINITION a near-duplicate of the row it replaces, so
+  # without a first-class path the E4 wall structurally blocks it (measured on
+  # a live p0 security packet — task-ccc1e5573598b91b). The exemption is
+  # pairwise: `content.supersedes: X` exempts the successor against X ONLY.
+
+  describe "declared supersession at the publish wall" do
+    test "a superseding publish passes E4 against exactly its predecessor and stamps superseded_by" do
+      paper_draft!("ss-pred", @good_labels, "Wall Supersession Corpus Paper")
+      assert {:ok, _} = Content.publish_document("ss-pred", "paper", @dataset)
+
+      # Arm one of the mutation proof: WITHOUT the declaration the identical
+      # successor is the hard-refuse shape — and the refusal now offers the
+      # supersession verb, never "differentiate this one's title/tags".
+      paper_draft!("ss-undeclared", @good_labels, "Wall Supersession Corpus Paper")
+
+      assert {:error, {:duplicate_of, payload}} =
+               Content.publish_document("ss-undeclared", "paper", @dataset)
+
+      assert payload.duplicate_of == "ss-pred"
+      assert payload.message =~ ~s(content.supersedes: "ss-pred")
+      refute payload.message =~ "differentiate"
+
+      # WITH the declaration the same near-duplicate content publishes.
+      successor = Map.put(@good_labels, "supersedes", "ss-pred")
+      paper_draft!("ss-succ", successor, "Wall Supersession Corpus Paper")
+      assert {:ok, _} = Content.publish_document("ss-succ", "paper", @dataset)
+
+      # And the predecessor's PUBLISHED row now points at its correction — a
+      # correction nobody can find from the row they are reading is not a
+      # correction.
+      {:ok, predecessor} = Content.get_document("ss-pred", "paper", @dataset)
+      assert predecessor.content["superseded_by"] == "ss-succ"
+    end
+
+    test "a supersession claim against a DIFFERENT document buys no pass" do
+      paper_draft!("ss-wrong-pred", @good_labels, "Wall Wrong Target Corpus Paper")
+      assert {:ok, _} = Content.publish_document("ss-wrong-pred", "paper", @dataset)
+
+      # Arm two of the mutation proof: declaring supersession of an UNRELATED
+      # doc must not defeat the wall against the real near-duplicate.
+      mis_declared = Map.put(@good_labels, "supersedes", "some-unrelated-doc")
+      paper_draft!("ss-mis", mis_declared, "Wall Wrong Target Corpus Paper")
+
+      assert {:error, {:duplicate_of, payload}} =
+               Content.publish_document("ss-mis", "paper", @dataset)
+
+      assert payload.duplicate_of == "ss-wrong-pred"
+      # The message names the mismatch so the author sees WHY the declaration
+      # did not exempt this refusal.
+      assert payload.message =~ "some-unrelated-doc"
+
+      # Nothing published, nothing stamped.
+      assert {:error, :not_found} = Content.get_document("ss-mis", "paper", @dataset)
+    end
+
+    test "a supersedes pointer at a nonexistent doc publishes (inert exemption) without a stamp crash" do
+      # The declared predecessor does not exist: the exemption is inert (no
+      # candidate matches it), the publish proceeds on its own merits, and the
+      # best-effort stamp logs-and-skips instead of failing the publish.
+      content = Map.put(@good_labels, "supersedes", "never-existed")
+      paper_draft!("ss-ghost", content, "Wall Ghost Predecessor Paper")
+      assert {:ok, _} = Content.publish_document("ss-ghost", "paper", @dataset)
+    end
+  end
+
   # ── main_tag denormalization (charter D7/D20) ───────────────────────────────
 
   describe "main_tag stamp at the publish chokepoint" do

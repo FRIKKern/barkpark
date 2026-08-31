@@ -63,6 +63,24 @@ defmodule Barkpark.Content.DedupWall do
   The incumbent published id is excluded from the candidate set (both at the
   query and defensively in `assess/3`), so republishing a document never flags
   itself as its own duplicate.
+
+  ## Declared supersession: `content.supersedes` exempts exactly ONE pair
+
+  A superseding document (a correction that REPLACES a published row) is BY
+  DEFINITION a near-duplicate of the row it replaces — that similarity is the
+  point, not an accident. Before this exemption the gate structurally blocked
+  corrections: both escapes it offered ("extend it" / "differentiate the
+  title/tags") meant either merging contradictory instructions or falsifying
+  the gated artifact's identity (measured on a live p0 security packet,
+  task-ccc1e5573598b91b).
+
+  So a document carrying **`content.supersedes: "<doc_id>"`** is never scored
+  against THAT ONE published document — the declared predecessor is excluded
+  from the candidate set exactly like the doc's own published id. Every OTHER
+  published row still refuses at full strength: a supersession claim against X
+  buys no pass against Y. `Content.Lifecycle` stamps the predecessor with
+  `superseded_by` after the successor publishes, so the pointer is visible
+  from the row being replaced.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -103,7 +121,12 @@ defmodule Barkpark.Content.DedupWall do
                   can will should must add fix use make build run new when then than also
                   each any all one two both only same onto over under out off up down how))
 
-  @type ref :: %{id: String.t(), title: String.t(), tags: [String.t()]}
+  @type ref :: %{
+          optional(:supersedes) => String.t() | nil,
+          id: String.t(),
+          title: String.t(),
+          tags: [String.t()]
+        }
   @type match :: %{
           id: String.t(),
           sim: float(),
@@ -187,14 +210,13 @@ defmodule Barkpark.Content.DedupWall do
     cond do
       assessment.refuse != [] ->
         incumbent = hd(assessment.refuse)
+        incumbent_pid = DraftId.published_id(incumbent.id)
 
         {:error,
          {:duplicate_of,
           %{
-            message:
-              "this document near-duplicates an already-published one — extend it, " <>
-                "or differentiate this one's title/tags before publishing",
-            duplicate_of: DraftId.published_id(incumbent.id),
+            message: refusal_message(incumbent_pid, supersedes_of(ref)),
+            duplicate_of: incumbent_pid,
             similar: Enum.map(assessment.refuse, &present/1),
             advise: Enum.map(assessment.advise, &present/1)
           }}}
@@ -230,6 +252,32 @@ defmodule Barkpark.Content.DedupWall do
 
   defp truthy_bypass?(_), do: false
 
+  # The refusal must never recommend falsifying the gated artifact ("edit the
+  # title/tags until the guard stops seeing it"). The two honest escapes are:
+  # extend the incumbent, or declare the supersession first-class. When a
+  # supersedes link IS declared but names a different document than the one
+  # refusing, say so — the exemption is pairwise on purpose.
+  defp refusal_message(incumbent_pid, declared_supersedes) do
+    base =
+      "this document near-duplicates the already-published #{incumbent_pid} — " <>
+        "extend that document instead, or, if this one REPLACES it, declare " <>
+        "content.supersedes: \"#{incumbent_pid}\" and republish (the wall exempts " <>
+        "exactly the declared pair; any other near-duplicate still refuses)"
+
+    case declared_supersedes do
+      nil ->
+        base
+
+      ^incumbent_pid ->
+        base
+
+      other ->
+        base <>
+          " — note: this document declares supersedes: \"#{other}\", but the " <>
+          "refusal is against #{incumbent_pid}, a different document"
+    end
+  end
+
   defp degraded_message(reason) do
     "publish dedup wall could not complete: #{reason}. The publish was REFUSED " <>
       "rather than passed unchecked — no duplicate check ran, so nothing here " <>
@@ -249,10 +297,18 @@ defmodule Barkpark.Content.DedupWall do
 
     new_tokens = doc_tokens(doc)
     new_pid = DraftId.published_id(field_str(doc, :id))
+    superseded_pid = supersedes_of(doc)
 
     matches =
       candidates
-      |> Enum.reject(fn c -> DraftId.published_id(field_str(c, :id)) == new_pid end)
+      # Two pairwise exclusions, same mechanism: a doc never duplicates ITSELF
+      # (same-id republish), and never duplicates the ONE document it DECLARES
+      # it supersedes (content.supersedes) — that similarity is the point of a
+      # correction. Everything else is scored at full strength.
+      |> Enum.reject(fn c ->
+        cand_pid = DraftId.published_id(field_str(c, :id))
+        cand_pid == new_pid or (superseded_pid != nil and cand_pid == superseded_pid)
+      end)
       |> Enum.map(fn c -> score(new_tokens, c, refuse_at, advise_at) end)
       |> Enum.reject(&is_nil/1)
 
@@ -460,9 +516,14 @@ defmodule Barkpark.Content.DedupWall do
   # ── shaping ──────────────────────────────────────────────────────────────────
 
   # Normalize the doc-being-published (a Document struct or a plain attrs/ref
-  # map) into `%{id, title, tags(list of strings)}`.
+  # map) into `%{id, title, tags(list of strings), supersedes}`.
   defp to_ref(%Document{doc_id: id, title: title, content: content}) do
-    %{id: to_string(id || ""), title: to_string(title || ""), tags: tags_from_content(content)}
+    %{
+      id: to_string(id || ""),
+      title: to_string(title || ""),
+      tags: tags_from_content(content),
+      supersedes: supersedes_from_content(content)
+    }
   end
 
   defp to_ref(%{} = m) do
@@ -477,9 +538,29 @@ defmodule Barkpark.Content.DedupWall do
     %{
       id: field_str(m, :id) |> fallback(field_str(m, :doc_id)),
       title: field_str(m, :title),
-      tags: tag_names(tags)
+      tags: tag_names(tags),
+      supersedes: supersedes_from_content(content) || normalize_supersedes(field(m, :supersedes))
     }
   end
+
+  # The declared-supersession pointer, read from the doc AS SUBMITTED (content
+  # map, or top-level on an already-normalized ref), `drafts.`-stripped so it
+  # keys the same published-id space as the candidate exclusion.
+  defp supersedes_of(ref), do: normalize_supersedes(field(ref, :supersedes))
+
+  defp supersedes_from_content(content) when is_map(content),
+    do: normalize_supersedes(Map.get(content, "supersedes") || Map.get(content, :supersedes))
+
+  defp supersedes_from_content(_), do: nil
+
+  defp normalize_supersedes(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      id -> DraftId.published_id(id)
+    end
+  end
+
+  defp normalize_supersedes(_), do: nil
 
   # The projected row IS the scored shape — the only JSONB left is the `tags`
   # array the select pulled out.
