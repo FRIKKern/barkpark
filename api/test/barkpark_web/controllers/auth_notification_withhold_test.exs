@@ -155,7 +155,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
       source = File.read!(@auth_source)
 
       assert source =~ ":no_user ->"
-      assert source =~ "{:error, _changeset} ->"
+      assert source =~ "{:error, changeset} ->"
 
       assert source =~
                "NotificationWithhold.record(\"magic_link\", :no_recipient_by_construction)"
@@ -167,7 +167,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
       source = File.read!(@session_source)
 
       assert source =~ ":no_user ->"
-      assert source =~ "{:error, _changeset} ->"
+      assert source =~ "{:error, changeset} ->"
 
       assert source =~
                "NotificationWithhold.record(\"magic_link\", :no_recipient_by_construction)"

@@ -231,9 +231,9 @@ defmodule BarkparkWeb.SessionController do
       :no_user ->
         NotificationWithhold.record("magic_link", :no_recipient_by_construction)
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
         NotificationWithhold.record("magic_link", :dispatch_crashed,
-          user_id: withheld_user_id(trimmed),
+          user_id: Ecto.Changeset.get_field(changeset, :user_id),
           detail: "token_mint_failed"
         )
     end
@@ -474,12 +474,4 @@ defmodule BarkparkWeb.SessionController do
   end
 
   defp sanitize_return_to(_), do: @default_return_to
-  # See AuthController.withheld_user_id/1 — looked up only on the rare failure
-  # path, where build_login_token/1 has already found the user.
-  defp withheld_user_id(email) do
-    case Barkpark.Accounts.get_user_by_email(email) do
-      %{id: id} -> id
-      _ -> nil
-    end
-  end
 end
