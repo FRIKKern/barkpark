@@ -83,16 +83,17 @@ type DockerContainer struct {
 }
 
 // EnsureUp brings the backing container into a running, health-checked state.
-// Idempotent: if the container is already running, returns nil after a single
-// `docker inspect` call.
+// Idempotent on the docker-side work: a single `docker inspect` call decides
+// whether to `docker start` / `docker run` / do nothing, but every path —
+// including an already-running container — converges on healthCheck before
+// returning. A container that is up but wedged (process alive, HTTP dead)
+// must never be reported healthy just because it was already running.
 func (d *DockerContainer) EnsureUp(ctx context.Context) error {
 	state, err := d.inspectState(ctx)
 	if err != nil {
 		return fmt.Errorf("inspect: %w", err)
 	}
 	switch state {
-	case stateRunning:
-		return nil
 	case stateStopped:
 		if err := d.runner().Run(ctx, devNull{}, "docker", "start", d.Name); err != nil {
 			return fmt.Errorf("docker start %s: %w", d.Name, err)

@@ -66,11 +66,23 @@ func TestDockerContainer_EnsureUp_AlreadyRunning_NoOp(t *testing.T) {
 	r := &scriptedRunner{respond: map[string]runResponse{
 		"inspect": {stdout: "true\n"},
 	}}
+	// EnsureUp now converges stateRunning on healthCheck too (see
+	// TestDockerContainer_EnsureUp_Running_Unhealthy_Errors in
+	// docker_ensureup_test.go for the defect this guards against) — stand up
+	// a healthy synthetic upstream so this "no docker start/run" assertion
+	// isn't entangled with health-check plumbing.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	port := mustPort(t, srv.URL)
+
 	d := &DockerContainer{
-		Name:         "site-shop",
-		Image:        "site-shop-img",
-		InternalPort: 17001,
-		Runner:       r,
+		Name:          "site-shop",
+		Image:         "site-shop-img",
+		InternalPort:  port,
+		HealthTimeout: 2 * time.Second,
+		Runner:        r,
 	}
 	if err := d.EnsureUp(context.Background()); err != nil {
 		t.Fatalf("EnsureUp: %v", err)
@@ -80,6 +92,9 @@ func TestDockerContainer_EnsureUp_AlreadyRunning_NoOp(t *testing.T) {
 	}
 	if len(r.callsFor("run")) != 0 {
 		t.Errorf("docker run should not be called: %+v", r.calls)
+	}
+	if len(r.callsFor("inspect")) != 1 {
+		t.Errorf("expected exactly 1 docker inspect, got %d: %+v", len(r.callsFor("inspect")), r.calls)
 	}
 }
 
