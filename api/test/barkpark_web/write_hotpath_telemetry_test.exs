@@ -88,7 +88,7 @@ defmodule BarkparkWeb.WriteHotpathTelemetryTest do
 
   describe "the events FIRE with a duration measurement on the live code path" do
     test "a slow before_save hook emits a hook.stop with duration_ms past the slow floor" do
-      Application.put_env(:barkpark, :plugins, [SlowGatePlugin])
+      set_plugins_env([SlowGatePlugin])
       ref = attach_forwarder("hook", @hook_stop)
 
       assert Hooks.fire(:before_save, before_save_payload()) == :ok
@@ -135,7 +135,7 @@ defmodule BarkparkWeb.WriteHotpathTelemetryTest do
 
   describe "the live Prometheus aggregator records the samples (measurement)" do
     test "hook + mutate + publish histograms leave the floor after real calls" do
-      Application.put_env(:barkpark, :plugins, [SlowGatePlugin])
+      set_plugins_env([SlowGatePlugin])
 
       assert Hooks.fire(:before_save, before_save_payload()) == :ok
       _ = Content.apply_mutations([%{"bogus" => %{}}], "production", [])
@@ -152,6 +152,29 @@ defmodule BarkparkWeb.WriteHotpathTelemetryTest do
       assert scraped =~ "barkpark_content_lifecycle_stop_duration_bucket",
              "lifecycle histogram never recorded a sample in the live reporter"
     end
+  end
+
+  # Sets `:barkpark, :plugins` for the duration of one test and restores the
+  # prior value in `on_exit`. Without this, the two tests below leaked
+  # `[SlowGatePlugin]` — a fake module with no `register_routes/1` — into the
+  # rest of the `mix test` run: `Barkpark.DataCase`'s per-test setup resets
+  # the env before every OTHER `DataCase` test, but a bare `ExUnit.Case`
+  # module (e.g. `plugin_routes_test.exs`) running next in the async: false
+  # order inherited the leak, saw only `SlowGatePlugin` when it called
+  # `Registry.collect_routes/1`, and its "every auth: bucket declared by a
+  # registered plugin route is an accepted scope" test failed with "no
+  # plugin contributed any route" — a standing, run-order-dependent flake,
+  # not a defect in that test or in this PR's BPML changes.
+  defp set_plugins_env(modules) do
+    prior = Application.get_env(:barkpark, :plugins, :unset)
+    Application.put_env(:barkpark, :plugins, modules)
+
+    on_exit(fn ->
+      case prior do
+        :unset -> Application.delete_env(:barkpark, :plugins)
+        v -> Application.put_env(:barkpark, :plugins, v)
+      end
+    end)
   end
 
   # Attach a telemetry handler that forwards {measurements, metadata} to the
