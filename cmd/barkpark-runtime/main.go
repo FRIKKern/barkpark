@@ -32,6 +32,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -107,6 +108,7 @@ func run(args []string) int {
 		AskGateURL:     *askGateURL,
 		StudioUpstream: *studio,
 		Interval:       *interval,
+		Logger:         log.Printf,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
