@@ -68,7 +68,24 @@ The `make` targets are **prod/Linux systemd wrappers** for the Hetzner box, not 
 
 Locally, always run bare `mix` commands inside `api/`.
 
-**The one exception is `make update`** — it is local-first by design: `git pull`, then a diff-driven refresh (rebuild + reinstall `bp` if Go changed, `mix deps.get` if the lockfile changed, `mix ecto.migrate` if migrations landed, `pnpm install` in `web/`/`js/` if their manifests changed), ending with a digest of what came in and what to re-read. Run it instead of a bare `git pull` to stay current. Already pulled? `SINCE=<old-head> make update` does the refresh + digest without pulling.
+**Two exceptions are local-first by design.** `make update` — `git pull`, then a diff-driven refresh (rebuild + reinstall `bp` if Go changed, `mix deps.get` if the lockfile changed, `mix ecto.migrate` if migrations landed, `pnpm install` in `web/`/`js/` if their manifests changed), ending with a digest of what came in and what to re-read. Run it instead of a bare `git pull` to stay current; `SINCE=<old-head> make update` does the refresh + digest without pulling. And `make test` — see below.
+
+## Test database partitioning (multi-agent / multi-lane hosts)
+
+Concurrent agents sharing one Postgres each need their own test database, or their runs collide and produce cross-lane failures that look like real bugs. `MIX_TEST_PARTITION=<lane>` (read in `config/test.exs`) makes `mix test` use `barkpark_test<lane>` instead of the shared `barkpark_test` — set a short, unique value per lane/worktree before running tests:
+
+```bash
+cd api && MIX_TEST_PARTITION=mylane mix test
+```
+
+`BARKPARK_TEST_POOL_SIZE` (default 20) caps that lane's Ecto pool; lower it (e.g. `BARKPARK_TEST_POOL_SIZE=6`) on a host running many concurrent lanes to leave headroom under Postgres's `max_connections`.
+
+**The leak this creates, and the fix.** Nothing ever dropped a partitioned database on its own — every lane's `barkpark_test<lane>` accumulated forever (314 of them measured 2026-08-24, `task-1a7e52b811dabc3c`). Two independent, complementary fixes:
+
+- `make test` (`MIX_TEST_PARTITION=<lane> make test`, or `ARGS="test/some_test.exs" MIX_TEST_PARTITION=<lane> make test` for a subset) runs the suite exactly as `mix test` would, then drops that lane's database afterward in a **detached background process** — it never blocks on or fails the test run itself. Prefer this over bare `mix test` for a partitioned run. (Bare `mix test`/`mix ecto.setup` etc. are still correct for the shared, unpartitioned `barkpark_test` a solo dev iterates against.)
+- `make reap-test-dbs` (dry run; `APPLY=1` to drop, `HOURS=N` to retune the age threshold) is the backstop age-based sweep for lanes that get killed before any teardown runs — it only drops a database with **zero active connections AND** an on-disk age past the threshold, never on either signal alone. `doctor.sh` surfaces the live orphan count at session start.
+
+Both matter: `make test` shrinks the population the sweep has to catch; the sweep is what makes the count converge for a lane that never exits cleanly. Neither raises `max_connections` — that masks the leak rather than fixing it, and is out of scope here (see `scripts/reap-test-databases.sh`'s header for the full incident history).
 
 ## What seeding produces
 
