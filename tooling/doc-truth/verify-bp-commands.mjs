@@ -43,7 +43,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   REPO_ROOT, DEFAULT_MANIFEST, loadBpSources, resolveBpCommand, flagsByDepth,
-  splitCommandLine, requiredFlagsFor, PROVEN, UNPROVEN, UNRESOLVED,
+  splitCommandLine, requiredFlagsFor, PROVEN, UNPROVEN, UNRESOLVED, NOT_A_COMMAND,
 } from "./bp-cli-sources.mjs";
 import { extractClaims } from "./verify-docs.mjs";
 
@@ -66,7 +66,7 @@ export function verifyDocs(docs, { root = REPO_ROOT, offline = false, use = "ABC
       ok: sources.ok, errors: sources.errors, absent: sources.absent,
       counts: sources.counts, origins: sources.origins,
     },
-    docs: [], totals: { proven: 0, unproven: 0, unresolved: 0, commands: 0 },
+    docs: [], totals: { proven: 0, unproven: 0, unresolved: 0, commands: 0, metasyntax: 0 },
     unresolved: [], unproven: [],
   };
   if (!sources.ok) return report; // LAW 2 — an unavailable source fails the run
@@ -90,6 +90,10 @@ export function verifyDocs(docs, { root = REPO_ROOT, offline = false, use = "ABC
         authority: r.authority, reasons: r.reasons, unproven: r.unproven,
       };
       rows.push(row);
+      // A pure grammar diagram (`bp [global flags] <noun> <verb> …`) is not a
+      // printed command at all: excluded from `commands`, never a pass, never
+      // counted toward UNRESOLVED.
+      if (r.verdict === NOT_A_COMMAND) { report.totals.metasyntax++; continue; }
       report.totals.commands++;
       if (r.verdict === PROVEN) report.totals.proven++;
       if (r.verdict === UNPROVEN) { report.totals.unproven++; report.unproven.push(row); }
@@ -126,7 +130,8 @@ function printReport(report, { authority = true } = {}) {
     if (d.rows.length === 0) continue;
     w(`\n${d.doc}`);
     for (const r of d.rows) {
-      const mark = r.verdict === PROVEN ? "✓" : r.verdict === UNPROVEN ? "?" : "✗";
+      const mark = r.verdict === PROVEN ? "✓" : r.verdict === UNPROVEN ? "?" :
+        r.verdict === NOT_A_COMMAND ? "·" : "✗";
       const via = r.via.length ? ` [${r.via.join("+")}]` : "";
       w(`  ${mark} L${r.line}${r.fenced ? "" : " (inline)"} \`${trunc(r.raw, 66)}\`${r.verdict === PROVEN ? via : ""}`);
       if (authority) for (const a of r.authority) w(`        ↳ ${a}`);
@@ -136,7 +141,8 @@ function printReport(report, { authority = true } = {}) {
   }
   const t = report.totals;
   w(`\n${bar}`);
-  w(`TOTALS  ${t.commands} printed bp command(s): ${t.proven} parse · ${t.unproven} UNPROVEN · ${t.unresolved} UNRESOLVED`);
+  w(`TOTALS  ${t.commands} printed bp command(s): ${t.proven} parse · ${t.unproven} UNPROVEN · ${t.unresolved} UNRESOLVED` +
+    (t.metasyntax ? ` (+${t.metasyntax} grammar diagram line(s) excluded — not a printed command)` : ""));
   if (t.unproven) {
     w(`UNPROVEN (${t.unproven}) — reported, never counted as a pass:`);
     for (const r of report.unproven) w(`  ? ${r.doc}:${r.line} \`${trunc(r.raw, 60)}\``);
@@ -439,6 +445,61 @@ function selftest() {
     const d = CITED.flatMap((r) => r.authority).filter((a) => a.startsWith("D "));
     return (d.length > 0 && d.every((a) => /→ internal\/cli\/\S+\.go:\d+$/.test(a))) ||
       `${d.length} D-citations, offenders: ${d.filter((a) => !/internal\/cli/.test(a)).slice(0, 3).join(" | ")}`;
+  });
+
+  // ── EXTRACTOR: bare global flags, verb-alternation, pipe-alternation,
+  // metasyntax (wbt-jwt-cli-doc-parity-extractor) ──────────────────────────
+  //
+  // A printed line that is ONLY a declared global flag IS the command — the
+  // CLI's own builtins.go declares `--version`/`-V`/`-h`/`--help` usable with
+  // no noun.
+  for (const flag of ["--version", "-V", "-h", "--help"]) {
+    check(`BARE GLOBAL: \`bp ${flag}\` resolves without a noun`, () => {
+      const r = verdict(`bp ${flag}`);
+      return (r.verdict === PROVEN) || `${r.verdict}: ${r.reasons.join("|")}`;
+    });
+  }
+  check("MUTATION: an UNDECLARED bare global flag still REDs", () => {
+    const r = verdict("bp --not-a-real-global-flag");
+    return (r.verdict === UNRESOLVED && /not a global flag/.test(r.reasons.join(" "))) ||
+      `${r.verdict}: ${r.reasons.join("|")}`;
+  });
+
+  // a verb SUMMARY (`bp task ls/ready/prime/…`) expands into one check per
+  // verb against the noun's manifest verb set — a coverage GAIN.
+  check("VERB ALTERNATION: a `/`-summary expands against the noun's manifest verb set", () => {
+    const r = verdict("bp task ls/ready/prime/events/get/claim/release/stamp/pulse/close/next/move");
+    return (r.verdict === PROVEN && r.via.includes("A")) || `${r.verdict}: ${r.reasons.join("|")}`;
+  });
+  check("MUTATION: an alternation naming a verb the noun LACKS still REDs, named", () => {
+    const r = verdict("bp task ls/ready/not-a-real-verb");
+    return (r.verdict === UNRESOLVED && /not-a-real-verb/.test(r.reasons.join(" "))) ||
+      `${r.verdict}: ${r.reasons.join("|")}`;
+  });
+
+  // a pipe alternation (`bash|zsh|fish`) documents one ARGUMENT's values, not
+  // verbs — read like a placeholder once a command path already exists.
+  check("PIPE ALTERNATION: `bash|zsh|fish` resolves as an argument value, not a verb", () => {
+    const r = verdict("bp completion bash|zsh|fish");
+    return r.verdict === PROVEN || `${r.verdict}: ${r.reasons.join("|")}`;
+  });
+
+  // a pure grammar diagram is NOT a printed command: never a pass, never an
+  // UNRESOLVED failure.
+  check("METASYNTAX: a grammar diagram line is not-a-command", () => {
+    const r = verdict("bp [global flags] <noun> <verb> [args] [command flags]");
+    return (r.verdict === NOT_A_COMMAND) || `${r.verdict}: ${r.reasons.join("|")}`;
+  });
+  check("MUTATION: one bare literal token means it is a REAL command, not metasyntax", () => {
+    const r = verdict("bp doc ls post");
+    return (r.verdict !== NOT_A_COMMAND) || "wrongly classified `bp doc ls post` as metasyntax";
+  });
+  check("WIRING: docs/cli/HANDBOOK.md's grammar-diagram line is excluded from totals", () => {
+    const r = verifyDocs(["docs/cli/HANDBOOK.md"]);
+    const row = r.docs[0] && r.docs[0].rows.find((x) => /^bp \[global flags\]/.test(x.raw));
+    if (!row) return "the grammar-diagram row was not found at all — extraction regressed";
+    return (row.verdict === NOT_A_COMMAND && r.totals.metasyntax >= 1) ||
+      `row verdict=${row.verdict} totals.metasyntax=${r.totals.metasyntax}`;
   });
 
   // the header never claims success
