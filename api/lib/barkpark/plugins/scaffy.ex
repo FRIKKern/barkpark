@@ -82,7 +82,16 @@ defmodule Barkpark.Plugins.Scaffy do
         name: Map.fetch!(raw, "name"),
         title: Map.get(raw, "title"),
         icon: Map.get(raw, "icon"),
-        visibility: Map.get(raw, "visibility", "public"),
+        # ALLOWLIST, not denylist. A schema is public only when its JSON
+        # SAYS so — a dropped key, a typo, or a future visibility value fails
+        # CLOSED. This matches the four sibling loaders (`onixedit.ex`,
+        # `media.ex`, `sheets.ex`, `frt.ex`) and the ruling recorded at
+        # `plugins/indx/indexer_worker.ex` `schema_public?/1`, so a nil or
+        # unknown visibility cannot index in one place while 404ing in
+        # another. Distinct from `%SchemaDefinition{}`'s own "public" default,
+        # which is about DESK PLACEMENT (see schema_definition.ex, Gyldendal
+        # #25) and is deliberately left alone.
+        visibility: Map.get(raw, "visibility", "private"),
         fields: Map.get(raw, "fields", []),
         dataset: "production"
       }
