@@ -22,11 +22,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
+
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 // runTaskCreate handles `bp task create [<title>] [--title <t>]
@@ -422,34 +423,72 @@ func firstMutationID(body []byte) (string, bool) {
 // keeps the same "validation_failed — kind: is required · …" feedback the
 // apiclient path produced. Unknown shapes fall back to the clamped body verbatim
 // so nothing is ever swallowed.
+// THIS IS THE SITE THAT PROVED THE FORK. It declared
+//
+//	Details map[string][]string `json:"details"`
+//
+// a guess at validation_failed's ONE shape. encoding/json rejects the whole
+// document on a single field mismatch, so the server's duplicate_task 409 —
+// whose details is {"similar":[{id,…}],"advise":[]} — failed to unmarshal and
+// took code, message AND hint down with it, dropping the caller to the clamped
+// raw body below. The clamp then cut mid-`hint`, which is exactly where the id
+// lives. The refusal told the caller to pass distinct_from: ["<id>"] while
+// withholding the id, and was therefore unappealable.
+//
+// It now reads through internal/apierr like every other surface, and renders
+// the two things the old decoder threw away: the server's hint, and the
+// candidate ids the refusal's own remedy demands.
 func mutateErrorMessage(status int, body []byte) string {
-	var env struct {
-		Error struct {
-			Code    string              `json:"code"`
-			Message string              `json:"message"`
-			Details map[string][]string `json:"details"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &env) == nil && (env.Error.Code != "" || env.Error.Message != "") {
-		msg := env.Error.Message
-		if msg == "" {
-			msg = env.Error.Code
+	if env, ok := apierr.Parse(body); ok {
+		lines := dedupCandidateLines(env)
+
+		// Summary() appends the GENERIC details rendering, which for a dedup
+		// refusal is the whole candidate array as compact JSON. When we are
+		// about to print those same candidates as readable id-leading lines,
+		// the blob is noise that buries them — so take the bare message here
+		// and let the lines below carry the payload. Every other refusal still
+		// gets the full Summary(), because for those the details ARE the
+		// detail and there is no second rendering.
+		msg := env.Summary()
+		if len(lines) > 0 {
+			msg = env.Message
+			if msg == "" {
+				msg = env.Code
+			}
 		}
-		var parts []string
-		for field, reasons := range env.Error.Details {
-			parts = append(parts, field+": "+strings.Join(reasons, "; "))
+		if h := env.HintLine(); h != "" {
+			msg += "\n  hint: " + h
 		}
-		sort.Strings(parts) // deterministic over the map
-		if len(parts) > 0 {
-			msg += " — " + strings.Join(parts, " · ")
+		if len(lines) > 0 {
+			msg += "\n  " + strings.Join(lines, "\n  ")
 		}
 		return msg
 	}
-	raw := strings.TrimSpace(string(body))
-	if r := []rune(raw); len(r) > 200 {
-		raw = string(r[:200]) + "…"
+	// Unknown shape. Do NOT truncate: the body is the only diagnosis left, and
+	// the old 200-rune clamp cut it precisely when it mattered most.
+	return fmt.Sprintf("error %d: %s", status, strings.TrimSpace(string(body)))
+}
+
+// dedupCandidateLines renders a dedup refusal's near-match rows one per line,
+// id FIRST, then the exact flag spelling that appeals the refusal. A refusal
+// that names an action must show that action's input.
+func dedupCandidateLines(env apierr.Envelope) []string {
+	similar, advise := env.Candidates()
+	var lines []string
+	for _, c := range similar {
+		if s := c.Line("matches"); s != "" {
+			lines = append(lines, s)
+		}
 	}
-	return fmt.Sprintf("error %d: %s", status, raw)
+	for _, c := range advise {
+		if s := c.Line("related"); s != "" {
+			lines = append(lines, s)
+		}
+	}
+	if len(lines) > 0 {
+		lines = append(lines, `pass --set 'distinct_from:=["<id>"]' with the id above to confirm yours is genuinely different`)
+	}
+	return lines
 }
 
 // parseTaskCreateArgs folds the positional title + flags into the create body

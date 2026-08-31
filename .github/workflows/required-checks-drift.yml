@@ -8,7 +8,11 @@
 #
 #   `Required-check spec gate`          Hermetic: no network, no token, no
 #                                       writes. Runs the mutation suite with
-#                                       --hermetic (166 assertions, ~40s).
+#                                       --hermetic (183 assertions, ~1min). The
+#                                       count is maintained by hand and was
+#                                       stale at 166 for several waves — if it
+#                                       disagrees with the suite's own tally
+#                                       line, the tally line is authoritative.
 #   `Required-check spec drift (advisory)`  ADVISORY. Everything that reads the
 #                                       GitHub API on a BREAKGLASS credential.
 #

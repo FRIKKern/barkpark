@@ -8,7 +8,28 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
     * `session["api_token"]` — a browser user who signed in at
       `GET /login` (see `BarkparkWeb.SessionController`).
 
-  The Bearer header wins when both are present. Never halts — like
+  PRECEDENCE, stated for all six cases — "the Bearer header wins when both are
+  present" was the previous wording and it is true of a VALID bearer ONLY.
+  Resolution is `token_from_bearer/1 || token_from_session/1 ||
+  token_from_dev_config/0`, and each arm yields `nil` unless its credential
+  actually VERIFIES. So a presented-but-unverifiable bearer does not win the
+  conn — it falls through to the cookie:
+
+      bearer   | session cookie | resolved principal
+      ---------|----------------|--------------------------------
+      valid    | valid          | the BEARER's token
+      valid    | absent         | the BEARER's token
+      INVALID  | valid          | the SESSION's token (bearer does NOT win)
+      INVALID  | absent         | anonymous — no `:api_token` assign
+      absent   | valid          | the SESSION's token
+      absent   | absent         | anonymous — no `:api_token` assign
+
+  A malformed `Authorization` header that does not match `"Bearer " <> raw`
+  (wrong scheme, wrong case, repeated header) is indistinguishable from an
+  absent one here and falls through identically. Pinned case-by-case in
+  `test/barkpark_web/plugs/optional_session_token_precedence_test.exs`.
+
+  Never halts — like
   `BarkparkWeb.Plugs.OptionalToken`, it passes an anonymous conn through
   untouched and lets the downstream membership gate
   (`BarkparkWeb.Plugs.ResolveWorkspace`) reject closed.

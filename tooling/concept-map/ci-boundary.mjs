@@ -70,13 +70,56 @@ function note(msg) {
   process.stderr.write(msg + "\n");
 }
 
+// Sentinel for "the gate could not read its instrument". Thrown rather than
+// exited so the single exit point below can set process.exitCode and let node
+// flush — the same drain race this whole file exists to close.
+class GateFault extends Error {}
+
 function runNodeJson(scriptPath, extraArgs = []) {
   const out = execFileSync(process.execPath, [scriptPath, "--json", ...extraArgs], {
     cwd: REPO_ROOT,
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "inherit"],
   });
-  return JSON.parse(out.toString("utf8"));
+  const text = out.toString("utf8");
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    // A gate that cannot READ its own instrument must say HOLD, not "regression".
+    // Left bare, JSON.parse throws an uncaught SyntaxError, node exits 1, and 1
+    // is this script's REGRESSION code — so an unreadable payload renders as
+    // architectural debt that nobody added. Exit 2 (fault) instead, and name the
+    // failure we have actually seen: a child that calls process.exit() after
+    // writing to a PIPE is torn down before the async write drains, cutting the
+    // payload short. That is why no script in this pipeline ends in
+    // process.exit().
+    //
+    // REACHABILITY, measured (5 trials per size, piped through `tee`):
+    //   1000 / 30000 / 60000 / 65000 / 65535 / 65536 bytes -> ALWAYS complete
+    //   70000 -> cut to 65536 on 2 of 5 runs
+    //   200000 -> cut to 65536, 73728 or 81920, on 3 of 5 runs
+    // So the cut is NOT always one 65536 buffer — 73728 and 81920 were both
+    // observed (the cuts land on 8192-byte boundaries). An earlier version of
+    // this check tested `length % 65536 === 0` and would have called those two
+    // "malformed", which is the wrong diagnosis pointing at the wrong file.
+    //
+    // What IS reliable is the floor: at or below PIPE_BUF the write fits the
+    // buffer and exit() cannot cut it, so truncation is RULED OUT. Above it,
+    // truncation is the first thing to suspect.
+    const PIPE_BUF = 65536;
+    note(`ci-boundary: FAULT — ${scriptPath} did not emit parseable JSON.`);
+    note(`  read ${text.length} bytes; ${err.message}`);
+    if (text.length >= PIPE_BUF) {
+      note(`  ${text.length} bytes is at or above the ${PIPE_BUF}-byte pipe buffer, so this`);
+      note(`  is very likely a TRUNCATED payload rather than a malformed one.`);
+      note(`  Check that ${scriptPath} does not call process.exit() after writing`);
+      note(`  --json to stdout; use process.exitCode and let node flush.`);
+    } else {
+      note(`  ${text.length} bytes is below the ${PIPE_BUF}-byte pipe buffer, which RULES OUT`);
+      note(`  the process.exit() truncation race — this payload is genuinely malformed.`);
+    }
+    throw new GateFault();
+  }
 }
 
 // Canonical edge key — stable, ascii, never trips a shell or a diff.
@@ -302,4 +345,15 @@ function main() {
   return 0;
 }
 
-process.exit(main());
+// process.exitCode, NOT process.exit() — same reason grade.mjs and boundary.mjs
+// no longer call it. main() writes the --json report to stdout immediately
+// before this line, and architecture.yml pipes this script into `tee`; an
+// exit() here would race the async pipe drain and cut the report at one 65536-
+// byte buffer. Assigning exitCode lets node flush and then exit with the same
+// status, so the gate keeps its 0 / 1 (regression) / 2 (fault) contract.
+try {
+  process.exitCode = main();
+} catch (err) {
+  if (!(err instanceof GateFault)) throw err;
+  process.exitCode = 2; // FAULT — the diagnosis is already on stderr.
+}

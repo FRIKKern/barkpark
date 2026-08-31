@@ -55,6 +55,7 @@ import { fileURLToPath } from "node:url";
 
 import { runConcepts } from "./concepts.mjs";
 import { isEntryPoint, isMixTaskFile } from "./entrypoints.mjs";
+import { conceptTokenMatchers } from "./concept-tokens.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -99,9 +100,7 @@ function assignConcepts(graph) {
     }
   }
   const tokens = [...concepts].sort((a, b) => b.length - a.length);
-  const tokenRe = new Map(
-    tokens.map((t) => [t, new RegExp("(^|[/_.])" + t + "([/_.]|$)")])
-  );
+  const tokenRe = conceptTokenMatchers(tokens);
   for (const n of graph.nodes) {
     if (conceptOf.has(n.id)) continue;
     // Mix CLI tasks are entry-points, never feature members — mirror P1's fold
@@ -662,12 +661,26 @@ export function runBoundary(opts = {}) {
 
   // synthesize the "proposed" edge set from the EXISTING cross-concept edges, so
   // the gate reports the live boundary state (sideways + wrong-direction counts).
+  //
+  // ENTRY-POINT EDGES ARE EXCLUDED, exactly as the other two passes exclude them.
+  // entrypoints.mjs states the rule for the whole of cqv8: "A feature→feature
+  // edge whose SOURCE file is an entry-point is ORCHESTRATION, not a
+  // domain-coupling boundary violation", and requires that the passes "agree on
+  // EXACTLY what entry-point means". The grade pass drops them from its sideways
+  // counter and proposeDecycle's domainEdges() drops them from the cycle
+  // analysis — but this live-state path, the one feeding the CI gate, counted
+  // them. So a Phoenix controller calling a context (settings_live.ex →
+  // Auth.has_permission?) was reported as an architectural violation. That is
+  // the intended direction in a Phoenix app, and it is why the third pass
+  // disagreed with the other two.
+  const fileOf = new Map(graph.nodes.map((n) => [n.id, n.file]));
   const edgeKey = new Map(); // "from→to" concept edge → count
   const edgeRaw = new Map(); // key → a representative raw {from,to}
   for (const e of graph.edges) {
     const cf = conceptOf.get(e.from);
     const ct = conceptOf.get(e.to);
     if (!cf || !ct || cf === ct) continue;
+    if (isEntryPoint(fileOf.get(e.from) || "")) continue; // orchestration, not coupling
     const k = cf + "→" + ct;
     edgeKey.set(k, (edgeKey.get(k) || 0) + 1);
     if (!edgeRaw.has(k)) edgeRaw.set(k, { from: cf, to: ct });
@@ -837,7 +850,8 @@ function main() {
   } else {
     printHuman(res);
   }
-  process.exit(0);
+  // NO process.exit() here — see grade.mjs: exit() truncates a piped stdout at
+  // one 64KiB pipe buffer, and ci-boundary.mjs parses this --json payload.
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

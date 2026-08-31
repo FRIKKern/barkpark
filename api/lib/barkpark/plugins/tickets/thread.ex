@@ -444,7 +444,32 @@ defmodule Barkpark.Plugins.Tickets.Thread do
   # `:current_workspace` (see `BarkparkWeb.ScopeHelpers.scope_opts/1`: the
   # `:shared_only` sentinel is emitted for a `%Plug.Conn{}` and NOT for a
   # socket). Trace the helper before assuming a direction.
-  defp operator_scope(scope), do: Keyword.delete(scope, :project_id)
+  #
+  # That warning is now CLOSED rather than merely recorded: this function
+  # states its own tenancy intent instead of inheriting whichever default the
+  # transport happened to supply. An absent OR explicitly-nil `:workspace_id`
+  # becomes the `:shared_only` sentinel, so both transports answer the tenancy
+  # question the same way. `BarkparkWeb.TicketsController` already emitted
+  # `:shared_only` through the conn arm of `ScopeHelpers.scope_opts/1`, while
+  # `Barkpark.Plugins.Tickets.InboxLive` reached this same read through the
+  # socket arm, which DROPS the key on a nil `:current_workspace`. Since
+  # `get_for_operator/3` shares this helper, the inbox's answer/close handlers
+  # were a cross-tenant WRITE on the widened read.
+  #
+  # `:shared_only` is NOT "zero rows": `Content.Scope.scope_to_workspace/3`
+  # resolves it to `where(is_nil(x.workspace_id))` — the shared/global layer —
+  # so an unseeded single-tenant install (`Tenancy.get_default_workspace/0`
+  # returns nil, and its tickets carry a NULL workspace) keeps seeing exactly
+  # its own tickets. Only a multi-tenant install changes behaviour, and there
+  # it stops leaking.
+  #
+  # `Keyword.put_new/3` would NOT be enough: it leaves a key that is PRESENT
+  # with a nil value untouched, and nil is precisely the leaking input.
+  defp operator_scope(scope) do
+    scope
+    |> Keyword.delete(:project_id)
+    |> Keyword.put(:workspace_id, Keyword.get(scope, :workspace_id) || :shared_only)
+  end
 
   # ── Presenter ────────────────────────────────────────────────────────────
 

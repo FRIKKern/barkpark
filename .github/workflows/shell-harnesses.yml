@@ -172,6 +172,12 @@ on:
       - "scripts/workflow-module-exec-smoke.sh"
       - "scripts/workflow-module-exec-smoke.test.sh"
       - ".claude/workflows/*.workflow.js"
+      # RUN-BODY SHELL CHECK. The glob is the same argument as the one above:
+      # `.github/workflows/*.yml` IS the corpus this gate enumerates, so pinning
+      # today's workflows by name would take the lane dark on the PR that adds a
+      # new one — exactly the PR where an unparseable `run:` body gets written.
+      - "scripts/workflow-run-shell-check.sh"
+      - ".github/workflows/*.yml"
       # DEPLOY-RELIABILITY EXIT RUNNER (W35). Per file, never a directory glob —
       # D26. The first two are the runner and its harness; the last four are the
       # INPUTS the harness's closing probes bind the runner's claims to, so an
@@ -319,6 +325,10 @@ on:
       - "scripts/workflow-module-exec-smoke.sh"
       - "scripts/workflow-module-exec-smoke.test.sh"
       - ".claude/workflows/*.workflow.js"
+      # RUN-BODY SHELL CHECK — mirrors the pull_request list above, glob
+      # included. A lane wired on PRs only goes dark the moment a merge lands.
+      - "scripts/workflow-run-shell-check.sh"
+      - ".github/workflows/*.yml"
       # DEPLOY-RELIABILITY EXIT RUNNER (W35) — mirrors the pull_request list
       # above, inputs included. A lane wired on PRs only goes dark the moment a
       # merge lands.
@@ -813,6 +823,38 @@ jobs:
         # this RUN, not BLOCK. Promotion is a separate evidence-gated decision,
         # filed as ecd-bl-tripwire-promotion.
         run: bash scripts/workflow-portability-check.sh .claude/workflows
+
+      # ── .github/workflows run: bodies are shell nothing ever parsed ─────────
+      # STEPS IN AN EXISTING JOB, deliberately: a new blocking job is a
+      # seven-place change (job, needs, decide binding, every `env -i`
+      # simulator, the spec-authority marker, the merge-authority claim count,
+      # the hermetic suite's --expect-unrendered acknowledgement). Steps cost
+      # none of them, and this job is already the home for "harnesses that read
+      # workflow files".
+      - name: workflow-run-shell-check.sh syntax check
+        # Runs on the runner's bash 5, but the script is ALSO required to parse
+        # under macOS bash 3.2 — see the header. That constraint is why its
+        # embedded python block carries no apostrophes.
+        run: bash -n scripts/workflow-run-shell-check.sh
+      - name: the run-body gate can still LOSE (7 arms, hermetic fixtures)
+        # THE FAIL-BEFORE PROOF. Arm (a) is the defect that motivated the gate,
+        # reproduced verbatim: an apostrophe inside a single-quoted `node -e`
+        # body truncates the program, node dies with SyntaxError, and the step
+        # exits 1 — ci-boundary.mjs's REGRESSION code, so a step that could not
+        # START was indistinguishable from one that had found architectural
+        # debt. Arms (e) and (f) are the ones that keep this gate honest rather
+        # than merely present: an unparseable workflow REFUSES by name instead
+        # of being silently skipped, and a run over zero bodies FAILS instead of
+        # reporting the success that any gate over no inputs reports.
+        run: bash scripts/workflow-run-shell-check.sh --selftest
+      # Quoted: an unquoted plain scalar cannot contain ": " — it is read as a
+      # mapping and the whole workflow stops parsing. Caught by this very gate.
+      - name: "every workflow run: body parses as shell"
+        # CLEAN-TREE, not never-worse, and measured before it was written: all
+        # 444 shell bodies across the corpus parse today (2 more declare a
+        # non-shell `shell:` and are skipped by name). No debt to grandfather
+        # means no baseline, and no baseline is a baseline that cannot rot.
+        run: bash scripts/workflow-run-shell-check.sh
 
   exit-runner-guard:
     name: deploy-reliability-exit-run.sh mutation matrix

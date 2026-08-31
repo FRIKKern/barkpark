@@ -61,6 +61,16 @@ ExUnit.start(
     :boot_test,
     :plugin_routes,
     :requires_vips,
+    # The `tsc --noEmit` check on priv/plugin_types.d.ts needs a TypeScript
+    # compiler. Tagged `:requires_node` and excluded for the same reason as
+    # `:requires_vips` above: a box without one gets a VISIBLE skip instead of
+    # the test quietly passing. It used to run everywhere and take a
+    # `find_executable -> nil -> :ok` arm, so deleting plugin_types.d.ts
+    # outright kept it green. Run explicitly:
+    #
+    #     mix test --include requires_node
+    #
+    :requires_node,
     # Live IdP interop (needs the Keycloak container) — scripts/idp-interop.sh
     :idp_interop,
     # Real-binary Studio-chat E2E (spawns the actual `claude` CLI: ~$0.43 +

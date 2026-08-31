@@ -13,12 +13,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/apierr"
 	"github.com/FRIKKern/barkpark/internal/httpx"
 )
 
@@ -411,91 +411,32 @@ func (c *Client) MutateResults(mutations []map[string]interface{}) ([]MutationRe
 // integer 0..4" instead of a raw JSON blob. Unknown shapes fall back to the
 // body verbatim (clamped) so nothing is ever swallowed.
 //
-// Details rides as json.RawMessage rather than a typed map[string][]string:
-// only validation_failed's flat {field:[reasons]} fits that one shape, so a
-// duplicate_of ({"duplicate_of":"post-1"}), resource_conflict, or label_spine
-// ({field,rule,fix,index}) envelope failed the whole Unmarshal, tripped the
-// `== nil` guard below, and fell through to the raw `error %d: %s` dump —
-// discarding code, message AND details together. humanDetailParts renders the
-// raw payload generically instead, mirroring internal/cli/errors.go's
-// detailLines/detailValue shape (duplicated rather than imported — apiclient
-// sits BELOW cli per ConfigFromEnv's axi-b4 note and must not depend upward).
+// THE DECODE NOW LIVES IN internal/apierr, the one reader every surface shares.
+// This function used to carry its own copy, and its previous comment recorded
+// exactly why: internal/cli's rendering was "duplicated rather than imported —
+// apiclient sits BELOW cli per ConfigFromEnv's axi-b4 note and must not depend
+// upward". That constraint is real (cli imports apiclient, so the reverse edge
+// is an import cycle) but the conclusion was wrong: the shared code belongs
+// BELOW both, not above one. apierr is that leaf, so this reads the envelope
+// through the same parser the CLI does instead of a private twin that drifts.
+//
+// apierr.DetailParts IS this file's old humanDetailParts algorithm, adopted as
+// the canonical one because it was the most capable of the eight decoders — so
+// this migration is byte-identical for every details shape.
+//
+// The 200-rune clamp on the unknown-shape fallback STAYS. This is a one-line
+// TUI status bar and the budget is a display decision, not an envelope
+// decision; widening it is a separate call with its own pinned test. What
+// changed here is which parser runs, not what this surface is allowed to print.
 func humanAPIError(status int, body []byte) error {
-	var env struct {
-		Error struct {
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Details json.RawMessage `json:"details"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &env) == nil && (env.Error.Code != "" || env.Error.Message != "") {
-		msg := env.Error.Message
-		if msg == "" {
-			msg = env.Error.Code
-		}
-		if parts := humanDetailParts(env.Error.Details); len(parts) > 0 {
-			msg += " — " + strings.Join(parts, " · ")
-		}
-		return fmt.Errorf("%s", msg)
+	if env, ok := apierr.Parse(body); ok {
+		return fmt.Errorf("%s", env.Summary())
 	}
 	raw := strings.TrimSpace(string(body))
 	if r := []rune(raw); len(r) > 200 {
 		raw = string(r[:200]) + "…"
 	}
 	return fmt.Errorf("error %d: %s", status, raw)
-}
-
-// humanDetailParts renders a `details` payload as sorted "field: value" parts.
-// Sorting by KEY (rather than the old map-range's sort.Strings over the
-// already-joined "field: value" parts) is byte-identical for this shape: every
-// part shares the "<field>: " prefix, so key order and part order agree as
-// long as field names use only ordinary identifier characters (true of every
-// field name this server emits), which is also why the flat validation_failed
-// rendering below stays byte-identical to the pre-fix behaviour. A details
-// payload that is absent, empty, or not a JSON object (a bare scalar/array)
-// renders nothing, matching the old map-shape's silent miss on those inputs.
-func humanDetailParts(raw json.RawMessage) []string {
-	d := bytes.TrimSpace(raw)
-	if len(d) == 0 {
-		return nil
-	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(d, &obj); err != nil || len(obj) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(obj))
-	for k := range obj {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, k+": "+humanDetailValue(obj[k]))
-	}
-	return parts
-}
-
-// humanDetailValue renders ONE details value for the human line. A
-// []string (validation_failed's {field:[reasons]}) joins with "; " —
-// byte-identical to the old strings.Join(reasons, "; ") — a JSON string loses
-// its quotes (duplicate_of's bare incumbent id), and every other shape
-// (number, bool, null, object, array — resource_conflict's conflicts list,
-// label_spine's {rule,fix,index}) prints as compact JSON, so nothing is ever
-// silently dropped.
-func humanDetailValue(raw json.RawMessage) string {
-	var reasons []string
-	if err := json.Unmarshal(raw, &reasons); err == nil {
-		return strings.Join(reasons, "; ")
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, raw); err != nil {
-		return strings.TrimSpace(string(raw))
-	}
-	return buf.String()
 }
 
 // Publish promotes a document's draft to published via the publish mutation.

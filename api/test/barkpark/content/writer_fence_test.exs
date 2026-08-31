@@ -73,11 +73,12 @@ defmodule Barkpark.Content.WriterFenceTest do
     :ok
   end
 
+  # Delegated to `Barkpark.PluginEnv` so the restore uses the `:unset`
+  # sentinel — a `[]` snapshot default would restore an EXPLICIT `[]` on the
+  # unset boot baseline, arming BootCollectors' discovery kill switch for
+  # later tests.
   defp with_plugins(modules, ctx) do
-    prior = Application.get_env(:barkpark, :plugins, [])
-    Application.put_env(:barkpark, :plugins, modules)
-    ExUnit.Callbacks.on_exit(ctx, fn -> Application.put_env(:barkpark, :plugins, prior) end)
-    :ok
+    Barkpark.PluginEnv.with_plugins(modules, ctx)
   end
 
   defp draft!(id, body) do

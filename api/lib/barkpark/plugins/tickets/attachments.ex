@@ -350,18 +350,19 @@ defmodule Barkpark.Plugins.Tickets.Attachments do
     end
   end
 
+  # Same tenancy direction as `Thread.operator_scope/1`: an absent or
+  # explicitly-nil `:workspace_id` is the SHARED/GLOBAL layer, never "every
+  # tenant". The old `nil -> query` arm handed the unscoped query straight
+  # through, so `count_for_ticket/3` counted `mediaAsset` rows across every
+  # workspace whenever the caller resolved none. `:shared_only` resolves to
+  # `where(is_nil(x.workspace_id))`, which is what a NULL-workspace install
+  # actually wants.
   defp scope_workspace(query, scope) do
-    case Keyword.get(scope, :workspace_id) do
-      nil ->
-        query
-
-      ws_id ->
-        Content.Scope.scope_to_workspace_or_global(
-          query,
-          ws_id,
-          Keyword.get(scope, :project_id)
-        )
-    end
+    Content.Scope.scope_to_workspace_or_global(
+      query,
+      Keyword.get(scope, :workspace_id) || :shared_only,
+      Keyword.get(scope, :project_id)
+    )
   end
 
   defp default_filename(mime) do

@@ -362,26 +362,38 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
   defp id_type_pair(_other), do: nil
 
-  # Reported total. For an ordinary read the candidate-pool length is the honest
-  # match count. For a GRANT-DERIVED caller (`opts[:grant_scoped]`) the pool
-  # counts out-of-grant hits the hydration read drops, so the raw length would
-  # OVER-report — leak the existence/count of docs outside the grant. Recompute
-  # the total as ONE grant-narrowed Postgres count over the ranked candidate id
-  # set (same dataset/workspace/owner/grant scoping the row hydration applies),
-  # fail-closed: a reported total can never exceed the grant-visible matches.
+  # Reported total — ALWAYS recomputed as ONE scoped Postgres count over the
+  # ranked candidate id set, never `length(ranked)`.
+  #
+  # The candidate pool is NOT tenant-scoped. `Indexer.current_dataset/1` keys the
+  # live Indx dataset on the Barkpark dataset STRING alone, so every workspace
+  # sharing a dataset name shares ONE pool — the situation `hydrate_documents/3`
+  # above is written for ("even when two workspaces share a dataset STRING").
+  # Hydration re-reads through `Content.get_documents_by_ids/3` and drops the
+  # other tenants' rows, so the HITS were always correct.
+  #
+  # The COUNT was not. This used to return the raw pool length for every
+  # non-grant caller, on the premise that "for an ordinary read the
+  # candidate-pool length is the honest match count". That premise holds only if
+  # the pool is tenant-scoped, and it is dataset-scoped — so workspace A's search
+  # reported a total that counted workspace B's matching documents while
+  # returning only A's rows: the existence and volume of another tenant's
+  # content, disclosed as a number. Same class as the `Content.Analytics`
+  # type_census leak (task-c6d2e34c64100678), one boundary over.
+  #
+  # `count_documents_by_ids/3` applies the SAME stack the hydration read does
+  # (dataset + workspace/project + owner + grant), so the total can never exceed
+  # what the caller may actually see — and the grant-derived case it already
+  # covered is unchanged, now as one branch of a rule instead of the exception.
   defp total_for(ranked, scope, opts) do
-    if Keyword.get(opts, :grant_scoped, false) do
-      ranked_ids =
-        ranked
-        |> Enum.map(&id_type_pair/1)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.map(&elem(&1, 0))
-        |> Enum.uniq()
+    ranked_ids =
+      ranked
+      |> Enum.map(&id_type_pair/1)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.uniq()
 
-      Content.count_documents_by_ids(ranked_ids, scope, scope_opts(opts))
-    else
-      length(ranked)
-    end
+    Content.count_documents_by_ids(ranked_ids, scope, scope_opts(opts))
   end
 
   # Forward the tenant-scope opts AND the caller_context into the authoritative

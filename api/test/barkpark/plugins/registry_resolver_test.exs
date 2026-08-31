@@ -156,11 +156,12 @@ defmodule Barkpark.Plugins.RegistryResolverTest do
 
   # Helper: install an explicit plugin load order via Application config
   # and restore the previous value on exit.
+  # `Barkpark.PluginEnv` restores through an `:unset` sentinel: a `[]` snapshot
+  # default would restore an EXPLICIT `[]` (BootCollectors' discovery kill
+  # switch) on the unset boot baseline. RegistryCase's own `delete_env` on_exit
+  # already covers this file; the sentinel makes the helper correct on its own.
   defp with_app_plugin_order(names, ctx) when is_list(names) do
-    prior = Application.get_env(:barkpark, :plugins, [])
-    Application.put_env(:barkpark, :plugins, names)
-    ExUnit.Callbacks.on_exit(ctx, fn -> Application.put_env(:barkpark, :plugins, prior) end)
-    :ok
+    Barkpark.PluginEnv.with_plugins(names, ctx)
   end
 
   # ── Group 2: resolver chain ordering ────────────────────────────────

@@ -65,6 +65,7 @@ import { fileURLToPath } from "node:url";
 import { runConcepts } from "./concepts.mjs";
 import { isRegistered } from "./registration.mjs";
 import { isEntryPoint, isMixTaskFile } from "./entrypoints.mjs";
+import { conceptTokenRe, conceptTokenMatchers } from "./concept-tokens.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE })
@@ -125,9 +126,7 @@ function assignConcepts(graph) {
     }
   }
   const tokens = [...concepts].sort((a, b) => b.length - a.length);
-  const tokenRe = new Map(
-    tokens.map((t) => [t, new RegExp("(^|[/_.])" + t + "([/_.]|$)")])
-  );
+  const tokenRe = conceptTokenMatchers(tokens);
   for (const n of graph.nodes) {
     if (conceptOf.has(n.id)) continue;
     // Mix CLI tasks are entry-points, never feature members — mirror P1's fold
@@ -212,7 +211,7 @@ function listTestFiles(rootDir) {
 }
 
 function testScatter(concept, allTestFiles) {
-  const re = new RegExp("(^|[/_.])" + concept + "([/_.]|$)");
+  const re = conceptTokenRe(concept);
   const rel = (f) => f.slice(ROOT.length + 1);
   const matches = allTestFiles.filter((f) => re.test(f.toLowerCase()));
   const dirs = new Set(matches.map((f) => dirname(rel(f))));
@@ -531,7 +530,11 @@ function main() {
   } else {
     printHuman(res);
   }
-  process.exit(0);
+  // NO process.exit() here. Node's stdout to a PIPE is async; process.exit()
+  // tears the process down before the write drains, silently truncating the
+  // payload at one pipe buffer (64KiB). ci-boundary.mjs pipes this --json and
+  // JSON.parse()s it, so an exit() here fails the gate at random on any report
+  // larger than the buffer. Falling off main() flushes, then exits 0.
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

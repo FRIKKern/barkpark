@@ -6,13 +6,14 @@ package apiclient
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"sync/atomic"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 // A DELIBERATELY NARROW retry for ONE server behaviour: a transient
@@ -292,15 +293,14 @@ func isRetryableServerFault(resp *http.Response) bool {
 	}
 	resp.Body = restoredBody(prefix, resp.Body)
 
-	var env struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(prefix, &env) != nil {
+	// Read the code through the shared parser rather than a private struct: a
+	// body whose OTHER fields are shaped unexpectedly must still yield its code,
+	// or a retryable refusal silently stops being retried.
+	env, ok := apierr.Parse(prefix)
+	if !ok {
 		return false
 	}
-	return env.Error.Code == retryErrorCode
+	return env.Code == retryErrorCode
 }
 
 // restoredBody re-attaches an already-read prefix in front of the unread

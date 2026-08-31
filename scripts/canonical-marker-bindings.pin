@@ -3,6 +3,7 @@ chat-stable-boundary	advance
 chat-stable-segments	advance
 cloud-provider-seam	DetectCapabilities
 codelist-lookup	lookup
+concept-token-fold	conceptTokenRe
 connector-credential-sealing	createCredentialCipher
 connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler

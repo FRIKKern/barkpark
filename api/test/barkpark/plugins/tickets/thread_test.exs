@@ -336,4 +336,68 @@ defmodule Barkpark.Plugins.Tickets.ThreadTest do
       assert {:ok, %Document{}} = Thread.get_for_operator(id, @dataset, project_scoped)
     end
   end
+
+  # ── Operator listing: the nil-workspace direction ────────────────────────
+  #
+  # The sibling block above pins the PROJECT drop. This one pins the WORKSPACE
+  # direction, which used to run the opposite way.
+  #
+  # `operator_scope/1` used to be a bare `Keyword.delete(scope, :project_id)`,
+  # so a scope carrying no `:workspace_id` reached
+  # `Content.Scope.scope_to_workspace_or_global(q, nil, _)` — the query
+  # UNTOUCHED, i.e. every tenant's tickets. That state is reachable: the conn
+  # arm of `BarkparkWeb.ScopeHelpers.scope_opts/1` emits the `:shared_only`
+  # sentinel, but the `%Socket{}` arm DROPS the key on a nil
+  # `:current_workspace`, and `Barkpark.Plugins.Tickets.InboxLive` reads
+  # through the socket arm. `get_for_operator/3` shares the helper, so the
+  # inbox's answer/close handlers rode the same widened read.
+  #
+  # Both assertions below fail against the bare `Keyword.delete/2`: run them
+  # against it and the listing comes back `["theirs", "mine"]` — two
+  # workspaces through one un-narrowed read.
+  #
+  # The non-regression half is NOT re-proven here, deliberately.
+  # `test/barkpark_web/empty_scope_shared_layer_test.exs:173` (":shared_only
+  # means the shared layer in every request-reachable arm") already pins that
+  # `:shared_only` resolves to `where(is_nil(x.workspace_id))` — the
+  # shared/global layer — and never to zero rows, across every Scope arm. It
+  # also could not be proven through this fixture: `Thread.create/2` resolves a
+  # default workspace, so a genuinely NULL-workspace ticket is unreachable from
+  # here.
+
+  describe "operator reads narrow when no workspace resolves" do
+    # The ticket schema is already registered by the outer setup:
+    # `schema_definitions_name_dataset_null_dataset_id_index` makes
+    # (name, dataset) unique regardless of workspace, so one registration
+    # covers every workspace this block creates.
+    setup %{ws: ws} do
+      other_ws = TenancyFixtures.create_workspace!()
+
+      {:ok, _mine} = Thread.create(mk_key(ws, "Kari"), %{subject: "mine", body: "hi"})
+
+      {:ok, theirs} =
+        Thread.create(mk_key(other_ws, "Ola"), %{subject: "theirs", body: "hi"})
+
+      %{theirs: theirs}
+    end
+
+    # `[]` is literally what `scope_opts(%Socket{})` yields for the tenancy
+    # keys when `:current_workspace` is unset; `[workspace_id: nil]` is the
+    # same intent spelled with the key present, which `Keyword.put_new/3`
+    # would have failed to narrow.
+    for {label, scope} <- [{"an absent key", []}, {"an explicit nil", [workspace_id: nil]}] do
+      test "#{label} yields the shared layer, not every tenant", %{theirs: theirs} do
+        subjects =
+          @dataset
+          |> Thread.list_for_operator(unquote(scope))
+          |> Enum.map(& &1.content["subject"])
+
+        refute "theirs" in subjects
+        refute "mine" in subjects
+
+        id = Content.published_id(theirs.doc_id)
+        assert {:error, :not_found} = Thread.get_for_operator(id, @dataset, unquote(scope))
+      end
+    end
+  end
 end
