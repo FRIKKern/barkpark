@@ -107,7 +107,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLivePluginAssertsTest do
   end
 
   describe "enrich_with_plugin_asserts/3 — assert-shape coverage" do
-    test "no :asserts key in spec → empty list and :pass status" do
+    test "no :asserts key in spec → empty list and :unverified status" do
       result = synth_result(~s|{}|)
       spec = %{name: "informational"}
 
@@ -115,8 +115,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLivePluginAssertsTest do
         ApiTesterLive.enrich_with_plugin_asserts(result, spec, skip_cleanup: true)
 
       assert enriched.plugin_asserts == []
-      # Empty assert list is treated as :pass (informational spec).
-      assert enriched.plugin_status == :pass
+      # Empty assert list is :unverified (informational spec) — never a silent pass.
+      assert enriched.plugin_status == :unverified
     end
 
     test "all eight built-in assert kinds dispatch through evaluate/2" do
