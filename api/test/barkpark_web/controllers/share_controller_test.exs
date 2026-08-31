@@ -9,6 +9,7 @@ defmodule BarkparkWeb.ShareControllerTest do
     * add rejects an invalid scope/surface (422, no row)
     * rm removes a stored share and refreshes the live list
     * ls reports both the env baseline and stored shares, tagged by source
+    * ls CONFINES the stored half to the caller's admin workspaces
     * TENANCY CONFINEMENT of the write half (arpss-w8 slice 2, below)
 
   ## Tenancy confinement (arpss-w8, slice 2)
@@ -48,6 +49,25 @@ defmodule BarkparkWeb.ShareControllerTest do
       `authorize/3`'s api_token arm is `member? AND the token's GLOBAL
       permissions[]`. Written against a NON-member of B, the same tests would
       pass under the weaker predicate and prove materially less.
+    * LISTING-CLOSED (`GET /v1/shares`, the STORED half) — on clean
+      origin/main `index/2` mapped `Sharing.list_stored/0` straight to JSON, so
+      a ws-A admin saw EVERY workspace's stored share. "cross-tenant: GET
+      /v1/shares does not list ws-B's stored share …" reproduces it RED there
+      (ws-B's `ls-ws-b/ls-proj-b/production` row present in the payload), and
+      both mutations of the new clamp turn it RED again: `-> true` (no
+      confinement) and `authorize/3` in place of `workspace_admin?/2` (the
+      attacker's real `member` row in ws-B walks through the weaker predicate).
+      The test is not satisfiable by returning nothing — it also asserts the
+      actor's OWN ws-A stored row is still listed.
+
+  SCOPE BOUNDARY, deliberate: only the STORED half of `index/2` is confined.
+  The env-declared half stays unclamped pending the owner ruling
+  `arpss-stored-share-registry-ruling` (an env entry may legally name a
+  workspace that does not exist, so it has no tenancy row to authorize
+  against). The listing test pins that on purpose: `env-only-ws` names no
+  workspace, the actor administers nothing there, and the row MUST still be
+  reported — a future clamp of the env half will red this assertion, which is
+  the intent.
 
   FIXTURE HYGIENE: every share is planted through `Sharing.add_share/1` (a
   StoredShare row + `refresh/0`) or through the HTTP verb under test, never a
@@ -262,7 +282,15 @@ defmodule BarkparkWeb.ShareControllerTest do
   # ── ls (GET) ────────────────────────────────────────────────────────────
 
   describe "GET /v1/shares" do
-    test "reports env baseline + stored, each tagged by source", %{conn: conn} do
+    # FIXTURE STRENGTHENED (not weakened) for the stored-half clamp: `db-ws` is
+    # now a REAL workspace the caller administers, because the stored half of
+    # the listing is confined to the caller's admin workspaces. Both assertions
+    # below are byte-identical to before — only the fixture gained the tenancy
+    # row the listing has always implied. `env-ws` deliberately stays a
+    # workspace that does NOT exist: the env half is unclamped (pending
+    # `arpss-stored-share-registry-ruling`) and must still be reported.
+    test "reports env baseline + stored, each tagged by source", %{conn: conn, admin: admin} do
+      admin_ws!(admin, "db-ws")
       Application.put_env(:barkpark, :shares_env, Sharing.parse("env-ws:papers:read"))
       assert {:ok, _} = Sharing.add_share("db-ws/default/production:docs:edit")
 
@@ -370,6 +398,43 @@ defmodule BarkparkWeb.ShareControllerTest do
       assert Sharing.shared?(ws_b.slug, proj_b.slug, "production", :docs)
       assert Sharing.access_for(ws_b.slug, proj_b.slug, "production") == :edit
       assert Repo.aggregate(StoredShare, :count) == 1
+    end
+
+    test "cross-tenant: GET /v1/shares does not list ws-B's stored share to a ws-A admin",
+         %{conn: conn} do
+      {_actor, ws_b, proj_b, scope_b} = cross_tenant_actor!("ls")
+
+      # ws-B's OWN legitimate stored share — planted through the store, not the
+      # HTTP verb, so the LISTING leak is reproduced even though `create/2` is
+      # already confined.
+      assert {:ok, _} = Sharing.add_share("#{scope_b}:docs,media:edit")
+
+      # ws-A's own stored share — the actor DOES administer this one. Without
+      # it this test would pass against a clamp that simply returns nothing.
+      assert {:ok, _} = Sharing.add_share("ls-ws-a/default/production:papers:read")
+
+      # An env-declared share naming a workspace the actor does not administer
+      # (and which does not exist at all). The env half is DELIBERATELY left
+      # unclamped pending `arpss-stored-share-registry-ruling`, so this row MUST
+      # stay visible — this assertion pins that scope boundary.
+      Application.put_env(:barkpark, :shares_env, Sharing.parse("env-only-ws:papers:read"))
+
+      body = conn |> bearer(@attacker_token) |> get("/v1/shares") |> json_response(200)
+
+      grouped = Enum.group_by(body["shares"], & &1["source"])
+      stored = grouped["stored"] || []
+
+      # THE LEAK: ws-B's row must not appear in ANY half of the payload.
+      refute Enum.any?(body["shares"], &(&1["workspace"] == ws_b.slug)),
+             "ws-B's share leaked into the listing: #{inspect(body["shares"])}"
+
+      refute Enum.any?(stored, &(&1["scope"] == "#{ws_b.slug}/#{proj_b.slug}/production"))
+
+      # …and the actor still sees its OWN workspace's stored share.
+      assert [%{"workspace" => "ls-ws-a", "access" => "read"}] = stored
+
+      # …and the env half is untouched by this clamp.
+      assert [%{"workspace" => "env-only-ws"}] = grouped["env"]
     end
 
     test "ghost share: POST for a workspace that does not exist is 422 and persists nothing",

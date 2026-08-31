@@ -113,12 +113,59 @@ defmodule BarkparkWeb.ShareController do
   `GET /v1/shares` — list every live share, env baseline + persisted, each
   tagged with its `source` (`"env"` | `"stored"`). Only `"stored"` shares are
   mutable here; `"env"` shares come from `BARKPARK_SHARES`.
+
+  CONFINED (the `"stored"` half only): `Sharing.list_stored/0` reads EVERY
+  workspace's rows, so they are filtered to the workspaces the caller is an
+  admin member of BEFORE `share_json/2` runs — the SAME shape `list_tokens/2`
+  uses for share-edit tokens (one membership lookup per DISTINCT workspace, not
+  per row). Status stays 200 and foreign rows are simply ABSENT, never a 403
+  that would confirm they exist.
+
+  THE `"env"` HALF IS DELIBERATELY LEFT UNCLAMPED, pending the owner ruling
+  `arpss-stored-share-registry-ruling`. An env entry is DECLARED by whoever set
+  `BARKPARK_SHARES` and may legally name a workspace that does not exist yet
+  (or ever) — it has no tenancy row to authorize against, so any clamp here
+  would have to invent an ownership rule and would hide an operator's own
+  configuration from the admin who wrote it. It stays visible until that ruling
+  lands. `active:` likewise stays global — it is a single "is sharing
+  configured at all" bit already implied by the unclamped env half.
   """
   def index(conn, _params) do
     env = Enum.map(Sharing.shares_env(), &share_json(&1, "env"))
-    stored = Enum.map(Sharing.list_stored(), &share_json(&1, "stored"))
+    stored = conn |> visible_stored_shares() |> Enum.map(&share_json(&1, "stored"))
 
     json(conn, %{shares: env ++ stored, active: Sharing.active?()})
+  end
+
+  # The stored-share twin of `list_tokens/2`'s filter. A `Sharing.Share` carries
+  # a workspace SLUG rather than an id, so the slug is resolved through
+  # `Tenancy.get_workspace_by_slug/1` first; the predicate itself is the same
+  # `workspace_admin?/2` every other confined action in this controller uses.
+  #
+  # FAIL-CLOSED on an unresolvable slug: a stored row naming a workspace that no
+  # longer exists (a GHOST left by the permissive create that shipped before
+  # arpss-w8 slice 2) is not listed. It stays deletable — `delete/2`
+  # deliberately does not confine an unresolvable workspace, which is the
+  # cleanup path for exactly those rows.
+  defp visible_stored_shares(conn) do
+    rows = Sharing.list_stored()
+
+    # One membership lookup per DISTINCT workspace slug, not per row.
+    allowed =
+      rows
+      |> Enum.map(& &1.workspace_slug)
+      |> Enum.uniq()
+      |> Enum.filter(&stored_share_visible?(conn, &1))
+      |> MapSet.new()
+
+    Enum.filter(rows, &MapSet.member?(allowed, &1.workspace_slug))
+  end
+
+  defp stored_share_visible?(conn, workspace_slug) do
+    case Tenancy.get_workspace_by_slug(workspace_slug) do
+      %Tenancy.Workspace{id: ws_id} -> workspace_admin?(conn, ws_id)
+      _ -> false
+    end
   end
 
   @doc """
