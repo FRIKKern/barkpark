@@ -7,7 +7,9 @@
 //   ownership      — bus-factor: top author's commit share + distinct author count
 //
 // Coverage is MEASURED, not proxied, for Go and Elixir (v2 Phase 1). Each file's
-// testScore carries a `testCoverageSource` flag: "go" | "elixir" | "proxy".
+// testScore carries a `testCoverageSource` flag: "go" | "elixir" | "js" |
+// "proxy" | "proxy-unasserted" (a sibling test exists but has zero assertion
+// sites — see tooling/risk/test-proxy.mjs).
 // Pass --no-coverage to skip the heavy suites and fall back to the proxy everywhere
 // (keeps the suite fast/portable on machines without the toolchains).
 //
@@ -22,6 +24,7 @@ import { createHash } from "node:crypto";
 import { FRAGILE_DENSITY, UNTESTED_SCORE } from "../lib/thresholds.mjs";
 import { evalFormula } from "../lib/formula.mjs";
 import { elixirFnCov, jsFnCov } from "./fn-coverage.mjs";
+import { scoreTestProxy } from "./test-proxy.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -88,14 +91,22 @@ function ownership(path) {
 const all = git(["ls-files"]).split("\n").filter(Boolean);
 const isTest = (f) => /(_test\.(go|exs)|\.test\.[tj]sx?|\.spec\.[tj]sx?)$/.test(f) || /(^|\/)test\//.test(f);
 const testFiles = all.filter(isTest);
-const testBasenames = new Set(testFiles.map(f => basename(f)));
 const read = (f) => { try { return readFileSync(join(ROOT, f), "utf8"); } catch { return ""; } };
+// basename -> full path, first match wins (same presence semantics as the old
+// testBasenames Set, but keeps a path so the sibling's source can be read for
+// assertion-density scoring — see test-proxy.mjs).
+const testBasenameToPath = new Map();
+for (const tf of testFiles) { const bn = basename(tf); if (!testBasenameToPath.has(bn)) testBasenameToPath.set(bn, tf); }
 const testCorpus = testFiles.map(read).join("\n").toLowerCase();
 
-function siblingTest(f) {
+// The sibling test file's path for `f`, or null if none exists.
+function siblingTestPath(f) {
   const b = basename(f).replace(/\.[^.]+$/, "");
-  return ["_test.exs", "_test.go", "_test.ts", ".test.ts", ".test.tsx", ".spec.ts", ".test.js"]
-    .some(suf => testBasenames.has(b + suf));
+  for (const suf of ["_test.exs", "_test.go", "_test.ts", ".test.ts", ".test.tsx", ".spec.ts", ".test.js"]) {
+    const p = testBasenameToPath.get(b + suf);
+    if (p) return p;
+  }
+  return null;
 }
 function modToken(f, txt) {
   if (/\.exs?$/.test(f)) { const m = txt.match(/defmodule\s+([\w.]+)/); return m ? m[1] : null; }
@@ -221,14 +232,17 @@ if (!covCacheHit) {
 const out = {};
 for (const s of code) {
   const txt = read(s.path);
-  const has = siblingTest(s.path);
+  const sibPath = siblingTestPath(s.path);
+  const has = !!sibPath;
   const mod = modToken(s.path, txt);
   const refs = mod ? Math.max(0, testCorpus.split(mod.toLowerCase()).length - 1) : 0;
-  const proxyScore = Math.min(100, (has ? 60 : 0) + Math.min(40, refs * 8));
+  // Gated on the sibling's ACTUAL assertion density, not mere existence —
+  // see test-proxy.mjs for the defect this fixes.
+  const { score: proxyScore, source: proxySource } = scoreTestProxy(has ? read(sibPath) : null, refs);
   // Prefer REAL coverage when measured; else fall back to the presence proxy.
   const rc = realCov[s.path];
   const testScore = rc ? Math.round(rc.pct) : proxyScore;
-  const testCoverageSource = rc ? rc.source : "proxy";
+  const testCoverageSource = rc ? rc.source : proxySource;
   const fixes = bugFix[s.path] || 0;
   const own = ownership(s.path);
   out[s.path] = { bugFixes: fixes, defectDensity: +(evalFormula(DEFECT_FORMULA, { fixes, churn: churn[s.path] || 1 })).toFixed(2),
@@ -249,7 +263,7 @@ const vals = Object.values(out);
 const untested = vals.filter(v => v.testScore < UNTESTED_SCORE).length;
 const fragile = Object.entries(out).filter(([, v]) => v.defectDensity >= FRAGILE_DENSITY).sort((a, b) => b[1].bugFixes - a[1].bugFixes);
 const e = (s) => process.stderr.write(s + "\n");
-const measured = vals.filter(v => v.testCoverageSource !== "proxy").length;
+const measured = vals.filter(v => v.testCoverageSource !== "proxy" && v.testCoverageSource !== "proxy-unasserted").length;
 e(`risk  ${vals.length} code files`);
 e(`  coverage: ${measured} files REAL-measured (go ${goPct ?? "—"}% · elixir ${exPct ?? "—"}% total) · ${vals.length - measured} on presence proxy`);
 e(`  test-presence: ${vals.filter(v => v.hasTest).length} have a sibling test · ${untested} score <40 (likely untested)`);
