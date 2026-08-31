@@ -485,8 +485,10 @@ defmodule Barkpark.Search.Synonyms do
   # the documented nil semantics of the sibling `Intelligence.scope_ws/2` and
   # `Crystallizer.scope_workspace/2` — a single-tenant/pre-tenancy instance,
   # whose rows all carry a NULL workspace_id, still reads exactly what it wrote.
-  defp scope_to_workspace(query, workspace_id),
-    do: Scope.scope_to_workspace_including_global(query, workspace_id || :shared_only, nil)
+  defp scope_to_workspace(query, workspace_id) do
+    # global-read: the synonym table has a DELIBERATELY SHARED NULL-workspace layer (the legacy/global synonyms every tenant is meant to inherit), so the _including_global family IS the intended read here — the fail-closed scope_to_workspace/3 would silently blind every tenant to the shared rows. This call is NOT fail-open: nil is mapped to the :shared_only sentinel, so an unresolved tenant reads the shared layer ALONE instead of every workspace's rows, which is exactly the leak this line replaces.
+    Scope.scope_to_workspace_including_global(query, workspace_id || :shared_only, nil)
+  end
 
   # Tenant leaf for the intel ROLL-UP tables (Crystal, MergePattern) — a
   # DIFFERENT boundary from `scope_to_workspace/2` above, deliberately. Roll-ups
