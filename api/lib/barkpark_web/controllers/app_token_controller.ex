@@ -144,21 +144,37 @@ defmodule BarkparkWeb.AppTokenController do
   returned either. Mirrors `ShareController.list_tokens/2`'s posture rather than
   inventing a second shape.
 
+  ## THE `?email=` ARM IS SCOPED TO THE BEARER'S WORKSPACES
+  (task-71787769f1d03e51)
+
+  The admin gate here is `Auth.has_permission?/2` — PERMISSION-only, with no
+  tenancy predicate (the same property `Plugs.RequireAdmin` has). So any
+  admin-permissioned token, in any workspace or none, reaches this route. What
+  the FILTERED arm then reads is confined by `Auth.list_app_tokens/2`, which
+  takes the bearer and keeps only rows in workspaces where it is an ADMIN
+  MEMBER — the same `Tenancy.Auth.workspace_admin?/2` predicate both revoke
+  selectors on this controller use, so all THREE selectors answer a
+  by-address question the same way.
+
   ## THE LABEL IS WITHHELD FROM AN UNFILTERED LIST, ON PURPOSE
 
   `GET /app-tokens` returns every app token on the instance with `label: null`
   and `label_redacted: true` on the envelope. `GET /app-tokens?email=<addr>`
-  returns that email's tokens WITH their real labels.
-
-  The admin gate here is `Auth.has_permission?/2` — PERMISSION-only, with no
-  tenancy predicate (the same property `Plugs.RequireAdmin` has). So any
-  admin-permissioned token, in any workspace, reaches this route.
+  returns that email's tokens WITHIN THE BEARER'S OWN WORKSPACES, with their
+  real labels.
 
   Labels follow the mint's `app:<email>` convention. An unfiltered list that
   returned them would hand one workspace's admin EVERY USER'S EMAIL ADDRESS on
-  the instance — a DIRECTORY, not a lifecycle verb. Revoke-by-email costs the
-  caller an address they already had; unfiltered enumeration would convert that
-  into discovery of everyone.
+  the instance — a DIRECTORY, not a lifecycle verb.
+
+  Revoke-by-email costs the caller an address they already had — TRUE ONLY
+  WITHIN A TENANT, which is the correction this paragraph carries. Across
+  tenants an address is not a cost already paid: confirming that a FOREIGN
+  address is provisioned here, in which workspace, with which permissions, is
+  new information, and it is precisely the information
+  `Auth.revoke_app_tokens_for_email/2` returns a bare count to withhold. The
+  `?email=` arm therefore answers within the bearer's own workspaces or answers
+  nothing at all.
 
   What survives redaction is everything this row's purpose needs: `id` (revoke
   by it), `workspace_id`, `permissions`, `dataset` and the dates. An operator
@@ -179,14 +195,20 @@ defmodule BarkparkWeb.AppTokenController do
 
   ## WHAT THIS READ PATH STILL DOES NOT DO, stated so it is not over-read
 
-  `index/2` is NOT scoped. An admin of workspace A still sees every app token
-  row on the instance — `id`, `workspace_id`, `permissions`, `dataset`, dates —
-  with the label withheld. That is now a strictly weaker disclosure than it was
-  (an id from another workspace no longer revokes anything: the by-id arm 404s
-  it), but it is still a cross-workspace read, and closing it is a separate
-  change with a real question attached — whether an operator running
-  `GET /app-tokens` to audit their instance should see rows they cannot act on.
-  Filed rather than widened into the revoke fix: `task-aa07355fa8a53355`.
+  The UNFILTERED sweep is still unscoped, deliberately. An admin of workspace A
+  running `GET /app-tokens` with no filter sees every app token row on the
+  instance — `id`, `workspace_id`, `permissions`, `dataset`, dates — with the
+  label withheld. `task-aa07355fa8a53355` remains OPEN and owns that question;
+  `task-71787769f1d03e51` did NOT close it, and its option 2 ("keep it
+  instance-wide and keep the redaction") is still on the table.
+
+  The line between the two arms is what the caller can ASK, not how much comes
+  back. `?email=` lets a caller name a SPECIFIC address and be told yes or no —
+  that is the oracle, and the chartered defect. The sweep cannot probe an
+  address: it returns what is there with labels withheld, so it discloses an
+  inventory rather than answering a question about a person. Different harms,
+  separate adjudication — which is why scoping the filtered arm here does not
+  pre-empt the other.
 
   Non-admin bearers get the same generic unauthorized as an invalid token, the
   mint's oracle discipline.
@@ -198,7 +220,16 @@ defmodule BarkparkWeb.AppTokenController do
           # `filtered?` is the whole posture: a caller who already supplied the
           # address gets the label back; an unfiltered sweep does not.
           filtered? = Keyword.has_key?(opts, :email)
-          rows = Enum.map(Auth.list_app_tokens(opts), &app_token_json(&1, filtered?))
+
+          # The bearer is the SELECTOR's first argument, not a post-filter here:
+          # `Auth.list_app_tokens/2` confines to workspaces it administers from
+          # the same predicate both revoke arms use. Narrowing in the controller
+          # would have left the next caller of that function holding the
+          # instance-wide read (task-71787769f1d03e51).
+          rows =
+            conn.assigns.api_token
+            |> Auth.list_app_tokens(opts)
+            |> Enum.map(&app_token_json(&1, filtered?))
 
           json(conn, %{tokens: rows, label_redacted: not filtered?})
 

@@ -151,7 +151,7 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
 
       # With the label withheld from an unfiltered list, the operator identifies
       # the row by the discriminators that survive — here newest-first, which is
-      # `list_app_tokens/1`'s documented order.
+      # `list_app_tokens/2`'s documented order.
       body = json_conn(admin) |> get("/v1/auth/app-tokens") |> json_response(200)
       id = hd(body["tokens"])["id"]
 
