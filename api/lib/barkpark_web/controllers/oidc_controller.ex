@@ -81,10 +81,7 @@ defmodule BarkparkWeb.OidcController do
               Sso.record_login(user, "oidc", c.organization_id)
 
               {:ok, token} =
-                Accounts.create_user_session_token(user,
-                  ip_address: client_ip(conn),
-                  user_agent: user_agent(conn)
-                )
+                Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
 
               conn =
                 conn |> configure_session(renew: true) |> put_session("user_session", token)
@@ -132,14 +129,5 @@ defmodule BarkparkWeb.OidcController do
     conn
     |> Plug.Conn.get_req_header("accept")
     |> Enum.any?(&String.contains?(&1, "text/html"))
-  end
-
-  defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
-
-  defp user_agent(conn) do
-    case get_req_header(conn, "user-agent") do
-      [ua | _] -> ua
-      _ -> nil
-    end
   end
 end

@@ -30,6 +30,15 @@ defmodule Barkpark.Accounts.UserSession do
     field :last_used_at, :utc_datetime_usec
     field :mfa_verified_at, :utc_datetime_usec
     field :ip_address, :string
+
+    # Which claim `ip_address` holds: "forwarded" (derived from a trusted
+    # front's x-forwarded-for chain) or "peer" (the verified TCP peer). NULL on
+    # every row minted before the trust boundary existed — see
+    # `Barkpark.RateLimiter.client_ip_with_source/1`. A reader who cannot tell
+    # the two apart cannot tell a real loopback client from a boundary that
+    # silently stopped firing.
+    field :ip_source, :string
+
     field :user_agent, :string
 
     # SAML birth context (nil for non-SAML sessions): lets logout send an
@@ -206,6 +215,7 @@ defmodule Barkpark.Accounts.UserSession do
       :last_used_at,
       :mfa_verified_at,
       :ip_address,
+      :ip_source,
       :user_agent,
       :saml_name_id,
       :saml_session_index,

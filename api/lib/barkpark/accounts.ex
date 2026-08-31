@@ -230,6 +230,7 @@ defmodule Barkpark.Accounts do
       last_used_at: now,
       mfa_verified_at: mfa_verified_at,
       ip_address: Keyword.get(opts, :ip_address),
+      ip_source: Keyword.get(opts, :ip_source),
       user_agent: Keyword.get(opts, :user_agent),
       saml_name_id: Keyword.get(opts, :saml_name_id),
       saml_session_index: Keyword.get(opts, :saml_session_index),

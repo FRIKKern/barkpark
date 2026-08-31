@@ -254,13 +254,41 @@ defmodule Barkpark.RateLimiter do
   """
   # @canonical capability:rate-limit-client-ip aka:client_ip,x-forwarded-for,xff,trusted-proxy,bucket-key,spoof
   @spec client_ip(Plug.Conn.t()) :: String.t()
-  def client_ip(%Plug.Conn{remote_ip: peer} = conn) do
+  def client_ip(conn) do
+    {ip, _source} = client_ip_with_source(conn)
+    ip
+  end
+
+  @doc """
+  As `client_ip/1`, plus WHICH of the two values it is:
+
+    * `{ip, :forwarded}` — derived from a trusted front's `x-forwarded-for`
+      chain, i.e. the address our own proxy says it saw;
+    * `{ip, :peer}` — the verified TCP peer, because the header was absent,
+      unusable, or arrived from a peer we do not trust.
+
+  Both are honest — `:peer` is never an attacker-chosen value — so this is not
+  a confidence score. It exists because a stored address that silently means
+  two different things cannot be audited, and one of those meanings is a KNOWN
+  FAILURE SHAPE rather than a hypothetical: in `cloud/`, Docker's hairpin NAT
+  rewrote the peer to the bridge gateway, the loopback trust guard therefore
+  NEVER fired, and 48 of 49 rows recorded the proxy while looking perfectly
+  valid (see the `cch-w1-peer-ip-pin` note in
+  `cloud/lib/barkpark_cloud/web/router.ex`). With the source stored, that
+  degradation is a query — every row says `peer` — instead of something a
+  reader has to notice by comparing rows and inferring.
+
+  Callers that only key a rate bucket want `client_ip/1`; callers that PERSIST
+  the address for someone to read later want this.
+  """
+  @spec client_ip_with_source(Plug.Conn.t()) :: {String.t(), :forwarded | :peer}
+  def client_ip_with_source(%Plug.Conn{remote_ip: peer} = conn) do
     with true <- trusted_proxy?(peer),
          client when is_binary(client) <-
            conn |> Plug.Conn.get_req_header("x-forwarded-for") |> rightmost_untrusted() do
-      client
+      {client, :forwarded}
     else
-      _ -> ip_to_string(peer)
+      _ -> {ip_to_string(peer), :peer}
     end
   end
 

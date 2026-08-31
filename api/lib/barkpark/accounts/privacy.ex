@@ -49,6 +49,12 @@ defmodule Barkpark.Accounts.Privacy do
             expires_at: s.expires_at,
             revoked_at: s.revoked_at,
             ip_address: s.ip_address,
+            # Stored alongside the address, so exported too: a subject-access
+            # export that omits a column we hold is an incomplete export, and
+            # without it `ip_address` is ambiguous between a derived client
+            # address and the raw peer. NULL on rows minted before the trust
+            # boundary existed.
+            ip_source: s.ip_source,
             user_agent: s.user_agent
           }
         end),

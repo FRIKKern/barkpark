@@ -502,6 +502,32 @@ jobs:
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh
 
+      # ── client-ip trust-boundary ratchet, riding this job ────────────────
+      # Same STEP-not-a-job reasoning as the ratchet above: adding a blocking
+      # job would trip the aggregator `needs` checks in the path-escape suite.
+      #
+      # This one needs neither Elixir nor deps (it is grep + awk), so it rides
+      # here purely to sit beside the ratchet it mirrors, and runs before
+      # compile so a reintroduced one-liner reds in seconds.
+      #
+      # WHY IT EXISTS: five modules reimplemented `client_ip/1` past a resolver
+      # that was already marked @canonical, and every one of them recorded the
+      # proxy instead of the actor. The marker's aka: list contains `client_ip`
+      # precisely so a grep lands on the right one; it did not route them. A
+      # marker nobody follows is decoration, so this makes it load-bearing.
+      #
+      # --selftest FIRST (distrust vacuous green). It plants the defect in the
+      # exact words of the removed code AND proves a clean tree still passes —
+      # without the second arm a scanner that reports "clean" unconditionally
+      # would satisfy a can-it-red test while measuring nothing.
+      - name: The client-ip resolver guard must be able to fail
+        working-directory: .
+        run: bash scripts/client-ip-resolver-check.sh --selftest
+
+      - name: No conn.remote_ip read outside the canonical resolver
+        working-directory: .
+        run: bash scripts/client-ip-resolver-check.sh
+
       - name: Cache deps
         uses: actions/cache@v4
         with:

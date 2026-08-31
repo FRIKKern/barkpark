@@ -100,9 +100,9 @@ defmodule BarkparkWeb.SessionController do
         ensure_default_owner_membership(user)
 
         {:ok, token} =
-          Barkpark.Accounts.create_user_session_token(user,
-            ip_address: client_ip(conn),
-            user_agent: user_agent(conn)
+          Barkpark.Accounts.create_user_session_token(
+            user,
+            BarkparkWeb.SessionIssuer.actor_opts(conn)
           )
 
         conn
@@ -393,7 +393,7 @@ defmodule BarkparkWeb.SessionController do
     {:ok, token} =
       Barkpark.Accounts.create_user_session_token(
         user,
-        [ip_address: client_ip(conn), user_agent: user_agent(conn)] ++ opts
+        BarkparkWeb.SessionIssuer.actor_opts(conn) ++ opts
       )
 
     conn
@@ -401,15 +401,6 @@ defmodule BarkparkWeb.SessionController do
     |> put_session("user_session", token)
     |> put_flash(:info, "Signed in.")
     |> redirect(to: return_to)
-  end
-
-  defp client_ip(conn), do: conn.remote_ip |> :inet.ntoa() |> to_string()
-
-  defp user_agent(conn) do
-    case get_req_header(conn, "user-agent") do
-      [ua | _] -> ua
-      _ -> nil
-    end
   end
 
   def delete(conn, _params) do
