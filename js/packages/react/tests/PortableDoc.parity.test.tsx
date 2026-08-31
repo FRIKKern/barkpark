@@ -82,6 +82,39 @@ describe('dom-shape comparator', () => {
     )
   })
 
+  // ── the non-data-* attribute leg (denylist, NOT allowlist) ──────────────────
+  // Before 2026-08-31 the comparator dropped EVERY attribute that was not
+  // class/style/data-*, on a rationale ("CDN image URLs vary by query order")
+  // that covers only the URL-bearing ones. Measured across all 64 pd-golden
+  // fixtures: 41 uncompared attribute names, agreeing on every one — the
+  // exclusion hid no live divergence, only future ones. These cases pin the
+  // reversal: everything outside VARIABLE_ATTRS is compared.
+  // NOTE: cells are always wrapped in a real <table> — `body.innerHTML` DROPS a
+  // bare <th>/<td>, so an unwrapped cell fixture compares two EMPTY trees and
+  // passes vacuously (this bit once, hence the wrapper and this note).
+  const cell = (attrs: string): string => `<table><tbody><tr><th ${attrs}>x</th></tr></tbody></table>`
+
+  it('compares non-data-* attributes as a map (order-insensitively)', () => {
+    assertShapeEqual(cell('scope="row" abbr="Q"'), cell('abbr="Q" scope="row"'))
+  })
+
+  it('does NOT compare the VARIABLE_ATTRS denylist (href/src/srcset/poster/id)', () => {
+    // The original, legitimate exemption: a CDN URL's query order is not shape.
+    assertShapeEqual(
+      '<a href="/a?x=1&y=2" id="r1">go</a>',
+      '<a href="/a?y=2&x=1" id="r9">go</a>',
+    )
+  })
+
+  it('does NOT compare width/height on media tags, but DOES on svg geometry', () => {
+    // composed-doc-parity's RESPONSIVE WIDTHS case: sizing hints ride attributes.
+    assertShapeEqual('<img width="320" height="200">', '<img width="1200" height="630">')
+    // …but on an <svg> the same names ARE geometry and must still diverge.
+    expect(() => assertShapeEqual('<svg width="10"></svg>', '<svg width="20"></svg>')).toThrow(
+      /attr: width "10" != "20"/,
+    )
+  })
+
   // ── the distrust-vacuous-green protective proof (charter D10) ────────────────
   describe('reds on a corrupted node (protective proof — the green must be meaningful)', () => {
     const golden = '<div class="bp-callout bp-callout--info"><p>note</p></div>'
@@ -111,6 +144,32 @@ describe('dom-shape comparator', () => {
     it('catches a divergent data-* value', () => {
       expect(() => assertShapeEqual('<div data-tone="danger">x</div>', '<div data-tone="info">x</div>')).toThrow(
         /data-tone "danger" != "info"/,
+      )
+    })
+
+    it('catches a divergent ACCESSIBILITY attribute (role / aria-*)', () => {
+      expect(() => assertShapeEqual('<div role="list">x</div>', '<div role="grid">x</div>')).toThrow(
+        /attr: role "list" != "grid"/,
+      )
+      expect(() =>
+        assertShapeEqual('<i aria-hidden="false">x</i>', '<i aria-hidden="true">x</i>'),
+      ).toThrow(/attr: aria-hidden "false" != "true"/)
+    })
+
+    it('catches a divergent TABLE-STRUCTURE attribute (scope / colspan)', () => {
+      // Wrapped in a real <table>: see the `cell` note above — a bare cell is
+      // dropped by the parser and would make this proof vacuous.
+      expect(() => assertShapeEqual(cell('scope="col"'), cell('scope="row"'))).toThrow(
+        /attr: scope "col" != "row"/,
+      )
+      expect(() => assertShapeEqual(cell('colspan="2"'), cell('colspan="3"'))).toThrow(
+        /attr: colspan "2" != "3"/,
+      )
+    })
+
+    it('catches a MISSING security attribute (rel="noopener")', () => {
+      expect(() => assertShapeEqual('<a>x</a>', '<a rel="noopener">x</a>')).toThrow(
+        /golden has rel="noopener", actual missing it/,
       )
     })
 
