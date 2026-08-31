@@ -109,6 +109,28 @@ const resurrectClaimPath = "/v1/internal/resurrect-jobs/claim"
 // the existing succeed/fail machinery with the claimed Job.ID.
 const supportClaimPath = "/v1/internal/support-jobs/claim"
 
+const (
+	enableApplyClaimPath      = "/v1/internal/enable-apply-jobs/claim"
+	enableApplySucceedPathFmt = "/v1/internal/enable-apply-jobs/%s/succeed"
+	enableApplyFailPathFmt    = "/v1/internal/enable-apply-jobs/%s/fail"
+)
+
+// EnableApplySpec is one claimed enable-apply job as the control plane hands
+// it back — the EXACT JSON the Elixir enable-apply claim endpoint returns on
+// 200 (a 204 means no pending job). ip is the box the instance lives on (the
+// barkpark's host). The worker re-validates it defensively
+// (validateEnableApplySpec) before any side effect — the claim payload is
+// never trusted blindly.
+type EnableApplySpec struct {
+	JobID string `json:"job_id"`
+	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
+	// stamped on this claim; the worker echoes it on succeed/fail so a
+	// swept-and-re-claimed job's stale worker cannot flip the row it lost. Empty
+	// when a pre-Stage-1 control plane omitted the key (the worker then sends none).
+	ClaimToken string `json:"claim_token,omitempty"`
+	IP         string `json:"ip"`
+}
+
 // AttachDomainSpec is one claimed attach-domain job as the control plane hands
 // it back — the EXACT JSON the Elixir attach-domain claim endpoint returns on
 // 200 (a 204 means no pending job). ip is the box the instance lives on (the
@@ -329,6 +351,10 @@ type Worker struct {
 	// support box + restart). nil → the worker skips the agent-key queue.
 	// Injected like the others; tests bind it via DefaultAgentKeyPush(AgentKeySeams{…}).
 	AgentKeyPush AgentKeyPushFunc
+	// EnableApply flips BARKPARK_SELF_UPDATE_APPLY=1 on one live box (+ app
+	// restart) for a claimed enable-apply job. nil → the worker skips the
+	// enable-apply queue. Injected like Provision/Deprovision/AttachDomain.
+	EnableApply EnableApplyFunc
 	// ProvisionTimeout bounds a single Provision call. Zero means
 	// DefaultProvisionTimeout. When it fires, the job's ctx is cancelled — a
 	// well-behaved Provision returns a (deadline-exceeded) error, which RunOnce
@@ -1619,4 +1645,119 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return string(r[:n]) + "…"
+}
+func (w *Worker) RunEnableApply(ctx context.Context) error {
+	return w.RunEnableApplyWith(ctx, nil)
+}
+
+func (w *Worker) RunEnableApplyWith(ctx context.Context, onCycle func(claimed bool, err error)) error {
+	interval := w.Interval
+	if interval <= 0 {
+		interval = DefaultInterval
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		claimed, err := w.RunOnceEnableApply(ctx)
+		if onCycle != nil {
+			onCycle(claimed, err)
+		}
+
+		if !claimed {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(interval):
+			}
+		}
+	}
+}
+
+// RunOnceEnableApply claims one enable-apply job, flips
+// BARKPARK_SELF_UPDATE_APPLY=1 on the box and restarts the app, reports
+// succeed/fail. NO orphan edge: both steps are idempotent (guarded env append,
+// restart), so a dropped succeed-report just re-runs as a no-op on a later
+// reaper re-claim.
+func (w *Worker) RunOnceEnableApply(ctx context.Context) (claimed bool, err error) {
+	if w.EnableApply == nil {
+		return false, nil
+	}
+
+	spec, ok, err := w.claimEnableApply(ctx)
+	if err != nil {
+		return false, fmt.Errorf("enable-apply claim: %w", err)
+	}
+	if !ok {
+		return false, nil
+	}
+
+	if eerr := w.EnableApply(ctx, spec); eerr != nil {
+		if rerr := w.failEnableApplyWithRetry(ctx, spec.JobID, spec.ClaimToken, eerr.Error()); rerr != nil {
+			return false, fmt.Errorf("report enable-apply fail for job %s (enable error %v): %w", spec.JobID, eerr, rerr)
+		}
+		return true, nil
+	}
+
+	if rerr := w.succeedEnableApplyWithRetry(ctx, spec.JobID, spec.ClaimToken); rerr != nil {
+		return false, fmt.Errorf("report enable-apply succeed for job %s (box already flagged; job left for retry): %w", spec.JobID, rerr)
+	}
+	return true, nil
+}
+
+func (w *Worker) claimEnableApply(ctx context.Context) (EnableApplySpec, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, w.url(enableApplyClaimPath), nil)
+	if err != nil {
+		return EnableApplySpec{}, false, err
+	}
+	w.authorize(req)
+
+	resp, err := w.httpClient().Do(req)
+	if err != nil {
+		return EnableApplySpec{}, false, err
+	}
+	defer resp.Body.Close()
+
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+
+	switch {
+	case resp.StatusCode == http.StatusNoContent:
+		return EnableApplySpec{}, false, nil
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		return EnableApplySpec{}, false, fmt.Errorf("POST %s: status %d: %s", enableApplyClaimPath, resp.StatusCode, truncate(string(data), 200))
+	}
+
+	var spec EnableApplySpec
+	if len(bytes.TrimSpace(data)) > 0 {
+		if err := json.Unmarshal(data, &spec); err != nil {
+			return EnableApplySpec{}, false, fmt.Errorf("decode enable-apply claim response: %w", err)
+		}
+	}
+	if strings.TrimSpace(spec.JobID) == "" {
+		return EnableApplySpec{}, false, fmt.Errorf("enable-apply claim response missing job_id: %s", truncate(string(data), 200))
+	}
+	return spec, true, nil
+}
+
+// succeedEnableApply reports a completed enable. claim-fence (bp-c55): echo the
+// claim_token when present so a stale worker's succeed is fenced; sent only when
+// non-empty (Stage 1 compat with a token-less control plane).
+func (w *Worker) succeedEnableApply(ctx context.Context, jobID, claimToken string) error {
+	return w.postJSON(ctx, fmt.Sprintf(enableApplySucceedPathFmt, jobID), claimBody(nil, claimToken))
+}
+
+func (w *Worker) failEnableApply(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.postJSON(ctx, fmt.Sprintf(enableApplyFailPathFmt, jobID), claimBody(map[string]any{"error": errMsg}, claimToken))
+}
+
+func (w *Worker) succeedEnableApplyWithRetry(ctx context.Context, jobID, claimToken string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.succeedEnableApply(ctx, jobID, claimToken) })
+}
+
+func (w *Worker) failEnableApplyWithRetry(ctx context.Context, jobID, claimToken, errMsg string) error {
+	return w.reportWithRetry(ctx, func(ctx context.Context) error { return w.failEnableApply(ctx, jobID, claimToken, errMsg) })
 }

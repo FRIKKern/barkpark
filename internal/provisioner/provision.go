@@ -10,6 +10,7 @@ import (
 
 	"github.com/FRIKKern/barkpark/internal/bootstrap"
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
+	"github.com/FRIKKern/barkpark/internal/cli/setup"
 	"github.com/FRIKKern/barkpark/internal/provisioner/catalog"
 )
 
@@ -388,7 +389,7 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		DNS:                seams.DNS,
 		Registry:           seams.Registry,
 		Health:             seams.Health,
-		Caddy:              seams.Caddy,
+		Caddy:              managedBoxCaddy{inner: seams.Caddy},
 		RunnerFor:          seams.RunnerFor,
 		Runner:             seams.Runner,
 		Secrets:            seams.Secrets,
@@ -528,6 +529,33 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 	// owner). NEVER logged here — it rides back only in the succeed request body.
 	return live.IP, live.Secrets.AdminToken, boot, teardown, nil
 }
+
+// managedBoxCaddy wraps the chain's CaddyStepper (the injected one, or the
+// canonical setup.CaddySteps default when nil) to append ONE extra
+// provision-time env write to the caddy/env phase: BARKPARK_SELF_UPDATE_APPLY=1
+// (managed boxes are cloud-operated; the team autoupdate policy is the consent
+// — enable_apply.go is the retrofit for boxes provisioned before the flag
+// existed). Appended after the PHX_HOST/PHX_SCHEME steps and before the chain's
+// secrets-install restart, so the one boot picks the flag up with the rest.
+type managedBoxCaddy struct{ inner cloud.CaddyStepper }
+
+func (c managedBoxCaddy) Steps(name, zone string, appPort int) []cloud.CaddyStep {
+	var steps []cloud.CaddyStep
+	if c.inner != nil {
+		steps = c.inner.Steps(name, zone, appPort)
+	} else {
+		// Mirror the cloud package's defaultCaddySteps: the canonical
+		// setup.CaddySteps with SkipAppRestart (the go-live chain's
+		// secrets-install step restarts the app once for everything).
+		for _, s := range setup.CaddySteps(setup.CaddyOpts{Name: name, Domain: zone, AppPort: appPort, SkipAppRestart: true}) {
+			steps = append(steps, cloud.CaddyStep{Title: s.Title, Cmd: s.Cmd, Argv: s.Argv})
+		}
+	}
+	// Managed boxes are cloud-operated — new boxes ship with the self-update executor enabled.
+	return append(steps, setSelfUpdateApplyStep(attachEnvFile))
+}
+
+var _ cloud.CaddyStepper = managedBoxCaddy{}
 
 // acquireHost returns a configured, live host for the job. When the warm pool is
 // enabled (WarmPoolSize > 0 AND a WarmClient is injected) it tries to ASSIGN a

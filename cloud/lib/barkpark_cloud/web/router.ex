@@ -167,6 +167,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/internal/agent-key-jobs/claim worker  claim oldest pending push_agent_key job (+one-time key pop — delete-on-read)
       POST    /v1/internal/agent-key-jobs/:id/succeed worker  key line landed + listener restarted (job row only)
       POST    /v1/internal/agent-key-jobs/:id/fail worker  delivery failed (row untouched; re-paste recovers)
+      POST    /v1/internal/enable-apply-jobs/claim worker  claim oldest pending enable_apply job (retro-arm the self-update executor)
+      POST    /v1/internal/enable-apply-jobs/:id/succeed worker  flag landed + app restarted (job row only; next probe measures armed)
+      POST    /v1/internal/enable-apply-jobs/:id/fail worker  arming failed (row untouched; next unarmed measurement re-enqueues)
       GET     /v1/internal/barkparks worker  list registry rows for the provisioner
       POST    /v1/internal/barkparks worker  create a registry row (provisioner-side)
       POST    /v1/internal/barkparks/:id/deprovision worker  enqueue a deprovision for one box
@@ -4046,9 +4049,11 @@ defmodule BarkparkCloud.Web.Router do
                     apply_arming: "unarmed",
                     apply_arming_checked_at: arming_checked_at,
                     remedy:
-                      "Set BARKPARK_SELF_UPDATE_APPLY=1 on the instance and restart it, " <>
-                        "then resume. The instance reports one-click apply is off, so the " <>
-                        "rollout cannot land a release on it while it is unpaused."
+                      "The instance reports one-click apply is off, so the rollout cannot " <>
+                        "land a release on it. An enable-apply job has been queued to arm " <>
+                        "it automatically (isu-w5) — retry the resume once it lands, or arm " <>
+                        "by hand: set BARKPARK_SELF_UPDATE_APPLY=1 on the instance and " <>
+                        "restart it."
                   }
                 })
 
@@ -4158,6 +4163,15 @@ defmodule BarkparkCloud.Web.Router do
 
     case set_result do
       {:ok, updated} ->
+        # isu-w5 (task-509f5fd02bc48f9c criterion 1): enabling autoupdate on a
+        # box already MEASURED unarmed files its repair right here — the earlier
+        # unarmed measurement could not enqueue (the consent gate reads
+        # autoupdate_enabled, which was false until this write). Best-effort +
+        # deduped; the hourly sweep's re-measurement is the backstop.
+        if updated.autoupdate_enabled and updated.apply_arming == "unarmed" do
+          _ = Registry.maybe_enqueue_enable_apply_job(updated)
+        end
+
         push_event(team.id, "fleet")
         push_event(team.id, "audit")
 
@@ -7088,6 +7102,117 @@ defmodule BarkparkCloud.Web.Router do
       reason = conn.body_params["error"]
 
       case Registry.fail_agent_key_job(
+             conn.path_params["id"],
+             if(is_binary(reason), do: reason, else: "unspecified"),
+             claim_token_opts(conn)
+           ) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  # POST /v1/internal/enable-apply-jobs/claim → 200 {job_id, claim_token, ip} |
+  # 204 (isu-w5, task-509f5fd02bc48f9c). Kind-filtered (enable_apply) so no
+  # other drain grabs it. FLAT payload — the exact JSON the Go worker's
+  # EnableApplySpec decodes. A host-less row (removed mid-flight) is failed
+  # HONESTLY right here rather than handed out undeliverable; the 204 lets the
+  # worker's poll loop continue to the next tick.
+  post "/v1/internal/enable-apply-jobs/claim" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.claim_next_enable_apply_job(generate_claim_token()) do
+        nil ->
+          send_resp(conn, 204, "")
+
+        {job, barkpark} ->
+          if is_binary(barkpark.host) and barkpark.host != "" do
+            json(conn, 200, %{
+              job_id: job.id,
+              claim_token: job.claim_token,
+              ip: barkpark.host
+            })
+          else
+            _ =
+              Registry.fail_enable_apply_job(
+                job.id,
+                "the box has no host — nowhere to deliver the arming flag",
+                claim_token: job.claim_token
+              )
+
+            broadcast_barkpark_team(job.barkpark_id, "fleet")
+            send_resp(conn, 204, "")
+          end
+      end
+    end
+  end
+
+  # POST /v1/internal/enable-apply-jobs/:id/succeed [{ip}] → the env flag landed
+  # + the app restarted. Flips the JOB ROW ONLY (succeed_enable_apply_job — an
+  # arming push must never clobber a live row's health/host the way a provision
+  # succeed does). `apply_arming` stays a MEASUREMENT: the next probe/sweep reads
+  # `apply_enabled: true` off the restarted box and re-enters it into the
+  # candidate set. Mirrors the agent-key succeed contract verbatim.
+  post "/v1/internal/enable-apply-jobs/:id/succeed" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      ip =
+        case conn.body_params["ip"] do
+          ip when is_binary(ip) and ip != "" -> ip
+          _ -> nil
+        end
+
+      case Registry.succeed_enable_apply_job(conn.path_params["id"], ip, claim_token_opts(conn)) do
+        {:ok, job} ->
+          broadcast_barkpark_team(job.barkpark_id, "fleet")
+          json(conn, 200, %{ok: true})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :conflict} ->
+          json(conn, 409, %{error: "conflict"})
+
+        {:error, :stale_claim} ->
+          json(conn, 409, %{error: "stale_claim"})
+
+        {:error, _} ->
+          json(conn, 422, %{error: "invalid"})
+      end
+    end
+  end
+
+  # POST /v1/internal/enable-apply-jobs/:id/fail {error} → arming failed; the
+  # barkpark row is untouched (still live, still MEASURED-unarmed — the next
+  # unarmed measurement re-enqueues, which is the retry loop).
+  post "/v1/internal/enable-apply-jobs/:id/fail" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      reason = conn.body_params["error"]
+
+      case Registry.fail_enable_apply_job(
              conn.path_params["id"],
              if(is_binary(reason), do: reason, else: "unspecified"),
              claim_token_opts(conn)
