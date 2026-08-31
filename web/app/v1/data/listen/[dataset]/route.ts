@@ -21,6 +21,22 @@ import { DATASET } from "@/lib/config";
  * datasets, even though the upstream listen endpoint does its own per-token
  * redaction.
  *
+ * INVARIANT: this demo reads exactly ONE perspective — `published` — same as
+ * every other read surface in `web/` (`lib/barkpark-client.ts`,
+ * `lib/find-search.ts`, and the app's own live client in
+ * `components/live-bridge.tsx` all pin it; `lib/papers.ts` states the intent
+ * outright: draft values never leak into the reader). `perspective` is
+ * therefore PINNED on the forwarded query rather than taken from the browser.
+ *
+ * That pin is the whole point of this route's threat model, not tidiness. The
+ * browser connects with NO token and this handler attaches the privileged
+ * server one; the API clamps a caller to `published` only because that caller
+ * is ANONYMOUS, and a token-bearing request is not clamped. Forwarding the
+ * query string verbatim therefore handed any caller a drafts stream under the
+ * server's credentials — `GET /v1/data/listen/<dataset>?perspective=drafts`
+ * returned content that same caller could never read directly. Same class of
+ * hole as the `[dataset]` segment above, on the same route.
+ *
  * Requires the Node.js runtime (streaming fetch) — and `BARKPARK_TOKEN`
  * with listen permission in the environment. Without the token, upstream 401s
  * and this returns 401 to the client (surfaced by <BarkparkLive/>).
@@ -31,6 +47,9 @@ export const dynamic = "force-dynamic";
 
 const apiUrl = PUBLIC_API_URL.replace(/\/+$/, "");
 const token = READ_TOKEN;
+
+/** The one perspective this demo reads — see the INVARIANT note above. */
+const PERSPECTIVE = "published";
 
 export async function GET(
   req: Request,
@@ -47,8 +66,12 @@ export async function GET(
   const upstream = new URL(
     `${apiUrl}/v1/data/listen/${encodeURIComponent(dataset)}`,
   );
-  // Forward types / perspective / filter[...] verbatim.
+  // Forward types / filter[...] verbatim, then PIN the perspective: a
+  // browser-supplied value is overwritten, and an omitted one is filled in, so
+  // there is exactly one rule and no request reaches upstream — with the server
+  // token attached — asking for anything but the published perspective.
   upstream.search = incoming.search;
+  upstream.searchParams.set("perspective", PERSPECTIVE);
 
   const headers: Record<string, string> = {
     Accept: "text/event-stream",
