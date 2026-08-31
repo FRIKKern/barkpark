@@ -192,10 +192,12 @@ defmodule Barkpark.Plugins.RegistryCollectTest do
       :ok = Registry.register(FakeOrderPluginA, %{"plugin_name" => name_a})
       :ok = Registry.register(FakeOrderPluginB, %{"plugin_name" => name_b})
 
-      prior = Application.get_env(:barkpark, :plugins, [])
+      # `capture/0` (an `:unset` sentinel), not `get_env(…, [])`: a `[]`
+      # default would restore an EXPLICIT `[]` — the discovery kill switch.
+      prior = Barkpark.PluginEnv.capture()
       # Configured order: A (zz-…) THEN B (aa-…) — opposite of alphabetical.
       Application.put_env(:barkpark, :plugins, [name_a, name_b])
-      on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+      on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
       assert :ok = Registry.run_all_codelist_seeders()
 

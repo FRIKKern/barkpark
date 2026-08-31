@@ -96,9 +96,11 @@ defmodule Barkpark.Plugins.RegistryApiTestsTest do
   end
 
   defp set_load_order(names) do
-    prev = Application.get_env(:barkpark, :plugins, [])
+    # `capture/0` (an `:unset` sentinel), not `get_env(…, [])`: a `[]` default
+    # would restore an EXPLICIT `[]` — the discovery kill switch.
+    prev = Barkpark.PluginEnv.capture()
     Application.put_env(:barkpark, :plugins, names)
-    on_exit(fn -> Application.put_env(:barkpark, :plugins, prev) end)
+    on_exit(fn -> Barkpark.PluginEnv.restore(prev) end)
   end
 
   # ─── Group 1 — additive plugins concatenate ─────────────────────────

@@ -168,10 +168,12 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacksTest do
   describe "asset_doc_id_for_media_file/2" do
     test "returns the string doc-id from a plugin that matches the file" do
       name = "asset-doc-#{System.unique_integer([:positive])}"
-      prior = Application.get_env(:barkpark, :plugins, [])
+      # `capture/0` (an `:unset` sentinel), not `get_env(…, [])`: a `[]`
+      # default would restore an EXPLICIT `[]` — the discovery kill switch.
+      prior = Barkpark.PluginEnv.capture()
       :ok = Registry.register(AssetDocPlugin, %{"plugin_name" => name})
       Application.put_env(:barkpark, :plugins, [name])
-      on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+      on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
       assert "asset-doc-123" =
                PluginCallbacks.asset_doc_id_for_media_file("known-file", "production")
@@ -179,10 +181,12 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacksTest do
 
     test "returns nil when no plugin resolves the file" do
       name = "asset-doc-nil-#{System.unique_integer([:positive])}"
-      prior = Application.get_env(:barkpark, :plugins, [])
+      # `capture/0` (an `:unset` sentinel), not `get_env(…, [])`: a `[]`
+      # default would restore an EXPLICIT `[]` — the discovery kill switch.
+      prior = Barkpark.PluginEnv.capture()
       :ok = Registry.register(AssetDocPlugin, %{"plugin_name" => name})
       Application.put_env(:barkpark, :plugins, [name])
-      on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+      on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
       assert nil == PluginCallbacks.asset_doc_id_for_media_file("unknown-file", "production")
     end
