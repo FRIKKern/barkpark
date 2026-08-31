@@ -40,7 +40,7 @@ outputs; run only what you need.
 
 `tooling/` has one Node script (no deps) per pass; all derived outputs (ledgers,
 indexes, reports, batches, results, nodes.json) are gitignored — regenerate,
-never commit. Agent fan-out uses the `Workflow` tool, Sonnet, ~10 files/batch,
+never commit. Agent fan-out uses the `Workflow` tool, Opus (operator model policy: never Sonnet/Haiku), ~10 files/batch,
 each agent seeded with pre-computed signals.
 
 ---
@@ -60,7 +60,7 @@ node tooling/status/status.mjs
   separability). Open `tooling/quality/quality-report.html`.
 - **PENDING** → do only the listed agent work, then re-run `status.mjs`:
   - *coverage drift* → `research-coverage/coverage.mjs prune && … batches` → dispatch
-    `batch-count.txt` Sonnet agents (read each file, write `results/batch-NNN.json`
+    `batch-count.txt` Opus agents (read each file, write `results/batch-NNN.json`
     `[{path,role,description,score,what_breaks_if_wrong,confidence}]`) → `… record`.
   - *consistency groups changed* → dispatch one agent per `consistency/batches/*.json`
     (write `consistency/results/<slug>.json` `{dir, canonical_pattern, verdicts:[{file,
