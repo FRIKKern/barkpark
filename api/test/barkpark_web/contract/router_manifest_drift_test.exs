@@ -309,20 +309,11 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
 
     # BarkparkWeb.RequestStatsController (1)
 
-    # BarkparkWeb.SearchController (13)
+    # BarkparkWeb.SearchController (1) — the other 12 were paid down by
+    # task-b1801ed5c86d2e2e (#14125, merged): search-settings/insights/
+    # synonyms/interaction/correction/reindex/suggestions all gained manifest
+    # commands. Only the /v1/data/local/search/:* alias remains a gap.
     {"GET", "/v1/data/local/search/:*"} => @census_task,
-    {"POST", "/v1/data/search/:*/correction"} => @census_task,
-    {"GET", "/v1/data/search/:*/insights"} => @census_task,
-    {"POST", "/v1/data/search/:*/interaction"} => @census_task,
-    {"POST", "/v1/data/search/:*/reindex"} => @census_task,
-    {"GET", "/v1/data/search/:*/settings"} => @census_task,
-    {"PUT", "/v1/data/search/:*/settings"} => @census_task,
-    {"GET", "/v1/data/search/:*/suggestions"} => @census_task,
-    {"GET", "/v1/data/search/:*/synonyms"} => @census_task,
-    {"POST", "/v1/data/search/:*/synonyms"} => @census_task,
-    {"DELETE", "/v1/data/search/:*/synonyms/:*"} => @census_task,
-    {"GET", "/v1/data/search/:*/synonyms/preview"} => @census_task,
-    {"POST", "/v1/data/search/:*/synonyms/promote"} => @census_task,
 
     # BarkparkWeb.SecretController (1)
     {"GET", "/v1/secrets/:*/audit"} => @census_task,
@@ -357,16 +348,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"POST", "/v1/tasks/:*/papers"} => @census_task,
     {"POST", "/v1/tasks/edges"} => @census_task,
 
-    # BarkparkWeb.V1.MediaController (9)
-    {"GET", "/v1/media/:*/search/insights"} => @census_task,
-    {"POST", "/v1/media/:*/search/interaction"} => @census_task,
-    {"GET", "/v1/media/:*/search/settings"} => @census_task,
-    {"PUT", "/v1/media/:*/search/settings"} => @census_task,
-    {"GET", "/v1/media/:*/search/synonyms"} => @census_task,
-    {"POST", "/v1/media/:*/search/synonyms"} => @census_task,
-    {"DELETE", "/v1/media/:*/search/synonyms/:*"} => @census_task,
-    {"GET", "/v1/media/:*/search/synonyms/preview"} => @census_task,
-    {"POST", "/v1/media/:*/search/synonyms/promote"} => @census_task,
+    # BarkparkWeb.V1.MediaController (0) — all 9 were paid down by
+    # task-b1801ed5c86d2e2e (#14125, merged).
 
     # BarkparkWeb.WorkspaceController (3)
     {"DELETE", "/api/workspaces/:*"} => @census_task,
