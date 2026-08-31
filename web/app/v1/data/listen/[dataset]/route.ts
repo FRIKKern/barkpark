@@ -1,5 +1,6 @@
 import "server-only";
 import { PUBLIC_API_URL, READ_TOKEN } from "@/lib/bp-env";
+import { DATASET } from "@/lib/config";
 
 /**
  * Same-origin SSE proxy for the live-listen stream.
@@ -11,6 +12,14 @@ import { PUBLIC_API_URL, READ_TOKEN } from "@/lib/bp-env";
  * it forwards the browser's query params + `Last-Event-ID`, injects the server
  * token, and pipes the upstream `text/event-stream` straight back — so the
  * browser subscribes same-origin with no token and no CORS.
+ *
+ * INVARIANT: this demo reads exactly ONE configured dataset (`lib/config.ts`'s
+ * `DATASET`), same as every other route in `web/`. The `[dataset]` path segment
+ * is therefore checked against `DATASET` and any mismatch is refused with 404
+ * BEFORE the privileged server token is attached to anything and BEFORE any
+ * upstream fetch — this proxy is not a general-purpose forwarder for arbitrary
+ * datasets, even though the upstream listen endpoint does its own per-token
+ * redaction.
  *
  * Requires the Node.js runtime (streaming fetch) — and `BARKPARK_TOKEN`
  * with listen permission in the environment. Without the token, upstream 401s
@@ -28,6 +37,11 @@ export async function GET(
   { params }: { params: Promise<{ dataset: string }> },
 ) {
   const { dataset } = await params;
+  if (dataset !== DATASET) {
+    return new Response(`listen proxy: unknown dataset "${dataset}"`, {
+      status: 404,
+    });
+  }
   const incoming = new URL(req.url);
 
   const upstream = new URL(
