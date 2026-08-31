@@ -124,7 +124,8 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
     end
 
     test "a signed-url param set is NOT denylisted on renditions either", ctx do
-      conn = get_scoped(ctx, "/media/renditions/#{ctx.media_file.id}/not-a-real-preset?_=sig&exp=1")
+      conn =
+        get_scoped(ctx, "/media/renditions/#{ctx.media_file.id}/not-a-real-preset?_=sig&exp=1")
 
       # Still reaches the unknown-preset arm — proves `_`/`exp` never entered
       # the denylist check at all, rather than happening to be allowed by luck.
