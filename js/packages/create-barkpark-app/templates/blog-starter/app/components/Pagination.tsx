@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { pageWindow } from '../../lib/page-param'
 
 interface PaginationProps {
   currentPage: number
@@ -7,9 +8,16 @@ interface PaginationProps {
 }
 
 export function Pagination({ currentPage, totalPages, basePath }: PaginationProps) {
-  if (totalPages <= 1) return null
+  if (!Number.isFinite(totalPages) || totalPages <= 1) return null
 
-  const pageNumbers = Array.from({ length: totalPages }, (_, i) => i + 1)
+  // This is a SERVER component: every element below is materialised on the
+  // server, per request. `pageWindow` therefore owns the array length — it is
+  // bounded by MAX_PAGE_LINKS and can never be Infinity, so a caller that
+  // passed an unclamped page number (or a corpus that grew to 5 000 pages)
+  // cannot turn one request into thousands of server-rendered <Link>s. The
+  // previous version built the array straight from `totalPages` and so had no
+  // such bound — `?page=Infinity` reached it and threw RangeError (a 500).
+  const pageNumbers = pageWindow(currentPage, totalPages)
   const href = (n: number): string =>
     n === 1 ? basePath : `${basePath}${basePath.includes('?') ? '&' : '?'}page=${n}`
 
