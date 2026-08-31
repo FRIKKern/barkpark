@@ -14,7 +14,19 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              POST route); the bare /v1/media/:dataset has no POST handler and
              returns 404.
   """
-  use BarkparkWeb.ConnCase, async: true
+  # async: false — the `share.token-*` live-route describe block below mints a
+  # real edit-token, which requires a live `:edit` share. Declaring one goes
+  # through `Barkpark.Sharing.add_share/1`, which calls `refresh/0` and lands
+  # the merged list in the process-global `:barkpark, :shares` Application env
+  # (NOT Ecto-sandboxed, unlike the DB row behind it) — the exact hazard
+  # `share_controller_test.exs` names in its own `async: false`. This file
+  # must serialize with that sync group rather than race it.
+  use BarkparkWeb.ConnCase, async: false
+
+  alias Barkpark.Auth
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  import Barkpark.TenancyFixtures
 
   @token "barkpark-dev-token"
 
@@ -44,6 +56,18 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   defp find_cmd(manifest, id) do
     manifest["commands"] |> Enum.find(&(&1["id"] == id))
   end
+
+  # Bearer helper for the undeclared-verb-family invocation tests below — a
+  # SECOND, test-local token distinct from @token/capabilities/1 (those two
+  # are reserved for the manifest-shape assertions throughout this file).
+  defp bearer(conn, raw) do
+    conn
+    |> put_req_header("authorization", "Bearer " <> raw)
+    |> put_req_header("content-type", "application/json")
+  end
+
+  defp restore_app_env(key, nil), do: Application.delete_env(:barkpark, key)
+  defp restore_app_env(key, value), do: Application.put_env(:barkpark, key, value)
 
   # Raw request → the conn, so a test can read both the decoded body and the
   # `etag` response header / raw bytes off the same response.
@@ -1346,6 +1370,393 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       assert body["auth_tier"] == "none"
       assert %{"digest" => "bpml-" <> _} = body["bpml"]
+    end
+  end
+
+  # ── Undeclared verb families (task wb-api-capabilities-undeclared-verbs) ──
+  #
+  # Four live-but-unadvertised route families get core_cmd entries here. Per
+  # the task's non-negotiable, every verb below is INVOKED through the real
+  # router + controller — declared on the strength of an observed response,
+  # never the router text alone.
+
+  describe "share.token-* (P5 edit tokens) live routes" do
+    setup do
+      # `Auth.create_share_token/5` (behind POST /v1/shares/tokens) requires
+      # the scope to ALREADY be a live `:edit` share for the surface — it
+      # never manufactures that precondition itself. Snapshot + restore the
+      # registry exactly like `share_controller_test.exs` does.
+      prior_shares = Application.get_env(:barkpark, :shares)
+      prior_env = Application.get_env(:barkpark, :shares_env)
+
+      on_exit(fn ->
+        restore_app_env(:shares, prior_shares)
+        restore_app_env(:shares_env, prior_env)
+      end)
+
+      raw = "ucv-share-tok-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, actor} =
+        Auth.create_token(raw, "ucv-share-tok-admin", "test", ["read", "write", "admin"])
+
+      ws = create_workspace!()
+      project = create_project!(ws)
+      {:ok, _} = TenancyAuth.create_membership(ws.id, actor.id, "admin")
+      {:ok, _} = Barkpark.Sharing.add_share("#{ws.slug}/#{project.slug}/production:docs:edit")
+
+      junior = "ucv-share-tok-junior-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(junior, "ucv-share-tok-junior", "test", ["read", "write"])
+
+      %{raw: raw, junior: junior, ws: ws, project: project}
+    end
+
+    test "manifest declares token-ls/token-mint/token-revoke under the `share` noun, admin tier",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      expected = %{
+        "share.token-ls" => {"GET", "/v1/shares/tokens"},
+        "share.token-mint" => {"POST", "/v1/shares/tokens"},
+        "share.token-revoke" => {"DELETE", "/v1/shares/tokens/:token_id"}
+      }
+
+      for {id, {method, path}} <- expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} missing from manifest"
+        assert cmd["noun"] == "share"
+        assert cmd["http"] == %{"method" => method, "path_template" => path}
+        assert cmd["auth_tier"] == "admin"
+      end
+    end
+
+    test "POST mints, GET lists, DELETE revokes — the real route (401 anon, 403 non-admin)",
+         %{conn: conn, raw: raw, junior: junior, ws: ws, project: project} do
+      scope = "#{ws.slug}/#{project.slug}/production"
+
+      assert post(conn, "/v1/shares/tokens", %{scope: scope, surfaces: "docs"}).status == 401
+
+      assert conn
+             |> bearer(junior)
+             |> post("/v1/shares/tokens", %{scope: scope, surfaces: "docs"})
+             |> Map.fetch!(:status) == 403
+
+      mint_resp =
+        conn |> bearer(raw) |> post("/v1/shares/tokens", %{scope: scope, surfaces: "docs"})
+
+      assert mint_resp.status == 201
+
+      %{"token" => raw_share_token, "share_token" => %{"id" => token_id}} =
+        json_response(mint_resp, 201)
+
+      assert is_binary(raw_share_token) and raw_share_token != ""
+
+      ls_resp = conn |> bearer(raw) |> get("/v1/shares/tokens?scope=#{scope}")
+      assert ls_resp.status == 200
+      ids = ls_resp |> json_response(200) |> Map.fetch!("tokens") |> Enum.map(& &1["id"])
+      assert token_id in ids
+
+      revoke_resp = conn |> bearer(raw) |> delete("/v1/shares/tokens/#{token_id}")
+      assert revoke_resp.status == 200
+      assert json_response(revoke_resp, 200)["revoked"] == true
+    end
+  end
+
+  describe "share.link-* (P7 item share links) live routes" do
+    setup do
+      raw = "ucv-share-link-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, actor} =
+        Auth.create_token(raw, "ucv-share-link-admin", "test", ["read", "write", "admin"])
+
+      ws = create_workspace!()
+      project = create_project!(ws)
+      {:ok, _} = TenancyAuth.create_membership(ws.id, actor.id, "admin")
+      {:ok, media} = create_media_file_in!(ws, project)
+
+      %{raw: raw, ws: ws, project: project, media: media}
+    end
+
+    test "manifest declares link-ls/link-mint/link-revoke under the `share` noun, admin tier",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+
+      expected = %{
+        "share.link-ls" => {"GET", "/v1/shares/links"},
+        "share.link-mint" => {"POST", "/v1/shares/links"},
+        "share.link-revoke" => {"DELETE", "/v1/shares/links/:id"}
+      }
+
+      for {id, {method, path}} <- expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} missing from manifest"
+        assert cmd["noun"] == "share"
+        assert cmd["http"] == %{"method" => method, "path_template" => path}
+        assert cmd["auth_tier"] == "admin"
+      end
+    end
+
+    test "POST mints a media link, GET lists it, DELETE revokes it — the real route",
+         %{conn: conn, raw: raw, ws: ws, project: project, media: media} do
+      scope = "#{ws.slug}/#{project.slug}/production"
+
+      mint_resp =
+        conn
+        |> bearer(raw)
+        |> post("/v1/shares/links", %{scope: scope, kind: "media", ref_id: media.id})
+
+      assert mint_resp.status == 201
+      %{"token" => raw_link_token, "link" => %{"id" => link_id}} = json_response(mint_resp, 201)
+      assert is_binary(raw_link_token) and raw_link_token != ""
+
+      ls_resp =
+        conn
+        |> bearer(raw)
+        |> get("/v1/shares/links?scope=#{scope}&kind=media&ref_id=#{media.id}")
+
+      assert ls_resp.status == 200
+      ids = ls_resp |> json_response(200) |> Map.fetch!("links") |> Enum.map(& &1["id"])
+      assert link_id in ids
+
+      revoke_resp = conn |> bearer(raw) |> delete("/v1/shares/links/#{link_id}")
+      assert revoke_resp.status == 200
+      assert json_response(revoke_resp, 200)["revoked"] == true
+    end
+  end
+
+  describe "app_token.* (mobile app-token exchange) live routes" do
+    setup do
+      admin = "ucv-appt-admin-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(admin, "ucv-appt-admin", "test", ["read", "write", "admin"])
+      reader = "ucv-appt-reader-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(reader, "ucv-appt-reader", "test", ["read"])
+
+      %{admin: admin, reader: reader}
+    end
+
+    test "manifest: app_token is a noun distinct from token, with tiers from the CONTROLLER gate",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+      assert Enum.any?(manifest["nouns"], &(&1["name"] == "app_token"))
+
+      # `token` keeps serving /v1/tokens, untouched — the two nouns never fold.
+      assert find_cmd(manifest, "token.ls")["http"]["path_template"] == "/v1/tokens"
+
+      expected = %{
+        "app_token.create" => {"POST", "/v1/auth/app-tokens", "admin"},
+        "app_token.ls" => {"GET", "/v1/auth/app-tokens", "admin"},
+        "app_token.revoke" => {"DELETE", "/v1/auth/app-tokens", "admin"},
+        "app_token.revoke-by-id" => {"DELETE", "/v1/auth/app-tokens/:id", "admin"},
+        # The self-revoke exception: reachable by a read-permission bearer
+        # (the controller only REFUSES an admin bearer), so it is the one
+        # verb in this family that must NOT be existence-hidden from "read".
+        "app_token.revoke-current" => {"DELETE", "/v1/auth/app-tokens/current", "read"}
+      }
+
+      for {id, {method, path, tier}} <- expected do
+        cmd = find_cmd(manifest, id)
+        assert cmd != nil, "#{id} missing from manifest"
+        assert cmd["noun"] == "app_token"
+        assert cmd["http"] == %{"method" => method, "path_template" => path}
+
+        assert cmd["auth_tier"] == tier,
+               "#{id} auth_tier should be #{tier}, got #{cmd["auth_tier"]}"
+      end
+    end
+
+    test "POST is controller-gated (401 non-admin, not the :require_token pipeline)",
+         %{conn: conn, admin: admin, reader: reader} do
+      email = "ucv-app-#{System.unique_integer([:positive])}@example.com"
+
+      refused = conn |> bearer(reader) |> post("/v1/auth/app-tokens", %{"email" => email})
+
+      assert refused.status == 401,
+             "non-admin bearer must get the generic unauthorized from the controller's " <>
+               "admin check, not a free pass from :require_token alone"
+
+      minted = conn |> bearer(admin) |> post("/v1/auth/app-tokens", %{"email" => email})
+      assert minted.status == 201
+      body = json_response(minted, 201)
+      assert is_binary(body["token"]) and body["token"] != ""
+      assert body["permissions"] == ["read", "write", "chat"]
+    end
+
+    test "GET lists it, then DELETE .../current self-revokes with NO admin bearer",
+         %{conn: conn, admin: admin} do
+      email = "ucv-app2-#{System.unique_integer([:positive])}@example.com"
+
+      %{"token" => raw_app_token} =
+        conn
+        |> bearer(admin)
+        |> post("/v1/auth/app-tokens", %{"email" => email})
+        |> json_response(201)
+
+      ls = conn |> bearer(admin) |> get("/v1/auth/app-tokens")
+      assert ls.status == 200
+      assert %{"tokens" => _, "label_redacted" => true} = json_response(ls, 200)
+
+      # Self-revoke: the MINTED token is its own bearer — no admin permission
+      # anywhere in this call.
+      self_revoke = conn |> bearer(raw_app_token) |> delete("/v1/auth/app-tokens/current")
+      assert self_revoke.status == 200
+      assert json_response(self_revoke, 200)["revoked"] == true
+
+      # Fail-closed proof: the same bearer is rejected afterwards.
+      after_revoke = conn |> bearer(raw_app_token) |> get("/v1/auth/app-tokens")
+      assert after_revoke.status == 401
+    end
+
+    test "DELETE body {token:} and DELETE /:id each revoke a real row",
+         %{conn: conn, admin: admin} do
+      email_a = "ucv-app3-#{System.unique_integer([:positive])}@example.com"
+      email_b = "ucv-app4-#{System.unique_integer([:positive])}@example.com"
+
+      %{"token" => raw_a} =
+        conn
+        |> bearer(admin)
+        |> post("/v1/auth/app-tokens", %{"email" => email_a})
+        |> json_response(201)
+
+      by_token = conn |> bearer(admin) |> delete("/v1/auth/app-tokens", %{"token" => raw_a})
+      assert by_token.status == 200
+      assert json_response(by_token, 200)["revoked"] == true
+
+      %{"token" => _raw_b} =
+        conn
+        |> bearer(admin)
+        |> post("/v1/auth/app-tokens", %{"email" => email_b})
+        |> json_response(201)
+
+      [row] =
+        conn
+        |> bearer(admin)
+        |> get("/v1/auth/app-tokens?email=#{email_b}")
+        |> json_response(200)
+        |> Map.fetch!("tokens")
+
+      by_id = conn |> bearer(admin) |> delete("/v1/auth/app-tokens/#{row["id"]}")
+      assert by_id.status == 200
+      assert json_response(by_id, 200)["revoked"] == true
+    end
+  end
+
+  describe "fleet_support_token.* (Personal Dev Fleet) live routes" do
+    setup do
+      admin = "ucv-fst-admin-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(admin, "ucv-fst-admin", "test", ["read", "write", "admin"])
+      junior = "ucv-fst-junior-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(junior, "ucv-fst-junior", "test", ["read", "write"])
+
+      %{admin: admin, junior: junior}
+    end
+
+    test "manifest declares fleet_support_token.create/revoke as admin tier", %{conn: conn} do
+      manifest = capabilities(conn)
+      assert Enum.any?(manifest["nouns"], &(&1["name"] == "fleet_support_token"))
+
+      create_cmd = find_cmd(manifest, "fleet_support_token.create")
+
+      assert create_cmd["http"] == %{
+               "method" => "POST",
+               "path_template" => "/v1/fleet/support-tokens"
+             }
+
+      assert create_cmd["auth_tier"] == "admin"
+      assert create_cmd["writes"] == true
+
+      revoke_cmd = find_cmd(manifest, "fleet_support_token.revoke")
+
+      assert revoke_cmd["http"] == %{
+               "method" => "DELETE",
+               "path_template" => "/v1/fleet/support-tokens/:token_id"
+             }
+
+      assert revoke_cmd["auth_tier"] == "admin"
+    end
+
+    test "POST mints a write-capable token (403 non-admin), DELETE revokes it for real",
+         %{conn: conn, admin: admin, junior: junior} do
+      refused = conn |> bearer(junior) |> post("/v1/fleet/support-tokens", %{"name" => "ucv"})
+      assert refused.status == 403
+
+      minted = conn |> bearer(admin) |> post("/v1/fleet/support-tokens", %{"name" => "ucv"})
+      assert minted.status == 201
+      body = json_response(minted, 201)
+      assert is_binary(body["token"]) and body["token"] != ""
+      token_id = body["token_id"]
+
+      revoke_resp = conn |> bearer(admin) |> delete("/v1/fleet/support-tokens/#{token_id}")
+      assert revoke_resp.status == 200
+      assert json_response(revoke_resp, 200)["revoked"] == true
+
+      # Idempotent-safe 200 (re-stamps the same revoked_at row), never a crash,
+      # on a second revoke of the same row.
+      second = conn |> bearer(admin) |> delete("/v1/fleet/support-tokens/#{token_id}")
+      assert second.status == 200
+    end
+  end
+
+  describe "incident.* (status-page incidents) live routes" do
+    setup do
+      admin = "ucv-incident-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(admin, "ucv-incident-admin", "test", ["read", "write", "admin"])
+
+      junior = "ucv-incident-junior-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(junior, "ucv-incident-junior", "test", ["read", "write"])
+
+      %{admin: admin, junior: junior}
+    end
+
+    test "manifest declares incident.create/resolve as admin tier over /v1/status/incidents",
+         %{conn: conn} do
+      manifest = capabilities(conn)
+      assert Enum.any?(manifest["nouns"], &(&1["name"] == "incident"))
+
+      create_cmd = find_cmd(manifest, "incident.create")
+
+      assert create_cmd["http"] == %{
+               "method" => "POST",
+               "path_template" => "/v1/status/incidents"
+             }
+
+      assert create_cmd["auth_tier"] == "admin"
+
+      resolve_cmd = find_cmd(manifest, "incident.resolve")
+
+      assert resolve_cmd["http"] == %{
+               "method" => "POST",
+               "path_template" => "/v1/status/incidents/:id/resolve"
+             }
+
+      assert resolve_cmd["auth_tier"] == "admin"
+    end
+
+    test "POST creates a real incident (403 non-admin), resolve transitions it",
+         %{conn: conn, admin: admin, junior: junior} do
+      attrs = %{
+        "title" => "ucv test incident",
+        "impact" => "minor",
+        "status" => "investigating",
+        "started_at" => DateTime.utc_now() |> DateTime.to_iso8601()
+      }
+
+      refused = conn |> bearer(junior) |> post("/v1/status/incidents", attrs)
+      assert refused.status == 403
+
+      created = conn |> bearer(admin) |> post("/v1/status/incidents", attrs)
+      assert created.status == 201
+
+      %{"incident" => %{"id" => id, "status" => "investigating", "resolved_at" => nil}} =
+        json_response(created, 201)
+
+      resolved = conn |> bearer(admin) |> post("/v1/status/incidents/#{id}/resolve", %{})
+      assert resolved.status == 200
+
+      %{"incident" => %{"status" => "resolved", "resolved_at" => resolved_at}} =
+        json_response(resolved, 200)
+
+      assert resolved_at != nil
     end
   end
 end

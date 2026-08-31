@@ -691,6 +691,36 @@ defmodule Barkpark.Plugins.Capabilities do
             "Live token streaming rides the `bp chat` SSE events channel " <>
             "(a builtin carve-out, not a manifest verb).",
         "plugin" => nil
+      },
+      # Mobile app-token exchange, instance half (mobile charter D4/D5/D9,
+      # task wb-api-capabilities-undeclared-verbs). DISTINCT noun from `token`
+      # above: `token` mints read-only workspace tokens over /v1/tokens;
+      # `app_token` mints member-shaped [read,write,chat] tokens over
+      # /v1/auth/app-tokens for the Cloud control plane's JIT-provisioned
+      # mobile identities. Folding them into one noun would collide two
+      # unrelated mint shapes under one verb set.
+      %{
+        "name" => "app_token",
+        "summary" =>
+          "Mobile app-token exchange — mint/list/revoke member-shaped, workspace-bound " <>
+            "tokens, distinct from `token` (/v1/tokens).",
+        "plugin" => nil
+      },
+      # Personal Dev Fleet support tokens (PDF-D57/D60, task
+      # wb-api-capabilities-undeclared-verbs). A write-capable, attributable
+      # token for a remote support machine to work the ledger — not the
+      # read-only `token` noun's mint.
+      %{
+        "name" => "fleet_support_token",
+        "summary" =>
+          "Write-capable per-support ledger tokens for a remote Personal Dev Fleet machine.",
+        "plugin" => nil
+      },
+      # Status-page incident management (task wb-api-capabilities-undeclared-verbs).
+      %{
+        "name" => "incident",
+        "summary" => "Status-page incidents — admin-only create + resolve.",
+        "plugin" => nil
       }
     ]
   end
@@ -2341,6 +2371,116 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # ── P5 edit-token management + P7 item share links (task
+      # wb-api-capabilities-undeclared-verbs) ─────────────────────────────
+      # Six routes under the SAME /v1/shares scope as share.ls/add/rm above,
+      # mounted behind the identical [:api, :require_admin] pipeline — kept at
+      # the same `admin` global tier as their siblings even though the
+      # controller additionally confines mint/list/revoke to a workspace admin
+      # of the TARGET row (ShareController / ShareLinkController moduledocs);
+      # that extra object-level check is not a different global tier, exactly
+      # as share.add/rm's own workspace_admin?/2 confinement does not move
+      # them off `admin` either.
+      core_cmd(
+        "share.token-ls",
+        "share",
+        "token-ls",
+        "List share edit-tokens (optional scope filter), confined to workspaces the caller admins.",
+        "GET",
+        "/v1/shares/tokens",
+        "admin",
+        flags: [flag("scope", "string", "Filter by ws[/project[/dataset]] scope.")],
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "share.token-mint",
+        "share",
+        "token-mint",
+        "Mint a share edit-token for one scope's surfaces (raw token shown once).",
+        "POST",
+        "/v1/shares/tokens",
+        "admin",
+        args: [
+          arg(
+            "scope",
+            true,
+            "string",
+            "ws[/project[/dataset]] — defaults project=default, dataset=production."
+          ),
+          arg("surfaces", true, "string", "Comma list: docs,media.")
+        ],
+        flags: [
+          flag("access", "string", "read | edit.", default: "read"),
+          flag("ttl", "int", "Token TTL in seconds."),
+          flag("label", "string", "Human label for the minted token.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "share.token-revoke",
+        "share",
+        "token-revoke",
+        "Revoke a share edit-token by id.",
+        "DELETE",
+        "/v1/shares/tokens/:token_id",
+        "admin",
+        args: [arg("token_id", true, "string", "Share edit-token id (from share token-ls).")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "share.link-ls",
+        "share",
+        "link-ls",
+        "List the item share-links (P7) for one doc/media item.",
+        "GET",
+        "/v1/shares/links",
+        "admin",
+        args: [
+          arg("scope", true, "string", "ws[/project[/dataset]] the item lives in."),
+          arg("kind", true, "string", "doc | media."),
+          arg("ref_id", true, "string", "The item's id.")
+        ],
+        flags: [flag("ref_type", "string", "Document type — required when kind=doc.")],
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "share.link-mint",
+        "share",
+        "link-mint",
+        "Mint a direct share link (P7) to ONE doc/media item (raw token shown once).",
+        "POST",
+        "/v1/shares/links",
+        "admin",
+        args: [
+          arg("scope", true, "string", "ws[/project[/dataset]] the item lives in."),
+          arg("kind", true, "string", "doc | media."),
+          arg("ref_id", true, "string", "The item's id.")
+        ],
+        flags: [
+          flag("ref_type", "string", "Document type — required when kind=doc."),
+          flag("access", "string", "read | edit.", default: "read"),
+          flag("label", "string", "Human label for the minted link."),
+          flag("ttl", "int", "Link TTL in seconds.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "share.link-revoke",
+        "share",
+        "link-revoke",
+        "Revoke one item share-link by id.",
+        "DELETE",
+        "/v1/shares/links/:id",
+        "admin",
+        args: [arg("id", true, "string", "Share link id (from share link-ls).")],
+        writes: true,
+        default_output: "minimal"
+      ),
       # ── Content graph (Goal ges/graph-edge-seam) ─────────────────────────
       # Mounted from CORE so the verbs survive the `:plugins, []` kill switch
       # (the graph roots on ANY content doc). All `auth_tier: "read"`: the
@@ -3121,6 +3261,182 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/chat/sessions/:id/unarchive",
         "admin",
         args: [arg("id", true, "string", "Chat session id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      # ── Mobile app-token exchange (task wb-api-capabilities-undeclared-verbs)
+      # Mounted at `/v1/auth/app-tokens` behind `[:api, :require_token]` — the
+      # PIPELINE only proves SOME token, so auth_tier here is taken from the
+      # ENFORCED gate inside AppTokenController, not the pipeline (the task's
+      # non-negotiable): create/ls/revoke/revoke-by-id all additionally require
+      # `Auth.has_permission?(token, "admin")` in the controller body, so they
+      # carry "admin". `revoke-current` is the one exception: the bearer
+      # revokes ITSELF and the controller only REFUSES an admin bearer (422) —
+      # any non-admin, i.e. "read"-tier-and-up, token reaches it. Declaring it
+      # "admin" would existence-hide a verb every authenticated caller can
+      # actually invoke.
+      core_cmd(
+        "app_token.create",
+        "app_token",
+        "create",
+        "Mint a member-shaped [read,write,chat] app token for a JIT-provisioned cloud identity.",
+        "POST",
+        "/v1/auth/app-tokens",
+        "admin",
+        args: [
+          arg("email", true, "string", "Cloud account the token is minted for.")
+        ],
+        flags: [
+          flag(
+            "workspace",
+            "string",
+            "Workspace slug or id to bind (default: Default Workspace)."
+          ),
+          flag(
+            "permissions",
+            "string",
+            "Comma list — read|write|chat.",
+            default: "read,write,chat"
+          ),
+          flag("label", "string", "Human label (default: \"app:<email>\")."),
+          flag("dataset", "string", "Dataset to bind.", default: "production")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "app_token.ls",
+        "app_token",
+        "ls",
+        "List app tokens on this instance (labels redacted unless ?email= filters to one address).",
+        "GET",
+        "/v1/auth/app-tokens",
+        "admin",
+        flags: [
+          flag(
+            "email",
+            "string",
+            "Filter to one email's tokens — reveals their labels; an unfiltered list redacts every label."
+          )
+        ],
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "app_token.revoke",
+        "app_token",
+        "revoke",
+        "Revoke an app token by its raw secret, or every live token for an email (logout-everywhere, confined to workspaces the caller admins).",
+        "DELETE",
+        "/v1/auth/app-tokens",
+        "admin",
+        flags: [
+          flag("token", "string", "Revoke exactly this raw token."),
+          flag("email", "string", "Revoke every live app token for this email.")
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "app_token.revoke-by-id",
+        "app_token",
+        "revoke-by-id",
+        "Revoke an app token by its row id — the escape hatch for a custom-labelled token.",
+        "DELETE",
+        "/v1/auth/app-tokens/:id",
+        "admin",
+        args: [arg("id", true, "string", "App-token row id (from app_token ls).")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "app_token.revoke-current",
+        "app_token",
+        "revoke-current",
+        "Self-revoke the app token sent as the bearer — possession is the authorization, no admin required (admin bearers are refused).",
+        "DELETE",
+        "/v1/auth/app-tokens/current",
+        "read",
+        writes: true,
+        default_output: "minimal"
+      ),
+      # ── Personal Dev Fleet support tokens (PDF-D57/D60; task
+      # wb-api-capabilities-undeclared-verbs). Mounted under :flat_admin_api,
+      # which re-runs the same RequireAdmin global-permission gate as the flat
+      # [:api, :require_admin] pipeline (only the workspace-derivation order
+      # differs) — same "admin" tier as share.* above on that pipeline.
+      core_cmd(
+        "fleet_support_token.create",
+        "fleet_support_token",
+        "create",
+        "Mint a write-capable, attributable support token for a remote Personal Dev Fleet machine.",
+        "POST",
+        "/v1/fleet/support-tokens",
+        "admin",
+        args: [
+          arg(
+            "name",
+            true,
+            "string",
+            "Support actor name — the stored label is fleet-support-<name>."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "fleet_support_token.revoke",
+        "fleet_support_token",
+        "revoke",
+        "Revoke a support token by id (confined to the fleet-support- family, in a workspace the caller admins).",
+        "DELETE",
+        "/v1/fleet/support-tokens/:token_id",
+        "admin",
+        args: [
+          arg("token_id", true, "string", "Support token id (from fleet_support_token create).")
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      # ── Status-page incidents (task wb-api-capabilities-undeclared-verbs).
+      # Mounted at /v1/status/incidents behind [:api, :require_admin] — same
+      # "admin" global tier as share.ls/add/rm and the fleet/incident siblings
+      # on that exact pipeline.
+      core_cmd(
+        "incident.create",
+        "incident",
+        "create",
+        "Open a status-page incident.",
+        "POST",
+        "/v1/status/incidents",
+        "admin",
+        args: [
+          arg("title", true, "string", "Incident title."),
+          arg("started_at", true, "string", "RFC-3339 incident start time.")
+        ],
+        flags: [
+          flag("component", "string", "Affected component."),
+          flag("impact", "string", "none | minor | major | critical.", default: "minor"),
+          flag(
+            "status",
+            "string",
+            "investigating | identified | monitoring | resolved.",
+            default: "investigating"
+          ),
+          flag("body", "string", "Incident body/description.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "incident.resolve",
+        "incident",
+        "resolve",
+        "Resolve a status-page incident.",
+        "POST",
+        "/v1/status/incidents/:id/resolve",
+        "admin",
+        args: [arg("id", true, "string", "Incident id.")],
         writes: true,
         default_output: "minimal"
       )
