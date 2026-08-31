@@ -140,13 +140,35 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	}, nil
 }
 
+// nonPublishedPerspectiveRequiresAuth reports whether this invocation is a
+// PUBLIC-tier read asking for an identity-sensitive perspective — the one case
+// where a tier-`none` command must still carry the bearer (buildManifestRequest
+// attaches it; with no token it refuses instead of sending).
+//
+// The gate is keyed on what the MANIFEST DECLARES: `auth_tier: "none"` plus a
+// DECLARED `perspective` flag. It used to be keyed on a literal id set —
+// `switch cmd.ID { case "doc.get", "doc.ls", "doc.query" }` — which stood in
+// for exactly those two structural facts and got the census wrong: the live
+// server declares FOUR such commands, not three. search.query (auth_tier
+// "none", GET /v1/data/search/:dataset, `perspective: published | drafts |
+// raw`) fell out of the switch, so `bp search query x --perspective drafts`
+// went out tokenless — authHeaders sends no credential for tier "none" — and
+// BarkparkWeb.AnonPerspective.resolve/2 pins a tokenless caller to `:published`
+// SILENTLY. The caller read the published corpus at exit 0 believing they had
+// read drafts, and a caller who DID hold a token was affected identically
+// because the bearer was never attached. Its doc.* siblings, one switch case
+// away, either attached the bearer or refused loudly.
+//
+// Declaration-keyed, the guard also reaches a class the id list could never
+// admit: a PLUGIN's own public read that declares the flag. The flag name is
+// the identity here and that is legitimate — splitArgs only ever populates
+// flags["perspective"] for a command that declares it — but the ID was never
+// load-bearing beyond restating the declaration.
 func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string][]string) bool {
 	if cmd.AuthTier != "none" {
 		return false
 	}
-	switch cmd.ID {
-	case "doc.get", "doc.ls", "doc.query":
-	default:
+	if !commandDeclaresFlag(cmd, "perspective") {
 		return false
 	}
 
