@@ -75,7 +75,12 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerTenantSwapTest do
 
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => @public_type, "title" => "SwapPost", "visibility" => "public", "fields" => []},
+        %{
+          "name" => @public_type,
+          "title" => "SwapPost",
+          "visibility" => "public",
+          "fields" => []
+        },
         @dataset,
         default_scope
       )
@@ -123,7 +128,12 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerTenantSwapTest do
 
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => @public_type, "title" => "SwapPost", "visibility" => "public", "fields" => []},
+        %{
+          "name" => @public_type,
+          "title" => "SwapPost",
+          "visibility" => "public",
+          "fields" => []
+        },
         @dataset,
         b_scope
       )
@@ -145,8 +155,7 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerTenantSwapTest do
     {:ok, dead} = Auth.create_token(dead_raw, "swap-dead", @dataset, ["read"], ws_b.id)
     {:ok, _} = Auth.revoke_token(dead)
 
-    {:ok,
-     default_ws: default_ws, ws_b: ws_b, proj_b: proj_b, live: live_raw, dead: dead_raw}
+    {:ok, default_ws: default_ws, ws_b: ws_b, proj_b: proj_b, live: live_raw, dead: dead_raw}
   end
 
   defp bearer(conn, raw), do: put_req_header(conn, "authorization", "Bearer " <> raw)
