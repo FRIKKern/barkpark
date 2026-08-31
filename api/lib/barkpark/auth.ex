@@ -634,6 +634,19 @@ defmodule Barkpark.Auth do
   default 30 days; capped at 1 year), `:owner_user_id` (bind the token to a
   USER identity — set ONLY by the session-gated self-mint, hard-bound to the
   authenticated caller; never a client-supplied value).
+
+  ## `:workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
+
+  When `:workspace_id` is omitted (or `nil`), the token is minted
+  WORKSPACE-LESS — `insert_token_with_membership/3` is skipped entirely and no
+  `Tenancy.Membership` row is ever created. There used to be an unconditional
+  `|| default_workspace_id()` fallback here; it let any caller that forgot to
+  resolve a real workspace (the self-service mint was the one that did) hand
+  the minted token a membership in the seeded Default Workspace with ZERO
+  relationship check. The caller MUST resolve and pass its own real
+  `:workspace_id` to get a workspace-bound token — there is no default to fall
+  into. (Every other caller already passes `:workspace_id` explicitly; grep
+  `create_personal_access_token` before relying on this.)
   """
   @spec create_personal_access_token(binary(), [binary()], keyword()) ::
           {:ok, {binary(), ApiToken.t()}} | {:error, :forbidden | Ecto.Changeset.t()}
@@ -643,7 +656,7 @@ defmodule Barkpark.Auth do
 
     with :ok <- authorize_pat_permissions(role, permissions) do
       raw = @pat_token_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
-      ws_id = Keyword.get(opts, :workspace_id) || default_workspace_id()
+      ws_id = Keyword.get(opts, :workspace_id)
 
       expires_at =
         case Keyword.get(opts, :ttl, @pat_default_ttl) do
@@ -715,6 +728,23 @@ defmodule Barkpark.Auth do
   end
 
   def touch_last_used(_), do: :ok
+
+  @doc """
+  The MAXIMUM PAT permission tier `role` may mint — the same
+  `@pat_admin_roles` / allowed-permissions split `authorize_pat_permissions/2`
+  gates on, exposed so a caller (the session-gated self-mint) can DERIVE the
+  permission set from the caller's REAL workspace role instead of a hardcoded
+  literal, without duplicating the role/permission mapping. `owner`/`admin`
+  get `#{inspect(@pat_allowed_admin_permissions)}`; every other role
+  (including `nil` — no membership resolved) gets
+  `#{inspect(@pat_allowed_member_permissions)}`, mirroring
+  `@pat_allowed_member_permissions`'s deliberate member cap.
+  """
+  @spec max_pat_permissions_for_role(String.t() | nil) :: [String.t()]
+  def max_pat_permissions_for_role(role) when role in @pat_admin_roles,
+    do: @pat_allowed_admin_permissions
+
+  def max_pat_permissions_for_role(_role), do: @pat_allowed_member_permissions
 
   # Gate the requested permission set against the minter's workspace role.
   defp authorize_pat_permissions(role, permissions) do
