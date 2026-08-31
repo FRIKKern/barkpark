@@ -7,6 +7,7 @@ defmodule BarkparkWeb.FederatedSearchController do
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
   alias Barkpark.Media
+  alias Barkpark.Media.Storage.Access, as: MediaAccess
   alias Barkpark.Search.HitEnvelope
   alias Barkpark.Search.Intelligence
   alias BarkparkWeb.AnonPerspective
@@ -121,7 +122,7 @@ defmodule BarkparkWeb.FederatedSearchController do
            dataset: dataset,
            scope: scope
          },
-         _caller_context,
+         caller_context,
          # Media hits are AssetResponse renders, not documents — the brief
          # document-card view does not apply (out of scope for AXI R3).
          _view
@@ -129,14 +130,40 @@ defmodule BarkparkWeb.FederatedSearchController do
     docs = Media.asset_docs_for_files(files, dataset, scope)
     render_opts = [include_urls: true]
 
+    # VISIBILITY CLAMP (task-0fcec595765a7b00): this was the one AssetResponse
+    # door with no ceiling — `caller_context` used to be discarded (`_caller_context`
+    # in the head) and every hit rendered with `include_urls: true` regardless of
+    # who asked. Predicate mirrors `Barkpark.Media.Storage.Access.delivery_ok?/3`
+    # (access.ex:113-119): `public` is visible to everyone; `token`/`private`
+    # require an AUTHENTICATED caller. This clause mints no SignedUrl
+    # (`render_opts` carries no `:conn`/`:sign_urls`), so `delivery_ok?/3`'s
+    # `signed` arm never applies here and is intentionally not reproduced.
+    # Shape (a), DROP rather than redact: a dropped hit cannot leak a filename,
+    # matching the documents-surface sibling above (caller_context threaded into
+    # `HitEnvelope.build/5`).
+    visible_files =
+      Enum.filter(files, fn file ->
+        MediaAccess.visibility(Map.get(docs, file.id)) == "public" or
+          authenticated_caller?(caller_context)
+      end)
+
+    dropped = length(files) - length(visible_files)
+
     hits =
-      Enum.map(files, fn file ->
+      Enum.map(visible_files, fn file ->
         Barkpark.Media.Delivery.AssetResponse.render(file, Map.get(docs, file.id), render_opts)
       end)
 
     %{
       hits: hits,
-      total: total,
+      # `total` is the retriever's PRE-FILTER corpus count (`Media.search_files/2`
+      # counts before this clamp runs). Subtract the rows dropped from THIS page
+      # so the number stays consistent with `hits` actually returned — it must
+      # never advertise a clamped-away row. CAVEAT: rows clamped on pages this
+      # request never fetched (beyond `limit`/`offset`) are not reflected here,
+      # so `total` can still overstate an anonymous caller's true visible corpus
+      # across the full result set, not just this page.
+      total: max(total - dropped, 0),
       parsedQuery: meta[:parsed],
       highlights: meta[:highlights] || %{},
       recovery: meta[:recovery]
@@ -217,6 +244,17 @@ defmodule BarkparkWeb.FederatedSearchController do
       end
     end
   end
+
+  # Authenticated, per `Barkpark.Content.CallerContext`: a verified `%User{}`
+  # session OR a verified `%ApiToken{}` — either sets `user_id`/`token_id`.
+  # `CallerContext.anonymous/0` has both `nil`, which is what `from_conn/1`
+  # returns when `Plugs.OptionalToken` (the `:api` pipeline's terminal plug)
+  # saw no credential. Mirrors the `auth` input `delivery_ok?/3` takes.
+  defp authenticated_caller?(%CallerContext{token_id: token_id, user_id: user_id}) do
+    not is_nil(token_id) or not is_nil(user_id)
+  end
+
+  defp authenticated_caller?(_), do: false
 
   defp parse_surfaces(nil), do: @default_surfaces
 
