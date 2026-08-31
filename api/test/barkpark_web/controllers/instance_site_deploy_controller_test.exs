@@ -224,6 +224,11 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
         command: {"bash", ["-c", "sleep 0.8; echo done; exit 0"]}
       )
 
+      # The line below reads a VM-GLOBAL gauge COLD. Guard the precondition
+      # first — see `await_idle_box/2` for why, and for why it is not the
+      # `await_in_flight/3` the fall-back assertion at the end of this test uses.
+      assert await_idle_box() == 0
+
       idle = build_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert idle["door"]["observed_in_flight"] == 0
       assert idle["door"]["in_flight_slugs"] == []
@@ -271,6 +276,68 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
       # A read that changed nothing did not invent a refusal.
       settled = build_conn() |> authed(token) |> get(@route) |> json_response(200)
       assert settled["door"]["refusals_total"] == refusals_before + 1
+    end
+  end
+
+  # ── PRECONDITION, not an assertion about the box's own bookkeeping ───────
+  #
+  # `door.observed_in_flight` is served from `:barkpark_site_deploy_door_census`, a
+  # `:named_table, :public` ETS table owned by the DeployRunner SINGLETON. It is
+  # VM-global, sits outside the Ecto sandbox, and is never reset between tests
+  # or between files — and CI runs bare `mix test` with no `--seed`, so ExUnit
+  # reshuffles every run. Anything that left a build in flight lands in the next
+  # test's cold read.
+  #
+  # Two known leakers, both real:
+  #
+  #   * this file's `configured …` test ends on a 202 (now awaited, below);
+  #   * `deploy_runner_door_vs_unit_review_test.exs` drives the SYSTEMD path,
+  #     whose engines are detached — the Runner never receives a port-exit for
+  #     them, so nothing republishes the census and a stale reading sits there
+  #     until the next `:census_tick`, which is `@default_census_interval_ms`
+  #     = 10s.
+  #
+  # Observed, twice, with output: `mix test <that file> <this file> --seed 7`
+  # reds here with `left: 1, right: 0`; so does a narrowed run pairing that
+  # file's `CONTROL:` test with this one (5 of 6).
+  #
+  # But the repro is LOAD-DEPENDENT, and this comment will not pretend
+  # otherwise. On a quiet box the same narrowed run went 0 for 8, and a probe
+  # reading the gauge immediately after each of that file's three tests found
+  # `observed_in_flight=0` every time. The likely reason the leak comes and
+  # goes: that file's `is_active` stub is a script under a tmp dir its
+  # `on_exit` deletes, and `building_slugs/1` SHELLS OUT to it — so whether a
+  # later `publish_census/1` still sees the unit as active depends on whether
+  # it runs before or after that delete. Stated as the open question it is,
+  # not as a finding.
+  #
+  # So the reason this guard exists is the MECHANISM above — a VM-global gauge
+  # the route reads without recomputing — not any one command. A cold `== 0`
+  # against a cache nothing is obliged to refresh is unsound whether or not
+  # today's box happens to expose it.
+  #
+  # `refresh_door_census/0` is a synchronous recompute inside the Runner
+  # (`publish_census/1` off `building_slugs/1`), so this waits for the box to
+  # BE idle instead of waiting out a tick it cannot influence.
+  #
+  # It cannot manufacture a green. It returns whatever the Runner observed, so
+  # a box that never goes idle still fails the `== 0` at the call site with the
+  # real number. And it is deliberately NOT `await_in_flight/3`: that helper's
+  # other caller is the "falls back when the build ends — no operator action"
+  # assertion, and forcing a refresh there would mask precisely the defect that
+  # assertion exists to catch.
+  defp await_idle_box(budget_ms \\ 10_000) do
+    deadline = System.monotonic_time(:millisecond) + budget_ms
+    do_await_idle_box(deadline)
+  end
+
+  defp do_await_idle_box(deadline) do
+    observed = DeployRunner.refresh_door_census().observed_in_flight
+
+    cond do
+      observed == 0 -> observed
+      System.monotonic_time(:millisecond) >= deadline -> observed
+      true -> Process.sleep(50) && do_await_idle_box(deadline)
     end
   end
 
@@ -334,6 +401,13 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
         })
 
       assert %{"ok" => true} = json_response(accepted, 202)
+
+      # This test returned on a 202 and used to STOP here, leaving `cap-probe-on`
+      # in flight in the singleton Runner's VM-global census — which the next
+      # test to read `observed_in_flight` cold inherits (see `await_idle_box/2`).
+      # Nothing above is relaxed by draining it: the 202 is still the assertion,
+      # this is the test cleaning up after itself.
+      assert await_idle_box() == 0
     end
   end
 
