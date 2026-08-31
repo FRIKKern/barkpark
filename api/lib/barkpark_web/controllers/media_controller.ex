@@ -55,6 +55,25 @@ defmodule BarkparkWeb.MediaController do
     if scope_bound?(opts), do: files, else: Enum.filter(files, &is_nil(&1.workspace_id))
   end
 
+  # ── Transform-param denylist guard (wb-api-media-transform-params-400) ──────
+  #
+  # `serve/2` and `serve_rendition/2` parsed NO transform vocabulary at all — a
+  # repo-wide grep for `w`/`h`/`fm`/`quality`/`rect` across api/lib media code
+  # returned ZERO hits, so there was never a parse-then-drop site to repair; a
+  # caller sending `?w=200` silently got a 200 of the ORIGINAL bytes (live prod
+  # proof, recorded on the ledger row: original / transform-laden /
+  # garbage-param URLs all answered 200 with the identical MD5).
+  #
+  # A DENYLIST, deliberately NOT an allowlist: signed-URL params (`_`, `exp` —
+  # `Media.Storage.SignedUrl`) and arbitrary CDN cache-busters are legitimate
+  # and must keep working unchanged; an allowlist would break them. Only the
+  # known image-transform vocabulary is refused.
+  @denied_transform_params ~w(w h fit crop rect fm q quality dpr auto blur sharp flip or)
+
+  defp ignored_transform_params(conn) do
+    Enum.filter(@denied_transform_params, &Map.has_key?(conn.params, &1))
+  end
+
   @doc "Upload a file via multipart form data."
   def upload(conn, %{"file" => upload}) do
     dataset = Map.get(conn.params, "dataset", "production")
@@ -133,6 +152,13 @@ defmodule BarkparkWeb.MediaController do
 
   @doc "Serve a file — from disk, or via redirect to the object-storage backend."
   def serve(conn, %{"path" => path_parts}) do
+    case ignored_transform_params(conn) do
+      [] -> serve_file(conn, path_parts)
+      ignored -> unsupported_transform_params(conn, ignored)
+    end
+  end
+
+  defp serve_file(conn, path_parts) do
     relative_path = Enum.join(path_parts, "/")
     opts = scope_opts(conn)
 
@@ -193,6 +219,13 @@ defmodule BarkparkWeb.MediaController do
   reachable only via the scoped route (P4) or an item share link.
   """
   def serve_rendition(conn, %{"id" => id, "preset" => preset}) do
+    case ignored_transform_params(conn) do
+      [] -> serve_rendition_file(conn, id, preset)
+      ignored -> unsupported_transform_params(conn, ignored)
+    end
+  end
+
+  defp serve_rendition_file(conn, id, preset) do
     opts = scope_opts(conn)
 
     with {:ok, file} <- Media.get_file(id, opts),
@@ -214,8 +247,12 @@ defmodule BarkparkWeb.MediaController do
       false ->
         forbidden(conn)
 
+      # A malformed request (an unrecognized preset name) was dressed as a
+      # missing resource — the same request-vs-resource confusion the
+      # transform-param guard above fixes. 400, naming the bad preset and the
+      # valid names (`Renditions.presets/0`), never 404.
       {:error, :unknown_preset} ->
-        not_found(conn, "unknown rendition preset")
+        unknown_preset(conn, preset)
 
       {:error, _} ->
         not_found(conn, "rendition unavailable")
@@ -376,6 +413,44 @@ defmodule BarkparkWeb.MediaController do
     conn
     |> put_status(:forbidden)
     |> json(%{error: Map.delete(env, :status)})
+  end
+
+  # A caller sent transform vocabulary (`w`, `h`, `fm`, ...) this endpoint
+  # never applies — silently serving the original would answer 200 while
+  # doing something other than what was asked. `code` is taken as an argument
+  # (the same shape `unprocessable/3` below already uses) rather than inlined
+  # as a map literal, matching this file's existing convention for a
+  # controller-local code not registered in `Content.Errors` @hints.
+  defp bad_request(conn, code, message, details) do
+    env =
+      %{code: code, message: message, status: 400, details: details}
+      |> Errors.stamp(conn)
+
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
+  defp unsupported_transform_params(conn, ignored) do
+    bad_request(
+      conn,
+      "unsupported_transform_param",
+      "transform parameter(s) #{Enum.join(ignored, ", ")} are not supported on this " <>
+        "endpoint and would otherwise be silently ignored — request a server-rendered " <>
+        "preset at /media/renditions/<id>/<preset> instead",
+      %{ignored: ignored}
+    )
+  end
+
+  defp unknown_preset(conn, preset) do
+    valid = Renditions.presets()
+
+    bad_request(
+      conn,
+      "unknown_preset",
+      "unknown rendition preset #{inspect(preset)}; valid presets: #{Enum.join(valid, ", ")}",
+      %{preset: preset, valid_presets: valid}
+    )
   end
 
   @doc """
