@@ -58,9 +58,10 @@ jobs:
           otp-version: "27.0"
           elixir-version: "1.18.1"
 
-      # build-symbols.mjs lifts the mix-xref module graph to raise edge
-      # confidence; it auto-compiles api/_build when absent but does NOT fetch
-      # deps. Fetch them here first, same as codebase-intel.yml.
+      # `build-index.mjs` (next step) runs `mix compile` + `mix xref graph` to
+      # produce the EXACT module graph. It does NOT fetch deps, so fetch them
+      # here first, same as codebase-intel.yml. build-symbols.mjs never compiles
+      # anything — it only READS the index build-index.mjs writes.
       - name: Fetch Elixir deps (for mix xref warming)
         working-directory: api
         env:
@@ -69,6 +70,68 @@ jobs:
           mix local.hex --force
           mix local.rebar --force
           mix deps.get
+
+      # WARM THE EXACT MODULE GRAPH BEFORE THE GATE READS IT.
+      #
+      # PROVEN NECESSARY, not assumed: rebuilt at the baseline's own commit
+      # 46038fef57 WITH this graph warm, boundary-baseline.json reproduces
+      # EXACTLY — 78/13/3, kernel ["content","tenancy"], and all three edge sets
+      # byte-identical with zero diff in either direction. Rebuilt COLD at that
+      # same commit it gives 56/10/3 with kernel ["content"] only.
+      #
+      # build-symbols.mjs only READS tooling/blast-radius/index.json; it never
+      # builds it, and nothing else in this workflow did either. So until this
+      # step existed the gate compared HEURISTIC edges against an EXACT-edge
+      # baseline and printed its own confession every run ("no mix-xref graph in
+      # index.json — EXACT module edges unavailable ... Proceeding with
+      # static/heuristic edges"). Heuristic edges are a strict SUBSET, so the
+      # gate UNDERSTATED the debt: 247 sideways on the comparable graph versus
+      # the 115 it was reporting. See task-b92f06da17f9fd7e.
+      - name: Warm the mix-xref module graph
+        run: |
+          set -euo pipefail
+          START=$(date +%s)
+          node tooling/blast-radius/build-index.mjs
+          echo "warm-graph-seconds=$(( $(date +%s) - START ))" | tee -a "$GITHUB_ENV"
+
+      # build-index.mjs is BEST-EFFORT BY DESIGN: it catches a failed `mix
+      # compile` or `mix xref` and returns null, writing an index with no elixir
+      # forward graph and exiting 0. A silent fall-back to cold would restore the
+      # exact defect this step exists to remove — and this time with everyone
+      # believing it fixed. So assert on the CONTENT, never on the exit code.
+      #
+      # Faults with exit 2, never 1: 1 is ci-boundary.mjs's REGRESSION code, and
+      # an instrument that cannot be warmed has found no architectural debt.
+      - name: Assert the warm graph is present
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const P = "tooling/blast-radius/index.json";
+            function check() {
+              if (!fs.existsSync(P)) return P + " was not written";
+              const raw = fs.readFileSync(P, "utf8");
+              if (!raw.trim()) return P + " is empty";
+              let j;
+              try { j = JSON.parse(raw); }
+              catch (e) { return P + " is not parseable JSON: " + e.message; }
+              const fwd = j.elixir && j.elixir.forward;
+              if (!fwd || typeof fwd !== "object")
+                return "index.json carries NO elixir.forward graph — mix compile or mix xref failed and build-index.mjs fell back silently";
+              const n = Object.keys(fwd).length;
+              if (n === 0)
+                return "index.json elixir.forward is EMPTY — the xref graph did not build";
+              console.log("warm graph OK: " + n + " elixir files with dependents");
+              return null;
+            }
+            const err = check();
+            if (err) {
+              console.error("FAULT: " + err);
+              console.error("The boundary gate must compare EXACT edges against an exact-edge baseline.");
+              console.error("Refusing to run it cold — a cold run silently UNDERSTATES the debt.");
+              process.exitCode = 2;
+            }
+          '
 
       - name: Run boundary gate
         run: |
@@ -95,6 +158,10 @@ jobs:
             echo "baseline. Advisory at first — does not block the merge."
             echo ""
             echo '```'
-            tail -40 /tmp/boundary-gate.txt
+            if [ -s /tmp/boundary-gate.txt ]; then
+              tail -40 /tmp/boundary-gate.txt
+            else
+              echo "(the gate did not run — see the warm-graph steps above)"
+            fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
