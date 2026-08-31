@@ -834,7 +834,8 @@ defmodule BarkparkWeb.ChatControllerTest do
   end
 
   # ── observed runtime telemetry readout (wb-api-chat-observed-telemetry-readout) ──
-  # session.ex:129-138 declares observed_model / observed_effort /
+  # `Barkpark.StudioChat.Session`'s schema (studio_chat/session.ex) declares
+  # observed_model / observed_effort /
   # observed_{input,cached_input,output,reasoning_output,total}_tokens /
   # observed_context_window / runtime_identity / runtime_telemetry_limitations,
   # and RuntimeTelemetry writes them on every provider result frame — this
@@ -855,7 +856,9 @@ defmodule BarkparkWeb.ChatControllerTest do
           observed_total_tokens: 1555,
           observed_context_window: 200_000,
           runtime_identity: %{"runtime_id" => "codex-app-server-9"},
-          runtime_telemetry_limitations: ["registered-host CPU and memory telemetry are unavailable"]
+          runtime_telemetry_limitations: [
+            "registered-host CPU and memory telemetry are unavailable"
+          ]
         )
       )
 
