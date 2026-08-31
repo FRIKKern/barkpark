@@ -29,16 +29,49 @@ name: Research-coverage suite
 # set, so a red here does not block a merge on its own. The step summary
 # re-derives that live on every run rather than trusting this comment to stay
 # true.
+#
+# SECOND JOB: tooling/{aesthetics,ergonomics,risk} node --test suite. Five
+# tooling regression suites were wired into zero CI workflow; this job wires
+# the four that are GREEN (compare.test.mjs, spotlight-clutter.test.mjs,
+# safety-classifier.test.mjs, fn-coverage.test.mjs) following this file's own
+# floor+log-parse precedent below. tooling/pds/rerun-adjudicate.test.mjs is
+# DELIBERATELY EXCLUDED — it fails on a pds/grip polarity drift that needs
+# evidence-weighed triage under a hard fence forbidding any tooling/grip edit,
+# not a quick fix, and the one thing worse than leaving it unwired is quietly
+# weakening its expectations to get a green. Tracked as a follow-up task
+# (wbt-pds-grip-polarity-drift-2026-08-31) rather than fixed inline here.
+#
+# The ergonomics safety-classifier suite imports ergonomics.mjs, which reads
+# tooling/file-importance/file-signals.json (gitignored, generated) at module
+# load — so the job runs the generator as a setup step before the suite.
 
 on:
   pull_request:
     paths:
       - "tooling/research-coverage/**"
+      - "tooling/aesthetics/compare.mjs"
+      - "tooling/aesthetics/compare.test.mjs"
+      - "tooling/aesthetics/aesthetics.mjs"
+      - "tooling/aesthetics/spotlight-clutter.test.mjs"
+      - "tooling/ergonomics/ergonomics.mjs"
+      - "tooling/ergonomics/safety-classifier.test.mjs"
+      - "tooling/risk/fn-coverage.mjs"
+      - "tooling/risk/fn-coverage.test.mjs"
+      - "tooling/file-importance/build-signals.mjs"
       - ".github/workflows/research-coverage-suite.yml"
   push:
     branches: [main]
     paths:
       - "tooling/research-coverage/**"
+      - "tooling/aesthetics/compare.mjs"
+      - "tooling/aesthetics/compare.test.mjs"
+      - "tooling/aesthetics/aesthetics.mjs"
+      - "tooling/aesthetics/spotlight-clutter.test.mjs"
+      - "tooling/ergonomics/ergonomics.mjs"
+      - "tooling/ergonomics/safety-classifier.test.mjs"
+      - "tooling/risk/fn-coverage.mjs"
+      - "tooling/risk/fn-coverage.test.mjs"
+      - "tooling/file-importance/build-signals.mjs"
       - ".github/workflows/research-coverage-suite.yml"
 
 permissions:
@@ -140,4 +173,76 @@ jobs:
             (silent field strip, and a lost update between concurrent writers).
             This check is advisory, so a red run does not block anything on its
             own. Open the run's log for the failing test names.
+        run: bash scripts/file-ci-failure-issue.sh
+
+  tooling-regression-suite:
+    name: "tooling/{aesthetics,ergonomics,risk} node --test suite"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: generate file-importance signals (safety-classifier.test.mjs needs file-signals.json)
+        run: node tooling/file-importance/build-signals.mjs
+
+      - name: test-file floor (a glob that expands to nothing exits 0)
+        run: |
+          set +e
+          shopt -s nullglob
+          files=(tooling/aesthetics/*.test.mjs tooling/ergonomics/*.test.mjs tooling/risk/*.test.mjs)
+          count=${#files[@]}
+          printf '%s\n' "${files[@]}"
+          echo "found $count tooling/{aesthetics,ergonomics,risk}/*.test.mjs files"
+          floor=4
+          if [ "$count" -lt "$floor" ]; then
+            echo "::error::expected at least $floor tooling/{aesthetics,ergonomics,risk}/*.test.mjs files, found $count: ${files[*]}"
+            exit 1
+          fi
+
+      - name: suite — exit 0 AND '# fail 0' AND '# skipped 0'
+        run: |
+          set +e
+          set -o pipefail
+          node --test --test-reporter=tap --test-reporter-destination=stdout tooling/aesthetics/*.test.mjs tooling/ergonomics/*.test.mjs tooling/risk/*.test.mjs 2>&1 | tee "$RUNNER_TEMP/tooling-suite.log"
+          run_rc=${PIPESTATUS[0]}
+
+          fail=$(awk -F'# fail ' '/^# fail /{print $2}' "$RUNNER_TEMP/tooling-suite.log")
+          skipped=$(awk -F'# skipped ' '/^# skipped /{print $2}' "$RUNNER_TEMP/tooling-suite.log")
+          echo "parsed clauses: run_rc=$run_rc fail=$fail skipped=$skipped"
+
+          status=0
+          if [ "$run_rc" != "0" ]; then
+            echo "::error::node --test exited $run_rc"
+            status=1
+          fi
+          if [ "$fail" != "0" ]; then
+            echo "::error::expected '# fail 0', got '# fail ${fail:-<none>}'"
+            status=1
+          fi
+          if [ "$skipped" != "0" ]; then
+            echo "::error::expected '# skipped 0' — a skip here means a test quietly stopped running; got '# skipped ${skipped:-<none>}'"
+            status=1
+          fi
+          exit $status
+
+      - name: report failure to a human
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: tooling-regression-suite
+          CI_FAILURE_DETAIL: |
+            One of the tooling/{aesthetics,ergonomics,risk} node --test suites
+            failed (or its file-count floor tripped) on ${{ github.ref }} at
+            ${{ github.sha }}. These suites guard the aesthetics diff-summary
+            (compare.mjs), the spotlight-clutter detector, the ergonomics
+            safety classifier, and the per-function coverage parser (risk).
+            tooling/pds/rerun-adjudicate.test.mjs is intentionally NOT wired
+            into this job — it is red on a pds/grip polarity drift tracked as
+            a follow-up task rather than fixed here. This check is advisory,
+            so a red run does not block anything on its own. Open the run's
+            log for the failing test names.
         run: bash scripts/file-ci-failure-issue.sh
