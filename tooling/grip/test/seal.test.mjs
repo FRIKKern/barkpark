@@ -304,6 +304,86 @@ test("an unreadable --ledger path is an INFRA FAULT path, never a NOT YET", () =
   assert.notEqual(r.status, 1, "exit 1 must mean NOT YET and nothing else");
 });
 
+// ── THE FIXTURE FLOOR ───────────────────────────────────────────────────────
+// `(fx.namespace || [])` and `(fx.criteria || [])` used to turn a missing or
+// empty key into a LEGAL zero-length corpus: clause (a) is an
+// Array.prototype.every over zero items (true by definition) and clause (b)
+// walks zero rows, so an empty fixture printed "0 published task rows" and
+// still exited 0 with "VERDICT: THE PREDICATE HOLDS". These are the mutation
+// controls that catch a regression back to that `|| []` default.
+
+function tmpFixture(name, patch) {
+  const base = JSON.parse(readFileSync(FIX("clean"), "utf8"));
+  const path = resolve(REPO, `tooling/grip/fixtures/.seal-${name}-mutation.json`);
+  writeFileSync(path, JSON.stringify({ ...base, ...patch }));
+  return path;
+}
+
+test("an empty namespace fixture is refused as INFRA, never a vacuous HOLDS", () => {
+  const path = tmpFixture("empty-namespace", { namespace: [] });
+  try {
+    const r = seal(["--ledger", path]);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes("THE PREDICATE HOLDS"), "an empty namespace must never print a HOLDS verdict");
+    assert.match(r.stdout, /fixture key "namespace" is missing or empty/);
+    assert.ok(r.stdout.includes(path), "the refusal must name the fixture path");
+  } finally {
+    rmSync(path, { force: true });
+  }
+});
+
+test("an empty criteria fixture is refused as INFRA, never a vacuous HOLDS", () => {
+  const path = tmpFixture("empty-criteria", { criteria: [] });
+  try {
+    const r = seal(["--ledger", path]);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes("THE PREDICATE HOLDS"), "an empty criteria must never print a HOLDS verdict");
+    assert.match(r.stdout, /fixture key "criteria" is missing or empty/);
+    assert.ok(r.stdout.includes(path), "the refusal must name the fixture path");
+  } finally {
+    rmSync(path, { force: true });
+  }
+});
+
+test("a fixture missing the namespace/criteria key entirely (not just []) is refused the same way", () => {
+  const base = JSON.parse(readFileSync(FIX("clean"), "utf8"));
+  const { namespace, ...withoutNamespace } = base;
+  const path = resolve(REPO, "tooling/grip/fixtures/.seal-missing-namespace-key-mutation.json");
+  writeFileSync(path, JSON.stringify(withoutNamespace));
+  try {
+    const r = seal(["--ledger", path]);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes("THE PREDICATE HOLDS"));
+    assert.match(r.stdout, /fixture key "namespace" is missing or empty/);
+  } finally {
+    rmSync(path, { force: true });
+  }
+});
+
+test("a fixture whose root is absent from its own namespace is refused as INFRA, not trusted off root_doc", () => {
+  // rootDoc is derived from rows.get(ROOT_ID), never from a separate `root_doc`
+  // field: a fixture can otherwise CLAIM a root status with no row to back it.
+  const base = JSON.parse(readFileSync(FIX("clean"), "utf8"));
+  const namespace = base.namespace.filter((r) => r._id !== ROOT_ID);
+  assert.ok(namespace.length > 0, "the premise of this test is a non-empty namespace missing only the root");
+  const path = tmpFixture("absent-root", { namespace });
+  try {
+    const r = seal(["--ledger", path]);
+    assert.equal(r.status, 2, r.stdout + r.stderr);
+    assert.ok(!r.stdout.includes("THE PREDICATE HOLDS"));
+    assert.match(r.stdout, new RegExp(`${ROOT_ID} is not in the walked corpus`));
+  } finally {
+    rmSync(path, { force: true });
+  }
+});
+
+test("MUTATION PROOF: a well-formed fixture still exits 0 with the unchanged verdict — the floor does not break the happy path", () => {
+  const r = seal(["--ledger", FIX("clean")]);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /VERDICT: THE PREDICATE HOLDS — all four clauses pass\. The root may close, LAST\./);
+  assert.match(r.stdout, /VERDICT-TOKEN: SEAL-PREDICATE HOLDS a=PASS b=PASS b'=PASS c=PASS/);
+});
+
 // ── THE POOL RECONCILIATION ─────────────────────────────────────────────────
 // The merged gate asserted `allUnique === allCount` and so faulted on a
 // duplicate doc_id in the SERVER's own listing. That is a real live condition —
