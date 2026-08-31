@@ -621,7 +621,31 @@ func (c *Client) Duplicate(typeName, id string) (string, error) {
 // sends no param, so the server applies its own default (published) — that is
 // the CLI/manifest contract; the TUI sets Perspective="drafts" to surface
 // unpublished work.
+//
+// Query DISCARDS the read outcome: a transport error, a 401, a 500 and a
+// genuinely empty type all return the same nil slice. Callers that render the
+// result to a human must use QueryResult instead — "the server refused" and
+// "this type holds nothing" are different facts and a list surface must not
+// spell them the same way.
 func (c *Client) Query(typeName, filter string) []Doc {
+	docs, _ := c.QueryResult(typeName, filter)
+	return docs
+}
+
+// QueryResult is Query that additionally reports WHY the read succeeded or
+// failed, using the same DocReadOutcome vocabulary GetPerspectiveResult
+// established for single-document reads.
+//
+// Same URL, auth, {"result":{"documents":[…]}} envelope-peel and
+// fail-closed-to-nil contract as Query — the only addition is the
+// discriminator, so Query stays behaviour-identical. A non-200 is classified by
+// classifyReadStatus (404 → DocReadNotFound, 401/403 → DocReadForbidden,
+// 5xx → DocReadServerError, anything else → DocReadUnreachable); a transport
+// error or an undecodable body → DocReadUnreachable. A decodable 200 →
+// DocReadOK, even when the page carries zero documents — an honestly empty
+// type IS an OK read, and that is precisely the case a failure must not be
+// confused with.
+func (c *Client) QueryResult(typeName, filter string) ([]Doc, DocReadOutcome) {
 	endpoint := c.scopedURL("/v1/data/query/" + c.Dataset + "/" + url.PathEscape(typeName))
 	params := url.Values{}
 	if filter != "" {
@@ -636,13 +660,13 @@ func (c *Client) Query(typeName, filter string) []Doc {
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {
-		return nil
+		return nil, DocReadUnreachable
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return nil
+		return nil, classifyReadStatus(resp.StatusCode)
 	}
 
 	// The query controller wraps the page in {"result":{"documents":[...]}};
@@ -655,12 +679,12 @@ func (c *Client) Query(typeName, filter string) []Doc {
 		Documents []Doc `json:"documents"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil
+		return nil, DocReadUnreachable
 	}
 	if len(result.Result.Documents) > 0 {
-		return result.Result.Documents
+		return result.Result.Documents, DocReadOK
 	}
-	return result.Documents
+	return result.Documents, DocReadOK
 }
 
 // Search runs the scoped full-text search endpoint
@@ -813,24 +837,80 @@ func (c *Client) GetPerspective(typeName, id, perspective string) (Doc, bool) {
 	return doc, outcome == DocReadOK
 }
 
-// DocReadOutcome classifies WHY a single-document read succeeded or failed, so a
-// caller (e.g. `bp cmux status`) can tell "no such document" (404) apart from
-// "the server is unreachable" (transport error / 5xx / unreadable body) —
-// GetPerspective's plain bool collapses both into false.
+// DocReadOutcome classifies WHY a read succeeded or failed, so a caller (e.g.
+// `bp cmux status`, the TUI's doc-list panes) can tell "no such document" (404)
+// apart from "the server said no" (401/403), "the server broke" (5xx) and "we
+// never reached it" (transport error / unreadable body) — GetPerspective's
+// plain bool collapses all four into false.
+//
+// The constants are APPEND-ONLY: DocReadOK/NotFound/Unreachable keep their
+// original iota values, so `outcome != DocReadOK` and `outcome ==
+// DocReadNotFound` in existing callers are untouched. What changed is that
+// DocReadUnreachable is no longer the catch-all — a 401/403 now lands on
+// DocReadForbidden and a 5xx on DocReadServerError, because telling an operator
+// a flat refusal "may simply be unreachable" sends them to debug the wrong
+// thing. Any `switch` over this type therefore needs a default arm; Failed and
+// Describe give every caller one for free.
 type DocReadOutcome int
 
 const (
 	DocReadOK          DocReadOutcome = iota // 200 with a decodable document
 	DocReadNotFound                          // 404 — the id names no document
-	DocReadUnreachable                       // transport error, non-200/404, or an unreadable/undecodable body
+	DocReadUnreachable                       // transport error, an unreadable/undecodable body, or a non-2xx with no more specific class
+	DocReadForbidden                         // 401/403 — the server answered, and the answer was no
+	DocReadServerError                       // 5xx — the server answered, and it broke
 )
+
+// Failed reports whether the read did not produce a document. It is the one
+// predicate callers should branch "did this work?" on, so a later failure
+// class can never silently read as a success.
+func (o DocReadOutcome) Failed() bool { return o != DocReadOK }
+
+// Describe returns a short lowercase clause naming what happened, for splicing
+// into a one-line status message ("could not check published twin — " +
+// Describe()). It never guesses: an unrecognised value describes itself as a
+// read that did not land rather than inventing a cause.
+func (o DocReadOutcome) Describe() string {
+	switch o {
+	case DocReadOK:
+		return "the read succeeded"
+	case DocReadNotFound:
+		return "no such document"
+	case DocReadForbidden:
+		return "the server refused the read (not signed in, or no access)"
+	case DocReadServerError:
+		return "the server errored on the read"
+	case DocReadUnreachable:
+		return "the server is unreachable, or answered with something unreadable"
+	default:
+		return "the read did not land"
+	}
+}
+
+// classifyReadStatus maps a non-2xx response status to the failure class it
+// belongs to. Every read that reports a DocReadOutcome goes through it, so the
+// surfaces can never disagree about what a 403 is.
+func classifyReadStatus(status int) DocReadOutcome {
+	switch {
+	case status == http.StatusNotFound:
+		return DocReadNotFound
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return DocReadForbidden
+	case status >= 500:
+		return DocReadServerError
+	default:
+		return DocReadUnreachable
+	}
+}
 
 // GetPerspectiveResult is GetPerspective that additionally reports the read
 // outcome. Same URL, auth, {"result":{…}} envelope-peel and fail-closed
 // contract; the only addition is the DocReadOutcome discriminator (every
 // non-OK outcome still maps to GetPerspective's false, so existing callers are
-// behaviour-identical). 404 → DocReadNotFound; a transport error, any other
-// non-200, an oversized body, or an undecodable body → DocReadUnreachable.
+// behaviour-identical). The status→class mapping is classifyReadStatus's:
+// 404 → DocReadNotFound, 401/403 → DocReadForbidden, 5xx → DocReadServerError,
+// any other non-200 → DocReadUnreachable; a transport error, an oversized body
+// or an undecodable body → DocReadUnreachable.
 func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, DocReadOutcome) {
 	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + url.PathEscape(typeName) + "/" + url.PathEscape(id))
 	if perspective != "" {
@@ -845,13 +925,9 @@ func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, Do
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return Doc{}, DocReadNotFound
-	}
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return Doc{}, DocReadUnreachable
+		return Doc{}, classifyReadStatus(resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocBytes+1))

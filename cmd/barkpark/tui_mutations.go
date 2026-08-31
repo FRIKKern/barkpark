@@ -270,16 +270,17 @@ func (m model) performDelete(docID, typeName string) (tea.Model, tea.Cmd) {
 
 // discardTwinStatusMessage maps a non-OK published-twin read to armDiscard's
 // status line. NotFound means there truly is no published twin — today's
-// copy, byte-identical (D's plain delete-outright path applies). Unreachable
-// means the probe itself failed (timeout, transport error, bad body) — it
-// must NOT be reported as "no published twin" (that would assert the twin is
-// absent when we simply don't know, and D would delete the draft outright on
-// a false premise), so it gets a distinct message instead.
+// copy, byte-identical (D's plain delete-outright path applies). Any OTHER
+// failure means the probe itself did not land — it must NOT be reported as
+// "no published twin" (that would assert the twin is absent when we simply
+// don't know, and D would delete the draft outright on a false premise), so
+// it gets a distinct message naming WHICH failure: "network error, try again"
+// was wrong copy for a refusal or a server fault.
 func discardTwinStatusMessage(outcome apiclient.DocReadOutcome) string {
 	if outcome == apiclient.DocReadNotFound {
 		return "no published twin — D deletes the draft outright"
 	}
-	return "could not check published twin — network error, try again"
+	return "could not check published twin — " + outcome.Describe()
 }
 
 // armDiscard arms the R×2 discard confirm for doc — a DRAFT whose published
