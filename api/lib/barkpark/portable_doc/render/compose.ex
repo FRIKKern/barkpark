@@ -2349,6 +2349,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     # to the exact unclassed bytes above.
     case Map.get(b, "variant") do
       "framed" -> Map.put(box, "class", "bp-section--framed")
+      "wide" -> Map.put(box, "class", "bp-section--wide")
       _ -> box
     end
   end
@@ -2451,6 +2452,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # fall to "" — byte-identical to the pre-hook wrapper.
   defp section_frame_class_attr(%{"variant" => "framed"}, :article),
     do: ~s( class="bp-section--framed")
+
+  defp section_frame_class_attr(%{"variant" => "wide"}, :article),
+    do: ~s( class="bp-section--wide")
 
   defp section_frame_class_attr(_b, _style), do: ""
 
@@ -2575,23 +2579,34 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           else: ""
 
       section_style =
-        if layout == "chapters",
-          do:
-            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:1px solid var(--paper-ink, #17332d)",
-          else:
+        case layout do
+          "chapters" ->
+            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:1px solid var(--paper-ink, #17332d)"
+
+          "timeline" ->
+            "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:3px double var(--paper-ink, #17332d)"
+
+          _ ->
             "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+        end
 
       title_style =
-        if layout == "chapters",
+        if layout in ["chapters", "timeline"],
           do:
             "margin:0;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.8rem,4vw,2.65rem);line-height:1.08;letter-spacing:-0.025em;color:var(--paper-ink, #17332d)",
           else: "margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)"
 
       grid_style =
-        if layout == "chapters",
-          do:
-            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)",
-          else: "display:grid;gap:0.85rem"
+        case layout do
+          "chapters" ->
+            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)"
+
+          "timeline" ->
+            "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:0;border-top:1px solid var(--paper-rule, #dde7e2);border-bottom:1px solid var(--paper-rule, #dde7e2)"
+
+          _ ->
+            "display:grid;gap:0.85rem"
+        end
 
       layout_attr = if layout, do: ~s| data-layout="#{Util.escape_attr(layout)}"|, else: ""
 
@@ -2661,6 +2676,24 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       ~s|<strong style="display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
       description <>
       ~s|<span style="display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.7rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(meta)} &nbsp;→</span>| <>
+      ~s(</a>)
+  end
+
+  defp paper_link_card(ref, _style, "timeline") do
+    href = Util.escape_attr("/papers/" <> ref.slug)
+    eyebrow = ref.eyebrow || "Edition"
+    description = paper_link_description(ref.description)
+
+    status =
+      [if(ref.live, do: "Live edition", else: "Edition"), ref.updated_at]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join(" · ")
+
+    ~s|<a data-paper-link-card data-timeline-stop href="#{href}" style="display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none">| <>
+      ~s|<span style="display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.7rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)">#{Util.escape_html(eyebrow)}</span>| <>
+      ~s|<strong style="display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)">#{Util.escape_html(ref.title)}</strong>| <>
+      description <>
+      ~s|<span style="display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.68rem;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(status)} &nbsp;→</span>| <>
       ~s(</a>)
   end
 

@@ -4,10 +4,21 @@
 # kitchen-sink array (render-path unification Wave 1, charter D8).
 #
 # It greps compose.ex's dispatched block types — the `"type" => "X"` clause heads
-# AND the `t in [...]` guard members — subtracts the 14 excluded schema-field/embed
-# types (charter D7), and FAILS if any in-scope type lacks a committed golden
-# fixture. That is the mechanism that keeps the hand-authored array complete: add a
-# new blog-grammar type to compose.ex and forget to seed it here → this reds.
+# AND the `when ... t in [...]` guard members — subtracts the 14 excluded
+# schema-field/embed types (charter D7), and FAILS if any in-scope type lacks a
+# committed golden fixture. That is the mechanism that keeps the hand-authored array
+# complete: add a new blog-grammar type to compose.ex and forget to seed it here →
+# this reds.
+#
+# The guard harvester is anchored on a literal `when ` / `and ` before `t in [` ON
+# PURPOSE. A bare `t in \[` also matches the TAIL of any identifier ending in "t"
+# — `layout in ["chapters", "timeline"]` contains the substring `t in [` — so the
+# unanchored form harvested `paper-links` LAYOUT VARIANTS as if they were block
+# types and demanded golden fixtures for block types that do not exist. Only the
+# block-type dispatch guards bind the variable `t` (`compose_block(%{"type" => t}
+# ...) when t in [...]`), so requiring the `when`/`and` keyword is exact, not lax.
+# Anything genuinely new that this misses still reds via the EXPECTED_COUNT check
+# below, which catches drift in BOTH directions.
 #
 # MUST run under bash (its shebang). Under zsh an unquoted `$var` does NOT
 # word-split, so the loop would iterate once over the whole blob and the coverage
@@ -45,11 +56,12 @@ fi
 # words only. This is the ONE lever a later wave edits to pull the field-* set in.
 EXCLUDED=" field-string field-slug field-text field-boolean field-select field-datetime field-color field-reference field-image field-number composite arrayOf codelist localizedText embed "
 
-# Dispatched types = `"type" => "X"` clause heads ∪ `t in [...]` guard members.
+# Dispatched types = `"type" => "X"` clause heads ∪ `when|and t in [...]` guard
+# members. See the header note on why the guard grep is keyword-anchored.
 DISPATCHED="$(
   {
     grep -oE '"type" => "[a-zA-Z-]+"' "$COMPOSE" | sed -E 's/.*"type" => "//; s/"$//'
-    grep -oE 't in \[[^]]+\]' "$COMPOSE" | grep -oE '"[a-zA-Z-]+"' | tr -d '"'
+    grep -oE '(when|and) t in \[[^]]+\]' "$COMPOSE" | grep -oE '"[a-zA-Z-]+"' | tr -d '"'
   } | sort -u
 )"
 

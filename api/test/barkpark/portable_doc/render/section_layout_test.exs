@@ -169,6 +169,17 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
     assert Render.render_block(b, @article) == @stack_html
   end
 
+  test "a wide section opts only that composition into the evidence band" do
+    section =
+      stack_section()
+      |> Map.put("variant", "wide")
+      |> Map.put("layout", %{"mode" => "grid", "tracks" => 3})
+
+    html = Render.render_block(section, @article)
+    assert html =~ ~s(class="bp-section--wide")
+    assert html =~ ~s(class="bp-section__grid")
+  end
+
   # ═══ STEP-6: per-child span/order emission on the grid cell ════════════════════
   #
   # A grid child MAY carry `span` (positive int → grid-column:span N) and/or `order`
