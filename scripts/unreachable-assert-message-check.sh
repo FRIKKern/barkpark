@@ -22,8 +22,8 @@
 #
 # SEVERITY, STATED HONESTLY: this is DIAGNOSTIC QUALITY, not a correctness hole.
 # Every affected test still FAILS when it should — the MatchError is a real
-# failure and the ExUnit title still names the case. That is precisely why 75 of
-# them survived unnoticed. What is lost is the authored explanation at the
+# failure and the ExUnit title still names the case. That is precisely why every
+# one of them survived unnoticed. What is lost is the authored explanation at the
 # moment a debugger most needs it, and several are multi-line heredocs naming
 # the file to edit. Do not let a reviewer price this as a live bug.
 #
@@ -32,10 +32,23 @@
 # A regex over these files reports ~400 files. `=` appears inside sigils
 # (`~s(property="og:url")`) and inside `==`, and no character-level tightening
 # fixes that reliably. This parses with `Code.string_to_quoted/2` and walks for
-# the node `{:assert, _, [{:=, _, [_, _]}, _message]}` — 75 sites in 45 of 1162
-# files, with ZERO parse failures, so that count is a CENSUS and not a sample.
-# The parse-failure count is PRINTED for exactly that reason: a future reader
-# must be able to tell which of the two they are holding.
+# the node `{:assert, _, [{:=, _, [_, _]}, _message]}`, with ZERO parse
+# failures — so the count is a CENSUS and not a sample. The parse-failure count
+# is PRINTED for exactly that reason: a future reader must be able to tell which
+# of the two they are holding.
+#
+# THE CENSUS IS A SNAPSHOT, SO IT IS PINNED AND RE-DERIVABLE. As of
+# origin/main 676504b3a4 (2026-09-01): 54 sites in 39 of 1212 files. This
+# header previously read "75 sites in 45 of 1162 files" — a figure that had
+# gone stale on all three numbers while reading as current, which is the same
+# defect class this gate exists to catch. Do not trust the line above; re-derive
+# it, and if you are editing this header, re-derive it again:
+#
+#   scripts/unreachable-assert-message-check.sh          # prints sites + files scanned
+#   scripts/unreachable-assert-message-check.sh --list   # every site, file:line
+#
+# The BASELINE, not this comment, is the machine-checked truth: its per-file
+# counts sum to the site total, and the gate compares against it every run.
 #
 # REFUSE, NEVER DEGRADE. A file the parser cannot read is a HARD FAILURE, not a
 # silent skip. A scanner that quietly drops what it cannot understand reports a
