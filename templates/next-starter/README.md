@@ -8,8 +8,11 @@ long-lived **Node SSR process** on the node-slot runtime target. It is the
 container analog of `templates/astro-starter` — where Astro emits static HTML,
 this emits a running PROCESS with a port + lifecycle.
 
-`@barkpark/core` is framework-free; the Next-native content link is
-`@barkpark/nextjs`. The whole link is one small server-only module,
+`@barkpark/core` is framework-free and **is** the content link here — read
+directly via this module's `createBpClient`, no Next-native wrapper. (An
+earlier version routed reads through `@barkpark/nextjs`'s
+`createBarkparkServer`; see the token gotcha below for why that path was
+abandoned.) The whole link is one small server-only module,
 `src/lib/barkpark.ts`.
 
 ## Two runtime targets, one deploy engine
@@ -32,9 +35,9 @@ The single page (`src/app/page.tsx`) is `export const dynamic = 'force-dynamic'`
 so on **every request** the running node slot:
 
 1. resolves the [env contract](#env-contract) (same names as every adapter),
-2. builds a fresh `@barkpark/core` client + a `createBarkparkServer` content
-   link (no `createPreloader` — that helper bleeds request state across module
-   scope),
+2. builds a fresh `@barkpark/core` client via `createBpClient` — token-authed,
+   carrying `BARKPARK_TOKEN` straight in the Authorization header (no
+   `createPreloader` — that helper bleeds request state across module scope),
 3. fetches one document (newest published `BARKPARK_DOC_TYPE`, default `paper`),
 4. renders five deploy markers into `<head>` (React 19 hoists the `<meta>`
    tags) so the deploy engine can assert **content-truth** before flipping the
@@ -97,10 +100,16 @@ adapter (Astro / Next / Nuxt / …).
 - **`NEXT_PUBLIC_` leaks.** Next inlines any `NEXT_PUBLIC_`-prefixed var into the
   client bundle. Never name a token that way. `src/lib/barkpark.ts` reads
   `BARKPARK_TOKEN` only in server code (guarded by `import 'server-only'`).
-- **Published reads are anonymous.** `@barkpark/nextjs`'s published fetch does
-  not send the read token (it is used only on the draft-preview branch), so this
-  starter reads anonymously-published content. A dataset whose published docs are
-  not publicly readable fails closed at HEALTH.
+- **`@barkpark/nextjs` is NOT the content link here — that path caused a real
+  incident.** An earlier version read through `@barkpark/nextjs`'s
+  `createBarkparkServer`/`barkparkFetch`, which puts the read token in
+  `serverToken` — the draft-preview slot — so the *published* content query
+  went out ANONYMOUS. On a token-required dataset that answered 403, 500ing
+  every SSR request (see Fail-closed, above). `createBpClient` fixes this by
+  calling `@barkpark/core`'s `createClient` directly, carrying `BARKPARK_TOKEN`
+  in the Authorization header — published reads are authenticated end-to-end,
+  and a dataset whose published docs genuinely aren't publicly readable still
+  fails closed at HEALTH like any other auth error.
 
 ## Serving under a path
 
