@@ -671,11 +671,15 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{439, 439}],
+      basis_spans: [{483, 483}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
-      basis: "inline comment :439 — \"Always 200 — never reveal whether the email is registered.\"",
+      basis:
+        "inline comment :483 — \"Always 200 — never reveal whether the email is registered.\" " <>
+          "RE-ANCHORED off :439 on the self-service-PAT-mint lane (PR #14245): that PR inserts " <>
+          "the PAT workspace-binding code above this def, pushing every line below down by 44 — " <>
+          "the span slid, the comment did not move relative to the def.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -684,22 +688,23 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{454, 459}],
+      basis_spans: [{498, 503}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis:
-        "@doc :454-459, the anti-enumeration sentence at :455-458 (the token `anti-enumeration` on :457). " <>
+        "@doc :498-503, the anti-enumeration sentence at :499-502 (the token `anti-enumeration` on :501). " <>
           "RE-ANCHORED off #{448} on the withheld-census-baseline lane (api-controller-silent-withholds/" <>
           "trace-skipped-notifications, PR #13902): that PR inserts a NotificationWithhold.record/2 " <>
           "else-branch above request_reset/2's json/2 call, pushing every line below down by 6 — the " <>
-          "span slid, the sentence did not move relative to the def.",
+          "span slid, the sentence did not move relative to the def. RE-ANCHORED again off :454-459 " <>
+          "on the self-service-PAT-mint lane (PR #14245): +44 lines inserted above the span.",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
           "line — no anti-enumeration text in it; PDS-D453b cites :410-417, which is pure code. " <>
-          "Both are phantom bases. This row SUPPRESSES NOTHING — the site's ok:true sits at :479, " <>
-          "after the case closes at :477, so no clause contains it and no shipping configuration " <>
+          "Both are phantom bases. This row SUPPRESSES NOTHING — the site's ok:true sits at :523, " <>
+          "after the case closes at :521, so no clause contains it and no shipping configuration " <>
           "of the arm can fire on it. It is registered as documentation of a control the lens " <>
           "wrongly accused for two waves."
     },
