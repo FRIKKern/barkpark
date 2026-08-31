@@ -9,6 +9,8 @@ defmodule BarkparkWeb.SessionController do
   """
   use BarkparkWeb, :controller
 
+  alias Barkpark.Accounts.NotificationWithhold
+
   @default_return_to "/studio"
 
   def new(conn, params) do
@@ -215,15 +217,25 @@ defmodule BarkparkWeb.SessionController do
   end
 
   def magic_request(conn, %{"email" => email}) when is_binary(email) do
-    case Barkpark.Accounts.build_login_token(String.trim(email)) do
+    trimmed = String.trim(email)
+
+    # Browser twin of AuthController.request_magic_link/2 — same three shapes,
+    # same refusal to collapse a consented skip into a swallowed failure.
+    case Barkpark.Accounts.build_login_token(trimmed) do
       {:ok, token, user} ->
         Barkpark.Accounts.UserNotifier.deliver_magic_link(
           user.email,
           BarkparkWeb.Endpoint.url() <> "/auth/magic/" <> token
         )
 
-      _ ->
-        :ok
+      :no_user ->
+        NotificationWithhold.record("magic_link", :no_recipient_by_construction)
+
+      {:error, changeset} ->
+        NotificationWithhold.record("magic_link", :dispatch_crashed,
+          user_id: Ecto.Changeset.get_field(changeset, :user_id),
+          detail: "token_mint_failed"
+        )
     end
 
     render(conn, :magic_request, page_title: "Sign-in link", sent: true)
@@ -275,6 +287,8 @@ defmodule BarkparkWeb.SessionController do
         user.email,
         BarkparkWeb.Endpoint.url() <> "/auth/reset/" <> token
       )
+    else
+      NotificationWithhold.record("reset", :no_recipient_by_construction)
     end
 
     render(conn, :reset_request, page_title: "Reset password", sent: true)

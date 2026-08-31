@@ -684,18 +684,22 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{448, 453}],
+      basis_spans: [{454, 459}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis:
-        "@doc :448-453, the anti-enumeration sentence at :449-452 (the token `anti-enumeration` on :451)",
+        "@doc :454-459, the anti-enumeration sentence at :455-458 (the token `anti-enumeration` on :457). " <>
+          "RE-ANCHORED off #{448} on the withheld-census-baseline lane (api-controller-silent-withholds/" <>
+          "trace-skipped-notifications, PR #13902): that PR inserts a NotificationWithhold.record/2 " <>
+          "else-branch above request_reset/2's json/2 call, pushing every line below down by 6 — the " <>
+          "span slid, the sentence did not move relative to the def.",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
           "line — no anti-enumeration text in it; PDS-D453b cites :410-417, which is pure code. " <>
-          "Both are phantom bases. This row SUPPRESSES NOTHING — the site's ok:true sits at :463, " <>
-          "after the case closes at :461, so no clause contains it and no shipping configuration " <>
+          "Both are phantom bases. This row SUPPRESSES NOTHING — the site's ok:true sits at :479, " <>
+          "after the case closes at :477, so no clause contains it and no shipping configuration " <>
           "of the arm can fire on it. It is registered as documentation of a control the lens " <>
           "wrongly accused for two waves."
     },
