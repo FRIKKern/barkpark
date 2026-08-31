@@ -58,6 +58,85 @@ describe('buildCspPolicy — security floor', () => {
   })
 })
 
+// The block above pins the floor of the DEFAULT policy — which is exactly what
+// it could not tell you about the floor's actual claim. `ExtendableDirective`
+// says everything outside its union "cannot be reached from options", and no
+// test ever TRIED to reach one, so the door was counted at full strength while
+// never being pushed. It opened: `buildCspPolicy` read `extra[name]` for every
+// base directive, floor included, and the option type does not close it either
+// — `Partial<Record<ExtendableDirective, …>>` accepts a variable of type
+// `Record<string, readonly string[]>` (excess-property checking only fires on a
+// fresh literal), and the package ships CJS/ESM for plain JS besides.
+describe('buildCspPolicy — the floor is unreachable FROM OPTIONS, not just by default', () => {
+  // Typed as the untyped map a consumer assembles from config: assignable to
+  // `CspOptions['additional']` with no compiler error, which is the point.
+  const widen = (name: string, sources: readonly string[]) =>
+    buildCspPolicy('N', {
+      additional: { [name]: sources } as Record<string, readonly string[]>,
+    })
+
+  for (const floor of [
+    'default-src',
+    'object-src',
+    'base-uri',
+    'frame-ancestors',
+    'form-action',
+  ]) {
+    it(`refuses to widen ${floor} through additional`, () => {
+      expect(() => widen(floor, ['*'])).toThrow(/fixed security floor/)
+    })
+  }
+
+  it('names the extendable set in the refusal, so the caller knows where to go', () => {
+    expect(() => widen('object-src', ['*'])).toThrow(/img-src/)
+  })
+
+  it('an unknown directive name is refused too, not silently appended', () => {
+    // The base policy never names it, so the old fall-through would have
+    // EMITTED `child-src 'self' https://evil.example` — a directive the caller
+    // never had permission to introduce.
+    expect(() => widen('child-src', ['https://evil.example'])).toThrow(
+      /fixed security floor/,
+    )
+  })
+
+  it('the refusal fires before any directive is built (no partial policy escapes)', () => {
+    // A floor key alongside a legitimate one must still throw — the guard runs
+    // over the whole map up front, not per-directive as they are assembled.
+    expect(() =>
+      buildCspPolicy('N', {
+        additional: { 'img-src': ['https:'], 'object-src': ['*'] } as Record<
+          string,
+          readonly string[]
+        >,
+      }),
+    ).toThrow(/object-src/)
+  })
+
+  it('every extendable directive is still accepted', () => {
+    for (const ok of [
+      'script-src',
+      'style-src',
+      'img-src',
+      'font-src',
+      'connect-src',
+      'frame-src',
+      'media-src',
+      'worker-src',
+    ]) {
+      expect(() => widen(ok, ['https://cdn.example.com'])).not.toThrow()
+    }
+  })
+
+  it('createCspMiddleware inherits the guard (options pass straight through)', () => {
+    expect(() =>
+      createCspMiddleware({
+        additional: { 'frame-ancestors': ['*'] } as Record<string, readonly string[]>,
+      })({ headers: new Headers() } as never),
+    ).toThrow(/fixed security floor/)
+  })
+})
+
 describe('buildCspPolicy — the variance the five forks encoded by hand', () => {
   it("website-starter's hosted hero images: img-src widens, nothing else moves", () => {
     const base = parse(buildCspPolicy('N'))
