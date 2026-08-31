@@ -23,11 +23,34 @@ defmodule Barkpark.Content.RelatedTest do
   use Barkpark.DataCase, async: true
 
   alias Barkpark.Content
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{CallerContext, Document}
   alias Barkpark.Content.Related
   alias Barkpark.Repo
 
   @ds "related-test"
+
+  # `tag_candidates/4`'s schema-visibility clamp (task-b69106868a235768) reads
+  # `Schema.public_type_names/2`, which allowlists by REGISTERED schema, not by
+  # absence. Every doc in this suite is `type: "post"` (insert_doc!'s default),
+  # so register it here, explicit-public, exactly like `query_test.exs` /
+  # `owner_scoped_test.exs` do for their own datasets — this keeps every
+  # existing test byte-identical (the default schema visibility is already
+  # "public"; see `schema_definition.ex:11`) while giving the new
+  # private-type tests in "the schema-visibility clamp" describe block below a
+  # real contrast.
+  setup do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "fields" => [%{"name" => "body", "type" => "text"}]
+        },
+        @ds
+      )
+
+    :ok
+  end
 
   defp unique_id(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 
@@ -62,6 +85,16 @@ defmodule Barkpark.Content.RelatedTest do
 
     :ok
   end
+
+  # A caller `Schema.bypasses_visibility_gate?/1` accepts: an authenticated,
+  # non-public-read principal (mirrors `CallerContext.from_conn/1`'s resolution
+  # for any real bearer token — the Studio/authoring tier).
+  defp bypassing_ctx,
+    do:
+      CallerContext.from_token(%{
+        id: "tok-rw-#{System.unique_integer([:positive])}",
+        permissions: ["read"]
+      })
 
   describe "tag leg (D69 scoring law)" do
     test "credits LEAST(src, cand)/100 per shared name and carries the shared_tags detail" do
@@ -202,6 +235,22 @@ defmodule Barkpark.Content.RelatedTest do
       ws_a = Barkpark.TenancyFixtures.create_workspace!()
       ws_b = Barkpark.TenancyFixtures.create_workspace!()
 
+      # `Schema.public_type_names/2`'s workspace-scoped read is FAIL-CLOSED,
+      # workspace-only (`scope_to_workspace_or_global/3` -> `scope_to_workspace/3`
+      # once a non-nil `workspace_id` is given — it does NOT also admit the
+      # top-level `setup` block's globally-registered "post" schema). A
+      # workspace-scoped caller needs its OWN catalog entry.
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "fields" => [%{"name" => "body", "type" => "text"}]
+          },
+          @ds,
+          workspace_id: ws_a.id
+        )
+
       src = unique_id("src")
       mine = unique_id("mine")
       theirs = unique_id("theirs")
@@ -295,6 +344,62 @@ defmodule Barkpark.Content.RelatedTest do
       Content.add_edges([%{from_id: src, to_id: src, kind: "embeds"}], dataset: @ds)
 
       assert Related.related_documents(src, @ds) == []
+    end
+  end
+
+  describe "the schema-visibility clamp (task-b69106868a235768)" do
+    setup do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "vault",
+            "title" => "Vault",
+            "visibility" => "private",
+            "fields" => [%{"name" => "body", "type" => "text"}]
+          },
+          @ds
+        )
+
+      :ok
+    end
+
+    # REGRESSION (REDS without the fix — mutation-proven): a private-visibility
+    # type sharing tags with the source must not surface id, type, OR title
+    # through the tag leg, for either call shape a real caller uses — the
+    # default (no `caller_context` at all, the shape every other test in this
+    # file uses) and an explicit `CallerContext.anonymous()`. Both land in
+    # `Schema.bypasses_visibility_gate?/1`'s narrow arm.
+    test "a private-type candidate sharing tags with the source is withheld from a non-bypassing caller" do
+      src = unique_id("src")
+      leak = unique_id("leak")
+      insert_doc!(src, "Source", weighted([{"elixir", 80}]))
+      insert_doc!(leak, "Private Leak", weighted([{"elixir", 30}]), type: "vault")
+
+      default_hits = Related.related_documents(src, @ds)
+
+      refute Enum.any?(default_hits, &(&1.doc_id == leak)),
+             "private-type doc leaked id+type+title via the default call shape: #{inspect(default_hits)}"
+
+      anon_hits = Related.related_documents(src, @ds, caller_context: CallerContext.anonymous())
+
+      refute Enum.any?(anon_hits, &(&1.doc_id == leak)),
+             "private-type doc leaked id+type+title to an explicit anonymous caller: #{inspect(anon_hits)}"
+    end
+
+    # CONTROL: the clamp is not over-broad. A caller `bypasses_visibility_gate?/1`
+    # accepts (the Studio/authoring tier — any real non-public-read token) still
+    # gets the private-type related row, proving the fix gates on TIER, not on
+    # schema visibility alone.
+    test "CONTROL: a bypassing caller_context still receives the private-type related row" do
+      src = unique_id("src")
+      visible = unique_id("visible")
+      insert_doc!(src, "Source", weighted([{"elixir", 80}]))
+      insert_doc!(visible, "Private But Authored", weighted([{"elixir", 30}]), type: "vault")
+
+      assert [entry] = Related.related_documents(src, @ds, caller_context: bypassing_ctx())
+      assert entry.doc_id == visible
+      assert entry.type == "vault"
+      assert entry.title == "Private But Authored"
     end
   end
 end
