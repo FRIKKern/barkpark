@@ -120,5 +120,10 @@ defmodule Barkpark.ApiTester.RunnerBuildTest do
 
       assert result.verdict == :pass
     end
+
+    test "verdict_badge_class(:unverified) stays its own distinct class, never the failure-coloured catch-all" do
+      assert BarkparkWeb.Studio.ApiTesterLive.Format.verdict_badge_class(:unverified) ==
+               "badge-verdict-unverified"
+    end
   end
 end
