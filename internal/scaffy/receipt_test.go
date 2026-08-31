@@ -149,6 +149,106 @@ func TestReceiptKeyedPerCommandAndVars(t *testing.T) {
 	}
 }
 
+// TestWriteReceiptTempRenameLeavesPreviousIntact — D35's temp-file-
+// plus-rename discipline for writeReceipt: a failed staged write (a
+// read-only receipts directory) leaves the PREVIOUS receipt's bytes
+// untouched and stages no orphaned temp file, rather than truncating
+// it the way a single os.WriteFile(O_TRUNC) would.
+func TestWriteReceiptTempRenameLeavesPreviousIntact(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory is still writable, so this arm cannot be exercised")
+	}
+	root := t.TempDir()
+	src, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd, findings := Parse(fixturePath, src)
+	if len(findings) > 0 {
+		t.Fatalf("parse: %v", findings)
+	}
+	vars := widgetVars("Timeline", "20260716100000", "42", "43")
+	opts := RunOptions{CommandPath: fixturePath, Vars: vars, RepoRoot: root}
+
+	firstOps := []ReceiptOp{{Kind: "create", Path: "internal/widgets/timeline.go", PostImage: []byte("v1"), PostSHA256: sha256Hex([]byte("v1"))}}
+	path, err := writeReceipt(opts, cmd, src, firstOps, nil)
+	if err != nil {
+		t.Fatalf("first writeReceipt: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	receiptsDir := filepath.Dir(path)
+	if err := os.Chmod(receiptsDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(receiptsDir, 0o755) })
+
+	// Probe: confirm this sandbox actually enforces the permission
+	// before trusting a pass born from a lock nobody honors.
+	if probe, perr := os.CreateTemp(receiptsDir, "probe-*"); perr == nil {
+		probe.Close()
+		os.Remove(probe.Name())
+		t.Skip("this sandbox does not enforce directory write permissions; the permission arm is unreachable here")
+	}
+
+	secondOps := []ReceiptOp{{Kind: "create", Path: "internal/widgets/timeline.go", PostImage: []byte("v2-should-never-land"), PostSHA256: sha256Hex([]byte("v2-should-never-land"))}}
+	if _, err := writeReceipt(opts, cmd, src, secondOps, nil); err == nil {
+		t.Fatal("want an error writing the receipt into a read-only directory, got nil")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("previous receipt unreadable after the failed write: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("previous receipt corrupted by a failed write:\nbefore %q\nafter  %q", before, after)
+	}
+
+	entries, err := os.ReadDir(receiptsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), "scaffy-tmp") {
+			t.Fatalf("temp receipt file left behind: %s", e.Name())
+		}
+	}
+}
+
+// TestReadReceiptTornGivesActionableMessage — a torn/undecodable
+// receipt must not brick `bp scaffy remove` with a bare JSON error: the
+// message names the receipt path and points at the command that
+// regenerates it.
+func TestReadReceiptTornGivesActionableMessage(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, ".scaffy", "receipts")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "widget--timeline--abc123456789.json")
+	if err := os.WriteFile(path, []byte(`{"receipt_version":1,"ops":[`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := ReadReceipt(path)
+	if err == nil {
+		t.Fatal("want an error reading a torn receipt, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, path) {
+		t.Fatalf("error must name the receipt path: %v", err)
+	}
+	if !strings.Contains(msg, "bp scaffy run") {
+		t.Fatalf("error must name the command that regenerates it: %v", err)
+	}
+	if !strings.Contains(msg, "widget") {
+		t.Fatalf("error must hint at the concept from the receipt filename: %v", err)
+	}
+}
+
 func TestKebabize(t *testing.T) {
 	for in, want := range map[string]string{
 		"widget":       "widget",
