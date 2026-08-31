@@ -746,15 +746,41 @@ func reanchorSplice(cmd *Command, sub *substituter, tr *tree, o *InOp, res *OpRe
 	// K from the UNSUBSTITUTED template: mark-comment line through the
 	// payload's last line. Substitution is line-count-invariant (D33a),
 	// so no prior-run vars and no receipt continuity are needed.
+	//
+	// The line is found by the op's OWN DECLARED mark, never by the bare
+	// token "MARK:". The op declares the fact structurally — Mark.Name —
+	// and E-008 (RuleUnplantedMark) guarantees the payload writes
+	// "MARK:"+Mark.Name verbatim, because Run pre-gates on ValidateFile
+	// and refuses on ANY finding. A bare "MARK:" scan is a WIDER match
+	// than the one that finds `last` in the file below (which is already
+	// family-scoped to needle = "MARK:"+REANCHOR prefix), and that
+	// asymmetry is a silent corruptor: a payload that mentions the token
+	// on an EARLIER line — a re-emitted anchor line already carrying a
+	// sibling's planted mark, a docs payload documenting the convention,
+	// generated code with a MARK: string constant — resolves markIdx to
+	// that line, so K comes out too large, the separator comma is edited
+	// onto a line PAST the family block and the whole template (its
+	// re-emitted anchor line included) is spliced in there. Whenever the
+	// over-shot tail line happens to close on the template's own closing
+	// byte the D33 tail-shape assertion below passes and the damage is
+	// written with no error at all.
+	//
+	// Fallback for a VIRTUAL mark (plants no bytes) or an op with no MARK
+	// at all: the family needle. Still never the bare token.
+	markNeedle := needle
+	if o.Mark != nil && !o.Mark.Virtual && o.Mark.Name != "" {
+		markNeedle = "MARK:" + o.Mark.Name
+	}
 	markIdx := -1
 	for i, ln := range tpl.Lines {
-		if strings.Contains(ln, "MARK:") {
+		if strings.Contains(ln, markNeedle) {
 			markIdx = i
 			break
 		}
 	}
 	if markIdx < 0 {
-		return nil, nil, applyErrorf(srcFile, o.Pos.Line, "REANCHOR requires the payload to plant its MARK comment line")
+		return nil, nil, applyErrorf(srcFile, o.Pos.Line,
+			"REANCHOR requires the payload to plant its MARK comment line — no template line carries %q", markNeedle)
 	}
 	k := len(tpl.Lines) - markIdx
 
