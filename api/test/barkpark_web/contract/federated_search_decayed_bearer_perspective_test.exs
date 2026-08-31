@@ -19,20 +19,33 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
   anonymous and still silently pinned to `:published` by
   `BarkparkWeb.AnonPerspective`.
 
-  THE SIGNAL ASYMMETRY IS THE FINDING, stated precisely rather than maximally.
+  THE SIGNAL ASYMMETRY WAS THE FINDING, stated precisely rather than maximally.
   `QueryController` echoes the perspective it ACTUALLY used at
-  `result.perspective`, so a caller on `/v1/data/query` can detect the
+  `result.perspective`, so a caller on `/v1/data/query` could detect the
   downgrade from the response envelope alone.
-  `FederatedSearchController`'s body is
+  `FederatedSearchController`'s body was
   `%{query, surfaces, results, searchEventId, ms}` — no perspective key at any
-  level. Same downgrade, same instant, one route tells you and the other does
+  level. Same downgrade, same instant, one route told you and the other did
   not.
 
+  FIXED, and this file is now the regression pin. The federated envelope
+  carries a root-level `perspective` echo using the SAME key name and the same
+  `to_string/1` shape `QueryController` already uses, so the two read surfaces
+  agree rather than this route inventing a third convention. SIGNAL ONLY — the
+  clamp is untouched, still silent, and still fails closed, which the sibling
+  tests here keep pinned. The echo is DYNAMIC, not a constant `"published"`:
+  the honoured-perspective cell is pinned below precisely so a hardcoded
+  literal could not satisfy this file.
+
   HONEST QUALIFIER, pinned below so nobody reads this file as claiming more
-  than it proves: the federated hits DO carry a per-row `_draft` boolean, so a
-  caller that inspects every row can infer the downgrade — but only while the
-  result set is NON-EMPTY. An empty page carries no indicator whatsoever, and
-  there is no envelope-level echo to assert on. That is the gap.
+  than it proves: the federated hits ALREADY carried a per-row `_draft`
+  boolean, so a caller that inspects every row could always infer the
+  downgrade — but only while the result set is NON-EMPTY. That is exactly why
+  the row flag was never a substitute for an envelope echo: an empty page
+  carries no row-level indicator whatsoever, so an instrument could not
+  distinguish "no drafts matched" from "drafts were never searched". The
+  envelope echo is what closes that hole, and the zero-row case is pinned below
+  to prove it.
 
   TWO POPULATIONS, and the second is the durable one:
 
@@ -151,7 +164,9 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       refute "drafts.fsd-draft" in ids(body)
     end
 
-    test "RED: no envelope-level signal that the drafts request was downgraded", %{conn: conn} do
+    test "DECAYED half: the envelope signals that the drafts request was downgraded", %{
+      conn: conn
+    } do
       body = conn |> bearer(@garbage) |> federated_body(@drafts_url)
 
       assert Map.has_key?(body, "perspective"),
@@ -159,7 +174,15 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
                "PUBLISHED corpus, but the body carries no perspective key to say so. " <>
                "Body keys: #{inspect(Enum.sort(Map.keys(body)))}"
 
+      # Not merely "the key exists": it must carry the perspective ACTUALLY
+      # used, so a caller that requested drafts reads back `published` and
+      # knows it was clamped.
       assert body["perspective"] == "published"
+
+      # And the clamp itself must be UNMOVED. A green that came from the route
+      # suddenly SERVING drafts would be a false green — the fix is a signal
+      # addition, never a posture change.
+      assert ids(body) == ["fsd-pub"]
     end
 
     test "QUALIFIER: a per-row _draft flag is the ONLY indicator, and it needs a non-empty page",
@@ -170,14 +193,26 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       # read as "no information of any kind reaches the caller".
       assert Enum.all?(hits(body), &(&1["_draft"] == false))
 
-      # And this is why it is not a substitute for an envelope echo: the
-      # indicator lives on rows, so a zero-row answer carries nothing at all.
+      # And this is why the row flag was never a substitute for an envelope
+      # echo: the indicator lives on ROWS, so a zero-row answer carries no
+      # row-level indicator at all. That reasoning is UNCHANGED by the fix —
+      # what changed is that the ENVELOPE now answers where the rows cannot,
+      # which is the entire justification for adding it.
       empty = conn |> bearer(@garbage) |> federated_body(
                 "/v1/search/#{@dataset}?q=zzznomatchzzz&surfaces=documents&perspective=drafts"
               )
 
-      assert hits(empty) == []
-      refute Map.has_key?(empty, "perspective")
+      assert hits(empty) == [],
+             "zero-row precondition broken; got #{inspect(ids(empty))}"
+
+      # The row-level channel is silent here, by construction — nothing to read.
+      assert Enum.flat_map(hits(empty), &Map.take(&1, ["_draft"])) == []
+
+      # The envelope-level channel is NOT silent, and it is now the only reason
+      # a caller can tell "drafts were never searched" from "no drafts matched".
+      assert empty["perspective"] == "published",
+             "a zero-row page must still state the perspective it searched; " <>
+               "body keys: #{inspect(Enum.sort(Map.keys(empty)))}"
     end
 
     test "a VALID public-read token is clamped here too — and 200s where the flat route 403s",
@@ -194,15 +229,16 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
       refute "drafts.fsd-draft" in ids(body)
     end
 
-    test "RED (valid credential): no envelope signal for a token that VERIFIES", %{
+    test "DURABLE half: the envelope signals the clamp for a token that VERIFIES", %{
       conn: conn,
       pubread: pubread
     } do
       # THE DURABLE HALF OF THIS PIN. `Auth.verify_token/1` succeeds for this
       # caller, so no strict-on-presented bearer gate can reach it — not the
       # one on `:api_grant_read`, and not any future one. If the garbage-bearer
-      # case above ever starts 401ing, THIS case still holds and the defect is
-      # still live.
+      # case above ever starts 401ing, THIS case still holds; it is the reason
+      # only an envelope echo could close this, and no authentication change
+      # ever could.
       body = conn |> bearer(pubread) |> federated_body(@drafts_url)
 
       assert Map.has_key?(body, "perspective"),
@@ -211,6 +247,36 @@ defmodule BarkparkWeb.Contract.FederatedSearchDecayedBearerPerspectiveTest do
                "Body keys: #{inspect(Enum.sort(Map.keys(body)))}"
 
       assert body["perspective"] == "published"
+
+      # Posture unmoved for this population too.
+      assert ids(body) == ["fsd-pub"]
+    end
+
+    # THE MISSING CELL. Every assertion above is on the DOWNGRADED side, and a
+    # hardcoded `perspective: "published"` literal would satisfy all of them —
+    # a reviewer could not tell the echo is dynamic. This pins the LOSING side
+    # of the same claim: when the requested perspective is HONOURED, the echo
+    # must say `drafts`, and the rows must agree with what it says.
+    test "the echo is DYNAMIC: an honoured drafts request echoes drafts, not published", %{
+      conn: conn,
+      admin: admin
+    } do
+      body = conn |> bearer(admin) |> federated_body(@drafts_url)
+
+      assert body["perspective"] == "drafts",
+             "the echo must report the perspective ACTUALLY used, not a constant. " <>
+               "Got #{inspect(body["perspective"])}"
+
+      # The echo and the corpus must not disagree: it said drafts, so the draft
+      # row must be there. An echo that can say `drafts` while serving the
+      # published corpus would be a worse lie than saying nothing at all.
+      assert "drafts.fsd-draft" in ids(body)
+
+      # Two DIFFERENT values from the same route, same query, same instant —
+      # only the credential differs. That is what makes it an echo.
+      clamped = conn |> bearer(@garbage) |> federated_body(@drafts_url)
+      assert clamped["perspective"] == "published"
+      refute clamped["perspective"] == body["perspective"]
     end
 
     test "CONTRAST: the same VALID public-read token is refused LOUDLY on the flat route", %{

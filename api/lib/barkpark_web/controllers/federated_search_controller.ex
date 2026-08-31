@@ -78,6 +78,19 @@ defmodule BarkparkWeb.FederatedSearchController do
     json(conn, %{
       query: q,
       surfaces: surfaces,
+      # The perspective ACTUALLY used, echoed at the root exactly as
+      # `QueryController` echoes it at `result.perspective` — same key name,
+      # same `to_string/1` shape — so the two read surfaces agree instead of
+      # this route inventing a third convention. Load-bearing because
+      # `AnonPerspective.resolve/2` SILENTLY clamps an anonymous caller's
+      # `?perspective=drafts` down to `:published`, and a decayed/unverifiable
+      # bearer is an anonymous caller here (bare `:api` carries neither
+      # `strict_on_presented` nor `Plugs.PublicRead`). Without this key the
+      # only trace of the downgrade is the per-row `_draft` flag, which a
+      # ZERO-ROW page does not carry — so a caller could not distinguish "no
+      # drafts matched" from "drafts were never searched". SIGNAL ONLY: the
+      # clamp is unchanged and still fails closed.
+      perspective: to_string(perspective),
       results:
         Map.new(results, fn r ->
           {r.surface, surface_payload(r, CallerContext.from_conn(conn), params["view"])}
