@@ -182,21 +182,39 @@ async function decodeErrorAndThrow(
       ? (envelope['details'] as Record<string, unknown>)
       : undefined
 
-  // `hint` + `serverCode` live on `base`, which is spread into every error's
-  // options below, so the server's fix-suggestion AND its machine-readable code
-  // reach every thrown error class. serverCode is what lets a caller distinguish
-  // e.g. `mfa_required` from `invalid_credentials` (both BarkparkAuthError) —
-  // `code` stays the class name for the cross-bundle instanceof fallback.
+  // The envelope's top-level `reason` — a sub-code sibling to `code`/`message`
+  // inside the canonical `error` object (api/lib/barkpark/content/errors.ex
+  // `build/1`, e.g. `forbidden_membership`'s `reason: "not_a_member"`,
+  // `:replay`'s `reason: "replay"`). Distinct from `bareReason` above, which is
+  // the PRE-canonical bare-string-`error` shape's sibling `reason` used only as
+  // a message fallback — this one rides the canonical object envelope through
+  // to the thrown error unchanged.
+  const reason = envelope ? strOrUndefined(envelope['reason']) : undefined
+
+  // `hint` + `serverCode` + `details` + `reason` live on `base`, which is spread
+  // into every error's options below, so the server's fix-suggestion, its
+  // machine-readable code, its structured details, and its reason sub-code all
+  // reach EVERY thrown error class — previously only the 429/412/422 branches
+  // picked individual fields out of `details`, so the 401/403/409/404 branches
+  // (e.g. `duplicate_task`'s `details.similar`, `forbidden_membership`'s
+  // `reason`, `schema_has_documents`'s `details.count`) silently dropped them.
+  // serverCode is what lets a caller distinguish e.g. `mfa_required` from
+  // `invalid_credentials` (both BarkparkAuthError) — `code` stays the class
+  // name for the cross-bundle instanceof fallback.
   const base: {
     url: string
     status: number
     requestId?: string
     hint?: string
     serverCode?: string
+    details?: Record<string, unknown>
+    reason?: string
   } = { url, status }
   if (requestId !== undefined) base.requestId = requestId
   if (hint !== undefined) base.hint = hint
   if (code !== undefined) base.serverCode = code
+  if (details !== undefined) base.details = details
+  if (reason !== undefined) base.reason = reason
 
   // 401 / 403 auth-class. BarkparkAuthError is documented as "401/403 or token
   // invalid" — a 403 (token lacks permission, CORS/CSRF rejection) is the same
@@ -264,7 +282,7 @@ async function decodeErrorAndThrow(
 
   // 422 / validation_failed — Phoenix `details` is field→[msg] map per w6.3
   if (status === 422 || code === 'validation_failed') {
-    const opts: typeof base & { issues?: unknown[]; field?: string; reason?: string } = { ...base }
+    const opts: typeof base & { issues?: unknown[]; field?: string } = { ...base }
     if (details !== undefined) {
       const issues: unknown[] = []
       for (const [field, msgs] of Object.entries(details)) {
