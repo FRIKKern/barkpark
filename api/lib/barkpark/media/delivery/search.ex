@@ -232,7 +232,7 @@ defmodule Barkpark.Media.Delivery.Search do
   # — never creates a dataset on a search path. Returns nil when unresolvable,
   # so the caller keeps the legacy `m.dataset` STRING filter.
   defp resolve_dataset_id(dataset, opts) when is_binary(dataset) do
-    project_id = Keyword.get(opts, :project_id) || default_project_id()
+    project_id = Barkpark.Tenancy.scope_project_id(opts)
 
     case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
       %Barkpark.Tenancy.Dataset{id: id} -> id
@@ -241,13 +241,6 @@ defmodule Barkpark.Media.Delivery.Search do
   end
 
   defp resolve_dataset_id(_dataset, _opts), do: nil
-
-  defp default_project_id do
-    case Barkpark.Tenancy.get_default_project() do
-      %{id: id} -> id
-      _ -> nil
-    end
-  end
 
   defp scope_media_to_dataset(query, _dataset, dataset_id) when is_binary(dataset_id) do
     where(query, [m], m.dataset_id == ^dataset_id)
