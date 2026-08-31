@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Listing } from "@/lib/listings-data";
 import type { GraphMatch } from "@/lib/hovered-doc-context";
 import { canvas } from "@/lib/tokens.gen";
+import { safeHref } from "@/lib/safe-href";
 import {
   TILE_SUBDOMAINS,
   tileUrlTemplate,
@@ -14,6 +15,18 @@ import {
 /** Compose an alpha variant of an emitted `hsl(H S% L%)` token for Canvas2D
  *  (`hsl(H S% L% / a)`), so no fixed rgba/hex literal lives in this file. */
 const withAlpha = (c: string, a: number) => c.replace(")", ` / ${a})`);
+
+/**
+ * The pin popover's "Website ↗" target. `l.url` is CMS-authored listing
+ * content, so it is caller-controlled and reaches an `<a href>` — the same
+ * class of value `sheet-grid.tsx` routes through `safeHref` — so this does
+ * too. It was the one `<a href>` in web/ that skipped the scheme allow-list.
+ * A url that is not an allowed scheme (or is protocol-relative, or is not a
+ * string at all) yields null and no anchor is rendered.
+ */
+export function detailHref(l: Listing): string | null {
+  return safeHref(l.url) ?? null;
+}
 
 /**
  * A self-contained slippy map of listing pins — the directory landing's right
@@ -734,11 +747,6 @@ export function ListingsMap({
   }, [onHover]);
 
   /* ── render ────────────────────────────────────────────────────────────── */
-
-  const detailHref = (l: Listing): string | null => {
-    if (l.url) return l.url;
-    return null;
-  };
 
   return (
     <div
