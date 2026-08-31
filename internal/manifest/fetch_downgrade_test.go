@@ -42,22 +42,23 @@ func captureStderr(t *testing.T, fn func()) string {
 }
 
 // DECISION RECORD (acceptance criterion #2): on a detected downgrade, Fetch
-// REFUSES rather than silently keeping the cached manifest and returning it
-// as if the call had succeeded. Rationale: bp is fail-closed by convention
-// (see the 304-without-cached-body branch and malformed-body handling right
-// above this guard in fetch.go) — a backwards generated_at from the server
-// is exactly the kind of anomaly that convention says must surface loudly
-// rather than be papered over with a quiet "use the old one and return nil
-// error." Refusing also means the caller cannot mistake a downgraded result
-// for a fresh, successful fetch. The cache itself is left untouched either
-// way (see the assertions below) so a subsequent equal-or-newer fetch heals
-// the situation with zero manual cache surgery.
+// KEEPS the cached manifest and returns it with a nil error, rather than
+// failing the call. Rationale: this guard cannot distinguish clock skew
+// (the case it actually catches) from anything scarier, and a hard refusal
+// would make bp unusable against a correctly-clocked replica for as long as
+// some other box's clock is skewed fast — a new failure mode worse than the
+// one being guarded against. A stale-but-plausible cached answer is strictly
+// better than no answer. The older body must never overwrite the cache
+// either way (see the assertions below) so a subsequent equal-or-newer fetch
+// heals the situation with zero manual cache surgery.
 //
 // This test fails on today's main: fetch.go's StatusOK branch unconditionally
 // Parses and Store()s any 200 body with no comparison against the cached
 // generation, so the second Fetch below would return (m, nil) with
-// GeneratedAt "2026-05-01T00:00:00Z" instead of an error.
-func TestFetchRefusesGeneratedAtDowngrade(t *testing.T) {
+// GeneratedAt "2026-05-01T00:00:00Z" — the older, incoming generation —
+// instead of the cached "2026-06-01T00:00:00Z", and would overwrite the
+// on-disk cache entry with the older body.
+func TestFetchKeepsCachedManifestOnGeneratedAtDowngrade(t *testing.T) {
 	var body string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Always answer 200 (never 304) so both calls exercise the StatusOK
@@ -81,17 +82,21 @@ func TestFetchRefusesGeneratedAtDowngrade(t *testing.T) {
 		t.Fatalf("first fetch generated_at = %q, want T2", m1.GeneratedAt)
 	}
 
-	// 2nd: T1 — strictly OLDER than the cached T2. Must be refused.
+	// 2nd: T1 — strictly OLDER than the cached T2. Must be kept-cached, not
+	// refused: Fetch returns the CACHED generation with a nil error.
 	body = downgradeManifest("2026-05-01T00:00:00Z", "e2")
-	var fetchErr error
+	var (
+		m2       *Manifest
+		fetchErr error
+	)
 	stderr := captureStderr(t, func() {
-		_, fetchErr = Fetch(c, cache)
+		m2, fetchErr = Fetch(c, cache)
 	})
-	if fetchErr == nil {
-		t.Fatal("Fetch silently adopted a generated_at downgrade (no error returned)")
+	if fetchErr != nil {
+		t.Fatalf("Fetch must not fail the call on a downgrade, got: %v", fetchErr)
 	}
-	if !strings.Contains(fetchErr.Error(), "2026-05-01T00:00:00Z") || !strings.Contains(fetchErr.Error(), "2026-06-01T00:00:00Z") {
-		t.Errorf("downgrade error does not name both timestamps: %v", fetchErr)
+	if m2.GeneratedAt != "2026-06-01T00:00:00Z" {
+		t.Errorf("Fetch returned generated_at = %q on a downgrade, want the CACHED generation 2026-06-01T00:00:00Z", m2.GeneratedAt)
 	}
 	if !strings.Contains(stderr, srv.URL) {
 		t.Errorf("stderr warning does not name the server %q: %q", srv.URL, stderr)
@@ -100,14 +105,14 @@ func TestFetchRefusesGeneratedAtDowngrade(t *testing.T) {
 		t.Errorf("stderr warning does not name both timestamps: %q", stderr)
 	}
 
-	// The cache must still hold the ORIGINAL (newer) generation — refusing
-	// must not overwrite it with the downgraded body.
+	// The on-disk cache entry's generated_at must be UNCHANGED — keeping the
+	// cached manifest must not overwrite it with the downgraded body.
 	cachedM, _, ok := cache.Load(key)
 	if !ok {
-		t.Fatal("cache was wiped by the refused downgrade")
+		t.Fatal("cache was wiped by the downgrade")
 	}
 	if cachedM.GeneratedAt != "2026-06-01T00:00:00Z" {
-		t.Errorf("cache overwritten despite refusal: generated_at = %q, want T2", cachedM.GeneratedAt)
+		t.Errorf("cache overwritten despite keeping the cached manifest: generated_at = %q, want T2", cachedM.GeneratedAt)
 	}
 
 	// 3rd: equal generation — proceeds exactly as today (parsed + stored).
