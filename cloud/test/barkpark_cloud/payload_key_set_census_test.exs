@@ -2635,7 +2635,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
 
   A CALL-SHAPED predicate — one that also demands `curl` / `http.NewRequest` / a
   verb on that line — is REFUTED, not merely unused: measured on this tree it
-  scores most of the 26 routes caller-less, because Go builds the path and issues the
+  scores most of the 29 routes caller-less, because Go builds the path and issues the
   request on different lines. A predicate that reds 21 true positives is not
   stricter, it is broken.
 
@@ -2661,8 +2661,8 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
   # Refused BY NAME, each for a measured reason:
   #   tooling/**   ledger prose; not under @roots today, so this is belt-and-braces
   #   *.md         prose. THE load-bearing refusal — see @moduledoc
-  #   router.ex    the producer itself. All 26 routes self-hit >= 2 (the route
-  #                line plus its own doc block), so including it scores 26/26 CALLED
+  #   router.ex    the producer itself. All 29 routes self-hit >= 2 (the route
+  #                line plus its own doc block), so including it scores 29/29 CALLED
   #   *_test.go    two Go tests carry a contiguous deprovision literal
   #   *_test.exs   the same shape on the Elixir side
   @refused ["tooling/**", "*.md", "router.ex", "*_test.go", "*_test.exs"]
@@ -2678,7 +2678,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
 
   @doc """
   The repo root, or a raise. NEVER a clean tree: a wrong root would walk nothing,
-  find no callers, and report all 26 routes caller-less — or, worse, parse no
+  find no callers, and report all 29 routes caller-less — or, worse, parse no
   routes at all and report a perfectly clean census over an empty population.
   """
   def repo_root!(root \\ @default_repo_root) do
@@ -2885,7 +2885,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
     3. THE CORPUS IS DECLARED — a floor on its size (a walk that silently
        stopped recursing would otherwise report a clean tree) and an explicit
        "prose entered the corpus" guard.
-    4. THE PREDICATE IS NOT THE PRODUCER — all 26 routes self-hit router.ex at
+    4. THE PREDICATE IS NOT THE PRODUCER — all 29 routes self-hit router.ex at
        least twice, so including the producer would score them all called; and
        the crown's LOOSE spellings are absent from the corpus, so its caller-less
        verdict is not an artefact of predicate strictness.
@@ -3052,7 +3052,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
   # arm 4 — the predicate is not the producer, and not merely strict
   # ---------------------------------------------------------------------------
 
-  test "THE PRODUCER SELF-HITS: every one of the 26 routes hits router.ex >= 2 times", ctx do
+  test "THE PRODUCER SELF-HITS: every one of the 29 routes hits router.ex >= 2 times", ctx do
     lines = @router |> File.read!() |> String.split("\n")
 
     self_hits =
@@ -3061,7 +3061,7 @@ defmodule BarkparkCloud.WorkerSeamCallerCensusTest do
         {route, Enum.count(lines, &Seam.line_calls?(&1, s))}
       end)
 
-    assert map_size(self_hits) == 26, "expected 26 write routes, saw #{map_size(self_hits)}"
+    assert map_size(self_hits) == 29, "expected 29 write routes, saw #{map_size(self_hits)}"
 
     {min_route, min_hits} = Enum.min_by(self_hits, &elem(&1, 1))
 
