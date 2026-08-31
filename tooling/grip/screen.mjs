@@ -121,6 +121,9 @@
 // are all still refused when they appear as SYNTAX. Only their appearance as
 // QUOTED DATA is now admitted.
 
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 export const HOST_BOUND = [
   [/\bssh\b/i, "names ssh (remote execution)"],
   [/\bscp\b/i, "names scp (remote copy)"],
@@ -2809,7 +2812,17 @@ function selftest() {
   return falsePermissions.length + falseRefusals.length;
 }
 
-const isMain = process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href;
+// THE ENTRY GUARD. Building a URL by string-concatenating a filesystem path
+// (the old `new URL(`file://${process.argv[1]}`)` form) breaks on any
+// URL-special character in the path — a `#` fragment-strips the `.href`, a
+// space or `?` likewise diverges — and the failure is SILENT: isMain reads
+// false, the process exits 0 having run none of --verify/--census/--selftest,
+// and all 219 safety-screen checks are skipped with nothing printed. Worktrees,
+// CI temp dirs and branch-named checkouts routinely carry such characters.
+// Use the same resolve()-based guard as cli.mjs, ledger.mjs, backfill.mjs and
+// acceptance.mjs — this is propagation of an already-fixed defect class, not
+// a new one.
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 if (isMain) {
   const mode = process.argv[2] || "--verify";
   try {
