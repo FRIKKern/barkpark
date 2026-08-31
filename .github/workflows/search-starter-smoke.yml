@@ -113,6 +113,14 @@ jobs:
     name: Journey smoke — live demo (report mode, never gates)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    # JOB-LEVEL, not workflow-level (cloud.yml's "Report main-push failure"
+    # comment explains why): the repo's default_workflow_permissions is read,
+    # so the escalation step's issue POST 403s without issues: write — but a
+    # workflow-level block would silently re-scope harness-self-test and
+    # finder-unit's tokens too. The grant lives on the one job that needs it.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - uses: actions/checkout@v4
 
@@ -126,8 +134,78 @@ jobs:
       # already distinguishes a site failure (which it reports and swallows)
       # from an environment failure (exit 2), and `|| true` would erase the
       # second, turning "Chrome is missing" into a silent green forever.
+      #
+      # The stdout+stderr tee below exists so the NEXT step can read the beats
+      # without re-running the journey. `set -o pipefail` is required, not
+      # decorative: without it the pipeline's exit status is `tee`'s (always
+      # 0), which would silently erase the GUARD exit-2 signal the comment
+      # above forbids erasing — that would be `|| true` wearing a tee disguise.
       - name: Live journey report
+        id: journey
         env:
           CHROME: /usr/bin/google-chrome
           SMOKE_URL: ${{ github.event.inputs.url || 'https://guerrilla.barkpark.cloud/sites/search-ember/' }}
-        run: node tooling/search-smoke/journey-smoke.mjs --url "$SMOKE_URL"
+        run: |
+          set -o pipefail
+          node tooling/search-smoke/journey-smoke.mjs --url "$SMOKE_URL" 2>&1 | tee "$RUNNER_TEMP/journey-report.txt"
+
+      # THE ALARM. journey-smoke.mjs prints PASS/FAIL beats (from its `report`
+      # function) but, by design, always exits 0 for a site failure — so
+      # nothing upstream of this step ever goes red for one. This step is what
+      # reads the beats instead of the exit code, which is the whole point of
+      # running this job at all (see the file header: the rot alarm for the
+      # blind spot that let a broken demo sit live for nine days).
+      #
+      # `always()`: this step itself must run whether the previous one
+      # succeeded (every site-failure case — report mode is always exit 0) or
+      # failed (a GUARD, exit 2 — an environment failure, not a site defect,
+      # and still worth a human). `steps.journey.outcome == 'failure'` is how
+      # exit 2 is detected without re-parsing stderr for the word GUARD.
+      #
+      # Beat detection matches the `report()` line shape exactly:
+      # `   ✗ FAIL    NAME    detail` — the mark+FAIL pair appears ONLY on a
+      # beat's own line, never on its indented sub-checks (those print a mark
+      # and a label with no status word), so this can't double-count.
+      - name: Escalate a failing beat to a human
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_FAILURE_KEY: search-starter-live-journey
+          SMOKE_URL: ${{ github.event.inputs.url || 'https://guerrilla.barkpark.cloud/sites/search-ember/' }}
+          JOURNEY_OUTCOME: ${{ steps.journey.outcome }}
+        run: |
+          # GitHub Actions' default bash run shell is `-eo pipefail`, not
+          # plain bash. `set +e` here is deliberate, not a stray habit: a
+          # clean all-PASS transcript makes the `grep -E '✗ +FAIL'` below
+          # match NOTHING, which exits 1 — and under the default -e that
+          # would abort this step right there, before it ever reaches the
+          # "nothing to escalate" branch below. "no FAIL beat found" is this
+          # step's expected happy path, not a script error, so errexit is
+          # turned off for exactly this reason (no `|| true` anywhere: the
+          # exit code this step ultimately returns is still whatever its own
+          # last command returns, same as always).
+          set +e +o pipefail
+          report_file="$RUNNER_TEMP/journey-report.txt"
+          report_text="$(cat "$report_file" 2>/dev/null)"
+          # `paste -sd ', ' -` is NOT used: BSD paste (macOS/Darwin runners
+          # would be unaffected either way here, but GNU vs BSD semantics
+          # differ) treats a multi-char -d as a CYCLING set of single-char
+          # delimiters, not one literal separator, so two beat names would
+          # join as "TYPE,ENGINE" with the space silently dropped. Join with a
+          # bare comma, then widen every comma to ", " — portable either way.
+          failing_beats="$(printf '%s\n' "$report_text" | grep -E '✗ +FAIL' | awk '{print $3}' | paste -sd, - | sed 's/,/, /g')"
+
+          if [ "$JOURNEY_OUTCOME" != "failure" ] && [ -z "$failing_beats" ]; then
+            echo "journey clean (outcome=$JOURNEY_OUTCOME, no FAIL beats) — nothing to escalate"
+            exit 0
+          fi
+
+          if [ "$JOURNEY_OUTCOME" = "failure" ]; then
+            reason="the harness GUARD-failed before completing the journey (environment failure, exit 2) — see the 'Live journey report' step's own log"
+          else
+            reason="failing beat(s): $failing_beats"
+          fi
+          echo "::error title=Live journey smoke is not clean::$reason"
+
+          export CI_FAILURE_DETAIL="$(printf 'The live search-starter journey smoke against %s is not clean.\n\n%s\n\nFull report:\n\n```\n%s\n```\n' "$SMOKE_URL" "$reason" "${report_text:-(no report captured)}")"
+          bash scripts/file-ci-failure-issue.sh
