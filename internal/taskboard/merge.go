@@ -47,23 +47,41 @@ func taskEpoch(t Task) int {
 //     the incoming row (the incoming snapshot is stale for that row); otherwise
 //     take the incoming row.
 //   - a doc only in next: added (a genuinely new row).
-//   - a doc only in prev: dropped — a real close/deletion. Never resurrected;
-//     a snapshot that no longer lists a task is authoritative about its absence.
+//   - a doc only in prev, window NOT truncated (truncated==false): dropped — a
+//     real close/deletion. A snapshot that lists every task is authoritative
+//     about an absence, and the row is never resurrected.
+//   - a doc only in prev, window TRUNCATED (truncated==true): the fetch is
+//     desc:updated_at clamped to a fixed row count (tasks_controller.ex), so
+//     over a corpus bigger than the clamp a quiet open/ready/blocked row simply
+//     rotates out of the window — that is NOT the same fact as a close. A
+//     NON-terminal row absent from next is therefore KEPT (appended, since it
+//     has no position in next's order — next never mentioned it). A TERMINAL
+//     row (done/closed/cancelled) is still dropped even under truncation: a
+//     truncated window must never resurrect a closed task.
 //
-// Output order follows next (kept-prev rows are substituted in place), so the
-// board still tracks the fresh snapshot's ordering.
+// The second return value is the count of rows kept this way — how many
+// previously-displayed rows are outside the current window rather than
+// actually closed — so the caller can surface an honest "N aged out of the
+// window" notice, distinct from the ambient "showing N of M" footnote (which
+// only says the corpus is bigger, never that specific rows went stale). It is
+// always 0 when truncated is false.
+//
+// Output order: kept/incoming rows follow next's order (kept-prev rows are
+// substituted in place); aged-out rows are appended after, in prev's order.
 //
 // Missing metadata: if EITHER side's UpdatedAt is zero (an older API envelope
 // without the field), the comparison is untrustworthy, so we take the incoming
 // row. This deliberately errs toward freshness — never strand a displayed row
 // on missing metadata by holding a stale copy forever.
-func mergeForward(prev, next []Task) []Task {
+func mergeForward(prev, next []Task, truncated bool) ([]Task, int) {
 	prevByID := make(map[string]Task, len(prev))
 	for _, t := range prev {
 		prevByID[t.DocID] = t
 	}
+	inNext := make(map[string]bool, len(next))
 	merged := make([]Task, 0, len(next))
 	for _, n := range next {
+		inNext[n.DocID] = true
 		if old, ok := prevByID[n.DocID]; ok &&
 			!old.UpdatedAt.IsZero() && !n.UpdatedAt.IsZero() &&
 			serverNewer(old, n) {
@@ -73,5 +91,16 @@ func mergeForward(prev, next []Task) []Task {
 		}
 		merged = append(merged, n)
 	}
-	return merged
+	if !truncated {
+		return merged, 0
+	}
+	agedOut := 0
+	for _, p := range prev {
+		if inNext[p.DocID] || isTerminal(p.Lifecycle) {
+			continue
+		}
+		merged = append(merged, p)
+		agedOut++
+	}
+	return merged, agedOut
 }
