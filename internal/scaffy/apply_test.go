@@ -749,6 +749,118 @@ func TestMidOpFailureWritesNothing(t *testing.T) {
 	}
 }
 
+const partialFlushSrc = `COMMAND "two-dir-notes" DESCRIPTION "Two notes in different directories." CONCEPT "notes" DIRECTION "add"
+
+VARIABLE 1 "NoteName" TITLE "Note" DESCRIPTION "Name of the note." EXAMPLES "Alpha"
+
+CREATE FILE IF ABSENT "docs/a/notes-a.txt"
+::: notes-a body :::
+note-a {{.note-name}}
+::: notes-a body :::
+
+CREATE FILE IF ABSENT "docs/locked/notes-b.txt"
+::: notes-b body :::
+note-b {{.note-name}}
+::: notes-b body :::
+`
+
+// TestFlushPartialFailureLeavesFirstFileUntouched — the all-or-nothing
+// guarantee stated at apply.go:6-8: op 0 CREATEs a file in a normal
+// writable directory, op 1 CREATEs a file in a directory with no write
+// permission. Both CREATEs need to add a brand-new directory entry, so
+// the SAME permission wall fails op 1 under either write strategy —
+// but op 0's file must come out the other side non-existent here: no
+// scaffy temp file left behind, and no receipt written. This reds
+// against the pre-fix per-file os.WriteFile loop, which committed op
+// 0 straight to its real path before ever reaching op 1's failure —
+// see the MUTATION PROOF recorded against this task's acceptance
+// criteria for the reverted-fix failure output.
+func TestFlushPartialFailureLeavesFirstFileUntouched(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory is still writable, so this arm cannot be exercised")
+	}
+	root := t.TempDir()
+	cmdPath := writeCommand(t, root, "two-dir-notes.scaffy", partialFlushSrc)
+
+	lockedDir := filepath.Join(root, "docs", "locked")
+	if err := os.MkdirAll(lockedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(lockedDir, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(lockedDir, 0o755) })
+
+	// Probe: confirm this sandbox actually enforces the permission
+	// before trusting a pass born from a lock nobody honors.
+	if probe, err := os.CreateTemp(lockedDir, "probe-*"); err == nil {
+		probe.Close()
+		os.Remove(probe.Name())
+		t.Skip("this sandbox does not enforce directory write permissions; the permission arm is unreachable here")
+	}
+
+	aPath := filepath.Join(root, "docs", "a", "notes-a.txt")
+
+	_, runErr := Run(RunOptions{CommandPath: cmdPath, Vars: map[string]string{"NoteName": "Alpha"}, RepoRoot: root})
+	if runErr == nil {
+		t.Fatal("want an error from the locked second directory, got nil")
+	}
+	t.Logf("flush error (expected): %v", runErr)
+
+	// Op 0's file must not exist at all — a partial write must not
+	// survive op 1's failure, even though op 0 staged/wrote cleanly.
+	if _, statErr := os.Stat(aPath); !os.IsNotExist(statErr) {
+		t.Fatalf("op 0's file exists despite op 1 failing — partial write leaked to disk (stat err: %v)", statErr)
+	}
+
+	// No scaffy temp file left behind in EITHER directory.
+	for _, dir := range []string{filepath.Join(root, "docs", "a"), lockedDir} {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue // docs/a itself never got created under the fix
+			}
+			t.Fatal(err)
+		}
+		for _, e := range entries {
+			if strings.Contains(e.Name(), "scaffy-tmp") {
+				t.Fatalf("temp file left behind in %s: %s", dir, e.Name())
+			}
+		}
+	}
+
+	// No receipt persisted — the run never mutated successfully.
+	if _, err := os.Stat(filepath.Join(root, ".scaffy")); !os.IsNotExist(err) {
+		t.Fatal("a failed flush must not leave a receipt behind")
+	}
+}
+
+// TestFlushPreservesExistingFileMode — the fix must not trade byte
+// atomicity for mode loss: REPLACE overwrites an existing file through
+// a temp-file rename, and the temp file's mode is explicitly carried
+// over from the file it replaces rather than os.CreateTemp's 0600.
+func TestFlushPreservesExistingFileMode(t *testing.T) {
+	root := t.TempDir()
+	cmdPath := writeCommand(t, root, "swap-flag.scaffy", swapFlagSrc)
+	settingsPath := filepath.Join(root, "conf", "settings.txt")
+	writeTreeFile(t, root, "conf/settings.txt", "before\nflag = off\nafter\n")
+	if err := os.Chmod(settingsPath, 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Run(RunOptions{CommandPath: cmdPath, Vars: map[string]string{"FlagName": "Fast"}, RepoRoot: root}); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := os.Stat(settingsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("overwrite must preserve the existing file's mode: got %o, want %o", info.Mode().Perm(), 0o640)
+	}
+}
+
 // TestValidateFilePreGate: a command with findings never reaches the
 // applier (D37 — ValidateFile, not bare Parse).
 func TestValidateFilePreGate(t *testing.T) {
