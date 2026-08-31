@@ -3,7 +3,9 @@ package manifest
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -71,6 +73,28 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 			return nil, err
 		}
 		if cache != nil {
+			// Downgrade guard: a stale replica, caching proxy, or rolled-back
+			// deploy behind a load balancer can hand us a 200 whose
+			// generated_at is OLDER than the manifest we already have cached.
+			// Every other failure mode on this path is already loud (see the
+			// 304-without-body branch above); silently Store()-ing a backwards
+			// manifest was the one exception. cachedGen, ok=false means either
+			// no cache hit or a legacy cacheEntry with no recorded generation
+			// (see CachedGeneration) — "unknown," so we proceed exactly as
+			// before. Equal-or-newer also proceeds exactly as before.
+			if cachedGen, _, ok := cache.CachedGeneration(key); ok && isOlderGeneration(m.GeneratedAt, cachedGen) {
+				fmt.Fprintf(os.Stderr,
+					"bp: refusing capabilities manifest from %s — it is OLDER than the cached one (incoming generated_at=%s, cached generated_at=%s); keeping the cached manifest and not overwriting the cache\n",
+					client.BaseURL(), m.GeneratedAt, cachedGen)
+				// Fail-closed by convention: bp never silently runs its command
+				// tree backwards. We do not fall back to the cached manifest
+				// here either — a caller that reached the StatusOK branch sent
+				// no If-None-Match match (or the server chose not to 304), so
+				// there is no cache-freshness guarantee backing a quiet
+				// fallback; refusing forces the anomaly to surface instead of
+				// hiding behind an old-but-plausible answer.
+				return nil, fmt.Errorf("fetch manifest: refusing downgrade from %s: generated_at %s is older than cached %s", client.BaseURL(), m.GeneratedAt, cachedGen)
+			}
 			etag := res.ETag
 			if etag == "" {
 				etag = m.ETag // fall back to the manifest's own etag field
@@ -90,6 +114,27 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 		}
 		return nil, fmt.Errorf("fetch manifest: unexpected status %d", res.StatusCode)
 	}
+}
+
+// isOlderGeneration reports whether incoming is strictly older than cached.
+// Both are manifest generated_at values, expected RFC3339 (time.RFC3339Nano
+// also accepts the no-fractional-second form the fixtures use). Either value
+// being empty or unparseable means the comparison is UNKNOWN, not "older" —
+// isOlderGeneration returns false so the caller proceeds exactly as it did
+// before this guard existed, never blocking on a timestamp it can't read.
+func isOlderGeneration(incoming, cached string) bool {
+	if incoming == "" || cached == "" {
+		return false
+	}
+	in, err := time.Parse(time.RFC3339Nano, incoming)
+	if err != nil {
+		return false
+	}
+	ca, err := time.Parse(time.RFC3339Nano, cached)
+	if err != nil {
+		return false
+	}
+	return in.Before(ca)
 }
 
 // clampErrBody bounds a server body before it lands in an error string, cutting
