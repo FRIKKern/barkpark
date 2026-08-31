@@ -228,13 +228,47 @@ func getJSONAttempt(ctx context.Context, c *apiclient.Client, path string) ([]by
 		return nil, false, fmt.Errorf("GET %s: %w", path, err)
 	}
 	if int64(len(body)) > maxBoardFetchBytes {
-		return nil, false, fmt.Errorf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", path, maxBoardFetchBytes)
+		return nil, false, &oversizeBodyError{Path: path, Limit: maxBoardFetchBytes}
 	}
 	if resp.StatusCode != http.StatusOK {
 		retry := resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode <= 599
-		return nil, retry, fmt.Errorf("GET %s: status %d%s", path, resp.StatusCode, bodyHint(body))
+		return nil, retry, &httpStatusError{Path: path, StatusCode: resp.StatusCode, Hint: bodyHint(body)}
 	}
 	return body, false, nil
+}
+
+// httpStatusError carries a refused snapshot fetch's status as the INT it was
+// read as, not only as text. Error() is byte-identical to the fmt.Errorf this
+// replaced, so every caller that reads the message ("GET /v1/tasks: status 401:
+// …") is unchanged — what is new is that snapshotErrorLabel can consult
+// StatusCode via errors.As instead of running strings.Contains over the message.
+// That distinction is load-bearing because Hint is bodyHint(body): up to 120
+// characters of the SERVER'S OWN response, which this binary does not control.
+// A gateway 500 whose body forwards "upstream status 404", or a 404 whose body
+// says "prefix exceeds 0 bytes", used to hijack its own classification and put
+// the wrong failure on the operator's identity strip.
+type httpStatusError struct {
+	Path       string
+	StatusCode int
+	// Hint is bodyHint's ": …" suffix (already condensed and capped) or "".
+	Hint string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("GET %s: status %d%s", e.Path, e.StatusCode, e.Hint)
+}
+
+// oversizeBodyError is the typed twin for the maxBoardFetchBytes refusal, for
+// the same reason: "the response blew the cap" is a fact this code KNOWS, and
+// leaving snapshotErrorLabel to infer it from the words "exceeds" and "bytes"
+// let any response body carrying those words claim the class.
+type oversizeBodyError struct {
+	Path  string
+	Limit int64
+}
+
+func (e *oversizeBodyError) Error() string {
+	return fmt.Sprintf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", e.Path, e.Limit)
 }
 
 // bodyHint condenses an error body into a short single-line ": …" suffix so a
