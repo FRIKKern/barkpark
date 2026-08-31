@@ -280,6 +280,61 @@ defmodule BarkparkWeb.ShareControllerTest do
     end
   end
 
+  # ── the LIST door: index/2 is UNCONFINED while its by-scope siblings are ──
+  #
+  # INSTRUMENT (by-id/by-scope scoped, LIST sibling missed): within THIS one
+  # controller, three of the four data-touching actions confine to
+  # `workspace_admin?/2` — `create/2` and `delete/2` (arpss-w8 slice 2) and the
+  # token LIST `list_tokens/2` (which post-filters rows to the caller's admin
+  # workspaces, its own moduledoc: "the rows are filtered to the workspaces the
+  # caller is an admin member of"). `index/2` — the registry LIST — does NOT.
+  # `:require_admin` proves only a GLOBAL `admin` permission, never authority
+  # over the tenant a row names, so any admin token in ANY single workspace
+  # enumerates EVERY workspace's stored share: workspace, project, dataset,
+  # which surfaces (papers/docs/media) are open, and at what access (read/edit).
+  #
+  # This is the SAME open asymmetry the app-token index carries
+  # (task-aa07355fa8a53355 — index/2 there "is NOT scoped … still a
+  # cross-workspace read, and closing it is a separate change with a real
+  # question attached"). The list door reads as a config question ("just list
+  # the registry"), not an authorization one — which is exactly where the
+  # scoping gets missed.
+  #
+  # RED-BEFORE: this asserts the CONFINED behaviour and fails on origin/main
+  # (the foreign row IS disclosed today). A confining fix (post-filter the
+  # STORED rows to `workspace_admin?/2`, mirroring `list_tokens/2`) turns it
+  # GREEN — and must also grant `@admin_token` an admin membership of the
+  # "db-ws" workspace in the "reports env baseline + stored" test above, whose
+  # actor administers no workspace today.
+  describe "GET /v1/shares tenancy confinement (LATENT — parity with list_tokens/2)" do
+    test "cross-tenant: a ws-A admin who is only a plain member of ws-B must not see ws-B's stored share in the registry LIST",
+         %{conn: conn} do
+      {_actor, ws_b, proj_b, _scope_b} = cross_tenant_actor!("lsleak")
+
+      # A stored share the attacker holds NO admin authority over (ws-B). Planted
+      # through the real store path and asserted LIVE, so the test cannot go
+      # vacuous on a silently-dropped fixture.
+      assert {:ok, _} =
+               Sharing.add_share("#{ws_b.slug}/#{proj_b.slug}/production:docs:read")
+
+      assert Sharing.shared?(ws_b.slug, proj_b.slug, "production", :docs)
+
+      body =
+        conn
+        |> bearer(@attacker_token)
+        |> get("/v1/shares")
+        |> json_response(200)
+
+      disclosed_workspaces =
+        body["shares"]
+        |> Enum.filter(&(&1["source"] == "stored"))
+        |> Enum.map(& &1["workspace"])
+
+      refute ws_b.slug in disclosed_workspaces,
+             "index/2 disclosed ws-B's stored share to a caller who holds only a member row in ws-B"
+    end
+  end
+
   # ── tenancy confinement (arpss-w8 slice 2) ──────────────────────────────
 
   # The attacker: a REAL admin of ws-A holding a REAL plain `member` row in
