@@ -53,7 +53,7 @@ curl -X POST $API/v1/data/mutate/production \
        "content":{"kind":"task","lifecycle_status":"open","priority":1}}}]}'
 ```
 
-> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). Lifecycle is independent of draft/publish.
+> **Draft prefix:** `create` lands as `drafts.t1`; the task endpoints resolve bare `t1` (published `t1` wins). That is *resolution*, not *listing* — listing is NOT published-only: an unpaired `drafts.<id>` task IS listed as itself, and only a draft that has a published twin is collapsed in favour of that twin. Lifecycle is independent of draft/publish.
 
 **4. Claim → stamp → close.** Use a stable `worker_id` per agent. Every prod write needs `--yes` — without it `bp` aborts with `prod write not confirmed` and sends nothing, so a batch script missing it no-ops every write.
 
