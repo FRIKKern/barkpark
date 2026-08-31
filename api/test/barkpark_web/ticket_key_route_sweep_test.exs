@@ -39,6 +39,10 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
 
   @http_verbs [:get, :post, :put, :patch, :delete, :head, :options]
 
+  # A keyed outcome in this set, where the anonymous caller was NOT refused, is
+  # a de-escalation rather than an elevation. See the `cond` in the sweep.
+  @refusal_statuses [401, 403]
+
   setup do
     # Neutralise rate limiting for the sweep: hundreds of requests share one IP
     # bucket, and a 429 would masquerade as (or mask) an auth outcome. High
@@ -66,7 +70,29 @@ defmodule BarkparkWeb.TicketKeyRouteSweepTest do
         anon = status_for(route.verb, path, nil)
         keyed = status_for(route.verb, path, raw)
 
-        if anon == keyed, do: nil, else: {route.verb, route.path, [anon: anon, keyed: keyed]}
+        cond do
+          anon == keyed ->
+            nil
+
+          # STRICTLY MORE REFUSING than anonymous is not an elevation — it is
+          # the opposite, and this test's invariant is "NO MORE access than an
+          # anonymous caller" (see @moduledoc), which a refusal satisfies.
+          #
+          # The flat `/v1/data` READ pipeline refuses ANY presented-but-
+          # unverifiable bearer with 401 (task-46872cadcfc50c5f, closing a
+          # silent tenant swap where a decayed token was served another
+          # tenant's rows at 200). A ticket key is unverifiable BY DESIGN —
+          # `Auth.verify_token/1`'s `kind == "api"` WHERE clause is the
+          # fail-closed ticket-key boundary this very file exists to pin — so
+          # the key now 401s there instead of falling through to the anonymous
+          # outcome. Blast radius still "spam, never data"; the door just
+          # closed harder.
+          keyed in @refusal_statuses and anon not in @refusal_statuses ->
+            nil
+
+          true ->
+            {route.verb, route.path, [anon: anon, keyed: keyed]}
+        end
       end
       |> Enum.reject(&is_nil/1)
 
