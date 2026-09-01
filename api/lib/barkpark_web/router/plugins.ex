@@ -115,10 +115,45 @@ defmodule BarkparkWeb.Router.Plugins do
   `not_found` while the manifest advertises `task.prime`. There is no
   hot-reload of plugin routes in v1.
 
-  With `:barkpark, :plugins` configured to `[]` (or no bundled plugins
-  on disk), `collect_routes/1` returns `[]` and the macro emits no
-  routes — preserving the fresh-install invariant.
+  ## The kill switch is enforced at RUNTIME, not here
+
+  This block used to read: "With `:barkpark, :plugins` configured to `[]`
+  (or no bundled plugins on disk), `collect_routes/1` returns `[]` and the
+  macro emits no routes — preserving the fresh-install invariant." Every
+  clause of that was true of `collect_routes/1` and the conclusion was still
+  false, because the branch it described is UNREACHABLE from here.
+
+  `:barkpark, :plugins` is set in exactly one place — `config/runtime.exs`,
+  which evaluates at BOOT. This macro runs at COMPILE time, where
+  `Application.fetch_env(:barkpark, :plugins)` is not `{:ok, []}` but
+  `:error` (UNSET) — the OTHER branch of `plugin_modules_sync/0`, the one
+  that walks disk and folds every bundled plugin in. So every build baked
+  routes for every discoverable plugin no matter what `BARKPARK_PLUGINS`
+  said at boot, while `collect_workers/1` and `collect_oban_crontab/0` —
+  which run after `runtime.exs` — correctly registered nothing. Observed
+  end to end: with the switch fully engaged, `collect_routes/1` returned 0
+  routes in every bucket while the compiled router carried 41 `/v1/plugins/*`
+  routes, and `POST /v1/plugins/pulse/:channel/events` took an
+  unauthenticated, persisted write.
+
+  A compile-time-mounted route cannot be unmounted at runtime, so the switch
+  is enforced one step later instead: every route emitted below is stamped
+  with its own spec key in the route's `private`, and each callsite's routes
+  are wrapped in a nested `scope` that pipes through
+  `BarkparkWeb.Plugs.PluginRouteGuard`. That plug re-reads
+  `collect_routes/1` at REQUEST time — after `runtime.exs`, so the switch is
+  finally visible — and 404s any route whose plugin is not in the enabled
+  set. The routes stay mounted; they stop answering. See that plug's
+  moduledoc for why it consults `collect_routes/1` rather than
+  `Registry.lookup/1`.
+
+  The mirror-image comment above `plugin_modules_sync/0` in
+  `Barkpark.Plugins.Registry.BootCollectors` has the same shape (correct
+  about its function, wrong about which branch compile time reaches) and is
+  not corrected here — that file is outside this change's fence.
   """
+
+  alias BarkparkWeb.Plugs.PluginRouteGuard
 
   @doc """
   Emits Phoenix.Router AST for plugin-contributed routes.
@@ -177,7 +212,25 @@ defmodule BarkparkWeb.Router.Plugins do
       |> Barkpark.Plugins.Registry.collect_routes()
       |> Enum.filter(&route_in_scope?(&1, scope))
 
-    Enum.map(routes, &emit_route_ast/1)
+    case Enum.map(routes, &emit_route_ast/1) do
+      # No plugin contributes to this bucket — emit nothing at all, so the
+      # caller's wrapping scope/live_session stays the harmless no-op it was.
+      [] ->
+        []
+
+      route_asts ->
+        # One nested scope per callsite, carrying the runtime kill-switch
+        # guard. Nesting (rather than a bare `pipe_through` at the callsite)
+        # bounds the guard to exactly the routes emitted here: `pipe_through`
+        # applies to every route declared after it in the SAME scope, and a
+        # host block may well declare more.
+        quote do
+          scope "/" do
+            pipe_through(unquote(PluginRouteGuard))
+            unquote_splicing(route_asts)
+          end
+        end
+    end
   end
 
   # ── Scope filtering ─────────────────────────────────────────────────
@@ -205,13 +258,30 @@ defmodule BarkparkWeb.Router.Plugins do
 
   # ── AST emission ────────────────────────────────────────────────────
 
+  # Every emitted route carries its own spec key in the route's `private`,
+  # which `BarkparkWeb.Plugs.PluginRouteGuard` reads at request time to decide
+  # whether the plugin behind it is still enabled. Phoenix merges route
+  # `private` in its `prepare` step, which runs BEFORE the pipeline, so the
+  # key is in place by the time the guard runs. A spec that already declares
+  # `private:` keeps its own keys — ours is merged over, not substituted.
+  defp guard_opts(spec, phoenix_opts) do
+    stamp = %{PluginRouteGuard.private_key() => PluginRouteGuard.route_key(spec)}
+
+    Keyword.update(phoenix_opts, :private, stamp, &Map.merge(&1, stamp))
+  end
+
   # `live/3` and `live/4` come from `Phoenix.LiveView.Router`, which the
   # host router imports via `use BarkparkWeb, :router`. We emit
   # unqualified calls so they resolve against the caller's imports — the
-  # resulting AST is identical to a hand-written `live "/foo", Foo` line.
-  defp emit_route_ast({:live, path, mod, action}) do
+  # resulting AST is identical to a hand-written
+  # `live "/foo", Foo, :index, private: %{…}` line. Opts are `Macro.escape`d
+  # rather than spliced raw: the guard stamp is a map holding a tuple, and
+  # neither is a valid AST literal.
+  defp emit_route_ast({:live, path, mod, action} = spec) do
+    opts = guard_opts(spec, [])
+
     quote do
-      live(unquote(path), unquote(mod), unquote(action))
+      live(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(opts)))
     end
   end
 
@@ -223,8 +293,8 @@ defmodule BarkparkWeb.Router.Plugins do
   # live_session + studio layout. The LiveView's own `mount/3` returns
   # `layout: false` to drop the app wrapper, mirroring the host's former
   # `:papers` live_session exactly.
-  defp emit_route_ast({:live, path, mod, action, opts}) when is_list(opts) do
-    phoenix_opts = strip_plugin_opts(opts)
+  defp emit_route_ast({:live, path, mod, action, opts} = spec) when is_list(opts) do
+    phoenix_opts = guard_opts(spec, strip_plugin_opts(opts))
 
     if Keyword.get(opts, :auth) == :public_root do
       session_name = public_root_session_name(path, mod)
@@ -232,12 +302,17 @@ defmodule BarkparkWeb.Router.Plugins do
 
       quote do
         live_session unquote(session_name), root_layout: unquote(Macro.escape(root_layout)) do
-          live(unquote(path), unquote(mod), unquote(action), unquote(phoenix_opts))
+          live(
+            unquote(path),
+            unquote(mod),
+            unquote(action),
+            unquote(Macro.escape(phoenix_opts))
+          )
         end
       end
     else
       quote do
-        live(unquote(path), unquote(mod), unquote(action), unquote(phoenix_opts))
+        live(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(phoenix_opts)))
       end
     end
   end
@@ -245,41 +320,41 @@ defmodule BarkparkWeb.Router.Plugins do
   # Controller routes — one clause per HTTP verb so the unqualified
   # macro name resolves correctly. `Phoenix.Router` exports `get/4`,
   # `post/4`, etc. as macros in scope inside the host router.
-  defp emit_route_ast({verb, path, mod, action})
+  defp emit_route_ast({verb, path, mod, action} = spec)
        when verb in [:get, :post, :put, :delete, :patch, :options] do
-    emit_verb_ast(verb, path, mod, action, [])
+    emit_verb_ast(verb, path, mod, action, guard_opts(spec, []))
   end
 
-  defp emit_route_ast({verb, path, mod, action, opts})
+  defp emit_route_ast({verb, path, mod, action, opts} = spec)
        when verb in [:get, :post, :put, :delete, :patch, :options] and is_list(opts) do
-    emit_verb_ast(verb, path, mod, action, strip_plugin_opts(opts))
+    emit_verb_ast(verb, path, mod, action, guard_opts(spec, strip_plugin_opts(opts)))
   end
 
   defp emit_verb_ast(:get, path, mod, action, opts) do
-    quote do: get(unquote(path), unquote(mod), unquote(action), unquote(opts))
+    quote do: get(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(opts)))
   end
 
   defp emit_verb_ast(:post, path, mod, action, opts) do
-    quote do: post(unquote(path), unquote(mod), unquote(action), unquote(opts))
+    quote do: post(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(opts)))
   end
 
   defp emit_verb_ast(:put, path, mod, action, opts) do
-    quote do: put(unquote(path), unquote(mod), unquote(action), unquote(opts))
+    quote do: put(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(opts)))
   end
 
   defp emit_verb_ast(:delete, path, mod, action, opts) do
-    quote do: delete(unquote(path), unquote(mod), unquote(action), unquote(opts))
+    quote do: delete(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(opts)))
   end
 
   defp emit_verb_ast(:patch, path, mod, action, opts) do
-    quote do: patch(unquote(path), unquote(mod), unquote(action), unquote(opts))
+    quote do: patch(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(opts)))
   end
 
   # CORS preflights: the router only matches declared verbs, so a plugin
   # exposing a browser-reachable POST on the `:public_api` bucket declares an
   # `{:options, …}` sibling route (PublicCors halts it with 204 upstream).
   defp emit_verb_ast(:options, path, mod, action, opts) do
-    quote do: options(unquote(path), unquote(mod), unquote(action), unquote(opts))
+    quote do: options(unquote(path), unquote(mod), unquote(action), unquote(Macro.escape(opts)))
   end
 
   # A unique, deterministic live_session name for a `:public_root` route.
