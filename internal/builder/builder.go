@@ -53,6 +53,11 @@ type Builder struct {
 	CacheDir   string
 	LogDir     string
 
+	// RetainImages bounds how many image tarballs CacheDir keeps PER SITE.
+	// Zero (unset) takes DefaultRetainImages; RetainImagesUnlimited (-1)
+	// restores the historical never-delete behaviour. See image_retention.go.
+	RetainImages int
+
 	Interval   time.Duration
 	HTTPClient *http.Client
 	Runner     CommandRunner
@@ -390,6 +395,23 @@ func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildCon
 		tee.flush()
 		fmt.Fprintf(logFile, "barkpark-builder image saved to %s\n", out)
 		con.logf("artifact: image saved to %s", out)
+
+		// Bound the shared cache. Every successful build adds a ~500 MB
+		// tarball here and nothing else in the tree has ever removed one, so
+		// without this the build plane's disk is a countdown (jarl reached
+		// 24 tarballs / 10.8 GiB for a single site). Best-effort by design:
+		// the image is already saved and the deployment is about to be handed
+		// to release, so a sweep failure must not fail the build.
+		removed := pruneImageCache(b.CacheDir, imageTag, b.retainImages(),
+			func(name string, err error) {
+				fmt.Fprintf(logFile, "barkpark-builder image-cache sweep: %s: %v\n", name, err)
+			})
+		if len(removed) > 0 {
+			fmt.Fprintf(logFile, "barkpark-builder image-cache sweep: removed %d old tarball(s) (keep=%d): %s\n",
+				len(removed), b.retainImages(), strings.Join(removed, " "))
+			con.logf("artifact: image cache swept — removed %d old tarball(s), keeping the newest %d for this site",
+				len(removed), b.retainImages())
+		}
 	}
 
 	fmt.Fprintf(logFile, "barkpark-builder build end ts=%s status=ok\n",
