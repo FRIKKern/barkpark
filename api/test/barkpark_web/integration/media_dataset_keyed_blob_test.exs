@@ -24,13 +24,21 @@ defmodule BarkparkWeb.Integration.MediaDatasetKeyedBlobTest do
     * NO object is moved and NO existing path is rewritten: an old flat row and a
       new dataset-keyed row both serve 200 in the SAME run.
 
-  ## What this does NOT claim
+  ## The read path is sealed too (task-8eb6542ece62aff1)
 
-  The last test pins the RESIDUAL honestly: hand-crafted rows sharing one flat
-  path still substitute on read. This change closes the WRITE SEAM (birth), not
-  the read path. If someone later seals the read path, that test reds — which is
-  the point: nobody should be able to believe the read path is sealed while it
-  is not.
+  This file used to end on a DOCUMENTED RESIDUAL asserting the leak as current
+  truth: hand-crafted rows sharing one flat path still substituted on read,
+  because the store was addressed by `media_files.path` ALONE. That is closed.
+  `media_files.object_key` holds each row's OWN object address — decided once at
+  insert by `Media.Storage.ObjectKey.derive/3`, backfilled by migration
+  `20260901120000` — and every byte-resolving consumer of `path`
+  (`Blobstore.serve_strategy/2`, `ensure_local/1`, `delete/1`, each via a
+  `%MediaFile{}` head) goes through `ObjectKey.for_row/1`. The last describe
+  block is now the POSITIVE assertion, in both directions.
+
+  Deeper coverage of the read seal — the delete arm, the uncontested majority,
+  the birth decision — lives in
+  `test/barkpark/media/blob_read_tenant_key_test.exs`.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -249,25 +257,43 @@ defmodule BarkparkWeb.Integration.MediaDatasetKeyedBlobTest do
     end
   end
 
-  describe "THE DOCUMENTED RESIDUAL — the read path is NOT sealed by this change" do
-    test "hand-crafted rows sharing one FLAT path still substitute on read", %{a: a, b: b} do
+  describe "THE RESIDUAL IS CLOSED — the read path is sealed too" do
+    # This describe block replaces "THE DOCUMENTED RESIDUAL — the read path is
+    # NOT sealed by this change" (task-8eb6542ece62aff1). That test asserted the
+    # leak AS CURRENT TRUTH — B's scoped GET returning @bytes_a — and its failure
+    # message instructed whoever sealed the read path to replace it with exactly
+    # this. It is now a POSITIVE assertion, on the BYTES, in both directions.
+    #
+    # The seal: `media_files.object_key` holds each row's OWN object address,
+    # decided once at insert by `Media.Storage.ObjectKey.derive/3` and reached by
+    # every byte-resolving consumer through `ObjectKey.for_row/1`. The canonical
+    # claimant of a flat key keeps it (its bytes are the ones physically there);
+    # every later claimant addresses its own tenant shadow.
+    test "hand-crafted rows sharing one FLAT path each serve their OWN bytes", %{a: a, b: b} do
       shared = "2026/08/hand-crafted-collision.png"
 
       {_row_a, push_a} = claim!(a, shared, @bytes_a)
       assert {:ok, _p, _r} = push_a
 
-      # B claims the SAME flat key. Its own push is still refused, so it is still
-      # wedged — nothing here closes that.
+      # B claims the SAME flat key. THE WEDGE IS GONE: B's push is now ACCEPTED,
+      # landing at B's own row's object address rather than on top of A's bytes.
       {_row_b, push_b} = claim!(b, shared, @bytes_b)
-      assert {:error, :blob_key_not_owned} = push_b
 
-      resp = scoped_get(b, shared)
+      assert match?({:ok, _p, _r}, push_b),
+             "B is still wedged out of its own key: #{inspect(push_b)}"
 
-      assert resp.resp_body == @bytes_a,
-             "the read path appears to have been SEALED. That is good news, not a " <>
-               "regression — update this test and the residual note in " <>
-               "Media.blob_key/3, because this file exists to stop anyone believing " <>
-               "the read path was sealed while it was not."
+      resp_b = scoped_get(b, shared)
+      resp_a = scoped_get(a, shared)
+
+      assert resp_b.resp_body == @bytes_b,
+             "cross-tenant blob READ substitution — B's own scoped route served " <>
+               "#{inspect(resp_b.resp_body)}; B's own bytes are #{inspect(@bytes_b)}"
+
+      # The other direction, in the same run: the canonical claimant is UNTOUCHED.
+      # B acquiring its own bytes must not have moved or overwritten A's.
+      assert resp_a.resp_body == @bytes_a,
+             "A's published reference stopped resolving to its own bytes — the " <>
+               "seal moved an object it must not move"
     end
   end
 end

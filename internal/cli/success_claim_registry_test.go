@@ -394,7 +394,7 @@ func successClaimRegistry() []claimSite {
 		{
 			Name: "renderSiteCreated/doc-type-binding",
 			Render: func(out *writer, resp any) {
-				renderSiteCreated(out.outf, resp.(cloudclient.SpawnSite), siteCreateReq, false)
+				renderSiteCreated(out.outf, resp.(cloudclient.SpawnSite), cloudclient.ContentBinding{}, siteCreateReq, false)
 			},
 			// A doc type the control plane did NOT store is not a binding, however
 			// loudly the request asked for one.
@@ -404,11 +404,54 @@ func successClaimRegistry() []claimSite {
 		{
 			Name: "renderSiteCreated/dataset-binding",
 			Render: func(out *writer, resp any) {
-				renderSiteCreated(out.outf, resp.(cloudclient.SpawnSite), siteCreateReq, false)
+				renderSiteCreated(out.outf, resp.(cloudclient.SpawnSite), cloudclient.ContentBinding{}, siteCreateReq, false)
 			},
 			Backed: spawnSiteRowFixture(nil),
 			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) {
 				s.Workspace, s.Project, s.Dataset = "", "", ""
+			}),
+		},
+		// The create-time BINDING VERDICT (ssw8). The row above says which type was
+		// STORED; these say whether the control plane could READ it through the new
+		// site's own token before it answered 201 — a fact the CLI used to decode
+		// into nothing. Each row varies ONE axis of the verdict and holds the row
+		// itself byte-identical, so the printed difference can only be the verdict.
+		{
+			// The axis the surfacing exists for: an UNVERIFIED create must not print
+			// the sentence a confirmed one prints.
+			Name: "renderSiteCreated/content-binding-status",
+			Render: func(out *writer, resp any) {
+				c := resp.(cloudclient.SpawnSiteCreated)
+				renderSiteCreated(out.outf, c.Site, c.ContentBinding, siteCreateReq, false)
+			},
+			Backed:       spawnSiteCreatedFixture(cloudclient.ContentBinding{Status: "bound", DocType: "paper"}),
+			Contradicted: spawnSiteCreatedFixture(cloudclient.ContentBinding{Status: "unverified", DocType: "paper"}),
+		},
+		{
+			// The producer OMITS `count` when the box published no total, so absent
+			// and zero are different answers — and a receipt that prints the same
+			// bytes for both is one that can claim a magnitude nobody published.
+			Name: "renderSiteCreated/content-binding-count",
+			Render: func(out *writer, resp any) {
+				c := resp.(cloudclient.SpawnSiteCreated)
+				renderSiteCreated(out.outf, c.Site, c.ContentBinding, siteCreateReq, false)
+			},
+			Backed:       spawnSiteCreatedFixture(cloudclient.ContentBinding{Status: "bound", DocType: "paper", Count: intp(12)}),
+			Contradicted: spawnSiteCreatedFixture(cloudclient.ContentBinding{Status: "bound", DocType: "paper"}),
+		},
+		{
+			// The REASON, relayed. Two different refusals must not read alike: the
+			// detail is the only thing that tells an operator what to fix.
+			Name: "renderSiteCreated/content-binding-detail",
+			Render: func(out *writer, resp any) {
+				c := resp.(cloudclient.SpawnSiteCreated)
+				renderSiteCreated(out.outf, c.Site, c.ContentBinding, siteCreateReq, false)
+			},
+			Backed: spawnSiteCreatedFixture(cloudclient.ContentBinding{
+				Status: "unverified", Detail: "acme has no URL yet — the site's content could not be read",
+			}),
+			Contradicted: spawnSiteCreatedFixture(cloudclient.ContentBinding{
+				Status: "unverified", Detail: "acme could not be reached — the site's content could not be read",
 			}),
 		},
 		{
@@ -700,6 +743,17 @@ func spawnSiteRowFixture(mut func(*cloudclient.SpawnSite)) cloudclient.SpawnSite
 		mut(&s)
 	}
 	return s
+}
+
+func intp(i int) *int { return &i }
+
+// spawnSiteCreatedFixture is the whole CREATE ENVELOPE — the row above, held
+// byte-identical, plus the create-time binding verdict that is the axis. The row
+// is deliberately NOT a parameter: a pair that moved the row as well as the
+// verdict would print two different lines for two different sites, which says
+// nothing about whether the receipt reads the verdict at all.
+func spawnSiteCreatedFixture(binding cloudclient.ContentBinding) cloudclient.SpawnSiteCreated {
+	return cloudclient.SpawnSiteCreated{Site: spawnSiteRowFixture(nil), ContentBinding: binding}
 }
 
 // ── THE HELD-FIXED HALVES (PDS-D355) ────────────────────────────────────────

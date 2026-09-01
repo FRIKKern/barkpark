@@ -31,6 +31,7 @@ defmodule Barkpark.Media.Blobstore do
 
   alias Barkpark.Media
   alias Barkpark.Media.Blobstore.{Local, S3}
+  alias Barkpark.Media.Storage.{MediaFile, ObjectKey}
 
   @typedoc "Server-generated path relative to the media root — never raw client input."
   @type relative_path :: String.t()
@@ -161,9 +162,29 @@ defmodule Barkpark.Media.Blobstore do
   # this guard leaves them untouched.
   defp safe_blob_path?(relative_path), do: Media.valid_blob_path?(relative_path)
 
+  # ── ROW-ADDRESSED VERBS (task-8eb6542ece62aff1) ────────────────────────────
+  #
+  # A bare `relative_path` carries NO TENANT, so a store addressed by it alone
+  # cannot tell two rows at one path apart and hands the second claimant the
+  # first one's bytes. These heads take the ROW and resolve its object through
+  # the single owner `Media.object_key/1`, which answers "which object does THIS
+  # row address" — the path itself for every uncontested and every born-keyed
+  # row (the overwhelming majority, zero queries), the row's own tenant shadow
+  # for a contested legacy flat key.
+  #
+  # The bare-string heads BELOW stay, and are not a bypass to be closed: they
+  # are the seam for keys no row claims yet — the bundle importer's blob push
+  # (`Media.put_blob/3`, rows COPYed first, bytes pushed after) and
+  # `scripts/pds-scratch-target.sh`'s bare-path probe. A caller holding a
+  # `%MediaFile{}` must use these heads; `ObjectKey.for_row/1` is what makes them
+  # differ from `verb(file.path)`.
+  def delete(%MediaFile{} = file), do: delete(ObjectKey.for_row(file))
+
   def delete(relative_path) do
     if safe_blob_path?(relative_path), do: impl().delete(relative_path), else: :ok
   end
+
+  def ensure_local(%MediaFile{} = file), do: ensure_local(ObjectKey.for_row(file))
 
   def ensure_local(relative_path) do
     if safe_blob_path?(relative_path),
@@ -202,7 +223,12 @@ defmodule Barkpark.Media.Blobstore do
     {:ok, %{received: received, stored: :unverified, verified_by: nil, unverified_reason: reason}}
   end
 
-  def serve_strategy(relative_path, opts \\ []) do
+  def serve_strategy(path_or_file, opts \\ [])
+
+  def serve_strategy(%MediaFile{} = file, opts),
+    do: serve_strategy(ObjectKey.for_row(file), opts)
+
+  def serve_strategy(relative_path, opts) do
     if safe_blob_path?(relative_path),
       do: impl().serve_strategy(relative_path, opts),
       else: {:error, :not_found}

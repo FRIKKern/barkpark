@@ -140,6 +140,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   def walk(%{"kind" => "PdButton"} = n, _width, pal), do: button(n, pal)
   def walk(%{"kind" => "PdHr"} = n, _width, pal), do: hr(n, pal)
+
+  def walk(%{"kind" => "PdImage"} = n, _width, %{style: :article}),
+    do: image(n, ~s( data-bp-lightboxable="true"))
+
   def walk(%{"kind" => "PdImage"} = n, _width, _pal), do: image(n)
   def walk(%{"kind" => "PdTable"} = n, width, pal), do: table(n, width, pal)
   def walk(%{"kind" => "PdSheet"} = n, width, pal), do: sheet(n, width, pal)
@@ -970,7 +974,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     ~s(<hr style="border:none;border-top:#{escape_attr(to_string(t))}px solid #{pal.rule};margin:30px 0 26px">)
   end
 
-  defp image(n) do
+  defp image(n, article_attrs \\ "") do
     dims =
       case Map.get(n, "width") do
         nil -> ""
@@ -981,7 +985,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
           h -> ~s( height="#{escape_attr(to_string(h))}")
         end
 
-    ~s(<img src="#{safe_url(Map.get(n, "src", ""))}" alt="#{escape_attr(Map.get(n, "alt", ""))}" style="max-width:100%;height:auto"#{dims}>)
+    ~s(<img src="#{safe_url(Map.get(n, "src", ""))}" alt="#{escape_attr(Map.get(n, "alt", ""))}"#{article_attrs} style="max-width:100%;height:auto"#{dims}>)
   end
 
   # Article mode styles the header row distinctly: the first row becomes a

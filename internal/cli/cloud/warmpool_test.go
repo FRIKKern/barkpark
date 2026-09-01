@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/FRIKKern/barkpark/deploy"
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
 
@@ -43,6 +45,11 @@ type recordingRunner struct {
 	diffErr    error    // diff script errors
 	ffRan      bool     // the bare fast-forward script actually ran
 	ffErr      error    // fast-forward errors (diverged snapshot)
+
+	// stepErr scripts a Run failure BY STEP TITLE, so a test can drive one
+	// non-fatal step's degrade path without reaching for a red health gate. Zero
+	// value (nil) → every step succeeds, so existing chain tests are undisturbed.
+	stepErr map[string]error
 }
 
 func (r *recordingRunner) Run(_ context.Context, s CaddyStep) error {
@@ -50,7 +57,7 @@ func (r *recordingRunner) Run(_ context.Context, s CaddyStep) error {
 	r.cmds = append(r.cmds, s.Cmd)
 	r.argvs = append(r.argvs, s.Argv)
 	r.events = append(r.events, "run:"+s.Title)
-	return nil
+	return r.stepErr[s.Title]
 }
 
 // RunOutput implements the freshen capture capability. It scripts the cheap-check
@@ -1541,6 +1548,207 @@ func TestProvision_SkipsAgentWhenUnclaimed(t *testing.T) {
 	}
 	if !reg.Has("acme.barkpark.cloud") {
 		t.Errorf("box not registered; registry=%+v", reg.Registered())
+	}
+}
+
+// ── jpf-w1-siteplane-chain: step 7c, the site plane ───────────────────
+
+// sitePlaneStepTitle is the narrated Title of step 7c — the handle the chain
+// tests use to prove the step ran (or did not) without matching on script text.
+const sitePlaneStepTitle = "install the site-hosting plane (builder + runtime)"
+
+// TestProvision_InstallsSitePlaneWhenClaimed proves the chain closes the gap the
+// row names: a claim carrying an agent token + control URL makes the go-live chain
+// ALSO install the site-hosting plane, so a freshly launched box can drain its OWN
+// site-deploy queue instead of waiting for a human to aim the manual per-box
+// cp-ops `site-runtime-install` workflow_dispatch at its IP.
+func TestProvision_InstallsSitePlaneWhenClaimed(t *testing.T) {
+	spec := agentSpec()
+	wp, _, _, runner, reg := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+
+	if _, err := wp.Provision(context.Background(), spec); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+
+	if !slices.Contains(runner.titles, sitePlaneStepTitle) {
+		t.Errorf("site-plane step did not run; titles:\n%s", strings.Join(runner.titles, "\n"))
+	}
+	// The real on-box work reached the box (asserted on the recorded Argv, where the
+	// script lives — not on Cmd, which is narration only).
+	all := runnerArgvJoined(runner)
+	for _, want := range []string{
+		"$GO build -o /usr/local/bin/barkpark-builder ./cmd/barkpark-builder",
+		"$GO build -o /usr/local/bin/barkpark-runtime ./cmd/barkpark-runtime",
+		"systemctl enable --now barkpark-builder barkpark-runtime",
+		// The plane authenticates with the box's OWN agent identity — the token FILE
+		// step 7b wrote, never a second credential threaded through the spec.
+		"--token-file /etc/barkpark/agent.token",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("site-plane install missing %q; ran:\n%s", want, all)
+		}
+	}
+	// Step 7c lands strictly BETWEEN 7b (agent) and the step-8 health poll, so the
+	// verify gate — which runs after configureHost — can never probe ahead of it.
+	agentAt := slices.Index(runner.titles, "install + enable the on-box monitoring agent")
+	planeAt := slices.Index(runner.titles, sitePlaneStepTitle)
+	if agentAt < 0 || planeAt < 0 || planeAt < agentAt {
+		t.Errorf("site plane must run after the agent step: agent=%d plane=%d; titles:\n%s",
+			agentAt, planeAt, strings.Join(runner.titles, "\n"))
+	}
+	if !reg.Has("acme.barkpark.cloud") {
+		t.Errorf("box not registered; registry=%+v", reg.Registered())
+	}
+}
+
+// TestProvision_SkipsSitePlaneWhenUnclaimed proves the additive contract: a claim
+// from an old control plane (no agent token / control URL) runs the chain
+// byte-for-byte as before — no site-plane commands at all, box still green. The
+// plane shares 7b's gate because it reuses 7b's token file.
+func TestProvision_SkipsSitePlaneWhenUnclaimed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		spec GoLiveSpec
+	}{
+		{"neither", acmeSpec()},
+		{"token only", func() GoLiveSpec { s := agentSpec(); s.ControlURL = ""; return s }()},
+		{"control-url only", func() GoLiveSpec { s := agentSpec(); s.AgentToken = ""; return s }()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wp, _, _, runner, reg := newFakeWarmPool(t, greenGate(tc.spec.healthTarget()))
+			if _, err := wp.Provision(context.Background(), tc.spec); err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+			if slices.Contains(runner.titles, sitePlaneStepTitle) {
+				t.Errorf("site-plane step ran for an unclaimed box (should skip); titles:\n%s",
+					strings.Join(runner.titles, "\n"))
+			}
+			all := runnerArgvJoined(runner)
+			for _, forbidden := range []string{"barkpark-builder", "barkpark-runtime", "nixpacks"} {
+				if strings.Contains(all, forbidden) {
+					t.Errorf("site-plane commands ran for an unclaimed box; found %q in:\n%s", forbidden, all)
+				}
+			}
+			if !reg.Has("acme.barkpark.cloud") {
+				t.Errorf("box not registered; registry=%+v", reg.Registered())
+			}
+		})
+	}
+}
+
+// TestProvision_SitePlaneFailureDoesNotFailGoLive is the degrade-loudly contract:
+// a box that serves its CMS perfectly must not be thrown away because apt/nixpacks
+// hiccuped. The step fails, the go-live still returns a LiveServer and a nil
+// error, the box registers — and the failure is SHOUTED to stderr so it is visible
+// in the worker journal (the queue-age alarm is the standing backstop).
+func TestProvision_SitePlaneFailureDoesNotFailGoLive(t *testing.T) {
+	spec := agentSpec()
+	wp, _, _, runner, reg := newFakeWarmPool(t, greenGate(spec.healthTarget()))
+	runner.stepErr = map[string]error{sitePlaneStepTitle: fmt.Errorf("nixpacks install failed (fake)")}
+
+	r, w, _ := os.Pipe()
+	origStderr := os.Stderr
+	os.Stderr = w
+
+	live, err := wp.Provision(context.Background(), spec)
+
+	w.Close()
+	os.Stderr = origStderr
+	var buf strings.Builder
+	io.Copy(&buf, r)
+	warning := buf.String()
+
+	if err != nil {
+		t.Fatalf("a failed site-plane install must NOT fail the go-live, got err: %v", err)
+	}
+	if live.FQDN != "acme.barkpark.cloud" {
+		t.Errorf("go-live must still return the LiveServer; got %+v", live)
+	}
+	if !reg.Has("acme.barkpark.cloud") {
+		t.Errorf("box not registered; registry=%+v", reg.Registered())
+	}
+	// The step really did run and really did fail — without this the test would pass
+	// vacuously if the step were silently skipped.
+	if !slices.Contains(runner.titles, sitePlaneStepTitle) {
+		t.Fatalf("site-plane step never ran, so its failure path was never exercised; titles:\n%s",
+			strings.Join(runner.titles, "\n"))
+	}
+	if !strings.Contains(warning, "site-plane install on") || !strings.Contains(warning, "WARNING") {
+		t.Errorf("a degraded site-plane install must warn loudly on stderr; got:\n%s", warning)
+	}
+	if !strings.Contains(warning, "nixpacks install failed (fake)") {
+		t.Errorf("the warning must carry the underlying error; got:\n%s", warning)
+	}
+}
+
+// TestSiteRuntimeInstallScript_EmbedParity proves the bytes the chain ships are
+// the bytes the shell harness gates. deploy/site-runtime-install_test.sh
+// (.github/workflows/shell-harnesses.yml) tests deploy/site-runtime-install.sh;
+// this asserts the embedded copy consumed by step 7c is BYTE-IDENTICAL to that
+// file, so a gated script and a shipped script can never be two different things.
+//
+// Parity here is by CONSTRUCTION — deploy.SiteRuntimeInstallScript is a
+// same-directory //go:embed of that one committed file, so there is no second
+// copy to drift. This test is the tripwire on the embed DIRECTIVE (repointed at
+// another file, or the file renamed away) rather than a drift detector, and the
+// marker assertions below keep it from passing over a gutted script.
+func TestSiteRuntimeInstallScript_EmbedParity(t *testing.T) {
+	// cwd is the package dir under `go test`, so walk up to the repo root.
+	const rel = "../../../deploy/site-runtime-install.sh"
+	onDisk, err := os.ReadFile(rel)
+	if err != nil {
+		t.Fatalf("read %s (path must resolve from the package dir): %v", rel, err)
+	}
+	if string(onDisk) != deploy.SiteRuntimeInstallScript {
+		t.Errorf("embedded script drifted from %s: embedded %d bytes, on disk %d bytes",
+			rel, len(deploy.SiteRuntimeInstallScript), len(onDisk))
+	}
+	// Non-vacuity: two EMPTY or gutted files would also be "identical". Pin the
+	// load-bearing lines so parity over a hollowed-out script fails.
+	if len(deploy.SiteRuntimeInstallScript) < 1000 {
+		t.Fatalf("embedded script is implausibly short (%d bytes) — parity is vacuous",
+			len(deploy.SiteRuntimeInstallScript))
+	}
+	for _, want := range []string{
+		"$GO build -o /usr/local/bin/barkpark-builder ./cmd/barkpark-builder",
+		"$GO build -o /usr/local/bin/barkpark-runtime ./cmd/barkpark-runtime",
+		"--token-file /etc/barkpark/agent.token",
+		"systemctl enable --now barkpark-builder barkpark-runtime",
+	} {
+		if !strings.Contains(deploy.SiteRuntimeInstallScript, want) {
+			t.Errorf("embedded script missing load-bearing line %q", want)
+		}
+	}
+}
+
+// TestSiteRuntimeInstallStep_Shape pins the step's delivery contract: the script
+// rides as Argv[2] of `bash -lc` (sshStepArgv base64s that string and decodes it
+// to a tempfile on the box, so the script's own quoting survives), the narration
+// never carries the script body, and no redaction is claimed — the script sources
+// no .env and carries no secret VALUE, only a token FILE reference.
+func TestSiteRuntimeInstallStep_Shape(t *testing.T) {
+	s := siteRuntimeInstallStep()
+
+	if len(s.Argv) != 3 || s.Argv[0] != "bash" || s.Argv[1] != "-lc" {
+		t.Fatalf("siteRuntimeInstallStep argv = %v, want [bash -lc <script>]", s.Argv)
+	}
+	if s.Argv[2] != deploy.SiteRuntimeInstallScript {
+		t.Errorf("step must ship the embedded script verbatim, not a rewrite of it")
+	}
+	if strings.Contains(s.Cmd, "systemctl") || len(s.Cmd) > 200 {
+		t.Errorf("Cmd is narration, not the script body; got %q", s.Cmd)
+	}
+	// The script sources no /opt/barkpark/.env, so pattern-scrubbing would be a
+	// false claim. This assertion is the tripwire: if the script ever starts
+	// sourcing .env, it fails and RedactEnvSecrets must be turned on.
+	if strings.Contains(deploy.SiteRuntimeInstallScript, "/opt/barkpark/.env") {
+		t.Errorf("the script now sources /opt/barkpark/.env — set RedactEnvSecrets on this step")
+	}
+	if s.RedactEnvSecrets {
+		t.Errorf("RedactEnvSecrets claims an .env-sourcing step that this is not")
+	}
+	if len(s.Redact) != 0 {
+		t.Errorf("no secret value is interpolated into this step; Redact should be empty, got %v", s.Redact)
 	}
 }
 

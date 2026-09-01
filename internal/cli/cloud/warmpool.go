@@ -31,6 +31,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FRIKKern/barkpark/deploy"
 	"github.com/FRIKKern/barkpark/internal/cli/setup"
 )
 
@@ -690,6 +691,43 @@ func agentInstallStep(token, controlURL, healthURL string) CaddyStep {
 		// The token rides in the Argv (base64'd over SSH); scrub it from any captured
 		// output so a step failure never surfaces the value.
 		Redact: []string{token},
+	}
+}
+
+// siteRuntimeInstallStep (jpf-w1-siteplane-chain) is the configure sub-step that
+// installs the SITE-HOSTING PLANE on a box: docker + buildx, nixpacks, an isolated
+// Go toolchain, a shallow tools checkout, and the barkpark-builder /
+// barkpark-runtime binaries with their systemd units. Without it a launched box
+// runs its CMS fine but nothing moves a hosted-site deployment along the queue
+// (queued -> pushing -> live), so every site pointed at that box sits queued
+// forever.
+//
+// The script is the COMMITTED deploy/site-runtime-install.sh, embedded at build
+// time (deploy.SiteRuntimeInstallScript) because the provisioner binary carries no
+// repo checkout. It rides as Argv[2] of `bash -lc`: sshStepArgv base64s that whole
+// string and decodes it to a tempfile the box then runs, so the script's own
+// single-quoted heredocs, $VARs and nested quotes survive VERBATIM — the same
+// bytes cp-ops scp's on the manual path, and the same bytes
+// deploy/site-runtime-install_test.sh gates.
+//
+// It takes NO arguments and NO environment. That is checked, not assumed: both
+// units the script writes hardcode `--control-url https://api.barkpark.cloud` and
+// name `--token-file /etc/barkpark/agent.token`, the file step 7b wrote moments
+// earlier. So the plane reuses the box's OWN per-box agent identity
+// (jpf-w1-builder-identity) rather than a second credential — which is exactly why
+// this step runs AFTER 7b and shares 7b's gate. Passing a CONTROL_URL/token env
+// here would be dead weight the script never reads; if a future revision starts
+// reading one, wire it HERE and not into the Title/Cmd.
+//
+// No Redact and no RedactEnvSecrets, also checked: the script never sources
+// /opt/barkpark/.env, and no secret VALUE is interpolated into it (the token is a
+// file REFERENCE), so a captured-output scrub would have nothing to catch. If the
+// script ever starts sourcing .env, flip RedactEnvSecrets here.
+func siteRuntimeInstallStep() CaddyStep {
+	return CaddyStep{
+		Title: "install the site-hosting plane (builder + runtime)",
+		Cmd:   "bash deploy/site-runtime-install.sh (embedded): docker + nixpacks + barkpark-builder/runtime units",
+		Argv:  []string{"bash", "-lc", deploy.SiteRuntimeInstallScript},
 	}
 }
 
@@ -1488,6 +1526,41 @@ func (wp *WarmPool) configureHost(ctx context.Context, host Server, spec GoLiveS
 			if err := runner.Run(ctx, agentInstallStep(spec.AgentToken, spec.ControlURL, spec.healthTarget())); err != nil {
 				fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: agent install on %s degraded (box serves without the monitoring beat): %v\n", host.IP, err)
 			}
+		}
+	}
+
+	// 7c. site plane (jpf-w1-siteplane-chain) — install the site-hosting plane so
+	// the box can drain its OWN site-deploy queue. Until this step the only delivery
+	// path was the MANUAL per-box cp-ops `site-runtime-install` workflow_dispatch:
+	// nothing under internal/ ever invoked the installer, so every freshly launched
+	// box shipped plane-less and any site pointed at it stayed queued forever until
+	// a human aimed that workflow at its IP.
+	//
+	// Gated exactly like 7b, on the SAME two spec fields, because the plane reuses
+	// the SAME per-box agent.token 7b just wrote — no new GoLiveSpec field and no
+	// second credential (jpf-w1-builder-identity made both units token-file-only).
+	// Skipped silently when the claim carried no token/control-url (an old control
+	// plane): the pre-plane behaviour, byte-for-byte.
+	//
+	// NON-FATAL, mirroring 7b: a plane-less box still serves its CMS perfectly, so
+	// an apt/nixpacks/network hiccup degrades loudly into the worker journal rather
+	// than failing an otherwise-good go-live. The BACKSTOP that keeps a degrade from
+	// being invisible is the queue-age alarm (jpf-w1-queue-age-alarm): a box whose
+	// plane never installed shows up as a site-deploy queue that stops draining,
+	// which is precisely what that alarm fires on.
+	//
+	// IDEMPOTENT BY CONSTRUCTION — the script probes before every install step
+	// (`command -v docker`, `docker buildx version`, `$GO version`, the tools
+	// checkout's .git), so a re-run is safe and this step deliberately adds no
+	// idempotence layer of its own.
+	//
+	// ORDERING IS SAFE: the verify gate runs strictly AFTER configureHost, so a
+	// plane installed here — in the window between 7b and the step-8 health poll —
+	// already exists before any probe goes looking for it.
+	if spec.ControlURL != "" && spec.AgentToken != "" {
+		wp.progress("configure", "progress", "Installing the site-hosting plane…")
+		if err := runner.Run(ctx, siteRuntimeInstallStep()); err != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-provisioner: WARNING: site-plane install on %s degraded (box serves, but its site deployments stay queued until the plane is installed): %v\n", host.IP, err)
 		}
 	}
 	wp.progress("configure", "done", "")

@@ -44,7 +44,9 @@ defmodule Barkpark.Media.Processing do
     # ensure_local/1, not file_path/1: with an object-storage backend the
     # original may not be on this disk (post-import, or a cold cache) — the
     # blobstore fetches it once into the write-through cache before probing.
-    with {:ok, src} <- Blobstore.ensure_local(file.path),
+    # ROW-ADDRESSED (task-8eb6542ece62aff1) — probing a substituted object would
+    # write ANOTHER tenant's real width/height onto this row's asset doc.
+    with {:ok, src} <- Blobstore.ensure_local(file),
          {:ok, %{width: w, height: h}} <- Probe.probe(src, file.mime_type) do
       patch_dimensions(doc, file, w, h)
     else

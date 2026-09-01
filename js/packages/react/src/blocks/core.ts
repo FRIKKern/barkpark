@@ -644,7 +644,11 @@ const image: Emit = (b) => {
   let dims = ''
   if (w !== null && w !== undefined) dims += ` width="${escapeAttr(str(w) || String(w))}"`
   if (h !== null && h !== undefined) dims += ` height="${escapeAttr(str(h) || String(h))}"`
-  return `<img src="${safeUrl(str(b.src))}" alt="${escapeAttr(str(b.alt))}" style="max-width:100%;height:auto"${dims}>`
+  // Mirrors walk.ex's `:article` image/2: the reader shell progressively enhances
+  // ONLY images carrying this hook, so a Paper's chrome images never become
+  // lightbox triggers. This registry renders the :article surface exclusively —
+  // Elixir's email/default legs stay bare, and so does anything not routed here.
+  return `<img src="${safeUrl(str(b.src))}" alt="${escapeAttr(str(b.alt))}" data-bp-lightboxable="true" style="max-width:100%;height:auto"${dims}>`
 }
 
 /* figure / diagram / asciicast (figures.ex) */

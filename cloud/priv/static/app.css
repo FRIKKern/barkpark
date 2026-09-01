@@ -1127,6 +1127,17 @@ select.form-input {
 .fresh-badge--rebuild { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-strong); }
 .fresh-badge--rebuild .fresh-dot { background: var(--warn); }
 .fresh-badge--rebuild .fresh-meta { color: var(--warn); }
+/* cch-w64-bl: the FIFTH dot. `cancelled` and the unknown-status else arm both
+   emit dot "unknown" (freshnessModel), and it had no rule — so a cancelled
+   deploy fell through to the bare .fresh-badge, which siteFreshnessSeg ships as
+   the "Not deployed to production" badge. Neutral is right for a settled
+   non-health outcome, but it must not be the NEVER-DEPLOYED neutral: a HOLLOW
+   ring separates it from all four filled dots and from the base's filled --dim
+   disc, and the dashed edge separates the badge itself. Tokens only — --dim and
+   --muted-text are both theme-driven (--cc-fg3 / --cc-fg2), so this reads in
+   light and dark without a second rule. */
+.fresh-badge--unknown { border-style: dashed; }
+.fresh-badge--unknown .fresh-dot { background: transparent; box-shadow: inset 0 0 0 2px var(--muted-text); }
 .fresh-badge.is-rebuilding .fresh-dot { animation: fresh-pulse var(--dur-3) var(--ease) infinite; }
 .fresh-badge.is-rebuilding { animation: fresh-glow var(--dur-3) var(--ease) infinite; }
 @keyframes fresh-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(1.55); } }

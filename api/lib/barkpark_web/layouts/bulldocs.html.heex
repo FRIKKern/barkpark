@@ -814,17 +814,8 @@
     }
     .bp-paper-article [data-bp-chapter-anchor] { scroll-margin-top: 1.5rem; }
 
-    /* Paper-image lightbox. Progressive enhancement lives in the reader shell
-       so PortableDoc's email/static <img> contract remains byte-stable. */
-    .bp-paper-article img[data-bp-lightboxable="true"] {
-      cursor: zoom-in;
-      transition: opacity 140ms ease;
-    }
-    .bp-paper-article img[data-bp-lightboxable="true"]:hover { opacity: 0.94; }
-    .bp-paper-article img[data-bp-lightboxable="true"]:focus-visible {
-      outline: 3px solid var(--paper-accent);
-      outline-offset: 4px;
-    }
+    /* Paper-image lightbox. Trigger styling lives in paper-surface.css; this
+       reader shell owns only the modal chrome and interaction. */
     .bp-image-lightbox {
       color-scheme: dark;
       width: 100vw;
@@ -1774,13 +1765,13 @@
       var trigger = null;
 
       function isEligible(image) {
-        return image && article.contains(image) && !image.closest("a, button");
+        return image && image.dataset.bpLightboxable === "true" && article.contains(image) && !image.closest("a, button");
       }
 
       function prepare(root) {
-        var images = root.matches && root.matches("img") ? [root] : Array.from(root.querySelectorAll("img"));
+        var selector = 'img[data-bp-lightboxable="true"]';
+        var images = root.matches && root.matches(selector) ? [root] : Array.from(root.querySelectorAll(selector));
         images.filter(isEligible).forEach(function (image) {
-          image.dataset.bpLightboxable = "true";
           image.tabIndex = 0;
           image.setAttribute("role", "button");
           image.setAttribute("aria-label", (image.alt ? image.alt + ". " : "") + "Open enlarged image");
