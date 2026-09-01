@@ -55,6 +55,44 @@ the fact shape, the fields that are dropped, the required mint, the
 all-or-nothing rule and the `.ok`-not-`.safe` trap — is documented beside the
 write target in [`ledger/README.md`](./ledger/README.md#how-to-write-a-row).
 
+## The mint and the two things a leading `cd` does
+
+A harvested rerun almost always opens `cd <somewhere> && …`, and that prefix is
+read **twice, for two unrelated questions**. Keeping them apart is the point:
+
+| question | who answers | what it changes |
+|---|---|---|
+| does the prefix survive into the STORED row? | `bindToCaller`, delegating the invariance call to `classifyBinding` | the `rerun` string only — never subject or deps |
+| where does the prefix put the ROOT? | `cdRootOffset` | subject and path-shaped deps — never the stored `rerun` |
+
+The second is newer. `cd <checkout>/api && mix test test/x_test.exs` names a
+file that lives at `api/test/x_test.exs` in this repo-rooted store, and the mint
+used to key it as `test/x_test.exs` — a path that resolves to nothing from the
+repo root, so the row indexed a file that does not exist and could never lead to
+the one it measured. The offset is now carried onto every token the shell would
+have resolved against that cwd. Tokens the `cd` provably cannot reach are left
+alone: an **absolute** one (the filesystem resolves it, and root-stripping
+already anchored it) and a **ref-qualified** one (`git show <rev>:<path>` is
+repo-root-relative by git's own rule).
+
+`cdRootOffset` reads exactly one target shape — an absolute path that strips to
+a known checkout root **plus** a non-empty remainder. A bare relative target
+(`cd api && …`) is refused, and not for tidiness: the committed store carries
+`cd barkpark && git grep … -- api/lib`, where the target is the repository
+reached from its *parent*. Carrying that would mint `barkpark/api/lib`. A
+relative target means nothing without the cwd it was typed in, and a recipe does
+not record one. A foreign absolute target (`cd /tmp && …`) is likewise
+unanchorable and behaviour there is unchanged. Both residuals are real: under
+those two shapes a subdirectory-relative subject is still minted.
+
+**The store is append-only, so the fix has a legacy tail.** Five write-path-
+attested rows were minted before the carry and keep the subdirectory-relative
+keys the old mint derived. The regression floor does not wave them through: it
+demands that each moved key be *exactly* the one `<offset>/` prefix read off
+that row's own rerun, and caps the class at a ceiling that cannot grow — every
+row written from here on already carries the offset, so no new attested row can
+enter it.
+
 ## Reading the store back — three shapes, and the scope that is not a pin
 
 `tooling/grip/ledger/` is a **shared append-only commons**: four epics write
