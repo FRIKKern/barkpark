@@ -78,14 +78,19 @@ if config_env() == :prod do
   # config.exs; the real commercial numbers are HUMAN task cloud-17. `trial` is
   # the signup grant, `forever` the admin comp (effectively unlimited), `none`
   # (no active subscription) is always 0.
-  barkpark_limits = %{
-    "free" => String.to_integer(System.get_env("LIMIT_FREE") || "1"),
-    "trial" => String.to_integer(System.get_env("LIMIT_TRIAL") || "1"),
-    "supporter" => String.to_integer(System.get_env("LIMIT_SUPPORTER") || "3"),
-    "support_plus" => String.to_integer(System.get_env("LIMIT_SUPPORT_PLUS") || "10"),
-    "forever" => 1_000_000,
-    "none" => 0
-  }
+  #
+  # cch-prod-limit-override-seam-unmirrored: this resolution used to be written
+  # out right here, which put it inside `if config_env() == :prod` where no test
+  # could reach it. The cross-layer mirror guard could therefore only compare
+  # COMMITTED DEFAULTS, and once cloud/docker-compose.yml began passing LIMIT_*
+  # through (2c25288479) an operator could move the server's real ceiling from
+  # cloud/.env while the console's PLAN_CATALOG constant stayed put — with
+  # nothing red. The rule now lives in a callable module and THIS IS ITS ONLY
+  # CALLER, so test/barkpark_cloud/billing_client_mirror_test.exs compares what
+  # actually runs. Behaviour is unchanged: same four names, same defaults, same
+  # String.to_integer — a malformed LIMIT_* still raises at boot rather than
+  # silently reading as "no override".
+  barkpark_limits = BarkparkCloud.Billing.PlanLimits.resolve()
 
   # BILL-2 boot-check: the StripeGateway is selected (a secret key is set), but
   # the PAID path is inert until the per-plan price ids AND the webhook signing
