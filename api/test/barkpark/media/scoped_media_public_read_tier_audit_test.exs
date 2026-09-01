@@ -69,7 +69,8 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Auth, Content, Repo, Tenancy}
-  alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Content.CallerContext
+  alias Barkpark.Media.Storage.{Collections, MediaFile, Share}
 
   @ds "production"
 
@@ -185,7 +186,9 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
     %{
       ws: ws,
       proj: proj,
+      scope: scope,
       asset_file: file,
+      coll_id: coll_id,
       probe: probe,
       admin: mint!("smprt-admin", ["read", "write", "admin"], ws.id),
       read: mint!("smprt-read", ["read"], ws.id),
@@ -220,15 +223,39 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
 
   # Titles, not ids: publishing rewrites `doc_id`, and the probe string is
   # unique to this run, so a title match is both stable and mine alone.
-  defp collection_titles(ctx, token) do
-    ctx.conn
-    |> bearer(token)
-    |> get(scoped(ctx, "/v1/media/#{@ds}/collections?limit=1000"))
-    |> json_response(200)
-    |> get_in(["result", "collections"])
-    |> Kernel.||([])
-    |> Enum.map(& &1["title"])
-    |> Enum.filter(&(is_binary(&1) and String.contains?(&1, ctx.probe)))
+  defp collection_titles(ctx, token), do: elem(collections_door(ctx, token), 0)
+
+  # `count` is safe to pin ONLY because the workspace is unique to this run:
+  # `index/2` reports `length(collections)` over the whole scoped listing, so on
+  # the fleet-shared database a workspace-wide count would otherwise meet
+  # another agent's rows. The titles are filtered by the run-unique probe on top
+  # of that.
+  defp collections_door(ctx, token) do
+    result =
+      ctx.conn
+      |> bearer(token)
+      |> get(scoped(ctx, "/v1/media/#{@ds}/collections?limit=1000"))
+      |> json_response(200)
+      |> Map.fetch!("result")
+
+    titles =
+      (result["collections"] || [])
+      |> Enum.map(& &1["title"])
+      |> Enum.filter(&(is_binary(&1) and String.contains?(&1, ctx.probe)))
+
+    {titles, result["count"]}
+  end
+
+  defp collection_show(ctx, token, id) do
+    conn =
+      ctx.conn
+      |> bearer(token)
+      |> get(scoped(ctx, "/v1/media/#{@ds}/collections/#{id}"))
+
+    case conn.status do
+      200 -> {:ok, json_response(conn, 200)["result"]}
+      status -> {:refused, status}
+    end
   end
 
   defp show(ctx, token) do
@@ -313,36 +340,134 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
     end
   end
 
-  # RECORDED FINDING, NOT FIXED HERE — `task-b4a4b33bfb6e2954`.
+  # THE THIRD DOOR, NOW CLOSED — `task-b4a4b33bfb6e2954`.
   #
-  # The collections index is a THIRD door around the same clamp and it has none:
-  # `Collections.list/2` is a bare `Repo.all` over `mediaCollection` documents
+  # `Collections.list/2` was a bare `Repo.all` over `mediaCollection` documents
   # with tenancy scoping and NO schema-visibility filter, and `Collections.get/3`
   # goes through `Content.Query.get_document/4`, a single-type keyed read that
   # carries no `restrict_to_visible_types/3` either. MEASURED on this exact
-  # fixture with the control below green in the same run: a `[public-read, read]`
+  # fixture with the control green in the same run: a `[public-read, read]`
   # token was listed the private-visibility `mediaCollection` seeded in `setup`,
   # title and description included.
   #
-  # It is a DIFFERENT SEAT from the asset tier this file fixes, with two hazards
-  # that make it its own change rather than a line in this one: `share_view/2`
-  # reaches `Collections.assets/3` with no caller context by design (the share
-  # token IS the credential), and the FLAT collections route is
-  # anonymous-reachable, so clamping `list/2` is a product call about the public
-  # demo surface. Both are written up on the row.
+  # ONE HALF IS FIXED, ONE HALF IS A PRODUCT QUESTION, AND THE SPLIT IS
+  # DELIBERATE. `Collections.restrict_public_read_tier?/1` keys on an
+  # AUTHENTICATED principal in the public-read tier, so:
   #
-  # The seed and the reader stay here so the next agent inherits a working
-  # repro. The assertion that reds is the one line the follow-up adds back:
-  #
-  #     assert collection_titles(ctx, ctx.public_read) == []
-  #
+  #   * a `public-read` token is clamped — the unambiguous half, asserted below;
+  #   * an ANONYMOUS caller is NOT, because the flat `/v1/media/:ds/collections`
+  #     route is anonymous-reachable and clamping it flips that index from
+  #     "every collection" to "none" — a product call about the public demo
+  #     surface, not a mechanical fix. Pinned as a BOUNDARY test below so the
+  #     day someone rules on it, this file reds and says so;
+  #   * `share_view/2` passes no caller context at all AND `assets/3` now
+  #     routes through the unclamped internal `fetch/3`, so a live share link
+  #     onto a private-typed collection still resolves — asserted below, since
+  #     404-ing every share link is the way this fix could have shipped broken.
   describe "scoped media COLLECTIONS index (/w/:ws/p/:proj/v1/media/:dataset/collections)" do
     test "CONTROL: admin reads the private-typed collection — the repro is leak-observable",
          ctx do
-      assert collection_titles(ctx, ctx.admin) != [],
-             "the collections repro kept for task-b4a4b33bfb6e2954 has gone blind — the " <>
-               "seeded private mediaCollection is invisible even to admin, so re-adding " <>
-               "the clamp assertion would pass VACUOUSLY"
+      {titles, count} = collections_door(ctx, ctx.admin)
+
+      assert titles != [],
+             "the collections repro for task-b4a4b33bfb6e2954 has gone blind — the seeded " <>
+               "private mediaCollection is invisible even to admin, so every clamp " <>
+               "assertion below would pass VACUOUSLY"
+
+      assert count >= 1
+    end
+
+    test "NON-REGRESSION: a {read} token still lists the private-typed collection", ctx do
+      assert collection_titles(ctx, ctx.read) != [],
+             "the clamp moved more than one tier: a plain {read} token lost the collection"
+    end
+
+    test "a [public-read, read] token must not list it — rows AND count", ctx do
+      {titles, count} = collections_door(ctx, ctx.public_read)
+
+      assert titles == [],
+             "PUBLIC-READ TIER LEAK on the scoped media collections index: a " <>
+               "private-visibility mediaCollection was listed to a public-read token. " <>
+               "titles=#{inspect(titles)}"
+
+      assert count == 0,
+             "EXISTENCE LEAK: rows were clamped but count still reported #{count}"
+    end
+
+    test "a singleton [public-read] token is clamped identically", ctx do
+      {titles, count} = collections_door(ctx, ctx.singleton)
+
+      assert titles == [],
+             "PUBLIC-READ TIER LEAK (singleton token) on the scoped media collections index"
+
+      assert count == 0
+    end
+  end
+
+  describe "scoped media COLLECTION show door (/w/:ws/p/:proj/v1/media/:dataset/collections/:id)" do
+    test "CONTROL: admin reads the private-typed collection by id", ctx do
+      assert {:ok, result} = collection_show(ctx, ctx.admin, ctx.coll_id)
+      assert result["title"] =~ ctx.probe
+    end
+
+    test "NON-REGRESSION: a {read} token still reads it by id", ctx do
+      assert {:ok, _result} = collection_show(ctx, ctx.read, ctx.coll_id)
+    end
+
+    test "a public-read token is refused the private-typed collection by id", ctx do
+      case collection_show(ctx, ctx.public_read, ctx.coll_id) do
+        {:refused, status} ->
+          assert status in [403, 404], "expected a refusal, got #{status}"
+
+        {:ok, result} ->
+          flunk(
+            "PUBLIC-READ TIER LEAK on the collection show door: title=" <>
+              "#{result["title"]} description=#{result["description"]}"
+          )
+      end
+    end
+  end
+
+  # THE TWO HALVES THIS FIX DELIBERATELY LEAVES ALONE. Both are asserted, not
+  # merely commented: a boundary nobody can see is a boundary that moves by
+  # accident.
+  describe "the deliberately-unclamped halves" do
+    test "BOUNDARY (product question, task-b4a4b33bfb6e2954): an ANONYMOUS caller is NOT clamped",
+         ctx do
+      titles =
+        ctx.scope
+        |> Keyword.put(:caller_context, CallerContext.anonymous())
+        |> then(&Collections.list(@ds, &1))
+        |> Enum.map(& &1.title)
+        |> Enum.filter(&(is_binary(&1) and String.contains?(&1, ctx.probe)))
+
+      assert titles != [],
+             "ANONYMOUS COLLECTIONS INDEX CHANGED. The flat /v1/media/:ds/collections route " <>
+               "is anonymous-reachable; clamping it flips that index from 'every collection' " <>
+               "to 'none' whenever mediaCollection is not a public-visibility schema. That is " <>
+               "a PRODUCT decision about the public demo surface and was left open on " <>
+               "task-b4a4b33bfb6e2954, NOT smuggled in with this security fix. If you meant " <>
+               "to rule on it, change this test on purpose and say so in the PR."
+    end
+
+    test "a live SHARE link onto a private-typed collection still resolves", ctx do
+      {:ok, share} = Share.create(ctx.coll_id, @ds, ctx.scope)
+
+      # The FLAT share route, deliberately: the scoped `/w/:ws/p/:proj/...` twin
+      # rides `ResolveWorkspace`'s membership gate and 403s an anonymous caller
+      # before `share_view/2` is ever reached, so it cannot witness this hazard.
+      # `Share.share_path/2` is the URL the mint itself hands out.
+      result =
+        ctx.conn
+        |> get(Share.share_path(@ds, share.token))
+        |> json_response(200)
+        |> Map.fetch!("result")
+
+      assert get_in(result, ["collection", "title"]) =~ ctx.probe,
+             "SHARE LINKS BROKEN by the collections clamp. `share_view/2` reaches " <>
+               "`Collections.assets/3` with NO caller context by design — a resolved share " <>
+               "token IS the principal — so `assets/3` must keep using the unclamped " <>
+               "internal fetch. This is the way this fix 404s every live share link."
     end
   end
 
