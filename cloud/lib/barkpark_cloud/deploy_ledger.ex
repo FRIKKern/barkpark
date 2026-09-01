@@ -1056,7 +1056,7 @@ defmodule BarkparkCloud.DeployLedger do
   #
   #   HEALTH — `templates/search-starter` (Next) DEGRADES: `fetchCorpusGraph`
   #   catches, the landing renders empty, and the cause rides the SSR's
-  #   `bp-corpus-status` marker. `deploy/site-deploy-node.sh:492` reads that
+  #   `bp-corpus-status` marker. `deploy/site-deploy-node.sh` `health_gate_node()` reads that
   #   marker back and writes `… could not read a content document: graph 503: …`
   #   — a HEALTH-stage exit 14.
   #
