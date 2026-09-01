@@ -84,6 +84,16 @@ Six leads run concurrently. Do not do lane work yourself while they run.
 - **Fable death.** A lead that dies on the Fable cap is relaunched on `opus` with the
   same prompt; its workers were already Opus.
 
+## 2b. Throttle the machine, not the fleet
+
+Elixir compiles are the real ceiling: 30 workers each compiling `api/` in their own worktree took a
+10-core Mac to load 33 and made everything slower. An ADVISORY throttle (`helpers/with-slot.sh`) is
+bypassed by half the workers within an hour (measured 2026-09-02: 6 `mix test` processes, 2 slots
+held). Install the UNAVOIDABLE one: copy `helpers/mix-slot-wrapper.sh` to `~/.local/bin/mix` and
+`helpers/go-slot-wrapper.sh` to `~/.local/bin/go` (that dir precedes Homebrew on PATH; every new
+shell picks them up), 3 slots each, `BP_NO_SLOT=1` bypasses, delete the files to disable. Tell the
+owner: their own `mix test` waits for a slot too while the campaign runs.
+
 ## 3. Improve the system — a standing 1-of-5
 
 Every lead keeps one worker slot for **system improvement**: a trap the lane hit while
