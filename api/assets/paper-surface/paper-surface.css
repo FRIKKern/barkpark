@@ -439,6 +439,25 @@ html[data-theme="dark"] .bp-paper-body {
   border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);
 }
 
+/* The public reader progressively enhances only PortableDoc article images.
+   The renderer emits this data hook in :article mode; email and default output
+   stays a bare image. Keeping the trigger styling here makes focus treatment
+   part of the canonical Paper surface while the dialog itself remains reader
+   chrome in bulldocs.html.heex. */
+.bp-paper-article img[data-bp-lightboxable="true"] {
+  cursor: zoom-in;
+  transition: opacity 140ms ease;
+}
+.bp-paper-article img[data-bp-lightboxable="true"]:hover { opacity: 0.94; }
+.bp-paper-article img[data-bp-lightboxable="true"]:focus-visible {
+  outline: 3px solid var(--paper-accent);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bp-paper-article img[data-bp-lightboxable="true"] { transition: none; }
+}
+
 /* ── Article component classes (Stage 2, wave 2 · charter Decisions 2-4).
    Emitted by Render.Walk in `:article` mode (roles/tones/chrome now carry
    `bp-*` classes instead of inline THEME styles). Every value here is lifted
