@@ -61,6 +61,21 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       Comparing a path-only dataset while the controller went on to derive a
       query-string one is the "guard before derivation" split that let
       `?dataset=` escape the share (task-4f26838232b5ece0).
+    * **A grant PUBLISHES the dataset it granted for** as `:share_dataset`.
+      Checking the dataset here is only half the invariant: a route whose read
+      never FILTERS by dataset can still resolve a row belonging to another
+      one, and then the guard's answer says nothing about what got served.
+      Three `:shared_media_api` routes did exactly that — `MediaController`'s
+      `show/2`, `serve/2` and `serve_rendition/2` look a `MediaFile` up by id
+      or by path through `ScopeHelpers.scope_opts/1`, which carries
+      workspace/project and NO dataset by design, and then read `file.dataset`
+      for the asset-doc lookup, i.e. they ADOPTED the row's dataset instead of
+      checking it against the shared one. A `production` share therefore
+      served a `staging` file to an anonymous caller (task-1445262e2c0b54ea).
+      This assign is the seam such a read fences itself on
+      (`MediaController.confine_share_dataset/2`). It is set ONLY on a grant,
+      so a member or flat caller carries no assign and is unaffected — the
+      fence narrows the share surface and nothing else.
 
   Pipeline placement: runs BEFORE `BarkparkWeb.Plugs.ResolveWorkspace` (and
   `ResolveProject`). It only ever ADDS assigns on the public-share path; it
@@ -155,6 +170,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
         |> assign(:share_public, true)
         |> assign(:share_access, Sharing.access_for(ws_slug, project_slug, dataset))
         |> assign(:share_grant, :section)
+        |> assign(:share_dataset, dataset)
       else
         _ -> conn
       end
@@ -218,6 +234,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
       |> assign(:share_public, true)
       |> assign(:share_access, :read)
       |> assign(:share_grant, :item)
+      |> assign(:share_dataset, dataset)
       |> strip_item_grant_walk_params()
     else
       _ -> conn
