@@ -42,12 +42,48 @@ defmodule BarkparkWeb.GithubAdoptController do
 
   use BarkparkWeb, :controller
 
+  alias BarkparkWeb.ErrorResponse
+
+  # The 400 messages for a list/map-shaped param — see the NON-BINARY PARAM
+  # GUARD comment in `adopt/2`.
+  @non_binary_dataset_message "dataset must be a string; a list or map value " <>
+                                "(e.g. ?dataset[]=x or ?dataset[k]=v) is not a dataset name"
+  @non_binary_id_message "id must be a string; a list or map value is not a task id"
+
   @doc """
   Adopt the `:id` intake task. See the moduledoc for the status mapping.
   """
   def adopt(conn, %{"id" => id} = params) do
     dataset = Map.get(params, "dataset", "production")
 
+    # NON-BINARY PARAM GUARD (task-0fba128e04ab8aee). Neither mount — the
+    # flat `/v1/plugins/github/adopt/:id` nor the scoped
+    # `/w/:ws/p/:proj/v1/plugins/…` mirror — carries a `:dataset` path
+    # segment, so `dataset` is a caller-controlled query param: `?dataset[]=x`
+    # parses to a LIST and `?dataset[k]=v` to a MAP, and `Map.get/3`'s default
+    # never fires for a key that IS present. Both shapes then reached
+    # `Barkpark.Plugins.Github.Adopt.adopt/3`, whose only head is
+    # `when is_binary(doc_id) and is_binary(dataset)` — FunctionClauseError
+    # after dispatch, i.e. a 500 reachable by any write-tier bearer (this
+    # bucket's `RequireWriteForMutation` gate is the only rung above `read`).
+    # This controller has no `action_fallback`, so the raise went straight to
+    # the endpoint's 500. `:id` is bound by the path segment and is therefore
+    # always a binary through the router; it is checked here anyway so the
+    # action is total for its own contract rather than relying on a router
+    # invariant a future mount could change.
+    cond do
+      not is_binary(id) ->
+        ErrorResponse.emit(conn, {:error, :malformed}, @non_binary_id_message)
+
+      not is_binary(dataset) ->
+        ErrorResponse.emit(conn, {:error, :malformed}, @non_binary_dataset_message)
+
+      true ->
+        do_adopt(conn, id, dataset)
+    end
+  end
+
+  defp do_adopt(conn, id, dataset) do
     # Thread the resolved tenant scope (D15). On the scoped
     # `/w/:ws/p/:proj/v1/plugins/github/adopt/:id` mirror the ResolveWorkspace /
     # ResolveProject plugs have set `current_workspace` / `current_project`, so
