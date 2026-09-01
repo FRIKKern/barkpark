@@ -272,7 +272,12 @@ PY
 )"
 
 run_pipe_check() {
-  local tmp records rc=0 hits=0 files=0
+  # `kind a b c` MUST be local. They are the read-loop's fields below, and
+  # without `local` they are GLOBAL — so this arm's loop overwrote `run_both`'s
+  # `a` and `b`, which hold arm A's and arm B's exit codes. Arm B then erased
+  # arm A's verdict on its way past. Measured: arm A exited 1, arm B exited 0,
+  # and run_both returned 0.
+  local tmp records rc=0 hits=0 files=0 kind a b c
   tmp="$(mktemp -d -t wrsc-pipe-XXXXXX)"
   # shellcheck disable=SC2064
   trap "rm -rf '$tmp'" RETURN
@@ -542,6 +547,93 @@ YML
 
   rm -rf "$bdir"
 
+  # ── the COMBINER (arm C) ─────────────────────────────────────────────────
+  # Every case above runs ONE arm in isolation via --arm-a or --arm-b. That is
+  # exactly how the masking survived: arm A's detection was well covered, and
+  # how the two verdicts COMBINE was covered by nothing. Measured on
+  # origin/main before this fix — arm A exited 1, arm B exited 0, and the
+  # default mode exited 0 while printing "FAILED", because run_pipe_check's
+  # read loop (`read -r kind a b c`, un-localised) overwrote run_both's `a`,
+  # and `[ -z "$a" ] && a=0` then turned the lost verdict into a pass.
+  # Consequence: deprecate.yml's "Resolve the range" step was unparseable bash,
+  # unable to start in CI, and every run was green over it.
+  local cdir
+  cdir="$(mktemp -d -t wrsc-c-XXXXXX)"
+  mkdir -p "$cdir/.github/workflows" "$cdir/tooling"
+
+  stc() { # stc <label> <expected-rc> — DEFAULT mode, both arms, the combiner
+    local label="$1" want="$2" got out
+    out="$(WORKFLOW_RUN_SHELL_DIR="$cdir/.github/workflows" WORKFLOW_RUN_SHELL_ROOT="$cdir" "$0" 2>&1)"; got=$?
+    if [ "$got" = "$want" ]; then
+      echo "  ok    $label — exit $got"
+      pass=$((pass + 1))
+    else
+      echo "  FAIL  $label — got $got want $want"
+      printf %s\\n "$out" | sed "s/^/          /"
+      fail=$((fail + 1))
+    fi
+  }
+
+  # Arm A FAILS (unterminated quote — the real deprecate.yml defect), while
+  # arm B is clean and passes. The combined verdict must be the FAILURE.
+  # This is the case that reproduces the bug: it returned 0 before the fix.
+  cat > "$cdir/.github/workflows/w.yml" <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: arm A fails — a command substitution whose quote is never closed
+        run: |
+          set -euo pipefail
+          MATCHED="$(printf '%s' "x" | node -e 'process.stdout.write("y")')
+          echo "done"
+      - name: arm B input — piped and clean
+        run: node tooling/r.mjs --json | tee /tmp/out.txt
+YML
+  printf %s\\n "console.log(1); process.exitCode = 0;" > "$cdir/tooling/r.mjs"
+  stc "C0) arm A fails + arm B passes => the FAILURE wins, never masked" 1
+
+  # The mirror: arm B fails while arm A is clean. Neither arm may mask the other.
+  cat > "$cdir/.github/workflows/w.yml" <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: arm A input — parses fine
+        run: |
+          set -euo pipefail
+          echo "hello"
+      - name: arm B input — piped
+        run: node tooling/r.mjs --json | tee /tmp/out.txt
+YML
+  printf %s\\n "console.log(1); process.exit(0);" > "$cdir/tooling/r.mjs"
+  stc "C1) arm B fails + arm A passes => the FAILURE wins, never masked" 1
+
+  # NON-VACUITY. Without this the two cases above would also pass against a
+  # combiner hard-wired to return 1.
+  cat > "$cdir/.github/workflows/w.yml" <<'YML'
+name: t
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - name: arm A input — parses fine
+        run: |
+          set -euo pipefail
+          echo "hello"
+      - name: arm B input — piped and clean
+        run: node tooling/r.mjs --json | tee /tmp/out.txt
+YML
+  printf %s\\n "console.log(1); process.exitCode = 0;" > "$cdir/tooling/r.mjs"
+  stc "C2) both arms pass => the combiner still says 0" 0
+
+  rm -rf "$cdir"
+
   echo ""
   if [ "$fail" -eq 0 ]; then
     echo "SELFTEST PASSED: $pass of $((pass + fail)) arms"
@@ -557,11 +649,24 @@ run_both() {
   run_check; a=$?
   echo ""
   run_pipe_check; b=$?
-  # A RETURN trap can clobber $? under bash 3.2, and an empty operand
-  # makes `[ -gt ]` abort with "integer expression expected" — which
-  # would surface as a harness crash rather than either arm verdict.
-  [ -z "$a" ] && a=0
-  [ -z "$b" ] && b=0
+  # A RETURN trap can clobber $? under bash 3.2, and an empty operand makes
+  # `[ -gt ]` abort with "integer expression expected" — a harness crash rather
+  # than either arm verdict. That much was right.
+  #
+  # But coercing the empty value to ZERO was the bug, not the cure: it turned a
+  # LOST verdict into a PASS. Combined with run_pipe_check's un-localised read
+  # loop (fixed above), arm A's failure was erased and this function returned 0
+  # while printing "workflow-run-shell-check: FAILED". Measured on origin/main:
+  # arm A exited 1, arm B exited 0, run_both exited 0 — and deprecate.yml's
+  # "Resolve the range" step had been unparseable bash, unable to start in CI,
+  # with every run green over it.
+  #
+  # An absent verdict is now a CONFIGURATION FAULT (3), never a pass. A checker
+  # that cannot say what it measured must not say "OK".
+  if [ -z "$a" ] || [ -z "$b" ]; then
+    echo "::error::workflow-run-shell-check: an arm returned no verdict (arm A='${a}', arm B='${b}'). Refusing to report a result — an absent verdict is not a pass." >&2
+    return 3
+  fi
   [ "$a" -gt "$b" ] && return "$a"
   return "$b"
 }
