@@ -1027,6 +1027,27 @@ func TestRedactBuildLine(t *testing.T) {
 			in:   "building the Next.js app for production",
 			want: "building the Next.js app for production",
 		},
+		// The three cases below are the proven-able-to-fail arm for this file's
+		// move onto the shared internal/secretscrub redactor. Run against the
+		// pre-dedup builderEnvSecretRe / builderTokenRe, each one FAILS: the
+		// builder's own alternation had no KEK (K-E-K contains neither SECRET nor
+		// KEY, so BARKPARK_KEK= was never matched) and this file had no
+		// ecto/postgres userinfo clause at all. All values are synthetic.
+		{
+			name: "KEK assignment scrubbed (builder's own regex never matched it)",
+			in:   "BARKPARK_KEK=syntheticKEKvalue0000 exported",
+			want: "BARKPARK_KEK=[REDACTED] exported",
+		},
+		{
+			name:    "bare ecto userinfo scrubbed even without an assignment",
+			in:      "connecting to ecto://u:syntheticPASS4444@h/db",
+			notWant: "syntheticPASS4444",
+		},
+		{
+			name:    "non-admin barkpark token scrubbed",
+			in:      "leftover handle bp_read_syntheticREADTOKEN333 in the log",
+			notWant: "bp_read_syntheticREADTOKEN333",
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
