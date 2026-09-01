@@ -118,6 +118,37 @@
 //     The residual loss is the handful of genuinely quoted operands.
 //  3. THE CLASS OF A COMPOUND IS ITS FLOOR. `a && b` is only as portable as its
 //     least portable read, and `reason` names how many statements were folded.
+//
+// ── THE PUBLISHED ELSE-SHARE FIGURE, AND WHAT DEFENDS IT (D102) ─────────────
+//
+// The epic publishes one number about this module: it answers from an ELSE
+// branch 4.8% of the time where a naive 3-way rule answers from one 89.0% of
+// the time. Re-derived over fixtures/evidence-corpus.json, blob
+// f0d6b6cbdb50490889e4489ef782eaca7737e86c:
+//
+//   31 of 652 = 4.8%   this grammar, else-branch arrivals
+//   580 of 652 = 89.0% the naive 3-way rule the tests run beside it
+//
+// THE FIGURE IS NEVER QUOTED BARE. binding.test.mjs recomputes both on every run
+// and prints them with THIS FILE'S blob sha beside them, so the pairing of a
+// number with the classifier that produced it is a live output rather than a
+// comment someone forgot to update. A figure copied out of here without that sha
+// is a present-tense claim about whatever the classifier is today.
+//
+// WHAT DEFENDS IT — because the 4.8% was, until this file grew `else_branch`,
+// a number no test could fail on. The guard was `assert.ok(defaultShare < 0.2)`
+// over a count derived from the rule REGISTRY, and pointing an else arm at an
+// already-registered rule marked `is_default: false` collapsed it 31 → 2 and
+// "improved" the published figure to 0.3% without classifying one command
+// differently. Two things changed:
+//
+//   * the count is stamped by the ARM (elseBranchVerdict is the only constructor
+//     that sets `else_branch`), so it cannot be moved by editing a string; and
+//   * it is bounded from BOTH sides at the measured value, because every way of
+//     gaming this figure moves it DOWN and a ceiling alone waves that through.
+//
+// So a genuine improvement here is a DELIBERATE edit: lower the floor, name the
+// rule that earned it, and re-derive this paragraph at the new sha.
 
 import { looksLikeProse } from "./level.mjs";
 
@@ -455,9 +486,25 @@ function stripDashC(text) {
 
 // --- the statement classifier ------------------------------------------------
 
+// THE TWO VERDICT CONSTRUCTORS, AND WHY THERE ARE TWO.
+//
+// `else_branch` is stamped by the CONSTRUCTOR the arm chose, never derived from
+// the rule NAME. The distinction is the whole point: `isDefaultRule` answers
+// "does the registry say this NAME is a default", which a rename settles, while
+// `else_branch` answers "did this verdict come out of an arm reached because
+// nothing above it matched", which only moving the arm can change. The
+// else-share census counts the second. See classifyAll.
 function verdictFor(rule, anchor, reason) {
   const entry = RULE_INDEX.get(rule);
-  return { rule, anchor, reason, class: entry ? entry.class : null };
+  return { rule, anchor, reason, class: entry ? entry.class : null, else_branch: false };
+}
+
+// The ONLY constructor in this module that stamps `else_branch: true`. Every
+// call site is an arm reached by exhaustion. Adding a third else arm without
+// routing it through here understates the census, which is why the arms are
+// counted by the suite rather than trusted.
+function elseBranchVerdict(rule, anchor, reason) {
+  return { ...verdictFor(rule, anchor, reason), else_branch: true };
 }
 
 // classifyStatement(text) → { class, rule, anchor, reason } | null when the
@@ -530,7 +577,7 @@ function classifyStatement(rawText) {
     );
   }
 
-  return verdictFor(
+  return elseBranchVerdict(
     "DEFAULT-CWD-BOUND",
     null,
     `no rule fired for head \`${head}\` — this is the ELSE branch, and the verdict is a floor rather than a finding`,
@@ -625,7 +672,7 @@ function classifyGitStatement(text) {
   }
 
   if (signals.length === 0) {
-    return verdictFor(
+    return elseBranchVerdict(
       "BARE-GIT-LOCAL-STATE",
       null,
       `\`git ${subcommand || "?"}\` names no ref, so git resolves it against THIS worktree's HEAD and config — the DEFAULT branch inside the git family`,
@@ -688,6 +735,9 @@ const EMPTY_VERDICT = Object.freeze({
   exit_mask_rule: null,
   reason: "there is no command to classify — a missing or prose rerun DEMOTES to unknown, it is never rejected and it is never guessed at",
   cd_prefix: null,
+  // NO-COMMAND is a guard, not an else arm: it is reached because the input is
+  // absent, never because the rules were exhausted on a real command.
+  else_branch: false,
 });
 
 /**
@@ -753,6 +803,7 @@ export function classifyBinding(rerun) {
       exit_masked: mask_info.exit_masked,
       exit_mask_rule: mask_info.exit_mask_rule,
       cd_prefix: cdPrefix,
+      else_branch: true,
       reason: "no statement in this command reads anything the grammar recognises — this is the ELSE branch, and the verdict is a floor rather than a finding",
     });
   }
@@ -764,7 +815,11 @@ export function classifyBinding(rerun) {
   // fired rule is not caution, it is a wrong answer wearing caution's uniform:
   // letting one in demoted `git merge-base --is-ancestor <sha> origin/main &&
   // echo YES` to cwd-bound on 51 of the 652 corpus proofs.
-  const fired = verdicts.filter((verdict) => !isDefaultRule(verdict.rule));
+  // Keyed on the ARM, not on the rule NAME. Reading `isDefaultRule(rule)` here
+  // agreed with the arms on every input, but it agreed by CONVENTION: rename an
+  // else arm's rule to one the registry marks `is_default: false` and the floor
+  // rule silently starts letting else verdicts outrank rules that fired.
+  const fired = verdicts.filter((verdict) => !verdict.else_branch);
   const weighed = fired.length > 0 ? fired : verdicts;
   const dropped = verdicts.length - weighed.length;
 
@@ -804,6 +859,7 @@ export function classifyBinding(rerun) {
     exit_mask_rule: mask_info.exit_mask_rule,
     reason: parts.join("; "),
     cd_prefix: cdPrefix,
+    else_branch: decided.else_branch === true,
   });
 }
 
@@ -823,9 +879,20 @@ function commandOf(row) {
  * corpus proofs ({command}). Exported so the render slices group once rather
  * than each re-deriving the buckets.
  *
- * `default_rule` is the number that matters: the share of verdicts that arrived
- * via an else branch. A high share means the grammar is absorbing, not
- * discriminating, and an accuracy figure beside it means nothing.
+ * TWO READINGS OF ONE NUMBER, AND THE REASON THEY ARE BOTH HERE.
+ *
+ * `else_branch` is the number that matters: the share of verdicts that arrived
+ * via an arm reached by exhaustion, counted off the `else_branch` stamp the arm
+ * itself set. A high share means the grammar is absorbing, not discriminating,
+ * and an accuracy figure beside it means nothing.
+ *
+ * `default_rule` is the same quantity read off the REGISTRY — `is_default` keyed
+ * by rule NAME. It is kept because a rename is exactly what makes the two
+ * disagree, and a disagreement is a defect a suite can see: point an else arm at
+ * a rule the registry marks `is_default: false` and `default_rule` collapses
+ * while `else_branch` does not move. Anything asserting a bound on this
+ * classifier's else share must assert BOTH readings agree, or the bound is
+ * satisfiable by editing a string.
  */
 export function classifyAll(rows) {
   const list = Array.isArray(rows) ? rows : [];
@@ -839,6 +906,7 @@ export function classifyAll(rows) {
   let unclassified = 0;
   let exit_masked = 0;
   let default_count = 0;
+  let else_branch_count = 0;
   let cd_prefixed = 0;
 
   for (const row of list) {
@@ -856,6 +924,7 @@ export function classifyAll(rows) {
       by_exit_mask_rule[verdict.exit_mask_rule] = (by_exit_mask_rule[verdict.exit_mask_rule] ?? 0) + 1;
     }
     if (isDefaultRule(verdict.rule)) default_count += 1;
+    if (verdict.else_branch) else_branch_count += 1;
     if (verdict.cd_prefix) cd_prefixed += 1;
   }
 
@@ -875,6 +944,10 @@ export function classifyAll(rows) {
     default_rule: Object.freeze({
       count: default_count,
       share: total === 0 ? 0 : default_count / total,
+    }),
+    else_branch: Object.freeze({
+      count: else_branch_count,
+      share: total === 0 ? 0 : else_branch_count / total,
     }),
     verdicts: Object.freeze(verdicts),
   });
