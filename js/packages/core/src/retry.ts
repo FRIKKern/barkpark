@@ -14,6 +14,14 @@ import {
   BarkparkTimeoutError,
 } from './errors'
 
+/**
+ * @internal Describes the transport's retry engine, which is configured
+ * publicly by intent rather than by policy object: a caller sets `retry: true`
+ * on a write (with `idempotencyKey` / `timeoutMs`) and this package picks the
+ * matching policy. Exporting the policy shape would let a consumer hand-build
+ * one, which the transport has no exported entry point to accept — the knob
+ * would be typed but unreachable.
+ */
 export interface RetryPolicy {
   /** Max attempts including the first. 3 for reads, 1 for writes (unless on-idempotency-key). */
   maxAttempts: number
@@ -29,6 +37,13 @@ export interface RetryPolicy {
   shouldRetry?: (err: unknown, attempt: number) => boolean
 }
 
+/**
+ * @internal A tuned default, not a contract. These three constants are the
+ * transport's own calibration and are expected to move as the server's
+ * behaviour is measured; publishing them would freeze tuning numbers into the
+ * package's public API and invite consumers to depend on a specific backoff
+ * curve. The supported knobs are `retry` and `timeoutMs` on the call.
+ */
 export const DEFAULT_READ_POLICY: RetryPolicy = {
   maxAttempts: 3,
   baseMs: 300,
@@ -36,6 +51,12 @@ export const DEFAULT_READ_POLICY: RetryPolicy = {
   jitter: true,
 }
 
+/**
+ * @internal A tuned default, not a contract — see {@link DEFAULT_READ_POLICY}.
+ * That writes do not retry by default is the durable fact (ADR-002 bullet 8),
+ * and it is already observable: it is what `retry: false` means on a commit.
+ * The numbers encoding it are not part of the public surface.
+ */
 export const DEFAULT_WRITE_POLICY: RetryPolicy = {
   maxAttempts: 1,
   baseMs: 0,
@@ -43,6 +64,12 @@ export const DEFAULT_WRITE_POLICY: RetryPolicy = {
   jitter: false,
 }
 
+/**
+ * @internal A tuned default, not a contract — see {@link DEFAULT_READ_POLICY}.
+ * A consumer selects this policy by opting in (`retry: true` on a write, which
+ * makes the transport carry one stable Idempotency-Key across attempts); they
+ * select it by intent, never by naming the constant.
+ */
 export const IDEMPOTENT_WRITE_POLICY: RetryPolicy = {
   maxAttempts: 3,
   baseMs: 400,
@@ -50,6 +77,13 @@ export const IDEMPOTENT_WRITE_POLICY: RetryPolicy = {
   jitter: true,
 }
 
+/**
+ * @internal The default arm of a hook (`RetryPolicy.shouldRetry`) that has no
+ * exported way to be supplied, so there is no supported call site for it. The
+ * classification it encodes is already public in a more useful form: the error
+ * taxonomy itself is exported, so a consumer deciding whether to re-issue a
+ * call can test the caught error's class or its `code` literal directly.
+ */
 export function defaultShouldRetry(err: unknown): boolean {
   if (err instanceof BarkparkNetworkError) return true
   if (err instanceof BarkparkTimeoutError) return true
@@ -63,6 +97,12 @@ export function defaultShouldRetry(err: unknown): boolean {
  * 3600` (whether hostile or misconfigured) would pin a single request for ~1h.
  * We honor the server's hint up to this bound, then cap — the caller can still
  * abort sooner via the signal.
+ *
+ * @internal A defensive ceiling this package applies on the caller's behalf,
+ * not a value they act on. What a consumer needs is the server's actual hint,
+ * and they already have it: `err.retryAfterMs` on a caught
+ * `BarkparkRateLimitError`. Publishing the cap would only let them re-derive a
+ * decision the transport has already made for them.
  */
 export const MAX_RATE_LIMIT_BACKOFF_MS = 60_000
 
@@ -112,6 +152,15 @@ function computeDelay(policy: RetryPolicy, attempt: number, err: unknown): numbe
   return delay
 }
 
+/**
+ * @internal A general-purpose retry loop, and that is exactly the problem with
+ * exporting it: it would become a public utility with no Barkpark meaning,
+ * pinning this signature as a permanent contract for a package whose job is an
+ * HTTP client. Consumers who want a generic retry combinator are better served
+ * by one; the retry behaviour that IS Barkpark-specific — idempotency-key reuse
+ * across attempts, Retry-After honouring — is reached with `retry: true` on a
+ * write, where the transport wires those in.
+ */
 export async function retry<T>(
   fn: (attempt: number) => Promise<T>,
   policy: RetryPolicy,
