@@ -250,13 +250,20 @@ function parseRowEnvelope(slug, raw) {
   if (normalizeSlug(id) !== normalizeSlug(slug)) {
     return { ok: false, why: `envelope is for ${JSON.stringify(id)}, not ${JSON.stringify(slug)}` };
   }
-  const criteria = (doc.content && doc.content.acceptance_criteria) || null;
-  if (!Array.isArray(criteria)) {
-    // criteria live under content, NOT at the top of the doc; a reader that walks the
-    // top level reports a confident zero.
-    return { ok: false, why: "doc.content.acceptance_criteria is absent or not an array" };
+  // Criteria live under `content`, NOT at the top of the doc: a reader that walks the
+  // top level reports a confident zero. But a row that genuinely carries NO
+  // acceptance_criteria is a legitimate ledger state, not a failed fetch — the first
+  // live run of this script refused the whole sweep over exactly one such row
+  // (task-85c531c2adbf0dff, open, no criteria at all). Conflating "the envelope did
+  // not arrive" with "this row has nothing to read" is a guard that reds on correct
+  // data, and a guard that reds on correct data gets worked around. So it is counted
+  // and DECLARED as arm-B-blind coverage instead, and only a missing, empty,
+  // unparseable or wrong-id envelope is a refusal.
+  const ac = doc.content && doc.content.acceptance_criteria;
+  if (ac !== undefined && ac !== null && !Array.isArray(ac)) {
+    return { ok: false, why: `doc.content.acceptance_criteria is ${typeof ac}, not an array` };
   }
-  return { ok: true, doc, criteria };
+  return { ok: true, doc, criteria: Array.isArray(ac) ? ac : [], noCriteria: !Array.isArray(ac) };
 }
 
 function bpTaskGet(bin, slug, attempts) {
@@ -391,6 +398,7 @@ export function sweep({ roster, rows, prs, status, prLookup, prWindow }) {
   const merged = readMergedPrs(prs);
   const mergedByNumber = new Map(merged.map((p) => [Number(p.number), p]));
 
+  const criteriaLess = popSlugs.filter((slug) => rows.get(slug) && rows.get(slug).noCriteria);
   const receipts = [];       // {row, pr, arm, mergeCommit, mergedAt, criterion?}
   const ambiguous = [];      // merged PRs whose trailer the MERGE GATE ITSELF would refuse
   const advisory = [];       // arm C — printed, never counted
@@ -414,6 +422,19 @@ export function sweep({ roster, rows, prs, status, prLookup, prWindow }) {
   }
 
   // ── ARM B: a criterion naming a PR number that is merged ───────────────────
+  //
+  // A CRITERION THAT NAMES A MERGED PR IS NOT AUTOMATICALLY PAID BY IT. The first
+  // live run made that plain: `cch-w40-bl-billing-is-owner-is-honest-only-by-position-
+  // after-10005` is 0/3 and its criteria name #10005 — as the PR whose merge CREATED
+  // the defect the row is about. Crediting that as a receipt inflates the floor with
+  // rows nothing has paid, and the floor is the one number this report asks anyone to
+  // trust.
+  //
+  // So arm B splits. A merged PR named by a criterion is a RECEIPT only when the
+  // criterion is itself the merge criterion (merge_gate: true, or merge-receipt-shaped
+  // prose). Every other mention is a CITATION: printed under its own heading for a
+  // human to read, counted in NOTHING.
+  const citations = [];
   for (const slug of popSlugs) {
     const row = rows.get(slug);
     if (!row) refuse("ROW_FETCH_INCOMPLETE", `no envelope in hand for ${slug}`);
@@ -426,13 +447,18 @@ export function sweep({ roster, rows, prs, status, prLookup, prWindow }) {
           if (looked && looked.merged) pr = looked;
         }
         if (!pr) continue;
-        receipts.push({
+        const entry = {
           row: slug, arm: "B", pr: n,
           mergedAt: pr.mergedAt || null,
           mergeCommit: (pr.mergeCommit && pr.mergeCommit.oid) || pr.mergeCommit || null,
           criterionIndex: i + 1,
+          met: isMet(c),
           why: `criterion ${i + 1} names #${n}, which is MERGED`,
-        });
+        };
+        // `mergeReceiptCanPay` with NO receipt set: the question here is whether the
+        // criterion is a merge criterion at all, not whether some other PR paid it.
+        if (mergeReceiptCanPay(c, null)) receipts.push(entry);
+        else citations.push({ ...entry, why: `criterion ${i + 1} MENTIONS #${n} (merged) but is not a merge criterion — a citation, not a receipt` });
       }
     });
   }
@@ -489,6 +515,8 @@ export function sweep({ roster, rows, prs, status, prLookup, prWindow }) {
 
   return {
     status, walked, declared,
+    criteriaLess,
+    citations,
     population: popSlugs.length,
     mergedPrs: merged.length,
     prWindow: prWindow || null,
@@ -523,6 +551,11 @@ export function renderReport(rep, meta) {
   } else {
     L.push(`merged-PR window: ${rep.mergedPrs} PRs (supplied)`);
   }
+  const cl = rep.criteriaLess || [];
+  L.push(
+    `arm-B coverage: ${rep.population - cl.length}/${rep.population} rows carry acceptance_criteria` +
+      (cl.length ? `  — ${cl.length} row(s) carry NONE, so arm B is STRUCTURALLY BLIND to them (arm A still sees them): ${cl.join(", ")}` : "")
+  );
   L.push("");
   L.push(`RESULT: ${rep.findings.length} of ${rep.population} open rows carry a merge receipt  (FULL ${rep.full} · PARTIAL ${rep.partial})`);
   L.push("");
@@ -553,6 +586,17 @@ export function renderReport(rep, meta) {
     "closing one of these on a merge receipt alone would stamp UNBUILT WORK AS DONE. Re-scope, do not close."
   );
 
+  const cites = rep.citations || [];
+  const citeRows = [...new Set(cites.map((c) => c.row))].filter((r) => !rep.findings.some((f) => f.row === r));
+  L.push(`── CITATIONS, NOT RECEIPTS — ${"─".repeat(38)}`);
+  L.push("   A criterion that NAMES a merged PR is not automatically PAID by it: a row can name");
+  L.push("   the very PR whose merge CREATED its defect. These are counted in NOTHING.");
+  L.push(`   ${cites.length} citation(s) across ${new Set(cites.map((c) => c.row)).size} row(s); ${citeRows.length} of those rows have NO receipt from any arm.`);
+  for (const r of citeRows.slice(0, 25)) {
+    const cs = cites.filter((c) => c.row === r);
+    L.push(`      ${r}  <- ${[...new Set(cs.map((c) => "#" + c.pr))].join(", ")} (criteria ${[...new Set(cs.map((c) => c.criterionIndex))].join(",")})`);
+  }
+  L.push("");
   L.push(`── ARM PAIRING — ${"─".repeat(46)}`);
   L.push(`   rows found ONLY by arm B (a trailer-only detector would have MISSED these): ${rep.armBRescues.length}`);
   for (const r of rep.armBRescues) L.push(`      ${r}`);
@@ -577,6 +621,10 @@ export function renderReport(rep, meta) {
   L.push("   The true false-open rate is >= this number and is UNBOUNDED above it. Only");
   L.push("   source re-derivation against origin/main finds that class, and that remains");
   L.push("   the expensive instrument this cheap one does not replace.");
+  if (cl.length) {
+    L.push(`   The floor is also short by construction: ${cl.length} row(s) carry no acceptance_criteria,`);
+    L.push("   so arm B cannot read them at all. Only arm A could have found those.");
+  }
   L.push("");
   L.push("   THIS TOOL CLOSES NOTHING. It has no write path to the ledger. Every row above");
   L.push("   stays open until a human disposes it, and PARTIAL rows are not disposable on a");
