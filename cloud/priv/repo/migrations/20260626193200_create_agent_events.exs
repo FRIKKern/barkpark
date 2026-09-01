@@ -2,7 +2,11 @@ defmodule BarkparkCloud.Repo.Migrations.CreateAgentEvents do
   use Ecto.Migration
 
   # The append-only agent event stream for a Barkpark — what the on-box agent
-  # reported (health beat, status flip, backup, TLS renewal). Belongs to a
+  # reported (health beat, status flip, disk-space report) plus the control
+  # plane's own verify runs. The live vocabulary is `AgentEvent.types/0`, never
+  # this comment: `backup` and `TLS renewal` were named here at this table's
+  # creation and were struck in cch-w51-bl, having never had a producer.
+  # Belongs to a
   # Barkpark. APPEND-ONLY: only inserted_at, no updated_at (an event is a fact
   # at a point in time, written once). `payload` is jsonb so each event `type`
   # carries its own shape with no per-kind migration. Indexed by

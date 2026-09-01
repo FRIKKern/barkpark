@@ -7010,18 +7010,21 @@
   //
   // cch-w55-s3 — THE THIRD STEP'S HINT NO LONGER PROMISES DETECTION. It read
   // "We'll notice automatically", and nothing in this plane notices. The step is
-  // derived by `Accounts.published_doc?/1` (accounts.ex:2764) from an `AgentEvent`
-  // of type "content" carrying `payload->>'published_count' > 0`, and no such row
-  // has ever been written: the four `record_event/3` call sites in cloud/lib
-  // write "health" (router.ex:1378), "space" (router.ex:1423), "verify"
-  // (router.ex:2627) and "status" (health/staleness_worker.ex:91), and the
-  // agent's HTTP surface (/v1/agent/report, /commands, /results, /space) has no
-  // content endpoint, so even a willing agent could not post one. "content" is
-  // declared in AgentEvent's @types with a moduledoc describing a producer that
-  // does not exist. The manual fallback is no fallback either: `ack_onboarding_step/2`
-  // (router.ex:1701) exists server-side, but the ONLY onboarding action this file
-  // POSTs is {action:"skip"} (see the runway dismiss below), so the console
-  // offers no control that ticks this step.
+  // derived by `Accounts.published_doc?/1` from an `AgentEvent` of type
+  // "content" carrying `payload->>'published_count' > 0`, and no such row has
+  // ever been written: the four `Registry.record_event/3` call sites in
+  // cloud/lib write "health" and "space" (the agent-report and agent-space
+  // handlers in web/router.ex), "verify" (the verify-run handler in the same
+  // file) and "status" (`Health.StalenessWorker`), and the agent's HTTP surface
+  // (/v1/agent/report, /commands, /results, /space) has no content endpoint, so
+  // even a willing agent could not post one. "content" IS still declared in
+  // AgentEvent's @types, and deliberately: cch-w51-bl struck `backup` and `tls`
+  // from that allowlist for having neither a producer nor a consumer, and KEPT
+  // `content` for THIS consumer — its moduledoc now says outright that no
+  // producer writes it yet. The manual fallback is no fallback either:
+  // `Accounts.ack_onboarding_step/2` exists server-side, but the ONLY
+  // onboarding action this file POSTs is {action:"skip"} (see the runway
+  // dismiss below), so the console offers no control that ticks this step.
   // NO PRODUCER IS BUILT HERE — that would convert a dead hint into a live
   // promise before anyone has decided what the agent can honestly observe. The
   // hint is retracted to what is true: this step does not tick itself, and the
@@ -11826,15 +11829,18 @@
   // an unreachable box is a NORMAL result rendered honestly, not an error.
 
   // The event-type vocabulary is CLOSED server-side — AgentEvent @types declares
-  // SEVEN: health status backup tls content verify space. DECLARED IS NOT
-  // PRODUCED. Only FOUR of them have a producer anywhere in the control plane
-  // (Registry.record_event/3 call sites in cloud/lib): `health` and `space`
-  // (router.ex, the agent beat), `verify` (router.ex, the suite), `status`
-  // (health/staleness_worker.ex). `backup`, `tls` and `content` have ZERO
-  // producers and never have had one in the history of main — so this map
-  // TITLES ONLY WHAT CAN ARRIVE (charter D575/D576: @types keeps the three,
-  // because `content` has a live server consumer; the console stops staging a
-  // welcome for them). A type with no title here renders its RAW name through
+  // FIVE: health status content verify space (read AgentEvent.types/0, never
+  // this line). DECLARED IS NOT PRODUCED. Only FOUR of them have a producer
+  // anywhere in the control plane (Registry.record_event/3 call sites in
+  // cloud/lib): `health` and `space` (router.ex, the agent beat), `verify`
+  // (router.ex, the suite), `status` (health/staleness_worker.ex). `content`
+  // has ZERO producers and never has had one in the history of main — so this
+  // map TITLES ONLY WHAT CAN ARRIVE (charter D575/D576). `backup` and `tls`
+  // were titled here once and are now struck from BOTH sides: wave 51 took
+  // their titles, cch-w51-bl then took their @types declarations. Of the three
+  // untitled words only `content` survived that cut, because it alone has a
+  // live server consumer (Accounts.published_doc?/1) — and the console still
+  // stages no welcome for it. A type with no title here renders its RAW name through
   // the `|| entry.type` fallbacks below — that is deliberate version-skew
   // safety for a type a newer server starts sending, never a blank row. The
   // bidirectional census (__agent_event_vocabulary_census.mjs) reds if a title

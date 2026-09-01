@@ -3162,9 +3162,16 @@ defmodule BarkparkCloud.Registry do
   ## Agent events
 
   @doc """
-  Append an event of `type` (`AgentEvent`'s allowlist: the agent-posted
-  `health`/`status`/`backup`/`tls`/`content` plus the control-plane-authored
-  `verify`) with `payload` (a map) to `barkpark`'s stream.
+  Append an event of `type` with `payload` (a map) to `barkpark`'s stream.
+
+  `type` must be in `AgentEvent.types/0` — that list is the allowlist and this
+  sentence is not, so read it there rather than trusting an enumeration here.
+  What it holds today: the agent-posted `health` and `space` beats, the `status`
+  transition `Health.StalenessWorker` writes, the control-plane-authored
+  `verify` run, and `content`, which is CONSUMER-ONLY — `Accounts.published_doc?/1`
+  reads it for the onboarding checklist and no producer writes it yet. `backup`
+  and `tls` were dropped from the allowlist in cch-w51-bl: they had neither a
+  producer nor a consumer anywhere in `cloud/lib`.
   """
   @spec record_event(Barkpark.t() | binary(), String.t(), map()) ::
           {:ok, AgentEvent.t()} | {:error, Ecto.Changeset.t()}
