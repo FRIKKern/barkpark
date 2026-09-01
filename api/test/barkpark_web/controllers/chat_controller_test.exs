@@ -1266,7 +1266,11 @@ defmodule BarkparkWeb.ChatControllerTest do
       |> json_response(202)
 
       user_rows = for m <- StudioChat.list_messages(sid), m.role == "user", do: m
-      assert [row] = user_rows, "exactly one organic user row (no double-write)"
+
+      assert match?([_], user_rows),
+             "exactly one organic user row (no double-write), got #{inspect(user_rows)}"
+
+      [row] = user_rows
       assert row.source_markdown == "organic hello"
       assert row.metadata["origin"] == "api"
     end

@@ -74,8 +74,10 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
 
       assert body["revoked_count"] == 0
 
-      assert {:ok, _} = Auth.verify_token(raw),
-             "the token should still authenticate — that is the gap"
+      verify = Auth.verify_token(raw)
+
+      assert match?({:ok, _}, verify),
+             "the token should still authenticate — that is the gap (#{inspect(verify)})"
     end
   end
 
@@ -261,7 +263,10 @@ defmodule BarkparkWeb.AppTokenAdminRevokeTest do
         |> Map.fetch!("id")
 
       assert json_conn(reader) |> delete("/v1/auth/app-tokens/#{id}") |> json_response(401)
-      assert {:ok, _} = Auth.verify_token(raw), "a refused revoke must not have landed"
+      verify = Auth.verify_token(raw)
+
+      assert match?({:ok, _}, verify),
+             "a refused revoke must not have landed (#{inspect(verify)})"
     end
   end
 

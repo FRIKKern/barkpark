@@ -1197,7 +1197,12 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     test "leading / trailing / doubled hyphens are a recoverable WARN" do
       for s <- ["-post", "post-", "my--post"] do
         refute PaperCanvas.sidebar_slug_valid?(s)
-        assert {:warn, msg} = PaperCanvas.slug_feedback(s), "expected #{inspect(s)} warn"
+        feedback = PaperCanvas.slug_feedback(s)
+
+        assert match?({:warn, _}, feedback),
+               "expected #{inspect(s)} warn, got #{inspect(feedback)}"
+
+        {:warn, msg} = feedback
         assert msg =~ "hyphen"
       end
     end

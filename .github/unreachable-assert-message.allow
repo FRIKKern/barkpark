@@ -2,15 +2,3 @@
 # ExUnit can never print (assert/2 is a function; the match raises first).
 # RATCHET: counts may only FALL. Regenerate with --baseline after fixing.
 # Counts, NOT file:line — a line pin slides on any insertion above it.
-2 api/test/barkpark_web/controllers/app_token_admin_revoke_test.exs
-1 api/test/barkpark_web/controllers/chat_controller_test.exs
-2 api/test/barkpark_web/controllers/graph_corpus_slot_ttl_test.exs
-1 api/test/barkpark_web/controllers/workspace_import_template_journey_test.exs
-1 api/test/barkpark_web/live/studio/paper_canvas_test.exs
-1 api/test/barkpark_web/live/studio/paths_test.exs
-1 api/test/barkpark_web/live/studio/studio_desk_add_button_name_test.exs
-1 api/test/barkpark_web/live/studio/studio_live_unpublish_guard_test.exs
-1 api/test/barkpark_web/live/studio/studio_plugin_link_aria_current_test.exs
-1 api/test/barkpark_web/live/studio/studio_session_birth_template_test.exs
-3 api/test/barkpark_web/studio/claude_chat_cloud_session_test.exs
-3 api/test/barkpark/studio_chat/stream_segments_test.exs
