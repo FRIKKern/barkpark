@@ -341,6 +341,11 @@ defmodule Barkpark.Media do
         :collection,
         :tags,
         :visibility,
+        # The unauthenticated read ceiling. It MUST be in this take-list: the
+        # list/index path is the one that reaches `Search.search/2` through
+        # here, and a key absent from the list is dropped SILENTLY — the clamp
+        # would compile, pass review, and enforce nothing.
+        :visibility_clamp,
         :sort,
         :workspace_id,
         :project_id
@@ -852,7 +857,7 @@ defmodule Barkpark.Media do
   #     here is load-bearing: an unconverted `:dataset_not_found` would fall to
   #     `upload/3`'s 503 storage catch-all and mislabel.
   defp put_scope_attrs(attrs, opts) do
-    project_id = Keyword.get(opts, :project_id) || default_project_id()
+    project_id = Barkpark.Tenancy.scope_project_id(opts)
 
     scoped =
       attrs
@@ -863,13 +868,6 @@ defmodule Barkpark.Media do
       {:ok, nil} -> {:ok, scoped}
       {:ok, dataset_id} -> {:ok, Map.put(scoped, :dataset_id, dataset_id)}
       {:error, _reason} = error -> error
-    end
-  end
-
-  defp default_project_id do
-    case Barkpark.Tenancy.get_default_project() do
-      %{id: id} -> id
-      _ -> nil
     end
   end
 

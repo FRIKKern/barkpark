@@ -68,7 +68,8 @@ defmodule Barkpark.Media.Delivery.Retriever do
   # envelope. Closes the search arm of the cross-workspace metadata leak — the
   # `ilike(d.title, …)` / tag match can no longer attach another workspace's
   # asset doc to this workspace's blob (barkpark-vmv1). A nil workspace_id
-  # (unscoped path) leaves the workspace filter off (deliberate global read).
+  # (unscoped path) leaves the workspace filter off (deliberate global read);
+  # the `:shared_only` sentinel does NOT — see `join_scope_workspace/3`.
   defp asset_doc_join_query(dataset, workspace_id, project_id) do
     dataset_id = Barkpark.Content.resolve_read_dataset_id(dataset, project_id: project_id)
 
@@ -91,6 +92,25 @@ defmodule Barkpark.Media.Delivery.Retriever do
   end
 
   defp join_scope_workspace(query, nil, _project_id), do: query
+
+  # `:shared_only` — the request-side empty-scope sentinel
+  # (task-3e2a70930c6df723), forwarded here VERBATIM: `Search.maybe_filter_text/3`
+  # rebuilds `retriever_opts` as `workspace_id: Keyword.get(opts, :workspace_id)`,
+  # so whatever `ScopeHelpers.scope_opts/1` put on the conn arrives unchanged.
+  #
+  # The sibling this module's own header says it MIRRORS
+  # (`Search.join_scope_workspace/3`) was given this arm and this one was not,
+  # which is the whole shape: an atom matches neither the `nil` clause nor the
+  # two `is_binary/1` clauses, so a media search with a `q` from a request that
+  # resolved no workspace raised FunctionClauseError — a 500 on the live
+  # `/v1/media/:dataset/search` door.
+  #
+  # `is_nil(d.workspace_id)` and NOT a collapse to `nil`: the nil clause above
+  # returns the query UNTOUCHED (the deliberate global read), so "fixing" the
+  # crash by mapping the sentinel to nil would turn a 500 into the
+  # cross-workspace metadata leak this join was added to close.
+  defp join_scope_workspace(query, :shared_only, _project_id),
+    do: where(query, [d], is_nil(d.workspace_id))
 
   defp join_scope_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
     where(query, [d], d.workspace_id == ^workspace_id or is_nil(d.workspace_id))

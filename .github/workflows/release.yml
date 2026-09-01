@@ -263,6 +263,16 @@ jobs:
           # --provenance as a flag; per npm docs both forms are accepted.
           NPM_CONFIG_PROVENANCE: "true"
         run: |
+          # `set -euo pipefail` is LOAD-BEARING, not decoration, and matches the
+          # dry-run sibling above. Actions' unspecified-shell default is
+          # `bash -e {0}` — WITHOUT pipefail — so `pnpm changeset publish | tee`
+          # would take tee's 0 as the step status and a real npm refusal (E401,
+          # OTP required, provenance rejected) would exit this step GREEN. The
+          # red then landed one step later in "Assert the published set equals
+          # the release plan", describing a plan/log mismatch instead of naming
+          # pnpm's actual refusal. Keep this line: an npm refusal must red the
+          # step that caused it.
+          set -euo pipefail
           echo "::warning title=Real publish::dist-tag=${{ steps.mode.outputs.dist_tag }} — writes to npm"
           # TODO(B4): npm provenance for unscoped `create-barkpark-app` has
           # historically been less well-tested than for scoped packages.

@@ -377,8 +377,10 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
 
       lists = for %{"type" => "list"} = b <- blocks_of(frames), do: b
 
-      assert [%{"items" => items}] = lists,
-             "expected exactly one list block, got #{length(lists)}"
+      assert match?([%{"items" => _}], lists),
+             "expected exactly one list block, got #{length(lists)}: #{inspect(lists)}"
+
+      [%{"items" => items}] = lists
 
       assert length(items) == 3
       assert reasons(frames) == ["settled"]
@@ -456,8 +458,10 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
       # the way back to today's plain-tail floor.
       swallow = "Use the ` operator\n\nThen it works.\n\n"
 
-      assert [%{"type" => "paragraph"}] = FromMarkdown.blocks(swallow),
-             "the swallow is gone from the converter — this guard's reason with it"
+      swallow_blocks = FromMarkdown.blocks(swallow)
+
+      assert match?([%{"type" => "paragraph"}], swallow_blocks),
+             "the swallow is gone from the converter — this guard's reason with it (#{inspect(swallow_blocks)})"
 
       {_state, frames} = turn(swallow)
       assert stables(frames) == [], "no segment may be committed once parity is odd"
@@ -789,7 +793,11 @@ defmodule Barkpark.StudioChat.StreamSegmentsTest do
         end)
         |> then(fn {st, fs, _n} -> {st, fs} end)
 
-      assert [%{to: 7}] = stables(frames), "the first paragraph committed, the rest held"
+      stable_frames = stables(frames)
+
+      assert match?([%{to: 7}], stable_frames),
+             "the first paragraph committed, the rest held, got #{inspect(stable_frames)}"
+
       assert state.tail.stable_len == 19, "a later boundary exists but was throttled"
 
       assert {:stable, %{to: 7, skeleton: %{kind: "table", prose: prose}}} =

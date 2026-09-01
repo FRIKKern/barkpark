@@ -332,13 +332,29 @@ check_says "re-fire degrades outside Actions"     1 "gh run rerun <this run id> 
 : > "$fixtures/says.out"
 ( TASK_ID=lapsestale PR_OPENED_AT="$PR_OPEN" LEDGER_BASE="$BASE" bash "$GATE" ) \
   > "$fixtures/says.out" 2>&1
-cited_line="$(grep -oE 'pr-task-gate\.sh:[0-9]+' "$fixtures/says.out" | head -1)"
-cited_line="${cited_line##*:}"
-cited_src="$([ -n "$cited_line" ] && awk -v n="$cited_line" 'NR==n' "$GATE")"
-if [ -n "$cited_line" ] && printf '%s' "$cited_src" | grep -q 'released_ge_expired'; then
-  pass=$((pass+1)); printf 'ok   %-40s (line %s is the ordering clause)\n' "cited ordering-clause line is real" "$cited_line"
+cited_rc=$?
+# CAPTURE THE RC (above) BEFORE reading the output. Without it a gate that
+# CRASHES — syntax error, bad interpreter, an unset-var abort — is
+# indistinguishable here from one that refuses correctly: neither prints a
+# citation, so the assertion reported `cited line <none> reads: <nothing>` while
+# the gate's real error sat unread in says.out. `lapsestale` is a definitive
+# red, so exit 1 is the ONLY status that means "the gate ran and refused"
+# (2 is UNCHECKED, anything else is a broken run) — and on any other status the
+# harness must SHOW what the gate actually said instead of an empty citation.
+if [ "$cited_rc" != "1" ]; then
+  fail=$((fail+1))
+  printf 'FAIL %-40s gate exited %s (want 1 — refusal); its output was:\n' \
+    "cited ordering-clause line is real" "$cited_rc"
+  tail -20 "$fixtures/says.out" | sed -e 's/^/       | /'
 else
-  fail=$((fail+1)); printf 'FAIL %-40s cited line %s reads: %s\n' "cited ordering-clause line is real" "${cited_line:-<none>}" "${cited_src:-<nothing>}"
+  cited_line="$(grep -oE 'pr-task-gate\.sh:[0-9]+' "$fixtures/says.out" | head -1)"
+  cited_line="${cited_line##*:}"
+  cited_src="$([ -n "$cited_line" ] && awk -v n="$cited_line" 'NR==n' "$GATE")"
+  if [ -n "$cited_line" ] && printf '%s' "$cited_src" | grep -q 'released_ge_expired'; then
+    pass=$((pass+1)); printf 'ok   %-40s (line %s is the ordering clause)\n' "cited ordering-clause line is real" "$cited_line"
+  else
+    fail=$((fail+1)); printf 'FAIL %-40s cited line %s reads: %s\n' "cited ordering-clause line is real" "${cited_line:-<none>}" "${cited_src:-<nothing>}"
+  fi
 fi
 
 # -- A 200 that carries no document is UNCHECKED, never an accusation (D59) ---
@@ -773,10 +789,17 @@ record_case "hotfix record: filed passes"    "tok" "$REC_BASE"        0 "::notic
 # THE DEFECT THIS EXISTS FOR: this workflow's exit-2 ::error told a blocked
 # human "if it stays down, the hotfix! lane is the documented override", and
 # merge-gates.md said in two places that without BARKPARK_TASK_TOKEN "the lane
-# still passes". The token is unprovisioned and the `hotfix!` label DOES exist,
-# so following that advice engaged a lane whose only surviving step exits 1 —
-# a required context turned into a guaranteed red, at 2am, by the gate's own
-# instructions. Prose and behaviour disagreed and nothing could notice.
+# still passes". At the time the token was UNPROVISIONED while the `hotfix!`
+# label DOES exist, so following that advice engaged a lane whose only surviving
+# step exits 1 — a required context turned into a guaranteed red, at 2am, by the
+# gate's own instructions. Prose and behaviour disagreed and nothing could notice.
+#
+# STATE RE-DERIVED 2026-09-01: BARKPARK_TASK_TOKEN was provisioned 2026-08-25
+# (`gh secret list`), so the lane is now ARMED and the census below runs against
+# the OTHER direction of its own law — the lane is promisable, and the surfaces
+# must agree that it is. The law is unchanged and bidirectional by design; only
+# which side of it we are standing on has moved. That is exactly why it was
+# written in both directions rather than as a one-way assertion.
 #
 # THE LAW, in both directions:
 #   the lane REFUSES  =>  no surface may promise it as an escape (zero hits)

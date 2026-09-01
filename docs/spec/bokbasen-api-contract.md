@@ -118,16 +118,24 @@ example.[^auth]
 ### 2.3 Credential plumbing (forward-reference WI2)
 
 WI2 owns credential storage; this doc only fixes the **shape of the
-secret** and the **env-var override names**. Implemented (runtime.exs
-lines 74–78; settings.ex):
+secret** and the **env-var override names**. Implemented in the
+`config :barkpark, :bokbasen` block of `api/config/runtime.exs` and in
+`Barkpark.Plugins.OnixEdit.Bokbasen.Settings`.
 
-| Setting | `plugin_settings` key | Env override | Notes |
+**THERE IS NO DOTTED KEY.** `plugin_settings` is ONE row per plugin
+(`@primary_key {:plugin_name, :string}`) whose `settings` field is a map, and
+the whole map is Cloak-encrypted through `Barkpark.EncryptedMap`. So the row is
+`plugin_name = "bokbasen"` and the map keys are the bare names below — there is
+no `bokbasen.client_id` anywhere, and no per-key split between plain and
+encrypted storage.
+
+| Setting | key in the `"bokbasen"` settings map | Env override | Notes |
 |---|---|---|---|
-| Client ID | `bokbasen.client_id` | `BOKBASEN_CLIENT_ID` | Plain text |
-| Client secret | `bokbasen.client_secret` | `BOKBASEN_CLIENT_SECRET` | Encrypted at rest via Cloak (`cloak_ecto` already in `api/mix.exs`) |
-| API base URL | `bokbasen.api_base` | `BOKBASEN_API_BASE` | Full base URL, e.g. `https://api.bokbasen.io` |
-| OAuth token URL | `bokbasen.oauth_token_url` | `BOKBASEN_OAUTH_TOKEN_URL` | Full token endpoint URL |
-| Client role | `bokbasen.client_role` | `BOKBASEN_CLIENT_ROLE` | `publisher` or `distributor`; affects which Onix Blocks Bokbasen accepts |
+| Client ID | `client_id` | `BOKBASEN_CLIENT_ID` | Encrypted at rest with the rest of the map |
+| Client secret | `client_secret` | `BOKBASEN_CLIENT_SECRET` | Encrypted at rest with the rest of the map |
+| API base URL | `api_base` | `BOKBASEN_API_BASE` | Full base URL, e.g. `https://api.bokbasen.io` |
+| OAuth token URL | `oauth_token_url` | `BOKBASEN_OAUTH_TOKEN_URL` | Full token endpoint URL |
+| Client role | `client_role` | `BOKBASEN_CLIENT_ROLE` | `publisher` (default) or `distributor`; affects which Onix Blocks Bokbasen accepts |
 
 > **Note re task-brief env-var names.** The brief lists
 > `BOKBASEN_API_KEY` / `BOKBASEN_USERNAME` / `BOKBASEN_PASSWORD`. Those
@@ -461,10 +469,12 @@ Total polling budget: 30 minutes (matches `* → TIMEOUT` rule in §4.1).
 
 ### 6.3 Concurrency
 
-WI4 Oban worker queue **`:bokbasen`** with concurrency =
-**4** (config.exs line 97; publish_worker.ex line 78). This is
-the implemented default; adjusting it requires either a quoted
-Bokbasen ceiling or Boss sign-off.
+WI4 Oban worker queue **`:bokbasen`** with concurrency = **4** — the
+`bokbasen: 4` entry in the `config :barkpark, Oban` queues list in
+`api/config/config.exs`, and `queue: :bokbasen` on
+`Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker`. This is the
+implemented default; adjusting it requires either a quoted Bokbasen
+ceiling or Boss sign-off.
 
 ---
 
@@ -472,18 +482,18 @@ Bokbasen ceiling or Boss sign-off.
 
 ### 7.1 Decision
 
-**Pinned: `Req` ~> 0.5 (latest stable: 0.5.17).**[^req-hex]
-
-Already a direct dep in `api/mix.exs`:
+**Pinned: `Req`.** The dep has since been bumped past the `~> 0.5` this
+contract was drafted against — `api/mix.exs` now carries:
 
 ```elixir
-{:req, "~> 0.5"},
+{:req, "~> 0.6.1"},
 ```
 
-WI1 does **not** add a Mix dep — the dep is already present and was
-introduced in Phase 6. WI2 / WI3 will use it as-is; if a newer
-0.5.x patch lands during Phase 7, the `~>` constraint picks it up at
-`mix deps.update`.
+resolving to 0.6.3 in `api/mix.lock`. Note `~> 0.5` would NOT have resolved a
+0.6.x release, so the "a newer 0.5.x patch is picked up at `mix deps.update`"
+reasoning below no longer describes how this dep moves. WI1 does **not** add a
+Mix dep — the dep is already present and was introduced in Phase 6. Read the
+0.5.x figures in the rest of §7 and in the footnotes as historical.
 
 > *"Req is a batteries-included HTTP client for Elixir. It provides
 > automatic response body decompression & decoding, following
@@ -511,11 +521,11 @@ introduced in Phase 6. WI2 / WI3 will use it as-is; if a newer
 ### 7.4 Pinned version & dep line
 
 ```elixir
-# api/mix.exs (UNCHANGED — already present; WI1 makes no mix.exs edit):
-# {:req, "~> 0.5"},
+# api/mix.exs (WI1 makes no mix.exs edit — but the dep HAS moved since):
+# {:req, "~> 0.6.1"},        # was "~> 0.5" when this contract was drafted
 #
-# Latest stable on hex: 0.5.17 (verified 2026-04-30 via hex.pm/api/packages/req)
-# Phase 7 may bump to "~> 0.5.17" if a specific feature lands; see WI3.
+# The "latest stable 0.5.17, verified 2026-04-30" figure below it is historical.
+# Re-read api/mix.exs and api/mix.lock rather than trusting a pin quoted here.
 ```
 
 ---
@@ -606,19 +616,19 @@ becomes a follow-up). All cross-link the relevant contract section.
   `client_id` / `client_secret` for the sandbox. This blocks WI3
   integration tests from running against a live mock host (Bypass
   covers unit tests; sandbox covers smoke tests).
-- **[blocking] Q-G — Rate limits.** Bokbasen publishes no documented
-  rate limit for metadata imports (§6.1). Either get a number from
-  Bokbasen partner contact or sign off on the conservative defaults
-  in §6.2 (queue concurrency 1, max 5 retries, 60 s ceiling). WI4
-  needs *some* number to compile against.
-- **[blocking] Q-J — Onix Block matrix for barkpark's sender role.**
-  Bokbasen scopes import permissions per sender role. A *Distributor*
-  may write Blocks 1, 2, 4, 6; a *Publisher* gets a different (still
-  partner-only) matrix.[^import] Phase 6 emits Blocks 1, 2, 4, and 6
-  (DescriptiveDetail, CollateralDetail, PublishingDetail, ProductSupply).
-  We need to confirm what role barkpark's OAuth2 client lands under, so
-  WI4 can correctly interpret `actionsCompleted` (silently-dropped
-  blocks vs. genuine failures).
+- **~~[blocking]~~ Q-G — Rate limits. ANSWERED IN CODE; no longer blocking.**
+  Bokbasen publishes no documented rate limit for metadata imports (§6.1), and
+  the shipped `Bokbasen.Client` says so in its own `## Rate limit (Q-G)`
+  moduledoc: it relies on Bokbasen's `429 + Retry-After` plus an optional
+  per-request floor (`BOKBASEN_RATE_LIMIT_MS` env var / `:bokbasen_rate_limit_ms`
+  app env, default 0). Note the parenthetical below was wrong on its own terms:
+  the queue concurrency is **4** (§6.3), never 1.
+- **~~[blocking]~~ Q-J — Onix Block matrix for barkpark's sender role.
+  ANSWERED IN CODE; no longer blocking.** Bokbasen scopes import permissions
+  per sender role.[^import] `Settings.default_client_role/0` records the
+  decision verbatim — *"Default `client_role` per Phase 7 plan (Q-J):
+  Barkpark = Publisher"* — and the client sends the publisher block set by
+  default, overridable per request via `:onix_block_access`.
 
 ### 9.2 Non-blocking
 
@@ -679,7 +689,8 @@ exact response shapes documented above.
     parses to recover `submission_id` + `poll_url` (see §3.1).
   - `poll_pending.xml` / `poll_accepted.xml` / `poll_rejected.xml` —
     XML poll-status fixtures with `<state>UNPROCESSED</state>` /
-    `<state>COMPLETED</state>` / `<state>FAILED</state>` (see §3.2).
+    `<state>COMPLETED</state>` / `<state>FAILED</state>` (see §5.3; §3.2 is
+    *Idempotency*).
   - `error_401.json` / `error_429.json` / `error_500.json` — error
     envelopes the WI3 `Errors` module surfaces as `AuthError`,
     `RateLimitError`, `HTTPError`.
@@ -714,8 +725,8 @@ mix test --include bokbasen_integration \
 
 ### Run against the real Bokbasen sandbox
 
-Set the five env vars (see §2.2 *Authentication* for the published
-URLs) and clear the test-only stub:
+Set the five env vars (see §2.1 *Decision* for the published URLs — §2.2 is
+*Caching*, not *Authentication*) and clear the test-only stub:
 
 ```bash
 export BOKBASEN_API_BASE="<api base from §2.2>"

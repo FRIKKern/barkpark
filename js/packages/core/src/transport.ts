@@ -37,8 +37,21 @@ import {
 import type { BarkparkClientConfig, RequestContext, ResponseContext } from './types'
 import { buildBaseHeaders, pickRequestId, uuidv7 } from './util/headers'
 
+/**
+ * @internal Names the HTTP verbs of a layer consumers do not address. Every
+ * supported operation is a named function (`getDoc`, `publishDoc`,
+ * `uploadAsset`, …) that picks its own verb; a consumer never chooses one. The
+ * standard `RequestInit['method']` covers anyone doing their own fetch.
+ */
 export type TransportMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
+/**
+ * @internal The option bag of `request`, which is itself internal — see the
+ * marker there. Several fields (`rawResponse`, `kind`, `retryPolicy`) are
+ * meaningful only to the layer that assembles a Barkpark call, and the ones a
+ * consumer legitimately wants are already re-exposed on the public operations
+ * as `signal`, `timeoutMs`, `retry` and `idempotencyKey`.
+ */
 export interface TransportRequestOptions {
   method?: TransportMethod
   body?: unknown
@@ -56,6 +69,14 @@ export interface TransportRequestOptions {
   timeoutMs?: number
 }
 
+/**
+ * @internal The return shape of the internal `request`. Public operations
+ * deliberately do NOT return this: they hand back the decoded payload, and
+ * where the raw `Response` genuinely matters they say so in their own type
+ * (`fetchRawDoc`, `exportDataset`). Exporting this pair would suggest every
+ * call carries a `Response` a consumer may read, which would be false — the
+ * body has already been consumed by the time `request` returns.
+ */
 export interface TransportResult<T> {
   data: T
   response: Response
@@ -327,6 +348,16 @@ function pickPolicy(opts: TransportRequestOptions): RetryPolicy {
 // Public entry point
 // ----------------------------------------------------------------------------
 
+/**
+ * @internal The unvalidated escape hatch under every public operation. It takes
+ * a raw `path` and appends it to the configured base URL, so exporting it would
+ * publish a way to call arbitrary endpoints while bypassing the scope prefixing
+ * and path-segment guards that the named operations apply — a consumer could
+ * reach a URL this package never intended to construct. It also returns a
+ * `Response` whose body is already consumed. Callers who need an unmodelled
+ * endpoint should use their own `fetch` (the client's `fetch` config option
+ * exists to keep instrumentation shared), or ask for the operation to be added.
+ */
 export async function request<T>(
   config: BarkparkClientConfig,
   path: string,
@@ -381,6 +412,17 @@ export async function request<T>(
       let timeoutTimer: ReturnType<typeof setTimeout> | undefined
       let timedOut = false
       let attemptSignal: AbortSignal | undefined = opts.signal
+      // [signal-listener-leak] Same hazard listen.ts documents at its own
+      // [signal-listener-leak] block, same idiom: `{ once: true }` only
+      // self-removes if the signal actually FIRES. The caller's signal outlives
+      // the attempt (one AbortController held across a component's or job's whole
+      // lifetime is the normal way to use this API), so every attempt that ended
+      // any other way -- success, HTTP error, retry, timeout, a throwing hook --
+      // left a dead handler bound to it. One per ATTEMPT, not per request: Node's
+      // EventTarget starts warning past 10. Capture the remover and run it in the
+      // attempt-wide finally below, which every exit path passes through.
+      // removeEventListener is idempotent, so it is safe after the signal fired.
+      let removeSignalListener: (() => void) | undefined
 
       if (timeoutMs !== undefined && timeoutMs > 0) {
         const ctrl = new AbortController()
@@ -390,148 +432,163 @@ export async function request<T>(
         }, timeoutMs)
         if (opts.signal !== undefined) {
           if (opts.signal.aborted) ctrl.abort()
-          else opts.signal.addEventListener('abort', () => ctrl.abort(), { once: true })
+          else {
+            const callerSignal = opts.signal
+            const onCallerAbort = () => ctrl.abort()
+            callerSignal.addEventListener('abort', onCallerAbort, { once: true })
+            removeSignalListener = () => callerSignal.removeEventListener('abort', onCallerAbort)
+          }
         }
         attemptSignal = ctrl.signal
       }
 
-      const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-      const reqCtx: RequestContext = {
-        method,
-        url,
-        headers,
-        attempt,
-        startedAt,
-      }
-      if (opts.body !== undefined) reqCtx.body = opts.body
-      if (config.onBeforeRequest) await config.onBeforeRequest(reqCtx)
-
-      // After-hook values: the hook may mutate ctx to rewrite url/method/headers/body.
-      const init: RequestInit = {
-        method: reqCtx.method,
-        headers: reqCtx.headers,
-      }
-      if (reqCtx.body !== undefined) {
-        if (typeof reqCtx.body === 'string') {
-          init.body = reqCtx.body
-        } else if (typeof FormData !== 'undefined' && reqCtx.body instanceof FormData) {
-          // Multipart (e.g. media upload): pass FormData through and drop the JSON
-          // Content-Type so fetch sets `multipart/form-data` with its own boundary.
-          init.body = reqCtx.body
-          delete reqCtx.headers['Content-Type']
-        } else {
-          init.body = JSON.stringify(reqCtx.body)
-        }
-      }
-      if (attemptSignal !== undefined) init.signal = attemptSignal
-
-      let response: Response
+      // Attempt-wide teardown: EVERY exit from here on -- a returned
+      // TransportResult, a thrown typed error, a retry, a caller abort, a
+      // throwing onBeforeRequest hook -- unwinds through this finally, which is
+      // the only place the caller-signal listener above is guaranteed to be
+      // dropped. (The inner finally below covers the timeout timer only, and
+      // only from after the hook onward.)
       try {
-        response = await fetchFn(reqCtx.url, init)
-      } catch (err) {
-        if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
-        if (timedOut) {
-          const opts2: { url: string; cause: unknown; timeoutMs?: number } = {
-            url: reqCtx.url,
-            cause: err,
-          }
-          if (timeoutMs !== undefined) opts2.timeoutMs = timeoutMs
-          throw new BarkparkTimeoutError('request timed out', opts2)
+        const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+        const reqCtx: RequestContext = {
+          method,
+          url,
+          headers,
+          attempt,
+          startedAt,
         }
-        // A caller-initiated abort (opts.signal) is a cancellation, NOT a network
-        // failure: surface the standard AbortError so callers detect it via
-        // `err.name === 'AbortError'` (exactly as with a bare fetch) and let it
-        // fail fast — defaultShouldRetry returns false for a non-Barkpark error,
-        // so it is never retried. Without this, an aborted read was wrapped as a
-        // retryable BarkparkNetworkError and re-tried up to 3× with backoff. The
-        // timeout abort is already handled above via `timedOut`, so `signal.aborted`
-        // here means the caller's signal — re-throw fetch's AbortError untouched.
-        if (opts.signal?.aborted) {
-          throw err
-        }
-        // A genuine fetch-level failure (DNS/offline/TLS) is retryable.
-        throw new BarkparkNetworkError(err instanceof Error ? err.message : 'network error', {
-          url: reqCtx.url,
-          cause: err,
-        })
-      }
+        if (opts.body !== undefined) reqCtx.body = opts.body
+        if (config.onBeforeRequest) await config.onBeforeRequest(reqCtx)
 
-      // The deadline is NOT cleared here: timeoutMs bounds the whole request,
-      // body included. Clearing at headers let a server that streamed headers
-      // and then stalled the body (slow-loris) hang request() forever — the
-      // documented timeout never fired. The timer now stays armed through the
-      // hook + body read (cleared in the finally below); rawResponse clears it
-      // before returning, since there the CALLER owns the body stream and an
-      // export may legitimately outlive timeoutMs.
-      try {
-        // onResponse hook runs on both success and error paths.
-        if (config.onResponse) {
-          const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-          const respHeaders = headersToRecord(response.headers)
-          const respCtx: ResponseContext = {
-            status: response.status,
-            ok: response.ok,
-            url: reqCtx.url,
-            headers: respHeaders,
-            durationMs: endedAt - startedAt,
-            attempt,
-          }
-          const rid = strOrUndefined(respHeaders['x-request-id'])
-          if (rid !== undefined) respCtx.requestId = rid
-          const etagRaw = strOrUndefined(respHeaders['etag'])
-          if (etagRaw !== undefined) respCtx.etag = etagRaw.replace(/^"|"$/g, '')
-          await config.onResponse(respCtx)
+        // After-hook values: the hook may mutate ctx to rewrite url/method/headers/body.
+        const init: RequestInit = {
+          method: reqCtx.method,
+          headers: reqCtx.headers,
         }
+        if (reqCtx.body !== undefined) {
+          if (typeof reqCtx.body === 'string') {
+            init.body = reqCtx.body
+          } else if (typeof FormData !== 'undefined' && reqCtx.body instanceof FormData) {
+            // Multipart (e.g. media upload): pass FormData through and drop the JSON
+            // Content-Type so fetch sets `multipart/form-data` with its own boundary.
+            init.body = reqCtx.body
+            delete reqCtx.headers['Content-Type']
+          } else {
+            init.body = JSON.stringify(reqCtx.body)
+          }
+        }
+        if (attemptSignal !== undefined) init.signal = attemptSignal
 
-        if (opts.rawResponse === true) {
+        let response: Response
+        try {
+          response = await fetchFn(reqCtx.url, init)
+        } catch (err) {
           if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
-          return { data: response as unknown as T, response }
-        }
-
-        if (response.ok) {
-          if (response.status === 204) {
-            return { data: undefined as unknown as T, response }
-          }
-          const text = await readBodyText(response, reqCtx.url, opts.signal)
-          if (text.length === 0) {
-            return { data: undefined as unknown as T, response }
-          }
-          try {
-            return { data: JSON.parse(text) as T, response }
-          } catch (err) {
-            throw new BarkparkAPIError('unexpected non-JSON response', {
-              status: response.status,
-              body: text,
+          if (timedOut) {
+            const opts2: { url: string; cause: unknown; timeoutMs?: number } = {
               url: reqCtx.url,
               cause: err,
-            })
+            }
+            if (timeoutMs !== undefined) opts2.timeoutMs = timeoutMs
+            throw new BarkparkTimeoutError('request timed out', opts2)
           }
-        }
-
-        await decodeErrorAndThrow(response, reqCtx.url, opts.signal)
-        // decodeErrorAndThrow returns Promise<never>; this line is unreachable.
-        throw new BarkparkAPIError('unreachable', { status: response.status, url: reqCtx.url })
-      } catch (err) {
-        // The deadline fired mid-body (or mid-hook): the abort surfaces as an
-        // AbortError from response.text() — or its retryable BarkparkNetworkError
-        // wrap from readBodyText. Reclassify OUR abort as the timeout it is; a
-        // caller abort (opts.signal) was already re-thrown raw and is excluded.
-        if (
-          timedOut &&
-          opts.signal?.aborted !== true &&
-          (err instanceof BarkparkNetworkError ||
-            (err instanceof Error && err.name === 'AbortError'))
-        ) {
-          const o: { url: string; cause: unknown; timeoutMs?: number } = {
+          // A caller-initiated abort (opts.signal) is a cancellation, NOT a network
+          // failure: surface the standard AbortError so callers detect it via
+          // `err.name === 'AbortError'` (exactly as with a bare fetch) and let it
+          // fail fast — defaultShouldRetry returns false for a non-Barkpark error,
+          // so it is never retried. Without this, an aborted read was wrapped as a
+          // retryable BarkparkNetworkError and re-tried up to 3× with backoff. The
+          // timeout abort is already handled above via `timedOut`, so `signal.aborted`
+          // here means the caller's signal — re-throw fetch's AbortError untouched.
+          if (opts.signal?.aborted) {
+            throw err
+          }
+          // A genuine fetch-level failure (DNS/offline/TLS) is retryable.
+          throw new BarkparkNetworkError(err instanceof Error ? err.message : 'network error', {
             url: reqCtx.url,
             cause: err,
-          }
-          if (timeoutMs !== undefined) o.timeoutMs = timeoutMs
-          throw new BarkparkTimeoutError('request timed out', o)
+          })
         }
-        throw err
+
+        // The deadline is NOT cleared here: timeoutMs bounds the whole request,
+        // body included. Clearing at headers let a server that streamed headers
+        // and then stalled the body (slow-loris) hang request() forever — the
+        // documented timeout never fired. The timer now stays armed through the
+        // hook + body read (cleared in the finally below); rawResponse clears it
+        // before returning, since there the CALLER owns the body stream and an
+        // export may legitimately outlive timeoutMs.
+        try {
+          // onResponse hook runs on both success and error paths.
+          if (config.onResponse) {
+            const endedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+            const respHeaders = headersToRecord(response.headers)
+            const respCtx: ResponseContext = {
+              status: response.status,
+              ok: response.ok,
+              url: reqCtx.url,
+              headers: respHeaders,
+              durationMs: endedAt - startedAt,
+              attempt,
+            }
+            const rid = strOrUndefined(respHeaders['x-request-id'])
+            if (rid !== undefined) respCtx.requestId = rid
+            const etagRaw = strOrUndefined(respHeaders['etag'])
+            if (etagRaw !== undefined) respCtx.etag = etagRaw.replace(/^"|"$/g, '')
+            await config.onResponse(respCtx)
+          }
+
+          if (opts.rawResponse === true) {
+            if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
+            return { data: response as unknown as T, response }
+          }
+
+          if (response.ok) {
+            if (response.status === 204) {
+              return { data: undefined as unknown as T, response }
+            }
+            const text = await readBodyText(response, reqCtx.url, opts.signal)
+            if (text.length === 0) {
+              return { data: undefined as unknown as T, response }
+            }
+            try {
+              return { data: JSON.parse(text) as T, response }
+            } catch (err) {
+              throw new BarkparkAPIError('unexpected non-JSON response', {
+                status: response.status,
+                body: text,
+                url: reqCtx.url,
+                cause: err,
+              })
+            }
+          }
+
+          await decodeErrorAndThrow(response, reqCtx.url, opts.signal)
+          // decodeErrorAndThrow returns Promise<never>; this line is unreachable.
+          throw new BarkparkAPIError('unreachable', { status: response.status, url: reqCtx.url })
+        } catch (err) {
+          // The deadline fired mid-body (or mid-hook): the abort surfaces as an
+          // AbortError from response.text() — or its retryable BarkparkNetworkError
+          // wrap from readBodyText. Reclassify OUR abort as the timeout it is; a
+          // caller abort (opts.signal) was already re-thrown raw and is excluded.
+          if (
+            timedOut &&
+            opts.signal?.aborted !== true &&
+            (err instanceof BarkparkNetworkError ||
+              (err instanceof Error && err.name === 'AbortError'))
+          ) {
+            const o: { url: string; cause: unknown; timeoutMs?: number } = {
+              url: reqCtx.url,
+              cause: err,
+            }
+            if (timeoutMs !== undefined) o.timeoutMs = timeoutMs
+            throw new BarkparkTimeoutError('request timed out', o)
+          }
+          throw err
+        } finally {
+          if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
+        }
       } finally {
-        if (timeoutTimer !== undefined) clearTimeout(timeoutTimer)
+        removeSignalListener?.()
       }
       // Pass the caller's signal so an abort during a between-attempt backoff sleep
       // cancels the retry immediately (surfaced as an AbortError) rather than

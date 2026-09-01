@@ -1,6 +1,17 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["src/**/*", "tests/**/*", "test/**/*"],
+  // Both `test/**/*` (11 files) and `tests/**/*` (3) — this package really does
+  // have both dirs. The build configs are here too because eslint runs with
+  // `projectService: true`: a file outside every tsconfig `include` is a
+  // PARSING ERROR, not a lint pass, so `lint` can only reach them from here.
+  //
+  // The `lint` script carries a trailing
+  // `--ignore-pattern test/pinned-collator.test.ts`. That is TEMPORARY: turning
+  // the gate on over `test/` for the first time found a dead
+  // `const fixturePath` at line 16 of that file, and fixing it is a source
+  // change. Delete the const, then delete the flag — task-b48b8587e0935449.
+  // The file still TYPECHECKS; only the lint pass skips it.
+  "include": ["src/**/*", "tests/**/*", "test/**/*", "tsup.config.ts", "vitest.config.ts"],
   "compilerOptions": {
     "rootDir": "."
   }

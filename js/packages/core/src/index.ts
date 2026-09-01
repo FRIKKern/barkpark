@@ -76,6 +76,12 @@ export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
 export type { ListenOptions } from './listen'
+// The edge-runtime detector `listen()` already gates on. Exported so downstream
+// packages (@barkpark/nextjs) REUSE it instead of hand-rolling a second copy —
+// the fork in @barkpark/nextjs's client bundle had drifted into classifying
+// every browser as an edge runtime.
+export { detectEdgeRuntime } from './util/edge-detect'
+export type { EdgeSignal } from './util/edge-detect'
 export { exportDataset } from './export'
 export { imageUrl } from './image-url'
 export type { RenditionPreset, ImageRef, ImageUrlOptions } from './image-url'
@@ -101,6 +107,14 @@ export {
   assertPaging,
 } from './filter-builder'
 export type { FilterExpression, BuilderState } from './filter-builder'
+
+// The path-segment guard this package's own eleven path builders call. Exported
+// so downstream packages (@barkpark/nextjs) REUSE the rule instead of writing a
+// second copy of it — @barkpark/nextjs's server fetch path had already hand-
+// rolled one, and the ONLY reason it existed was that this line was missing.
+// Two implementations of one rule means the next reader greps, finds the copy,
+// and edits that. Same reason `detectEdgeRuntime` above is public.
+export { assertSegment } from './util/guards'
 
 // --- Errors — export class AND note: every class has a `code` literal equal
 // to its class name, for cross-bundle matching when `instanceof` is unreliable

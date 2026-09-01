@@ -129,7 +129,7 @@ func TestRunCommandRefusesUnreadableWriteReceipt(t *testing.T) {
 // honestWriteReceipts is the CONTROL list, RE-DERIVED from
 // api/lib/barkpark_web/controllers/** rather than copied from a charter count:
 //
-//	{"ok":true}                          auth_controller.ex:379 (verify_email)
+//	{"ok":true}                          auth_controller.ex:466 (verify_email)
 //	{key,raw,quickstart}                 ticket_keys_controller.ex:44 (201 mint)
 //	{workspace,deleted:true}             workspace_controller.ex:112 (delete)
 //	{"result":{transactionId,results}}   mutate_controller.ex:24

@@ -297,13 +297,34 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
       us
     end
 
-    median = fn times -> times |> Enum.sort() |> Enum.at(div(length(times), 2)) end
+    # ESTIMATOR: min-of-N, NOT the median.
+    #
+    # Every source of error in this measurement is ONE-SIDED — a sample can be
+    # inflated by a GC pause, a scheduler preemption, or a peer agent hammering
+    # the same box, but nothing can make the server do the work FASTER than it
+    # actually does it. So the minimum of N draws is the maximum-likelihood
+    # estimate of the true cost, and it converges DOWN toward it as N grows.
+    #
+    # The median does not: it sits in the middle of whatever noise the run drew,
+    # and this statistic subtracts TWO independent medians, so the noise on both
+    # samples compounds instead of cancelling. Measured spread of the median
+    # form was ~17ms against a 10ms budget while the true signal is ≤~3ms —
+    # which is how three unrelated PRs (#14072, #14074, #14003) lost the
+    # required Elixir Test check in one 25-minute window on `frame_ms` 10.387.
+    #
+    # The fix is the estimator, not the budget: covering the median's noise
+    # would need ≥25ms, which is ABOVE the ~15ms full-grid-re-render regression
+    # this test exists to catch — i.e. a deleted test. min-of-N keeps `< 10`
+    # meaningful. Verified fail-able: re-reading `@presences` inside the cell
+    # comprehension (the pre-overlay-split shape) puts frame_ms at ~15ms and
+    # this assertion RED under the min estimator.
+    best = fn times -> Enum.min(times) end
 
     [_warmup | moving] = for i <- 0..10, do: frame.("B#{i + 2}")
     [_warmup | static] = for _ <- 0..10, do: frame.("B12")
 
-    moving_ms = median.(moving) / 1000
-    baseline_ms = median.(static) / 1000
+    moving_ms = best.(moving) / 1000
+    baseline_ms = best.(static) / 1000
     frame_ms = max(moving_ms - baseline_ms, 0.0)
 
     # The frames really re-rendered: the last cursor landed on B12.
@@ -312,12 +333,14 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
     IO.puts(
       "[sheets-presence-bench] 500-row (10-col) presence frame: " <>
         "#{Float.round(frame_ms, 2)}ms server cost " <>
-        "(moving #{Float.round(moving_ms, 2)}ms - barrier baseline #{Float.round(baseline_ms, 2)}ms, n=10 medians)"
+        "(moving #{Float.round(moving_ms, 2)}ms - barrier baseline #{Float.round(baseline_ms, 2)}ms, n=10 minima)"
     )
 
-    # The 10ms review budget, with headroom for slow CI boxes — before the
-    # overlay split + derive_grid persistence this measured ~15ms (a full
-    # grid-body re-render per frame); now only the overlay layer re-renders.
+    # The 10ms review budget — UNCHANGED. Before the overlay split +
+    # derive_grid persistence this measured ~15ms (a full grid-body re-render
+    # per frame); now only the overlay layer re-renders. The budget still sits
+    # BELOW that regression, which is the whole point: widening it past 15ms to
+    # absorb estimator noise would delete the test.
     assert frame_ms < 10
   end
 

@@ -12,6 +12,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 // PaperTeachErr is one structured teaching error from the BPML parser —
@@ -132,26 +134,37 @@ func (c *Client) PaperSync(slug, bpml, baseRev string) (*PaperSyncResult, *Paper
 	return &result, nil, nil
 }
 
+// decodePaperErr reads the envelope through internal/apierr — the one shared
+// parser — and then makes a SECOND, separate pass for `error.errors`, the
+// paper-specific teach list that rides inside the error object.
+//
+// The two-pass split is the point. This function used to decode both in one
+// typed struct, which meant a `errors` payload in any unexpected shape failed
+// the whole Unmarshal and dropped the caller all the way to "http_422" plus a
+// trimmed body — losing the code, the message AND the hint the server had sent.
+// That is the same failure that made bp task create's dedup 409 unappealable.
+// Now a malformed teach list costs only the teach list.
 func decodePaperErr(status int, body []byte) *PaperAPIErr {
-	var env struct {
-		Error struct {
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Hint    string          `json:"hint"`
-			Errors  []PaperTeachErr `json:"errors"`
-		} `json:"error"`
-	}
-
-	if err := json.Unmarshal(body, &env); err != nil || env.Error.Code == "" {
+	env, ok := apierr.Parse(body)
+	if !ok || env.Code == "" {
 		return &PaperAPIErr{Status: status, Code: fmt.Sprintf("http_%d", status), Message: trimForErr(body)}
 	}
 
+	// Best-effort, and deliberately not guarded: an `errors` value this struct
+	// cannot read leaves Errors nil and nothing else is affected.
+	var teach struct {
+		Error struct {
+			Errors []PaperTeachErr `json:"errors"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(body, &teach)
+
 	return &PaperAPIErr{
 		Status:  status,
-		Code:    env.Error.Code,
-		Message: env.Error.Message,
-		Hint:    env.Error.Hint,
-		Errors:  env.Error.Errors,
+		Code:    env.Code,
+		Message: env.Message,
+		Hint:    env.Hint,
+		Errors:  teach.Error.Errors,
 	}
 }
 

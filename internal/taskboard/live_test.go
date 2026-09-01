@@ -772,3 +772,76 @@ func TestSnapshotBudgetIndependentOfInteractiveClientTimeout(t *testing.T) {
 		t.Fatal("snapshot fetched under the scoped budget carried no detail index")
 	}
 }
+
+// TestSnapshotErrorLabelReadsTypedStatusNotBodyText is the regression pin for
+// the string-match-standing-in-for-a-typed-fact class (parent
+// task-ce8f04315a6d1f10, sibling of run.go's mediaUploadFileArg): the HTTP
+// status of a refused snapshot fetch is a TYPED int at the point it is known
+// (getJSONAttempt reads resp.StatusCode), but it used to be flattened into the
+// error's TEXT and re-parsed by snapshotErrorLabel with
+// strings.Contains(s, "status 401"). That text also carries bodyHint(body) —
+// up to 120 characters of the SERVER'S OWN RESPONSE BODY, which nothing in this
+// binary controls. Any body that happens to SPELL another status (a gateway
+// forwarding "upstream returned status 404") or the oversize words
+// ("exceeds … bytes") hijacks the classification, and the operator's identity
+// strip names the wrong failure: a 403 reads "unauthorized", a 500 reads
+// "snapshot unavailable" (a permanent-looking class, so nobody retries), a 404
+// reads "snapshot too large".
+//
+// Every error here is produced by the REAL fetch path against a real httptest
+// server (or by the real decoder), never hand-built, so the test pins the whole
+// pipe: status -> error -> label.
+func TestSnapshotErrorLabelReadsTypedStatusNotBodyText(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		body   string
+		want   string
+	}{
+		// A 403 whose body explains itself by naming a DIFFERENT status.
+		{"403 body quoting a 401", http.StatusForbidden,
+			`{"reason":"forbidden","detail":"membership probe returned status 401"}`,
+			"forbidden"},
+		// A 404 whose body happens to spell the oversize words.
+		{"404 body quoting a byte budget", http.StatusNotFound,
+			`{"reason":"not_found","detail":"prefix exceeds 0 bytes"}`,
+			"snapshot unavailable"},
+		// The sharpest one: a gateway 500 forwarding an upstream 404. Read as
+		// "snapshot unavailable" this looks permanent; it is a retryable server
+		// error.
+		{"500 body quoting an upstream 404", http.StatusInternalServerError,
+			`{"reason":"bad_gateway","detail":"upstream status 404"}`,
+			"server error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, tc.body, tc.status)
+			}))
+			defer srv.Close()
+
+			_, err := getJSON(newClient(srv.URL), "/v1/tasks?limit=1000")
+			if err == nil {
+				t.Fatalf("status %d did not fail the fetch", tc.status)
+			}
+			if got := snapshotErrorLabel(err); got != tc.want {
+				t.Errorf("HTTP %d misclassified by its BODY TEXT: snapshotErrorLabel(%q) = %q, want %q",
+					tc.status, err, got, tc.want)
+			}
+		})
+	}
+
+	// The envelope-fence decode refusal (fetch.go decodeTaskListFull) also
+	// embeds bodyHint. Its own comment promises the "invalid snapshot" class; a
+	// 200 body that merely MENTIONS a status must not steal it.
+	t.Run("decode refusal whose body quotes a status", func(t *testing.T) {
+		_, _, err := decodeTaskListFull([]byte(`{"ok":true,"note":"upstream status 404 while listing"}`))
+		if err == nil {
+			t.Fatal("a docs-less envelope did not fail the decode")
+		}
+		if got := snapshotErrorLabel(err); got != "invalid snapshot" {
+			t.Errorf("decode refusal misclassified by its BODY TEXT: snapshotErrorLabel(%q) = %q, want %q",
+				err, got, "invalid snapshot")
+		}
+	})
+}

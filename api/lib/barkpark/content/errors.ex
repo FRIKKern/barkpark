@@ -1,6 +1,8 @@
 defmodule Barkpark.Content.Errors do
   @moduledoc "Maps internal error tuples to v1 JSON error envelopes."
 
+  require Logger
+
   # Human-grade, fix-suggesting hints keyed off the STABLE `code` string. Purely
   # additive: merged in `to_envelope/2` only when a hint is registered for the
   # code, so existing `code`/`message`/`status`/`details` stay byte-for-byte
@@ -768,8 +770,103 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, reason}) when is_binary(reason),
     do: %{code: "internal_error", message: reason, status: 500}
 
-  defp build(_),
+  # THE DELIBERATE "no fault in scope" SENTINEL, narrowed OUT of the catch-all.
+  # `BarkparkWeb.ErrorJSON` renders `{:error, :unknown}` when Phoenix's
+  # RenderErrors hands it a 500 carrying no `:kind`/`:reason` at all — there is
+  # genuinely nothing to name, and its moduledoc promises the message is then
+  # exactly "unknown error". Giving it its own clause is what lets the catch-all
+  # below speak and LOG freely: every term that still reaches the catch-all is by
+  # definition an unanticipated shape, never this one, so its log line is signal
+  # rather than noise.
+  defp build({:error, :unknown}),
     do: %{code: "internal_error", message: "unknown error", status: 500}
+
+  # ── CATCH-ALL: an unanticipated reason term. NEVER BARE, NEVER SILENT ───────
+  #
+  # This clause used to render `message: "unknown error"` and log nothing, so an
+  # operator holding the request_id learned exactly two things: that it was a
+  # 500, and nothing else. THE REMEDY FOR THAT ALREADY EXISTED — TWICE — AND THE
+  # CODE PATH ROUTES AROUND BOTH:
+  #
+  #   * the 2026-08-09 fault-family fix (#11364), which makes a crash-path 500
+  #     name its fault family, lives in `BarkparkWeb.ErrorJSON` — and a RETURNED
+  #     `{:error, term}` never reaches ErrorJSON at all; and
+  #   * `BarkparkWeb.FallbackController`'s "NEVER SILENT ON 5xx" log
+  #     (task-96d8ab2b582818a4) fires only for controllers that actually delegate
+  #     to it — `BarkparkWeb.MutateController`, the write door the whole task
+  #     ledger is filed through, declares `action_fallback` but renders these
+  #     envelopes itself from `Errors.to_envelope/2`, so it never triggers.
+  #
+  # Both remedies are therefore re-seated HERE, in the one place every caller of
+  # `to_envelope/2` inherits them without a controller edit: the message carries
+  # a shape DESCRIPTOR in the same `unknown error (<family>)` form ErrorJSON
+  # established, and the term is logged BEFORE the envelope is returned. A caller
+  # that also routes through FallbackController now logs twice; two lines about
+  # one defect is the cheap side of that trade.
+  #
+  # WHAT IS DISCLOSED, AND WHAT IS NOT. The descriptor speaks TAGS and TYPE NAMES
+  # only — `{:some_tag, map}`, `%Ecto.StaleEntryError{}`, `:whatever` — never a
+  # value. Binaries, numbers, list elements and map KEYS (which is where a JSON
+  # body's caller-supplied strings land) all collapse to a type name, so no
+  # document field, token, filter string or user text can ride out on a 500. The
+  # full term is still `inspect`ed into the SERVER-SIDE log, bounded exactly as
+  # FallbackController already bounds it.
+  #
+  # The `code` stays byte-identical "internal_error":
+  # `BarkparkCloud.Sites.Deploy.transient_refusal?/1` grants its retry grace by
+  # matching the CODE, and moving it turns that grace terminal (error_json.ex).
+  defp build(other) do
+    descriptor = reason_descriptor(other)
+
+    Logger.error(
+      "Barkpark.Content.Errors: no build/1 clause matched a returned error term — " <>
+        "rendering 500 internal_error (#{descriptor}). " <>
+        "term=#{inspect(other, limit: 25, printable_limit: 500)}"
+    )
+
+    %{code: "internal_error", message: "unknown error (#{descriptor})", status: 500}
+  end
+
+  # Longest descriptor the envelope will carry. A pathological term (a deeply
+  # nested tuple) can only cost this many graphemes of the message.
+  @descriptor_max_chars 120
+
+  # `{:error, reason}` is described by its REASON — the tag the caller actually
+  # returned. Anything else (a bare term, or an unmatched 3-tuple such as
+  # `{:error, :rate_limited, opts}`) is described whole.
+  defp reason_descriptor({:error, reason}), do: clamp_descriptor(term_family(reason))
+  defp reason_descriptor(term), do: clamp_descriptor(term_family(term))
+
+  # A struct is named by its MODULE (a compile-time name); a tuple by its
+  # elements' families, so a tagged tuple keeps its tag; everything else by its
+  # type name alone.
+  defp term_family(%{__struct__: mod}), do: "%#{inspect(mod)}{}"
+
+  defp term_family(tuple) when is_tuple(tuple),
+    do: "{" <> (tuple |> Tuple.to_list() |> Enum.map_join(", ", &term_family/1)) <> "}"
+
+  defp term_family(term), do: type_name(term)
+
+  # Atoms are code-authored vocabulary — every `{:error, tag}` in this tree is a
+  # literal, and a decoded JSON body yields STRINGS, never atoms — so an atom is
+  # spoken verbatim; it is the part an operator routes on. Everything that can
+  # carry caller bytes is reduced to its type and nothing else.
+  defp type_name(v) when is_atom(v), do: inspect(v)
+  defp type_name(v) when is_binary(v), do: "binary"
+  defp type_name(v) when is_bitstring(v), do: "bitstring"
+  defp type_name(v) when is_integer(v), do: "integer"
+  defp type_name(v) when is_float(v), do: "float"
+  defp type_name(%{__struct__: mod}), do: "%#{inspect(mod)}{}"
+  defp type_name(v) when is_map(v), do: "map"
+  defp type_name(v) when is_list(v), do: "list"
+  defp type_name(v) when is_function(v), do: "function"
+  defp type_name(v) when is_pid(v), do: "pid"
+  defp type_name(v) when is_reference(v), do: "reference"
+  defp type_name(v) when is_port(v), do: "port"
+  defp type_name(_v), do: "term"
+
+  defp clamp_descriptor(s) when byte_size(s) <= @descriptor_max_chars, do: s
+  defp clamp_descriptor(s), do: String.slice(s, 0, @descriptor_max_chars) <> "…"
 
   # A halt reason is normally a human string the plugin author chose; use it
   # verbatim so "plugin authors can rely on it" stays true. Fall back to a

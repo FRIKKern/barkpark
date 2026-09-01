@@ -95,8 +95,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PathsTest do
         opts = if desk, do: [desk: desk], else: []
         built = Paths.studio_path_for(segments, dataset, opts)
 
-        assert {^dataset, ^segments, ^desk} = parse_studio_path(built),
-               "parse-back drifted for #{inspect({segments, dataset, desk})} → #{built}"
+        parsed_back = parse_studio_path(built)
+
+        assert parsed_back == {dataset, segments, desk},
+               "parse-back drifted for #{inspect({segments, dataset, desk})} → #{built}, got #{inspect(parsed_back)}"
 
         # Rebuild from the recovered tuple → byte-identical to the original.
         {ds2, segs2, desk2} = parse_studio_path(built)

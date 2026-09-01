@@ -338,7 +338,8 @@ defmodule Barkpark.Auth do
   @doc """
   Every app token (`kind == "api"`), newest first, for the admin enumerate
   route. Optionally narrowed to one `email` by the SAME label convention the
-  mint uses.
+  mint uses — and WHEN so narrowed, confined to the workspaces `actor`
+  administers (see below; the unfiltered sweep is deliberately unchanged).
 
   ## Why enumeration had to exist (jf-backlog-apptoken-revoke-upstream)
 
@@ -351,25 +352,125 @@ defmodule Barkpark.Auth do
 
   Returns rows, never raw secrets: `token_hash` is the only stored form and the
   caller renders a redacted view.
+
+  ## `actor` IS REQUIRED — the LIST door is where authorization looks like
+  configuration (task-71787769f1d03e51)
+
+  This was `list_app_tokens/1`, taking `opts` and no actor at all, while BOTH
+  of its siblings on this controller — `revoke_app_tokens_for_email/2` and
+  `revoke_app_token_by_id/2` — already took one. That asymmetry is the shape of
+  the class, not an accident of this module: a BY-ID lookup naturally has the
+  id AND the caller in hand, so scoping it reads as authorization. A LIST takes
+  FILTERS, and "which filters" reads as a query question. So the missing
+  argument here was the caller, and it did not look missing.
+
+  What the unscoped form granted, over HTTP:
+  `GET /v1/auth/app-tokens?email=<addr>` answered, for an ARBITRARY address,
+  whether it holds a live app token anywhere on the instance — and because
+  `AppTokenController.index/2` treats a supplied filter as licence to skip
+  redaction, it answered with the UNREDACTED `label`, plus `workspace_id`
+  (which tenants that address belongs to), `permissions`, `dataset`, `id` and
+  the dates. `revoke_app_tokens_for_email/2` returns a bare count, and its
+  docstring says why in as many words: "a 403 here would confirm that the
+  address holds a live token somewhere on the instance, which is the disclosure
+  the route already refuses to make." The route did not refuse it — one HTTP
+  GET away on the same controller, this function granted exactly the
+  confirmation its sibling withholds. A refusal a neighbour grants is not a
+  refusal.
+
+  Same predicate as both revoke arms — the private `administrable_by?/2` ->
+  `Tenancy.Auth.workspace_admin?/2` — so the THREE selectors cannot drift
+  again, and a NULL `workspace_id` row is administrable by nobody and absent
+  (fail-closed, exactly as the write arms document).
+
+  ## THE SCOPE IS THE `?email=` ARM ONLY, AND THAT IS THE PRINCIPLE, NOT
+  CONVENIENCE
+
+  The unfiltered sweep is left exactly as it was, label redaction and all.
+  What makes the filtered arm the defect is that IT CONFIRMS A SPECIFIC
+  ADDRESS: the caller supplies a candidate and the answer says yes or no. An
+  unfiltered sweep cannot probe an address — it returns whatever is there,
+  with labels withheld — so it is a different question, and the question of
+  who should see an instance-wide inventory is a genuine policy one with an
+  argument on each side. It is open as `task-aa07355fa8a53355`, it belongs to
+  that row's owner, and NOTHING here closes it: option 2 ("keep it
+  instance-wide, keep the redaction") remains available.
+
+  This narrowness matters for a concrete reason rather than a tidy one. The
+  GATE on this route is `has_permission?(token, "admin")` — the same
+  permission-only test `BarkparkWeb.Plugs.RequireAdmin` applies, a flat read of
+  the token's global `permissions[]` with NO membership requirement at all.
+  `workspace_admin?/2` is membership-and-role. So an `admin`-permissioned token
+  holding zero memberships passes the gate, reaches this function, and is
+  administrator of nothing.
+
+  On the `?email=` arm that is exactly right, and it is already the ratified
+  posture of the write twin: `revoke_app_tokens_for_email/2` hands such a
+  caller `revoked_count: 0`. On the SWEEP it would silently empty that
+  operator's instance inventory — a live question, not an obvious win, and not
+  one to settle inside a fix chartered against something else.
+
+  (Do not restate this as a bypass in `Tenancy.Auth.authorize/3`. `authorize/3`
+  IS membership-gated — `member?/2 and permits?/2`. Its documented, load-bearing
+  divergence from `workspace_admin?/2` is a different thing: both read
+  membership, and they differ on whether the GRANT comes from the token's
+  global `permissions[]` or from the membership ROLE, which is why a
+  global-admin token seated in workspace B as a plain `member` passes
+  `authorize(tok, B, :admin)` and correctly fails `workspace_admin?(tok, B)`.
+  The permission-only reach on this route comes from the ROUTE'S OWN gate, not
+  from `authorize/3`.)
+
+  Denial SHAPE, per the law in `BarkparkWeb.ShareLinkController`: the caller
+  named an email, not a workspace, so there is no target to 403 about. Foreign
+  rows are simply ABSENT, and the 200 response for a provisioned foreign
+  address is byte-identical to the 200 for an address that exists nowhere — a
+  status-code difference would rebuild the oracle this closes.
+
+  WHAT THAT GUARANTEE IS NOT, stated so nobody reads it as more than it is: the
+  denial is byte-identical in the RESPONSE, not in the WORK. Because the
+  predicate runs after `Repo.all`, a provisioned foreign address loads one row
+  and costs one `workspace_admin?/2` membership query before dropping it, while
+  an address that exists nowhere costs none. Same bytes, different timing — a
+  noisy residue, and the SAME shape `revoke_app_tokens_for_email/2` already
+  has, inherited from the twin rather than introduced here. Closing it means
+  joining the workspace set into the WHERE clause, which is the same change a
+  paginator would force (see the comment on the filter below); until someone
+  needs constant time, this is where it lives.
   """
-  @spec list_app_tokens(keyword()) :: [ApiToken.t()]
-  def list_app_tokens(opts \\ []) do
+  @spec list_app_tokens(ApiToken.t(), keyword()) :: [ApiToken.t()]
+  def list_app_tokens(%ApiToken{} = actor, opts) when is_list(opts) do
     query =
       ApiToken
       |> where([t], t.kind == "api")
 
-    query =
+    # `by_email?` is BOTH the filter and the scope trigger, derived once, so the
+    # two can never be spelled inconsistently by a later edit.
+    {query, by_email?} =
       case Keyword.get(opts, :email) do
         email when is_binary(email) and email != "" ->
-          where(query, [t], t.label == ^("app:" <> email))
+          {where(query, [t], t.label == ^("app:" <> email)), true}
 
         _ ->
-          query
+          {query, false}
       end
 
-    query
-    |> order_by([t], desc: t.inserted_at)
-    |> Repo.all()
+    rows =
+      query
+      |> order_by([t], desc: t.inserted_at)
+      |> Repo.all()
+
+    if by_email? do
+      # Post-`Repo.all` filtering, matching `revoke_app_tokens_for_email/2`
+      # exactly so the twin selectors read the same. IF A LIMIT IS EVER ADDED,
+      # IT MUST NOT GO IN THE QUERY ABOVE: the database would take 50 rows
+      # instance-wide and this filter would then hand back the 3 of them the
+      # caller administers, so a full page of the caller's own tokens would look
+      # like a near-empty account. A paginator has to push the workspace set
+      # into the WHERE clause first, which also removes this hop.
+      Enum.filter(rows, &administrable_by?(&1, actor))
+    else
+      rows
+    end
   end
 
   @doc """
@@ -634,6 +735,19 @@ defmodule Barkpark.Auth do
   default 30 days; capped at 1 year), `:owner_user_id` (bind the token to a
   USER identity — set ONLY by the session-gated self-mint, hard-bound to the
   authenticated caller; never a client-supplied value).
+
+  ## `:workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
+
+  When `:workspace_id` is omitted (or `nil`), the token is minted
+  WORKSPACE-LESS — `insert_token_with_membership/3` is skipped entirely and no
+  `Tenancy.Membership` row is ever created. There used to be an unconditional
+  `|| default_workspace_id()` fallback here; it let any caller that forgot to
+  resolve a real workspace (the self-service mint was the one that did) hand
+  the minted token a membership in the seeded Default Workspace with ZERO
+  relationship check. The caller MUST resolve and pass its own real
+  `:workspace_id` to get a workspace-bound token — there is no default to fall
+  into. (Every other caller already passes `:workspace_id` explicitly; grep
+  `create_personal_access_token` before relying on this.)
   """
   @spec create_personal_access_token(binary(), [binary()], keyword()) ::
           {:ok, {binary(), ApiToken.t()}} | {:error, :forbidden | Ecto.Changeset.t()}
@@ -643,7 +757,7 @@ defmodule Barkpark.Auth do
 
     with :ok <- authorize_pat_permissions(role, permissions) do
       raw = @pat_token_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
-      ws_id = Keyword.get(opts, :workspace_id) || default_workspace_id()
+      ws_id = Keyword.get(opts, :workspace_id)
 
       expires_at =
         case Keyword.get(opts, :ttl, @pat_default_ttl) do
@@ -715,6 +829,23 @@ defmodule Barkpark.Auth do
   end
 
   def touch_last_used(_), do: :ok
+
+  @doc """
+  The MAXIMUM PAT permission tier `role` may mint — the same
+  `@pat_admin_roles` / allowed-permissions split `authorize_pat_permissions/2`
+  gates on, exposed so a caller (the session-gated self-mint) can DERIVE the
+  permission set from the caller's REAL workspace role instead of a hardcoded
+  literal, without duplicating the role/permission mapping. `owner`/`admin`
+  get `#{inspect(@pat_allowed_admin_permissions)}`; every other role
+  (including `nil` — no membership resolved) gets
+  `#{inspect(@pat_allowed_member_permissions)}`, mirroring
+  `@pat_allowed_member_permissions`'s deliberate member cap.
+  """
+  @spec max_pat_permissions_for_role(String.t() | nil) :: [String.t()]
+  def max_pat_permissions_for_role(role) when role in @pat_admin_roles,
+    do: @pat_allowed_admin_permissions
+
+  def max_pat_permissions_for_role(_role), do: @pat_allowed_member_permissions
 
   # Gate the requested permission set against the minter's workspace role.
   defp authorize_pat_permissions(role, permissions) do

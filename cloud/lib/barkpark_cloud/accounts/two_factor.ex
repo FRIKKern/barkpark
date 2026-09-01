@@ -41,32 +41,36 @@ defmodule BarkparkCloud.Accounts.TwoFactor do
   def base32(secret) when is_binary(secret), do: Base.encode32(secret, padding: false)
 
   @doc """
-  True iff `otp` is a valid 6-digit code for `secret` right now, tolerating ±1
-  30-second step of clock skew (the conservative default Coolify inherits from
-  Fortify). The previous/next steps are checked explicitly so enroll-confirm and
-  the login challenge can never drift on tolerance.
-  """
-  @spec valid_otp?(binary(), String.t()) :: boolean()
-  def valid_otp?(secret, otp) when is_binary(secret) and is_binary(otp) do
-    code = String.trim(otp)
-    now = System.os_time(:second)
+  THE ONLY OTP VERIFIER. Returns the RFC-6238 30-second time-step index the code
+  matched at (`{:ok, step}`), or `:error` when no step in the ±1 window matches.
+  `otp` is trimmed; a non-binary secret or code is `:error`.
 
-    Enum.any?([-1, 0, 1], fn step ->
-      time = now + step * 30
-      NimbleTOTP.valid?(secret, code, time: time)
-    end)
-  end
+  The ±1 step of clock-skew tolerance is the conservative default Coolify
+  inherits from Fortify, and the previous/next steps are checked EXPLICITLY so
+  enroll-confirm and the login challenge can never drift on tolerance. But a
+  tolerance window is inherently REPLAYABLE — the same six digits stay valid for
+  ~90 seconds — so a bare boolean "is this code valid right now?" is not a safe
+  answer to hand a caller, and this module deliberately offers none.
 
-  def valid_otp?(_secret, _otp), do: false
+  Returning the STEP instead is what closes that: the step index is `div(time,
+  30)`, so it is monotonic in wall-clock time — the `Accounts` context persists
+  the last consumed step and rejects any code whose step is <= it, which turns
+  the replayable tolerance window into a single-use verification (a valid OTP
+  can be spent exactly once, even within its 90-second validity).
 
-  @doc """
-  Like `valid_otp?/2`, but returns the RFC-6238 30-second time-step index the
-  code matched at (`{:ok, step}`) rather than a bare boolean, or `:error` when
-  no step in the ±1 window matches. The step index is `div(time, 30)`, so it is
-  monotonic in wall-clock time — the `Accounts` context persists the last
-  consumed step and rejects any code whose step is <= it, which is what turns
-  the inherently-replayable ±1 tolerance window into a single-use verification
-  (a valid OTP can be spent exactly once, even within its 90-second validity).
+  NO BOOLEAN TWIN, ON PURPOSE. A `valid_otp?/2` used to sit directly above this
+  function running exactly the `Enum.any?` over `[-1, 0, 1]` that this one runs,
+  minus the step — zero call sites and zero tests anywhere in `cloud/`, yet named
+  so it read as the obvious thing to call while this one read as its variant
+  ("Like `valid_otp?/2`, but…"). A public function raises no unused warning, and
+  a zero-caller sweep could not see it either: its only reference in the whole
+  tree was this `@doc`, which named it as the thing this one is "like". So
+  nothing would have
+  caught the next 2FA surface (step-up confirm, admin re-auth, a recovery flow)
+  reaching for the shorter name and getting a replay-blind check.
+  `two_factor_replay_door_test.exs` reds if a boolean OTP predicate reappears on
+  this module, or if `NimbleTOTP.valid?` is called anywhere in `cloud/lib`
+  outside this function.
 
   `now` is injectable for deterministic tests; production always passes the real
   clock. Steps are scanned oldest-first so a code straddling two steps resolves
@@ -114,6 +118,15 @@ defmodule BarkparkCloud.Accounts.TwoFactor do
   # "is monotonic in wall-clock time". Wall-clock time is NOT monotonic — that
   # is the whole premise of this wave. The verdict rests on the SQL guard at
   # accounts.ex:2186, which holds whether or not the clock behaves.
+  #
+  # THE MARKER IS THE POINT, not decoration. `aka:` carries `valid_otp` on
+  # purpose: the deleted twin's name is the term a reader who learned 2FA from
+  # the old code — or from a stale note, a cached search, an LLM's memory of
+  # this file — will actually type. Grepping it must land HERE, on the door that
+  # returns the step, rather than on nothing (which reads as "no such thing,
+  # write your own"). A marker that only lists the surviving spelling protects
+  # nobody, because nobody searches for the name they already found.
+  # @canonical capability:totp-step-verification aka:otp,2fa,totp,valid_otp,verify_two_factor_otp
   @spec matching_step(binary(), String.t(), integer()) :: {:ok, integer()} | :error
   def matching_step(secret, otp, now \\ System.os_time(:second))
 

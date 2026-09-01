@@ -5,7 +5,9 @@ defmodule Barkpark.Media.Storage.Collections do
 
   import Ecto.Query
   alias Barkpark.Content
+  alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Schema
   alias Barkpark.Content.Scope
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
@@ -31,6 +33,39 @@ defmodule Barkpark.Media.Storage.Collections do
   # `ResolveWorkspace` admitted a grantee), so a member's read is unchanged.
   @scope_keys [:workspace_id, :project_id, :grant_scoped, :caller_context]
 
+  # The NON-tenancy half of what the collection-assets search door accepts.
+  #
+  # The tenancy half is deliberately NOT repeated here:
+  # `collection_search_opts/3` takes `@scope_keys ++ @search_passthrough_keys`,
+  # so the search door and the collection GATE (`scope_opts/1`) read the same
+  # constant and cannot drift apart. That linkage is the point — this module's
+  # allowlists have now silently dropped a security-relevant key THREE times,
+  # each time by hand-maintaining a second list:
+  #
+  #   1. `:grant_scoped` / `:caller_context` (task-2b7cbaf8265f6b4e) — the gate
+  #      was reached with the input that disables it, so a grant-derived caller
+  #      resolved collections across the whole workspace.
+  #   2. `:visibility_clamp` — the unauthenticated read ceiling enforced nothing
+  #      on this door while enforcing on its `/v1/media/:ds` sibling.
+  #   3. `:workspace_id` / `:project_id` (task-f42f7f9c2d10f0bb) — the gate was
+  #      scoped and the PAYLOAD was not, so a `virtual` collection answered with
+  #      an unscoped media search over the dataset STRING.
+  #
+  # A `Keyword.take/2` allowlist is still the right shape for the door: the
+  # search opts are a closed vocabulary, and passing unknown keys through to
+  # `Media.search_files/2` is how the ORIGINAL leak on this module happened.
+  # What was wrong was maintaining the tenancy vocabulary TWICE. Deriving it
+  # from `@scope_keys` means the next key added for the gate reaches the search
+  # for free, which is the failure mode all three incidents share.
+  @search_passthrough_keys [
+    :limit,
+    :offset,
+    :sort,
+    :facets,
+    :facet_selections,
+    :visibility_clamp
+  ]
+
   @doc "List collection documents for a dataset (workspace-scoped via opts)."
   @spec list(String.t(), keyword()) :: [Document.t()]
   def list(dataset, opts \\ []) when is_binary(dataset) do
@@ -40,26 +75,54 @@ defmodule Barkpark.Media.Storage.Collections do
     Document
     |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
     |> Scope.scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
+    |> restrict_public_read_tier(dataset, opts)
     |> order_by([d], asc: d.title)
     |> limit(^limit)
     |> offset(^offset)
     |> Repo.all()
   end
 
-  @doc "Fetch a collection document by id (workspace-scoped via opts)."
+  @doc """
+  Fetch a collection document by id (workspace-scoped via opts).
+
+  CLAMPED for the public-read tier — see `restrict_public_read_tier?/1`. The
+  UNCLAMPED read is `fetch/3` and it is private on purpose: `assets/3` is the
+  one caller entitled to it, because `share_view/2` reaches it with a resolved
+  share token and no caller context at all.
+  """
   @spec get(String.t(), String.t(), keyword()) :: {:ok, Document.t()} | {:error, :not_found}
   def get(collection_id, dataset, opts \\ [])
       when is_binary(collection_id) and is_binary(dataset) do
-    case Content.get_document(collection_id, @collection_type, dataset, scope_opts(opts)) do
-      {:ok, doc} -> {:ok, doc}
-      _ -> {:error, :not_found}
+    if restrict_public_read_tier?(opts[:caller_context]) and
+         @collection_type not in Schema.public_type_names(dataset, scope_opts(opts)) do
+      {:error, :not_found}
+    else
+      fetch(collection_id, dataset, opts)
     end
   end
 
-  @doc "Search assets belonging to a collection."
+  @doc """
+  Search assets belonging to a collection.
+
+  DELIBERATELY reaches the UNCLAMPED `fetch/3` rather than `get/3`, and that is
+  the whole reason this row was split out of PR #14582:
+  `MediaCollectionsController.share_view/2` resolves a share token to a
+  collection and then calls THIS function with no caller context — the resolved
+  share token IS the principal, by documented design. Routing the collection
+  lookup here through the clamp would 404 every live share link onto a
+  collection whose type is not public-visibility.
+
+  This does NOT re-open the door the clamp closes. The scoped assets endpoint
+  (`MediaCollectionsController.assets/2`) calls `get/3` itself as an explicit
+  pre-gate before it ever reaches this function, so a public-read caller is
+  refused upstream; and the ASSETS in the payload carry their own ceiling via
+  `visibility_clamp_opts/1` (PR #14582). A shared predicate is only as good as
+  its least-compliant consumer, so the exemption is named here rather than left
+  to whichever opts a future caller happens to pass.
+  """
   @spec assets(String.t(), String.t(), keyword()) :: {[struct()], non_neg_integer(), map()}
   def assets(collection_id, dataset, opts \\ []) when is_binary(collection_id) do
-    with {:ok, collection} <- get(collection_id, dataset, opts) do
+    with {:ok, collection} <- fetch(collection_id, dataset, opts) do
       search_opts = collection_search_opts(collection, collection_id, opts)
       {files, total, facets, _meta} = Media.search_files(dataset, search_opts)
       {files, total, facets}
@@ -112,14 +175,106 @@ defmodule Barkpark.Media.Storage.Collections do
     }
   end
 
+  # ── the public-read schema-visibility clamp (task-b4a4b33bfb6e2954) ─────────
+  #
+  # THE LEAK. `list/2` was a bare `Repo.all` over `mediaCollection` documents
+  # with tenancy scoping and NO schema-visibility filter, and `get/3` goes
+  # through `Content.Query.get_document/4`, a single-type keyed read that
+  # carries none either. So a `public-read` token — the browser-shipped site
+  # credential `cloud/sites/deploy.ex` bakes into a built site as
+  # `BARKPARK_TOKEN` — was served a private-visibility collection's TITLE and
+  # DESCRIPTION. `Tenancy.Auth`'s `@read_perms` maps `public-read -> :read`, so
+  # it clears `ResolveWorkspace`'s membership gate, and `:scoped_api` mounts no
+  # `Plugs.PublicRead` and must not (search-template D49). This is the THIRD
+  # door around the one clamp: the document surface 404s the type
+  # (`PublicRead`'s `schema_public?` arm), the scoped search door filters it
+  # (`DocumentsRetriever.restrict_anonymous_to_public_types/3`), and this one
+  # had nothing. MEASURED, with the admin control green in the same run:
+  # `test/barkpark/media/scoped_media_public_read_tier_audit_test.exs`.
+  #
+  # THE TIER TEST IS BORROWED, NEVER RE-IMPLEMENTED.
+  # `Schema.bypasses_visibility_gate?/1` (canonical slug
+  # `visibility-gate-tier`) is the one owner of "which tier is asking", shared
+  # with the anonymous search allowlist, the batch document read and the
+  # corpus-graph clamp. PR #14582 keyed `Media.Storage.Access.authenticated?/1`
+  # on it for the ASSET tier rather than adding a fourth hand-rolled
+  # `"public-read" in permissions`; this is the same move at the collection
+  # seat. A literal role check here would be the fourth copy.
+  #
+  # WHY THIS IS NOT SIMPLY `not bypasses_visibility_gate?/1`, WHICH WOULD BE
+  # THE SHORTER LINE. That predicate is default-narrow: it answers FALSE for an
+  # anonymous caller too, by construction. Using it alone as the clamp key
+  # would therefore clamp ANONYMOUS as well — and the flat
+  # `/v1/media/:dataset/collections` route is anonymous-reachable, so that
+  # flips the anonymous index from "every collection" to "none" whenever
+  # `mediaCollection` is not a public-visibility schema. That is a PRODUCT
+  # decision about the public demo surface, not a mechanical security fix, and
+  # it is left OPEN on task-b4a4b33bfb6e2954 rather than smuggled in here.
+  #
+  # So the key is narrowed to what is unambiguous: a caller that carries an
+  # AUTHENTICATED principal and is in the public-read tier. The two halves are
+  # different questions and only the second is delegated:
+  #
+  #   * `principal_type in [:api_token, :user]` — is a principal present at
+  #     all? Anonymous and the no-context share path fall out here, unchanged.
+  #   * `bypasses_visibility_gate?/1` — has that principal earned the wide
+  #     view? THE canonical owner, membership-keyed (`TokenController` mints
+  #     `["public-read", "read"]` over a public route, so a list-equality pin
+  #     would be escapable by construction).
+  #
+  # The narrow arm FAILS CLOSED for the tier it does cover: `public_type_names`
+  # is derived at READ TIME, so a schema flipped to private drops out on the
+  # very next read, and an empty allowlist means the caller sees NOTHING.
+  defp restrict_public_read_tier?(%CallerContext{principal_type: p} = ctx)
+       when p in [:api_token, :user],
+       do: not Schema.bypasses_visibility_gate?(ctx)
+
+  # Anonymous, `nil` (the `share_view/2` path passes no caller context), a bare
+  # map, and any future principal shape: today's answer, untouched.
+  defp restrict_public_read_tier?(_), do: false
+
+  defp restrict_public_read_tier(query, dataset, opts) do
+    if restrict_public_read_tier?(opts[:caller_context]) do
+      where(query, [d], d.type in ^Schema.public_type_names(dataset, scope_opts(opts)))
+    else
+      query
+    end
+  end
+
   # Keep only the tenancy keys so the rest of `opts` (limit/offset/sort/…) never
   # leaks into the keyed `Content.get_document` read.
   defp scope_opts(opts), do: Keyword.take(opts, @scope_keys)
 
+  # The UNCLAMPED collection read. Private, and it stays private: `get/3` is the
+  # public entry point and carries the clamp, so a new caller reaching for a
+  # collection gets the clamped answer by default. `assets/3` is the one
+  # exemption and says why at its own @doc.
+  defp fetch(collection_id, dataset, opts) do
+    case Content.get_document(collection_id, @collection_type, dataset, scope_opts(opts)) do
+      {:ok, doc} -> {:ok, doc}
+      _ -> {:error, :not_found}
+    end
+  end
+
   defp collection_search_opts(%Document{content: content}, collection_id, opts) do
     base =
       opts
-      |> Keyword.take([:limit, :offset, :sort, :facets, :facet_selections])
+      # A key absent from this take is dropped SILENTLY, which is why both
+      # halves are named constants rather than a literal list here.
+      #
+      # `@scope_keys` carries the tenancy pair the caller actually resolved.
+      # Without it `Search.build_query/2` read `nil` for `:workspace_id` and
+      # handed it to `scope_to_workspace_or_global/3`, whose nil arm returns
+      # the query UNTOUCHED — so a `virtual` collection (which sets no
+      # `:collection` filter) answered with an unscoped media search across
+      # every workspace sharing the dataset string, in its rows, its `total`,
+      # AND every facet bucket.
+      #
+      # `:visibility_clamp` is the unauthenticated read ceiling and MUST also
+      # survive: it rides ALONGSIDE `:visibility` (set by a virtual
+      # collection's own filter, below) rather than replacing it — the filter
+      # narrows, the clamp bounds.
+      |> Keyword.take(@scope_keys ++ @search_passthrough_keys)
       |> Keyword.put_new(:limit, 50)
       |> Keyword.put_new(:offset, 0)
       |> Keyword.put_new(:sort, "created-desc")

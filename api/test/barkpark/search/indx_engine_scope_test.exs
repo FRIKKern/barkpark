@@ -75,13 +75,25 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
   end
 
   setup do
-    # Make @ds resolve to a live dataset so the engine path runs.
+    # Make @ds resolve to a live dataset so the engine path runs. The pointer is
+    # keyed by `Indexer.index_key/2`, so this seats the GLOBAL (nil-tenancy)
+    # index — the one the owner-ACL case below searches. Per-workspace indexes
+    # are seated by `two_workspaces_with_matching_doc/0`.
     prior = :persistent_term.get(@pointer_term, %{})
-    :persistent_term.put(@pointer_term, Map.put(prior, @ds, %{dataset: @live_dataset}))
     on_exit(fn -> :persistent_term.put(@pointer_term, prior) end)
+    seat_live_index!([])
 
     SurfaceConfigs.seed_defaults!()
     :ok
+  end
+
+  # Seat a live Indx dataset for @ds under the index key `scope_kw` resolves to.
+  # Without it `Retriever.search/4` short-circuits on a nil dataset and every
+  # assertion downstream passes against an empty pool — vacuously.
+  defp seat_live_index!(scope_kw) do
+    key = Indexer.index_key(@ds, scope_kw)
+    table = :persistent_term.get(@pointer_term, %{})
+    :persistent_term.put(@pointer_term, Map.put(table, key, %{dataset: @live_dataset}))
   end
 
   # Two workspaces/projects each owning a `production` dataset holding a doc
@@ -94,6 +106,12 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
 
     scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
+
+    # Each tenant now owns its OWN live index for the shared dataset string
+    # `production` — that partition is the fix under test elsewhere; here it is
+    # just the precondition that makes both searches below reach the engine.
+    seat_live_index!(scope_a)
+    seat_live_index!(scope_b)
 
     # W10 schema-visibility gate: the anonymous (no caller_context) searches in
     # these cases are restricted to PUBLIC schema types — seed "post" as one in
@@ -143,10 +161,20 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
 
     b_ids = Enum.map(b_hits, & &1.doc_id)
 
-    # The leak invariant is about VISIBLE hits: exactly one survives the
-    # Postgres source-read scope, and it is B's. (`total` now reflects the
-    # pre-scope candidate pool count, not the visible slice.)
-    assert b_total == 2
+    # The leak invariant covers the COUNT as well as the visible hits: exactly
+    # one row survives the Postgres source-read scope, it is B's, and the
+    # reported total agrees with it.
+    #
+    # This assertion used to read `b_total == 2`, with the parenthetical "`total`
+    # now reflects the pre-scope candidate pool count, not the visible slice" —
+    # i.e. this fixture already reproduced the count leak and the invariant was
+    # narrowed to exclude it. Two workspaces share one dataset-keyed Indx pool
+    # (that is what `BothDocsClient` models), so a pre-scope pool count tells B
+    # how many documents workspace A has matching its query. `total_for/3` now
+    # recomputes the total through `Content.count_documents_by_ids/3` — the same
+    # scoping stack the hydration read applies — so the number can never exceed
+    # what the caller may see. Tightened, not relaxed: 2 -> 1.
+    assert b_total == 1
     assert length(b_ids) == 1
     assert "drafts.b-hit" in b_ids
     refute "drafts.a-hit" in b_ids

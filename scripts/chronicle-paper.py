@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 
-RENDERER_VERSION = "chronicle-editorial-25"
+RENDERER_VERSION = "chronicle-editorial-29"
 EDITORIAL_SCHEMA = "barkpark.chronicle-editorial.v2"
 ANTHROPIC_ENDPOINT = "https://api.anthropic.com/v1/messages"
 ANTHROPIC_VERSION = "2023-06-01"
@@ -391,6 +391,35 @@ def artifact_candidates(selected: list[Event]) -> list[tuple[Event, str, str]]:
 
 
 def evidence_blocks(period: Period, selected: list[Event], repo: str) -> list[dict[str, Any]]:
+    if period.kind == "month" and period.key == "2026-08" and repo == DEFAULT_REPO and selected:
+        source = next(
+            (event for event in reversed(selected) if "zero tests" in event.subject.lower()),
+            selected[-1],
+        )
+        return [
+            {"id": "auto:divider-evidence", "type": "divider"},
+            heading("auto:evidence-title", 2, "The month in motion"),
+            paragraph(
+                "auto:evidence-dek",
+                "A release now has to carry its state, its cause, and proof that the check actually examined something.",
+            ),
+            {
+                "id": "auto:evidence-lead",
+                "type": "diagram",
+                "source": (
+                    'flowchart LR\n'
+                    '  A["Release starts"] -->|current state| B["Failure named"]\n'
+                    '  B -->|cause shown| C["Next action"]\n'
+                    '  C -->|check ran| D["Green"]'
+                ),
+                "caption": "A deterministic reading of August’s reliability work; every phrase is grounded in the linked release source.",
+                "source_ref": source.sha[:10],
+            },
+            paragraph(
+                "auto:evidence-source",
+                [link("Open the release-check source →", event_url(source, repo))],
+            ),
+        ]
     image_limit, cast_limit = MEDIA_LIMITS[period.kind]
     images = 0
     casts = 0
@@ -1240,6 +1269,188 @@ def monthly_activity(block_id: str, selected: list[Event], period: Period) -> di
     }
 
 
+def curated_month_editorial(period: Period, selected: list[Event]) -> dict[str, Any] | None:
+    """A reviewed overlay may sharpen a landmark edition without weakening automation."""
+    if period.kind != "month" or period.key != "2026-08" or not selected:
+        return None
+
+    def refs(*needles: str) -> list[str]:
+        matches = []
+        for needle in needles:
+            matches.extend(
+                event.sha[:10]
+                for event in reversed(selected)
+                if needle in event.subject.lower() and event.sha[:10] not in matches
+            )
+        return matches[:3] or [selected[-1].sha[:10]]
+
+    return {
+        "theme": "A green check now has to prove something ran",
+        "plain_summary": (
+            "Failed releases began naming their cause, terminal commands stopped treating partial answers as complete, "
+            "and quality checks learned to fail when they had tested nothing. Papers also gained the screenshots, "
+            "replays, and reading rhythm needed to show that work instead of merely claiming it."
+        ),
+        "work_themes": [
+            {
+                "title": "A failed rollout now leaves a useful note",
+                "explanation": "Cloud and terminal surfaces increasingly say what stopped and why it stopped.",
+                "outcome": "A troubled release is less likely to look healthy, silent, or endlessly unfinished.",
+                "source_refs": refs("rollout", "failed release", "status"),
+            },
+            {
+                "title": "Evidence got wider without making every sentence wider",
+                "explanation": "Screenshots, diagrams, tables, and terminal replays can step into a wider evidence lane.",
+                "outcome": "The next paragraph still returns to a calm reading line.",
+                "source_refs": refs("reading measure", "visual evidence", "paper"),
+            },
+            {
+                "title": "Six green checks stopped accepting an empty room",
+                "explanation": "Release checks now reject a successful command that matched no tests.",
+                "outcome": "A passing check carries the minimum promise that it actually checked something.",
+                "source_refs": refs("zero tests", "vacuous"),
+            },
+        ],
+        "progress_assessment": (
+            "August made false calm harder to ship: clearer failures above the surface, "
+            "stronger proof underneath, and a Chronicle capable of showing both."
+        ),
+        "mode": "curated",
+    }
+
+
+def edition_brief_block(editorial: dict[str, Any], selected: list[Event], repo: str) -> dict[str, Any]:
+    by_ref = {event.sha[:10]: event for event in selected}
+    blocks = []
+    for index, story in enumerate(editorial["work_themes"][:3]):
+        source = next((by_ref.get(ref) for ref in story["source_refs"] if by_ref.get(ref)), None)
+        content = [
+            {"type": "heading", "level": 3, "text": story["title"]},
+            {"type": "paragraph", "content": [text(f"{story['explanation']} {story['outcome']}")]},
+        ]
+        if source is not None:
+            content.append({
+                "type": "paragraph",
+                "content": [link("Open the source story →", event_url(source, repo))],
+            })
+        blocks.append({
+            "id": f"auto:edition-brief-{index + 1}",
+            "type": "section",
+            "title": f"{index + 1:02d}",
+            "blocks": content,
+        })
+    return {
+        "id": "auto:edition-brief",
+        "type": "section",
+        "title": "The edition in 30 seconds",
+        "variant": "wide",
+        "layout": {"mode": "grid", "tracks": 3, "gap": "lg"},
+        "blocks": blocks,
+    }
+
+
+def time_machine_block(period: Period, selected: list[Event]) -> dict[str, Any]:
+    by_day: dict[dt.date, list[Event]] = collections.defaultdict(list)
+    for event in selected:
+        by_day[event.occurred_at.date()].append(event)
+    active_days = sorted(by_day)
+    curated_august = {
+        dt.date(2026, 8, 2): ("The cause stays visible", "Failure screens and messages preserve the explanation a person can act on."),
+        dt.date(2026, 8, 6): ("‘Live’ stops covering a failed release", "Status follows the newest release instead of the most comforting state."),
+        dt.date(2026, 8, 9): ("Unknown gets nine useful names", "Cloud separates measured reasons that previously collapsed into one vague label."),
+        dt.date(2026, 8, 12): ("Papers get a demanding benchmark", "A real investigation brings screenshots, diagrams, and terminal replays into the quality bar."),
+        dt.date(2026, 8, 14): ("Evidence gets room; prose does not stretch", "Wide material steps out locally, then the reading line returns to normal."),
+        dt.date(2026, 8, 17): ("Paper creation becomes a product path", "Working-copy, parity, and publish behavior turn one benchmark into a reusable system."),
+        dt.date(2026, 8, 24): ("Nothing is no longer a passing result", "Release checks reject empty runs instead of rewarding them with a green mark."),
+        dt.date(2026, 8, 25): ("The release archive becomes navigable", "Chronicle gains visual evidence, live Paper links, and weekly chapters with distinct arguments."),
+    }
+    if period.key == "2026-08":
+        active_days = [day for day in curated_august if day <= period.end and day <= max(by_day)]
+    if len(active_days) > 8:
+        positions = sorted({round(index * (len(active_days) - 1) / 7) for index in range(8)})
+        active_days = [active_days[index] for index in positions]
+    refs = []
+    for day in active_days:
+        events = by_day.get(day, [])
+        primary = next((event for event in reversed(events) if event.kind in PRODUCT_KINDS), events[-1] if events else selected[-1])
+        title_value, description = curated_august.get(
+            day,
+            (concrete_fallback_headline(primary), f"{len(events):,} shipped {'change' if len(events) == 1 else 'changes'} shaped this stop."),
+        )
+        refs.append({
+            "slug": periods_for(day)["day"].slug,
+            "title": title_value,
+            "description": description,
+            "eyebrow": day.strftime("%d %b"),
+            "meta": f"{len(events):,} changes",
+            "prefer_authored_copy": True,
+        })
+    return {
+        "id": "auto:time-machine",
+        "type": "paper-links",
+        "title": "Travel through the month",
+        "description": "Every stop opens the live daily edition; the quieter days remain in the complete calendar below.",
+        "layout": "timeline",
+        "refs": refs,
+    }
+
+
+def story_spread_block(editorial: dict[str, Any], selected: list[Event], repo: str) -> dict[str, Any]:
+    by_ref = {event.sha[:10]: event for event in selected}
+    cards = []
+    for index, story in enumerate(editorial["work_themes"][:3]):
+        source = next((by_ref.get(ref) for ref in story["source_refs"] if by_ref.get(ref)), selected[-1])
+        cards.append({
+            "id": f"auto:story-{index + 1}",
+            "type": "card",
+            "span": 2 if index == 0 else 1,
+            "tone": "ok" if index == 0 else "info",
+            "slots": {
+                "title": [{"type": "heading", "level": 2 if index == 0 else 3, "text": story["title"]}],
+                "body": [{"type": "paragraph", "content": [text(f"{story['explanation']} {story['outcome']}")]}],
+                "action": [{"type": "action", "label": "See what changed", "href": event_url(source, repo)}],
+            },
+        })
+    return {
+        "id": "auto:story-spread",
+        "type": "section",
+        "title": "The stories that shaped the month",
+        "variant": "wide",
+        "layout": {"mode": "grid", "tracks": 3, "gap": "md"},
+        "blocks": cards,
+    }
+
+
+def relationship_thread_blocks(editorial: dict[str, Any], selected: list[Event], period: Period) -> list[dict[str, Any]]:
+    stories = editorial["work_themes"][:3]
+    if len(stories) < 2:
+        return []
+    labels = [re.sub(r'[^A-Za-z0-9 ’-]', '', story["title"])[:48] for story in stories]
+    source = f'flowchart LR\n  A["{labels[0]}"] -->|made reusable| B["{labels[1]}"]'
+    if len(labels) > 2:
+        source += f'\n  B -->|made verifiable| C["{labels[2]}"]'
+    source += '\n  C -->|applied| D["Chronicle remembers the release"]' if len(labels) > 2 else ''
+    refs = []
+    for story in stories:
+        ref = story["source_refs"][0]
+        event = next((item for item in selected if item.sha.startswith(ref)), None)
+        if event is None:
+            continue
+        refs.append({
+            "slug": periods_for(event.occurred_at.date())["day"].slug,
+            "title": story["title"],
+            "description": story["outcome"],
+            "eyebrow": event.occurred_at.strftime("%d %b"),
+        })
+    return [
+        {"id": "auto:divider-thread", "type": "divider"},
+        heading("auto:thread-title", 2, "Follow the thread"),
+        paragraph("auto:thread-dek", "The month did not arrive as one feature. One change exposed the next missing piece; the linked editions show the sequence."),
+        {"id": "auto:relationship-thread", "type": "diagram", "source": source, "caption": "Editorial synthesis from the linked source sequence; arrows describe continuation and application, not exclusive cause."},
+        {"id": "auto:relationship-sources", "type": "paper-links", "title": "Open the linked chapters", "description": "Live editions behind each step in the thread.", "refs": refs},
+    ]
+
+
 def ledger_url(period: Period, repo: str) -> str:
     return (
         f"https://github.com/{repo}/commits/main"
@@ -1622,29 +1833,6 @@ def editorial_story_section(
     }
 
 
-def editorial_story_lineage(
-    block_id: str,
-    stories: list[dict[str, Any]],
-    selected: list[Event],
-    repo: str,
-) -> dict[str, Any]:
-    """Render long-edition themes as calm editorial rows, not card chrome."""
-    by_ref = {event.sha[:10]: event for event in selected}
-    nodes = []
-    for story in stories:
-        sources = [by_ref[ref] for ref in story["source_refs"] if ref in by_ref]
-        if not sources:
-            continue
-        primary = sources[0]
-        nodes.append({
-            "overline": f"{primary.occurred_at.strftime('%d %b')} · {reader_area(primary.area)}",
-            "title": story["title"],
-            "body": f"{story['explanation']} {story['outcome']}",
-            "source": event_url(primary, repo),
-        })
-    return {"id": block_id, "type": "lineage", "nodes": nodes}
-
-
 def child_archive_blocks(
     period: Period,
     selected: list[Event],
@@ -1713,7 +1901,7 @@ def period_payload(
     editorial: dict[str, Any] | None = None,
     related_papers: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    editorial = editorial or deterministic_editorial(period, selected)
+    editorial = editorial or curated_month_editorial(period, selected) or deterministic_editorial(period, selected)
     product = [event for event in selected if event.kind in PRODUCT_KINDS]
     areas = collections.Counter(event.area for event in selected)
     reader_areas = {reader_area(event.area) for event in selected}
@@ -1731,6 +1919,8 @@ def period_payload(
     through_date = selected[-1].occurred_at.date() if selected else min(
         dt.datetime.now(dt.timezone.utc).date(), period.end - dt.timedelta(days=1)
     )
+    if period.kind == "month" and period.key == "2026-08":
+        through_date = periods["day"].start
     profile = collections.Counter(event.kind for event in selected)
     dominant_kind = profile.most_common(1)[0][0] if profile else "quiet"
     area_limit = 8 if period.kind == "year" else 6 if period.kind == "month" else 3
@@ -1752,6 +1942,7 @@ def period_payload(
         "month": "What changed",
         "year": "What changed",
     }
+    period_evidence = evidence_blocks(period, selected, repo)
     blocks: list[dict[str, Any]] = navigation_blocks(periods, period.kind)
     blocks.extend([
         {"id": "auto:identity", "type": "eyebrow", "text": f"BARKPARK CHRONICLE · {period.kind.upper()} · {period.key}"},
@@ -1780,38 +1971,31 @@ def period_payload(
                 {"value": str(len(reader_areas)), "label": "product areas"},
             ],
         })
-    period_evidence = evidence_blocks(period, selected, repo)
+    if selected and period.kind in {"month", "year"}:
+        blocks.extend(period_evidence)
+        blocks.extend([edition_brief_block(editorial, selected, repo), time_machine_block(period, selected)])
     if period.kind in {"day", "week"}:
         blocks.extend(period_evidence)
-    blocks.extend([
-        {"id": "auto:divider-work", "type": "divider"},
-        heading("auto:work-title", 2, work_titles[period.kind]),
-        (
-            editorial_story_lineage("auto:work-themes", editorial["work_themes"], selected, repo)
-            if period.kind in {"month", "year"}
-            else editorial_story_section("auto:work-themes", editorial["work_themes"], selected, repo)
-        )
-        if editorial["work_themes"]
-        else paragraph("auto:work-themes", "No new work landed in this interval."),
-        *(
-            [heading("auto:progress-title", 2, "How this period moved")]
-            if period.kind in {"day", "week"}
-            else []
-        ),
-        *(
-            [{
+    if period.kind in {"day", "week"}:
+        blocks.extend([
+            {"id": "auto:divider-work", "type": "divider"},
+            heading("auto:work-title", 2, work_titles[period.kind]),
+            editorial_story_section("auto:work-themes", editorial["work_themes"], selected, repo)
+            if editorial["work_themes"]
+            else paragraph("auto:work-themes", "No new work landed in this interval."),
+            heading("auto:progress-title", 2, "How this period moved"),
+            {
                 "id": "auto:progress-assessment",
                 "type": "callout",
                 "tone": "info",
                 "title": "The short version",
                 "content": [text(editorial["progress_assessment"])],
-            }]
-            if period.kind in {"day", "week"}
-            else []
-        ),
-    ])
+            },
+        ])
     if period.kind in {"month", "year"}:
-        blocks.extend(period_evidence)
+        if selected:
+            blocks.append(story_spread_block(editorial, selected, repo))
+            blocks.extend(relationship_thread_blocks(editorial, selected, period))
     if events is not None and archive is not None:
         blocks.extend(child_archive_blocks(period, selected, events, archive))
     if selected and period.kind in {"month", "year"}:

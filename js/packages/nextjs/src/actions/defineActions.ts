@@ -104,6 +104,44 @@ function buildTagPrefix(dataset: string, workspace?: string, project?: string): 
 }
 
 /**
+ * Look up the schema REGISTERED under `type` — own keys only.
+ *
+ * This was `schemas?.[type]`, a prototype-chain read on a plain codegen object
+ * literal. `_type` is reachable from untyped form/JSON input (the comment at its
+ * caller says so), and `'toString'` / `'constructor'` / `'valueOf'` /
+ * `'__proto__'` all resolved to an INHERITED value whose `.parse` is not a
+ * function, so `schema.parse(input)` threw a raw `TypeError` out of a Server
+ * Action — escaping the Barkpark error taxonomy, the same defect class this
+ * package names elsewhere in its own comments. It was a CRASH, not a validation
+ * bypass: no inherited value carries a callable `.parse`, so nothing was ever
+ * validated-then-waved-through.
+ *
+ * `Object.hasOwn` makes an inherited name behave exactly like any other
+ * unregistered type — validation is skipped, as it already was for an unknown
+ * `_type`. An own key whose value is not a usable schema is a different story
+ * and REFUSED loudly: silently skipping validation there would turn a codegen or
+ * hand-written-map bug into a real bypass. `Record<string, ActionSchema>` closes
+ * neither case — this package ships CJS/ESM to plain JS consumers with no types.
+ */
+function lookupSchema(
+  schemas: Record<string, ActionSchema> | undefined,
+  type: string,
+): ActionSchema | undefined {
+  if (schemas === undefined || schemas === null || !Object.hasOwn(schemas, type)) return undefined
+  const schema = schemas[type] as ActionSchema | undefined
+  // Duck-typed on `.parse` alone, not on `typeof === 'object'`: the declared
+  // contract is "any object with .parse", and a callable carrying one satisfies
+  // it just as well. Optional chaining absorbs null and primitives.
+  if (typeof schema?.parse !== 'function') {
+    throw new BarkparkValidationError(
+      `createDoc: the schema registered for _type ${JSON.stringify(type)} has no callable .parse()`,
+      { field: '_type' },
+    )
+  }
+  return schema
+}
+
+/**
  * [publish-warnings-dropped] `createDoc` / `deleteDoc` go through a transaction
  * and then narrow the envelope to `results[0]` — which silently discarded the
  * publish wall's non-blocking `warnings`. The four actions that call a core
@@ -158,9 +196,11 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       // matches no read tag, silently losing the intended invalidation. Reachable from
       // untyped form/JSON input, so guard before the schema lookup or tag fan-out.
       if (typeof input._type !== 'string' || input._type.length === 0) {
-        throw new BarkparkValidationError('createDoc requires a non-empty _type', { field: '_type' })
+        throw new BarkparkValidationError('createDoc requires a non-empty _type', {
+          field: '_type',
+        })
       }
-      const schema = schemas?.[input._type]
+      const schema = lookupSchema(schemas, input._type)
       let body = input
       if (schema !== undefined) {
         // Persist the PARSED value — Zod .parse() returns the validated+transformed

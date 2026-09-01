@@ -76,9 +76,10 @@ defmodule Barkpark.Sites.DeployRequestTest do
             String.duplicate("a", 65),
             String.duplicate("a", 64) <> "\n"
           ] do
-        assert {:error, "invalid_artifact_digest", _} =
-                 DeployRequest.new(params(%{"artifact_b64" => b64, "artifact_sha256" => bad})),
-               "expected #{inspect(bad)} to be refused as a digest"
+        result = DeployRequest.new(params(%{"artifact_b64" => b64, "artifact_sha256" => bad}))
+
+        assert match?({:error, "invalid_artifact_digest", _}, result),
+               "expected #{inspect(bad)} to be refused as a digest, got #{inspect(result)}"
       end
     end
 

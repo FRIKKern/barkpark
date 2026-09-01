@@ -300,6 +300,13 @@ function filtersToRecord(filter: ListenFilter | undefined): Record<string, unkno
  * Extension surface added at runtime (not part of BarkparkClient interface).
  * `handshake()` fetches + caches /v1/meta; callers can opt-in for schema drift
  * checks or apiVersion negotiation.
+ *
+ * @internal Declares a `__handshakeCache` field that exists for this package's
+ * own tests to observe cache dedup — a double-underscore escape hatch, not a
+ * contract. `createClient` (exported) already returns a client carrying
+ * `handshake()` at runtime, so the capability is reachable; what is withheld is
+ * a public type that would bless the test hook alongside it. If the drift-check
+ * flow needs a supported type, it should get one that omits the cache field.
  */
 export interface BarkparkClientWithHandshake extends BarkparkClient {
   handshake(): Promise<MetaResponse>

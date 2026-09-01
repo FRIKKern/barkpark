@@ -92,9 +92,13 @@ SELF="doc-gates-paths-parity-check"
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 DEFAULT_TARGET="$REPO_ROOT/.github/workflows/doc-gates.yml"
 
-# DOC_GATES_PATHS_PARITY_TARGET retargets the read at another file; the selftest
-# is its only caller. It cannot weaken a real run — pointing it at the real
-# doc-gates.yml gives the identical verdict.
+# DOC_GATES_PATHS_PARITY_TARGET retargets the read at another file. Two callers:
+# the selftest (fixtures), and the LIVE shell-harnesses.yml invocation in the
+# doc-gates-paths-parity job — added after the 2026-09-01 measurement found that
+# file's twin lists had drifted 94 vs 85 with nine one-way entries, the exact
+# hazard this guard was built for, on a file it did not watch. It cannot weaken
+# the default run — pointing it at the real doc-gates.yml gives the identical
+# verdict.
 TARGET="${DOC_GATES_PATHS_PARITY_TARGET:-$DEFAULT_TARGET}"
 
 # The pinned one-sided entries, one per line, as `<side-it-is-ON>:<glob>`.
@@ -103,8 +107,11 @@ TARGET="${DOC_GATES_PATHS_PARITY_TARGET:-$DEFAULT_TARGET}"
 KNOWN_ONE_SIDED='push:api/test/**/*.exs'
 
 # The pin set is env-overridable ONLY when the target has been retargeted away
-# from the real doc-gates.yml — i.e. only from the selftest's fixtures. There is
-# deliberately NO environment hatch that can silence the live gate.
+# from the real doc-gates.yml. For the DEFAULT target there is deliberately NO
+# environment hatch that can silence the gate. For a retargeted LIVE run the
+# pins arrive from the workflow step that sets the env — which is the same
+# reviewed surface as this constant, so a pin cannot appear without a diff in
+# .github/workflows/ any more than one can appear here.
 if [ "$TARGET" != "$DEFAULT_TARGET" ]; then
   KNOWN_ONE_SIDED="${DOC_GATES_PATHS_PARITY_PINS-}"
 fi

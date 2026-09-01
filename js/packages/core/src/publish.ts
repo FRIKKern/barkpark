@@ -47,6 +47,13 @@ function commitOptions(opts?: CommitOptions): {
  * result's advisories. Omitted (never `[]`) when the server sent none, mirroring
  * the server's own omit-when-empty shape — so `'warnings' in result` is a
  * truthful test rather than one that is always true.
+ *
+ * @internal Narrows an envelope a consumer is never handed in the shape this
+ * expects. The three exported publish-lifecycle calls — `publishDoc`,
+ * `unpublishDoc`, `discardDraftDoc` — return the already-narrowed result, and
+ * the calls that DO hand back a whole `MutateEnvelope` (`client.create` /
+ * `replace` / `delete`) do that deliberately, because a batch's results are not
+ * one result. Exporting this would offer a way to throw that distinction away.
  */
 export function onlyResult(data: MutateEnvelope, op: string): MutateResult {
   const first = data.results?.[0]

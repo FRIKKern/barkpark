@@ -13,12 +13,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/apierr"
 	"github.com/FRIKKern/barkpark/internal/httpx"
 )
 
@@ -411,91 +411,32 @@ func (c *Client) MutateResults(mutations []map[string]interface{}) ([]MutationRe
 // integer 0..4" instead of a raw JSON blob. Unknown shapes fall back to the
 // body verbatim (clamped) so nothing is ever swallowed.
 //
-// Details rides as json.RawMessage rather than a typed map[string][]string:
-// only validation_failed's flat {field:[reasons]} fits that one shape, so a
-// duplicate_of ({"duplicate_of":"post-1"}), resource_conflict, or label_spine
-// ({field,rule,fix,index}) envelope failed the whole Unmarshal, tripped the
-// `== nil` guard below, and fell through to the raw `error %d: %s` dump —
-// discarding code, message AND details together. humanDetailParts renders the
-// raw payload generically instead, mirroring internal/cli/errors.go's
-// detailLines/detailValue shape (duplicated rather than imported — apiclient
-// sits BELOW cli per ConfigFromEnv's axi-b4 note and must not depend upward).
+// THE DECODE NOW LIVES IN internal/apierr, the one reader every surface shares.
+// This function used to carry its own copy, and its previous comment recorded
+// exactly why: internal/cli's rendering was "duplicated rather than imported —
+// apiclient sits BELOW cli per ConfigFromEnv's axi-b4 note and must not depend
+// upward". That constraint is real (cli imports apiclient, so the reverse edge
+// is an import cycle) but the conclusion was wrong: the shared code belongs
+// BELOW both, not above one. apierr is that leaf, so this reads the envelope
+// through the same parser the CLI does instead of a private twin that drifts.
+//
+// apierr.DetailParts IS this file's old humanDetailParts algorithm, adopted as
+// the canonical one because it was the most capable of the eight decoders — so
+// this migration is byte-identical for every details shape.
+//
+// The 200-rune clamp on the unknown-shape fallback STAYS. This is a one-line
+// TUI status bar and the budget is a display decision, not an envelope
+// decision; widening it is a separate call with its own pinned test. What
+// changed here is which parser runs, not what this surface is allowed to print.
 func humanAPIError(status int, body []byte) error {
-	var env struct {
-		Error struct {
-			Code    string          `json:"code"`
-			Message string          `json:"message"`
-			Details json.RawMessage `json:"details"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(body, &env) == nil && (env.Error.Code != "" || env.Error.Message != "") {
-		msg := env.Error.Message
-		if msg == "" {
-			msg = env.Error.Code
-		}
-		if parts := humanDetailParts(env.Error.Details); len(parts) > 0 {
-			msg += " — " + strings.Join(parts, " · ")
-		}
-		return fmt.Errorf("%s", msg)
+	if env, ok := apierr.Parse(body); ok {
+		return fmt.Errorf("%s", env.Summary())
 	}
 	raw := strings.TrimSpace(string(body))
 	if r := []rune(raw); len(r) > 200 {
 		raw = string(r[:200]) + "…"
 	}
 	return fmt.Errorf("error %d: %s", status, raw)
-}
-
-// humanDetailParts renders a `details` payload as sorted "field: value" parts.
-// Sorting by KEY (rather than the old map-range's sort.Strings over the
-// already-joined "field: value" parts) is byte-identical for this shape: every
-// part shares the "<field>: " prefix, so key order and part order agree as
-// long as field names use only ordinary identifier characters (true of every
-// field name this server emits), which is also why the flat validation_failed
-// rendering below stays byte-identical to the pre-fix behaviour. A details
-// payload that is absent, empty, or not a JSON object (a bare scalar/array)
-// renders nothing, matching the old map-shape's silent miss on those inputs.
-func humanDetailParts(raw json.RawMessage) []string {
-	d := bytes.TrimSpace(raw)
-	if len(d) == 0 {
-		return nil
-	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(d, &obj); err != nil || len(obj) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(obj))
-	for k := range obj {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		parts = append(parts, k+": "+humanDetailValue(obj[k]))
-	}
-	return parts
-}
-
-// humanDetailValue renders ONE details value for the human line. A
-// []string (validation_failed's {field:[reasons]}) joins with "; " —
-// byte-identical to the old strings.Join(reasons, "; ") — a JSON string loses
-// its quotes (duplicate_of's bare incumbent id), and every other shape
-// (number, bool, null, object, array — resource_conflict's conflicts list,
-// label_spine's {rule,fix,index}) prints as compact JSON, so nothing is ever
-// silently dropped.
-func humanDetailValue(raw json.RawMessage) string {
-	var reasons []string
-	if err := json.Unmarshal(raw, &reasons); err == nil {
-		return strings.Join(reasons, "; ")
-	}
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
-	}
-	var buf bytes.Buffer
-	if err := json.Compact(&buf, raw); err != nil {
-		return strings.TrimSpace(string(raw))
-	}
-	return buf.String()
 }
 
 // Publish promotes a document's draft to published via the publish mutation.
@@ -621,7 +562,31 @@ func (c *Client) Duplicate(typeName, id string) (string, error) {
 // sends no param, so the server applies its own default (published) — that is
 // the CLI/manifest contract; the TUI sets Perspective="drafts" to surface
 // unpublished work.
+//
+// Query DISCARDS the read outcome: a transport error, a 401, a 500 and a
+// genuinely empty type all return the same nil slice. Callers that render the
+// result to a human must use QueryResult instead — "the server refused" and
+// "this type holds nothing" are different facts and a list surface must not
+// spell them the same way.
 func (c *Client) Query(typeName, filter string) []Doc {
+	docs, _ := c.QueryResult(typeName, filter)
+	return docs
+}
+
+// QueryResult is Query that additionally reports WHY the read succeeded or
+// failed, using the same DocReadOutcome vocabulary GetPerspectiveResult
+// established for single-document reads.
+//
+// Same URL, auth, {"result":{"documents":[…]}} envelope-peel and
+// fail-closed-to-nil contract as Query — the only addition is the
+// discriminator, so Query stays behaviour-identical. A non-200 is classified by
+// classifyReadStatus (404 → DocReadNotFound, 401/403 → DocReadForbidden,
+// 5xx → DocReadServerError, anything else → DocReadUnreachable); a transport
+// error or an undecodable body → DocReadUnreachable. A decodable 200 →
+// DocReadOK, even when the page carries zero documents — an honestly empty
+// type IS an OK read, and that is precisely the case a failure must not be
+// confused with.
+func (c *Client) QueryResult(typeName, filter string) ([]Doc, DocReadOutcome) {
 	endpoint := c.scopedURL("/v1/data/query/" + c.Dataset + "/" + url.PathEscape(typeName))
 	params := url.Values{}
 	if filter != "" {
@@ -636,13 +601,13 @@ func (c *Client) Query(typeName, filter string) []Doc {
 
 	resp, err := c.authGet(endpoint)
 	if err != nil {
-		return nil
+		return nil, DocReadUnreachable
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return nil
+		return nil, classifyReadStatus(resp.StatusCode)
 	}
 
 	// The query controller wraps the page in {"result":{"documents":[...]}};
@@ -655,12 +620,12 @@ func (c *Client) Query(typeName, filter string) []Doc {
 		Documents []Doc `json:"documents"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil
+		return nil, DocReadUnreachable
 	}
 	if len(result.Result.Documents) > 0 {
-		return result.Result.Documents
+		return result.Result.Documents, DocReadOK
 	}
-	return result.Documents
+	return result.Documents, DocReadOK
 }
 
 // Search runs the scoped full-text search endpoint
@@ -813,24 +778,80 @@ func (c *Client) GetPerspective(typeName, id, perspective string) (Doc, bool) {
 	return doc, outcome == DocReadOK
 }
 
-// DocReadOutcome classifies WHY a single-document read succeeded or failed, so a
-// caller (e.g. `bp cmux status`) can tell "no such document" (404) apart from
-// "the server is unreachable" (transport error / 5xx / unreadable body) —
-// GetPerspective's plain bool collapses both into false.
+// DocReadOutcome classifies WHY a read succeeded or failed, so a caller (e.g.
+// `bp cmux status`, the TUI's doc-list panes) can tell "no such document" (404)
+// apart from "the server said no" (401/403), "the server broke" (5xx) and "we
+// never reached it" (transport error / unreadable body) — GetPerspective's
+// plain bool collapses all four into false.
+//
+// The constants are APPEND-ONLY: DocReadOK/NotFound/Unreachable keep their
+// original iota values, so `outcome != DocReadOK` and `outcome ==
+// DocReadNotFound` in existing callers are untouched. What changed is that
+// DocReadUnreachable is no longer the catch-all — a 401/403 now lands on
+// DocReadForbidden and a 5xx on DocReadServerError, because telling an operator
+// a flat refusal "may simply be unreachable" sends them to debug the wrong
+// thing. Any `switch` over this type therefore needs a default arm; Failed and
+// Describe give every caller one for free.
 type DocReadOutcome int
 
 const (
 	DocReadOK          DocReadOutcome = iota // 200 with a decodable document
 	DocReadNotFound                          // 404 — the id names no document
-	DocReadUnreachable                       // transport error, non-200/404, or an unreadable/undecodable body
+	DocReadUnreachable                       // transport error, an unreadable/undecodable body, or a non-2xx with no more specific class
+	DocReadForbidden                         // 401/403 — the server answered, and the answer was no
+	DocReadServerError                       // 5xx — the server answered, and it broke
 )
+
+// Failed reports whether the read did not produce a document. It is the one
+// predicate callers should branch "did this work?" on, so a later failure
+// class can never silently read as a success.
+func (o DocReadOutcome) Failed() bool { return o != DocReadOK }
+
+// Describe returns a short lowercase clause naming what happened, for splicing
+// into a one-line status message ("could not check published twin — " +
+// Describe()). It never guesses: an unrecognised value describes itself as a
+// read that did not land rather than inventing a cause.
+func (o DocReadOutcome) Describe() string {
+	switch o {
+	case DocReadOK:
+		return "the read succeeded"
+	case DocReadNotFound:
+		return "no such document"
+	case DocReadForbidden:
+		return "the server refused the read (not signed in, or no access)"
+	case DocReadServerError:
+		return "the server errored on the read"
+	case DocReadUnreachable:
+		return "the server is unreachable, or answered with something unreadable"
+	default:
+		return "the read did not land"
+	}
+}
+
+// classifyReadStatus maps a non-2xx response status to the failure class it
+// belongs to. Every read that reports a DocReadOutcome goes through it, so the
+// surfaces can never disagree about what a 403 is.
+func classifyReadStatus(status int) DocReadOutcome {
+	switch {
+	case status == http.StatusNotFound:
+		return DocReadNotFound
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return DocReadForbidden
+	case status >= 500:
+		return DocReadServerError
+	default:
+		return DocReadUnreachable
+	}
+}
 
 // GetPerspectiveResult is GetPerspective that additionally reports the read
 // outcome. Same URL, auth, {"result":{…}} envelope-peel and fail-closed
 // contract; the only addition is the DocReadOutcome discriminator (every
 // non-OK outcome still maps to GetPerspective's false, so existing callers are
-// behaviour-identical). 404 → DocReadNotFound; a transport error, any other
-// non-200, an oversized body, or an undecodable body → DocReadUnreachable.
+// behaviour-identical). The status→class mapping is classifyReadStatus's:
+// 404 → DocReadNotFound, 401/403 → DocReadForbidden, 5xx → DocReadServerError,
+// any other non-200 → DocReadUnreachable; a transport error, an oversized body
+// or an undecodable body → DocReadUnreachable.
 func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, DocReadOutcome) {
 	endpoint := c.scopedURL("/v1/data/doc/" + c.Dataset + "/" + url.PathEscape(typeName) + "/" + url.PathEscape(id))
 	if perspective != "" {
@@ -845,13 +866,9 @@ func (c *Client) GetPerspectiveResult(typeName, id, perspective string) (Doc, Do
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
-		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return Doc{}, DocReadNotFound
-	}
 	if resp.StatusCode != http.StatusOK {
 		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return Doc{}, DocReadUnreachable
+		return Doc{}, classifyReadStatus(resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxDocBytes+1))

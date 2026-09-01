@@ -7,7 +7,9 @@
   "license": "Apache-2.0",
   "scripts": {
     "build": "( [ -f ../react/dist/index.mjs ] && [ -f ../nextjs/dist/index.mjs ] || pnpm --filter @barkpark/core --filter @barkpark/react --filter @barkpark/nextjs build ) && next build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src tests next.config.ts vitest.config.ts"
   },
   "dependencies": {
     "@barkpark/react": "workspace:^",

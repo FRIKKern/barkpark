@@ -2,7 +2,26 @@
   "extends": ["//"],
   "tasks": {
     "build": {
-      "outputs": ["out/**", ".next/**", "!.next/cache/**"]
+      "outputs": ["out/**", ".next/**", "!.next/cache/**"],
+      "inputs": [
+        "src/**",
+        "tsup.config.ts",
+        "package.json",
+        "tsconfig.json",
+        "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**"
+      ]
+    },
+    "test": {
+      "inputs": [
+        "src/**",
+        "tests/**",
+        "vitest.config.ts",
+        "vitest.browser.config.ts",
+        "vitest.workerd.config.ts",
+        "wrangler.toml",
+        "$TURBO_ROOT$/packages/react/tests/fixtures/pd-golden/**",
+        "$TURBO_ROOT$/packages/react/tests/support/**"
+      ]
     }
   }
 }

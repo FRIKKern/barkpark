@@ -174,10 +174,16 @@ jobs:
           SMOKE_URL: ${{ github.event.inputs.url || 'https://guerrilla.barkpark.cloud/sites/search-ember/' }}
           JOURNEY_OUTCOME: ${{ steps.journey.outcome }}
         run: |
-          # GitHub Actions' default bash run shell is `-eo pipefail`, not
-          # plain bash. `set +e` here is deliberate, not a stray habit: a
+          # The run shell here is Actions' UNSPECIFIED default, `bash -e {0}`
+          # — errexit ON, pipefail OFF. (Only an explicit `shell: bash` gets
+          # `--noprofile --norc -eo pipefail`; this file sets no `shell:` key
+          # anywhere.) Do not carry "-eo pipefail" out of here into a new
+          # workflow as if pipefail came for free: a `cmd | tee log` written on
+          # that belief takes tee's 0 as the step status and launders the real
+          # failure. So `+o pipefail` below is a no-op belt; `set +e` is the
+          # load-bearing half, and it is deliberate, not a stray habit: a
           # clean all-PASS transcript makes the `grep -E '✗ +FAIL'` below
-          # match NOTHING, which exits 1 — and under the default -e that
+          # match NOTHING, which exits 1 — and under that -e it
           # would abort this step right there, before it ever reaches the
           # "nothing to escalate" branch below. "no FAIL beat found" is this
           # step's expected happy path, not a script error, so errexit is

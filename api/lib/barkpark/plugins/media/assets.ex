@@ -123,10 +123,40 @@ defmodule Barkpark.Plugins.Media.Assets do
   bounds the result to one dataset, so the NULL-tolerant OR cannot widen
   across datasets. A nil workspace_id (unscoped / legacy single-tenant path)
   leaves the query untouched — the deliberate global read (barkpark-vmv1).
+
+  The `:shared_only` sentinel is NOT that read: a REQUEST that resolved no
+  workspace sees `workspace_id IS NULL` alone. Only an internal caller (or a
+  socket-borne read, which `ScopeHelpers.scope_opts/1` gives `:legacy` mode)
+  can still reach the nil arm.
   """
-  @spec scope_asset_workspace(Ecto.Queryable.t(), binary() | nil, binary() | nil) ::
-          Ecto.Queryable.t()
+  @spec scope_asset_workspace(
+          Ecto.Queryable.t(),
+          binary() | :shared_only | nil,
+          binary() | nil
+        ) :: Ecto.Queryable.t()
   def scope_asset_workspace(query, nil, _project_id), do: query
+
+  # `:shared_only` — the request-side empty-scope sentinel
+  # (task-3e2a70930c6df723). This envelope is a RAW consumer of
+  # `Keyword.get(opts, :workspace_id)`: `Media.asset_docs_for_files/3` is called
+  # with `scope_opts(conn)` verbatim at `v1/media_controller.ex:34`,
+  # `v1/media_collections_controller.ex:57,123` and
+  # `federated_search_controller.ex:143`, so a request that resolved no
+  # workspace delivers the atom straight into these clauses. Untranslated it
+  # matched none of them — FunctionClauseError, a 500 on each of those doors.
+  #
+  # SHARED LAYER, never every tenant, and never a collapse to `nil`: the nil
+  # clause above is the deliberate global read that returns the query
+  # UNTOUCHED, so mapping the sentinel onto it would trade the crash for the
+  # cross-tenant asset-metadata leak this envelope exists to close. Placed
+  # ABOVE the `is_binary/1` clauses, matching the corrected sibling at
+  # `Media.Delivery.Search.join_scope_workspace/3`.
+  #
+  # No NULL-tolerant OR here, deliberately: the other clauses widen to
+  # `is_nil(d.workspace_id)` so legacy unstamped docs stay visible inside their
+  # own tenant, and that IS this clause's entire result set already.
+  def scope_asset_workspace(query, :shared_only, _project_id),
+    do: where(query, [d], is_nil(d.workspace_id))
 
   def scope_asset_workspace(query, workspace_id, nil) when is_binary(workspace_id) do
     where(query, [d], d.workspace_id == ^workspace_id or is_nil(d.workspace_id))
@@ -173,17 +203,10 @@ defmodule Barkpark.Plugins.Media.Assets do
   # a read/delete path. Returns nil when unresolvable so the caller keeps the
   # legacy STRING filter.
   defp resolve_dataset_id(dataset, opts) when is_binary(dataset) do
-    project_id = Keyword.get(opts, :project_id) || default_project_id()
+    project_id = Barkpark.Tenancy.scope_project_id(opts)
 
     case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
       %Barkpark.Tenancy.Dataset{id: id} -> id
-      _ -> nil
-    end
-  end
-
-  defp default_project_id do
-    case Barkpark.Tenancy.get_default_project() do
-      %{id: id} -> id
       _ -> nil
     end
   end

@@ -285,6 +285,48 @@ defmodule Barkpark.Tenancy do
     end
   end
 
+  @doc """
+  The project a scope should resolve a dataset slug within, or `nil`.
+
+  An EXPLICIT `:project_id` always wins. The seeded Default Project is the right
+  answer ONLY when no workspace resolved — the legacy flat/Default path, whose
+  behaviour is unchanged.
+
+  A resolved workspace with NO project returns `nil`, and that is the whole
+  point. A token carries no project binding (`Auth.create_token/5` has no
+  project argument), `Plugs.DeriveWorkspaceFromToken` assigns only
+  `:current_workspace`, and `Plugs.AssignDefaultScope` DELIBERATELY declines to
+  stamp the Default Project for a non-Default workspace — its moduledoc: pairing
+  workspace A with a Default-owned project means "every scoped read matches zero
+  rows, and every scoped write stamps a `project_id` belonging to another
+  tenant". `ScopeHelpers.put_scope/3` drops a nil scope entirely
+  (`put_scope(opts, _key, nil), do: opts`), so `:project_id` arrives ABSENT
+  rather than nil — which is why a `Keyword.get(opts, :project_id) ||
+  default_project_id()` fallback silently re-created exactly that cross-tenant
+  pairing. Callers treat `nil` as "no dataset_id" and keep their
+  workspace-scoped `dataset` STRING filter.
+
+  `:workspace_id` may be the `:shared_only` sentinel `ScopeHelpers` assigns when
+  an HTTP request resolved no workspace; that is an unresolved workspace, so it
+  takes the Default arm.
+  """
+  # @canonical capability:scope-project-resolution aka:default_project_id,project_id,dataset_id,scope_opts
+  @spec scope_project_id(keyword()) :: binary() | nil
+  def scope_project_id(opts) when is_list(opts) do
+    case {Keyword.get(opts, :project_id), Keyword.get(opts, :workspace_id)} do
+      {project_id, _workspace} when is_binary(project_id) -> project_id
+      {_absent, workspace} when is_binary(workspace) -> nil
+      {_absent, _unresolved} -> scope_default_project_id()
+    end
+  end
+
+  defp scope_default_project_id do
+    case get_default_project() do
+      %Project{id: id} -> id
+      _ -> nil
+    end
+  end
+
   @doc "Fetch a Workspace by its slug, or nil."
   @spec get_workspace_by_slug(String.t()) :: Workspace.t() | nil
   def get_workspace_by_slug(slug) when is_binary(slug) do

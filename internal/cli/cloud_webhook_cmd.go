@@ -37,6 +37,8 @@ import (
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
+
+	"github.com/FRIKKern/barkpark/internal/apierr"
 )
 
 // runCloudWebhook is the `bp cloud webhook <verb> …` dispatcher. It requires a
@@ -855,18 +857,23 @@ func upstreamDetail(raw json.RawMessage) string {
 	if len(raw) == 0 {
 		return "(no detail)"
 	}
-	var env struct {
-		Error struct {
-			Message string `json:"message"`
-			Code    string `json:"code"`
-		} `json:"error"`
-	}
-	if json.Unmarshal(raw, &env) == nil {
-		if env.Error.Message != "" {
-			return env.Error.Message
+	// The shared parser, so an upstream envelope whose `details` (or any other
+	// field) is shaped unexpectedly still yields its message rather than
+	// dropping through to the raw blob below.
+	//
+	// The upstream's HINT is appended when it sent one: this string is the only
+	// thing the operator sees about the instance's refusal, so dropping the
+	// server's own remedy leaves them with a fault and no next step.
+	if env, ok := apierr.Parse(raw); ok {
+		detail := env.Message
+		if detail == "" {
+			detail = env.Code
 		}
-		if env.Error.Code != "" {
-			return env.Error.Code
+		if detail != "" {
+			if h := env.HintLine(); h != "" {
+				detail += " — " + h
+			}
+			return detail
 		}
 	}
 	var s string

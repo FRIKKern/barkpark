@@ -88,10 +88,17 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	}
 
 	needsPerspectiveAuth := nonPublishedPerspectiveRequiresAuth(cmd, cmdFlags)
+	needsDraftIDAuth := draftIDRequiresAuth(cmd, argMap)
 	if needsPerspectiveAuth && ctx.Token == "" {
 		perspective := cmdFlags["perspective"][len(cmdFlags["perspective"])-1]
 		return nil, &dispatchError{
 			msg:       fmt.Sprintf("--perspective %s requires an API token", perspective),
+			withUsage: false,
+		}
+	}
+	if needsDraftIDAuth && ctx.Token == "" {
+		return nil, &dispatchError{
+			msg:       "a " + draftIDPrefix + " document id requires an API token — an unpublished document is invisible to an anonymous read, which can only ever answer not_found",
 			withUsage: false,
 		}
 	}
@@ -118,7 +125,7 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 
 	// Tier-appropriate credential.
 	headers := authHeaders(cmd, ctx)
-	if needsPerspectiveAuth {
+	if needsPerspectiveAuth || needsDraftIDAuth {
 		// doc get/ls/query are public at their default published perspective,
 		// so their manifest tier must remain `none`. Drafts and raw are
 		// identity-sensitive, however: OptionalToken intentionally pins an
@@ -140,13 +147,35 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 	}, nil
 }
 
+// nonPublishedPerspectiveRequiresAuth reports whether this invocation is a
+// PUBLIC-tier read asking for an identity-sensitive perspective — the one case
+// where a tier-`none` command must still carry the bearer (buildManifestRequest
+// attaches it; with no token it refuses instead of sending).
+//
+// The gate is keyed on what the MANIFEST DECLARES: `auth_tier: "none"` plus a
+// DECLARED `perspective` flag. It used to be keyed on a literal id set —
+// `switch cmd.ID { case "doc.get", "doc.ls", "doc.query" }` — which stood in
+// for exactly those two structural facts and got the census wrong: the live
+// server declares FOUR such commands, not three. search.query (auth_tier
+// "none", GET /v1/data/search/:dataset, `perspective: published | drafts |
+// raw`) fell out of the switch, so `bp search query x --perspective drafts`
+// went out tokenless — authHeaders sends no credential for tier "none" — and
+// BarkparkWeb.AnonPerspective.resolve/2 pins a tokenless caller to `:published`
+// SILENTLY. The caller read the published corpus at exit 0 believing they had
+// read drafts, and a caller who DID hold a token was affected identically
+// because the bearer was never attached. Its doc.* siblings, one switch case
+// away, either attached the bearer or refused loudly.
+//
+// Declaration-keyed, the guard also reaches a class the id list could never
+// admit: a PLUGIN's own public read that declares the flag. The flag name is
+// the identity here and that is legitimate — splitArgs only ever populates
+// flags["perspective"] for a command that declares it — but the ID was never
+// load-bearing beyond restating the declaration.
 func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string][]string) bool {
 	if cmd.AuthTier != "none" {
 		return false
 	}
-	switch cmd.ID {
-	case "doc.get", "doc.ls", "doc.query":
-	default:
+	if !commandDeclaresFlag(cmd, "perspective") {
 		return false
 	}
 
@@ -160,6 +189,62 @@ func nonPublishedPerspectiveRequiresAuth(cmd manifest.Command, flags map[string]
 	default:
 		return false
 	}
+}
+
+// draftIDPrefix is the id prefix every unpublished (draft) row carries. Named
+// here rather than spelled inline so the guard, its refusal message and any
+// future caller cannot drift apart. (internal/taskboard has its own unexported
+// `draftsPrefix` for the same string; it is not importable from this package,
+// and exporting it would widen a taskboard-private detail into an API.)
+const draftIDPrefix = "drafts."
+
+// draftIDRequiresAuth reports whether this invocation is a PUBLIC-tier read
+// ADDRESSING a `drafts.`-prefixed document id — the second way a tier-`none`
+// command becomes identity-sensitive, and the one
+// nonPublishedPerspectiveRequiresAuth structurally cannot see, because the
+// caller names the draft in the ID rather than in a flag.
+//
+// Measured against guerrilla on 2026-09-01, same id, same server, seconds apart:
+//
+//	bp doc get paper drafts.l5goc-draft-probe-2
+//	  -> {"error":{"code":"not_found","message":"not found: document not found"},"ok":false}
+//	bp doc get paper drafts.l5goc-draft-probe-2 --perspective drafts
+//	  -> the full document, all 120 content blocks
+//
+// The document existed for both calls. The only difference was whether the
+// bearer went out: the live manifest declares `doc get` at `auth_tier: "none"`,
+// authHeaders sends no credential for that tier (correct, and it stays), and
+// server-side BarkparkWeb.QueryController.show/2 answers `{:error, :not_found}`
+// for an anonymous caller naming a `drafts.` id — the
+// `AnonPerspective.anon_pinned?(conn) and String.starts_with?(doc_id, "drafts.")`
+// clause (api/lib/barkpark_web/controllers/query_controller.ex). That 404 is
+// correct existence-hiding for a caller with no identity, and it is the WRONG
+// answer to give a caller who was holding a token the CLI declined to send. The
+// CLI turned "you sent no credential" into "the document does not exist" — a
+// reader that fails silently at exit 0's cousin, a confident not_found.
+//
+// Like its sibling the gate is keyed on what the MANIFEST DECLARES, never on a
+// literal command-id set: `auth_tier: "none"` plus a declared arg whose bound
+// value carries the prefix. An id list would have to re-enumerate every public
+// read that takes a document id — including a plugin's own — and would get the
+// census wrong the same way the `switch cmd.ID` before it did.
+//
+// This never widens a published read. A `drafts.`-prefixed id can only ever
+// address an unpublished row (publish is the act that produces the bare id), so
+// attaching the bearer changes no request that a published id could have made:
+// the public path stays byte-for-byte public, and the only requests that gain a
+// credential are the ones that could otherwise only have returned not_found.
+func draftIDRequiresAuth(cmd manifest.Command, argMap map[string]string) bool {
+	if cmd.AuthTier != "none" {
+		// Every other tier already attaches the bearer in authHeaders.
+		return false
+	}
+	for _, arg := range cmd.Args {
+		if strings.HasPrefix(argMap[arg.Name], draftIDPrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // sendManifestRequest is the send half of the dispatch seam: it performs the
@@ -212,6 +297,15 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	var failOnFailedDelivery bool
 	if cmd.ID == "webhook.test-send" {
 		failOnFailedDelivery, tail = extractFailOnFailedDeliveryFlag(tail)
+	}
+
+	// `bp doc discard-draft --delete-unpublished`: the SECOND additive, opt-in
+	// flag the manifest never declares, stripped here for the same reason — it
+	// must never reach splitArgs. See discard_draft_guard.go for what it opts
+	// into; the guard itself runs below, beside the other write gates.
+	var discardDeleteUnpublished bool
+	if cmd.ID == discardDraftCommandID {
+		discardDeleteUnpublished, tail = extractDiscardDraftDeleteFlag(tail)
 	}
 
 	// Resolve the request-side view HERE, with the writer in hand — never
@@ -267,6 +361,17 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			out.errf("aborted: destroy not confirmed")
 			return exitUsage
 		}
+	}
+
+	// Published-twin guard (discard_draft_guard.go): `bp doc discard-draft` on a
+	// document that was NEVER published is a delete, not a revert — the server
+	// deletes the draft row unconditionally and there is nothing to fall back
+	// to. Neither gate above can catch it: the prod guard is keyed on the target
+	// being prod, and the destroy registry is keyed on the OPERATION alone,
+	// while this one is only destructive for SOME documents. So it probes, and
+	// refuses only when it has to. Runs last, immediately before the send.
+	if code, refused := guardDiscardDraft(out, g, ctx, m, cmd, tail, discardDeleteUnpublished); refused {
+		return code
 	}
 
 	// Paginated reads with --all loop over offset pages.
@@ -2278,9 +2383,63 @@ func collectIDs(v any) []string {
 	return ids
 }
 
+// paginationWalkAttempts bounds how many times the --all walk restarts after it
+// catches the collection shifting under it (see paginatedAllWalk). One retry is
+// usually enough — a single claim landing mid-walk is a moment, not a state —
+// but a busy ledger can lose two snapshots in a row, and every attempt is a
+// plain GET. The LAST attempt refuses loudly instead of retrying, so the walk
+// ends either with a complete answer or with a named error, never with a
+// silently short list.
+const paginationWalkAttempts = 3
+
+// paginationShiftedHint is the remedy carried by a pagination_shifted refusal.
+const paginationShiftedHint = "the collection changed while --all was walking it — a task claimed or closed, a document created or deleted. Offset pages are windows on a live query, so a row leaving the set BEFORE the current page shifts every later row back one place and one row is served by no page at all. Re-run (a quiet moment walks clean), or narrow the query until the answer fits a single page."
+
 // runPaginatedAll fetches every offset page of a paginated read and prints the
-// concatenated documents in the resolved output shape.
+// concatenated documents in the resolved output shape. A walk that caught the
+// collection moving is retried, then refused; see paginatedAllWalk.
 func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers map[string]string) int {
+	for attempt := 1; ; attempt++ {
+		code, shifted := paginatedAllWalk(out, cmd, baseURL, headers, attempt == paginationWalkAttempts)
+		if !shifted {
+			return code
+		}
+	}
+}
+
+// paginatedAllWalk performs ONE offset walk. It returns (exit code, false) for
+// every terminal outcome, and (0, true) when it caught the collection shifting
+// under it and the caller may retry — `final` turns that retry signal into the
+// pagination_shifted refusal.
+//
+// THE SHIFT, AND WHY IT WAS SILENT (task-406343e4f378cbdf). The walk asks for
+// disjoint offset windows of a query the server RE-EVALUATES per request —
+// api/lib/barkpark/tasks/queue.ex applies limit/offset to an ordinary ordered
+// SELECT (order_by priority, inserted_at, id), with no snapshot and no cursor —
+// and membership of the ready set is defined by mutable columns:
+// content.lifecycle_status and content.claim.worker. So when a row that sorts
+// BEFORE the current page boundary leaves the set between page k and page k+1 —
+// one `bp task next` by any of a hundred agents is enough — every later row
+// shifts back one position and the row that WAS at the boundary offset is
+// served by no page at all. The result is short, correctly ordered,
+// well-formed, and exit 0: the caller cannot tell it from a complete answer,
+// and the omission always makes a contradiction-hunting join print a SMALLER
+// number, which is the direction that looks safe. The stall guard below cannot
+// see it — it catches a page that REPEATS, and a shift produces no repeat. The
+// ready envelope carries no total either (tasks_controller.ex task_list_response
+// emits %{ok: true, docs: …} and nothing else), so there is no server-declared
+// count to check the walk against.
+//
+// THE FIX IS A LOOKAHEAD ANCHOR. Each page is requested with limit pageSize+1.
+// The extra row is never rendered; it is remembered. The next page's FIRST row
+// must be that row. A removal before the boundary makes the next page open one
+// row late, an insertion makes it open one row early — either way the anchor
+// breaks, so a skipped row can no longer pass as a complete walk. The requested
+// OFFSETS are unchanged (0, 100, 200, … — the #5588 order lock still reads
+// them), and a server that ignores `limit` simply returns no lookahead row, in
+// which case that one boundary goes unverified and says so on stderr rather
+// than being quietly assumed.
+func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers map[string]string, final bool) (int, bool) {
 	const pageSize = 100
 	offset := 0
 	var all []json.RawMessage
@@ -2289,21 +2448,25 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 	// renderer sees the envelope shape the command emits (docs/hits/… not just
 	// documents). Empty until the first page is extracted.
 	key := ""
+	// anchor is the identity of the row the PREVIOUS request saw one place past
+	// its page — the row this page must open with. Empty before the first page,
+	// and empty for any boundary the server left unverifiable.
+	anchor := ""
 	for {
-		pageURL := withOffsetLimit(baseURL, offset, pageSize)
+		pageURL := withOffsetLimit(baseURL, offset, pageSize+1)
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
 		if err != nil {
 			if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 				out.userErr("request failed: %v", err)
 			}
-			return exitGeneric
+			return exitGeneric, false
 		}
 		if status < 200 || status >= 300 {
 			ae := classifyError(status, respBody)
 			renderError(out, ae)
-			return ae.exit
+			return ae.exit, false
 		}
-		docs, k := extractListRows(unwrapResult(respBody))
+		rows, k := extractListRows(unwrapResult(respBody))
 		// PDS wave 27 — the reader half of the epic's law. extractListRows
 		// returns the "" sentinel for ANY body it cannot read as a list
 		// envelope, and an HTTP 200 is no proof the body came from Barkpark: a
@@ -2320,10 +2483,19 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 				offset, status, len(respBody), bodyPreview(respBody),
 			)
 			refuseWithRemedy(out, "unreadable_list_page", msg, unreadableListPageHint)
-			return exitGeneric
+			return exitGeneric, false
 		}
 		if key == "" {
 			key = k
+		}
+		// Split the lookahead off the page. It anchors the NEXT request and is
+		// never rendered, so the emitted rows stay exactly the pageSize windows
+		// the walk has always emitted.
+		docs := rows
+		lookahead := ""
+		if len(rows) > pageSize {
+			docs = rows[:pageSize]
+			lookahead = rowIdentity(rows[pageSize])
 		}
 		if len(docs) == pageSize {
 			identity := paginatedPageIdentity(docs)
@@ -2332,9 +2504,31 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 				if !renderErrorEnvelope(out, "pagination_stalled", msg, "", "") {
 					out.userErr("%s", msg)
 				}
-				return exitGeneric
+				return exitGeneric, false
 			}
 			seenFullPages[identity] = offset
+		}
+		// Continuity. This page must open with the row the PREVIOUS request
+		// already saw at this exact index. Anything else means the collection
+		// moved between the two requests, and a walk over a moved collection
+		// cannot prove it served every row — so it must not print its result as
+		// though it had.
+		if anchor != "" {
+			opened := "<no rows>"
+			if len(docs) > 0 {
+				opened = rowIdentity(docs[0])
+			}
+			if opened != anchor {
+				if !final {
+					return 0, true
+				}
+				msg := fmt.Sprintf(
+					"pagination shifted under the walk at offset %d: after %d attempts this page still opens with %s where the previous page had already seen %s one place earlier. The collection moved mid-walk, so rows between the pages may never have been served — refusing to print a possibly-short list as if it were complete.",
+					offset, paginationWalkAttempts, opened, anchor,
+				)
+				refuseWithRemedy(out, "pagination_shifted", msg, paginationShiftedHint)
+				return exitGeneric, false
+			}
 		}
 		all = append(all, docs...)
 		if len(docs) < pageSize {
@@ -2350,10 +2544,20 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 			// result has no single server body to pass through.
 			if offset == 0 {
 				renderSuccess(out, cmd, respBody)
-				return exitOK
+				return exitOK, false
 			}
 			break
 		}
+		if lookahead == "" {
+			// A FULL page with no lookahead row: we asked for pageSize+1 and the
+			// server gave us pageSize. It ignored the limit, so it handed us no
+			// row to anchor the next page against and this one boundary cannot
+			// be checked. Say so on stderr — an unverified boundary that
+			// announces itself is the whole difference between this walk and the
+			// one that dropped a row in silence.
+			out.userErr("pagination boundary at offset %d is unverified: the server returned %d rows for a limit of %d, so --all has no lookahead row to anchor the next page against", offset+pageSize, len(rows), pageSize+1)
+		}
+		anchor = lookahead
 		offset += pageSize
 	}
 
@@ -2362,7 +2566,32 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 	// longer reach the success renderer.
 	wrapped, _ := json.Marshal(map[string]any{key: json.RawMessage(mustArray(all))})
 	renderSuccess(out, cmd, mustResult(wrapped))
-	return exitOK
+	return exitOK, false
+}
+
+// rowIdentity names ONE paginated row for the lookahead anchor. The first
+// id-bearing key wins, most-unique first: `_id` (documents) and `id` (task
+// rows, media assets) are per-row unique, while `doc_id` is unique only within
+// a dataset — the live ready queue currently serves two rows sharing the doc_id
+// akbr-feedback-2026-08-epic — so it ranks below `id`. A row carrying none of
+// them falls back to a hash of its bytes: exact for the "is this the same row"
+// question the anchor asks, at the cost of a false alarm if that row is edited
+// mid-walk (which refuses loudly, the safe direction).
+func rowIdentity(row json.RawMessage) string {
+	var obj map[string]json.RawMessage
+	if json.Unmarshal(row, &obj) == nil {
+		for _, k := range []string{"_id", "id", "doc_id"} {
+			raw, ok := obj[k]
+			if !ok {
+				continue
+			}
+			var s string
+			if json.Unmarshal(raw, &s) == nil && s != "" {
+				return k + ":" + s
+			}
+		}
+	}
+	return fmt.Sprintf("sha256:%x", sha256.Sum256(row))
 }
 
 func paginatedPageIdentity(rows []json.RawMessage) string {

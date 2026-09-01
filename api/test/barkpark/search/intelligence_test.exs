@@ -284,7 +284,7 @@ defmodule Barkpark.Search.IntelligenceTest do
           end
         end)
 
-      assert %Event{} = event, "background insert never landed"
+      assert match?(%Event{}, event), "background insert never landed, got #{inspect(event)}"
       assert event.id == id
       assert event.query == "asyncprobe"
       assert event.quality == "accepted"

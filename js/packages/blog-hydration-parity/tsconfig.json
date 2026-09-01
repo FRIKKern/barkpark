@@ -12,7 +12,20 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "jsxImportSource": "react",
-    "types": ["@vitest/browser/providers/playwright"]
+    "types": ["@vitest/browser-playwright"],
+    // The typecheck twin of vitest.config.ts KNOB 2. The blog-starter template
+    // is NOT a workspace package, so the island's bare `react` /
+    // `react-dom/client` specifiers do not resolve from the template tree —
+    // tsc reports TS2307 / TS2875 on a file this package only IMPORTS. Pin the
+    // same five specifiers the runtime aliases to THIS package's own copy, so
+    // the type program and the browser run agree on one React.
+    "paths": {
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
+      "react/jsx-dev-runtime": ["./node_modules/@types/react/jsx-dev-runtime"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/client": ["./node_modules/@types/react-dom/client"]
+    }
   },
   "include": ["**/*.ts", "**/*.tsx"],
   "exclude": ["node_modules"]

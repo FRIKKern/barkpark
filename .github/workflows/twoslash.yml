@@ -3,7 +3,7 @@ name: twoslash
 on:
   pull_request:
     paths:
-      - "apps/docs/**"
+      - "js/docs/**"
       - "tooling/twoslash-mocks/**"
       - "js/packages/**"
       - ".github/workflows/twoslash.yml"
@@ -18,7 +18,7 @@ jobs:
       - name: Detect docs app
         id: detect
         run: |
-          if [ -d apps/docs ]; then
+          if [ -d js/docs ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -26,7 +26,7 @@ jobs:
 
       - name: Skip — Track A docs app not present yet
         if: steps.detect.outputs.present != 'true'
-        run: echo "Track A docs app (apps/docs/) not scaffolded yet — twoslash gate skipped."
+        run: echo "Docs app (js/docs/) not present — twoslash gate skipped."
 
       - name: Setup Node
         if: steps.detect.outputs.present == 'true'

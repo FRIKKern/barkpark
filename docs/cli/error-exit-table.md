@@ -132,7 +132,7 @@ exit code for them. Proposed mappings:
 | Real shape | HTTP | Where | Proposed exit | Rationale |
 |---|---|---|---|---|
 | `{"error":"halted","reason":…}` | 409 | mutate / legacy / history lifecycle-veto | `6` (conflict) | `error` is a bare string, not a coded object — there is no `error.code`. A lifecycle veto is semantically a conflict (the write was refused), so bucket it as **6** (the additive conflict code). The CLI special-cases the literal string `"halted"` since the key is `error`, not `error.code`. |
-| `{"ok":false,"reason":"invalid_edge",…}` | (tasks) | `tasks_controller` add-edge | `2` (validation) | Different schema entirely (`ok`/`reason`). It is a client-side validation failure on the edge payload → **2**. |
+| `{"ok":false,"reason":"invalid_edge",…}` | (tasks) | `tasks_controller` add-edge | `2` (usage) | Different schema entirely (`ok`/`reason`), and `invalid_edge` is absent from `codeExit`, so the `{"ok":false}` branch's table MISS falls to `exitUsage` — bucket **2**, the usage/bad-args bucket of the scheme above, NOT the validation bucket (`5`). A reason the table DOES know keys normally (a `not_found` reason lands on `4`). |
 | `{"ok":false,"error":"not_found","id":…}` | (intents) | `bulldocs_intents_controller` | `4` (not-found) | `error` is a string `"not_found"`, not `error.code`. Map the string value to the same bucket as the canonical `not_found` → **4**. |
 | plugin-settings bare strings: `"not_found"` | — | `plugin_settings_controller` | `4` | String-valued `error`; map `"not_found"` → **4**. |
 | plugin-settings bare strings: `"invalid"`, `"settings_object_required"` | — | `plugin_settings_controller` | `2` | String-valued `error`; both are client-side validation → **2**. |

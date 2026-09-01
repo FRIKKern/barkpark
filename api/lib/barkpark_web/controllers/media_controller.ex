@@ -55,6 +55,47 @@ defmodule BarkparkWeb.MediaController do
     if scope_bound?(opts), do: files, else: Enum.filter(files, &is_nil(&1.workspace_id))
   end
 
+  # ── Share-dataset confinement (task-1445262e2c0b54ea) ───────────────────────
+  #
+  # A `:media` section share (and an item link) is minted for exactly ONE
+  # dataset, but three of the four routes on `:shared_media_api` resolved their
+  # row without ever filtering on one: `show/2` and `serve_rendition/2` call
+  # `Media.get_file/2`, `serve/2` calls `Media.get_file_by_path/2`, and
+  # `scope_opts/1` carries `workspace_id` + `project_id` and NO dataset by
+  # design (scope_helpers.ex). Each then passed `file.dataset` to
+  # `Media.asset_doc_for_file/2` — ADOPTING the row's dataset rather than
+  # checking it — so a share for `production` served a `staging` file's
+  # metadata, bytes and renditions to an ANONYMOUS caller. `index/2` was never
+  # affected: it takes a `dataset` and `RequireShareScope.request_dataset/1`
+  # guards the same value (task-4f26838232b5ece0).
+  #
+  # That earlier row was a DIFFERENT mechanism — a `?dataset=` escape where the
+  # guard read one dataset and the controller derived another. Aligning the two
+  # sides cannot help here, because these reads consult NO dataset at all.
+  #
+  # THE FENCE IS SHARE-ONLY, and deliberately so. `:share_dataset` is assigned
+  # only by `RequireShareScope` on a grant, so:
+  #
+  #   * an anonymous share caller is confined to the dataset that was shared;
+  #   * a member (token or account session) and every flat-route caller carry
+  #     no assign, take the `nil` clause, and behave byte-identically to before
+  #     — this is why the fix lives here and not inside `Media`, whose
+  #     `get_file/2` / `get_file_by_path/2` serve legitimate cross-dataset
+  #     internal callers (the same reasoning the unscoped-read note above gives
+  #     for `confine_one/2`).
+  #
+  # Fails CLOSED on a mismatch, INCLUDING a row whose `dataset` is nil: an
+  # anonymous share holder has no claim on a row that cannot prove which
+  # dataset it belongs to. The refusal is `:not_found`, not `:forbidden`, so it
+  # is byte-identical to a miss and leaks no existence oracle.
+  defp confine_share_dataset(conn, %MediaFile{} = file) do
+    case conn.assigns[:share_dataset] do
+      nil -> {:ok, file}
+      dataset when dataset == file.dataset -> {:ok, file}
+      _ -> {:error, :not_found}
+    end
+  end
+
   # ── Transform-param denylist guard (wb-api-media-transform-params-400) ──────
   #
   # `serve/2` and `serve_rendition/2` parsed NO transform vocabulary at all — a
@@ -108,15 +149,26 @@ defmodule BarkparkWeb.MediaController do
   resolves it the same way, so a `:media` share is checked against the dataset
   this action actually lists; before task-4f26838232b5ece0 the guard compared
   `"production"` while `?dataset=` listed another dataset's library.
+
+  Clamped to the public tier for a caller with no principal — the LISTING twin
+  of the `Access.allowed?/4` gate on `show/2` directly below. `show/2` grew that
+  gate for the felix W14 leak, and this sibling, in the same module, kept
+  enumerating the `filename` / `path` / `size` of every `private` and `token`
+  asset to anyone (task-27d5fdba100d2bc6 item 3). A listing cannot answer 403
+  per row, so the ceiling rides into the query and `count` counts what was
+  actually returned.
   """
   def index(conn, params) do
     dataset = Map.get(params, "dataset", "production")
     mime_filter = Map.get(params, "type")
     opts = scope_opts(conn)
 
+    read_opts =
+      if Access.authenticated?(conn), do: opts, else: [{:visibility_clamp, :public} | opts]
+
     files =
       dataset
-      |> Media.list_files([mime_type: mime_filter] ++ opts)
+      |> Media.list_files([mime_type: mime_filter] ++ read_opts)
       |> then(&confine_many(opts, &1))
 
     json(conn, %{
@@ -138,6 +190,7 @@ defmodule BarkparkWeb.MediaController do
 
     with {:ok, file} <- Media.get_file(id, opts),
          {:ok, file} <- confine_one(opts, file),
+         {:ok, file} <- confine_share_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :view) do
       json(conn, render_file(file, conn))
@@ -164,6 +217,7 @@ defmodule BarkparkWeb.MediaController do
 
     with {:ok, file} <- Media.get_file_by_path(relative_path, opts),
          {:ok, file} <- confine_one(opts, file),
+         {:ok, file} <- confine_share_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :original) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
@@ -230,6 +284,7 @@ defmodule BarkparkWeb.MediaController do
 
     with {:ok, file} <- Media.get_file(id, opts),
          {:ok, file} <- confine_one(opts, file),
+         {:ok, file} <- confine_share_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset),
          true <- Access.allowed?(conn, file, doc, :preview),
          watermark = Access.watermark_profile(doc),

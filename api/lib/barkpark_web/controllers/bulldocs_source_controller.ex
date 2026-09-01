@@ -98,7 +98,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
   # the ops path's if_rev guard compares against — NOT the row's _rev hash
   # (which the JSON envelope already exposes as "_rev").
   defp send_bpml(conn, paper, blocks) do
-    bpml = Bpml.print_paper(%{"slug" => paper.doc_id, "title" => paper.title, "blocks" => blocks})
+    bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks))
 
     conn
     |> put_resp_content_type("text/bpml")

@@ -126,9 +126,25 @@ jobs:
           fi
 
           # The path set this gate answers for: the compose install surface,
-          # the image and everything it copies (api/**), and the gate's own
-          # files. Each alternative is fully anchored.
-          if printf '%s\n' "$changed" | grep -qE '^(docker-compose\.yml|\.env\.example|scripts/compose-smoke\.sh|scripts/env-census\.py|\.github/workflows/compose-smoke\.yml)$|^api/'; then
+          # the image and everything it copies (api/**), the CONTROL-PLANE
+          # runtime (cloud/**), and the gate's own files. Each alternative is
+          # fully anchored.
+          #
+          # `^cloud/` was MISSING until 2026-09-01, and its absence made this
+          # gate blind to half its own subject. scripts/compose-smoke.sh runs
+          # env-census over BOTH runtime roots — `--root api` at :194 AND
+          # `--root cloud` at :196 — and env-census's ROOTS["cloud"] covers
+          # cloud/config/runtime.exs, cloud/lib and cloud/docker-compose.yml.
+          # So a control-plane env-var drift was censused by a job that no
+          # control-plane change could start: the RED it produces by hand was a
+          # red CI could never produce.
+          #
+          # scripts/compose-smoke-dispatch.test.sh pins this. It EXTRACTS this
+          # predicate from this file rather than copying it, and re-derives the
+          # census's roots from env-census.py's own `--root` choices — so
+          # adding a third root, or re-narrowing this line, reds by name
+          # instead of going quietly blind again.
+          if printf '%s\n' "$changed" | grep -qE '^(docker-compose\.yml|\.env\.example|scripts/compose-smoke\.sh|scripts/env-census\.py|\.github/workflows/compose-smoke\.yml)$|^api/|^cloud/'; then
             smoke=true
           else
             smoke=false

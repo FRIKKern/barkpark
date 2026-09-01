@@ -24,7 +24,11 @@
 // ## The security floor is not configurable
 //
 // `default-src`, `object-src`, `base-uri`, `frame-ancestors` and `form-action`
-// are fixed. `script-src` accepts additions but REJECTS `'unsafe-inline'` and
+// are fixed — enforced at RUNTIME against `EXTENDABLE_DIRECTIVES`, since the
+// `additional` TYPE never closed the door (a `Record<string, readonly
+// string[]>` assembled from config is assignable to it with no error, and the
+// package is consumable from plain JS besides). Naming a floor directive in
+// `additional` THROWS. `script-src` accepts additions but REJECTS `'unsafe-inline'` and
 // `'unsafe-eval'`: the whole point of the nonce is that an injected inline
 // script cannot execute, and a policy that re-admits `'unsafe-inline'` is
 // decoration. Conformant browsers also ignore `'unsafe-inline'` alongside a
@@ -40,7 +44,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 
 /**
  * The directives a consumer may WIDEN. Everything absent from this union is
- * part of the fixed security floor and cannot be reached from options.
+ * part of the fixed security floor and cannot be reached from options — an
+ * invariant {@link EXTENDABLE_DIRECTIVES} enforces at RUNTIME, because the type
+ * alone never did (see that constant's note).
  */
 export type ExtendableDirective =
   | 'script-src'
@@ -51,6 +57,58 @@ export type ExtendableDirective =
   | 'frame-src'
   | 'media-src'
   | 'worker-src'
+
+/**
+ * The runtime twin of {@link ExtendableDirective} — the allow-list
+ * `buildCspPolicy` actually consults.
+ *
+ * The type could not carry this on its own. `additional` is typed
+ * `Partial<Record<ExtendableDirective, readonly string[]>>`, and TypeScript's
+ * excess-property check only fires on a fresh object literal: a variable of
+ * type `Record<string, readonly string[]>` — the realistic shape when a
+ * consumer assembles its policy map from config or env — is assignable with no
+ * error. The package also ships CJS/ESM consumable from plain JS, where no
+ * type exists at all. Before this list, `buildCspPolicy` read
+ * `extra[name as ExtendableDirective]` for EVERY base directive, so
+ * `object-src`, `frame-ancestors`, `base-uri`, `form-action` and `default-src`
+ * — the five the module header calls fixed — were all reachable from options.
+ */
+const EXTENDABLE_DIRECTIVES: readonly ExtendableDirective[] = [
+  'script-src',
+  'style-src',
+  'img-src',
+  'font-src',
+  'connect-src',
+  'frame-src',
+  'media-src',
+  'worker-src',
+]
+
+function isExtendable(name: string): name is ExtendableDirective {
+  return (EXTENDABLE_DIRECTIVES as readonly string[]).includes(name)
+}
+
+/**
+ * Coerce one `additional` value into a real source array.
+ *
+ * The same reason the EXTENDABLE_DIRECTIVES runtime check exists, applied one
+ * level down: `additional`'s values are TYPED `readonly string[]`, but a bare
+ * STRING is iterable, so `{ 'script-src': "'unsafe-inline'" }` walked the value
+ * CHARACTER by character. The FORBIDDEN_SCRIPT_SOURCES loop below then compared
+ * `'`, `u`, `n`, `s`… against the forbidden list and NEVER FIRED, and the merge
+ * loop appended those characters as separate sources. The emitted policy was
+ * not actually weaker — a single character is not a valid CSP source
+ * expression, so browsers drop it — so this was a FAILED CONTROL, not an open
+ * hole. It still mattered: the note on EXTENDABLE_DIRECTIVES justifies its own
+ * runtime check by saying the package "ships CJS/ESM consumable from plain JS,
+ * where no type exists at all", and the throw was defeated in exactly that
+ * scenario. Coercing (rather than throwing on a non-array) keeps the intended
+ * value and lets the forbidden-source throw judge it on its merits.
+ */
+function asSources(value: unknown): readonly string[] {
+  if (Array.isArray(value)) return value as readonly string[]
+  return typeof value === 'string' && value.length > 0 ? [value] : []
+}
 
 /** Sources that make a nonce-based `script-src` meaningless. */
 const FORBIDDEN_SCRIPT_SOURCES = ["'unsafe-inline'", "'unsafe-eval'"] as const
@@ -107,7 +165,23 @@ function baseDirectives(nonce: string): Array<[string, string[]]> {
 export function buildCspPolicy(nonce: string, options: CspOptions = {}): string {
   const extra = options.additional ?? {}
 
-  const scriptExtras = extra['script-src'] ?? []
+  // Enforce the allow-list BEFORE any directive is built, so a floor key can
+  // never be merged. Throwing (rather than dropping) matches the module's
+  // posture for `'unsafe-inline'` below: a caller who believes they widened
+  // `object-src` and silently did not is worse off than one who is told.
+  for (const name of Object.keys(extra)) {
+    if (!isExtendable(name)) {
+      // Message kept terse on purpose: `dist/csp.mjs` sits under a 1 kB
+      // size-limit cap (js/CLAUDE.md "Bundle budget"), and the extendable list
+      // is reused from the constant rather than re-spelled.
+      throw new Error(
+        `buildCspPolicy: "${name}" is in the fixed security floor. ` +
+          `Extendable: ${EXTENDABLE_DIRECTIVES.join(' ')}`,
+      )
+    }
+  }
+
+  const scriptExtras = asSources(extra['script-src'])
   for (const src of scriptExtras) {
     if ((FORBIDDEN_SCRIPT_SOURCES as readonly string[]).includes(src.trim())) {
       throw new Error(
@@ -119,7 +193,12 @@ export function buildCspPolicy(nonce: string, options: CspOptions = {}): string 
   }
 
   const directives = baseDirectives(nonce).map(([name, sources]) => {
-    const additions = extra[name as ExtendableDirective] ?? []
+    // `isExtendable` rather than a cast: `name` walks the FULL base list, floor
+    // directives included, so a cast here reads `extra['object-src']` whenever
+    // one is present. The guard above already refuses such a key — this keeps
+    // the invariant readable where it matters instead of depending on a check
+    // twenty lines up.
+    const additions = asSources(isExtendable(name) ? extra[name] : undefined)
     const merged = [...sources]
     for (const src of additions) {
       if (!merged.includes(src)) merged.push(src)
@@ -130,8 +209,9 @@ export function buildCspPolicy(nonce: string, options: CspOptions = {}): string 
   // A directive a consumer widens but the base policy never named (e.g.
   // `worker-src`) still needs to exist, or the addition silently falls through
   // to `default-src`.
-  for (const [name, additions] of Object.entries(extra)) {
-    if (!additions || additions.length === 0) continue
+  for (const [name, raw] of Object.entries(extra)) {
+    const additions = asSources(raw)
+    if (additions.length === 0) continue
     if (directives.some((d) => d.startsWith(`${name} `))) continue
     directives.push(`${name} ${["'self'", ...additions].join(' ')}`)
   }

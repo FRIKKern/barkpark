@@ -7,6 +7,7 @@
 // Useful for dynamic/generic UIs that render fields from the schema.
 
 import { scopePrefix } from './scope'
+import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, BarkparkSchema, UpsertSchemaInput } from './types'
@@ -27,8 +28,7 @@ export async function getSchema(
   name: string,
   opts?: { signal?: AbortSignal },
 ): Promise<BarkparkSchema | null> {
-  if (typeof name !== 'string' || !name.trim())
-    throw new BarkparkValidationError('getSchema: schema name is required', { field: 'name' })
+  assertSegment(name, 'name', 'getSchema: schema name is required (one path segment)')
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}/${encodeURIComponent(name)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
@@ -86,8 +86,7 @@ export async function deleteSchema(
   config: BarkparkClientConfig,
   name: string,
 ): Promise<{ deleted: string }> {
-  if (typeof name !== 'string' || !name.trim())
-    throw new BarkparkValidationError('deleteSchema: schema name is required', { field: 'name' })
+  assertSegment(name, 'name', 'deleteSchema: schema name is required (one path segment)')
   const path = `${scopePrefix(config)}/v1/schemas/${encodeURIComponent(config.dataset)}/${encodeURIComponent(name)}`
   const { data } = await request<{ deleted: string }>(config, path, {
     method: 'DELETE',

@@ -1319,6 +1319,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 @media (max-width: 720px) { .bp-paper-surface .bp-section__grid { grid-template-columns: 1fr; } }
 .bp-paper-surface .bp-section__cell { min-width: 0; }
 .bp-paper-surface .bp-section__cell > :first-child { margin-top: 0; }
+.bp-paper-surface .bp-section--wide { margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; }
 
 /* ── section frame — the framed-finale device (charter D19). A `section` with
    variant="framed" carries `.bp-section--framed` on its OWN box div (stamped by

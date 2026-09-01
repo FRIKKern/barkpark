@@ -60,17 +60,28 @@ defmodule Barkpark.Plugins.TypesTest do
              "plugin_types.d.ts: #{inspect(missing)}"
   end
 
+  # Excluded by default via `:requires_node` (test_helper.exs), so a box with
+  # no TypeScript compiler gets a visible skip. It must therefore NOT carry a
+  # silent-pass arm of its own: opting the tag in is a request to actually run
+  # the check, so a missing compiler is a failure, not an `:ok`. The old
+  # `find_executable("tsc") -> nil -> :ok` shape ran on every machine and
+  # asserted nothing — replacing plugin_types.d.ts with "this is not
+  # typescript", or deleting it, kept the suite green.
   @tag :requires_node
   test "tsc --noEmit accepts the .d.ts" do
-    case System.find_executable("tsc") do
-      nil ->
-        # Node toolchain not installed — WI4 will wire CI to enforce this.
-        # Locally skip rather than fail.
-        :ok
+    {cmd, args} =
+      case System.find_executable("tsc") do
+        nil -> {System.find_executable("npx"), ["--no-install", "tsc"]}
+        tsc -> {tsc, []}
+      end
 
-      tsc ->
-        {output, code} = System.cmd(tsc, ["--noEmit", @types_path], stderr_to_stdout: true)
-        assert code == 0, "tsc rejected plugin_types.d.ts:\n#{output}"
-    end
+    assert cmd,
+           "neither `tsc` nor `npx` is on PATH, but :requires_node was included — " <>
+             "install a TypeScript compiler or drop the tag from this run"
+
+    {output, code} =
+      System.cmd(cmd, args ++ ["--noEmit", @types_path], stderr_to_stdout: true)
+
+    assert code == 0, "tsc rejected plugin_types.d.ts:\n#{output}"
   end
 end

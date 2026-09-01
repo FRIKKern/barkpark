@@ -535,7 +535,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       }
     ] ++
       tmux_console_entry(admin?, return_path) ++
-      claude_chat_entry(admin?, return_path) ++
+      claude_chat_entry(scope_prefix, admin?, return_path) ++
       styleguide_entry(admin?, return_path) ++
       connectors_entry(scope_prefix, admin?) ++ settings_entry(base, scope_prefix, admin?)
   end
@@ -617,17 +617,42 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   defp settings_entry(_base, _scope_prefix, _), do: []
 
-  defp claude_chat_entry(admin?, return_path) do
+  # SCOPE-PREFIXED, exactly like `settings_entry/3` and `connectors_entry/2`
+  # above (task-58b55b015f222b51). ChatLive is dual-mounted — flat
+  # `/studio/chat` and scoped `/w/:ws/p/:proj/studio/chat` (router.ex, the
+  # `:scoped_admin_studio` session) — and this tab hardcoded the FLAT spelling,
+  # so the Chat tab on a SCOPED Studio page navigated the operator OUT of the
+  # workspace they were browsing and onto the flat surface. That surface then
+  # binds via `StudioChrome`, not the URL, so the tab silently changed which
+  # tenant the next chat session would be written into.
+  #
+  # Unlike Settings/Connectors, the flat arm here is a REAL mount, not a 302:
+  # both routes exist, so prefixing makes the link scope-truthful with no
+  # redirect involved. Whether the flat spelling should keep mounting at all —
+  # nav.ex above calls it a "flat singleton path … like the tmux console",
+  # while its substance is workspace-scoped — is the separate adjudication this
+  # row deferred, and is NOT settled by this tab fix.
+  #
+  # `active_when` stays the BARE path: `path` carries a `?return_to=` query, and
+  # the active-tab match is on the path alone (it must also match the
+  # `/chat/:session_id` sibling, which shares this prefix).
+  defp claude_chat_entry(scope_prefix, admin?, return_path) do
     if admin? and BarkparkWeb.Studio.ClaudeChat.enabled?() do
+      chat_path =
+        case scope_prefix || "" do
+          "" -> "/studio/chat"
+          prefix -> "#{prefix}/studio/chat"
+        end
+
       [
         %{
           label: "chat",
-          path: BarkparkWeb.Studio.ReturnTo.with_return_to("/studio/chat", return_path),
+          path: BarkparkWeb.Studio.ReturnTo.with_return_to(chat_path, return_path),
           # messages-square glyph ships with sup-w1-icon-authority; falls back
           # to "file" until it merges.
           icon: "messages-square",
           order: 45,
-          active_when: "/studio/chat"
+          active_when: chat_path
         }
       ]
     else

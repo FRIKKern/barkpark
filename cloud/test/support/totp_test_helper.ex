@@ -10,10 +10,19 @@ defmodule BarkparkCloud.TotpTestHelper do
   Sharing the module would mean either making one app's test tree a build input
   of the other's, or hoisting test support into a lib both depend on — both are
   heavier and more surprising than a sibling with an identical contract. So the
-  contract is duplicated deliberately, and
-  `totp_test_helper_test.exs`'s CONTRACT PARITY test asserts, mechanically, that
-  the two modules still export the same function set. The duplication cannot
-  drift silently; that is the whole reason the parity assertion exists.
+  contract is duplicated deliberately, and `totp_test_helper_test.exs` guards it
+  in TWO layers, because one is not enough:
+
+    * **CONTRACT PARITY** — the api module's exported `name/arity` set must stay
+      a subset of this one. Catches a dropped or renamed function.
+    * **BEHAVIOURAL PARITY** — the api source is read and compiled into cloud's
+      test VM at run time, and both implementations are run against the same
+      pinned inputs. Catches a drifted BODY, which the first layer cannot see at
+      all: a mutation that moved the api twin's period from 30s to 60s and
+      disarmed its `wait_ms/2` entirely — turning it back into the wall-clock
+      race this module exists to remove — left the name/arity check green with
+      exit 0. "Cannot drift silently" is a claim about behaviour, so it needs a
+      check on behaviour.
 
   ## The defect this removes
 

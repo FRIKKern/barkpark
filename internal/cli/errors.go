@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/apierr"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -369,27 +370,26 @@ func exitForCode(code string) int {
 // (See docs/cli/error-exit-table.md "Codes that don't cleanly fit".) Anything it
 // cannot recognise becomes exitGeneric with the raw body as the message.
 func classifyError(status int, body []byte) apiError {
-	// First: try the canonical {"error": <object>} envelope.
-	var canon struct {
-		Error struct {
-			Code      string `json:"code"`
-			Message   string `json:"message"`
-			RequestID string `json:"request_id"`
-			Hint      string `json:"hint"`
-			// Declared so encoding/json stops DISCARDING it: an unmapped key is
-			// dropped silently, which is why every `details` the server has ever
-			// sent died here and no printer could show it (PDS-D457).
-			Details json.RawMessage `json:"details"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &canon); err == nil && canon.Error.Code != "" {
+	// First: the canonical {"error": <object>} envelope, read through
+	// internal/apierr — the ONE parser every surface shares. The struct that
+	// used to live here was copied into seven other decoders that then drifted
+	// (five stopped reading `hint`, one typed `details` and lost whole
+	// envelopes); apierr exists so there is nothing left to copy. Only the
+	// PARSE moved: the code→exit-code table below, the four alternative body
+	// shapes, and this file's rendering are CLI-specific and stay here.
+	//
+	// The admission test is unchanged in effect — classifyError has always
+	// required a non-empty code to claim this branch, so a message-only
+	// envelope still falls through to the no-code arm further down that decides
+	// between exit 2 and exit 4.
+	if env, ok := apierr.Parse(body); ok && env.Code != "" {
 		return apiError{
-			exit:       exitForCode(canon.Error.Code),
-			code:       canon.Error.Code,
-			message:    canon.Error.Message,
-			requestID:  canon.Error.RequestID,
-			serverHint: canon.Error.Hint,
-			details:    normalizeDetails(canon.Error.Details),
+			exit:       exitForCode(env.Code),
+			code:       env.Code,
+			message:    env.Message,
+			requestID:  env.RequestID,
+			serverHint: env.Hint,
+			details:    normalizeDetails(env.Details),
 		}
 	}
 
@@ -471,17 +471,16 @@ func classifyError(status int, body []byte) apiError {
 
 	// Message-only no-code envelope: default usage, downgrade to not-found when
 	// the message text reads like one.
-	var msgOnly struct {
-		Error struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(body, &msgOnly); err == nil && msgOnly.Error.Message != "" {
+	// Same shared parser as the canonical branch — this arm differs only in
+	// that it accepts an envelope with NO code, which apierr.Parse admits (it
+	// requires code OR message). Reaching here means the canonical branch above
+	// already declined for want of a code.
+	if env, ok := apierr.Parse(body); ok && env.Message != "" {
 		exit := exitUsage
-		if looksLikeNotFound(msgOnly.Error.Message) {
+		if looksLikeNotFound(env.Message) {
 			exit = exitNotFound
 		}
-		return apiError{exit: exit, message: msgOnly.Error.Message}
+		return apiError{exit: exit, message: env.Message}
 	}
 
 	// Truly unrecognised body: a non-JSON gateway/proxy page (nginx 502·503·504

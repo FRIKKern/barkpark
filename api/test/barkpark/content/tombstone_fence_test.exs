@@ -308,13 +308,15 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       absent = Ecto.UUID.generate()
 
       for ghost <- [malformed, absent] do
-        assert {:error, :not_found} =
-                 Tasks.close(ghost, "worker-tomb",
-                   observed_epoch: 1,
-                   lifecycle_status: "cancelled",
-                   reason: "a tombstone for a document that does not exist"
-                 ),
-               "expected #{inspect(ghost)} to refuse with :not_found"
+        result =
+          Tasks.close(ghost, "worker-tomb",
+            observed_epoch: 1,
+            lifecycle_status: "cancelled",
+            reason: "a tombstone for a document that does not exist"
+          )
+
+        assert result == {:error, :not_found},
+               "expected #{inspect(ghost)} to refuse with :not_found, got #{inspect(result)}"
       end
     end
   end

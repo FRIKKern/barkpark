@@ -8,7 +8,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   alias Barkpark.Media
-  alias Barkpark.Media.Storage.{Collections, Share}
+  alias Barkpark.Media.Storage.{Access, Collections, Share}
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
   alias BarkparkWeb.Plugs.RequireWritePermission
@@ -51,7 +51,7 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     t0 = System.monotonic_time(:microsecond)
 
     with {:ok, _collection} <- Collections.get(id, dataset, scope_opts(conn)) do
-      opts = MediaSearchParams.parse(params) ++ scope_opts(conn)
+      opts = MediaSearchParams.parse(params) ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
 
       {files, total, facets} = Collections.assets(id, dataset, opts)
       docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
@@ -202,13 +202,40 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   defp ensure_dataset(%{dataset: ds}, ds), do: :ok
   defp ensure_dataset(_, _), do: {:error, :not_found}
 
+  # A FORK OF `V1.MediaController.render_opts/3`, and it needed the same fix
+  # (task-d55b02001cf589f0). The query-string arm minted a real `SignedUrl` for a
+  # `token` asset with no principal consulted, so the collection-assets door was
+  # a second, identically-shaped route from "I know a collection id" to gated
+  # BYTES. Fixing only the sibling would have left this one open.
+  #
+  # THE TWO ARMS ARE NOT THE SAME AUTHORITY and are deliberately gated
+  # differently:
+  #
+  #   * `extra[:sign_urls]` is set ONLY by `share_view/2`, where `Share.resolve/2`
+  #     has already validated a share TOKEN. That token IS the credential — the
+  #     whole point of a share link is delivery without a login — so it keeps
+  #     signing and must not be routed through `Access.authenticated?/1`, which
+  #     would break every live share link.
+  #
+  #   * `params["appendRequestSecret"]` is caller-typed and carries no authority
+  #     whatsoever. It now only expresses a PREFERENCE for signed URLs; the
+  #     principal decides whether that preference is honoured.
   defp render_opts(conn, params, dataset, extra \\ []) do
     [
       conn: conn,
       dataset: dataset,
       sign_urls:
-        Keyword.get(extra, :sign_urls, false) or params["appendRequestSecret"] in ["true", "1"]
+        Keyword.get(extra, :sign_urls, false) or
+          (params["appendRequestSecret"] in ["true", "1"] and Access.authenticated?(conn))
     ]
+  end
+
+  # See `V1.MediaController.visibility_clamp_opts/1` — same ceiling, same reason.
+  # NOT applied to `share_view/2`: a resolved share token is a principal, and
+  # clamping there would empty every shared collection of its non-public assets,
+  # which is the thing being shared.
+  defp visibility_clamp_opts(conn) do
+    if Access.authenticated?(conn), do: [], else: [visibility_clamp: :public]
   end
 
   defp parse_int(nil, default), do: default

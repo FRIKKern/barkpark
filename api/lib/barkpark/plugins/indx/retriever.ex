@@ -17,15 +17,19 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   `Barkpark.Search.DocumentsRetriever.search/4` returns
   `{[%Barkpark.Content.Document{}, ...], total, meta}`. This retriever returns
   the SAME shape: a list of `%Document{}` structs (hydrated from Postgres via
-  `Barkpark.Content.get_document/4`, tenant-scoped), an integer total, and an
-  engine-diagnostics `meta` map (defaults to `%{}`).
+  `Barkpark.Content.get_document/4`, tenant-scoped), an integer total, and a
+  `meta` map — which on this path is ALWAYS `%{}`. The engine's `facets` and
+  `truncationIndex` are deliberately dropped; see "Why this retriever returns
+  no `facets` and no `truncation`" below for the ruling.
 
   ## Pipeline
 
     1. Parse the query terms out of `parsed` and join them into a CloudQuery
        text string.
-    2. `Client.search_full/3` against the scope's live dataset (from
-       `Indexer.current_dataset/1`) → a WIDE pool of `documentKey` records
+    2. `Client.search_full/3` against this tenant's live dataset — from
+       `Indexer.current_dataset/1`, addressed by the tenant-partitioned
+       `Indexer.index_key/2`, NOT by the bare dataset string → a WIDE pool
+       of `documentKey` records
        (score-ordered by the engine — `@candidate_pool`, the whole matched
        set, NOT just the display limit; see `do_search/6`).
     3. `Client.get_json/3` hydrates those keys → light index records carrying
@@ -54,11 +58,15 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   @spec search(String.t(), map(), map(), keyword()) :: {[struct()], non_neg_integer(), map()}
   def search(scope, parsed, config, opts) when is_binary(scope) do
     text = query_text(parsed)
-    dataset = Indexer.current_dataset(scope)
+    # The live dataset is addressed by the TENANT-PARTITIONED index key, not by
+    # the raw dataset string: co-tenants share the string `production`, so
+    # reading the pointer by scope alone handed workspace B whatever index
+    # workspace A last swapped in (`Indexer` moduledoc, "Index identity").
+    dataset = Indexer.current_dataset(Indexer.index_key(scope, opts))
 
-    # An empty `text` is NOT short-circuited: Indx's empty-query + enableFacets
-    # is the browse-with-facets mode (the finder's landing). Only a missing live
-    # dataset degrades to empty.
+    # An empty `text` is NOT short-circuited: Indx's empty-query mode is the
+    # browse listing (the finder's landing), which still returns records. Only a
+    # missing live dataset degrades to empty.
     cond do
       is_nil(dataset) ->
         {[], 0, %{}}
@@ -83,7 +91,11 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     pool = display_limit |> max(@candidate_pool) |> min(@candidate_pool)
     client_opts = client_opts(opts)
 
-    with {:ok, %{records: records, facets: facets, truncation_index: tindex}} <-
+    # The engine's reply also carries `facets` and `truncation_index`. Neither is
+    # bound: both describe WHATEVER INDEX the engine was pointed at, counted by
+    # the engine and never re-read under tenant scope — not this caller's
+    # tenant-scoped match set. See the ruling below.
+    with {:ok, %{records: records}} <-
            client.search_full(dataset, text, [max: pool] ++ client_opts),
          keys = Enum.map(records, &record_key/1) |> Enum.reject(&is_nil/1),
          {:ok, indx_docs} <- hydrate(client, dataset, keys, client_opts) do
@@ -102,7 +114,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
       Barkpark.Plugins.Indx.Monitor.record_success(scope, %{dataset: dataset})
 
-      {hits, total_for(ranked, scope, opts), engine_meta(facets, tindex)}
+      {hits, total_for(ranked, scope, opts), %{}}
     else
       {:error, err} ->
         # P4b Hardening A: turn silent fallback into a queryable signal.
@@ -114,38 +126,62 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     end
   end
 
-  # Engine diagnostics surfaced to the pipeline → HTTP response: Indx-computed
-  # dataset-wide facet buckets and the coverage `truncation` boundary. Both are
-  # genuinely Indx (the API gateway exposes neither for Postgres).
-  defp engine_meta(facets, tindex) do
-    %{}
-    |> maybe_put(:facets, normalize_facets(facets))
-    |> maybe_put(:truncation, if(is_integer(tindex), do: %{index: tindex}))
-  end
-
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, _key, v) when v == %{}, do: map
-  defp maybe_put(map, key, v), do: Map.put(map, key, v)
-
-  # Indx returns `%{"type" => [%{"key" => "post", "value" => 2}], ...}` (key =
-  # bucket value, value = count). Re-shape to `%{"type" => [%{"label","count"}]}`
-  # and drop the empty-string bucket (docs that lack the field).
-  defp normalize_facets(facets) when is_map(facets) do
-    facets
-    |> Enum.map(fn {field, buckets} ->
-      {field,
-       buckets
-       |> List.wrap()
-       |> Enum.map(fn b ->
-         %{"label" => to_string(Map.get(b, "key", "")), "count" => Map.get(b, "value", 0)}
-       end)
-       |> Enum.reject(&(&1["label"] in ["", nil]))}
-    end)
-    |> Enum.reject(fn {_field, buckets} -> buckets == [] end)
-    |> Map.new()
-  end
-
-  defp normalize_facets(_), do: %{}
+  # ---------------------------------------------------------------------------
+  # Why this retriever returns no `facets` and no `truncation`
+  # ---------------------------------------------------------------------------
+  #
+  # It used to. A private `engine_meta/2` re-shaped the engine's `facets`
+  # payload onto the pipeline's `facets:` key and its `truncationIndex` onto
+  # `truncation:`.
+  #
+  # The facet buckets were computed BY THE ENGINE, over an index that at the
+  # time was keyed on the Barkpark dataset STRING alone — so every workspace
+  # sharing a dataset name shared ONE index, the pool `total_for/3` below
+  # describes. That keying is now history: `Indexer.current_dataset/1` takes an
+  # `Indexer.index_key/2` — shaped `<slugified-dataset>_t<16 lowercase hex>`,
+  # the tail being the first 8 bytes of a SHA-256 over
+  # `{workspace_id, project_id}`. Two workspaces both owning a dataset called
+  # `production` therefore address two different indexes.
+  #
+  # That does NOT make re-attaching the buckets safe, and the reason is the
+  # part to carry forward: the rows beside those buckets are re-read from
+  # Postgres under full tenant scope; the buckets were never re-read at all.
+  # Partitioning changed WHICH rows land in the index, not whether the engine's
+  # own counts are answerable to the caller's scope.
+  #
+  # `author` and `category` are tenant-authored FREE TEXT (`Indexer`'s
+  # `field_proxies/1` marks them facetable), so workspace A received workspace
+  # B's author names and category names VERBATIM — not merely counts. Measured:
+  # A could read 1 document while the bucket beside it said 2.
+  #
+  # Reachable with no credentials. `engine` is a raw caller-supplied query param
+  # (`SearchController`), not an admin surface, and a tokenless flat request is
+  # still stamped with a real binary `workspace_id` by `Plugs.AssignDefaultScope`
+  # — so both halves of the D3-b gate in `QueryPipeline` are satisfiable
+  # anonymously. The `search:*` channel DEFAULTS `engine` to `"indx"`, so every
+  # WS query took this path with no param at all: the default, not an odd URL.
+  #
+  # There is a prior ruling and dropping these restores compliance with it.
+  # `DocumentsRetriever` (at `count_and_facets/1`): "Facets + count stay on the
+  # FULL match set (not the ranking pool): the user wants 'this query matched
+  # 1.2k items across these facets', not 'the top 500 break down this way'."
+  # Barkpark already decided that a facet number means a count over the CALLER'S
+  # full, tenant-scoped match set. Indx never implemented that — it reported the
+  # index's own counts. With the buckets dropped, `facets` means exactly one
+  # thing everywhere it is non-null: a Postgres count over rows the caller could
+  # have reached one by one. `truncation` goes with it — it is a coverage
+  # boundary over that same engine-side pool, describing a set the caller
+  # cannot see either.
+  #
+  # DO NOT "restore the facet rail" here. Tenant-scoped facets over an Indx
+  # result would require the ENGINE to narrow by workspace at query time (a
+  # `filterable` proxy `Client.search_full/3` does not currently send);
+  # handing its own counts through reopens an anonymous cross-tenant read of
+  # another workspace's author and category strings the moment any one index
+  # holds more than one tenant's rows — which per-tenant keying makes
+  # unlikely-by-default, not impossible, and is not a property this module
+  # can check.
+  # `Barkpark.Plugins.Indx.RetrieverDropsEngineFacetsTest` reds if it comes back.
 
   # Indx has no native negation in this path: query_text/1 builds only the
   # POSITIVE query for the engine. The parsed `:excludes` are honored here as a
@@ -362,26 +398,42 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
   defp id_type_pair(_other), do: nil
 
-  # Reported total. For an ordinary read the candidate-pool length is the honest
-  # match count. For a GRANT-DERIVED caller (`opts[:grant_scoped]`) the pool
-  # counts out-of-grant hits the hydration read drops, so the raw length would
-  # OVER-report — leak the existence/count of docs outside the grant. Recompute
-  # the total as ONE grant-narrowed Postgres count over the ranked candidate id
-  # set (same dataset/workspace/owner/grant scoping the row hydration applies),
-  # fail-closed: a reported total can never exceed the grant-visible matches.
+  # Reported total — ALWAYS recomputed as ONE scoped Postgres count over the
+  # ranked candidate id set, never `length(ranked)`.
+  #
+  # The candidate pool USED to be tenant-blind: `Indexer.current_dataset/1` keyed
+  # the live Indx dataset on the Barkpark dataset STRING alone, so every
+  # workspace sharing a dataset name shared ONE pool — the situation
+  # `hydrate_documents/3` above is written for ("even when two workspaces share
+  # a dataset STRING"). Hydration re-read through
+  # `Content.get_documents_by_ids/3` and dropped the other tenants' rows, so the
+  # HITS were always correct. The pool is now partitioned per tenant as well
+  # (`Indexer.index_key/2`), but the scoped re-read below STAYS: the index is a
+  # relevance oracle and Postgres is the source of truth, so the count is
+  # derived from the boundary that owns it rather than trusting the pool.
+  #
+  # The COUNT was not. This used to return the raw pool length for every
+  # non-grant caller, on the premise that "for an ordinary read the
+  # candidate-pool length is the honest match count". That premise holds only if
+  # the pool is tenant-scoped, and it is dataset-scoped — so workspace A's search
+  # reported a total that counted workspace B's matching documents while
+  # returning only A's rows: the existence and volume of another tenant's
+  # content, disclosed as a number. Same class as the `Content.Analytics`
+  # type_census leak (task-c6d2e34c64100678), one boundary over.
+  #
+  # `count_documents_by_ids/3` applies the SAME stack the hydration read does
+  # (dataset + workspace/project + owner + grant), so the total can never exceed
+  # what the caller may actually see — and the grant-derived case it already
+  # covered is unchanged, now as one branch of a rule instead of the exception.
   defp total_for(ranked, scope, opts) do
-    if Keyword.get(opts, :grant_scoped, false) do
-      ranked_ids =
-        ranked
-        |> Enum.map(&id_type_pair/1)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.map(&elem(&1, 0))
-        |> Enum.uniq()
+    ranked_ids =
+      ranked
+      |> Enum.map(&id_type_pair/1)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.uniq()
 
-      Content.count_documents_by_ids(ranked_ids, scope, scope_opts(opts))
-    else
-      length(ranked)
-    end
+    Content.count_documents_by_ids(ranked_ids, scope, scope_opts(opts))
   end
 
   # Forward the tenant-scope opts AND the caller_context into the authoritative

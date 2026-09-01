@@ -228,7 +228,7 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	}
 	headerText := icon + pane.Node.Title
 	if pane.IsDocList {
-		headerText += dimStyle.Render(fmt.Sprintf(" %d", len(pane.Items)))
+		headerText += dimStyle.Render(" " + docListCount(pane))
 	}
 	lines = append(lines, headerStyle.Width(width).Render(headerText))
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width)))
@@ -239,7 +239,12 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 	// clips to budget, and reserves an affordance row only when actually clipped.
 	interiorHeight := m.listInteriorHeight(height)
 	var interior []string
-	if pane.IsDocList && len(pane.Items) == 0 {
+	if pane.IsDocList && len(pane.Items) == 0 && pane.ReadFailed {
+		// The read never landed (transport error / 401 / 5xx). Say so — the
+		// empty-state placebo below would tell the user this type holds
+		// nothing, which is a claim we have no evidence for.
+		interior = failedDocListInterior()
+	} else if pane.IsDocList && len(pane.Items) == 0 {
 		// A focused doc-list pane with nothing in it would otherwise render an
 		// empty box — advertise the create affordance instead of blank space.
 		interior = emptyDocListInterior(true)
@@ -355,6 +360,11 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDo
 // ── Editor pane ──────────────────────────────────────────────────────────────
 
 func (m model) renderEditor(width, height int, isActive bool) string {
+	if m.selectedDoc == nil && m.docReadFailed {
+		// The read did not land. The empty-state splash below would invite the
+		// user to "select a document" from a list we never managed to fetch.
+		return m.renderReadFailedState(width, height)
+	}
 	if m.selectedDoc == nil || m.editorSchema == nil {
 		return m.renderEmptyState(width, height)
 	}
@@ -950,11 +960,17 @@ func (m model) renderPreview(width, height int) string {
 		content := m.buildListPreview(child, width, height)
 		return paneBorder.Width(width).Height(height).Render(content)
 	case NodeDocument:
-		docs := m.ds.Query(child.TypeName, "")
+		// Same discrimination the doc-list preview makes: zero docs from a
+		// FAILED read must not render as the blank "" a genuinely empty type
+		// renders as.
+		docs, outcome := m.ds.QueryResult(child.TypeName, "")
 		schema := findSchema(child.TypeName)
 		if len(docs) > 0 && schema != nil {
 			content := clipContentToHeight(m.buildDocPreview(&docs[0], schema, width), height)
 			return paneBorder.Width(width).Height(height).Render(content)
+		}
+		if outcome.Failed() {
+			return m.renderReadFailedState(width, height)
 		}
 	}
 	return ""
@@ -989,10 +1005,16 @@ func (m model) buildDocListPreview(node *StructureNode, width, height int) strin
 		icon = node.Icon + " "
 	}
 	pane := m.buildDocListPane(node)
-	headerText := icon + node.Title + dimStyle.Render(fmt.Sprintf(" %d", len(pane.Items)))
+	headerText := icon + node.Title + dimStyle.Render(" "+docListCount(pane))
 	lines = append(lines, headerStyle.Width(width-2).Render(headerText))
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))
 
+	if len(pane.Items) == 0 && pane.ReadFailed {
+		// Same refusal the focused pane renders: no rows AND no successful
+		// read is a failure to report, not an empty type to announce.
+		lines = append(lines, failedDocListInterior()...)
+		return lipgloss.JoinVertical(lipgloss.Left, lines...)
+	}
 	if len(pane.Items) == 0 {
 		// Preview pane isn't focusable, so it states the fact without the
 		// create affordance the focused pane offers.
@@ -1034,6 +1056,30 @@ func (m model) buildListPreview(node *StructureNode, width, height int) string {
 // no documents. The focused pane passes actionable=true to advertise the create
 // key (`n` opens the title prompt); the preview pane — which can't be focused —
 // passes false and just states the fact.
+// docListCount renders a doc-list pane's header count. A pane whose read
+// FAILED has no count to report — it prints "—" rather than "0", which would
+// assert a number the failed read never produced.
+func docListCount(pane Pane) string {
+	if pane.ReadFailed && len(pane.Items) == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d", len(pane.Items))
+}
+
+// failedDocListInterior renders the placeholder shown when a doc-list pane's
+// query did not succeed. It must never be confused with emptyDocListInterior:
+// that one says the type is empty (a fact), this one says we could not find
+// out (the absence of one). It advertises NO key — the TUI binds no refresh
+// key today (the SSE stream drives DataStoreRefreshMsg), and offering one it
+// cannot honour is the same class of lie the placeholder is fixing.
+func failedDocListInterior() []string {
+	return []string{
+		"",
+		dimStyle.Render("   ✕ Couldn't load documents"),
+		dimStyle.Render("   the server refused or is unreachable"),
+	}
+}
+
 func emptyDocListInterior(actionable bool) []string {
 	lines := []string{"", dimStyle.Render("   No documents yet")}
 	if actionable {
@@ -1041,6 +1087,27 @@ func emptyDocListInterior(actionable bool) []string {
 		lines = append(lines, dimStyle.Render("   press ")+keyStyle.Render("n")+dimStyle.Render(" to create the first one"))
 	}
 	return lines
+}
+
+// renderReadFailedState is renderEmptyState's honest sibling: same centred
+// chrome, but it reports that the document read failed instead of inviting a
+// selection from a list that was never fetched.
+func (m model) renderReadFailedState(width, height int) string {
+	var lines []string
+	mid := height / 2
+	for i := 0; i < mid-2; i++ {
+		lines = append(lines, "")
+	}
+	lines = append(lines, dimStyle.Render("   ✕ Couldn't load this document"))
+	lines = append(lines, dimStyle.Render("   the server refused or is unreachable"))
+
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	return paneBorder.Width(width).Height(height).Render(lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func (m model) renderEmptyState(width, height int) string {

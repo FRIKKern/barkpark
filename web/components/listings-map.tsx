@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Listing } from "@/lib/listings-data";
 import type { GraphMatch } from "@/lib/hovered-doc-context";
 import { canvas } from "@/lib/tokens.gen";
+import { safeHref } from "@/lib/safe-href";
 import {
   TILE_SUBDOMAINS,
   tileUrlTemplate,
@@ -14,6 +15,18 @@ import {
 /** Compose an alpha variant of an emitted `hsl(H S% L%)` token for Canvas2D
  *  (`hsl(H S% L% / a)`), so no fixed rgba/hex literal lives in this file. */
 const withAlpha = (c: string, a: number) => c.replace(")", ` / ${a})`);
+
+/**
+ * The pin popover's "Website ↗" target. `l.url` is CMS-authored listing
+ * content, so it is caller-controlled and reaches an `<a href>` — the same
+ * class of value `sheet-grid.tsx` routes through `safeHref` — so this does
+ * too. It was the one `<a href>` in web/ that skipped the scheme allow-list.
+ * A url that is not an allowed scheme (or is protocol-relative, or is not a
+ * string at all) yields null and no anchor is rendered.
+ */
+export function detailHref(l: Listing): string | null {
+  return safeHref(l.url) ?? null;
+}
 
 /**
  * A self-contained slippy map of listing pins — the directory landing's right
@@ -93,6 +106,96 @@ function worldYToLat(y: number, z: number): number {
   return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 }
 
+/* ── bounds on caller-controlled pin geometry ─────────────────────────────── */
+
+/** Longest label a pin will paint, in GRAPHEMES. See `pinLabelText`. */
+export const PIN_LABEL_MAX_GRAPHEMES = 64;
+
+/** How many UTF-16 code units to slice off a title before segmenting it.
+ *
+ * `Intl.Segmenter.segment()` is NOT lazy enough to lean on: measured in
+ * Chromium, taking the first 64 graphemes of a 1,000,000-character string costs
+ * 1.27ms warm, while taking the first 64 of that string's leading 1024
+ * characters costs 0.004ms. So the slice comes first, and the segmenter only
+ * ever sees a short head. 16 code units per grapheme clears even the longest
+ * ZWJ emoji sequences. */
+const PIN_LABEL_SLICE = PIN_LABEL_MAX_GRAPHEMES * 16;
+
+function* graphemesOf(s: string): Generator<string> {
+  // Intl.Segmenter is Baseline-wide but not universal (Safari < 16.4); fall
+  // back to code points, which at least never splits a surrogate pair.
+  if (typeof Intl.Segmenter !== "function") {
+    yield* s;
+    return;
+  }
+  const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  for (const { segment } of seg.segment(s)) yield segment;
+}
+
+/**
+ * The text a pin's canvas label actually paints — the title, elided to a
+ * bounded number of graphemes.
+ *
+ * A listing `title` is CMS-authored and arrives with NO upper bound
+ * (`lib/listings.ts`'s `str()` accepts any non-empty string), while `drawLabel`
+ * re-measures and repaints its text from scratch on EVERY animation frame that
+ * a pin is hovered or its popover is open. Unbounded in meant unbounded work:
+ * measured in Chromium at this file's 12px label font, a 1,000,000-character
+ * title produced a 6,744,155px-wide label box at 10.25ms per label draw, against
+ * a 53px box at 0.01ms for "Mocca" — one such listing drops the whole map to
+ * single-digit FPS for as long as that pin stays lit.
+ *
+ * The popover already bounds each of its own fields (a `line-clamp-3` on the
+ * description, a `slice(0, 4)` on the tags); the canvas label was the one field
+ * with nothing. It is ELIDED, never dropped — a pin with no label is a worse
+ * map than a pin with a shortened one — and it is cut on grapheme boundaries so
+ * an emoji or a combining sequence never ends up half-painted.
+ */
+export function pinLabelText(title: string): string {
+  if (typeof title !== "string") return "";
+  // ≤N code units can never be more than N graphemes, so short titles — every
+  // real one — skip the segmenter entirely and pass through byte-identical.
+  if (title.length <= PIN_LABEL_MAX_GRAPHEMES) return title;
+
+  const head = title.slice(0, PIN_LABEL_SLICE);
+  const units: string[] = [];
+  for (const g of graphemesOf(head)) {
+    units.push(g);
+    if (units.length > PIN_LABEL_MAX_GRAPHEMES) break;
+  }
+  // A long-but-few-graphemes title (combining marks, emoji) still fits.
+  if (units.length <= PIN_LABEL_MAX_GRAPHEMES && head.length === title.length) {
+    return title;
+  }
+  return `${units.slice(0, PIN_LABEL_MAX_GRAPHEMES).join("")}…`;
+}
+
+/** Smallest radius a pin is ever drawn at, in CSS px. See `pinRadius`. */
+const PIN_MIN_RADIUS = 1;
+
+/**
+ * A pin's canvas radius, in CSS px, from its dim state and its finder weight.
+ *
+ * `weight` comes from the `matches` prop — caller-controlled — and lands in
+ * `ctx.arc`, which THROWS on a negative radius. Measured in Chromium against
+ * the unbounded expression this replaces: `w = -10` yields `r = -19.5` and
+ * `IndexSizeError: Failed to execute 'arc' on 'CanvasRenderingContext2D': The
+ * radius provided (-19.5) is negative.` A throw out of `drawPins` costs the
+ * whole frame, so every pin after the offending one goes unpainted. `NaN` and
+ * `Infinity` do not throw but paint nothing, which is the same hole seen from
+ * the other side; both land on the floor here.
+ *
+ * REACHABILITY, honestly: the only in-repo caller, `components/finder.tsx`,
+ * already bounds `w` to [0.2, 1.0], so `r` there is always in [6.0, 8.0] and
+ * this floor never fires. It exists because `ListingsMap` is an EXPORTED
+ * component an external consumer can feed any `matches` array — not because
+ * the shipped app trips it.
+ */
+export function pinRadius(dim: boolean, weight: number | undefined): number {
+  const r = dim ? 4.5 : 5.5 + (weight ? weight * 2.5 : 0);
+  return Number.isFinite(r) ? Math.max(PIN_MIN_RADIUS, r) : PIN_MIN_RADIUS;
+}
+
 interface View {
   lng: number;
   lat: number;
@@ -141,7 +244,13 @@ export function ListingsMap({
   // View + frame state live in refs so panning/zooming never re-renders React.
   const viewRef = useRef<View>({ lng: 10.5, lat: 64.5, zoom: 3.4 });
   const sizeRef = useRef({ w: 0, h: 0, dpr: 1 });
-  const posRef = useRef<Array<{ x: number; y: number } | null>>([]);
+  // Pin screen positions, INDEXED BY the listings array they were computed
+  // from — and carrying that array, because an index only means anything
+  // alongside it. See `hitTest` for the window this closes.
+  const posRef = useRef<{
+    list: readonly Listing[];
+    pos: Array<{ x: number; y: number } | null>;
+  }>({ list: [], pos: [] });
   const hoverRef = useRef(-1);
   const tilesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const rafRef = useRef<number | null>(null);
@@ -334,7 +443,10 @@ export function ListingsMap({
       ctx.font =
         "600 12px ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif";
       const padX = 7;
-      const tw = ctx.measureText(text).width;
+      // Bound the text BEFORE measuring it — `measureText` and `fillText` both
+      // cost time proportional to the string, every frame the pin is lit.
+      const label = pinLabelText(text);
+      const tw = ctx.measureText(label).width;
       const bw = tw + padX * 2;
       const bh = 22;
       let bx = x - bw / 2;
@@ -353,7 +465,7 @@ export function ListingsMap({
       ctx.fill();
       ctx.fillStyle = canvas.primaryFg;
       ctx.textBaseline = "middle";
-      ctx.fillText(text, bx + padX, by + bh / 2 + 0.5);
+      ctx.fillText(label, bx + padX, by + bh / 2 + 0.5);
       ctx.restore();
     },
     [],
@@ -406,8 +518,15 @@ export function ListingsMap({
 
         const weight = matchMap?.get(l.id);
         const dim = matchMap != null && weight === undefined;
-        const r = dim ? 4.5 : 5.5 + (weight ? weight * 2.5 : 0);
-        drawPin(ctx, x, y, r, dim ? MARKER_DIM : MARKER, dim, false);
+        drawPin(
+          ctx,
+          x,
+          y,
+          pinRadius(dim, weight),
+          dim ? MARKER_DIM : MARKER,
+          dim,
+          false,
+        );
       }
 
       // Second pass: lit pins on top, with label.
@@ -419,7 +538,7 @@ export function ListingsMap({
         drawLabel(ctx, p.x, p.y, l.title);
       }
 
-      posRef.current = pos;
+      posRef.current = { list, pos };
     },
     [drawPin, drawLabel],
   );
@@ -538,7 +657,17 @@ export function ListingsMap({
   };
 
   const hitTest = (mx: number, my: number): number => {
-    const pos = posRef.current;
+    const { list, pos } = posRef.current;
+    // A hit index is only meaningful for the array the positions were drawn
+    // from. A `listings` prop change writes `listingsRef` IMMEDIATELY but
+    // defers the repaint to the next animation frame, so for one frame these
+    // coordinates describe a DIFFERENT array than the one the index gets
+    // resolved against below — which opens the popover for the WRONG listing,
+    // or for `undefined` if the array shrank, and `undefined` then throws in
+    // render at `selected.listing.title`. Both halves were reproduced with
+    // real pointer input against a transplant of this exact ref/rAF ordering.
+    // Refusing the hit costs at most the one frame before the redraw lands.
+    if (list !== listingsRef.current) return -1;
     let best = -1;
     let bestD = HIT_RADIUS * HIT_RADIUS;
     for (let i = 0; i < pos.length; i++) {
@@ -625,7 +754,7 @@ export function ListingsMap({
       const idx = hitTest(x, y);
       if (idx >= 0) {
         const l = listingsRef.current[idx];
-        const p = posRef.current[idx];
+        const p = posRef.current.pos[idx];
         if (p) {
           // Pre-clamp the anchor here (an event handler — ref reads are fine)
           // so the render path never has to touch sizeRef. The card is w-60
@@ -734,11 +863,6 @@ export function ListingsMap({
   }, [onHover]);
 
   /* ── render ────────────────────────────────────────────────────────────── */
-
-  const detailHref = (l: Listing): string | null => {
-    if (l.url) return l.url;
-    return null;
-  };
 
   return (
     <div

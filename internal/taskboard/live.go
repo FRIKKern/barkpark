@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -390,9 +391,28 @@ func isSnapshotTimeout(err error) bool {
 // snapshotErrorLabel keeps the identity strip accurate without dumping a long
 // transport/decode error into the fixed-width header. The full error remains at
 // the fetch boundary for tests and diagnostics; this is the operator-facing
-// classification. The timeout class is checked FIRST and TYPED — a *url.Error's
-// text spells the whole request and would otherwise fall to the default bucket,
-// which is how a slow fetch used to read "offline".
+// classification.
+//
+// EVERY class this binary can KNOW is decided on a TYPE, never on the error's
+// text, and the reason is that the text is not ours: a status error's message
+// ends in bodyHint(body) — up to 120 characters of the SERVER'S OWN response.
+// The old switch ran strings.Contains over that, so a body that merely SPELLED
+// another status or the oversize words stole the class: a 403 explaining itself
+// with "membership probe returned status 401" read "unauthorized"; a gateway
+// 500 forwarding "upstream status 404" read "snapshot unavailable" — a
+// permanent-looking class for the one failure that is actually retryable.
+//   - timeout: typed (errors.As on *url.Error + errors.Is DeadlineExceeded) —
+//     a *url.Error's text spells the whole request and carries no "timeout"
+//     word, which is how a slow fetch used to read "offline".
+//   - status: typed (*httpStatusError.StatusCode, the int resp.StatusCode was
+//     read as), so the code decides and the body is never consulted.
+//   - oversize: typed (*oversizeBodyError).
+//
+// The trailing string switch is the LEGACY tail: it exists for errors this
+// package did not construct (a hand-built error in a caller or a test). It
+// checks "decode" — a prefix THIS binary writes on decodeTaskListFull's
+// refusals — before the status words, so a decode refusal whose bodyHint quotes
+// a status still lands in its own documented "invalid snapshot" class.
 func snapshotErrorLabel(err error) string {
 	if err == nil {
 		return ""
@@ -400,8 +420,18 @@ func snapshotErrorLabel(err error) string {
 	if isSnapshotTimeout(err) {
 		return labelServerTimeout
 	}
+	var oversize *oversizeBodyError
+	if errors.As(err, &oversize) {
+		return "snapshot too large"
+	}
+	var status *httpStatusError
+	if errors.As(err, &status) {
+		return httpStatusLabel(status.StatusCode)
+	}
 	s := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(s, "decode"):
+		return "invalid snapshot"
 	case strings.Contains(s, "exceeds") && strings.Contains(s, "bytes"):
 		return "snapshot too large"
 	case strings.Contains(s, "status 401"):
@@ -410,9 +440,26 @@ func snapshotErrorLabel(err error) string {
 		return "forbidden"
 	case strings.Contains(s, "status 404"):
 		return "snapshot unavailable"
-	case strings.Contains(s, "decode"):
-		return "invalid snapshot"
 	case strings.Contains(s, "status 5"):
+		return "server error"
+	default:
+		return "offline"
+	}
+}
+
+// httpStatusLabel names a refused fetch's status class from the CODE. 5xx is a
+// range check, not a "status 5" prefix match, so a 5xx is a 5xx whatever the
+// body says — and any other unmapped code (a 400, a 429) keeps the honest
+// generic bucket rather than being guessed at.
+func httpStatusLabel(code int) string {
+	switch {
+	case code == http.StatusUnauthorized:
+		return "unauthorized"
+	case code == http.StatusForbidden:
+		return "forbidden"
+	case code == http.StatusNotFound:
+		return "snapshot unavailable"
+	case code >= 500 && code <= 599:
 		return "server error"
 	default:
 		return "offline"

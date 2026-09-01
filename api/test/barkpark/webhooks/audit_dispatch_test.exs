@@ -41,6 +41,17 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
         _ -> :ok
       end
 
+      # Optional deterministic dwell. `post/3` runs inside the INNER
+      # `WebhookDeliverySupervisor` task, which the OUTER `fan_out/3` task is
+      # blocked on — so sleeping here guarantees the outer supervised task is
+      # still alive to be INSPECTED. The attribution positive control needs
+      # that; without it the task can die between `start_child` returning and
+      # `Process.info/2` sampling, and the control would pass vacuously.
+      case Application.get_env(:barkpark, :audit_dispatch_test_dwell_ms) do
+        ms when is_integer(ms) and ms > 0 -> Process.sleep(ms)
+        _ -> :ok
+      end
+
       {:ok, 200}
     end
   end
@@ -57,6 +68,7 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
         else: Application.delete_env(:barkpark, :webhook_http_adapter)
 
       Application.delete_env(:barkpark, :audit_dispatch_test_pid)
+      Application.delete_env(:barkpark, :audit_dispatch_test_dwell_ms)
     end)
 
     {:ok, org} = Tenancy.create_organization(%{slug: "auditdisp", name: "Audit Disp"})
@@ -91,13 +103,58 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
     }
   end
 
-  # Only the tasks THIS dispatch adds — robust against any pre-existing task on
-  # the shared supervisor at the moment we sample.
+  # `Barkpark.TaskSupervisor` is SHARED — 20+ production spawners use it. A
+  # bracket-and-diff is robust against tasks that were ALREADY there when we
+  # sampled, but NOT against one another spawner starts INSIDE the measured
+  # window: that lands in the diff and reds this file on work the audit path
+  # never did. No budget fixes that; only ATTRIBUTION does.
+  defp supervisor_children do
+    Barkpark.TaskSupervisor |> Task.Supervisor.children() |> MapSet.new()
+  end
+
+  # Raw diff — kept ONLY so the negative control below can show the
+  # interference is real (a decoy DOES land here) before showing that
+  # attribution ignores it.
   defp new_tasks(before) do
     Barkpark.TaskSupervisor
     |> Task.Supervisor.children()
     |> MapSet.new()
     |> MapSet.difference(before)
+  end
+
+  # The new tasks ATTRIBUTABLE to the audit fan-out, by the code identity of
+  # the function each task was spawned with.
+  #
+  # `Task.Supervisor.start_child(sup, fun)` makes `Task.Supervised` stash
+  # `{module, name, 0}` of that fun under `:"$initial_call"` in the child's
+  # process dictionary (this is what `:proc_lib.initial_call/1` reads). The
+  # audit fan-out's task is the closure defined in
+  # `Barkpark.Webhooks.Dispatcher.fan_out/3`, so its module is the Dispatcher
+  # — and a task spawned by any OTHER caller (or by a test decoy) carries that
+  # other module and is correctly ignored.
+  @dispatcher Barkpark.Webhooks.Dispatcher
+
+  defp audit_dispatch_tasks(before) do
+    before |> new_tasks() |> Enum.filter(&spawned_by_dispatcher?/1)
+  end
+
+  defp spawned_by_dispatcher?(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} ->
+        # `List.keyfind/3`, not `Keyword.get/2`: a process dictionary is a plain
+        # 2-tuple list whose keys are not all atoms.
+        case List.keyfind(dict, :"$initial_call", 0) do
+          {_key, {mod, _fun, _arity}} -> mod == @dispatcher
+          _ -> false
+        end
+
+      # Already exited between `children/0` and this sample — it cannot be a
+      # live leak past the sandbox owner, which is the whole point of the
+      # assertion. `:audit_dispatch_test_dwell_ms` keeps a task we DO want to
+      # inspect alive; see the positive control.
+      nil ->
+        false
+    end
   end
 
   describe "sync toggle (:audit_dispatch_async false) — the leak-proof path" do
@@ -115,7 +172,7 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
       # Bracket the WHOLE emit: under the sync toggle its post-commit bridge runs
       # the fan-out inline, so no fire-and-forget task should ever land on the
       # shared supervisor.
-      before = Barkpark.TaskSupervisor |> Task.Supervisor.children() |> MapSet.new()
+      before = supervisor_children()
 
       {:ok, _event} =
         Audit.emit(%{
@@ -131,9 +188,14 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
       assert_received {:delivered, "https://sink.example/hook", body}
       assert Jason.decode!(body)["action"] == "sso_login"
 
-      # NO fire-and-forget task was spawned → nothing can outlive the sandbox
-      # owner and deadlock a concurrent DDL test.
-      assert MapSet.size(new_tasks(before)) == 0
+      # NO fire-and-forget task was spawned BY THE AUDIT FAN-OUT → nothing of
+      # ours can outlive the sandbox owner and deadlock a concurrent DDL test.
+      # Attribution, not a raw count: `Barkpark.TaskSupervisor` is shared with
+      # 20+ production spawners, and a task one of THEM starts inside this
+      # window is not evidence about this code path. The positive control in
+      # the async describe proves this filter still catches a real audit spawn.
+      assert audit_dispatch_tasks(before) == [],
+             "the audit fan-out spawned a supervised task under the sync toggle"
 
       # Exactly ONE durable audit delivery row (source_kind "audit"), proving the
       # inline path went through the same state machine as the async one.
@@ -151,11 +213,43 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
     test "dispatch on a no-subscription event is an inline no-op", %{org: org} do
       # No matching audit webhook exists — audit_targets returns []; the inline
       # fan-out is a no-op: no delivery, no task.
-      before = Barkpark.TaskSupervisor |> Task.Supervisor.children() |> MapSet.new()
+      before = supervisor_children()
       assert :ok = Dispatcher.dispatch_audit_async(event_for(org))
 
       refute_received {:delivered, _, _}
-      assert MapSet.size(new_tasks(before)) == 0
+      assert audit_dispatch_tasks(before) == []
+    end
+
+    test "a concurrent UNRELATED task on the shared supervisor is not attributed here",
+         %{org: org} do
+      # NEGATIVE CONTROL for the attribution filter. This is the interference
+      # that reds the raw-count form of the assertion above: `Audit.emit` is
+      # not the only caller of `Barkpark.TaskSupervisor`, and a task another
+      # spawner starts inside the bracketed window lands in the diff.
+      _wh = audit_sub(org)
+      before = supervisor_children()
+
+      {:ok, decoy} =
+        Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn -> Process.sleep(5_000) end)
+
+      on_exit(fn -> Process.exit(decoy, :kill) end)
+
+      {:ok, _event} =
+        Audit.emit(%{
+          category: "auth",
+          action: "sso_login",
+          subject: "u-decoy",
+          metadata: %{"organization_id" => org.id}
+        })
+
+      # The interference is REAL: the raw diff this assertion used to be sees
+      # the decoy and would report a leak the audit path never caused.
+      assert decoy in new_tasks(before),
+             "decoy did not land on the shared supervisor — this control proves nothing"
+
+      # Attribution ignores it: the decoy's `$initial_call` names THIS module,
+      # not Barkpark.Webhooks.Dispatcher.
+      assert audit_dispatch_tasks(before) == []
     end
 
     test "dispatch returns :ok (inline), never a spawned-task tuple", %{org: org} do
@@ -181,6 +275,32 @@ defmodule Barkpark.Webhooks.AuditDispatchTest do
       assert is_pid(pid)
       # Not delivered synchronously — it runs on the spawned task.
       refute_received {:delivered, _, _}
+      assert_receive {:delivered, "https://sink.example/hook", _body}, 2000
+    end
+
+    test "POSITIVE CONTROL: attribution still SEES a genuine audit spawn", %{org: org} do
+      # Without this, `audit_dispatch_tasks/1 == []` in the sync describe could
+      # be vacuous — a filter that matches nothing passes for the wrong reason.
+      # Here the audit path REALLY spawns, and the same filter must catch it.
+      _wh = audit_sub(org)
+      Application.put_env(:barkpark, :audit_dispatch_async, true)
+      # Hold the inner delivery so the OUTER fan-out task is guaranteed alive
+      # while we inspect its `$initial_call` — otherwise a fast task could die
+      # first and this control would "pass" on an empty diff.
+      Application.put_env(:barkpark, :audit_dispatch_test_dwell_ms, 300)
+
+      on_exit(fn ->
+        Application.put_env(:barkpark, :audit_dispatch_async, false)
+        Application.delete_env(:barkpark, :audit_dispatch_test_dwell_ms)
+      end)
+
+      before = supervisor_children()
+      assert {:ok, pid} = Dispatcher.dispatch_audit_async(event_for(org))
+
+      assert pid in audit_dispatch_tasks(before),
+             "the attribution filter missed a task the audit fan-out really spawned — " <>
+               "the sync-path assertion it guards would then be unfailable"
+
       assert_receive {:delivered, "https://sink.example/hook", _body}, 2000
     end
   end

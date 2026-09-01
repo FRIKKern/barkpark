@@ -1,0 +1,20 @@
+{
+  // TEMPORARY — delete this file when task-f33e18958975bd45 lands.
+  //
+  // `pnpm typecheck` runs this instead of tsconfig.json purely to quarantine
+  // ONE file. Widening the type program over the 9 previously-ungated test
+  // files surfaced four REAL `noUncheckedIndexedAccess` faults in
+  // tests/template-pins.test.ts's hand-rolled semver comparator (TS18048 at
+  // 32:16, TS2532 at 51:43 and 51:56, TS2345 at 60:33). Fixing them is a
+  // SOURCE change; the lane that enabled the gate was config-only.
+  //
+  // The exclusion lives HERE and not in tsconfig.json on purpose: eslint runs
+  // with `projectService: true`, so a file outside every tsconfig `include` is
+  // a parsing error rather than a lint pass. Keeping tsconfig.json wide means
+  // all 20 files still LINT; only this narrower program skips the one file.
+  //
+  // DONE = the four errors are fixed, this file is deleted, and `typecheck`
+  // goes back to a bare `tsc --noEmit`.
+  "extends": "./tsconfig.json",
+  "exclude": ["**/dist", "**/node_modules", "tests/template-pins.test.ts"]
+}

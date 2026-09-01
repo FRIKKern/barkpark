@@ -9,4 +9,11 @@ export {
   detectEdgeRuntime,
 } from './live'
 
-export type { BarkparkLiveProps, BarkparkLiveProviderProps, StartLiveOpts } from './live'
+export type {
+  BarkparkLiveProps,
+  BarkparkLiveProviderProps,
+  StartLiveOpts,
+  // The return type of `detectEdgeRuntime` (core's `EdgeSignal`), so a consumer
+  // can name what it holds without reaching into `@barkpark/core` directly.
+  EdgeSignal,
+} from './live'

@@ -476,9 +476,12 @@ defmodule BarkparkWeb.Contract.MutateTest do
       # Wire the Bulldocs plugin in so Barkpark.Plugins.Hooks fires its
       # before_save/before_publish gates deterministically (the same pattern
       # tasks_quality_gate_test.exs uses for the Tasks plugin).
-      prior = Application.get_env(:barkpark, :plugins, [])
+      # `PluginEnv.capture/0`, not `get_env(…, [])`: on the unset boot baseline
+      # a `[]` default would restore an EXPLICIT `[]`, which BootCollectors
+      # reads as the discovery kill switch and leaks to later tests.
+      prior = Barkpark.PluginEnv.capture()
       Application.put_env(:barkpark, :plugins, [Barkpark.Plugins.Bulldocs])
-      on_exit(fn -> Application.put_env(:barkpark, :plugins, prior) end)
+      on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
       Barkpark.LabelFixtures.register_tags!("test")
       :ok
     end

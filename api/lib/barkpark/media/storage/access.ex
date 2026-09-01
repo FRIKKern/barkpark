@@ -165,16 +165,111 @@ defmodule Barkpark.Media.Storage.Access do
   # (the comment above) already warns about. Works unmodified on a
   # `Phoenix.LiveView.Socket` too: both arms below read only `.assigns`, which
   # a socket carries the same shape as a conn.
+  #
+  # SECOND, INDEPENDENT CALLER FAMILY (task-d55b02001cf589f0), arrived at from
+  # the opposite direction and recorded here because the agreement is the
+  # evidence: the versioned media READ path asks the same question in two
+  # places — `V1.MediaController.render_opts/3` (and its fork in
+  # `MediaCollectionsController`) gates URL SIGNING on it, and the anonymous
+  # listing clamp gates on it too. Two unrelated changes independently
+  # concluded that a local `conn.assigns[:api_token] != nil` would be the
+  # divergence the comment above warns about; here it would have refused a
+  # signature to the account-session workspace member this arm exists to admit.
+  #
+  # KEEP THE SOCKET IN THE SPEC. The media-side change originally wrote the
+  # narrower `Plug.Conn.t() | map()`, which would have silently retracted the
+  # contract the Studio picker relies on. Widen, never narrow, this signature.
+  # THE PUBLIC-READ TIER IS NOT A MEDIA PRINCIPAL
+  # (`dr-w2-s7-followup-scoped-media-public-read-audit`).
+  #
+  # This predicate is the ONE seat the whole media READ tier keys on:
+  # `V1.MediaController.visibility_clamp_opts/1` and its
+  # `MediaCollectionsController` fork decide the listing ceiling with it,
+  # `render_opts/3` decides URL SIGNING with it, and `permission_set/2` /
+  # `allowed?/4` below decide the single-asset answer with it. Until this
+  # change it asked PRESENCE — any `%ApiToken{}` at all — so the `public-read`
+  # tier, the browser-shipped site credential that `cloud/sites/deploy.ex`
+  # bakes into a built site as `BARKPARK_TOKEN`, was a full media principal:
+  #
+  #   * `Tenancy.Auth`'s `@read_perms` maps `public-read -> :read`, so the token
+  #     clears `ResolveWorkspace`'s membership gate on the scoped media routes;
+  #   * `:scoped_api` in `router.ex` mounts no `Plugs.PublicRead` and MUST NOT
+  #     (search-template D49 — deny-by-default would 403 the 21 routes riding
+  #     it), so nothing upstream clamps the tier;
+  #   * so `visibility_clamp_opts/1` returned `[]`, and a `bp_visibility:
+  #     "private"` asset was served — rows, `count`, `filename`, `path`, `size`
+  #     — to a credential shipped in public site JS. MEASURED before this
+  #     change on the listing, search AND show doors:
+  #     `test/barkpark/media/scoped_media_public_read_tier_audit_test.exs`.
+  #
+  # This is the media twin of the fix `DocumentsRetriever` landed for the
+  # scoped DOCUMENT search door
+  # (`DocumentsRetriever.restrict_anonymous_to_public_types/3`, "KEYED ON THE
+  # PERMISSION, NOT ON `principal_type`"), and it is keyed the same way:
+  # by MEMBERSHIP in the permission list, never list equality. `TokenController`
+  # mints from the allowlist `~w(public-read read)` over a PUBLIC route, so
+  # `["public-read", "read"]` is a shape anyone can ask for and a
+  # `perms == ["public-read"]` pin would be escapable by construction.
+  #
+  # ONE OWNER, NOT A FOURTH COPY. The tier test itself is
+  # `Content.Schema.bypasses_visibility_gate?/1` (canonical slug
+  # `visibility-gate-tier`) — the same predicate behind the anonymous search
+  # allowlist, the batch document read and the corpus-graph clamp. A
+  # hand-rolled `"public-read" in token.permissions` here is exactly the
+  # "one rule, several private copies" defect this module's own history warns
+  # about two comments up.
+  #
+  # WHAT IS DELIBERATELY UNCHANGED:
+  #
+  #   * PUBLIC assets. `delivery_ok?("public", _, _)` is true regardless, and
+  #     `visibility_clamp: :public` is precisely the tier this credential was
+  #     minted for — a public-read caller still gets 200s, just the public tier.
+  #   * The ACCOUNT arm. `account_member?/1` is untouched, so the
+  #     account-session workspace member the arm exists to admit is
+  #     byte-identical.
+  #   * A token struct carrying no `permissions` LIST keeps today's answer.
+  #     Absence of the key is not evidence of the tier (the same reading
+  #     `Plugs.PublicRead.public_read_token?/1` takes), and a `nil` there must
+  #     not become a `FunctionClauseError` on a delivery path — a crash where a
+  #     boolean belongs is the defect the `admin?/1` comment below records.
+  #   * `share_view/2`. A resolved SHARE token is its own credential and never
+  #     routes through this predicate (see the `render_opts/4` comment in
+  #     `MediaCollectionsController`); this change cannot reach it.
+  #
+  # SIGNING FOLLOWS, AND THAT IS THE POINT, NOT A SIDE EFFECT. With the tier no
+  # longer a principal, `render_opts/3` stops honouring `appendRequestSecret`
+  # for it, so a public-read caller can no longer mint a `SignedUrl` for a
+  # `token`-visibility asset — the "I know an id" -> BYTES escalation
+  # `v1_media_anon_read_clamp_test.exs` closed for the anonymous caller and
+  # left open for this one.
   @doc """
-  Whether the request/socket carries a PRINCIPAL — an API token (any
-  permission) or an account session whose user is a member of the RESOLVED
-  workspace. Authentication, not authorization: `allowed?/4` decides what
-  that someone may do.
+  Whether the request/socket carries a media-delivery PRINCIPAL — an API token
+  OUTSIDE the `public-read` tier (share tokens included:
+  `Auth.create_share_token/5` inserts a real `api_tokens` row) or an account
+  session whose user is a member of the RESOLVED workspace.
+
+  Authentication, not authorization: `allowed?/4` decides what that someone may
+  do. A `public-read` token is a valid token and a workspace member, and is
+  still NOT a principal here — it is the public tier by construction, so it
+  reads the public tier and nothing else.
   """
   @spec authenticated?(Plug.Conn.t() | Phoenix.LiveView.Socket.t() | map()) :: boolean()
   def authenticated?(conn) do
-    match?(%{assigns: %{api_token: %_{} = _}}, conn) or account_member?(conn)
+    token_principal?(conn) or account_member?(conn)
   end
+
+  defp token_principal?(%{assigns: %{api_token: %_{id: _, permissions: perms} = token}})
+       when is_list(perms) do
+    Barkpark.Content.Schema.bypasses_visibility_gate?(
+      Barkpark.Content.CallerContext.from_token(token)
+    )
+  end
+
+  # A token struct with no `permissions` list (or no `id`) — absence of the key
+  # is not evidence of the tier, so it keeps the historical PRESENCE answer.
+  defp token_principal?(%{assigns: %{api_token: %_{}}}), do: true
+
+  defp token_principal?(_), do: false
 
   defp account_member?(%{assigns: assigns}) do
     case {assigns[:current_user], assigns[:current_workspace]} do

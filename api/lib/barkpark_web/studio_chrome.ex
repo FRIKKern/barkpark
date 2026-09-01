@@ -28,8 +28,10 @@ defmodule BarkparkWeb.StudioChrome do
     * `current_workspace` / `current_project` — hydrated to full structs
       (PluginScopeSession bridges id+slug maps; the switcher and the
       navigation handlers want `.name`/`.slug`); flat surfaces fall back
-      to the seeded Default scope, mirroring the flat Studio's
-      `ensure_tenancy_scope`.
+      to the seeded Default scope ONLY for a principal
+      `Tenancy.Auth.authorize/3` actually authorizes there — a principal
+      holding no membership anywhere keeps a nil workspace rather than
+      being handed a tenant it cannot act in (task-e9386e19bd7bb376).
     * `shares_admin?` — WORKSPACE-SCOPED. Delegates to
       `BarkparkWeb.Studio.Caps.admin?/1`, the same seat-authority oracle
       StudioLive derives its `caps.admin` from and re-checks in every
@@ -126,7 +128,23 @@ defmodule BarkparkWeb.StudioChrome do
       |> assign_new(:dataset, fn -> params["dataset"] || Content.default_dataset() end)
       |> assign_new(:scope_prefix, fn -> scope_prefix_from(params) end)
       |> hydrate_scope()
+      # ORDER IS THE FIX (task-e656670726427b96): derive the principal's OWN
+      # workspace BEFORE the Default fallback, which is no-op-if-set. Reversed,
+      # it fails SILENTLY — the fallback pins Default and the derivation never
+      # runs. Same ordering contract as the HTTP pipeline's
+      # DeriveWorkspaceFromToken → AssignDefaultScope (router.ex:40-61).
+      |> derive_scope_from_principal()
       |> default_scope_fallback()
+      # PRESENCE, not merely value (task-e9386e19bd7bb376). Now that the
+      # fallback is authority-checked, a perfectly legitimate mount can end with
+      # no workspace at all, and that used to be the rare unseeded-tenancy case.
+      # Every consumer already reads `assigns[:current_workspace]` (bracket
+      # access, nil-safe) — pin the keys as PRESENT-and-nil anyway, so the day
+      # someone writes `@current_workspace` in a studio-layout template it
+      # degrades to a blank instead of KeyError-crashing the mount for exactly
+      # the principal this row narrows.
+      |> assign_new(:current_workspace, fn -> nil end)
+      |> assign_new(:current_project, fn -> nil end)
       # Resolve the workspace THEME IDENTITY (ts-w4e) from the now-resolved
       # current_workspace, so root.html.heex stamps `data-bp-theme` server-side
       # (no flash). A nil/unseeded workspace → the default theme → no attribute.
@@ -514,23 +532,144 @@ defmodule BarkparkWeb.StudioChrome do
     end
   end
 
-  # Flat surfaces (no resolver ran): pin the seeded Default scope so the
-  # full switcher renders everywhere — the same fallback the flat Studio's
-  # ensure_tenancy_scope applies. An unseeded tenancy stays nil and the
-  # layout's dataset-only branch covers it.
+  # The LiveView analogue of `BarkparkWeb.Plugs.DeriveWorkspaceFromToken`
+  # (task-e656670726427b96). The flat live_sessions — `:plugin_admin` most
+  # sharply — carry NO workspace producer: `LiveAuth :admin` gates on the
+  # workspace-BLIND `admin` permission and assigns only `:api_token`, so before
+  # this step `default_scope_fallback/1` below was the ONLY producer and it
+  # pinned the seeded Default for every admin, including one whose token is
+  # bound elsewhere. That is not merely a display defect on plugin surfaces:
+  # Tickets' `InboxLive` reads this very assign for `Keys.mint/rotate/pause/
+  # unpause`, so a workspace-B admin MINTED a live credential into Default and
+  # could churn Default's existing keys. `Keys.scope_workspace/2` is fail-closed
+  # and was working perfectly — it was handed the wrong workspace and faithfully
+  # confined the operator to the wrong tenant. The fence was never the bug; the
+  # assign upstream of it was.
+  #
+  # Runs only when nothing stronger resolved: a scoped mount's LiveScope /
+  # PluginScopeSession assign short-circuits on the same truthy guard the
+  # fallback uses, so the scoped surfaces are untouched by this step.
+  #
+  # FAIL-SOFT, exactly like the plug — it never halts, it only narrows:
+  #
+  #   * `:current_workspace` already set → untouched.
+  #   * no `:api_token` (the account-session arm, which carries `:current_user`)
+  #     → untouched, and the Default fallback below is CORRECT for it:
+  #     `LiveAuth.authorize_user/3` authorizes that principal against the
+  #     DEFAULT workspace specifically, so Default IS its authorized scope.
+  #   * `workspace_id` nil — a genuinely instance-wide token — → untouched
+  #     HERE, because this step only binds a workspace the principal NAMES and
+  #     that principal names none. It does NOT follow that Default is its scope:
+  #     `default_scope_fallback/1` below now authority-checks that population
+  #     through `Tenancy.Auth.authorize/3` and leaves it nil when it holds no
+  #     membership anywhere (task-e9386e19bd7bb376, superseding the carve-out
+  #     this bullet used to assert).
+  #   * `workspace_id` names no row → untouched rather than a 500.
+  defp derive_scope_from_principal(socket) do
+    if socket.assigns[:current_workspace] do
+      socket
+    else
+      with %{workspace_id: ws_id} when is_binary(ws_id) <- socket.assigns[:api_token],
+           %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_id(ws_id) do
+        assign(socket, current_workspace: ws, current_project: project_for(ws))
+      else
+        _ -> socket
+      end
+    end
+  end
+
+  # Flat surfaces where the principal named NO workspace of its own (an
+  # instance-wide token, or the account session, whose authority
+  # `LiveAuth.authorize_user/3` measures on Default): pin the seeded Default
+  # scope — but ONLY when the principal is actually AUTHORIZED in Default — so
+  # the full switcher renders for the operators entitled to it. An unseeded
+  # tenancy stays nil and the layout's dataset-only branch covers it.
+  #
+  # SETTLED (task-e656670726427b96, acceptance 4): it must NOT pin Default for a
+  # principal that HAS a resolvable workspace — a bound principal's own tenant is
+  # a fact, and overriding it with Default silently redirects that operator's
+  # WRITES into a tenant they may hold no authority in. Hence
+  # `derive_scope_from_principal/1` runs first and this is now genuinely a
+  # last-resort fallback, reached only when there is nothing truer to bind to.
+  #
+  # AUTHORITY-CHECKED SINCE task-e9386e19bd7bb376, which RETRACTS the
+  # unconditional pin task-e656670726427b96 left standing for the
+  # membership-less population. `Tenancy.Auth.authorize/3` (auth.ex) is
+  # literally `member?(token, workspace_id) and permits?(token, action)` —
+  # there is NO global-permission bypass — so an api_token with
+  # `workspace_id == nil` and no `workspace_memberships` row is authorized in
+  # NO workspace, the seeded Default INCLUDED. Pinning Default for that
+  # principal handed it a tenant it cannot be authorized in, and every
+  # workspace-scoped read and write on the surface then ran against that
+  # tenant: Tickets' `InboxLive` read Default's ticket keys and MINTED a live
+  # credential into Default; `ChatLive` listed Default's REGISTERED EXECUTION
+  # HOSTS (remote command-execution targets).
+  #
+  # The old argument was the HTTP sibling `DeriveWorkspaceFromToken`'s
+  # nil-token carve-out. It does not survive: preserving Default for a
+  # nil-workspace token is not evidence that the token has AUTHORITY in
+  # Default, and `authorize/3` says it does not.
+  #
+  # BOTH LEGITIMATE DEFAULT POPULATIONS ARE UNCHANGED, because both clear the
+  # very same chokepoint:
+  #
+  #   * the ACCOUNT-session arm — `LiveAuth.authorize_user/3` already demands
+  #     `Tenancy.Auth.authorize(user, default_ws_id, :admin) == :ok` before it
+  #     will `{:cont, …}` at all, so this principal holds a real Default
+  #     membership and clears `:read` here a fortiori.
+  #   * a TOKEN that holds a Default membership — `authorize/3` passes.
+  #
+  # A principal that clears neither keeps `current_workspace: nil`. We NARROW
+  # rather than halt on purpose: the six resolver-less live_sessions also carry
+  # genuinely scope-free host surfaces (OrgAdminLive, StyleguideLive,
+  # SwatchLive, TmuxLive) an instance operator must keep reaching. nil is an
+  # already-supported chrome state — an unseeded tenancy has always produced it
+  # — and every consumer on that path is fail-CLOSED, not fail-open:
+  #
+  #   * the studio layout renders its dataset-only branch;
+  #   * `Caps.admin?/1` DENIES on a nil workspace (arpss-w10), so no admin
+  #     chrome;
+  #   * `ChatLive.execution_hosts/1` pattern-matches `%{id: ws_id}` -> `[]`;
+  #   * Tickets' `Keys.list/1` AND its by-id fences are fail-closed on nil —
+  #     `scope_workspace(query, nil)` is `is_nil(t.workspace_id)`, i.e. the
+  #     un-bound tenant, NOT every tenant (proved by `keys_test.exs`'s
+  #     colliding two-tenant fixture). A `Keys.mint/1` from this state creates
+  #     an un-bound, member-less, kind-fenced key — inert on every normal route
+  #     — instead of a live credential inside Default.
   defp default_scope_fallback(socket) do
     if socket.assigns[:current_workspace] do
       socket
     else
-      case Tenancy.get_default_workspace() do
-        %Tenancy.Workspace{} = ws ->
-          assign(socket, current_workspace: ws, current_project: project_for(ws))
-
-        _ ->
-          socket
+      with %Tenancy.Workspace{} = ws <- Tenancy.get_default_workspace(),
+           true <- authorized_in?(socket, ws.id) do
+        assign(socket, current_workspace: ws, current_project: project_for(ws))
+      else
+        _ -> socket
       end
     end
   end
+
+  # Both principal kinds go through the ONE chokepoint, `Tenancy.Auth.authorize/3`
+  # — never a second, laxer copy of the membership rule.
+  #
+  # `:read` is deliberately the WEAKEST action: the only question here is "may
+  # this principal be SCOPED to this tenant at all". Every consumer re-gates its
+  # own action afterwards (`Caps.admin?/1` for the admin chrome, the per-surface
+  # deny-gates for writes), so demanding `:admin` here would strip chrome from a
+  # legitimate read-only member of Default.
+  #
+  # Checked as an OR over BOTH arms rather than `api_token || current_user`:
+  # `LiveAuth.on_mount(:fetch_api_token)` (the `:plugin_public` session) assigns
+  # BOTH, and a `||` would silently answer the question for the wrong principal.
+  defp authorized_in?(socket, ws_id) do
+    principal_authorized?(socket.assigns[:api_token], ws_id) or
+      principal_authorized?(socket.assigns[:current_user], ws_id)
+  end
+
+  defp principal_authorized?(nil, _ws_id), do: false
+
+  defp principal_authorized?(principal, ws_id),
+    do: Tenancy.Auth.authorize(principal, ws_id, :read) == :ok
 
   # HOST-LEVEL admin, for the self-update banner ONLY (arpss-w10): an admin
   # API token OR an account whose role on the DEFAULT workspace is admin-grade.

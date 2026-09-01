@@ -14,6 +14,7 @@ import {
   num,
   asList,
   isMap,
+  capitalize,
   renderInlines,
   glyphHtml,
   roleOf,
@@ -567,34 +568,22 @@ const numberedList: Emit = (b) => list({ ...b, ordered: true } as Block)
 
 /* callout (walk.ex callout/3, article) */
 
+// The four named callout tones; anything else (including a missing tone) falls
+// back to `info`. Both derived strings come off this ONE list: the CSS modifier
+// IS the tone slug, and the default summary label is its sentence-cased form.
+// This replaced two parallel five-arm switches that between them spelled every
+// tone word three times — the class switch even repeated each word on its own
+// arm (`case 'success': return 'success'`) — so a fifth tone meant editing two
+// functions in lockstep and a label could silently drift from its class.
+const CALLOUT_TONES = ['success', 'warning', 'danger', 'neutral']
+
 function calloutToneClass(tone: unknown): string {
-  switch (str(tone)) {
-    case 'success':
-      return 'success'
-    case 'warning':
-      return 'warning'
-    case 'danger':
-      return 'danger'
-    case 'neutral':
-      return 'neutral'
-    default:
-      return 'info'
-  }
+  const slug = str(tone)
+  return CALLOUT_TONES.includes(slug) ? slug : 'info'
 }
 
 function toneLabel(tone: unknown): string {
-  switch (str(tone)) {
-    case 'success':
-      return 'Success'
-    case 'warning':
-      return 'Warning'
-    case 'danger':
-      return 'Danger'
-    case 'neutral':
-      return 'Neutral'
-    default:
-      return 'Info'
-  }
+  return capitalize(calloutToneClass(tone))
 }
 
 const callout: Emit = (b) => {

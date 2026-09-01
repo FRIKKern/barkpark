@@ -141,6 +141,16 @@ export function makeFilterExpression(
  * fields — a corrupted / over-broad projection). `label` names the caller field
  * ('expand'/'fields') for the error. Shared by the builder's expand()/select()
  * and getDoc's expand/fields so both fail closed the same way.
+ *
+ * @internal THIS SHOULD BE EXPORTED — the marker records a deferral, not a
+ * decision that it stays private. `@barkpark/nextjs` already carries a
+ * hand-written copy of this function in its `server/core.ts`, and that copy's
+ * own doc comment says it exists because widening core's index cost gzipped
+ * bundle bytes. This is the motivating case for the export-surface gate in
+ * `tests/export-surface.test.ts`. Exporting it here and deleting the mirror is
+ * tracked as task-296d7e0028c7e7e0, held only until the correctness queue
+ * drains. Do not read this marker as "private by design", and do not add a
+ * third copy — take the deferred task instead.
  */
 export function normalizeFieldList(input: string | string[], label: string): string {
   const list = Array.isArray(input) ? input : [input]
@@ -165,6 +175,13 @@ export function normalizeFieldList(input: string | string[], label: string): str
  * over-broad query, the exact corruption `normalizeFieldList`/the `in`/`nin` guard
  * already fail closed on. `field` names the caller param for the error. Array
  * entries only: a caller passing a pre-joined `'a,b'` string may intend CSV.
+ *
+ * @internal Guards a wire format a consumer never assembles by hand. Every
+ * param it protects — search `types`, graph `kinds`/`sources`, media
+ * `tags`/`facets` — is reached through an exported function that applies this
+ * guard on the way to the query string. Calling it directly would only make
+ * sense while hand-building a Barkpark URL, which is not a supported path;
+ * `buildQueryString` (exported) is.
  */
 export function assertNoCommaEntries(values: readonly string[], field: string): void {
   const bad = values.find((v) => v.includes(','))

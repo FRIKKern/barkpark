@@ -141,6 +141,12 @@ defmodule Barkpark.PluginFreeBootTest do
   @coupling_guarded_runtime [
     {"Barkpark.Plugins.Media", "lib/barkpark/media.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/delivery/asset_response.ex"},
+    # `V1.MediaController.asset_doc/2` (task-d55b02001cf589f0) calls the SAME
+    # `PluginAssets.file_scope_opts/1` the asset_response.ex reach directly
+    # above already sanctions — pure over the `%MediaFile{}` row (workspace_id/
+    # project_id -> a scope keyword list, no DB/network/config touch), so it is
+    # identical, not merely similar, under `:plugins []`.
+    {"Barkpark.Plugins.Media", "lib/barkpark_web/controllers/v1/media_controller.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/processing.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/checkout.ex"},
     {"Barkpark.Plugins.Media", "lib/barkpark/media/storage/collections.ex"},

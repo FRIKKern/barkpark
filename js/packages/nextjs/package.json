@@ -116,9 +116,10 @@
   },
   "scripts": {
     "build": "tsup && node ../../scripts/post-build-dts.mjs",
-    "test": "vitest run --project=server && vitest run --project=client",
+    "test": "vitest run --project=server && vitest run --project=client && vitest run --project=browser",
     "test:server": "vitest run --project=server",
     "test:client": "vitest run --project=client",
+    "test:browser": "vitest run --project=browser",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "size": "size-limit"
@@ -152,6 +153,9 @@
     "size-limit": "^11.1.0",
     "@size-limit/preset-small-lib": "^11.1.0",
     "jsdom": "^25.0.0",
+    "@vitest/browser": "^4.1.0",
+    "@vitest/browser-playwright": "^4.1.0",
+    "playwright": "^1.48.0",
     "server-only": "^0.0.1"
   }
 }

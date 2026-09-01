@@ -130,8 +130,8 @@ residual):
   enforce it. It deliberately does not commit for you: a tool that commits
   mid-incident is one surprise too many, and it could not push to a protected
   main anyway until the glass is down.
-- **The live-protection authority is UNARMED until `BREAKGLASS_TOKEN` exists —
-  and it now says so out loud.** Reading branch protection needs repo-admin
+- **The live-protection authority depends on `BREAKGLASS_TOKEN` staying valid —
+  and it says so out loud.** Reading branch protection needs repo-admin
   scope, which `GITHUB_TOKEN` never carries and no workflow `permissions:` key
   can grant (`administration` is not an accepted scope — writing it makes the
   whole workflow file invalid, so the scream would never run;
@@ -140,9 +140,13 @@ residual):
   the workflow mapped UNKNOWN to exit 0, and the run concluded **SUCCESS** — a
   watch with no live authority reporting green. A 401/403 is now a
   **configuration fault**: not retried, exit 3, and the workflow **fails the
-  run**. So until the secret is provisioned this workflow reds every 30 minutes.
-  That is the honest state of a watch that cannot read what it watches; it is
-  not a false alarm to silence. A 5xx, a timeout, or a **403 rate limit** keeps
+  run**. This bullet read "until the secret is provisioned this workflow reds
+  every 30 minutes" until 2026-09-01; `BREAKGLASS_TOKEN` has existed since
+  **2026-07-28** (`gh secret list`) and `gh run list --workflow=breakglass-watch.yml`
+  shows the watch concluding **success**. The residual is therefore not the
+  secret's absence but its **expiry or revocation**: on the day it lapses this
+  reds every 30 minutes, which is the honest state of a watch that cannot read
+  what it watches — not a false alarm to silence. A 5xx, a timeout, or a **403 rate limit** keeps
   the old treatment — three attempts, then a `::warning`; a rate limit clears on
   its own and reding main every 30 minutes for one would be the fatigue this
   epic refuses.

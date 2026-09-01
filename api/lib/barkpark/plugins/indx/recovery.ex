@@ -23,20 +23,28 @@ defmodule Barkpark.Plugins.Indx.Recovery do
     1. `Client.get_user_datasets/1` to list the datasets the Indx user owns.
        On `{:error, _}` (Indx down / unconfigured) it is a no-op + debug log
        — the upsert rebuild-fallback in `IndexerWorker` is the backstop.
-    2. Parse names of the form `<prefix>_<scope>_v<n>` (prefix from
-       `Settings.dataset_prefix`, default `"bp"`), group by scope, and pick
-       the MAX version `n` per scope.
-    3. For each scope, `Indexer.restore_pointer/2` seats the live pointer to
-       that dataset with an EMPTY key_map — but ONLY when the scope has no
+    2. Parse names of the form `<prefix>_<index_key>_v<n>` (prefix from
+       `Settings.dataset_prefix`, default `"bp"`), group by index key, and
+       pick the MAX version `n` per index key.
+    3. For each index key, `Indexer.restore_pointer/2` seats the live pointer
+       to that dataset with an EMPTY key_map — but ONLY when that index has no
        live pointer yet (so a rebuild that already ran is never clobbered).
 
-  ## slug == scope assumption
+  ## The parsed segment IS the index key
 
-  The parsed `<scope>` segment is a SLUGIFIED scope (`Indexer.slug/1` lower-
-  cases + underscores it). For every current Barkpark scope ("production")
-  the slug equals the scope verbatim, so we use the parsed segment directly
-  as the pointer key. A future scope whose name slugifies to something else
-  would need a slug→scope reverse map; today none does.
+  `Indexer.next_dataset_name/3` names a dataset `<prefix>_<index_key>_v<n>`,
+  and an index key from `Indexer.index_key/2` is already slug-safe
+  (`<slugified-scope>_t<16 hex>`), so the segment this module parses out is the
+  pointer key verbatim — no slug→scope reverse map is needed, and the tenancy
+  partition survives a restart.
+
+  Names whose parsed segment is NOT a well-formed index key are SKIPPED with a
+  debug log rather than passed on. That covers a dataset left behind by a
+  release that named datasets `<prefix>_<scope>_v<n>` (tenant-blind), plus any
+  unrelated dataset in the same Indx account: seating a pointer from one would
+  re-establish exactly the shared, tenant-blind slot this partition removes.
+  Skipping costs nothing — the first save re-enqueues a rebuild, which creates
+  the correctly-keyed dataset.
   """
 
   use GenServer
@@ -44,6 +52,10 @@ defmodule Barkpark.Plugins.Indx.Recovery do
   require Logger
 
   alias Barkpark.Plugins.Indx.{Client, Indexer, Persistence, Settings}
+
+  # `Indexer.is_index_key/1` is a defguard (a macro), so it must be required
+  # before `parse/2` can use it to reject a tenant-blind dataset name.
+  require Barkpark.Plugins.Indx.Indexer
 
   @doc "Start the recovery GenServer. Registered under the module name."
   def start_link(opts \\ []) do
@@ -64,9 +76,9 @@ defmodule Barkpark.Plugins.Indx.Recovery do
   end
 
   @doc """
-  Run one recovery pass. Listed datasets are grouped by parsed scope and the
-  MAX-version dataset per scope re-seats that scope's live pointer (only when
-  the scope has no live pointer). Tolerant: any failure is logged, never
+  Run one recovery pass. Listed datasets are grouped by parsed index key and
+  the MAX-version dataset per index key re-seats that index's live pointer
+  (only when it has no live pointer). Tolerant: any failure is logged, never
   raised, and an Indx-down client error is a quiet no-op (the upsert
   rebuild-fallback is the backstop).
 
@@ -79,7 +91,7 @@ defmodule Barkpark.Plugins.Indx.Recovery do
     client_opts = Keyword.take(opts, [:base_url, :timeout])
     prefix = Settings.get().dataset_prefix
 
-    # P4b Hardening B: rehydrate the persisted key_map for each scope BEFORE
+    # P4b Hardening B: rehydrate the persisted key_map for each index BEFORE
     # the live-dataset rediscovery seats the pointer. `Indexer.restore_pointer/2`
     # reads from the persisted file and uses that key_map verbatim when its
     # `dataset` matches what the engine reports — so a fresh boot now arrives
@@ -91,14 +103,14 @@ defmodule Barkpark.Plugins.Indx.Recovery do
     case client.get_user_datasets(client_opts) do
       {:ok, names} when is_list(names) ->
         names
-        |> latest_per_scope(prefix)
-        |> Enum.each(fn {scope, dataset} ->
-          case Indexer.restore_pointer(scope, dataset) do
+        |> latest_per_index(prefix)
+        |> Enum.each(fn {index_key, dataset} ->
+          case Indexer.restore_pointer(index_key, dataset) do
             :ok ->
-              size = persisted |> Map.get(scope, %{}) |> Map.get(:key_map, %{}) |> map_size()
+              size = persisted |> Map.get(index_key, %{}) |> Map.get(:key_map, %{}) |> map_size()
 
               Logger.info(
-                "Indx.Recovery: restored pointer scope=#{scope} dataset=#{dataset} key_map=#{size} entries"
+                "Indx.Recovery: restored pointer index=#{index_key} dataset=#{dataset} key_map=#{size} entries"
               )
 
             :noop ->
@@ -123,26 +135,40 @@ defmodule Barkpark.Plugins.Indx.Recovery do
       :ok
   end
 
-  # Group `<prefix>_<scope>_v<n>` dataset names by parsed scope, keeping the
-  # MAX version's full dataset name per scope. Names that don't match the
-  # shape are dropped. Returns a list of {scope, dataset}.
-  defp latest_per_scope(names, prefix) do
+  # Group `<prefix>_<index_key>_v<n>` dataset names by parsed index key, keeping
+  # the MAX version's full dataset name per index key. Names that don't match
+  # the shape are dropped. Returns a list of {index_key, dataset}.
+  defp latest_per_index(names, prefix) do
     names
     |> Enum.flat_map(fn name -> parse(name, prefix) end)
-    |> Enum.group_by(fn {scope, _ver, _name} -> scope end)
-    |> Enum.map(fn {scope, entries} ->
-      {_scope, _ver, dataset} = Enum.max_by(entries, fn {_s, ver, _n} -> ver end)
-      {scope, dataset}
+    |> Enum.group_by(fn {index_key, _ver, _name} -> index_key end)
+    |> Enum.map(fn {index_key, entries} ->
+      {_key, _ver, dataset} = Enum.max_by(entries, fn {_k, ver, _n} -> ver end)
+      {index_key, dataset}
     end)
   end
 
-  # Parse one `<prefix>_<scope>_v<n>` name → [{scope, version, name}] or [].
-  # The scope segment is the SLUGIFIED scope (see moduledoc): for current
-  # scopes slug == scope, so it doubles as the pointer key directly.
+  # Parse one `<prefix>_<index_key>_v<n>` name → [{index_key, version, name}]
+  # or []. The parsed segment IS the pointer key (see moduledoc). A segment
+  # that is not a well-formed index key — a tenant-blind name from an older
+  # release, or a foreign dataset in the same Indx account — is SKIPPED, not
+  # seated: seating it would recreate the shared, tenant-blind pointer slot.
   defp parse(name, prefix) when is_binary(name) do
     case Regex.run(~r/^#{Regex.escape(prefix)}_(.+)_v(\d+)$/, name) do
-      [_, scope, ver] when scope != "" -> [{scope, String.to_integer(ver), name}]
-      _ -> []
+      [_, index_key, ver] when index_key != "" ->
+        if Indexer.is_index_key(index_key) do
+          [{index_key, String.to_integer(ver), name}]
+        else
+          Logger.debug(
+            "Indx.Recovery: skipping dataset #{name} — `#{index_key}` is not a " <>
+              "tenant-partitioned index key (pre-partition or foreign dataset)"
+          )
+
+          []
+        end
+
+      _ ->
+        []
     end
   end
 

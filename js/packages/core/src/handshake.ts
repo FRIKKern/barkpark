@@ -5,6 +5,15 @@ import type { BarkparkClientConfig, MetaResponse } from './types'
 import { request } from './transport'
 import { scopePrefix } from './scope'
 
+/**
+ * @internal A cache-management surface whose two useful methods are lifecycle
+ * details this package owns: `invalidate` is called for the consumer on a
+ * schema mismatch, and `clear` exists for tests. `createHandshakeCache` is
+ * exported and returns one, so a consumer who needs their own cache instance
+ * can already get it; naming the interface would additionally freeze these
+ * three methods as a contract for something whose invalidation rules are
+ * expected to follow the server's meta endpoint rather than the caller.
+ */
 export interface HandshakeCache {
   /** Fetch + cache /v1/meta. Dedupes concurrent calls by projectUrl+workspace+project+dataset. */
   get(config: BarkparkClientConfig): Promise<MetaResponse>

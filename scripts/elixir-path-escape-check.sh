@@ -132,6 +132,19 @@ scripts/gate-announces-skips.test.sh'
 #       <- api/test/barkpark/sites/deploy_runner_stage_names_test.exs
 #   .github/workflows/deploy.yml, scripts/check-deployyml-filters.sh
 #       <- api/test/barkpark/sites/deployyml_connectors_pathfilter_test.exs
+#
+# THE TWO `web/public/bp-paper-editor.*` ENTRIES: the vendored Web Component
+# artifacts, read by api/test/barkpark/paper_editor_vendor_drift_test.exs. They
+# are here for BOTH of this list's effects, and the second one is the point.
+# Declaring them makes the ratchet honest about the read — but it also puts
+# them in the DISPATCH set, so a PR that edits only the vendored web copy now
+# runs the Elixir suite and trips the tripwire. Without that, the guard would
+# only ever see the api side move, and the web copy could still be edited alone
+# — one door watched, the other open. Priced like the deploy/ entries above:
+# these two artifacts are touched only when the editor is rebuilt (58 commits
+# in the repo's life), so the full-suite cost is rare and bounded.
+#   web/public/bp-paper-editor.bundle.js, web/public/assets/bp-paper-editor.css
+#       <- api/test/barkpark/paper_editor_vendor_drift_test.exs
 ELIXIR_TEST_ONLY_PATHS='.codex/skills/epic-cycle/scripts/**
 .github/unreachable-assert-message.allow
 .github/workflows/deploy.yml
@@ -154,8 +167,13 @@ scripts/pds-published-artifact-door_test.sh
 scripts/pds-record-parity.test.sh
 scripts/pds-status-only-residue.exs
 scripts/pds-window-sentinel_test.sh
+scripts/test-env-leak-allowlist.txt
+scripts/test-env-leak-gate.sh
+scripts/test-env-leak-gate.test.sh
 scripts/unreachable-assert-message-check.sh
-web/__tests__/**'
+web/__tests__/**
+web/public/assets/bp-paper-editor.css
+web/public/bp-paper-editor.bundle.js'
 
 # EXEMPT — escapes that resolve to a real file but are NOT reachable from the
 # default `mix test` lane. Each line is `<path><TAB><why>`; an entry without a

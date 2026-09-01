@@ -18,15 +18,78 @@
 //   - data-* attributes (name -> value map)
 //   - the `style` attribute (parsed to a property -> value map, order-insensitive;
 //     required for D4 inline-mark spans and D6 chat markup — "shape+style-attribute")
+//   - EVERY OTHER attribute, minus the small justified {@link VARIABLE_ATTRS} denylist
 //   - immediate text (whitespace-collapsed; pure-whitespace text nodes are dropped so
 //     HEEx indentation does not create phantom diffs)
 //   - element children, compared in order, recursively
 //
-// It deliberately does NOT compare incidental attributes (href/src/id/colspan/…): the
-// golden's own shape projection (golden-gen slice) is defined as tag + class-set +
-// data-* + text, and comparing e.g. CDN image URLs would red on cross-surface query
-// ordering that is not a structural divergence. `style` is the one addition, mandated
-// by D4/D6 for the inline-mark and chat families.
+// ## Why the exclusion is a DENYLIST, not an allowlist (2026-08-31)
+//
+// This comparator's `data-*` leg carries NO allowlist, and that breadth is exactly
+// why it caught a live half-change (Elixir emitting an attribute the JS mirror
+// lacked). Every other attribute used to be dropped wholesale, with the stated
+// rationale "incidental attributes (href/src/id/colspan/…) … comparing e.g. CDN
+// image URLs would red on cross-surface query ordering". That rationale justifies
+// the URL-bearing attributes and NOTHING ELSE — but the exclusion was far wider
+// than its own justification, so the mirrors could diverge silently on:
+//
+//   - `role`, `aria-label`, `aria-hidden`, `aria-selected` — accessibility SEMANTICS
+//   - `scope`, `colspan`, `rowspan`, `headers` — table STRUCTURE
+//   - `alt` — accessibility text
+//   - `rel` (`noopener`) — a SECURITY property
+//   - `x`/`y`/`points`/`d`/`viewBox`/`fill`/`stroke` — the whole SVG geometry
+//     surface, which for the `route` block IS the content
+//
+// MEASURED before the change, across all 64 pd-golden fixtures: 41 distinct
+// attribute names appear on the two mirrors and were compared by nothing, and
+// they currently AGREE on every one — the exclusion was hiding no live
+// divergence, only future ones. A `scope="row"` -> `scope="col"` flip on the
+// Elixir mirror (real screen-reader breakage) left the whole harness green at
+// 81/81. So the exclusion set is now a NAMED DENYLIST with a per-entry reason,
+// and everything outside it is compared. A guard that compares a subset reads
+// as coverage while failing silently; that is the failure mode being closed.
+
+/**
+ * The ONLY attributes exempt from comparison, each for a stated reason. Anything
+ * not listed here is compared — adding an entry needs a reason of the same kind
+ * (the value legitimately varies BETWEEN SURFACES without a structural meaning).
+ */
+export const VARIABLE_ATTRS: ReadonlySet<string> = new Set([
+  // URL-bearing: a CDN/asset URL's query-parameter ORDER differs per surface
+  // (the original, legitimate rationale for this exclusion).
+  'href',
+  'src',
+  'srcset',
+  'poster',
+  // Identity-bearing: React/Astro/Next may mint their own instance ids, and an
+  // id is a handle rather than a structural property.
+  'id',
+])
+
+/**
+ * Tags on which `width`/`height` are consumer-supplied RESPONSIVE SIZING HINTS
+ * rather than structure — `composed-doc-parity.test.ts`'s "RESPONSIVE WIDTHS"
+ * case asserts exactly that (`{...image, width: 320}` must stay shape-identical
+ * to the base image). Scoped to the media tags on purpose: on `<svg>` and its
+ * children `width`/`height` ARE geometry, so they stay compared there.
+ */
+const SIZING_HINT_TAGS: ReadonlySet<string> = new Set([
+  'img',
+  'video',
+  'audio',
+  'iframe',
+  'source',
+  'embed',
+  'canvas',
+  'object',
+])
+
+/** True when `name` on `tag` is exempt from comparison. */
+function isVariableAttr(tag: string, name: string): boolean {
+  if (VARIABLE_ATTRS.has(name)) return true
+  if ((name === 'width' || name === 'height') && SIZING_HINT_TAGS.has(tag)) return true
+  return false
+}
 
 import { Window, type Element } from 'happy-dom'
 
@@ -40,6 +103,12 @@ export interface ShapeNode {
   data: Record<string, string>
   /** the `style` attribute parsed to a property -> value map (order-insensitive) */
   style: Record<string, string>
+  /**
+   * Every remaining attribute, name -> value: everything that is not `class`,
+   * not `style`, not `data-*` (those have their own fields above) and not in
+   * {@link VARIABLE_ATTRS}. Names are lower-cased; values compared verbatim.
+   */
+  attrs: Record<string, string>
   /** immediate text of this element (whitespace-collapsed), excluding descendants */
   text: string
   /** element children, in document order */
@@ -69,13 +138,23 @@ function parseStyle(raw: string | null): Record<string, string> {
 
 /** Project a live DOM element into a normalized {@link ShapeNode}. */
 function project(el: Element): ShapeNode {
+  const tag = el.tagName.toLowerCase()
   const classAttr = el.getAttribute('class') ?? ''
   const classes = classAttr.split(/\s+/).filter(Boolean)
   classes.sort()
 
   const data: Record<string, string> = {}
+  const attrs: Record<string, string> = {}
   for (const attr of Array.from(el.attributes)) {
-    if (attr.name.startsWith('data-')) data[attr.name] = attr.value ?? ''
+    const name = attr.name.toLowerCase()
+    if (name.startsWith('data-')) {
+      data[name] = attr.value ?? ''
+      continue
+    }
+    // `class` and `style` are projected into their own order-insensitive fields.
+    if (name === 'class' || name === 'style') continue
+    if (isVariableAttr(tag, name)) continue
+    attrs[name] = attr.value ?? ''
   }
 
   // Immediate text: only direct text-node children, whitespace-collapsed.
@@ -91,10 +170,11 @@ function project(el: Element): ShapeNode {
   }
 
   return {
-    tag: el.tagName.toLowerCase(),
+    tag,
     classes,
     data,
     style: parseStyle(el.getAttribute('style')),
+    attrs,
     text: normText(text),
     children,
   }
@@ -145,6 +225,9 @@ function diffNode(a: ShapeNode, b: ShapeNode, path: string, diffs: string[]): vo
 
   diffAttrMap(a.data, b.data, `${path} <${a.tag}> data-*`, diffs)
   diffAttrMap(a.style, b.style, `${path} <${a.tag}> style`, diffs)
+  // Everything else: aria-*, role, scope, colspan, alt, rel, SVG geometry, …
+  // Only VARIABLE_ATTRS is exempt (see the module note on denylist-not-allowlist).
+  diffAttrMap(a.attrs, b.attrs, `${path} <${a.tag}> attr`, diffs)
 
   if (a.text !== b.text) {
     diffs.push(`${path} <${a.tag}>: text "${a.text}" != "${b.text}"`)

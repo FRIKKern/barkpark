@@ -10,7 +10,7 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 - `@barkpark/react` `PortableDoc` — the canonical, Phoenix-faithful PortableDocument renderer, plus `@barkpark/react/client` media hydration (mermaid diagrams + asciicasts) and `@barkpark/react/paper-surface.css` for the skin
 - Tailwind CSS
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
-- Sample schemas (`page`, `post`, `author`) + seed script
+- Sample schemas (`page`, `post`, `author`, `contact`) + seed script
 - SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
 - Graceful states: branded `not-found.tsx`, an `error.tsx` boundary, and a `loading.tsx` skeleton
 
@@ -37,6 +37,24 @@ Default dev token: `barkpark-dev-token` (read + write + admin). **Must not be us
 BARKPARK_TOKEN=barkpark-dev-token
 BARKPARK_SERVER_TOKEN=barkpark-dev-token
 ```
+
+## Contact form
+
+`app/contact/` posts to `POST /v1/data/mutate/:dataset`, which **always requires a
+token** — anonymous callers can read a public dataset but can never write to it.
+The Server Action therefore attaches `BARKPARK_SERVER_TOKEN` itself
+(`app/contact/actions.ts`); it is not on `barkpark.config.ts`, so the credential
+stays out of any module a client component could import. With the token unset the
+form fails on every submission.
+
+Create the `contact` document type in Studio before pointing the form at a real
+project — `schemas/contact.ts` is the shape it writes. Keep it
+`visibility: 'private'`: submissions carry a visitor's email address and must not
+be readable over the public anonymous read path this site uses for its content.
+
+A failed submission shows the visitor one fixed sentence; the upstream detail goes
+to the server log only (`lib/submission-error.ts`), because the raw error can name
+your API host, dataset, workspace/project slugs, or schema fields.
 
 ## Realtime revalidation
 

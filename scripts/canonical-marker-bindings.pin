@@ -3,6 +3,7 @@ chat-stable-boundary	advance
 chat-stable-segments	advance
 cloud-provider-seam	DetectCapabilities
 codelist-lookup	lookup
+concept-token-fold	conceptTokenRe
 connector-credential-sealing	createCredentialCipher
 connector-tenant-routing	resolveTenantForEvent
 connector-webhook-demux	createWebhookRequestHandler
@@ -23,6 +24,7 @@ github-projects-sync	sync
 github-reporter-acknowledgement	criterion
 heat-quantile-bin	HeatQuantileBins
 http-redirect-policy	CheckRedirect
+indx-index-identity	index_key
 instance-content-bootstrap	Run
 instrument-exit-vocabulary	createExitVocabulary
 mcp-task-tools	registerTaskTools
@@ -31,6 +33,7 @@ platform-delivery-record	record_all
 preview-manifest	project
 pull-provenance-schema-guard	pulled_schema_row
 rate-limit-client-ip	client_ip
+scope-project-resolution	scope_project_id
 search-crystal-period-key	period_start_for
 secret-redaction	redact
 share-scope-tenancy	declarable_scope?
@@ -42,11 +45,13 @@ studio-scope-resolution	resolve_scope
 task-chip-resolve	resolve_wikilink
 task-claimable-statuses	claimable_statuses
 task-criteria-progress	progress
+task-publish-wall-preflight	checkLabelSpineLocal
 taskboard-render	Render
 teams-tenant-id	teamsTenantId
 template-manifest	Load
 tenancy-scope	scope_to_workspace_or_global
 tenant-blob-key	blob_key
+totp-step-verification	matching_step
 url-scoped-build	ScopedURL
 user-auth	register_user
 uuid-guarded-fetch	uuid_or_nil

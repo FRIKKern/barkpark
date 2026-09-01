@@ -787,6 +787,18 @@ func mcpBoolPtr(b bool) *bool { return &b }
 // with a message that still names the created id (so a created-but-publish-failed
 // task is not silently lost).
 func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp.CallToolResult {
+	// The SAME pre-flight `bp task create --publish` runs (tasks_publish_wall.go),
+	// and it matters more here: an MCP caller is an agent, and an agent that reads
+	// "created task-N but publish failed" files a phantom and moves on. Refuse
+	// before writing anything, in the machine-readable words the wall uses.
+	if publish {
+		if ref := checkLabelSpineLocal(body); ref != nil {
+			return mcpTextError(mcpPublishWallMessage(ref))
+		}
+		if ref, _ := checkTagRegistry(ctx, body); ref != nil {
+			return mcpTextError(mcpPublishWallMessage(ref))
+		}
+	}
 	createOp := map[string]any{"_type": "task"}
 	for k, v := range body {
 		createOp[k] = v
@@ -809,10 +821,10 @@ func mcpTaskCreate(ctx manifest.Context, body map[string]any, publish bool) *mcp
 		pubOp := map[string]any{"publish": map[string]any{"id": bareID, "type": "task"}}
 		pStatus, pBody, pErr := sendTaskMutations(ctx, []map[string]any{pubOp})
 		if pErr != nil {
-			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v", bareID, pErr))
+			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %v%s", draftID, pErr, orphanedDraftRemedyText(draftID, bareID)))
 		}
 		if pStatus < 200 || pStatus >= 300 {
-			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %s", bareID, mutateErrorMessage(pStatus, pBody)))
+			return mcpTextError(fmt.Sprintf("task_create: created %s but publish failed: %s%s", draftID, mutateErrorMessage(pStatus, pBody), orphanedDraftRemedyText(draftID, bareID)))
 		}
 		docStatus = "published"
 		warnBody = pBody

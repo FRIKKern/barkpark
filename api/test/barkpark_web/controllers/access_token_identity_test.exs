@@ -13,6 +13,22 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
     5. An owned token acts ONLY as its bound owner: `access mine` returns ONLY
        that user's grants, never another user's.
     6. `access mine` never emits `link_token_hash`.
+
+  task-d70c118c80c1d0df — the self-mint's WORKSPACE binding (a cross-tenant
+  read escalation, one layer below #4's owner-identity binding):
+
+    7. A caller with ZERO `Tenancy.Membership` rows self-mints a
+       WORKSPACE-LESS token (no membership row is ever created for it — in
+       particular none in the seeded Default Workspace) and that token is
+       REFUSED reading Default-Workspace content on the membership-gated
+       scoped route.
+    8. A caller who IS a member of workspace W self-mints a token bound to W
+       (never the Default Workspace) and reads W's content successfully.
+    9. Permissions are DERIVED from the caller's REAL resolved workspace role
+       (Option A), never a literal: owner/admin mint up to
+       `["read", "write", "admin"]`, a member still gets `["read"]` only, and
+       a non-member (no resolvable role) mints the member-tier `["read"]`
+       workspace-less token from #7.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -24,6 +40,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
   alias Barkpark.Accounts
   alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
+  alias Barkpark.Content
   alias Barkpark.Repo
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -347,6 +364,153 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
 
       assert %{"personal_access_token" => pat} = json_response(conn, 201)
       assert pat["owner_user_id"] == user.id
+    end
+  end
+
+  # ── 10-12. task-d70c118c80c1d0df — self-mint WORKSPACE binding ─────────────
+  #
+  # The escalation one layer below case 4's owner-identity binding:
+  # `AuthController.create_token/2` used to pass NO `:workspace_id`, so
+  # `Auth.create_personal_access_token/3` fell back to the seeded Default
+  # Workspace for EVERY caller and granted it a `Tenancy.Membership` with
+  # zero relationship check. Fixed by resolving the caller's OWN membership
+  # (workspace + role) instead, and minting workspace-less when it holds none.
+
+  # Self-mint via the real HTTP route (the vulnerable surface), as the session
+  # user. Returns {raw_token, personal_access_token_json}.
+  defp self_mint(user, params \\ %{"name" => "cli"}) do
+    conn =
+      build_conn()
+      |> bearer(user_bearer(user))
+      |> post("/v1/auth/tokens", params)
+
+    assert %{"token" => raw, "personal_access_token" => pat} = json_response(conn, 201)
+    {raw, pat}
+  end
+
+  # A minimal public "post" schema in a fresh per-test dataset, so a scoped
+  # query has a real row to (fail to) return — mirrors scoped_routing_test.exs.
+  defp register_post_schema!(dataset) do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+        dataset
+      )
+
+    :ok
+  end
+
+  defp unique_dataset(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+
+  describe "case 10 — a caller with ZERO membership self-mints WORKSPACE-LESS" do
+    test "no Default-Workspace membership is created, and the scoped route refuses the token" do
+      {default_ws, default_project} = ensure_default_scope!()
+      dataset = unique_dataset("pat-escalation")
+      register_post_schema!(dataset)
+      {:ok, _doc} = create_document_in!(default_ws, default_project, "post", %{}, dataset)
+
+      user = register_user(uniq_email("zero-member"))
+      {raw, pat} = self_mint(user)
+
+      # The no-escalation guarantee from case 4 still holds.
+      assert pat["owner_user_id"] == user.id
+      # Option A: a non-member resolves no role, so the member-tier default.
+      assert pat["permissions"] == ["read"]
+
+      {:ok, minted} = Auth.verify_token(raw)
+      # Workspace-less: no fallback to the Default Workspace, and — the actual
+      # escalation vector — NO Tenancy.Membership row anywhere, in particular
+      # none in the Default Workspace.
+      assert is_nil(minted.workspace_id)
+      refute TenancyAuth.member?(minted, default_ws.id)
+
+      # The read-leak proof: the membership-gated scoped route (the same gate
+      # `ResolveWorkspace`'s own moduledoc calls "the cross-dataset read-leak
+      # fix") refuses this token against the Default Workspace's content —
+      # where, on unpatched code (workspace_id defaulted to Default + a
+      # Membership row inserted for it), this request answered 200.
+      resp =
+        build_conn()
+        |> bearer(raw)
+        |> get("/w/#{default_ws.slug}/p/#{default_project.slug}/v1/data/query/#{dataset}/post")
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
+    end
+  end
+
+  describe "case 11 — a member of workspace W self-mints a token bound to W" do
+    test "the token binds to W (never the Default Workspace) and reads W's content" do
+      {default_ws, _default_project} = ensure_default_scope!()
+      ws = create_workspace!()
+      project = create_project!(ws)
+      dataset = unique_dataset("pat-member-ws")
+      register_post_schema!(dataset)
+      {:ok, _doc} = create_document_in!(ws, project, "post", %{}, dataset)
+
+      user = register_user(uniq_email("member-w"))
+      {:ok, _membership} = TenancyAuth.create_membership(ws.id, user.id, "member", "user")
+
+      {raw, pat} = self_mint(user)
+
+      assert pat["owner_user_id"] == user.id
+      assert pat["permissions"] == ["read"]
+
+      {:ok, minted} = Auth.verify_token(raw)
+      assert minted.workspace_id == ws.id
+      refute minted.workspace_id == default_ws.id
+      assert TenancyAuth.member?(minted, ws.id)
+
+      resp =
+        build_conn()
+        |> bearer(raw)
+        |> get("/w/#{ws.slug}/p/#{project.slug}/v1/data/query/#{dataset}/post")
+
+      assert resp.status == 200
+    end
+  end
+
+  describe "case 12 — permissions are DERIVED from the caller's real role (Option A)" do
+    test "an owner self-mints up to [\"read\", \"write\", \"admin\"]" do
+      ws = create_workspace!()
+      user = register_user(uniq_email("owner-mint"))
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "owner", "user")
+
+      {_raw, pat} = self_mint(user)
+
+      assert Enum.sort(pat["permissions"]) == ["admin", "read", "write"]
+    end
+
+    test "an admin self-mints up to [\"read\", \"write\", \"admin\"]" do
+      ws = create_workspace!()
+      user = register_user(uniq_email("admin-mint"))
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "admin", "user")
+
+      {_raw, pat} = self_mint(user)
+
+      assert Enum.sort(pat["permissions"]) == ["admin", "read", "write"]
+    end
+
+    test "a member still gets [\"read\"] only — @pat_allowed_member_permissions is not widened" do
+      ws = create_workspace!()
+      user = register_user(uniq_email("member-mint"))
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "member", "user")
+
+      {_raw, pat} = self_mint(user)
+
+      assert pat["permissions"] == ["read"]
+    end
+
+    test "a client-supplied role in the request body is ignored — the resolved role wins" do
+      ws = create_workspace!()
+      user = register_user(uniq_email("no-escalate-role"))
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "member", "user")
+
+      {_raw, pat} = self_mint(user, %{"name" => "cli", "role" => "owner"})
+
+      # A member requesting "owner" via the body still gets member-tier read
+      # only — the role comes from the caller's REAL membership, never params.
+      assert pat["permissions"] == ["read"]
     end
   end
 end

@@ -10,6 +10,7 @@ defmodule Barkpark.Search.Intelligence do
   """
 
   import Ecto.Query
+  alias Barkpark.Content.Scope
   alias Barkpark.Search.{Crystal, Crystallizer, Event, MergePattern, Sanitizer, Synonyms}
   alias Barkpark.Repo
 
@@ -511,7 +512,8 @@ defmodule Barkpark.Search.Intelligence do
             duration_ms: nil
           })
 
-        distinct = count_distinct_correction_sessions(surface, scope, from_norm, to_norm)
+        distinct =
+          count_distinct_correction_sessions(surface, scope, from_norm, to_norm, workspace_id)
 
         promoted =
           distinct >= 2 and
@@ -522,15 +524,30 @@ defmodule Barkpark.Search.Intelligence do
     end
   end
 
-  defp count_distinct_correction_sessions(surface, scope, from_norm, to_norm) do
+  defp count_distinct_correction_sessions(surface, scope, from_norm, to_norm, workspace_id) do
     # SQL COUNT(DISTINCT session_key) — never fetch every distinct session row into
     # Elixir just to take length/1 (these are anonymous, attacker-driven writes).
+    #
+    # `scope_ws/2` for the same reason every other Event read in this module takes
+    # it, and with more at stake than a read: the four keys below (`surface`,
+    # `scope`, `query_normalized`, `object_id`) are ALL caller-supplied and
+    # identical across tenants — `"production"` is the universally-seeded scope
+    # slug — so without the workspace bind this count is BOTH an echoed
+    # cross-tenant volume oracle (the caller reads it back as
+    # `distinct_sessions`, rendered `distinctSessions` by
+    # `POST /v1/data/search/:dataset/correction`, an OptionalToken door) and, via
+    # the `distinct >= 2` gate in `do_record_correction/4`, a channel by which
+    # one tenant's corrections promote a synonym into ANOTHER tenant's live
+    # search config. Fail-closed on nil through the `:shared_only` sentinel
+    # (`workspace_id IS NULL`) — exactly the row set an unresolved/flat caller's
+    # own correction events land in.
     from(e in Event,
       where:
         e.surface == ^surface and e.scope == ^scope and e.event_type == "correction" and
           e.query_normalized == ^from_norm and e.object_id == ^to_norm,
       select: count(e.session_key, :distinct)
     )
+    |> scope_ws(workspace_id)
     |> Repo.one()
   end
 
@@ -687,10 +704,17 @@ defmodule Barkpark.Search.Intelligence do
   # callers stay behaviour-identical; a real workspace_id narrows to that tenant
   # so a scope STRING shared across workspaces no longer unions their roll-ups.
   # Binds on `workspace_id`, present on Crystal, MergePattern and Event alike.
-  defp scope_ws(queryable, nil), do: from(x in queryable, where: is_nil(x.workspace_id))
-
+  #
+  # Mapped onto the centralized clause in `Content.Scope`, byte-for-byte: the
+  # `:shared_only` sentinel IS `workspace_id IS NULL`, and the binary arm IS
+  # `workspace_id == ^ws`. Deliberately the WORKSPACE-ONLY helper, NOT
+  # `scope_to_workspace_including_global/3`: intel roll-ups have no shared
+  # layer, so a tenant must never see NULL-workspace rows folded into its own
+  # counts. `Search.Synonyms` takes the including-global helper for the opposite
+  # reason (its NULL rows are a deliberately shared synonym layer) — the two
+  # boundaries look alike and are not, so they stay separate helpers on purpose.
   defp scope_ws(queryable, workspace_id),
-    do: from(x in queryable, where: x.workspace_id == ^workspace_id)
+    do: Scope.scope_to_workspace(queryable, workspace_id || :shared_only)
 
   # Anonymous actors collapse to ONE globally-shared `actor_key == "anon"`, so an
   # anon recent-queries read would union every anonymous session/tenant. Fail

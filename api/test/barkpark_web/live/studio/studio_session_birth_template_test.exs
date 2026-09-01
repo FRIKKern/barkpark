@@ -77,8 +77,9 @@ defmodule BarkparkWeb.Studio.StudioSessionBirthTemplateTest do
 
     assert created, "expected the created session draft row to exist"
 
-    assert [%{"id" => "session-body", "type" => "paragraph"} = run] =
-             created.content["blocks"],
+    session_blocks = created.content["blocks"]
+
+    assert match?([%{"id" => "session-body", "type" => "paragraph"}], session_blocks),
            """
            A Studio-born session must carry ONE seeded paragraph run.
 
@@ -88,6 +89,8 @@ defmodule BarkparkWeb.Studio.StudioSessionBirthTemplateTest do
 
            got: #{inspect(created.content["blocks"])}
            """
+
+    [run] = session_blocks
 
     assert run["content"] == [], "the seeded run is EMPTY — a place to type, not content"
 

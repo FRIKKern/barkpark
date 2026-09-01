@@ -228,13 +228,47 @@ func getJSONAttempt(ctx context.Context, c *apiclient.Client, path string) ([]by
 		return nil, false, fmt.Errorf("GET %s: %w", path, err)
 	}
 	if int64(len(body)) > maxBoardFetchBytes {
-		return nil, false, fmt.Errorf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", path, maxBoardFetchBytes)
+		return nil, false, &oversizeBodyError{Path: path, Limit: maxBoardFetchBytes}
 	}
 	if resp.StatusCode != http.StatusOK {
 		retry := resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode <= 599
-		return nil, retry, fmt.Errorf("GET %s: status %d%s", path, resp.StatusCode, bodyHint(body))
+		return nil, retry, &httpStatusError{Path: path, StatusCode: resp.StatusCode, Hint: bodyHint(body)}
 	}
 	return body, false, nil
+}
+
+// httpStatusError carries a refused snapshot fetch's status as the INT it was
+// read as, not only as text. Error() is byte-identical to the fmt.Errorf this
+// replaced, so every caller that reads the message ("GET /v1/tasks: status 401:
+// …") is unchanged — what is new is that snapshotErrorLabel can consult
+// StatusCode via errors.As instead of running strings.Contains over the message.
+// That distinction is load-bearing because Hint is bodyHint(body): up to 120
+// characters of the SERVER'S OWN response, which this binary does not control.
+// A gateway 500 whose body forwards "upstream status 404", or a 404 whose body
+// says "prefix exceeds 0 bytes", used to hijack its own classification and put
+// the wrong failure on the operator's identity strip.
+type httpStatusError struct {
+	Path       string
+	StatusCode int
+	// Hint is bodyHint's ": …" suffix (already condensed and capped) or "".
+	Hint string
+}
+
+func (e *httpStatusError) Error() string {
+	return fmt.Sprintf("GET %s: status %d%s", e.Path, e.StatusCode, e.Hint)
+}
+
+// oversizeBodyError is the typed twin for the maxBoardFetchBytes refusal, for
+// the same reason: "the response blew the cap" is a fact this code KNOWS, and
+// leaving snapshotErrorLabel to infer it from the words "exceeds" and "bytes"
+// let any response body carrying those words claim the class.
+type oversizeBodyError struct {
+	Path  string
+	Limit int64
+}
+
+func (e *oversizeBodyError) Error() string {
+	return fmt.Sprintf("GET %s: response exceeds %d bytes — refusing to parse a truncated body", e.Path, e.Limit)
 }
 
 // bodyHint condenses an error body into a short single-line ": …" suffix so a
@@ -383,13 +417,20 @@ func decodePrime(body []byte) (primeExtras, error) {
 // priority is decoded permissively because content.priority is an integer 0..4
 // on the wire while the board carries it as a display string.
 type taskWire struct {
-	DocID           string          `json:"doc_id"`
-	Title           string          `json:"title"`
-	Lifecycle       string          `json:"lifecycle_status"`
-	Kind            string          `json:"kind"`
-	ParentID        string          `json:"parent_id"`
-	Priority        json.RawMessage `json:"priority"`
-	Labels          []string        `json:"labels"`
+	DocID     string          `json:"doc_id"`
+	Title     string          `json:"title"`
+	Lifecycle string          `json:"lifecycle_status"`
+	Kind      string          `json:"kind"`
+	ParentID  string          `json:"parent_id"`
+	Priority  json.RawMessage `json:"priority"`
+	// Labels is RawMessage for the SAME reason as Priority/Papers/Content/
+	// PreviousWorker/ExpiredAt/Now below: a []string here made ONE row with an
+	// oddly-shaped labels value fail the WHOLE list decode (encoding/json
+	// rejects the entire document on a single field mismatch), which killed
+	// `bp task lint` outright and blanked the board. Live shape that did it:
+	// task-949912e93ee948d4 carries weighted TAG OBJECTS
+	// ({rationale,strength,tag}) in labels. decodeLabels coerces permissively.
+	Labels          json.RawMessage `json:"labels"`
 	Claim           *claimWire      `json:"claim"`
 	Criteria        *criteriaWire   `json:"criteria_progress"`
 	DependencyCount int             `json:"dependency_count"`
@@ -432,6 +473,56 @@ type claimWire struct {
 	Now json.RawMessage `json:"now"`
 }
 
+// decodeLabels coerces a task's `labels` value into the []string the board
+// renders, tolerating every shape the field has actually carried. It is the
+// FIELD-scoped half of detail_data.go's frozen tolerance contract — "one odd
+// task's content must never break the whole list decode" — which a plain
+// []string could not honour, because encoding/json fails the entire document
+// on one mismatched element.
+//
+// A string element is kept verbatim. An OBJECT element is not discarded: the
+// weighted-tag shape ({rationale,strength,tag}) that appears in production
+// carries its name in "tag", so that name becomes the label — recovering real
+// data we are already holding rather than dropping the row's labels wholesale.
+// Anything else (numbers, nested lists, an object with no usable "tag", a blank
+// name) contributes nothing, and a labels value that is not a list at all
+// yields no labels. None of these is an error: the row keeps every other field.
+func decodeLabels(raw json.RawMessage) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+	var items []json.RawMessage
+	if json.Unmarshal(raw, &items) != nil {
+		return nil // null, a scalar, or an object — not a list of labels
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if name := labelName(item); name != "" {
+			out = append(out, name)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// labelName pulls one label's display name out of a single element, or ""
+// when the element carries none.
+func labelName(item json.RawMessage) string {
+	var s string
+	if json.Unmarshal(item, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var obj struct {
+		Tag string `json:"tag"`
+	}
+	if json.Unmarshal(item, &obj) == nil {
+		return strings.TrimSpace(obj.Tag)
+	}
+	return ""
+}
+
 type criteriaWire struct {
 	Met   int `json:"met"`
 	Total int `json:"total"`
@@ -451,7 +542,7 @@ func (w taskWire) toTask() Task {
 		Kind:            w.Kind,
 		ParentID:        w.ParentID,
 		Priority:        coercePriority(w.Priority),
-		Labels:          w.Labels,
+		Labels:          decodeLabels(w.Labels),
 		DependencyCount: w.DependencyCount,
 		DependentCount:  w.DependentCount,
 		InsertedAt:      w.InsertedAt,

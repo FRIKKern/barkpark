@@ -35,7 +35,7 @@ understood and refused for a named reason.
 |---|---|
 | `400 worker_id is required` | Claim/release/stamp/pulse/close need `worker_id` — positional via bp, JSON body via curl. |
 | `409 not_holder` / `criteria_unmet` | Holder-only; a `done` needs criteria met **as stored**. Stamp as you prove — or record why: `--set holder_override=`/`criteria_override="<why>"`. |
-| `409 fenced_off` | Stale `observed_epoch` — **your own `pulse` bumped it**, the lease was swept, or a blocker/move landed on your claimed task (L4). The hint names only the last two. Renew: `bp task claim <id> <same-worker>` (digest kept), close with the new epoch. |
+| `409 fenced_off` | Stale `observed_epoch` — **your own `pulse` bumped it**, the lease was swept, or a blocker/move landed on your claimed task (L4). The hint names the pulse first. Renew: `bp task claim <id> <same-worker>` (digest kept), close with the new epoch. |
 | `409 stale_claim` | Lost a concurrent claim race. Call `/v1/tasks/claim` again. |
 | `409 doc_changed_since_claim` | The brief was edited under your claim — re-read, then close again. |
 | `409 not_ready` | Targeted claim on an `in_progress`/`done`/`cancelled` task (your OWN in_progress re-claim is a **renewal**, not an error). |

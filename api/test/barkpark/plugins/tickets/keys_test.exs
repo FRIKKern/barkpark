@@ -174,7 +174,8 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
       assert {:ok, _} = Keys.verify(b_raw)
 
       # FAIL-CLOSED: a nil workspace scope matches only un-bound keys, so it
-      # cannot reach a bound key either (contrast list/1's nil → all keys).
+      # cannot reach a bound key either — the same predicate `list/1` now
+      # shares (see the nil-scope tests below).
       assert {:error, :not_found} = Keys.revoke(b_key.id, nil)
 
       # ws B — the real owner — still operates its own key.
@@ -207,6 +208,43 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
       ids = ws_a.id |> Keys.list() |> Enum.map(& &1.id)
       assert ids == [a.id]
     end
+
+    # THE LIST DOOR. `get_ticket_key/2`'s fence (`scope_workspace/2`) is
+    # fail-CLOSED on nil — a nil-scoped caller sees only the un-bound keys — and
+    # its own comment names this exact widening as the fail-OPEN it prevents.
+    # `list/1` used to skip the WHERE entirely on nil, so a caller whose
+    # workspace never resolved read EVERY tenant's ticket keys. Both request
+    # callers pass a workspace that can be nil: `TicketKeysController.index`
+    # (`current_workspace_id/1` → nil when `:current_workspace` is unset) and
+    # `InboxLive.fetch_keys` (`socket.assigns[:current_workspace]`, which
+    # StudioChrome's `default_scope_fallback/1` leaves nil on an unseeded
+    # tenancy).
+    test "a nil scope does NOT widen to every tenant's keys (fail-closed, like the by-id fence)" do
+      ws_a = create_workspace!()
+      ws_b = create_workspace!()
+      {:ok, %{key: a}} = Keys.mint(%{name: "A", workspace_id: ws_a.id})
+      {:ok, %{key: b}} = Keys.mint(%{name: "B", workspace_id: ws_b.id})
+
+      ids = nil |> Keys.list() |> Enum.map(& &1.id)
+
+      refute a.id in ids, "a nil scope returned workspace A's ticket keys"
+      refute b.id in ids, "a nil scope returned workspace B's ticket keys"
+    end
+
+    # The mirror of the fence's OTHER half: nil is not "nothing", it is the
+    # un-bound tenant. A key minted with no workspace is exactly what a
+    # nil-scoped caller owns — and it is what `get_ticket_key/2` already
+    # returns them.
+    test "a nil scope still returns the un-bound keys — the tenant nil actually names" do
+      ws = create_workspace!()
+      {:ok, %{key: bound}} = Keys.mint(%{name: "Bound", workspace_id: ws.id})
+      {:ok, %{key: unbound}} = Keys.mint(%{name: "Unbound"})
+
+      ids = nil |> Keys.list() |> Enum.map(& &1.id)
+
+      assert unbound.id in ids
+      refute bound.id in ids
+    end
   end
 
   test "Auth.verify_token/1 never returns a ticket-kind row (fail-closed choke point)" do
@@ -231,5 +269,34 @@ defmodule Barkpark.Plugins.Tickets.KeysTest do
     assert n >= 1
     refute Repo.get(ApiToken, doomed.id)
     assert Repo.get(ApiToken, key.id), "the purge deleted a ticket key — an outsider's identity"
+  end
+
+  # Same collateral class as the kind-fence above, one tier over. The purge is
+  # an instance-wide `delete_all` — it spans every workspace — and the LIKE
+  # pattern matches on a caller-chosen LABEL. `TokenController` lets a tenant
+  # name its own api-kind token freely, so a token labelled "public-read-…"
+  # in ANOTHER workspace was swept by the weekly rotation timer. Fence on the
+  # tier the creator actually stamps (`["public-read"]`, the same predicate
+  # `Plugs.PublicRead.public_read_token?/1` uses) so only real rotation tokens
+  # are in scope.
+  test "the weekly public-read purge never sweeps a tenant's own api token that merely shares the label prefix" do
+    ws = create_workspace!()
+
+    raw = "bppat_" <> Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false)
+
+    {:ok, tenant_token} =
+      Auth.create_token(raw, "public-read-my-blog-feed", "production", ["read"], ws.id)
+
+    {:ok, _raw, doomed} =
+      Barkpark.Auth.PublicRead.create_public_read_token("public-read-2026-old")
+
+    cutoff = DateTime.utc_now() |> DateTime.add(60)
+    {:ok, n} = Barkpark.Auth.PublicRead.purge_public_read_older_than(cutoff)
+
+    assert n >= 1
+    refute Repo.get(ApiToken, doomed.id), "the real rotation token survived the purge"
+
+    assert Repo.get(ApiToken, tenant_token.id),
+           "the purge deleted another tenant's api token on a label-prefix match alone"
   end
 end

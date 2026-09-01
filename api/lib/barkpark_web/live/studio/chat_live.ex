@@ -922,8 +922,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
         socket
       else
         # rename/2 pins title_source: "human" — a human name is never
-        # overwritten by the AI titler (charter D13).
-        StudioChat.rename(id, title)
+        # overwritten by the AI titler (charter D13). rename/2 takes no scope
+        # argument (it reads :global), so the tenancy check is made here.
+        if tenancy_permits?(socket, id), do: StudioChat.rename(id, title)
         refresh_sessions(socket)
       end
 
@@ -936,15 +937,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   def handle_event("session-archive", %{"id" => id}, socket) do
     # Admin LiveView is the `:global` superuser path (charter D17/D18) — the
-    # sidebar sees every workspace's sessions, unchanged from today.
-    StudioChat.archive_session(id, :global)
+    # sidebar sees every workspace's sessions, unchanged from today. The scope
+    # stays :global; `tenancy_permits?/2` is what refuses a CROSS-TENANT reach.
+    if tenancy_permits?(socket, id), do: StudioChat.archive_session(id, :global)
     {:noreply, after_lifecycle_mutation(socket, id)}
   end
 
   # Unarchive keeps an on-screen session on screen (store_session_id unchanged);
   # it only leaves the archived shelf, so a refresh is enough — no push_patch.
   def handle_event("session-unarchive", %{"id" => id}, socket) do
-    StudioChat.unarchive_session(id, :global)
+    if tenancy_permits?(socket, id), do: StudioChat.unarchive_session(id, :global)
     {:noreply, socket |> assign(open_menu_session: nil) |> refresh_sessions()}
   end
 
@@ -953,7 +955,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # protected by RESTRICT FKs (StudioChat.delete_session maps them to a
     # changeset error). Surface that as a flash — never let the FK abort crash
     # the admin LiveView. Its ledgers are permanent; archive is the way out.
-    case StudioChat.delete_session(id, :global) do
+    case delete_within_tenancy(socket, id) do
       {:error, _reason} ->
         {:noreply,
          put_flash(
@@ -4595,6 +4597,56 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # background row leaves the open session untouched. The refreshed session list
   # survives the patch (reset_to_new_chat never re-lists), so the deleted row is
   # gone from the sidebar too.
+  # ── Tenancy confinement for the id-addressed lifecycle clauses ─────────────
+  #
+  # These four clauses take a session id straight off the wire. The flat
+  # `/studio/chat` route rides `LiveAuth.:admin`, a GLOBAL-permission gate that
+  # never reads the acting token's workspace binding, so "this socket mounted"
+  # says nothing about which tenant's rows it may touch. Before this guard a
+  # workspace-bound admin token could rename, archive and DELETE another
+  # workspace's chat sessions by id.
+  #
+  # The predicate refuses ONE thing: a row owned by a workspace that is not the
+  # principal's. It deliberately does NOT narrow to the principal's workspace
+  # wholesale — a NULL `owner_workspace_id` is a legacy / pre-tenancy row and
+  # stays reachable, which is the admin superuser path charter D17/D18 asks for
+  # and what the sidebar has always shown. Note that `Auth.create_token/5`
+  # defaults an omitted workspace to the Default workspace, so almost every
+  # token IS bound; narrowing on the binding alone would have made every legacy
+  # row unmanageable.
+  defp tenancy_permits?(socket, id) do
+    case principal_workspace_id(socket) do
+      # No binding at all (no Default workspace) — the genuine :global superuser.
+      nil ->
+        true
+
+      ws_id ->
+        case StudioChat.get_session(id, :global) do
+          %{owner_workspace_id: owner} when is_binary(owner) -> owner == ws_id
+          # Missing row, or a legacy NULL-owned one: not a cross-tenant reach.
+          _ -> true
+        end
+    end
+  end
+
+  defp principal_workspace_id(socket) do
+    case socket.assigns[:api_token] do
+      %{workspace_id: ws_id} when is_binary(ws_id) -> ws_id
+      _ -> nil
+    end
+  end
+
+  # `:noop` is `delete_session/2`'s own "nothing to delete" return, so a refused
+  # cross-tenant delete takes the existing success-or-noop branch and the flash
+  # stays reserved for the real FK-protected case.
+  defp delete_within_tenancy(socket, id) do
+    if tenancy_permits?(socket, id) do
+      StudioChat.delete_session(id, :global)
+    else
+      :noop
+    end
+  end
+
   defp after_lifecycle_mutation(socket, id) do
     socket = socket |> assign(open_menu_session: nil) |> refresh_sessions()
 

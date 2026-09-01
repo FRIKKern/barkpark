@@ -165,6 +165,7 @@ defmodule Barkpark.Media.Delivery.Search do
     |> maybe_filter_tags(selections["tags"])
     |> maybe_filter_visibility(Keyword.get(opts, :visibility))
     |> maybe_filter_visibility(selections["visibility"])
+    |> maybe_clamp_visibility(Keyword.get(opts, :visibility_clamp))
   end
 
   # Pre-scoped Document subquery the search LEFT-JOINs against. Without scope on
@@ -231,7 +232,7 @@ defmodule Barkpark.Media.Delivery.Search do
   # — never creates a dataset on a search path. Returns nil when unresolvable,
   # so the caller keeps the legacy `m.dataset` STRING filter.
   defp resolve_dataset_id(dataset, opts) when is_binary(dataset) do
-    project_id = Keyword.get(opts, :project_id) || default_project_id()
+    project_id = Barkpark.Tenancy.scope_project_id(opts)
 
     case project_id && Barkpark.Tenancy.get_dataset(project_id, dataset) do
       %Barkpark.Tenancy.Dataset{id: id} -> id
@@ -240,13 +241,6 @@ defmodule Barkpark.Media.Delivery.Search do
   end
 
   defp resolve_dataset_id(_dataset, _opts), do: nil
-
-  defp default_project_id do
-    case Barkpark.Tenancy.get_default_project() do
-      %{id: id} -> id
-      _ -> nil
-    end
-  end
 
   defp scope_media_to_dataset(query, _dataset, dataset_id) when is_binary(dataset_id) do
     where(query, [m], m.dataset_id == ^dataset_id)
@@ -555,7 +549,40 @@ defmodule Barkpark.Media.Delivery.Search do
   # fail-closed `scope_to_workspace/3`, whose nil arm is `where: false`. The
   # name matters here precisely because a reader auditing this raw SQL for
   # fail-closedness would otherwise be told it has a property it does not.
-  defp scope_fragments(opts, start_idx) do
+  #
+  # `:shared_only` — the request-side empty-scope sentinel
+  # (task-3e2a70930c6df723). MUST come before the uuid-dumping clause below:
+  # `first_present/1` passes the atom through (it is neither `nil` nor `""`)
+  # and `uuid_param/1` has only a `nil` clause and an `is_binary/1` clause, so
+  # untranslated the sentinel is a FunctionClauseError — a 500 on a live
+  # `GET /v1/media/search?facets=tags` whenever no Default workspace is seeded,
+  # which is precisely the condition the sentinel exists for.
+  #
+  # THE SAME REQUEST already meets a corrected interpreter twice in this module:
+  # the Ecto results path scopes `m` through `Content.Scope.scope_to_workspace/3`
+  # (`build_query/2`) and the joined doc through `join_scope_workspace/3`, both
+  # of which narrow `:shared_only` to `workspace_id IS NULL`. These fragments are
+  # the raw-SQL mirror of exactly those two clauses, so they emit the same
+  # narrowing: strict `IS NULL` on the primary `media_files m` and `IS NULL` on
+  # the joined `documents d`.
+  #
+  # `is_nil` needs no bound parameter, so `start_idx` is returned UNCHANGED —
+  # the dynamic filters that follow keep their slot numbering.
+  #
+  # Deliberately NOT the `nil` branch below: that one emits no clauses at all
+  # (the explicit-global read), which is the every-tenant answer this sentinel
+  # was introduced to stop an unresolved request from getting.
+  defp scope_fragments(opts, start_idx) when is_list(opts) do
+    case opts[:workspace_id] do
+      :shared_only ->
+        {"AND m.workspace_id IS NULL", "AND d.workspace_id IS NULL", [], start_idx}
+
+      _ ->
+        uuid_scope_fragments(opts, start_idx)
+    end
+  end
+
+  defp uuid_scope_fragments(opts, start_idx) do
     # `m.workspace_id` / `m.project_id` are :binary_id (uuid) columns. Raw
     # Postgrex needs the 16-byte binary, not the UUID string — the Ecto path
     # casts via the schema type, but `Repo.query/2` does not. Dump here; an
@@ -633,8 +660,25 @@ defmodule Barkpark.Media.Delivery.Search do
              ], params ++ [tags], idx + 1}
       end)
 
+    parts = parts ++ visibility_clamp_sql(Keyword.get(opts, :visibility_clamp))
+
     {Enum.join(parts, " "), params}
   end
+
+  # The raw-SQL twin of `maybe_clamp_visibility/2`. The tags facet is the ONE
+  # aggregation that does not route through `build_query/2`, so without this an
+  # anonymous tag census would count a PRIVATE asset's tags — leaking the
+  # vocabulary of the very rows the same request is refused. Same COALESCE
+  # default and same `:public` key as its Ecto twin, so the two cannot drift in
+  # meaning without drifting visibly.
+  #
+  # No bound parameter, deliberately: the ceiling is a constant and never
+  # caller-derived, so the SQL text stays free of request input and the accepted
+  # sobelow waiver on `run_tags_facet_sql/2` keeps its stated basis.
+  defp visibility_clamp_sql(:public),
+    do: ["AND COALESCE(d.content->>'bp_visibility', 'public') = 'public'"]
+
+  defp visibility_clamp_sql(_), do: []
 
   defp flat_filters(opts, extra) do
     skip_tags? = Keyword.get(extra, :skip_tags, false)
@@ -923,6 +967,36 @@ defmodule Barkpark.Media.Delivery.Search do
   defp maybe_filter_visibility(query, visibility) when is_binary(visibility) do
     where(query, [_m, d], fragment("?->>? = ?", d.content, "bp_visibility", ^visibility))
   end
+
+  # THE UNAUTHENTICATED READ CLAMP (task-27d5fdba100d2bc6 item 3).
+  #
+  # Distinct from `maybe_filter_visibility/2` above in BOTH directions, which is
+  # why it is a separate clause rather than a reuse:
+  #
+  #   * It is a CEILING, not a filter. `maybe_filter_visibility/2` is caller
+  #     supplied — an anonymous caller could pass `?visibility=private` and it
+  #     was honoured. The clamp is appended AFTER it, so both predicates hold and
+  #     the caller's filter can only ever narrow inside the ceiling.
+  #
+  #   * It is NULL-TOLERANT, and must be. `= 'public'` would be wrong here:
+  #     `Access.visibility/1` reads `content["bp_visibility"] || "public"` and
+  #     answers "public" for a nil doc, so a blob with no `mediaAsset` document
+  #     at all — or one whose document predates the field — IS public. On a LEFT
+  #     JOIN with no match `d.content` is NULL, and a bare equality would drop
+  #     exactly those rows: the clamp would hide legitimately public assets from
+  #     every anonymous consumer. COALESCE reproduces the Elixir default.
+  #
+  # `""` deliberately does NOT survive the clamp, matching `delivery_ok?/3`'s
+  # unknown-tier arm, which denies an unauthenticated caller.
+  defp maybe_clamp_visibility(query, :public) do
+    where(
+      query,
+      [_m, d],
+      fragment("COALESCE(?->>?, 'public') = 'public'", d.content, "bp_visibility")
+    )
+  end
+
+  defp maybe_clamp_visibility(query, _), do: query
 
   defp maybe_filter_mime(query, nil), do: query
   defp maybe_filter_mime(query, ""), do: query

@@ -144,6 +144,66 @@ describe('revalidateBarkpark', () => {
     expect(mockedRevalidatePath).toHaveBeenCalledWith('/b')
   })
 
+  // `revalidateBarkpark` is documented to take a raw `await req.json()` body, so
+  // every list arm must be Array.isArray-guarded — the reason spelled out in the
+  // sync_tags comment in src/revalidate/index.ts. That ruling reached sync_tags,
+  // ids and types; `paths` kept a bare truthy check, and a bare STRING is truthy
+  // AND iterable. The cast below is the point: it is exactly the shape an
+  // untyped webhook body has at runtime.
+  const raw = (p: unknown) => p as Parameters<typeof revalidateBarkpark>[0]
+
+  it('a STRING paths is not walked character by character', () => {
+    process.env.BARKPARK_ALLOW_ALL_REVALIDATE = '1'
+    revalidateBarkpark(raw({ paths: '/blog' }))
+
+    // The bug fired revalidatePath('/'), ('b'), ('l'), ('o'), ('g').
+    expect(mockedRevalidatePath).not.toHaveBeenCalledWith('b')
+    expect(mockedRevalidatePath).not.toHaveBeenCalledWith('l')
+    expect(mockedRevalidatePath).not.toHaveBeenCalledWith('g')
+    expect(mockedRevalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('a non-iterable paths (number, object) is ignored, not thrown on', () => {
+    process.env.BARKPARK_ALLOW_ALL_REVALIDATE = '1'
+    expect(() => revalidateBarkpark(raw({ paths: 42 }))).not.toThrow()
+    expect(() => revalidateBarkpark(raw({ paths: { a: '/x' } }))).not.toThrow()
+    expect(mockedRevalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('non-string entries inside a real paths array are skipped, the rest still fire', () => {
+    process.env.BARKPARK_ALLOW_ALL_REVALIDATE = '1'
+    revalidateBarkpark(raw({ paths: ['/a', 7, null, '', '/b'] }))
+    expect(mockedRevalidatePath).toHaveBeenCalledTimes(2)
+    expect(mockedRevalidatePath).toHaveBeenCalledWith('/a')
+    expect(mockedRevalidatePath).toHaveBeenCalledWith('/b')
+  })
+
+  it('a non-string single path is ignored too', () => {
+    process.env.BARKPARK_ALLOW_ALL_REVALIDATE = '1'
+    revalidateBarkpark(raw({ path: 42 }))
+    revalidateBarkpark(raw({ path: '' }))
+    expect(mockedRevalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('a malformed paths still trips the env gate — the refusal is not narrowed', () => {
+    // The gate keys on PRESENCE, not shape, and must stay that way: a caller
+    // without the opt-in gets the throw whatever they sent.
+    expect(() => revalidateBarkpark(raw({ paths: '/blog' }))).toThrow(
+      'Path-based revalidation requires BARKPARK_ALLOW_ALL_REVALIDATE=1',
+    )
+    expect(mockedRevalidatePath).not.toHaveBeenCalled()
+  })
+
+  it('a malformed paths does not suppress the tag fan-out beside it', () => {
+    process.env.BARKPARK_ALLOW_ALL_REVALIDATE = '1'
+    revalidateBarkpark(
+      raw({ dataset: 'production', type: 'post', doc_id: 'p1', paths: '/blog' }),
+    )
+    const calls = mockedRevalidateTag.mock.calls.map((c) => c[0])
+    expect(calls).toContain('bp:ds:production:doc:p1')
+    expect(mockedRevalidatePath).not.toHaveBeenCalled()
+  })
+
   it('{} → no-op, no throw', () => {
     expect(() => revalidateBarkpark({})).not.toThrow()
     expect(mockedRevalidateTag).not.toHaveBeenCalled()

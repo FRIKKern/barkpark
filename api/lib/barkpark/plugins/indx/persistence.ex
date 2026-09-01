@@ -1,6 +1,6 @@
 defmodule Barkpark.Plugins.Indx.Persistence do
   @moduledoc """
-  Durable per-scope key_map storage — the closure of P4b Hardening B.
+  Durable per-INDEX key_map storage — the closure of P4b Hardening B.
 
   The live pointer + key_map have always lived in `:persistent_term`,
   which Erlang wipes on every Barkpark restart. The original delete
@@ -9,13 +9,13 @@ defmodule Barkpark.Plugins.Indx.Persistence do
   SHA-256-derived key and accepted a `~2^-63` per-pair mis-target risk
   on a true hash collision plus a missing map.
 
-  This module persists `%{dataset, key_map}` to disk per scope, so
-  `Recovery` can re-seat the EXACT post-restart state — `delete_target_keys`
-  then never needs the bare-hash branch in normal operation.
+  Persisted per INDEX — keyed by `Indexer.index_key/2`, so co-tenants sharing
+  one dataset string never overwrite each other — so `Recovery` re-seats the
+  EXACT state and `delete_target_keys` never needs the bare-hash branch.
 
   ## File format
 
-  One file per scope at `<dir>/<safe_scope>.term`, the body is
+  One file per index at `<dir>/<safe_key>.term`, the body is
   `:erlang.term_to_binary(%{dataset, key_map})`. Writes are atomic via
   the temp-file + rename dance: a crash mid-write leaves the previous
   file intact, never a partial blob.
@@ -37,14 +37,14 @@ defmodule Barkpark.Plugins.Indx.Persistence do
       not the previously-empty one)
 
   Sync I/O is fine in practice — upserts are 5s-debounced by the
-  `IndexerWorker` Oban job, so the per-scope write rate is at most
+  `IndexerWorker` Oban job, so the per-index write rate is at most
   one every five seconds.
 
   ## Safety / scope sanitization
 
-  The scope segment is `URI.encode_www_form/1`'d so an exotic scope
-  string never escapes the `dir` boundary. A scope of `"../etc/passwd"`
-  becomes `..%2Fetc%2Fpasswd.term` — same dir, no path-traversal.
+  The key segment is `URI.encode_www_form/1`'d so an exotic key string
+  never escapes the `dir` boundary. A key of `"../etc/passwd"` becomes
+  `..%2Fetc%2Fpasswd.term` — same dir, no path-traversal.
   """
 
   require Logger
@@ -123,7 +123,7 @@ defmodule Barkpark.Plugins.Indx.Persistence do
   end
 
   @doc """
-  Load every persisted scope from `dir`. Returns `%{scope => entry}` —
+  Load every persisted index from `dir`. Returns `%{index_key => entry}` —
   unreadable / corrupt files are skipped (logged). Used by `Recovery`
   to seed the in-memory pointer table at boot before the live engine
   is queried.
