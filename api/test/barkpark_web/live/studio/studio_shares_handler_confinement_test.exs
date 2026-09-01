@@ -198,8 +198,11 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
              "the Studio panel revoked #{ws_b.slug}'s share, " <>
                "which DELETE /v1/shares answers 403 for"
 
-      assert [_still_there] = stored_rows_for(ws_b.slug),
-             "the victim's StoredShare row was deleted despite the denial"
+      remaining = stored_rows_for(ws_b.slug)
+
+      assert match?([_still_there], remaining),
+             "the victim's StoredShare row was deleted despite the denial — " <>
+               "stored rows for #{ws_b.slug}: #{inspect(remaining)}"
 
       # POSITIVE CONTROL, SAME SOCKET: removal still works at home.
       {:ok, _} =
