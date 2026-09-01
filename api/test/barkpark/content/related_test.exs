@@ -402,4 +402,181 @@ defmodule Barkpark.Content.RelatedTest do
       assert entry.title == "Private But Authored"
     end
   end
+
+  # ── The reference leg carries the SAME clamp set as the tag leg ────────────
+  #
+  # REGRESSION BLOCK for task-0e2bb63990e505fa. `related_documents/3` fuses two
+  # legs into ONE emitted list; before this block only the TAG leg was clamped,
+  # and the hardened leg is exactly what made the open one read as covered.
+  #
+  # Every test here uses an UNTAGGED source, so the tag leg contributes nothing
+  # and the assertions isolate the reference leg. Every test also carries a
+  # PUBLIC referrer that MUST survive, plus a pinned count — a clamp that
+  # returns nothing passes a naive `refute` and pins nothing. All ids are
+  # `unique_id/1`-scoped, so nothing here can meet another suite's rows.
+  describe "the reference leg's clamp set (task-0e2bb63990e505fa)" do
+    setup do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "vault",
+            "title" => "Vault",
+            "visibility" => "private",
+            "fields" => [%{"name" => "body", "type" => "text"}]
+          },
+          @ds
+        )
+
+      :ok
+    end
+
+    # REGRESSION: the LIVE leak. `Papers.Proposals.add_provenance_edge/4` pins
+    # a `proposal-source` edge to the DRAFT row's PK on purpose, so every
+    # unapproved AI paper proposal was a `drafts.`-prefixed referrer emitting
+    # its title through this door.
+    test "a drafts.-prefixed referrer is withheld, and the published referrer still surfaces" do
+      src = unique_id("src")
+      ok = unique_id("okref")
+      leak = unique_id("draftref")
+
+      insert_doc!(src, "Untagged Source", %{"body" => "no tags"})
+      insert_doc!(ok, "Published Referrer", %{"body" => "links"})
+      insert_doc!("drafts." <> leak, "Draft Referrer", %{"body" => "links"})
+
+      reference!(ok, src)
+      reference!("drafts." <> leak, src)
+
+      hits = Related.related_documents(src, @ds)
+      ids = Enum.map(hits, & &1.doc_id)
+
+      refute ("drafts." <> leak) in ids,
+             "drafts.-prefixed referrer leaked through the reference leg: #{inspect(hits)}"
+
+      # CONTROL — the clamp is not "return nothing": the published referrer
+      # survives, and the COUNT is pinned (a surviving count is an existence
+      # leak on its own).
+      assert ids == [ok]
+      assert length(hits) == 1
+      assert match?([%{sources: [:references], title: "Published Referrer"}], hits)
+    end
+
+    test ~S(a status:"draft" referrer is withheld, and the published referrer still surfaces) do
+      src = unique_id("src")
+      ok = unique_id("okref")
+      leak = unique_id("unpubref")
+
+      insert_doc!(src, "Untagged Source", %{"body" => "no tags"})
+      insert_doc!(ok, "Published Referrer", %{"body" => "links"})
+      insert_doc!(leak, "Unpublished Referrer", %{"body" => "links"}, status: "draft")
+
+      reference!(ok, src)
+      reference!(leak, src)
+
+      hits = Related.related_documents(src, @ds)
+      ids = Enum.map(hits, & &1.doc_id)
+
+      refute leak in ids,
+             "status=draft referrer leaked through the reference leg: #{inspect(hits)}"
+
+      assert ids == [ok]
+      assert length(hits) == 1
+    end
+
+    test "a private-visibility-type referrer is withheld from a non-bypassing caller" do
+      src = unique_id("src")
+      ok = unique_id("okref")
+      leak = unique_id("vaultref")
+
+      insert_doc!(src, "Untagged Source", %{"body" => "no tags"})
+      insert_doc!(ok, "Published Referrer", %{"body" => "links"})
+      insert_doc!(leak, "Vault Referrer", %{"body" => "links"}, type: "vault")
+
+      reference!(ok, src)
+      reference!(leak, src)
+
+      # Both call shapes a real caller uses: the default (no caller_context)
+      # and an explicit anonymous one. Both land in the narrow arm of
+      # `Schema.bypasses_visibility_gate?/1`.
+      for {label, hits} <- [
+            {"default", Related.related_documents(src, @ds)},
+            {"anonymous",
+             Related.related_documents(src, @ds, caller_context: CallerContext.anonymous())}
+          ] do
+        ids = Enum.map(hits, & &1.doc_id)
+
+        refute leak in ids,
+               "private-type referrer leaked via the #{label} call shape: #{inspect(hits)}"
+
+        assert ids == [ok], "#{label} lost the public control referrer: #{inspect(hits)}"
+        assert length(hits) == 1
+      end
+    end
+
+    # CONTROL, two ways at once: the visibility clamp gates on TIER (a
+    # bypassing token DOES get the private-type referrer, so the clamp is not
+    # over-broad), while the published-perspective clamp is caller-INDEPENDENT
+    # (that same token still never sees the draft).
+    test "CONTROL: a bypassing caller gets the private-type referrer but STILL not the draft" do
+      src = unique_id("src")
+      ok = unique_id("okref")
+      vault = unique_id("vaultref")
+      draft = unique_id("draftref")
+
+      insert_doc!(src, "Untagged Source", %{"body" => "no tags"})
+      insert_doc!(ok, "Published Referrer", %{"body" => "links"})
+      insert_doc!(vault, "Vault Referrer", %{"body" => "links"}, type: "vault")
+      insert_doc!("drafts." <> draft, "Draft Referrer", %{"body" => "links"})
+
+      reference!(ok, src)
+      reference!(vault, src)
+      reference!("drafts." <> draft, src)
+
+      hits = Related.related_documents(src, @ds, caller_context: bypassing_ctx())
+      ids = hits |> Enum.map(& &1.doc_id) |> Enum.sort()
+
+      assert ids == Enum.sort([ok, vault]),
+             "bypassing caller got the wrong reference set: #{inspect(hits)}"
+
+      assert length(hits) == 2
+
+      vault_hit = Enum.find(hits, &(&1.doc_id == vault))
+      assert match?(%{type: "vault", title: "Vault Referrer"}, vault_hit)
+
+      refute ("drafts." <> draft) in ids,
+             "published perspective is caller-independent — a bypassing token must not see the draft: #{inspect(hits)}"
+    end
+
+    # `Graph.reverse_referencers/2` reads `content_edges` by `to_id` alone
+    # (`edge_opts/1` forwards only `:kind`), so an edge whose source lives in
+    # another dataset surfaces unless the DOOR filters it. The tag leg always
+    # did; the reference leg did not.
+    test "a referrer in another dataset is withheld, and the in-dataset referrer still surfaces" do
+      src = unique_id("src")
+      ok = unique_id("okref")
+      leak = unique_id("otherdsref")
+
+      insert_doc!(src, "Untagged Source", %{"body" => "no tags"})
+      insert_doc!(ok, "Published Referrer", %{"body" => "links"})
+
+      insert_doc!(leak, "Other Dataset Referrer", %{"body" => "links"},
+        dataset: "related-test-other"
+      )
+
+      reference!(ok, src)
+
+      # Resolved with NO dataset scope so the cross-dataset edge can exist at
+      # all — exactly the row `content_edges` would hold if a projector ever
+      # materialised one.
+      [{:ok, _}] = Content.add_edges([%{from_id: leak, to_id: src, kind: "references"}], [])
+
+      hits = Related.related_documents(src, @ds)
+      ids = Enum.map(hits, & &1.doc_id)
+
+      refute leak in ids,
+             "cross-dataset referrer leaked through the reference leg: #{inspect(hits)}"
+
+      assert ids == [ok]
+      assert length(hits) == 1
+    end
+  end
 end
