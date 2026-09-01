@@ -51,7 +51,41 @@ defmodule Barkpark.Tasks.Queue do
     limit = Keyword.get(opts, :limit, @ready_default_limit)
     offset = Keyword.get(opts, :offset, 0)
     order = Keyword.get(opts, :order, :compatibility)
-    workspace_uuid = workspace_id && Ecto.UUID.dump!(workspace_id)
+
+    # ── The empty-scope sentinel at a RAW seat (task-3e2a70930c6df723) ──────
+    #
+    # `:shared_only` is what `BarkparkWeb.ScopeHelpers.scope_opts/1` emits when
+    # a REQUEST resolved no workspace. It means the SHARED layer
+    # (`workspace_id IS NULL`), never "every tenant". THREE doors arrive here
+    # carrying it, because all three ride `ready_query/1`:
+    # `GET /v1/tasks/ready`, `GET /v1/tasks/prime`, and `Tasks.Claim.claim/2`.
+    #
+    # THE FORK THIS CLOSES. `workspace_id` is handed to TWO interpreters in this
+    # one function. `Content.Scope.scope_to_workspace/3` — applied to
+    # `done_tasks` just below and to the outer query at the end — has owned a
+    # `:shared_only` arm since the class fix. The raw-SQL CTE did not. The atom
+    # is TRUTHY, so `&&` fell straight through to `Ecto.UUID.dump!/1`, whose
+    # only success clauses take a 36-char string or a 16-byte binary; an atom
+    # hits `dump(_), do: :error` and `dump!/1` raises ArgumentError. That is a
+    # 500 on exactly the condition the sentinel exists for — no Default
+    # workspace seeded — and it takes the ready queue, prime, and claim with it.
+    #
+    # THE SAME SHAPE, FOUND TWICE. `Media.Delivery.Search` was corrected at
+    # `join_scope_workspace/3` and missed at `scope_fragments/2` 340 lines below
+    # IN THE SAME MODULE (PR #14669). Both misses were found by grepping a
+    # FUNCTION NAME; the defect is keyed on the GUARD SHAPE — a value from
+    # `scope_opts/1` reaching a UUID-dumping or `is_binary`-guarded seam that
+    # bypasses `Content.Scope`. That is why the predicate below stays ONE SQL
+    # body with one branch rather than a second copy of the statement: a forked
+    # copy is precisely how this class keeps coming back.
+    shared_only? = workspace_id == :shared_only
+
+    # `nil` is left EXACTLY as it was. It is the explicit-global read; it binds
+    # NULL, and `candidate.workspace_id = NULL` matches nothing. That is today's
+    # behaviour and is deliberately not this change's to touch — widening `nil`
+    # would blind every caller that legitimately means "everything".
+    workspace_uuid =
+      if shared_only?, do: nil, else: workspace_id && Ecto.UUID.dump!(workspace_id)
 
     done_tasks =
       Document
@@ -89,11 +123,14 @@ defmodule Barkpark.Tasks.Queue do
            AND done.project_id IS NOT DISTINCT FROM candidate.project_id
            AND done.normalized_id = regexp_replace(dep.id, '^drafts\\.', '')
           WHERE candidate.type = 'task'
-            AND candidate.workspace_id = ?
+            AND CASE WHEN ?::boolean
+                     THEN candidate.workspace_id IS NULL
+                     ELSE candidate.workspace_id = ? END
             AND candidate.content->>'kind' = 'task'
             AND candidate.content->>'lifecycle_status' = ANY(?)
             AND done.normalized_id IS NULL
           """,
+          ^shared_only?,
           ^workspace_uuid,
           ^@ready_lifecycle_statuses
         ),
