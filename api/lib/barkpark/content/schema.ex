@@ -464,6 +464,14 @@ defmodule Barkpark.Content.Schema do
       title: schema.title,
       icon: schema.icon,
       visibility: schema.visibility,
+      # The SOLE desk discriminant (schema_definition.ex): `singleton: true` opts
+      # a type out of the generic Content bucket into the siteSettings-style
+      # single-document node. The changeset CASTS it, so POST accepts it — this
+      # serializer is the body of BOTH the 201 echo and every GET /v1/schemas row,
+      # so omitting it made the flag WRITE-ONLY: a consumer could set it and never
+      # read back what took (task-567f0fb2429086df). `|| false` normalises a nil
+      # (unloaded/legacy) to the schema's own default rather than leaking nil.
+      singleton: schema.singleton || false,
       schemaHash: schema_hash_for_schema(schema),
       fields: Enum.map(schema.fields || [], &serialize_field/1),
       actions: schema.actions || [],
