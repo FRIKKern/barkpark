@@ -115,7 +115,7 @@ defmodule BarkparkWeb.Studio.Caps do
     show-history close-history close-delete close-discard
     close-unpublish-guard close-confirm-modal
     open-secondary-picker close-secondary-picker secondary-search
-    select-secondary close-secondary view-graph
+    select-secondary close-secondary view-graph node-clicked
     sidebar-toggle-panel sidebar-toggle-section
     backlinks-refresh open-backlink paper-wikilink-search paper-tag-search
     task-preview-refresh paper-valueref-inspect valueref-writeback-close
