@@ -260,8 +260,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   defdelegate paper_block_by_id(socket, id), to: Paper
 
+  # pds-w42-bl-handle-info-write-seam-audit — THE PRINCIPAL GATE, AT THE
+  # SECOND HOOK-INVISIBLE CHOKEPOINT.
+  #
+  # `Caps.attach/1` arms the Studio deny-gate as
+  # `attach_hook(_, :handle_event, _)`, and no `handle_event` hook — parent
+  # socket or component socket — can see a `handle_info`. This function is the
+  # body of one: `handle_info({:autosave_form, form})` → `autosave_form/2` →
+  # here → `Content.upsert_draft`. Before this gate the ONLY thing standing in
+  # a write-denied principal's way was the socket gate on the five parent
+  # events that send to this seam today (select-media / clear-image /
+  # upload-image / select-ref / clear-ref, all in `Caps` `@write_events`) —
+  # a property of today's CALLERS, not of the seam. That is precisely the
+  # argument that held for `paper_op` right up until `PaperFieldBlock` started
+  # sending to it and turned it into a live bypass.
+  #
+  # Reproduced by run before the gate: a read-only api-token member opened a
+  # document and a bare `{:autosave_form, …}` message wrote the draft row.
+  #
+  # ONE RULE, NOT A FORK: `Paper.write_denied?/1` is the shared negation of
+  # `Caps.write_capable?/2` — the single copy the socket gate itself uses — and
+  # `Paper.refuse_write_denied/1` is the shared refusal, so this door and the
+  # paper doors speak one vocabulary. Gating HERE rather than in the
+  # `handle_info` body also covers the four `handle_event` callers, which is
+  # belt-and-braces: they are already gated at the socket.
+  #
+  # SCOPE, HONESTLY: this denies any principal `Caps` denies write — a
+  # read-only api_token or read-only member. It is silent on a principal-LESS
+  # socket, because `write_capable?/2` returns TRUE there BY DESIGN (the
+  # intentionally-open public-demo posture).
   @doc false
   def do_autosave(socket, params) do
+    if Paper.write_denied?(socket) do
+      Paper.refuse_write_denied(socket)
+    else
+      autosave_write(socket, params)
+    end
+  end
+
+  defp autosave_write(socket, params) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
