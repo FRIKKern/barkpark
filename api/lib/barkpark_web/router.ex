@@ -790,6 +790,40 @@ defmodule BarkparkWeb.Router do
   # RequireBearerOrSessionToken's `x-requested-with` check; bearer callers are
   # token-auth. protect_from_forgery cannot apply (no Phoenix CSRF token on API /
   # Web-Component uploads).
+  # Presented-but-UNVERIFIABLE bearer → 401, on the two FLAT media READ blocks
+  # (task-6716af864218081b for `/media`, task-79e10984bbb23734 for `/v1/media`).
+  #
+  # Both blocks ride bare `:api`, whose `OptionalToken` runs in its default
+  # fail-soft mode and SWALLOWS a revoked/expired/unknown bearer: the conn
+  # continued anonymous, `DeriveWorkspaceFromToken` had no `:api_token` to
+  # derive from, and `AssignDefaultScope` stamped the seeded Default workspace.
+  # A caller holding a decayed workspace-B token got a 200 describing ANOTHER
+  # TENANT's media library, with no signal that its credential had died.
+  #
+  # Layered as a SECOND pipeline rather than added to `:api`, deliberately:
+  # `:api` backs the whole flat `/v1` surface plus every `[:api, :require_token]`
+  # composite, and widening it would clamp far more than the two blocks that
+  # were actually traced. The opt is a no-op once `:api` has already assigned
+  # `:api_token`, so a valid bearer pays nothing.
+  #
+  # SEVERITY, held deliberately: integrity/mislead, NOT confidentiality. Both
+  # privilege gates on these controllers key on
+  # `Barkpark.Media.Storage.Access.authenticated?/1`, which is FALSE for a
+  # decayed bearer — `visibility_clamp_opts/1` pins the read to the public tier
+  # and `render_opts/3` withholds signed URLs — so a decayed bearer reads
+  # nothing an anonymous caller could not. What it closes is the SILENCE.
+  #
+  # The plug and its `strict_on_presented` opt are owned by the `fix-tenant-swap`
+  # lane (PR #14318), which mounts the same opt on `:api_grant_read`. Reused
+  # here rather than forked; see that lane's note at `:api_grant_read` for why
+  # the capability is an opt on `OptionalToken` and not a standalone plug.
+  #
+  # NOT a liveness surface: `deploy.sh`, the docker-compose healthcheck and
+  # `cloud/` all probe `/api/schemas`, never a media path (grep in the PR body).
+  pipeline :strict_bearer_media_read do
+    plug(BarkparkWeb.Plugs.OptionalToken, strict_on_presented: true)
+  end
+
   pipeline :media_mutate do
     plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
@@ -2413,7 +2447,7 @@ defmodule BarkparkWeb.Router do
 
   # ── Media — upload requires token, serving is public ────────────────────
   scope "/media", BarkparkWeb do
-    pipe_through(:api)
+    pipe_through([:api, :strict_bearer_media_read])
 
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
     get("/", MediaController, :index)
@@ -2473,7 +2507,7 @@ defmodule BarkparkWeb.Router do
   end
 
   scope "/v1/media", BarkparkWeb do
-    pipe_through(:api)
+    pipe_through([:api, :strict_bearer_media_read])
 
     get("/:dataset/search/suggestions", V1.MediaController, :search_suggestions)
     post("/:dataset/search/interaction", V1.MediaController, :search_interaction)
