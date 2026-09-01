@@ -11,6 +11,14 @@ defmodule Barkpark.PortableDoc.Render.Util do
 
   @allowed_scheme ~r/^(?:https?|mailto|tel):/i
 
+  # The three bytes the WHATWG URL parser deletes from ANYWHERE in a URL before
+  # parsing it. Measured against `new URL(raw, base)` across `\x00`-`\x20`:
+  # exactly `\x09` / `\x0A` / `\x0D` collapse `/<c>/host` into the
+  # protocol-relative `//host`; every other C0 byte percent-encodes and stays an
+  # ordinary path segment. Twin of `URL_STRIPPED` in
+  # `js/packages/react/src/inline.tsx` and `web/lib/safe-href.ts`.
+  @url_stripped ["\t", "\n", "\r"]
+
   @doc """
   Escape the five HTML-significant characters in the EXACT order `& < > " '`.
 
@@ -45,14 +53,27 @@ defmodule Barkpark.PortableDoc.Render.Util do
   (`#anchor`, `?query`, `./rel`, `../up`). Bare relative words (`other-page`)
   are rejected, mirroring the stricter JS sibling.
 
-  Parity twins — keep the permitted set in lockstep:
-  `web/lib/safe-href.ts` and `internal/pdrender/inline.go` (`sanitizeURL`).
+  ASCII tab / LF / CR are removed from ANYWHERE in the string FIRST, not just
+  at the head: the WHATWG URL parser deletes those three bytes before parsing,
+  so `/<TAB>/host` is not a path segment named TAB — it is the protocol-relative
+  `//host`, and a leading-only strip plus a position-1 test never sees it. Any
+  remaining leading ASCII control / whitespace bytes are stripped after that,
+  mirroring browser tolerance for `\\tjavascript:…`. The cleaned string is what
+  gets emitted, so what was CHECKED is what RESOLVES.
 
-  Leading ASCII control characters / whitespace are stripped before matching,
-  mirroring browser tolerance for `\\tjavascript:…`.
+  Parity twins — keep the permitted set in lockstep:
+  `web/lib/safe-href.ts`, `js/packages/react/src/inline.tsx` (`safeUrl`) and
+  `internal/pdrender/inline.go` (`sanitizeURL`). The JS pair strips the same
+  three bytes. `sanitizeURL` deletes the whole C0 set plus DEL because its
+  output is an OSC 8 terminal sequence, where any control byte can hijack the
+  reader's terminal — a hazard this HTML lane does not have, since attribute
+  quotes are already entity-escaped. The divergence is consumer-driven.
   """
   def safe_url(href) when is_binary(href) do
-    trimmed = String.replace(href, ~r/^[\x00-\x20]+/, "")
+    trimmed =
+      href
+      |> String.replace(@url_stripped, "")
+      |> String.replace(~r/^[\x00-\x20]+/, "")
 
     cond do
       String.starts_with?(trimmed, "/") ->
