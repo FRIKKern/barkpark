@@ -551,17 +551,76 @@ const unreadableListPageHint = "the transport, not the query: a proxy/gateway pa
 // emits a key listEnvelopeKeys knows (TestPaginatedCommandsUseKnownEnvelopeKeys
 // re-derives that population from the API source), and an EMPTY array still
 // matches its key — a genuinely empty queue is readable, and stays rc=0.
+//
+// THE PREDICATE ITSELF WAS THE LAST SKIP (task-031d0e3520771b4a). It opened
+// `if !cmd.Paginated || cmd.Writes`, so the law reached 7 of the 61 core reads:
+// `bp webhook ls` against a gateway answering HTTP 200 `{}` printed nothing and
+// exited 0 — the same lie one flag away, exactly as the paragraph above
+// predicted. It now also covers listReadCommands (list_reads.go), the 31
+// non-paginated reads whose success body is a list envelope, judged by SHAPE
+// rather than by key. The 23 single-OBJECT reads stay out: extractListRows
+// returns "" for their HAPPY path, so covering them here would refuse honest
+// answers — screenUnpaginatedRead is their fence.
 func refuseUnreadableDefaultPage(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
-	if !cmd.Paginated || cmd.Writes {
+	if cmd.Writes {
 		return 0, false
 	}
-	if _, key := extractListRows(unwrapResult(respBody)); key != "" {
+	// `cmd.Paginated` was the same class of skip this function's own docstring
+	// warns about one paragraph up. Only 7 of the 61 core reads carry
+	// `paginated: true`, so `bp webhook ls`, `bp schema ls`, `bp token ls` and
+	// 28 more LIST reads sat outside the fence by construction and laundered a
+	// rowless HTTP 200 into "no rows, exit 0". listReadCommands (list_reads.go)
+	// is the population that answers with rows; the single-OBJECT reads
+	// (doc.get, auth.me, data.counts, …) stay out, because extractListRows
+	// returns the "" sentinel for their HAPPY path and a blanket widening would
+	// refuse 23 honest reads.
+	listRead := !cmd.Paginated && listReadCommands[cmd.ID]
+	if !cmd.Paginated && !listRead {
+		return 0, false
+	}
+	if listRead {
+		// screenUnpaginatedRead (run.go, three functions down) already owns the
+		// classes it can NAME better than "no list envelope": an empty body, an
+		// HTML proxy page, a `result` filled with non-JSON, and — the one that
+		// must not be swallowed — an error envelope on a 2xx, whose remedy is
+		// "read the error", not "retry the transport". Hand those back so the
+		// caller gets the right sentence and one fault gets one name. What is
+		// left is exactly this row's residual hole: a body that parses, carries
+		// no rows, and exits 0 today.
+		if reason, _ := unreadableReadBody(respBody); reason != "" {
+			return 0, false
+		}
+		// carriesRowArray, NOT extractListRows, and the difference is measured:
+		// extractListRows matches on the KEY and then accepts whatever it holds,
+		// so `{"webhooks":null}` — json.Unmarshal takes null into a slice — comes
+		// back readable with key "webhooks" and 0 rows. That is the launder this
+		// row is about wearing the right key. The shape test demands an actual
+		// '[', and it is also what lets the 9 commands answering under a key
+		// listEnvelopeKeys never recorded (sessions, orphans, links, …) stay
+		// honest instead of being refused on their happy path.
+		if carriesRowArray(unwrapResult(respBody)) {
+			return 0, false
+		}
+	} else if _, key := extractListRows(unwrapResult(respBody)); key != "" {
+		// The paginated arm keeps the strict key test WORD FOR WORD:
+		// TestPaginatedCommandsUseKnownEnvelopeKeys certifies every
+		// `paginated: true` command's key is recorded, so strictness there costs
+		// nothing and refusing an unknown envelope is wave 27's proven behaviour.
 		return 0, false
 	}
 
+	// The two arms fail for different reasons and must say so. A paginated read
+	// is judged by the KEY (listEnvelopeKeys); a non-paginated list read is
+	// judged by the SHAPE, because 11 of the 31 answer under a key this CLI
+	// does not record. "no known list envelope" would be a false sentence on
+	// the second arm.
+	what := "carried no known list envelope"
+	if listRead {
+		what = "carried no rows: this command answers with a list, and the body holds no array"
+	}
 	msg := fmt.Sprintf(
-		"unreadable list page: HTTP %d carried no known list envelope (%d bytes): %s",
-		status, len(respBody), bodyPreview(respBody),
+		"unreadable list page: HTTP %d %s (%d bytes): %s",
+		status, what, len(respBody), bodyPreview(respBody),
 	)
 	refuseWithRemedy(out, "unreadable_list_page", msg, unreadableListPageHint)
 	return exitGeneric, true
