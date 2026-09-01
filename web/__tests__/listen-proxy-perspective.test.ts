@@ -1,20 +1,30 @@
 /**
- * `/v1/data/listen/[dataset]` must PIN the upstream `perspective` to
- * `published`, whatever the browser asked for.
+ * `/v1/data/listen/[dataset]` PINS the upstream `perspective` to `published`,
+ * whatever the browser asked for — and these tests assert ONLY that the param
+ * is written on the outgoing URL.
  *
- * The browser connects to this proxy with NO token and the handler attaches the
- * server-only `BARKPARK_TOKEN` before forwarding. The API clamps a caller to
- * the published perspective only because that caller is ANONYMOUS — a
- * token-bearing request is not clamped. So forwarding the query string verbatim
- * (`upstream.search = incoming.search`) let any caller ask for
- * `?perspective=drafts` and receive a drafts SSE stream under the server's
- * credentials. Every other read surface in `web/` pins `published`
- * (`lib/barkpark-client.ts`, `lib/find-search.ts`, `components/live-bridge.tsx`).
+ * READ THIS BEFORE TRUSTING A GREEN HERE: the pin is INERT. The upstream
+ * `ListenController` never reads a perspective param —
+ * `grep -c perspective api/lib/barkpark_web/controllers/listen_controller.ex`
+ * is 0, and `listen/2` reads exactly one thing off params
+ * (`params["lastEventId"]`). So this file proves the handler WROTE the param,
+ * not that anything clamps. The published-only invariant is enforced by the
+ * response-body filter in the route (`clampToPublished`), and the tests that
+ * actually prove it live in `listen-proxy-draft-clamp.test.ts`, which reads the
+ * bytes the CLIENT receives. The pin is kept purely as forward-compatibility.
  *
- * These tests read the URL the handler actually sent upstream — asserting on
- * the response alone could not tell a pinned request from a forwarded one.
- * Each also asserts the Authorization header IS present, so a "pass" can never
- * come from the token silently going missing instead of the clamp working.
+ * The threat model these assertions were written for is real and still holds:
+ * the browser connects with NO token, the handler attaches the server-only
+ * `BARKPARK_TOKEN`, and the API clamps a caller to public/published content
+ * only because that caller is ANONYMOUS — adding the credential removes that
+ * clamp. Pinning a param the API ignores was simply the wrong remedy for it.
+ * Every other read surface in `web/` pins `published` on endpoints that DO read
+ * it (`lib/barkpark-client.ts`, `lib/find-search.ts`,
+ * `components/live-bridge.tsx`).
+ *
+ * These tests read the URL the handler actually sent upstream. Each also
+ * asserts the Authorization header IS present, so a "pass" can never come from
+ * the token silently going missing instead of the pin being written.
  *
  * Run: `cd web && node ../scripts/node-test-floor.mjs --import
  * ./__tests__/support/stub-server-only.mjs -- '__tests__/listen-proxy-perspective.test.ts'`
