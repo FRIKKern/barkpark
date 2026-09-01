@@ -2,6 +2,8 @@
 
 # Half-taken close repair verb (pe-w2-bpml-inline-vocabulary, 2026-08-17)
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 ## Anomaly
 
 A slice can land in a state where **the claim slot is closed but lifecycle_status is still `open`**:

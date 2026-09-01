@@ -2,6 +2,8 @@
 
 # wbqs-go-dead-exports keep-open premise smoke (2026-08-18)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Re-derivation recipe for the verdict that `wbqs-go-dead-exports-coordination-gated-backlog`
 stays OPEN as genuine coordination-gated residue. Verified against origin/main @ `710c38f06a7e`.
 

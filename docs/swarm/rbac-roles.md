@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: swarm-rbac-roles | budget: 4000tok -->
 # rbac-roles — provenance note
 
+> HISTORICAL RECORD (2026-06-29) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 **Slug:** `rbac-roles` · **Target app:** `cloud/` (BarkparkCloud) · **Status:** candidate (judge before merge)
 
 ## What

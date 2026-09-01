@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: ttw22-merge-state-anchors | budget: 800tok -->
 # Wave-22 merge-state + anchor re-derivation (vf-merge-state-anchors)
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Snapshot: origin/main = `c37a29244702f103245a173bfe255e51adb5259f` (fetched 2026-08-17).
 
 ## Merge state — NONE merged

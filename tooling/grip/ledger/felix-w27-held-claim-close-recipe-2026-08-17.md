@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: felix-w27-held-claim-close-recipe | budget: 1200tok -->
 # felix-w27 — held-claim ledger-close recipe (re-derivation)
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 **Verdict:** A foreign session CLOSES a held-claim row by presenting the LIVE claim's `worker` + `epoch` — **no re-claim needed**. The wave-26 D164 re-claim→stamp→close recipe is NOT required and would needlessly bump the epoch. Close is hard-CAS on `epoch`, honesty-gated on `worker`.
 
 ## Proof (live guerrilla, 2026-08-17)

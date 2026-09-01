@@ -2,6 +2,8 @@
 
 # Anonymous task+paper census, count semantics, and the author-email field — re-derivation recipes (2026-08-17)
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Written by verifier `v-census-live-reconfirm` for the api-read-path-security-sweep
 wave 2 ruling packet. Live-network recipes, so they cannot go through
 `node tooling/grip/ledger.mjs write` (host bound + `python3 -c` not allowlisted) —

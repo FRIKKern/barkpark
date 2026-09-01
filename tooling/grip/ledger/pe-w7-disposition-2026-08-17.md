@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: pe-w7-disposition-census | budget: 1400tok -->
 # pe-w7 ledger disposition — the non-terminal children, honestly sorted before the seal
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Slice `pe-w7-ledger-disposition` (task, epic `task-4792223ca9eb5a7d`). Executed live against
 guerrilla.barkpark.cloud on 2026-08-17. The epic cannot close over a pile of open children —
 this is the D51 SPLIT disposition (never a blanket close): merge-stranded rows closed on their

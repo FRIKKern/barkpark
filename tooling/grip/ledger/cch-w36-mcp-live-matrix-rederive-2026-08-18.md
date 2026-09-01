@@ -2,6 +2,8 @@
 
 # Wave 36 — authoritative public MCP live matrix (re-derivation recipe)
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Ground truth the wave rests on. All L1 against `https://guerrilla.barkpark.cloud`, 2026-08-18. Re-run any row to re-derive.
 
 ## Route code matrix

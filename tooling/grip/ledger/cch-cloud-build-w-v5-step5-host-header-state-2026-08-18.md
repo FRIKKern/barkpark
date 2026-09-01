@@ -2,6 +2,8 @@
 
 # Step-5 host-header current state — re-derivation recipe
 
+> HISTORICAL RECORD (2026-08-18) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 Authority: read against **origin/main = 41b16d78** (local HEAD a6535504 is behind — do not quote the worktree).
 
 ## Claim: no host->tenant/workspace derivation exists in api/ today; the host-header mechanism is fully UNBUILT. Disposition = MIXED (mechanism offline-buildable / DNS-TLS cutover + /v1/tls/ask CP verification human-gated).

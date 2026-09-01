@@ -1,6 +1,8 @@
 <!-- doc-tier: cold | canonical-for: none | budget: 800tok -->
 # Felix W26 — SafeOutbound DNS-rebinding TOCTOU verdict (re-derivation recipe)
 
+> HISTORICAL RECORD (2026-08-17) — the commands below were run on that date. Re-run them to re-derive; never quote the recorded output as current.
+
 VERDICT: **REAL** (not prove-clean). The check-time resolved IP is NOT pinned into the request; Finch re-resolves the hostname at connect time.
 
 ## Re-derive from scratch (origin/main)
