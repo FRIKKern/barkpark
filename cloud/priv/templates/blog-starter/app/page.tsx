@@ -1,6 +1,7 @@
 import Link from 'next/link'
-import { getDocs } from '../lib/barkpark'
+import { countDocs, getDocs } from '../lib/barkpark'
 import { POSTS_PER_PAGE } from '../lib/queries'
+import { pageCount, resolvePageParam } from '../lib/page-param'
 import { Pagination } from './components/Pagination'
 import { formatDate } from '../lib/format-date'
 
@@ -14,20 +15,29 @@ interface Post {
 }
 
 interface HomeProps {
-  searchParams: Promise<{ page?: string }>
+  // Next hands an ARRAY when a param repeats (`?page=2&page=9`), so the type
+  // has to admit it — and `resolvePageParam` has to handle it.
+  searchParams: Promise<{ page?: string | string[] }>
 }
 
 export default async function HomePage({ searchParams }: HomeProps) {
   const sp = await searchParams
-  const pageNum = Math.max(1, Math.floor(Number(sp.page ?? '1') || 1))
+
+  // `?page=` is anonymous, caller-controlled input, and `totalPages` flows
+  // straight into `Array.from({ length: totalPages })` inside <Pagination>, a
+  // SERVER component. So the page number is clamped to the REAL corpus size
+  // before it is used for anything: `countDocs` is one small fetch that returns
+  // the envelope's true total-match count. Without the upper clamp,
+  // `?page=20000` renders 20 000 <Link> elements server-side per request and
+  // `?page=Infinity` throws RangeError (a 500) — see lib/page-param.ts.
+  const totalPages = pageCount(await countDocs('post'), POSTS_PER_PAGE)
+  const pageNum = resolvePageParam(sp.page, totalPages)
   const offset = (pageNum - 1) * POSTS_PER_PAGE
 
   const posts = await getDocs<Post>('post', {
-    limit: POSTS_PER_PAGE + 1,
+    limit: POSTS_PER_PAGE,
     offset,
   })
-  const hasNext = posts.length > POSTS_PER_PAGE
-  const visible = posts.slice(0, POSTS_PER_PAGE)
 
   return (
     <div className="space-y-10">
@@ -38,11 +48,11 @@ export default async function HomePage({ searchParams }: HomeProps) {
         </p>
       </section>
 
-      {visible.length === 0 ? (
+      {posts.length === 0 ? (
         <p className="text-slate-500">No posts yet.</p>
       ) : (
         <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((post) => {
+          {posts.map((post) => {
             const slug = post.slug?.current ?? post._id
             return (
               <li
@@ -66,11 +76,7 @@ export default async function HomePage({ searchParams }: HomeProps) {
         </ul>
       )}
 
-      <Pagination
-        currentPage={pageNum}
-        totalPages={hasNext ? pageNum + 1 : pageNum}
-        basePath="/"
-      />
+      <Pagination currentPage={pageNum} totalPages={totalPages} basePath="/" />
     </div>
   )
 }
