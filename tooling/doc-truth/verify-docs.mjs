@@ -958,6 +958,37 @@ function verifyLinerefAgainst(claim, rel) {
     return tag(claim, "confirmed", "high",
       `referenced content found within ±${WINDOW} of cited line(s)`);
   }
+  // THE ANCHOR IS THE ENCLOSING DEFINITION, AND ±3 CANNOT SEE IT. A definition
+  // writes its name ONCE, at its head; every line of its body is, by
+  // construction, a line that does not repeat the name. So a citation pointing
+  // into a body and anchoring on the function it is inside asks the reader to
+  // look at exactly the region where the anchor cannot appear, and the ±3 scan
+  // above returns "none of the referenced anchors sit within ±3" on a citation
+  // that is CORRECT. Measured on main: the quiz-bridge sandbox cascade
+  // regression cites the bridge at a line inside `handle_info/2` whose clause
+  // head sits SIX lines above, and the sweep reported it NOVEL.
+  //
+  // ±3 IS NOT WIDENED TO FIX THIS, and must not be. The window is the precision
+  // knob: widen it and every citation confirms against a neighbour, which is how
+  // a guard stops finding drift while still looking busy — and `clippedEnumeration`
+  // above exists precisely because window slack already reached OUTSIDE a cited
+  // range once and confirmed on the very line the citation excluded. Widening
+  // trades one false direction for the other. This is instead a SEPARATE confirm
+  // path asking a DIFFERENT question: not "is the word near the line" but "is the
+  // line inside the thing the word names". WINDOW stays 3 and remains the
+  // fallback for every citation with no enclosing definition to appeal to.
+  //
+  // CONFIRM-ONLY, INDEPENDENT-ANCHORS-ONLY. It can turn a would-be stale into a
+  // confirmation; it can never manufacture a stale. And it reads only needles
+  // that survived `selfDerived`, so a name the citation's own path supplied
+  // cannot certify the citation — the leak `basenameStem` closed stays closed.
+  const enclosing = enclosingDefHit(lines, t.lines, independent);
+  if (enclosing) {
+    return tag(claim, "confirmed", "high",
+      `cited line ${enclosing.cited} sits INSIDE \`${enclosing.name}\`, whose definition head is at` +
+      ` line ${enclosing.line} of ${rel} — the name is written once, at the head, which is outside` +
+      ` ±${WINDOW} of the cited line`);
+  }
   if (anyHit) {
     // Every hit came from a needle the CITATION ITSELF supplied. That is not a
     // confirmation, and it is not evidence of drift either — say so, rather
@@ -973,6 +1004,79 @@ function verifyLinerefAgainst(claim, rel) {
     ? `cited line(s) ${t.lines.join("/")} exceed file length (${lines.length}) in ${rel}`
     : `none of the referenced anchors [${needles.slice(0, 3).join(", ")}] sit within ±${WINDOW} of cited line(s) ${t.lines.join("/")} in ${rel}`;
   return tag(claim, "stale", "high", ev);
+}
+
+// ── the ENCLOSING DEFINITION ─────────────────────────────────────────────────
+// Definition heads this checker understands, one pattern per host language, the
+// capture group always the NAME. Kept deliberately narrow: a line that is not
+// unmistakably a function definition is better left to the ±3 fallback than
+// guessed at, because every shape added here is a shape that can CONFIRM.
+const DEF_HEAD_PATTERNS = [
+  /^\s*def(?:p|macro|macrop)?\s+([a-z_][A-Za-z0-9_]*[?!]?)/,                                   // Elixir
+  /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*[([]/,                               // Go, incl. methods
+  /^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)/, // JS/TS
+  // An exported arrow / function expression. Restricted to a right-hand side
+  // that is actually a function, so `export const CONFIG = {…}` — an object, not
+  // a definition with a body a line can be "inside" — is not treated as one.
+  /^\s*export\s+(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*(?::[^=]*)?=\s*(?:async\s+)?(?:\(|function\b|[A-Za-z_$][A-Za-z0-9_$]*\s*=>)/,
+];
+
+function defHeadName(text) {
+  for (const re of DEF_HEAD_PATTERNS) {
+    const m = text.match(re);
+    if (m) return m[1];
+  }
+  return null;
+}
+
+// Every definition whose BODY contains line `n`, innermost first.
+//
+// INDENTATION IS THE WHOLE MECHANISM, which is why this needs no parser and no
+// per-language brace counting. Walk BACKWARDS from the cited line carrying the
+// smallest indent seen so far: a definition head encloses the line exactly when
+// its own indent is STRICTLY smaller than every non-blank line between it and
+// the citation. A closing `end` / `}` sits at its head's own indent, so the
+// first one met on the way up pins the running minimum there and every
+// definition at that level or deeper is correctly ruled out as already closed.
+//
+// IT FAILS CLOSED, ON PURPOSE. A body line at column 0 — a heredoc, a wrapped
+// string, a language this list does not cover — drives the running minimum to 0
+// and no enclosing definition is found; the ±3 scan then answers exactly as it
+// does today. The cost of that is a confirmation not granted, i.e. at worst the
+// false-stale this file already errs toward. The alternative — guessing past a
+// construct we cannot read — manufactures CONFIRMATIONS, and a checker that
+// certifies what it could not read is the failure the whole baseline exists to
+// measure.
+function enclosingDefNames(lines, n) {
+  const out = [];
+  let minIndent = Infinity;
+  for (let i = Math.min(n, lines.length); i >= 1; i--) {
+    const text = lines[i - 1] || "";
+    if (text.trim() === "") continue;
+    const indent = text.length - text.trimStart().length;
+    if (indent < minIndent) {
+      const name = defHeadName(text);
+      if (name) out.push({ name, line: i });
+      minIndent = indent;
+    }
+    if (indent === 0) break;
+  }
+  return out;
+}
+
+// Does any cited line sit inside a definition an independent anchor NAMES?
+// A dotted needle counts when its last segment is the name, so a comment citing
+// `Quiz.Content.load_question/2` anchors on the `load_question` it means.
+function enclosingDefHit(lines, citedLines, anchorNeedles) {
+  for (const n of citedLines) {
+    if (!(n >= 1 && n <= lines.length)) continue;
+    for (const d of enclosingDefNames(lines, n)) {
+      if (anchorNeedles.some((nd) => nd === d.name || nd.endsWith("." + d.name))) {
+        return { name: d.name, line: d.line, cited: n };
+      }
+    }
+  }
+  return null;
 }
 
 // ── the TOO-NARROW WINDOW ────────────────────────────────────────────────────

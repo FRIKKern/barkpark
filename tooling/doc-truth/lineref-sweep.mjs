@@ -100,7 +100,7 @@ function writeBaseline(findings) {
 }
 
 // ── selftest ─────────────────────────────────────────────────────────────────
-// Seven arms. The gate must be provably able to RED, provably able to stay
+// Eleven arms. The gate must be provably able to RED, provably able to stay
 // SILENT, provably able to tell known from novel, provably still reading files
 // that plain `grep` goes blind on, and provably able to see a cited window that
 // is one line TOO NARROW — plus the control proving that last arm reds on
@@ -313,6 +313,76 @@ function derivePartialPathTarget() {
       }
       if (near) continue;
       return { rel, partial, dirs, stem, line: n };
+    }
+  }
+  return null;
+}
+
+// A CORRECT citation pointing INTO a definition's body, anchored on that
+// definition's own name, with the head far enough above that neither the ±3
+// scan nor the RE-VERIFY GATE's wider re-scan can see it. This is the shape the
+// enclosing-definition rule exists for, and the derivation carries the
+// constraints that make the arm able to BITE. Every one of them was learned by
+// watching a draft of this arm pass with the rule reverted:
+//   1. the def name must carry an UNDERSCORE — that is the rule that harvests a
+//      bare identifier as a needle; a name like `build` is harvested by nothing,
+//      so the probe would have NO anchor, exit `unverifiable`, and pass silent;
+//   2. the name must not appear in the citation's own path or basename, or
+//      `selfDerived` discards it and the verdict is again silence;
+//   3. the head must sit at least 6 lines above the cited line, and the name
+//      must appear NOWHERE within ±5 of it. ±3 is the first pass, but a stale
+//      verdict is then re-checked by the re-verify gate over a ±5 window and
+//      SUPPRESSED if the anchor lands — so a gap of 4 or 5 makes this arm green
+//      with the rule reverted. The live instance has a gap of exactly 6;
+//   4. the BASENAME must name exactly one tracked file. The re-verify gate
+//      re-resolves through `resolveBasenameNear`, which reads t.BASE and throws
+//      the explicit path away — so with an ambiguous stem the gate re-scans a
+//      DIFFERENT file of the same name, finds the anchor there, and suppresses
+//      the finding. The first draft of this arm derived its window from the file
+//      it walked while the gate scored a namesake, and shipped VACUOUS;
+//   5. the probe cites the EXPLICIT repo-relative path, so the first pass has
+//      exactly one candidate and the file examined is the file verified.
+// Returns {rel, base, name, head, line} or null.
+function deriveEnclosingDefTarget() {
+  const { present } = codeCommentCorpus();
+  const baseCount = new Map();
+  try {
+    const out = execFileSync("git", ["ls-files"], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }).toString();
+    for (const l of out.split("\n")) {
+      if (!l) continue;
+      const b = l.split("/").pop();
+      baseCount.set(b, (baseCount.get(b) || 0) + 1);
+    }
+  } catch { return null; }
+
+  for (const rel of present) {
+    if (!rel.endsWith(".ex") || rel.includes("/test/")) continue;
+    const base = rel.split("/").pop();
+    if (baseCount.get(base) !== 1) continue;            // (4) no namesake for the gate to score
+    let lines;
+    try { lines = readFileSync(join(ROOT, rel), "utf8").split("\n"); } catch { continue; }
+    for (let h = 1; h <= lines.length; h++) {
+      const m = (lines[h - 1] || "").match(/^(\s{2})def ([a-z][a-z0-9_]*_[a-z0-9_]+)\(.*\bdo\s*$/);
+      if (!m) continue;
+      const name = m[2];
+      if (name.length < 4) continue;
+      if (rel.includes(name) || base.includes(name)) continue;   // (2)
+      // The body runs to the `end` sitting at the head's own indent.
+      let close = -1;
+      for (let i = h + 1; i <= lines.length; i++) {
+        if (/^\s{2}end\s*$/.test(lines[i - 1] || "")) { close = i; break; }
+        if (/^\s{2}defp?\s/.test(lines[i - 1] || "")) break;
+      }
+      if (close < 0) continue;
+      for (let n = h + 6; n < close; n++) {             // (3) outside ±5, not just ±3
+        if ((lines[n - 1] || "").trim() === "") continue;
+        let near = false;
+        for (let i = Math.max(1, n - 5); i <= Math.min(lines.length, n + 5); i++) {
+          if ((lines[i - 1] || "").includes(name)) { near = true; break; }
+        }
+        if (near) continue;
+        return { rel, base, name, head: h, line: n };
+      }
     }
   }
   return null;
@@ -572,6 +642,45 @@ function selftest() {
         );
       }
     }
+    // (k) THE ENCLOSING DEFINITION. A definition writes its name ONCE, at its
+    //     head, so every line of its body is a line that cannot contain the
+    //     anchor. A citation pointing into that body and anchoring on the
+    //     function it is inside therefore fails a ±3 scan BY CONSTRUCTION, and
+    //     the verdict is stale-on-correct — the same direction as (g) and (j),
+    //     reached by a different route.
+    //
+    //     MEASURED on main: the quiz-bridge sandbox cascade regression cites the
+    //     bridge at a line inside `handle_info/2` whose clause head sits SIX
+    //     lines above, and the sweep reported it NOVEL. Eleven findings in total
+    //     were this shape, every one of them a correct citation.
+    //
+    //     ±3 IS NOT WIDENED, and this arm is what pins that: it passes because
+    //     the checker learned to ask whether the cited line is INSIDE the named
+    //     definition, not because the window grew. Arms (e)/(f) hold the other
+    //     end — a window with more slack starts confirming on lines the citation
+    //     excluded, which is how a guard stops finding drift while looking busy.
+    const encl = deriveEnclosingDefTarget();
+    if (!encl) {
+      fails.push("(k) SETUP: no underscore-named def with an anchor-free body line — the arm would be vacuous");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The work is done by \`${encl.name}\` (${encl.rel}:${encl.line}).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const enclFindings = linerefFindings([probeRel]);
+      if (enclFindings.length !== 0) {
+        fails.push(
+          `(k) ENCLOSING DEF: a CORRECT citation of ${encl.rel}:${encl.line}, which sits inside ` +
+            `\`${encl.name}\` (head at line ${encl.head}, ${encl.line - encl.head} lines above the ` +
+            `cited line and so outside ±3), produced ${enclFindings.length} finding(s) — the checker ` +
+            "is demanding the definition's NAME inside its own BODY, a test no correct citation can " +
+            "pass: " + (enclFindings[0].evidence || ""),
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -594,6 +703,7 @@ function selftest() {
   process.stdout.write("  ok: (h) silent on an AMBIGUOUS stem whose line is valid in another candidate\n");
   process.stdout.write("  ok: (i) an EXPLICIT path binds to the file it names, never to a basename twin\n");
   process.stdout.write("  ok: (j) silent on a CORRECT PARTIAL path — directory segments are not anchors\n");
+  process.stdout.write("  ok: (k) silent on a CORRECT citation INSIDE a definition whose head is outside ±3\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
