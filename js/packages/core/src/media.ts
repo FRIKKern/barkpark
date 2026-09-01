@@ -7,6 +7,7 @@
 // zero-dependency, runtime-agnostic contract.
 
 import { scopePrefix } from './scope'
+import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { assertPaging, assertNoCommaEntries } from './filter-builder'
 import { BarkparkNotFoundError, BarkparkEdgeRuntimeError, BarkparkValidationError } from './errors'
@@ -31,13 +32,15 @@ import type {
 } from './types'
 
 // Guard the id/assetId every write (and non-null-returning read) op feeds into
-// encodeURIComponent: an empty string collapses the path (e.g. `//checkout`) and
-// `undefined` yields the literal `undefined` segment, so the server answers with an
-// opaque 404/405. Fail closed client-side with a self-explaining error instead.
+// encodeURIComponent. An empty string collapses the path (e.g. `//checkout`) and
+// `undefined` yields the literal `undefined` segment; `'..'` is worse — it survives
+// encodeURIComponent and fetch's URL parser resolves it before the request leaves,
+// retargeting the call at a DIFFERENT media route (`revokeCollectionShare('..')`
+// emitted `DELETE /v1/media/:dataset/:id` — MediaController.delete, an asset
+// deletion). One shared rule covers both: a path segment may not be a
+// relative-path operator. See util/guards.ts.
 function assertAssetId(id: string, field = 'id'): void {
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new BarkparkValidationError(`media op requires a non-empty ${field}`, { field })
-  }
+  assertSegment(id, field)
 }
 
 // Normalize a tags/facets filter (single value or array) into the comma-joined

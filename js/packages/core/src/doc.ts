@@ -9,7 +9,8 @@
 // so callers (client.doc) can treat missing as null (the 404 → null read convention).
 
 import { scopePrefix } from './scope'
-import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
+import { assertSegment } from './util/guards'
+import { BarkparkNotFoundError } from './errors'
 import { normalizeFieldList } from './filter-builder'
 import { request } from './transport'
 import type { BarkparkClientConfig, BarkparkDocument, Perspective } from './types'
@@ -54,10 +55,8 @@ export async function getDoc<T = BarkparkDocument>(
   id: string,
   opts?: GetDocOptions,
 ): Promise<DocResult<T>> {
-  if (typeof type !== 'string' || type.length === 0)
-    throw new BarkparkValidationError('doc requires a non-empty type', { field: 'type' })
-  if (typeof id !== 'string' || id.length === 0)
-    throw new BarkparkValidationError('doc requires a non-empty id', { field: 'id' })
+  assertSegment(type, 'type')
+  assertSegment(id, 'id')
   const perspective = opts?.perspective ?? config.perspective
   const qp = new URLSearchParams()
   if (perspective !== undefined) qp.set('perspective', perspective)
