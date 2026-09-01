@@ -160,6 +160,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # `/studio` session funnel. nil when arrived at flat/directly.
          return_to: ReturnTo.sanitize(params["return_to"]),
          chat_base_path: chat_base_path(params),
+         # WHICH of the two mounts this socket is (see `read_workspace_id/1`).
+         # The workspace-scoped route carries `:workspace_slug` in its path; the
+         # flat `/studio/chat` route has no such segment. Captured at mount
+         # because the two mounts are authorized by DIFFERENT gates and the read
+         # scope below turns on exactly that.
+         scoped_mount?: is_binary(params["workspace_slug"]),
          session: nil,
          store_session_id: nil,
          session_id: nil,
@@ -338,7 +344,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         # and reload when it is reopened.
         socket = capture_draft(socket)
 
-        case StudioChat.get_session(sid, :global) do
+        case get_session_in_tenancy(socket, sid) do
           nil ->
             # Unknown/deleted session — fall back to the new-chat state with an
             # honest notice. (A mount-time push_patch would fight the initial
@@ -936,9 +942,23 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   def handle_event("session-archive", %{"id" => id}, socket) do
-    # Admin LiveView is the `:global` superuser path (charter D17/D18) — the
-    # sidebar sees every workspace's sessions, unchanged from today. The scope
-    # stays :global; `tenancy_permits?/2` is what refuses a CROSS-TENANT reach.
+    # `archive_session/2` is called at `:global` because the STORE call takes no
+    # narrower scope that keeps NULL-owned legacy rows reachable (see
+    # `session_in_tenancy?/2`); `tenancy_permits?/2` is what refuses a
+    # CROSS-TENANT reach.
+    #
+    # WHAT THIS COMMENT USED TO SAY, and why it no longer does: "the sidebar sees
+    # every workspace's sessions, unchanged from today", stated flatly, of every
+    # mount. That was written when this LiveView was mounted ONLY at flat
+    # `/studio/chat` under the instance-wide `{LiveAuth, :admin}`, and it is
+    # still true THERE (charter D17/D18 — `chat_live_test.exs`'s "tenant seam"
+    # case pins it). It became false the day the router also mounted this module
+    # inside `live_session :scoped_admin_studio` at `/w/:ws/p/:proj/studio/chat`
+    # behind `{LiveAuth, :scoped_admin}` — a gate that proves owner/admin in the
+    # URL WORKSPACE and nothing more, so a global sidebar THERE discloses every
+    # other tenant's session titles to a principal who proved authority in one.
+    # The read scope is now per-mount: see `read_workspace_id/1`, which clamps
+    # the scoped mount and leaves the flat superuser path alone.
     if tenancy_permits?(socket, id), do: StudioChat.archive_session(id, :global)
     {:noreply, after_lifecycle_mutation(socket, id)}
   end
@@ -4065,7 +4085,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     # assign: on the flat /studio/chat route StudioChrome pins that assign to
     # the seeded Default workspace, so a genuinely-:global session would
     # silently inherit the Default workspace's execution profile (D205).
-    store_session = StudioChat.get_session(store_id, :global)
+    store_session = get_session_in_tenancy(socket, store_id)
 
     with {:ok, recorder} <-
            Recorder.ensure(%{
@@ -4538,8 +4558,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp refresh_sessions(socket) do
+    # The sidebar LIST. The store call stays `:global` and the tenant clamp is
+    # applied HERE — `StudioChat`'s own workspace scope is a strict
+    # `owner_workspace_id == ^ws` equality that would ALSO delete every
+    # NULL-owned legacy row from the sidebar (see `owner_in_tenancy?/2` for the
+    # full argument), and on the flat superuser mount there is no clamp at all.
+    # Clamping BEFORE the folds below is deliberate: `workflow_summaries`,
+    # `epic_goals` (which queries the task ledger per row) and
+    # `pending_ask_roles` all derive from this list, so a row filtered here can
+    # never reach a per-tenant count rendered into the page.
     sessions =
-      StudioChat.list_sessions([archived: socket.assigns[:show_archived] == true], :global)
+      [archived: socket.assigns[:show_archived] == true]
+      |> StudioChat.list_sessions(:global)
+      |> clamp_list_to_tenancy(socket)
 
     # Cold workflow truth (wsc charter D7): the select-widened rail_snapshot
     # folds to the compact D3 summary HERE, and the snapshot itself never
@@ -4626,6 +4657,129 @@ defmodule BarkparkWeb.Studio.ChatLive do
           # Missing row, or a legacy NULL-owned one: not a cross-tenant reach.
           _ -> true
         end
+    end
+  end
+
+  # ── The acting tenant for a READ, and the permitted set it may see ────────
+  #
+  # ChatLive is DUAL-MOUNTED and the two mounts prove DIFFERENT things:
+  #
+  #   * flat `/studio/chat` (`live_session :admin_studio`) — `{LiveAuth, :admin}`,
+  #     an INSTANCE-wide permission gate. This is the `:global` superuser path
+  #     charter D17/D18 reserves, and `chat_live_test.exs`'s "tenant seam" case
+  #     pins it: the flat sidebar surfaces sessions of EVERY owner. Nothing here
+  #     narrows it — `nil` means no clamp. The cross-tenant WRITE reach on that
+  #     route is a separate question, already answered by `tenancy_permits?/2`.
+  #
+  #   * scoped `/w/:ws/p/:proj/studio/chat` (`live_session :scoped_admin_studio`)
+  #     — `{LiveAuth, :scoped_admin}`, which proves owner/admin membership in the
+  #     URL WORKSPACE and NOTHING MORE. A workspace-B admin is not an instance
+  #     admin. THIS is the mount the carve-out comment was never written for, and
+  #     the reason it went stale: it predates the scoped mount entirely.
+  #
+  # On that scoped mount the acting tenant is `:current_workspace`, which
+  # `LiveScope.:resolve` pins to the authorized URL workspace before this
+  # LiveView's `mount/3` runs (it short-circuits both of StudioChrome's flat
+  # fallbacks). It is also the very assign `ensure_session/1` reads to stamp
+  # `owner_workspace_id` on a session it CREATES — so the reads stop disagreeing
+  # with the write beside them. `principal_workspace_id/1` is the fallback for a
+  # scoped socket with no resolved workspace, which narrows rather than opens.
+  defp read_workspace_id(socket) do
+    if socket.assigns[:scoped_mount?] do
+      case socket.assigns[:current_workspace] do
+        %{id: ws_id} when is_binary(ws_id) -> ws_id
+        _ -> principal_workspace_id(socket)
+      end
+    end
+  end
+
+  # The PERMITTED SET for a read: the acting workspace's own rows PLUS
+  # `NULL`-owned legacy / pre-tenancy rows — the same permitted set
+  # `tenancy_permits?/2` grants a WRITE, for the same reason it gives there.
+  #
+  # Note what this deliberately is NOT: `StudioChat.list_sessions/2` and
+  # `get_session/2` handed a bare workspace binary. That store gate is a strict
+  # `owner_workspace_id == ^ws` equality (documented in `studio_chat.ex`, with
+  # `StudioChat.scope_match?/2` as its term twin), so a NULL owner never matches
+  # and every pre-tenancy session would VANISH the moment these loaders stopped
+  # saying `:global`. `Auth.create_token/5` defaults an omitted workspace to the
+  # seeded Default, so nearly every token IS bound and that vanishing would be
+  # the common case, not the edge. The store has no "mine-or-unowned" scope to
+  # ask for, so the clamp is made HERE.
+  defp owner_in_tenancy?(socket, owner) do
+    case read_workspace_id(socket) do
+      nil -> true
+      ws_id -> is_nil(owner) or owner == ws_id
+    end
+  end
+
+  defp session_in_tenancy?(socket, %{owner_workspace_id: owner}),
+    do: owner_in_tenancy?(socket, owner)
+
+  defp session_in_tenancy?(_socket, _other), do: false
+
+  # `StudioChat.get_session/2` clamped to that permitted set: a row outside this
+  # socket's tenancy reads back as `nil`, indistinguishable from a row that does
+  # not exist — so `handle_params/3` takes its existing "no longer available"
+  # branch rather than growing a second refusal path.
+  defp get_session_in_tenancy(socket, id) do
+    case StudioChat.get_session(id, :global) do
+      %{} = session -> if session_in_tenancy?(socket, session), do: session
+      _ -> nil
+    end
+  end
+
+  # The SIDEBAR arm of the same rule — and it cannot reuse `session_in_tenancy?/2`
+  # directly, for a reason that is invisible in the source and was caught only by
+  # running it:
+  #
+  #   `StudioChat.list_sessions/2` carries a narrowing `select` of the sidebar
+  #   columns, and `owner_workspace_id` is NOT one of them. Every row it returns
+  #   therefore carries `owner_workspace_id: nil` — the struct default for a
+  #   field that was never selected, indistinguishable from a genuine NULL owner.
+  #   Filtering that projection on the owner field reads EVERY row as a
+  #   NULL-owned legacy row and removes nothing. The same trap swallows
+  #   `StudioChat.scope_match?/2`, the documented term twin, if it is handed a
+  #   `list_sessions/2` row.
+  #
+  # So ownership is RE-READ for the listed ids instead of trusted from the
+  # projection: ONE bounded query (`list_sessions/2` caps at 50 rows), never a
+  # per-row `get_session/2`. The one-line alternative — adding
+  # `owner_workspace_id: s.owner_workspace_id` to that select — lives inside
+  # `Barkpark.StudioChat` and is deliberately not taken from here.
+  #
+  # A `nil` read scope (the flat superuser mount) short-circuits before the extra
+  # query, so that path pays nothing.
+  defp clamp_list_to_tenancy(sessions, socket) do
+    if is_nil(read_workspace_id(socket)) do
+      sessions
+    else
+      owners = session_owners(Enum.map(sessions, & &1.id))
+      Enum.filter(sessions, &owner_in_tenancy?(socket, Map.get(owners, &1.id)))
+    end
+  end
+
+  defp session_owners([]), do: %{}
+
+  defp session_owners(ids) do
+    import Ecto.Query, only: [from: 2]
+
+    from(s in StudioChat.Session,
+      where: s.id in ^ids,
+      select: {s.id, s.owner_workspace_id}
+    )
+    |> Barkpark.Repo.all()
+    |> Map.new()
+  end
+
+  # `StudioChat.get_session/2` clamped to that permitted set: a row outside this
+  # socket's tenancy reads back as `nil`, indistinguishable from a row that does
+  # not exist — so `handle_params/3` takes its existing "no longer available"
+  # branch rather than growing a second refusal path.
+  defp get_session_in_tenancy(socket, id) do
+    case StudioChat.get_session(id, :global) do
+      %{} = session -> if session_in_tenancy?(socket, session), do: session
+      _ -> nil
     end
   end
 
@@ -4962,7 +5116,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Recording here too would double-sum the lifetime token totals.
   defp record_result(socket, _ev) do
     with store_id when is_binary(store_id) <- socket.assigns.store_session_id,
-         %{} = session <- StudioChat.get_session(store_id, :global) do
+         %{} = session <- get_session_in_tenancy(socket, store_id) do
       assign(socket, ring: ring_from_session(session))
     else
       _ -> socket
@@ -4977,6 +5131,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # LIMIT caps both the query result and the initial socket heap; the store keeps
   # the full durable history, so nothing is lost — only the on-screen window is
   # bounded. `assign_messages/2` keeps it bounded across subsequent live appends.
+  # The store call stays `:global` because `chat_messages` carries no
+  # `owner_workspace_id` of its own — `StudioChat`'s scoped arm reaches the
+  # tenant through the parent SESSION, on the same strict equality that would
+  # blank a NULL-owned legacy transcript. The tenant gate for a transcript is
+  # therefore its session, and `replay_messages/2` is reachable from exactly one
+  # place: `load_stored_session/2`, whose only caller is the `handle_params/3`
+  # clause above — which now loads through `get_session_in_tenancy/2`. A foreign
+  # session never becomes an on-screen session, so its messages are never read.
   defp replay_messages(session_id, live?) do
     StudioChat.list_messages(session_id, @transcript_window, :global)
     |> Enum.map(&replay_message(&1, live?))
