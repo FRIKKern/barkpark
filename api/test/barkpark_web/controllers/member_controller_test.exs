@@ -366,6 +366,44 @@ defmodule BarkparkWeb.MemberControllerTest do
       refute body |> Jason.encode!() |> String.contains?("token_hash")
     end
 
+    # THE INVENTORY IS THE ENUMERATION ORACLE, so its tenancy rail needs its own
+    # pin. The revoke leg below is fenced by `Members.token_member?/2` and has a
+    # test; the LIST leg is fenced by a different mechanism — the workspace id
+    # comes from `conn.assigns[:current_workspace]` and the query joins
+    # membership on it — and nothing pinned it. A regression that swapped the
+    # join for an unscoped `Repo.all(ApiToken)` would keep every other test in
+    # this block green while handing A's admin the label, permissions and id of
+    # every credential on the instance, which is exactly the id `token revoke`
+    # takes. Both directions are asserted: A cannot READ B's scope, and A's OWN
+    # scope does not contain B's rows.
+    test "the token inventory does not cross tenants — neither by scope nor by leak", %{
+      ws: ws,
+      project: project,
+      other_ws: other_ws,
+      other_project: other_project,
+      admin_raw: admin_raw
+    } do
+      b_raw = "b-inventory-#{System.unique_integer([:positive])}"
+      {:ok, b_token} = Auth.create_token(b_raw, "b-inventory", @dataset, ["read"])
+      {:ok, _} = TenancyAuth.create_membership(other_ws.id, b_token.id, "member", "api_token")
+
+      # A's admin reaching into B's scope is refused by the workspace-role gate.
+      assert req(admin_raw)
+             |> get("#{base(other_ws, other_project)}/tokens")
+             |> json_response(403)
+
+      # …and B's credential is absent from A's own inventory. Asserted on the
+      # id we just created rather than on the row COUNT: every agent shares one
+      # test database, so a count is another agent's row away from lying.
+      body = req(admin_raw) |> get("#{base(ws, project)}/tokens") |> json_response(200)
+
+      refute b_token.id in Enum.map(body["tokens"], & &1["id"]),
+             "workspace A's token inventory must not carry a credential seated only in B — " <>
+               "this listing is what feeds `bp token revoke <id>`"
+
+      refute body |> Jason.encode!() |> String.contains?(b_raw)
+    end
+
     test "revoking a token that holds a seat here stamps revoked_at", %{
       ws: ws,
       project: project,
