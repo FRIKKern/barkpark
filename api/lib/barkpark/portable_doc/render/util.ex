@@ -11,6 +11,18 @@ defmodule Barkpark.PortableDoc.Render.Util do
 
   @allowed_scheme ~r/^(?:https?|mailto|tel):/i
 
+  # Control bytes removed from the WHOLE href before any check — the exact set
+  # `isCtrlRune` strips in the Go twin (`internal/pdrender/inline.go`:
+  # `r < 0x20 || r == 0x7f`). Kept as one @-attribute so the two sets are
+  # comparable by eye; see `safe_url/1` for why the strip must be global.
+  @control_bytes ~r/[\x00-\x1F\x7F]/
+  # Leading spaces (0x20) only. The Go twin does NOT strip these — a leading
+  # space makes `urlScheme` return "" there, so the value passes through as
+  # schemeless. Elixir has always trimmed them, and continuing to is a NO-OP
+  # for every allowed form, so this line preserves shipped behaviour rather
+  # than importing a divergence in the name of parity.
+  @leading_spaces ~r/^\x20+/
+
   @doc """
   Escape the five HTML-significant characters in the EXACT order `& < > " '`.
 
@@ -48,11 +60,30 @@ defmodule Barkpark.PortableDoc.Render.Util do
   Parity twins — keep the permitted set in lockstep:
   `web/lib/safe-href.ts` and `internal/pdrender/inline.go` (`sanitizeURL`).
 
-  Leading ASCII control characters / whitespace are stripped before matching,
-  mirroring browser tolerance for `\\tjavascript:…`.
+  ASCII control bytes (0x00-0x1F and 0x7F) are removed from the WHOLE string
+  before matching, not just from its head, and the CLEANED string is what gets
+  emitted — so the value that was CHECKED is the value that RESOLVES.
+
+  This is the parity point, and a leading-only strip is what made it a defect:
+  the WHATWG URL parser deletes ASCII tab / LF / CR from ANYWHERE in a URL
+  before it parses. Strip only the head and then test position 1 for the
+  protocol-relative `//` or `/\\` form, and `/<TAB>/evil.example/phish` reads as
+  an ordinary root-relative path here while a browser resolves it to
+  `https://evil.example/phish` — an off-site navigation out of a CMS-authored
+  link, straight past the scheme allowlist. Measured against the Go twin before
+  the fix: `sanitizeURL` dropped all seven embedded-control protocol-relative
+  forms; `safe_url/1` returned every one of them unchanged.
+
+  The strip set is `internal/pdrender/inline.go`'s `isCtrlRune`
+  (`r < 0x20 || r == 0x7f`) exactly — wider than the JS twins' `[\\t\\n\\r]`,
+  because the Go renderer is the reference implementation for this function and
+  a third behaviour would be a new divergence, not a fix.
   """
   def safe_url(href) when is_binary(href) do
-    trimmed = String.replace(href, ~r/^[\x00-\x20]+/, "")
+    trimmed =
+      href
+      |> String.replace(@control_bytes, "")
+      |> String.replace(@leading_spaces, "")
 
     cond do
       String.starts_with?(trimmed, "/") ->

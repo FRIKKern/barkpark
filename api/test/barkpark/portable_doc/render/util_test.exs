@@ -122,6 +122,193 @@ defmodule Barkpark.PortableDoc.Render.UtilTest do
     end
   end
 
+  # ── the tab / newline control-byte parity trio, third and last third ───────
+  #
+  # `safe_url/1` stripped ASCII control characters LEADING-ONLY, then tested
+  # position 1 for the protocol-relative `//` or `/\` form. The WHATWG URL
+  # parser deletes ASCII tab / LF / CR from ANYWHERE in a URL before it parses,
+  # so `/<TAB>/evil.example/phish` was returned as an ordinary root-relative
+  # path and a browser resolved it to https://evil.example/phish.
+  #
+  # The other two thirds landed in #14455 (`web/lib/safe-href.ts` `safeHref`
+  # and `js/packages/react/src/inline.tsx` `safeUrl`), which routed this copy
+  # out as a known-vulnerable sibling. `internal/pdrender/inline.go`
+  # `sanitizeURL` is the REFERENCE — it already stripped control runes across
+  # the whole string — so this table encodes MEASURED Go verdicts, not a
+  # reading of the Go source.
+  #
+  # SENTINEL MAPPING, stated because the two functions refuse differently:
+  # Go returns "" to drop, Elixir returns "#". Parity is over the DECISION
+  # (emit vs refuse) and over the CLEANED string, never over the sentinel.
+  describe "safe_url/1 control-byte parity with the Go twin (sanitizeURL)" do
+    # The subject must EXIST and must still be a real guard before any parity
+    # claim is made about it — a table that passes because the function
+    # degraded to a constant would prove nothing. Booleans are bound rather
+    # than match-asserted: ExUnit discards the message on `assert %S{} = x`.
+    test "subject presence: safe_url/1 is exported and still refuses a known-bad scheme" do
+      loaded? = Code.ensure_loaded?(Util)
+
+      assert loaded?,
+             "Barkpark.PortableDoc.Render.Util did not load — every case below would " <>
+               "assert properties of an absent subject"
+
+      exported? = function_exported?(Util, :safe_url, 1)
+
+      assert exported?,
+             "Util.safe_url/1 is not exported — the table below would test nothing"
+
+      refuses_javascript? = Util.safe_url("javascript:alert(1)") == "#"
+
+      assert refuses_javascript?,
+             "safe_url/1 no longer refuses `javascript:` — the guard has degraded to a " <>
+               "pass-through, so every parity case below would pass vacuously"
+
+      allows_plain? = Util.safe_url("/docs/page") == "/docs/page"
+
+      assert allows_plain?,
+             "safe_url/1 no longer emits a plain root-relative path — it has degraded to " <>
+               "refusing everything, so every REFUSE case below would pass vacuously"
+    end
+
+    # Go verdict "" (drop) => Elixir "#". Every one of these was returned
+    # UNCHANGED by safe_url/1 before the fix, i.e. emitted as a live href.
+    @embedded_protocol_relative [
+      {"tab", "/\t/evil.example/phish"},
+      {"newline", "/\n/evil.example/phish"},
+      {"CR", "/\r/evil.example/phish"},
+      {"CRLF", "/\r\n/evil.example/phish"},
+      {"tab + backslash form", "/\t\\evil.example/phish"},
+      {"newline + backslash form", "/\n\\evil.example/phish"},
+      {"CR + backslash form", "/\r\\evil.example/phish"},
+      {"doubled tabs before a real //", "/\t\t//evil.example/phish"},
+      {"tab between the two slashes", "/\t/evil.example"},
+      {"NUL", "/\0/evil.example/phish"},
+      {"DEL (0x7F)", "/\x7F/evil.example/phish"},
+      {"vertical tab", "/\v/evil.example/phish"},
+      {"form feed", "/\f/evil.example/phish"}
+    ]
+
+    for {label, raw} <- @embedded_protocol_relative do
+      test "an embedded #{label} cannot smuggle a protocol-relative host past safe_url/1" do
+        raw = unquote(raw)
+        out = Util.safe_url(raw)
+
+        assert out == "#",
+               "safe_url(#{inspect(raw)}) returned #{inspect(out)} instead of \"#\". " <>
+                 "A browser deletes the control byte and resolves that to an OFF-SITE " <>
+                 "navigation. The Go twin sanitizeURL/1 drops this input (measured)."
+      end
+    end
+
+    # Go verdict "" (drop) — a control byte must not split a dangerous scheme
+    # into something the allowlist regex fails to recognise as dangerous.
+    @embedded_scheme [
+      {"tab", "jav\tascript:alert(1)"},
+      {"newline", "jav\nascript:alert(1)"},
+      {"CRLF", "java\r\nscript:alert(1)"},
+      {"leading tab", "\tjavascript:alert(1)"},
+      {"NUL", "jav\0ascript:alert(1)"},
+      {"DEL", "jav\x7Fascript:alert(1)"}
+    ]
+
+    for {label, raw} <- @embedded_scheme do
+      test "an embedded #{label} cannot smuggle a dangerous scheme past safe_url/1" do
+        raw = unquote(raw)
+        out = Util.safe_url(raw)
+
+        assert out == "#",
+               "safe_url(#{inspect(raw)}) returned #{inspect(out)} — the byte the browser " <>
+                 "deletes reassembles this into `javascript:`. Go drops it (measured)."
+      end
+    end
+
+    # Go CLEANS and returns. The emitted string must carry no byte the browser
+    # would delete, so the value that was CHECKED is the value that RESOLVES.
+    @cleaned_through [
+      {"/d/po\tst/x", "/d/post/x"},
+      {"/d/po\nst/x", "/d/post/x"},
+      {"/d/po\rst/x", "/d/post/x"},
+      {"/d/po\r\nst/x", "/d/post/x"},
+      {"https://example.com/a\nb", "https://example.com/ab"},
+      {"#an\rchor", "#anchor"},
+      {"?ta\tb=2", "?tab=2"},
+      {"./ot\ther", "./other"},
+      {"../u\np", "../up"},
+      {"mailto:us\ter@example.com", "mailto:user@example.com"}
+    ]
+
+    for {raw, expected} <- @cleaned_through do
+      test "safe_url/1 emits the CLEANED string for #{inspect(raw)} — checked == resolved" do
+        raw = unquote(raw)
+        expected = unquote(expected)
+        out = Util.safe_url(raw)
+
+        assert out == expected,
+               "safe_url(#{inspect(raw)}) returned #{inspect(out)}, expected " <>
+                 "#{inspect(expected)} — the Go twin returns the cleaned string (measured), " <>
+                 "so a browser and this renderer must agree on what the link points at"
+
+        refute String.match?(out, ~r/[\x00-\x1F\x7F]/),
+               "safe_url(#{inspect(raw)}) returned #{inspect(out)}, which still carries a " <>
+                 "byte the browser deletes — the checked string is not the resolved one"
+      end
+    end
+
+    test "empty and whitespace-only inputs refuse, before and after the control strip" do
+      for raw <- ["", "   ", "\t", "\n", "\r", "\r\n", "\t\n\r", " \t \n ", "\0", "\x7F"] do
+        out = Util.safe_url(raw)
+
+        assert out == "#",
+               "safe_url(#{inspect(raw)}) returned #{inspect(out)} — an input that is empty " <>
+                 "once the control bytes are removed must refuse, not emit"
+      end
+    end
+
+    test "the strip does not widen the allowlist — combinations still refuse" do
+      for raw <- [
+            "f\ttp://example.com",
+            "\tftp://example.com",
+            "da\nta:text/html;base64,PHN2Zz4=",
+            "vb\rscript:msgbox(1)",
+            "ot\ther-page",
+            "//evil.example",
+            "/\\evil.example"
+          ] do
+        out = Util.safe_url(raw)
+
+        assert out == "#",
+               "safe_url(#{inspect(raw)}) returned #{inspect(out)} — removing control bytes " <>
+                 "must never turn a refused form into an allowed one"
+      end
+    end
+
+    test "legitimate URLs are byte-unaffected by the control-byte strip" do
+      # The Go moduledoc's own claim: "well-formed allowed URLs are
+      # byte-unaffected". Regression fence for the whole permitted set.
+      for raw <- [
+            "https://example.com",
+            "http://example.com/path",
+            "mailto:user@example.com",
+            "tel:+4700000000",
+            "/docs/page",
+            "#conclusion",
+            "?tab=2",
+            "./other",
+            "../up"
+          ] do
+        assert Util.safe_url(raw) == raw,
+               "safe_url(#{inspect(raw)}) changed a well-formed allowed URL — the control " <>
+                 "strip must be a no-op on inputs that carry no control bytes"
+      end
+    end
+
+    test "fail-soft clauses are unchanged by the control strip" do
+      assert Util.safe_url(nil) == "#"
+      assert Util.safe_url(42) == "#"
+      assert Util.safe_url([]) == "#"
+    end
+  end
+
   describe "tone_palette/1" do
     test "returns correct colours for success" do
       assert Util.tone_palette("success") == %{bg: "#e7f2ec", fg: "#1e6b52"}
