@@ -6,7 +6,7 @@ Every file in this directory is a **single, self-contained** TypeScript example.
 ## Authoring contract
 
 - Valid TypeScript/TSX, passes `tsc --noEmit` against `js/tsconfig.base.json` (`strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`).
-- Imports **only** from `@barkpark/*`, `next/*`, `react`, and the Node standard library. No imports between snippets.
+- Imports **only** from `@barkpark/*`, `next/*`, `react`, `server-only`, and the Node standard library. No imports between snippets.
 - First block comment is the "expected output" — concrete enough to smoke-test end-to-end. `_meta.json` duplicates this in structured form.
 - Each file exports a single function (or App Router convention: `GET` / `POST` / `default`).
 

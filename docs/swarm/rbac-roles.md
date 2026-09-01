@@ -52,7 +52,7 @@ model into Cloud verbatim in shape, closing the hole without inventing a paralle
 |---|---|
 | `cloud/lib/barkpark_cloud/accounts/authz.ex` | new — Authz module |
 | `cloud/lib/barkpark_cloud/accounts.ex` | edit — `add_member_as/4` |
-| `cloud/lib/barkpark_cloud/web/auth.ex` | edit — `require_team_admin/2`, `require_team_owner/2`, `gate_role/3`, `forbidden/1` |
+| `cloud/lib/barkpark_cloud/web/auth.ex` | edit — `require_team_admin/2`, `require_team_owner/2`, `gate_role/3`, `forbidden/2` (arity 1 does not exist — a default `evidence \\ []` reds the `--warnings-as-errors` Cloud gate) |
 | `cloud/lib/barkpark_cloud/web/router.ex` | edit — 5 gate-line swaps |
 | `cloud/test/barkpark_cloud/accounts/authz_test.exs` | new — unit tests |
 | `cloud/test/barkpark_cloud/web/router_test.exs` | edit — RBAC gating describe block |
@@ -75,13 +75,16 @@ member/admin negative paths (403) and the no-team/no-token boundaries.
   are not provisioned (`import_deps :ecto` formatter error). Code is written to match the
   existing formatter output and neighbouring module conventions; verify on a provisioned
   checkout.
-- `manage_members` / `delete_team` actions and `can_grant?/3` are wired into the context
-  (`add_member_as/4`) but have **no route yet** — they land with the teams/invitations
-  feature. Shipping them now means the escalation hole is closed at the context the
-  moment member-management routes appear.
-- Token revocation on demotion (Coolify `RevokeUserTeamTokens`) is **out of scope** — it
-  needs a `revoked_at` column on `user_token`, deferred to the teams/auth slug. No column
-  added here; the hook point is the future `update_member_role_as/4` / `remove_member_as/3`.
+- `manage_members` / `delete_team` actions and `can_grant?/3` were wired into the context
+  (`add_member_as/4`) ahead of any route. **The routes have since landed** —
+  `GET /v1/teams/:id/members`, `PATCH|DELETE /v1/teams/:id/members/:user_id` plus the four
+  invitation routes — so the escalation hole was already closed at the context when they
+  appeared, exactly as planned.
+- Token revocation on demotion (Coolify `RevokeUserTeamTokens`) was **out of scope here**
+  and has SINCE SHIPPED: `user_tokens` carries `revoked_at`
+  (`20260629120100_add_session_lifecycle_to_user_tokens.exs`), and both named hook points —
+  `Accounts.update_member_role_as/4` and `Accounts.remove_member_as/3` — now call
+  `delete_user_session_tokens/1`.
 - Policy decision: site CRUD/deploy (`POST /v1/sites*`) stays at `member`. Spending money
   and destroying infra is the beta hole; routine content work is not. Tighten later by
   swapping one plug call.

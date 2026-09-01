@@ -8,7 +8,7 @@ have produced, and any claim it cannot back must say so in the same breath.
 **Every integer below is a READ, and each one names the command that re-reads it.**
 This doc shipped three consecutive waves of transcribed numbers — a census doc lying
 about its own census is this epic's disease on this epic's own paperwork. Re-derive,
-never transcribe; figures here were derived at `974d412ca` unless stated otherwise.
+never transcribe; figures here were derived at `4f98108a2` unless stated otherwise.
 
 **The ruling this census classifies against (PDS-D313).** "Response-backed" is three
 classes, and the axis is the MEASUREMENT POINT — not response-vs-second-read:
@@ -48,7 +48,7 @@ names the exact command it rests on so a reader can refute it:
 |---|---|---|
 | `vercel_cmd.go` carries checkmarks… | `grep -c '✓' internal/cli/vercel_cmd.go` | 13 |
 | …and a print-call glyph lint reaches NONE of them — every one is an argument to the `out.progressf` wrapper, not to `fmt.Print*` | `grep -cE 'fmt\.(Print\|Printf\|Println\|Fprint\|Fprintf\|Fprintln)\([^)]*✓' internal/cli/vercel_cmd.go` | 0 |
-| in `api/lib` almost every glyph is LiveView chrome, not a claim | `grep -r -o '✓' api/lib \| wc -l` and `grep -rl '✓' api/lib \| wc -l` | 48 across 17 files |
+| in `api/lib` almost every glyph is LiveView chrome, not a claim | `grep -r -o '✓' api/lib \| wc -l` and `grep -rl '✓' api/lib \| wc -l` | 49 across 17 files |
 
 (The earlier wording — "ZERO match a quoted-glyph grep" — was false as literally
 written: the glyphs ARE inside quoted strings. What is true, and now falsifiable, is
@@ -77,14 +77,14 @@ test catches all five.
 
 ## Shell — NOT ENFORCED. No gate ships. Here is the measured reason.
 
-Denominator, re-derived (`grep -rn "✓" --include="*.sh" .`, excluding `.git`): **24
-glyph occurrences across 12 files.** Correcting the survey figure, which counted FILES:
+Denominator, re-derived (`grep -rn "✓" --include="*.sh" .`, excluding `.git`): **25
+glyph occurrences across 13 files.** Correcting the survey figure, which counted FILES:
 
 | bucket | count | evidence |
 |---|---|---|
 | proof harnesses | 13 | `deploy/site-spawner-live-proof.sh` 5, `-node-live-` 4, `-autorebuild-` 4 — a proof harness asserting its own findings is not a product success claim |
-| `ok()` helper DEFINITIONS inside smoke/doctor scripts | 7 | `scripts/{create-quickstart,media,cmux,onramp-live-client}-smoke.sh`, `scripts/doctor.sh`, `scripts/bp-vercel-quick-setup.sh`, `scripts/local-update.sh` — one definition each; the claim lives at every call site, which the glyph never reaches |
-| a comment | 1 | `scripts/demo-living-values.sh:23` |
+| `ok()` helper DEFINITIONS inside smoke/doctor scripts | 7 | `scripts/{create-quickstart,media,cmux,onramp-live-client}-smoke.sh`, `scripts/{doctor,bp-vercel-quick-setup,local-update}.sh` — one definition each; the claim lives at every call site, which the glyph never reaches |
+| comments | 2 | `scripts/{demo-living-values.sh,taskboard-drive/drive.sh}` |
 | **real product success claims** | **3** | `templates/place-directory/install.sh:29,33,49` |
 
 Of those three: line 49 is gated on a genuine read-back (step 3 re-queries the public
@@ -96,22 +96,22 @@ makes a 4xx non-zero, so this is stronger than a bare exit code, but it is still
 if the server 200'd without persisting.
 
 **Ruling: no shell gate.** Two sites, in one optional template installer, is not a
-population a repo-wide guard can be calibrated against — a guard over 24 occurrences
-of which 21 are harness plumbing greens on the plumbing and teaches the reader that
+population a repo-wide guard can be calibrated against — a guard over 25 occurrences
+of which 22 are harness plumbing greens on the plumbing and teaches the reader that
 shell is covered. **It is not covered.** The two sites are filed as
 `pds-bl-place-directory-install-echoes-transport`, to be fixed by read-back
 (re-`GET` the schema / count the seeded docs) rather than by a lint.
 
 ## Elixir — NOT ENFORCED. No gate ships. And the glyph census is structurally blind here.
 
-Denominator, re-derived (`grep -r -o "✓" api/lib | wc -l`): **48 occurrences across 17
-files** (the survey said 47). Of these, **47 are LiveView/HEEx/render chrome** —
+Denominator, re-derived (`grep -r -o "✓" api/lib | wc -l`): **49 occurrences across 17
+files** (the survey said 47). Of these, **48 are LiveView/HEEx/render chrome** —
 `panes.ex`, `chat_live.ex`, `paper_editor.ex`, `board_live.ex`, `components.ex`,
 `portable_doc/render/components.ex`, `root.html.heex` and friends. A checkmark in a
 template is a UI affordance, not a claim about a post-condition.
 
 Exactly **one** console emitter carries the glyph:
-`api/lib/mix/tasks/barkpark.workspace.provision_schemas.ex:114` —
+`api/lib/mix/tasks/barkpark.workspace.provision_schemas.ex:115` —
 `case Content.upsert_schema(...) do {:ok, _} -> Mix.shell().info("  ✓ #{name}")`.
 That is **A2**: the success arm is the Repo returning the record it wrote, and the
 `{:error, cs}` arm prints `✗` with the changeset errors. Compliant.
@@ -134,58 +134,58 @@ will ever find it. The honest fix is a post-condition read of the OBJECT
 
 ### THE POPULATION AND ITS OWNER (PDS wave 38) — `router.ex`, not the string `ok: true`
 
-**This doc used to say the population was 91 emitted `ok: true` claims. That is now the
+**This doc used to say the population was 95 emitted `ok: true` claims. That is now the
 population of one LENS, not of the surface.** The string `ok: true` is a convention an
 author may decline; a ROUTE is not. An unrouted write is unreachable, and a routed
 write is in the table by construction — so the denominator's owner is
-`api/lib/barkpark_web/router.ex`, and the 91 is a numerator measured against it.
+`api/lib/barkpark_web/router.ex`, and the 95 is a numerator measured against it.
 
 **The key is the QUAD `{method, path, module, action}`.** A `{module, action}` key
-collapses this population **252 → 196** and, worse, goes BLIND to arrivals: a new
+collapses this population **260 → 204** and, worse, goes BLIND to arrivals: a new
 route onto an already-disposed `{Controller, action}` pair vanishes into the existing
 row and the completeness arm never notices it arrive. The quad is why
 `ROUTED-POPULATION-COMPLETE` reds on an **undisposed arrival** rather than on a count
 — a count-shaped arm over this surface reds on unrelated churn (PDS-D524).
 
-Derived by `scripts/pds-elixir-receipt-census.exs` (build-free AST over 804
+Derived by `scripts/pds-elixir-receipt-census.exs` (build-free AST over 825
 `api/lib/**/*.ex` files, no mix project and no compile — it never boots the app; it
 prints its own `user cpu … ms` line (D605) on every run, which is where a runtime figure
 belongs rather than in this sentence):
 
 | figure | today | what it is |
 |---|---|---|
-| routed entries from `router.ex` AST | 469 | plus 83 plugin specs mounted at 17 `plugin_routes/1` callsites |
-| **ROUTED-WRITE population** | **252** | `post`/`put`/`patch`/`delete` plus every LiveView mount |
-| JUDGED | 67 | reaches a receipt this lens emitted AND the register judged |
+| routed entries from `router.ex` AST | 481 | plus 85 plugin specs mounted at 17 `plugin_routes/1` callsites |
+| **ROUTED-WRITE population** | **260** | `post`/`put`/`patch`/`delete` plus every LiveView mount |
+| JUDGED | 68 | reaches a receipt this lens emitted AND the register judged |
 | ROSTERED | 7 | reaches a hand-named roster site outside the lens |
-| EXCLUDED | 178 | committed, dated disposition row — see the classes below |
+| EXCLUDED | 185 | committed, dated disposition row — see the classes below |
 | **UNDISPOSED** | **0** | `ROUTED-POPULATION-COMPLETE` reds on this |
-| sum | 252 | == the population, both directions, no duplicate key |
+| sum | 260 | == the population, both directions, no duplicate key |
 
 **EXCLUDED is not a silence — it is written, dated prose, counted by class:**
 
 | class | n | why |
 |---|---|---|
 | `liveview_handle_event` | 40 | a LiveView route names a MOUNT; its writes live in `handle_event/3`, which carries no routed action name for a receipt register to key on (26 distinct modules) |
-| **`status_only_receipt`** | **138** | **THE HOLE.** The routed action reaches no `ok: true` / `"ok" => true` receipt this lens can see and carries no roster anchor. SCIM's three IdP write routes land here. Wave 38 also called it "success by STATUS alone"; wave 40 MEASURED that and RETIRED the clause — most of these rows DO render the stored row, they just do not spell the key the lens greps for. The run prints the retirement and the derivation partition that replaced it. |
+| **`status_only_receipt`** | **145** | **THE HOLE.** The routed action reaches no `ok: true` / `"ok" => true` receipt this lens can see and carries no roster anchor. SCIM's three IdP write routes land here. Wave 38 also called it "success by STATUS alone"; wave 40 MEASURED that and RETIRED the clause — most of these rows DO render the stored row, they just do not spell the key the lens greps for. The run prints the retirement and the derivation partition that replaced it. |
 
 The run emits exactly these TWO classes; `action_not_in_corpus` was listed here and
 occurs ZERO times in the output.
 
 **THE JUDGMENT-COVERAGE LADDER, four rungs printed every run (wave 45):** population
-**252** members -> judged-coverage **74** -> VERDICTED **23** -> **PROVEN-BACKED 23
+**260** members -> judged-coverage **75** -> VERDICTED **24** -> **PROVEN-BACKED 24
 MEMBERS**. The top rung is ONE `Enum.count` over ONE `MapSet.union` of two INDEPENDENT
-legs, never `leg_a + leg_b` — OVERLAP is 0 today, so the addition prints the same 23 and
+legs, never `leg_a + leg_b` — OVERLAP is 0 today, so the addition prints the same 24 and
 the integer is no evidence. The selftest case `LADDER-UNION-NOT-SUM` is the only
 discriminator: it injects a leg-B def into leg A and requires `naive > UNION`, which an
-addition can never print. MEMBERS is load-bearing — 23 is also the size of a wrong set
+addition can never print. MEMBERS is load-bearing — 24 is also the size of a wrong set
 (proven register defs ∪ every roster def, crediting the roster's UNJUDGED rows).
 
-**THE JUDGED FRACTION IS 74/252 = 29.4%** — printed, never thresholded. Naming the 40
-LiveView mounts while omitting the 138 would satisfy the letter of "excluded is
+**THE JUDGED FRACTION IS 75/260 = 28.8%** — printed, never thresholded. Naming the 40
+LiveView mounts while omitting the 145 would satisfy the letter of "excluded is
 disclosed" and conceal the finding: **the largest single class in this population is a
 receipt shape this lens cannot see at all.** The register's completeness claim never
-covered the 138; wave 38 made them COUNTED instead of absent.
+covered the 145; wave 38 made them COUNTED instead of absent.
 
 **LENS-CAN-MISS — the blind-shape roll, printed with a count on every run.** A
 completeness claim without a stated blind spot is the vacuous green wearing the lens
@@ -195,48 +195,48 @@ instead of the corpus:
   reads **23**; the difference is comment prose the AST does not count. (This is why
   `GithubWebhookController` appears zero times in `router.ex` directly.)
 - **1** route-generating macro callsite this lens CANNOT expand, NAMED rather than
-  swallowed: `live_dashboard/2` at `barkpark_web/router.ex:2601` — expanded by a
+  swallowed: `live_dashboard/2` at `barkpark_web/router.ex:3113` — expanded by a
   dependency a build-free lens never compiles, so its routes are UNCOUNTED, not judged.
 
 Re-derive every figure in this section, and every figure below it, with one command:
 
 ```sh
-elixir scripts/pds-elixir-receipt-census.exs        # add --sites for all 91 emitted sites
+elixir scripts/pds-elixir-receipt-census.exs        # add --sites for all 95 emitted sites
 ```
 
 ### The `ok: true` lens — the numerator, and what it costs
 
 | layer | n | what it is |
 |---|---|---|
-| textual occurrences | 104 | plain substring, 103 lines (`auth_controller.ex:351` carries two): 100 `ok: true` + 4 `"ok" => true` |
-| AST-literal pairs | 95 | real `ok:`/`"ok" =>` pairs — a bare `{:ok, true}` tuple quotes identically and is excluded by key metadata (`format: :keyword` / `assoc:`) |
-| phantoms | 9 | 8 prose in `@doc`/comments + `github/web/ops_live.ex:285`, which is `db_ok: true` — **a different key** |
+| textual occurrences | 108 | plain substring, 107 lines (`auth_controller.ex:441` carries two): 104 `ok: true` + 4 `"ok" => true` |
+| AST-literal pairs | 99 | real `ok:`/`"ok" =>` pairs — a bare `{:ok, true}` tuple quotes identically and is excluded by key metadata (`format: :keyword` / `assoc:`) |
+| phantoms | 9 | 8 prose in `@doc`/comments + `github/web/ops_live.ex:342`, which is `db_ok: true` — **a different key** |
 | consumers | 4 | `connectors/bridge_client.ex:66,83,97` + `sync/pusher.ex:286` pattern-match a REMOTE response; they make no claim |
-| **emitted claims** | **91** | the numerator over the 252 |
+| **emitted claims** | **95** | the numerator over the 260 |
 
 Routed through the call graph (defdelegate followed, and a defdelegate costs **zero**
 depth — it is a rename, not logic; charging it a hop is how the 21-entry
 `Barkpark.Tasks` facade makes a naive detector report 24/25 false). At depth 3:
-write **34** / read 20 / unrouted 37. At depth 6 (the census depth): 54 / 14 / 23.
+write **36** / read 21 / unrouted 38. At depth 6 (the census depth): 57 / 15 / 23.
 
-**54 is a FLOOR, and so is 34.** The write count is a function of the depth budget, not
+**57 is a FLOOR, and so is 36.** The write count is a function of the depth budget, not
 a property of the code — which is why the script prints the whole sweep instead of one
 integer, and why it prints the DRIFT against PDS-D448's hand-followed 64/17/10 rather
 than hiding it. The harder finding: **23 emitted claims reach no `Repo` verb at all
 within six hops** — and they are unrouted because the lens gave up or could not resolve
 an alias, not because they touch no state.
 
-Shapes (PDS-D453) are assertion-backed — `classified 16 + unclassified 75 == emitted 91`:
-POST-READ **15** · CATCH-ALL-TO-SUCCESS **1** · UNCLASSIFIED **75** · the other four
+Shapes (PDS-D453) are assertion-backed — `classified 20 + unclassified 75 == emitted 95`:
+POST-READ **17** · CATCH-ALL-TO-SUCCESS **3** · UNCLASSIFIED **75** · the other four
 shapes 0, each printing why it is 0. Read POST-READ as a **ceiling**: its evidence is
 line order (a `Repo` read below a `Repo` write inside the writing function) —
 necessary, not sufficient, since the lens cannot prove the read is *of the row written*.
 Only `select:` **inside** the update query proves that; `returning:` is silently ignored
 by `update_all` (`auth.ex:139-141`) and proves nothing.
 
-**Blind spots, re-derived by the same run**: 218 `json(conn, …)`, 66 `put_status(2xx)`,
+**Blind spots, re-derived by the same run**: 231 `json(conn, …)`, 67 `put_status(2xx)`,
 3 `send_resp(conn, 2xx)` — every one of them a success claim this lens never sees, and
-the same shape the 138 `status_only_receipt` routes wear one axis up.
+the same shape the 145 `status_only_receipt` routes wear one axis up.
 
 **The lens is part of the finding (PDS-D448a).** On macOS, Apple Git 2.39.5's POSIX ERE
 has no `\b`, and the engines disagree — measured, with the command beside each:
@@ -244,9 +244,9 @@ has no `\b`, and the engines disagree — measured, with the command beside each
 | engine | command | result |
 |---|---|---|
 | Apple git ERE | `git grep -cE '\bok: true' -- 'api/lib/**/*.ex'` | **0 lines, exit 1, SILENTLY** |
-| git PCRE | `git grep -cP '\bok: true' -- 'api/lib/**/*.ex'` | 98 lines |
-| BSD grep | `grep -rEo '\bok: true' --include='*.ex' api/lib \| wc -l` | 99 occurrences |
-| substring | `grep -rFo 'ok: true' --include='*.ex' api/lib \| wc -l` | 100 occurrences |
+| git PCRE | `git grep -cP '\bok: true' -- 'api/lib/**/*.ex'` | 102 lines |
+| BSD grep | `grep -rEo '\bok: true' --include='*.ex' api/lib \| wc -l` | 103 occurrences |
+| substring | `grep -rFo 'ok: true' --include='*.ex' api/lib \| wc -l` | 104 occurrences |
 
 The three non-empty engines do not agree with each other either: `\b` refuses
 `db_ok: true` (the wrong-key phantom) where the substring accepts it, and a per-line
@@ -284,7 +284,7 @@ number forward from this paragraph; run the command.
 Adding a receipt to `internal/cli` means adding its registry row. Shell and Elixir
 stay unguarded — but Elixir is no longer uncounted, and the count is no longer keyed on
 a string an author may decline: rerun
-`elixir scripts/pds-elixir-receipt-census.exs` (add `--sites` for all 91).
+`elixir scripts/pds-elixir-receipt-census.exs` (add `--sites` for all 95).
 **Refusing to ship a fake green is the successful outcome for those two surfaces.**
 
 ## Code anchors
@@ -292,5 +292,5 @@ a string an author may decline: rerun
 - `internal/cli/success_claim_registry_test.go` — the gate: registry, contradiction property, anti-prose reflection, enrollment floor
 - `internal/cli/cloud_autoupdate_cmd.go` — the A3 site converted with it (`autoupdateReceipt`, `autoupdateApplied`)
 - `templates/place-directory/install.sh` — the two unguarded shell claims (lines 29, 33)
-- `api/lib/barkpark_web/router.ex` — the owner of the 252-member ROUTED-WRITE denominator
+- `api/lib/barkpark_web/router.ex` — the owner of the 260-member ROUTED-WRITE denominator
 - `scripts/pds-elixir-receipt-census.exs` — the census: routed population, disposition, lens, blind shapes, register, and the integrity arms that can go red
