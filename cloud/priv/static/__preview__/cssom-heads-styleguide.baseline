@@ -1,0 +1,35 @@
+# cssom-heads-styleguide.baseline — the exact authored-rule-head count of the
+# INLINE <style> sheet inside cloud/priv/static/styleguide.html.
+#
+# Sibling of cssom-heads.baseline, same ratchet, different file. cssom-parity.mjs
+# asserts authoredHeads(styleguide.html's inline sheet) == this number (EXACT, not
+# >=), for the reasons its own "THE EXACT-MATCH SIDECAR RATCHET" block gives: a
+# `/*` swallow drops the count and reds, a new rule raises it and reds, until the
+# number is bumped IN THE SAME COMMIT as the CSS change.
+#
+# WHY THIS FILE EXISTS AT ALL. Through wave 7 cssom-parity certified app.css and
+# nothing else, while styleguide.html shipped 193 lines of CSS in an inline
+# <style> block (lines 10-202 of 841) and sat in the Plug.Static `only:` allowlist
+# in BarkparkCloud.Web.Router — genuinely served, and parsed by no gate. The one
+# instrument that opens that block, __css_check.mjs, is pointed the other way: its
+# E2 pass harvests the page's class="…" attributes and asks whether APP.CSS
+# defines them, with the inline sheet's own selectors EXEMPTED by design
+# (sgLocalClasses); E12 reads it for `:focus` rules only and prints, honestly, that
+# the population is empty. So the sheet's own 84 rules had never been parsed by
+# anything. Bug #4592 could have happened there in exactly the same way.
+#
+# WHY A SEPARATE SIDECAR RATHER THAN ONE SHARED NUMBER. A single count over two
+# files can only ever be a sum, and a sum is a number no reviewer can bump
+# honestly: it moves for a reason in a file the diff may not even touch. Per-sheet
+# counts keep each bump attributable to the file it is about.
+#
+# Measured 2026-09-01 on origin/main @ 1caa2316a7, by a real cssom-parity.mjs run
+# (Chrome 152.0.7977.65, node v22.22.0), not hand-derived:
+#   styleguide.html · 52722 B · sha256 ff7b951c041e…
+#   authored rule heads 84 == 84 CSSOM style rules, 82/82 flattened, MISSES 0.
+#
+# THE COUNT IS OF RULE HEADS IN THE INLINE SHEET ONLY. The `<link rel="stylesheet"
+# href="app.css">` this page also carries is app.css's business and is counted by
+# the sibling sidecar; feeding both into one page would sum the two censuses and
+# make each number a statement about neither file.
+84

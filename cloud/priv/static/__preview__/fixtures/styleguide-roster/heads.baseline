@@ -1,0 +1,13 @@
+# heads.baseline — the authored-rule-head count of clean.html's INLINE sheet.
+#
+# Fixture sidecar for proof.sh next door. Measured 2026-09-01 by a real
+# cssom-parity.mjs run (Chrome 152.0.7977.65, node v22.22.0), not hand-counted:
+# clean.html -> 8 authored rule heads == 8 CSSOM style rules, 7/7 flattened,
+# MISSES 0.
+#
+# The 8: `:root`, `.fx-wrap`, the `.fx-row, .fx-col` comma group (ONE head, two
+# selectors), `.fx-card`, `.fx-card:hover`, the two heads inside the `@media`
+# band, and `.fx-pulse`. `@keyframes fx-pulse`'s percent stops are an OPAQUE
+# at-rule and are skipped on BOTH sides by design, so they contribute zero — the
+# same rule cssom-heads.baseline records for app.css's @property blocks.
+8

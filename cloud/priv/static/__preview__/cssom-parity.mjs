@@ -1,4 +1,4 @@
-// cssom-parity.mjs — does EVERY authored rule in app.css reach the browser?
+// cssom-parity.mjs — does EVERY authored rule on the ROSTER reach the browser?
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  WHY THIS EXISTS (charter GR73 / GR93 / GR100)
@@ -17,10 +17,39 @@
 //  A gate that cannot parse the artifact it certifies is not a gate.
 //
 //  This is the first check in the surface that parses the artifact rather than
-//  a text projection of it. It loads app.css in headless Chrome, enumerates
-//  `document.styleSheets` recursively, and diffs the result against the
-//  selectors the source file actually authors. Any authored selector with no
+//  a text projection of it. It loads each ROSTERED sheet in headless Chrome,
+//  enumerates `document.styleSheets` recursively, and diffs the result against
+//  the selectors the source file actually authors. Any authored selector with no
 //  CSSOM counterpart is a MISS.
+//
+// ────────────────────────────────────────────────────────────────────────────────────
+//  THE ROSTER — WHY IT IS A LIST AND NOT A CONSTANT
+// ────────────────────────────────────────────────────────────────────────────────────
+//  Through wave 7 this file certified `app.css` and NOTHING ELSE — `DEFAULT_CSS`
+//  was a single path and the word "roster" appears nowhere. That was not a
+//  declared scope, it was an unexamined one, and it left a SERVED surface with
+//  no CSSOM check at all:
+//
+//    `cloud/priv/static/styleguide.html` carries 193 lines of CSS in an inline
+//    `<style>` block (lines 10-202 of 841), and it sits in the `Plug.Static`
+//    `only:` allowlist in `BarkparkCloud.Web.Router` — it is genuinely served to
+//    browsers. Bug #4592 could happen there in exactly the same way, and NOTHING
+//    would have seen it.
+//
+//  The one instrument that does open that block is pointed the other way.
+//  `__css_check.mjs` harvests the styleguide's `class="…"` attributes and asks
+//  whether **app.css** defines them — with the inline sheet's OWN selectors
+//  explicitly EXEMPTED (`sgLocalClasses`, the analog of the `--sg-*` token
+//  carve-out), because those classes are page-local by design. E12 opens the
+//  block too, for `:focus` rules only, and honestly prints that the population is
+//  empty. So every existing read of that sheet either exempts it or asks a
+//  narrow question about a different file. The sheet itself was never parsed.
+//
+//  A LIST, THEN, RATHER THAN A SECOND CONSTANT. Two hard-coded paths would be a
+//  bigger version of the same bug: the scope stays implicit and the next served
+//  sheet is uncovered again in silence. `ROSTER` below is the gate's scope,
+//  written down, and it is REFUSED (exit 2) rather than skipped when an entry
+//  cannot be measured — see the roster preflight in main().
 //
 //  RELATIONSHIP TO ITS NEIGHBOURS — three tools, three scopes, no overlap:
 //    · __css_check.mjs E10  — catches the SPECIFIC mechanism (an orphan `*/`
@@ -89,8 +118,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  RUN
 // ─────────────────────────────────────────────────────────────────────────────
-//    node cloud/priv/static/__preview__/cssom-parity.mjs
-//    CSS=/path/to/other.css node cssom-parity.mjs      # certify a different file
+//    node cloud/priv/static/__preview__/cssom-parity.mjs   # the whole ROSTER
+//    CSS=/path/to/other.css node cssom-parity.mjs      # certify ONE ad-hoc file
+//                                                      # (.html → its inline <style>)
+//    HEADS_BASELINE=/path    node cssom-parity.mjs     # override app.css's sidecar
 //    CHROME=/path/to/chrome  node cssom-parity.mjs
 //
 //  Exit codes: 0 = every authored selector reached the CSSOM · 1 = at least one
@@ -146,11 +177,13 @@
 //  legitimate CSS change must bump the sidecar in the same commit. See readBaseline().
 //
 //  ZERO DEPENDENCIES — Node 22 native fetch + native WebSocket speak CDP
-//  directly, matching __preview__'s doctrine. It reads the file from disk rather
+//  directly, matching __preview__'s doctrine. It reads each file from disk rather
 //  than through serve.mjs: serve.mjs serves cloud/priv/static VERBATIM, so these
-//  are the served bytes, and a lone injected <style> keeps the CSSOM isolated to
-//  exactly one stylesheet — which is what makes the 1189 == 1189 calibration
-//  mean anything.
+//  are the served bytes, and ONE FRESH PAGE PER ROSTER ENTRY, each with a single
+//  injected <style>, keeps the CSSOM isolated to exactly one stylesheet at a time
+//  — which is what makes the head == CSSOM calibration mean anything. Sharing a
+//  page across the roster would sum both sheets into one `document.styleSheets`
+//  and turn every per-sheet count into a number about neither file.
 //
 //  TEARDOWN — hand-bounded, and it does NOT inherit shoot.sh's blocking `wait`.
 //  That `wait` on a Chrome which ignores SIGTERM is a measured multi-hour stall
@@ -216,6 +249,124 @@ const KILL_POLL_CAP = 2000;
 // node v22.22.0). That number lives in cssom-heads.baseline, NOT here — a constant
 // in this file would decay exactly as MIN_AUTHORED_HEADS did.
 const DEFAULT_BASELINE = path.resolve(HERE, "cssom-heads.baseline");
+
+// ── THE ROSTER — the gate's scope, written down ─────────────────────────
+// Every served stylesheet in cloud/priv/static that a browser parses as CSS. See
+// the header for why this is a LIST and not a second constant. Each entry gets its
+// OWN sidecar: the counts are facts about different files and a shared number could
+// only ever be a sum, which no reviewer can bump honestly.
+//
+// `extract: "html-inline-style"` means the served artifact is an HTML document and
+// the CSS is the concatenation of its `<style>` blocks — see inlineStyleSheet().
+//
+// ADDING A SHEET IS A THREE-PART CHANGE: an entry here, a committed sidecar next to
+// this file, and the measured count in it. There is deliberately no glob: a glob
+// would silently widen the gate's claim every time someone dropped a file in the
+// directory, and a gate whose scope you cannot read is the thing this row was
+// filed about.
+const ROSTER = [
+  {
+    id: "app.css",
+    file: DEFAULT_CSS,
+    baseline: DEFAULT_BASELINE,
+    extract: null,
+  },
+  {
+    id: "styleguide.html",
+    file: path.resolve(HERE, "..", "styleguide.html"),
+    baseline: path.resolve(HERE, "cssom-heads-styleguide.baseline"),
+    extract: "html-inline-style",
+  },
+];
+
+// ── HTML → the sheet the browser actually parses ─────────────────────────
+// BLANK, NEVER SLICE. Everything outside a `<style>` block is replaced by
+// whitespace of the SAME SHAPE — newlines kept, every other byte spaced — so the
+// extracted sheet has the host document's exact line numbering, byte for byte.
+// That is the whole reason this is not a two-line `match()[1]`: a sliced sheet
+// reports offsets into a string that exists on no disk, so `styleguide.html:47`
+// would name line 47 OF THE SLICE and send a reader to the wrong place. Under
+// blanking, every line this gate prints is a line a human can open.
+//
+// It also keeps the parser honest about the boundary. The `<style>` tags themselves
+// are blanked, so the brace-tracking parser can never absorb `</style>` or the
+// surrounding markup into a prelude; and prose between two blocks cannot join them.
+const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
+const HTML_COMMENT = /<!--[\s\S]*?-->/g;
+
+// HTML COMMENTS ARE BLANKED FIRST, AND THAT IS NOT TIDINESS. A `<style>` written
+// inside an `<!-- … -->` comment is not a stylesheet; a scan that does not know
+// that starts its match THERE and swallows every byte from the comment to the real
+// `</style>` into the first prelude. Measured on this file's own committed fixture
+// (fixtures/styleguide-roster/clean.html, whose comment mentions `<style>` in
+// prose): before this pass the CLEAN fixture reported 3 MISSES and a COUNT SKEW —
+// a gate accusing a stylesheet that had nothing wrong with it. A gate that cries
+// wolf is disabled within a wave, so this is load-bearing, not cosmetic.
+//
+// Blanking rather than stripping, here too: the comment's bytes become spaces of
+// the same shape, so every offset after it is still the offset in the real file.
+const blankRun = (s) => s.replace(/[^\n]/g, " ");
+
+function inlineStyleSheet(rawHtml) {
+  const html = rawHtml.replace(HTML_COMMENT, blankRun);
+  let out = "";
+  let last = 0;
+  let blocks = 0;
+  STYLE_BLOCK.lastIndex = 0;
+  for (let m; (m = STYLE_BLOCK.exec(html)); ) {
+    const openEnd = m.index + m[0].indexOf(">") + 1;
+    out += blankRun(html.slice(last, openEnd)) + m[1];
+    last = openEnd + m[1].length;
+    blocks++;
+  }
+  out += blankRun(html.slice(last));
+  return { css: out, blocks };
+}
+
+// A roster entry whose file no longer carries the thing the entry CLAIMS it carries
+// is an environment fault, not a clean sheet. If styleguide.html's inline CSS is one
+// day folded into app.css, this refuses (exit 2) and names the entry, so the roster
+// gets edited — rather than reporting `0 heads · MISSES 0 · PARITY PASS` over a
+// sheet that does not exist. A gate that greens an empty population it was told to
+// find is the same failure as the blindness this roster was added to close.
+function extractSheet(entry, raw) {
+  if (entry.extract !== "html-inline-style") return { css: raw, blocks: null };
+  const { css, blocks } = inlineStyleSheet(raw);
+  if (blocks === 0) return { css: null, blocks: 0, why: "no <style> block" };
+  if (!/\S/.test(css)) return { css: null, blocks, why: `${blocks} <style> block(s), all empty` };
+  return { css, blocks };
+}
+
+// The CSS= escape hatch still certifies ONE ad-hoc sheet (the committed fixture
+// proofs in fixtures/cssom-floor/ and fixtures/styleguide-roster/ depend on it,
+// paired with HEADS_BASELINE). Its extractor is chosen by extension so
+// `CSS=…/styleguide.html` behaves like the roster entry rather than feeding a whole
+// HTML document to a CSS parser.
+function adHocEntry(cssPath) {
+  return {
+    id: path.basename(cssPath),
+    file: cssPath,
+    baseline: path.resolve(process.env.HEADS_BASELINE || DEFAULT_BASELINE),
+    extract: /\.x?html?$/i.test(cssPath) ? "html-inline-style" : null,
+  };
+}
+
+// HEADS_BASELINE WITHOUT CSS STILL OVERRIDES app.css's SIDECAR, AND THAT IS A
+// CONTRACT, NOT A CONVENIENCE. Before the roster, a bare run certified app.css and
+// HEADS_BASELINE named its sidecar; scripts/console-path-escape-check.test.sh case 11
+// drives the REAL instrument with `HEADS_BASELINE=/nonexistent/…` and no CSS= to
+// prove the CI wrapper turns the exit-2 refusal into a red job with a REFUSED
+// annotation. Ignoring the variable once the roster arrived did not red that test's
+// subject — it made the run PASS, so the wrapper had nothing to classify and the
+// selftest went from 278/0 to 276/2. A multi-sheet gate cannot take one baseline for
+// every sheet, so the override binds to the sheet it always bound to: the default
+// one. Every other entry keeps its committed sidecar.
+function applyBaselineOverride(entries) {
+  const override = process.env.HEADS_BASELINE;
+  if (!override) return entries;
+  const resolved = path.resolve(override);
+  return entries.map((e) => (e.file === DEFAULT_CSS ? { ...e, baseline: resolved } : e));
+}
 
 // The sidecar is a committed text file: `#` lines are human context, the first
 // bare-integer line is the count. Override with HEADS_BASELINE=/path (pair it with
@@ -494,51 +645,95 @@ async function main() {
     process.exit(2);
   }
 
-  const cssPath = path.resolve(process.env.CSS || DEFAULT_CSS);
-  if (!fs.existsSync(cssPath)) {
-    process.stderr.write(`!! GUARD (exit 2): no stylesheet at ${cssPath}\n`);
-    process.exit(2);
+  // ── THE ROSTER PREFLIGHT — EVERY entry, before anything is spawned ─────────
+  // Each refusal below is an ENVIRONMENT fact (exit 2), never a stylesheet defect
+  // (exit 1): a rostered file that is absent, a sidecar that is absent or carries no
+  // count, or an entry whose file no longer holds the sheet the roster claims. In all
+  // four cases the gate cannot make a parity claim, so it must not make one — and it
+  // must not make one about the OTHER entries either, because a partial run reported
+  // as a pass is exactly the silent-skip this roster exists to forbid. It names the
+  // entry, so a reader knows which line of ROSTER to go fix.
+  const roster = process.env.CSS
+    ? [adHocEntry(path.resolve(process.env.CSS))]
+    : applyBaselineOverride(ROSTER);
+
+  const sheets = [];
+  for (const entry of roster) {
+    if (!fs.existsSync(entry.file)) {
+      process.stderr.write(
+        `!! GUARD (exit 2): rostered sheet "${entry.id}" is MISSING at ${entry.file}\n` +
+          `   The roster in cssom-parity.mjs claims this file is a served stylesheet. It is not on\n` +
+          `   disk, so NO parity claim is being made about it — and none is made about the rest of\n` +
+          `   the roster either: a run that quietly measures a subset and prints PASS is the silent\n` +
+          `   skip this roster exists to refuse. Restore the file, or remove its ROSTER entry and its\n` +
+          `   sidecar in the same commit.\n`,
+      );
+      process.exit(2);
+    }
+    if (!fs.existsSync(entry.baseline)) {
+      process.stderr.write(
+        `!! GUARD (exit 2): no authored-head baseline sidecar for "${entry.id}" at ${entry.baseline}\n` +
+          `   This gate asserts each rostered sheet's authored-head count EQUALS its committed\n` +
+          `   sidecar. Without it there is nothing to assert against — an environment fault, not a\n` +
+          `   CSS defect. Restore the sidecar, or set HEADS_BASELINE=/path with CSS=/path when\n` +
+          `   certifying a single ad-hoc stylesheet.\n`,
+      );
+      process.exit(2);
+    }
+    const baseline = parseBaseline(fs.readFileSync(entry.baseline, "utf8"));
+    if (baseline === null) {
+      process.stderr.write(
+        `!! GUARD (exit 2): baseline sidecar ${entry.baseline} (for "${entry.id}") carries no parseable count.\n` +
+          `   Expected a file whose first non-\`#\` line is a bare integer (the authored-head count).\n`,
+      );
+      process.exit(2);
+    }
+
+    const raw = fs.readFileSync(entry.file, "utf8");
+    const got = extractSheet(entry, raw);
+    if (got.css === null) {
+      process.stderr.write(
+        `!! GUARD (exit 2): rostered sheet "${entry.id}" carries NO INLINE CSS (${got.why}).\n` +
+          `   The roster says this document embeds a stylesheet; it does not. Refusing rather than\n` +
+          `   certifying an empty population — \`0 heads · MISSES 0 · PARITY PASS\` over a sheet that\n` +
+          `   is not there reads as coverage and is the absence of it. If the CSS moved into\n` +
+          `   app.css, delete the ROSTER entry and its sidecar in the same commit.\n`,
+      );
+      process.exit(2);
+    }
+
+    const css = got.css;
+    const heads = authoredHeads(css);
+    const authored = new Map(); // normalised selector -> first {head, line, braceLine}
+    for (const h of heads) {
+      const where = { head: h.head, line: lineOf(css, h.index), braceLine: lineOf(css, h.braceIndex) };
+      for (const sel of splitGroup(h.head)) {
+        const key = normalise(sel);
+        if (key && !authored.has(key)) authored.set(key, where);
+      }
+    }
+
+    sheets.push({
+      id: entry.id,
+      file: entry.file,
+      rel: path.relative(process.cwd(), entry.file),
+      baselinePath: entry.baseline,
+      baseline,
+      css,
+      blocks: got.blocks,
+      bytes: Buffer.byteLength(raw),
+      sheetBytes: Buffer.byteLength(css.replace(/[ ]+$/gm, "")),
+      sha: crypto.createHash("sha256").update(raw).digest("hex"),
+      heads,
+      authored,
+      cssom: null,
+    });
   }
+
   const chromeBin = findChrome();
   if (!chromeBin) {
     process.stderr.write(chromeGuardLine());
     process.exit(2);
-  }
-
-  // D65 — the committed baseline, read on the GUARD path before anything is spawned.
-  // A missing/unparseable sidecar means the gate cannot know what to assert; that is
-  // an environment fault (exit 2), never a stylesheet defect (exit 1).
-  const baselinePath = path.resolve(process.env.HEADS_BASELINE || DEFAULT_BASELINE);
-  if (!fs.existsSync(baselinePath)) {
-    process.stderr.write(
-      `!! GUARD (exit 2): no authored-head baseline sidecar at ${baselinePath}\n` +
-        `   This gate asserts the authored-head count EQUALS the committed sidecar. Without it there\n` +
-        `   is nothing to assert against — an environment fault, not a CSS defect. Restore\n` +
-        `   cssom-heads.baseline, or set HEADS_BASELINE=/path when certifying a different stylesheet.\n`,
-    );
-    process.exit(2);
-  }
-  const baseline = parseBaseline(fs.readFileSync(baselinePath, "utf8"));
-  if (baseline === null) {
-    process.stderr.write(
-      `!! GUARD (exit 2): baseline sidecar ${baselinePath} carries no parseable count.\n` +
-        `   Expected a file whose first non-\`#\` line is a bare integer (the authored-head count).\n`,
-    );
-    process.exit(2);
-  }
-
-  const css = fs.readFileSync(cssPath, "utf8");
-  const bytes = Buffer.byteLength(css);
-  const sha = crypto.createHash("sha256").update(css).digest("hex");
-
-  const heads = authoredHeads(css);
-  const authored = new Map(); // normalised selector -> first {head, line, braceLine}
-  for (const h of heads) {
-    const where = { head: h.head, line: lineOf(css, h.index), braceLine: lineOf(css, h.braceIndex) };
-    for (const sel of splitGroup(h.head)) {
-      const key = normalise(sel);
-      if (key && !authored.has(key)) authored.set(key, where);
-    }
   }
 
   // D101 (deploy-reliability charter, PR #9905) — the BRING-UP class.
@@ -600,7 +795,6 @@ async function main() {
     teardownMs = Date.now() - td0;
   };
 
-  let cssom;
   try {
     // REVIEW ADDITION to D101 — the FOURTH bring-up step, and the one that was
     // still misclassified after the slice landed. An EXEC failure is not the
@@ -705,8 +899,16 @@ async function main() {
     process.stdout.write(
       `>> chrome     ${chromeBin}\n` +
         `>> build      ${version.Browser} · node ${process.version}\n` +
-        `>> stylesheet ${path.relative(process.cwd(), cssPath)} · ${bytes} B · sha256 ${sha.slice(0, 12)}…\n\n`,
+        `>> roster     ${sheets.length} sheet(s)\n`,
     );
+    for (const s of sheets) {
+      process.stdout.write(
+        `>> stylesheet ${s.rel} · ${s.bytes} B · sha256 ${s.sha.slice(0, 12)}…` +
+          (s.blocks === null ? "" : ` · ${s.blocks} inline <style> block(s)`) +
+          `\n`,
+      );
+    }
+    process.stdout.write("\n");
     try {
       cdp = await Cdp.connect(version.webSocketDebuggerUrl);
     } catch (err) {
@@ -716,32 +918,41 @@ async function main() {
       throw bringUpFailure(`CDP bring-up failed: ${err.message}`);
     }
 
-    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
-    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
-    await cdp.send("Runtime.enable", {}, sessionId);
+    // ONE FRESH PAGE PER ROSTER ENTRY. `document.styleSheets` is per-document, so
+    // reusing one page across the roster would sum every sheet into one census and
+    // make `heads == CSSOM rules` a statement about neither file. A new target also
+    // means a sheet that fails to parse cannot contaminate the next one's count.
+    // Every accusation below is prefixed with the sheet's id: exit 1 is a claim
+    // about A stylesheet and the reader has to be told WHICH.
+    for (const s of sheets) {
+      const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+      const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+      await cdp.send("Runtime.enable", {}, sessionId);
 
-    // Inject as ONE inline <style> and wait for the sheet to be reachable. An
-    // inline sheet is always same-origin, so `cssRules` can never throw the
-    // SecurityError that would silently zero this instrument out.
-    const inject = await cdp.send("Runtime.evaluate", {
-      expression:
-        `(function(){var s=document.createElement("style");` +
-        `s.textContent=${JSON.stringify(css)};document.head.appendChild(s);` +
-        `return document.styleSheets.length;})()`,
-      returnByValue: true,
-    }, sessionId);
-    if (inject.exceptionDetails) throw new Error("injection threw: " + inject.exceptionDetails.text);
+      // Inject as ONE inline <style> and wait for the sheet to be reachable. An
+      // inline sheet is always same-origin, so `cssRules` can never throw the
+      // SecurityError that would silently zero this instrument out.
+      const inject = await cdp.send("Runtime.evaluate", {
+        expression:
+          `(function(){var s=document.createElement("style");` +
+          `s.textContent=${JSON.stringify(s.css)};document.head.appendChild(s);` +
+          `return document.styleSheets.length;})()`,
+        returnByValue: true,
+      }, sessionId);
+      if (inject.exceptionDetails) throw new Error(`${s.id}: injection threw: ` + inject.exceptionDetails.text);
 
-    let collected = null;
-    for (let w = 0; w < PARSE_CAP; w += 100) {
-      const ev = await cdp.send("Runtime.evaluate", { expression: COLLECT_JS, returnByValue: true }, sessionId);
-      if (ev.exceptionDetails) throw new Error("collection threw: " + ev.exceptionDetails.text);
-      if (ev.result.value && ev.result.value.rules.length) { collected = ev.result.value; break; }
-      await sleep(100);
+      let collected = null;
+      for (let w = 0; w < PARSE_CAP; w += 100) {
+        const ev = await cdp.send("Runtime.evaluate", { expression: COLLECT_JS, returnByValue: true }, sessionId);
+        if (ev.exceptionDetails) throw new Error(`${s.id}: collection threw: ` + ev.exceptionDetails.text);
+        if (ev.result.value && ev.result.value.rules.length) { collected = ev.result.value; break; }
+        await sleep(100);
+      }
+      if (!collected) throw new Error(`${s.id}: Chrome parsed ZERO style rules — the stylesheet never reached the CSSOM`);
+      if (collected.unreadable) throw new Error(`${s.id}: ${collected.unreadable} stylesheet(s) were unreadable — the diff would be a false green`);
+      s.cssom = collected;
+      await cdp.send("Target.closeTarget", { targetId }).catch(() => {});
     }
-    if (!collected) throw new Error("Chrome parsed ZERO style rules — the stylesheet never reached the CSSOM");
-    if (collected.unreadable) throw new Error(`${collected.unreadable} stylesheet(s) were unreadable — the diff would be a false green`);
-    cssom = collected;
   } catch (err) {
     await teardown();
     // D19, second line of defence. A ReferenceError escaping this block is a
@@ -766,8 +977,8 @@ async function main() {
             `   teardown ${teardownMs}ms\n`
         : neverStarted
           ? `\n!! GUARD (exit 2): REFUSED TO MEASURE — ${detail}\n` +
-              `   Headless Chrome never came up, so NOT ONE rule of the stylesheet was parsed.\n` +
-              `   No parity claim was made about ${path.relative(process.cwd(), cssPath)} — this is NOT a CSS defect.\n` +
+              `   Headless Chrome never came up, so NOT ONE rule of any rostered sheet was parsed.\n` +
+              `   No parity claim was made about ${sheets.map((s) => s.rel).join(", ")} — this is NOT a CSS defect.\n` +
               `   Fix the browser in this environment (CHROME=${chromeBin}), then re-run.\n` +
               `   teardown ${teardownMs}ms\n`
           : `\n!! PARITY ERROR: ${detail}\n   teardown ${teardownMs}ms\n`,
@@ -777,130 +988,151 @@ async function main() {
 
   await teardown();
 
-  const cssomSet = new Set();
-  for (const sel of cssom.rules) for (const one of splitGroup(sel)) cssomSet.add(normalise(one));
-
-  const misses = [];
-  for (const [key, where] of authored) if (!cssomSet.has(key)) misses.push({ key, ...where });
-
   const wall = Date.now() - t0;
-  const baselineMismatch = heads.length !== baseline;
-  const grew = heads.length > baseline;
+  let failed = 0;
 
-  process.stdout.write(
-    `   authored rule heads   ${heads.length} (baseline ${baseline}${baselineMismatch ? (grew ? " ← ABOVE" : " ← BELOW") : ""})\n` +
-      `   CSSOM style rules     ${cssom.rules.length}\n` +
-      `   flattened selectors   ${authored.size} authored / ${cssomSet.size} CSSOM\n` +
-      `   MISSES                ${misses.length}\n`,
-  );
+  // ONE REPORT PER ROSTERED SHEET, then ONE verdict. Each block is the report this
+  // file has always printed — the only change is that it now says WHICH sheet, and
+  // that a red anywhere on the roster reds the run. A per-sheet PASS line is printed
+  // even when a sibling fails: "app.css is clean" and "the styleguide is not" are two
+  // facts and collapsing them into one exit code without printing both is how a
+  // reader ends up hunting the wrong file.
+  for (const s of sheets) {
+    const cssomSet = new Set();
+    for (const sel of s.cssom.rules) for (const one of splitGroup(sel)) cssomSet.add(normalise(one));
 
-  // Count skew means the parser no longer models the file (CSS nesting, a new
-  // at-rule) — the miss list may then be INCOMPLETE, which is the failure mode
-  // this whole instrument exists to refuse. Advisory, not fatal: it is a fact
-  // about the parser, not about the CSS, and a gate that reds on the wrong
-  // thing gets disabled. Under a real swallow it moves too, and the MISS below
-  // is the signal that decides the exit code.
-  if (heads.length !== cssom.rules.length) {
+    const misses = [];
+    for (const [key, where] of s.authored) if (!cssomSet.has(key)) misses.push({ key, ...where });
+
+    const baselineMismatch = s.heads.length !== s.baseline;
+    const grew = s.heads.length > s.baseline;
+
     process.stdout.write(
-      `\n!! COUNT SKEW: ${heads.length} authored heads vs ${cssom.rules.length} CSSOM rules. Either a rule was\n` +
-        `   discarded by the browser (see MISSES), or this parser no longer models app.css\n` +
-        `   (CSS nesting? a new at-rule? add it to GROUPING_AT). If MISSES is 0 while this\n` +
-        `   is non-zero, treat the 0 as UNPROVEN and fix the parser first.\n`,
+      `── ${s.id} ───\n` +
+        `   authored rule heads   ${s.heads.length} (baseline ${s.baseline}${baselineMismatch ? (grew ? " ← ABOVE" : " ← BELOW") : ""})\n` +
+        `   CSSOM style rules     ${s.cssom.rules.length}\n` +
+        `   flattened selectors   ${s.authored.size} authored / ${cssomSet.size} CSSOM\n` +
+        `   MISSES                ${misses.length}\n`,
     );
-  }
 
-  // D65 — the exact-match baseline. FATAL, and checked independently of `misses`,
-  // because the whole point is the case where MISSES is 0 and the stylesheet is
-  // still missing rules. Reported BEFORE the miss list: under a stray-`/*` insert
-  // this is the ONLY signal, and under a real swallow it is the more legible one.
-  if (baselineMismatch) {
-    const delta = Math.abs(heads.length - baseline);
-    process.stderr.write(
-      `\n!! BASELINE MISMATCH: ${heads.length} authored rule heads, sidecar baseline is ${baseline} ` +
-        `(${grew ? "+" : "−"}${delta}).\n` +
-        `   sidecar: ${path.relative(process.cwd(), baselinePath)}\n\n`,
-    );
-    if (grew) {
-      process.stderr.write(
-        `   The stylesheet GREW without recording it. This is not a defect by itself — it is an\n` +
-          `   UNRECORDED change, which the ratchet refuses on purpose so the count can only move\n` +
-          `   through a reviewed diff. Bump the sidecar to ${heads.length} IN THE SAME COMMIT as the\n` +
-          `   CSS change, so the next reader sees the new count was reviewed. (Confirm MISSES is 0\n` +
-          `   first — a mismatch with misses is a genuine parity defect, not just an unrecorded add.)\n`,
-      );
-    } else {
-      process.stderr.write(
-        `   MISSES above may well be 0 and that 0 IS NOT A PASS. The authored-vs-CSSOM diff is\n` +
-          `   symmetric, so a region commented out by a stray \`/*\` opener vanishes from BOTH sides\n` +
-          `   at once and the diff stays empty while ${delta} rule(s) leave the stylesheet. This count\n` +
-          `   assertion is the only thing in this file that can see that.\n\n` +
-          `   TWO CAUSES, AND YOU MUST SAY WHICH:\n` +
-          `     1. A stray \`/*\` opener commented out a live region — a real defect, of the same\n` +
-          `        family as #4592. Find it: \`node cloud/priv/static/__css_check.mjs\` (E10), or\n` +
-          `        diff the comment openers against \`git show origin/main:cloud/priv/static/app.css\`.\n` +
-          `     2. You deliberately deleted ${delta} rule head(s). Then lower the sidecar to\n` +
-          `        ${heads.length}, IN THE SAME COMMIT as the deletion, so the ratchet stays honest\n` +
-          `        and the next reader sees the count was reviewed.\n`,
+    // Count skew means the parser no longer models the file (CSS nesting, a new
+    // at-rule) — the miss list may then be INCOMPLETE, which is the failure mode
+    // this whole instrument exists to refuse. Advisory, not fatal: it is a fact
+    // about the parser, not about the CSS, and a gate that reds on the wrong
+    // thing gets disabled. Under a real swallow it moves too, and the MISS below
+    // is the signal that decides the exit code.
+    if (s.heads.length !== s.cssom.rules.length) {
+      process.stdout.write(
+        `\n!! COUNT SKEW in ${s.id}: ${s.heads.length} authored heads vs ${s.cssom.rules.length} CSSOM rules. Either a rule\n` +
+          `   was discarded by the browser (see MISSES), or this parser no longer models\n` +
+          `   ${s.id} (CSS nesting? a new at-rule? add it to GROUPING_AT). If MISSES is 0 while\n` +
+          `   this is non-zero, treat the 0 as UNPROVEN and fix the parser first.\n`,
       );
     }
+
+    // D65 — the exact-match baseline. FATAL, and checked independently of `misses`,
+    // because the whole point is the case where MISSES is 0 and the stylesheet is
+    // still missing rules. Reported BEFORE the miss list: under a stray-`/*` insert
+    // this is the ONLY signal, and under a real swallow it is the more legible one.
+    if (baselineMismatch) {
+      const delta = Math.abs(s.heads.length - s.baseline);
+      process.stderr.write(
+        `\n!! BASELINE MISMATCH in ${s.id}: ${s.heads.length} authored rule heads, sidecar baseline is ` +
+          `${s.baseline} (${grew ? "+" : "−"}${delta}).\n` +
+          `   sidecar: ${path.relative(process.cwd(), s.baselinePath)}\n\n`,
+      );
+      if (grew) {
+        process.stderr.write(
+          `   The stylesheet GREW without recording it. This is not a defect by itself — it is an\n` +
+            `   UNRECORDED change, which the ratchet refuses on purpose so the count can only move\n` +
+            `   through a reviewed diff. Bump the sidecar to ${s.heads.length} IN THE SAME COMMIT as the\n` +
+            `   CSS change, so the next reader sees the new count was reviewed. (Confirm MISSES is 0\n` +
+            `   first — a mismatch with misses is a genuine parity defect, not just an unrecorded add.)\n`,
+        );
+      } else {
+        process.stderr.write(
+          `   MISSES above may well be 0 and that 0 IS NOT A PASS. The authored-vs-CSSOM diff is\n` +
+            `   symmetric, so a region commented out by a stray \`/*\` opener vanishes from BOTH sides\n` +
+            `   at once and the diff stays empty while ${delta} rule(s) leave the stylesheet. This count\n` +
+            `   assertion is the only thing in this file that can see that.\n\n` +
+            `   TWO CAUSES, AND YOU MUST SAY WHICH:\n` +
+            `     1. A stray \`/*\` opener commented out a live region — a real defect, of the same\n` +
+            `        family as #4592. Find it: diff the comment openers against\n` +
+            `        \`git show origin/main:${s.rel}\`. (For app.css, \`node cloud/priv/static/__css_check.mjs\`\n` +
+            `        E10 guards the same mechanism at the source-text level; it does NOT scan the\n` +
+            `        styleguide's inline sheet, so on that entry this gate is the only witness.)\n` +
+            `     2. You deliberately deleted ${delta} rule head(s). Then lower the sidecar to\n` +
+            `        ${s.heads.length}, IN THE SAME COMMIT as the deletion, so the ratchet stays honest\n` +
+            `        and the next reader sees the count was reviewed.\n`,
+        );
+      }
+    }
+
+    if (misses.length === 0 && !baselineMismatch) {
+      process.stdout.write(`   PASS — every authored selector reached the CSSOM, count matches baseline\n\n`);
+      continue;
+    }
+    failed++;
+
+    if (misses.length === 0) {
+      process.stderr.write(`\n   FAIL ${s.id} — baseline mismatch with 0 misses\n\n`);
+      continue;
+    }
+
+    // Report GROUPED BY AUTHORED HEAD. One orphan-comment swallow fragments into
+    // several misses (the prose contains commas), and listing them flat reads as
+    // several unrelated defects instead of the single one it is.
+    const byHead = new Map();
+    for (const m of misses) {
+      if (!byHead.has(m.head)) byHead.set(m.head, { where: m, keys: [] });
+      byHead.get(m.head).keys.push(m.key);
+    }
+
+    process.stderr.write(
+      `\n!! ${misses.length} authored selector(s) in ${byHead.size} rule head(s) of ${s.id} NEVER REACHED THE CSSOM:\n\n`,
+    );
+    for (const [head, g] of byHead) {
+      const orphan = head.includes("*/");
+      // The swallowed rule is ALWAYS the tail of the garbage run — error recovery
+      // stops at the first `{`, and that `{` belongs to the real rule. Naming it
+      // is the difference between "some nonsense selector" and ".modal-root is
+      // dead in production".
+      const swallowed = orphan ? head.slice(head.lastIndexOf("*/") + 2).trim() : null;
+
+      if (orphan) {
+        process.stderr.write(
+          `   ✗ ${s.id}:${g.where.braceLine}  ${swallowed || "(unnamed)"}   ← SWALLOWED\n` +
+            `     ORPHAN-COMMENT SWALLOW — not a malformed selector, and not a bug in this gate.\n` +
+            `     The comment beginning at ${s.id}:${g.where.line} is missing its \`/*\` opener, so its\n` +
+            `     prose is parsed as CSS. Error recovery then discards tokens until the next\n` +
+            `     \`{…}\` block — and that block belongs to \`${swallowed || "the next rule"}\`, which is\n` +
+            `     therefore consumed with it and never reaches the browser. This is bug #4592\n` +
+            `     exactly: it is how \`.modal-root\` stayed dead in production for five waves.\n` +
+            `     __css_check.mjs E10 guards that same mechanism at the source-text level over\n` +
+            `     app.css — cross-check it there. It does NOT read this file's inline <style>, so on\n` +
+            `     the styleguide entry this gate is the only instrument that can see this.\n` +
+            `     Fix: restore the \`/*\` opener at ${s.id}:${g.where.line}.\n` +
+            `     Garbage run absorbed into the prelude (${g.keys.length} fragment(s)):\n`,
+        );
+        for (const k of g.keys) process.stderr.write(`       · ${ellipsis(k)}\n`);
+      } else {
+        process.stderr.write(`   ✗ ${s.id}:${g.where.braceLine}  ${g.keys.map(ellipsis).join(", ")}\n`);
+      }
+    }
+    process.stderr.write("\n");
   }
 
-  if (misses.length === 0 && !baselineMismatch) {
+  if (failed === 0) {
     process.stdout.write(
-      `\nPARITY PASS — every authored selector reached the CSSOM, count matches baseline · ` +
-        `${(wall / 1000).toFixed(1)}s wall · teardown ${teardownMs}ms\n`,
+      `PARITY PASS — ${sheets.length} rostered sheet(s) certified, every authored selector reached the ` +
+        `CSSOM, counts match baselines · ${(wall / 1000).toFixed(1)}s wall · teardown ${teardownMs}ms\n`,
     );
     process.exit(0);
   }
 
-  if (misses.length === 0) {
-    process.stderr.write(
-      `\nPARITY FAIL — baseline mismatch with 0 misses · ${(wall / 1000).toFixed(1)}s wall · ` +
-        `teardown ${teardownMs}ms\n`,
-    );
-    process.exit(1);
-  }
-
-  // Report GROUPED BY AUTHORED HEAD. One orphan-comment swallow fragments into
-  // several misses (the prose contains commas), and listing them flat reads as
-  // several unrelated defects instead of the single one it is.
-  const byHead = new Map();
-  for (const m of misses) {
-    if (!byHead.has(m.head)) byHead.set(m.head, { where: m, keys: [] });
-    byHead.get(m.head).keys.push(m.key);
-  }
-
   process.stderr.write(
-    `\n!! ${misses.length} authored selector(s) in ${byHead.size} rule head(s) NEVER REACHED THE CSSOM:\n\n`,
-  );
-  for (const [head, g] of byHead) {
-    const orphan = head.includes("*/");
-    // The swallowed rule is ALWAYS the tail of the garbage run — error recovery
-    // stops at the first `{`, and that `{` belongs to the real rule. Naming it
-    // is the difference between "some nonsense selector" and ".modal-root is
-    // dead in production".
-    const swallowed = orphan ? head.slice(head.lastIndexOf("*/") + 2).trim() : null;
-
-    if (orphan) {
-      process.stderr.write(
-        `   ✗ app.css:${g.where.braceLine}  ${swallowed || "(unnamed)"}   ← SWALLOWED\n` +
-          `     ORPHAN-COMMENT SWALLOW — not a malformed selector, and not a bug in this gate.\n` +
-          `     The comment beginning at app.css:${g.where.line} is missing its \`/*\` opener, so its\n` +
-          `     prose is parsed as CSS. Error recovery then discards tokens until the next\n` +
-          `     \`{…}\` block — and that block belongs to \`${swallowed || "the next rule"}\`, which is\n` +
-          `     therefore consumed with it and never reaches the browser. This is bug #4592\n` +
-          `     exactly: it is how \`.modal-root\` stayed dead in production for five waves.\n` +
-          `     __css_check.mjs E10 guards this same mechanism at the source-text level —\n` +
-          `     cross-check it. Fix: restore the \`/*\` opener at app.css:${g.where.line}.\n` +
-          `     Garbage run absorbed into the prelude (${g.keys.length} fragment(s)):\n`,
-      );
-      for (const k of g.keys) process.stderr.write(`       · ${ellipsis(k)}\n`);
-    } else {
-      process.stderr.write(`   ✗ app.css:${g.where.braceLine}  ${g.keys.map(ellipsis).join(", ")}\n`);
-    }
-  }
-  process.stderr.write(
-    `\nPARITY FAIL — ${misses.length} miss(es) · ${(wall / 1000).toFixed(1)}s wall · teardown ${teardownMs}ms\n` +
+    `PARITY FAIL — ${failed} of ${sheets.length} rostered sheet(s) failed · ${(wall / 1000).toFixed(1)}s wall · ` +
+      `teardown ${teardownMs}ms\n` +
       `Findings are FILED as tasks, never patched by this instrument.\n`,
   );
   process.exit(1);
