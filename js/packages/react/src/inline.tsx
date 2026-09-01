@@ -46,14 +46,27 @@ export const escapeAttr = escapeHtml
 const ALLOWED_SCHEME = /^(?:https?|mailto|tel):/i
 const IN_DOC = /^(#|\?|\.\/|\.\.\/)/
 
+/** ASCII tab (0x09), LF (0x0A) and CR (0x0D): the three bytes the WHATWG URL
+ * parser DELETES from a URL — anywhere in the string — BEFORE it parses it.
+ * Probed across 0x00-0x20 with `new URL(raw, base)`: exactly these three
+ * collapse; every other C0 byte is percent-encoded into the path instead. They
+ * must therefore be removed GLOBALLY before any structural test, or the string
+ * the guard inspects is not the string the browser resolves. */
+const URL_STRIPPED = /[\t\n\r]/g
+
 /** Return the URL attribute-escaped if safe to emit, else `#` — a faithful port
  * of `Render.Util.safe_url/1` (twin of web/lib/safe-href.ts & pdrender sanitizeURL).
  * Permitted: allowlisted scheme, root-relative `/…` (NOT protocol-relative
  * `//host`), or scheme-less in-doc `#`/`?`/`./`/`../` forms. */
 export function safeUrl(href: unknown): string {
   if (typeof href !== 'string') return '#'
-  // Strip leading ASCII control/whitespace (browser tolerance for `\tjavascript:`).
-  const trimmed = href.replace(/^[\x00-\x20]+/, '')
+  // Remove the URL parser's own deletions FIRST and everywhere, not just at the
+  // head: `/<TAB>/evil.example` is not a path segment named "<TAB>", it is the
+  // protocol-relative `//evil.example` — a leading-only strip plus a position-1
+  // test never sees it. Then strip leading ASCII control/whitespace (browser
+  // tolerance for `\tjavascript:`). The cleaned string is what gets emitted, so
+  // what was CHECKED is what RESOLVES.
+  const trimmed = href.replace(URL_STRIPPED, '').replace(/^[\x00-\x20]+/, '')
   if (trimmed.startsWith('/')) {
     // Reject protocol-relative `//host` (and `/\host`).
     return /^\/[/\\]/.test(trimmed) ? '#' : escapeAttr(trimmed)
@@ -92,6 +105,15 @@ export function num(v: unknown): number | undefined {
 
 export function asList<T = unknown>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
+}
+
+/** Sentence-case the first character (`'' → ''`). The shared half of the "labels
+ * are DERIVED, never a second copy" rule two families already follow: the
+ * taskboard sentence-cases a column's role slug, and a callout sentence-cases
+ * its tone slug. Keeping ONE copy here keeps the derivation honest — a label
+ * that drifts from its slug is then impossible rather than merely discouraged. */
+export function capitalize(s: string): string {
+  return s === '' ? s : s.charAt(0).toUpperCase() + s.slice(1)
 }
 
 export function isMap(v: unknown): v is Record<string, unknown> {

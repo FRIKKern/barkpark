@@ -7,6 +7,7 @@
 // `?dataset=` query param (server defaults to "production"). Token-gated (read).
 
 import { request } from './transport'
+import { assertSegment } from './util/guards'
 import { assertNoCommaEntries } from './filter-builder'
 import { BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, GraphResult, GraphNode, GraphEdge, GraphOptions } from './types'
@@ -22,8 +23,7 @@ export async function getGraph(
   id: string,
   opts?: GraphOptions,
 ): Promise<GraphResult> {
-  if (typeof id !== 'string' || id.length === 0)
-    throw new BarkparkValidationError('getGraph requires a non-empty id', { field: 'id' })
+  assertSegment(id, 'id')
   if (
     opts?.depth !== undefined &&
     (!Number.isInteger(opts.depth) || opts.depth < 1 || opts.depth > 5)

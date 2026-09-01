@@ -699,6 +699,32 @@ function gaugeRows(block: unknown): 'epic' | Gauge[] {
   return gaugeMode(block) === 'share' ? shareGauges(block) : countGauges(block)
 }
 
+/* ── the shared proportional-bar row (gauge-list / bar-chart / criteria-progress) ── */
+//
+// The ONE row shape those three families emit: a label, a filled track, an
+// optional digit, then whatever the family appends. All three already SAID in
+// prose that they ride "the same proportional-bar vocabulary" while each kept
+// its own copy of the markup — this is that sentence made structural, so the
+// element ORDER can no longer drift between them. Only the BEM prefix varies.
+// `label` is escaped here; `digit` and `extra` are pre-escaped HTML because each
+// family composes its own datum (a share string, a formatted value, `met/total`).
+function barRow(
+  prefix: string,
+  label: string,
+  prop: number,
+  digit: string | null,
+  extra = '',
+): string {
+  return (
+    `<div class="${prefix}__row">` +
+    `<span class="${prefix}__l">${escapeHtml(label)}</span>` +
+    `<span class="${prefix}__bar"><i style="width:${fmt(prop * 100)}%"></i></span>` +
+    (digit === null ? '' : `<span class="${prefix}__d">${digit}</span>`) +
+    extra +
+    `</div>`
+  )
+}
+
 const gaugeList: Emit = (block) => {
   if (!isMap(block)) return empty('gauge-list')
   const title = displayString(get(block, 'title'))
@@ -714,14 +740,7 @@ const gaugeList: Emit = (block) => {
   const body = rows
     .map((g) => {
       const noteHtml = g.note === '' ? '' : `<span class="bp-gauge__n">${escapeHtml(g.note)}</span>`
-      return (
-        `<div class="bp-gauge__row">` +
-        `<span class="bp-gauge__l">${escapeHtml(g.label)}</span>` +
-        `<span class="bp-gauge__bar"><i style="width:${fmt(g.prop * 100)}%"></i></span>` +
-        `<span class="bp-gauge__d">${escapeHtml(g.digit)}</span>` +
-        noteHtml +
-        `</div>`
-      )
+      return barRow('bp-gauge', g.label, g.prop, escapeHtml(g.digit), noteHtml)
     })
     .join('')
   return `<div class="bp-gauge">${titleHtml}${body}</div>`
@@ -747,16 +766,7 @@ const barChart: Emit = (block) => {
       const label = displayString(get(b, 'label'))
       const value = values[i] ?? 0.0
       const prop = clamp(value / denom, 0.0, 1.0)
-      const digitHtml = showValues
-        ? `<span class="bp-bar-chart__d">${escapeHtml(fmt(value))}</span>`
-        : ''
-      return (
-        `<div class="bp-bar-chart__row">` +
-        `<span class="bp-bar-chart__l">${escapeHtml(label)}</span>` +
-        `<span class="bp-bar-chart__bar"><i style="width:${fmt(prop * 100)}%"></i></span>` +
-        digitHtml +
-        `</div>`
-      )
+      return barRow('bp-bar-chart', label, prop, showValues ? escapeHtml(fmt(value)) : null)
     })
     .join('')
   return `<div class="bp-bar-chart">${rows}</div>`
@@ -791,12 +801,11 @@ const criteriaProgress: Emit = (block) => {
       const total = numeric(get(row, 'total')) ?? 0
       const prop = total > 0 ? clamp(met / total, 0.0, 1.0) : 0.0
       const label = displayString(get(row, 'label'))
-      return (
-        `<div class="bp-criteria-progress__row">` +
-        `<span class="bp-criteria-progress__l">${escapeHtml(label)}</span>` +
-        `<span class="bp-criteria-progress__bar"><i style="width:${fmt(prop * 100)}%"></i></span>` +
-        `<span class="bp-criteria-progress__d">${escapeHtml(fmt(met))}/${escapeHtml(fmt(total))}</span>` +
-        `</div>`
+      return barRow(
+        'bp-criteria-progress',
+        label,
+        prop,
+        `${escapeHtml(fmt(met))}/${escapeHtml(fmt(total))}`,
       )
     })
     .join('')

@@ -4,30 +4,46 @@
 
 import { createContext, useContext, useEffect, type JSX, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
-import { BarkparkEdgeRuntimeError, type BarkparkClient } from '@barkpark/core'
+import {
+  BarkparkEdgeRuntimeError,
+  detectEdgeRuntime,
+  type BarkparkClient,
+  type EdgeSignal,
+} from '@barkpark/core'
 
 const DEBOUNCE_MS = 500
 const DEV_FIRST_EVENT_WARN_MS = 5000
 
-/** Three independent edge-runtime detectors. Returns the matched signal name or null. */
-export function detectEdgeRuntime(): string | null {
-  if (typeof (globalThis as { EdgeRuntime?: unknown }).EdgeRuntime !== 'undefined') {
-    return 'globalThis.EdgeRuntime'
-  }
-  if (
-    typeof process !== 'undefined' &&
-    (process as { env?: Record<string, string | undefined> }).env?.NEXT_RUNTIME === 'edge'
-  ) {
-    return 'process.env.NEXT_RUNTIME==="edge"'
-  }
-  if (typeof ReadableStream !== 'undefined' && typeof process === 'undefined') {
-    return 'globalThis.ReadableStream && !process'
-  }
-  return null
-}
+/**
+ * Edge-runtime detector. Re-exported from `@barkpark/core` — this package
+ * deliberately keeps NO copy of its own.
+ *
+ * History (do not re-fork this): the local copy carried a third layer that
+ * classified a runtime as "edge" from the ABSENCE of `process`:
+ *
+ * ```ts
+ * if (typeof ReadableStream !== 'undefined' && typeof process === 'undefined') { ... }
+ * ```
+ *
+ * Every modern browser satisfies both halves, so that layer fired on the single
+ * most common runtime this module runs in — `assertNotEdge()` then threw
+ * `BarkparkEdgeRuntimeError` synchronously during render and crashed the React
+ * tree. It never bit under Next only because Next's client chunks inject
+ * `next/dist/compiled/process` module-scoped into any module naming `process`,
+ * which made the branch dead there and a false positive everywhere else
+ * (Vite/Rollup/esbuild consumers, or the published ESM loaded directly).
+ *
+ * Core's detector does the same job by POSITIVE signal — `globalThis.EdgeRuntime`,
+ * `process.env.NEXT_RUNTIME === 'edge'`, a `Cloudflare-Workers` user agent, or
+ * `globalThis.WebSocketPair` — none of which a browser has. Absence of `process`
+ * was never a sound proxy for workerd anyway: under `nodejs_compat`, workerd HAS
+ * `process`.
+ */
+export { detectEdgeRuntime }
+export type { EdgeSignal }
 
 function assertNotEdge(): void {
-  const detected = detectEdgeRuntime()
+  const detected: EdgeSignal = detectEdgeRuntime()
   if (detected !== null) {
     throw new BarkparkEdgeRuntimeError(
       `@barkpark/nextjs <BarkparkLive /> requires the Node.js runtime; detected ${detected}. Add 'export const runtime = "nodejs"' to your route segment.`,
@@ -50,8 +66,9 @@ export interface BarkparkLiveProps {
  * Mounts a server-sent-events subscription to the configured Barkpark client and
  * triggers a debounced `router.refresh()` on each event. Renders nothing.
  *
- * Edge guard: throws synchronously in render AND inside the subscription on detection
- * (three-layer detector). Pair with `createBarkparkServer().defineLive`
+ * Edge guard: throws synchronously in render AND inside the subscription when
+ * `@barkpark/core`'s {@link detectEdgeRuntime} returns a signal. A plain browser
+ * is NOT such a signal. Pair with `createBarkparkServer().defineLive`
  * so the client prop is pre-bound, or wrap in {@link BarkparkLiveProvider}.
  *
  * @param props — Optional overrides; the client must be provided here or via provider.

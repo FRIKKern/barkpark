@@ -62,10 +62,27 @@ defmodule BarkparkWeb.ScopeHelpers do
   def scope_opts(%Conn{assigns: assigns}),
     do: [memoize: true] ++ from_assigns(assigns, :sentinel)
 
-  def scope_opts(%Socket{assigns: assigns}), do: from_assigns(assigns, :legacy)
+  def scope_opts(%Socket{assigns: assigns}), do: scope_opts_from_assigns(assigns)
   # The channel/transport socket — a distinct struct from the LiveView Socket
   # aliased above; matched fully-qualified so it can't collide with that alias.
-  def scope_opts(%Phoenix.Socket{assigns: assigns}), do: from_assigns(assigns, :legacy)
+  def scope_opts(%Phoenix.Socket{assigns: assigns}), do: scope_opts_from_assigns(assigns)
+
+  @doc """
+  `scope_opts/1` for a caller that holds the ASSIGNS MAP but not the socket
+  around it — a LiveView render/component function, which Phoenix hands
+  `assigns` and nothing else.
+
+  Same extraction, same keys, same socket-side nil handling as
+  `scope_opts(%Phoenix.LiveView.Socket{})`; it is the clause that function now
+  delegates to, so the two can never drift. It exists so a render function that
+  must respect the tenant boundary has a seam to call instead of hand-rolling
+  `[workspace_id: ..., project_id: ...]` from the assigns and quietly dropping
+  `caller_context` / `grant_scoped` — the failure mode that puts a fenced read
+  and an unfenced one in the same module.
+  """
+  @spec scope_opts_from_assigns(map()) :: keyword()
+  def scope_opts_from_assigns(assigns) when is_map(assigns),
+    do: from_assigns(assigns, :legacy)
 
   defp from_assigns(assigns, mode) do
     []

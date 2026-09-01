@@ -129,28 +129,46 @@ afterEach(() => {
 // detectEdgeRuntime / assertNotEdge
 // ---------------------------------------------------------------------------
 
-describe('detectEdgeRuntime — three-layer detector', () => {
+describe('detectEdgeRuntime (re-exported from @barkpark/core)', () => {
   it('returns null in a normal node/jsdom environment', () => {
     expect(detectEdgeRuntime()).toBeNull()
   })
 
-  it('layer 1: trips on globalThis.EdgeRuntime', () => {
+  it('trips on globalThis.EdgeRuntime (Vercel Edge)', () => {
     ;(globalThis as { EdgeRuntime?: string }).EdgeRuntime = 'edge-light'
-    expect(detectEdgeRuntime()).toBe('globalThis.EdgeRuntime')
+    expect(detectEdgeRuntime()).toBe('vercel-edge-runtime')
   })
 
-  it('layer 2: trips on process.env.NEXT_RUNTIME==="edge"', () => {
+  it('trips on process.env.NEXT_RUNTIME==="edge"', () => {
     const prev = process.env.NEXT_RUNTIME
     process.env.NEXT_RUNTIME = 'edge'
     try {
-      expect(detectEdgeRuntime()).toBe('process.env.NEXT_RUNTIME==="edge"')
+      expect(detectEdgeRuntime()).toBe('next-runtime-edge')
     } finally {
       if (prev === undefined) delete process.env.NEXT_RUNTIME
       else process.env.NEXT_RUNTIME = prev
     }
   })
-  // Layer 3 (no `process` global) is hard to simulate inside jsdom without breaking other tests;
-  // covered structurally by the source-level if-branch and the synchronous render-time check.
+
+  it('trips on globalThis.WebSocketPair (workerd)', () => {
+    ;(globalThis as { WebSocketPair?: unknown }).WebSocketPair = class {}
+    try {
+      expect(detectEdgeRuntime()).toBe('workerd')
+    } finally {
+      delete (globalThis as { WebSocketPair?: unknown }).WebSocketPair
+    }
+  })
+
+  // NOT COVERED HERE — and deliberately not claimed to be. This project is
+  // `environment: 'jsdom'` running under node, so `process` ALWAYS exists and
+  // `navigator.userAgent` is jsdom's; the browser case (`process` absent,
+  // `ReadableStream` present) is unreachable from this runtime. It is covered
+  // for real by the `browser` project — tests/live.browser.test.tsx, a headless
+  // Playwright chromium — which is what `pnpm test` runs third.
+  //
+  // The comment this replaced said the browser branch was "covered structurally
+  // by the source-level if-branch". That is a branch asserting about itself: it
+  // had never executed in any test, and it was wrong — it matched every browser.
 })
 
 // ---------------------------------------------------------------------------

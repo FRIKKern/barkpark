@@ -176,7 +176,8 @@ function selfTest() {
     ] },
     aesthetics: { score: 99, findings: [{ kind: "dead-task", path: "bp-task:(unscoped ×4)", severity: 0.32, why: "unscoped" }] },
   };
-  const fail = (m) => { console.error("SELF-TEST FAIL: " + m); process.exit(1); };
+  // Aborting at the first failed arm IS the behaviour here.
+  const fail = (m) => { console.error("SELF-TEST FAIL: " + m); process.exit(1); }; // pipe-exit-ok: selftest abort, one stderr line, never the piped payload
 
   // 1. head with a new root-clutter → flags exactly that one structural finding
   const d1 = compareReports(baseReport, headReport);
@@ -208,10 +209,13 @@ if (isMain) {
     // ADVISORY: always exit 0. The workflow reads stdout + the `flagged` line
     // below to emit a ::warning::; it never fails the merge on a non-zero exit.
     if (diff.flagged) process.stdout.write("\nAESTHETICS_GUARD_FLAGGED=1\n");
-    process.exit(0);
+    // exitCode, never exit(): this line follows a full renderMarkdown()
+    // write into a `| tee` pipe, and process.exit() does not wait for a
+    // pending pipe write to drain. Nothing runs after this block.
+    process.exitCode = 0;
   } else {
     console.error("usage: node tooling/aesthetics/compare.mjs <base-report.json> <head-report.json>");
     console.error("   or: node tooling/aesthetics/compare.mjs --self-test");
-    process.exit(2);
+    process.exitCode = 2;
   }
 }

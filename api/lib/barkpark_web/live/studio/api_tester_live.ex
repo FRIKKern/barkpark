@@ -18,6 +18,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   require Logger
 
   alias Barkpark.ApiTester.{Endpoints, Runner}
+  alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.Caps
   import BarkparkWeb.Studio.ApiTesterLive.Format
   import BarkparkWeb.Studio.ApiTesterLive.Request
@@ -805,12 +806,39 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   # Phase 8 WI4 — live, data-driven schema browser. Iterates
-  # `Content.list_schemas/1` so plugin schemas (e.g. book) auto-appear with
+  # `Content.list_schemas/2` so plugin schemas (e.g. book) auto-appear with
   # field shape, visibility badge, and an example query curl. v2 field
   # types (composite/arrayOf/codelist/localizedText) render as collapsed
   # JSON dumps per CLAUDE.md plugin-v2 (decision D12).
+  #
+  # TENANCY. This read is scoped to the MOUNTED workspace, like every other
+  # read in the Studio — `ScopeHelpers.scope_opts_from_assigns/1` turns the
+  # `current_workspace` / `current_project` assigns that `LiveScope.:resolve`
+  # put on this socket into the same opts `SettingsLive`'s type catalog passes
+  # to this same function. It used to call `list_schemas/1`: no opts list
+  # existed at the call site, so no workspace key reached
+  # `Content.Scope.scope_to_workspace_or_global/3`, whose nil arm is the
+  # documented all-tenants global read.
+  #
+  # The `:dataset` path segment did NOT stand in for it. With no opts,
+  # `Content.resolve_read_dataset_id/2` resolves against the seeded DEFAULT
+  # project and returns nil for any slug that project does not have, at which
+  # point the schema query degrades to a bare `s.dataset == ^dataset` STRING
+  # filter — and a dataset slug is per-project, so the same slug exists in every
+  # tenant that chose it. That is why `Barkpark.Content.Scope` calls the dataset
+  # the leaf discriminator and the workspace the envelope around it.
+  #
+  # `include_global: true` keeps the pane's stated contract — the workspace's
+  # own types PLUS the shared/plugin base layer whose rows carry a NULL
+  # workspace_id — which is the identical pairing `SettingsLive` uses. It widens
+  # to the shared layer, never to another tenant.
   defp render_reference(assigns, :schema_browser) do
-    schemas = Barkpark.Content.list_schemas(assigns.dataset)
+    opts =
+      assigns
+      |> ScopeHelpers.scope_opts_from_assigns()
+      |> Keyword.put(:include_global, true)
+
+    schemas = Barkpark.Content.list_schemas(assigns.dataset, opts)
     {public, private} = Enum.split_with(schemas, &(&1.visibility == "public"))
     assigns = assign(assigns, public_schemas: public, private_schemas: private)
 

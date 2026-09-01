@@ -67,7 +67,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # too. A real query adds the full-text/trigram match.
     base =
       Document
-      |> scope_to_dataset(scope, project_id)
+      |> scope_to_dataset(scope, project_id, workspace_id)
       |> scope_to_workspace_or_global(workspace_id, project_id)
       # Row/ownership ACL (Phase 4, core-auth). Applied UNCONDITIONALLY: it is
       # byte-identical for non-owner_scoped types because their rows carry a
@@ -390,8 +390,32 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # legacy `dataset` STRING filter only when the dataset can't be resolved
   # (no project scope / dataset row predates the W2 dual-write), which keeps the
   # leaf discriminator working for back-compat reads.
-  defp scope_to_dataset(query, scope, project_id) do
-    case Barkpark.Content.resolve_read_dataset_id(scope, project_id: project_id) do
+  #
+  # The workspace MUST be forwarded too (barkpark-sknf). `resolve_read_dataset_id/2`
+  # only falls back to the seeded Default project when the caller passed NO
+  # scope at all, and it detects that by the PRESENCE of a `:workspace_id` key.
+  # This call site used to build a fresh `[project_id: project_id]` list, so the
+  # guard was unreachable from here: a workspace-only read (the shape the flat
+  # routes produce — `DeriveWorkspaceFromToken` sets the workspace and
+  # `AssignDefaultScope` deliberately leaves a derived non-Default workspace
+  # project-less) resolved the DEFAULT project's dataset_id and this clause
+  # applied it as a strict `d.dataset_id == <Default's id>`. ANDed with
+  # `scope_to_workspace_or_global`'s `d.workspace_id == <tenant>` that is empty
+  # by construction — document search went fully BLIND for every token-derived
+  # non-Default workspace.
+  #
+  # The key is added ONLY when the workspace is actually present, mirroring
+  # `ScopeHelpers.scope_opts/1`, which drops an absent assign rather than
+  # emitting `workspace_id: nil`. Passing a nil workspace as a PRESENT key
+  # would make the guard fire for the genuinely-unscoped flat caller too and
+  # regress the y9ee dataset_id resolution above.
+  defp scope_to_dataset(query, scope, project_id, workspace_id) do
+    opts =
+      if is_binary(workspace_id),
+        do: [project_id: project_id, workspace_id: workspace_id],
+        else: [project_id: project_id]
+
+    case Barkpark.Content.resolve_read_dataset_id(scope, opts) do
       id when is_binary(id) -> where(query, [d], d.dataset_id == ^id)
       _ -> where(query, [d], d.dataset == ^scope)
     end

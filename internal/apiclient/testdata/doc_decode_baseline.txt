@@ -1,0 +1,72 @@
+# well-shaped (legacy + envelope keys)
+ID="legacy-id"
+Type="post"
+Title="Hello"
+Status="published"
+Category="news"
+Author="Ada"
+UpdatedAt=2025-01-02T03:04:05Z
+UpdatedAt.IsZero=false
+Values==nil:false len=1
+  Values["a"]="b"
+Blocks=[{"type": "paragraph"}]
+Content=<nil>
+Body=<nil>
+BodyHTML="<p>hi</p>"
+Extra==nil:false len=20
+  Extra["_createdAt"]="2026-01-01T00:00:00Z"
+  Extra["_draft"]=true
+  Extra["_id"]="envelope-id"
+  Extra["_publishedId"]="pub-1"
+  Extra["_rev"]="r1"
+  Extra["_type"]="post"
+  Extra["_updatedAt"]="2026-06-05T10:19:18.901132Z"
+  Extra["author"]="Ada"
+  Extra["blocks"]=[{"type": "paragraph"}]
+  Extra["body_html"]="<p>hi</p>"
+  Extra["category"]="news"
+  Extra["featured"]=true
+  Extra["id"]="legacy-id"
+  Extra["meta"]={"x": 1}
+  Extra["priority"]=2
+  Extra["status"]="published"
+  Extra["tags"]=["a", "b"]
+  Extra["title"]="Hello"
+  Extra["updatedAt"]="2025-01-02T03:04:05Z"
+  Extra["values"]={"a": "b"}
+
+# live v1 envelope (gap-fill branches)
+ID="drafts.playground-unpublish-1"
+Type="post"
+Title="Unpublish me"
+Status="draft"
+Category="Tech"
+Author="Knut"
+UpdatedAt=2026-06-05T10:19:18.901132Z
+UpdatedAt.IsZero=false
+Values==nil:false len=5
+  Values["author"]="Knut"
+  Values["category"]="Tech"
+  Values["featured"]="true"
+  Values["priority"]="2"
+  Values["status"]="draft"
+Blocks=<nil>
+Content=<nil>
+Body=<nil>
+BodyHTML=""
+Extra==nil:false len=15
+  Extra["_createdAt"]="2026-06-05T10:19:18.901132Z"
+  Extra["_draft"]=true
+  Extra["_id"]="drafts.playground-unpublish-1"
+  Extra["_publishedId"]="playground-unpublish-1"
+  Extra["_rev"]="a49ab6f8b38b957cfa3d3a165aabce0f"
+  Extra["_type"]="post"
+  Extra["_updatedAt"]="2026-06-05T10:19:18.901132Z"
+  Extra["author"]="Knut"
+  Extra["category"]="Tech"
+  Extra["featured"]=true
+  Extra["meta"]={"x": 1}
+  Extra["priority"]=2
+  Extra["status"]="draft"
+  Extra["tags"]=["a", "b"]
+  Extra["title"]="Unpublish me"

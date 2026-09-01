@@ -112,7 +112,7 @@ defmodule Barkpark.Media.Storage.ShareScopeTest do
       result =
         Share.create(a_doc_id, @dataset, workspace_id: ws_b.id, project_id: proj_b.id)
 
-      assert {:error, :not_found} = result,
+      assert result == {:error, :not_found},
              "CROSS-WORKSPACE SHARE LEAK: workspace B minted a share token on " <>
                "the Default workspace's collection (#{inspect(result)})"
 
@@ -148,16 +148,18 @@ defmodule Barkpark.Media.Storage.ShareScopeTest do
       result =
         Share.revoke(a_doc_id, @dataset, workspace_id: ws_b.id, project_id: proj_b.id)
 
-      assert {:error, :not_found} = result,
+      assert result == {:error, :not_found},
              "CROSS-WORKSPACE SHARE LEAK: workspace B revoked the Default workspace's " <>
                "share link (#{inspect(result)})"
 
       # A's share link must still be enabled — B's revoke was a no-op on A. This
       # is the line that FAILS against pre-fix (B's unscoped upsert flipped A's
       # Default row's `enabled` to false).
-      assert %{"enabled" => true} = share_link(raw_collection(a_doc_id, default_ws.id)),
+      default_link = share_link(raw_collection(a_doc_id, default_ws.id))
+
+      assert match?(%{"enabled" => true}, default_link),
              "CROSS-WORKSPACE SHARE LEAK: the Default workspace's share link was " <>
-               "disabled by a workspace-B Share.revoke"
+               "disabled by a workspace-B Share.revoke (#{inspect(default_link)})"
     end
   end
 

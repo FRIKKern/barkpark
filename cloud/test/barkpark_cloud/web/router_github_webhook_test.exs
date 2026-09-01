@@ -167,7 +167,13 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert plaintext == body["webhook_secret"]
     end
 
-    test "user-supplied webhook_secret is honoured" do
+    # The secret is the HMAC key for POST /v1/webhooks/github/:site_id, a route
+    # with no bearer auth by design. A caller who CHOSE it would hold a deploy
+    # trigger that is not team-scoped, not session-tied, not revoked when they
+    # lose access, and not visible in the audit log. So the server mints it and
+    # the request body cannot override that. This inverts an earlier decision
+    # ("user-supplied webhook_secret is honoured"); the field is now ignored.
+    test "a caller-supplied webhook_secret is IGNORED — the server mints it" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
@@ -184,9 +190,16 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
         )
 
       assert conn.status == 200
-      assert json_body(conn)["webhook_secret"] == mine
+
+      returned = json_body(conn)["webhook_secret"]
+      assert returned != mine
+      assert byte_size(returned) >= 32
+
+      # And the caller's value never reaches the store either — a member who
+      # posts a secret must not be able to predict the persisted HMAC key.
       {:ok, plain} = Registry.reveal_site_github_secret(Registry.get_site(site.id))
-      assert plain == mine
+      assert plain != mine
+      assert plain == returned
     end
 
     test "missing repo → 422" do

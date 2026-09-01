@@ -76,6 +76,12 @@ export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
 export type { ListenOptions } from './listen'
+// The edge-runtime detector `listen()` already gates on. Exported so downstream
+// packages (@barkpark/nextjs) REUSE it instead of hand-rolling a second copy —
+// the fork in @barkpark/nextjs's client bundle had drifted into classifying
+// every browser as an edge runtime.
+export { detectEdgeRuntime } from './util/edge-detect'
+export type { EdgeSignal } from './util/edge-detect'
 export { exportDataset } from './export'
 export { imageUrl } from './image-url'
 export type { RenditionPreset, ImageRef, ImageUrlOptions } from './image-url'

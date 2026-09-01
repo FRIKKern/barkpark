@@ -69,23 +69,72 @@ type Doc struct {
 	Extra map[string]json.RawMessage `json:"-"`
 }
 
-// UnmarshalJSON decodes the typed fields exactly as before (alias type — no
-// behaviour change), captures the raw top-level key set into Extra so
-// schema-named content fields are reachable without a struct change per field,
-// then normalizes the v1 flat envelope onto the legacy-shaped typed fields
-// (ID / UpdatedAt / Values) the TUI consumes.
+// UnmarshalJSON decodes a document TOLERANTLY: one mis-shaped field costs that
+// FIELD, never the document, and never the document's whole page.
+//
+// Go's encoding/json fails the ENTIRE Unmarshal when ONE field's shape does not
+// match the struct — you do not lose that field, you lose the whole value, and
+// inside a []Doc (QueryResult, Search) you lose every OTHER document too. That
+// is reachable here, not theoretical: the v1 envelope flattens EVERY unreserved
+// content field to the top level under its own name (Barkpark.Content.Envelope),
+// and a reference field's value is "either a plain id string or a Sanity-style
+// %{"_ref" => id} object" (Barkpark.Content.Expand) — same field, same schema,
+// two shapes. The live `post` schema declares a reference field literally named
+// "author", so an expanded or object-shaped reference used to hand a JSON object
+// to Doc.Author string and blank an entire list pane SILENTLY: QueryResult
+// returns (nil, DocReadUnreachable) and Query discards the outcome, so the pane
+// spells "the read failed" exactly like "this type holds nothing".
+//
+// The SEVEN fields whose json names are also reachable content-field names —
+// id, status, category, author, updatedAt, values, body_html — are therefore
+// held as raw JSON during the struct decode (the shadow fields below) and
+// coerced afterwards in normalizeEnvelope, through the same tolerant
+// scalarString the file already used to derive Values. A well-shaped document
+// decodes to exactly the values it decoded to before, pinned field-by-field
+// against a captured baseline in doc_tolerant_decode_test.go.
+//
+// "id" is the worst of the seven and the least obvious: @reserved in
+// Barkpark.Content.Envelope is only _id/_type/_rev/_draft/_publishedId/
+// _createdAt/_updatedAt, so a content field named plain "id" flattens onto
+// Doc.ID — the document's IDENTITY, which saveDocument patches against and
+// Get-by-id reads. A collision there does not merely blank a field, it makes
+// the document unaddressable. Shadowing it changes NO precedence: "id" is the
+// only wire tag ID carries ("_id" is not a struct tag, it is the Extra gap-fill
+// below), and the coerced fill runs BEFORE that gap-fill, so a legacy "id"
+// still beats "_id" exactly as it did — see TestLegacyEnvelopeKeysWin.
+//
+// The exported fields and their json tags are unchanged — this is a DECODE
+// change, not an API change.
 func (d *Doc) UnmarshalJSON(b []byte) error {
 	type docAlias Doc
-	var a docAlias
+	// The shadow fields sit at depth 0 and therefore WIN over the embedded
+	// alias's same-named fields (encoding/json resolves a json-name conflict by
+	// the shallowest depth), which is what keeps the typed counterparts out of
+	// the wire decode. json.RawMessage accepts any shape, so an object-, array-
+	// or number-valued "author" can no longer fail the Unmarshal. Embedding the
+	// alias (rather than restating the safe fields) means a field added to Doc
+	// later is picked up automatically.
+	var a struct {
+		docAlias
+		ID        json.RawMessage `json:"id"`
+		Status    json.RawMessage `json:"status"`
+		Category  json.RawMessage `json:"category"`
+		Author    json.RawMessage `json:"author"`
+		UpdatedAt json.RawMessage `json:"updatedAt"`
+		Values    json.RawMessage `json:"values"`
+		BodyHTML  json.RawMessage `json:"body_html"`
+	}
 	if err := json.Unmarshal(b, &a); err != nil {
 		return err
 	}
-	*d = Doc(a)
+	*d = Doc(a.docAlias)
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(b, &raw); err == nil {
 		d.Extra = raw
-		d.normalizeEnvelope()
 	}
+	// Unconditional: the seven shadowed fields are filled HERE now, so skipping
+	// this call would drop them rather than merely skip the gap-fills.
+	d.normalizeEnvelope()
 	return nil
 }
 
@@ -100,15 +149,57 @@ var envelopeMetaKeys = map[string]bool{
 	"body": true, "body_html": true,
 }
 
-// normalizeEnvelope maps the v1 flat envelope onto the legacy-shaped typed
-// fields. The legacy keys ("id", "updatedAt", "values") never appear on the
-// live wire — the envelope emits "_id" / "_updatedAt" and flattens content to
-// the top level (verified against /v1/data/query) — so the plain typed decode
-// left ID empty, UpdatedAt zero and Values nil, latently breaking every
-// consumer (saveDocument's patch target, Get-by-id, the editor's field
-// values, timeAgo subtitles). Each fill is guarded so a legacy envelope that
-// DOES carry the old keys still wins.
+// normalizeEnvelope does two jobs, in this order.
+//
+// FIRST it fills the seven fields UnmarshalJSON deliberately does NOT decode
+// from the wire (id / status / category / author / updatedAt / values /
+// body_html), coercing each from its raw Extra value. This is the same work the
+// typed struct decode used to do, minus the failure mode: scalarString and
+// rfc3339Time report failure instead of erroring, so a reference-shaped
+// "author" leaves Author empty rather than discarding the document and its
+// page. The "id" fill runs here, AHEAD of the "_id" gap-fill below, which is
+// what preserves the legacy-wins precedence.
+//
+// THEN it maps the v1 flat envelope onto the legacy-shaped typed fields. The
+// legacy keys ("id", "updatedAt", "values") never appear on the live wire — the
+// envelope emits "_id" / "_updatedAt" and flattens content to the top level
+// (verified against /v1/data/query) — so the plain typed decode left ID empty,
+// UpdatedAt zero and Values nil, latently breaking every consumer
+// (saveDocument's patch target, Get-by-id, the editor's field values, timeAgo
+// subtitles). Each gap-fill is guarded so a legacy envelope that DOES carry the
+// old keys still wins.
 func (d *Doc) normalizeEnvelope() {
+	// ── the wire fields, coerced instead of typed ────────────────────────────
+	// Order matters for ID ONLY: this fill must precede the "_id" gap-fill
+	// below, so a legacy top-level "id" still wins over the envelope's "_id"
+	// exactly as the typed decode made it win.
+	if v, ok := scalarString(d.Extra["id"]); ok {
+		d.ID = v
+	}
+	if v, ok := scalarString(d.Extra["status"]); ok {
+		d.Status = v
+	}
+	if v, ok := scalarString(d.Extra["category"]); ok {
+		d.Category = v
+	}
+	if v, ok := scalarString(d.Extra["author"]); ok {
+		d.Author = v
+	}
+	if t, ok := rfc3339Time(d.Extra["updatedAt"]); ok {
+		d.UpdatedAt = t
+	}
+	// A "values" that is not a flat string map (a reference object, an expanded
+	// document, a numeric map) leaves Values empty and falls through to the
+	// Extra-derived synthesis below — the document survives either way.
+	var wireValues map[string]string
+	if json.Unmarshal(d.Extra["values"], &wireValues) == nil {
+		d.Values = wireValues
+	}
+	if v, ok := scalarString(d.Extra["body_html"]); ok {
+		d.BodyHTML = v
+	}
+
+	// ── the v1 envelope gap-fills ────────────────────────────────────────────
 	if d.ID == "" {
 		var id string
 		if json.Unmarshal(d.Extra["_id"], &id) == nil {
@@ -116,11 +207,8 @@ func (d *Doc) normalizeEnvelope() {
 		}
 	}
 	if d.UpdatedAt.IsZero() {
-		var ts string
-		if json.Unmarshal(d.Extra["_updatedAt"], &ts) == nil {
-			if t, err := time.Parse(time.RFC3339, ts); err == nil {
-				d.UpdatedAt = t
-			}
+		if t, ok := rfc3339Time(d.Extra["_updatedAt"]); ok {
+			d.UpdatedAt = t
 		}
 	}
 	if d.Status == "" {
@@ -149,6 +237,23 @@ func (d *Doc) normalizeEnvelope() {
 			d.Values = values
 		}
 	}
+}
+
+// rfc3339Time coerces a raw JSON value to a timestamp exactly the way
+// encoding/json's time.Time decode does — an RFC 3339 string and nothing else
+// — but REPORTS failure instead of returning an error. That difference is the
+// whole point: a "updatedAt" that is an object, an array, or a string the
+// server did not format as RFC 3339 costs the field, not the document.
+func rfc3339Time(raw json.RawMessage) (time.Time, bool) {
+	var s string
+	if json.Unmarshal(raw, &s) != nil {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // scalarString renders a raw JSON scalar as the editor's string value:
