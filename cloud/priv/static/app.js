@@ -15335,6 +15335,31 @@
     return notes.length ? esc(notes.join(" · ")) : "";
   }
 
+  // cch-w33-bl: WHICH of the two builder paths wrote this console. Both append
+  // into the SAME `deployment.console` array and this panel used to render them
+  // identically:
+  //
+  //   • kind == "container" — the OFF-BOX builder. internal/builder's consoleTee
+  //     mirrors every complete line of the real build to
+  //     POST /v1/builder/deployments/:id/console, and append_deployment_console/2
+  //     stores a plain {line, at} with NO `stage` key. That console IS the log.
+  //   • kind in ["static","node"] — the ON-BOX relay. Nothing under deploy/ posts
+  //     to the console endpoint at all; the build log stays on the box. The only
+  //     entries that ever arrive are the six synthesized stage lines from
+  //     Sites.Deploy.record_stage/2 via console_entry/1, which DO carry `stage`.
+  //
+  // So a console EVERY entry of which carries `stage` is a stage narration, not a
+  // build log. ALL, never ANY: a box row that ALSO received real builder lines
+  // holds a genuine (partial) log, and telling its reader the output stayed on the
+  // box would swap one lie for another. Empty is excluded explicitly — [].every()
+  // is true, which would otherwise label every empty panel a box deploy.
+  function deployConsoleIsStageOnly(lines) {
+    if (!lines.length) return false;
+    return lines.every(function (e) {
+      return e && typeof e.stage === "string" && e.stage !== "";
+    });
+  }
+
   function deployConsoleHtml(d, active) {
     var lines = d.console || [];
     // dwb-18: a queued-but-unclaimed deploy shows no dark console at all — the
@@ -15343,6 +15368,7 @@
     if (deployIsPreClaim(d, d.status || "queued")) return "";
     if (!lines.length && !active) return "";
     var open = (d.id in deployConsoleOpen) ? deployConsoleOpen[d.id] : active;
+    var stageOnly = deployConsoleIsStageOnly(lines);
     var body = lines.length
       ? lines.map(function (e) {
           var ts = newFmtConsoleTime(e.at);
@@ -15351,6 +15377,15 @@
             '<span class="deploy-console-text">' + esc(e.line) + "</span></div>";
         }).join("")
       : '<div class="deploy-console-line dim">Waiting for the first log line&hellip;</div>';
+    // cch-w33-bl: a box-driven console holds no build output at all. Say so, and
+    // say where the output actually IS — the log is KEPT on the box
+    // (site-deploy-node.sh sets BUILD_LOG_KEEP when the runner names a durable
+    // log file); what never happens is anything POSTing it here. "Not sent to
+    // me" and "the build printed none" used to render identically.
+    if (stageOnly) {
+      body = '<div class="deploy-console-line dim">This site is built on the box &mdash; only its ' +
+        'stage narration is sent here. The build log stayed there.</div>' + body;
+    }
     var count = lines.length ? esc(String(lines.length)) + (lines.length === 1 ? " line" : " lines") : "";
     // cch-w33-s3: the count used to read as though it were the whole log. On
     // 2,881 failed production deployments (nine sites) the LAST console entry's
@@ -15366,7 +15401,8 @@
     }
     return '<div class="deploy-console' + (open ? "" : " is-collapsed") + '" data-deploy-id="' + esc(d.id) + '">' +
         '<button type="button" class="deploy-console-toggle" aria-expanded="' + (open ? "true" : "false") + '">' +
-          '<span class="deploy-console-caret" aria-hidden="true"></span>Build console' +
+          '<span class="deploy-console-caret" aria-hidden="true"></span>' +
+          (stageOnly ? "Deploy stages" : "Build console") +
           '<span class="deploy-console-count">' + count + "</span>" +
         "</button>" +
         '<div class="deploy-console-body"' + (open ? "" : " hidden") + ">" + body + "</div>" +
