@@ -634,57 +634,17 @@
     /* ── Layout ───────────────────────────────────────────────────────── */
     .studio { display: flex; height: 100vh; overflow: hidden; }
 
-    /* ── Sidebar ──────────────────────────────────────────────────────── */
-    .sidebar {
-      width: var(--sidebar-w); background: var(--bg-card);
-      border-right: 1px solid var(--border-muted);
-      display: flex; flex-direction: column; flex-shrink: 0;
-      overflow-y: auto;
-    }
-    .sidebar-brand {
-      height: var(--header-h); display: flex; align-items: center;
-      padding: 0 20px; gap: 10px;
-      border-bottom: 1px solid var(--border-muted);
-      font-weight: 700; font-size: 15px; letter-spacing: -0.01em;
-    }
+    /* ── Brand mark ───────────────────────────────────────────────────── */
+    /* All that survives of the legacy admin shell: the "B" square that
+       studio.html.heex renders when no workspace resolves. The .sidebar/
+       .main layout rules that used to surround it had zero template
+       consumers anywhere in api/lib and were deleted. */
     .sidebar-brand-icon {
       width: 28px; height: 28px; border-radius: var(--radius-sm);
       background: var(--primary); color: var(--primary-fg);
       display: flex; align-items: center; justify-content: center;
       font-size: var(--text-base); font-weight: 700;
     }
-    .sidebar-section {
-      padding: 16px 16px 6px;
-      font-size: 11px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.06em; color: var(--fg-dim);
-    }
-    .sidebar-nav { padding: 4px 8px; }
-    .sidebar-link {
-      display: flex; align-items: center; gap: 10px;
-      padding: 7px 12px; border-radius: var(--radius-sm);
-      font-size: var(--text-sm); font-weight: 500; color: var(--fg-muted);
-      transition: all 0.15s;
-    }
-    .sidebar-link:hover { background: var(--bg-muted); color: var(--fg); }
-    .sidebar-link.active { background: var(--bg-accent); color: var(--fg); }
-    .sidebar-link-icon { font-size: var(--text-lg); width: 20px; text-align: center; }
-    .sidebar-divider { height: 1px; background: var(--border-muted); margin: 8px 16px; }
-
-    /* ── Main content ─────────────────────────────────────────────────── */
-    .main {
-      flex: 1; display: flex; flex-direction: column;
-      overflow: hidden;
-    }
-    .main-header {
-      height: var(--header-h); min-height: var(--header-h);
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 24px;
-      border-bottom: 1px solid var(--border-muted);
-      background: var(--bg-card);
-    }
-    .main-header-left { display: flex; align-items: center; gap: 12px; }
-    .main-header-right { display: flex; align-items: center; gap: 8px; }
-    .main-body { flex: 1; overflow-y: auto; padding: 24px; }
 
     /* ── Typography ───────────────────────────────────────────────────── */
     .h1 { font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.02em; color: var(--fg); }
