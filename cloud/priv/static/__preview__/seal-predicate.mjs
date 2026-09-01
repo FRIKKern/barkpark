@@ -632,7 +632,46 @@ const fetchRoster = (parentId) => {
       `the roster of ${parentId} came back under perspective "${perspective}", not "published". Every draft-visibility conclusion in this walk — including the cross-check immediately below — is derived from the published-only behaviour measured on 2026-08-24, so a different perspective means this program no longer knows what it just read. Re-derive the cross-check against the new perspective before trusting clause (a). Nothing is asserted about clause (a).`,
       'ROSTER-PERSPECTIVE-CHANGED');
 
-  const ledgerCount = (() => {
+  // ── AND THE SAME RESPONSE CARRIES THE LIST, WHICH WAVE 66 THREW AWAY ────────────────
+  //
+  // Wave 66 read ONE field off `/v1/tasks/:id` — `child_count` — refused on the delta, and
+  // told the reader to go run `bp task get <parent>` BY HAND to find out which rows were in
+  // it. That endpoint answers `{child_count, children:[{doc_id, lifecycle_status, title,
+  // criteria_progress, …}]}`: the list the refusal sends a human to fetch was already in
+  // the variable the throw could see. Measured live 2026-09-01 against the epic this whole
+  // instrument exists to certify — the walk read 921 published rows against child_count
+  // 925, and the four in the gap came straight out of the same response:
+  //
+  //   drafts.task-c64f2a37d7f97bd8                                       cancelled
+  //   drafts.cch-w40-bl-probe-packet-audit-x1                            cancelled
+  //   drafts.cch-w40-s5-followup-reason-only-refusals-invisible-…-lens   cancelled
+  //   drafts.cch-w64-s5-law-0-repayment-twelve-closes-three-integers     OPEN
+  //
+  // None had a published twin. So Standing Law 0's own instrument had been unable to
+  // produce a number about its own epic since wave 66 for want of a field read — and a
+  // refusal a program's own payload can discharge is not honesty, it is an unread response.
+  //
+  // SO: RESOLVE, AND REFUSE ONLY WHAT CANNOT BE RESOLVED. A draft-only child is ADMITTED
+  // into the roster carrying the lifecycle_status the task layer reports, which is the one
+  // field clause (a) reads off a row — so a live draft now COUNTS as residue instead of
+  // being invisible. This is strictly narrower than wave 66's blanket refusal and strictly
+  // wider than what the published query can see; nothing is softened.
+  //
+  // FOUR THINGS STILL REFUSE, all under the same `ROSTER-DRAFT-BLIND` code, because each
+  // is a gap this program cannot close from what it holds:
+  //
+  //   no list          `children` absent or not an array — wave 66's world exactly
+  //   short list       the list does not account for every missing row (a list that is
+  //                    itself truncated resolves nothing, and a PARTIAL resolution is the
+  //                    fail-open this file is written against)
+  //   a TWIN           a `drafts.<id>` whose published `<id>` was already walked. The same
+  //                    row twice: admitting it double-counts the population, and the
+  //                    remedy is DESTRUCTIVE — publishing a stale twin over its parent
+  //                    overwrites the published criteria and can un-stamp a met one. That
+  //                    stays a human's call, resolved individually, published-wins.
+  //   no status        a gap row with no `lifecycle_status` cannot be placed live or dead,
+  //                    and a row this program cannot place must never be counted clean.
+  const cross = (() => {
     const parsedTask = qTasks(parentId);
     const doc = parsedTask.doc || parsedTask;
     const n = parsedTask.child_count !== undefined ? parsedTask.child_count : doc.child_count;
@@ -640,23 +679,66 @@ const fetchRoster = (parentId) => {
       throw new Infra(
         `/v1/tasks/${parentId} returned no numeric child_count, so the published-only roster of ${rows.length} rows cannot be compared against the ledger's own count and a draft child would be invisible with nothing to reveal it. Nothing is asserted about clause (a).`,
         'DRAFT-CROSSCHECK-UNREADABLE');
-    return n;
+    const kids = Array.isArray(parsedTask.children) ? parsedTask.children
+      : Array.isArray(doc.children) ? doc.children : null;
+    return { count: n, children: kids };
   })();
+  const ledgerCount = cross.count;
 
   if (ledgerCount > rows.length) {
     const delta = ledgerCount - rows.length;
-    throw new Infra(
-      `the roster of ${parentId} is PUBLISHED-ONLY and the ledger disagrees — this walk read ${rows.length} published rows, `
-      + `and /v1/tasks/${parentId} reports child_count ${ledgerCount}. ${delta} child${delta === 1 ? '' : 'ren'} `
-      + `${delta === 1 ? 'is' : 'are'} invisible to /v1/data/query, which answers from the published perspective and drops `
-      + `\`perspective=drafts\` silently (measured 2026-08-24: identical to passing a parameter that does not exist). `
-      + `Each invisible row is EITHER a draft-only child — which may be OPEN, may carry unmet criteria, and would make `
-      + `clause (a) certify "no residue" over a row that is still live — OR a \`drafts.<id>\` TWIN of a row already counted `
-      + `here. The two have opposite remedies and one is destructive: publishing a stale twin overwrites the published `
-      + `row's criteria and can un-stamp a met one, so resolve twins INDIVIDUALLY, published-wins. `
-      + `To find them: \`bp task get ${parentId}\` lists .children including drafts; diff those ids against this walk. `
-      + `Nothing is asserted about clause (a).`,
-      'ROSTER-DRAFT-BLIND');
+    // `unresolved` is the sentence that says WHY the list could not close the gap. It stays
+    // null exactly when every missing row was admitted, and only then does the walk go on.
+    const admitted = [];
+    let unresolved = null;
+    if (cross.children === null) {
+      unresolved = `/v1/tasks/${parentId} carried no \`children\` list to resolve them from, so which rows are in the gap is not a question this run can answer`;
+    } else {
+      const missing = cross.children.filter((k) => k && !seen.has(k.doc_id));
+      if (missing.length !== delta) {
+        unresolved = `the \`children\` list /v1/tasks/${parentId} returned accounts for only ${missing.length} of the ${delta} — a list that is itself partial resolves nothing, and a PARTIAL resolution is the fail-open this walk refuses on principle`;
+      } else {
+        for (const k of missing) {
+          const id = k.doc_id;
+          if (typeof id !== 'string' || id === '') {
+            unresolved = 'a row in the gap carries no doc_id, so it cannot be placed in the roster at all';
+            break;
+          }
+          const published = id.startsWith('drafts.') ? id.slice('drafts.'.length) : null;
+          if (published !== null && seen.has(published)) {
+            unresolved = `${id} is a \`drafts.<id>\` TWIN of ${published}, a row this walk already counted. Admitting it would count one row twice, and the remedy is destructive: publishing a stale twin over its parent overwrites the published row's criteria and can un-stamp a met one. Resolve twins INDIVIDUALLY, published-wins`;
+            break;
+          }
+          const status = k.lifecycle_status;
+          if (typeof status !== 'string' || status === '') {
+            unresolved = `${id} carries no lifecycle_status, so this program cannot place it live or dead — and a row it cannot place must never be counted as clean`;
+            break;
+          }
+          admitted.push({ _id: id, lifecycle_status: status, _createdAt: k.inserted_at || '', _draft: true });
+        }
+      }
+    }
+
+    if (unresolved !== null)
+      throw new Infra(
+        `the roster of ${parentId} is PUBLISHED-ONLY and the ledger disagrees — this walk read ${rows.length} published rows, `
+        + `and /v1/tasks/${parentId} reports child_count ${ledgerCount}. ${delta} child${delta === 1 ? '' : 'ren'} `
+        + `${delta === 1 ? 'is' : 'are'} invisible to /v1/data/query, which answers from the published perspective and drops `
+        + `\`perspective=drafts\` silently (measured 2026-08-24: identical to passing a parameter that does not exist). `
+        + `Each invisible row is EITHER a draft-only child — which may be OPEN, may carry unmet criteria, and would make `
+        + `clause (a) certify "no residue" over a row that is still live — OR a \`drafts.<id>\` TWIN of a row already counted `
+        + `here. The two have opposite remedies and one is destructive: publishing a stale twin overwrites the published `
+        + `row's criteria and can un-stamp a met one, so resolve twins INDIVIDUALLY, published-wins. `
+        + `THIS RUN TRIED TO RESOLVE THE GAP FROM THE LEDGER'S OWN \`children\` LIST AND COULD NOT: ${unresolved}. `
+        + `To find them by hand: \`bp task get ${parentId}\` lists .children including drafts; diff those ids against this walk. `
+        + `Nothing is asserted about clause (a).`,
+        'ROSTER-DRAFT-BLIND');
+
+    // RESOLVED. Every row in the gap is a draft-ONLY child with a status this program can
+    // read, so the population is now the whole population and clause (a) may be evaluated
+    // over it. The rows are marked `_draft` so the verdict token can disclose how many of
+    // them the published query never saw.
+    for (const a of admitted) rows.push(a);
   }
   return rows;
 };
@@ -1692,7 +1774,14 @@ function main() {
   // must stay BYTE-IDENTICAL to the token this predicate emitted before the discrimination
   // existed — a new field on every green would make every previously-quoted token
   // unmatchable for a condition that did not occur.
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${orphans.length === 0 ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}`);
+  //
+  // `drafts=` obeys the same two rules for the same reason. It counts the rows admitted
+  // from the ledger's `children` list that the PUBLISHED query could not see, so a reader
+  // can tell a roster read wholly off `/v1/data/query` from one this walk had to complete
+  // out of the task layer. Zero is the overwhelming majority of parents, and on those the
+  // token stays byte-identical to every one quoted before this field existed.
+  const draftCount = children.filter((c) => c && c._draft).length;
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${orphans.length === 0 ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}${draftCount ? ` drafts=${draftCount}` : ''}`);
   console.log(L.join('\n'));
   return ok ? 0 : 1;
 }
