@@ -129,12 +129,15 @@ decision **recorded as a task in the task system** (dogfood it — the task
 directory is retired). Capture the reason and the follow-up
 to remove the override on the task itself:
 
-A task is a `type:"task"` document created through the standard mutate
-endpoint (`content.kind` must equal `"task"`); there is no bespoke
-`POST /v1/tasks` create verb — the `bp task` verbs are read/lifecycle/progress
-only (`ls`, `ready`, `prime`, `get`, `events`, `claim`, `release`, `next`,
-`move`, `stage`, `pulse`, `stamp`, `close`). Run `bp task <verb> --help` for
-the current contract of any one of them.
+File it with `bp task create` — the contract-correct front door: it injects the
+task schema's two required fields, `kind:"task"` and `lifecycle_status:"open"`.
+`create` is a CLI built-in, so it is absent from `bp task --help` and from the
+`task` noun of `bp capabilities`, whose 13 verbs are read/lifecycle/progress
+(`ls`, `ready`, `prime`, `get`, `events`, `claim`, `release`, `next`, `move`,
+`stage`, `pulse`, `stamp`, `close`); `bp task create --help` has the contract.
+The server still has no bespoke `POST /v1/tasks` create verb, so the `curl`
+below stays as the no-`bp` fallback — it must send `kind` and
+`lifecycle_status` itself; a mutate payload missing them 422s `validation_failed`.
 
 **Write to the ledger of record, not to a dev box.** The commands below target
 `https://guerrilla.barkpark.cloud` — the instance every gate and board reads.
@@ -143,8 +146,9 @@ The older form of this runbook pointed at `http://localhost:4000` with
 into a database that does not exist and left the merge unjustified. Use your
 own guerrilla token (`bp login`, or the same write token CI uses as
 `BARKPARK_TASK_TOKEN`); the `curl` here is the no-`bp` fallback — with the CLI
-on hand, `bp doc create task … && bp doc publish task <task_id>` is the shorter
-path, and boards read only the **published** ledger.
+on hand, `bp task create … --publish` is the shorter path (`bp doc create task`
+is NOT: it skips the injected required fields and 422s), and boards read only
+the **published** ledger.
 
 ```bash
 LEDGER=https://guerrilla.barkpark.cloud
