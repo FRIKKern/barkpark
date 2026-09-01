@@ -39,6 +39,8 @@
 #   31 PREFLIGHT_NO_CLOUD_SESSION   — no cloud session token (`bp login`)
 #   32 PREFLIGHT_NO_BARKPARK        — the session's TEAM does not own the target box
 #   33 PREFLIGHT_NO_CONTENT         — the doc type has 0 published docs (would build an EMPTY page)
+#   39 CREATE_MINT_REFUSED         — the BOX refused the control plane's read-token mint
+#                                    (a CP↔box credential fault, not a caller fault)
 #   40 CREATE_FAILED                — `bp cloud site create` did not return a site
 #   41 CREATE_NOT_CONTENT_BOUND     — the ghost 201: no read token stored, no dataset binding
 #   42 PREBUILT_NOT_ENABLED         — the site has not opted in to prebuilt uploads
@@ -104,6 +106,7 @@ E_NO_BP=30
 E_NO_SESSION=31
 E_NO_BARKPARK=32
 E_NO_CONTENT=33
+E_CREATE_MINT_REFUSED=39
 E_CREATE_FAILED=40
 E_CREATE_NOT_BOUND=41
 E_PB_NOT_ENABLED=42
@@ -134,6 +137,7 @@ codename() {
     "$E_NO_SESSION") echo "PREFLIGHT_NO_CLOUD_SESSION" ;;
     "$E_NO_BARKPARK") echo "PREFLIGHT_NO_BARKPARK" ;;
     "$E_NO_CONTENT") echo "PREFLIGHT_NO_CONTENT" ;;
+    "$E_CREATE_MINT_REFUSED") echo "CREATE_MINT_REFUSED" ;;
     "$E_CREATE_FAILED") echo "CREATE_FAILED" ;;
     "$E_CREATE_NOT_BOUND") echo "CREATE_NOT_CONTENT_BOUND" ;;
     "$E_PB_NOT_ENABLED") echo "PREBUILT_NOT_ENABLED" ;;
@@ -195,6 +199,28 @@ now_ms() {
   perl -MTime::HiRes=time -e 'printf "%d\n", time*1000'
 }
 
+# cli_err <stdout-file> <stderr-file> — the REASON a `bp … -o json` call failed.
+#
+# WHY THIS EXISTS. In `-o json` mode the CLI writes its error ENVELOPE to
+# STDOUT ({"ok":false,"error":{"code":…,"message":…}}) and leaves stderr EMPTY.
+# Every call site here quoted stderr, so a fully-diagnosed control-plane refusal
+# ("guerrilla refused to mint the site's read token (HTTP 403): forbidden —
+# caller is not a member of this workspace") printed as a BLANK — the operator
+# saw `exited 8:` and nothing else, and the script's whole promise is that a red
+# names its reason. Reads the envelope first, falls back to stderr, and says so
+# explicitly when there is genuinely no output rather than printing emptiness.
+cli_err() {
+  local msg
+  msg="$(jget "$1" error.message)"
+  [ -n "$msg" ] || msg="$(jget "$1" error.code)"
+  [ -n "$msg" ] || msg="$(head -c 400 "${2:-/dev/null}" 2>/dev/null)"
+  [ -n "$msg" ] || msg="(the CLI produced no error envelope and no stderr)"
+  printf '%s' "$msg"
+}
+
+# cli_err_code <stdout-file> — the envelope's machine `error.code`, or "".
+cli_err_code() { jget "$1" error.code; }
+
 jget() {
   # jget <json-file> <dotted.path> — prints the value, or "" when absent/null.
   # Deliberately python3 (always present where bp is developed/operated) rather
@@ -251,17 +277,42 @@ PY
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/site-proof.XXXXXX")"
 CREATED_SITE=""
 CREATED_BROKEN=""
+# cleanup — tear down every site THIS RUN created, unless --keep.
+#
+# ssw8: this used to refuse to delete and told the operator "there is no DELETE
+# /v1/sites/:id route yet". That claim went STALE — the route landed (cloud
+# router `delete "/v1/sites/:id"`) together with the CLI verb (`bp cloud site
+# delete <site> --yes`), and it is the teardown that ALSO revokes the site's
+# minted read token by label. While the script kept repeating the old sentence,
+# every green run leaked a sites row, a releases dir, a Caddy block AND a live
+# read credential — the exact orphan the proof is supposed to prove away.
+#
+# A failed delete is REPORTED, never swallowed: the operator gets the manual
+# steps. Cleanup never changes the run's verdict — it runs from the EXIT trap,
+# so `exit "$code"` in fail() has already fixed the exit status.
 cleanup() {
   if [ "$KEEP" -eq 0 ]; then
-    local s
+    local s dx
     for s in "$CREATED_SITE" "$CREATED_BROKEN"; do
       [ -n "$s" ] || continue
       say ""
-      note "cleanup: the demo site '$s' was created on the live fleet."
-      note "         There is no DELETE /v1/sites/:id route yet (see site-spawner-backlog-token-revoke),"
-      note "         so it is LEFT IN PLACE deliberately, along with its releases dir and Caddy block."
-      note "         Remove by hand: on $LIVE_HOST → rm -rf /opt/barkpark/sites/$s and drop the"
-      note "         '# barkpark-site:$s' guarded handle_path block from /etc/caddy/Caddyfile."
+      note "cleanup: deleting the demo site '$s' (this also revokes its minted read token)…"
+      dx=0
+      "$BP" cloud site delete "$s" --yes >"${TMP:-/tmp}/del-$s.json" 2>"${TMP:-/tmp}/del-$s.err" || dx=$?
+      if [ "$dx" -eq 0 ]; then
+        ok "cleanup: '$s' deleted from the control plane"
+      else
+        note "cleanup: DELETE FAILED for '$s' (exit $dx): $(cli_err "${TMP:-/tmp}/del-$s.json" "${TMP:-/tmp}/del-$s.err")"
+        note "         Remove by hand: \`$BP cloud site delete $s --yes\`, or on $LIVE_HOST →"
+        note "         rm -rf /opt/barkpark/sites/$s and drop the '# barkpark-site:$s' guarded"
+        note "         handle_path block from /etc/caddy/Caddyfile. The site's read token is STILL LIVE."
+      fi
+    done
+  else
+    local k
+    for k in "$CREATED_SITE" "$CREATED_BROKEN"; do
+      [ -n "$k" ] || continue
+      note "cleanup: --keep — '$k' is LEFT IN PLACE (its read token stays live)."
     done
   fi
   [ -n "${TMP:-}" ] && rm -rf "$TMP"
@@ -283,6 +334,24 @@ judge_create() {
   [ "$bound" = "true" ] || return "$E_CREATE_NOT_BOUND"
   [ -n "$ws" ] && [ -n "$proj" ] && [ -n "$ds" ] || return "$E_CREATE_NOT_BOUND"
   return 0
+}
+
+# judge_create_failure <envelope-error-code> — classify a FAILED create.
+#
+# `read_token_mint_failed` is not a caller fault and must not wear the same name
+# as one. The control plane relays the site's read-token mint to the box with
+# ITS OWN stored admin credential (Registry.mint_public_read_token/5 →
+# relay_admin → POST /w/:ws/p/:proj/v1/tokens); when the box answers 403
+# `not_a_member`, the caller's own session can be perfectly valid — and it IS,
+# because PREFLIGHT just proved the team owns the box. Nothing the operator does
+# to their own login fixes it: the remedy is re-seating the CONTROL PLANE's
+# admin token for that instance. Naming it CREATE_FAILED sends them to `bp
+# login`, which is the one thing that cannot help.
+judge_create_failure() {
+  case "$1" in
+    read_token_mint_failed) return "$E_CREATE_MINT_REFUSED" ;;
+    *) return "$E_CREATE_FAILED" ;;
+  esac
 }
 
 # judge_stages <status> <stage-names-in-observed-order…>
@@ -464,6 +533,12 @@ self_check() {
   expect_code "$E_CREATE_NOT_BOUND" "the ghost 201 (no read token stored)"   judge_create false default default production
   expect_code "$E_CREATE_NOT_BOUND" "201 with the dataset binding dropped"   judge_create true "" "" ""
 
+  note "create failure — the BOX's refusal must not wear the CALLER's name"
+  expect_code "$E_CREATE_MINT_REFUSED" "the box refused the CP's read-token mint" judge_create_failure read_token_mint_failed
+  expect_code "$E_CREATE_FAILED" "a cross-team create (caller's own fault)"       judge_create_failure barkpark_not_found
+  expect_code "$E_CREATE_FAILED" "an unrecognised refusal still fails, by name"   judge_create_failure some_new_error
+  expect_code "$E_CREATE_FAILED" "no envelope code at all"                        judge_create_failure ""
+
   note "deploy"
   expect_pass      "six stages, in order, live"                      judge_stages live PLAN BUILD STAGE HEALTH SWITCH RETIRE
   expect_code "$E_DEPLOY_STAGES" "only three stages ever landed"      judge_stages live PLAN BUILD STAGE
@@ -522,6 +597,29 @@ self_check() {
   expect_code "$E_PB_BASE_BROKEN" "bp-site-base is a full URL — every asset href is dead" \
     judge_site_base "/https://guerrilla.barkpark.cloud/sites/perfect-proof/" /sites/perfect-proof/
   expect_code "$E_PB_BASE_BROKEN" "bp-site-base is empty"            judge_site_base "" /sites/perfect-proof/
+
+  # The reason a red is legible at all. `bp … -o json` puts its error ENVELOPE on
+  # STDOUT and leaves stderr EMPTY; quoting stderr printed a BLANK reason for a
+  # fully-diagnosed refusal, which is how a 403 not_a_member reached an operator
+  # as "exited 8:" and nothing more. Guarded here so it cannot regress silently.
+  note "the reason must survive the -o json split (envelope on STDOUT)"
+  local sc_out="$TMP/sc-env.json" sc_err="$TMP/sc-env.err"
+  printf '%s' '{"ok":false,"error":{"code":"read_token_mint_failed","message":"guerrilla refused to mint the site read token (HTTP 403): forbidden"}}' >"$sc_out"
+  : >"$sc_err"
+  case "$(cli_err "$sc_out" "$sc_err")" in
+    *"refused to mint"*) ok "$(printf '%-30s' "REASON") the envelope's message is read from STDOUT, not empty stderr" ;;
+    *) printf '  %s✗%s cli_err lost the envelope message — a diagnosed refusal would print blank\n' "$RED" "$OFF" >&2; SC_FAILED=1 ;;
+  esac
+  printf '%s' '{"not":"an envelope"}' >"$sc_out"; printf '%s' 'stderr had it' >"$sc_err"
+  case "$(cli_err "$sc_out" "$sc_err")" in
+    *"stderr had it"*) ok "$(printf '%-30s' "REASON") falls back to stderr when there is no envelope" ;;
+    *) printf '  %s✗%s cli_err did not fall back to stderr\n' "$RED" "$OFF" >&2; SC_FAILED=1 ;;
+  esac
+  : >"$sc_out"; : >"$sc_err"
+  case "$(cli_err "$sc_out" "$sc_err")" in
+    *"no error envelope"*) ok "$(printf '%-30s' "REASON") says so out loud when there is genuinely no output" ;;
+    *) printf '  %s✗%s cli_err printed emptiness instead of naming it\n' "$RED" "$OFF" >&2; SC_FAILED=1 ;;
+  esac
 
   note "the red must have a NAME"
   local unnamed; unnamed="$(codename 255)"
@@ -657,7 +755,18 @@ PY
       "$RED$BLD" "$WALL_DOWN" "$OFF" >&2
     fail "$WALL_CODE" "$WALL_WHY" "$WALL_FIX"
   fi
-  printf '%s✓ PREFLIGHT PASSED%s — nothing was created; the spawn can proceed.\n' "$GRN$BLD" "$OFF" >&2
+  # The claim is bounded ON PURPOSE. These walls are about the CALLER's session:
+  # that it exists, that its team owns the box, and that the content it names is
+  # really there. There is one wall left that NO read-only client-side check can
+  # reach — the CONTROL PLANE's own stored admin credential for this instance,
+  # which it uses to mint the site's read token against the box. Exercising it
+  # requires the mint, and the mint is a WRITE, so it cannot be probed without
+  # creating something. It is proven INLINE at CREATE instead, and it has its own
+  # named red (CREATE_MINT_REFUSED) so it can never be read as a caller fault.
+  # An earlier version of this line said "the spawn can proceed" and was WRONG in
+  # exactly that gap: a run that passed every wall here still died at CREATE.
+  printf '%s✓ PREFLIGHT PASSED%s — nothing was created. The caller-side walls are down;\n' "$GRN$BLD" "$OFF" >&2
+  printf '  the control plane'"'"'s own box credential is proven at CREATE (it cannot be read-probed).\n' >&2
 }
 
 # =============================================================================
@@ -678,9 +787,20 @@ live_proof() {
     --framework astro --kind static --instance "$INSTANCE" \
     --doc-type "$DOC_TYPE" \
     -o json >"$TMP/create.json" 2>"$TMP/create.err" || cx=$?
-  [ "$cx" -eq 0 ] ||
-    fail "$E_CREATE_FAILED" "\`bp cloud site create\` exited $cx: $(head -c 400 "$TMP/create.err")" \
-      "if this is 404 barkpark_not_found, the session's team does not own '$INSTANCE' (see PREFLIGHT)"
+  if [ "$cx" -ne 0 ]; then
+    local ccode chint
+    ccode="$(cli_err_code "$TMP/create.json")"
+    case "$ccode" in
+      read_token_mint_failed)
+        chint="NOT your login: the control plane mints the site's read token with ITS OWN stored admin credential for '$INSTANCE' (relay_admin → POST /w/<ws>/p/<proj>/v1/tokens). A 403 not_a_member there means THAT credential is no longer a member of the '${DATASET%%/*}' workspace — re-seat the instance's admin token in the control plane. Confirm the split by hand: your own token on the same route should answer 200." ;;
+      barkpark_not_found)
+        chint="the session's team does not own '$INSTANCE' (see PREFLIGHT)" ;;
+      *)
+        chint="if this is 404 barkpark_not_found, the session's team does not own '$INSTANCE' (see PREFLIGHT)" ;;
+    esac
+    judge_create_failure "$ccode" ||
+      fail $? "\`bp cloud site create\` exited $cx${ccode:+ ($ccode)}: $(cli_err "$TMP/create.json" "$TMP/create.err")" "$chint"
+  fi
 
   local site_id; site_id="$(jget "$TMP/create.json" site.id)"
   [ -n "$site_id" ] ||
@@ -726,7 +846,7 @@ live_proof() {
   build_id="$(jget "$TMP/deploy.json" deployment.build_id)"
 
   if [ "$dx" -ne 0 ] && [ -z "$status" ]; then
-    fail "$E_DEPLOY_FAILED" "\`bp cloud site deploy\` exited $dx with no deployment: $(head -c 400 "$TMP/deploy.stream")" \
+    fail "$E_DEPLOY_FAILED" "\`bp cloud site deploy\` exited $dx with no deployment: $(cli_err "$TMP/deploy.json" "$TMP/deploy.stream")" \
       "if this is 422 no_build_source, POST /v1/sites/:id/deploy still refuses a content-bound static site — it must kind-branch on static and compute the build itself"
   fi
 
@@ -804,7 +924,7 @@ PY
   elapsed=$(( t1 - t0 ))
 
   [ "$rbx" -eq 0 ] ||
-    fail "$E_ROLLBACK_FAILED" "\`bp cloud site rollback\` exited $rbx after ${elapsed}ms: $(head -c 400 "$TMP/rollback.err")" \
+    fail "$E_ROLLBACK_FAILED" "\`bp cloud site rollback\` exited $rbx after ${elapsed}ms: $(cli_err "$TMP/rollback.json" "$TMP/rollback.err")" \
       "if this is a 404, POST /v1/sites/:id/rollback is not wired — the CLI calls it and the control plane does not answer it"
 
   curl -sS -m 30 -o "$TMP/live3.html" "https://$LIVE_HOST/sites/$SLUG/" >/dev/null 2>&1 || true
@@ -837,7 +957,7 @@ PY
     --doc-type "__no_such_type__" \
     -o json >"$TMP/broken-create.json" 2>"$TMP/broken-create.err" || pcx=$?
   [ "$pcx" -eq 0 ] ||
-    fail "$E_CREATE_FAILED" "could not create the poison site to prove HEALTH containment: $(head -c 300 "$TMP/broken-create.err")"
+    fail "$E_CREATE_FAILED" "could not create the poison site to prove HEALTH containment: $(cli_err "$TMP/broken-create.json" "$TMP/broken-create.err")"
   CREATED_BROKEN="$broken_slug"
 
   # A non-zero deploy exit here is the CORRECT outcome, so it is not an error —
@@ -1031,7 +1151,7 @@ prebuilt_journey() {
   "$BP" cloud site settings "$slug" --prebuilt-enabled true -o json \
     >"$TMP/pb-settings.json" 2>"$TMP/pb-settings.err" || sx=$?
   [ "$sx" -eq 0 ] ||
-    fail "$E_PB_NOT_ENABLED" "\`bp cloud site settings $slug --prebuilt-enabled true\` exited $sx: $(head -c 300 "$TMP/pb-settings.err")" \
+    fail "$E_PB_NOT_ENABLED" "\`bp cloud site settings $slug --prebuilt-enabled true\` exited $sx: $(cli_err "$TMP/pb-settings.json" "$TMP/pb-settings.err")" \
       "the control plane answers 422 prebuilt_not_enabled until the SITE opts in; a 404 here means this cloud session's team does not own '$slug'"
   ok "prebuilt_enabled=true on '$slug'"
 
