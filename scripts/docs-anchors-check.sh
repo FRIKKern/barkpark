@@ -854,6 +854,44 @@ else
   echo "ok:   §8b all $CANON_PAIR_N marker pairing(s) match the pin — none has migrated"
 fi
 
+# --- 9. roster drift: documented rosters must match the code -------------------
+# §1-§3 prove that what a doc POINTS AT exists. They say nothing about whether a
+# doc's ENUMERATION is complete, and two rosters had undercounted for months:
+# root CLAUDE.md named 6 plugins where 11 modules `use Barkpark.Plugin`, and
+# api/CLAUDE.md named 7 task mutation_event kinds where 14 are emitted. A roster
+# reads as complete by construction, so no reader catches it.
+#
+# It lives in its own script (with its own --selftest) because the derivation is
+# fiddly enough to deserve one; it is INVOKED here because this is the job that
+# doc-gates.yml already triggers on `.ex` paths — so adding a plugin module fires
+# the check on that very PR. A guard nobody runs is not a guard.
+echo "== roster drift (CLAUDE.md / api/CLAUDE.md vs the code) =="
+if [ -n "${DOCS_ANCHORS_ROOT:-}" ]; then
+  # A CUSTOM ROOT IS NOT THIS REPO — same precedent as §8b. The selftest
+  # fixtures carry four files and no api/lib/barkpark/plugins tree at all, so
+  # running the roster gate there would red every fixture case.
+  echo "ok:   §9 roster drift not applicable to a custom DOCS_ANCHORS_ROOT"
+elif [ ! -x "$REPO_ROOT/scripts/roster-drift-check.sh" ]; then
+  echo "FAIL: §9 scripts/roster-drift-check.sh is missing or not executable"
+  FAIL=1
+else
+  # Status is captured BEFORE any formatting. `cmd | sed` reports sed's exit
+  # code unless pipefail happens to be set, and a gate whose red is laundered by
+  # its own pretty-printer is worse than no gate — so the rc never travels
+  # through a pipe.
+  set +e
+  ROSTER_OUT=$("$REPO_ROOT/scripts/roster-drift-check.sh" 2>&1)
+  ROSTER_RC=$?
+  set -e
+  printf '%s\n' "$ROSTER_OUT" | sed 's/^/      /'
+  if [ "$ROSTER_RC" -eq 0 ]; then
+    echo "ok:   §9 documented rosters match the code"
+  else
+    echo "FAIL: §9 a documented roster no longer matches the code (rc=$ROSTER_RC, see above)"
+    FAIL=1
+  fi
+fi
+
 # --- summary ------------------------------------------------------------------
 echo ""
 if [ "$FAIL" -ne 0 ]; then
