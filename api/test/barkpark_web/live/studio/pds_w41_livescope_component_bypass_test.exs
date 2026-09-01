@@ -37,9 +37,9 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       `Caps.write_capable?/2` takes NO target: it short-circuits on
       `caps.write == true`, and `Caps.derive/1` computes `write` through
       `Access.admits_desk?/3`, which OVERWRITES the request's `type`/`doc_id`
-      with the GRANT'S OWN (access.ex:329-336) before validating. A doc-scoped
-      write grant therefore self-satisfies at desk granularity and the prop
-      arrives `true` on EVERY sheet of the desk.
+      with the GRANT'S OWN before validating. A doc-scoped write grant therefore
+      self-satisfies at desk granularity and the prop arrives `true` on EVERY
+      sheet of the desk.
 
   So the bypass is REAL, and it is a GRANULARITY gap, not a missing gate:
   socket route = doc-granular, component route = desk-granular.
@@ -182,11 +182,11 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
   # WHY THE ROW'S `dataset_id` IS NULLED (a real, separate defect this suite had
   # to route around — NOT a relaxation of anything under test).
   #
-  # `Sheets.Session.load_doc/2` (session.ex:749) calls `Content.get_document/3`
-  # with NO scope opts. `WriteScope.resolve_read_dataset_id/2` then falls back to
-  # the SEEDED DEFAULT project (write_scope.ex:315-320, the `true ->` arm, taken
-  # because the caller passed no `:workspace_id` key at all) and returns the
-  # DEFAULT project's `dataset_id`. `Query.scope_to_dataset/3` applies that as
+  # `Sheets.Session.load_doc/2` calls `Content.get_document/3` with NO scope
+  # opts. `WriteScope.resolve_read_dataset_id/2` then falls back to the SEEDED
+  # DEFAULT project (its `true ->` arm, taken because the caller passed no
+  # `:workspace_id` key at all) and returns the DEFAULT project's `dataset_id`.
+  # `Query.scope_to_dataset/3` applies that as
   # `dataset_id == default_ds_id or (is_nil(dataset_id) and dataset == "production")`.
   # A sheet stamped with a NON-Default workspace's own `production` dataset row
   # matches NEITHER arm, so the session gets `{:error, :not_found}`, never starts,
