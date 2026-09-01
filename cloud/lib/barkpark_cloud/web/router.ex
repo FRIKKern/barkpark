@@ -4211,10 +4211,15 @@ defmodule BarkparkCloud.Web.Router do
 
   # ── Fleet-wide autoupdate kill switch (isu-w5.2) ──────────────────────────
   #
-  # PLATFORM-OPERATOR gated, cross-team by design — the same faceless WORKER
-  # token (`require_worker`) behind the `/v1/internal/*` fleet-ops surface, NOT a
-  # team-scoped admin. Fails CLOSED: an unset/blank/wrong token 401s every route,
-  # so the kill switch can never be flipped by omission.
+  # WORKER-gated, cross-team by design — the same faceless WORKER token
+  # (`require_worker`) behind the `/v1/internal/*` fleet-ops surface, NOT a
+  # team-scoped admin and NOT the platform operator (this block's opening line
+  # used to say "PLATFORM-OPERATOR gated" one sentence before naming
+  # `require_worker`, which is the contradiction isu-backlog-operator-principal
+  # exists to delete). The HUMAN principal is the `/v1/operator/autoupdate*`
+  # trio below — that is what the console and `bp cloud rollout` call. These
+  # three stay the worker's alone. Fails CLOSED: an unset/blank/wrong token 401s
+  # every route, so the kill switch can never be flipped by omission.
   #
   #   GET  /v1/admin/autoupdate         → 200 {halted: bool}   — current state
   #   POST /v1/admin/autoupdate/halt    → 200 {halted: true}   — engage
