@@ -1190,8 +1190,12 @@ defmodule BarkparkWeb.TasksController.Params do
 
         withdraw ->
           case Map.get(params, "note") do
-            n when is_binary(n) and n != "" -> {:ok, index, {:withdraw, n}, criterion_text}
-            _ -> {:error, :invalid_stamp, "--withdraw requires non-empty --note (why it was withdrawn)"}
+            n when is_binary(n) and n != "" ->
+              {:ok, index, {:withdraw, n}, criterion_text}
+
+            _ ->
+              {:error, :invalid_stamp,
+               "--withdraw requires non-empty --note (why it was withdrawn)"}
           end
 
         # A body that carries `met=false` and nothing else names no verb at

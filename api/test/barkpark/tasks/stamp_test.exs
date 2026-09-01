@@ -823,6 +823,7 @@ defmodule Barkpark.Tasks.StampTest do
       assert before["met"] == true
       assert before["evidence"] == "42 tests green: stamp_test.exs"
       assert Map.get(before, "withdrawals") == nil
+
       assert Criteria.progress(%{"acceptance_criteria" => criteria_of(task.id)}) ==
                %{met: 1, total: 2}
 
@@ -1079,13 +1080,18 @@ defmodule Barkpark.Tasks.StampTest do
          %{scope: scope} do
       {task, closed} = sealed_task!(scope)
 
-      assert {:error, {:not_in_progress, "done"}} =
-               Stamp.stamp(task.id, "reviewer",
-                 observed_epoch: 0,
-                 criterion: 1,
-                 criterion_text: "docs updated",
-                 outcome: {:met, "a --met on a sealed row is still refused"}
-               ),
+      # Bound, then asserted on a BOOLEAN: `assert pattern = expr, msg` raises
+      # MatchError inside the match before assert/2 ever sees the message, so
+      # the message would be dead code (scripts/unreachable-assert-message-check).
+      raise_on_sealed_row =
+        Stamp.stamp(task.id, "reviewer",
+          observed_epoch: 0,
+          criterion: 1,
+          criterion_text: "docs updated",
+          outcome: {:met, "a --met on a sealed row is still refused"}
+        )
+
+      assert raise_on_sealed_row == {:error, {:not_in_progress, "done"}},
              "the seal still refuses a RAISE — only the lowering verb is exempt"
 
       assert {:ok, doc} =
@@ -1111,6 +1117,7 @@ defmodule Barkpark.Tasks.StampTest do
       # closed-ness of the row all survive a post-hoc correction.
       assert doc.content["lifecycle_status"] == "done"
       assert doc.content["close_reason"] == closed.content["close_reason"]
+
       assert doc.content["claim"] == closed.content["claim"],
              "the close receipt is not rewritten by a later correction"
     end
