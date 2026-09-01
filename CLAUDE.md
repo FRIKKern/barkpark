@@ -45,18 +45,17 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 
 ## Prod micro-block
 
-`89.167.28.206` · `/opt/barkpark` · systemd `barkpark.service` · deploy = `git pull` (post-merge hook rebuilds) — canonical: `docs/ops/PROD_OPS.md`.
+`89.167.28.206` · `/opt/barkpark` · systemd `barkpark.service` · deploy = `git pull` ON THE BOX (post-merge hook rebuilds) — canonical: `docs/ops/PROD_OPS.md`. **Not a `deploy.yml` target** (its only SSH hosts are `CP_HOST`/`GUERRILLA_HOST`), so a merge is not live until pulled.
 
 ## Quick commands
 
 `make update` (**local**: pull + diff-driven refresh of bp/deps/migrations + digest of what changed — use instead of bare `git pull`) · `make doctor` (**local**: read-only staleness report — behind? bp stale? migrations pending?) · `make dev` (local tmux: Phoenix + TUI) · `make deploy` (server: `git pull` — the `.githooks/post-merge` hook does the clean rebuild + restart) · `make rebuild` (nuke `_build/prod` + recompile + restart) · `make logs`. Local setup: `docs/setup/SETUP.md`.
 
-Smoke test after any deploy:
+Smoke test. A 200 proves the box ANSWERS, never that your merge shipped — ask which commit:
 
 ```bash
-curl -s http://89.167.28.206/api/schemas | head -20    # API works
-curl -sL http://89.167.28.206/studio | grep -E "pane-layout|Sign in" # Studio gated (anonymous → /login unless BARKPARK_PUBLIC_DEMO_STUDIO)
-curl -s http://89.167.28.206/v1/data/query/production/post | grep "count" # Documents
+curl -s http://89.167.28.206/status.json | jq -r .commit  # what the box RUNS
+curl -s https://barkpark.cloud/health | jq -r .git_sha    # deploy.yml's check: IDENTITY, not liveness
 ```
 
 ## Past Mistakes (NEVER REPEAT)
