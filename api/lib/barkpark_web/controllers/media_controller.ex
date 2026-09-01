@@ -33,7 +33,8 @@ defmodule BarkparkWeb.MediaController do
   # (content/scope.ex:178) already expresses the same distinction query-side.
   #
   # Applied HERE and not inside `Media`, deliberately: `Media.list_files/1`
-  # (plugins/media/assets.ex:205), `Media.get_file_by_path/2` (preview.ex:120)
+  # (plugins/media/assets.ex:Assets.backfill/2), `Media.get_file_by_path/2`
+  # (preview.ex:Preview.media_resolver/1)
   # and the unscoped reads in media_test.exs are legitimate internal global
   # callers, so narrowing the shared helper would change behaviour well outside
   # this route family. Making an empty scope fail CLOSED at the Content/Media
