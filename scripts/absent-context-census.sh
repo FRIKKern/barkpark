@@ -144,6 +144,12 @@ FIXTURES=""
 REPO_OVERRIDE=""
 NOW_ISO=""
 STALE_QUEUE_HOURS=24
+# A queued run on the current head of an open PR is only actionable if someone
+# is plausibly coming back to that PR. Older than this with no PR activity, the
+# re-run remedy exists in principle and will never be applied in practice
+# (#11766: owner-held since Aug 17, 300+ commits behind main). Dispatched runs
+# are unaffected — cancel works regardless of whether anyone returns.
+DORMANT_PR_DAYS=14
 SHAS=()
 
 # Report accumulators. ABSENT_ROWS and STALE_ROWS are the two SCREAMING limbs and
@@ -153,6 +159,18 @@ ABSENT_ROWS=0
 STALE_ROWS=0
 UNKNOWN_ROWS=0
 PENDING_ROWS=0
+# ORPHANED runs are stale-queued rows that are UNDISPATCHABLE and unattached:
+# jobs.total_count 0, and a head that is no longer the current head of any open
+# PR or of main. GitHub has no state transition for them — `gh run cancel` says
+# "completed", the REST cancel says "has NOT BEEN QUEUED YET" while status reads
+# queued (measured on all 8 specimens, 2026-09-01) — so a verdict that screams
+# about them screams about something nobody can act on, forever. That is how
+# this census spent 93 runs red without one green: a watch that is red every
+# time it runs is indistinguishable from a watch that is broken, which is this
+# file's own founding principle. Orphans are counted and PRINTED, never exited
+# on. The run records stay: deleting them to green a gate would be destroying
+# the only evidence the class exists.
+ORPHAN_ROWS=0
 
 # Informational rows are buffered, not printed inline, so the queue limb's
 # verdict is never pushed off the top of a log by in-flight noise.
@@ -173,6 +191,7 @@ while [ $# -gt 0 ]; do
     --repo)              REPO_OVERRIDE="$2"; shift 2 ;;
     --now)               NOW_ISO="$2"; shift 2 ;;
     --stale-queue-hours) STALE_QUEUE_HOURS="$2"; shift 2 ;;
+    --dormant-pr-days) DORMANT_PR_DAYS="$2"; shift 2 ;;
     --sha)               SHAS+=("$2"); shift 2 ;;
     -h|--help)           usage; exit 0 ;;
     *) warn "unknown argument: $1"; usage >&2; exit 2 ;;
@@ -307,6 +326,20 @@ read_head_runs() { # <sha>
   fi
 }
 
+# The current head of main, or empty when it cannot be read. Liveness of a
+# queued run's head is judged against open-PR heads PLUS this; an unreadable
+# answer disables the orphan downgrade entirely (fail closed — a run nobody can
+# prove dead keeps screaming).
+read_main_head() {
+  local f
+  if [ -n "$FIXTURES" ]; then
+    f="$(fixture main-head.json)" || return 1
+    jq -r '.sha // empty' "$f"
+  else
+    gh api "repos/$REPO/commits/main" --jq '.sha' 2>/dev/null
+  fi
+}
+
 # jobs.total_count for a run, or -1 when it cannot be read. -1 is a real value
 # here: it downgrades the class to UNCLASSIFIED instead of asserting ZOMBIED off
 # a number nobody managed to fetch.
@@ -334,10 +367,10 @@ read_queued_paginated() {
   local f
   if [ -n "$FIXTURES" ]; then
     f="$(fixture queued-paginated.json)" || { warn "fixtures mode: missing queued-paginated.json"; return 1; }
-    jq -c '.workflow_runs[] | {id, path, status, run_attempt, created_at, head_sha}' "$f"
+    jq -c '.workflow_runs[] | {id, path, status, run_attempt, created_at, updated_at, head_sha}' "$f"
   else
     gh_api "repos/$REPO/actions/runs?status=queued&per_page=100" \
-      '.workflow_runs[] | {id, path, status, run_attempt, created_at, head_sha}'
+      '.workflow_runs[] | {id, path, status, run_attempt, created_at, updated_at, head_sha}'
   fi
 }
 
@@ -549,6 +582,18 @@ if [ "$REQ_COUNT" -lt 1 ] 2>/dev/null; then
 fi
 say "required contexts: $REQ_COUNT"
 
+# Live heads, for the queue limb's orphan discriminator. Knowable only when the
+# open-PR list was actually walked AND main's head was readable; under --sha the
+# PR list is never read, so liveness stays UNKNOWN and every stale row keeps the
+# screaming path it has today (fail closed, never downgrade on missing data).
+LIVE_HEADS=""
+# Heads of open PRs with NO activity in DORMANT_PR_DAYS. Still live — the
+# absence limb still walks them — but for the queue limb their re-run remedy is
+# notional. An unreadable updated_at keeps the head ACTIVE (fail closed: a PR
+# nobody can prove dormant keeps its scream).
+DORMANT_HEADS=""
+LIVE_OK=0
+
 HEADS_SEEN=0
 if [ "${#SHAS[@]}" -gt 0 ]; then
   for s in "${SHAS[@]}"; do
@@ -564,12 +609,25 @@ else
   while IFS= read -r row; do
     [ -n "$row" ] || continue
     HEADS_SEEN=$((HEADS_SEEN + 1))
+    pr_upd="$(jq -r '.updated_at // empty' <<<"$row")"
+    pr_upd_hrs="$(age_hours "$pr_upd")"
+    if [ "$pr_upd_hrs" != "?" ] \
+       && awk -v a="$pr_upd_hrs" -v d="$DORMANT_PR_DAYS" 'BEGIN { exit !(a > d * 24) }'; then
+      DORMANT_HEADS="$DORMANT_HEADS $(jq -r '.sha' <<<"$row")"
+    else
+      LIVE_HEADS="$LIVE_HEADS $(jq -r '.sha' <<<"$row")"
+    fi
     census_head \
       "$(jq -r '.sha' <<<"$row")" \
       "PR #$(jq -r '.number' <<<"$row")" \
       "$(jq -r '.updated_at' <<<"$row")" \
       "$(jq -r '.mergeable // "UNKNOWN"' <<<"$row")"
   done <<<"$PRS"
+  MAIN_HEAD="$(read_main_head)" || MAIN_HEAD=""
+  if [ -n "$MAIN_HEAD" ]; then
+    LIVE_HEADS="$LIVE_HEADS $MAIN_HEAD"
+    LIVE_OK=1
+  fi
 fi
 say "heads examined: $HEADS_SEEN"
 say ""
@@ -600,10 +658,51 @@ else
     [ -n "$row" ] || continue
     created="$(jq -r '.created_at' <<<"$row")"
     hrs="$(age_hours "$created")"
-    line="  queued $(jq -r '.path' <<<"$row")  run $(jq -r '.id' <<<"$row")  attempt $(jq -r '.run_attempt // 1' <<<"$row")  age ${hrs}h  head $(jq -r '.head_sha // "-"' <<<"$row" | cut -c1-9)"
+    qhead="$(jq -r '.head_sha // "-"' <<<"$row")"
+    qid="$(jq -r '.id' <<<"$row")"
+    line="  queued $(jq -r '.path' <<<"$row")  run $qid  attempt $(jq -r '.run_attempt // 1' <<<"$row")  age ${hrs}h  head $(printf '%s' "$qhead" | cut -c1-9)"
     if [ "$hrs" != "?" ] && awk -v a="$hrs" -v t="$STALE_QUEUE_HOURS" 'BEGIN { exit !(a > t) }'; then
-      say "$line  STALE (> ${STALE_QUEUE_HOURS}h)"
-      STALE_ROWS=$((STALE_ROWS + 1))
+      # A stale-queued run is a FINDING only when a remedy exists. Split on the
+      # two questions that decide that, in remedy order, and fail closed on
+      # every unreadable answer:
+      #   live head?          -> re-run the workflow on that head. SCREAM.
+      #   dead head, jobs>0?  -> dispatched and stuck; cancel works. SCREAM.
+      #   dead head, jobs==0? -> ORPHANED. GitHub refuses both cancel paths
+      #                          (measured on all 8: run cancel says
+      #                          "completed", REST says "NOT BEEN QUEUED YET").
+      #                          No remedy exists, so no verdict — a NOTICE.
+      qjobs="$(read_jobs_count "$qid")"
+      if [ "$LIVE_OK" != "1" ] || [ "$qjobs" = "-1" ]; then
+        # Liveness or the job count could not be read. A run nobody can prove
+        # orphaned keeps the verdict it has today.
+        say "$line  STALE (> ${STALE_QUEUE_HOURS}h)"
+        STALE_ROWS=$((STALE_ROWS + 1))
+      elif [ -n "$qhead" ] && [ "$qhead" != "-" ] && case " $LIVE_HEADS " in *" $qhead "*) true ;; *) false ;; esac; then
+        say "$line  STALE (> ${STALE_QUEUE_HOURS}h)  LIVE HEAD — remedy: re-run this workflow on the head"
+        STALE_ROWS=$((STALE_ROWS + 1))
+      elif [ "$qjobs" != "0" ]; then
+        # Dispatched outranks dormancy: cancel works on ANY head, live, dormant
+        # or dead, and a dispatched queued run is holding a runner slot.
+        say "$line  STALE (> ${STALE_QUEUE_HOURS}h)  DISPATCHED — remedy: gh run cancel $qid"
+        STALE_ROWS=$((STALE_ROWS + 1))
+      elif [ -n "$qhead" ] && [ "$qhead" != "-" ] && case " $DORMANT_HEADS " in *" $qhead "*) true ;; *) false ;; esac; then
+        # The boundary case, decided rather than left to reopen the design: the
+        # head IS current on an open PR, so re-run exists in principle — but the
+        # PR has had no activity in DORMANT_PR_DAYS, so nobody is coming to
+        # apply it. A remedy nobody will apply is not a remedy.
+        say "$line  DORMANT PR HEAD (open PR, no activity in ${DORMANT_PR_DAYS}d — the re-run remedy is notional)"
+        ORPHAN_ROWS=$((ORPHAN_ROWS + 1))
+      else
+        # created_at == updated_at is evidence about HOW it died — never
+        # dispatched at all versus dispatched and lost — not the verdict key.
+        updated="$(jq -r '.updated_at // empty' <<<"$row")"
+        if [ -n "$updated" ] && [ "$updated" = "$created" ]; then
+          say "$line  ORPHANED (never dispatched; undispatchable, head not on any open PR or main)"
+        else
+          say "$line  ORPHANED (undispatchable; head not on any open PR or main)"
+        fi
+        ORPHAN_ROWS=$((ORPHAN_ROWS + 1))
+      fi
     else
       say "$line"
     fi
@@ -642,12 +741,15 @@ else
   say "VERDICT  absence limb : clean — every required context is rendered, or its producing run is still working on it"
 fi
 if [ "$STALE_ROWS" -gt 0 ]; then
-  say "VERDICT  queue limb   : SCREAM — $STALE_ROWS queued run(s) older than ${STALE_QUEUE_HOURS}h, created and never dispatched"
+  say "VERDICT  queue limb   : SCREAM — $STALE_ROWS queued run(s) older than ${STALE_QUEUE_HOURS}h with a live remedy (re-run or cancel)"
 else
-  say "VERDICT  queue limb   : clean — no queued run is older than ${STALE_QUEUE_HOURS}h"
+  say "VERDICT  queue limb   : clean — no actionable queued run is older than ${STALE_QUEUE_HOURS}h"
+fi
+if [ "$ORPHAN_ROWS" -gt 0 ]; then
+  say "NOTICE   queue limb   : $ORPHAN_ROWS orphaned run record(s) — undispatchable, on heads no open PR or main carries. No remedy exists; kept as the audit trail of the class."
 fi
 say ""
-say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS"
+say "SUMMARY  absent=$ABSENT_ROWS  stale-queued=$STALE_ROWS  unknown=$UNKNOWN_ROWS  in-flight=$PENDING_ROWS  orphaned=$ORPHAN_ROWS"
 
 [ "$CONFIG_FAULT" = "1" ] && {
   warn "CONFIGURATION FAULT — this run's credential cannot read the Actions and check-run endpoints. A census with no authority is not a clean census."
