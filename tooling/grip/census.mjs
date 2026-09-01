@@ -77,8 +77,8 @@
 // writer and contains no write call.
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { accessSync, constants, readFileSync, statSync } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { screenCommand } from "./screen.mjs";
@@ -280,6 +280,14 @@ export const OUTCOME = Object.freeze({
   RAN_AND_FAILED: "RAN-AND-FAILED",
   TOOL_ERROR: "TOOL-ERROR",
   // neither — the census does not know, and says so
+  // A BINARY THIS HOST LACKS IS NOT A ROTTED RECIPE. rc 127 is the shell saying
+  // "I could not find that command", which is a fact about the PATH in front of
+  // this process — the same class as WRONG-CWD and REF-GONE, and governed by the
+  // rule this module already states for those: an environment fault says
+  // something about THIS HOST and nothing about the stored recipe, so it leaves
+  // the denominator. Scoring it as decay lets an operator with a lean PATH
+  // publish a decay wave that a `brew install` erases.
+  TOOL_ABSENT: "TOOL-ABSENT",
   AMBIGUOUS_SILENCE: "AMBIGUOUS-SILENCE",
   ANOMALOUS_SILENCE: "ANOMALOUS-SILENCE",
   REF_GONE: "REF-GONE",
@@ -419,7 +427,13 @@ export function classifyOutcome(command, run) {
   }
   if (run?.spawnError) return row(OUTCOME.SPAWN_ERROR, `the shell could not start the command (${run.spawnError})`);
   if (rc === null || rc === undefined) return row(OUTCOME.SPAWN_ERROR, "no exit status — nothing was measured");
-  if (rc === 127) return row(OUTCOME.PATH_GONE, "command not found — the tool the recipe depends on is gone");
+  if (rc === 127) {
+    const head = commandHead(command);
+    return row(
+      OUTCOME.TOOL_ABSENT,
+      `${head || "the command"} is not on this host's PATH (exit 127) — a missing binary measures THIS HOST, not the recipe, so it is in NEITHER rate`,
+    );
+  }
   if (rc === 126) return row(OUTCOME.SPAWN_ERROR, "found but not executable — a permission fault on this host");
 
   // BY EXIT CODE, NOT BY STDERR — `curl -s` leaves stderr empty, so no pattern
@@ -644,6 +658,127 @@ export function networkReach(rows) {
   return { executedReaching: reaching, byTool };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TOOL AVAILABILITY — PROBED, NEVER ASSUMED
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A decay rate is only readable beside the list of tools the host actually had.
+// Without it, `bp`, `gh` and `go` missing from one operator's PATH reads exactly
+// like 37 recipes rotting: measured on the frozen corpus, stripping those heads
+// moved the run from 20.2% decayed (CONSISTENT) to 31.0% (CONTRARY) with not one
+// byte of the ledger changed. TOOL-ABSENT keeps those rows out of the numerator;
+// this header is what tells the reader WHICH tools the number is conditional on,
+// including on the runs where nothing is missing.
+//
+// THE PROBE SPAWNS NOTHING. It walks the same PATH string the child shells
+// inherit and asks the filesystem for an executable file, which is a `command
+// -v` by other means — a real read of this host, not an assumption, and not one
+// more thing the census executes. The census's execution set stays exactly what
+// screenCommand admitted (D47).
+
+/** POSIX shell builtins. `/bin/sh -c 'cd x'` needs no binary, so PATH says nothing about them. */
+const SHELL_BUILTINS = new Set([
+  ":", ".", "alias", "bg", "break", "cd", "command", "continue", "echo", "eval", "exec",
+  "exit", "export", "false", "fg", "getopts", "hash", "jobs", "kill", "local", "printf",
+  "pwd", "read", "readonly", "return", "set", "shift", "source", "test", "[", "times",
+  "trap", "true", "type", "ulimit", "umask", "unalias", "unset", "wait",
+]);
+
+/** True when `p` is a file this process may execute. Every throw is an absence. */
+function canExecute(p) {
+  try {
+    accessSync(p, constants.X_OK);
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Every distinct command head this run EXECUTED, with how many rows use it.
+ *
+ * Read over EVERY pipeline segment, not just the tail: `bp task ls | grep foo`
+ * exits with grep's status, so the tail alone would report a run as fully
+ * tooled while its head was missing. Rows the screen refused are excluded —
+ * they reached no shell, so their heads say nothing about the rates.
+ */
+export function toolHeads(rows) {
+  const heads = new Map();
+  for (const r of rows ?? []) {
+    if (!r?.executed) continue;
+    for (const head of new Set(rowHeads(r.command))) heads.set(head, (heads.get(head) || 0) + 1);
+  }
+  return heads;
+}
+
+/** The raw first token of each segment — NOT path-stripped, so `./x.sh` stays resolvable. */
+function rowHeads(command) {
+  const out = [];
+  for (const segment of pipelineSegments(command)) {
+    const tokens = segmentTokens(segment);
+    if (tokens.length) out.push(tokens[0]);
+  }
+  return out;
+}
+
+/**
+ * Where one head resolves on this host, or that it does not resolve at all.
+ *
+ * @param {string} head raw token, e.g. `bp`, `/usr/bin/grep`, `./scripts/x.sh`
+ */
+export function resolveTool(head, { pathEnv = process.env.PATH ?? "", cwd = REPO_ROOT, isExecutable = canExecute } = {}) {
+  if (SHELL_BUILTINS.has(head)) return { head, present: true, kind: "shell-builtin", at: null };
+  if (head.includes("/")) {
+    const at = isAbsolute(head) ? head : join(cwd, head);
+    return isExecutable(at)
+      ? { head, present: true, kind: "path-literal", at }
+      : { head, present: false, kind: "path-literal", at: null };
+  }
+  for (const dir of pathEnv.split(":").filter(Boolean)) {
+    const at = join(dir, head);
+    if (isExecutable(at)) return { head, present: true, kind: "on-path", at };
+  }
+  return { head, present: false, kind: "on-path", at: null };
+}
+
+/**
+ * The tool-availability header's data: which command heads this host had.
+ *
+ * Pure of spawns and injectable end to end (`pathEnv`, `isExecutable`) so a test
+ * can prove BOTH directions — a head that resolves and a head that does not —
+ * without depending on what happens to be installed on the machine running it.
+ */
+export function probeToolAvailability(rows, { pathEnv = process.env.PATH ?? "", cwd = REPO_ROOT, isExecutable = canExecute } = {}) {
+  const heads = toolHeads(rows);
+  const ordered = [...heads].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const present = [];
+  const absent = [];
+  const absentHeads = new Set();
+  for (const [head, rowCount] of ordered) {
+    const r = resolveTool(head, { pathEnv, cwd, isExecutable });
+    const entry = { head, rows: rowCount, kind: r.kind, at: r.at };
+    if (r.present) present.push(entry);
+    else {
+      absent.push(entry);
+      absentHeads.add(head);
+    }
+  }
+  let rowsDependingOnAbsent = 0;
+  for (const r of rows ?? []) {
+    if (!r?.executed) continue;
+    if (rowHeads(r.command).some((h) => absentHeads.has(h))) rowsDependingOnAbsent += 1;
+  }
+  return {
+    probed: heads.size,
+    pathEntries: pathEnv.split(":").filter(Boolean).length,
+    present,
+    absent,
+    presentHeads: present.map((e) => e.head),
+    absentHeads: absent.map((e) => e.head),
+    rowsDependingOnAbsent,
+  };
+}
+
 /** Which runner each excluded row is, so the exclusion is auditable rather than a bare count. */
 function testRunnerHeads(rows) {
   const by = {};
@@ -656,13 +791,26 @@ function testRunnerHeads(rows) {
   return by;
 }
 
-export function summarise(rows, { corpusName = "(unnamed command set)", includeTestRunners = false, provenance = null } = {}) {
+export function summarise(rows, opts = {}) {
+  const { corpusName = "(unnamed command set)", includeTestRunners = false, provenance = null } = opts;
   const count = (pred) => rows.filter(pred).length;
   const screened = rows.filter((r) => r.screened);
   const executed = rows.filter((r) => r.executed);
   const admissible = executed.filter((r) => r.admissible);
   const answering = admissible.filter((r) => r.answering);
   const decayed = admissible.filter((r) => r.decayed);
+
+  // TOOL AVAILABILITY. Computed here rather than threaded from the CLI because
+  // the header is a PRECONDITION of printing a rate, not an optional extra: a
+  // caller that forgot to supply it would otherwise get a fully-rendered decay
+  // number with nothing qualifying it. Passing `tools: null` EXPLICITLY is the
+  // one way to get a report without it, and the renders then withhold the rate
+  // rather than printing one. The probe reads the filesystem; it spawns nothing.
+  const tools = "tools" in opts ? opts.tools : probeToolAvailability(rows, opts);
+  // ORDER MATTERS: the probe runs AFTER the folds above, so a caller who hands
+  // this function a REPORT instead of a row array still crashes on
+  // `rows.filter` — the loud, named failure that test pins — rather than on a
+  // less recognisable iteration error inside the probe.
 
   const byOutcome = new Map();
   for (const r of rows) byOutcome.set(r.outcome, (byOutcome.get(r.outcome) || 0) + 1);
@@ -697,6 +845,9 @@ export function summarise(rows, { corpusName = "(unnamed command set)", includeT
       executed: executed.length,
       notACommand: count((r) => r.outcome === OUTCOME.NOT_A_COMMAND),
       testRunnersSkipped: count((r) => r.outcome === OUTCOME.SKIPPED_TEST_RUNNER),
+      // ROWS THAT HIT A MISSING BINARY. In NEITHER rate, and counted so the
+      // exclusion is visible instead of being a silently smaller denominator.
+      toolAbsent: count((r) => r.outcome === OUTCOME.TOOL_ABSENT),
       // COUNTED, not asserted. An earlier brief put this at 5 (against the
       // pre-D63 admitted reach of 240, since widened to 254 by
       // tgw5-screen-hardening — that 240 is historical, not the live count);
@@ -733,6 +884,7 @@ export function summarise(rows, { corpusName = "(unnamed command set)", includeT
     byFamily,
     byLevel,
     binding,
+    tools,
     rows,
   };
 }
@@ -756,9 +908,14 @@ export function renderHuman(report) {
   const { reach, decisive } = report;
 
   // ONE-LINE VERDICT BANNER, before any detail.
+  // NO RATE WITHOUT THE TOOL-AVAILABILITY HEADER. The banner is the first place
+  // a number could escape, so the refusal starts here rather than lower down.
+  const tools = report.tools;
   L.push(
     decisive.admissible === 0
       ? `CENSUS — no admissible rows: nothing was measured, and no rate is reported.`
+      : !tools
+      ? `CENSUS — ${decisive.admissible} decisive rows measured; NO RATE IS REPORTED because this run has no tool-availability probe beside it.`
       : `CENSUS — ${decisive.answeringPct.toFixed(1)}% of ${decisive.admissible} decisive recipes STILL ANSWER; ${decisive.decayPct.toFixed(1)}% decayed.`,
   );
   // WHICH TREE THE CENSUS ITSELF RAN IN. Supplied by the caller so this render
@@ -801,6 +958,33 @@ export function renderHuman(report) {
     L.push("  itself as decay. A service that connected and answered 'no' still counts.");
   }
   L.push("");
+
+  // TOOL AVAILABILITY — the header that makes the rates below readable. Printed
+  // on every run, including the runs where nothing is missing, because "every
+  // head this run needed was installed" is exactly the fact a decay rate is
+  // conditional on. PROBED against this process's PATH, never assumed.
+  if (tools) {
+    const list = (entries, cap = 14) => {
+      const names = entries.map((e) => `${e.head}${e.rows > 1 ? `(${e.rows})` : ""}`);
+      return names.length <= cap ? names.join(", ") : `${names.slice(0, cap).join(", ")}, …and ${names.length - cap} more`;
+    };
+    L.push("TOOL AVAILABILITY ON THIS HOST — probed against this process's PATH, not assumed");
+    L.push(`  command heads probed  ${tools.probed} distinct, over ${tools.pathEntries} PATH entries`);
+    L.push(`  present               ${tools.present.length}${tools.present.length ? `  ${list(tools.present)}` : ""}`);
+    L.push(`  ABSENT                ${tools.absent.length}${tools.absent.length ? `  ${list(tools.absent)}` : "  — every head this run executed resolves here"}`);
+    L.push(`  rows hitting one      ${tools.rowsDependingOnAbsent}   scored TOOL-ABSENT: ${reach.toolAbsent ?? 0}`);
+    if (tools.absent.length) {
+      L.push("  A HEAD LISTED ABSENT IS A FACT ABOUT THIS BOX, NOT ABOUT THE LEDGER. Every row");
+      L.push("  that hit one exits 127 and is classified TOOL-ABSENT, which is in NEITHER rate");
+      L.push("  below — install the tool and those rows re-enter the measurement unchanged. The");
+      L.push("  rates below are therefore conditional on this list: read them together or not");
+      L.push("  at all.");
+    } else {
+      L.push("  Nothing the rates below rest on was missing, so no share of the decay figure is");
+      L.push("  a missing binary wearing a rotted recipe's costume.");
+    }
+    L.push("");
+  }
 
   // BINDING CLASS — the distribution this census was built blind to. Sourced
   // from binding.mjs, folded over the whole corpus. It answers a question the
@@ -846,6 +1030,17 @@ export function renderHuman(report) {
     L.push("NULL STATE — no row was admissible. Either the screen admitted nothing or every");
     L.push("execution hit an environment fault. No answering rate and no decay rate exist");
     L.push("for this run; reporting one would be inventing it.");
+    return L.join("\n");
+  }
+
+  if (!tools) {
+    L.push("NO RATE — THE TOOL-AVAILABILITY PROBE DID NOT RUN.");
+    L.push("  Without it this render cannot tell the reader what share of the rows below");
+    L.push("  failed because a binary is missing on this host rather than because a recipe");
+    L.push("  rotted — and a missing `bp`, `gh` or `go` alone has moved this corpus from");
+    L.push("  CONSISTENT to CONTRARY. A decay rate published without that list beside it is a");
+    L.push("  number claiming an authority it did not earn, so it is WITHHELD rather than");
+    L.push("  printed with a disclaimer nobody reads.");
     return L.join("\n");
   }
 
@@ -895,12 +1090,24 @@ export function renderHuman(report) {
 }
 
 export function toJson(report) {
+  const tools = report.tools;
   return {
     corpus: report.corpusName,
     timeout_ms: report.timeoutMs,
     include_test_runners: report.includeTestRunners,
     reach: report.reach,
-    decisive: report.decisive,
+    // THE SAME REFUSAL THE HUMAN RENDER MAKES. A machine consumer that reads
+    // `decay_pct` out of this document is doing what the banner does, so the
+    // rate is nulled here too when no probe ran — a JSON escape hatch around a
+    // human-render guard is the guard not existing.
+    decisive: tools
+      ? report.decisive
+      : {
+          ...report.decisive,
+          answeringPct: null,
+          decayPct: null,
+          rate_withheld: "no tool-availability probe ran, so a missing binary cannot be told from a rotted recipe — see tool_availability",
+        },
     prediction: { ...report.prediction },
     by_outcome: Object.fromEntries(report.byOutcome),
     by_family: Object.fromEntries(report.byFamily),
@@ -916,6 +1123,19 @@ export function toJson(report) {
           dirty: report.provenance.dirty ?? null,
         }
       : null,
+    // WHICH TOOLS THIS HOST HAD. The machine mirror of the render's
+    // tool-availability header; `absent` is the list every rate above is
+    // conditional on.
+    tool_availability: tools
+      ? {
+          probed: tools.probed,
+          path_entries: tools.pathEntries,
+          present: tools.present,
+          absent: tools.absent,
+          rows_hitting_an_absent_head: tools.rowsDependingOnAbsent,
+          rows_scored_tool_absent: report.reach?.toolAbsent ?? 0,
+        }
+      : null,
     binding: report.binding
       ? {
           by_class: report.binding.by_class,
@@ -927,6 +1147,7 @@ export function toJson(report) {
       : null,
     caveats: [
       "Every rate describes the admitted subset only and may not be restated as covering the whole command set.",
+      "A command head missing from this host's PATH exits 127 and is scored TOOL-ABSENT, which is in NEITHER rate: it measures this box, not the ledger. Read `tool_availability.absent` beside every rate above — the same corpus moved from 20.2% decayed to 31.0% on a host without bp, gh and go before that class existed.",
       "STILL-ANSWERING is not STILL-CORRECT — answer drift is unmeasured and out of scope for this wave.",
       "Inadmissible rows (environment faults, ambiguous silences) are excluded from both rates.",
       "The census writes nothing: no row here was stored in tooling/grip/ledger/.",

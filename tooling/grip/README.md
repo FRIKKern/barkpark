@@ -208,6 +208,39 @@ here after the fix precisely because the fix is the least interesting part of
 it: one verifier read the empty result and concluded the census never screens at
 all — the exact opposite of the truth — and caught itself only by accident.
 
+## A missing binary is not a rotted recipe — read the census's tool header
+
+`census.mjs` used to map exit **127** (the shell's "command not found") to
+`PATH-GONE`, which sits in the **DECAYED** set. So the census scored the
+operator's own toolbox as decay *in the ledger*. Re-derived over one unchanged
+tree and one unchanged corpus, with nothing but `PATH` differing:
+
+| run | decisive | decayed | rate | PREDICTION 3 verdict |
+|---|---|---|---|---|
+| full `PATH` | 193 | 39 | 20.2% | **CONSISTENT** |
+| `PATH` without `bp`, `gh`, `go` | 197 | 61 | 31.0% | **CONTRARY** |
+
+37 of that second 61 were pure rc-127. The verdict flipped on which tools
+happened to be installed.
+
+Two things changed, and both are load-bearing:
+
+- **`TOOL-ABSENT`** is an outcome *outside* the DECAYED set. rc 127 lands there
+  and leaves **both** rates — the same rule `WRONG-CWD` and `REF-GONE` already
+  followed: a fault that measures **this host** never measures the ledger. A
+  genuinely gone *path* is still `PATH-GONE` and still decay.
+- **A tool-availability header** is printed on every run, naming which command
+  heads were **present** and which **ABSENT**, and **no rate is printed without
+  it** — the human banner, the rate block and the `--json` `decisive` figures are
+  all withheld when no probe ran. Availability is **probed** (a walk of the same
+  `PATH` the child shells inherit, plus the POSIX builtins) — it spawns nothing,
+  so the census's execution set stays exactly what `screenCommand` admitted.
+
+Post-fix the same three runs read 39/194 (20.1%), 24/160 (15.0%) and, with `npm`
+also stripped, 24/159 (15.1%) — all **CONSISTENT**, with `bp`, `gh`, `go` (then
+`npm`) named on the ABSENT line. **A decay rate from this census is conditional
+on that list: quote them together or not at all.**
+
 ## What this certifies — and what it does not
 
 The grammar certifies **re-derivability**: that the recorded command, run

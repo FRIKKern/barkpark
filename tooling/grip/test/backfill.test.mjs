@@ -124,10 +124,21 @@ test("SAFETY: a screen-refused command NEVER reaches a spawn — and classifySaf
 // ── 3. NO ROW WITHOUT AN ANSWER ───────────────────────────────────────────────
 
 test("a command that does NOT answer today produces NO row (decayed, spawn-error and refused all mint nothing)", () => {
-  // Decayed: a path that is gone (rc 127 = command/tool gone → PATH-GONE).
-  const decayed = backfillOne("wc -l tooling/grip/backfill.mjs", { now: NOW, exec: () => run(127, "", "sh: nope: not found") });
+  // Decayed: the path the recipe reads is gone → PATH-GONE, which IS decay.
+  const decayed = backfillOne("cat tooling/grip/gone.mjs", { now: NOW, exec: () => run(1, "", "cat: tooling/grip/gone.mjs: No such file or directory") });
   assert.equal(decayed.disposition, DISPOSITION.DECAYED);
   assert.ok(!("recipe" in decayed));
+
+  // A MISSING BINARY IS NOT DECAY, AND IS STILL NOT A ROW. rc 127 says the tool
+  // is absent from THIS host, so census.mjs scores it TOOL-ABSENT — outside the
+  // decayed set — and backfill files it as a null read. Both halves matter: it
+  // must NOT be counted as decay, and it must STILL mint nothing, because a
+  // command that did not run cannot carry an observed_at either.
+  const toolGone = backfillOne("wc -l tooling/grip/backfill.mjs", { now: NOW, exec: () => run(127, "", "sh: wc: not found") });
+  assert.equal(toolGone.outcome, "TOOL-ABSENT");
+  assert.notEqual(toolGone.disposition, DISPOSITION.DECAYED, "a lean PATH must not be published as recipe rot");
+  assert.equal(toolGone.disposition, DISPOSITION.NULL_READ);
+  assert.ok(!("recipe" in toolGone));
 
   // Spawn error: the shell could not run it.
   const spawnErr = backfillOne("wc -l tooling/grip/backfill.mjs", {
