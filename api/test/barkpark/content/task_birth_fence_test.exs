@@ -115,9 +115,12 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
       for term <- ["wontfix", "OPEN", "Parked", " open "] do
         title = uniq("birth-term")
 
-        assert {:error, {:invalid_task_content, %{"disposition" => [message]}}} =
-                 mutate([create_op(title, task_content(%{"disposition" => term}))], scope),
-               "expected #{inspect(term)} to be refused at birth"
+        result = mutate([create_op(title, task_content(%{"disposition" => term}))], scope)
+
+        assert match?({:error, {:invalid_task_content, %{"disposition" => [_]}}}, result),
+               "expected #{inspect(term)} to be refused at birth, got #{inspect(result)}"
+
+        {:error, {:invalid_task_content, %{"disposition" => [message]}}} = result
 
         assert message =~ "lowercase-canonical vocabulary"
         assert titled_task_ids(title) == []
