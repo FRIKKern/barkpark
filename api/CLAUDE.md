@@ -32,13 +32,9 @@ Elixir/Phoenix backend: all CRUD, real-time, plugins, Studio. Dev: `mix phx.serv
 
 ## Sheets
 
-`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant).
+`type:"sheet"` docs (multi-tab, sparse A1 `cells` maps) + a `"sheet"` embed block carrying a dense snapshot — Bulldocs split again (core machinery, thin plugin wiring; fresh-install invariant). Core is `Barkpark.Plugins.Sheets.{Core,Engine,Session,Structure}` + `SheetsReaderLive` / `Studio.SheetGrid`; the plugin (`plugins/sheets.ex`) declares the `sheet` schema, a before_save gate, the `:ingest` import/export/ops API and the `/sheets/:slug` reader; embeds refresh via `content/sheets.ex`.
 
-- **Core:** `Barkpark.Plugins.Sheets.Core` (A1 + snapshot synthesis, 200k cap), `Sheets.Engine` (formula subset; eager-IF deps → `#CYCLE!`), `Sheets.Session` (lazy per-sheet GenServer; serialized cell/structural/undo ops, ≤1000/call, debounced persist 2s/25-ops + terminate), `Sheets.Structure` (ref-shift), `SheetsReaderLive`, `Studio.SheetGrid`.
-- **Plugin (`plugins/sheets.ex`):** `sheet` schema; before_save gate (A1 keys, XFD grid bounds, merge ≤10k) → 409 `halted`; `:ingest` API: import (xlsx/csv/tsv; size/cell caps) · export `.{xlsx,csv,tsv,md,html}` (flush-first) · `/ops` (batch caps); `:public_root` reader `/sheets/:slug` (published-only). Error envelopes (413/422/503) in `plugins/sheets.ex`.
-- **Pipeline:** sheet saves run Engine recompute → write-through refreshes every embedding paper's snapshot; hydration mirrors it when a paper save adds `{"type":"sheet","ref":…}` blocks (content/sheets.ex — `tap_sheet_writethrough` / `hydrate_sheet_embed_snapshots`).
-
-Session deltas: `{:sheets_op, %{rev, tab, changed}}` on `doc_topic <> ":sheets:op"`; SSE doc events fire only on the debounced persist.
+Owner (caps, formula subset, error envelopes, embed pipeline, session deltas): `docs/contracts/sheets-engine.md`.
 
 ## Adding a document type: plugin-declared vs ad-hoc
 

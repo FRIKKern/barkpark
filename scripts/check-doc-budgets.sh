@@ -505,7 +505,7 @@ fi
 # makes both sides zero and the check agrees with itself. So the number is
 # pinned here, by hand. Adding or removing a cap row is therefore a two-line
 # edit: the row, and this number. That is intended friction, not an oversight.
-CAPS_ROWS_EXPECTED=31
+CAPS_ROWS_EXPECTED=33
 CAPS_ROWS_WALKED=0
 if [ "$SPAN_ONLY" != "1" ]; then
 while read -r path cap; do
@@ -527,6 +527,8 @@ docs/contracts/portable-doc-inline.md 6800
 docs/contracts/tenancy.md 8300
 docs/contracts/task-claim-lifecycle.md 6000
 docs/contracts/close-packet.md 4400
+docs/contracts/canonical-impl-markers.md 3000
+docs/contracts/sheets-engine.md 2600
 README.md 7400
 docs/ops/PROD_OPS.md 6000
 
@@ -587,6 +589,42 @@ if [ "$CARD_COUNT" -ne 7 ]; then
 else
   echo "ok:   card count is exactly 7"
 fi
+
+# --- router headroom floor: the two surface routers keep room to be CORRECTED --
+# A cap-only gate is GREEN at 9998/10000. That is not a healthy doc, it is a
+# FROZEN one: root CLAUDE.md sat at 9998B and api/CLAUDE.md at 6499B on
+# origin/main, and in that state every subsequent correction — a plugin roster
+# that undercounted by five, a "CI-enforced" claim the required set denies — was
+# blocked on bytes rather than on judgment. The cap says "do not grow." The floor
+# says "stay correctable," and it is the arm that reds while there is still time
+# to act, instead of after the next author is already stuck.
+#
+# These two files earn a floor and the other cap rows do not: they are the
+# surface routers every agent loads, so they are where a correction is most
+# urgent and least postponable. Raising a cap to buy floor is not a fix and the
+# doc contract forbids it outright — split content to its owning doc instead.
+check_headroom() {
+  # $1 = path, $2 = byte cap, $3 = minimum free bytes
+  local path="$1" cap="$2" floor="$3" size free
+  if [ ! -f "$path" ]; then
+    echo "FAIL: $path is missing (headroom-gated file must exist)"
+    FAIL=1
+    return
+  fi
+  size=$(wc -c < "$path" | tr -d ' ')
+  free=$((cap - size))
+  if [ "$free" -lt "$floor" ]; then
+    echo "FAIL: $path has ${free}B of headroom under its ${cap}B cap, floor is ${floor}B." \
+         "The file is too full to be corrected. Do NOT raise the cap — split the" \
+         "least load-bearing section to its owning doc and leave a one-line pointer."
+    FAIL=1
+  else
+    echo "ok:   $path headroom ${free}B >= ${floor}B (${size}B of ${cap}B)"
+  fi
+}
+
+check_headroom CLAUDE.md 10000 600
+check_headroom api/CLAUDE.md 6500 400
 
 if [ "$FAIL" -ne 0 ]; then
   echo ""
