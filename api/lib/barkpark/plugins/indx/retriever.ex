@@ -26,8 +26,10 @@ defmodule Barkpark.Plugins.Indx.Retriever do
 
     1. Parse the query terms out of `parsed` and join them into a CloudQuery
        text string.
-    2. `Client.search_full/3` against the scope's live dataset (from
-       `Indexer.current_dataset/1`) → a WIDE pool of `documentKey` records
+    2. `Client.search_full/3` against this tenant's live dataset — from
+       `Indexer.current_dataset/1`, addressed by the tenant-partitioned
+       `Indexer.index_key/2`, NOT by the bare dataset string → a WIDE pool
+       of `documentKey` records
        (score-ordered by the engine — `@candidate_pool`, the whole matched
        set, NOT just the display limit; see `do_search/6`).
     3. `Client.get_json/3` hydrates those keys → light index records carrying
@@ -90,8 +92,9 @@ defmodule Barkpark.Plugins.Indx.Retriever do
     client_opts = client_opts(opts)
 
     # The engine's reply also carries `facets` and `truncation_index`. Neither is
-    # bound: both describe the SHARED, dataset-keyed index rather than this
-    # caller's tenant-scoped match set. See the ruling below.
+    # bound: both describe WHATEVER INDEX the engine was pointed at, counted by
+    # the engine and never re-read under tenant scope — not this caller's
+    # tenant-scoped match set. See the ruling below.
     with {:ok, %{records: records}} <-
            client.search_full(dataset, text, [max: pool] ++ client_opts),
          keys = Enum.map(records, &record_key/1) |> Enum.reject(&is_nil/1),
@@ -131,12 +134,22 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # payload onto the pipeline's `facets:` key and its `truncationIndex` onto
   # `truncation:`.
   #
-  # The facet buckets were computed BY THE ENGINE over an index keyed on the
-  # Barkpark dataset STRING alone (`Indexer.current_dataset/1`), so every
-  # workspace sharing a dataset name shares ONE index — the same shared pool
-  # `total_for/3` below is written for. The rows beside those buckets are
-  # re-read from Postgres under full tenant scope; the buckets were not re-read
-  # at all. `author` and `category` are tenant-authored FREE TEXT (`Indexer`'s
+  # The facet buckets were computed BY THE ENGINE, over an index that at the
+  # time was keyed on the Barkpark dataset STRING alone — so every workspace
+  # sharing a dataset name shared ONE index, the pool `total_for/3` below
+  # describes. That keying is now history: `Indexer.current_dataset/1` takes an
+  # `Indexer.index_key/2` — shaped `<slugified-dataset>_t<16 lowercase hex>`,
+  # the tail being the first 8 bytes of a SHA-256 over
+  # `{workspace_id, project_id}`. Two workspaces both owning a dataset called
+  # `production` therefore address two different indexes.
+  #
+  # That does NOT make re-attaching the buckets safe, and the reason is the
+  # part to carry forward: the rows beside those buckets are re-read from
+  # Postgres under full tenant scope; the buckets were never re-read at all.
+  # Partitioning changed WHICH rows land in the index, not whether the engine's
+  # own counts are answerable to the caller's scope.
+  #
+  # `author` and `category` are tenant-authored FREE TEXT (`Indexer`'s
   # `field_proxies/1` marks them facetable), so workspace A received workspace
   # B's author names and category names VERBATIM — not merely counts. Measured:
   # A could read 1 document while the bucket beside it said 2.
@@ -157,14 +170,17 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # index's own counts. With the buckets dropped, `facets` means exactly one
   # thing everywhere it is non-null: a Postgres count over rows the caller could
   # have reached one by one. `truncation` goes with it — it is a coverage
-  # boundary over that same dataset-wide pool, describing a set the caller
+  # boundary over that same engine-side pool, describing a set the caller
   # cannot see either.
   #
   # DO NOT "restore the facet rail" here. Tenant-scoped facets over an Indx
   # result would require the ENGINE to narrow by workspace at query time (a
   # `filterable` proxy `Client.search_full/3` does not currently send);
-  # recomputing them from the shared index reopens an anonymous cross-tenant
-  # read of another workspace's author and category strings.
+  # handing its own counts through reopens an anonymous cross-tenant read of
+  # another workspace's author and category strings the moment any one index
+  # holds more than one tenant's rows — which per-tenant keying makes
+  # unlikely-by-default, not impossible, and is not a property this module
+  # can check.
   # `Barkpark.Plugins.Indx.RetrieverDropsEngineFacetsTest` reds if it comes back.
 
   # Indx has no native negation in this path: query_text/1 builds only the
