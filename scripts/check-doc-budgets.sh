@@ -34,7 +34,13 @@ cd "$REPO_ROOT"
 
 # Overridable so --selftest can point the onramp arm at a temp tree and prove
 # the pin REDs without planting anything in the real checkout.
-ONRAMP_DOC="${DOC_BUDGETS_ONRAMP_DOC:-docs/setup/CODEX.md}"
+# The committed onramp doc. Kept as its OWN name because DOC_BUDGETS_ONRAMP_DOC
+# repoints $ONRAMP_DOC at a temp fixture during --selftest, and header discovery
+# below must go on skipping the REAL CODEX.md in that run too — otherwise the
+# harness's own override silently enrols a file the onramp arm already governs,
+# and discovery double-counts the span the onramp arm deliberately excludes.
+ONRAMP_DOC_DEFAULT="docs/setup/CODEX.md"
+ONRAMP_DOC="${DOC_BUDGETS_ONRAMP_DOC:-$ONRAMP_DOC_DEFAULT}"
 ONRAMP_GOLDEN="${DOC_BUDGETS_ONRAMP_GOLDEN:-scripts/onramp-span.golden}"
 # The excluded span is itself capped: without this, the golden becomes the new
 # laundering channel (regenerate it and any amount of bloat is blessed). 4000B
@@ -225,7 +231,44 @@ fi
 # (--span-only) so every red below is attributable to the pin.
 if [ "$MODE" = selftest ]; then
   TMP="$(mktemp -d)"
-  trap 'rm -rf "$TMP"' EXIT
+  # PRESERVE THE STATUS. On bash 3.2 a plain `trap ... EXIT` RESETS the exit
+  # code after a fatal `set -u` abort: the harness printed "unbound variable"
+  # having run ZERO arms and still exited 0 — a tripwire that cannot fail,
+  # inside the tripwire built to catch exactly that. (An ordinary `set -e`
+  # failure still exited 1, which is why this hid.) Arm k7 pins it.
+  # THE HARNESS MUST BE ABLE TO FAIL. A plain `trap ... EXIT` let a fatal
+  # `set -u` abort exit 0: bash 3.2 has ALREADY reset $? to 0 by the time the
+  # trap runs, so no trap can recover the status — measured, three ways. The
+  # harness printed "unbound variable" having run ZERO arms and still reported
+  # success: a tripwire that cannot fail, inside the tripwire built to catch
+  # exactly that. (An ordinary `set -e` failure did exit 1, which is why it
+  # hid.) So completion is asserted POSITIVELY instead: the sentinel is set on
+  # the last line before the PASS, and anything that leaves it unset while
+  # claiming 0 exits 70. Arm k7 pins it.
+  SELFTEST_COMPLETED=0
+  trap 'dw_rc=$?; rm -rf "$TMP";
+        if [ "$SELFTEST_COMPLETED" != 1 ] && [ "$dw_rc" -eq 0 ]; then
+          echo "check-doc-budgets --selftest: FAILED — the harness exited before" \
+               "reaching its end while claiming success (a fatal abort, e.g. an" \
+               "unbound variable, whose status bash 3.2 resets to 0). NO arm verdict" \
+               "above can be trusted."
+          exit 70
+        fi
+        exit $dw_rc' EXIT
+
+  # NO NESTED HARNESS. Arm k7 runs a COPY of this script with --selftest, and
+  # without this the copy would reach its own k7 and spawn another — unbounded
+  # recursion that HANGS CI instead of reporting. k7 works because the line it
+  # injects sits between the trap above and this guard, so the copy aborts
+  # before it can recurse; the guard is what makes that a design rather than a
+  # coincidence, and it is why a k7 whose injection silently stopped applying
+  # would exit 2 here rather than fork forever.
+  if [ "${DOC_BUDGETS_SELFTEST_ACTIVE:-0}" = "1" ]; then
+    echo "check-doc-budgets --selftest: refusing to nest inside another --selftest"
+    SELFTEST_COMPLETED=1
+    exit 2
+  fi
+  export DOC_BUDGETS_SELFTEST_ACTIVE=1
   PRISTINE="$TMP/pristine.md"
   cp "$ONRAMP_DOC" "$PRISTINE"
 
@@ -372,6 +415,30 @@ if [ "$MODE" = selftest ]; then
   for card_i in 1 2 3 4 5 6 7; do
     printf 'x\n' > "$caps_root/docs/cards/card-$card_i.md"
   done
+  # Plant the DISCOVERY corpus, derived from this script's own literals so the
+  # fixture can never go stale against them. Without it the CONTROL run reds on
+  # the discovery floor and no arm below is attributable.
+  #   - one file per FREEZE row, at a path the freeze table names, carrying a
+  #     1tok header (cap 4B) so it is genuinely OVER its header and the freeze
+  #     branch is the branch under test;
+  #   - enough plain 1000tok-header docs to reach DISCOVERY_MIN.
+  selftest_freeze_rows=0
+  while read -r plant_path _plant_bytes; do
+    [ -n "$plant_path" ] || continue
+    selftest_freeze_rows=$((selftest_freeze_rows + 1))
+    mkdir -p "$caps_root/$(dirname "$plant_path")"
+    printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-$selftest_freeze_rows | budget: 1tok -->" \
+      > "$caps_root/$plant_path"
+  done < <(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$')
+  selftest_docs_floor=$(grep -E '^GATED_DOCS_FLOOR=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  selftest_caps_literal=$(grep -E '^CAPS_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  selftest_discovery_min=$((selftest_docs_floor - selftest_caps_literal))
+  plant_i="$selftest_freeze_rows"
+  while [ "$plant_i" -lt "$selftest_discovery_min" ]; do
+    plant_i=$((plant_i + 1))
+    printf '%s\n' "<!-- doc-tier: agent | canonical-for: discovery-fixture-$plant_i | budget: 1000tok -->" \
+      > "$caps_root/docs/discovery-fixture-$plant_i.md"
+  done
   # The probe inherits DOC_BUDGETS_ONRAMP_DOC/GOLDEN (absolute, in $TMP);
   # earlier arms mutated that doc, so restore + re-pin before the control run.
   cp "$PRISTINE" "$DOC_BUDGETS_ONRAMP_DOC"
@@ -479,11 +546,191 @@ if [ "$MODE" = selftest ]; then
     *) fail_selftest "a MISSING capped file did not print its \`is missing\` FAIL line — the red came from something other than check_cap's missing-file arm" ;;
   esac
 
-  echo "check-doc-budgets --selftest: PASS (16 arms: pristine, in-span plant," \
+
+  # k0: the freeze literal agrees with the committed freeze table. Same reason
+  #     as j0 — if these drift, every assertion below is about a number nobody
+  #     maintains.
+  freeze_rows_in_table=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -cE '^[A-Za-z].* [0-9]+$' || true)
+  freeze_expected_literal=$(grep -E '^FREEZE_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  [ "$freeze_rows_in_table" = "$freeze_expected_literal" ] \
+    || fail_selftest "FREEZE_ROWS_EXPECTED=$freeze_expected_literal but the freeze table holds $freeze_rows_in_table row(s)"
+
+  # k1: DISCOVERY GOES DARK. This is the arm that matters most: discovery walks
+  #     a COMPUTED set, so unlike a heredoc it can be emptied by a bad find, a
+  #     renamed directory, or a cd — and a loop over nothing prints no FAIL at
+  #     all. Kill both find roots; the floor must REFUSE, not merely mention it.
+  #     The probe ALSO empties the FREEZE table and zeroes its literal. Without
+  #     that, blinding discovery orphans all 39 freeze rows, the stale-row arm
+  #     reds first, and this arm passes on someone else's refusal: measured —
+  #     with the floor's FAIL=1 replaced by FAIL=0 the selftest still printed
+  #     PASS. An arm has to red for its OWN reason or it certifies nothing.
+  sed -e "s|^      find docs -name '\*\.md' -not -path 'docs/cli/fixtures/\*'$|      true|" \
+      -e "s|^      find scripts -maxdepth 1 -name '\*\.md'$|      true|" \
+      -e "s|^FREEZE_ROWS_EXPECTED=[0-9]*$|FREEZE_ROWS_EXPECTED=0|" \
+      "$SELF" \
+    | awk 'BEGIN { drop = 0 }
+           /^done <<.FREEZE.$/ { print; drop = 1; next }
+           /^FREEZE$/          { print; drop = 0; next }
+           drop == 0           { print }' > "$caps_probe"
+  grep -q "^      find docs -name " "$caps_probe" \
+    && fail_selftest "the discovery-blinding step did not remove the docs find — this arm would have proven nothing"
+  [ "$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$caps_probe" | grep -cE '^[A-Za-z].* [0-9]+$' || true)" -eq 0 ] \
+    || fail_selftest "the discovery-blinding step did not also empty the FREEZE table — the stale-row arm would red first and this arm would prove nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "DARK header discovery exited $caps_rc, expected 1 — the floor prints but does not REFUSE, so a discovery loop over NOTHING would still exit 0"
+  case "$caps_out" in
+    *"($expected_literal capped + 0 discovered), floor is $selftest_docs_floor"*) ;;
+    *) fail_selftest "DARK header discovery did not print \`($expected_literal capped + 0 discovered), floor is $selftest_docs_floor\` — the floor is gone, so discovery can verdict on nothing and pass" ;;
+  esac
+
+  # k2: a doc OVER its own header budget must RED, naming the header. Planted
+  #     as a FIXTURE (not a script mutation) because that is the real shape:
+  #     someone grows a doc whose header nobody was reading.
+  cp "$SELF" "$caps_probe"
+  printf '%s\n' "<!-- doc-tier: agent | canonical-for: overbudget-fixture | budget: 1tok -->" \
+    > "$caps_root/docs/discovery-overbudget-fixture.md"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  rm -f "$caps_root/docs/discovery-overbudget-fixture.md"
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a doc OVER its declared header budget exited $caps_rc, expected 1 — the header is still decoration"
+  case "$caps_out" in
+    *"docs/discovery-overbudget-fixture.md is"*"its own header declares 1tok = 4B"*) ;;
+    *) fail_selftest "an over-header doc did not print its \`header declares 1tok = 4B\` FAIL line — the red came from something other than the discovery arm" ;;
+  esac
+
+  # k3: a FROZEN doc that GROWS must RED. Shrink the first freeze row's number
+  #     to 1 (row count unchanged, file present) so the only red is the freeze
+  #     ratchet. Without this arm the freeze table is a blank cheque.
+  awk 'BEGIN { intab = 0; done_shrink = 0 }
+       /^done <<.FREEZE.$/ { print; intab = 1; next }
+       /^FREEZE$/          { intab = 0; print; next }
+       intab == 1 && done_shrink == 0 && $0 ~ /^[A-Za-z].* [0-9]+$/ { $NF = 1; print; done_shrink = 1; next }
+       { print }' "$SELF" > "$caps_probe"
+  sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$caps_probe" | grep -qE '^[A-Za-z][^ ]* 1$' \
+    || fail_selftest "the freeze-shrinking step did not produce a 1-byte freeze row — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a GROWN frozen doc exited $caps_rc, expected 1 — the freeze ratchet is disarmed and frozen debt can grow"
+  case "$caps_out" in
+    *"frozen at 1B — a frozen doc may not grow"*) ;;
+    *) fail_selftest "a GROWN frozen doc did not print its \`frozen at 1B\` FAIL line — the red came from something other than the freeze ratchet" ;;
+  esac
+
+  # k4: a frozen doc that has come back UNDER its header must RED too, telling
+  #     the author to DELETE the row. Without this the freeze list only ever
+  #     grows, and a paid debt keeps buying slack forever.
+  cp "$SELF" "$caps_probe"
+  selftest_first_frozen=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | head -1 | cut -d' ' -f1)
+  printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-paid | budget: 1000tok -->" \
+    > "$caps_root/$selftest_first_frozen"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-1 | budget: 1tok -->" \
+    > "$caps_root/$selftest_first_frozen"
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a PAID frozen doc exited $caps_rc, expected 1 — the freeze list can never be made to shrink"
+  case "$caps_out" in
+    *"$selftest_first_frozen is"*"now fits its own 1000tok header"*) ;;
+    *) fail_selftest "a PAID frozen doc did not print its \`now fits its own\` FAIL line — nothing forces a settled freeze row out of the table" ;;
+  esac
+
+  # k5: a freeze row naming a doc discovery never reaches must RED. That row is
+  #     a number that can no longer fail — the exact shape this whole arm exists
+  #     to refuse, reappearing inside its own remedy.
+  awk 'BEGIN { intab = 0; done_swap = 0 }
+       /^done <<.FREEZE.$/ { print; intab = 1; next }
+       /^FREEZE$/          { intab = 0; print; next }
+       intab == 1 && done_swap == 0 && $0 ~ /^[A-Za-z].* [0-9]+$/ { $1 = "docs/no-such-frozen-doc-planted-by-selftest.md"; print; done_swap = 1; next }
+       { print }' "$SELF" > "$caps_probe"
+  grep -q '^docs/no-such-frozen-doc-planted-by-selftest.md ' "$caps_probe" \
+    || fail_selftest "the freeze path-swapping step did not swap a row — this arm would have proven nothing"
+  # The orphaned fixture must stop being a SECOND red, or this arm passes on
+  # someone else's refusal: with its 1tok header it would fall straight into the
+  # over-header branch the moment its freeze row is swapped away, and the stale
+  # diagnostic would print while nothing here refused. Measured: with the stale
+  # check's FAIL=1 replaced by a no-op the selftest still printed PASS. Widen
+  # its header for the duration so the ONLY red is the stale row.
+  printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-orphan | budget: 1000tok -->" \
+    > "$caps_root/$selftest_first_frozen"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  printf '%s\n' "<!-- doc-tier: agent | canonical-for: freeze-fixture-1 | budget: 1tok -->" \
+    > "$caps_root/$selftest_first_frozen"
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "a STALE freeze row exited $caps_rc, expected 1 — dead freeze rows accumulate unnoticed"
+  case "$caps_out" in
+    *"freeze row 'docs/no-such-frozen-doc-planted-by-selftest.md"*"matched no discovered doc"*) ;;
+    *) fail_selftest "a STALE freeze row did not print its \`matched no discovered doc\` FAIL line — the red came from something else" ;;
+  esac
+
+  # k6: a freeze row ADDED without bumping the literal must RED. Note the
+  #     asymmetry with the CAPS table, and it is why there is no freeze-DARK
+  #     arm: a dark CAPS heredoc is fail-OPEN (it verdicts on nothing and exits
+  #     0), while a dark FREEZE heredoc is fail-SAFE — all 39 frozen docs
+  #     immediately fall back to header*4, which every one of them exceeds, so
+  #     the gate reds loudly on its own. The direction that can go quiet is a
+  #     row appearing without review, so that is the direction pinned here.
+  #     The added row DUPLICATES the first one, so lookup (first match wins) is
+  #     unchanged and the row count is the ONLY thing that differs.
+  selftest_dup_freeze=$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$SELF" | grep -E '^[A-Za-z].* [0-9]+$' | head -1)
+  awk -v add="$selftest_dup_freeze" '
+       { print }
+       /^done <<.FREEZE.$/ && !done_add { print add; done_add = 1 }' "$SELF" > "$caps_probe"
+  [ "$(sed -n '/^done <<.FREEZE.$/,/^FREEZE$/p' "$caps_probe" | grep -cE '^[A-Za-z].* [0-9]+$' || true)" -eq $((freeze_expected_literal + 1)) ] \
+    || fail_selftest "the freeze row-adding step did not add a row — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "an UNPINNED extra freeze row exited $caps_rc, expected 1 — freeze rows can be added without review"
+  case "$caps_out" in
+    *"freeze table walked $((freeze_expected_literal + 1)) row(s), expected $freeze_expected_literal"*) ;;
+    *) fail_selftest "an UNPINNED extra freeze row did not print its row-count FAIL line — the freeze table's row ratchet is gone" ;;
+  esac
+
+  # k7: THE HARNESS ITSELF MUST BE ABLE TO FAIL. A fatal abort in the selftest —
+  #     an unbound variable in setup, before a single arm runs — must not exit 0.
+  #     Injected immediately after the trap, so the probe dies having proven
+  #     nothing; the only acceptable answer is a non-zero exit.
+  awk '{ print }
+       /^  export DOC_BUDGETS_SELFTEST_ACTIVE=1$/ && !done_inject { print "  : \"$dw_unbound_planted_by_selftest\""; done_inject = 1 }' \
+      "$SELF" > "$caps_probe"
+  grep -q 'dw_unbound_planted_by_selftest' "$caps_probe" \
+    || fail_selftest "the unbound-variable injection did not apply — this arm would have proven nothing"
+  set +e
+  # ACTIVE=0 so the copy gets PAST the nesting guard and reaches the injected
+  # line; its own export then re-arms the guard, so the copy's k7 (if it ever
+  # ran) would be refused at depth 2. One level, by construction.
+  caps_out="$(DOC_BUDGETS_SELFTEST_ACTIVE=0 bash "$caps_probe" --selftest 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 70 ] \
+    || fail_selftest "a selftest that ABORTED on an unbound variable exited $caps_rc, expected 70 — the EXIT trap is resetting the status, so this harness can die having run zero arms and still report PASS. Its output was: $(printf '%s' "$caps_out" | tail -2 | tr '\n' ' ')"
+
+  SELFTEST_COMPLETED=1
+  echo "check-doc-budgets --selftest: PASS (24 arms: pristine, in-span plant," \
        "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
        "span-cap clamp both directions, retired env var inert, caps green control," \
        "caps-table dark, caps-table unpinned row, over-cap file, missing capped" \
-       "file — every probe arm asserts the EXIT CODE and its own message)"
+       "file, freeze literal pin, DISCOVERY DARK, over-header doc, grown frozen" \
+       "doc, paid frozen doc, stale freeze row, unpinned freeze row, harness" \
+       "aborts non-zero — every" \
+       "probe arm asserts the EXIT CODE and its own message)"
   exit 0
 fi
 
@@ -507,10 +754,13 @@ fi
 # edit: the row, and this number. That is intended friction, not an oversight.
 CAPS_ROWS_EXPECTED=31
 CAPS_ROWS_WALKED=0
+CAPS_PATHS=""
 if [ "$SPAN_ONLY" != "1" ]; then
 while read -r path cap; do
   [ -z "$path" ] && continue
   CAPS_ROWS_WALKED=$((CAPS_ROWS_WALKED + 1))
+  CAPS_PATHS="$CAPS_PATHS$path
+"
   check_cap "$path" "$cap"
 done <<'CAPS'
 CLAUDE.md 10000
@@ -556,6 +806,239 @@ CAPS
     FAIL=1
   else
     echo "ok:   fixed-caps table walked all $CAPS_ROWS_WALKED budget-gated row(s)"
+  fi
+fi
+
+
+# --- header-discovered caps: the declared budget IS the cap -----------------
+#
+# THE HOLE THIS CLOSES. Everything above is an EXPLICIT path list. A doc that
+# is not on it declares `budget: <N>tok` in its G1 header and nothing reads
+# that number — measured on the tree this arm shipped against: 89 spine docs
+# carried a header no gate enforced, `scripts/*.md` (17 of them) among them.
+# The header LOOKED like a cap and was decoration, which is the vacuous-green
+# shape this gate exists to refuse.
+#
+# THE DERIVATION, applied here and nowhere else in this script: a declared
+# budget of N tokens is N * DOC_BUDGET_BYTES_PER_TOKEN bytes. Four is the
+# repo's stated convention (docs/ops/merge-gates.md: "at the repo's ~4B/tok
+# convention") and it is what the hand-written contract rows already encode —
+# bokbasen 1500tok/6000B, onix-field-map 1400/5600, webhook-realtime 800/3200,
+# schema-v2 1800/7200. So NO second per-path number is introduced: the number
+# already in the doc's own header becomes the cap, and an author who wants a
+# bigger cap must argue for it in the header where a reviewer reads it.
+#
+# PRECEDENCE — an explicit rule always wins, and only ever downward:
+#   1. a row in the CAPS table above  -> that row binds; discovery skips the
+#      file. Several rows are TIGHTER than the header (docs/api-v1.md 3500tok
+#      would allow 14000B and the row says 14000; AGENTS.md 150tok/600B and the
+#      row says 700). The table is the reviewed number; discovery never
+#      loosens it.
+#   2. docs/cards/*.md                -> the 7-card arm below binds (2400B and
+#      the count of exactly 7). Discovery skips cards so that arm stays the one
+#      authority on them. NOTE, honestly: six of the seven card headers declare
+#      LESS than 2400B (cli.md 450tok = 1800B against a 2377B file), so their
+#      headers remain under-declared. Reconciling card headers with the card
+#      rule is separate work, filed rather than smuggled in here.
+#   3. $ONRAMP_DOC                    -> the pinned-span arm binds.
+#   4. everything else discovered     -> header * 4, or a FREEZE row.
+#
+# `doc-tier: cold` IS EXEMPT, deliberately. The doc contract defines cold as
+# retired — "never load; git history is the archive". A byte budget buys agent
+# context, so on a doc no agent is allowed to load it buys nothing: capping the
+# 158 cold records (mostly tooling/grip/ledger/*.md and dated fire records)
+# would spend review friction on files whose only remaining job is to sit still.
+# Their headers stay declarative and this is the sentence that says so, rather
+# than leaving a reader to infer it from an absence.
+#
+# SCOPE is the doc spine, matching what docs-anchors-check.sh §4 already
+# requires a header ON, plus scripts/*.md (this arm's originating finding).
+# It is deliberately NOT every .md in the repo: .claude/workflows/*-charter.md
+# and tooling/grip/ledger/*.md carry headers, are not agent-loaded spine, and
+# sweeping them in would have made this a 105-file freeze instead of a 39.
+DOC_BUDGET_BYTES_PER_TOKEN=4
+
+# A FLOOR OVER THE UNION, not a pin on discovery alone. Discovery walks a
+# COMPUTED set, so its failure mode is going dark and verdicting on nothing
+# while the script still prints PASS — exactly what blinding the CAPS heredoc
+# did (35 size verdicts to 7, still PASS). A floor catches that.
+#
+# It counts CAPPED + DISCOVERED together because enrolling a doc in the CAPS
+# table MOVES it out of discovery: the two sets partition the same population,
+# so the sum is invariant under exactly the edit people make most often. Pinned
+# on discovery alone, this number would red on every unrelated PR that adds a
+# caps row — and a gate that reds for unrelated churn gets its literal bumped
+# reflexively until it discriminates nothing. Lower it only alongside a
+# deliberate deletion or retiering of spine docs.
+#
+# Cards and $ONRAMP_DOC are out of the sum on purpose: the card arm pins its own
+# count at exactly 7, and the onramp doc is a single named path.
+GATED_DOCS_FLOOR=118
+
+DISCOVERY_HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-z0-9._-]+ \| budget: [0-9]+tok -->'
+
+# Docs ALREADY over header*4 on the day discovery landed. They are pinned at
+# their MEASURED size, so the gate is green on the shipped tree and the debt
+# cannot get worse — and NOT by raising anyone's header, which would be the
+# never-raise-a-cap violation wearing a different hat.
+#
+# THIS LIST MAY ONLY SHRINK. Two arms enforce that: a frozen doc that GROWS
+# reds, and a frozen doc that has come back UNDER its header budget also reds,
+# telling you to delete its row. So paying a debt is not optional bookkeeping —
+# the gate refuses until the row is gone.
+FREEZE_ROWS_EXPECTED=39
+
+FREEZE_ROWS_WALKED=0
+FREEZE_TABLE=""
+DISCOVERY_WALKED=0
+DISCOVERY_SEEN=""
+if [ "$SPAN_ONLY" != "1" ]; then
+while read -r fz_path fz_bytes; do
+  [ -z "$fz_path" ] && continue
+  FREEZE_ROWS_WALKED=$((FREEZE_ROWS_WALKED + 1))
+  FREEZE_TABLE="$FREEZE_TABLE$fz_path $fz_bytes
+"
+done <<'FREEZE'
+docs/api/error-envelope-migration.md 2645
+docs/cli/error-exit-table.md 20911
+docs/cli/HANDBOOK.md 13979
+docs/cli/m0-decisions.md 5334
+docs/contracts/cycle-fleet.md 7497
+docs/contracts/dispatch-areas.md 5782
+docs/contracts/roster-reading.md 7384
+docs/contracts/tui-render-doctrine.md 3920
+docs/decisions/0001-sdk-envelope.md 2179
+docs/decisions/0002-npm-dist-tag.md 5221
+docs/decisions/0003-sync-tags.md 3674
+docs/decisions/0005-pr-body-criteria.md 3113
+docs/decisions/deferred.md 3892
+docs/media/DISCOVERY.md 2445
+docs/ops/barkpark-cloud-go-live.md 10564
+docs/ops/bokbasen-go-live.md 5153
+docs/ops/break-glass-log.md 9272
+docs/ops/connectors-deploy.md 10694
+docs/ops/github-sync.md 8693
+docs/ops/mcp-serve-validation.md 13209
+docs/ops/merge-gates.md 72393
+docs/ops/npm-rollback-playbook.md 11433
+docs/ops/vercel-dns-connect.md 12390
+docs/plugins/codelists-byo.md 2081
+docs/search/ROADMAP.md 2809
+docs/setup/CLAUDE-CODE.md 12444
+docs/setup/cloud-login.md 6290
+docs/setup/CURSOR.md 7579
+docs/setup/personal-local.md 5169
+docs/setup/REMOTE.md 7457
+docs/setup/SETUP.md 12185
+docs/snippets/README.md 1975
+docs/spec/bokbasen-api-contract.md 39908
+docs/studio/user-guide.md 4913
+docs/studio/web-components.md 3676
+docs/swarm/oban-substrate.md 5931
+docs/swarm/personal-access-tokens.md 6925
+docs/swarm/subscription-billing.md 7317
+docs/swarm/teams-invitations.md 4937
+FREEZE
+  if [ "$FREEZE_ROWS_WALKED" -ne "$FREEZE_ROWS_EXPECTED" ]; then
+    echo "FAIL: the freeze table walked $FREEZE_ROWS_WALKED row(s), expected $FREEZE_ROWS_EXPECTED." \
+         "Either it went dark (a broken heredoc freezes NOTHING and every frozen doc" \
+         "silently falls back to a header budget it does not meet), or you paid a debt" \
+         "and must lower FREEZE_ROWS_EXPECTED to match."
+    FAIL=1
+  else
+    echo "ok:   freeze table walked all $FREEZE_ROWS_WALKED frozen row(s)"
+  fi
+
+  while IFS= read -r dpath; do
+    if [ ! -f "$dpath" ]; then continue; fi
+    dhead=$(head -n 1 "$dpath")
+    printf '%s\n' "$dhead" | grep -Eq "$DISCOVERY_HEADER_RE" || continue
+    # cold is exempt — see the block comment above
+    case "$dhead" in *"doc-tier: cold"*) continue ;; esac
+    # precedence: an explicit rule wins
+    case "
+$CAPS_PATHS" in *"
+$dpath
+"*) continue ;; esac
+    case "$dpath" in docs/cards/*) continue ;; esac
+    if [ "$dpath" = "$ONRAMP_DOC" ] || [ "$dpath" = "$ONRAMP_DOC_DEFAULT" ]; then continue; fi
+
+    DISCOVERY_WALKED=$((DISCOVERY_WALKED + 1))
+    DISCOVERY_SEEN="$DISCOVERY_SEEN$dpath
+"
+    dtok=$(printf '%s\n' "$dhead" | sed -E 's/.*budget: ([0-9]+)tok.*/\1/')
+    dcap=$((dtok * DOC_BUDGET_BYTES_PER_TOKEN))
+    dsize=$(wc -c < "$dpath" | tr -d ' ')
+    dfrozen=$(printf '%s' "$FREEZE_TABLE" | awk -v p="$dpath" '$1 == p { print $2; exit }')
+
+    if [ -n "$dfrozen" ]; then
+      if [ "$dsize" -le "$dcap" ]; then
+        echo "FAIL: $dpath is ${dsize}B and now fits its own ${dtok}tok header (${dcap}B) —" \
+             "DELETE its row from the FREEZE table and lower FREEZE_ROWS_EXPECTED." \
+             "The freeze list may only shrink; a paid debt left in it re-buys slack nobody needs."
+        FAIL=1
+      elif [ "$dsize" -gt "$dfrozen" ]; then
+        echo "FAIL: $dpath is ${dsize}B, frozen at ${dfrozen}B — a frozen doc may not grow." \
+             "$REMEDY, toward its ${dtok}tok header budget (${dcap}B). Do NOT raise the freeze" \
+             "number and do NOT raise the header; both are the cap-raise this gate refuses."
+        FAIL=1
+      else
+        echo "ok:   $dpath ${dsize}B <= ${dfrozen}B (FROZEN — owes $((dfrozen - dcap))B against its ${dtok}tok header)"
+      fi
+    elif [ "$dsize" -gt "$dcap" ]; then
+      echo "FAIL: $dpath is ${dsize}B, its own header declares ${dtok}tok = ${dcap}B —" \
+           "$REMEDY. Do NOT raise the header to fit: the header IS the cap here," \
+           "so editing it is raising the cap."
+      FAIL=1
+    else
+      echo "ok:   $dpath ${dsize}B <= ${dcap}B (header ${dtok}tok x $DOC_BUDGET_BYTES_PER_TOKEN)"
+    fi
+  done < <(
+    {
+      find docs -name '*.md' -not -path 'docs/cli/fixtures/*'
+      find scripts -maxdepth 1 -name '*.md'
+      for surface in CLAUDE.md AGENTS.md api/CLAUDE.md js/CLAUDE.md web/AGENTS.md; do
+        if [ -f "$surface" ]; then echo "$surface"; fi
+      done
+    } 2>/dev/null | sed 's|^\./||' | sort -u
+  )
+
+  GATED_DOCS_REACHED=$((CAPS_ROWS_WALKED + DISCOVERY_WALKED))
+  if [ "$GATED_DOCS_REACHED" -lt "$GATED_DOCS_FLOOR" ]; then
+    echo "FAIL: the budget gate reached $GATED_DOCS_REACHED gated doc(s)" \
+         "($CAPS_ROWS_WALKED capped + $DISCOVERY_WALKED discovered), floor is $GATED_DOCS_FLOOR." \
+         "Either discovery went dark (it verdicts on NOTHING and this gate still exits 0)," \
+         "or spine docs were deleted and the floor must be lowered deliberately."
+    FAIL=1
+  else
+    echo "ok:   budget gate reached $GATED_DOCS_REACHED gated doc(s)" \
+         "($CAPS_ROWS_WALKED capped + $DISCOVERY_WALKED discovered, floor $GATED_DOCS_FLOOR)"
+  fi
+
+  # A freeze row naming nothing discovery reached is a row that can never red:
+  # the file was deleted, renamed, retiered to cold, or given a CAPS row, and
+  # the freeze number quietly stopped meaning anything.
+  FREEZE_STALE=0
+  while read -r fz_path fz_bytes; do
+    [ -z "$fz_path" ] && continue
+    case "
+$DISCOVERY_SEEN" in
+      *"
+$fz_path
+"*) ;;
+      *)
+        echo "FAIL: freeze row '$fz_path $fz_bytes' matched no discovered doc —" \
+             "it was deleted, renamed, retiered to cold, or given a CAPS row." \
+             "A freeze row nothing reaches is a number that can never red; remove it."
+        FAIL=1
+        FREEZE_STALE=1
+        ;;
+    esac
+  done <<FREEZE_CHECK
+$FREEZE_TABLE
+FREEZE_CHECK
+  if [ "$FREEZE_STALE" -eq 0 ]; then
+    echo "ok:   every freeze row still names a discovered doc"
   fi
 fi
 
