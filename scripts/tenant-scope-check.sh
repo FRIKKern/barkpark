@@ -657,9 +657,23 @@ if new_hits:
 
 msg = "tenant-scope-check: PASS — %d baselined fail-open tenant read(s), no new unjustified reads." % sum(cur.values())
 if removed:
+    # NAME the vanished entries. An unnamed count is not actionable: a baselined
+    # occurrence that is gone leaves a FREE SLOT, and the counter arithmetic
+    # (extra = current - baselined) silently absorbs the next read that matches
+    # that triple. Between 2026-07-11 and 2026-09-01 this NOTE reported "1
+    # occurrence no longer present" on every run and nobody re-anchored, because
+    # finding WHICH one meant hand-diffing a fresh scan against the manifest.
+    # The gate knows the answer; printing it turns a seven-week research task
+    # into a one-line edit. It stays a NOTE, not a failure — a shrinking
+    # fail-open surface is a GOOD change and must not red the branch that made
+    # it. Delete the named lines by hand; do NOT regenerate, or unreviewed drift
+    # elsewhere in the manifest is absorbed along with them.
     msg += ("\n  NOTE: %d baselined occurrence(s) no longer present — the fail-open "
-            "surface shrank.\n  Consider re-running --baseline to tighten the manifest."
-            % len(removed))
+            "surface shrank.\n  Each is a FREE SLOT that will absorb the next matching "
+            "read. Delete these lines\n  from %s (by hand — do not regenerate):"
+            % (len(removed), os.path.relpath(baseline_path, os.path.dirname(lib))))
+    for rel, kind, norm in sorted(removed):
+        msg += "\n    %s\t%s\t%s" % (rel, kind, norm)
 print(msg)
 sys.exit(0)
 PY
