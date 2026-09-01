@@ -11,11 +11,9 @@
 
 Work: Oban async record (API returns immediately); monthly RANGE partitions on `inserted_at` (DROP not DELETE); crystal retention day 90d / week+month 2y; SQL crystallize (`INSERT…SELECT`) when >100k events/day.
 
-## Phase 10 — Optional external retriever (pain-gated)
+## Phase 10 — External retriever — SHIPPED (not pain-gated any more)
 
-**Triggers: >500k media assets OR fuzzy p95 > 100ms.**
-
-Typesense collection per surface; **intelligence stays in Postgres** (mirror hits to record events only); skip Algolia SaaS unless enterprise mandate. Spike doc only until a trigger fires.
+The seam landed as `Barkpark.Search.Retriever` and the engine as `Barkpark.Plugins.Indx.Retriever`, registered by default in `config :barkpark, :search_retrievers` and reachable per request as `?engine=indx` (default `postgres`). Credentials come from `INDX_API_BASE` / `INDX_USER_EMAIL` in `runtime.exs`. **Intelligence did stay in Postgres** — the retriever returns documents and records no events. Typesense and Algolia were never adopted, and the >500k-assets / fuzzy-p95 triggers are moot.
 
 ## What we deliberately skip
 
@@ -24,9 +22,10 @@ Typesense collection per surface; **intelligence stays in Postgres** (mirror hit
 | Algolia Recommend ML | No co-purchase graph; CMS not storefront |
 | Personalized suggestions | Needs click volume + user profiles |
 | Full Rules / merchandising engine | CMS editorial workflow differs |
-| Algolia SaaS | Postgres sufficient until Phase 10 trigger |
+| Algolia SaaS | Never adopted; Phase 10 landed on the self-hosted Indx engine instead |
 | Vector semantic search | Defer until lexical ceiling hit; adds ops cost |
 | Redis for recent | Actor-key query fine until Phase 9 |
+| Vector/semantic embeddings | Still absent — no pgvector, no embedding column anywhere in `api/` |
 
 ## Code anchors
 

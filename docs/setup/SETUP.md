@@ -57,18 +57,18 @@ mix phx.server                     # serves on :4000
 
 So one command creates the database, runs every migration, and runs the seed script.
 
-## CRITICAL — do not use the `make` targets locally
+## CRITICAL — the *service* `make` targets are prod-only
 
-The `make` targets are **prod/Linux systemd wrappers** for the Hetzner box, not local dev commands.
+The database and systemd targets are **prod/Linux wrappers** for the Hetzner box, not local dev commands.
 
 | Target | What it actually does | Use locally instead |
 |---|---|---|
 | `make seed` / `make migrate` / `make reset-db` | Wrap `start.sh`, which hardcodes `/root/.asdf` paths and `MIX_ENV=prod` | `mix ecto.setup` / `mix ecto.migrate` / `mix ecto.reset` (in `api/`) |
 | `make restart` / `make stop` / `make status` / `make logs` | `systemctl` / `journalctl` against the prod unit | nothing — useless on macOS |
 
-Locally, always run bare `mix` commands inside `api/`.
+For database work, always run bare `mix` commands inside `api/`.
 
-**Two exceptions are local-first by design.** `make update` — `git pull`, then a diff-driven refresh (rebuild + reinstall `bp` if Go changed, `mix deps.get` if the lockfile changed, `mix ecto.migrate` if migrations landed, `pnpm install` in `web/`/`js/` if their manifests changed), ending with a digest of what came in and what to re-read. Run it instead of a bare `git pull` to stay current; `SINCE=<old-head> make update` does the refresh + digest without pulling. And `make test` — see below.
+**The rest of the Makefile is local-first by design** — a whole `Local development` section (`make dev`, `api`, `run`, `tui`, `web`, `build`) plus every target whose `make help` line starts `LOCAL:` (`update`, `doctor`, `test`, `reap-test-dbs`, `cli-install`). Run `make help` for the live list. Two worth knowing now: `make update` — `git pull`, then a diff-driven refresh (rebuild + reinstall `bp` if Go changed, `mix deps.get` if the lockfile changed, `mix ecto.migrate` if migrations landed, `pnpm install` in `web/`/`js/` if their manifests changed), ending with a digest of what came in and what to re-read. Run it instead of a bare `git pull` to stay current; `SINCE=<old-head> make update` does the refresh + digest without pulling. And `make test` — see below.
 
 ## Test database partitioning (multi-agent / multi-lane hosts)
 
@@ -118,13 +118,17 @@ Details worth knowing:
 
 ## Verify it's running
 
-There is **no `/health` endpoint**. The real liveness probe is the schemas list — note that `/api/schemas` is a **legacy deprecated route** (responds with `Deprecation: true` / `Sunset: 2026-12-31`; the canonical is `/v1/schemas/production`):
+There is **no `/health` endpoint**. The token-free liveness probe is `/api/schemas` — deliberately not token-gated, and the same probe the blue/green deploy health gate and the uptime monitor use. It carries legacy headers (`Deprecation: true` / `Sunset: Wed, 31 Dec 2026 23:59:59 GMT`) and 404s after that sunset; it lists **public** schemas only:
 
 ```bash
 curl -s localhost:4000/api/schemas | head -c 200
 # → [{"name":"author",...}]
-# or using the canonical v1 route:
-curl -s localhost:4000/v1/schemas/production | head -c 200
+```
+
+**`/v1/schemas/production` is not a liveness probe.** It is the canonical *schema-management* route, on the `:flat_admin_api` pipeline — it needs an **admin** token, so an unauthenticated `curl` returns `401`, not the list (and `curl -s` still exits 0, so the failure looks like a dead server):
+
+```bash
+curl -s localhost:4000/v1/schemas/production -H 'Authorization: Bearer barkpark-dev-token' | head -c 200
 ```
 
 The Studio UI is served at the scoped URL (e.g. `http://localhost:4000/w/default/p/default/d/production/studio`). Both root `/` and `/studio` 302-redirect there automatically — the exact target depends on your session token and the Default Workspace/Project/Dataset resolution rule. Writes require auth:
@@ -135,7 +139,7 @@ Authorization: Bearer barkpark-dev-token
 
 ## Keep-alive on macOS
 
-There is **no canonical service mechanism** for local dev — the `make` targets are prod-only. To survive logout/reboot, use a LaunchAgent. Foreground options (`make api`, tmux `make dev`, `run.sh`) do **not** survive a session end.
+There is **no canonical service mechanism** for local dev — the systemd `make` targets are prod-only. To survive logout/reboot, use a LaunchAgent. The local foreground options (`make api`, tmux `make dev`, `./run.sh`) do **not** survive a session end.
 
 Create `~/Library/LaunchAgents/dev.pelle.barkpark.plist` running `mix phx.server` with:
 
@@ -158,5 +162,5 @@ Create `~/Library/LaunchAgents/dev.pelle.barkpark.plist` running `mix phx.server
 ## Troubleshooting
 
 - **Server won't connect to Postgres / `ecto.setup` fails on auth.** You don't have the `postgres` role with password `postgres`. Run the verify command in [Prerequisites](#the-postgres-role-gotcha-verified-real); create the role or override `config/dev.exs`.
-- **`localhost:4000` not responding.** Confirm the server is up with `curl -s localhost:4000/v1/schemas/production` (the canonical probe; `/api/schemas` is legacy/deprecated). There is no `/health` endpoint. Check for a port conflict on `:4000`.
+- **`localhost:4000` not responding.** Confirm the server is up with `curl -s localhost:4000/api/schemas` (the token-free probe). There is no `/health` endpoint. Do **not** probe with `/v1/schemas/production` — it is admin-gated, so its `401` tells you nothing about liveness. Check for a port conflict on `:4000`.
 - **`mix deps.get` or media operations fail mentioning `vips`/`image`.** libvips isn't installed: `brew install vips`, then `mix deps.get` again.

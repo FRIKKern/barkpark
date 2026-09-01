@@ -31,7 +31,7 @@ Select with `Accept-Version: 2` header. Non-validation errors (`not_found`, `una
 ## Implementation pointers
 
 - Module: `BarkparkWeb.ErrorEnvelope` (`serialize_v1/1`, `serialize_v2/1`)
-- Plug: `BarkparkWeb.Plugs.ErrorEnvelopeNegotiation` — wired into `:api`, `:scoped_api`, `:shared_docs_api`, `:shared_media_api`, `:scoped_mutate`, `:scoped_media_mutate`, `:api_unlimited`, `:api_preview`, `:media_mutate`, `:media_processing_callback`
+- Plug: `BarkparkWeb.Plugs.ErrorEnvelopeNegotiation` — wired into 14 pipelines — `:api`, `:cycle_api`, `:scoped_api`, `:shared_docs_api`, `:shared_media_api`, `:scoped_mutate`, `:scoped_media_mutate`, `:api_unlimited`, `:api_preview`, `:session_token_root`, `:user_auth`, `:media_mutate`, `:flat_admin_api`, `:media_processing_callback`. Re-derive rather than transcribe: `awk '/^  pipeline /{n=$2} /plug\(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation\)/{print n}' api/lib/barkpark_web/router.ex`
 - Today only `MutateController` reshapes for `validation_failed` v2; other controllers pick up the assign automatically when they need it
 - Code registry: `Barkpark.Content.ErrorCodes` — compile-time map atom → `%{message_template, default_severity, since_version}`; new codes are additive
 - Hints: `Barkpark.Content.Errors.to_envelope/2` adds an additive top-level `hint` string keyed off the stable `code` (`@hints` map); v1 and v2 both include it; it reshapes no existing key

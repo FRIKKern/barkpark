@@ -109,26 +109,32 @@ the bug is "wrong version got promoted."
 Local `npm dist-tag` returns **HTTP 403** — only the CI `NPM_TOKEN` holds
 publish/dist-tag scope on the `@barkpark` org. Dispatch through
 `.github/workflows/retag.yml` (`workflow_dispatch`, no branch restriction — can
-be dispatched from any branch that carries the file; fails fast with
-`::error title=Missing NPM_TOKEN::` if the secret is unset). The
+be dispatched from any branch that carries the file). It fails closed **twice**:
+`::error title=Missing NPM_TOKEN::` if the secret is unset, and
+`::error title=NPM_TOKEN rejected by the registry::` from the `npm whoami`
+preflight when the secret *is* set but the token is expired or revoked — that
+second one means rotate `NPM_TOKEN`, not re-dispatch. The
 protected-channel guard **skips** the removal step with a `::warning::`
 annotation (exit 0 — the workflow still succeeds) when `remove_tag` is
 `preview` or `next`. Reference incident: `release.yml` run **24627335562**
 (2026-04-19) published two `1.0.0-preview.1` packages to `latest` instead of
 `preview` — see `docs/decisions/0002-npm-dist-tag.md`.
 
-> **Approval gate (P0 guardrail):** **Boss must approve each
-> `workflow_dispatch` run separately before it executes.** Two packages = two
-> approvals; a re-run after a failure = a fresh approval. Dist-tag changes are
-> immediately live for every npm consumer — the approval cadence is the only
-> human gate.
+> **Approval gate (P0 guardrail) — convention only, NOT enforced by CI:**
+> **Boss must approve each `workflow_dispatch` run separately before it
+> executes.** Two packages = two approvals; a re-run after a failure = a fresh
+> approval. `retag.yml` carries no `environment:` protection rule, so a dispatch
+> runs immediately and no approval prompt will ever appear — get the approval in
+> `#incidents` *before* you press Run. Dist-tag changes are immediately live for
+> every npm consumer — the approval cadence is the only human gate.
 
 **Split-state rollback (run 1 succeeded, run 2 failed):** re-run **only run 2**
 with the same inputs — the `Add dist-tag` step is idempotent on npm. Full undo
 (restore the version to `latest`): dispatch with `add_tag=latest` and
 `remove_tag` **empty** — never strip `preview` on the way back (the guard
-skips it with a warning anyway). If the workflow cannot start (token missing),
-fix the gating and re-dispatch — never improvise locally (403s).
+skips it with a warning anyway). If the workflow refuses (secret unset, or
+`npm whoami` rejected the token), fix that first — rotate the token if the
+registry rejected it — then re-dispatch. Never improvise locally (403s).
 
 **404-is-intentional:** `npm dist-tag rm <pkg> latest` **deletes** the `latest`
 entry — it does not reassign. With no stable version published, a bare
@@ -145,8 +151,9 @@ pins are unaffected.
 ## Mechanism D — git revert (fix the source)
 
 Every npm rollback is a stopgap; the permanent fix is a revert shipped as a new
-patch: `git revert <bad-sha>` on main → `pnpm changeset` (patch) → push → CI
-publishes. If the revert conflicts, abort and either revert the follow-ups too
+patch: `git revert <bad-sha>` on main → `cd js && pnpm changeset` (patch) →
+push → CI publishes. (`js/` is its own pnpm workspace — the `changeset` script
+and `.changeset/` live only there; at the repo root the command is not defined.) If the revert conflicts, abort and either revert the follow-ups too
 or forward-fix. **Never** force-push main to paper over a revert. Don't revert a
 whole multi-concern PR — undo just the broken piece. npm-side rollback runs in
 parallel, not after.
@@ -157,7 +164,7 @@ parallel, not after.
 2. **Assess** (<15 min): reproduce in a scratch dir; classify (type-only / runtime / install-time / security / dist-tag); estimate blast radius.
 3. **Decide:** use the decision tree; **write the decision down** in the incident ticket before acting. Critical ⇒ Boss approves.
 4. **Execute:** most incidents combine two mechanisms (A+D, C+D, or B+D). Every command goes in the ticket verbatim with timestamps.
-5. **Verify:** mechanism checks above + fresh-install invariant: `npx create-barkpark-app@latest blog /tmp/rollback-smoke-$(date +%s)`. Re-test from a clean cache (`npm cache clean --force`).
+5. **Verify:** mechanism checks above + fresh-install invariant: `npx create-barkpark-app@latest /tmp/rollback-smoke-$(date +%s) --template blog-starter --yes`. The CLI takes **one** positional (the target directory) — a second one is silently ignored, so the old two-argument form scaffolded into `./blog` instead; `blog` is not a template name (`website-starter` | `blog-starter`), and without `--yes` it blocks on interactive prompts. Re-test from a clean cache (`npm cache clean --force`).
 6. **Communicate:** "rolled back" banner on the GitHub Release; reply where users reported it.
 7. **Postmortem (48h):** record as a task in the task system — a `type:"task"` document via the standard mutate endpoint with `content.kind == "task"`; there is no `POST /v1/tasks` create verb (`bp task` verbs are read/lifecycle only). Capture timeline, detection gap, decision rationale, fix, prevention. Long-form: attach a Bulldocs paper via `POST /v1/tasks/<task_id>/papers`. Never write to `.doey/plans/` (retired). File preventive tickets; a same-class second incident upgrades prevention to P0.
 

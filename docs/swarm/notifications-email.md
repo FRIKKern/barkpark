@@ -8,7 +8,7 @@
 The shared **mailer** for Barkpark Cloud plus two layers on top of it:
 
 1. **Transactional email** (the beta blocker) — invite / password-reset / email-verification / test, always over the **platform** transport (`BarkparkCloud.Mailer`), so onboarding works even before a team configures any SMTP.
-2. **Per-team event notifications** — a `email_notification_settings` row per team (transport + nine per-event toggles + encrypted SMTP/API secrets), a `dispatch_event/3` dispatcher with an `@always_send` allowlist and a team-members-only recipient guard, and a durable `notification_deliveries` log.
+2. **Per-team event notifications** — a `email_notification_settings` row per team (transport + per-event toggles + encrypted SMTP secrets — SIX events today, not the nine this shipped with: `deployment_succeeded`, `member_invited` and `token_expiring` were dropped, because every atom in `@events` must have a producer), a `dispatch_event/3` dispatcher with an `@always_send` allowlist and a team-members-only recipient guard, and a durable `notification_deliveries` log.
 
 The mailer dependency is the prerequisite every email-bearing cloud feature waits on (teams-invite, auth-reset, billing-dunning), which is why this candidate ships it first.
 
@@ -43,8 +43,8 @@ cloud/lib/barkpark_cloud/notifications/email_settings.ex   per-team settings sch
 cloud/lib/barkpark_cloud/notifications/delivery.ex         durable send-record schema
 cloud/lib/barkpark_cloud/notifications/transactional.ex    invite/reset/verify/test builders
 cloud/lib/barkpark_cloud/notifications/event_email.ex      per-event alert body builder
-cloud/priv/repo/migrations/20260629120000_create_email_notification_settings.exs
-cloud/priv/repo/migrations/20260629120100_create_notification_deliveries.exs
+cloud/priv/repo/migrations/20260629120200_create_email_notification_settings.exs
+cloud/priv/repo/migrations/20260629120300_create_notification_deliveries.exs
 cloud/test/barkpark_cloud/notifications_test.exs           context tests
 cloud/test/barkpark_cloud/web/router_notifications_test.exs route tests
 docs/swarm/notifications-email.md                          this note
@@ -76,10 +76,10 @@ Dev mailbox: `Swoosh.Adapters.Local` keeps sent mail in memory (a `/dev/mailbox`
 
 ## Caveats / honest deferrals
 
-- **Async retry needs Oban.** `cloud/` has no Oban (`bp-scheduled-jobs`: absent in cloud), so `dispatch_event/3` sends **synchronously**. A slow SMTP send blocks the trigger path; the dispatcher swallows errors (never raises into the SSE broadcast) and records a `failed` delivery. The `notification_deliveries` (`attempts`, `last_error`) shape is the retry seam for when Oban lands.
-- **No RBAC gate on the settings routes.** Cloud has no `team_admin?` yet (roles stored, never checked — `bp-teams` gap). Any team member can edit settings / send a test. Flagged in the route comments; wrap PUT + test in the gate when it lands.
-- **`api` (hosted-provider) transport is deferred.** SMTP was chosen as the platform transport to avoid a Finch/Hackney HTTP-client dep (matching the Billing layer's `:httpc` posture). The `api_key_encrypted` column + `"api"` transport value ship, but the adapter falls back to the platform transport for now.
-- **`member_invited` / `token_expiring` have no emit site yet.** Their columns + dispatcher accept them; the owning features (teams-invite, api-token) add the one-line emit when they land.
+- **Async retry needs Oban. OBAN HAS SINCE LANDED IN `cloud/`** (`{:oban, "~> 2.17"}`, an `{Oban, ...}` child in `application.ex`, a live `Oban.Plugins.Cron` crontab and 14 workers), and `dispatch_event/3`'s chat leg is enqueued through it. The EMAIL leg still sends **synchronously**. A slow SMTP send blocks the trigger path; the dispatcher swallows errors (never raises into the SSE broadcast) and records a `failed` delivery. The `notification_deliveries` (`attempts`, `last_error`) shape is the retry seam for when Oban lands.
+- **No RBAC gate on the settings routes — FIXED; all three sub-claims are now false.** `Accounts.Authz.team_admin?/2` exists, and both `PUT /v1/notifications/settings` and `POST /v1/notifications/test` open with `Auth.require_team_admin(conn, [])`. A plain team member can no longer edit settings or send a test.
+- **`api` (hosted-provider) transport is deferred.** SMTP was chosen as the platform transport to avoid a Finch/Hackney HTTP-client dep (matching the Billing layer's `:httpc` posture). The `"api"` transport value and the `api_key_encrypted` schema field were subsequently DELETED rather than left as a dead offer — `@transports` is `~w(instance smtp)`. Only the unselected DB column remains.
+- **`member_invited` / `token_expiring` were RETIRED, not left pending.** Their columns were dropped and the dispatcher no longer accepts them: an atom in `@events` with no producer reds the Console gate, so the promise was removed rather than carried.
 - **`subscription_past_due` fires only if Billing surfaces a `past_due` subscription** from the webhook. Today `handle_webhook/2` returns an `active` subscription on activation; the dispatch is additive and guarded on `sub.status == "past_due"`, so it lights up the moment Billing emits that state.
 - **The failed-delivery path is not exercised in tests.** The Test adapter always succeeds; the `failed` branch (status + `last_error`) is covered by reading, not by an assertion (no hermetic way to force an SMTP failure without a network). Verified by inspection.
 - **`mix format` not run** — the project's `.formatter.exs` uses `import_deps`, which needs fetched deps (absent in the worktree). Code was hand-written to the surrounding style; run `mix format` after `mix deps.get` before merge.

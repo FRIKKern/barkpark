@@ -254,6 +254,23 @@ defmodule BarkparkCloud.FailureCopy do
     # weakens the redaction for nothing.
     {~r/\b(bearer\s+)(?!#{@prose_value})\S+/i, "\\1#{@redaction}"},
 
+    # A DB URL's USERINFO — `ecto://user:PASS@host/db`. The SCHEME and everything
+    # from the `@` on are kept (they name the host that refused); only the
+    # `user:pass` is redacted.
+    #
+    # This clause is the one the Go runner has carried all along
+    # (`ectoUserinfoRe`, `internal/cli/cloud/warmpool.go`) and this boundary never
+    # grew. It is NOT reachable by any clause above it: `DATABASE_URL` is not one
+    # of the key clause's key words, so a `DATABASE_URL=ecto://…` env fold never
+    # matched there, and the password sits behind a `//` that the bare-token
+    # clause cannot see (a real DB password usually carries a `-`/`_`/symbol, so
+    # it is not a contiguous 32+ alnum run either). A migrate failure is the most
+    # common way this capture is produced, and it shipped in cleartext.
+    #
+    # `postgres`/`postgresql` ride along because `deploy.sh` writes the `ecto://`
+    # spelling but Ecto/psql errors echo the other two back.
+    {~r{\b(ecto|postgres|postgresql)://[^\s:/@]+:[^\s@]+@}, "\\1://#{@redaction}@"},
+
     # `client_secret=…`, `token: …`, `api-key=…`. The KEY and its separator are
     # kept (they name what leaked); the value is redacted up to the next
     # delimiter. `authorization` is deliberately absent — the Bearer clause above
@@ -277,7 +294,17 @@ defmodule BarkparkCloud.FailureCopy do
     # "hashed_password =[redacted] before", copy loss where no secret ever was.
     # A COMPARISON is not an assignment. A real value never STARTS with `=` or
     # `:`, so the guard costs no redaction (`token=abc==` still redacts whole).
-    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?![=:])(?!#{@prose_value})[^\s"',;)]+/i,
+    # `<` joins `=`/`:` in the value-position stop set for the same reason they
+    # are there: it marks copy that is NOT a credential. The provisioner
+    # deliberately narrates the provider-key hand-off as
+    # `printf 'ANTHROPIC_API_KEY=<your-key>\n' >> …` — the agent key is the one
+    # secret Barkpark never copies, so the developer pastes it themselves — and
+    # that line reaches the console fold like any other capture. Redacting
+    # `<your-key>` into `[redacted]` destroyed the only copy telling the person
+    # what to type, which is the same class of copy loss as the `hashed_password
+    # == before` case the `(?![=:])` guard already fixes. A real credential never
+    # STARTS with `<`, so this costs the redaction nothing.
+    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?![=:<])(?!#{@prose_value})[^\s"',;)]+/i,
      "\\1#{@redaction}"},
 
     # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/
@@ -302,7 +329,23 @@ defmodule BarkparkCloud.FailureCopy do
     # — a real sentinel in `api/lib/barkpark_web/studio/claude_chat.ex` — is
     # copy a person needs to read, not a secret. `bp-` alone is deliberately
     # absent: every provisioned site is named `bp-<slug>-<hash>`.
-    {~r/\b(?:(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_]|(?:bppat|bpcs)_)[A-Za-z0-9\-_]{8,}/,
+    # `bp_<kind>_` is the MINTED BOX CREDENTIAL family — `bp_admin_…` (every
+    # provisioned site's per-instance admin token, `setup.GenerateAdminToken`),
+    # `bp_read_…`, and any sibling kind minted later. It was the conspicuous gap
+    # in this arm: `bppat_`/`bpcs_` are the tokens a PERSON mints, while
+    # `bp_<kind>_` is the one the CONTROL PLANE mints for every box it builds —
+    # the credential most likely to be in a provisioner capture in the first
+    # place. The Go side has never been blind to it (`adminTokenRe` in
+    # `internal/provisioner/console.go`, `builderTokenRe` in
+    # `internal/builder/console.go` — the latter is exactly `bp_[a-z]+_`), so
+    # this clause brings the display boundary level with the two worker-side
+    # scrubs rather than trusting them to have caught it upstream.
+    #
+    # `_` after `bp` is load-bearing and NOT a tidy-up: `bp-` is the site-name
+    # prefix (`bp-<slug>-<hash>.barkpark.cloud`), pinned as a negative below. The
+    # `[a-z]+` kind keeps that separation exact — a hostname can never enter this
+    # clause, because a hostname's separator is a hyphen.
+    {~r/\b(?:(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_]|(?:bppat|bpcs)_|bp_[a-z]+_)[A-Za-z0-9\-_]{8,}/,
      @redaction},
 
     # An AWS access key id: `AKIA` + 16 uppercase alphanumerics, no separator, so
