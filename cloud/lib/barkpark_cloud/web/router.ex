@@ -10604,6 +10604,25 @@ defmodule BarkparkCloud.Web.Router do
       # "suspended (billing)" state distinct from a health-down box.
       suspended: bp.suspended,
       suspended_reason: bp.suspended_reason,
+      # cch-w54-bl SINCE WHEN. Suspension is one UPDATE of THREE columns
+      # (`Registry.suspend_barkpark/2` and the bulk
+      # `Registry.suspend_team_barkparks/2` behind it) and only two of them
+      # reached a wire, so every reader could say a box was suspended and why
+      # but never since when.
+      #
+      # The absence was not rendered as absence. `suspendedCardBannerHtml` in
+      # app.js fell through to `dunningDates(sub)`, which is computed off
+      # `sub.current_period_end` — the NEXT renewal day — so a box suspended
+      # today painted a FUTURE date as a past-tense suspension day. A field
+      # with no reader is invisible; one whose absence is papered over by a
+      # wrong value is a silent-failure defect, which is why the fix is the
+      # field and not the copy.
+      #
+      # NULL means NOT SUSPENDED, never "suspended at an unknown time":
+      # `unsuspend_barkpark/1` and the bulk resume clear all three columns
+      # together, so a live box never carries a stale stamp. Consumers render
+      # null as no-date and must NOT substitute a billing date for it.
+      suspended_at: bp.suspended_at,
       # isu-6 self-update status — the cached mirror of the instance's OWN
       # update verdict (the UpdateStatusWorker sweep / post-trigger refresh).
       update_state: bp.update_state,
