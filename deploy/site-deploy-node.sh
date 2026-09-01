@@ -427,6 +427,18 @@ HEALTH_PATIENT_MAX="${BARKPARK_SITE_HEALTH_PATIENT_MAX:-90}" # ~2x the worst (48
 HEALTH_DETAIL=""
 HEALTH_SLOW=0        # 1 = served 200, but only past the fast ceiling
 HEALTH_SECONDS=""    # curl %{time_total} of the attempt that answered
+# A 200 IS ONLY A 200 IF THE TRANSFER FINISHED. Both halves of that sentence in
+# ONE predicate, on purpose: the probe reads BOTH numbers off the same curl call
+# (`-w %{http_code}` and `$?`) and every decision below asks THIS, so there is one
+# place to get it wrong and one place to mutate. Dropping `$2` here — which is
+# exactly what `[ "$code" = 200 ] && break` used to do — makes an http_code=200
+# with curl exit 28 (the ceiling cut the body mid-stream) indistinguishable from
+# a document read to its last byte, and the SSR marker assertions downstream then
+# read a TRUNCATED page as a statement about the site's CONTENT. The self-test's
+# truncation mutation proof is anchored on this function for that reason.
+clean_200() { # <http_code> <curl_rc> -> 0 when the body was read to the end
+  [ "$1" = 200 ] && [ "$2" = 0 ]
+}
 health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
   local slot="$1" bid="$2" port inst path
@@ -458,7 +470,7 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
-  local body code=000 i curl_rc=0 t_total="" out fast_code=000
+  local body code=000 i curl_rc=0 t_total="" out fast_code=000 fast_trunc=0
   HEALTH_SLOW=0; HEALTH_SECONDS=""
   body="$(mktemp "${TMPDIR:-/tmp}/site-node-health.XXXXXX")"
   # PHASE 1 — the fast poll. A force-dynamic SSR page fetches content per request,
@@ -474,22 +486,53 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     # code — the marker-by-value assertion below still proves the served bytes.
     out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_FAST_MAX" "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
     code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
-    [ "$code" = 200 ] && break
+    # A 200 WHOSE TRANSFER DID NOT FINISH IS NOT A CLEAN 200. `curl_rc` is
+    # captured on the line above and, until this guard existed, thrown away right
+    # here: `[ "$code" = 200 ] && break` accepted http_code=200 + curl exit 28
+    # (the ceiling cut the body mid-stream) and handed the marker assertions a
+    # TRUNCATED document. That is not neutral, because the markers are not
+    # symmetrically placed: bp-build-id and bp-content-rev are literal <head>
+    # children and flush in the shell, while bp-doc-id is emitted from the page
+    # component later in the stream — so truncated bytes PASS the first two and
+    # FAIL the third, and the empty-bp-doc-id branch below then reports an
+    # UNFINISHED READ as a CONTENT FACT ("the SSR rendered no content document").
+    # Consulting curl_rc is what keeps those two sentences different.
+    if [ "$code" = 200 ] && ! clean_200 "$code" "$curl_rc"; then
+      fast_trunc=1
+      log "HEALTH: attempt $i answered 200 but curl exited $curl_rc — the body was cut at the ${HEALTH_FAST_MAX}s ceiling, so it is a TRUNCATED read, not a clean 200; the markers are NOT asserted on partial bytes"
+    fi
+    clean_200 "$code" "$curl_rc" && break
     sleep 0.5
   done
   HEALTH_SECONDS="$t_total"
-  # PHASE 2 — the patient attempt. The fast poll never saw a 200; that is the
-  # state where SLOW and BROKEN are indistinguishable, so ASK ONCE MORE without
-  # the tight ceiling instead of guessing. Whatever this returns is a fact about
-  # the site, not about the ceiling.
-  if [ "$code" != 200 ]; then
+  # PHASE 2 — the patient attempt. The fast poll never saw a CLEAN 200; that is
+  # the state where SLOW and BROKEN are indistinguishable, so ASK ONCE MORE
+  # without the tight ceiling instead of guessing. Whatever this returns is a
+  # fact about the site, not about the ceiling. A fast poll that only ever
+  # truncated lands here too, and that is exactly what this phase is for: the
+  # patient ceiling is the headroom a slow-but-complete render needs.
+  if ! clean_200 "$code" "$curl_rc"; then
     fast_code="$code"
-    log "HEALTH: no 200 in $HEALTH_FAST_ATTEMPTS attempts at the ${HEALTH_FAST_MAX}s ceiling (last: $fast_code) — one patient probe at ${HEALTH_PATIENT_MAX}s to tell a SLOW site from a BROKEN one"
+    [ "$fast_trunc" = 1 ] && [ "$code" = 200 ] && fast_code="200-but-TRUNCATED"
+    log "HEALTH: no clean 200 in $HEALTH_FAST_ATTEMPTS attempts at the ${HEALTH_FAST_MAX}s ceiling (last: $fast_code) — one patient probe at ${HEALTH_PATIENT_MAX}s to tell a SLOW site from a BROKEN one"
     out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_PATIENT_MAX" "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
     code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
     HEALTH_SECONDS="$t_total"
     i=$((i + 1))
-    [ "$code" = 200 ] && HEALTH_SLOW=1
+    clean_200 "$code" "$curl_rc" && HEALTH_SLOW=1
+  fi
+  # THE READ NEVER FINISHED, even at the patient ceiling. Refuse — but refuse in
+  # the engine's OWN words about the READ, never in the content branch's words
+  # about the site. The distinction the ledger needs is that this sentence
+  # carries no "bp-doc-id marker is empty", so `DeployLedger.classify/2` cannot
+  # reach its DOC_ID_EMPTY arm (whose meaning is "the marker was empty and
+  # NOTHING RECORDED WHY", agency :ambiguous) on bytes that were merely unread;
+  # it falls to the `HEALTH failed` prefix arm — HEALTH_GATE_FAILED, agency :box
+  # — the same honest class the never-200 refusal below already lands in.
+  if [ "$code" = 200 ] && ! clean_200 "$code" "$curl_rc"; then
+    rm -f "$body"; stop_slot "$slot"
+    HEALTH_DETAIL="slot $slot on :$port answered 200 at $path but the body was TRUNCATED after ${HEALTH_SECONDS}s (curl exit $curl_rc) — cut at the patient ${HEALTH_PATIENT_MAX}s ceiling after $HEALTH_FAST_ATTEMPTS attempts at the ${HEALTH_FAST_MAX}s fast ceiling (last $fast_code). The SSR markers were never read to the end, so this run states NOTHING about the site's content — it is an unfinished READ, not an empty document; live slot untouched"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
   if [ "$code" != 200 ]; then
     rm -f "$body"; stop_slot "$slot"
@@ -733,7 +776,12 @@ case "\$verb" in
     # ships a sentinel INSIDE its release: .slow-serve holds a per-request delay
     # in seconds, .broken-serve an HTTP status it always answers with. Everything
     # else gets the plain fast file server, byte-identical to before.
-    if [ -f "\$rel/.slow-serve" ] || [ -f "\$rel/.broken-serve" ]; then
+    # .truncate-serve holds a STALL in seconds taken MID-BODY: the <head> markers
+    # flush, then the stream hangs before bp-doc-id. That is the shape a probe
+    # ceiling turns into http_code=200 + curl exit 28 + a partial document.
+    if [ -f "\$rel/.truncate-serve" ]; then
+      python3 "$TD/trunc-server.py" "\$port" "\$rel" "\$(cat "\$rel/.truncate-serve")" >/dev/null 2>&1 &
+    elif [ -f "\$rel/.slow-serve" ] || [ -f "\$rel/.broken-serve" ]; then
       delay=0; status=200
       [ -f "\$rel/.slow-serve" ]   && delay="\$(cat "\$rel/.slow-serve")"
       [ -f "\$rel/.broken-serve" ] && status="\$(cat "\$rel/.broken-serve")"
@@ -771,6 +819,41 @@ class H(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
 PROBESRV
+  # THE TRUNCATING SLOT SERVER — a render that STREAMS. It answers 200
+  # immediately, flushes everything up to (but not including) the bp-doc-id
+  # marker, then stalls. That is the real asymmetry the template has:
+  # bp-build-id/bp-content-rev are literal <head> children and arrive in the
+  # first flush, bp-doc-id comes from the page component further down the
+  # stream. A probe ceiling that lands inside the stall therefore reads
+  # http_code=200, curl exit 28, and a document that carries two of the three
+  # markers. Threaded on purpose: each probe attempt must be answered on its own
+  # timeline, not queued behind the previous attempt's stall.
+  cat > "$TD/trunc-server.py" <<'TRUNCSRV'
+import http.server, socketserver, sys, time
+port, root, stall = int(sys.argv[1]), sys.argv[2], float(sys.argv[3])
+with open(root + "/index.html", "rb") as f:
+    DOC = f.read()
+CUT = DOC.index(b'<meta name="bp-doc-id"')
+class H(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.0"   # close-delimited: no Content-Length to betray the cut
+    def log_message(self, *a):
+        pass
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")
+        self.end_headers()
+        self.wfile.write(DOC[:CUT])
+        self.wfile.flush()
+        time.sleep(stall)
+        try:
+            self.wfile.write(DOC[CUT:])
+            self.wfile.flush()
+        except Exception:
+            pass
+class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+S(("127.0.0.1", port), H).serve_forever()
+TRUNCSRV
   # Fake npm: `ci` no-ops; `run build` emits a Next standalone layout carrying the
   # markers the health gate asserts. Lie/fail switches ride in FILES in the source
   # dir (cwd is the one channel the env scrub cannot close).
@@ -823,9 +906,10 @@ printf 'robots\n' > public/robots.txt
 # Carry the slot-behaviour sentinels INTO the release (STAGE's `cp -a src/.`
 # copies dotfiles), so the fake systemctl can boot a slot that is slow, or one
 # that never answers 200, without touching the engine's own code path.
-rm -f .next/standalone/.slow-serve .next/standalone/.broken-serve
+rm -f .next/standalone/.slow-serve .next/standalone/.broken-serve .next/standalone/.truncate-serve
 [ -f ./.slow-serve ]   && cp ./.slow-serve   .next/standalone/.slow-serve
 [ -f ./.broken-serve ] && cp ./.broken-serve .next/standalone/.broken-serve
+[ -f ./.truncate-serve ] && cp ./.truncate-serve .next/standalone/.truncate-serve
 true
 # basePath mode: an app built with basePath=/sites/<slug> serves its marker page
 # UNDER that prefix even on the raw node port — so also emit the index there, so
@@ -1199,7 +1283,7 @@ FAKENPM
       BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
       BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
       BARKPARK_SITE_HEALTH_PATIENT_MAX="${6:-20}" \
-      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+      bash "${SL_ENGINE:-$SELF}" > "$TD/out.log" 2> "$TD/err.log"; echo $?
   }
 
   echo "[selftest] e2e: a SLOW site (serves 200, past the per-attempt ceiling) is gated HEALTHY and SAYS it is slow"
@@ -1244,6 +1328,118 @@ FAKENPM
   check "MUTANT: no headroom -> the identical slow site exits 14"  [ "$rc" = 14 ]
   check "MUTANT: and it is called BROKEN, which is the false diagnosis being fixed" \
     grep -q 'BROKEN, not slow' "$TD/out.log"
+
+  # -------------------------------------------------------------------------
+  # A TRUNCATED 200 IS NOT A CONTENT FACT (task-60ee738ee0555798).
+  #
+  # THE SHAPE, and why it is not caught by the SLOW/BROKEN pair above: an SSR
+  # that STREAMS past the per-attempt ceiling answers http_code=200 (the status
+  # line arrived) with curl exit 28 (the body was cut mid-stream). The old
+  # `[ "$code" = 200 ] && break` read only the first number, so the gate walked
+  # on to the marker assertions holding a PARTIAL document — and the markers are
+  # asymmetrically placed: bp-build-id and bp-content-rev are literal <head>
+  # children (templates/search-starter/app/layout.tsx) and arrive in the first
+  # flush, bp-doc-id comes from the page component (app/(finder)/page.tsx) later
+  # in the stream. Truncated bytes therefore PASS two assertions and FAIL the
+  # third, landing in the empty-bp-doc-id branch, which — finding no
+  # bp-corpus-status marker in bytes it never finished reading — states "the SSR
+  # rendered no content document (no bp-corpus-status marker: this build predates
+  # the corpus-status contract…)". Every clause of that is false about a current
+  # build: it DID emit the marker and it DID render a document; the probe stopped
+  # reading. The row then lands as DOC_ID_EMPTY (:ambiguous) and the
+  # misattribution survives into the census.
+  #
+  # The `.no-corpus-legacy` case above pins that SAME sentence as HONEST for the
+  # build that genuinely emits no marker. Both cases reach one branch, so the
+  # branch was simultaneously proven honest and reachable dishonestly — which is
+  # exactly why the fix is upstream of it, in what counts as a 200 at all.
+  #
+  # Fixture: `.truncate-serve` holds a mid-body stall in seconds. Two ceilings,
+  # two outcomes, because the ceiling is the whole variable:
+  #   RECOVERABLE   stall 2s vs fast 1s / patient 20s — the fast poll truncates,
+  #                 the patient probe reads the document whole: deploy GREEN, SLOW.
+  #   UNRECOVERABLE stall 8s vs fast 1s / patient 3s  — even the patient probe is
+  #                 cut: refuse, naming the TRUNCATION, never the content.
+  # -------------------------------------------------------------------------
+  echo "[selftest] e2e: a TRUNCATED fast read is NOT accepted as a 200 — the patient probe reads the document whole and the site deploys"
+  printf '2\n' > "$SRC/.truncate-serve"
+  rc="$(sl_deploy truncsite tr1 truncsite "$(free_port)" "$(free_port)" 20)"
+  rm -f "$SRC/.truncate-serve"
+  check "truncating-then-complete deploy exit 0"   [ "$rc" = 0 ]
+  check "HEALTH ok"                                saw HEALTH ok tr1
+  check "SWITCH ok (the document WAS readable — just not inside the fast ceiling)" \
+    saw SWITCH ok tr1
+  check "the fast loop REFUSED the truncated 200 instead of breaking on it" \
+    grep -q 'answered 200 but curl exited 28 — the body was cut at the 1s ceiling' "$TD/out.log"
+  check "and it fell through to the patient probe, naming the truncated fast read" \
+    grep -q 'no clean 200 in 2 attempts at the 1s ceiling (last: 200-but-TRUNCATED)' "$TD/out.log"
+  check "the bp-doc-id it reports is the one from the COMPLETE read" \
+    grep -q 'bp-doc-id=doc-42' "$TD/out.log"
+  # THE FABRICATION, named. This is the sentence the truncated bytes used to
+  # produce, and it must not appear on a run whose document was readable.
+  check "it never claims the SSR rendered no content document" \
+    no_log_match 'the SSR rendered no content document'
+  check "it never claims the build predates the corpus-status contract" \
+    no_log_match 'predates the corpus-status contract'
+
+  echo "[selftest] e2e: a read TRUNCATED even at the patient ceiling refuses by naming the TRUNCATION — never as a fact about the content"
+  printf '8\n' > "$SRC/.truncate-serve"
+  rc="$(sl_deploy truncsite2 tr2 truncsite2 "$(free_port)" "$(free_port)" 3)"
+  rm -f "$SRC/.truncate-serve"
+  check "unreadable-within-the-ceiling deploy exit 14" [ "$rc" = 14 ]
+  check "HEALTH failed"                            saw HEALTH failed tr2
+  check "the detail says the body was TRUNCATED, with the seconds and the curl exit" \
+    grep -qE 'the body was TRUNCATED after [0-9]+\.[0-9]+s \(curl exit 28\)' "$TD/out.log"
+  check "it names the patient ceiling the read was cut at" \
+    grep -q 'cut at the patient 3s ceiling after 2 attempts at the 1s fast ceiling' "$TD/out.log"
+  check "it says the run states NOTHING about the site's content" \
+    grep -q "an unfinished READ, not an empty document" "$TD/out.log"
+  check "the TRUNCATION verdict ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: slot .* the body was TRUNCATED' "$TD/out.log"
+  # THE CLASSIFIER, asserted by the PRODUCER (same contract as the graph-code
+  # anchor above). `DeployLedger.classify/2` reaches DOC_ID_EMPTY on
+  # `stage == "HEALTH" and reason =~ "bp-doc-id marker is empty"`, and that class
+  # MEANS "the marker was empty and nothing recorded why" (agency :ambiguous).
+  # A truncated read is not that fact, so the detail must not carry the phrase —
+  # `Sites.Deploy.stage_failure_copy/1` prefixes it "HEALTH failed — ", which
+  # routes it to `health_gate?/1` instead: HEALTH_GATE_FAILED, agency :box, the
+  # same class the never-200 refusal already lands in. NO cloud-side change: put
+  # the phrase back into this sentence and the ledger silently re-acquires the
+  # fabricated class, so the anchor is asserted HERE, at edit time.
+  check "the detail carries NO 'bp-doc-id marker is empty' (would re-class it DOC_ID_EMPTY)" \
+    no_log_match 'bp-doc-id marker is empty'
+  check "and no invented corpus cause"             no_log_match 'predates the corpus-status contract'
+  check "it did NOT report the site as never-serving (it DID serve 200)" \
+    no_log_match 'NEVER served 200'
+  check "no SWITCH stage line at all"              nosaw SWITCH
+  check "Caddy never got a route for the refused site" \
+    sh -c "! grep -q 'BARKPARK_SITE_ROUTE:truncsite2' '$CF'"
+  check "the unreadable release is purged"         [ ! -d "$TD/sites/truncsite2/releases/tr2" ]
+
+  echo "[selftest] e2e: MUTATION PROOF — throw curl_rc away and the readable site is refused with the FABRICATED content diagnosis"
+  # ONE LINE, and it is the row's title verbatim: `clean_200` stops consulting
+  # its second argument, which is what `[ "$code" = 200 ] && break` did. With it,
+  # the fast poll breaks on the truncated 200, the patient probe never runs, the
+  # truncation refusal is unreachable, and the marker assertions read partial
+  # bytes — reproducing the fabricated sentence on a site that renders fine.
+  TRMUT="$TD/mutant-drops-curl-rc.sh"; TRMUTLIB="$TD/lib"
+  mkdir -p "$TRMUTLIB"
+  cp "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh" "$TRMUTLIB/"  # a mutant sources by its OWN dirname
+  awk '{ if ($0 == "  [ \"$1\" = 200 ] && [ \"$2\" = 0 ]") print "  [ \"$1\" = 200 ]"; else print }' \
+    "$SELF" > "$TRMUT"
+  check "the mutant differs by exactly ONE line (the mutation APPLIED)" \
+    [ "$(diff "$SELF" "$TRMUT" | grep -c '^[<>]')" = 2 ]
+  printf '2\n' > "$SRC/.truncate-serve"
+  mrc="$(SL_ENGINE="$TRMUT" sl_deploy truncsite3 tr3 truncsite3 "$(free_port)" "$(free_port)" 20)"
+  rm -f "$SRC/.truncate-serve"
+  check "MUTANT: the identical readable site is REFUSED (exit 14)"  [ "$mrc" = 14 ]
+  check "MUTANT: and the reason is the FABRICATED content diagnosis" \
+    grep -q 'the SSR rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract' "$TD/out.log"
+  check "MUTANT: which would land as DOC_ID_EMPTY — the classifier's own anchor" \
+    grep -q 'bp-doc-id marker is empty' "$TD/out.log"
+  check "MUTANT: and the truncation was never named at all" \
+    no_log_match 'the body was TRUNCATED'
+  echo "  mutation proof: with clean_200 reduced to '[ \"\$1\" = 200 ]', a site whose document IS readable at the patient ceiling exits 14 and reports 'the SSR rendered no content document … predates the corpus-status contract' — the three checks above (fast loop refused the truncated 200 / fell through to the patient probe / never claims no content document) all red"
 
   echo "[selftest] build_failure_reason resolves from the SHARED lib in THIS engine too"
   # The lift's whole point: one copy, both engines. If it ever gets re-forked into

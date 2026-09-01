@@ -7,6 +7,15 @@ For prod host identity (IP, paths, service name) see `docs/ops/PROD_OPS.md`.
 
 Other units here are installed **by the deploy**, not by hand: `barkpark-slot@` (blue/green app slots), `barkpark-agent` (monitoring beat), `barkpark-mcp` (`/mcp`), `barkpark-connectors` (the Connectors bridge behind `/connectors` — runbook: `docs/ops/connectors-deploy.md`). See `deploy/README.md`.
 
+## `barkpark-agent` — the two token files
+
+| File | Mode | Written by | Missing ⇒ |
+|---|---|---|---|
+| `/etc/barkpark/agent.token` | 0600 | provision (`agentInstallStep`) | unit exits — no beat at all |
+| `/etc/barkpark/agent.health.token` | 0600 | provision (`agentInstallStep`) | `req_per_s` / `p95_ms` / `err_5xx_per_s` stay `-1` (unmetered); the beat runs |
+
+The unit passes `--health-token-file` (a **path**, never a value). The health token is the box's own admin bearer — the same credential the health gate already presents to the same box's `GET /v1/instance/request-stats`. Backfill on a box provisioned before this existed: write that box's admin bearer to `/etc/barkpark/agent.health.token`, `chmod 600`, `systemctl restart barkpark-agent`. Confirm with `journalctl -u barkpark-agent | grep 'health token'` — the agent prints which source answered.
+
 ## Site plane — `barkpark-builder` + `barkpark-runtime`
 
 These two are **not** prod units. Their host is **the site's own box** — the managed box that serves that site. The build plane is *co-located* with the runtime by design: the builder writes the image tarball to `/var/lib/barkpark-builder/images` and the runtime reads it from the same local filesystem, so the handoff is a file move, never a registry push or a cross-host copy.

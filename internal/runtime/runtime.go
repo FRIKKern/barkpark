@@ -76,7 +76,7 @@ type Executor struct {
 
 	// Logger is called for non-fatal warnings the executor wants visible
 	// without failing the deploy — e.g. a best-effort drain that didn't
-	// succeed. nil -> silent. Mirrors waker.Waker.Logger.
+	// succeed. nil -> silent.
 	Logger func(format string, args ...any)
 }
 
@@ -104,11 +104,20 @@ func (d Deployment) isPreview() bool { return d.Environment == "preview" }
 
 // InlineSite is the slug + domains slice the control plane bundles with each
 // agent claim — exactly what the executor needs to render its Caddyfile.
-// ScaleMode is "always_on" (default) or "zero" — when "zero" the executor
-// spawns a per-site barkpark-waker (P7 stream C) on the allocated port
-// instead of running the container directly; the waker handles cold-start +
-// idle-reap. Caddy sees the same loopback port either way, so the on-box
-// reverse-proxy block is unchanged.
+// ScaleMode carries the control plane's "always_on" (default) or "zero"
+// instruction. NOTHING ON THIS SIDE ACTS ON IT: the executor always runs the
+// container directly, so a site created with scale_mode="zero" is served
+// always-on. The field is decoded (not dropped) only so the over-claim stays
+// traceable from the box back to the CP that accepts the value — see the
+// site-spawner charter D84, which records `scale_mode: "zero"` as ACCEPTED and
+// VALIDATED by the control plane with no implementation behind it.
+//
+// The P7 stream-C Docker waker that once backed this field (cmd/barkpark-waker,
+// internal/waker) was deleted as dead code: it had no systemd unit, no build
+// target and no caller, and this comment was the only thing that described it
+// as wired. Node scale-to-zero is a DEFERRED charter item, and it would be
+// built on the node-slot path, not on this Docker executor — so the deleted
+// Docker waker is not the implementation a future scale_mode="zero" wants.
 //
 // gh-6: PreviewSlug + PreviewHost are set (non-empty) only for a preview
 // deployment — the distinct Caddy slug key + the single host it answers on.

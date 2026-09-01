@@ -186,6 +186,47 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
       assert Content.draft?(created.doc_id), "create_document always writes drafts.<id>"
       assert_template_shape!(created)
     end
+
+    # task-a945b98cfd8d941f — THE STORED SHAPE, not the painted text. The desk,
+    # the breadcrumb and the tab all render "Untitled" either way (they fall
+    # back with `doc.title || "Untitled"`), so asserting page text here would
+    # pass with the defect fully present. What the human felt was that
+    # "Untitled" is real CONTENT in the block they are about to type in — the
+    # caret sat after it and the first keystroke appended
+    # ("UntitledHand walk MT4FI4TN"). So this asserts the persisted document.
+    test "the seeded title BLOCK is empty — \"Untitled\" is a display fallback, not stored text",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper"))
+
+      view
+      |> element(~s(button.pane-add-btn[phx-click="new-document"][phx-value-type="paper"]))
+      |> render_click()
+
+      created =
+        "paper"
+        |> Content.list_documents(@dataset, perspective: :raw)
+        |> Enum.find(&(&1.doc_id != "drafts.#{@fossil_slug}"))
+
+      assert created, "expected the created paper draft row to exist"
+
+      title_block =
+        Enum.find(created.content["blocks"], &(Map.get(&1, "role") == "title"))
+
+      assert title_block["id"] == "tpl-title"
+
+      assert title_block["text"] == "",
+             "a brand-new paper's title block must start EMPTY so typing does not append; got #{inspect(title_block["text"])}"
+
+      # …and the row title is not pre-filled either: `derive_title/2` fills it
+      # from the block the moment the author types, and until then every
+      # display site supplies the word itself.
+      refute created.title == "Untitled",
+             "the literal must not be STORED — the display fallbacks own that word"
+
+      # The fallback is real, not assumed: this is the exact expression the
+      # desk/breadcrumb/tab use, and it still reads "Untitled".
+      assert (created.title || "Untitled") == "Untitled"
+    end
   end
 
   describe "arm 2 — a pre-existing TEMPLATE-SEEDED draft-only paper opened by URL (D228)" do

@@ -16,6 +16,14 @@ defmodule BarkparkWeb.FinderLive do
   — the flat `/v1/graph` twin; a shared extraction is filed as backlog) and
   inlined as `data-*` attrs the `FinderGraph` hook (bulldocs layout) ingests.
 
+  THE SEARCH AND THE GRAPH ARE ONE SURFACE. Every resolved query pushes a
+  `graph-matches` event carrying the weighted hit set, which the hook hands to
+  the renderer's `setMatches` — so typing lights the matching nodes and dims the
+  rest. `data-external-search` tells the same renderer the host owns the query,
+  suppressing the in-canvas search box it otherwise draws past 30 nodes. Before
+  both, this page shipped a server-side search that never touched the canvas
+  BESIDE a client-side substring filter that never touched the result list.
+
   Tenancy: mounted FLAT on the public root, exactly like the flat `/papers`
   reader — reads resolve the Default workspace, published perspective only.
   That is threaded, not assumed: `mount/3` resolves
@@ -184,6 +192,21 @@ defmodule BarkparkWeb.FinderLive do
     {:noreply, push_patch(socket, to: finder_path(socket.assigns.dataset, query), replace: true)}
   end
 
+  # The shared graph hook installs `onNodeClick -> pushEvent("node-clicked")`
+  # UNCONDITIONALLY (`window.BarkparkGraph.mounted` in bp-graph.js), so every
+  # host that mounts it receives this event whether it asked for one or not.
+  # LiveView has no catch-all `handle_event/3`, so the missing clause was a
+  # FunctionClauseError that KILLED the view on the first node click: the page
+  # blanked and reconnected to a fresh, empty finder.
+  #
+  # The public finder has no per-node action to offer — the node is an id, its
+  # type lives only in the client-side payload, and `paper` is the one type with
+  # a public reader (see `public_href/2`), so inventing a navigation here would
+  # send every other node to a 404. This clause is therefore deliberately inert:
+  # it exists to keep the view alive and says so, rather than pretending a click
+  # does something.
+  def handle_event("node-clicked", _params, socket), do: {:noreply, socket}
+
   defp finder_path(dataset, query) do
     params =
       []
@@ -198,7 +221,49 @@ defmodule BarkparkWeb.FinderLive do
     end
   end
 
+  # THE FINDER -> GRAPH BRIDGE. `run_search/2` is the ONE place a query
+  # resolves — a typed keystroke, a reload, a pasted link and the back button
+  # all arrive here through `handle_params/3` — so it is the one place the graph
+  # can be told what matched. Every pass pushes `graph-matches` to the
+  # `FinderGraph` hook, which hands the list to the renderer's `setMatches/1`.
+  # The renderer has exposed that entry point all along; nothing on this page
+  # ever called it, so matches delivered per keystroke were ZERO and the canvas
+  # sat inert beside a working search.
+  #
+  # Pushing from HERE and not from `handle_event("search", ...)` is deliberate:
+  # the search handler only patches the URL, and `/finder?q=foo` opened cold
+  # must light the graph exactly like a typed query does.
   defp run_search(socket, raw) do
+    socket = resolve_search(socket, raw)
+    push_event(socket, "graph-matches", %{matches: graph_matches(socket.assigns)})
+  end
+
+  # `nil` = IDLE (no query): the hook clears the filter and the full corpus
+  # shows undimmed. `[]` = a query ran and matched nothing: every node dims.
+  # Two different payloads on purpose — collapsing them would render a zero-hit
+  # query identically to no query at all, which is the graph telling a lie about
+  # a search that did run.
+  #
+  # The weight curve is the one the React editions publish
+  # (`web/components/finder.tsx`, `graphMatches`): `w = 0.2 + 0.8·(1−t)^1.4`
+  # over the rank normalised across the returned set, rounded to 3 decimals.
+  # The renderer scales dot size, accent warmth and label prominence by `w`, so
+  # the top hit reads loudest — and sharing the curve keeps the three framework
+  # editions of this same surface visually identical rather than merely similar.
+  defp graph_matches(%{q: ""}), do: nil
+
+  defp graph_matches(%{hits: hits}) do
+    n = length(hits)
+
+    hits
+    |> Enum.with_index()
+    |> Enum.map(fn {hit, rank} ->
+      t = if n <= 1, do: 0.0, else: min(rank, n - 1) / (n - 1)
+      %{id: hit.id, w: Float.round(0.2 + 0.8 * :math.pow(1 - t, 1.4), 3)}
+    end)
+  end
+
+  defp resolve_search(socket, raw) do
     case {String.trim(to_string(raw || "")), socket.assigns.workspace_id} do
       {"", _} ->
         assign(socket, q: "", hits: [], hit_count: 0)
@@ -262,6 +327,7 @@ defmodule BarkparkWeb.FinderLive do
         data-edges={@graph_edges}
         data-root={@graph_root}
         data-rev={@node_count}
+        data-external-search="true"
         data-truncated={to_string(@graph_truncated)}
         data-truncation-reason={@graph_truncation_reason}
       >
@@ -341,7 +407,10 @@ defmodule BarkparkWeb.FinderLive do
   defp hit(doc) do
     id = Content.published_id(doc.doc_id)
 
-    %{title: doc.title || id, type: doc.type, href: public_href(doc.type, id)}
+    # `id` is the PUBLISHED id — byte-identical to the graph payload's
+    # `node.doc_id` (both go through `Content.published_id/1`), which is what
+    # makes `graph_matches/1` below addressable in the renderer.
+    %{id: id, title: doc.title || id, type: doc.type, href: public_href(doc.type, id)}
   end
 
   # `paper` is the ONLY type with a public reader — `live("/papers/:slug",
