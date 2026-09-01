@@ -7,8 +7,8 @@
 // referencing sources the caller can't see are dropped, never leaked.
 
 import { scopePrefix } from './scope'
+import { assertSegment } from './util/guards'
 import { request } from './transport'
-import { BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, BacklinksResult, BacklinksOptions } from './types'
 
 /**
@@ -21,8 +21,7 @@ export async function getBacklinks(
   id: string,
   opts?: BacklinksOptions,
 ): Promise<BacklinksResult> {
-  if (typeof id !== 'string' || id.length === 0)
-    throw new BarkparkValidationError('getBacklinks requires a non-empty id', { field: 'id' })
+  assertSegment(id, 'id')
   const path = `${scopePrefix(config)}/v1/data/backlinks/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal

@@ -8,6 +8,8 @@
 // presets, not width-parametric transforms, so there is no `srcSet` / `w=`
 // (responsive-width) support.
 
+import { isHttpUrl } from './util/guards'
+
 /**
  * Server rendition presets (see `Barkpark.Media.Renditions.@presets`).
  *
@@ -58,8 +60,15 @@ function assetUrl(asset: ImageRef): string | undefined {
  * - Otherwise → the original: an inline `url` if the asset carries one, else
  *   `<baseUrl>/images/<id>`.
  *
- * Returns `null` when the asset is nullish or no id/url can be resolved. A bare
- * URL string has no id, so a `preset` can't apply — the string is returned as-is.
+ * Returns `null` when the asset is nullish, when no id/url can be resolved, or
+ * when the stored url is not an absolute http(s) URL. That last case is a real
+ * guard, not a claim: an image field is attacker-writable content, and the
+ * inline branch used to return it verbatim — so `javascript:`, `data:`,
+ * `vbscript:` and protocol-relative `//host` strings came straight back out of a
+ * function whose whole job is to produce a URL for markup. It is a null here
+ * rather than a throw because this is a synchronous render helper with a
+ * documented `null` return; a bad field should blank the image, not crash the
+ * page. Relative paths (a single leading `/`) are still ours and pass through.
  *
  * @example
  * imageUrl(post.cover, { preset: 'hero', baseUrl: 'https://cdn.example.com' })
@@ -79,7 +88,12 @@ export function imageUrl(
   }
 
   const inline = assetUrl(asset)
-  if (inline) return base && inline.startsWith('/') ? `${base}${inline}` : inline
+  if (inline) {
+    // A single leading '/' is a path on our own origin; '//host' is scheme-relative
+    // and escapes it, so it goes through the scheme allowlist like any absolute URL.
+    if (inline.startsWith('/') && inline[1] !== '/') return `${base}${inline}`
+    return isHttpUrl(inline) ? inline : null
+  }
   if (id) return `${base}${prefix}/images/${encodeURIComponent(id)}`
   return null
 }

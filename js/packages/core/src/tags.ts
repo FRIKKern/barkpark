@@ -15,9 +15,9 @@
 // so a consumer never has to branch on the wire form.
 
 import { scopePrefix } from './scope'
+import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { assertNoCommaEntries } from './filter-builder'
-import { BarkparkValidationError } from './errors'
 import type {
   BarkparkClientConfig,
   ListTagsResult,
@@ -68,8 +68,10 @@ export async function getTagDocs(
   tag: string,
   opts?: TagDocsOptions,
 ): Promise<TagDocsResult> {
-  if (typeof tag !== 'string' || tag.length === 0)
-    throw new BarkparkValidationError('getTagDocs requires a non-empty tag', { field: 'tag' })
+  // Separators are allowed here and only here: a hierarchical tag `a/b` is a
+  // supported tag NAME, and encodeURIComponent collapses it to one `a%2Fb`
+  // segment. `.`/`..` are not — they survive the encode and retarget the request.
+  assertSegment(tag, 'tag', "tag must be non-empty and not '.' or '..'", true)
   const path =
     `${scopePrefix(config)}/v1/data/tags/${encodeURIComponent(config.dataset)}/${encodeURIComponent(tag)}${typeQuery(opts?.types)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }

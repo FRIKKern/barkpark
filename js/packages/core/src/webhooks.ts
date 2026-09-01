@@ -8,6 +8,7 @@
 // stays dependency-free (no transport) and tree-shakeable on the receive side.
 
 import { scopePrefix } from './scope'
+import { assertSegment, isHttpUrl } from './util/guards'
 import { request } from './transport'
 import { BarkparkNotFoundError, BarkparkValidationError } from './errors'
 import type {
@@ -23,15 +24,11 @@ function base(config: BarkparkClientConfig): string {
 
 // Reject a scheme-less/typo'd delivery URL client-side — a bad url ships to the
 // server otherwise and the hook silently never fires. Mirrors the absolute
-// http(s) guard in client.ts validateConfig for projectUrl.
+// http(s) guard in client.ts validateConfig for projectUrl. The parse+allowlist
+// itself lives in util/guards.ts (`isHttpUrl`), shared with imageUrl so the
+// package has exactly ONE scheme allowlist.
 function assertWebhookUrl(url: string, fn: string): void {
-  let parsed: URL
-  try {
-    parsed = new URL(url)
-  } catch {
-    throw new BarkparkValidationError(`${fn}: url must be an absolute http(s) URL`, { field: 'url' })
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+  if (!isHttpUrl(url)) {
     throw new BarkparkValidationError(`${fn}: url must be an absolute http(s) URL`, { field: 'url' })
   }
 }
@@ -59,9 +56,7 @@ export async function getWebhook(
   id: string,
   opts?: { signal?: AbortSignal },
 ): Promise<Webhook | null> {
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new BarkparkValidationError('getWebhook requires a non-empty id', { field: 'id' })
-  }
+  assertSegment(id, 'id')
   const path = `${base(config)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
@@ -111,9 +106,7 @@ export async function updateWebhook(
   input: UpdateWebhookInput,
   opts?: { signal?: AbortSignal },
 ): Promise<Webhook> {
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new BarkparkValidationError('updateWebhook requires a non-empty id', { field: 'id' })
-  }
+  assertSegment(id, 'id')
   // Partial patch — only validate url when the caller is actually changing it.
   if (input.url !== undefined) assertWebhookUrl(input.url, 'updateWebhook')
   const path = `${base(config)}/${encodeURIComponent(id)}`
@@ -136,9 +129,7 @@ export async function deleteWebhook(
   id: string,
   opts?: { signal?: AbortSignal },
 ): Promise<{ deleted: string }> {
-  if (typeof id !== 'string' || id.length === 0) {
-    throw new BarkparkValidationError('deleteWebhook requires a non-empty id', { field: 'id' })
-  }
+  assertSegment(id, 'id')
   const path = `${base(config)}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'write'; method: 'DELETE'; signal?: AbortSignal } = {
     kind: 'write',

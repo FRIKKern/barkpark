@@ -11,6 +11,7 @@
 // can render WHY two docs relate.
 
 import { scopePrefix } from './scope'
+import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { BarkparkValidationError } from './errors'
 import type { BarkparkClientConfig, RelatedResult, RelatedOptions } from './types'
@@ -26,8 +27,7 @@ export async function getRelated(
   id: string,
   opts?: RelatedOptions,
 ): Promise<RelatedResult> {
-  if (typeof id !== 'string' || id.length === 0)
-    throw new BarkparkValidationError('getRelated requires a non-empty id', { field: 'id' })
+  assertSegment(id, 'id')
   if (
     opts?.limit !== undefined &&
     (!Number.isInteger(opts.limit) || opts.limit < 1)
