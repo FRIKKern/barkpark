@@ -47,6 +47,20 @@ const MAX_SSE_BUFFER_BYTES = 1_048_576
 // one). See [clean-close-infinite-silent].
 const MAX_CONSECUTIVE_CLEAN_CLOSES = 5
 
+// [malformed-frame-silent, escalation] A run of this many CONSECUTIVE frames
+// whose `data:` is unusable escalates to a thrown error. onDroppedFrame reports
+// each skip, but a caller who passes NO callback would otherwise take unbounded
+// silent loss while the iterator's "here is every event" contract stayed
+// nominally true. Reset ONLY by a healthy DATA frame — deliberately NOT by a
+// keepalive, which proves the socket is alive and nothing about the encoder.
+// The count survives reconnects: a reconnect does not re-encode anything.
+//
+// Unlike MAX_CONSECUTIVE_CLEAN_CLOSES this stays ARMED under
+// maxReconnects: 'unbounded'. A clean close is a transport symptom a retry can
+// outlast; an encoder emitting garbage is a producer defect no retry fixes, so
+// retry-forever is not consent to lose every event forever.
+const MAX_CONSECUTIVE_DROPPED_FRAMES = 10
+
 // Under maxReconnects: 'unbounded' the clean-close escalation above is disarmed
 // (retry-forever means forever on clean closes too). Compensation: past the old
 // threshold the clean-close delay escalates on the jittered exponential up to
@@ -67,7 +81,9 @@ export interface ListenOptions {
    * Max reconnect attempts after an *error* (clean stream close doesn't count).
    * Default 5. 0 disables. `'unbounded'` retries forever AND disarms the
    * consecutive-clean-close escalation (the delay escalates to a 16s cap instead
-   * of throwing). The sentinel is a STRING deliberately, not Infinity:
+   * of throwing). It does NOT disarm the consecutive-malformed-frame escalation:
+   * a clean close is a transport symptom a retry can outlast, an encoder
+   * emitting garbage is not. The sentinel is a STRING deliberately, not Infinity:
    * `JSON.stringify(Infinity)` is `null`, which the `?? 5` default would silently
    * turn back into the bounded default across any serialization boundary — the
    * string survives JSON verbatim, and unknown strings fail loud.
@@ -96,6 +112,12 @@ export interface ListenOptions {
    * Purely observational — throwing from it is not a supported way to stop the
    * stream, and a throw here is swallowed so a logging callback cannot take down
    * a subscription. Use it to log, count, or alert.
+   *
+   * Passing no callback is not silent loss: after
+   * {@link MAX_CONSECUTIVE_DROPPED_FRAMES} consecutive dropped frames (reset by a
+   * healthy data frame, NOT by a keepalive) `listen()` throws a
+   * `BarkparkAPIError` naming repeated malformed frames — and it does so even
+   * under `maxReconnects: 'unbounded'`.
    */
   onDroppedFrame?: (raw: string, err: unknown) => void
   signal?: AbortSignal
@@ -185,6 +207,9 @@ export function createListenHandle<T = BarkparkDocument>(
   let lastEventId: string | undefined
   let reconnectCount = 0
   let cleanCloseCount = 0
+  // Consecutive unusable frames. Declared out here (like cleanCloseCount) so it
+  // survives reconnects — a reconnect does not fix a broken encoder.
+  let droppedFrameCount = 0
   const maxReconnectsOpt = opts?.maxReconnects ?? 5
   // 'unbounded' maps to POSITIVE_INFINITY internally so the reconnectCount
   // comparison below is unchanged; the sentinel additionally gates the
@@ -316,6 +341,8 @@ export function createListenHandle<T = BarkparkDocument>(
                     // idle-watchdog cycles over a quiet board would kill a healthy
                     // stream. (An instantly-terminating LB never emits a
                     // 30s-cadence keepalive, so the detector keeps its teeth.)
+                    // It deliberately does NOT reset droppedFrameCount: a keepalive
+                    // is evidence about the SOCKET, none about the ENCODER.
                     cleanCloseCount = 0
                     frameEnd = findFrameBoundary(buffer)
                     continue
@@ -358,12 +385,20 @@ export function createListenHandle<T = BarkparkDocument>(
                     } catch {
                       // A logging callback must not be able to kill the stream.
                     }
+                    // …and the callback is not the ONLY channel: a caller who
+                    // passed none still gets a bounded loss. Stays armed under
+                    // 'unbounded' — see MAX_CONSECUTIVE_DROPPED_FRAMES.
+                    if (++droppedFrameCount >= MAX_CONSECUTIVE_DROPPED_FRAMES) {
+                      throw new BarkparkAPIError('listen: repeated malformed frames')
+                    }
                     frameEnd = findFrameBoundary(buffer)
                     continue
                   }
 
                   const event = buildListenEvent<T>(parsed.eventName, parsed.eventId, payload)
-                  cleanCloseCount = 0 // healthy data frame — reset the silent-close escalation
+                  // Healthy DATA frame — the only thing that resets EITHER
+                  // escalation. (A keepalive resets only the first, above.)
+                  cleanCloseCount = droppedFrameCount = 0
                   yield event
                   frameEnd = findFrameBoundary(buffer)
                 }
