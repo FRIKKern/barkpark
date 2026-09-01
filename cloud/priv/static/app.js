@@ -13032,7 +13032,11 @@
       // deferred arm); every other settled row still hovers status · trigger · when.
       : (m.hint || (m.label + " · " + m.meta));
     // Inline-concat so the walker reads the literal head "fresh-badge fresh-badge--"
-    // (ALLOW_PREFIXES) rather than ""; dot ∈ up|down|deploy|rebuild, all real rules.
+    // (ALLOW_PREFIXES) rather than "". The dot set is NOT this comment's to state:
+    // it said up|down|deploy|rebuild "all real rules" while the cancelled arm and
+    // the else arm below both emitted a FIFTH dot, "unknown", with no rule at all.
+    // __css_check's E16 now DERIVES the set from this function's arms and reds on
+    // any dot without a .fresh-badge--<dot> rule (grep: FRESH_DOTS).
     return '<span class="fresh-badge fresh-badge--' + m.dot + (m.rebuilding ? " is-rebuilding" : "") +
       '" title="' + esc(title) + '">' +
       '<span class="fresh-dot" aria-hidden="true"></span>' +

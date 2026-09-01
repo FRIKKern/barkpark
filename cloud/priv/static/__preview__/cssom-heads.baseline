@@ -609,4 +609,19 @@
 # .support-key-fallback summary). Bumped in the same commit as the CSS change,
 # per the ratchet's own failure text, after confirming MISSES 0 locally
 # (Chrome, cssom-parity.mjs: 1340 authored == 1340 CSSOM rules).
-1340
+#
+# Re-measured 2026-09-01 (cch-w64-bl-fresh-badge-modifier-family-is-waived-by-its-own-allowlist):
+# 1342 authored heads, MISSES 0 — the +2 are the fifth freshness dot's own rules
+# (.fresh-badge--unknown, .fresh-badge--unknown .fresh-dot). freshnessModel has
+# always assigned dot "unknown" on the `cancelled` arm and on the unknown-status
+# else arm, and the class had NO rule, so the badge fell through to the BARE
+# .fresh-badge — which siteFreshnessSeg deliberately ships as the "Not deployed to
+# production" badge. A cancelled deploy therefore impersonated a site that had
+# never deployed: the same shape as .dep-deferred/.dep-queued recorded above, one
+# surface over. The new rules give up the FILLED dot for a hollow ring, so the
+# state cannot be confused with the base disc or with any of the four coloured dots.
+# MEASURED, NOT REASONED (D158): cssom-parity.mjs was RUN against the stale 1340 and
+# printed "!! BASELINE MISMATCH: 1342 authored rule heads, sidecar baseline is 1340
+# (+2)" with "MISSES 0" and "flattened selectors 1288 authored / 1288 CSSOM" on the
+# same run. Both numbers are copied from that printout, never from arithmetic.
+1342
