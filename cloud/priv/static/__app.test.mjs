@@ -4025,6 +4025,121 @@ test("cch-w33-s3: the pre-claim and empty-console silences are untouched", () =>
   assert.equal(hooks.deployIsPreClaim({ id: "q", status: "queued" }, "queued"), true);
 });
 
+// ── cch-w33-bl: two builder paths feed ONE console, and the panel could not
+// ── attribute the silence to either of them.
+//
+// Site.kind routes a deploy down one of two paths that write into the SAME
+// `deployment.console` array:
+//
+//   * kind == "container" — the OFF-BOX builder. internal/builder's consoleTee
+//     mirrors every complete line of the real build to
+//     POST /v1/builder/deployments/:id/console, which
+//     Registry.append_deployment_console/2 stores as a plain {line, at}. NO
+//     `stage` key. This console IS the build log.
+//   * kind in ["static","node"] — the ON-BOX relay. deploy/site-deploy*.sh
+//     posts NOTHING to the console endpoint (`grep -rn console deploy/` finds
+//     no endpoint call); the build log stays on the box in
+//     $BARKPARK_SITE_LOG_FILE. All this console ever receives is the six
+//     synthesized stage lines from Sites.Deploy.record_stage/2 via
+//     console_entry/1, whose entries DO carry `stage`.
+//
+// deployConsoleHtml read only e.line/e.at, so it called both "Build console"
+// and printed the entry count as though it were the log's size. For two of the
+// three site kinds the affordance claimed to hold a build log it was never
+// sent — and an operator staring at six terse stage lines could not tell
+// "no build output because none was sent to me" from "no build output because
+// the build printed none". The per-entry `stage` key was ALREADY on the wire,
+// unread. THE COUNT IS DELIBERATELY UNTOUCHED — it still reads "N lines", the
+// real number of entries, exactly as cch-w33-s3 pinned it.
+
+test("cch-w33-bl: a box-driven console (every entry carries a stage) is not called a build console", () => {
+  const d = {
+    id: "dep-box", status: "failed",
+    console: [
+      { line: "PLAN done", at: null, stage: "PLAN", status: "done" },
+      { line: "BUILD done", at: null, stage: "BUILD", status: "done" },
+      { line: "HEALTH failed — probe returned 502", at: null, stage: "HEALTH", status: "failed" },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  // The affordance names what it actually holds...
+  assert.match(html, /Deploy stages/);
+  assert.doesNotMatch(html, /Build console/);
+  // ...and says where the build output actually is.
+  assert.match(html, /built on the box/i);
+  assert.match(html, /log stayed there/i);
+  // cch-w33-s3's contract survives: the count is the REAL entry count.
+  assert.match(html, /deploy-console-count">3 lines/);
+});
+
+test("cch-w33-bl: the off-box builder's console is still the build console, and is NOT libelled", () => {
+  // THE PATH THAT CURRENTLY WORKS. A fix that only labels the broken path
+  // leaves exactly the same ambiguity the next time this one goes quiet.
+  const d = {
+    id: "dep-container", status: "failed",
+    console: [
+      { line: "#8 [builder 3/5] RUN npm ci", at: null },
+      { line: "npm ERR! code ELIFECYCLE", at: null },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.match(html, /Build console/);
+  assert.doesNotMatch(html, /Deploy stages/);
+  assert.doesNotMatch(html, /stayed there/i);
+  assert.match(html, /deploy-console-count">2 lines/);
+});
+
+test("cch-w33-bl: THE FLIP — the same lines with and without the stage key attribute to different paths", () => {
+  // Criterion 3, stated as one test: the discriminator is the ONLY difference
+  // between these two fixtures, so a branch that stops reading it fails here.
+  const lines = [{ line: "BUILD done", at: null }, { line: "SWITCH done", at: null }];
+  const asBuilder = hooks.deployConsoleHtml(
+    { id: "f1", status: "failed", console: lines.map((e) => ({ ...e })) },
+    false,
+  );
+  const asBox = hooks.deployConsoleHtml(
+    { id: "f2", status: "failed", console: [
+      { ...lines[0], stage: "BUILD", status: "done" },
+      { ...lines[1], stage: "SWITCH", status: "done" },
+    ] },
+    false,
+  );
+  assert.notEqual(
+    /Deploy stages/.test(asBox),
+    /Deploy stages/.test(asBuilder),
+    "adding the stage key must flip the attribution",
+  );
+  assert.match(asBox, /Deploy stages/);
+  assert.match(asBuilder, /Build console/);
+});
+
+test("cch-w33-bl: a MIXED console is never accused of holding no build output", () => {
+  // A box row that ALSO received real builder lines holds a genuine (partial)
+  // build log. Claiming "the log stayed on the box" there would be a new lie in
+  // place of the old one, so stage-only is an ALL, never an ANY.
+  const d = {
+    id: "dep-mixed", status: "failed",
+    console: [
+      { line: "PLAN done", at: null, stage: "PLAN", status: "done" },
+      { line: "npm ERR! code ELIFECYCLE", at: null },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.match(html, /Build console/);
+  assert.doesNotMatch(html, /Deploy stages/);
+  assert.doesNotMatch(html, /stayed there/i);
+});
+
+test("cch-w33-bl: an empty/pre-claim console is still silence, not a box claim", () => {
+  // stage-only is defined over a NON-EMPTY console: `[].every(...)` is true, so
+  // a naive predicate would label every empty panel a box deploy.
+  assert.equal(hooks.deployConsoleHtml({ id: "q", status: "queued" }, false), "");
+  assert.equal(hooks.deployConsoleHtml({ id: "t", status: "failed", console: [] }, false), "");
+  const active = hooks.deployConsoleHtml({ id: "b", status: "building" }, true);
+  assert.doesNotMatch(active, /Deploy stages/);
+  assert.match(active, /Waiting for the first log line/);
+});
+
 // ── failureCopy: raw builder failure_reason → human copy for the deploy-fail row
 
 test("failureCopy maps a known builder reason to friendly copy", () => {
