@@ -10703,6 +10703,43 @@ test("diagnosis: consumer roots are TOTAL — absent list vs. empty list, and ga
   assert.equal(m.consumerRoots[0].bytes, null, "an unknown status must not carry a number through");
 });
 
+test("diagnosis: a DEGRADED root is a measured FLOOR — 'or more', with the subtree it could not read named", () => {
+  // du finished and printed a total, but could not descend into a named
+  // subtree, so the number is a floor (guerrilla: 212K against a true 712K, a
+  // 70% shortfall). The SPA used to fold "degraded" to "unmeasured" and null
+  // its numbers — the fourth word, and the floor it protects, reached no eye.
+  const model = hooks.spaceModel({
+    consumer_roots: [
+      {
+        path: "/var/lib/containerd", status: "degraded", bytes: 217088, count: 4,
+        top: [{ name: "overlayfs", bytes: 131072 }],
+        degraded: ["/var/lib/containerd/io.containerd.runtime.v2.task"],
+        degraded_count: 3,
+      },
+    ],
+  }, null);
+
+  const r = model.consumerRoots[0];
+  assert.equal(r.status, "degraded", "the fourth status word must survive into the model");
+  assert.equal(r.bytes, 217088, "a degraded root carries a REAL floor, not a nulled one");
+  assert.equal(r.count, 4);
+  assert.deepEqual([...r.top.map((x) => x.name)], ["overlayfs"]);
+  assert.deepEqual([...r.degraded], ["/var/lib/containerd/io.containerd.runtime.v2.task"]);
+  assert.equal(r.degradedCount, 3);
+
+  const html = hooks.spacePanelHtml(model);
+  // The total is worded as a FLOOR, never as a size.
+  assert.match(html, /212\.0 KB or more/, "a floor must be worded 'or more', never rendered as a size");
+  assert.doesNotMatch(html, /not measured/, "a degraded root is MEASURED — a floor — not unmeasured");
+  // The named subtree, so the operator knows what the shortfall is.
+  assert.match(html, /io\.containerd\.runtime\.v2\.task/);
+  assert.match(html, /could not read/);
+  // The cap on the names list announces itself: 1 named, 3 hit → "and 2 more".
+  assert.match(html, /and 2 more/);
+  // The top child still renders — a degraded root is not an empty state.
+  assert.match(html, /overlayfs/);
+});
+
 test("diagnosis: the models are TOTAL — garbage never throws, and never fabricates calm", () => {
   for (const bad of [null, undefined, 0, "x", [], { signals: "nope" }, { state: "made-up" }]) {
     const m = hooks.pressureModel(bad);

@@ -21931,6 +21931,13 @@
       }).map(function (r) { return { name: r.name, bytes: r.bytes }; });
     }
     function num(v) { return (typeof v === "number" && isFinite(v) && v >= 0) ? v : null; }
+    // A list of PATHS — the degraded subtree names. Only non-empty strings
+    // survive (a corrupt member cannot name a place an operator can act on); a
+    // non-list is null, the same unmeasured sentinel the numbers use.
+    function strList(list) {
+      if (!Array.isArray(list)) return null;
+      return list.filter(function (s) { return typeof s === "string" && s !== ""; });
+    }
     var sites = (payload.sites && typeof payload.sites === "object") ? payload.sites : {};
     var top = rows(sites.top);
     var count = num(sites.count);
@@ -21945,16 +21952,25 @@
       return list.filter(function (r) {
         return r && typeof r.path === "string" && r.path !== "";
       }).map(function (r) {
-        var status = (r.status === "read" || r.status === "absent") ? r.status : "unmeasured";
+        var status = (r.status === "read" || r.status === "absent" || r.status === "degraded")
+          ? r.status : "unmeasured";
+        // A READ or a DEGRADED root carries numbers — a degraded walk finished
+        // and printed a real, SHORT total (a floor, worded "or more" by the
+        // view). Absent/unmeasured carry none. A -1 sentinel that slipped
+        // through still fails num() and lands as null, so no arm paints a
+        // negative size.
+        var measured = status === "read" || status === "degraded";
         return {
           path: r.path,
           status: status,
-          // Only a READ root is allowed to carry numbers. A -1 sentinel that
-          // slipped through with status "read" still fails num() and lands as
-          // null, so no arm can paint a negative size.
-          bytes: status === "read" ? num(r.bytes) : null,
-          top: status === "read" ? rows(r.top) : null,
-          count: status === "read" ? num(r.count) : null,
+          bytes: measured ? num(r.bytes) : null,
+          top: measured ? rows(r.top) : null,
+          count: measured ? num(r.count) : null,
+          // The subtrees a degraded walk could not descend into, BY PATH, and
+          // how many it hit — only a degraded root carries them, so the panel
+          // can name what the floor is short by.
+          degraded: status === "degraded" ? strList(r.degraded) : null,
+          degradedCount: status === "degraded" ? num(r.degraded_count) : null,
         };
       });
     }
@@ -22023,6 +22039,38 @@
         return '<div class="space-group">' +
           '<div class="space-group-head"><span class="space-group-name">' + esc(r.path) + "</span>" +
           '<span class="space-group-bytes dim">not on this box</span></div></div>';
+      }
+      // A DEGRADED root: the walk finished and printed a REAL total, but du
+      // could not descend into the named subtrees, so the number is a FLOOR —
+      // worded "or more", never as a size — and the names it could not read are
+      // stated so an operator knows what the shortfall is and where to `sudo
+      // du`. bytes/top/count are real here, exactly as for a read root.
+      if (r.status === "degraded") {
+        var dnote = "";
+        if (r.count !== null && r.top !== null && r.count > r.top.length) {
+          dnote = '<span class="space-note dim">top ' + esc(String(r.top.length)) +
+            " of " + esc(String(r.count)) + "</span>";
+        }
+        var names = "";
+        if (r.degraded && r.degraded.length) {
+          var extra = (r.degradedCount !== null && r.degradedCount > r.degraded.length)
+            ? " and " + esc(String(r.degradedCount - r.degraded.length)) + " more" : "";
+          names = '<span class="space-note dim">could not read ' +
+            r.degraded.map(esc).join(", ") + extra + "</span>";
+        }
+        // The floor. metricsBytesText already words a null/-1 as an em-dash, so
+        // "or more" only rides a real number — never "— or more".
+        var floorBytes = r.bytes === null
+          ? esc(metricsBytesText(r.bytes))
+          : esc(metricsBytesText(r.bytes)) + " or more";
+        return '<div class="space-group">' +
+          '<div class="space-group-head"><span class="space-group-name">' + esc(r.path) + "</span>" +
+          '<span class="space-group-bytes">' + floorBytes + "</span></div>" +
+          dnote + names +
+          (r.top && r.top.length
+            ? '<ul class="space-consumers">' + r.top.map(spaceConsumerHtml).join("") + "</ul>"
+            : "") +
+          "</div>";
       }
       if (r.status !== "read") {
         return '<div class="space-group">' +

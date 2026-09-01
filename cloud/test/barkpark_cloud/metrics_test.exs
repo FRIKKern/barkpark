@@ -769,6 +769,74 @@ defmodule BarkparkCloud.MetricsTest do
       assert hd(space.consumer_roots).status == "unmeasured"
     end
 
+    test "consumer_roots: a degraded root's status AND its named subtrees survive" do
+      # The real shape a `degraded` agent sends: du finished and printed a
+      # total, but could not descend into a named subtree, so the number is a
+      # FLOOR (measured on guerrilla: 212K reported against a true 712K) and the
+      # walk names what it could not read. The control plane used to coerce
+      # "degraded" back to "unmeasured" and drop the names entirely — the fourth
+      # word, and the floor it protects, never reached an eye.
+      space =
+        Telemetry.normalize_space(%{
+          "consumer_roots" => [
+            %{
+              "path" => "/var/lib/containerd",
+              "status" => "degraded",
+              "bytes" => 217_088,
+              "count" => 4,
+              "top" => [%{"name" => "overlayfs", "bytes" => 131_072}],
+              "degraded" => ["/var/lib/containerd/io.containerd.runtime.v2.task"],
+              "degraded_count" => 3
+            }
+          ]
+        })
+
+      root = hd(space.consumer_roots)
+
+      assert root.status == "degraded",
+             "the fourth status word must SURVIVE — coercing it to unmeasured throws away " <>
+               "a floor the operator can act on"
+
+      # The floor is a REAL, SHORT number — not nulled the way absent/unmeasured
+      # are — so the view can word it "or more".
+      assert root.bytes == 217_088
+      assert root.count == 4
+      assert root.top == [%{name: "overlayfs", bytes: 131_072}]
+
+      # The subtree it could not descend into, BY PATH, and how many it hit.
+      assert root.degraded == ["/var/lib/containerd/io.containerd.runtime.v2.task"]
+
+      assert root.degraded_count == 3,
+             "degraded_count carries how many the walk hit so a capped names list can say it is capped"
+    end
+
+    test "consumer_roots: an UNKNOWN status word still coerces to unmeasured (catch-all stays)" do
+      # Widening the closed set to include `degraded` must NOT open the gate to
+      # any word an agent invents: a status this control plane cannot interpret
+      # still lands as "unmeasured", the only safe direction, and carries no
+      # number and no degraded names through.
+      space =
+        Telemetry.normalize_space(%{
+          "consumer_roots" => [
+            %{
+              "path" => "/var/lib/snapd",
+              "status" => "brand-new-word",
+              "bytes" => 999,
+              "degraded" => ["/var/lib/snapd/x"],
+              "degraded_count" => 1
+            }
+          ]
+        })
+
+      root = hd(space.consumer_roots)
+      assert root.status == "unmeasured"
+      # An unknown word asserts no measurement: its degraded names are carried
+      # verbatim (the normalizer never invents), but the STATUS is what every
+      # surface branches on, and it says unmeasured.
+      assert root.degraded == ["/var/lib/snapd/x"]
+      assert root.degraded_count == 1
+    end
+
     test "a malformed consumer row is dropped, never rendered nameless or sizeless" do
       space =
         Telemetry.normalize_space(%{
