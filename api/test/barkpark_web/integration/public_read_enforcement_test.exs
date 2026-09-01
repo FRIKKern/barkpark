@@ -345,7 +345,13 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
         # What TokenController's PUBLIC mint route actually hands out when the
         # caller asks for both allowlisted permissions — the literal-list bypass.
         mixed: mint!(ws, ["public-read", "read"], "clamp public-read+read"),
-        read: mint!(ws, ["read"], "clamp read")
+        read: mint!(ws, ["read"], "clamp read"),
+        # The tier ABOVE `read`. Needed since task-a85afbbc0c4b1be3 mounted
+        # `Plugs.RequireWriteForMutation` in `:require_token`: a `read` token is
+        # now refused on the POST reindex arm by the WRITE gate, so proving the
+        # clamp is TIER-scoped (rather than route breakage) needs a principal
+        # that meets neither gate.
+        write: mint!(ws, ["read", "write"], "clamp write")
       }
     end
 
@@ -544,21 +550,46 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
 
     # The twin that makes the case above mean something. Without it, deleting
     # the route entirely (404) or breaking it for everyone would still read as
-    # "public-read is denied". The clamp must be TIER-scoped, so a `read` token
-    # must not receive PublicRead's denial on the same request.
+    # "public-read is denied". The clamp must be TIER-scoped.
+    #
+    # RE-ANCHORED (task-a85afbbc0c4b1be3). This used to use the `read` token and
+    # assert `refute resp.status == 403`. That stopped being the right probe
+    # when `Plugs.RequireWriteForMutation` mounted in `:require_token`: a `read`
+    # token is now refused on this POST by the WRITE gate — correctly, since
+    # reindex enqueues a full-corpus rebuild. The tier-scoping claim is
+    # unchanged, so the probe moves UP one tier to a principal that meets
+    # neither gate.
     #
     # The downstream outcome is deliberately NOT asserted: `reindex` enqueues an
     # Indx rebuild, so a 200-with-jobId and a canonical `internal_error` are both
     # legitimate depending on whether the worker is reachable in this env. What
-    # is never legitimate is a read token meeting the clamp.
-    test "reindex: a read token is NOT clamped — the 403 is tier-scoped, not route breakage", %{
-      conn: conn,
-      read: token
-    } do
+    # is never legitimate is a write token meeting the clamp.
+    test "reindex: a write token is NOT clamped — the 403 is tier-scoped, not route breakage",
+         %{conn: conn, write: token} do
       resp = conn |> authed(token) |> post("/v1/data/search/#{@dataset}/reindex")
 
       refute resp.status == 403
       refute resp.resp_body =~ "public-read tokens may only read"
+    end
+
+    # And the `read` tier's refusal is the WRITE gate's, never PublicRead's —
+    # the two denials must stay distinguishable or a regression in either one
+    # hides behind the other's message.
+    test "reindex: a read token is refused by the write gate, NOT by the public-read clamp", %{
+      conn: conn,
+      read: token
+    } do
+      body =
+        conn
+        |> authed(token)
+        |> post("/v1/data/search/#{@dataset}/reindex")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "forbidden"
+
+      refute body["error"]["message"] ==
+               "public-read tokens may only read published public documents",
+             "a `read` token met the PUBLIC-READ clamp — the clamp has stopped being tier-scoped"
     end
   end
 
