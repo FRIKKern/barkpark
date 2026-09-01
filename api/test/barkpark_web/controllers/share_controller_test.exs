@@ -409,6 +409,12 @@ defmodule BarkparkWeb.ShareControllerTest do
       # already confined.
       assert {:ok, _} = Sharing.add_share("#{scope_b}:docs,media:edit")
 
+      # FIXTURE NON-VACUITY. The attack row must be LIVE in the store before the
+      # listing is read: if `add_share/1` ever stops persisting this scope, the
+      # refutes below would pass while proving nothing at all. The `{:ok, _}`
+      # above only says the call returned — this says the row is really there.
+      assert Sharing.shared?(ws_b.slug, proj_b.slug, "production", :docs)
+
       # ws-A's own stored share — the actor DOES administer this one. Without
       # it this test would pass against a clamp that simply returns nothing.
       assert {:ok, _} = Sharing.add_share("ls-ws-a/default/production:papers:read")
