@@ -16,12 +16,14 @@ import (
 // boundary (FailureCopy) is a SECOND, independent scrub — it protects what a
 // person reads, not what is stored. Storage is what these tests protect.
 
-// fleetKeyHandoffFormat is a VERBATIM copy of the narration format string at
-// internal/provisioner/support.go:804 (PDF-D88). That line deliberately renders
-// a provider key VAR NAME with a PLACEHOLDER value so a developer can copy the
-// one-liner; it is the one named NON-defect the generic scrubber must not
-// mangle. TestFleetKeyHandoffNarration_StillLivesInProvisioner is the tripwire
-// that catches this copy going stale.
+// fleetKeyHandoffFormat is a VERBATIM copy of the narration format string in
+// internal/provisioner/support.go: the PDF-D88 key hand-off logf inside
+// (*supportRun).verifyRuntime — the one line in that file carrying
+// spec.keyVar. That line deliberately renders a provider key VAR NAME with a
+// PLACEHOLDER value so a developer can copy the one-liner; it is the one named
+// NON-defect the generic scrubber must not mangle.
+// TestFleetKeyHandoffNarration_StillLivesInProvisioner is the tripwire that
+// catches this copy going stale.
 const fleetKeyHandoffFormat = "agent provider keys are NEVER copied — hand the box its %s key yourself: ssh root@%s \"printf '%s=<your-key>\\n' >> /etc/barkpark/fleet-listener.env && systemctl restart barkpark-fleet-listener\""
 
 // syntheticNarration is one line carrying every shape the six-name allowlist
@@ -110,11 +112,13 @@ func TestScrubEnvSecrets_KeepsLegacySixNameCoverage(t *testing.T) {
 }
 
 // TestScrubEnvSecrets_PreservesPlaceholderInstruction is the criterion-4 trap.
-// internal/provisioner/support.go:804 narrates a provider key VAR NAME with an
-// angle-bracket PLACEHOLDER value. A generic ALLCAPS_KEY=value scrubber would
-// mangle it into `ANTHROPIC_API_KEY=[REDACTED]` and destroy an instruction a
-// developer has to be able to read and paste. The placeholder guard must let it
-// through BYTE-FOR-BYTE.
+// In internal/provisioner/support.go, the PDF-D88 key hand-off logf inside
+// (*supportRun).verifyRuntime — the line carrying spec.keyVar — narrates a
+// provider key VAR NAME with an angle-bracket PLACEHOLDER value. A generic
+// ALLCAPS_KEY=value scrubber would mangle it into
+// `ANTHROPIC_API_KEY=[REDACTED]` and destroy an instruction a developer has to
+// be able to read and paste. The placeholder guard must let it through
+// BYTE-FOR-BYTE.
 func TestScrubEnvSecrets_PreservesPlaceholderInstruction(t *testing.T) {
 	for _, keyVar := range []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY"} {
 		line := fmt.Sprintf(fleetKeyHandoffFormat, "claude", "203.0.113.9", keyVar)
