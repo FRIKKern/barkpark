@@ -51,8 +51,8 @@
 # the syntax error killed the shell mid-run and the exit status of the last
 # completed command — a passing assertion — was what the caller saw.
 #
-# CI WAS NEVER EXPOSED: both jobs in .github/workflows/required-checks-drift.yml
-# invoke this suite with `bash`. This was an agent- and human-facing trap, not a
+# CI WAS NEVER EXPOSED: both jobs that invoke this suite from
+# .github/workflows/required-checks-drift.yml call it with `bash`. This was an agent- and human-facing trap, not a
 # CI hole, and it is recorded here as one.
 #
 # So the file now refuses a non-bash or POSIX-mode interpreter BEFORE the first
