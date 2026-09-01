@@ -722,14 +722,38 @@ if [ "$MODE" = selftest ]; then
   [ "$caps_rc" -eq 70 ] \
     || fail_selftest "a selftest that ABORTED on an unbound variable exited $caps_rc, expected 70 — the EXIT trap is resetting the status, so this harness can die having run zero arms and still report PASS. Its output was: $(printf '%s' "$caps_out" | tail -2 | tr '\n' ' ')"
 
+  # k8: an exemption row ADDED without bumping its pin must RED. An exemption
+  #     list is the one table here whose growth is silent by nature — nothing
+  #     downstream notices a file that simply stops being verdicted — so the
+  #     count is the only thing standing between one argued exception and a
+  #     drawer of them. The added row DUPLICATES the existing one, so lookup is
+  #     unchanged and the count is the ONLY difference.
+  ao_expected_literal=$(grep -E '^APPEND_ONLY_ROWS_EXPECTED=[0-9]+$' "$SELF" | head -1 | cut -d= -f2)
+  ao_dup_row=$(sed -n "/^done <<.APPEND_ONLY.$/,/^APPEND_ONLY$/p" "$SELF" | grep -E '^[A-Za-z].*\.md$' | head -1)
+  awk -v add="$ao_dup_row" '
+       { print }
+       /^done <<.APPEND_ONLY.$/ && !done_add { print add; done_add = 1 }' "$SELF" > "$caps_probe"
+  [ "$(sed -n "/^done <<.APPEND_ONLY.$/,/^APPEND_ONLY$/p" "$caps_probe" | grep -cE '^[A-Za-z].*\.md$' || true)" -eq $((ao_expected_literal + 1)) ] \
+    || fail_selftest "the exemption row-adding step did not add a row — this arm would have proven nothing"
+  set +e
+  caps_out="$(bash "$caps_probe" 2>&1)"
+  caps_rc=$?
+  set -e
+  [ "$caps_rc" -eq 1 ] \
+    || fail_selftest "an UNPINNED extra append-only exemption exited $caps_rc, expected 1 — files can be exempted from the byte gate without review"
+  case "$caps_out" in
+    *"append-only exemption table walked $((ao_expected_literal + 1)) row(s), expected $ao_expected_literal"*) ;;
+    *) fail_selftest "an UNPINNED extra exemption did not print its row-count FAIL line — the exemption list can grow quietly" ;;
+  esac
+
   SELFTEST_COMPLETED=1
-  echo "check-doc-budgets --selftest: PASS (24 arms: pristine, in-span plant," \
+  echo "check-doc-budgets --selftest: PASS (25 arms: pristine, in-span plant," \
        "re-pin, marker relocation, span cap, missing golden, no markers, bad arg," \
        "span-cap clamp both directions, retired env var inert, caps green control," \
        "caps-table dark, caps-table unpinned row, over-cap file, missing capped" \
        "file, freeze literal pin, DISCOVERY DARK, over-header doc, grown frozen" \
        "doc, paid frozen doc, stale freeze row, unpinned freeze row, harness" \
-       "aborts non-zero — every" \
+       "aborts non-zero, unpinned exemption row — every" \
        "probe arm asserts the EXIT CODE and its own message)"
   exit 0
 fi
@@ -886,7 +910,21 @@ DISCOVERY_HEADER_RE='^<!-- doc-tier: (agent|human|cold) \| canonical-for: [A-Za-
 # reds, and a frozen doc that has come back UNDER its header budget also reds,
 # telling you to delete its row. So paying a debt is not optional bookkeeping —
 # the gate refuses until the row is gone.
-FREEZE_ROWS_EXPECTED=39
+FREEZE_ROWS_EXPECTED=38
+
+# APPEND-ONLY RECORDS. A byte ceiling on a file that grows by design is a gate
+# in front of the thing it is supposed to protect: docs/ops/break-glass-log.md
+# says of ITSELF that it is "the procedure at the top, the append-only record at
+# the bottom", so freezing it would red this gate on every incident entry, at
+# the exact moment nobody should be arguing with CI. It is counted as REACHED
+# and adjudicated — it just gets no size verdict, and the run says so by name.
+#
+# THIS IS NOT A GENERAL ESCAPE HATCH, and the count is pinned because an
+# exemption list is the classic tripwire that stops discriminating once it
+# grows: the eighth entry is waved through by the seven above it. An addition
+# needs the same argument this one carries — the FILE ITSELF must declare that
+# it is an append-only record — plus the two-line friction of bumping the pin.
+APPEND_ONLY_ROWS_EXPECTED=1
 
 FREEZE_ROWS_WALKED=0
 FREEZE_TABLE=""
@@ -915,11 +953,10 @@ docs/decisions/deferred.md 3892
 docs/media/DISCOVERY.md 2445
 docs/ops/barkpark-cloud-go-live.md 10564
 docs/ops/bokbasen-go-live.md 5153
-docs/ops/break-glass-log.md 9272
 docs/ops/connectors-deploy.md 10694
 docs/ops/github-sync.md 8693
 docs/ops/mcp-serve-validation.md 13209
-docs/ops/merge-gates.md 72393
+docs/ops/merge-gates.md 72395
 docs/ops/npm-rollback-playbook.md 11433
 docs/ops/vercel-dns-connect.md 12390
 docs/plugins/codelists-byo.md 2081
@@ -939,6 +976,25 @@ docs/swarm/personal-access-tokens.md 6925
 docs/swarm/subscription-billing.md 7317
 docs/swarm/teams-invitations.md 4937
 FREEZE
+
+APPEND_ONLY_ROWS_WALKED=0
+APPEND_ONLY_TABLE=""
+while read -r ao_path; do
+  [ -z "$ao_path" ] && continue
+  APPEND_ONLY_ROWS_WALKED=$((APPEND_ONLY_ROWS_WALKED + 1))
+  APPEND_ONLY_TABLE="$APPEND_ONLY_TABLE$ao_path
+"
+done <<'APPEND_ONLY'
+docs/ops/break-glass-log.md
+APPEND_ONLY
+  if [ "$APPEND_ONLY_ROWS_WALKED" -ne "$APPEND_ONLY_ROWS_EXPECTED" ]; then
+    echo "FAIL: the append-only exemption table walked $APPEND_ONLY_ROWS_WALKED row(s)," \
+         "expected $APPEND_ONLY_ROWS_EXPECTED. An exemption list that can grow without" \
+         "review stops discriminating; bump the pin in the same edit, in front of a reviewer."
+    FAIL=1
+  else
+    echo "ok:   append-only exemption table walked all $APPEND_ONLY_ROWS_WALKED row(s)"
+  fi
   if [ "$FREEZE_ROWS_WALKED" -ne "$FREEZE_ROWS_EXPECTED" ]; then
     echo "FAIL: the freeze table walked $FREEZE_ROWS_WALKED row(s), expected $FREEZE_ROWS_EXPECTED." \
          "Either it went dark (a broken heredoc freezes NOTHING and every frozen doc" \
@@ -966,6 +1022,15 @@ $dpath
     DISCOVERY_WALKED=$((DISCOVERY_WALKED + 1))
     DISCOVERY_SEEN="$DISCOVERY_SEEN$dpath
 "
+    case "
+$APPEND_ONLY_TABLE" in
+      *"
+$dpath
+"*)
+        echo "ok:   $dpath EXEMPT — an append-only record carries no byte ceiling (still reached and counted)"
+        continue
+        ;;
+    esac
     dtok=$(printf '%s\n' "$dhead" | sed -E 's/.*budget: ([0-9]+)tok.*/\1/')
     dcap=$((dtok * DOC_BUDGET_BYTES_PER_TOKEN))
     dsize=$(wc -c < "$dpath" | tr -d ' ')
