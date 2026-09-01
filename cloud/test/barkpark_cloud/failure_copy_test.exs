@@ -792,6 +792,27 @@ defmodule BarkparkCloud.FailureCopyTest do
     # leaked. This row is the only thing that reds on that mutation.
     @unprefixed_bearer "nJq2LmT4vB" <> "7nR1zC8kW5"
 
+    # THE MINTED PER-INSTANCE CREDENTIALS. `bp_admin_…` / `bp_read_…` are what
+    # `setup.GenerateAdminToken` actually mints and what the provisioner installs
+    # on every box — `internal/provisioner/console.go`'s `adminTokenRe` exists for
+    # exactly this shape, and `internal/builder/console.go`'s `builderTokenRe`
+    # generalises it to `bp_[a-z]+_`. This module's provider-prefix clause knew
+    # `bppat_`/`bpcs_` but NOT the `bp_<kind>_` family, so the one credential the
+    # control plane mints for every provisioned site was the one it could not see.
+    #
+    # A `-` and a `_` are kept in each body on purpose: without one the body is a
+    # contiguous 32+ mixed-case alnum run and the BARE-TOKEN clause redacts it by
+    # accident, which would make these rows pass even unfixed.
+    @bp_admin "bp_admin_" <> "9aB3xQ7z-LmNpR4tV" <> "6wY2_Kj8Xm2QpL9vR4tZ7wN1cB"
+    @bp_read "bp_read_" <> "Zx7Qm2Lp-9Vr4Tz8W" <> "n1Cb6Yh3_sD5fG0aQ2eR7uI9K"
+
+    # A DATABASE_URL's userinfo. The Go runner has carried `ectoUserinfoRe` since
+    # the scrub was written (`internal/cli/cloud/warmpool.go`), but THIS boundary
+    # never grew the clause: `DATABASE_URL` is not one of the key clause's key
+    # words, and the password sits behind a `//` that no other clause reaches — so
+    # the DB password shipped to the screen in cleartext.
+    @db_password "Qp9vR4tZ-7wN1cB6yH3sD5fG0"
+
     # POSITIVES: every shape a remote capture can carry a live credential in.
     # Each row is {label, input, must_not_survive}.
     @positives [
@@ -838,7 +859,25 @@ defmodule BarkparkCloud.FailureCopyTest do
       {"generic SCREAMING_SNAKE env secret", "env: MY_SECRET=Qp9vR4tZ7wN1cB6yH3sD5fG0",
        "Qp9vR4tZ7wN1cB6yH3sD5fG0"},
       {"generic SCREAMING_SNAKE env token", "env: DEPLOY_TOKEN=Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3",
-       "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"}
+       "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"},
+
+      # THE MINTED BOX CREDENTIAL, bare in prose — the one carrier shape no other
+      # clause can reach. In an env fold (`ADMIN_TOKEN=bp_admin_…`) the key clause
+      # already covers it and as a `Bearer` the bearer clause does, so BARE is the
+      # only row that isolates the provider-prefix clause and reds on its absence.
+      {"minted admin token bare in prose", "installed " <> @bp_admin <> " on the box", @bp_admin},
+      {"minted read token bare in prose", "agent inherited " <> @bp_read <> " and exited 1",
+       @bp_read},
+
+      # A DATABASE_URL fold. The password lives in the URL's userinfo, which the
+      # key clause cannot see (`DATABASE_URL` is not one of its key words, and the
+      # value it would take is the whole URL only if it matched at all).
+      {"ecto URL userinfo (DATABASE_URL fold)",
+       "migrate failed: DATABASE_URL=ecto://bp_user:" <>
+         @db_password <> "@db.internal:5432/barkpark", @db_password},
+      {"postgres URL userinfo bare in prose",
+       "repo could not connect to postgres://admin:" <> @db_password <> "@10.0.0.4/bp",
+       @db_password}
     ]
 
     # NEGATIVES: shapes a person NEEDS to read. A redacted git SHA costs them the
@@ -884,7 +923,18 @@ defmodule BarkparkCloud.FailureCopyTest do
       # "hashed_password =[redacted] before" — copy loss where no secret was.
       {"an Elixir comparison echoed from a stack trace, not an assignment",
        "match failed: hashed_password == before"},
-      {"a guard clause echoed from the build log", "refused because deploy_token == nil"}
+      {"a guard clause echoed from the build log", "refused because deploy_token == nil"},
+
+      # THE PLACEHOLDER. `internal/provisioner/support.go` deliberately narrates
+      # the provider-key hand-off with the VAR NAME and an angle-bracket
+      # placeholder, because the key is the one secret Barkpark never copies — the
+      # developer pastes it themselves. That line is an INSTRUCTION, and the key
+      # clause was redacting `<your-key>` into `[redacted]`, destroying the only
+      # copy telling the person what to type. A real credential never starts with
+      # `<`, so excluding that one byte costs the redaction nothing.
+      {"the provider-key hand-off instruction keeps its placeholder",
+       ~s(hand the box its key: printf 'ANTHROPIC_API_KEY=<your-key>\\n' >> /etc/barkpark/fleet-listener.env)},
+      {"a generic angle-bracket placeholder in a key position", "set api_key=<paste-it-here>"}
     ]
 
     for {label, input, secret} <- @positives do
