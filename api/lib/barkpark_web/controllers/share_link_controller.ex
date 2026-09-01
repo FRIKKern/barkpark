@@ -314,7 +314,11 @@ defmodule BarkparkWeb.ShareLinkController do
         mime = file.mime_type || "application/octet-stream"
         disposition = if MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline"
 
-        case Barkpark.Media.Blobstore.serve_strategy(file.path,
+        # ROW-ADDRESSED (task-8eb6542ece62aff1): a share link is a legitimate
+        # principal, but it is a principal for ONE ROW — so it must resolve that
+        # row's own object, never whatever object another tenant's row sits on at
+        # the same flat path. Same seal as MediaController.serve/2.
+        case Barkpark.Media.Blobstore.serve_strategy(file,
                response_content_type: MediaFile.serve_content_type(mime),
                response_content_disposition: disposition
              ) do

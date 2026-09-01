@@ -233,7 +233,14 @@ defmodule BarkparkWeb.MediaController do
       # collapse/nosniff/disposition headers itself (maybe_send_file), and the
       # REDIRECT branch bakes the SAME collapsed type + disposition into the
       # presigned query (response-content-*) so the bucket echoes them.
-      case Blobstore.serve_strategy(file.path,
+      # ROW-ADDRESSED, not path-addressed (task-8eb6542ece62aff1). Passing
+      # `file.path` addressed the store by the path ALONE, and `media_files`
+      # uniqueness is `(path, dataset_id)` — so two rows in different tenants at
+      # one path resolved to ONE object and the second claimant's own scoped GET
+      # answered 200 with the first one's bytes. The `%MediaFile{}` head resolves
+      # THIS row's `object_key` (`Media.Storage.ObjectKey`). `file.path` remains
+      # the published reference and is still what the JSON and URL builders emit.
+      case Blobstore.serve_strategy(file,
              response_content_type: MediaFile.serve_content_type(mime),
              response_content_disposition: disposition(mime)
            ) do

@@ -51,6 +51,7 @@ teams-tenant-id	teamsTenantId
 template-manifest	Load
 tenancy-scope	scope_to_workspace_or_global
 tenant-blob-key	blob_key
+tenant-blob-read-key	for_row
 totp-step-verification	matching_step
 url-scoped-build	ScopedURL
 user-auth	register_user

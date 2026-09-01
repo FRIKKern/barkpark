@@ -117,7 +117,11 @@ defmodule Barkpark.Media.Renditions do
     # one-time cache download under an object-storage backend). The rendition
     # OUTPUT stays a plain local write regardless of backend — renditions are
     # a regenerable cache, never routed through remote storage.
-    case Blobstore.ensure_local(file.path) do
+    # ROW-ADDRESSED (task-8eb6542ece62aff1): the rendition SOURCE must be this
+    # row's own object, never whatever object another tenant's row happens to
+    # hold at the same flat path — a substituted source would bake a foreign
+    # image into a cache served under this row's id.
+    case Blobstore.ensure_local(file) do
       {:ok, src} ->
         File.mkdir_p!(Path.dirname(dest))
 

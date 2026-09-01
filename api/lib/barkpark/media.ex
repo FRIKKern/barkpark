@@ -6,7 +6,7 @@ defmodule Barkpark.Media do
   alias Barkpark.Content
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Delivery.{Cdn, Events}
-  alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Media.Storage.{MediaFile, ObjectKey}
   alias Barkpark.Plugins.Media.Assets
 
   @asset_type "mediaAsset"
@@ -179,6 +179,11 @@ defmodule Barkpark.Media do
         # The backend write failed. A partial write may survive → best-effort
         # cleanup so no orphan blob remains, then report storage as unavailable
         # (503) rather than raising.
+        #
+        # PATH-ADDRESSED ON PURPOSE (task-8eb6542ece62aff1 consumer sweep): this
+        # is not a read of a row's `path` — it removes the key `blob_key/3` just
+        # chose for THIS upload, which is that row's object address, and the row
+        # may not exist yet. There is nothing to resolve a tenant from.
         _ = Blobstore.delete(relative_path)
         {:error, :storage_unavailable}
     end
@@ -202,6 +207,10 @@ defmodule Barkpark.Media do
         # Insert (validation / DB) failed — the blob is already persisted, so
         # remove it to avoid orphaning bytes with no owning row, then surface
         # the original error unchanged (happy path + error shape preserved).
+        #
+        # PATH-ADDRESSED ON PURPOSE (task-8eb6542ece62aff1 consumer sweep): the
+        # insert FAILED, so there is no row to address from — and the key being
+        # removed is the one `blob_key/3` chose for this very upload.
         _ = Blobstore.delete(relative_path)
         error
     end
@@ -234,6 +243,18 @@ defmodule Barkpark.Media do
   #
   # A NULL `dataset_id` has no prefix to apply and stays flat: that is the legacy
   # / untenanted layer, untouched.
+  #
+  # THE READ IS SEALED TOO, and this note now says so (task-8eb6542ece62aff1).
+  # It used to record a RESIDUAL here: keying at birth left the read addressing
+  # objects by `media_files.path` alone, so two hand-crafted rows at one flat
+  # path still substituted on read. That is closed. `media_files.object_key`
+  # holds each row's OWN object address — decided once at insert by
+  # `Barkpark.Media.Storage.ObjectKey.derive/3`, backfilled for existing rows by
+  # migration `20260901120000` — and every byte-resolving consumer of `path`
+  # (`Blobstore.serve_strategy/2`, `ensure_local/1`, `delete/1`, each via a
+  # `%MediaFile{}` head) goes through `ObjectKey.for_row/1`. A flat path is now
+  # only ever resolved within the tenant whose row matched. `blob_key/3` still
+  # owns BIRTH; `ObjectKey` owns the READ.
   #
   # PUBLIC so it has exactly ONE owner: any future write seam that needs to place
   # a blob calls this instead of restating the rule, and the flat (legacy) clause
@@ -565,7 +586,11 @@ defmodule Barkpark.Media do
             defer_media_effect(fn ->
               Cdn.invalidate(file)
               Events.dispatch(file.dataset, "media.deleted", file, doc)
-              Blobstore.delete(file.path)
+              # ROW-ADDRESSED (task-8eb6542ece62aff1): remove THIS row's object.
+              # Path-addressed, a second claimant's delete would erase the first
+              # claimant's bytes — a cross-tenant DESTROY through the same hole
+              # the read substitution came through.
+              Blobstore.delete(file)
               Barkpark.Media.Renditions.delete_for_file(file.id)
             end)
 
@@ -684,14 +709,16 @@ defmodule Barkpark.Media do
     * `{:error, :unscoped_blob_write}` — `opts` carried no `:workspace_id`. There
       is no unscoped blob write; the caller must name the owning workspace.
     * `{:error, :blob_key_not_owned}` — a `media_files` row at this key belongs to
-      a DIFFERENT workspace, or to none at all. The store is addressed by the very
-      string `media_files.path` holds, so the tenant wall on THIS route — where
-      the caller supplies the key — is OWNERSHIP of the key. Since
-      task-918106d49c62563e a key BORN through `upload/3` also carries a
-      `d/<dataset_id>/` prefix (see `blob_key/3`), so newly-written keys are
-      tenant-disjoint by construction and this predicate is the guard on
-      caller-supplied ones. It remains a WRITE-side predicate and structurally
-      cannot close a read-side substitution; see `blob_key/3` for what does.
+      a DIFFERENT workspace (or to none at all) and the caller's workspace holds
+      NO row here: the caller is naming someone else's key. When the caller DOES
+      own a row at this path the push is accepted and the bytes land at that
+      row's `object_key` (`Barkpark.Media.Storage.ObjectKey`), which for a
+      contested flat key is the caller's own tenant shadow — so a second
+      claimant is no longer wedged out of holding its own bytes
+      (task-8eb6542ece62aff1). Since task-918106d49c62563e a key BORN through
+      `upload/3` also carries a `d/<dataset_id>/` prefix (see `blob_key/3`), so
+      newly-written keys are tenant-disjoint by construction and this predicate
+      is the guard on caller-supplied ones.
     * `{:error, :empty_body}` — a zero-byte body (422). No real media blob is
       empty; the common cause is a caller mislabeling the content-type (e.g.
       `application/json`), which lets `Plug.Parsers` consume the body before the
@@ -719,19 +746,31 @@ defmodule Barkpark.Media do
   def put_blob(relative_path, body, opts)
       when is_binary(relative_path) and is_binary(body) and is_list(opts) do
     with true <- valid_blob_path?(relative_path) or {:error, :invalid_path},
-         :ok <- authorize_blob_key(relative_path, opts) do
-      put_validated_blob(relative_path, body)
+         {:ok, object_key} <- authorize_blob_key(relative_path, opts) do
+      # The bytes land at the caller's OWN row's object address, which for every
+      # uncontested key IS `relative_path`. The RECEIPT still names the
+      # caller-supplied path: that is the published reference, and the object
+      # address underneath it is not the caller's business (task-8eb6542ece62aff1).
+      case put_validated_blob(object_key, body) do
+        {:ok, _object_key, receipt} -> {:ok, relative_path, receipt}
+        error -> error
+      end
     else
       {:error, _reason} = error -> error
     end
   end
 
-  # The blob keyspace is FLAT and instance-wide: `Blobstore` resolves an object
-  # by the very string that `media_files.path` holds (serve/2 →
-  # `Blobstore.serve_strategy(file.path)`, `delete_file/2` →
-  # `Blobstore.delete(file.path)`). A key is therefore OWNED by whatever
-  # workspace owns the `media_files` row(s) at that path, and the tenant wall on
-  # THIS route — the one place a CALLER names the key — is ownership of it.
+  # This route is the one place a CALLER names a blob key, so the tenant wall on
+  # it is OWNERSHIP of that key by the caller's workspace.
+  #
+  # SUPERSEDED, and the correction matters (task-8eb6542ece62aff1). This comment
+  # used to open "the blob keyspace is FLAT and instance-wide: `Blobstore`
+  # resolves an object by the very string that `media_files.path` holds". That
+  # is no longer true and must not be re-derived from it: `serve/2`,
+  # `delete_file/2`, the rendition source and the probe source all now pass the
+  # ROW and resolve `media_files.object_key` through
+  # `Barkpark.Media.Storage.ObjectKey.for_row/1`. `path` is the PUBLISHED
+  # REFERENCE; `object_key` is the object address.
   #
   # CORRECTED (task-918106d49c62563e). This comment used to justify ownership over
   # a prefix by claiming a prefix "would change the layout of every object already
@@ -766,16 +805,45 @@ defmodule Barkpark.Media do
   # unclaimed key is not a path to another tenant's data: both ways a workspace
   # acquires a key (`upload/3`'s `Blobstore.put_file`, or its own blob push)
   # write the bytes themselves, overwriting any squat.
+  #
+  # THE WEDGE IS GONE (task-8eb6542ece62aff1). This used to answer `:ok` and let
+  # the caller write at `relative_path`, which meant the SECOND claimant of a
+  # contested flat key was refused outright — it could neither read its own
+  # bytes (the read served the first claimant's) nor write them. Now the answer
+  # is an OBJECT ADDRESS: when the caller's OWN row holds this path, the bytes
+  # go to that row's `object_key`, which for a contested key is its own tenant
+  # shadow. A foreign row alone (with none of the caller's own) is still
+  # `:blob_key_not_owned` — a workspace with no row here is naming someone
+  # else's key, and that refusal is unchanged.
   defp authorize_blob_key(relative_path, opts) do
     case Keyword.get(opts, :workspace_id) do
       workspace_id when is_binary(workspace_id) ->
+        own_row =
+          MediaFile
+          |> where([m], m.path == ^relative_path)
+          |> where([m], m.workspace_id == ^workspace_id)
+          # One workspace CAN hold two rows at one path (uniqueness is `(path,
+          # dataset_id)`), and the caller named only a path — so take the
+          # canonical claimant rather than letting `Repo.one/1` raise on the
+          # ambiguity. Both rows are this workspace's own; neither is a
+          # cross-tenant reach.
+          |> order_by([m], asc: m.inserted_at, asc: m.id)
+          |> limit(1)
+          |> Repo.one()
+
         foreign? =
           MediaFile
           |> where([m], m.path == ^relative_path)
           |> where([m], is_nil(m.workspace_id) or m.workspace_id != ^workspace_id)
           |> Repo.exists?()
 
-        if foreign?, do: {:error, :blob_key_not_owned}, else: :ok
+        cond do
+          own_row -> {:ok, ObjectKey.for_row(own_row)}
+          foreign? -> {:error, :blob_key_not_owned}
+          # A key NO row claims stays writable at its literal path — the bundle
+          # importer / scratch-probe seam, unchanged.
+          true -> {:ok, relative_path}
+        end
 
       _ ->
         {:error, :unscoped_blob_write}
