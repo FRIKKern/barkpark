@@ -329,7 +329,8 @@ on:
       # included. A lane wired on PRs only goes dark the moment a merge lands.
       - "scripts/workflow-run-shell-check.sh"
       - ".github/workflows/*.yml"
-      # MERGE-GATE AUTOSTAMP BRIDGE — mirrors the pull_request list above.
+      # AUTOSTAMP BRIDGE (the seven entries above the changelog pair) —
+      # mirrors the pull_request list above.
       # These seven were PR-only from the day they were wired (measured
       # 2026-09-01: the two lists were 94 vs 85, all nine one-way — the
       # signature of PR-list edits never mirrored), so the parity tripwire and
@@ -1046,8 +1047,9 @@ jobs:
       # THIS FILE'S OWN twin lists, through the same guard. The 2026-09-01
       # measurement found them drifted 94 vs 85 — nine entries wired on
       # pull_request and missing from push, every one added by hand and never
-      # mirrored, so the merge-gate-bridge and weekly-changelog lanes went dark
-      # on exactly the event that matters: the merge. The nine were adjudicated
+      # mirrored, so the autostamp-bridge and weekly-changelog lanes stopped
+      # running the moment code landed on main — the one event they exist to
+      # observe. The nine were adjudicated
       # (all mirrored, none PR-only by design) and PINS is empty on purpose —
       # this run is CLEAN-TREE, and a new one-sided entry reds the PR that adds
       # it instead of going dark for weeks. The job NAME still says doc-gates;
