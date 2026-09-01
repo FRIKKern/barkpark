@@ -1092,11 +1092,14 @@ the page is outside the CAPS table (filed as
 down here: the header states `16000tok` (≈ 64,000B at the repo's ~4B/tok
 convention) and remains **unenforced** — so it is a stated intent, not a
 ceiling the file is held to. It said the file "actually lives under" that
-number until 2026-09-01, when `wc -c` read 68,546B: the page had grown past its
-own declared budget and, being outside the CAPS table, nothing reded. Measure
-with `wc -c`, never from this paragraph — a byte figure typed here has no
-producer and goes stale in its own commit, which is what happened to the "~61KB"
-that stood in this sentence. Dropping the figure instead was not an option — G1 in
+number until 2026-09-01, when the page was measured past its own declared
+budget and, being outside the CAPS table, nothing reded. Measure with `wc -c`,
+never from this paragraph — a byte figure typed here has no producer and goes
+stale in its own commit. That is not hypothetical: this sentence has now
+carried three of them ("~61KB", then a byte count that was already wrong by
+~3.6KB the moment the commit correcting it landed, because writing the
+correction grew the file). It carries none now, which is the only version that
+cannot rot. Dropping the figure instead was not an option — G1 in
 `scripts/docs-anchors-check.sh` requires `budget: [0-9]+tok` on every active
 doc — and enforcing the old 800tok would mean splitting the canonical
 merge-authority page. Adding this page to the CAPS table is a deliberate
