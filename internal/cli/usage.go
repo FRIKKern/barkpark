@@ -236,6 +236,15 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		out.errf("")
 		out.errf("pagination: --limit <n> · --offset <n> · --all")
 	}
+
+	// `--match` is honoured entirely client-side (see tasks_match.go), so the
+	// manifest cannot declare it and the flags block above cannot show it. A
+	// flag nobody can discover is a flag nobody uses — and this one exists
+	// precisely because the reader who needs it is following a hint.
+	if cmd.ID == taskLsCommandID {
+		out.errf("")
+		out.errf("search: --match <substring>  case-insensitive over doc_id and title, walks every page")
+	}
 	if cmd.Writes {
 		out.errf("")
 		out.errf("write globals: --dry-run (print the request, don't send) · --yes (skip the prod confirmation)")
