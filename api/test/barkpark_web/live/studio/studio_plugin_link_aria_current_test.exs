@@ -56,7 +56,12 @@ defmodule BarkparkWeb.Studio.StudioPluginLinkAriaCurrentTest do
        %{conn: conn} do
     {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/media-desk"))
 
-    assert [link] = anchor(html), "the media-desk pane should render the Media Library link"
+    anchors = anchor(html)
+
+    assert match?([_], anchors),
+           "the media-desk pane should render the Media Library link, got #{inspect(anchors)}"
+
+    [link] = anchors
 
     # An <a href>, not a button (criterion 2's shape, pinned in-DOM).
     assert [href] = LazyHTML.attribute(link, "href")

@@ -215,8 +215,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       # `right: %Session{cloud_sandbox_id: "sbx-stub-1"}` — the dead binding
       # survives the loud failure and would --resume the NEXT turn into an empty
       # filesystem). After wiring, the loud nonzero exit clears it inline.
-      assert %{cloud_sandbox_id: nil} = StudioChat.get_session(sid),
-             "a loud reuse failure (nonzero exit) must clear the dead sandbox binding"
+      session_after = StudioChat.get_session(sid)
+
+      assert match?(%{cloud_sandbox_id: nil}, session_after),
+             "a loud reuse failure (nonzero exit) must clear the dead sandbox binding (#{inspect(session_after.cloud_sandbox_id)})"
 
       # Non-vacuity: turn 2 genuinely ATTEMPTED to reuse the dead sandbox —
       # its own argv carried --sandbox-id sbx-stub-1 (the gaslighting scenario).
@@ -250,8 +252,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       assert_w12_belt_intact(a3)
 
       # …and it RE-BOUND a DIFFERENT sandbox (proving re-establish, not stale reuse).
-      assert %{cloud_sandbox_id: "sbx-stub-2"} = StudioChat.get_session(sid),
-             "turn 3's fresh sandbox re-binds the session to a new id"
+      session_after = StudioChat.get_session(sid)
+
+      assert match?(%{cloud_sandbox_id: "sbx-stub-2"}, session_after),
+             "turn 3's fresh sandbox re-binds the session to a new id (#{inspect(session_after.cloud_sandbox_id)})"
 
       # The invocation ledger: create, a failed reuse, then a fresh create.
       assert read_lines(counter) == ["create", "reuse-fail", "create"]
@@ -283,8 +287,10 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       # exit must NOT clear — the bp_sandbox frame minted a LIVE box mid-turn and
       # clearing it (or re-reading the column at exit) would orphan a healthy
       # sandbox. The next turn legitimately reuses it.
-      assert %{cloud_sandbox_id: "sbx-preserve-1"} = StudioChat.get_session(sid),
-             "a create turn (at-spawn nil) keeps the freshly-bound sandbox even on nonzero exit"
+      session_after = StudioChat.get_session(sid)
+
+      assert match?(%{cloud_sandbox_id: "sbx-preserve-1"}, session_after),
+             "a create turn (at-spawn nil) keeps the freshly-bound sandbox even on nonzero exit (#{inspect(session_after.cloud_sandbox_id)})"
 
       a = read_argv(argv)
       refute "--sandbox-id" in a, "the create turn spawned with no binding"

@@ -144,7 +144,9 @@ defmodule BarkparkWeb.Studio.StudioDeskAddButtonNameTest do
       # aria-label itself must carry the name: with only a decorative
       # <svg aria-hidden="true"> inside, stripped text is empty, so an empty
       # or absent aria-label leaves AT announcing a bare "button".
-      assert [label | _] = LazyHTML.attribute(button, "aria-label"),
+      labels = LazyHTML.attribute(button, "aria-label")
+
+      assert match?([_ | _], labels),
              """
              The #{what} (phx-click=#{event}) renders with NO aria-label.
 
@@ -155,6 +157,8 @@ defmodule BarkparkWeb.Studio.StudioDeskAddButtonNameTest do
 
              Rendered: #{LazyHTML.to_html(button)}
              """
+
+      [label | _] = labels
 
       assert String.trim(label) != "",
              "the #{what}'s aria-label is present but blank — that is still " <>

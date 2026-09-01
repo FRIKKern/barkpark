@@ -104,10 +104,15 @@ defmodule BarkparkWeb.WorkspaceImportTemplateJourneyTest do
         # succeeds after this assertion cannot be leaning on it; anyone who
         # reintroduces a superuser-only statement into the import path turns
         # this test into the live failure instead of a silent CI pass.
-        assert {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}} =
-                 Repo.query("SET session_replication_role = replica", []),
+        replica_result = Repo.query("SET session_replication_role = replica", [])
+
+        assert match?(
+                 {:error, %Postgrex.Error{postgres: %{code: :insufficient_privilege}}},
+                 replica_result
+               ),
                "expected #{@nosuper_role} to be denied SET session_replication_role " <>
-                 "(superuser-only) — the privilege-parity model is broken"
+                 "(superuser-only) — the privilege-parity model is broken " <>
+                 "(got #{inspect(replica_result)})"
 
         :switched
 
