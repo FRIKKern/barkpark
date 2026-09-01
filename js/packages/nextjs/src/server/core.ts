@@ -12,6 +12,7 @@ import {
   BarkparkRateLimitError,
   BarkparkTimeoutError,
   BarkparkValidationError,
+  assertSegment,
   buildQueryString,
   scopePrefix,
 } from '@barkpark/core'
@@ -69,49 +70,41 @@ function resolveTagPrefix(cfg: BarkparkServerConfig): string {
 }
 
 /**
- * Assert `value` is usable as ONE URL path segment.
+ * Assert `value` is usable as ONE URL path segment, via @barkpark/core's
+ * `assertSegment` — the single implementation of the rule, which this file
+ * used to keep a hand-written copy of because the symbol was not on core's
+ * export surface. It is now (core's `index.ts` says why), so the copy is gone
+ * and only the message differs: these call sites have always prefixed
+ * `barkparkFetch:`, and core's third parameter exists precisely to carry a
+ * call-site message (its own `getSchema`/`deleteSchema` use it the same way).
+ * Nothing here re-states the predicate; there is one place to change it.
  *
- * A local mirror of @barkpark/core's `assertSegment` (its `util/guards.ts`),
- * which is not on core's public export surface — the same precedent
- * {@link normalizeFieldList} below already set for a core helper this package
- * needs but cannot import. Keep the RULE identical; if core's ever lands on the
- * export surface, delete this mirror and import it.
+ * Deleted predicate, recorded so nobody re-forks it: reject a non-string, an
+ * empty-or-whitespace-only value, exactly `'.'` or `'..'`, or anything holding
+ * `/` or `\`. Core's rule is identical, plus an `allowSep` opt-out these call
+ * sites do not take (no id or type in this API legitimately holds a separator;
+ * core's one hierarchical-tag caller does). Percent-encoded forms (`%2e%2e`)
+ * are deliberately NOT rejected, in core and here alike: every value is wrapped
+ * in `encodeURIComponent`, which escapes the `%` itself (`%252e%252e`), so they
+ * can never decode back to `..` at the URL parser.
  *
- * `encodeURIComponent` escapes `/` and `\` but NOT `.`, so an id or type of
- * `'..'` reached `fetch` intact and the WHATWG URL parser resolved it BEFORE the
- * request left: `/v1/data/doc/production/post/..` went out as
- * `/v1/data/doc/production/`, and `type: '..'` retargeted at
- * `/v1/data/doc/<id>`. Escaping harder cannot fix that — the honest rule is that
- * a path segment may not be a relative-path operator. Bounded (the api router
- * declares only `/doc/:dataset/:type/:doc_id`, so the retarget 404s — not an
- * over-broad read), but it produced a `BarkparkNotFoundError` naming a URL the
- * caller never asked for and a Next data-cache entry tagged `<prefix>:doc:..`
- * that no `revalidateTag` can ever match.
- *
- * Percent-encoded forms (`%2e%2e`) are deliberately NOT rejected, exactly as in
- * core: every value here is wrapped in `encodeURIComponent`, which escapes the
- * `%` itself (`%252e%252e`), so they can never decode back to `..` at the URL
- * parser. `/` and `\` are rejected as defence in depth — no id or type in this
- * API legitimately contains one, and the ban holds even if a future path builder
- * forgets `encodeURIComponent`.
- *
- * Takes `unknown`, not `string`: this package ships CJS/ESM to plain JS
- * consumers where no type exists, so the parameter's declared type closes
- * nothing.
+ * Why the rule exists: `encodeURIComponent` escapes `/` and `\` but NOT `.`, so
+ * an id or type of `'..'` reached `fetch` intact and the WHATWG URL parser
+ * resolved it BEFORE the request left: `/v1/data/doc/production/post/..` went
+ * out as `/v1/data/doc/production/`, and `type: '..'` retargeted at
+ * `/v1/data/doc/<id>`. Escaping harder cannot fix that — a path segment may not
+ * be a relative-path operator. Bounded (the api router declares only
+ * `/doc/:dataset/:type/:doc_id`, so the retarget 404s — not an over-broad
+ * read), but it produced a `BarkparkNotFoundError` naming a URL the caller
+ * never asked for and a Next data-cache entry tagged `<prefix>:doc:..` that no
+ * `revalidateTag` can ever match.
  */
 function assertPathSegment(value: unknown, field: string): void {
-  if (
-    typeof value !== 'string' ||
-    !value.trim() ||
-    value === '.' ||
-    value === '..' ||
-    /[/\\]/.test(value)
-  ) {
-    throw new BarkparkValidationError(
-      `barkparkFetch: ${field} must be one non-empty path segment (not '.', '..', '/' or '\\')`,
-      { field },
-    )
-  }
+  assertSegment(
+    value,
+    field,
+    `barkparkFetch: ${field} must be one non-empty path segment (not '.', '..', '/' or '\\')`,
+  )
 }
 
 function buildUrl(

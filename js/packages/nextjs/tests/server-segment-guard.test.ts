@@ -13,9 +13,11 @@
 // the caller never asked for, and a Next data-cache entry tagged
 // `<prefix>:doc:..` that no `revalidateTag` will ever match.
 //
-// @barkpark/core closed the same class in `util/guards.ts` (`assertSegment`).
-// It is not on core's public export surface, so this package mirrors the rule —
-// the same precedent `normalizeFieldList` in server/core.ts already set.
+// @barkpark/core closed the same class in `util/guards.ts` (`assertSegment`),
+// and this package now CALLS it rather than keeping the hand-written copy it
+// first shipped — the copy existed only because the symbol was missing from
+// core's export surface. These cases are unchanged across that swap on purpose:
+// they assert the emitted URL, so they hold whoever implements the rule.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
