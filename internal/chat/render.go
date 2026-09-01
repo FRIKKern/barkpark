@@ -127,13 +127,36 @@ func (m Model) transcriptLines(width int) []string {
 // pass over the transcript. transcriptLines is the width-pure/clock-free façade
 // the golden harness diffs against the Studio projection.
 func (m Model) transcriptBuild(width int, targetRID string) ([]string, int) {
+	lines, startLine, _ := m.transcriptAnchored(width, targetRID)
+	return lines, startLine
+}
+
+// transcriptAnchored is transcriptBuild plus the BLOCK INDEX the scroll anchor
+// keys on (charter D80). blockStarts[i] is the physical line index of the first
+// content line of block i, where a block is one unit the accumulator pushes — a
+// settled message, an optimistic local send, or the streaming tail — in walk
+// order. The blank separator push() prepends between blocks belongs to NEITHER
+// block (it sits at blockStarts[i]-1), exactly like the targetRID startLine
+// capture below, which is the same arithmetic generalised from the one
+// answerable() card to every block.
+//
+// Blocks are the anchor's coordinate system. A pinned viewport records
+// (block, intra-block offset) instead of a raw physical top line, so a height
+// change ABOVE the pin shifts blockStarts and the pin follows its own content
+// instead of silently showing something else at the same line number.
+func (m Model) transcriptAnchored(width int, targetRID string) ([]string, int, []int) {
 	w := bodyWidth(width)
 	var lines []string
+	var blockStarts []int
 	startLine := -1
 	push := func(ls ...string) {
-		if len(lines) > 0 && len(ls) > 0 {
+		if len(ls) == 0 {
+			return
+		}
+		if len(lines) > 0 {
 			lines = append(lines, "")
 		}
+		blockStarts = append(blockStarts, len(lines))
 		lines = append(lines, ls...)
 	}
 	// The focused pending card's request_id — its card wears the active border +
@@ -168,8 +191,9 @@ func (m Model) transcriptBuild(width int, targetRID string) ([]string, int) {
 	}
 	if len(lines) == 0 {
 		lines = []string{dimStyle.Render("No messages yet — type below and press Enter.")}
+		blockStarts = []int{0}
 	}
-	return lines, startLine
+	return lines, startLine, blockStarts
 }
 
 // renderMessage renders one settled Postgres row (charter D8). Assistant rows
@@ -1729,8 +1753,7 @@ func (m Model) renderChat() string {
 	if bodyH < 1 {
 		bodyH = 1
 	}
-	all := m.transcriptLines(m.width)
-	body := window(all, bodyH, m.scroll)
+	body := m.transcriptViewport(bodyH)
 	for len(body) < bodyH {
 		body = append(body, "")
 	}
@@ -1940,6 +1963,88 @@ func window(lines []string, height, scroll int) []string {
 		return lines[maxTop:] // follow: pin to bottom
 	}
 	return lines[scroll : scroll+height]
+}
+
+// scrollAnchor is a CONTENT-relative pin (charter D80). A raw physical top line
+// is not a stable address: any height change in content ABOVE it silently swaps
+// the viewport (measured: an 11-line growth == 11 lines of drift, with no signal
+// to the reader). The anchor addresses the top row as (block ordinal,
+// intra-block line offset) — never a string match, which duplicate lines and a
+// width re-wrap both defeat — so the pin is relocated against the CURRENT
+// layout on every frame.
+//
+// set is the discriminator, not a zero-value guess: {block:0, off:0} is a real
+// anchor (the Home key), so an unset anchor must be distinguishable from a pin
+// at the very top.
+type scrollAnchor struct {
+	set   bool
+	block int
+	off   int
+}
+
+// anchorAt records the content anchor for a physical top line against the
+// layout that top line was computed in. A top landing on the blank separator
+// before block i resolves to the END of block i-1 (the last block whose start is
+// <= top) — its offset simply runs one past that block's last line, which
+// relocates to the same separator wherever the block moves.
+func anchorAt(blockStarts []int, top int) scrollAnchor {
+	if len(blockStarts) == 0 || top < 0 {
+		return scrollAnchor{}
+	}
+	i := 0
+	for j, start := range blockStarts {
+		if start > top {
+			break
+		}
+		i = j
+	}
+	return scrollAnchor{set: true, block: i, off: top - blockStarts[i]}
+}
+
+// resolve relocates the anchor into the CURRENT layout, returning the physical
+// top line to slice at. An anchor whose block no longer exists (the transcript
+// was replaced wholesale, not grown) degrades to the raw pinned index — no
+// worse than the pre-anchor behaviour, and never a jump to somewhere the reader
+// did not ask for.
+func (a scrollAnchor) resolve(blockStarts []int, fallback, maxTop int) int {
+	if !a.set || a.block < 0 || a.block >= len(blockStarts) {
+		return fallback
+	}
+	top := blockStarts[a.block] + a.off
+	if top < 0 {
+		top = 0
+	}
+	if top > maxTop {
+		top = maxTop
+	}
+	return top
+}
+
+// viewportTop is the physical top line window() should slice at for this frame.
+//
+// FOLLOW MODE IS UNTOUCHED: scroll < 0 passes straight through, so the pure
+// last-N slice (and its bottom clamp) stays byte-identical — follow was already
+// structurally immune to height change and gains nothing from an anchor. A pin
+// carrying an anchor is RELOCATED against the current blockStarts. A pin with
+// no anchor (a caller that poked m.scroll directly) keeps the old raw-index
+// semantics verbatim.
+func (m Model) viewportTop(blockStarts []int, maxTop int) int {
+	if m.scroll < 0 || !m.anchor.set {
+		return m.scroll
+	}
+	return m.anchor.resolve(blockStarts, m.scroll, maxTop)
+}
+
+// transcriptViewport is the windowed transcript body — the ONE place the pinned
+// top is re-anchored to content before the slice. renderChat paints exactly
+// this; tests read it without going through the header/footer chrome.
+func (m Model) transcriptViewport(bodyH int) []string {
+	all, _, blockStarts := m.transcriptAnchored(m.width, "")
+	maxTop := len(all) - bodyH
+	if maxTop < 0 {
+		maxTop = 0
+	}
+	return window(all, bodyH, m.viewportTop(blockStarts, maxTop))
 }
 
 // bodyHeight is the transcript viewport row count: the frame minus the two

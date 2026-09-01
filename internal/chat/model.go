@@ -85,6 +85,16 @@ type Model struct {
 	scroll     int    // -1 = follow mode (bottom); >=0 = pinned top line
 	cardCursor int    // focus ring index into the pending answerable cards (Tab cycles)
 
+	// anchor is what scroll >= 0 actually MEANS (charter D80): the content the
+	// pinned top row was showing, as (block ordinal, intra-block line offset),
+	// recorded by pinScroll at the moment of the pin and relocated against the
+	// current layout on every frame (render.go viewportTop). scroll stays the
+	// raw index it always was — the anchor CORRECTS it when content above the
+	// pin changes height, so the reader keeps reading the same lines instead of
+	// having the viewport silently swapped. Follow mode (scroll < 0) never
+	// consults it and is byte-identical to the pre-anchor behaviour.
+	anchor scrollAnchor
+
 	// The below-composer workflow panel's focus model (wave session-card charter
 	// D14): focus names which zone owns the arrow keys — the composer by default;
 	// the workflow strip after arrow-down (only while the strip is visible).
@@ -368,6 +378,7 @@ func (m Model) openSession(s Session) Model {
 	m.mode, m.modelChoice, m.effortChoice = s.Mode, s.ModelChoice, s.EffortChoice
 	m.screen = screenChat
 	m.scroll = -1
+	m.anchor = scrollAnchor{}
 	m.cardCursor = 0
 	m.focus = focusComposer
 	m.wfExpanded = false
