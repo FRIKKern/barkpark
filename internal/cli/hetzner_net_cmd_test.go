@@ -695,6 +695,81 @@ func TestHetznerFirewallCreateAdvisoryCountsRules(t *testing.T) {
 	}
 }
 
+// TestHetznerFirewallCreateReceiptCountsTheServersRules is the rule_count's own
+// pin, and it is deliberately SEPARATE from the advisory test above.
+//
+// WHY A SECOND TEST. The advisory line is the ONE receipt value authorised to
+// print argv (PDS-D432), and the test above asserts only that line. An
+// implementation that reported `rule_count: 1` — the ARGV echo — while ALSO
+// printing a correct "you asked for 1, the server reports 0" advisory would
+// pass it. The field an operator reads to learn their network posture would
+// still be the number they typed.
+//
+// So this drives a create whose SERVER-SIDE count (2) differs from the
+// requested count (1) in the OTHER direction: no zero value, no empty slice,
+// and no len() of the request can produce 2, so a green here cannot come from
+// a coincidence.
+func TestHetznerFirewallCreateReceiptCountsTheServersRules(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /firewalls", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"firewall":{"id":3,"name":"web-fw","applied_to":[],"rules":[
+			{"direction":"in","protocol":"tcp","port":"80","source_ips":["0.0.0.0/0"]},
+			{"direction":"in","protocol":"tcp","port":"80","source_ips":["::/0"]}
+		]},"actions":[]}`)
+	})
+	rulesPath := filepath.Join(t.TempDir(), "rules.json")
+	if err := writeTempFile(rulesPath, `[{"direction":"in","protocol":"tcp","port":"80","source_ips":["0.0.0.0/0","::/0"]}]`); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "firewall", "create", "--name", "web-fw", "--rules-file", rulesPath)
+	if code != exitOK {
+		t.Fatalf("create exited %d, stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("receipt is not JSON (%v): %s", err, stdout)
+	}
+	got, ok := payload["rule_count"].(float64)
+	if !ok {
+		t.Fatalf("receipt = %v, want a rule_count", payload)
+	}
+	if got == 1 {
+		t.Errorf("rule_count = 1 — the receipt echoed the REQUESTED count; the server reported 2 rules")
+	}
+	if got != 2 {
+		t.Errorf("rule_count = %v, want 2 — the count the create RESPONSE carries", got)
+	}
+	if src := payload["rule_source"]; src != "the create response" {
+		t.Errorf("rule_source = %v, want the receipt to name the create response", src)
+	}
+}
+
+// TestHetznerFirewallCreateRefusesAnIDLessResponse pins the EMPTY-ID COLLAPSE at
+// the firewall create site, the same one the network create carries.
+//
+// hcloud-go's generated FirewallFromSchema takes a schema VALUE and returns
+// `&hcloudFirewall` on EVERY path, so `result.Firewall == nil` cannot be true
+// once Create returned no error — the hand-rolled nil guard that used to sit
+// here was dead code that read as protection. What CAN arrive is a 2xx whose
+// body carries no firewall object, and that is the case the dead guard left
+// unhandled: the zero value confirms a firewall at id 0 with an empty name and
+// rule_count 0, which is a confident receipt for a security posture nobody has.
+func TestHetznerFirewallCreateRefusesAnIDLessResponse(t *testing.T) {
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("POST /firewalls", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{}`)
+	})
+
+	_, stderr, code := runHzCLI(t, "table", "hetzner", "firewall", "create", "--name", "web-fw")
+	if code == exitOK {
+		t.Fatalf("a create response carrying no firewall exited 0; stderr: %s", stderr)
+	}
+	if !strings.Contains(stderr, "NOT READABLE") {
+		t.Errorf("stderr = %q, want the not-readable refusal", stderr)
+	}
+}
+
 // TestHetznerFirewallSetRules asserts the --rules-file read: the parsed rules
 // ride in the set_rules body and the returned actions are polled.
 func TestHetznerFirewallSetRules(t *testing.T) {

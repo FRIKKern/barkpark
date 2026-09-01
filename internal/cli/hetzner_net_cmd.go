@@ -1545,17 +1545,36 @@ func runHetznerFirewallCreate(out *writer, g globals, args []string) int {
 	if err != nil {
 		return hzFail(out, "create firewall "+name, err)
 	}
-	if result.Firewall == nil {
-		return useError(out, "failed", "create firewall "+name+": the API returned no firewall", exitGeneric)
-	}
 	if werr := hzWait(ctx, hc, result.Actions...); werr != nil {
 		return hzFail(out, "create firewall "+name+": create action failed", werr)
 	}
-	// CLASS A2. The nil guard above is the file's existing one and stays; a
-	// second nil check here would be unreachable (the generated converter always
-	// allocates), so hzResObservedResponse is handed the object directly.
-	return hzResObservedResponse(out, "create", "firewall", result.Firewall.ID, result.Firewall.Name,
-		nil, result.Firewall, hzObserveFirewallCreated(strconv.Itoa(len(rules))))
+	// THE EMPTY-ID COLLAPSE, the same one the network create carries above.
+	//
+	// WHAT WAS REMOVED AND WHY. A hand-rolled `result.Firewall == nil` refusal
+	// used to stand here. hcloud-go's generated FirewallFromSchema takes a
+	// schema VALUE and returns `&hcloudFirewall` on every path, so once Create
+	// returns no error that branch CANNOT be taken — dead code that read as
+	// protection and gave none, and which pushed the reader past the failure
+	// that can actually arrive.
+	//
+	// WHAT ARRIVES INSTEAD: a 2xx whose body carries no firewall object. The
+	// zero value then confirms id 0, an empty name and rule_count 0 — a
+	// confident receipt for a network security posture nobody has, which is
+	// strictly worse than the argv echo this site already retired. Collapsing an
+	// id-less object to nil makes hzResObservedResponse's refusal REACHABLE, so
+	// the one guard left here is the one that can fire.
+	obj := result.Firewall
+	var id any = name
+	observedName := name
+	if obj == nil || obj.ID == 0 {
+		obj = nil
+	} else {
+		id, observedName = obj.ID, obj.Name
+	}
+	// CLASS A2: the create RESPONSE object is server truth, so the receipt is
+	// read off it — rule_count comes from obj.Rules, never from len(rules).
+	return hzResObservedResponse(out, "create", "firewall", id, observedName,
+		nil, obj, hzObserveFirewallCreated(strconv.Itoa(len(rules))))
 }
 
 func runHetznerFirewallDelete(out *writer, g globals, args []string) int {
