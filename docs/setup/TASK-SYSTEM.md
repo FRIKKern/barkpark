@@ -123,7 +123,7 @@ Stamp at three moments ([ledger rule 6](../../.claude/workflows/bp-loop-ledger.m
 
 ## The cmux bridge — a pane that owns its task
 
-A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims, **PreToolUse** renews ≤1/60s, **Stop**/**SessionEnd** close IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
+A cmux pane can auto-own its task. `bp cmux install --print` shows the four hooks + worker-id; `--merge --yes` folds them into `~/.claude/settings.json` (deduped, backup first). The worker is the *pane* (`cmux-<CMUX_SURFACE_ID>`), so subagents share one lease: with `BARKPARK_TASK=<doc_id>`, **SessionStart** claims, **PreToolUse** **pulses** ≤1/60s (holder-only renew + a bounded now-line built from `tool_name` + the cwd basename — never the transcript; a lost lease answers `not_holder` and is NOT re-claimed), **Stop**/**SessionEnd** close on the epoch that pulse stamped (re-claiming only if the stamp is stale) IFF every criterion is met (published met-flips need a re-publish) — else LEAVE it claimed. Hooks exit 0 with empty stdout, so a dead server can't harm the agent (`bp cmux status`; auth in `~/.config/barkpark/`). No `uninstall` — remove hook groups by hand.
 
 ## Working with your AI in Studio
 
