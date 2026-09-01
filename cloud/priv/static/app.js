@@ -7147,25 +7147,61 @@
   // told that team their payment failed and that paying would restore it, which
   // is not just unbacked but actively wrong GUIDANCE: reconcile_plan_limit keys
   // STRICTLY on the reason and restores a quota row only when the team is back
-  // at or under its ceiling. It also carried a DATE the plane cannot produce —
-  // `suspended_at` is written but never serialized, so dunningDates substitutes
-  // `current_period_end`, a FUTURE renewal day rendered as a past suspension
-  // day. The quota arm therefore names the real cause, the two real remedies,
-  // and no date at all.
+  // at or under its ceiling. The quota arm therefore names the real cause and
+  // the two real remedies.
+  //
+  // THE DATE, AND WHERE IT COMES FROM (cch-w54-bl). Both arms used to date
+  // themselves from `dunningDates(sub).suspendMs`, which is
+  // `sub.current_period_end` — the NEXT renewal day, rendered as a past-tense
+  // suspension day. It was wrong on both axes and wrong differently: a
+  // quota-suspended team is fully paid and `status: "active"`, so the borrowed
+  // day was a future date about money it does not owe; and on the billing axis
+  // `mark_past_due/2` re-anchors `current_period_end` to now+3d on every webhook
+  // delivery, so the borrowed day slid forward on its own. cch-w54-s1 removed
+  // the wrong date from the quota arm only, because at the time the plane could
+  // not produce a right one.
+  //
+  // It can now. `barkpark_json/5` serializes `suspended_at` — the stamp
+  // `Registry.suspend_barkpark/2` writes on every suspension — so BOTH arms date
+  // themselves from the suspension itself, via suspendedDay below, and neither
+  // one can reach a subscription date any more.
   //
   // Neither arm says the server is stopped: suspension is a flag on a row and
   // reaches nothing on the host (see LIFECYCLE_PILL_LABEL above).
+  // cch-w54-bl — THE SUSPENSION DAY, FROM THE SUSPENSION AND NOTHING ELSE.
+  //
+  // Reads `suspended_at` off the BOX. It takes no subscription argument on
+  // purpose: the defect this replaces was a renewal date standing in for a
+  // suspension date, and a helper with no access to a subscription cannot spell
+  // that substitution even by accident.
+  //
+  // "" means NO DAY, and every caller renders its dateless variant on "". The
+  // three ways a day can be missing — a row the plane never stamped, a row that
+  // was never suspended, a value that will not parse — collapse to one answer
+  // deliberately: all three mean "we were not told", and none of them licenses a
+  // substitute. `fmtDay` would render "—" for an unparseable instant, which
+  // beside the word "Suspended" reads as a date the console tried and failed to
+  // state; "" reads as a sentence that simply does not mention a day.
+  function suspendedDay(bp) {
+    var raw = bp && bp.suspended_at;
+    if (!raw) return "";
+    var ms = Date.parse(raw);
+    return isNaN(ms) ? "" : fmtDay(ms);
+  }
   function suspendedCardBannerHtml(sub, bp) {
+    var day = suspendedDay(bp);
     if (bp && bp.suspended_reason === "quota_exceeded") {
+      var overTitle = day
+        ? "Suspended " + esc(day) + " — over your plan&rsquo;s instance limit"
+        : "Suspended — over your plan&rsquo;s instance limit";
       return '<div class="notice notice-warn suspended-card-banner" role="alert">' +
-        '<div class="suspended-card-title">Suspended — over your plan&rsquo;s instance limit</div>' +
+        '<div class="suspended-card-title">' + overTitle + "</div>" +
         '<p class="suspended-card-body">Your team has more instances than ' + esc(planName(sub && sub.plan)) +
           " includes, so the newest ones are suspended. Nothing is deleted, and this is not a payment problem. " +
           "Remove an instance, or move to a plan with a higher instance limit, and the suspended instances come back automatically.</p>" +
       "</div>";
     }
-    var d = dunningDates(sub);
-    var since = d ? "Suspended " + esc(fmtDay(d.suspendMs)) + " — payment failed" : "Suspended — payment failed";
+    var since = day ? "Suspended " + esc(day) + " — payment failed" : "Suspended — payment failed";
     return '<div class="notice notice-warn suspended-card-banner" role="alert">' +
       '<div class="suspended-card-title">' + since + "</div>" +
       '<p class="suspended-card-body">Nothing is deleted, and nothing on this server has been touched — Barkpark Cloud has stopped managing it. Everything comes back exactly as it was the moment payment succeeds.</p>' +
@@ -17039,16 +17075,23 @@
     });
   }
 
-  // GR17: the dunning dates, DATA-DRIVEN off the server's current_period_end —
-  // suspend day = the grace end; failed day = suspend minus the 3-day grace
-  // window (billing.ex @grace_days). null when the server sent no dated
-  // milestone (the banner then drops the dates, never invents them).
-  var DUNNING_GRACE_DAYS = 3;
-  function dunningDates(sub) {
-    var end = sub && sub.current_period_end ? Date.parse(sub.current_period_end) : NaN;
-    if (isNaN(end)) return null;
-    return { suspendMs: end, failedMs: end - DUNNING_GRACE_DAYS * 86400 * 1000 };
-  }
+  // cch-w54-bl — `dunningDates` AND `DUNNING_GRACE_DAYS` ARE GONE FROM HERE.
+  //
+  // It derived two milestones from `current_period_end`: `failedMs` (the grace
+  // end minus billing.ex's 3-day window) and `suspendMs` (the grace end). Both
+  // consumers are gone. cch-w54-s5 deleted the "your payment failed on {day}"
+  // copy that read `failedMs`, after measuring that `mark_past_due/2` re-anchors
+  // `current_period_end` to now+3d on every webhook delivery — so that day was
+  // approximately TODAY, forever. cch-w54-bl replaced `suspendMs` with the
+  // plane's own `suspended_at` (see suspendedDay above).
+  //
+  // It is DELETED rather than left orphaned, and that is the load-bearing half
+  // of "no surface falls back to current_period_end for a suspension date". An
+  // exported helper named `dunningDates` returning a field named `suspendMs` is
+  // a ready-made way to spell exactly the bug that was just removed, and its
+  // name says nothing about the renewal date underneath — the next author
+  // reaching for "the suspension day" would have no way to see the substitution.
+  // Removing it makes the regression unspellable rather than merely absent.
   function fmtDay(ms) {
     var d = new Date(ms);
     return isNaN(d.getTime()) ? "—" : d.toLocaleDateString(undefined, { month: "long", day: "numeric" });
@@ -25446,7 +25489,7 @@
       canManageOnboarding: canManageOnboarding,
       billingHasPaidPlan: billingHasPaidPlan,
       readOnlyPlanCardHtml: readOnlyPlanCardHtml,
-      dunningDates: dunningDates,
+      suspendedDay: suspendedDay,
       dunningBannerHtml: dunningBannerHtml,
       currentPlanCardHtml: currentPlanCardHtml,
       trialCardHtml: trialCardHtml,

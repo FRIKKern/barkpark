@@ -13688,15 +13688,44 @@ test("planFromSub: a past_due team KEEPS its paid plan (the sidebar-pill fix)", 
   assert.equal(hooks.planFromSub({ status: "active" }), "free");
 });
 
-test("dunningDates: failed_date is EXACTLY suspend_date minus the 3-day grace", () => {
-  const end = "2026-08-01T12:00:00.000Z";
-  const d = hooks.dunningDates({ current_period_end: end });
-  assert.ok(d, "a dated sub yields both milestones");
-  assert.equal(d.suspendMs, Date.parse(end));
-  assert.equal(d.suspendMs - d.failedMs, 3 * 86400 * 1000, "the −3d offset is the grace window");
-  // No dated milestone → null (the banner drops dates, never invents them).
-  assert.equal(hooks.dunningDates({ current_period_end: null }), null);
-  assert.equal(hooks.dunningDates(null), null);
+// ── cch-w54-bl · dunningDates IS GONE, AND THAT IS THE FIX ───────────────
+//
+// This slot held `test("dunningDates: failed_date is EXACTLY suspend_date minus
+// the 3-day grace")`. Both of that helper's outputs are now unreachable:
+// `failedMs` fed the "your payment failed on {day}" copy that cch-w54-s5
+// deleted, and `suspendMs` fed the suspension day that cch-w54-bl replaced with
+// the plane's own `suspended_at`. It had exactly one production call site and
+// that call site WAS the defect.
+//
+// Deleting the helper rather than leaving it exported is the load-bearing half
+// of criterion 3. An orphaned `dunningDates` still in `hooks` is a
+// ready-to-hand way to spell "suspension day" out of a renewal date, and the
+// next author reaching for a date has no way to know it is the wrong one — the
+// name does not say `current_period_end` anywhere. Removing it makes the
+// regression structurally impossible instead of merely currently-absent, and
+// the test below is the replacement contract.
+test("cch-w54-bl: suspendedDay reads the suspension stamp, and answers '' rather than guessing", () => {
+  const at = "2026-08-04T12:00:00.000Z";
+  const expected = new Date(Date.parse(at)).toLocaleDateString(undefined, { month: "long", day: "numeric" });
+  assert.equal(hooks.suspendedDay({ suspended_at: at }), expected);
+
+  // "" is NO DAY, and every caller renders the dateless variant on it. The three
+  // ways a day can be absent are one answer on purpose: a row the plane never
+  // stamped, a row that was never suspended, and a value that will not parse are
+  // all "we were not told", and none of them licenses a substitute.
+  assert.equal(hooks.suspendedDay({ suspended_at: null }), "");
+  assert.equal(hooks.suspendedDay({}), "");
+  assert.equal(hooks.suspendedDay(null), "");
+  assert.equal(hooks.suspendedDay(undefined), "");
+  assert.equal(hooks.suspendedDay({ suspended_at: "not-a-date" }), "", "an unparseable stamp is not a day");
+
+  // It reads ONLY the box. There is no subscription argument to reach for, which
+  // is what makes the old substitution unspellable rather than merely unspelled.
+  assert.equal(hooks.suspendedDay.length, 1);
+
+  // And the retired helper is really gone from the surface the console exports.
+  assert.equal(typeof hooks.dunningDates, "undefined",
+    "dunningDates must not survive as an exported way to date a suspension from current_period_end");
 });
 
 // ── cch-w54-s5 · THE DUNNING BANNERS NAME NO DAY AND PROMISE NO SUSPENSION ───
@@ -14222,10 +14251,46 @@ test("overviewDunningBannerHtml: 'Your payment failed.' + isolation, naming no d
   assert.equal(hooks.overviewDunningBannerHtml({ plan: "supporter", status: "past_due" }), html);
 });
 
-test("suspendedCardBannerHtml (GR17): 'Suspended {date} — payment failed' on the BILLING axis, verbatim", () => {
-  const sub = { plan: "supporter", status: "past_due", current_period_end: "2026-08-04T12:00:00.000Z" };
-  const html = hooks.suspendedCardBannerHtml(sub, { suspended: true, suspended_reason: "billing_past_due" });
-  assert.match(html, /Suspended .+ — payment failed/);
+// ── cch-w54-bl · THE CARD DATES THE SUSPENSION, NOT THE RENEWAL ──────────
+//
+// The title used to read `"Suspended " + fmtDay(dunningDates(sub).suspendMs)`,
+// and `dunningDates` is computed off `sub.current_period_end` — the NEXT
+// renewal day. That is not a near-miss, it is the wrong QUANTITY, and it was
+// wrong differently on each axis: on the quota axis the team is fully paid and
+// `status: "active"`, so the day rendered as a past-tense suspension was a
+// FUTURE renewal; on the billing axis mark_past_due/2 re-anchors
+// current_period_end to now+3d on every webhook delivery, so it slid forward on
+// its own. No producer made it right.
+//
+// The plane stamped `suspended_at` on every suspension the whole time
+// (Registry.suspend_barkpark/2) and `barkpark_json/5` has SERIALIZED it since
+// cch-w54-bl, so the card reads the suspension's own stamp now. The old
+// assertion here was `/Suspended .+ — payment failed/`, which passed happily on
+// the wrong date: `.+` cannot tell a suspension day from a renewal day. Naming
+// the expected day is the point.
+test("cch-w54-bl: the billing arm dates the card from suspended_at, never from current_period_end", () => {
+  // Three months apart and both at midday UTC, so the negative assertion below
+  // cannot pass or fail on the runner's timezone.
+  const suspendedAt = "2026-08-04T12:00:00.000Z";
+  const sub = { plan: "supporter", status: "past_due", current_period_end: "2026-12-01T12:00:00.000Z" };
+  const html = hooks.suspendedCardBannerHtml(sub, { suspended: true, suspended_reason: "billing_past_due", suspended_at: suspendedAt });
+
+  // Computed the same way the renderer computes it, so a runner in another
+  // timezone cannot turn this green by accident — or red by accident either.
+  const day = new Date(Date.parse(suspendedAt)).toLocaleDateString(undefined, { month: "long", day: "numeric" });
+  assert.match(html, new RegExp("Suspended " + day + " — payment failed"));
+
+  // THE KILLER. The renewal day is three months out and must appear NOWHERE.
+  // If this ever reds, someone reached for dunningDates again.
+  assert.doesNotMatch(html, /December/,
+    "the card must never date a suspension from current_period_end");
+
+  // A suspended row the plane never stamped gets NO day — never a borrowed one.
+  // This is the arm that keeps the fix from degrading back into a fallback.
+  const unstamped = hooks.suspendedCardBannerHtml(sub, { suspended: true, suspended_reason: "billing_past_due" });
+  assert.match(unstamped, /Suspended — payment failed/);
+  assert.doesNotMatch(unstamped, /December/, "no stamp means no date, not the renewal date");
+  assert.doesNotMatch(unstamped, /Suspended \w+ \d/, "and no invented day either");
   // cch-w54-s1 — clause 1 no longer claims a stop. Suspension writes three
   // columns on the barkparks row and the control plane then stops LOOKING at the
   // box (health sweeps + autoupdate skip it); there is no power action, no
@@ -14235,9 +14300,15 @@ test("suspendedCardBannerHtml (GR17): 'Suspended {date} — payment failed' on t
   assert.match(html, /Nothing is deleted, and nothing on this server has been touched — Barkpark Cloud has stopped managing it\. Everything comes back exactly as it was the moment payment succeeds\./);
   assert.doesNotMatch(html, /The server is stopped/);
   assert.doesNotMatch(html, /suspended — not deleted/); // the card uses its OWN copy, never the banner's
-  // No reason, or a billing reason → the billing arm, unchanged.
-  assert.match(hooks.suspendedCardBannerHtml(sub, null), /payment failed/);
-  assert.match(hooks.suspendedCardBannerHtml(sub, { suspended: true, suspended_reason: "billing_lapsed" }), /payment failed/);
+  // No reason, or the other billing reason → the billing arm, unchanged.
+  // A null box cannot carry a stamp, so it is dateless by construction — and
+  // still must not borrow the renewal day.
+  const noBox = hooks.suspendedCardBannerHtml(sub, null);
+  assert.match(noBox, /payment failed/);
+  assert.doesNotMatch(noBox, /December/, "a null box has no stamp and no licence to guess");
+  assert.match(
+    hooks.suspendedCardBannerHtml(sub, { suspended: true, suspended_reason: "billing_lapsed", suspended_at: suspendedAt }),
+    new RegExp("Suspended " + day + " — payment failed"));
 });
 
 // ── cch-w54-s1 · THE QUOTA AXIS IS NOT THE BILLING AXIS ─────────────────────
@@ -14251,8 +14322,9 @@ test("suspendedCardBannerHtml (GR17): 'Suspended {date} — payment failed' on t
 // un-suspends once the team is back at or under its ceiling. That makes it wrong
 // GUIDANCE, not merely an unbacked promise.
 test("cch-w54-s1: a quota-suspended box on a FULLY PAID team is never told its payment failed", () => {
+  const quotaSuspendedAt = "2026-06-12T12:00:00.000Z";
   const paid = { plan: "supporter", status: "active", current_period_end: "2026-09-01T12:00:00.000Z" };
-  const quota = { id: "b9", name: "Overflow", host: "h", suspended: true, suspended_reason: "quota_exceeded", provision_status: "succeeded" };
+  const quota = { id: "b9", name: "Overflow", host: "h", suspended: true, suspended_reason: "quota_exceeded", provision_status: "succeeded", suspended_at: quotaSuspendedAt };
   const html = hooks.suspendedCardBannerHtml(paid, quota);
 
   assert.doesNotMatch(html, /payment failed/, "a paid team is never told a payment failed");
@@ -14261,15 +14333,35 @@ test("cch-w54-s1: a quota-suspended box on a FULLY PAID team is never told its p
   assert.match(html, /over your plan&rsquo;s instance limit/i);
   assert.match(html, /Remove an instance, or move to a plan with a higher instance limit/);
   assert.match(html, /come back automatically/); // backed by reconcile_plan_limit's restore arm
-  // NO DATE. suspended_at is written but never serialized, so the old copy
-  // substituted current_period_end — a FUTURE renewal day rendered as a PAST
-  // suspension day. The plane cannot produce this date, so the card omits it.
-  assert.doesNotMatch(html, /September|August|Suspended \w+ \d/);
+  // THE DATE IS BACK, AND IT IS THE RIGHT ONE — cch-w54-bl.
+  //
+  // This assertion read `doesNotMatch(html, /September|August|Suspended \w+ \d/)`
+  // under the comment "The plane cannot produce this date, so the card omits
+  // it." That premise was TRUE when cch-w54-s1 wrote it and is FALSE now:
+  // `barkpark_json/5` serializes `suspended_at` as of cch-w54-bl.
+  //
+  // Note what the rot did NOT do: it did not make this test fail. The card kept
+  // omitting the date, the assertion kept passing, and the comment kept
+  // explaining why that was correct — so nothing anywhere announced that the
+  // reason had expired. A guard vouching for a fact that stopped being true is
+  // invisible precisely because it is green, which is why the comment is
+  // rewritten in the same edit as the assertion rather than left to be
+  // "obviously stale" to some later reader.
+  const quotaDay = new Date(Date.parse(quotaSuspendedAt)).toLocaleDateString(undefined, { month: "long", day: "numeric" });
+  assert.match(html, new RegExp("Suspended " + quotaDay + " — over your plan"),
+    "the quota axis dates the card too — the stamp is written by the same clause for every reason");
+  // Still never the renewal day, on this axis least of all: this team is PAID
+  // and active, so current_period_end is a future date about money it does not
+  // owe. The negative that mattered survives; only its justification changed.
+  assert.doesNotMatch(html, /September/,
+    "a paid team's next renewal is not the day its box was suspended");
 
-  // And it reaches the card through the real render path, not just the helper.
+  // And it reaches the card through the real render path, not just the helper —
+  // the day included, so a call site that dropped the box argument would red.
   const card = hooks.instanceCardHtml(quota, { sub: paid, stats: hooks.instanceCardStats(null) });
   assert.match(card, /suspended-card-banner/);
   assert.doesNotMatch(card, /payment failed/);
+  assert.match(card, new RegExp("Suspended " + quotaDay + " — over your plan"));
 });
 
 // cch-w54-s1 — the raw `suspended_reason` column used to reach a user verbatim:
