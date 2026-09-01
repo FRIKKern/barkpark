@@ -9,13 +9,25 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
   hooks — `:live_scope_readonly` and `:live_scope_write_scope` — was asserted
   from `phoenix_live_view/channel.ex` source only. This file runs it.
 
-  ## ⚠ THIS SUITE CONTAINS A REPRODUCTION, NOT ONLY REGRESSION PROOF
+  ## ✅ THE GUARD IS NOW CLOSED — THIS SUITE IS ALL REGRESSION PROOF
 
-  The test named "…and the COMPONENT route WRITES" asserts that the escalated
-  bytes REACH THE STORE. It is GREEN because the bypass is REAL and OPEN. When
-  the fix lands, that assertion must be INVERTED (store stays `@orig`) — a red
-  there is the FIX arriving, not a regression. Every OTHER test in this file is
-  an ordinary standing regression proof and must stay green.
+  This banner previously read "⚠ THIS SUITE CONTAINS A REPRODUCTION": the test
+  below named "…and the COMPONENT route WRITES" asserted that the escalated
+  bytes REACHED THE STORE, and it was GREEN because the bypass was REAL and
+  OPEN. `task-6c2352ce57f8ef20` closed it, and that test is now INVERTED — it
+  asserts the store stays `@orig` and the component receives
+  `write_capable: false`. Every test in this file is an ordinary standing
+  regression proof and must stay green.
+
+  THE FIX, in one line: `sheet_write_capable?/1` at the `SheetGrid` callsite
+  (`grep -n 'sheet_grant_target_denied?' lib/barkpark_web/live/studio/studio_live/components.ex`)
+  now requires, for a GRANT-graded socket only, that some active grant
+  `Access.validate/3`-admits `:write` at the MOUNTED SHEET's real
+  `type` + canonical `doc_id` — not merely at desk granularity. Same door
+  `Shared.Paper.grant_target_denied?/3` built for the paper surface in wave 44,
+  travelled into the component as the prop rather than as a fourth
+  `attach_hook` (a `phx-target`ed event never consults the parent's hook list —
+  that is the whole bug).
 
   ## What the run finds — three different answers, one per grade
 
@@ -29,7 +41,8 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       same mechanism via `readonly_gate?: true`.
 
     * `{:grant, ctx}` with a WRITE grant NARROWER than the desk
-      (`:live_scope_write_scope`) — **BYPASSED**. This hook is not a presence
+      (`:live_scope_write_scope`) — **WAS BYPASSED; now GATED by the prop's own
+      target narrowing.** This hook is not a presence
       check, it is a per-event TARGET check: it resolves
       `%{workspace_id, project_id, dataset, type, doc_id}` from the loaded
       editor doc and requires `Access.validate(grant, :write, target) == :ok`.
@@ -38,18 +51,21 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       `caps.write == true`, and `Caps.derive/1` computes `write` through
       `Access.admits_desk?/3`, which OVERWRITES the request's `type`/`doc_id`
       with the GRANT'S OWN before validating. A doc-scoped write grant therefore
-      self-satisfies at desk granularity and the prop arrives `true` on EVERY
-      sheet of the desk.
+      self-satisfies at desk granularity and the prop USED TO arrive `true` on
+      EVERY sheet of the desk. It no longer does: `sheet_write_capable?/1`
+      now ANDs a per-target `Access.validate/3` on top of that desk answer.
 
-  So the bypass is REAL, and it is a GRANULARITY gap, not a missing gate:
-  socket route = doc-granular, component route = desk-granular.
+  So the bypass was REAL, and it was a GRANULARITY gap, not a missing gate:
+  socket route = doc-granular, component route = desk-granular. The fix makes
+  the component route doc-granular too, so the two agree.
 
   This is the SHEET twin of `pds_w44_grant_door_test.exs`, which found and
   closed the same gap on the PAPER route via
-  `Shared.Paper.grant_target_denied?/3`. `grep -rn 'grant_target_denied?' lib/`
-  returns `shared/paper.ex` only — the sheet surface has no such door, and
-  `SheetGrid.Ops.send_ops/2`'s `write_capable: false` wall is the only thing
-  between this principal and the Sheets session.
+  `Shared.Paper.grant_target_denied?/3`. That predicate is a `defp` on the
+  paper module, so the sheet callsite states the same ladder over the same
+  public core primitive (`Barkpark.Access.validate/3`) rather than reaching
+  into it; `SheetGrid.Ops.send_ops/2`'s `write_capable: false` wall is what
+  now stops this principal at the Sheets session.
 
   ## `StudioChrome`'s `:studio_chrome_nav` — the third hook the row names
 
@@ -67,9 +83,11 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
   Every assertion reads A1 back through `Session.peek/2` (a live session's
   memory is authoritative when one exists) falling back to the stored row. A
   refute-on-absence under async logging would prove nothing; these assert on
-  PRESENCE — the escalated bytes ARE in the store on the bypass path, and the
-  original bytes ARE still there on the gated paths, printed by value on
-  failure.
+  PRESENCE by VALUE — the ORIGINAL bytes ARE still there on every gated path,
+  and the ESCALATED bytes ARE there on the granted sheet, printed by value on
+  failure. Each gated assertion is PAIRED with that positive control through
+  the SAME component route, so "the fence works" cannot be confused with
+  "sheet writing is broken for everyone".
 
   `async: false` — sheet sessions are globally-registered processes reading
   through the SQL sandbox in shared mode, same as the sibling SheetGrid suites.
@@ -350,9 +368,11 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       assert Content.published_id(assigns[:sheet_doc].doc_id) == @other_slug
       assert assigns[:editor_type] == "sheet"
 
-      # THE GRANULARITY GAP, stated as two values from the running socket: the
-      # prop the component receives is `true`, while the socket-level hook's own
-      # predicate on this exact target is `{:error, :forbidden}`.
+      # THE GRANULARITY GAP THE FIX CLOSES, stated as three values from the
+      # running socket. `Caps.write_capable?/2` is DELIBERATELY still `true`:
+      # it is the DESK answer, it takes no target, and it is the socket gate's
+      # predicate too — widening it was explicitly out of scope. The narrowing
+      # lives at the callsite, so the value that changed is the PROP.
       caps = Caps.derive(socket_of(view))
       assert caps.write == true
       assert Caps.write_capable?(assigns, caps) == true
@@ -369,18 +389,22 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
                assigns[:caller_context].grants,
                &(Barkpark.Access.validate(&1, :write, target) == :ok)
              )
+
+      # …and THAT is the answer the component now receives: the desk-granular
+      # capability said `true`, the target-granular one says `false`. These two
+      # lines side by side ARE the fix.
+      assert component_assigns(view)[:write_capable] == false
     end
   end
 
   # ── 2. THE BYPASS: same socket, same sheet, two routes ──────────────────────
 
   describe "component-targeted write vs :live_scope_write_scope" do
-    @tag :reproduction
-    test "REPRODUCTION: SOCKET route is HALTED by the hook, and the COMPONENT route WRITES", %{
-      conn: conn,
-      ws: ws,
-      proj: proj
-    } do
+    # WAS `@tag :reproduction`, and WAS asserting `%{"v" => 1337}` — the leak.
+    # INVERTED by task-6c2352ce57f8ef20: the same run, the same socket, the same
+    # two routes, and now they AGREE. A red here means the fence came back off.
+    test "BOTH routes now REFUSE the non-granted sheet — socket by the hook, component by the prop",
+         %{conn: conn, ws: ws, proj: proj} do
       {_user, conn} = write_grantee_session(conn, ws, proj)
       {view, _html} = open_sheet!(conn, ws, proj, @other_slug)
 
@@ -394,27 +418,51 @@ defmodule BarkparkWeb.Studio.PdsW41LiveScopeComponentBypassTest do
       assert flash_error(view) == @outside_grant_flash
       assert persisted_a1(@other_slug) == @orig
 
+      # NON-VACUITY, BEFORE the write: the component IS reachable on this socket
+      # and the cid-routed event really is dispatched into its own
+      # `handle_event/3` — C3 is not the mount default, so a changed `active` on
+      # the COMPONENT socket is presence-evidence. Without this, an unchanged
+      # store below could just mean the event never arrived.
+      render_hook(grid_target!(view, @other_slug), "cell-click", %{
+        "ref" => "C3",
+        "shift" => false
+      })
+
+      assert component_assigns(view)[:active] == {3, 3}
+
       # ROUTE B — the SAME socket, the SAME sheet, targeted at the component.
-      # The parent's hook list is never consulted on this path; the only wall is
-      # the `write_capable` prop, which is desk-granular and says `true`.
-      #
+      # The parent's hook list is still never consulted on this path (that is
+      # structural and unchanged); the wall is the `write_capable` prop, which
+      # is now TARGET-granular and says `false`.
       component_write(view, @other_slug, @escalated)
 
-      # THE ORACLE: persisted state, by value. Bound to a variable so a
-      # regression prints `left: %{"v" => "orig"}` rather than a custom message.
+      # THE ORACLE FIRST — persisted state, by value. Bound to a variable so a
+      # regression prints `left: %{"v" => 1337}` rather than a custom message,
+      # and asserted BEFORE any mechanism assertion so a mutation run reports
+      # the BYTES rather than the flag that shadowed them.
       after_component_event = persisted_a1(@other_slug)
 
-      assert after_component_event == %{"v" => 1337},
-             "the component route did not write; the bypass did not reproduce"
+      assert after_component_event == @orig
 
-      # …and the value the two routes disagree about, read off the COMPONENT's
-      # own socket: the capability really arrived `true` here while the socket
-      # hook's own predicate on the same target is `{:error, :forbidden}`.
-      assert component_assigns(view)[:write_capable] == true
+      # …and the MECHANISM that held it, read off the COMPONENT's own socket:
+      # the capability arrived `false`, which is the value that used to be
+      # `true` while the socket hook's predicate on the same target was
+      # `{:error, :forbidden}`. The two routes now agree.
+      assert component_assigns(view)[:write_capable] == false
 
-      # And the SOCKET route still refuses the same target on the same socket —
-      # the two routes disagree, which is the finding.
+      # And the SOCKET route still refuses the same target on the same socket.
       assert flash_error(view) == @outside_grant_flash
+
+      # THE PAIRED POSITIVE CONTROL, SAME PRINCIPAL, SAME RUN, SAME ROUTE: the
+      # sheet the grant DOES name is still written through the component. This
+      # is what separates "the fence is target-selective" from "I closed the
+      # sheet surface for everyone" — without it the assertion above is
+      # satisfied by a blanket denial.
+      {granted_view, _html} = open_sheet!(conn, ws, proj, @granted_slug)
+      component_write(granted_view, @granted_slug, @escalated)
+
+      assert persisted_a1(@granted_slug) == %{"v" => 1337}
+      assert component_assigns(granted_view)[:write_capable] == true
     end
 
     test "the sheet the grant DOES name is written too — the prop is not blanket-open", %{
