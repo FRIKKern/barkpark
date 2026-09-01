@@ -15,7 +15,12 @@ package cli
 //
 // `autoupdate` PATCHes ONE instance's policy (PATCH /v1/barkparks/:id/autoupdate,
 // team-admin-gated); `rollout` drives the FLEET brake (GET/POST
-// /v1/admin/autoupdate*). Both mirror cloud_deploy_cmd.go's style and — like
+// /v1/operator/autoupdate*, PLATFORM-OPERATOR gated — the caller's own bp-login
+// session, allowlisted by PLATFORM_ADMIN_EMAILS. It used to call the
+// worker-gated /v1/admin/autoupdate* trio, which no human credential can open;
+// isu-backlog-operator-principal ruled the platform operator to be THE principal
+// for the fleet brake and this verb now honours it).
+// Both mirror cloud_deploy_cmd.go's style and — like
 // every control-plane verb here — its HARD INVARIANT: they NEVER write bp config.
 // They resolve the instance by name/id via the fleet list and the Cloud session
 // token, exactly like `bp cloud verify` / `bp cloud domain`, and touch nothing
@@ -358,9 +363,18 @@ func emitRolloutRaw(out *writer, state cloudclient.RolloutState) {
 }
 
 // rolloutFail maps a refused rollout call onto the `bp:` error seam. A 404 (an
-// older control plane without the admin-rollout route) is a distinct, honest
-// "your control plane doesn't have this yet"; a 403 is the admin gate; anything
-// else routes through cloudFail so auth handling stays shared.
+// older control plane that predates the /v1/operator seam) is a distinct, honest
+// "your control plane doesn't have this yet"; a 403 is the platform-operator
+// allowlist; anything else (including the 401 of an expired session) routes
+// through cloudFail so auth handling stays shared.
+//
+// The 403 sentence names PLATFORM_ADMIN_EMAILS on purpose. The refusal is NOT
+// "log in again" — the caller already holds a valid session, and re-running
+// `bp login` will produce the identical 403 forever. The only thing that moves
+// this refusal is the control plane's allowlist, so the message says which knob
+// and where it lives; anything vaguer sends an operator round a login loop
+// during the exact incident the brake exists for. (It is unset on prod today —
+// tracked separately as the ops gate, not as a CLI defect.)
 func rolloutFail(out *writer, err error) int {
 	var re *cloudclient.CloudRouteError
 	if errors.As(err, &re) {
@@ -371,7 +385,10 @@ func rolloutFail(out *writer, err error) int {
 				exitNotFound)
 		case "forbidden":
 			return useError(out, "auth",
-				"fleet rollout is platform-operator only — a team session cannot drive it",
+				"you are signed in, but this account is not a platform operator — the fleet brake is "+
+					"gated on the control plane's PLATFORM_ADMIN_EMAILS allowlist, and your login email is not on it "+
+					"(re-running `bp login` will not change this; the allowlist must be set on the control plane). "+
+					"Per-instance pause/pin needs no operator: see `bp cloud autoupdate`.",
 				exitAuth)
 		}
 	}
@@ -423,9 +440,12 @@ USAGE
 
 WHAT IT DOES
   The control plane rolls blessed releases across the fleet one health-gated box
-  at a time. These verbs are the GLOBAL control over that rollout. They are
-  PLATFORM-OPERATOR gated (the control plane's operator credential, above any
-  team) — a plain team session is refused:
+  at a time. These verbs are the GLOBAL control over that rollout. They run on
+  YOUR bp-login session ('bp login') and are PLATFORM-OPERATOR gated: the control
+  plane accepts them only when your login email is on its PLATFORM_ADMIN_EMAILS
+  allowlist (the same allowlist that lights the console's Operator surface). A
+  plain team session is refused with a 403 that says so — owner or admin on a
+  team is a different axis and does not grant it:
 
     status   is the rollout running or halted, and how many boxes are eligible /
              behind / in-flight (each shown when the control plane reports it).

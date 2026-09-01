@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -65,12 +66,20 @@ func TestBarkparkToleratesOlderControlPlane(t *testing.T) {
 
 // fakeCP stands up a control plane recording the last request and answering with
 // a canned status + body.
-func fakeCP(t *testing.T, status int, body string) (*Client, *struct{ method, path, body string }) {
+//
+// It records `auth` (the raw Authorization header) because a fake server that
+// throws the credential away cannot tell a call that authenticates from one that
+// does not — every rollout assertion below would have passed just as happily
+// against a client sending no header at all, which is precisely how this suite
+// stayed green while `bp cloud rollout` was knocking on a worker-only door with
+// a session token (isu-backlog-operator-principal). Path AND credential are now
+// asserted together on every rollout call.
+func fakeCP(t *testing.T, status int, body string) (*Client, *struct{ method, path, auth, body string }) {
 	t.Helper()
-	rec := &struct{ method, path, body string }{}
+	rec := &struct{ method, path, auth, body string }{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
-		rec.method, rec.path, rec.body = r.Method, r.URL.Path, string(raw)
+		rec.method, rec.path, rec.auth, rec.body = r.Method, r.URL.Path, r.Header.Get("Authorization"), string(raw)
 		w.WriteHeader(status)
 		_, _ = w.Write([]byte(body))
 	}))
@@ -114,6 +123,12 @@ func TestSetAutoupdateInvalidNestedIsRouteError(t *testing.T) {
 	}
 }
 
+// TestRolloutMethodsAndDecode pins the DOOR and the KEY for all three rollout
+// verbs: the `/v1/operator/autoupdate*` trio (platform-operator gated, the
+// isu-backlog-operator-principal ruling) carrying the caller's session as
+// `Authorization: Bearer <session>`. Both halves matter — the old version of
+// this test asserted only the path, and would have stayed green with the client
+// sending no credential at all.
 func TestRolloutMethodsAndDecode(t *testing.T) {
 	c, rec := fakeCP(t, 200, `{"ok":true,"halted":true,"eligible":3,"behind":2,"in_flight":1}`)
 
@@ -121,8 +136,11 @@ func TestRolloutMethodsAndDecode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RolloutStatus: %v", err)
 	}
-	if rec.method != "GET" || rec.path != "/v1/admin/autoupdate" {
-		t.Fatalf("status hit %s %s", rec.method, rec.path)
+	if rec.method != "GET" || rec.path != "/v1/operator/autoupdate" {
+		t.Fatalf("status hit %s %s, want GET /v1/operator/autoupdate", rec.method, rec.path)
+	}
+	if rec.auth != "Bearer tok" {
+		t.Fatalf("status auth = %q, want the session bearer %q", rec.auth, "Bearer tok")
 	}
 	if !st.Halted || st.Eligible == nil || *st.Eligible != 3 || st.Behind == nil || *st.Behind != 2 || st.InFlight == nil || *st.InFlight != 1 {
 		t.Fatalf("rollout state = %+v", st)
@@ -131,17 +149,71 @@ func TestRolloutMethodsAndDecode(t *testing.T) {
 		t.Fatalf("rollout Raw not retained for -o json passthrough")
 	}
 
+	rec.auth = ""
 	if _, err := c.RolloutHalt(context.Background()); err != nil {
 		t.Fatalf("RolloutHalt: %v", err)
 	}
-	if rec.method != "POST" || rec.path != "/v1/admin/autoupdate/halt" {
-		t.Fatalf("halt hit %s %s", rec.method, rec.path)
+	if rec.method != "POST" || rec.path != "/v1/operator/autoupdate/halt" {
+		t.Fatalf("halt hit %s %s, want POST /v1/operator/autoupdate/halt", rec.method, rec.path)
 	}
+	if rec.auth != "Bearer tok" {
+		t.Fatalf("halt auth = %q, want the session bearer", rec.auth)
+	}
+
+	rec.auth = ""
 	if _, err := c.RolloutResume(context.Background()); err != nil {
 		t.Fatalf("RolloutResume: %v", err)
 	}
-	if rec.path != "/v1/admin/autoupdate/resume" {
-		t.Fatalf("resume hit %s", rec.path)
+	if rec.path != "/v1/operator/autoupdate/resume" {
+		t.Fatalf("resume hit %s, want /v1/operator/autoupdate/resume", rec.path)
+	}
+	if rec.auth != "Bearer tok" {
+		t.Fatalf("resume auth = %q, want the session bearer", rec.auth)
+	}
+}
+
+// TestRolloutNeverCallsTheWorkerRoutes is the negative half of the same ruling.
+// `/v1/admin/autoupdate*` stays the faceless WORKER's (require_worker, a
+// constant-time compare against WORKER_TOKEN) — a bp-login session can never
+// equal that secret, so a client that drifts back to those paths is broken for
+// every human caller by construction. Asserted as an explicit non-prefix so a
+// future re-point cannot pass by matching some other path fragment.
+func TestRolloutNeverCallsTheWorkerRoutes(t *testing.T) {
+	c, rec := fakeCP(t, 200, `{"ok":true,"halted":false}`)
+
+	for _, call := range []struct {
+		name string
+		fn   func() (RolloutState, error)
+	}{
+		{"status", func() (RolloutState, error) { return c.RolloutStatus(context.Background()) }},
+		{"halt", func() (RolloutState, error) { return c.RolloutHalt(context.Background()) }},
+		{"resume", func() (RolloutState, error) { return c.RolloutResume(context.Background()) }},
+	} {
+		if _, err := call.fn(); err != nil {
+			t.Fatalf("%s: %v", call.name, err)
+		}
+		if strings.HasPrefix(rec.path, "/v1/admin/") {
+			t.Fatalf("%s knocked on the WORKER door %s — no bp-login session can open it", call.name, rec.path)
+		}
+		if !strings.HasPrefix(rec.path, "/v1/operator/autoupdate") {
+			t.Fatalf("%s hit %s, want the /v1/operator/autoupdate* seam", call.name, rec.path)
+		}
+	}
+}
+
+// TestRolloutForbiddenIsRouteError pins the 403 the operator gate emits for a
+// signed-in NON-operator (`Auth.forbidden/2` → the flat `{"error":"forbidden"}`
+// slug, merged with evidence) as a decodable *CloudRouteError, so the CLI can
+// print the allowlist sentence instead of dumping a body.
+func TestRolloutForbiddenIsRouteError(t *testing.T) {
+	c, _ := fakeCP(t, 403, `{"error":"forbidden","required":"platform_operator","scope":"platform"}`)
+	_, err := c.RolloutHalt(context.Background())
+	var re *CloudRouteError
+	if err == nil || !asRoute(err, &re) || re.Code != "forbidden" {
+		t.Fatalf("want CloudRouteError forbidden, got %v", err)
+	}
+	if re.HTTPStatus != 403 {
+		t.Fatalf("HTTPStatus = %d, want 403", re.HTTPStatus)
 	}
 }
 

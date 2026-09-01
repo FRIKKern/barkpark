@@ -324,10 +324,20 @@ defmodule BarkparkCloud.Web.Auth do
 
   Distinct from `require_worker/2` (the faceless off-box provisioner secret
   behind `/v1/internal/*` + `/v1/admin/*`): this gates the human operator's
-  browser SESSION, which is 401-dead against the worker surface. This is the
-  DECLARED interim operator principal per charter GR9/GR39 — never a team role
-  (owner/admin is a different axis: authority reads from the membership row, not
-  a global allowlist — Authz law).
+  browser SESSION, which is 401-dead against the worker surface. Never a team
+  role (owner/admin is a different axis: authority reads from the membership
+  row, not a global allowlist — Authz law).
+
+  THE RULING (`isu-backlog-operator-principal`, closing charter GR9/GR39's open
+  question): this is THE human principal for the fleet self-update controls, not
+  an interim placeholder, and it is reachable from BOTH shipped human surfaces —
+  the console SPA and `bp cloud rollout`, which now calls
+  `/v1/operator/autoupdate[/halt|/resume]` with the caller's session instead of
+  aiming it at the worker-gated `/v1/admin/autoupdate*` trio no `bp login` token
+  could ever open. The worker routes were NOT widened to accept a session: the
+  two doors are disjoint in both directions, and
+  `test/barkpark_cloud/web/router_operator_test.exs` §2b asserts that as a
+  full-equality matrix (worker 401/200 · operator 200/401 · plain 403/401).
   """
   @spec require_platform_operator(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
   def require_platform_operator(conn, opts) do

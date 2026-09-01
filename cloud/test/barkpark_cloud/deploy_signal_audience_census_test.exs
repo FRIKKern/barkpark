@@ -418,19 +418,21 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     # the GOOD direction: its closer landed. Delete the allowlist row.") and the
     # row is gone in the same commit as the re-address that closed it.
     "fleet_rollout_state" =>
-      "EMPTY BY CONSTRUCTION today, and green here until dr-w19-s5 widened the " <>
-        "pull-side empty tiers: `RolloutStatus` sends GET /v1/admin/autoupdate, which " <>
-        "the router gates at tier `worker` — the machine population that holds " <>
-        "`WORKER_TOKEN`. No human account holds that secret, and `bp cloud rollout " <>
-        "status` on the real prod owner token 401s, so the fleet brake's POSITION — " <>
-        "read before and after every deploy wave — is unreadable by any person. " <>
-        "This is NOT closed by re-pointing the Go client at the operator door " <>
-        "(GET/POST /v1/operator/autoupdate, router.ex:3470/3480/3491, already called " <>
-        "by the console at app.js:8321): that door exists, but it is gated on the " <>
-        "SAME `:platform_admin_emails` allowlist, and repointing there flips this " <>
-        "signal worker -> operator and reds this census harder. Charter D30 rules " <>
-        "that allowlist a PERMANENT HUMAN GATE. The defect is that no human ACCOUNT " <>
-        "is in it, not that no human VERB exists. " <>
+      "EMPTY BY CONSTRUCTION — but the CONSTRUCTION MOVED, and so did the reason. " <>
+        "`platform_admin_emails/0` reads `[]` when the config key is unset, so the " <>
+        "gate still resolves to zero accounts by construction; what changed is WHY. " <>
+        "This row used to read " <>
+        "'`RolloutStatus` sends GET /v1/admin/autoupdate, tier `worker`' — the " <>
+        "machine population that holds `WORKER_TOKEN`, which no human account holds. " <>
+        "isu-backlog-operator-principal repointed the three rollout verbs at the " <>
+        "operator door (GET/POST /v1/operator/autoupdate*, the same trio the console " <>
+        "calls), so Side B now derives tier `operator` from source with no edit here. " <>
+        "The row's own prediction that repointing 'reds this census harder' is " <>
+        "REFUTED: dr-w19-s5 had already put `operator` in @empty_pull_tiers, so the " <>
+        "verdict is unchanged and only the REASON moved. What is left is not a " <>
+        "missing verb or a wrong door — it is that `:platform_admin_emails` is unset " <>
+        "on the live control plane, so the human-shaped door has nobody behind it. " <>
+        "Charter D30 rules that allowlist a PERMANENT HUMAN GATE. " <>
         "CLOSER: gr-ops-platform-admin-emails — set PLATFORM_ADMIN_EMAILS on the live " <>
         "control plane and the operator door opens for a real person; when it lands, " <>
         "delete this row."
