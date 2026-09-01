@@ -206,6 +206,26 @@ var claimDispositions = []claimDisposition{
 		Identity: []string{"ID", "Name", "Slug", "DocType"},
 		Post:     []string{"Workspace", "Project", "Dataset"},
 	},
+	// ssw8 — the create-time binding verdict. The identity is the ROW (the site is
+	// the same site in both halves) plus every part of the verdict that is not this
+	// row's axis; the post-condition is the one field each row exists to pin.
+	{
+		Name:     "renderSiteCreated/content-binding-status",
+		Identity: []string{"Site.ID", "Site.Name", "Site.Slug", "Site.DocType", "ContentBinding.DocType"},
+		Post:     []string{"ContentBinding.Status"},
+	},
+	{
+		// @presence, not a value: the axis is whether the box published a total at
+		// all, which is precisely what an int would have collapsed into "0".
+		Name:     "renderSiteCreated/content-binding-count",
+		Identity: []string{"Site.ID", "ContentBinding.Status", "ContentBinding.DocType"},
+		Post:     []string{"ContentBinding.Count@presence"},
+	},
+	{
+		Name:     "renderSiteCreated/content-binding-detail",
+		Identity: []string{"Site.ID", "ContentBinding.Status"},
+		Post:     []string{"ContentBinding.Detail"},
+	},
 	{
 		Name:     "renderSiteDeployVerdict/live-vs-failed",
 		Identity: []string{"ID"},

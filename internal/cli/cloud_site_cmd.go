@@ -241,7 +241,7 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 		Theme: strings.TrimSpace(a.val("theme")),
 	}
 
-	site, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
+	created, cerr := cfg.CloudClient().CreateSpawnSite(cloudCtx(), req)
 	if cerr != nil {
 		// The create refusal rides the SAME #11784 ladder as delete/rollback — one
 		// dialect, never a second. POST /v1/sites emits no top-level 403 and no 409,
@@ -259,7 +259,12 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	// the `deploy it with …` hint.
 	wantDeploy := a.bools["deploy"]
 
-	if !wantDeploy && out.emitStructured(map[string]any{"site": spawnSiteMap(site)}) {
+	// The row and the VERDICT are two different facts and the receipt needs both:
+	// the row says which type was stored, the verdict says whether the control
+	// plane could read it through this site's own token at create time.
+	site, binding := created.Site, created.ContentBinding
+
+	if !wantDeploy && out.emitStructured(siteCreatedEnvelope(site, binding)) {
 		return exitOK
 	}
 	ref := spawnSiteRef(site)
@@ -270,7 +275,7 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 	if wantDeploy {
 		emit = out.progressf
 	}
-	renderSiteCreated(emit, site, req, wantDeploy)
+	renderSiteCreated(emit, site, binding, req, wantDeploy)
 	if wantDeploy {
 		return chainSiteDeploy(out, cfg, ref, site)
 	}
@@ -287,32 +292,19 @@ func runCloudSiteCreate(out *writer, g globals, args []string) int {
 // echoed what you asked for" from "the server said nothing about it". Where the
 // two diverge the line says which one it is printing, because a create that
 // echoes your own flag back at you is not evidence the control plane bound it.
-func renderSiteCreated(emit func(string, ...any), site cloudclient.SpawnSite, req cloudclient.SpawnSiteCreate, wantDeploy bool) {
+//
+// `binding` is the control plane's CREATE-TIME READ of the bound type (charter
+// D73) — a different fact from the row, and the one an operator actually needs.
+// It arrives on a top-level `content_binding` key beside `site`, so it is a
+// separate parameter rather than a field of the row.
+func renderSiteCreated(emit func(string, ...any), site cloudclient.SpawnSite, binding cloudclient.ContentBinding, req cloudclient.SpawnSiteCreate, wantDeploy bool) {
 	ref := spawnSiteRef(site)
 	emit("✓ site %s created — %s build, kind %s",
 		hzCell(siteOr(site.Name, req.Name)),
 		hzCell(siteOr(site.Framework, req.Framework)),
 		hzCell(siteOr(site.Kind, req.Kind)))
 	emit("  dataset: %s", siteDatasetClaim(site, req))
-	// The bound content type. The record's doc_type is the only thing that says the
-	// control plane STORED the binding; echoing req.DocType back would claim a
-	// binding nothing confirmed.
-	//
-	// WHAT THIS LINE MAY NOT SAY. The control plane now READS the binding back at
-	// create time (charter D73) and refuses 422 content_binding_empty when the
-	// site's own token cannot see the type — so "whether the dataset serves that
-	// type is proven by the first deploy, not here" became FALSE the moment that
-	// landed. But the verdict rides a top-level `content_binding` key that
-	// cloudclient.SpawnSite (the site ROW) does not carry, so this render cannot
-	// see it either way. It therefore claims exactly what it holds — the stored
-	// row — and names the verdict it is not being shown, rather than narrating
-	// someone else's read from memory. Surfacing it is ssw8-surface-the-create-binding-verdict.
-	switch {
-	case strings.TrimSpace(site.DocType) != "":
-		emit("  content: %s (the type stored on the site row; the control plane also checks at create that this site can read it, but that verdict is not in this envelope)", hzCell(site.DocType))
-	case strings.TrimSpace(req.DocType) != "":
-		emit("  content: %s requested — the control plane echoed no doc type back, so the binding is UNCONFIRMED", hzCell(req.DocType))
-	}
+	renderSiteContentClaim(emit, site, binding, req)
 	if t := siteOr(site.Template, req.Template); strings.TrimSpace(t) != "" {
 		emit("  starter: %s", hzCell(t))
 	}
@@ -2071,6 +2063,101 @@ func siteStagesInOrder(d cloudclient.SiteDeployment) []cloudclient.SiteStage {
 }
 
 // spawnSiteMap is the structured (json/yaml) shape of a spawned site.
+// siteCreatedEnvelope is the machine-mode create result: the row, plus the
+// control plane's create-time binding verdict WHEN IT SENT ONE. The key is
+// omitted entirely for a create that carried no verdict, so a script can tell
+// "the control plane did not probe this kind" from "the probe came back
+// unverified" without parsing prose — the same distinction the human line makes.
+func siteCreatedEnvelope(s cloudclient.SpawnSite, binding cloudclient.ContentBinding) map[string]any {
+	env := map[string]any{"site": spawnSiteMap(s)}
+	if m := contentBindingMap(binding); m != nil {
+		env["content_binding"] = m
+	}
+	return env
+}
+
+// contentBindingMap re-emits the verdict for the machine channel, key-for-key with
+// the producer: an absent `count` stays ABSENT (never a fabricated 0), `detail`
+// keeps its name (it is not `reason`), and a verdict-less binding is nil so the
+// caller can drop the key rather than emit an empty object that reads like a
+// verdict of its own.
+func contentBindingMap(b cloudclient.ContentBinding) map[string]any {
+	if strings.TrimSpace(b.Status) == "" {
+		return nil
+	}
+	m := map[string]any{"status": b.Status}
+	if strings.TrimSpace(b.DocType) != "" {
+		m["doc_type"] = b.DocType
+	}
+	if b.Count != nil {
+		m["count"] = *b.Count
+	}
+	if strings.TrimSpace(b.Detail) != "" {
+		m["detail"] = b.Detail
+	}
+	return m
+}
+
+// renderSiteContentClaim writes the create receipt's `content:` line — the one
+// place two different facts about the same doc type have to be told apart:
+//
+//	the ROW's doc_type      what the control plane STORED on the site
+//	the BINDING verdict     what the control plane READ, through this site's own
+//	                        token, before it answered 201 (charter D73)
+//
+// A stored type is not a proven read, and the line says which one it is printing.
+// The three verdicts and what each may claim:
+//
+//   - BOUND WITH A COUNT — the box published a total for the type, so the receipt
+//     names it. This is the strongest thing the create can honestly say.
+//   - BOUND WITHOUT A COUNT — the producer OMITS `count` when the box published no
+//     total, and an absent count is not a zero one. The line says bound and prints
+//     NO number: "0 documents" about a site nobody counted is a worse lie than
+//     silence, and it is exactly the lie a non-pointer Count would tell.
+//   - UNVERIFIED — the read could not be confirmed. This is the case the whole
+//     surfacing exists for: it used to print the same confident line as a
+//     confirmed binding, so a CLI user was told nothing and believed the binding
+//     had been checked. It now says NOT confirmed and relays the server's own
+//     reason (the key is `detail`; the arm carries no doc type, so the type comes
+//     from the row or the request).
+//
+// A verdict-less envelope (an empty Status — the control plane does not probe
+// every kind) falls through to the stored-row line ALONE. Absent is not
+// unverified: printing a failure for a probe that never ran would be the same
+// class of invention this line exists to prevent.
+func renderSiteContentClaim(emit func(string, ...any), site cloudclient.SpawnSite, binding cloudclient.ContentBinding, req cloudclient.SpawnSiteCreate) {
+	switch strings.ToLower(strings.TrimSpace(binding.Status)) {
+	case "bound":
+		typ := siteOr(binding.DocType, siteOr(site.DocType, req.DocType))
+		if binding.Count != nil {
+			emit("  content: %s — bound: the control plane read %d of them through this site's own token at create", hzCell(typ), *binding.Count)
+			return
+		}
+		emit("  content: %s — bound: the control plane confirmed this site can read the type at create, and the box published no total, so none is claimed", hzCell(typ))
+		return
+	case "unverified":
+		typ := siteOr(site.DocType, req.DocType)
+		emit("  content: %s — the control plane could NOT confirm this site can read the type: %s", hzCell(typ), siteBindingReason(binding.Detail))
+		return
+	}
+	switch {
+	case strings.TrimSpace(site.DocType) != "":
+		emit("  content: %s (the type stored on the site row; this envelope carried no create-time verdict about it)", hzCell(site.DocType))
+	case strings.TrimSpace(req.DocType) != "":
+		emit("  content: %s requested — the control plane echoed no doc type back, so the binding is UNCONFIRMED", hzCell(req.DocType))
+	}
+}
+
+// siteBindingReason relays the server's stated reason, and says so plainly when
+// there is none — an unverified verdict with an empty detail is still a refusal to
+// confirm, and blank space after a colon would read like one that was confirmed.
+func siteBindingReason(detail string) string {
+	if d := strings.TrimSpace(detail); d != "" {
+		return d
+	}
+	return "the control plane gave no reason"
+}
+
 func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 	m := map[string]any{
 		"id":        s.ID,

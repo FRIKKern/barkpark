@@ -2096,24 +2096,67 @@ type SiteDeleteResult struct {
 	Slug   string `json:"slug"`
 }
 
+// ContentBinding is the create-time verdict the control plane OBSERVED — its own
+// read of the bound type through the new site's own token, taken before it
+// answered 201. It is NOT the site row: the row records which type was STORED,
+// this records whether that type could actually be READ.
+//
+// Status is "bound" or "unverified", and the two carry different keys because the
+// control plane knows different things in each case:
+//
+//   - "bound" carries DocType and, when the box published a magnitude, Count.
+//     COUNT IS A POINTER ON PURPOSE. The producer OMITS the key entirely when the
+//     box reported no total ("bound without a magnitude is the honest shape"), so
+//     absent and zero are different answers — nil means "the box published no
+//     total", a pointer to 0 means "the box published a total, and it is zero". A
+//     plain int collapses the two and lets a receipt print "0 documents" about a
+//     site whose content was never counted.
+//   - "unverified" carries DETAIL — the reason the read could not be confirmed —
+//     and NO doc type: the control plane never got far enough to name one, so a
+//     receipt that wants to name the type must take it from the row or the request.
+//     The key is `detail`, not `reason`.
+//
+// The zero value is the third case: the control plane sends NO content_binding key
+// at all for a kind it does not probe, and an empty Status is how a consumer tells
+// "no verdict was offered" apart from "the verdict was bad".
+type ContentBinding struct {
+	Status  string `json:"status"`
+	DocType string `json:"doc_type"`
+	Count   *int   `json:"count"`
+	Detail  string `json:"detail"`
+}
+
+// SpawnSiteCreated is the WHOLE POST /v1/sites 201 envelope, not just the row.
+// The create-time binding verdict rides a TOP-LEVEL `content_binding` key beside
+// `site`, so decoding into SpawnSite alone silently discarded it — which is how a
+// caller whose create came back "unverified" was told nothing at all. Anything
+// that REPORTS a create must be handed this, never the row on its own.
+type SpawnSiteCreated struct {
+	Site           SpawnSite      `json:"site"`
+	ContentBinding ContentBinding `json:"content_binding"`
+}
+
 // CreateSpawnSite POSTs /v1/sites (Bearer) with the spawner body and returns the
-// new row. The dataset triple tells the control plane which content to build
-// from; kind distinguishes the row from a container-model site.
-func (c *Client) CreateSpawnSite(ctx context.Context, req SpawnSiteCreate) (SpawnSite, error) {
+// new row TOGETHER WITH the control plane's create-time binding verdict. The
+// dataset triple tells the control plane which content to build from; kind
+// distinguishes the row from a container-model site.
+//
+// An envelope with no `content_binding` key decodes to the zero ContentBinding —
+// an empty Status, which every consumer must render as NOTHING, never as
+// "unverified".
+func (c *Client) CreateSpawnSite(ctx context.Context, req SpawnSiteCreate) (SpawnSiteCreated, error) {
 	status, body, err := c.do(ctx, "POST", "/v1/sites", true, req)
 	if err != nil {
-		return SpawnSite{}, err
+		return SpawnSiteCreated{}, err
 	}
 	if !ok(status) {
-		return SpawnSite{}, cloudError(status, body)
+		return SpawnSiteCreated{}, cloudError(status, body)
 	}
-	var out struct {
-		Site SpawnSite `json:"site"`
-	}
+	var out SpawnSiteCreated
 	if err := json.Unmarshal(body, &out); err != nil {
-		return SpawnSite{}, fmt.Errorf("decode site response: %w", err)
+		return SpawnSiteCreated{}, fmt.Errorf("decode site response: %w", err)
 	}
-	return out.Site, nil
+	return out, nil
 }
 
 // GetSpawnSite returns one spawned site by id via GET /v1/sites/:id (Bearer),
