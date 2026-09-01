@@ -463,9 +463,21 @@ defmodule BarkparkWeb.SheetsOpsRouteTest do
 
   # ── hardening helpers ──────────────────────────────────────────────────────
 
+  # `Barkpark.Plugins.Sheets` rides along with the halting double for a reason.
+  # `:barkpark, :plugins` is the INSTALLED-plugin whitelist, and since the
+  # BARKPARK_PLUGINS kill switch became effective at request time
+  # (`BarkparkWeb.Plugs.PluginRouteGuard`), replacing it wholesale also
+  # un-serves every sheets route — the `export.csv` call below would 404
+  # before the flush it is here to fail. Listing Sheets keeps the plugin
+  # installed; the double is additive, contributing only its `before_save`
+  # halt. This is the seam behaving correctly, not a workaround.
   defp with_failing_persist(fun) do
     prior = Application.fetch_env(:barkpark, :plugins)
-    Application.put_env(:barkpark, :plugins, [BarkparkWeb.SheetsOpsRouteTest.HaltingPersist])
+
+    Application.put_env(:barkpark, :plugins, [
+      BarkparkWeb.SheetsOpsRouteTest.HaltingPersist,
+      Barkpark.Plugins.Sheets
+    ])
 
     try do
       fun.()
