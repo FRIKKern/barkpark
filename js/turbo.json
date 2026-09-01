@@ -33,6 +33,9 @@
         "templates/**",
         "vitest*.config.*",
         "wrangler.toml",
+        "README.md",
+        "CHANGELOG.md",
+        "$TURBO_ROOT$/.changeset/**",
         "$TURBO_ROOT$/test-utils/**"
       ],
       "outputs": ["coverage/**"]
