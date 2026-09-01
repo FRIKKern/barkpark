@@ -493,3 +493,31 @@ func TestTaskPublishCommandNamesARealVerb(t *testing.T) {
 		t.Error("`bp task publish` now exists — point taskPublishCommand at it, so the remedy names the verb closest to what the reader just ran")
 	}
 }
+
+// A census of 7691 type:task rows found 559 with NO acceptance_criteria key at
+// all — invisible to the acceptance-criteria gate, because a counting sweep
+// reads a missing key as zero obligations rather than obligations it cannot
+// see. The cause was discoverability, not capability: --set has always taken
+// the typed array, but the help never showed it, so filers reached for
+// --description and wrote prose criteria instead. These assertions pin the two
+// facts that close that gap — the copyable typed-JSON example, and that the
+// same one flag also builds the brief's Criteria section (ensureTaskPortableBrief
+// composes it from acceptance_criteria). Delete either line from
+// printTaskCreateHelp and this test reds.
+func TestTaskCreateHelpTeachesTypedAcceptanceCriteria(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+
+	printTaskCreateHelp(w)
+
+	out := stdout.String()
+	for _, want := range []string{
+		"acceptance_criteria:=",      // the typed --set form, copyable as-is
+		`{"criterion":"gates green"`, // …carrying a real criterion object
+		"Criteria",                   // the brief section the same flag builds
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("bp task create --help no longer teaches %q — filers fall back to prose criteria in --description, and the row lands with no acceptance_criteria key at all: %q", want, out)
+		}
+	}
+}
