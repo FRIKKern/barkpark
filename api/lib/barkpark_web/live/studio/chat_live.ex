@@ -4772,17 +4772,6 @@ defmodule BarkparkWeb.Studio.ChatLive do
     |> Map.new()
   end
 
-  # `StudioChat.get_session/2` clamped to that permitted set: a row outside this
-  # socket's tenancy reads back as `nil`, indistinguishable from a row that does
-  # not exist — so `handle_params/3` takes its existing "no longer available"
-  # branch rather than growing a second refusal path.
-  defp get_session_in_tenancy(socket, id) do
-    case StudioChat.get_session(id, :global) do
-      %{} = session -> if session_in_tenancy?(socket, session), do: session
-      _ -> nil
-    end
-  end
-
   defp principal_workspace_id(socket) do
     case socket.assigns[:api_token] do
       %{workspace_id: ws_id} when is_binary(ws_id) -> ws_id
