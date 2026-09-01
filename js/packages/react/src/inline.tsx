@@ -107,6 +107,15 @@ export function asList<T = unknown>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : []
 }
 
+/** Sentence-case the first character (`'' → ''`). The shared half of the "labels
+ * are DERIVED, never a second copy" rule two families already follow: the
+ * taskboard sentence-cases a column's role slug, and a callout sentence-cases
+ * its tone slug. Keeping ONE copy here keeps the derivation honest — a label
+ * that drifts from its slug is then impossible rather than merely discouraged. */
+export function capitalize(s: string): string {
+  return s === '' ? s : s.charAt(0).toUpperCase() + s.slice(1)
+}
+
 export function isMap(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v)
 }
