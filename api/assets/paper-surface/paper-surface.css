@@ -440,7 +440,7 @@ html[data-theme="dark"] .bp-paper-body {
 }
 
 /* The public reader progressively enhances only PortableDoc article images.
-   The renderer emits this data hook in :article mode; email/default output
+   The renderer emits this data hook in :article mode; email and default output
    stays a bare image. Keeping the trigger styling here makes focus treatment
    part of the canonical Paper surface while the dialog itself remains reader
    chrome in bulldocs.html.heex. */
