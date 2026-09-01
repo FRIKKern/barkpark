@@ -693,7 +693,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
       throughout. Side C named all three — and then dr-w24-s2 EMITTED them in
       the same wave, so the arm refused until their allowlist rows were deleted
       and `@schema_unserialized_floor` fell 26 -> 23. The hole it was built to
-      find is closed; 23 columns remain, `suspended_at` among them.
+      find is closed. It has since closed a SECOND one it was not built for:
+      `suspended_at`, the billing-suspension stamp, was written on every
+      suspension and emitted by no serializer, so a reader could say a box was
+      suspended and why but never SINCE WHEN — and the console papered over the
+      gap with `sub.current_period_end`, a future renewal day rendered as a past
+      suspension day. cch-w54-bl wired it into `barkpark_json/5`, the arm
+      refused until its allowlist row died, and the floor fell 25 -> 24.
 
   A GREEN SCHEMA ARM DOES NOT MEAN THE WIRE IS CONNECTED, and the counterexample
   is RE-MEASURED here rather than carried. When Side C was written the example
@@ -982,6 +988,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w11-payload-divergence-close — the in-flight rollout marker; without it a CLI status can print a stale cached verdict over a landing rollout."},
     {"barkpark_json/5", :unread, "custom_host",
      "dr-w11-payload-divergence-close — the attached platform-zone host."},
+    # THIS ROW IS A HOLE MOVING, NOT A HOLE TRADED FOR ANOTHER. `suspended_at`
+    # was a Side C row (UNSERIALIZED: written by every suspension, emitted by no
+    # serializer). cch-w54-bl emitted it, so that row is DELETED above and
+    # `@schema_unserialized_floor` fell 25 -> 24. What is left is strictly
+    # smaller and one arm to the right: the key is now ON the wire and the Go
+    # client does not decode it yet. The console — the reader this fix exists
+    # for — reads it from the same payload immediately, so the browser half is
+    # closed; only `bp` is still blind.
+    {"barkpark_json/5", :unread, "suspended_at",
+     "cch-w54-bl-suspended-at-is-written-but-never-serialized — the billing-suspension stamp, EMITTED since cch-w54-bl and decoded by nobody. `internal/cloudclient/client.go:107-108` declares json:\"suspended\" and json:\"suspended_reason\" on the same struct and stops there, so `bp` can still say a box is suspended and why but never SINCE WHEN. Adding the third field is a one-line change in internal/, outside the cloud/-only fence of the PR that emitted it; it is filed rather than smuggled."},
     # THE THREE FLEET ROWS SAID SOMETHING FALSE (corrected by hand, dr-w27-s2).
     # They read as "decoded by NOBODY", and all three are decoded today by
     # `internal/cli/cloud_support_cmd.go:1460-1462`, which declares
@@ -1321,7 +1337,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 999-technique on this branch, never summed: both pins set to 999 and the two
   # refusals printed "157 emitted key(s) collected" and "289 json tag(s) found in
   # internal/cloudclient".
-  @emitted_pinned 158
+  #
+  # 158 -> 159 (cch-w54-bl): `barkpark_json/5` gains `suspended_at`, the
+  # billing-suspension stamp that every suspension wrote and no serializer
+  # emitted. ONE name on ONE pair, so this pin and the two barkpark-family pins
+  # below all move by exactly one and the Go-tag floor does not move at all (no
+  # Go struct decodes it yet — see its :unread row). MEASURED by the
+  # 999-technique on this branch: the refusal printed "159 emitted key(s)
+  # collected", never derived from the diff.
+  @emitted_pinned 159
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -1594,8 +1618,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # them from there.
   # 62 -> 63: the `runaway_procs` key merge_pressure/2 now emits (see
   # @emitted_pinned above) is inside the barkpark_json family.
-  @barkpark_family_keys 64
-  @barkpark_family_keys_blind 47
+  # 64 -> 65 and 47 -> 48 (cch-w54-bl): `suspended_at` lands in the base map
+  # literal of `barkpark_json/5`, which BOTH walkers reach — the blind walker's
+  # miss is the guarded merge_* clauses, not the base map — so this is the case
+  # where the two counts legitimately move together. That is not the pair
+  # tracking each other: the INVARIANT below (`seeing - blind == 14`, the
+  # vitals behind the `:when` unwrap) is unchanged by this key, and it is the
+  # invariant, not the equality of the deltas, that the arm checks.
+  @barkpark_family_keys 65
+  @barkpark_family_keys_blind 48
 
   # ---------------------------------------------------------------------------
 
@@ -1637,10 +1668,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
     assert p.unresolvable == []
 
-    # The base literal is 39 keys (jpf-w1-queue-age-alarm added
-    # queued_deploy_age_seconds) — what a regex would report. The pipeline adds
-    # the four job-status keys, the two list keys, and `pressure`.
-    assert MapSet.size(p.top) == 47
+    # The base literal is 40 keys (jpf-w1-queue-age-alarm added
+    # queued_deploy_age_seconds; cch-w54-bl added suspended_at) — what a regex
+    # would report. The pipeline adds the four job-status keys, the two list
+    # keys, and `pressure`: 40 + 7 = 47, and the SUM is the point. This arm
+    # exists to prove the extractor walks the pipeline rather than the literal,
+    # so it must stay a literal number that moves when either side does — the
+    # seven pipeline keys are re-listed by name below precisely so a base-literal
+    # growth like this one cannot be mistaken for the pipeline being seen.
+    assert MapSet.size(p.top) == 48
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure) do
@@ -2187,8 +2223,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "RULED — same custody as vercel_project_id above; display state for the claim page, not a fleet-row vital."},
     {"barkpark_json/5", "vercel_claim_minted_at",
      "RULED — the 24h-expiry stamp of the ENCRYPTED claim code. Emitting it without the code it dates would be a countdown to nothing."},
-    {"barkpark_json/5", "suspended_at",
-     "dr-w24-s4 KNOWN OPEN — the billing-suspension stamp. `suspended` and `suspended_reason` ARE emitted, so `bp` can say a box is suspended and why but never SINCE WHEN — the one field that separates a fresh suspension from a month-old one."},
+    # THE `suspended_at` ROW IS GONE, and its death is this arm's second
+    # receipt. It read "dr-w24-s4 KNOWN OPEN — `suspended` and `suspended_reason`
+    # ARE emitted, so `bp` can say a box is suspended and why but never SINCE
+    # WHEN". cch-w54-bl wired it into `barkpark_json/5`, so the row died in the
+    # same commit as the emit, exactly as the arm's own refusal text demands.
+    # The three commit_* rows went the same way in dr-w24-s2. That is twice now
+    # that this list has shrunk by a fix rather than grown by a discovery.
     {"barkpark_json/5", "apply_arming",
      "dr-w24-s4 KNOWN OPEN, and the arm found it on its own first run against this tree. The ARMING verdict (armed | unarmed | NULL = not measured) does reach a wire — `operator_fleet_json/1` (router.ex:10377) emits it on the operator arming roster — but NOT the fleet row every `bp cloud` reader decodes, and `grep -rn apply_arming internal/` is EMPTY, so no Go struct decodes it from either route. `operator_fleet_json/1` is not a censused pair, so no arm in this file can say that second half; this row is where it is written down."},
     {"barkpark_json/5", "apply_arming_checked_at",
@@ -2250,11 +2291,17 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   #     (#13003, landed the same day as this reland) are columns `barkpark_json/5`
   #     does not carry. That is the arm doing its job on a hole it was not built
   #     for, FOURTEEN DAYS after it was written (2026-08-08 -> 2026-08-22). See their rows above.
+  #   * It went 25 -> 24 when cch-w54-bl wired `suspended_at` into
+  #     `barkpark_json/5` — DOWN again, and for the same reason as the first
+  #     move: a hole closed and its allowlist row died in the same commit as the
+  #     emit. Side C has now named two holes that got fixed (commit_* and
+  #     suspended_at) and found two it was not built for (the apply_arming
+  #     pair). It is not a rubber stamp in either direction.
   #   * @schema_field_floor went 95 -> 103: eight columns joined the three
   #     censused schemas in the interval. It is measured, never derived — a bound
   #     computed from what it bounds can never red.
   @schema_field_floor 103
-  @schema_unserialized_floor 25
+  @schema_unserialized_floor 24
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,
@@ -2367,10 +2414,30 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
 
   test "SIDE C STILL NAMES A HOLE THE WIRE ARMS STRUCTURALLY CANNOT SEE" do
     # The arm is only worth its floors if it is still measuring something. A
-    # column no serializer writes is in NEITHER wire input set, so neither UNREAD
-    # nor PHANTOM can address it — `suspended_at` is the live example: `bp` can
-    # say a box is suspended and why, but never SINCE WHEN.
-    column = "suspended_at"
+    # column the PAIR's serializer does not write is in NEITHER of the two wire
+    # input sets this file compares — the pair's emitted keys and the paired Go
+    # struct's tags — so neither UNREAD nor PHANTOM can name it, however loudly
+    # it is missing.
+    #
+    # THE EXAMPLE MOVED, AND THE MOVE IS THE POINT. It was `suspended_at`:
+    # emitted by nothing, so `bp` could say a box was suspended and why but
+    # never SINCE WHEN. cch-w54-bl closed that one, this test refused until its
+    # allowlist row was deleted, and the example had to be re-chosen from the
+    # live list rather than the test quietly deleted.
+    #
+    # `apply_arming` is a STRICTLY WEAKER hole than the one it replaces, and the
+    # difference is stated here rather than smoothed over: it is not emitted by
+    # nothing. `operator_fleet_json/1` carries it on the operator arming roster
+    # (GET /v1/operator/fleet). What it is missing from is the FLEET ROW every
+    # `bp cloud` reader decodes, and `grep -rn apply_arming internal/` is still
+    # EMPTY, so no Go struct decodes it from either route. `operator_fleet_json/1`
+    # is not a censused pair, so no arm in this file can see that second
+    # emitter — which is exactly why the column is invisible to UNREAD and
+    # PHANTOM and visible only to Side C. If this example ever has to be
+    # re-chosen again, prefer a column no serializer writes at all; if none
+    # remains, say Side C has run out of holes deliberately rather than
+    # weakening the example a third time.
+    column = "apply_arming"
 
     assert column in unserialized(barkpark()),
            "`#{column}` is no longer unserialized — DELETE its @schema_allowlist row, the hole " <>
@@ -2427,18 +2494,23 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   test "THE FIX DIRECTION REDS TOO: emitting an allowlisted column forces its row's deletion" do
     # Not hypothetical and not a synthetic fixture: this runs the REAL assertion
     # over the REAL payload plus one key, which is exactly what wiring
-    # `suspended_at` into `barkpark_json/5` would look like from Side C. The
-    # allowlist row must die in the same commit as the emit — and it already
-    # happened for real once in this wave: dr-w24-s2 emitted the three commit_*
-    # columns and this arm refused until their three rows were deleted.
+    # `apply_arming` into `barkpark_json/5` would look like from Side C. The
+    # allowlist row must die in the same commit as the emit — and it has now
+    # happened for real TWICE: dr-w24-s2 emitted the three commit_* columns and
+    # cch-w54-bl emitted `suspended_at`, and this arm refused each time until
+    # the rows were deleted. The probe column is deliberately the SAME one the
+    # Side C example above uses, so a fix that closes that hole cannot leave
+    # this arm probing a column that is already emitted — a mutation that no
+    # longer mutates raises nothing and this assert_raise would red, which is
+    # the behaviour we want rather than a silent pass.
     error =
       assert_raise ExUnit.AssertionError, fn ->
-        assert_schema_arm!(barkpark(), extra_emitted: ["suspended_at"])
+        assert_schema_arm!(barkpark(), extra_emitted: ["apply_arming"])
       end
 
     message = Exception.message(error)
     assert message =~ "no longer unserialized"
-    assert message =~ "suspended_at"
+    assert message =~ "apply_arming"
     assert message =~ "DELETE the allowlist"
   end
 
@@ -2529,10 +2601,33 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # that is precisely how three rows came to cite PR #10014: a PR number was
     # the only citable thing, and a PR number keeps matching after the PR is
     # CLOSED with mergedAt null — a dead pointer that still reads as an owner.
-    # A `dr-w<n>-…` slug points at the ledger, which carries a lifecycle.
+    # A `<epic>-w<n>-…` slug points at the ledger, which carries a lifecycle.
+    #
+    # THE EPIC PREFIX IS NOT PART OF THE RULE, and pinning it was a bug this arm
+    # carried from the day it was written: the regex read `dr-w\d+-…`, so it
+    # accepted the deploy-reliability epic's slugs and NOTHING ELSE. The stated
+    # rule is "name the task or PR that closes it" — an epic this file happens
+    # not to have met yet is not a missing tracker. cch-w54-bl is the first row
+    # from another epic (cloud-console-hardening) to land here and it was
+    # refused while carrying a perfectly good slug, which is the wrong red: it
+    # pressures the next author into citing a PR number instead, and a PR number
+    # keeps matching after the PR is closed with mergedAt null — the exact dead
+    # pointer the widening below exists to avoid.
+    #
+    # The SHAPE is still required, so this is a widening and not a removal: an
+    # `<epic>-w<n>-<kebab>` slug, or a PR number. A bare word, a name, or "known
+    # issue" still reds.
     for {payload, _arm, key, reason} <- @known_open do
-      assert reason =~ ~r/dr-w\d+-[a-z0-9-]+|PR #\d+/,
+      assert reason =~ ~r/[a-z][a-z0-9]*-w\d+-[a-z0-9-]+|PR #\d+/,
              "#{payload}/#{key}: a KNOWN OPEN row must name the task or PR that closes it"
+    end
+
+    # THE WIDENING IS NOT A HOLE. Prose that merely sounds like an owner is
+    # still refused — proved by running the real predicate over strings that
+    # have no slug and no PR number, rather than asserting it about itself.
+    for not_a_tracker <- ["known issue", "tracked internally", "dr-w", "wave 54", "see the epic"] do
+      refute not_a_tracker =~ ~r/[a-z][a-z0-9]*-w\d+-[a-z0-9-]+|PR #\d+/,
+             "#{inspect(not_a_tracker)} is not a tracker and must not satisfy the rule"
     end
 
     reconciled = MapSet.new(@reconciled, fn {p, a, k, _} -> {p, a, k} end)
