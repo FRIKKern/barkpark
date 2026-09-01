@@ -120,9 +120,10 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
       # this slice exists to normalise. So EVERY raw change of the term is
       # refused and routed to the verb, which owns the triple atomically.
       for term <- ["open", "OPEN", "closed", "CLOSED", "parked", "banana"] do
-        assert {:error, {:invalid_task_content, %{"disposition" => _}}} =
-                 mutate([set_patch(id, %{"disposition" => term})], scope),
-               "raw disposition write #{inspect(term)} should be refused"
+        result = mutate([set_patch(id, %{"disposition" => term})], scope)
+
+        assert match?({:error, {:invalid_task_content, %{"disposition" => _}}}, result),
+               "raw disposition write #{inspect(term)} should be refused, got #{inspect(result)}"
       end
     end
 

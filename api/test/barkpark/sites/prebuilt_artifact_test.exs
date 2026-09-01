@@ -282,8 +282,10 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
 
         result = stage(tar, dest, opts)
 
-        assert {:error, ^code, message} = result,
+        assert match?({:error, ^code, _}, result),
                "#{label}: expected #{code}, got #{inspect(result)}"
+
+        {:error, _, message} = result
 
         assert is_binary(message) and message != ""
       end
@@ -730,7 +732,7 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
           ] do
         tar = tarball([pax_entry([{"path", path}]), file_entry("shadow.html", "x")])
         result = stage(tar, dest)
-        assert {:error, ^code, _} = result, "#{label}: got #{inspect(result)}"
+        assert match?({:error, ^code, _}, result), "#{label}: got #{inspect(result)}"
       end
     end
 
@@ -911,7 +913,10 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
     test "a record with no `=` or no length prefix is refused", %{dest: dest} do
       for block <- ["21 pathis../../escape\n", "path=../../escape\n", "21 =value\n"] do
         tar = tarball([pax_raw(block), file_entry("shadow.html", "x")])
-        assert {:error, "E_MALFORMED", _} = stage(tar, dest), "block: #{inspect(block)}"
+        staged = stage(tar, dest)
+
+        assert match?({:error, "E_MALFORMED", _}, staged),
+               "block: #{inspect(block)}, got #{inspect(staged)}"
       end
     end
   end

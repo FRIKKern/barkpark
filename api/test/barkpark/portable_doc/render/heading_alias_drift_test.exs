@@ -41,8 +41,10 @@ defmodule Barkpark.PortableDoc.Render.HeadingAliasDriftTest do
           ] do
         composed = Compose.compose_block(block, :article)
 
-        assert %{"kind" => "PdHeading", "level" => ^level, "children" => [text]} = composed,
+        assert match?(%{"kind" => "PdHeading", "level" => ^level, "children" => [_]}, composed),
                "#{block["type"]} (level key #{inspect(block["level"])}) composed to #{inspect(composed)}"
+
+        %{"children" => [text]} = composed
 
         assert text == block["text"]
       end

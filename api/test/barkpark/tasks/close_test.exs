@@ -1791,9 +1791,10 @@ defmodule Barkpark.Tasks.CloseTest do
       task = mk_task!(uniq("sentinel"), scope)
 
       for sentinel <- ["", "   ", "None", "none", "NULL", "null", "nil", "-", " None "] do
-        assert {:error, {:sentinel_worker_id, ^sentinel}} =
-                 Close.close(task.id, sentinel, observed_epoch: 0, lifecycle_status: "done"),
-               "#{inspect(sentinel)} must never be recorded as a closer"
+        result = Close.close(task.id, sentinel, observed_epoch: 0, lifecycle_status: "done")
+
+        assert match?({:error, {:sentinel_worker_id, ^sentinel}}, result),
+               "#{inspect(sentinel)} must never be recorded as a closer, got #{inspect(result)}"
       end
 
       reloaded = Repo.get!(Document, task.id)

@@ -366,14 +366,16 @@ defmodule Barkpark.TenancyDeleteWorkspaceTest do
 
       # Sanity: prove the halt hook IS wired in for this test before we
       # blame Tenancy.delete_workspace for not propagating it.
-      assert {:error, {:halted, "atomicity-test"}} =
-               Content.delete_document(
-                 "halt-me",
-                 "post",
-                 @dataset,
-                 workspace_id: ws.id
-               ),
-             "before_delete halt hook must be wired in for this test to be meaningful"
+      halt_result =
+        Content.delete_document(
+          "halt-me",
+          "post",
+          @dataset,
+          workspace_id: ws.id
+        )
+
+      assert halt_result == {:error, {:halted, "atomicity-test"}},
+             "before_delete halt hook must be wired in for this test to be meaningful, got #{inspect(halt_result)}"
 
       # Re-fetch the doc — Content.delete_document calls get_document
       # which scopes by workspace_id; the row should still be there after

@@ -296,8 +296,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
           n.type == :plugin_link and n.filter == "/admin/projects"
         end)
 
-      assert %Barkpark.Structure.Node{title: "Projects"} = node,
-             "the /admin/projects link must appear in the desk"
+      assert match?(%Barkpark.Structure.Node{title: "Projects"}, node),
+             "the /admin/projects link must appear in the desk, got #{inspect(node)}"
     end
   end
 

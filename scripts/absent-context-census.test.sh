@@ -564,6 +564,103 @@ else
   bad "5.6 the base fixture did not report both limbs clean; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
 fi
 
+# ═══ 5c. ORPHANED is a notice, and only when it is PROVED — 4 directions ═════
+section "5c. an undispatchable orphan is a NOTICE; every unreadable answer keeps the SCREAM"
+
+# THE POPULATION THIS EXISTS FOR, measured 2026-09-01: eight queued run records
+# untouched for 24 days, jobs.total_count 0, heads long superseded. `gh run
+# cancel` answers "completed"; the REST cancel answers "has NOT BEEN QUEUED
+# YET" while status reads queued. No state transition exists, so a verdict that
+# screams about them is a verdict about the weather — and this census was 93
+# runs red without one green on exactly that. The downgrade must be EARNED:
+# liveness readable, job count readable, head provably dead. Anything less
+# keeps today's scream.
+
+# (a) the full orphan proof -> NOTICE, exit 0, counted apart.
+D5C="$(derive orphan-proved)"
+jq '{workflow_runs: [.workflow_runs[] | if .id == 910007 then .created_at = "2026-07-23T07:38:15Z" | .updated_at = "2026-07-23T07:38:15Z" else . end]}' \
+  "$D5C/queued-paginated.json" > "$D5C/.tmp" && mv "$D5C/.tmp" "$D5C/queued-paginated.json"
+jq -n '{total_count: 0, jobs: []}' > "$D5C/jobs-910007.json"
+jq -n '{sha: "1234512345123451234512345123451234512345"}' > "$D5C/main-head.json"
+OUT="$(run_census "$D5C")"; RC=$?
+if [ "$RC" = "0" ] \
+   && grep -q 'ORPHANED (never dispatched' <<<"$OUT" \
+   && grep -q 'orphaned=1' <<<"$OUT" \
+   && grep -q 'stale-queued=0' <<<"$OUT" \
+   && grep -qF 'NOTICE   queue limb' <<<"$OUT"; then
+  ok "5c.1 a PROVED orphan (dead head + jobs 0 + liveness readable) is a NOTICE at exit 0, counted apart from stale-queued"
+else
+  bad "5c.1 expected exit 0 with orphaned=1/stale-queued=0; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# (b) the SAME run on a LIVE head keeps screaming, with the re-run remedy named.
+D5D="$(derive orphan-live-head)"
+jq --arg sha "$SHA" '{workflow_runs: [.workflow_runs[] | if .id == 910007 then .created_at = "2026-07-23T07:38:15Z" | .head_sha = $sha else . end]}' \
+  "$D5D/queued-paginated.json" > "$D5D/.tmp" && mv "$D5D/.tmp" "$D5D/queued-paginated.json"
+jq -n '{total_count: 0, jobs: []}' > "$D5D/jobs-910007.json"
+jq -n '{sha: "1234512345123451234512345123451234512345"}' > "$D5D/main-head.json"
+OUT="$(run_census "$D5D")"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'LIVE HEAD' <<<"$OUT" && grep -q 'stale-queued=1' <<<"$OUT"; then
+  ok "5c.2 the identical tuple on a LIVE PR head stays a SCREAM naming the re-run remedy — head liveness is the verdict key"
+else
+  bad "5c.2 a live-head stale run must keep screaming; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# (c) dead head but DISPATCHED (jobs > 0): cancellable, so still a SCREAM.
+D5E="$(derive orphan-dispatched)"
+jq '{workflow_runs: [.workflow_runs[] | if .id == 910007 then .created_at = "2026-07-23T07:38:15Z" else . end]}' \
+  "$D5E/queued-paginated.json" > "$D5E/.tmp" && mv "$D5E/.tmp" "$D5E/queued-paginated.json"
+jq -n '{total_count: 2, jobs: [{}, {}]}' > "$D5E/jobs-910007.json"
+jq -n '{sha: "1234512345123451234512345123451234512345"}' > "$D5E/main-head.json"
+OUT="$(run_census "$D5E")"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'DISPATCHED — remedy: gh run cancel' <<<"$OUT" && grep -q 'stale-queued=1' <<<"$OUT"; then
+  ok "5c.3 dead head but jobs DISPATCHED stays a SCREAM naming the cancel remedy — cancellable is actionable on ANY head"
+else
+  bad "5c.3 a dispatched stale run must keep screaming; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# (d) FAIL CLOSED: the orphan tuple WITHOUT main-head.json (liveness unreadable)
+# keeps today's scream — the downgrade never fires on missing data. This is
+# also the arm that proves 5.1/5.5 above were not weakened: the pre-existing
+# stale fixtures have no main-head.json and must behave exactly as before.
+D5F="$(derive orphan-blind)"
+jq '{workflow_runs: [.workflow_runs[] | if .id == 910007 then .created_at = "2026-07-23T07:38:15Z" else . end]}' \
+  "$D5F/queued-paginated.json" > "$D5F/.tmp" && mv "$D5F/.tmp" "$D5F/queued-paginated.json"
+jq -n '{total_count: 0, jobs: []}' > "$D5F/jobs-910007.json"
+OUT="$(run_census "$D5F")"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'stale-queued=1' <<<"$OUT" && ! grep -q 'ORPHANED' <<<"$OUT"; then
+  ok "5c.4 the SAME orphan tuple with liveness UNREADABLE keeps the SCREAM — the downgrade is earned, never defaulted"
+else
+  bad "5c.4 unreadable liveness must fail closed to the scream; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
+# (e) the boundary case, decided: a stale run on the CURRENT head of a DORMANT
+# open PR (no activity in --dormant-pr-days) is a NOTICE — the re-run remedy
+# exists in principle and nobody is coming to apply it (#11766 is the live
+# specimen: owner-held since Aug 17, 300+ commits behind). Same tuple as 5c.2
+# except the PR's OWN updated_at; that one field is the whole verdict flip,
+# which is the point — dormancy is read off the PR, never off the run.
+D5G="$(derive orphan-dormant-pr)"
+jq --arg sha "$SHA" '{workflow_runs: [.workflow_runs[] | if .id == 910007 then .created_at = "2026-07-23T07:38:15Z" | .head_sha = $sha else . end]}' \
+  "$D5G/queued-paginated.json" > "$D5G/.tmp" && mv "$D5G/.tmp" "$D5G/queued-paginated.json"
+jq --arg sha "$SHA" -n '[{number: 9887, headRefOid: $sha, updatedAt: "2026-07-01T00:00:00Z"}]' > "$D5G/prs.json"
+jq -n '{total_count: 0, jobs: []}' > "$D5G/jobs-910007.json"
+jq -n '{sha: "1234512345123451234512345123451234512345"}' > "$D5G/main-head.json"
+OUT="$(run_census "$D5G")"; RC=$?
+if [ "$RC" = "0" ] && grep -q 'DORMANT PR HEAD' <<<"$OUT" && grep -q 'orphaned=1' <<<"$OUT"; then
+  ok "5c.5 the 5c.2 tuple on a DORMANT open PR flips to a NOTICE — dormancy is read off the PR's own updated_at"
+else
+  bad "5c.5 a dormant-PR stale run must be a NOTICE; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+# …and the flip is the THRESHOLD's doing, not the fixture's: widen the window
+# past the PR's age and the identical fixture screams again.
+OUT="$(run_census "$D5G" --dormant-pr-days 100000)"; RC=$?
+if [ "$RC" = "1" ] && grep -q 'LIVE HEAD' <<<"$OUT"; then
+  ok "5c.6 …and raising --dormant-pr-days past the PR's age restores the SCREAM — the knob does the work"
+else
+  bad "5c.6 an enormous dormancy window must restore the live-head scream; got $RC"; printf '%s\n' "$OUT" | sed 's/^/       /' >&2
+fi
+
 # ═══ 6. it fails CLOSED — an unreadable feed is never a clean bill of health ══
 section "6. an unreadable feed is UNKNOWN (exit 2), never a silent pass"
 
