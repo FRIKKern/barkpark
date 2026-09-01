@@ -393,7 +393,15 @@ func TestTaskCreatePublishedReceiptCarriesNoRemedy(t *testing.T) {
 
 	var so, se bytes.Buffer
 	w := &writer{stdout: &so, stderr: &se}
-	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task", "--publish"}); code != exitOK {
+	// The row carries a WALL-PASSING body. Before the client-side pre-flight
+	// (tasks_publish_wall.go) this test passed with a bare title, because the stub
+	// mutate endpoint has no publish wall — a green that could not have caught the
+	// phantom-draft defect it sat next to.
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{
+		"a task", "--publish",
+		"--description", wallPassingDescription,
+		"--set", wallPassingTags,
+	}); code != exitOK {
 		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
 	}
 	got := so.String()
@@ -419,7 +427,9 @@ func TestTaskCreateJSONReceiptCarriesOnBoardAndRemedy(t *testing.T) {
 		wantOnBoard bool
 	}{
 		{"draft", []string{"a task"}, false},
-		{"published", []string{"a task", "--publish"}, true},
+		// Wall-passing body: --publish now refuses a row that could not clear the
+		// server's publish wall, so a bare title here would test the refusal path.
+		{"published", []string{"a task", "--publish", "--description", wallPassingDescription, "--set", wallPassingTags}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var so, se bytes.Buffer
