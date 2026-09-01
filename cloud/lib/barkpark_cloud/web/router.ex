@@ -197,7 +197,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
       DELETE  /v1/sites/:id/domains user     remove a domain from a site — frees the hostname
-      POST    /v1/sites/:id/github  user     link a GitHub repo + branch + webhook secret (manual)
+      POST    /v1/sites/:id/github  admin    link a GitHub repo + branch + webhook secret (manual)
       POST    /v1/sites/:id/github/connect admin  pick a repo → auto-register the push webhook on GitHub (gh-4)
       DELETE  /v1/sites/:id/github  admin  disconnect a Site's GitHub link (gh-4)
       POST    /v1/webhooks/github/:site_id —  GitHub push → enqueue Deployment (HMAC)
@@ -8556,8 +8556,17 @@ defmodule BarkparkCloud.Web.Router do
   # key is a durable deploy trigger that is not team-scoped, not session-tied,
   # not revoked when the actor loses access, and not visible in the audit log.
   # This matches /github/connect, which has always minted unconditionally.
+  #
+  # RBAC: binding a repo is a capability action -> TEAM ADMIN only, the same tier
+  # /github/connect and DELETE /v1/sites/:id/github already enforce. The three
+  # doors reach one outcome — the team's production site builds and serves code
+  # the caller chose — so a member-open create against an admin-only delete let
+  # the weaker principal mint state only the stronger one could clear (and
+  # OVERWRITE an admin-established link, rotating its secret, in the same call).
+  # That connect spends the team's GitHub App credential and this route does not
+  # bounds what CONNECT may do; it never bounded what the member may achieve.
   post "/v1/sites/:id/github" do
-    with_team_site(conn, fn conn, site ->
+    with_team_site(conn, :team_admin, fn conn, site ->
       repo = conn.body_params["repo"]
       branch = conn.body_params["branch"]
 
@@ -13115,6 +13124,10 @@ defmodule BarkparkCloud.Web.Router do
   # `auth` selects the credential mode:
   #   * `:session` (the default) — session-token ONLY (the dashboard / browser
   #     management routes). A PAT cannot reach these.
+  #   * `:team_admin` — session-token AND the team-admin role. Same credential
+  #     kind as `:session`, one tier up: for the site-management verbs whose
+  #     outcome a plain member must not be able to reach (linking a GitHub repo,
+  #     which mints a deploy trigger only an admin can clear).
   #   * `{:ability, ab}` — accept a session OR a PAT, then gate on ability `ab`
   #     (a session implies `root`, so the browser always passes). Used by the
   #     programmatic routes external integrations call (e.g. deploy → "write").
@@ -13124,6 +13137,7 @@ defmodule BarkparkCloud.Web.Router do
     conn =
       case auth do
         :session -> Auth.require_user(conn, [])
+        :team_admin -> Auth.require_team_admin(conn, [])
         {:ability, ab} -> conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
       end
 
