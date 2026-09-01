@@ -159,6 +159,29 @@
 # CLOSED on a non-200 or an unreadable `_createdAt`. It NEVER falls back to now():
 # an anchor at now() is an anchor that excuses every row the round just filed.
 #
+# ...AND THE DERIVATION IS BOUND TO THE ROUND IT CERTIFIES (wave 28). Deriving
+# the instant from a Paper closed only half the hole: NOTHING checked that the
+# Paper IS this round's. A caller passing an EARLIER wave's slug gets an EARLIER
+# anchor, which makes MORE rows fall after it and be deferred as residue -- a
+# greener 4(a) reached by MOVING THE BOUNDARY rather than by adjudicating, which
+# is the same vacuous green under a different verb. The round already names its
+# own Paper: the epic root row carries `wave_paper` (ROUND_ANCHOR_FIELD below),
+# and /v1/data/query flattens content.* to the top level, so it arrives in the
+# corpus this census already pages -- no second read, nothing to keep in sync.
+# So:
+#
+#   * with NO anchor flag, the anchor is DERIVED from the root's `wave_paper`;
+#   * `--anchor-from-paper <slug>` that DISAGREES with it is REFUSED (exit 3);
+#   * `--anchor-unbound` accepts the disagreement and SAYS SO, in the human
+#     render and as `round_anchor_binding: "override"` in --json;
+#   * a root that declares no `wave_paper` cannot bind anything, and that is
+#     reported as `unverifiable` -- never as a silent pass;
+#   * `--no-anchor` opts back INTO the unanchored clause. It is the only opt-out
+#     and it is strictly STRICTER, so it can never seal a round.
+#
+# The binding therefore lives in the report as well as in the guard: a
+# certifying run proves which round it anchored on instead of being trusted.
+#
 # IT TERMINATES, AND THAT WAS OBSERVED, NOT ARGUED. Anchored at wave 25's Paper
 # the live board reports residue 14 and 4(a) 171/172; anchored at wave 26's,
 # residue 0 and 4(a) 157/172. The SAME 14 rows are residue for round N and
@@ -373,6 +396,7 @@
 #                                [--retries N] [--lens closure|children]
 #                                [--assert-round-done] [--json]
 #                                [--anchor-from-paper WAVE-PAPER-SLUG]
+#                                [--anchor-unbound] [--no-anchor]
 #                                [--fixture-dir DIR] [--server URL]
 #   bash scripts/pds-ledger-census_test.sh    # the mutation fixtures
 #
@@ -407,6 +431,14 @@ from datetime import datetime, timezone
 
 # The PDS epic root. Every count in this census is relative to it.
 DEFAULT_ROOT = "task-2ac1f95237c4a8e5"
+
+# THE FIELD THAT BINDS THE ANCHOR TO THE ROUND. The epic root row names its own
+# wave Paper here, and /v1/data/query flattens content.* to the top level (the
+# settled key path, above), so this is read straight off the root row the corpus
+# already carries. ONE constant: if the ledger ever renames the field, this line
+# is the whole change -- and a rename that this line did not follow is reported
+# as `unverifiable`, never as a pass.
+ROUND_ANCHOR_FIELD = "wave_paper"
 
 # The canonical case for the OPEN disposition. `OPEN` (67 rows on 2026-07-30)
 # is off-vocabulary against it. ONE constant: if a later round ratifies the
@@ -974,6 +1006,96 @@ def resolve_anchor_from_paper(transport, dataset, slug):
     return born, raw
 
 
+def declared_wave_paper(root_row):
+    """THE ROUND'S OWN NAME FOR ITS PAPER, read off the epic root row.
+
+    Absent, non-string and blank are the SAME thing here: a root that does not
+    name a Paper binds nothing, and that state is REPORTED (`unverifiable`)
+    rather than silently treated as agreement.
+    """
+    value = root_row.get(ROUND_ANCHOR_FIELD)
+    return value.strip() if isinstance(value, str) else ""
+
+
+def resolve_round_anchor(transport, dataset, root, root_row, args):
+    """THE ANCHOR, BOUND TO THE ROUND IT CERTIFIES (the wave-26 residual).
+
+    Returns (anchor, source, slug, binding, declared). `binding` is the whole
+    point and it is never inferred by a reader: one of
+
+        "bound"         the slug IS the root's `wave_paper`
+        "override"      it is not, and --anchor-unbound said so out loud
+        "unverifiable"  the root names no Paper, so nothing could be checked
+        "fixture-clock" --anchor, reachable only under --fixture-dir
+        None            no anchor at all (the wave-25 clause, unchanged)
+
+    THE REFUSAL IS THE FIX. An earlier wave's Paper is an EARLIER instant, and
+    every row born between the two anchors moves from `bare` (a 4(a) failure) to
+    `residue` (a deferral). That is a greener predicate bought by moving the
+    boundary, and it is exactly what an unbound argv anchor could do silently.
+    """
+    declared = declared_wave_paper(root_row)
+
+    if args.anchor:
+        anchor = parse_instant(args.anchor)
+        if anchor is None:
+            die(EXIT_USAGE, "--anchor %r is not an ISO-8601 instant" % args.anchor)
+        return anchor, "--anchor (fixture clock)", None, "fixture-clock", declared
+
+    if args.anchor_from_paper:
+        slug = args.anchor_from_paper
+        if declared and slug != declared:
+            if not args.anchor_unbound:
+                die(EXIT_USAGE,
+                    "--anchor-from-paper `%s` does not match the round being certified: "
+                    "the epic root %s declares `%s: %s`." % (slug, root, ROUND_ANCHOR_FIELD, declared),
+                    ["an EARLIER wave's Paper is an EARLIER anchor, so more rows fall AFTER "
+                     "it and are deferred as residue -- a greener 4(a) reached by MOVING THE "
+                     "BOUNDARY rather than by adjudicating the rows.",
+                     "drop the flag (the anchor is then derived from the root's %s), or pass "
+                     "--anchor-unbound, which accepts the divergence and prints it."
+                     % ROUND_ANCHOR_FIELD])
+            binding = "override"
+        elif declared:
+            binding = "bound"
+        else:
+            binding = "unverifiable"
+        born, raw = resolve_anchor_from_paper(transport, dataset, slug)
+        return born, "paper/%s _createdAt %s" % (slug, raw), slug, binding, declared
+
+    # THE DEFAULT. No flag: the round's own Paper, named by the round itself.
+    if declared and not args.no_anchor:
+        born, raw = resolve_anchor_from_paper(transport, dataset, declared)
+        return (born,
+                "epic %s %s=%s -> paper/%s _createdAt %s"
+                % (root, ROUND_ANCHOR_FIELD, declared, declared, raw),
+                declared, "bound", declared)
+
+    return None, None, None, None, declared
+
+
+def anchor_binding_line(report):
+    """The binding, in one human line. A run that anchors must say WHY it was
+    entitled to that anchor, or the residue below it is a number nobody can
+    check."""
+    binding = report.get("round_anchor_binding")
+    slug = report.get("round_anchor_slug")
+    declared = report.get("round_anchor_declared")
+    if binding == "bound":
+        return ("BOUND to the round: the epic root declares `%s: %s` and the anchor is "
+                "derived from it" % (ROUND_ANCHOR_FIELD, declared))
+    if binding == "override":
+        return ("ANCHOR UNBOUND (--anchor-unbound): anchored on `%s` while the epic root "
+                "declares `%s: %s`. The round boundary was MOVED by argv -- every deferral "
+                "below is owed that caveat." % (slug, ROUND_ANCHOR_FIELD, declared))
+    if binding == "unverifiable":
+        return ("UNVERIFIABLE: the epic root declares no `%s`, so NOTHING binds `%s` to the "
+                "round being certified" % (ROUND_ANCHOR_FIELD, slug))
+    if binding == "fixture-clock":
+        return "SELFTEST CLOCK: --anchor, reachable only under --fixture-dir"
+    return "none"
+
+
 def lapse_shapes(rows, started, lease_ttl):
     """CLAUSE 7 (PDS-D638): THE LEDGER LAPSE, IN THREE SHAPES THAT DO NOT SHARE
     A KEY. Read straight off the `claim` object the paged read already fetched.
@@ -1377,6 +1499,7 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     if report.get("round_anchor"):
         out.append("  round       born %s  (anchor: %s)"
                    % (report["round_anchor"], report["round_anchor_source"]))
+        out.append("  anchor bind %s" % anchor_binding_line(report))
     out.append("  paging      %d page(s) of limit %d -> corpus %d rows  (page sizes: %s)"
                % (len(pages), page_limit, corpus_size, ", ".join(str(p) for p in pages)))
     out.append("  page order  order=%s   (explicit offsets over a MUTATING key can skip a row silently)"
@@ -1564,6 +1687,8 @@ def round_done_predicate(report):
     if report["round_anchor"]:
         lines.append("  round anchor                                  %s   (%s)"
                      % (report["round_anchor"], report["round_anchor_source"]))
+        lines.append("  round anchor binding                          %s"
+                     % anchor_binding_line(report))
     # THE NUMERATOR IS LITERAL. `bare` is the ANCHORED subset, so
     # `live - len(bare)` would count every residue row as carrying a
     # disposition and print "172/172 PASS" over a board where 15 rows carry
@@ -1680,6 +1805,14 @@ def main(argv):
                         help="SELFTEST CLOCK ONLY -- refused outside --fixture-dir, "
                              "because a caller-supplied anchor lets a round seal "
                              "itself by argv.")
+    parser.add_argument("--anchor-unbound", action="store_true",
+                        help="accept an --anchor-from-paper slug that DISAGREES with the "
+                             "epic root's %s. The divergence is printed and rides in "
+                             "--json as round_anchor_binding=override." % ROUND_ANCHOR_FIELD)
+    parser.add_argument("--no-anchor", action="store_true",
+                        help="do not derive an anchor from the root's %s. This is the "
+                             "STRICTER clause (nothing is deferred), so it can never seal "
+                             "a round." % ROUND_ANCHOR_FIELD)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--fixture-dir")
     parser.add_argument("--server")
@@ -1703,6 +1836,16 @@ def main(argv):
             "--anchor-from-paper <wave-slug>, which derives the instant.")
     if args.anchor and args.anchor_from_paper:
         die(EXIT_USAGE, "--anchor and --anchor-from-paper are mutually exclusive")
+    # --no-anchor is an opt-out of the DERIVED anchor, never a modifier of one:
+    # a run that asked for both an anchor and no anchor has not said what it
+    # wants, and guessing for it is how a boundary moves unnoticed.
+    if args.no_anchor and (args.anchor or args.anchor_from_paper):
+        die(EXIT_USAGE, "--no-anchor and --anchor/--anchor-from-paper are mutually exclusive")
+    # A flag that OVERRIDES NOTHING must not be reachable: it would print an
+    # override caveat on a run that never diverged, and a caveat that fires
+    # everywhere is one nobody reads.
+    if args.anchor_unbound and not args.anchor_from_paper:
+        die(EXIT_USAGE, "--anchor-unbound overrides nothing without --anchor-from-paper")
 
     if args.fixture_dir:
         if not os.path.isdir(args.fixture_dir):
@@ -1724,20 +1867,6 @@ def main(argv):
                 "BARKPARK_TOKEN, or run `bp login`")
         transport = HttpTransport(server, token)
 
-    # THE ANCHOR IS RESOLVED BEFORE THE READ WINDOW OPENS, so it can never be
-    # mistaken for part of the snapshot clause 5 asserts coherence over.
-    anchor = None
-    anchor_source = None
-    if args.anchor_from_paper:
-        anchor, anchor_raw = resolve_anchor_from_paper(
-            transport, args.dataset, args.anchor_from_paper)
-        anchor_source = "paper/%s _createdAt %s" % (args.anchor_from_paper, anchor_raw)
-    elif args.anchor:
-        anchor = parse_instant(args.anchor)
-        if anchor is None:
-            die(EXIT_USAGE, "--anchor %r is not an ISO-8601 instant" % args.anchor)
-        anchor_source = "--anchor (fixture clock)"
-
     # CLAUSE 5: the window is named before the first byte is read.
     started = datetime.now(timezone.utc)
     corpus, pages, duplicates, perspectives = read_corpus(
@@ -1748,6 +1877,16 @@ def main(argv):
         die(EXIT_FAIL_CLOSED,
             "root %s is not in the %d-row corpus -- refusing to census an empty "
             "closure under a root that does not exist" % (args.root, len(corpus)))
+
+    # THE ANCHOR IS RESOLVED OUTSIDE THE CLAUSE-5 WINDOW -- on the FAR side of
+    # it now, beside the drafts lens, and for the same reason the drafts lens
+    # sits there: `finished` is already stamped, so nothing this read does can
+    # be mistaken for part of the snapshot clause 5 asserts coherence over. It
+    # MOVED here (it used to run before the window) because binding the anchor
+    # to the round means reading the epic root's own ROUND_ANCHOR_FIELD, and the
+    # root row arrives with the corpus. One resolution site, one binding.
+    anchor, anchor_source, anchor_slug, anchor_binding, anchor_declared = resolve_round_anchor(
+        transport, args.dataset, args.root, corpus[args.root], args)
 
     closure, depth_of = build_closure(corpus, args.root, args.lens)
     if not closure:
@@ -1777,6 +1916,13 @@ def main(argv):
     report["round_anchor"] = (
         anchor.isoformat().replace("+00:00", "Z") if anchor is not None else None)
     report["round_anchor_source"] = anchor_source
+    # THE BINDING RIDES IN THE PAYLOAD. A consumer must be able to ask which
+    # round this anchor belongs to without scraping prose -- the slug that was
+    # used, the slug the round DECLARES, and which of the two the run was
+    # entitled to.
+    report["round_anchor_slug"] = anchor_slug
+    report["round_anchor_binding"] = anchor_binding
+    report["round_anchor_declared"] = anchor_declared or None
     report["root"] = args.root
     report["lens"] = args.lens
     report["corpus_size"] = len(corpus)
