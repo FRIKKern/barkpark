@@ -67,6 +67,17 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# THE FILE UNDER TEST, resolved absolutely. selftest's probe() re-execs THIS —
+# never "$REPO_ROOT/scripts/required-checks-verify.sh", which is the committed
+# copy and therefore always armed no matter what the running file says. A
+# mutant copy has to grade ITSELF or its --selftest is a vacuous green.
+# `${BASH_SOURCE[0]}` and not `$0` so the resolution survives being sourced.
+# A copy OUTSIDE the repo now re-execs instead of exiting 127, but carries
+# REPO_ROOT into its own parent directory; --selftest refuses that up front by
+# name rather than letting the probes red on a missing scan directory. Keep a
+# mutant inside scripts/ — that refusal is the honest report, not a bug to
+# widen away.
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 SPEC="$REPO_ROOT/.github/required-checks.json"
 # Read the live protection of a branch OTHER than the one the spec names. The
@@ -659,13 +670,17 @@ advisory_prose_check() {
 #
 #     ARMED    (committed clause)                    -> rc=1
 #     DISARMED (BLOCKING_NAME_TOKEN neutered)        -> rc=0
-#     the mutant copy's OWN --selftest               -> rc=0, "SELFTEST OK"
+#     the mutant copy's OWN --selftest               -> rc=1, "SELFTEST FAILED"
 #
-# The third line is the reason the proof is hand-run and not a probe: selftest's
-# probe() re-execs "$REPO_ROOT/scripts/required-checks-verify.sh", never "$0",
-# so a fully disarmed copy still prints SELFTEST OK. Automating this arm is
-# cgsiw-s4's slice, deliberately decoupled so it can red on the fail-before
-# state rather than shipping already-green beside its own subject.
+# The third line USED to read rc=0, "SELFTEST OK", and that was the whole
+# defect: probe() re-execed "$REPO_ROOT/scripts/required-checks-verify.sh"
+# rather than the file it was launched from, so a fully disarmed copy graded
+# the COMMITTED script and passed. probe() now re-execs $SELF, so a mutant
+# grades itself and a neutered clause reds its own selftest. The §6(d)
+# direct-invocation idiom above stays the recipe of record for proving ONE
+# clause on a fixture; what changed is that the whole-file arm can fail at all.
+# Turning that arm into a planted suite CLAUSE is still cgsiw-s4's slice — this
+# one only makes the arm capable of failing for it to assert.
 BLOCKING_NAME_TOKEN='[(]blocking[)]'
 BLOCKING_PROSE_CLAIM='(^|[^A-Za-z])BLOCKING([^A-Za-z]|$)|blocks the merge|must block|merge gate'
 # The escape hatch, established here because the repo had no annotation idiom
@@ -1156,7 +1171,7 @@ JSON
   probe() { # label expect_rc <args…>
     local label="$1" expect="$2"; shift 2
     local out rc=0
-    out="$(bash "$REPO_ROOT/scripts/required-checks-verify.sh" "$@" 2>&1)" || rc=$?
+    out="$(bash "$SELF" "$@" 2>&1)" || rc=$?
     if [ "$rc" -eq "$expect" ]; then
       echo "  ok   $label (exit $rc)"
       return 0
@@ -1167,6 +1182,20 @@ JSON
   }
 
   echo "── verify selftest: every clause proven by mutation ──"
+
+  # Now that probe() re-execs $SELF, a copy run from OUTSIDE the repo actually
+  # executes instead of exiting 127 — and carries REPO_ROOT into its own parent
+  # directory. Every probe that does not pass --workflows would then red on a
+  # missing scan directory rather than on the clause it names, which quietly
+  # turns the fourteen probes expecting exit 1 into "ok" for the wrong reason.
+  # Refuse by name instead: the 127 used to say this loudly and it must not be
+  # traded for a green.
+  [ -d "$WORKFLOWS_DIR" ] || {
+    echo "  SELFTEST FAIL: this copy is $SELF, so REPO_ROOT is $REPO_ROOT and $WORKFLOWS_DIR does not exist — the probes that scan workflows would red on the missing directory instead of on their own clause. Run the copy from inside the repo's scripts/." >&2
+    rm -rf "$tmp"
+    echo "SELFTEST FAILED" >&2
+    return 1
+  }
 
   probe "1/23 honest read-back passes" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
