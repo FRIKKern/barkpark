@@ -76,7 +76,25 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       tabindex={@focus_on_mount && "-1"}
       phx-mounted={@focus_on_mount && JS.focus()}
     >
-      <div style="display: flex; align-items: center; gap: 8px;">
+      <%!-- spd-b35: `min-width: 0` + `max-width: 70%` are LOAD-BEARING, not
+            cosmetics. Without them this group's flex base size is its
+            max-content width (the title is `white-space: nowrap`, so its own
+            `min-width: auto` floor is the WHOLE string) while the actions group
+            below has `flex-basis: 0`. Once the title alone exceeds the header,
+            free space goes negative and the shrink phase distributes by
+            flex-shrink x flex-basis — the actions' scaled shrink factor is
+            1 x 0 = 0, so the title keeps every pixel and the action bar
+            resolves to a ZERO-WIDTH box. Its buttons then still have
+            non-empty layout boxes (clipped by `bp-overflow-menu`'s
+            `overflow: hidden`, spilled leftwards by `justify-content:
+            flex-end`) sitting on top of the title and the presence dots, so
+            every real-mouse click on a doc action hit-tests to
+            `.pane-header-title` or `.presence-dot` instead. Capping this group
+            keeps the leftover space positive, so the actions always get a
+            real, content-independent width and the title ellipsises instead.
+            Measured before/after in Chrome across {short,long} title x
+            {0,1,3} dots x {1400,1280,760,520,360,260}px: 22/36 -> 36/36. --%>
+      <div style="display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 70%;">
         <%= if @back_href do %>
           <a href={@back_href} class="btn btn-ghost btn-sm" aria-label="Back to Studio">&larr;</a>
         <% end %>
@@ -503,9 +521,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <:presence>
             <% doc_presences = presences_on_doc(@presences, Barkpark.Content.published_id(@editor_doc.doc_id), @dataset) %>
             <%= if doc_presences != [] do %>
-              <div class="presence-dots">
+              <%!-- spd-b35: the indicator is DECORATION — it has no click
+                    handler and `cursor: default`, so it must never be a
+                    pointer target. `.presence-dots` is `pointer-events: none`
+                    in root.html.heex; the per-dot `title=` tooltip that used
+                    to carry the editor's name went with it. It was mouse-only
+                    anyway (a 10px hover target, invisible to keyboard and
+                    touch), so the name now rides `role="img"` +
+                    `aria-label` on the group, which every input mode can
+                    reach. The richer hover/inspection affordance still lives
+                    on `.presence-nav` in the studio bar (`.presence-tooltip`),
+                    which this change does not touch. --%>
+              <div class="presence-dots" role="img" aria-label={presence_dots_label(doc_presences)}>
                 <%= for p <- doc_presences do %>
-                  <div class="presence-dot" style={"background: #{p.color}"} title={"#{Map.get(p, :name, "User")} is editing"}></div>
+                  <div class="presence-dot" style={"background: #{p.color}"}></div>
                 <% end %>
               </div>
             <% end %>
@@ -617,6 +646,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # in another dataset is NOT co-presence.
   defp presences_on_doc(presences, doc_id, dataset) do
     Enum.filter(presences, &(&1.doc_id == doc_id and Map.get(&1, :dataset) == dataset))
+  end
+
+  # spd-b35: the accessible name for the `.presence-dots` group. Replaces the
+  # per-dot `title=` tooltip, which only a mouse could reach and which the
+  # group's `pointer-events: none` now makes unreachable even by one. Same
+  # "<name> is editing" vocabulary the tooltip used, folded into one sentence
+  # so a screen reader announces the group once instead of per 10px dot.
+  defp presence_dots_label(presences) do
+    names = Enum.map(presences, &Map.get(&1, :name, "User"))
+
+    case names do
+      [one] -> "#{one} is editing"
+      many -> "#{Enum.join(many, ", ")} are editing"
+    end
   end
 
   # Slug off the parent LV's resolved scope structs — "" when unscoped

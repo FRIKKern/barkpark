@@ -1239,7 +1239,12 @@
       padding: 0 16px; border-bottom: 1px solid var(--border-subtle);
     }
     .pane-header-titlewrap { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .pane-header-title { font-size: var(--text-sm); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* spd-b35: `min-width: 0` is what MAKES the ellipsis above reachable. As a
+       flex item this span's automatic minimum size is its min-content width,
+       and `white-space: nowrap` makes that the whole string — so without this
+       the title never shrinks, the ellipsis never engages, and a long title
+       squeezes its sibling action bar to zero width. */
+    .pane-header-title { font-size: var(--text-sm); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* Dimmed doc count next to a pane title (only :doc items counted). */
     .pane-header-count {
       flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--fg-muted);
@@ -3027,7 +3032,15 @@
       border: none; cursor: pointer;
       text-transform: uppercase; flex-shrink: 0;
     }
-    .presence-dots { display: flex; gap: 4px; margin-left: 8px; }
+    /* spd-b35: the editor-header co-presence indicator is DECORATION — no
+       click handler, `cursor: default`. `pointer-events: none` makes it
+       structurally incapable of being the element a click hit-tests to, so it
+       can never swallow a doc action again whatever the header geometry does.
+       Its name is announced from `role="img"` + `aria-label` on the group
+       (editor.ex), not the old per-dot `title=`, so keyboard, touch and screen
+       readers keep the information a hover tooltip only ever gave a mouse.
+       `flex-shrink: 0` keeps the dots round when the title group is squeezed. */
+    .presence-dots { display: flex; gap: 4px; margin-left: 8px; flex-shrink: 0; pointer-events: none; }
     .presence-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--bg); cursor: default; }
     .presence-dot-sm { width: 6px; height: 6px; border-radius: 50%; margin-left: 2px; flex-shrink: 0; }
 
@@ -3212,6 +3225,19 @@
     bp-overflow-menu {
       display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
       overflow: hidden; min-width: 0; flex: 1; justify-content: flex-end;
+      /* spd-b35: plain `flex-end` BLINDS this element's own overflow detector.
+         In LTR, content that overflows towards the START edge is unreachable
+         and does NOT extend `scrollWidth` — so `_reflow()`'s
+         `if (this.scrollWidth <= available) return;` guard (bp-overflow-menu.js)
+         sees no overflow, never marks items `[data-overflowed]`, and never
+         reveals the ••• trigger. The buttons stay laid out to the LEFT of this
+         box, clipped by `overflow: hidden` but still owning layout boxes over
+         the title/presence area, which is what makes them unclickable. `safe`
+         falls back to `start` alignment exactly when the content overflows, so
+         the spill goes RIGHT, `scrollWidth` reports it, and the priority+
+         collapse fires as designed. Declared twice on purpose: a UA without
+         `safe` keeps the first line. */
+      justify-content: safe flex-end;
     }
     bp-overflow-menu > [data-overflowed] { display: none !important; }
     .bp-overflow-trigger {
