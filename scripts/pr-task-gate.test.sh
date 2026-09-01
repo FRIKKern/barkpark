@@ -350,7 +350,12 @@ else
   cited_line="$(grep -oE 'pr-task-gate\.sh:[0-9]+' "$fixtures/says.out" | head -1)"
   cited_line="${cited_line##*:}"
   cited_src="$([ -n "$cited_line" ] && awk -v n="$cited_line" 'NR==n' "$GATE")"
-  if [ -n "$cited_line" ] && printf '%s' "$cited_src" | grep -q 'released_ge_expired'; then
+  # ASSERT THE CLAUSE, NOT THE WORD. This used to accept any cited line that
+  # merely MENTIONED released_ge_expired — so when the reference was derived by
+  # grepping for that symbol, the search line matched itself and this arm went
+  # green on a citation pointing at the assignment rather than the rule. A line
+  # that names a symbol is not the line that enforces it.
+  if [ -n "$cited_line" ] && printf '%s' "$cited_src" | grep -qE '^[[:space:]]*\[ "\$released_ge_expired" = "no" \].*\|\| fail'; then
     pass=$((pass+1)); printf 'ok   %-40s (line %s is the ordering clause)\n' "cited ordering-clause line is real" "$cited_line"
   else
     fail=$((fail+1)); printf 'FAIL %-40s cited line %s reads: %s\n' "cited ordering-clause line is real" "${cited_line:-<none>}" "${cited_src:-<nothing>}"
@@ -489,8 +494,51 @@ check_extract() { # check_extract <label> <pr_body> <expected_id>
 check_extract "trailer: plain id"        $'Does a thing.\n\nTask: cch-bl-x\n'   'cch-bl-x'
 check_extract "trailer: backticked id"   $'Does a thing.\n\nTask: `cch-bl-x`\n' 'cch-bl-x'
 check_extract "trailer: backticked lower" $'task:   `cch-bl-x`\n'               'cch-bl-x'
-check_extract "trailer: first match wins" $'Task: first-one\nTask: second-one\n' 'first-one'
 check_extract "trailer: absent -> empty"  $'No trailer here at all.\n'          ''
+
+# ── THE HIJACK, BOTH DIRECTIONS ─────────────────────────────────────────────
+# The extractor used to allow leading whitespace and take `head -1`, so an
+# INDENTED example inside a fenced block matched and, if it sat above the real
+# trailer, WON. This fleet quotes real claimed ids in PR bodies as a matter of
+# routine, so the vector was a paste, not an attack.
+#
+# BOTH ORDERINGS ARE TESTED ON PURPOSE. `tail -1` passes the first of these two
+# and fails the second; `head -1` does the reverse. A remedy that satisfies one
+# of them has moved the hijack, not removed it — which is why the fix is column
+# 0 plus a refusal, and why a one-directional test would have hidden that.
+check_extract "hijack: indented quote ABOVE" \
+  $'Background:\n\n    Task: quoted-example-above\n\nTask: the-real-one\n' 'the-real-one'
+check_extract "hijack: indented quote BELOW" \
+  $'Task: the-real-one\n\nExample of the trailer grammar:\n\n    Task: quoted-example-below\n' 'the-real-one'
+check_extract "hijack: fenced quote, tab-indented" \
+  $'Task: the-real-one\n\n```\n\tTask: fenced-example\n```\n' 'the-real-one'
+
+# A REPEATED id is not ambiguity — a body may restate its own trailer, and
+# refusing that would red correct PRs, which is how a gate loses its reviewer.
+check_extract "repeat: same id twice is fine" \
+  $'Task: cch-bl-x\n\nmore prose\n\nTask: cch-bl-x\n' 'cch-bl-x'
+
+# TWO DISTINCT COLUMN-0 IDS: REFUSE, do not pick. Exit 4, nothing on stdout.
+# The ids here are deliberately BOTH plausible references — the refusal must
+# come from the ambiguity itself, not from either id failing some later check.
+amb_out="$(PR_BODY=$'Task: first-one\nTask: second-one\n' bash "$GATE" --extract-task-id 2>"$fixtures/amb.err")"; amb_rc=$?
+if [ "$amb_rc" = "4" ] && [ -z "$amb_out" ] && grep -q 'ambiguous task reference' "$fixtures/amb.err" \
+   && grep -q 'first-one' "$fixtures/amb.err" && grep -q 'second-one' "$fixtures/amb.err"; then
+  pass=$((pass+1)); printf 'ok   %-40s (exit 4, both ids named)\n' "ambiguity: two distinct ids REFUSE"
+else
+  fail=$((fail+1)); printf 'FAIL %-40s rc=%s stdout=[%s] err=%s\n' "ambiguity: two distinct ids REFUSE" \
+    "$amb_rc" "$amb_out" "$(cat "$fixtures/amb.err")"
+fi
+
+# ...and the refusal must NOT be reported as absence. An author with an
+# ambiguous body HAS named their task; telling them to add a trailer they
+# already wrote is the wrong instruction, and wrong instructions get gates
+# worked around rather than satisfied.
+if grep -q 'no task reference found' "$fixtures/amb.err"; then
+  fail=$((fail+1)); printf 'FAIL %-40s ambiguity reported as absence\n' "ambiguity: not reported as absence"
+else
+  pass=$((pass+1)); printf 'ok   %-40s\n' "ambiguity: not reported as absence"
+fi
 check_extract "trailer: label with no id" $'Task:\ncch-bl-x\n'                  ''
 check_extract "trailer: mid-sentence no"  $'Please see Task: cch-bl-x for why.\n' ''
 check_extract "trailer: bold wrapper no"  $'**Task:** cch-bl-x\n'               ''

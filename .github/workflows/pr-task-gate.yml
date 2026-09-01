@@ -297,7 +297,23 @@ jobs:
           # point: while the regex sat inline here, the hermetic harness could
           # not reach it, and it silently dropped every backtick-wrapped trailer
           # (PR #5290 red vs #5307 green, run 29804094521).
-          task_id="$(bash scripts/pr-task-gate.sh --extract-task-id)"
+          # Exit 4 = AMBIGUOUS: two or more DISTINCT `Task:` ids at column 0.
+          # The extractor refuses rather than picking, because picking by
+          # position is guessing and a guess here is a guess in the permissive
+          # direction. Surface its stderr as a titled annotation — under
+          # `bash -e {0}` the non-zero would otherwise abort this step with no
+          # output but the runner's own "Process completed with exit code 4",
+          # which is the anonymous red this gate spent a whole slice removing.
+          rc=0
+          task_id="$(bash scripts/pr-task-gate.sh --extract-task-id 2>"$RUNNER_TEMP/ref.err")" || rc=$?
+          if [ "$rc" = "4" ]; then
+            echo "::error title=PR is not task-backed::pr-task-gate: FAIL: $(tr '\n' ' ' <"$RUNNER_TEMP/ref.err")" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          if [ "$rc" != "0" ]; then
+            echo "::error title=PR is not task-backed::pr-task-gate: FAIL: the task-reference extractor exited $rc: $(tr '\n' ' ' <"$RUNNER_TEMP/ref.err")" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
           echo "task_id=${task_id}" >> "$GITHUB_OUTPUT"
 
       # Optional author→worker map: .github/pr-task-workers.json = { "<gh-login>": "<worker-id>" }.
