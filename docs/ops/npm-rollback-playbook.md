@@ -42,6 +42,29 @@ Verify: `npm view @barkpark/core@1.0.0 deprecated` prints the message; version
 still listed; a scratch install prints `npm WARN deprecated`. If the version is
 completely uninstallable the warning is never seen — escalate to B.
 
+### Deprecation via CI (`deprecate.yml`)
+
+Local `npm deprecate` 403s for the same reason local `npm dist-tag` does — only
+the CI `NPM_TOKEN` holds `@barkpark` scope rights. Dispatch
+`.github/workflows/deprecate.yml` (`workflow_dispatch`: `package_name`,
+`version_range`, `message`; an empty `message` un-deprecates). It fails closed on
+a missing token, **measures** the token with `npm whoami` before any write
+(`npm publish --dry-run` and `npm access list` both exit 0 on a bogus token —
+neither is evidence), hard-fails a `version_range` matching **zero** published
+versions (a silent no-op would otherwise exit green), and re-reads every matched
+version afterwards to assert the message landed.
+
+**Standing disposition — `@barkpark/react` `1.0.0-preview.0` + `1.0.0-preview.1`:**
+both published previews contain the reference-error collapse repaired by #9601;
+neither is free of it (byte-identical `src/Reference.tsx`), so **deprecate both**
+pointing at `1.0.0-preview.2` — `preview.2` is an unused version number, and npm
+never lets a used one be re-published. Execute after that version actually
+publishes (cutting it is a separate row). The disposition is **conditional on
+`NPM_TOKEN` still being live**: that is unproven, and this workflow's `npm whoami`
+step is what proves it. Unpublish stays off the table (past the 72h window).
+Public dependents are **unmeasured** — npm's `depends:` search qualifier is
+silently ignored, so no "no dependents" claim is available to lean on.
+
 ## Mechanism B — `npm unpublish` (hard recall)
 
 Only for: completely broken installs; security hazards where the artifact itself
