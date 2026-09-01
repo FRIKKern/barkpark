@@ -101,7 +101,7 @@ defmodule BarkparkWeb.ShareLinkController do
   TIMING (the foreign path runs one extra membership query). KNOWN EXCEPTION,
   named so the law is not refuted by the first grep: `GET|DELETE
   /v1/access/:id` answers 403 for a foreign grant id and 404 for a missing one
-  (access_controller.ex:100/106/118/119 over an unscoped `Access.get_grant/1`).
+  (access_controller.ex:Access.get_grant/1, the two unscoped call sites).
   It is filed as `arpss-w8-bl-access-grant-id-existence-oracle` and is NOT fixed
   here — access_controller.ex is outside this slice's fence.
 
