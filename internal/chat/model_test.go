@@ -31,6 +31,8 @@ type fakeTransport struct {
 	sent        []string
 	interrupted bool
 	approvals   []approvalCall
+	answers     []answerCall
+	answerErr   error
 	approveErr  error
 	uploads     []uploadCall
 	uploadRef   Attachment
@@ -46,6 +48,11 @@ type fakeTransport struct {
 
 type approvalCall struct {
 	id, requestID, decision string
+}
+
+type answerCall struct {
+	id, requestID string
+	answers       map[string]any
 }
 
 type getCall struct {
@@ -95,6 +102,10 @@ func (f *fakeTransport) UploadAttachment(sessionID, path string) (Attachment, er
 func (f *fakeTransport) Approve(id, requestID, decision string) error {
 	f.approvals = append(f.approvals, approvalCall{id: id, requestID: requestID, decision: decision})
 	return f.approveErr
+}
+func (f *fakeTransport) AnswerQuestion(id, requestID string, answers map[string]any) error {
+	f.answers = append(f.answers, answerCall{id: id, requestID: requestID, answers: answers})
+	return f.answerErr
 }
 func (f *fakeTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(string, []byte)) error {
 	<-ctx.Done()

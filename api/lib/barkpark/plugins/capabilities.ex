@@ -3315,6 +3315,32 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal"
       ),
       core_cmd(
+        "chat.answer",
+        "chat",
+        "answer",
+        "Answer an AskUserQuestion card with the option label(s) the human picked (question rows only).",
+        "POST",
+        "/v1/chat/sessions/:id/answer",
+        "admin",
+        args: [
+          arg("id", true, "string", "Chat session id."),
+          arg(
+            "request_id",
+            true,
+            "string",
+            "The question ask's request id (≤256 UTF-8 bytes)."
+          ),
+          arg(
+            "answers",
+            true,
+            "object",
+            "Question string → the chosen option label (or a list of labels for a multiSelect question). Every key and value is validated against the ask the server persisted; updatedInput is rebuilt server-side, never sent by the caller."
+          )
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
         "chat.archive",
         "chat",
         "archive",

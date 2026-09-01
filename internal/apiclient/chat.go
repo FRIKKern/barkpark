@@ -182,6 +182,74 @@ func (m ChatMessage) Resolved() bool {
 	return false
 }
 
+// ChatQuestion is ONE AskUserQuestion prompt off a question row's server-held
+// ask (metadata.input.questions). The TUI reads it to paint the option chips and
+// to name the answer it POSTs; the server re-validates every label against this
+// SAME stored ask (StudioChat.QuestionAnswer), so the terminal can only ever
+// select among options the model itself offered — it can never author input
+// (charter D22, ct-bl-question-updatedinput).
+type ChatQuestion struct {
+	// Question is the prompt string, and it is also the ANSWER KEY: the wire
+	// answers map is keyed by this exact string (the CLI keys internally by it).
+	Question string
+	// Header is the short label the card shows above the prompt ("" when absent).
+	Header string
+	// MultiSelect is true when the ask accepts several labels for this question.
+	MultiSelect bool
+	// Options are the offered labels, in the order the model listed them.
+	Options []string
+}
+
+// Questions decodes a question row's server-held ask into the option chips the
+// card renders. Nil for any other role, a malformed input, or a row with no
+// questions — the caller then keeps the plain allow/deny affordance, exactly as
+// before, so a legacy or mid-persist row never loses its answer path.
+//
+// The decode is deliberately TOLERANT in the same shape the Elixir parse is
+// (StudioChat.QuestionAnswer.parse_questions/1): options may be objects with a
+// "label" or bare strings, and anything else is skipped rather than fatal.
+func (m ChatMessage) Questions() []ChatQuestion {
+	input, ok := m.Metadata["input"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	raw, ok := input["questions"].([]any)
+	if !ok {
+		return nil
+	}
+	var out []ChatQuestion
+	for _, item := range raw {
+		q, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		prompt, _ := q["question"].(string)
+		if prompt == "" {
+			continue
+		}
+		entry := ChatQuestion{Question: prompt}
+		entry.Header, _ = q["header"].(string)
+		entry.MultiSelect, _ = q["multiSelect"].(bool)
+		if opts, ok := q["options"].([]any); ok {
+			for _, o := range opts {
+				switch v := o.(type) {
+				case string:
+					entry.Options = append(entry.Options, v)
+				case map[string]any:
+					if label, ok := v["label"].(string); ok {
+						entry.Options = append(entry.Options, label)
+					}
+				}
+			}
+		}
+		if len(entry.Options) == 0 {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
+}
+
 // ChatSessionSummary is the sidebar shape from GET /v1/chat/sessions (the
 // list_sessions/1 → sidebar_json projection). It intentionally lacks draft, the
 // rail, and the model/effort choices — those live only on the full GET :id
@@ -612,6 +680,22 @@ func (c *Client) chatArchiveFlip(id, verb string) (ChatSession, error) {
 func (c *Client) RespondChatApproval(id, requestID, decision string) error {
 	payload := map[string]string{"request_id": requestID, "decision": decision}
 	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/approval"), payload, http.StatusNoContent, http.StatusOK)
+	return err
+}
+
+// AnswerChatQuestion answers a pending AskUserQuestion card with the option
+// label(s) the operator picked (204) — POST /v1/chat/sessions/:id/answer.
+//
+// This is NOT a widened approval: `answers` is a CONSTRAINED map (question
+// string → a label, or a list of labels for a multiSelect question) and the
+// server validates every key and value against the ask it persisted, then
+// rebuilds `updatedInput` itself. A caller cannot smuggle process input through
+// it (charter D22 intact, ct-bl-question-updatedinput). A 404 means the question
+// is gone or already answered — an answer is never idempotent the way an
+// allow/deny is, so the caller must NOT retry it blindly.
+func (c *Client) AnswerChatQuestion(id, requestID string, answers map[string]any) error {
+	payload := map[string]any{"request_id": requestID, "answers": answers}
+	_, err := c.chatSend(http.MethodPost, c.chatURL("/sessions/"+url.PathEscape(id)+"/answer"), payload, http.StatusNoContent, http.StatusOK)
 	return err
 }
 
