@@ -6,8 +6,12 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
   spending a deploy. Two properties are worth a test each, and they are the two
   ways this instrument could lie:
 
-    * it rides the EXISTING `[:api, :require_token]` seam — 401 without a token,
-      200 with one, four keys, no new auth surface;
+    * it rides the `[:api, :require_admin]` seam (task-d7ac954aa57aa522) — 401
+      without a token, 403 with a plain `["read"]` token, 200 with an admin
+      one, four keys. It rode `[:api, :require_token]` until then, and the
+      three assertions in "auth — the operator tier" are what would catch a
+      revert: `door.in_flight_slugs` names other tenants' site slugs, and
+      `:require_token` admits any read token from any workspace;
     * `configured` CANNOT contradict the refusal a real POST would produce —
       proved by mutation, both directions, in the same test.
 
@@ -55,13 +59,20 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
     put_runner_cfg(run_state_dir: run_state)
     on_exit(fn -> File.rm_rf(run_state) end)
 
-    raw = "instance-site-deploy-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(raw, "instance-site-deploy", "test", ["read"])
+    # A PLAIN read token — deliberately not `public-read`, which `PublicRead`
+    # would clamp on the old pipeline for an unrelated reason and so could not
+    # tell `:require_token` from `:require_admin`. This is the exact principal
+    # the tier gap admitted, and after task-d7ac954aa57aa522 it gets a 403.
+    read_raw = "instance-site-deploy-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(read_raw, "instance-site-deploy", "test", ["read"])
 
     {:ok, _} =
       Auth.create_token(@admin_token, "instance-sd-admin", "test", ["read", "write", "admin"])
 
-    {:ok, token: raw}
+    # `token:` is the ADMIN token: every payload assertion below reads the route
+    # as the principal that is now allowed to. `read_token:` is the negative
+    # control, used only in "auth — the operator tier".
+    {:ok, token: @admin_token, read_token: read_raw}
   end
 
   defp authed(conn, token) do
@@ -108,13 +119,32 @@ defmodule BarkparkWeb.InstanceSiteDeployControllerTest do
     end)
   end
 
-  describe "auth — the existing Bearer seam, no new surface" do
+  describe "auth — the operator tier" do
     test "401 without a token", %{conn: conn} do
       assert conn |> get(@route) |> json_response(401)
     end
 
     test "401 with a bogus token", %{conn: conn} do
       assert conn |> authed("not-a-real-token") |> get(@route) |> json_response(401)
+    end
+
+    # THE REGRESSION GUARD (task-d7ac954aa57aa522). This route returned 200 to
+    # this exact conn on `[:api, :require_token]`, handing a plain read token
+    # from any workspace `door.in_flight_slugs` — the list of every site slug
+    # building on the box. Revert the router hunk and this test reds with
+    # `expected response with status 403, got: 200`.
+    test "403 for a plain read token — in_flight_slugs names other tenants' sites",
+         %{conn: conn, read_token: read_token} do
+      assert %{"error" => %{"code" => "forbidden"}} =
+               conn |> authed(read_token) |> get(@route) |> json_response(403)
+    end
+
+    # POSITIVE CONTROL. Without this, the test above is satisfiable by a route
+    # that 403s everyone — including the on-box agent this route exists for.
+    test "200 for an admin token, with in_flight_slugs present", %{conn: conn} do
+      body = conn |> authed(@admin_token) |> get(@route) |> json_response(200)
+
+      assert is_list(body["door"]["in_flight_slugs"])
     end
   end
 

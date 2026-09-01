@@ -2045,10 +2045,39 @@ defmodule BarkparkWeb.Router do
   scope "/v1", BarkparkWeb do
     pipe_through([:api, :require_token])
 
+    # STAYS on `:require_token`, and it is the ONLY one of the three that may
+    # (task-d7ac954aa57aa522). Its payload is the five-class route ENUM
+    # (`lv_dead|browser|api|unrouted|pre_router`) plus rates — no path, no id,
+    # no tenant row, nothing that names a workspace or a site. The two routes
+    # BELOW were moved off this pipeline because their payloads do name
+    # tenants; the argument for keeping this one here is the payload's, not the
+    # pipeline's, so read `RequestStatsController`'s wire contract before
+    # assuming it transfers to a neighbour.
     get("/instance/request-stats", RequestStatsController, :show)
+  end
+
+  # ── Instance operator reads whose PAYLOADS name tenants ─────────────────
+  #
+  # `:require_admin`, not `:require_token` (task-d7ac954aa57aa522). Both routes
+  # below used to sit on the `:require_token` block above, whose gate is
+  # NOT-ANONYMOUS, not OPERATOR-ONLY: `RequireToken` + `PublicRead` (which
+  # denies only the `public-read` tier) + `RequireWriteForMutation` (method-
+  # gated, so a GET passes untouched). Net, any read/write/admin token from ANY
+  # workspace reached them — including a disposable 48h playground visitor
+  # token, which `PlaygroundController.provision/2` mints `["read", "write"]`.
+  # Both moduledocs stated the intent as "instance-operational data is never
+  # anonymous"; the mount implemented exactly that sentence and nothing
+  # stronger, while both payloads carry OTHER TENANTS' identifiers.
+  #
+  # `:require_admin` is the same gate the narrower twin `GET /v1/admin/site-
+  # deploy` has always had, and the same one the only real callers already
+  # present: the on-box agent's health gate curls these with the instance admin
+  # token (`/etc/barkpark/agent.health.token`). Neither route has a non-test
+  # caller in-tree.
+  scope "/v1", BarkparkWeb do
+    pipe_through([:api, :require_admin])
 
     # Can this box deploy sites? Answered WITHOUT spending a deploy (dr-w15-s1).
-    # Same Bearer seam, same never-unauthenticated rule as request-stats.
     # {"configured": bool, "runner_alive": bool, "door": {…}, "serving": {…}}
     # — was six keys until dr-w26-s7 deleted `build_slots` and
     # `runner_queue_len`, neither of which ever had a reader. Contract owned by
@@ -2058,12 +2087,32 @@ defmodule BarkparkWeb.Router do
     # WEDGED runner still gets an answer — true of the code, but NO LONGER
     # PINNED BY A TEST: the wedge control observed the wedge only through
     # `runner_queue_len` and went with it (dr-w26-s7).
+    #
+    # WHY ADMIN: `door.in_flight_slugs` is `DeployRunner.door_census/0`'s list
+    # of every site slug building on the box right now — other tenants' site
+    # identifiers, by name, not a count. `door.observed_in_flight` is the count;
+    # the slugs are beside it.
     get("/instance/site-deploy", InstanceSiteDeployController, :show)
 
     # Prometheus scrape of the telemetry aggregates (p95 Ecto query, per-route
-    # latency, VM memory/run-queue). Same Bearer seam — NOT the public `/metrics`
-    # convention, because request-rate/latency/memory is instance-operational
-    # data. Served by TelemetryMetricsPrometheus.Core (BarkparkWeb.Telemetry).
+    # latency, VM memory/run-queue). NOT the public `/metrics` convention.
+    # Served by TelemetryMetricsPrometheus.Core (BarkparkWeb.Telemetry).
+    #
+    # WHY ADMIN — NOT "cited safe", and this is the correction the filing
+    # invited: the controller path is tenant-blind (no `scope_opts`, no
+    # `workspace_id`) but the PAYLOAD is not. Four series in
+    # `BarkparkWeb.Telemetry.prometheus_metrics/0` carry a `:workspace_id`
+    # Prometheus LABEL — `barkpark.content.mutate.stop.duration`,
+    # `barkpark.search.query.stop.duration`,
+    # `barkpark.content.lifecycle.stop.duration` and
+    # `barkpark.media.mutate.count` — so one scrape enumerates the box's
+    # workspace-id roster and each tenant's write/search/publish/media volume
+    # and latency. Two more carry `:dataset`
+    # (`barkpark.authoring.wall_rejection.count`,
+    # `barkpark.authoring.findability_miss.count`), and `:module` on
+    # `barkpark.hooks.hook.stop.duration` enumerates which plugins this
+    # instance actually runs. Tenant identifiers ride the label set even
+    # though no tenant row rides the body.
     get("/instance/metrics", MetricsController, :scrape)
   end
 
