@@ -38,6 +38,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -231,24 +232,86 @@ func hookStopClose(c *apiclient.Client, task, worker string, dryRun bool, dbg, f
 			dbg("help: %s", h)
 		}
 	}
+	// THE FENCE IS ARMED FIRST, AND THE BYPASS IS NEVER SILENT.
+	//
 	// The agent marking its own acceptance criteria met is a LEGITIMATE
 	// post-claim change, but it trips the server's work-digest fence
-	// (doc_changed_since_claim) — and the renewal above keeps the stale digest.
-	// Read the FRESH rev (after the re-claim bumped it) and pass observed_rev:
-	// strict full-rev CAS is the server's sanctioned bypass, and the worker
-	// match already prevents theft. Rev unreadable → plain close (may fence to
-	// resume, the honest direction).
+	// (doc_changed_since_claim) — and the renewal above keeps the claim-time
+	// digest, so the renewal cannot clear it. D82's answer is observed_rev:
+	// strict full-rev CAS is the server's sanctioned bypass (close.ex
+	// short-circuits check_work_digest whenever observed_rev is non-nil), and
+	// the worker match already prevents theft.
+	//
+	// That ruling STANDS — but sending observed_rev unconditionally made the
+	// hook the ONE closer the fence never protects, and made it invisible when
+	// the brief moved under the claim (someone rewriting a criterion out of
+	// band looks exactly like the agent ticking its own boxes). So: close with
+	// the fence ARMED. When the brief did not move, that close lands and NO
+	// bypass is used at all. Only a doc_changed_since_claim refusal opens the
+	// bypass, and only after the drift is NAMED on the diagnostic channel (the
+	// hook's CARDINAL contract forbids stdout, so dbg is the venue) together
+	// with the server's own reason, which suffixes the changed field.
+	//
+	// Cost, stated honestly: the drifted path now spends one extra round trip
+	// (close → 409 → fresh GET → close) while the undrifted path spends one
+	// FEWER (no fresh-rev GET at all). The server is the only authority on
+	// whether the brief moved — the hook holds nothing it could compare.
+	closeNotices, closeHelp, cerr := c.TaskCloseN(task, worker, epoch)
+	if cerr == nil {
+		for _, n := range closeNotices {
+			if n.Type != "" {
+				dbg("notice: %s", n.Type)
+			}
+		}
+		for _, h := range closeHelp {
+			if h != "" {
+				dbg("help: %s", h)
+			}
+		}
+		dbg("close: closed · epoch %d (work-digest fence held — no observed_rev bypass needed)", epoch)
+		clearHookBreadcrumb(worker)
+		return
+	}
+	if !isDocChangedSinceClaim(cerr) {
+		fail("Stop: close failed: %s", cerr.Error())
+		return
+	}
+	// The brief CHANGED under this claim. Say so — naming the server's own
+	// reason, whose suffix carries the changed field — then take D82's bypass.
+	dbg("close: the brief changed under this claim (server refused with %s) — the work-digest fence blocked the close; re-closing through the observed_rev CAS (D82), which SKIPS that fence", cerr.Error())
 	rev := ""
 	if fresh, ok := c.GetPerspective("task", task, "drafts"); ok {
 		rev = docRev(fresh)
 	}
-	res := taskboard.DoCloseRev(c, task, worker, epoch, rev)
-	if !res.OK {
-		fail("Stop: close failed: %s", res.Message)
+	if rev == "" {
+		// Without a current rev there is no sanctioned bypass, and a rev-less
+		// retry would only repeat the 409. Leave it claimed → resume, which is
+		// the honest direction, and breadcrumb WHY.
+		fail("Stop: the brief changed under this claim and the current rev is unreadable — not closing; re-read the task and close with observed_rev")
 		return
 	}
-	dbg("close: %s", res.Message)
+	res := taskboard.DoCloseRev(c, task, worker, epoch, rev)
+	if !res.OK {
+		fail("Stop: close failed after the brief changed under the claim: %s", res.Message)
+		return
+	}
+	dbg("close (through the observed_rev bypass): %s", res.Message)
 	clearHookBreadcrumb(worker)
+}
+
+// isDocChangedSinceClaim reports whether a close refusal is the server's
+// work-digest fence. The reason arrives VERBATIM from the envelope and may
+// carry a colon-suffixed field list ("doc_changed_since_claim:brief"), so this
+// matches the code, never the whole string — and it matches ONLY that code, so
+// every other refusal (fenced_off, stale_claim, a transport failure) still
+// takes the honest fail path instead of silently escalating to a strict-CAS
+// close.
+func isDocChangedSinceClaim(err error) bool {
+	if err == nil {
+		return false
+	}
+	reason := strings.ToLower(strings.TrimSpace(err.Error()))
+	return reason == "doc_changed_since_claim" || strings.HasPrefix(reason, "doc_changed_since_claim:")
 }
 
 // docRev pulls the document rev out of the flattened envelope (the doc API
