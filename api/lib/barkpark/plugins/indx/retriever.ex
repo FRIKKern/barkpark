@@ -54,7 +54,11 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   @spec search(String.t(), map(), map(), keyword()) :: {[struct()], non_neg_integer(), map()}
   def search(scope, parsed, config, opts) when is_binary(scope) do
     text = query_text(parsed)
-    dataset = Indexer.current_dataset(scope)
+    # The live dataset is addressed by the TENANT-PARTITIONED index key, not by
+    # the raw dataset string: co-tenants share the string `production`, so
+    # reading the pointer by scope alone handed workspace B whatever index
+    # workspace A last swapped in (`Indexer` moduledoc, "Index identity").
+    dataset = Indexer.current_dataset(Indexer.index_key(scope, opts))
 
     # An empty `text` is NOT short-circuited: Indx's empty-query + enableFacets
     # is the browse-with-facets mode (the finder's landing). Only a missing live
@@ -365,12 +369,16 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # Reported total — ALWAYS recomputed as ONE scoped Postgres count over the
   # ranked candidate id set, never `length(ranked)`.
   #
-  # The candidate pool is NOT tenant-scoped. `Indexer.current_dataset/1` keys the
-  # live Indx dataset on the Barkpark dataset STRING alone, so every workspace
-  # sharing a dataset name shares ONE pool — the situation `hydrate_documents/3`
-  # above is written for ("even when two workspaces share a dataset STRING").
-  # Hydration re-reads through `Content.get_documents_by_ids/3` and drops the
-  # other tenants' rows, so the HITS were always correct.
+  # The candidate pool USED to be tenant-blind: `Indexer.current_dataset/1` keyed
+  # the live Indx dataset on the Barkpark dataset STRING alone, so every
+  # workspace sharing a dataset name shared ONE pool — the situation
+  # `hydrate_documents/3` above is written for ("even when two workspaces share
+  # a dataset STRING"). Hydration re-read through
+  # `Content.get_documents_by_ids/3` and dropped the other tenants' rows, so the
+  # HITS were always correct. The pool is now partitioned per tenant as well
+  # (`Indexer.index_key/2`), but the scoped re-read below STAYS: the index is a
+  # relevance oracle and Postgres is the source of truth, so the count is
+  # derived from the boundary that owns it rather than trusting the pool.
   #
   # The COUNT was not. This used to return the raw pool length for every
   # non-grant caller, on the premise that "for an ordinary read the

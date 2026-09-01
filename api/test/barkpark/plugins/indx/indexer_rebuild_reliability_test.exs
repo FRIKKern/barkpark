@@ -24,11 +24,13 @@ defmodule Barkpark.Plugins.Indx.IndexerRebuildReliabilityTest do
 
   describe "Bug 1: rebuild failure deletes the freshly-created dataset" do
     test "a failure after create_or_open deletes the new dataset before returning the error" do
-      scope = "reindex-fail-#{System.unique_integer([:positive])}"
+      # `rebuild/3` addresses an INDEX, so its first argument is an
+      # `Indexer.index_key/2` key, not a bare dataset string.
+      index_key = Indexer.index_key("reindex-fail-#{System.unique_integer([:positive])}")
       docs = [%{"_id" => "a", "title" => "Alpha"}]
 
       assert {:error, %IndexError{}} =
-               Indexer.rebuild(scope, docs,
+               Indexer.rebuild(index_key, docs,
                  client: FailAfterCreateClient,
                  poll_interval_ms: 0
                )
@@ -36,24 +38,24 @@ defmodule Barkpark.Plugins.Indx.IndexerRebuildReliabilityTest do
       # The v1 dataset was created, then the failure fired; rebuild must have
       # asked the client to delete exactly that dataset.
       assert_receive {:deleted_dataset, deleted}
-      assert deleted =~ "_#{String.replace(scope, "-", "_")}_v1"
+      assert deleted =~ "_#{index_key}_v1"
     end
 
     test "the deleted dataset is the v(n+1) name, not the live one" do
-      scope = "reindex-fail2-#{System.unique_integer([:positive])}"
+      index_key = Indexer.index_key("reindex-fail2-#{System.unique_integer([:positive])}")
       # Seat a live v3 pointer so the fresh dataset should be v4.
       pointer_term = {Indexer, :live_dataset}
       prior = :persistent_term.get(pointer_term, %{})
 
       :persistent_term.put(
         pointer_term,
-        Map.put(prior, scope, %{dataset: "bp_#{String.replace(scope, "-", "_")}_v3"})
+        Map.put(prior, index_key, %{dataset: "bp_#{index_key}_v3"})
       )
 
       on_exit(fn -> :persistent_term.put(pointer_term, prior) end)
 
       assert {:error, %IndexError{}} =
-               Indexer.rebuild(scope, [%{"_id" => "a", "title" => "A"}],
+               Indexer.rebuild(index_key, [%{"_id" => "a", "title" => "A"}],
                  client: FailAfterCreateClient,
                  poll_interval_ms: 0
                )

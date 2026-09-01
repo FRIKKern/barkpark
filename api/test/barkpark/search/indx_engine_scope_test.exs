@@ -75,13 +75,25 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
   end
 
   setup do
-    # Make @ds resolve to a live dataset so the engine path runs.
+    # Make @ds resolve to a live dataset so the engine path runs. The pointer is
+    # keyed by `Indexer.index_key/2`, so this seats the GLOBAL (nil-tenancy)
+    # index — the one the owner-ACL case below searches. Per-workspace indexes
+    # are seated by `two_workspaces_with_matching_doc/0`.
     prior = :persistent_term.get(@pointer_term, %{})
-    :persistent_term.put(@pointer_term, Map.put(prior, @ds, %{dataset: @live_dataset}))
     on_exit(fn -> :persistent_term.put(@pointer_term, prior) end)
+    seat_live_index!([])
 
     SurfaceConfigs.seed_defaults!()
     :ok
+  end
+
+  # Seat a live Indx dataset for @ds under the index key `scope_kw` resolves to.
+  # Without it `Retriever.search/4` short-circuits on a nil dataset and every
+  # assertion downstream passes against an empty pool — vacuously.
+  defp seat_live_index!(scope_kw) do
+    key = Indexer.index_key(@ds, scope_kw)
+    table = :persistent_term.get(@pointer_term, %{})
+    :persistent_term.put(@pointer_term, Map.put(table, key, %{dataset: @live_dataset}))
   end
 
   # Two workspaces/projects each owning a `production` dataset holding a doc
@@ -94,6 +106,12 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
 
     scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
+
+    # Each tenant now owns its OWN live index for the shared dataset string
+    # `production` — that partition is the fix under test elsewhere; here it is
+    # just the precondition that makes both searches below reach the engine.
+    seat_live_index!(scope_a)
+    seat_live_index!(scope_b)
 
     # W10 schema-visibility gate: the anonymous (no caller_context) searches in
     # these cases are restricted to PUBLIC schema types — seed "post" as one in
