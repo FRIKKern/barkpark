@@ -216,13 +216,23 @@ func (m model) buildPaperContent(width int) string {
 	paneW := width
 	paperWidth := paperColumnWidth(paneW)
 
+	// readFailed is the paper pane's twin of Pane.ReadFailed / model.docReadFailed:
+	// the three resolvers below read through the store, and a refused or
+	// unreachable read yields the SAME miss an absent document does — the plain
+	// wikilink, the raw id, the pinned fallback. The inline degrade is CORRECT
+	// and stays (an inline resolver has no business turning a sentence into an
+	// error message, and it cannot block on a fetch to learn more); what the
+	// pane owes the reader is the fact that the render is INCOMPLETE. Each
+	// resolver sets this only when its lookup actually MISSED *and* the read
+	// behind that miss failed — a reference that resolved never cries wolf.
+	var readFailed bool
 	ctx := pdrender.RenderCtx{
 		Width:         paperWidth,
 		Theme:         m.paperTheme,
 		Profile:       m.paperProfile,
-		RefResolver:   m.resolvePaperRef,
-		TaskResolver:  m.taskChipResolver(),
-		ValueResolver: m.paperValueResolver(),
+		RefResolver:   m.paperRefResolver(&readFailed),
+		TaskResolver:  m.taskChipResolver(&readFailed),
+		ValueResolver: m.paperValueResolver(&readFailed),
 	}
 	rendered := m.paperRegistry.RenderDoc(m.selectedPaperBlocks, ctx)
 
@@ -233,10 +243,30 @@ func (m model) buildPaperContent(width int) string {
 	if leftPad < 0 {
 		leftPad = 0
 	}
-	if leftPad == 0 {
-		return rendered
+	if leftPad > 0 {
+		rendered = centerPaperLines(rendered, leftPad)
 	}
-	return centerPaperLines(rendered, leftPad)
+	// The notice sits at the PANE's left edge, above the reading column — it is
+	// pane chrome, not part of the document, so it is added after centering.
+	if readFailed {
+		rendered = strings.Join(paperReadFailedNotice(), "\n") + "\n" + rendered
+	}
+	return rendered
+}
+
+// paperReadFailedNotice is the paper pane's member of the shared read-failure
+// vocabulary — the same ✕ glyph, dim styling and "the server refused or is
+// unreachable" second line that failedDocListInterior and renderReadFailedState
+// use, so the TUI speaks about a failed read with ONE voice. It says
+// "referenced documents", not "documents": the paper itself rendered, only its
+// references did not resolve. Like its siblings it advertises no key — the TUI
+// binds no refresh.
+func paperReadFailedNotice() []string {
+	return []string{
+		dimStyle.Render("   ✕ Couldn't load referenced documents"),
+		dimStyle.Render("   the server refused or is unreachable"),
+		"",
+	}
 }
 
 // centerPaperLines prefixes leftPad spaces to EVERY rendered line — a local mirror
@@ -255,22 +285,31 @@ func centerPaperLines(s string, leftPad int) string {
 
 // taskChipResolver returns a per-render memoised TaskResolver (lvw-t7): the
 // FIRST task-chip lookup in a render pass loads the task list once through the
-// datastore (the same single-query cost resolvePaperRef pays per type) and
+// datastore (the same single-query cost paperRefResolver pays per type) and
 // keys chips by task id in BOTH the `drafts.` and published spellings. The TUI
 // stays conservative: it resolves ID-PINNED wikilinks only (no title keys —
 // without the paper corpus in hand a title key could shadow a paper link;
 // a typed-by-title task link degrades to the plain link, which is the allowed
 // fallback, never wrong). A nil datastore / fetch miss yields nil → the plain
 // wikilink degrade.
-func (m model) taskChipResolver() func(id string) *pdrender.TaskChip {
+//
+// QueryResult, not Query: a refused or unreachable task read returns the same
+// zero docs an empty task list does, and the degrade would then spell "no such
+// task" over "we were not allowed to look". The degrade still happens — it is
+// the right inline behaviour — but a miss BEHIND a failed read reports through
+// readFailed so buildPaperContent can say the render is incomplete.
+func (m model) taskChipResolver(readFailed *bool) func(id string) *pdrender.TaskChip {
 	var chips map[string]*pdrender.TaskChip
+	var loadFailed bool
 	return func(id string) *pdrender.TaskChip {
 		if m.ds == nil || id == "" {
 			return nil
 		}
 		if chips == nil {
 			chips = map[string]*pdrender.TaskChip{}
-			for _, d := range m.ds.Query("task", "") {
+			docs, outcome := m.ds.QueryResult("task", "")
+			loadFailed = outcome.Failed()
+			for _, d := range docs {
 				if d.ID == "" {
 					continue
 				}
@@ -280,7 +319,11 @@ func (m model) taskChipResolver() func(id string) *pdrender.TaskChip {
 				chips["drafts."+pub] = chip
 			}
 		}
-		return chips[id]
+		chip := chips[id]
+		if chip == nil && loadFailed && readFailed != nil {
+			*readFailed = true
+		}
+		return chip
 	}
 }
 
@@ -327,12 +370,19 @@ func taskChipFromDoc(d Doc) *pdrender.TaskChip {
 // TUI paper pane: resolve a valueref's (target, field) from whatever the
 // datastore already has loaded — CACHE-ONLY and non-blocking (wire §10: the
 // TUI value is stale until the datastore refreshes; never a blocking fetch
-// inside a render pass, exactly like resolvePaperRef). The FIRST lookup in a
+// inside a render pass, exactly like paperRefResolver). The FIRST lookup in a
 // render pass builds one id→doc map across the loaded types (memoised — never
 // a scan per node); the published spelling is preferred over its `drafts.`
 // twin (D3). "" = miss → pdrender shows the node's pinned fallback.
-func (m model) paperValueResolver() func(target, field string) string {
+//
+// QueryResult, not Query: a type the store refuses contributes zero docs to the
+// map, exactly as an empty type does, and the valueref then shows its pinned
+// fallback as though the live value were merely absent. The fallback still
+// shows — that is the wire §3 contract — but a miss behind a failed read
+// reports through readFailed so the pane can flag the incomplete render.
+func (m model) paperValueResolver(readFailed *bool) func(target, field string) string {
 	var docs map[string]Doc
+	var loadFailed bool
 	return func(target, field string) string {
 		target = strings.TrimSpace(target)
 		field = strings.TrimSpace(field)
@@ -344,7 +394,11 @@ func (m model) paperValueResolver() func(target, field string) string {
 		if docs == nil {
 			docs = map[string]Doc{}
 			for i := range schemas {
-				for _, d := range m.ds.Query(schemas[i].Name, "") {
+				page, outcome := m.ds.QueryResult(schemas[i].Name, "")
+				if outcome.Failed() {
+					loadFailed = true
+				}
+				for _, d := range page {
 					if d.ID != "" {
 						if _, taken := docs[d.ID]; !taken {
 							docs[d.ID] = d
@@ -359,6 +413,9 @@ func (m model) paperValueResolver() func(target, field string) string {
 			d, ok = docs["drafts."+pub]
 		}
 		if !ok {
+			if loadFailed && readFailed != nil {
+				*readFailed = true
+			}
 			return ""
 		}
 		return paperValueScalar(d, field)
@@ -398,22 +455,37 @@ func paperValueScalar(d Doc, field string) string {
 	}
 }
 
-// resolvePaperRef is the RefResolver seam: given a referenced doc id, it returns
-// that doc's title from whatever the datastore already has loaded, falling back
-// to the raw id when the referenced doc isn't in memory (no blocking fetch — the
-// renderer stays synchronous).
-func (m model) resolvePaperRef(id, _ string) string {
-	if m.ds == nil || id == "" {
-		return id
-	}
-	// Scan the loaded schemas' types for a doc with this id. The datastore caches
-	// per-type query results; a miss just returns the id, which is a valid display.
-	for i := range schemas {
-		for _, d := range m.ds.Query(schemas[i].Name, "") {
-			if d.ID == id && d.Title != "" {
-				return d.Title
+// paperRefResolver builds the RefResolver seam: given a referenced doc id it
+// returns that doc's title from the loaded types, falling back to the raw id
+// when the referenced doc isn't found (no blocking fetch — the renderer stays
+// synchronous). The raw id is a valid display and stays the degrade.
+//
+// QueryResult, not Query: a refused type reads as an empty type, so a
+// reference the reader is simply not allowed to resolve renders exactly like a
+// reference to a document that does not exist. The scan therefore remembers
+// whether any type's read FAILED and reports through readFailed only when the
+// id was not found anyway — a reference resolved from a readable type never
+// raises the notice, even when some other type in the scan was refused.
+func (m model) paperRefResolver(readFailed *bool) func(id, refType string) string {
+	return func(id, _ string) string {
+		if m.ds == nil || id == "" {
+			return id
+		}
+		var loadFailed bool
+		for i := range schemas {
+			page, outcome := m.ds.QueryResult(schemas[i].Name, "")
+			if outcome.Failed() {
+				loadFailed = true
+			}
+			for _, d := range page {
+				if d.ID == id && d.Title != "" {
+					return d.Title
+				}
 			}
 		}
+		if loadFailed && readFailed != nil {
+			*readFailed = true
+		}
+		return id
 	}
-	return id
 }
