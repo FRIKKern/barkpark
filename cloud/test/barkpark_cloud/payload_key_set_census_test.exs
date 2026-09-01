@@ -997,7 +997,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # for — reads it from the same payload immediately, so the browser half is
     # closed; only `bp` is still blind.
     {"barkpark_json/5", :unread, "suspended_at",
-     "cch-w54-bl-suspended-at-is-written-but-never-serialized — the billing-suspension stamp, EMITTED since cch-w54-bl and decoded by nobody. `internal/cloudclient/client.go:107-108` declares json:\"suspended\" and json:\"suspended_reason\" on the same struct and stops there, so `bp` can still say a box is suspended and why but never SINCE WHEN. Adding the third field is a one-line change in internal/, outside the cloud/-only fence of the PR that emitted it; it is filed rather than smuggled."},
+     "cch-w54-bl-suspended-at-is-written-but-never-serialized closed the SERIALIZER half; task-85c531c2adbf0dff is the live tracker for THIS half. The billing-suspension stamp is EMITTED since cch-w54-bl and decoded by nobody: internal/cloudclient's Barkpark struct declares the `Suspended` and `SuspendedReason` fields (json:\"suspended\" / json:\"suspended_reason\") and stops there, so `bp` can still say a box is suspended and why but never SINCE WHEN. Cited by FIELD rather than by line because this struct is appended to constantly and a line number here would rot within the week. Adding the third field is a one-line change in internal/, outside the cloud/-only fence of the PR that emitted the key; it is filed rather than smuggled."},
     # THE THREE FLEET ROWS SAID SOMETHING FALSE (corrected by hand, dr-w27-s2).
     # They read as "decoded by NOBODY", and all three are decoded today by
     # `internal/cli/cloud_support_cmd.go:1460-1462`, which declares
