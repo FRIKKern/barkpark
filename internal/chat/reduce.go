@@ -377,6 +377,28 @@ func reduceFrame(st State, ev FrameEvent) (State, []Effect) {
 			st.LiveWorkflow = &wf
 		}
 		return st, nil
+	case "title":
+		// The AI title landed (ct-bl-recorder-titles): the Recorder publishes it
+		// on the session topic, so the header renames itself mid-session instead
+		// of waiting for a turn-boundary session GET to notice (the D15 poll).
+		// Carries ONLY {session_id, title} (D23); the sid is ignored exactly as
+		// the workflow case ignores it — this stream IS one session, so the
+		// subscription is the fence, not a field.
+		//
+		// NO Effect: that missing refetch is the whole point. An empty or
+		// malformed frame is inert, leaving the last-known title standing — the
+		// turn-boundary GET below is still the settling truth, so a dropped frame
+		// costs freshness, never correctness.
+		var body struct {
+			SessionID string `json:"session_id"`
+			Title     string `json:"title"`
+		}
+		if err := json.Unmarshal(ev.Data, &body); err == nil {
+			if t := strings.TrimSpace(body.Title); t != "" {
+				st.Title = t
+			}
+		}
+		return st, nil
 	case "permission":
 		// The ask row is persisted by the Recorder — refetch the tail so the
 		// answerable card renders from replay truth (request_id + pending status

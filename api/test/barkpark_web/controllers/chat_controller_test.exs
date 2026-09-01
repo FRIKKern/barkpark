@@ -1815,6 +1815,27 @@ defmodule BarkparkWeb.ChatControllerTest do
              }
     end
 
+    test "title frame is EXACTLY {session_id, title}, with NO id (ct-bl-recorder-titles)" do
+      frame = ChatController.sse_title_frame("sess-42", "Fix the flaky login test")
+      assert String.starts_with?(frame, "event: title\ndata: ")
+      assert String.ends_with?(frame, "\n\n")
+      # Unreplayable like every other live delta (D5) — a reconnect re-reads the
+      # persisted title off GET session, it never resumes a title frame.
+      refute frame =~ "id:"
+
+      data =
+        frame
+        |> String.split("data: ", parts: 2)
+        |> List.last()
+        |> String.trim()
+        |> Jason.decode!()
+
+      # D23: session identity + the settled title, and NOTHING else. The map is
+      # asserted whole, so a later "helpful" addition (cwd, argv, a stderr tail,
+      # the session struct) fails here rather than shipping to every client.
+      assert data == %{"session_id" => "sess-42", "title" => "Fix the flaky login test"}
+    end
+
     test "permission + keepalive frames" do
       pframe = ChatController.sse_permission_frame(%{request_id: "r"})
       assert String.starts_with?(pframe, "event: permission\ndata: ")
@@ -1878,6 +1899,21 @@ defmodule BarkparkWeb.ChatControllerTest do
       # Subscription is gone with the helper — a fresh broadcast reaches nobody.
       Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, {:claude_chat_event, %{"k" => 2}})
       refute_receive {:claude_chat_event, %{"k" => 2}}, 100
+    end
+
+    test "a Recorder title broadcast reaches the stream process (ct-bl-recorder-titles)" do
+      # The end-to-end wiring the SSE loop needs, proven at the seam the loop is
+      # assertable at: `Recorder.broadcast_title/2` publishes on the SESSION
+      # topic, and the forwarder — subscribed to that topic and nothing else
+      # (D24) — hands the tuple to the connection process, whose stream_loop
+      # clause serializes it with sse_title_frame/2 (shape asserted above).
+      sid = Ecto.UUID.generate()
+      fwd = ChatController.start_forwarder(Recorder.topic(sid), self())
+
+      Recorder.broadcast_title(sid, "Pushed to a headless client")
+      assert_receive {:chat_title, ^sid, "Pushed to a headless client"}, 500
+
+      send(fwd, :stop)
     end
 
     test "the emergency per-connection heap cap defaults to 10_000_000 words (D24)" do
