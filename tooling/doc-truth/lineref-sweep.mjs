@@ -260,6 +260,64 @@ function deriveStemTarget() {
   return null;
 }
 
+// A citation written as a PARTIAL path — `plugins/indx/errors.ex:<line>` — names
+// some directories but not the repo root. It is the shape arms (g) and (i) both
+// miss: not a bare basename, not an explicit repo-relative path, and its
+// DIRECTORY names get harvested as anchors that the cited code was never obliged
+// to contain. Returns {rel, partial, dirs, stem, line} or null.
+//
+// THE ARM MUST BE ABLE TO BITE, so the derivation carries three constraints, and
+// dropping any one of them makes it pass against the un-fixed verifier:
+//   1. the partial suffix must resolve to EXACTLY ONE tracked file, or the
+//      finding is about ambiguity (arm h's subject) rather than about anchors;
+//   2. every directory segment must actually match the needle rules — a segment
+//      too short or capitalised is never harvested, so nothing was ever demanded;
+//   3. NO harvested word — directory segment or basename stem — may appear
+//      within the ±3 window. If one does, the un-fixed verifier finds it, calls
+//      the anchors self-derived and exits `unverifiable`, which is silence, and
+//      the arm goes green on the very defect it exists to catch.
+function derivePartialPathTarget() {
+  const { present } = codeCommentCorpus();
+  let tracked = [];
+  try {
+    const out = execFileSync("git", ["ls-files"], { cwd: ROOT, maxBuffer: 64 * 1024 * 1024 }).toString();
+    tracked = out.split("\n").filter(Boolean);
+  } catch { return null; }
+
+  for (const rel of present) {
+    if (!rel.endsWith(".ex") || rel.includes("/test/")) continue;
+    const segs = rel.split("/");
+    if (segs.length < 4) continue;
+    const partial = segs.slice(-3).join("/");
+    const dirs = segs.slice(-3, -1);
+    const stem = segs[segs.length - 1].replace(/\.[A-Za-z0-9]+$/, "");
+    // (2) both directories must be harvestable words
+    if (!dirs.every((d) => /^[a-z][a-z0-9_]{2,}$/.test(d))) continue;
+    // (1) the suffix must be unique across the whole tracked corpus
+    const suffix = "/" + partial;
+    let hits = 0;
+    for (const p of tracked) if (p === rel || p.endsWith(suffix)) hits++;
+    if (hits !== 1) continue;
+
+    let lines;
+    try { lines = readFileSync(join(ROOT, rel), "utf8").split("\n"); } catch { continue; }
+    if (lines.length < 60) continue;
+    const words = [...dirs, stem];
+    for (let n = 20; n < Math.min(lines.length, 400); n++) {
+      if ((lines[n - 1] || "").trim() === "") continue;
+      // (3) the window must be clean of every harvested word
+      const lo = Math.max(1, n - 3), hi = Math.min(lines.length, n + 3);
+      let near = false;
+      for (let i = lo; i <= hi && !near; i++) {
+        if (words.some((w) => (lines[i - 1] || "").includes(w))) near = true;
+      }
+      if (near) continue;
+      return { rel, partial, dirs, stem, line: n };
+    }
+  }
+  return null;
+}
+
 function selftest() {
   const fails = [];
   const dir = mkdtempSync(join(tmpdir(), "lineref-selftest-"));
@@ -478,6 +536,42 @@ function selftest() {
         );
       }
     }
+
+    // (j) PARTIAL PATH — the shape between (g) and (i). A citation like
+    //     `plugins/indx/errors.ex:<line>` supplies directories but not the repo
+    //     root, and the needle harvest chews those directories into anchors: the
+    //     sweep then demands the words `plugins` / `indx` within ±3 of the cited
+    //     line. No module is obliged to name its own directory in its own body,
+    //     so the test cannot be passed by a correct citation, and the verdict is
+    //     stale-on-correct.
+    //
+    //     MEASURED on main at 4d223c151a: 6 of the 8 NOVEL findings reddening
+    //     doc-gates were this shape, with anchor sets of nothing but path
+    //     segments — [github, errors, indx] and [provisioner, support]. Across
+    //     the whole corpus 141 findings held no anchor that was not a path
+    //     segment of their own citing line.
+    const pp = derivePartialPathTarget();
+    if (!pp) {
+      fails.push("(j) SETUP: no uniquely-resolving partial path with an anchor-free window — the arm would be vacuous");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The behaviour is described at (${pp.partial}:${pp.line}).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const partialFindings = linerefFindings([probeRel]);
+      if (partialFindings.length !== 0) {
+        fails.push(
+          `(j) PARTIAL PATH: a CORRECT citation naming only ${pp.partial}:${pp.line} produced ` +
+            `${partialFindings.length} finding(s) — the directory segments ` +
+            `[${pp.dirs.join(", ")}] are being demanded as anchors, so every ` +
+            "`<dir>/<file>:<line>` citation in the repo is a false positive: " +
+            (partialFindings[0].evidence || ""),
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -499,6 +593,7 @@ function selftest() {
   process.stdout.write("  ok: (g) silent on a CORRECT bare `<file>:<line>` — the filename stem is not an anchor\n");
   process.stdout.write("  ok: (h) silent on an AMBIGUOUS stem whose line is valid in another candidate\n");
   process.stdout.write("  ok: (i) an EXPLICIT path binds to the file it names, never to a basename twin\n");
+  process.stdout.write("  ok: (j) silent on a CORRECT PARTIAL path — directory segments are not anchors\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }
