@@ -549,7 +549,40 @@ defmodule Barkpark.Media.Delivery.Search do
   # fail-closed `scope_to_workspace/3`, whose nil arm is `where: false`. The
   # name matters here precisely because a reader auditing this raw SQL for
   # fail-closedness would otherwise be told it has a property it does not.
-  defp scope_fragments(opts, start_idx) do
+  #
+  # `:shared_only` — the request-side empty-scope sentinel
+  # (task-3e2a70930c6df723). MUST come before the uuid-dumping clause below:
+  # `first_present/1` passes the atom through (it is neither `nil` nor `""`)
+  # and `uuid_param/1` has only a `nil` clause and an `is_binary/1` clause, so
+  # untranslated the sentinel is a FunctionClauseError — a 500 on a live
+  # `GET /v1/media/search?facets=tags` whenever no Default workspace is seeded,
+  # which is precisely the condition the sentinel exists for.
+  #
+  # THE SAME REQUEST already meets a corrected interpreter twice in this module:
+  # the Ecto results path scopes `m` through `Content.Scope.scope_to_workspace/3`
+  # (`build_query/2`) and the joined doc through `join_scope_workspace/3`, both
+  # of which narrow `:shared_only` to `workspace_id IS NULL`. These fragments are
+  # the raw-SQL mirror of exactly those two clauses, so they emit the same
+  # narrowing: strict `IS NULL` on the primary `media_files m` and `IS NULL` on
+  # the joined `documents d`.
+  #
+  # `is_nil` needs no bound parameter, so `start_idx` is returned UNCHANGED —
+  # the dynamic filters that follow keep their slot numbering.
+  #
+  # Deliberately NOT the `nil` branch below: that one emits no clauses at all
+  # (the explicit-global read), which is the every-tenant answer this sentinel
+  # was introduced to stop an unresolved request from getting.
+  defp scope_fragments(opts, start_idx) when is_list(opts) do
+    case opts[:workspace_id] do
+      :shared_only ->
+        {"AND m.workspace_id IS NULL", "AND d.workspace_id IS NULL", [], start_idx}
+
+      _ ->
+        uuid_scope_fragments(opts, start_idx)
+    end
+  end
+
+  defp uuid_scope_fragments(opts, start_idx) do
     # `m.workspace_id` / `m.project_id` are :binary_id (uuid) columns. Raw
     # Postgrex needs the 16-byte binary, not the UUID string — the Ecto path
     # casts via the schema type, but `Repo.query/2` does not. Dump here; an
