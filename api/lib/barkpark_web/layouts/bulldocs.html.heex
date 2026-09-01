@@ -2311,39 +2311,33 @@
         LiveSocket below registers hooks. Only the /finder page mounts it —
         every other reader page pays one cached script fetch, no execution. --%>
   <script src="/assets/bp-graph.js"></script>
+  <%!-- THE shared Mermaid hook + evergreen palette — the SAME asset
+        root.html.heex loads for the Studio chat transcript
+        (task-e96ac3b80506cf32: the reader used to carry a byte-identical
+        inline copy of both). Non-defer like the phoenix/bp-graph pair above:
+        `window.BarkparkPaperMermaid` must exist BEFORE the inline script
+        below reads it into PaperHooks and connects the LiveSocket. NOT in
+        <head> and NOT blocking (Golden Rule #4) — the engine itself
+        (mermaid.min.js) still loads `defer` above. --%>
+  <script src="/assets/bp-paper-mermaid.js"></script>
   <script nonce={assigns[:csp_nonce]}>
-    // PaperMermaid: run Mermaid over any unprocessed `pre.mermaid` inside this
-    // hook's element. Registered on the streamed <article>, so its mounted()
-    // fires once and updated() fires on every stream delta — exactly when a new
-    // `diagram` block's <pre class="mermaid"> enters the DOM. Guarded for the
-    // case where mermaid.min.js (deferred) hasn't loaded yet: we retry on the
-    // script's load event.
+    // PaperMermaid: the reader's per-<article> hook. Registered on the streamed
+    // <article>, so mounted() fires once and updated() fires on every stream
+    // delta — exactly when a new block's mount point enters the DOM. Diagrams
+    // delegate to the SHARED asset; asciicast / code-tabs / tabs are
+    // reader-only and implemented here.
     let PaperHooks = {
       PaperMermaid: {
+        // runMermaid is NOT reimplemented here: /assets/bp-paper-mermaid.js
+        // (loaded non-defer above) owns the diagram engine, the stash-the-
+        // source discipline, the deferred-load retry and the legibility
+        // unshrink — the same code the Studio chat transcript runs.
+        // `.call(this)` because the shared implementation reads `this.el`,
+        // the LiveView hook's element. Guarded so a missing asset degrades to
+        // "no diagrams" instead of taking the whole hook map down.
         runMermaid() {
-          let nodes = Array.from(
-            this.el.querySelectorAll('pre.mermaid:not([data-processed="true"])')
-          );
-          if (!nodes.length) return;
-          // Stash the raw source before the first run — mermaid replaces the
-          // <pre>'s text with the SVG, and the scheme-change re-render below
-          // needs the original source to re-run under the other palette.
-          nodes.forEach((n) => {
-            if (n.dataset.bpSrc == null) n.dataset.bpSrc = n.textContent;
-          });
-          if (window.mermaid && window.mermaid.run) {
-            window.mermaid.run({ nodes });
-          } else {
-            // mermaid.min.js still deferred-loading — retry once it's ready.
-            window.addEventListener("load", () => {
-              if (window.mermaid && window.mermaid.run) {
-                window.mermaid.run({
-                  nodes: Array.from(
-                    this.el.querySelectorAll('pre.mermaid:not([data-processed="true"])')
-                  )
-                });
-              }
-            }, { once: true });
+          if (window.BarkparkPaperMermaid) {
+            window.BarkparkPaperMermaid.runMermaid.call(this);
           }
         },
         // runAsciicast: mount an asciinema player over any unprocessed
@@ -2525,100 +2519,36 @@
       }
     };
 
-    // Initialise the engine in manual mode (startOnLoad:false). Wrapped so it's
-    // a no-op if the deferred script isn't present yet — the hook re-checks.
+    // Mermaid theming for the reader. The palette, the engine init and the
+    // re-render-from-stashed-source machinery all live in
+    // /assets/bp-paper-mermaid.js (loaded above) — the reader configures its
+    // two documented seams instead of carrying a second copy:
     //
-    // THEME (gui-premium w1): mermaid's stock "default" theme is off-palette
-    // (trebuchet + pastel blue). We drive theme:"base" with themeVariables
-    // derived from the reader's `--paper-*` evergreen palette (the same values
-    // the CSS above sets for light and prefers-color-scheme dark), and label
-    // in the reader's mono — the diagrams read as kin to the TUI's box-art.
-    // The values are literals (not read from CSS vars) because mermaid bakes
-    // colors into the SVG at render time; the scheme listener below re-renders
-    // from the stashed source when the OS palette flips.
-    function mermaidThemeVariables(dark) {
-      const mono =
-        "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace";
-      if (dark) {
-        return {
-          fontFamily: mono, fontSize: "14px",
-          background: "#0e1614", mainBkg: "#131d19",
-          primaryColor: "#131d19", primaryTextColor: "#e7ede9",
-          primaryBorderColor: "#45b394", nodeBorder: "#45b394",
-          lineColor: "#9aaaa3", textColor: "#e7ede9", titleColor: "#e7ede9",
-          secondaryColor: "#1a2b25", tertiaryColor: "#131d19",
-          clusterBkg: "#0e1614", clusterBorder: "rgba(231,237,233,0.2)",
-          edgeLabelBackground: "#0e1614",
-          actorBkg: "#131d19", actorBorder: "#45b394",
-          actorTextColor: "#e7ede9", actorLineColor: "#6c7a74",
-          signalColor: "#9aaaa3", signalTextColor: "#e7ede9",
-          labelBoxBkgColor: "#131d19", labelBoxBorderColor: "#45b394",
-          labelTextColor: "#e7ede9", loopTextColor: "#e7ede9",
-          noteBkgColor: "#1c2620", noteBorderColor: "#6c7a74",
-          noteTextColor: "#e7ede9"
-        };
-      }
-      return {
-        fontFamily: mono, fontSize: "14px",
-        background: "#f6faf9", mainBkg: "#eaf1ee",
-        primaryColor: "#eaf1ee", primaryTextColor: "#15211d",
-        primaryBorderColor: "#1e5347", nodeBorder: "#1e5347",
-        lineColor: "#55635e", textColor: "#15211d", titleColor: "#15211d",
-        secondaryColor: "#d7e8e1", tertiaryColor: "#f6faf9",
-        clusterBkg: "#f6faf9", clusterBorder: "#dde7e2",
-        edgeLabelBackground: "#f6faf9",
-        actorBkg: "#eaf1ee", actorBorder: "#1e5347",
-        actorTextColor: "#15211d", actorLineColor: "#82918b",
-        signalColor: "#55635e", signalTextColor: "#15211d",
-        labelBoxBkgColor: "#eaf1ee", labelBoxBorderColor: "#1e5347",
-        labelTextColor: "#15211d", loopTextColor: "#15211d",
-        noteBkgColor: "#e6f0eb", noteBorderColor: "#82918b",
-        noteTextColor: "#15211d"
+    //   * isDark: the reader's EFFECTIVE mode, not the raw OS query. The
+    //     pre-paint `data-theme` stamp (OS default, or the dark/light pill's
+    //     persisted choice) wins; bare OS scheme is the fallback for the
+    //     pathological no-stamp case.
+    //   * autoScheme:false — the mode-toggle IIFE above fires `bp:mode` for
+    //     toggle clicks AND for OS flips that actually change the effective
+    //     mode (never for a no-op OS flip under a stored choice), so it, not
+    //     the raw scheme listener, is the reader's re-render trigger.
+    //
+    // Guarded: a missing asset must never break the hooks map below.
+    if (window.BarkparkPaperMermaid) {
+      const readerScheme = window.matchMedia("(prefers-color-scheme: dark)");
+      window.BarkparkPaperMermaid.isDark = () => {
+        const t = document.documentElement.dataset.theme;
+        return t ? t === "dark" : readerScheme.matches;
       };
-    }
-    const mermaidScheme = window.matchMedia("(prefers-color-scheme: dark)");
-    // Effective reader mode: the pre-paint data-theme stamp (OS default or the
-    // dark/light pill's persisted choice) wins; bare OS scheme is the fallback
-    // for the pathological no-stamp case.
-    function readerDark() {
-      const t = document.documentElement.dataset.theme;
-      return t ? t === "dark" : mermaidScheme.matches;
-    }
-    function initMermaid() {
-      if (window.mermaid && window.mermaid.initialize) {
-        window.mermaid.initialize({
-          startOnLoad: false,
-          theme: "base",
-          themeVariables: mermaidThemeVariables(readerDark()),
-          flowchart: { useMaxWidth: true },
-          sequence: { useMaxWidth: true }
-        });
-      }
-    }
-    if (document.readyState === "complete") initMermaid();
-    else window.addEventListener("load", initMermaid, { once: true });
-    // Re-render every diagram from its stashed source when the EFFECTIVE mode
-    // flips — mermaid bakes the palette into the SVG, so a live flip would
-    // otherwise strand light diagrams on a dark page (and vice versa). The
-    // mode-toggle IIFE fires `bp:mode` for both toggle clicks and OS flips
-    // that actually change the effective mode (never for a no-op OS flip
-    // under a stored choice), so it replaces the old raw scheme listener.
-    window.addEventListener("bp:mode", () => {
-      initMermaid();
-      document.querySelectorAll("pre.mermaid[data-processed]").forEach((pre) => {
-        if (pre.dataset.bpSrc != null) {
-          pre.textContent = pre.dataset.bpSrc;
-          pre.removeAttribute("data-processed");
-        }
+      window.BarkparkPaperMermaid.autoScheme = false;
+      // The asset's own deferred init runs on `load`, i.e. AFTER this line, so
+      // it already picks up the resolver above; this call only matters for the
+      // readyState==="complete" case (a cached, already-loaded page).
+      window.BarkparkPaperMermaid.init();
+      window.addEventListener("bp:mode", () => {
+        window.BarkparkPaperMermaid.rerenderAll();
       });
-      if (window.mermaid && window.mermaid.run) {
-        window.mermaid.run({
-          nodes: Array.from(
-            document.querySelectorAll('pre.mermaid:not([data-processed="true"])')
-          )
-        });
-      }
-    });
+    }
 
     // FinderGraph — the /finder corpus graph. bp-graph.js exports the LiveView
     // hook itself (window.BarkparkGraph, the same object Studio registers as
