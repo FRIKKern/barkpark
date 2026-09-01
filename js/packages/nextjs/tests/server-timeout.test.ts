@@ -129,28 +129,24 @@ beforeEach(() => {
 })
 
 describe('barkparkFetch — the configured fetchOptions.timeout is actually armed', () => {
-  it(
-    'a hung origin aborts WITHIN the configured window and raises BarkparkTimeoutError carrying that window',
-    async () => {
-      mockHangingFetch()
-      const startedAt = Date.now()
-      const err = await barkparkFetch(makeCfg({ timeout: 80 }), { type: 'post' }).then(
-        () => {
-          throw new Error('unexpectedly resolved — the hung origin was never aborted')
-        },
-        (e: unknown) => e,
-      )
-      const elapsed = Date.now() - startedAt
-      expect(err).toBeInstanceOf(BarkparkTimeoutError)
-      // The deadline that FIRED is the one reported.
-      expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
-      // Not aborted instantly (that would pass a fix that aborts everything)…
-      expect(elapsed).toBeGreaterThanOrEqual(70)
-      // …and genuinely bounded, nowhere near the platform limit.
-      expect(elapsed).toBeLessThan(2000)
-    },
-    3000,
-  )
+  it('a hung origin aborts WITHIN the configured window and raises BarkparkTimeoutError carrying that window', async () => {
+    mockHangingFetch()
+    const startedAt = Date.now()
+    const err = await barkparkFetch(makeCfg({ timeout: 80 }), { type: 'post' }).then(
+      () => {
+        throw new Error('unexpectedly resolved — the hung origin was never aborted')
+      },
+      (e: unknown) => e,
+    )
+    const elapsed = Date.now() - startedAt
+    expect(err).toBeInstanceOf(BarkparkTimeoutError)
+    // The deadline that FIRED is the one reported.
+    expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
+    // Not aborted instantly (that would pass a fix that aborts everything)…
+    expect(elapsed).toBeGreaterThanOrEqual(70)
+    // …and genuinely bounded, nowhere near the platform limit.
+    expect(elapsed).toBeLessThan(2000)
+  }, 3000)
 
   it('THE SUBJECT IS PRESENT: a normal fast request still succeeds under the same configured timeout', async () => {
     mockOkFetch({ documents: [{ _id: 'p1' }] })
@@ -159,100 +155,80 @@ describe('barkparkFetch — the configured fetchOptions.timeout is actually arme
     })
   })
 
-  it(
-    'the deadline stays armed through the BODY read — a slow-loris body times out too',
-    async () => {
-      mockStallingBodyFetch()
-      const err = await barkparkFetch(makeCfg({ timeout: 80 }), { type: 'post' }).then(
-        () => {
-          throw new Error('unexpectedly resolved — the stalled body was never aborted')
-        },
-        (e: unknown) => e,
-      )
-      expect(err).toBeInstanceOf(BarkparkTimeoutError)
-      expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
-    },
-    3000,
-  )
+  it('the deadline stays armed through the BODY read — a slow-loris body times out too', async () => {
+    mockStallingBodyFetch()
+    const err = await barkparkFetch(makeCfg({ timeout: 80 }), { type: 'post' }).then(
+      () => {
+        throw new Error('unexpectedly resolved — the stalled body was never aborted')
+      },
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(BarkparkTimeoutError)
+    expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
+  }, 3000)
 
-  it(
-    "undici's real mid-body shape — a `TypeError: terminated` — is still reported as the timeout it is",
-    async () => {
-      mockStallingBodyFetch('terminated')
-      const err = await barkparkFetch(makeCfg({ timeout: 80 }), { type: 'post' }).then(
-        () => {
-          throw new Error('unexpectedly resolved')
-        },
-        (e: unknown) => e,
-      )
-      expect(err).toBeInstanceOf(BarkparkTimeoutError)
-      expect(err).not.toBeInstanceOf(TypeError)
-      expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
-    },
-    3000,
-  )
+  it("undici's real mid-body shape — a `TypeError: terminated` — is still reported as the timeout it is", async () => {
+    mockStallingBodyFetch('terminated')
+    const err = await barkparkFetch(makeCfg({ timeout: 80 }), { type: 'post' }).then(
+      () => {
+        throw new Error('unexpectedly resolved')
+      },
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(BarkparkTimeoutError)
+    expect(err).not.toBeInstanceOf(TypeError)
+    expect((err as BarkparkTimeoutError).timeoutMs).toBe(80)
+  }, 3000)
 
-  it(
-    'NO configured timeout leaves the request unbounded — no invented default is applied',
-    async () => {
-      mockHangingFetch()
-      const settled = barkparkFetch(makeCfg(), { type: 'post' }).then(
-        () => 'resolved',
-        () => 'rejected',
-      )
-      const race = await Promise.race([
-        settled,
-        new Promise<string>((r) => setTimeout(() => r('still-pending'), 300)),
-      ])
-      expect(race).toBe('still-pending')
-    },
-    3000,
-  )
+  it('NO configured timeout leaves the request unbounded — no invented default is applied', async () => {
+    mockHangingFetch()
+    const settled = barkparkFetch(makeCfg(), { type: 'post' }).then(
+      () => 'resolved',
+      () => 'rejected',
+    )
+    const race = await Promise.race([
+      settled,
+      new Promise<string>((r) => setTimeout(() => r('still-pending'), 300)),
+    ])
+    expect(race).toBe('still-pending')
+  }, 3000)
 })
 
 describe('barkparkFetch — deadline / caller-signal composition', () => {
-  it(
-    'a caller abort is STILL a raw AbortError cancellation while a config deadline is armed',
-    async () => {
-      mockHangingFetch()
-      const ac = new AbortController()
-      const settled = barkparkFetch(makeCfg({ timeout: 5000 }), {
-        type: 'post',
-        signal: ac.signal,
-      }).then(
-        () => {
-          throw new Error('unexpectedly resolved')
-        },
-        (e: unknown) => e,
-      )
-      ac.abort()
-      const err = await settled
-      expect(err).toBeInstanceOf(Error)
-      expect((err as Error).name).toBe('AbortError')
-      expect(err).not.toBeInstanceOf(BarkparkTimeoutError)
-    },
-    3000,
-  )
+  it('a caller abort is STILL a raw AbortError cancellation while a config deadline is armed', async () => {
+    mockHangingFetch()
+    const ac = new AbortController()
+    const settled = barkparkFetch(makeCfg({ timeout: 5000 }), {
+      type: 'post',
+      signal: ac.signal,
+    }).then(
+      () => {
+        throw new Error('unexpectedly resolved')
+      },
+      (e: unknown) => e,
+    )
+    ac.abort()
+    const err = await settled
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).name).toBe('AbortError')
+    expect(err).not.toBeInstanceOf(BarkparkTimeoutError)
+  }, 3000)
 
-  it(
-    "a caller's AbortSignal.timeout wins the race and the error does NOT report the config's unrelated window",
-    async () => {
-      mockHangingFetch()
-      const err = await barkparkFetch(makeCfg({ timeout: 30_000 }), {
-        type: 'post',
-        signal: AbortSignal.timeout(60),
-      }).then(
-        () => {
-          throw new Error('unexpectedly resolved')
-        },
-        (e: unknown) => e,
-      )
-      expect(err).toBeInstanceOf(BarkparkTimeoutError)
-      // 30000 never elapsed — reporting it would name a deadline that did not fire.
-      expect((err as BarkparkTimeoutError).timeoutMs).toBeUndefined()
-    },
-    3000,
-  )
+  it("a caller's AbortSignal.timeout wins the race and the error does NOT report the config's unrelated window", async () => {
+    mockHangingFetch()
+    const err = await barkparkFetch(makeCfg({ timeout: 30_000 }), {
+      type: 'post',
+      signal: AbortSignal.timeout(60),
+    }).then(
+      () => {
+        throw new Error('unexpectedly resolved')
+      },
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(BarkparkTimeoutError)
+    // 30000 never elapsed — reporting it would name a deadline that did not fire.
+    expect((err as BarkparkTimeoutError).timeoutMs).toBeUndefined()
+  }, 3000)
 
   it('the caller-signal abort listener is removed on a SUCCESSFUL exit (no listener leak)', async () => {
     mockOkFetch()

@@ -128,14 +128,17 @@ function lookupSchema(
   type: string,
 ): ActionSchema | undefined {
   if (schemas === undefined || schemas === null || !Object.hasOwn(schemas, type)) return undefined
-  const schema: unknown = schemas[type]
-  if (schema === null || typeof schema !== 'object' || typeof (schema as ActionSchema).parse !== 'function') {
+  const schema = schemas[type] as ActionSchema | undefined
+  // Duck-typed on `.parse` alone, not on `typeof === 'object'`: the declared
+  // contract is "any object with .parse", and a callable carrying one satisfies
+  // it just as well. Optional chaining absorbs null and primitives.
+  if (typeof schema?.parse !== 'function') {
     throw new BarkparkValidationError(
       `createDoc: the schema registered for _type ${JSON.stringify(type)} has no callable .parse()`,
       { field: '_type' },
     )
   }
-  return schema as ActionSchema
+  return schema
 }
 
 /**
@@ -193,7 +196,9 @@ export function defineActions(config: DefineActionsConfig): BarkparkActions {
       // matches no read tag, silently losing the intended invalidation. Reachable from
       // untyped form/JSON input, so guard before the schema lookup or tag fan-out.
       if (typeof input._type !== 'string' || input._type.length === 0) {
-        throw new BarkparkValidationError('createDoc requires a non-empty _type', { field: '_type' })
+        throw new BarkparkValidationError('createDoc requires a non-empty _type', {
+          field: '_type',
+        })
       }
       const schema = lookupSchema(schemas, input._type)
       let body = input

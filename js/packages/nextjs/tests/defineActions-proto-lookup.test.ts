@@ -67,7 +67,11 @@ function makeClient(): Harness {
     },
   }
   const client = {
-    config: { projectUrl: 'http://localhost:4000', dataset: 'production', apiVersion: '2026-01-01' },
+    config: {
+      projectUrl: 'http://localhost:4000',
+      dataset: 'production',
+      apiVersion: '2026-01-01',
+    },
     transaction: () => tx,
   } as unknown as BarkparkClient
   return { client, created }
