@@ -43,13 +43,20 @@ name: pr-task-gate
 #     bypass: if the task cannot be filed, the lane REFUSES (red) rather than
 #     passing with a warning nobody reads. A bypass with no attributable record
 #     is indistinguishable from the gate being off.
-#     STATE OF THE LANE, re-derived 2026-08-04: `BARKPARK_TASK_TOKEN` is NOT
-#     provisioned (repo secrets are BREAKGLASS_TOKEN, CP_HOST, DEPLOY_SSH_KEY,
-#     GUERRILLA_HOST, HETZNER_DNS_TOKEN, NPM_TOKEN; the owner is a User, so no
-#     org tier can hide it), while the `hotfix!` label DOES exist. So applying
-#     the label today does not waive this gate — `hotfix_record` exits 1 and it
-#     is the only step left running (`:216`, `:238`, `:253` all carry
-#     `hotfix != '1'`), i.e. a guaranteed red. That is the designed refusal, not
+#     STATE OF THE LANE, re-derived 2026-09-01: `BARKPARK_TASK_TOKEN` IS NOW
+#     PROVISIONED (`gh secret list`: created 2026-08-25T11:00:10Z, alongside a
+#     new BARKPARK_INGEST_TOKEN; the owner is a User, so no org tier can hide
+#     it). The previous derivation, dated 2026-08-04, enumerated the secrets as
+#     BREAKGLASS_TOKEN, CP_HOST, DEPLOY_SSH_KEY, GUERRILLA_HOST,
+#     HETZNER_DNS_TOKEN, NPM_TOKEN — accurate on its date, and the token landed
+#     21 days later. It is kept here rather than deleted because the shape is
+#     the lesson: a comment stating a measured STATE needs its date read as
+#     hard as its claim, and this one went on asserting an absence for a week
+#     after the absence ended.
+#     So the `hotfix!` lane is now ARMED: `hotfix_record` can file its override
+#     task, and applying the label routes through a RECORDED bypass rather than
+#     a guaranteed red. The refusal below still stands for the case the record
+#     cannot be written — that is the designed refusal, not
 #     a bug, and it is why nothing in this file may advertise the lane as an
 #     escape. The armed escape is admin break-glass (`scripts/breakglass.sh`).
 #
@@ -67,14 +74,21 @@ name: pr-task-gate
 #     on a conflicted PR must read as "not satisfied", not as a passing/absent
 #     check. A required context that never renders reports `is expected.`
 #     forever, which is a DEADLOCK — hence no paths filter below, ever.
-#   * The emergency lane is NOT a way past a red on a genuinely urgent PR while
-#     its write token is unprovisioned — it reds. It must still actually engage
-#     (the `labeled` trigger) and must still leave a record (the
-#     `hotfix_record` step's hard failure), because the day the token exists the
-#     record is what makes the bypass legitimate. The escape that is armed today
-#     is admin break-glass: `scripts/breakglass.sh --open/--close`, which writes
-#     an attributable record to `docs/ops/break-glass-log.md` and is watched by
-#     `breakglass-watch.yml` (BREAKGLASS_TOKEN). See merge-gates.md.
+#   * The emergency lane must still actually engage (the `labeled` trigger) and
+#     must still leave a record (the `hotfix_record` step's hard failure),
+#     because the record is what makes the bypass legitimate rather than a
+#     silent skip. THAT DAY HAS ARRIVED: this bullet used to add "while its
+#     write token is unprovisioned — it reds", and reasoned about "the day the
+#     token exists" in the future tense. The token was provisioned 2026-08-25,
+#     so the hotfix lane is ARMED and its record is now the live condition of
+#     the bypass, exactly as designed.
+#     TWO escapes are armed today, and they are not interchangeable: the
+#     `hotfix!` label (records an override task on the ledger — so it cannot
+#     complete during a LEDGER outage), and admin break-glass
+#     `scripts/breakglass.sh --open/--close` (writes an attributable record to
+#     `docs/ops/break-glass-log.md`, watched by `breakglass-watch.yml` via
+#     BREAKGLASS_TOKEN — the one that still works when the ledger is down).
+#     See merge-gates.md.
 
 on:
   pull_request:
@@ -347,10 +361,12 @@ jobs:
             #
             # The instruction must name an escape that is ARMED. This message
             # used to end "if it stays down, the hotfix! lane is the documented
-            # override", which was false twice: BARKPARK_TASK_TOKEN is not
-            # provisioned, so `hotfix_record` exits 1 and — being the only step
-            # left once the lane engages — converts this required context into a
-            # guaranteed red; and even WITH the token that step POSTs to the
+            # override", which was false twice AT THE TIME: BARKPARK_TASK_TOKEN
+            # was not yet provisioned (it landed 2026-08-25), so `hotfix_record`
+            # exited 1 and — being the only step left once the lane engages —
+            # converted this required context into a guaranteed red. The first
+            # half no longer holds; the SECOND half is why the instruction below
+            # is still right: even WITH the token that step POSTs to the
             # same ledger host whose outage produced this very message, so the
             # documented escape from a guerrilla outage was gated on guerrilla
             # being up. The `hotfix!` label exists, so a blocked human at 2am
@@ -358,7 +374,7 @@ jobs:
             # scripts/pr-task-gate.test.sh executes this file's own
             # `hotfix_record` body with an empty token and cross-checks this
             # text against merge-gates.md, so the false lane cannot drift back.
-            echo "::error title=Ledger unreachable — task backing UNVERIFIED::The task ledger did not answer after the gate's bounded retries, so whether this PR is task-backed is UNKNOWN. This is not a finding against the PR. Re-run this check once the ledger is up. Do NOT reach for the 'hotfix!' label: BARKPARK_TASK_TOKEN is unprovisioned, so that lane REDS this same required context with every evaluating step skipped, and even with the token it files its record on the ledger that is down. The one armed override is admin break-glass — scripts/breakglass.sh --open --reason ... --task ... , merge, then --close (docs/ops/merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "::error title=Ledger unreachable — task backing UNVERIFIED::The task ledger did not answer after the gate's bounded retries, so whether this PR is task-backed is UNKNOWN. This is not a finding against the PR. Re-run this check once the ledger is up. Do NOT reach for the 'hotfix!' label: it files its override record on the SAME ledger host whose outage produced this message, so it cannot complete while the ledger is down. The one armed override is admin break-glass — scripts/breakglass.sh --open --reason ... --task ... , merge, then --close (docs/ops/merge-gates.md)." | tee -a "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
           exit "$rc"
