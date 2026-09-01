@@ -708,7 +708,7 @@ defmodule Barkpark.Tasks.Stage do
   #
   # The lead's ruling, verbatim: "a same-state stage (from == to) that clears a
   # live engagement lease is a DEFECT. `apply_engagement/5`'s catch-all clause
-  # in api/lib/barkpark/tasks/stage.ex (line ~704 on origin/main) returns
+  # in api/lib/barkpark/tasks/stage.ex [line reference elided] returns
   # `{Map.delete(content, \"engagement\"), nil}` for every non-thought target.
   # When from == to the row is being ADJUDICATED, not MOVED, so the engagement
   # map must survive byte-identical. Movement (from != to, to not in @thought)
