@@ -13,19 +13,27 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
   anonymous-mountable by design (documented why), so the guard never falsely
   demands auth on a public surface.
 
-  ## Per-module authz census
+  ## Authz census, keyed on `{module, live_session}`
+
+  The key is the PAIR, never the module alone. `ChatLive` is routed in TWO
+  live_sessions whose `on_mount` chains differ (`:admin_studio` and
+  `:scoped_admin_studio`), so a module-keyed row describes one door and stays
+  silent about the other. It was keyed on the module until
+  `pds-w42-bl-chatlive-routed-clauses-ungated`, and the missing
+  `{ChatLive, :scoped_admin_studio}` row is why this census read green through a
+  live cross-tenant delete on the flat route.
 
   ### ADMIN tier — flat global `admin` permission (`LiveAuth.:admin`), deny → /studio
 
-  | Module              | Route                                                     | Deny target |
-  |---------------------|-----------------------------------------------------------|-------------|
-  | OrgAdminLive        | /studio/org-admin                                         | /studio     |
-  | StyleguideLive      | /studio/styleguide                                        | /studio     |
-  | SwatchLive          | /studio/styleguide/swatch                                 | /studio     |
-  | TmuxLive            | /studio/tmux                                              | /studio     |
-  | ChatLive            | /studio/chat                                              | /studio     |
-  | PluginsLive         | /w/:ws/p/:proj/d/:ds/studio/_plugins                      | /studio     |
-  | PluginSettingsLive  | /w/:ws/p/:proj/d/:ds/studio/_plugins/:plugin/settings     | /studio     |
+  | Module              | live_session            | Route                                                     | Deny target |
+  |---------------------|-------------------------|-----------------------------------------------------------|-------------|
+  | OrgAdminLive        | :admin_studio           | /studio/org-admin                                         | /studio     |
+  | StyleguideLive      | :admin_studio           | /studio/styleguide                                        | /studio     |
+  | SwatchLive          | :admin_swatch           | /studio/styleguide/swatch                                 | /studio     |
+  | TmuxLive            | :admin_studio           | /studio/tmux                                              | /studio     |
+  | ChatLive            | :admin_studio           | /studio/chat                                              | /studio     |
+  | PluginsLive         | :scoped_plugin_admin    | /w/:ws/p/:proj/d/:ds/studio/_plugins                      | /studio     |
+  | PluginSettingsLive  | :scoped_plugin_admin    | /w/:ws/p/:proj/d/:ds/studio/_plugins/:plugin/settings     | /studio     |
 
   TmuxLive and ChatLive carry a SECOND runtime gate inside their own mount
   (`TmuxConsole.enabled?/0` needs a compiled PTY backend + the flag; ChatLive
@@ -36,11 +44,17 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
 
   ### SCOPED-ADMIN tier — TARGET-workspace admin (`LiveAuth.:scoped_admin`), deny → /studio
 
-  | Module         | Route                                | Deny target |
-  |----------------|--------------------------------------|-------------|
-  | SettingsLive   | /w/:ws/p/:proj/studio/settings       | /studio     |
-  | ChatHostsLive  | /w/:ws/p/:proj/studio/chat-hosts     | /studio     |
-  | ConnectorsLive | /w/:ws/p/:proj/studio/connectors     | /studio     |
+  | Module         | live_session          | Route                                | Deny target |
+  |----------------|-----------------------|--------------------------------------|-------------|
+  | SettingsLive   | :scoped_admin_studio  | /w/:ws/p/:proj/studio/settings       | /studio     |
+  | ChatHostsLive  | :scoped_admin_studio  | /w/:ws/p/:proj/studio/chat-hosts     | /studio     |
+  | ConnectorsLive | :scoped_admin_studio  | /w/:ws/p/:proj/studio/connectors     | /studio     |
+  | ChatLive       | :scoped_admin_studio  | /w/:ws/p/:proj/studio/chat           | /studio     |
+
+  `ChatLive` appears in BOTH tiers — that is the point of keying on the pair.
+  Its flat row rides a global-permission gate; its scoped row rides the
+  target-workspace gate. The two rows disagree about the same module, and both
+  are true.
 
   Wrong-role for this tier is the W24 escalation shape: a token holding the
   flat global `admin` permission but only a `member` (not owner/admin) role in
@@ -86,8 +100,18 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
 
   ## Findings
 
-  Zero mount-authz findings. Every privileged LiveView denies anon AND
-  wrong-role at mount; every public LiveView is anon-mountable by design.
+  Zero mount-authz findings. Every privileged `{module, live_session}` pair
+  denies anon AND wrong-role at mount; every public LiveView is anon-mountable
+  by design.
+
+  One recorded LIMIT, from `pds-w42-bl-chatlive-routed-clauses-ungated`: a
+  clean mount census is not a clean authorization census. `{ChatLive,
+  :admin_studio}` denies anon and denies a `read`-only token, and still admitted
+  a workspace-bound admin token that then drove four lifecycle clauses at
+  `:global` scope into another workspace's rows. A mount gate bounds WHO gets a
+  socket, never WHICH ROWS the clauses on that socket may touch. Clause-level
+  scope is guarded separately, in
+  `test/barkpark_web/live/studio/pds_w42_chatlive_flat_lifecycle_global_test.exs`.
 
   async: false — flips `:public_demo_studio` and runtime-gate config globally.
   """
@@ -116,6 +140,43 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
     raw = "#{label}-#{System.unique_integer([:positive])}"
     {:ok, tok} = Auth.create_token(raw, label, "production", perms)
     {raw, tok}
+  end
+
+  # A principal class this census could not express until
+  # `pds-w42-bl-chatlive-routed-clauses-ungated`: an admin token BOUND to a
+  # workspace. Every wrong-role principal above is keyed on permission-ABSENCE
+  # (a `read`-only token) or on membership role; none of them varies the token's
+  # TENANCY. `LiveAuth.on_mount(:admin)` reads only `permissions` and never the
+  # binding, so a bound admin token mounts every flat admin surface — which is
+  # correct at the mount, and was NOT correct at ChatLive's lifecycle clauses,
+  # where a hard-coded `:global` scope let it reach another workspace's rows.
+  defp bound_token!(label, perms, workspace_id) do
+    raw = "#{label}-#{System.unique_integer([:positive])}"
+    {:ok, tok} = Auth.create_token(raw, label, "production", perms, workspace_id)
+    {raw, tok}
+  end
+
+  # ChatLive.mount/3 bounces a runtime-less instance to "/studio" — the SAME
+  # target an authz denial redirects to. So the runtime must be enabled BEFORE
+  # any ChatLive deny assertion: otherwise a principal whose gate was REMOVED
+  # would reach mount/3, be bounced for the missing runtime, and satisfy
+  # `assert_denied_to(…, "/studio")` for entirely the wrong reason. With the
+  # runtime on, a gate removal shows up as `{:ok, …}` and the assertion fails,
+  # which is the only way these rows are worth anything.
+  defp enable_chat_runtime! do
+    prev_chat = Application.get_env(:barkpark, :claude_chat)
+    prev_demo = Application.get_env(:barkpark, :public_demo_studio)
+
+    on_exit(fn ->
+      if prev_chat,
+        do: Application.put_env(:barkpark, :claude_chat, prev_chat),
+        else: Application.delete_env(:barkpark, :claude_chat)
+
+      Application.put_env(:barkpark, :public_demo_studio, prev_demo)
+    end)
+
+    Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
+    Application.put_env(:barkpark, :public_demo_studio, false)
   end
 
   # A privileged mount must NOT be {:ok} for anon/wrong-role — it redirects.
@@ -225,26 +286,46 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
 
     test "ChatLive denies anon + wrong-role; admin mounts with a runtime enabled", ctx do
       %{conn: conn, admin_raw: admin, junior_raw: junior} = ctx
+
+      # BEFORE the denials, not after — see `enable_chat_runtime!/0`. A
+      # runtime-less mount redirects to the same "/studio" an authz denial does,
+      # so the denials below are only meaningful with the runtime already on.
+      enable_chat_runtime!()
+
       assert_denied_to(live(anon(conn), "/studio/chat"), "/studio")
       assert_denied_to(live(as(conn, junior), "/studio/chat"), "/studio")
 
-      # Positive control: enable a fake `claude` runtime (`cat` echo) so the
-      # provider check in ChatLive.mount clears and an authorized admin mounts.
-      prev_chat = Application.get_env(:barkpark, :claude_chat)
-      prev_demo = Application.get_env(:barkpark, :public_demo_studio)
-
-      on_exit(fn ->
-        if prev_chat,
-          do: Application.put_env(:barkpark, :claude_chat, prev_chat),
-          else: Application.delete_env(:barkpark, :claude_chat)
-
-        Application.put_env(:barkpark, :public_demo_studio, prev_demo)
-      end)
-
-      Application.put_env(:barkpark, :claude_chat, enabled: true, command: {"cat", []})
-      Application.put_env(:barkpark, :public_demo_studio, false)
-
       assert {:ok, _view, _html} = live(as(conn, admin), "/studio/chat")
+    end
+
+    # The class the module-keyed census could not express. This asserts the
+    # TRUTH, which is a mount SUCCESS: `on_mount(:admin)` is a global-permission
+    # gate and a workspace-bound admin token clears it. Recorded here so the
+    # census stops implying the flat route filters by tenancy — it does not, and
+    # the confinement for this module lives at the CLAUSES
+    # (`ChatLive.principal_chat_scope/1`, guarded by
+    # pds_w42_chatlive_flat_lifecycle_global_test.exs).
+    test "ChatLive flat: an admin token BOUND to another workspace still mounts", ctx do
+      %{conn: conn} = ctx
+
+      {:ok, other} =
+        Tenancy.create_workspace(%{
+          slug: "census-bound-#{System.unique_integer([:positive])}",
+          name: "Census Bound WS"
+        })
+
+      {:ok, _proj} = Tenancy.create_project(other, %{slug: "default", name: "Default"})
+      {bound_raw, _} = bound_token!("census-bound-admin", ["read", "write", "admin"], other.id)
+
+      enable_chat_runtime!()
+
+      bound_result = live(as(conn, bound_raw), "/studio/chat")
+
+      assert match?({:ok, _view, _html}, bound_result),
+             "the flat admin gate is expected to admit a workspace-bound admin token — " <>
+               "if this now denies, the flat gate gained a tenancy check and the " <>
+               "clause-level scope guard should be re-examined, not silently kept " <>
+               "(got #{inspect(bound_result)})"
     end
   end
 
@@ -294,6 +375,41 @@ defmodule BarkparkWeb.LiveViewMountAuthzCensusTest do
       path = "/w/#{ws.slug}/p/default/studio/connectors"
       assert_denied_to(live(anon(conn), path), "/studio")
       assert_denied_to(live(as(conn, member), path), "/studio")
+      assert {:ok, _view, _html} = live(as(conn, owner), path)
+    end
+
+    # The row a module-keyed census cannot hold: ChatLive's SECOND live_session.
+    # `{ChatLive, :admin_studio}` is covered in the ADMIN tier above and rides a
+    # global-permission gate; this pair rides the target-workspace gate. Both
+    # rows are true of the same module, which is why the key is the pair.
+    test "ChatLive scoped denies anon + member-only + a ws-bound-elsewhere admin, owner mounts",
+         ctx do
+      %{conn: conn, ws: ws, owner_raw: owner, member_raw: member} = ctx
+      path = "/w/#{ws.slug}/p/default/studio/chat"
+
+      # An admin token bound to a DIFFERENT workspace — the exact principal that
+      # sails through the flat route. The scoped gate resolves the target from
+      # the URL and denies it. That asymmetry between ChatLive's two rows is the
+      # finding the module-keyed census could not represent.
+      {:ok, elsewhere} =
+        Tenancy.create_workspace(%{
+          slug: "census-elsewhere-#{System.unique_integer([:positive])}",
+          name: "Census Elsewhere WS"
+        })
+
+      {bound_raw, _} =
+        bound_token!("census-elsewhere-admin", ["read", "write", "admin"], elsewhere.id)
+
+      # Runtime BEFORE the denials — see `enable_chat_runtime!/0`. Without it,
+      # removing the `:scoped_admin` gate would let each principal fall through
+      # to mount/3, bounce on the missing runtime to "/studio", and satisfy all
+      # three denials anyway. The gate would be gone and this row still green.
+      enable_chat_runtime!()
+
+      assert_denied_to(live(anon(conn), path), "/studio")
+      assert_denied_to(live(as(conn, member), path), "/studio")
+      assert_denied_to(live(as(conn, bound_raw), path), "/studio")
+
       assert {:ok, _view, _html} = live(as(conn, owner), path)
     end
   end
