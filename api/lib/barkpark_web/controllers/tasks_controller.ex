@@ -2052,14 +2052,31 @@ defmodule BarkparkWeb.TasksController do
   end
 
   # ─── GET /v1/fleet/roster ───────────────────────────────────────────────
-  # The fleet roster — global-per-dataset (PDF-D19, no workspace clause) with
-  # online/offline computed at read time, fail closed. The envelope key is
-  # `documents` (PDF-D21): the one key every installed bp binary renders as a
-  # real table; a bespoke key would degrade to one crammed KV cell.
+  # The fleet roster — WORKSPACE-SCOPED, with online/offline computed at read
+  # time, fail closed. The envelope key is `documents` (PDF-D21): the one key
+  # every installed bp binary renders as a real table; a bespoke key would
+  # degrade to one crammed KV cell.
+  #
+  # Owner ruling, 2026-09-01 (task-4e2986e8609670d7, criterion 0), verbatim:
+  #
+  #   orchestrator, delegated; owner informed 2026-09-01 — RULED A: scope the
+  #   roster read with scope_opts(conn); the global view is for the OPERATOR
+  #   tier only, NOT any `admin` bit.
+  #
+  # This route READ globally while `fleet_beat/2` two functions up WROTE
+  # scoped — the asymmetry that leaked every workspace's listeners, and each
+  # worker's in-progress task id, to any bearer holding `read`. Both halves now
+  # thread the same `scope_opts(conn)`.
+  #
+  # `scope_opts/1` ALWAYS carries `:workspace_id` for a conn — a real id, or
+  # the `:shared_only` sentinel when the request resolved no workspace — so a
+  # request can never reach `Fleet.roster/2`'s `global: true` opt-in, and never
+  # falls into its fail-closed nil arm by accident either. See the ruling and
+  # the operator-tier note in `Barkpark.Tasks.Fleet`'s moduledoc.
 
   def fleet_roster(conn, _params) do
     dataset = request_dataset(conn)
-    json(conn, %{ok: true, documents: Fleet.roster(dataset)})
+    json(conn, %{ok: true, documents: Fleet.roster(dataset, scope_opts(conn))})
   end
 
   defp unprocessable(conn, reason, message) do

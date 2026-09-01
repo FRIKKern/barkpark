@@ -2,8 +2,13 @@ defmodule Barkpark.Plugins.Tasks.Web.FleetLiveTest do
   @moduledoc """
   The Studio Fleet desk tile at `/admin/fleet` — a thin, read-only roster of the
   Personal Dev Fleet's listeners (`worker · status · last-seen`), read through
-  `Barkpark.Tasks.Fleet.roster/1` (the flat global-per-dataset endpoint
-  semantics, PDF-D19 — NEVER a socket-scoped read that would fail-closed empty).
+  `Barkpark.Tasks.Fleet.roster/2` with `global: true` — the ONE explicit
+  cross-tenant opt-in, and this tile is its only caller. The 2026-09-01 ruling
+  on task-4e2986e8609670d7 scoped the flat `GET /v1/fleet/roster` endpoint to
+  `scope_opts(conn)`, so the endpoint no longer shares this shape; the tile
+  keeps it because it has no request scope to thread and would otherwise render
+  permanently empty (PDF-D19 — NEVER a socket-scoped read that would
+  fail-closed empty).
 
   Covers:
 
