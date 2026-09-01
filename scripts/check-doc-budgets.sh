@@ -595,9 +595,18 @@ fi
 # FROZEN one: root CLAUDE.md sat at 9998B and api/CLAUDE.md at 6499B on
 # origin/main, and in that state every subsequent correction — a plugin roster
 # that undercounted by five, a "CI-enforced" claim the required set denies — was
-# blocked on bytes rather than on judgment. The cap says "do not grow." The floor
-# says "stay correctable," and it is the arm that reds while there is still time
-# to act, instead of after the next author is already stuck.
+# blocked on bytes rather than on judgment.
+#
+# THIS ARM IS AN EARLY WARNING FOR "CANNOT BE CORRECTED", NOT A SECOND GROWTH
+# CAP. The cap already governs growth; this says the file still has room for the
+# next fix, and it should fire only when that is genuinely in doubt. So the
+# floors are deliberately LOW — a few hundred bytes, roughly one corrected
+# sentence — rather than set just under whatever the file happens to measure
+# today. A floor tuned tight to the current size reds on the next honest edit
+# and teaches authors to route around the gate, which is worse than no gate:
+# these are the documents an owner rewrites in place (the Golden Rules are being
+# revised as this lands), and a warning that cries on every such edit stops being
+# read. Leave real slack between the floor and the file.
 #
 # These two files earn a floor and the other cap rows do not: they are the
 # surface routers every agent loads, so they are where a correction is most
@@ -615,16 +624,16 @@ check_headroom() {
   free=$((cap - size))
   if [ "$free" -lt "$floor" ]; then
     echo "FAIL: $path has ${free}B of headroom under its ${cap}B cap, floor is ${floor}B." \
-         "The file is too full to be corrected. Do NOT raise the cap — split the" \
-         "least load-bearing section to its owning doc and leave a one-line pointer."
+         "That is too full to absorb the next correction. Do NOT raise the cap — split" \
+         "the least load-bearing section to its owning doc and leave a one-line pointer."
     FAIL=1
   else
     echo "ok:   $path headroom ${free}B >= ${floor}B (${size}B of ${cap}B)"
   fi
 }
 
-check_headroom CLAUDE.md 10000 600
-check_headroom api/CLAUDE.md 6500 400
+check_headroom CLAUDE.md 10000 200
+check_headroom api/CLAUDE.md 6500 150
 
 if [ "$FAIL" -ne 0 ]; then
   echo ""
