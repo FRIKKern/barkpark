@@ -15,13 +15,17 @@ defmodule Barkpark.Content.ErrorsUnmatchedReasonTest do
   only for controllers that delegate to it. Re-seating both here is what makes
   every caller of `to_envelope/2` — MutateController included — inherit them.
 
-  RED-BEFORE (run in this worktree against the pre-change `defp build(_), do:
-  %{code: "internal_error", message: "unknown error", status: 500}`):
-  6 tests, 4 failures — the three naming tests on
-  `left: "unknown error"` / `right: "unknown error ({:pool_exhausted, map})"`,
-  and the log test on an empty capture. The two invariance tests (`code` stays
-  byte-identical, `{:error, :unknown}` stays bare) passed BEFORE and AFTER by
-  construction; they are the guard on the fix, not the proof of the defect.
+  RED-BEFORE, measured — not asserted. The catch-all body was reverted in place
+  to the old `%{code: "internal_error", message: "unknown error", status: 500}`
+  (the descriptor helper left compiled and called, so the mutation isolates the
+  MESSAGE and the LOG, not a compile break) and this file was run together with
+  errors_test.exs: **31 tests, 5 failures**, seed 706987. Four of the five are
+  in THIS file — the three naming tests on `left: "unknown error"`, and the log
+  test on `left: ""` (an empty capture) — and the fifth is the catch-all case in
+  errors_test.exs. The two invariance tests here (`code` stays byte-identical,
+  `{:error, :unknown}` stays bare) passed BEFORE and AFTER by construction; they
+  are the guard on the fix, not the proof of the defect. GREEN-after on the same
+  two files: 31 tests, 0 failures.
 
   SCOPE NOTE (shared test database): every assertion here is a pure function
   call on a literal term. Nothing touches `Repo`, so no other agent's rows can
