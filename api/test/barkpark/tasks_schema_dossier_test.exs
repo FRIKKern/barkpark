@@ -274,9 +274,12 @@ defmodule Barkpark.TasksSchemaDossierTest do
 
     test "rejects non-string scalar dossier fields" do
       for key <- ~w(description design design_doc due_at blocked_reason close_reason retro) do
-        assert {:error, errors} =
-                 Tasks.validate_task_content(Map.put(valid_base(), key, 42)),
-               "expected #{key}=42 to be rejected"
+        result = Tasks.validate_task_content(Map.put(valid_base(), key, 42))
+
+        assert match?({:error, _}, result),
+               "expected #{key}=42 to be rejected, got #{inspect(result)}"
+
+        {:error, errors} = result
 
         assert errors[key]
       end
