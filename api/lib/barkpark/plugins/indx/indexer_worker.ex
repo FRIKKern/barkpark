@@ -5,13 +5,14 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
 
   ## Queue + uniqueness
 
-  Runs on the `:indx` queue. Unique on the `scope` partition key over a
+  Runs on the `:indx` queue. Unique on the `index_key` partition key over a
   debounce window (`@debounce_seconds`) across `:available` / `:scheduled`
-  / `:executing` — so a burst of saves to the same scope collapses into a
-  single rebuild instead of one rebuild per document. This is the whole
-  reason the lifecycle hooks enqueue a SCOPE rebuild rather than touching
-  the index per-document (and it dovetails with the spike's serialise-loads
-  rule).
+  / `:executing` — so a burst of saves to the same TENANT's scope collapses
+  into a single rebuild instead of one rebuild per document, while a
+  co-tenant's rebuild of the same dataset string stays its own job. This is
+  the whole reason the lifecycle hooks enqueue a SCOPE rebuild rather than
+  touching the index per-document (and it dovetails with the spike's
+  serialise-loads rule).
 
   ## Three ops
 
@@ -36,7 +37,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
        types-blind on purpose — the blue/green swap replaces the entire live
        dataset, so it must carry every public type or the swap erases the rest.
     2. Hand the corpus to `Indexer.rebuild/3` (blue/green: loads into a
-       fresh `<prefix>_<scope>_v<n>`, NEVER re-loads a live dataset).
+       fresh `<prefix>_<index_key>_v<n>`, NEVER re-loads a live dataset).
     3. On success, `Indexer.swap/2` flips the live pointer, then
        `Indexer.delete_dataset/2` drops the old dataset.
 
@@ -87,9 +88,19 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
         "_id"         => "drafts.p1",           # upsert/delete op only (required)
         "workspace_id"=> "...",                 # optional tenancy scope
         "project_id"  => "...",                  # optional tenancy scope
+        "index_key"   => "production_t4f1…",     # ALWAYS present; the index this
+                                                # job acts on (Indexer.index_key/2
+                                                # over scope + the two ids above).
+                                                # It is the uniqueness partition —
+                                                # see the `unique:` note below.
         "indexer"     => "...",                  # TEST-ONLY indexer module override
         "content"     => "..."                   # TEST-ONLY content module override
       }
+
+  `"scope"` and `"index_key"` are NOT interchangeable: `"scope"` addresses the
+  Barkpark CORPUS (what `Content.list_documents/3` reads, narrowed by the
+  tenancy args), `"index_key"` addresses the SEARCH INDEX that corpus is loaded
+  into and swapped onto. They differ per tenant, which is the point.
 
   The `"indexer"` arg is a test seam (a module name string) — never set by
   the lifecycle enqueue paths, so production always uses the real
@@ -107,17 +118,32 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   failure).
   """
 
-  # Uniqueness keyed on `(op, scope, _id)` — deliberately NO `:types`:
-  #   * rebuild jobs carry NO `_id` → they dedup on `(rebuild, scope, nil)`,
-  #     i.e. unique per scope. This is CORRECT because a rebuild is
+  # Uniqueness keyed on `(op, index_key, _id)` — deliberately NO `:types`:
+  #   * rebuild jobs carry NO `_id` → they dedup on `(rebuild, index_key, nil)`,
+  #     i.e. unique per INDEX. This is CORRECT because a rebuild is
   #     types-BLIND: `run_rebuild_op/2` ignores the enqueued `"types"` and
   #     rebuilds the WHOLE public-schema corpus for the scope (see below), so
   #     collapsing a mixed-type save burst into one job loses nothing — the
   #     single surviving job re-indexes every public type anyway.
   #   * upsert/delete jobs carry an `_id` → they dedup on
-  #     `(upsert|delete, scope, _id)`, i.e. unique per (op, scope, _id) —
-  #     many distinct upserts/deletes in a burst all enqueue, repeated
-  #     upserts/deletes of the SAME doc collapse.
+  #     `(upsert|delete, index_key, _id)` — many distinct upserts/deletes in a
+  #     burst all enqueue, repeated ones of the SAME doc collapse.
+  #
+  # `:index_key`, NOT `:scope`. The key must be the INDEX's identity, and the
+  # index is per-TENANT: every workspace is born owning a dataset called
+  # `production`, so keying on the dataset string collapsed workspace B's
+  # rebuild into workspace A's in-flight job — B's rebuild simply never ran,
+  # and the surviving job then listed A's corpus and swapped it into the slot B
+  # reads from. `Indexer.index_key/2` folds `:workspace_id` + `:project_id`
+  # into one always-present scalar arg (see `job_index_key/1`).
+  #
+  # It must be a DEDICATED arg, not the two tenancy args already in the map.
+  # Oban's `keys:` filter is `args @> <taken subset>` (Oban.Engines.Basic
+  # `unique_field/2`), i.e. CONTAINMENT — and `drop_nil/1` omits a nil
+  # `workspace_id` entirely. So a workspace-LESS job, whose subset is just
+  # `{op, scope}`, is contained by EVERY tenant's job and would still be
+  # deduped away by whichever tenant happened to be in flight. An always-present
+  # `index_key` has no such third state: nil tenancy hashes to its own key.
   #
   # Do NOT add `:types` to the key. The sibling `EdgeProjector.ProjectorWorker`
   # DOES key on `:types` (lvw-t11-followup-dedup) because its projection deletes
@@ -128,12 +154,14 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   # type from live search. Two per-type keyed jobs would each swap a one-type
   # dataset — last swap wins, the rest vanish. The fix for THIS worker is the
   # opposite lever: make the rebuild whole-corpus (types-blind) and keep the key
-  # types-blind too. (task indx-rebuild-types-dedup.)
+  # types-blind too. (task indx-rebuild-types-dedup.) The WORKSPACE dimension is
+  # the mirror case: that same "last swap wins" argument holds verbatim across
+  # tenants, which is why the workspace belongs IN the key while types stay out.
   use Oban.Worker,
     queue: :indx,
     max_attempts: 5,
     unique: [
-      keys: [:op, :scope, :_id],
+      keys: [:op, :index_key, :_id],
       states: [:available, :scheduled, :executing],
       period: 30
     ]
@@ -167,6 +195,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       "project_id" => Keyword.get(opts, :project_id)
     }
     |> drop_nil()
+    |> put_index_key(scope, opts)
     |> new(schedule_in: @debounce_seconds)
     |> Oban.insert()
   end
@@ -192,6 +221,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       "project_id" => Keyword.get(opts, :project_id)
     }
     |> drop_nil()
+    |> put_index_key(scope, opts)
     |> new(schedule_in: @debounce_seconds)
     |> Oban.insert()
   end
@@ -218,8 +248,43 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       "project_id" => Keyword.get(opts, :project_id)
     }
     |> drop_nil()
+    |> put_index_key(scope, opts)
     |> new(schedule_in: @debounce_seconds)
     |> Oban.insert()
+  end
+
+  # Stamp the tenant-partitioned index identity onto the job args. Applied
+  # AFTER `drop_nil/1` on purpose: this key must be present on EVERY job, nil
+  # tenancy included, or Oban's containment-based uniqueness lets a
+  # workspace-less job be swallowed by a co-tenant's (see the `unique:` note
+  # at the top of the module).
+  defp put_index_key(args, scope, opts) do
+    Map.put(
+      args,
+      "index_key",
+      Indexer.index_key(scope,
+        workspace_id: Keyword.get(opts, :workspace_id),
+        project_id: Keyword.get(opts, :project_id)
+      )
+    )
+  end
+
+  # The index identity this job acts on. Jobs enqueued by the three helpers
+  # above always carry it; the fallback re-derives it from the tenancy args so
+  # a job enqueued by a PREVIOUS release (and any `perform_job/2` fixture that
+  # hand-writes args) resolves to exactly the key its enqueue would have
+  # produced, rather than to the tenant-blind dataset string.
+  defp job_index_key(args) do
+    case Map.get(args, "index_key") do
+      key when is_binary(key) and key != "" ->
+        key
+
+      _ ->
+        Indexer.index_key(Map.get(args, "scope", ""),
+          workspace_id: Map.get(args, "workspace_id"),
+          project_id: Map.get(args, "project_id")
+        )
+    end
   end
 
   @impl Oban.Worker
@@ -278,7 +343,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
     if not is_binary(id) or id == "" do
       {:cancel, :missing_id}
     else
-      case indexer_mod(args).delete_record(scope, id) do
+      case indexer_mod(args).delete_record(job_index_key(args), id) do
         :ok ->
           Logger.info("Indx.IndexerWorker: deleted _id=#{id} from scope=#{scope}")
           :ok
@@ -343,7 +408,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   end
 
   defp upsert_doc(scope, id, doc, args) do
-    case indexer_mod(args).upsert_record(scope, doc) do
+    case indexer_mod(args).upsert_record(job_index_key(args), doc) do
       :ok ->
         Logger.info("Indx.IndexerWorker: upserted _id=#{id} into scope=#{scope}")
         :ok
@@ -525,8 +590,15 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   # WARN (naming the type) when a listing comes back exactly at the cap.
   @rebuild_list_limit 1000
 
+  # Two identities, deliberately not one: the corpus is LISTED by the Barkpark
+  # `scope` (dataset string) narrowed by the tenancy opts, while the INDEX it is
+  # loaded into and swapped onto is addressed by `job_index_key/1`. Passing
+  # `scope` where the index key belongs is the cross-tenant clobber this whole
+  # change exists to close — `Indexer`'s `is_index_key/1` guard makes that
+  # mistake raise rather than silently merge two tenants' corpora.
   defp run_rebuild(scope, types, perspective, args) do
     limit = list_limit(args)
+    index_key = job_index_key(args)
 
     list_opts =
       [perspective: perspective, limit: limit]
@@ -543,14 +615,14 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
         listed
       end)
 
-    case indexer.rebuild(scope, docs) do
+    case indexer.rebuild(index_key, docs) do
       {:ok, result} ->
-        old = indexer.swap(scope, result)
+        old = indexer.swap(index_key, result)
         indexer.delete_dataset(old, [])
 
         Logger.info(
-          "Indx.IndexerWorker: rebuilt scope=#{scope} dataset=#{result.new_dataset} " <>
-            "count=#{result.count} (dropped #{inspect(old)})"
+          "Indx.IndexerWorker: rebuilt scope=#{scope} index=#{index_key} " <>
+            "dataset=#{result.new_dataset} count=#{result.count} (dropped #{inspect(old)})"
         )
 
         :ok

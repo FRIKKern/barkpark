@@ -4,6 +4,11 @@ defmodule Barkpark.Plugins.Indx.RecoveryPersistenceTest do
   restart wipes :persistent_term → Recovery's load_all + restore_pointer
   re-seats the EXACT key_map → delete_target_keys finds the id without
   the bare-hash fallback.
+
+  Every pointer here is addressed by an `Indexer.index_key/2` INDEX KEY, not
+  by a bare dataset string — that is the argument type these functions take,
+  and passing a raw scope now raises rather than sharing one slot between
+  co-tenants.
   """
   use ExUnit.Case, async: false
 
@@ -26,7 +31,7 @@ defmodule Barkpark.Plugins.Indx.RecoveryPersistenceTest do
   end
 
   test "swap persists the key_map to disk" do
-    scope = "rp-#{System.unique_integer([:positive])}"
+    scope = Indexer.index_key("rp-#{System.unique_integer([:positive])}")
 
     Indexer.swap(scope, %{
       new_dataset: "bp_rp_v1",
@@ -38,7 +43,7 @@ defmodule Barkpark.Plugins.Indx.RecoveryPersistenceTest do
   end
 
   test "simulated restart: restore_pointer loads the persisted key_map" do
-    scope = "rp-restore-#{System.unique_integer([:positive])}"
+    scope = Indexer.index_key("rp-restore-#{System.unique_integer([:positive])}")
 
     # 1. Persist a state.
     Persistence.save(scope, %{dataset: "bp_rp_v2", key_map: %{42 => "doc-x"}})
@@ -56,7 +61,7 @@ defmodule Barkpark.Plugins.Indx.RecoveryPersistenceTest do
   end
 
   test "restore_pointer drops a stale persisted key_map when the engine's dataset moved" do
-    scope = "rp-drift-#{System.unique_integer([:positive])}"
+    scope = Indexer.index_key("rp-drift-#{System.unique_integer([:positive])}")
 
     # Persisted under v2.
     Persistence.save(scope, %{dataset: "bp_rp_v2", key_map: %{99 => "stale"}})
@@ -72,7 +77,7 @@ defmodule Barkpark.Plugins.Indx.RecoveryPersistenceTest do
   end
 
   test "bare-hash fallback emits a telemetry signal so operators see it" do
-    scope = "rp-bare-#{System.unique_integer([:positive])}"
+    scope = Indexer.index_key("rp-bare-#{System.unique_integer([:positive])}")
 
     # No persisted state for this scope; restore an empty key_map.
     wipe_pointer(scope)
@@ -98,7 +103,8 @@ defmodule Barkpark.Plugins.Indx.RecoveryPersistenceTest do
     # an error against the unconfigured stub), only that the signal fires.
     _ = Indexer.delete_record(scope, "vanished-id", client: FakeIndxClient)
 
-    assert_receive {:telemetry, ^event, %{count: 1}, %{scope: ^scope, id: "vanished-id"}}, 200
+    assert_receive {:telemetry, ^event, %{count: 1}, %{index_key: ^scope, id: "vanished-id"}},
+                   200
   end
 
   defp wipe_pointer(scope) do

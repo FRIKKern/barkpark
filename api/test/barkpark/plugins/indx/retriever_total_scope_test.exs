@@ -32,6 +32,7 @@ defmodule Barkpark.Plugins.Indx.RetrieverTotalScopeTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Indx.Indexer
   alias Barkpark.Plugins.Indx.Retriever
 
   @pointer_term {Barkpark.Plugins.Indx.Indexer, :live_dataset}
@@ -114,9 +115,21 @@ defmodule Barkpark.Plugins.Indx.RetrieverTotalScopeTest do
 
     # Point the retriever at a live Indx dataset for this scope; without it
     # `search/4` short-circuits to `{[], 0, %{}}` and the test would pass
-    # vacuously against an empty pool.
+    # vacuously against an empty pool. The pointer is keyed by workspace A's
+    # INDEX KEY, which is what `Retriever.search/4` now resolves for a caller
+    # scoped to A — seating it under the bare dataset string would leave A's
+    # search with no live dataset and the assertions below vacuous.
     prior = :persistent_term.get(@pointer_term, %{})
-    :persistent_term.put(@pointer_term, Map.put(prior, dataset, %{dataset: "idx-#{dataset}"}))
+
+    :persistent_term.put(
+      @pointer_term,
+      Map.put(
+        prior,
+        Indexer.index_key(dataset, workspace_id: ws_a.id),
+        %{dataset: "idx-#{dataset}"}
+      )
+    )
+
     on_exit(fn -> :persistent_term.put(@pointer_term, prior) end)
 
     %{dataset: dataset, ws_a: ws_a, ws_b: ws_b}

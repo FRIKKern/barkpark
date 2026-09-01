@@ -5,13 +5,21 @@ defmodule Barkpark.Plugins.Indx.RetrieverDropsEngineFacetsTest do
 
   ## What re-enabling them would reopen
 
-  The Indx index is keyed on the Barkpark dataset STRING alone
-  (`Indexer.current_dataset/1` reads `persistent_term[scope][:dataset]`), so
-  every workspace sharing a dataset name shares ONE index. The retriever's ROWS
+  When the leak shipped, the Indx index was keyed on the Barkpark dataset
+  STRING alone (`Indexer.current_dataset/1` read `persistent_term[scope]`), so
+  every workspace sharing a dataset name shared ONE index. The retriever's ROWS
   are re-read from Postgres under full tenant scope (`hydrate_documents/3`) and
   its TOTAL is recounted there (`total_for/3`) — but the engine's facet buckets
   were neither. They were computed by the engine, over the shared index, and
   handed through verbatim.
+
+  `Indexer.index_key/2` has since partitioned the pointer table per tenant, so
+  a shared two-tenant pool no longer arises on its own — which is exactly why
+  the stub below FABRICATES one. The engine still computes its buckets over
+  whatever index it was handed, and nothing in the retriever re-reads them
+  under tenant scope, so re-attaching them is still a leak the moment any
+  index holds more than one tenant's rows. The fence measures the retriever's
+  handling of the payload, not the key that produced it.
 
   `author` and `category` are tenant-authored FREE TEXT that `Indexer`'s
   `field_proxies/1` marks facetable. So workspace A's search returned workspace
@@ -59,6 +67,7 @@ defmodule Barkpark.Plugins.Indx.RetrieverDropsEngineFacetsTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Indx.Indexer
   alias Barkpark.Plugins.Indx.Retriever
   alias Barkpark.Search.Retrievers
 
@@ -175,14 +184,32 @@ defmodule Barkpark.Plugins.Indx.RetrieverDropsEngineFacetsTest do
     {:ok, _} = Content.publish_document("facet-a", "post", dataset, workspace_id: ws_a.id)
     {:ok, _} = Content.publish_document("facet-b", "post", dataset, workspace_id: ws_b.id)
 
+    # The ONE opts list the search below runs under. It is threaded into
+    # `index_key/2` here and into `Retriever.search/4` in the test so the
+    # fixture's pointer slot and the retriever's lookup cannot drift apart.
+    scope_opts = [workspace_id: ws_a.id]
+
     # Point the retriever at a live Indx dataset for this scope; without it
     # `search/4` short-circuits to `{[], 0, %{}}` and every assertion below
     # would pass against an empty pool.
+    #
+    # The pointer table is keyed by the TENANT-PARTITIONED index key, not by
+    # the bare dataset string: `search/4` reads
+    # `Indexer.current_dataset(Indexer.index_key(scope, opts))`. Seating this
+    # under `dataset` alone silently misses, `dataset` resolves nil, and the
+    # stub is never called — which is precisely what the `assert_received`
+    # below exists to catch. Derive the key by CALLING `index_key/2`; never
+    # hand-write the `_t<digest>` tail, or a change to the key shape leaves
+    # this fixture pointing at a slot nothing reads.
+    index_key = Indexer.index_key(dataset, scope_opts)
+
     prior = :persistent_term.get(@pointer_term, %{})
-    :persistent_term.put(@pointer_term, Map.put(prior, dataset, %{dataset: "idx-#{dataset}"}))
+    :persistent_term.put(@pointer_term, Map.put(prior, index_key, %{dataset: "idx-#{dataset}"}))
+    # `:persistent_term` is VM-global and no ExUnit sandbox rolls it back;
+    # restoring the WHOLE prior table drops the slot added above.
     on_exit(fn -> :persistent_term.put(@pointer_term, prior) end)
 
-    %{dataset: dataset, ws_a: ws_a, ws_b: ws_b}
+    %{dataset: dataset, index_key: index_key, scope_opts: scope_opts, ws_a: ws_a, ws_b: ws_b}
   end
 
   test ~s|the Indx retriever is actually the registered "indx" engine in this env| do
@@ -198,14 +225,14 @@ defmodule Barkpark.Plugins.Indx.RetrieverDropsEngineFacetsTest do
   end
 
   test "the engine's dataset-wide facet buckets and truncation NEVER reach the caller",
-       %{dataset: dataset, ws_a: ws_a} do
+       %{dataset: dataset, scope_opts: scope_opts} do
     {hits, total, meta} =
       Retriever.search(
         dataset,
         %{terms: ["facet"]},
         %{},
-        workspace_id: ws_a.id,
-        client: LeakyFacetClient
+        # Same `scope_opts` the fixture derived the pointer's index key from.
+        scope_opts ++ [client: LeakyFacetClient]
       )
 
     # ---- non-vacuity, asserted before the fence ----------------------------
