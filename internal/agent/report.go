@@ -313,6 +313,25 @@ type Report struct {
 	// precisely the silence of 2026-08-06.
 	Runaways []RunawayProc `json:"runaway_procs"`
 
+	// SlotUnits is the state of the box's blue/green SYSTEMD UNITS (and the
+	// spawned-site units systemd currently calls failed) — the fact that a
+	// `barkpark-slot@blue` sitting in `failed` was known ONLY to ssh, while every
+	// operator surface read `ok`. See the SlotUnit block below for the full case
+	// and for why Result and ExecMainStatus must travel together.
+	//
+	// Same nil-vs-empty law as Runaways, and here it matters more, not less: nil
+	// (a JSON null) is UNMEASURED — no systemd, no dbus, a timed-out probe — and
+	// a NON-NIL EMPTY list is MEASURED and nothing to report. A consumer that
+	// rendered "no failed units" off an unwired probe would re-create the exact
+	// silence this field exists to break.
+	SlotUnits []SlotUnit `json:"slot_units"`
+	// SlotUnitsTruncated is how many FAILED SITE units slotUnitsLimit hid, so the
+	// short list says it is short (the rule SitesCount already keeps for the
+	// per-slug cap). 0 = the list is complete; -1 = the probe never ran, matching
+	// the -1 sentinel every unmeasured number on this beat uses. The blue/green
+	// pair is never truncated, so this can never hide a slot unit.
+	SlotUnitsTruncated int `json:"slot_units_truncated"`
+
 	// BackupOK / BackupDetail come from the injected backup-status probe — is a
 	// recent backup present and scheduled?
 	BackupOK     bool   `json:"backup_ok"`
@@ -832,6 +851,12 @@ type ReportConfig struct {
 	// error to one, so "measured and quiet" can never arrive as "we did not look".
 	// Wire the production implementation with NewRunawayProbe().
 	RunawayProbe func() ([]RunawayProc, error)
+	// SlotUnitsProbe returns the blue/green (and failed site) unit states plus
+	// how many the cap hid. nil → SlotUnits stays nil (UNMEASURED) and
+	// SlotUnitsTruncated stays -1; the two land as ONE unit like SwapProbe's
+	// pair, because a truncation count without its list says nothing. Wire the
+	// production implementation with NewSlotUnitsProbe().
+	SlotUnitsProbe func() ([]SlotUnit, int, error)
 	// SwapProbe returns (used percent 0..100, total swap bytes). nil → BOTH swap
 	// fields keep the -1 sentinel. Gathered fail-soft as ONE unit like
 	// ReqStatsProbe, not independently like CPU/Mem: a percent landed against an
@@ -892,6 +917,9 @@ func gatherReport(cfg ReportConfig) Report {
 		SwapTotalBytes:  -1,
 		BeamPSSBytes:    -1,
 		BeamSwapBytes:   -1,
+		// -1, not 0: 0 means "the cap hid nothing", which is a MEASUREMENT and
+		// would be a lie on a box whose unit probe never ran.
+		SlotUnitsTruncated: -1,
 		// Always measured, never probed: the fence's denominator (D52).
 		CPUCores: runtime.NumCPU(),
 	}
@@ -953,6 +981,20 @@ func gatherReport(cfg ReportConfig) Report {
 				procs = []RunawayProc{}
 			}
 			r.Runaways = procs
+		}
+	}
+
+	// Blue/green UNIT STATE — the half of "is this box healthy" that no vital can
+	// answer. Same nil-vs-empty normalization as Runaways above, and the pair
+	// lands together: an error leaves SlotUnits nil AND SlotUnitsTruncated -1,
+	// because a truncation count beside no list is a number about nothing.
+	if cfg.SlotUnitsProbe != nil {
+		if units, truncated, err := cfg.SlotUnitsProbe(); err == nil {
+			if units == nil {
+				units = []SlotUnit{}
+			}
+			r.SlotUnits = units
+			r.SlotUnitsTruncated = truncated
 		}
 	}
 
@@ -2410,4 +2452,253 @@ func restAfterFields(line string, n int) string {
 		rest = rest[j:]
 	}
 	return strings.TrimLeft(rest, " \t")
+}
+
+// --- slot / site UNIT STATE (dr-bl-w5-failed-slot-unit-is-invisible) ---------
+//
+// WHAT WAS MISSING, measured on guerrilla 2026-08-06 and again 2026-09-01: the
+// box runs blue/green as two systemd template units and the beat carried NOT ONE
+// BIT of their state. `systemctl is-active barkpark-slot@blue barkpark-slot@green`
+// read `failed / active` — blue had died on an 8m30s stop-sigterm timeout and
+// been SIGKILLed — and every operator surface said `ok`, because the verdict was
+// computed from vitals alone and had no unit-state input at all. It was ACCIDENTALLY
+// right (green was serving, so the box genuinely was serving) and would have said
+// exactly the same thing with BOTH halves dead: a light that cannot go out.
+//
+// The beat now carries the unit facts themselves — never a verdict. Whether a
+// failed half matters is the consumer's call, and it CANNOT be made from
+// ActiveState alone:
+//
+//   - Result= separates a crash from a deliberate stop that systemd mislabels.
+//     Measured 2026-09-01: barkpark-site@search__b is `failed` with
+//     Result=exit-code, ExecMainStatus=143 — 128+15, i.e. Next.js exiting on the
+//     SIGTERM of its own retire. PR #14863 adds SuccessExitStatus=143 to the unit
+//     file for exactly this. Until it lands, a reader that treats `failed` as a
+//     crash is reading a clean shutdown as an outage, so the exit status rides
+//     WITH the result and neither is dropped.
+//   - MainPID separates "the unit says active" from "a process is actually
+//     there". An `active`/`exited` oneshot has MainPID 0.
+//   - StateSince is systemd's own timestamp string, carried VERBATIM. An
+//     operator's next question after "blue is failed" is "since when", and a
+//     re-formatted timestamp is a second source of truth for a fact systemd
+//     already states.
+//
+// A verdict built on this can finally distinguish the two cases the row names:
+// half the pair failed while the OTHER half serves (still ok, say so in the
+// detail), versus NEITHER half active while health claims up (a real
+// contradiction, and previously unsayable).
+
+// SlotUnit is ONE systemd unit's state as `systemctl show` reports it — the raw
+// properties, never a derived verdict.
+//
+// Every string is systemd's own vocabulary verbatim (ActiveState
+// active|inactive|failed|activating|deactivating; SubState running|dead|failed|…;
+// Result success|exit-code|signal|timeout|oom-kill|…). Reproducing that
+// vocabulary here as an enum would be a second, drifting copy of a contract the
+// kernel of this design does not own.
+type SlotUnit struct {
+	// Unit is systemd's `Id=` — the full unit name including `.service`. It is
+	// read back from the property block rather than echoed from the argv, so a
+	// block that came back for a different unit than we asked about cannot be
+	// mislabelled.
+	Unit string `json:"unit"`
+	// ActiveState / SubState / Result are systemd's three state axes. Result is
+	// the one that separates a crash from a signal from a timeout, and it is
+	// meaningless without ExecMainStatus (see the 143 case above).
+	ActiveState string `json:"active_state"`
+	SubState    string `json:"sub_state"`
+	Result      string `json:"result"`
+	// MainPID is systemd's `MainPID=`: 0 when no main process is running. It is
+	// the difference between a unit that CLAIMS active and one that has a
+	// process. -1 when the property was absent or unparseable — an unread pid is
+	// not pid 0, which is a real, different fact.
+	MainPID int64 `json:"main_pid"`
+	// ExecMainStatus is the main process's last exit status (or signal number).
+	// -1 when absent/unparseable, for the same reason MainPID is: a status we
+	// could not read must never render as a clean 0.
+	ExecMainStatus int `json:"exec_main_status"`
+	// StateSince is systemd's own timestamp for the unit's last state change,
+	// VERBATIM (e.g. "Tue 2026-09-01 11:07:52 UTC"). Empty when systemd has none
+	// — a never-started unit reports empty timestamps, and an invented one would
+	// be the fabrication the whole beat's honesty law forbids.
+	StateSince string `json:"state_since"`
+}
+
+// slotUnitNames is the blue/green pair, asked for BY NAME on every beat. They
+// are named rather than discovered so the pair is reported even when a half is
+// `inactive`/`dead` — a discovery listing that only returns loaded-and-running
+// units would report the healthy half and silently omit the dead one, which is
+// the precise blindness this field exists to end.
+var slotUnitNames = []string{"barkpark-slot@blue.service", "barkpark-slot@green.service"}
+
+// slotUnitProps is the `systemctl show -p` property list. Id FIRST because it is
+// what labels the block; the timestamps are three because systemd populates a
+// different one depending on how the unit came to rest (see stateSince below).
+const slotUnitProps = "Id,ActiveState,SubState,Result,MainPID,ExecMainStatus," +
+	"StateChangeTimestamp,InactiveEnterTimestamp,ActiveEnterTimestamp"
+
+// slotUnitsLimit caps the whole list. The blue/green pair is 2 of it and is
+// NEVER dropped; the remainder is the failed `barkpark-site@*` units, and
+// SlotUnitsTruncated reports how many the cap hid, so the short list says it is
+// short (the same rule sitesTopLimit/SitesCount keep above). Six failed sites is
+// already a story; the seventh does not change the operator's next action.
+const slotUnitsLimit = 8
+
+// siteUnitPattern is the spawned-site template. `--state=failed` does the
+// filtering server-side, so a box with fifty healthy sites costs one line of
+// output, not fifty.
+const siteUnitPattern = "barkpark-site@*"
+
+// slotUnitsProbeTimeout bounds each systemctl shell-out. Two short `systemctl`
+// calls on a local dbus are milliseconds; a hung dbus must degrade to the
+// unmeasured nil, never stall the beat behind it.
+var slotUnitsProbeTimeout = 5 * time.Second
+
+// NewSlotUnitsProbe builds the production probe: two bounded, DIRECT-argv
+// `systemctl` calls per beat (no shell, no pipe — see psRunawayArgs for why
+// that is a contract and not a taste).
+//
+// The FIRST call is the blue/green pair and its failure is the probe's failure:
+// SlotUnits stays nil (UNMEASURED) rather than landing an empty list that would
+// read "we looked at the pair and there is nothing to say". The SECOND call is
+// the failed site units and it degrades independently — a `systemctl list-units`
+// that errors costs the site rows, never the pair.
+func NewSlotUnitsProbe() func() ([]SlotUnit, int, error) {
+	return newSlotUnitsProbeWith(boundedSpaceRunner(slotUnitsProbeTimeout))
+}
+
+func newSlotUnitsProbeWith(run probeRunner) func() ([]SlotUnit, int, error) {
+	return func() ([]SlotUnit, int, error) {
+		args := append([]string{"show", "-p", slotUnitProps}, slotUnitNames...)
+		out, err := run("systemctl", args...)
+		if err != nil {
+			return nil, -1, fmt.Errorf("systemctl show: %w: %s", err, truncate(strings.TrimSpace(out), 120))
+		}
+		units := parseSystemctlShow(out)
+		if len(units) == 0 {
+			// `systemctl show` prints a block even for a unit that does not
+			// exist, so NOTHING parseable means the command did not really run
+			// (no systemd, no dbus, a busybox `systemctl`). That is unmeasured.
+			return nil, -1, fmt.Errorf("systemctl show: no unit block in %q", truncate(strings.TrimSpace(out), 120))
+		}
+
+		truncated := 0
+		names, lerr := failedSiteUnitNames(run)
+		if lerr == nil && len(names) > 0 {
+			room := slotUnitsLimit - len(units)
+			if room < 0 {
+				room = 0
+			}
+			if len(names) > room {
+				truncated = len(names) - room
+				names = names[:room]
+			}
+			if len(names) > 0 {
+				sargs := append([]string{"show", "-p", slotUnitProps}, names...)
+				if sout, serr := run("systemctl", sargs...); serr == nil {
+					units = append(units, parseSystemctlShow(sout)...)
+				}
+			}
+		}
+		return units, truncated, nil
+	}
+}
+
+// failedSiteUnitNames lists the spawned-site units systemd currently calls
+// FAILED, in systemd's own order. `--plain --no-legend --no-pager` strips the
+// decorations so the first field of every line is a unit name and nothing else.
+func failedSiteUnitNames(run probeRunner) ([]string, error) {
+	out, err := run("systemctl", "list-units", siteUnitPattern,
+		"--all", "--state=failed", "--plain", "--no-legend", "--no-pager")
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.HasSuffix(fields[0], ".service") {
+			names = append(names, fields[0])
+		}
+	}
+	return names, nil
+}
+
+// parseSystemctlShow turns `systemctl show -p A,B,C unit…` output into one
+// SlotUnit per property BLOCK. Blocks are blank-line separated and properties
+// arrive as `Key=Value` in an order systemd does not promise, so every block is
+// read into a map and looked up by name — never by position.
+//
+// A block with no `Id=` is DROPPED: an unlabelled block cannot be attributed to
+// a unit, and attributing it to the argv position would be a guess in exactly
+// the place beam_slot already taught this tree not to guess.
+func parseSystemctlShow(out string) []SlotUnit {
+	var units []SlotUnit
+	block := map[string]string{}
+	flush := func() {
+		if len(block) == 0 {
+			return
+		}
+		if u, ok := slotUnitFrom(block); ok {
+			units = append(units, u)
+		}
+		block = map[string]string{}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		block[strings.TrimSpace(k)] = v
+	}
+	flush()
+	return units
+}
+
+func slotUnitFrom(block map[string]string) (SlotUnit, bool) {
+	id := strings.TrimSpace(block["Id"])
+	if id == "" {
+		return SlotUnit{}, false
+	}
+	return SlotUnit{
+		Unit:           id,
+		ActiveState:    strings.TrimSpace(block["ActiveState"]),
+		SubState:       strings.TrimSpace(block["SubState"]),
+		Result:         strings.TrimSpace(block["Result"]),
+		MainPID:        parseUnitInt64(block["MainPID"]),
+		ExecMainStatus: int(parseUnitInt64(block["ExecMainStatus"])),
+		StateSince:     stateSince(block),
+	}, true
+}
+
+// parseUnitInt64 reads a systemd numeric property, returning -1 for absent or
+// unparseable. Never 0: an unread pid and pid 0 are different facts.
+func parseUnitInt64(s string) int64 {
+	n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64)
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
+// stateSince picks the timestamp that describes how the unit came to rest, in
+// the order systemd actually populates them: StateChangeTimestamp is set for a
+// unit that has changed state at all; a unit that fell out of active carries
+// InactiveEnterTimestamp; a running one carries ActiveEnterTimestamp. All three
+// are EMPTY on a unit that has never run since boot — measured on guerrilla for
+// barkpark-slot@blue — and empty is carried through as empty.
+func stateSince(block map[string]string) string {
+	for _, k := range []string{"StateChangeTimestamp", "InactiveEnterTimestamp", "ActiveEnterTimestamp"} {
+		if v := strings.TrimSpace(block[k]); v != "" {
+			return v
+		}
+	}
+	return ""
 }
