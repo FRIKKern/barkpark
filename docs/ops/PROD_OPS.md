@@ -5,7 +5,7 @@
 
 | Fact | Value |
 |---|---|
-| Host | `89.167.28.206` — Hetzner cax11, ARM64 (aarch64), Ubuntu 22.04 |
+| Host | `89.167.28.206` — Hetzner cax11, ARM64, Ubuntu 22.04. **Not a `deploy.yml` target** — pull-deployed; a merge is NOT live until pulled |
 | App dir | `/opt/barkpark` (server tracks `origin/main`, `core.hooksPath=.githooks`) |
 | Service | systemd `barkpark.service`; wrapper `api/start.sh` (sources ASDF + `.env`) |
 | Proxy | Caddy on :80 → `localhost:4000` (`/etc/caddy/Caddyfile`) |
@@ -14,7 +14,7 @@
 | Env file | `/opt/barkpark/.env` (`DATABASE_URL`, `SECRET_KEY_BASE`, `BARKPARK_EXTRA_ORIGINS` ws origins) |
 | Logs | `journalctl -u barkpark -f` |
 
-Deploy: `ssh root@89.167.28.206`, then on the box `cd /opt/barkpark && git pull` (the post-merge hook rebuilds + restarts; `make deploy` wraps it). Golden Rules apply verbatim — never partial-clean `_build`, never skip `systemctl restart`, always test after deploy.
+Deploy: `ssh root@89.167.28.206`, then on the box `cd /opt/barkpark && git pull` (the post-merge hook rebuilds + restarts; `make deploy` wraps it). Golden Rules 2/3/6 apply verbatim (`CLAUDE.md`).
 
 ## The postcheck rule
 
