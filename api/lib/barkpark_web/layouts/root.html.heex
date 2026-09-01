@@ -676,6 +676,22 @@
       transition: all 0.15s; white-space: nowrap;
     }
     .btn:hover { background: var(--bg-accent); }
+    /* WCAG 2.4.7 — the house ring for the shared button family. `.btn` had
+       only :hover and :disabled, so every control wearing the base class (the
+       inspector close button, the modal close buttons, the editor doc-action
+       icons) fell back to whatever outline the browser draws. The sheets
+       reader layout already carries this exact rule; the Studio did not.
+
+       BARE var(--ring) — never `var(--ring, #hex)`. A fallback hex is a colour
+       literal and counts against design/check.mjs Part E's exemption ledger.
+
+       No variant override is needed: .btn-primary, .btn-destructive,
+       .btn-ghost, .btn-sm and .btn-icon declare border/background/colour/box
+       only — not one of them declares `outline`, and no companion class worn
+       alongside .btn anywhere in api/lib (theme-toggle, share-row-remove,
+       item-share-revoke, bp-prop-unbind, bar-focusable) sets one either. So
+       nothing later in the cascade can beat this at equal specificity. */
+    .btn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     /* Disabled state for every .btn variant (sup-w1 control kit): dimmed +
        inert, no hover feedback. Opacity-based so it needs no color token. */
     .btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
