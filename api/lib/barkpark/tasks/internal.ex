@@ -190,8 +190,20 @@ defmodule Barkpark.Tasks.Internal do
 
   # ─── Acceptance-criteria merge (shared by Close and Stamp) ────────────────
   #
-  # Applies `[%{"index" => i, ...}]` updates onto content["acceptance_criteria"].
-  # Two update shapes, discriminated by the presence of an `"attempt"` key:
+  # Applies updates onto content["acceptance_criteria"]. An update names its row
+  # in one of TWO dialects, and a caller speaks exactly one of them per command
+  # (the mixed-array refusal lives one layer up, in `Params.parse_criteria/1`,
+  # where it costs no document read):
+  #
+  #   * INDEXED — `%{"index" => i, …}`, 0-based, with `"criterion"` as the
+  #     stored-text CAS. REQUIRED on any met-flip (D56, below).
+  #   * TEXT-KEYED — `%{"criterion" => "<the exact stored wording>", …}` with no
+  #     index: the AUTHORING rubric shape, resolved to an index here by exact
+  #     match (see `apply_criteria_update/2`'s text-keyed clause). It carries its
+  #     own guard by construction, so it can never flip a neighbour.
+  #
+  # Orthogonally, two update KINDS, discriminated by the presence of an
+  # `"attempt"` key:
   #
   #   * met/evidence (close + `stamp --met`): `met` defaults to true —
   #     CLOSE-TIME semantics, you are proving the expectation. Callers that
@@ -256,6 +268,35 @@ defmodule Barkpark.Tasks.Internal do
 
   def merge_criteria(_content, _other), do: {:error, :invalid_criteria}
 
+  # TEXT-KEYED ENTRIES (the AUTHORING rubric shape). An update with NO "index"
+  # but a non-empty "criterion" names its row the way `bp task get` prints it —
+  # `%{"criterion" => …, "met" => …, "evidence" => …}`, exactly the stored row —
+  # so an agent can flip the rubric it just read instead of reconstructing
+  # 0-based indices by hand (the ergonomic half of gh-2314).
+  #
+  # Resolution is EXACT string equality against the stored `criterion` text,
+  # performed HERE — inside the caller's transaction, against the list as the
+  # write sees it — never in the pure param parser, which has no document. The
+  # resolved index then falls through to the SAME indexed clause below, so a
+  # text-keyed update inherits every guard verbatim: the text it resolved by IS
+  # the `criterion` CAS, which means a met-flip is guarded by construction.
+  #
+  # AMBIGUITY IS REFUSED, NEVER GUESSED. Two stored rows may carry identical
+  # wording; picking the first would be the same silent-neighbour bug D56 closed
+  # for unguarded indices, wearing a different hat. Zero matches is equally
+  # loud. Both abort the whole write:
+  #
+  #   * `:criterion_not_found`  — no stored row has that exact wording (the text
+  #     was edited, or the caller retyped rather than copied).
+  #   * `:criterion_ambiguous`  — 2+ rows share it; pass `"index"` to say which.
+  defp apply_criteria_update(list, %{"criterion" => text} = update)
+       when is_binary(text) and text != "" and not is_map_key(update, "index") do
+    case resolve_criterion_index(list, text) do
+      {:ok, index} -> apply_criteria_update(list, Map.put(update, "index", index))
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp apply_criteria_update(list, %{"index" => index} = update)
        when is_integer(index) and index >= 0 do
     case Enum.at(list, index) do
@@ -285,6 +326,19 @@ defmodule Barkpark.Tasks.Internal do
   end
 
   defp apply_criteria_update(_list, _update), do: {:error, :invalid_criteria}
+
+  # Exact-match row lookup for a text-keyed update. Exactly one hit resolves;
+  # zero and many are both named refusals (see the clause above).
+  defp resolve_criterion_index(list, text) do
+    list
+    |> Enum.with_index()
+    |> Enum.filter(fn {entry, _i} -> is_map(entry) and Map.get(entry, "criterion") == text end)
+    |> case do
+      [{_entry, index}] -> {:ok, index}
+      [] -> {:error, :criterion_not_found}
+      _many -> {:error, :criterion_ambiguous}
+    end
+  end
 
   # A guard only guards when it has words: `nil` and `""` are no guard at all.
   # (An `""` that "matches" a text-less criterion row must not buy a free flip.)
