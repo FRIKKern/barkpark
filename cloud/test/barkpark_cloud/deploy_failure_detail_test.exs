@@ -50,9 +50,12 @@ defmodule BarkparkCloud.DeployFailureDetailTest do
     bp
   end
 
-  defp site_fixture(barkpark, attrs \\ %{}) do
+  defp site_fixture(barkpark, attrs) do
     n = System.unique_integer([:positive])
-    {:ok, site} = Registry.create_site(barkpark, Map.merge(%{name: "S #{n}", slug: "s-#{n}"}, attrs))
+
+    {:ok, site} =
+      Registry.create_site(barkpark, Map.merge(%{name: "S #{n}", slug: "s-#{n}"}, attrs))
+
     site
   end
 

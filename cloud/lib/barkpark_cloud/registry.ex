@@ -6979,7 +6979,14 @@ defmodule BarkparkCloud.Registry do
                |> Repo.insert(),
              {:ok, failed} <-
                queued
-               |> Deployment.transition_changeset(%{status: "failed", failure_reason: reason})
+               # `detail` rides the SAME write, not a follow-up: a born-failed
+               # row has no earlier caption to inherit, so omitting it filed a
+               # terminal failure whose caption was NULL from birth.
+               |> Deployment.transition_changeset(%{
+                 status: "failed",
+                 failure_reason: reason,
+                 detail: failure_detail(reason)
+               })
                |> Repo.update() do
           failed
         else
@@ -8365,6 +8372,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @no_build_source_reason,
+          detail: failure_detail(@no_build_source_reason),
           updated_at: now
         ]
       )
@@ -8387,6 +8395,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @no_content_binding_reason,
+          detail: failure_detail(@no_content_binding_reason),
           updated_at: now
         ]
       )
@@ -8406,6 +8415,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @stale_builder_reason,
+          detail: failure_detail(@stale_builder_reason),
           claim_worker: nil,
           claimed_at: nil,
           updated_at: now
@@ -8440,6 +8450,7 @@ defmodule BarkparkCloud.Registry do
         set: [
           status: "failed",
           failure_reason: @instance_unreachable_reason,
+          detail: failure_detail(@instance_unreachable_reason),
           claim_worker: nil,
           claimed_at: nil,
           updated_at: now
@@ -8490,6 +8501,36 @@ defmodule BarkparkCloud.Registry do
   end
 
   ## Helpers
+
+  # A FAILED DEPLOYMENT'S CAPTION IS A CAUSE (deploy-reliability,
+  # task-fb4fb869490b4213 criterion 5). `deployments.detail` is the LATEST-WINS
+  # string the site page renders under the status pill: the off-box builder
+  # writes a progress caption into it on every beat ("Fetching your source…",
+  # "Building your site…", "Handing off to release…") through
+  # `set_deployment_detail/2`. Every terminal writer therefore owes it a rewrite
+  # — a terminal write that touches only `failure_reason` leaves the row wearing
+  # whatever the UI was saying when the build died, and files a failure whose
+  # only human-readable text is a caption.
+  #
+  # The epic measured the consequence on the live control plane: 24 failed rows
+  # carrying a progress caption where a cause belongs, and 7 carrying nothing at
+  # all. `Sites.Deploy.fail/3` already did this (`detail: short_detail(reason)`);
+  # the reaper's four `Repo.update_all` passes and `create_failed_deployment/3`
+  # did not, and those are exactly the two writers that produce those rows.
+  #
+  # THE CLAMP IS THE CAPTION'S, NOT THE COLUMN'S. `detail` was widened to `:text`
+  # (20260806110000), so nothing here can raise 22001 — but the column is still
+  # the one-line caption under a status pill, and `failure_reason` (`:text`) is
+  # where the whole story lives untruncated. 255 mirrors
+  # `Sites.Deploy.short_detail/1` deliberately: the two terminal paths must not
+  # render the same failure at two different lengths. Knowingly duplicated rather
+  # than shared, to keep this change inside one module; folding both onto one
+  # `FailureCopy` helper is a follow-up, not a silent fork.
+  defp failure_detail(reason) when is_binary(reason) do
+    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
+  end
+
+  defp failure_detail(reason), do: reason
 
   # notifications (wave 28 S6): fire `:deployment_failed` only on the EDGE into
   # `failed`. `Sites.Deploy.record_stage/2` re-drives the fenced writer on every
