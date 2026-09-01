@@ -389,6 +389,35 @@ jobs:
         with:
           node-version: "20"
 
+      # EVERY GATE STEP BELOW CARRIES `if: ${{ !cancelled() }}` — a red gate
+      # must not disarm its neighbours (task-9c2cd9e440f8ebac). These steps are
+      # INDEPENDENT: each runs its own scanner over the committed tree and
+      # consumes nothing from any other gate; only Checkout / Set up Node /
+      # Set up Go are real dependencies. Without conditions the steps are
+      # sequential, so the first failure aborted the job and GitHub stamped
+      # every later step `skipped` — measured on run 33499694026 (main): one
+      # red citation guard silently skipped TEN steps, among them the tenant
+      # fail-open baseline gate, the nil-polarity fail-closed gate, the
+      # preview-env isolation gate and the scaffy anchor-drift gate, plus
+      # three of their tripwires. A skipped gate does not report, and does not
+      # report that it did not report — the job already says `failure` for the
+      # other reason, so the silence reads as noise. The same shape was
+      # recorded in July behind spd-w19-literal-gate-entity and recurred five
+      # weeks later behind a new red step; the condition fixes the structure,
+      # not the incident.
+      #
+      # `!cancelled()`, NEVER `always()`: always() also runs the step on
+      # CANCELLATION, and this repo cancels superseded runs constantly (21 of
+      # 60 recent main runs) — always() would burn runner minutes on dead
+      # trees and emit verdicts nobody should read. The job still reds when
+      # any gate reds: a step condition changes when a step RUNS, never how
+      # its failure counts.
+      #
+      # Set up Go carries the condition too, so the scaffy gates behind it can
+      # execute after an unrelated earlier red. If setup itself fails, the
+      # gates below fail loudly on the missing toolchain — loud is the point;
+      # `skipped` is the only outcome this job must never produce for a gate.
+
       # --selftest FIRST (distrust vacuous green). The 13-arm harness plants a
       # real violation and re-invokes the shipping script for each one; it had
       # NO CI caller, so it was rotting unexecuted — a harness nothing runs is
@@ -404,6 +433,7 @@ jobs:
       # a committed literal and the harness proves that ratchet bites in both
       # directions.
       - name: Doc byte budgets (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/check-doc-budgets.sh --selftest
           bash scripts/check-doc-budgets.sh
@@ -423,6 +453,7 @@ jobs:
       # dedup lands, so zero is a legitimate tree. The selftest is what makes a
       # zero here mean "the repo has none" instead of "the scanner went blind".
       - name: Doc anchors + headers (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/docs-anchors-check.sh --selftest
           bash scripts/docs-anchors-check.sh
@@ -437,6 +468,7 @@ jobs:
       # it). The bundled --selftest is a durable tripwire (distrust vacuous green):
       # it proves the gate REDs on a planted one-column drift, plants nothing.
       - name: Connectors DDL drift gate (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/connectors-ddl-drift-check.sh --selftest
           bash scripts/connectors-ddl-drift-check.sh
@@ -455,6 +487,7 @@ jobs:
       # gate REDs on a dropped connect member and plants nothing in the tree. The
       # static list in catalog.ex stays the fail-closed runtime fallback.
       - name: Connectors catalog drift gate (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/connectors-catalog-drift-check.sh --selftest
           bash scripts/connectors-catalog-drift-check.sh
@@ -472,6 +505,7 @@ jobs:
       # tripwire (distrust vacuous green): it proves the gate REDs on the
       # hazardous shape and greens on each safe one, and plants nothing.
       - name: Never-cancel-main concurrency ratchet (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/never-cancel-main-check.sh --selftest
           bash scripts/never-cancel-main-check.sh
@@ -492,16 +526,19 @@ jobs:
       # reintroduces the hazard must run them. --selftest first (distrust
       # vacuous green), then the real assertion.
       - name: Deploy paths↔filters drift gate (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/check-deployyml-filters.sh --selftest
           bash scripts/check-deployyml-filters.sh
 
       - name: Control-plane smoke can-fail gate (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/check-deploy-smoke.sh --selftest
           bash scripts/check-deploy-smoke.sh
 
       - name: Paper-editor style mirror lockstep (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/paper-editor-mirror-check.sh
 
       # Status vocabulary single-source (parity §2/§7). design/status-manifest.json
@@ -509,6 +546,7 @@ jobs:
       # compile time, and the --st-* CSS tone tokens are GENERATED from it. This
       # gate fails if any surface hand-drifts a tone or a glyph role away from it.
       - name: Status manifest drift gate (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/status-manifest-check.sh
 
       # Preview-contract cross-surface parity tripwire (preview-contract W4,
@@ -529,6 +567,7 @@ jobs:
       # and to exit 2 REFUSED TO MEASURE rather than report a clean tree it never
       # read. It plants nothing in this repo and runs in about a second.
       - name: Preview parity + D10 no-oEmbed gate (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/preview-parity-check.sh --selftest
           bash scripts/preview-parity-check.sh
@@ -541,6 +580,7 @@ jobs:
       # artifact, plus a §6 cross-surface parity assertion (Go lifecycle literals ==
       # CSS glyph tones == tokens) so a GUI/TUI divergence cannot slip through.
       - name: Design-token drift gate (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           node design/validate.mjs
           node design/check.mjs
@@ -567,6 +607,7 @@ jobs:
       # block, rgb() shadows, the paper-surface/Sheets skip region, and annotated
       # per-line resisters). See scripts/studio-literal-check.sh for the full list.
       - name: Studio literal-color gate (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/studio-literal-check.sh
 
       # Durable tripwire (spd-w19; mirrors the Go + link-gate self-tests): prove
@@ -579,6 +620,7 @@ jobs:
       # Plants nothing in the tree; guards the detector against a future edit
       # that silently blinds LITERAL, the comment strip, or the corpus walk.
       - name: Studio literal-color gate self-test (tripwire)
+        if: ${{ !cancelled() }}
         run: bash scripts/studio-literal-check.sh --selftest
 
       # Studio link/path gate (bp-studio-deep-link W1). Every Studio destination
@@ -588,6 +630,7 @@ jobs:
       # that literal is how the deep-vs-shallow path drift (different breadcrumbs
       # / back-nav / scope per arrival) crept in. See scripts/studio-link-lint.sh.
       - name: Studio link/path gate (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/studio-link-lint.sh
 
       # Tripwire (mirrors the Go literal self-test): prove the link gate actually
@@ -595,6 +638,7 @@ jobs:
       # scanner exits non-zero naming the file:line, then asserts a clean file
       # (static singleton + ~p verified route) passes. Plants nothing in the tree.
       - name: Studio link/path gate self-test (tripwire)
+        if: ${{ !cancelled() }}
         run: bash scripts/studio-link-lint.sh --selftest
 
       # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
@@ -605,6 +649,7 @@ jobs:
       # GENERATED block, rgb()/rgba() overlay tints, and annotated per-line
       # resisters). See scripts/web-literal-check.sh for the full list.
       - name: Web literal-color gate (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/web-literal-check.sh
 
       # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
@@ -617,6 +662,7 @@ jobs:
       # per-line resisters earmarking au-w4-cli-chrome-tokens). See
       # scripts/go-literal-check.sh for the full list.
       - name: Go literal-color gate (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/go-literal-check.sh
 
       # Durable tripwire (au-w4-cli-ratchet, AC5): prove the gate actually REDs on
@@ -625,6 +671,7 @@ jobs:
       # commented-hex files pass. Plants nothing in the tree; guards the gate
       # against a future edit that silently weakens the lexer/LITERAL/allow logic.
       - name: Go literal-color gate self-test (tripwire)
+        if: ${{ !cancelled() }}
         run: bash scripts/go-literal-check.sh --selftest
 
       # Citation-truth guard (citation-truth epic). Extends the doc-truth verifier
@@ -646,6 +693,7 @@ jobs:
       #     and proves the arm can still RED on a planted drift, so a green sweep
       #     is evidence about the tree rather than about a broken scanner.
       - name: Code-comment citation guard (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           node tooling/doc-truth/acceptance-code-comments.mjs
           node tooling/doc-truth/retired-terms.mjs
@@ -678,6 +726,7 @@ jobs:
       # instead of passing, and HEAD == base reports SKIPPED rather than OK so a
       # reader can tell "found nothing" from "never looked".
       - name: New file:line citations in comments (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/new-lineref-check.sh --selftest
           bash scripts/new-lineref-check.sh
@@ -693,12 +742,14 @@ jobs:
       # a reviewed `# global-read:` justification. Defense-in-depth against the next
       # w9dg. See scripts/tenant-scope-check.sh.
       - name: Tenant fail-open read baseline gate (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/tenant-scope-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs on a
       # planted fail-open + by-PK read — a temp-dir self-test that plants nothing in
       # the tree. Guards the gate against a future edit that weakens the scanner.
       - name: Tenant fail-open read gate self-test (tripwire)
+        if: ${{ !cancelled() }}
         run: bash scripts/tenant-scope-check.sh --selftest
 
       # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
@@ -710,6 +761,7 @@ jobs:
       # green): it proves the gate REDs on each planted fail-open shape and greens
       # on the fail-closed forms, planting nothing in the tree.
       - name: Nil-polarity fail-closed gate (fails this job)
+        if: ${{ !cancelled() }}
         run: |
           bash scripts/nil-polarity-check.sh --selftest
           bash scripts/nil-polarity-check.sh
@@ -722,6 +774,7 @@ jobs:
       # preview-env mutation is always a real bug. See
       # scripts/preview-env-isolation-check.sh.
       - name: Preview-env isolation gate (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/preview-env-isolation-check.sh
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs
@@ -729,6 +782,7 @@ jobs:
       # self-test that plants nothing in the tree. Guards the scanner against a
       # future edit that silently weakens it.
       - name: Preview-env isolation gate self-test (tripwire)
+        if: ${{ !cancelled() }}
         run: bash scripts/preview-env-isolation-check.sh --selftest
 
       # PortableDoc render-parity completeness guard (render-unification D8/D45).
@@ -741,6 +795,7 @@ jobs:
       # created, invisible until now) can no longer merge unnoticed. MUST run under
       # bash (its shebang); under zsh the coverage loop word-splits vacuously.
       - name: PortableDoc render-parity completeness (fails this job)
+        if: ${{ !cancelled() }}
         run: bash scripts/pd-parity-completeness.sh
 
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
@@ -751,12 +806,14 @@ jobs:
       # Token-bearing anchors with no --var set are skipped-and-counted
       # (anchors_skipped_token), never vacuously passed. Sub-100ms, no test suite.
       - name: Set up Go
+        if: ${{ !cancelled() }}
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
       - name: Scaffy anchor-drift gate (fails this job)
+        if: ${{ !cancelled() }}
         run: go run ./cmd/barkpark scaffy validate --repo . scaffy/commands/
 
       # Durable tripwire (distrust vacuous green): prove the gate actually REDs
@@ -766,6 +823,7 @@ jobs:
       # exit non-zero with R-002. Plants nothing in the tree; guards RepoCheck
       # against a future edit that silently stops resolving anchors.
       - name: Scaffy anchor-drift gate self-test (tripwire)
+        if: ${{ !cancelled() }}
         run: |
           set -u
           tmp="$(mktemp -d)"
