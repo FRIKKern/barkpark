@@ -11,6 +11,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Shared
 
+  # The Studio's display default for a brand-new row's `title` FIELD.
+  @untitled "Untitled"
+
+  # Types whose title is NOT a plain field but the text of a locked title
+  # BLOCK. Mirrors `Writer.maybe_apply_paper_template/2`, which seeds the paper
+  # template for "paper" and nothing else.
+  #
+  # [untitled-is-a-fallback-not-a-seed] A paper is born WITHOUT a title, on
+  # purpose. `Papers.Template.template_blocks/1` copies the attrs title
+  # verbatim into the locked `tpl-title` heading's `"text"`, so seeding
+  # "Untitled" here did not write chrome — it wrote CONTENT, into the one block
+  # the author is about to type in, and the caret landing after it made the
+  # first keystroke APPEND ("UntitledHand walk…"). Every display site already
+  # renders `doc.title || "Untitled"` (pane_builder, components, secondary,
+  # refs, editor_fields, modals), so a nil title still reads "Untitled" on the
+  # desk, the breadcrumb and the tab — while the title block itself starts
+  # empty and the editor paints its own heading placeholder. `derive_title/2`
+  # then fills the row title from the block the moment the author types, which
+  # is the single-truth contract the literal was quietly pre-empting.
+  @block_titled_types ["paper"]
+
   def new_document(%{"type" => type}, socket) do
     # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
     # drew from a 1M-value space, so on a populated dataset a collision landed
@@ -21,10 +42,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     # collision odds. See [doc-id-collision-overwrite] in content/writer.ex.
     case Content.create_document(
            type,
-           %{
-             "title" => "Untitled",
-             "content" => Shared.seed_new_doc_content(type)
-           },
+           new_document_attrs(type),
            socket.assigns.dataset,
            Shared.hook_opts(socket)
          ) do
@@ -41,6 +59,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       {:error, _} ->
         {:noreply, put_flash(socket, :error, "Failed to create")}
     end
+  end
+
+  # See [untitled-is-a-fallback-not-a-seed] above.
+  defp new_document_attrs(type) do
+    attrs = %{"content" => Shared.seed_new_doc_content(type)}
+
+    if type in @block_titled_types,
+      do: attrs,
+      else: Map.put(attrs, "title", @untitled)
   end
 
   def save(%{"doc" => params}, socket) do
